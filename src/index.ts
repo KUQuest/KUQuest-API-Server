@@ -1,7 +1,9 @@
 import { app } from '@/app';
+import { env } from '@/config/env';
 
-const port = Number(Bun.env.PORT ?? 5000);
+app.listen({
+  hostname: env.host,
+  port: env.port,
+});
 
-app.listen(port);
-
-console.log(`KUQuest API running at http://localhost:${port}`);
+console.log(`KUQuest API running at http://localhost:${env.port}`);
