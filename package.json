@@ -6,17 +6,21 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "build": "bun build src/index.ts --target=bun --outdir=dist",
-    "check": "bun run typecheck && bun test && bun run build"
+    "check": "bun run lint && bun run typecheck && bun test && bun run build"
   },
   "dependencies": {
     "elysia": "latest"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "oxlint": "^1.73.0",
+    "oxlint-tsgolint": "^0.24.0",
     "typescript": "latest"
   }
 }
