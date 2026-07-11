@@ -1,15 +1,21 @@
 {
-  "name": "KUQuest-API-Server",
-  "version": "1.0.50",
+  "name": "kuquest-api-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "bun run --watch src/index.ts"
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "build": "bun build src/index.ts --target=bun --outdir=dist"
   },
   "dependencies": {
     "elysia": "latest"
   },
   "devDependencies": {
-    "bun-types": "latest"
-  },
-  "module": "src/index.js"
+    "@types/bun": "latest",
+    "typescript": "latest"
+  }
 }
