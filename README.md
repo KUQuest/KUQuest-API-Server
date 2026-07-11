@@ -1,16 +1,18 @@
-# KUQuest-API-Server
-## Elysia with Bun runtime
+# KUQuest API Server
 
-## Getting Started
-To get started with this template, simply paste this command into your terminal:
-```bash
-bun create elysia ./elysia-example
-```
+Backend API for KUQuest Mobile and CMS, built with Elysia and Bun.
 
-## Development
-To start the development server run:
+## Requirements
+
+- Bun: see `.bun-version`
+- Git
+
+## Setup
+
 ```bash
+git clone <repository-url>
+cd KUQuest-API-Server
+
+cp .env.example .env
+bun install --frozen-lockfile
 bun run dev
-```
-
-Open http://localhost:5000/ with your browser to see the result.
