@@ -1,4 +1,4 @@
-import { app } from './app';
+import { app } from '@/app';
 
 const port = Number(Bun.env.PORT ?? 5000);
 
