@@ -52,6 +52,11 @@ Better Auth is mounted at `/api/auth`. The main endpoints are:
 - `GET /api/auth/get-session`
 - `POST /api/auth/sign-out`
 
+Interactive OpenAPI documentation, including request examples, session cookie
+security, response schemas, and OAuth errors, is available at
+`http://localhost:5000/openapi`. The raw specification is available at
+`http://localhost:5000/openapi/json`.
+
 Google is the only enabled sign-in provider, and the Google account must have an
 email address ending exactly in `@ku.th`. Email/password authentication is
 disabled. On first sign-in, Google profile data is saved in the `user` table as

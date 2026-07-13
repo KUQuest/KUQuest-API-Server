@@ -1,5 +1,10 @@
 import { openapi } from '@elysia/openapi';
 
+import {
+  authOpenAPIComponents,
+  authOpenAPIPaths,
+} from '@/modules/auth/auth.openapi';
+
 export const openapiPlugin = openapi({
   documentation: {
     info: {
@@ -16,6 +21,13 @@ export const openapiPlugin = openapi({
         name: 'Health',
         description: 'Endpoints for checking API availability',
       },
+      {
+        name: 'Auth',
+        description:
+          'Google OAuth and database-backed session endpoints. Only @ku.th accounts are allowed.',
+      },
     ],
+    components: authOpenAPIComponents,
+    paths: authOpenAPIPaths,
   },
 });
