@@ -1,5 +1,5 @@
 import { Elysia } from 'elysia';
-import { authPlugin } from './modules/auth';
+import { authPlugin, authTestRoute } from './modules/auth';
 import { healthRoute } from './modules/health/health.route';
 
 import { corsPlugin } from './plugins/cors';
@@ -11,12 +11,5 @@ export const app = new Elysia({
   .use(corsPlugin)
   .use(authPlugin)
   .use(openapiPlugin)
-  .get('/', () => 'Hello Elysia', {
-    detail: {
-      tags: ['General'],
-      summary: 'API root',
-      description: 'Returns a basic response from the KUQuest API.',
-      operationId: 'getApiRoot',
-    },
-  })
+  .use(authTestRoute)
   .use(healthRoute);
