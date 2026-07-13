@@ -9,14 +9,38 @@ const parsePort = (value: string | undefined): number => {
 };
 
 export const env = {
-  nodeEnv: Bun.env.NODE_ENV ?? 'development',
-  host: Bun.env.HOST ?? '0.0.0.0',
-  port: parsePort(Bun.env.PORT),
+  nodeEnv: process.env.NODE_ENV ?? 'development',
+  host: process.env.HOST ?? '0.0.0.0',
+  port: parsePort(process.env.PORT),
 
-  databaseUrl: Bun.env.DATABASE_URL,
-  jwtAccessSecret: Bun.env.JWT_ACCESS_SECRET,
-  jwtRefreshSecret: Bun.env.JWT_REFRESH_SECRET,
-  xenditSecretKey: Bun.env.XENDIT_SECRET_KEY,
-  xenditWebhookToken: Bun.env.XENDIT_WEBHOOK_TOKEN,
-  cmsOrigin: Bun.env.CMS_ORIGIN,
+  databaseUrl: process.env.DATABASE_URL,
+  betterAuthUrl: process.env.BETTER_AUTH_URL,
+  betterAuthSecret: process.env.BETTER_AUTH_SECRET,
+  googleClientId: process.env.GOOGLE_CLIENT_ID,
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  xenditSecretKey: process.env.XENDIT_SECRET_KEY,
+  xenditWebhookToken: process.env.XENDIT_WEBHOOK_TOKEN,
+  cmsOrigin: process.env.CMS_ORIGIN,
 } as const;
+
+const requiredRuntimeVariables = {
+  DATABASE_URL: env.databaseUrl,
+  BETTER_AUTH_URL: env.betterAuthUrl,
+  BETTER_AUTH_SECRET: env.betterAuthSecret,
+  GOOGLE_CLIENT_ID: env.googleClientId,
+  GOOGLE_CLIENT_SECRET: env.googleClientSecret,
+} as const;
+
+export const validateRuntimeEnv = (): void => {
+  const missing = Object.entries(requiredRuntimeVariables)
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+
+  if (missing.length > 0) {
+    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+  }
+
+  if (env.betterAuthSecret && env.betterAuthSecret.length < 32) {
+    throw new Error('BETTER_AUTH_SECRET must be at least 32 characters long');
+  }
+};

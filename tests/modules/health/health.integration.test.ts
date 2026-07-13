@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 import { app } from '@/app';
 
-describe('GET /health', () => {
+describe('health integration: GET /health', () => {
   it('returns service health status', async () => {
     const response = await app.handle(
       new Request('http://localhost/health'),
