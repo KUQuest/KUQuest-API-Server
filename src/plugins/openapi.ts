@@ -16,6 +16,32 @@ export const openapiPlugin = openapi({
         name: 'Health',
         description: 'Endpoints for checking API availability',
       },
+      {
+        name: 'Wallet',
+        description: 'Current-user balances, policy, and wallet activity.',
+      },
+      {
+        name: 'Earnings conversion',
+        description: 'Irreversible earnings-to-spending conversion.',
+      },
+      {
+        name: 'Xendit webhooks',
+        description: 'Authenticated provider events persisted before acknowledgement.',
+      },
     ],
+    components: {
+      securitySchemes: {
+        sessionAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'Session JWT',
+        },
+        xenditWebhookAuth: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-callback-token',
+        },
+      },
+    },
   },
 });
