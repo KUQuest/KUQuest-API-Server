@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KUQuest Database Design — MVP</title>
+  <style>
+    :root{--ink:#17232d;--muted:#596873;--nav:#143541;--line:#d5dee4;--paper:#fff;--band:#f3f7f9;--blue:#116fa6;--green:#157347;--amber:#946200;--red:#b42318}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);background:var(--paper);font:15px/1.62 system-ui,-apple-system,"Segoe UI",sans-serif}header{padding:44px max(24px,calc((100% - 1180px)/2));background:var(--nav);color:#fff}header h1{margin:0 0 8px;font-size:35px}header p{max-width:920px;margin:0;color:#dce9ee;font-size:17px}nav{position:sticky;top:0;z-index:4;padding:10px max(20px,calc((100% - 1180px)/2));overflow:auto;white-space:nowrap;background:#fff;border-bottom:1px solid var(--line)}nav a{margin-right:17px;color:var(--blue);font-weight:700;text-decoration:none}main{max-width:1180px;margin:auto;padding:34px 24px 72px}section{margin:0 0 50px;scroll-margin-top:64px}h2{padding-bottom:7px;border-bottom:2px solid var(--ink);font-size:26px}h3{margin:25px 0 8px;font-size:19px}h4{margin:19px 0 5px;font-size:16px}p{max-width:960px}.lead{font-size:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:14px}.card{padding:15px;border:1px solid var(--line);border-radius:7px}.card h3{margin-top:0}.callout{max-width:980px;margin:15px 0;padding:12px 16px;border-left:4px solid var(--blue);background:#eef7fb}.warn{border-color:var(--amber);background:#fff7e8}.danger{border-color:var(--red);background:#fff0ee}.ok{border-color:var(--green);background:#edf8f1}table{width:100%;margin:13px 0 25px;border-collapse:collapse}th,td{padding:9px 11px;border:1px solid var(--line);text-align:left;vertical-align:top}th{background:var(--band)}code{padding:2px 5px;border-radius:4px;background:#edf1f4;font:13px ui-monospace,SFMono-Regular,Consolas,monospace}.mermaid{margin:16px 0;padding:16px;overflow:auto;border:1px solid var(--line);background:#fff}.tag{display:inline-block;margin:2px 3px 2px 0;padding:2px 7px;border-radius:999px;background:#e9f3f8;color:#145b7f;font-size:12px;font-weight:700}.schema td:first-child{white-space:nowrap;font-weight:750}.schema td:nth-child(2){white-space:nowrap;color:#33434d}.checklist li{margin:6px 0}.small{color:var(--muted);font-size:13px}footer{padding:25px;text-align:center;border-top:1px solid var(--line);color:var(--muted)}@media(max-width:720px){header h1{font-size:29px}th,td{padding:8px}.schema td:first-child,.schema td:nth-child(2){white-space:normal}}
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({startOnLoad:true,theme:'neutral',securityLevel:'strict'});
+  </script>
+</head>
+<body>
+<header>
+  <h1>KUQuest MVP Database Design</h1>
+  <p>Database-first design for Better Auth, marketplace work, disputes, wallets, immutable accounting, Xendit money movement, operations, and audit. This document explains both the tables and the guarantees they are intended to enforce.</p>
+</header>
+<nav>
+  <a href="#decisions">Decisions</a><a href="#overview">ER overview</a><a href="#identity">Identity</a><a href="#marketplace">Marketplace</a><a href="#ledger">Ledger</a><a href="#payments">Payments</a><a href="#operations">Operations</a><a href="#constraints">Constraints</a><a href="#security">Security</a><a href="#drizzle">Drizzle</a><a href="#docker">Docker</a><a href="#deferred">Deferred</a>
+</nav>
+<main>
+<section id="decisions">
+  <h2>1. Approved Design Decisions</h2>
+  <p class="lead">The MVP uses one PostgreSQL database and the default <code>public</code> schema. Drizzle files are split by module, while cross-module transactions remain possible. A user is never forced into an employer/worker role: every ordinary user may do both.</p>
+  <div class="grid">
+    <article class="card"><h3>Identity</h3><p>Better Auth owns opaque <code>text</code> IDs for <code>user</code>, <code>session</code>, <code>account</code>, and <code>verification</code>. Domain records use PostgreSQL UUIDs and reference users with <code>text</code> foreign keys.</p></article>
+    <article class="card"><h3>Authentication</h3><p>Google login is accepted when the normalized address ends exactly with <code>@ku.th</code>. Better Auth's opaque database-backed session cookie authenticates API requests. There are no application JWTs.</p></article>
+    <article class="card"><h3>Money units</h3><p>Wallet and ledger columns use signed <code>bigint</code> whole baht and explicit <code>_baht</code> names. Exact provider fee, tax, and reconciliation values use signed <code>bigint</code> satang and <code>_satang</code> names. Currency is <code>THB</code>.</p></article>
+    <article class="card"><h3>History</h3><p>Main lifecycle rows keep current status for fast reads. Separate append-only history tables retain every transition with actor/source, reason, and time. Accounting history is never rewritten.</p></article>
+    <article class="card"><h3>Provisioning</h3><p>Creating a user automatically creates their wallet and required user ledger accounts in the same database transaction through a reviewed custom migration trigger.</p></article>
+    <article class="card"><h3>MVP operations</h3><p>One API process also runs small PostgreSQL-backed background loops. Compose has PostgreSQL, a one-shot migration service, and the API—no Redis and no separate worker.</p></article>
+  </div>
+  <div class="callout warn"><strong>Deliberate MVP exception:</strong> payout destination/profile fields are plaintext to make development debugging simple. They must be excluded from logs and API responses must mask them. Encryption at rest and key rotation are a mandatory production blocker.</div>
+</section>
+
+<section id="overview">
+  <h2>2. Relationship Overview</h2>
+  <p>This overview shows ownership and the main money path. Status-history, audit, idempotency, and operational tables are described later but omitted from the picture to keep it readable.</p>
+  <div class="mermaid">
+erDiagram
+  USER ||--o{ SESSION : has
+  USER ||--o{ ACCOUNT : authenticates_with
+  USER ||--|| WALLET : receives
+  USER ||--o{ USER_ROLE_ASSIGNMENT : granted
+  ROLE ||--o{ USER_ROLE_ASSIGNMENT : contains
+  USER ||--o{ JOB : employs
+  USER ||--o{ JOB_APPLICATION : applies
+  JOB ||--o{ JOB_APPLICATION : receives
+  JOB ||--o| WORK_SUBMISSION : receives
+  JOB ||--o| DISPUTE : may_enter
+  DISPUTE ||--o{ DISPUTE_RESOLUTION : proposed
+  WALLET ||--o{ LEDGER_ACCOUNT : represented_by
+  LEDGER_TRANSACTION ||--|{ LEDGER_POSTING : contains
+  LEDGER_ACCOUNT ||--o{ LEDGER_POSTING : receives
+  USER ||--o{ TOP_UP : requests
+  TOP_UP_QUOTE ||--o| TOP_UP : consumed_by
+  USER ||--o{ PAYOUT_ACCOUNT : versions
+  PAYOUT_ACCOUNT ||--o{ PAYOUT : snapshotted_for
+  PAYOUT_QUOTE ||--o| PAYOUT : consumed_by
+  PROVIDER_WEBHOOK_EVENT }o--o| TOP_UP : concerns
+  PROVIDER_WEBHOOK_EVENT }o--o| PAYOUT : concerns
+  MONEY_POLICY_REVISION ||--o{ JOB : snapshots
+  MONEY_POLICY_REVISION ||--o{ TOP_UP_QUOTE : prices
+  MONEY_POLICY_REVISION ||--o{ PAYOUT_QUOTE : prices
+  </div>
+  <h3>Identifier and time conventions</h3>
+  <table><tr><th>Concern</th><th>Convention</th><th>Reason</th></tr>
+    <tr><td>Better Auth IDs</td><td>Opaque <code>text</code></td><td>Preserves adapter compatibility and avoids replacing library-owned identity generation.</td></tr>
+    <tr><td>Domain IDs</td><td><code>uuid</code> with database default</td><td>Non-sequential public identifiers, generated even outside the API.</td></tr>
+    <tr><td>User references</td><td><code>text NOT NULL REFERENCES "user"(user_id)</code></td><td>Clean boundary between Better Auth and UUID domain records.</td></tr>
+    <tr><td>Time</td><td>Better Auth-compatible timestamps for auth tables; <code>timestamptz</code> in UTC for domain tables</td><td>Do not casually alter library-owned column types; application deadlines and provider events remain timezone-safe.</td></tr>
+    <tr><td>Flexible payloads</td><td><code>jsonb</code> only for provider payloads, audit snapshots, and task payloads</td><td>Core domain relations remain typed and enforceable.</td></tr>
+  </table>
+</section>
+
+<section id="identity">
+  <h2>3. Identity and Access</h2>
+  <p>Better Auth remains the owner of its four tables and token behavior, including the branch's encrypted OAuth token configuration. The API resolves the current user from the Better Auth session cookie. User IDs supplied by clients never determine ownership.</p>
+  <table class="schema"><tr><th>Table</th><th>Key columns</th><th>Purpose and rules</th></tr>
+    <tr><td><code>user</code></td><td><code>user_id text PK</code>, <code>email</code>, names, <code>email_verified</code>, image, timestamps</td><td>Better Auth user plus first/last name. Email is unique. Admission policy is only the normalized exact suffix check <code>@ku.th</code>; no additional Google Workspace claim requirement is introduced. A defense-in-depth check equivalent to <code>lower(email) ~ '^[^@]+@ku\.th$'</code> prevents another insert path from provisioning a non-KU wallet. User records remain in the database; no special KU-access-loss lifecycle is designed.</td></tr>
+    <tr><td><code>session</code></td><td><code>id text PK</code>, unique <code>token</code>, <code>user_id</code>, expiry, IP, agent</td><td>Opaque revocable server-side session. Cascade deletion follows Better Auth's schema. Index <code>user_id</code> and expiry for lookup/cleanup. This replaces JWT authentication.</td></tr>
+    <tr><td><code>account</code></td><td><code>id text PK</code>, provider/account IDs, <code>user_id</code>, encrypted token fields</td><td>Google identity linkage managed by Better Auth. Unique <code>(provider_id, account_id)</code> prevents one provider identity being linked twice.</td></tr>
+    <tr><td><code>verification</code></td><td><code>id text PK</code>, identifier, value, expiry</td><td>Better Auth verification material. Index identifier and expiry; cleanup must not affect durable user/domain history.</td></tr>
+    <tr><td><code>roles</code></td><td><code>id uuid PK</code>, unique <code>code</code>, description</td><td>Named privileged capabilities such as <code>ADMIN</code>, <code>DISPUTE_OPERATOR</code>, and <code>FINANCE_OPERATOR</code>. Ordinary employer/worker behavior needs no role row.</td></tr>
+    <tr><td><code>user_role_assignments</code></td><td><code>id uuid PK</code>, <code>user_id</code>, <code>role_id</code>, granted/revoked metadata</td><td>Auditable access grants. A partial unique index allows only one active assignment per user/role. Grantor and revoker reference users; revoked rows are retained.</td></tr>
+  </table>
+  <div class="callout ok"><strong>Authorization boundary:</strong> being authenticated proves identity only. Job-party access comes from job relationships; administrator operations require active role assignments; webhook routes use provider authentication, not a user session.</div>
+</section>
+
+<section id="marketplace">
+  <h2>4. Jobs, Applications, Submissions, and Disputes</h2>
+  <p>A published job is already fully funded. Job creation, the employer spending debit, and the job-held credit occur atomically. Current status is duplicated on the aggregate for fast queries; its history is the explanation and audit trail.</p>
+  <table class="schema"><tr><th>Table</th><th>Key columns</th><th>Purpose and rules</th></tr>
+    <tr><td><code>jobs</code></td><td><code>id uuid PK</code>, employer/selected worker IDs, title/description, <code>amount_baht</code>, fee snapshot, policy revision, deadlines, current status</td><td>Funded listing and aggregate root. Positive whole-baht amount; employer cannot be selected worker. Selection deadline precedes work deadline. One selected worker at most. Status: <code>OPEN</code>, <code>ASSIGNED</code>, <code>OVERDUE</code>, <code>IN_REVIEW</code>, <code>DISPUTED</code>, <code>SETTLED</code>, <code>RETURNED</code>, <code>CANCELLED</code>, <code>EXPIRED</code>.</td></tr>
+    <tr><td><code>job_status_history</code></td><td><code>id uuid PK</code>, <code>job_id</code>, from/to status, actor/source, reason, <code>occurred_at</code></td><td>Append-only record of every transition. First row has no prior status. Source distinguishes user, administrator, system loop, and provider-derived action.</td></tr>
+    <tr><td><code>job_applications</code></td><td><code>id uuid PK</code>, job/worker IDs, message, current status, timestamps</td><td>Worker request to be selected. Unique <code>(job_id, worker_user_id)</code>. An employer cannot apply to their own job. Selection atomically accepts one application and withdraws/rejects other pending applications according to domain rules.</td></tr>
+    <tr><td><code>job_application_status_history</code></td><td><code>id uuid PK</code>, application ID, from/to status, actor/source, reason, time</td><td>Full application lifecycle (<code>PENDING</code>, <code>SELECTED</code>, <code>WITHDRAWN</code>, <code>REJECTED</code>, <code>REMOVED_WORKER_ENGAGED</code>).</td></tr>
+    <tr><td><code>work_submissions</code></td><td><code>id uuid PK</code>, unique <code>job_id</code>, worker ID, summary, status, submitted/review deadline</td><td>One MVP submission per job. It starts the 24-hour review window. Evidence files are deferred; text summary remains available. Status history records submission/review actions.</td></tr>
+    <tr><td><code>work_submission_status_history</code></td><td><code>id uuid PK</code>, submission ID, from/to status, actor/source, reason, time</td><td>Append-only transitions such as <code>SUBMITTED</code>, <code>APPROVED</code>, <code>AUTO_APPROVED</code>, and <code>DISPUTED</code>.</td></tr>
+    <tr><td><code>disputes</code></td><td><code>id uuid PK</code>, unique <code>job_id</code>, opened-by user, reason code, description, current status</td><td>At most one dispute per MVP job. Only a job party may open it in the allowed window. Status: <code>OPEN</code>, <code>PENDING_SECOND_APPROVAL</code>, <code>RESOLVED</code>. Time alone never resolves it.</td></tr>
+    <tr><td><code>dispute_status_history</code></td><td><code>id uuid PK</code>, dispute ID, from/to status, actor/source, reason, time</td><td>Append-only dispute progress. Operational escalation may be recorded without changing the financial outcome.</td></tr>
+    <tr><td><code>dispute_resolutions</code></td><td><code>id uuid PK</code>, dispute ID, proposer ID, outcome, reason, amount/policy snapshots, status</td><td>Binary proposal: <code>RETURN_TO_EMPLOYER</code> or <code>SETTLE_TO_WORKER</code>; no partial award. Below threshold one authorized admin may execute. Above threshold it waits for a second administrator.</td></tr>
+    <tr><td><code>dispute_resolution_approvals</code></td><td><code>id uuid PK</code>, unique resolution ID, approver ID, decision, reason, time</td><td>Second-person control. Database check plus transaction logic require approver to differ from proposer. Execution references the resulting ledger transaction exactly once.</td></tr>
+  </table>
+  <h3>Critical marketplace indexes</h3>
+  <ul class="checklist">
+    <li><code>jobs(status, application_deadline_at)</code>, <code>jobs(status, work_deadline_at)</code>, and <code>work_submissions(status, review_deadline_at)</code> support the in-process scheduler.</li>
+    <li>A partial unique index on <code>jobs(selected_worker_user_id) WHERE status IN ('ASSIGNED','OVERDUE','IN_REVIEW','DISPUTED')</code> enforces one engaged job per worker.</li>
+    <li><code>job_applications(worker_user_id, status)</code> supports atomic removal when a worker becomes engaged.</li>
+    <li>Status-history indexes use <code>(aggregate_id, occurred_at DESC, id DESC)</code> for deterministic timelines.</li>
+  </ul>
+</section>
+
+<section id="ledger">
+  <h2>5. Wallet and Immutable Ledger</h2>
+  <p>The ledger is the source of truth. <code>wallets</code> contains locked, transactionally maintained cached balances for fast reads and concurrency control. A rebuild must reproduce those caches from postings. “Held for jobs” and “reserved for payouts” are summaries of ledger accounts, not extra spendable wallets.</p>
+  <table class="schema"><tr><th>Table</th><th>Key columns</th><th>Purpose and rules</th></tr>
+    <tr><td><code>wallets</code></td><td><code>id uuid PK</code>, unique <code>user_id</code>, cached spending/earnings baht, status, timestamps</td><td>Exactly one per user. Balances are non-negative <code>bigint</code>. <code>ACTIVE</code>/<code>FROZEN</code> governs new user commands but does not stop committed settlement or provider recovery work.</td></tr>
+    <tr><td><code>wallet_status_history</code></td><td><code>id uuid PK</code>, wallet ID, from/to status, actor ID, reason, time</td><td>Every freeze/unfreeze is retained. No hard deletion of financial history.</td></tr>
+    <tr><td><code>ledger_accounts</code></td><td><code>id uuid PK</code>, code, type, currency, optional wallet/user owner</td><td>Each wallet owns spending and earnings accounts. Central system accounts hold job commitments, payout clearing, provider assets, platform revenue, adjustments, and shortfalls; the transaction business reference identifies the job or payout. Valid owner/type combinations and account codes are constrained and unique.</td></tr>
+    <tr><td><code>ledger_transactions</code></td><td><code>id uuid PK</code>, unique business reference, event type, idempotency key link, <code>sealed_at</code>, created metadata</td><td>Immutable header for one business money event. Sealing requires at least two postings, one currency, and a zero sum; no posting may be appended afterward. A correction is a new compensating transaction referencing the original, never an update.</td></tr>
+    <tr><td><code>ledger_postings</code></td><td><code>id uuid PK</code>, transaction/account IDs, <code>amount_baht bigint</code>, currency</td><td>Signed non-zero posting. Sum of postings for each transaction and currency must be zero. Postings and completed headers reject update/delete through triggers.</td></tr>
+    <tr><td><code>idempotency_keys</code></td><td><code>id uuid PK</code>, user/scope/key, request hash, resource reference, response/status, expiry</td><td>Unique <code>(principal_user_id, operation_scope, key)</code>. Same payload returns the original result; a different hash conflicts. Provider webhook deduplication is separate.</td></tr>
+    <tr><td><code>earnings_conversions</code></td><td><code>id uuid PK</code>, user ID, <code>amount_baht</code>, unique ledger transaction ID, time</td><td>Immutable command record for the fee-free one-way movement from earnings to spending. The balanced ledger transaction is the monetary source of truth.</td></tr>
+    <tr><td><code>wallet_activities</code></td><td><code>id uuid PK</code>, user ID, type/status, four <code>bigint</code> deltas, typed resource reference, time</td><td>User-facing chronological projection of spending, earnings, job-held, and payout-reserved effects. It is written atomically and rebuildable; it is not raw ledger history.</td></tr>
+    <tr><td><code>wallet_adjustments</code></td><td><code>id uuid PK</code>, wallet/admin IDs, amount/compartment, reason, ledger transaction ID</td><td>Admin command record tied one-to-one to a compensating ledger transaction. There is no “set balance” operation.</td></tr>
+    <tr><td><code>amounts_owed</code></td><td><code>id uuid PK</code>, user ID, amount/recovered baht, reason/source, status</td><td>Tracks value that cannot be recovered without making a wallet negative. It is operational debt, never a negative wallet balance.</td></tr>
+  </table>
+  <div class="mermaid">
+flowchart LR
+  C[Business command] -->|lock aggregate + wallet| T[Ledger transaction]
+  T --> P1[Posting: source -N baht]
+  T --> P2[Posting: destination +N baht]
+  P1 --> B{Deferred balance check}
+  P2 --> B
+  B -->|sum = 0 and caches nonnegative| K[Commit]
+  B -->|invalid| R[Rollback entire command]
+  </div>
+  <div class="callout danger"><strong>Custom SQL required:</strong> a deferred constraint/finalization mechanism rejects zero-posting, one-posting, mixed-currency, unbalanced, or late-appended transactions; immutable triggers reject update/delete; wallet provisioning and cache maintenance are transactional. These guarantees cannot be represented by Drizzle TypeScript definitions alone.</div>
+</section>
+
+<section id="payments">
+  <h2>6. Top-ups, Payouts, and Policy</h2>
+  <p>Provider-facing amounts retain exact satang independently from whole-baht wallet movements. Stable KUQuest statuses remain separate from raw Xendit statuses. Quotes move no money and snapshot the policy used to calculate them.</p>
+  <table class="schema"><tr><th>Table</th><th>Key columns</th><th>Purpose and rules</th></tr>
+    <tr><td><code>money_policy_revisions</code></td><td><code>id uuid PK</code>, monotonic revision, limits, fees, durations, threshold, author/reason, effective time</td><td>Append-only prospective configuration. Exactly one revision is effective for a time range. Existing jobs and quotes retain their snapshot/revision.</td></tr>
+    <tr><td><code>top_up_quotes</code></td><td><code>id uuid PK</code>, user/policy IDs, credit/charged fee/tax/payment total <code>_baht</code>, exact provider fee/tax/total <code>_satang</code>, expiry, consumed time</td><td>Five-minute offer storing both user-charged whole-baht values and exact provider values. Known arithmetic is constrained, including upward rounding from satang to charged baht; a locked conditional update permits consumption once.</td></tr>
+    <tr><td><code>top_ups</code></td><td><code>id uuid PK</code>, user/quote IDs, stable/provider refs, snapped baht and satang amounts, QR metadata, current status, credited ledger transaction</td><td>Independent PromptPay request. Multiple pending requests are allowed. A matching authenticated provider success credits spending exactly once, including a valid late success.</td></tr>
+    <tr><td><code>top_up_status_history</code></td><td><code>id uuid PK</code>, top-up ID, from/to stable status, provider status, actor/source, reason, time</td><td>Full transitions: <code>CREATING</code>, <code>REQUIRES_ACTION</code>, <code>AWAITING_RECONCILIATION</code>, <code>SUCCEEDED</code>, <code>FAILED</code>, <code>EXPIRED</code>.</td></tr>
+    <tr><td><code>payout_accounts</code></td><td><code>id uuid PK</code>, user ID, bank/routing/holder/profile fields, masked last four, active/retired times</td><td>Immutable destination version. One active account per user via partial unique index. Replacement creates a new row and is blocked while a payout is non-terminal.</td></tr>
+    <tr><td><code>payout_quotes</code></td><td><code>id uuid PK</code>, user/destination/policy IDs, receipt/max fee/max tax/max debit <code>_baht</code>, exact quoted <code>_satang</code> values, expiry, consumed time</td><td>Five-minute maximum-cost snapshot. It moves no value. Whole-baht reserves and exact provider estimates are separate and explicitly named.</td></tr>
+    <tr><td><code>payouts</code></td><td><code>id uuid PK</code>, user/quote/account IDs, immutable destination snapshot, provider ref, principal/max/actual amounts, current status, ledger refs</td><td>Reserves maximum debit before provider call. One non-terminal payout per user. Finalization restores unused reserve; failed/reversed transfer restores undelivered principal and retains only provider cost actually charged.</td></tr>
+    <tr><td><code>payout_status_history</code></td><td><code>id uuid PK</code>, payout ID, from/to stable status, provider status, actor/source, reason, time</td><td>Full transitions: <code>CREATING</code>, <code>PENDING</code>, <code>SUCCEEDED</code>, <code>FAILED</code>, <code>REVERSED</code>, <code>CANCELLED</code>, <code>AWAITING_RECONCILIATION</code>. A success may later reverse, so history is essential.</td></tr>
+  </table>
+  <h3>Development-only payout storage</h3>
+  <table><tr><th>Allowed during development</th><th>Required immediately</th><th>Mandatory before production</th></tr>
+    <tr><td>Bank number, recipient identity, and required routing/profile fields may remain plaintext in restricted columns.</td><td>Never log the fields; never include raw values in generic audit JSON; API reads return masked values; fixtures use fake accounts; only the application DB role can access required columns.</td><td>Application-level authenticated encryption, versioned key ID, key outside PostgreSQL, rotation procedure, sanitized backups/exports, and production-gate tests.</td></tr>
+  </table>
+</section>
+
+<section id="operations">
+  <h2>7. Webhook Inbox, Reconciliation, Scheduling, and Audit</h2>
+  <table class="schema"><tr><th>Table</th><th>Key columns</th><th>Purpose and rules</th></tr>
+    <tr><td><code>provider_webhook_events</code></td><td><code>id uuid PK</code>, provider/event ID, kind, received/auth metadata, raw <code>jsonb</code>, actual payload hash, status, attempts, claim/error times</td><td>Durable inbox. Unique <code>(provider, provider_event_id)</code> deduplicates delivery. An identical hash is a retry; reuse with a different payload is quarantined and alerted. Authenticate, insert, then acknowledge. Processing validates reference, amount, currency, and transition before effects.</td></tr>
+    <tr><td><code>provider_webhook_event_status_history</code></td><td><code>id uuid PK</code>, event ID, from/to status, reason/error, time</td><td>Append-only processing lifecycle (<code>RECEIVED</code>, <code>PROCESSING</code>, <code>PROCESSED</code>, <code>RETRYABLE</code>, <code>DEAD_LETTER</code>).</td></tr>
+    <tr><td><code>reconciliation_runs</code></td><td><code>id uuid PK</code>, period/provider, internal/provider totals satang, difference, status, started/completed metadata</td><td>One comparison execution. Whole-baht internal obligations are converted to satang for comparison without losing the original ledger unit.</td></tr>
+    <tr><td><code>reconciliation_items</code></td><td><code>id uuid PK</code>, run ID, type/reference, expected/actual/difference satang, status, notes</td><td>Explains each discrepancy and resolution. Unexplained shortfall activates the platform outbound hold.</td></tr>
+    <tr><td><code>platform_controls</code></td><td>singleton key, <code>outbound_money_held</code>, run/reason/actor, timestamps</td><td>Small explicit control plane for a reconciliation hold. Updates require finance authority and audit; it never edits ledger history.</td></tr>
+    <tr><td><code>scheduled_tasks</code></td><td><code>id uuid PK</code>, type, dedupe key, aggregate refs, run time, payload, status, lock/attempt/error fields</td><td>PostgreSQL-backed jobs for listing expiry, overdue marking, auto-approval, webhook retry, and reconciliation. Unique dedupe key prevents duplicate logical tasks. Claims use <code>FOR UPDATE SKIP LOCKED</code>.</td></tr>
+    <tr><td><code>scheduled_task_status_history</code></td><td><code>id uuid PK</code>, task ID, from/to status, source, reason/error, time</td><td>Append-only execution trail (<code>PENDING</code>, <code>RUNNING</code>, <code>SUCCEEDED</code>, <code>RETRYABLE</code>, <code>FAILED</code>, <code>CANCELLED</code>).</td></tr>
+    <tr><td><code>audit_events</code></td><td><code>id uuid PK</code>, actor/source, action, typed resource refs, reason, before/after <code>jsonb</code>, request/trace/IP metadata, time</td><td>Append-only privileged/domain audit trail. Sensitive payout values are redacted before insertion. Audit supplements—not replaces—domain status history and the ledger.</td></tr>
+  </table>
+  <h3>Single-process loop behavior</h3>
+  <p>The API starts bounded polling loops after readiness. Each loop claims a small batch, commits quickly, and uses database time. Tasks must be idempotent because the process can crash after applying an effect but before marking a task complete. A lease timeout makes abandoned work retryable. Multiple future API replicas can safely claim different rows through row locks, but this MVP has no independent worker autoscaling.</p>
+  <div class="callout warn"><strong>Known MVP limitation:</strong> heavy work can compete with HTTP traffic and API downtime pauses scheduled processing. The table design intentionally permits moving the same handlers into a separate worker later without a database redesign.</div>
+</section>
+
+<section id="constraints">
+  <h2>8. Database Guarantees and Index Plan</h2>
+  <table><tr><th>Guarantee</th><th>Database mechanism</th><th>Application responsibility</th></tr>
+    <tr><td>No fractional/ambiguous wallet money</td><td><code>bigint</code>, explicit unit names, <code>currency='THB'</code> checks</td><td>Validate ranges and present amounts correctly.</td></tr>
+    <tr><td>No negative cached balances</td><td>Checks plus row locking and transactional cache trigger/function</td><td>Lock wallet/accounts in stable order before money commands.</td></tr>
+    <tr><td>Balanced, immutable ledger</td><td>Seal/finalize invariant; at least two non-zero same-currency postings; zero sum; late-append/update/delete rejection</td><td>Create and seal complete postings in one transaction; compensate errors.</td></tr>
+    <tr><td>Exactly one wallet per user</td><td>Unique user FK and automatic provisioning trigger</td><td>Do not separately “ensure wallet” after login.</td></tr>
+    <tr><td>No duplicate command/provider effect</td><td>Unique idempotency scope/key, provider event ID, provider/business refs, one-to-one ledger-effect refs</td><td>Compare request hash and validate webhook semantics.</td></tr>
+    <tr><td>One engaged job / one non-terminal payout</td><td>Partial unique indexes</td><td>Return a stable conflict and perform state transition transactionally.</td></tr>
+    <tr><td>Complete lifecycle history</td><td>History insert in same transaction; update/delete rejection triggers</td><td>Every state-changing service writes current state and transition together.</td></tr>
+    <tr><td>Valid second approval</td><td>Unique resolution approval and proposer/approver inequality check</td><td>Check active roles and policy threshold in the locked transaction.</td></tr>
+  </table>
+  <h3>General indexing rules</h3>
+  <ul class="checklist">
+    <li>Every foreign key used for joins or deletion checks receives a B-tree index; PostgreSQL does not create these automatically.</li>
+    <li>Queue indexes are partial and ordered, for example <code>(run_at, id) WHERE status IN ('PENDING','RETRYABLE')</code>.</li>
+    <li>User history uses <code>(user_id, created_at DESC, id DESC)</code> for cursor pagination. Provider references and business references are unique.</li>
+    <li>Use partial indexes for “active/current/non-terminal” uniqueness rather than mutable boolean-only conventions.</li>
+    <li>Use check constraints for local row facts; use locked service transactions or custom triggers for cross-row/state-machine facts.</li>
+  </ul>
+</section>
+
+<section id="security">
+  <h2>9. Security Boundaries</h2>
+  <p>One database improves atomicity, so least privilege must be explicit. Network isolation and separate credentials prevent the API from turning an injection or application compromise into schema ownership.</p>
+  <table><tr><th>Principal</th><th>May do</th><th>Must not do</th></tr>
+    <tr><td><code>kuquest_migrator</code></td><td>Own schema objects; run reviewed DDL, migrations, grants, functions, and triggers.</td><td>Serve HTTP requests or share credentials with the runtime.</td></tr>
+    <tr><td><code>kuquest_app</code></td><td>Connect at runtime with table-specific rights: Better Auth may delete ephemeral session/account/verification rows; user and domain history are retained; ledger/history writes use only narrowly permitted inserts or protected functions.</td><td>DDL, role management, superuser, table ownership, <code>TRUNCATE</code>, trigger control, broad mutation of cached balances, or bypass of immutable-ledger protections.</td></tr>
+    <tr><td>PostgreSQL bootstrap/admin</td><td>Create the two roles/database during local initialization or controlled infrastructure setup.</td><td>Be exposed to the API container or used as an application connection string.</td></tr>
+  </table>
+  <ul class="checklist">
+    <li>Revoke default <code>CREATE</code> on <code>public</code> and unnecessary <code>PUBLIC</code> privileges. Grant existing objects explicitly. Before production, add a reviewed default-privilege policy so future objects remain inaccessible until deliberately exposed.</li>
+    <li>Trigger functions pin a safe <code>search_path</code>, qualify referenced objects, and are <code>SECURITY INVOKER</code> unless elevation is unavoidable. <code>SECURITY DEFINER</code> functions have <code>EXECUTE</code> revoked from <code>PUBLIC</code>; moving their ownership from the local login-capable migrator to a dedicated non-login function owner is a production requirement.</li>
+    <li>Keep PostgreSQL off public interfaces in production; Compose exposes it only when local debugging requires it.</li>
+    <li>Secrets come from environment/secret management, never the image or repository. Use separate migration and runtime URLs.</li>
+    <li>Better Auth cookies are <code>HttpOnly</code>, <code>Secure</code> in production, and appropriately <code>SameSite</code>; CORS/trusted origins are allowlisted.</li>
+    <li>Cookie-authenticated custom <code>POST</code>/<code>PUT</code>/<code>PATCH</code>/<code>DELETE</code> routes validate trusted <code>Origin</code>/<code>Referer</code> as CSRF defense. CORS alone is not CSRF protection, and <code>Idempotency-Key</code> is included in allowed request headers.</li>
+    <li>API authorization derives the user from the session. It never trusts a request body/path <code>user_id</code> as proof of ownership.</li>
+    <li>Webhook secrets are compared safely; raw payload access is restricted; logs and audits redact credentials, OAuth tokens, session tokens, and payout plaintext.</li>
+  </ul>
+</section>
+
+<section id="drizzle">
+  <h2>10. Drizzle Schema and Migration Policy</h2>
+  <p>Drizzle TypeScript schemas are the structural source of truth and are split by module while exporting one combined schema to the client. Suggested files are <code>auth.schema.ts</code>, <code>access.schema.ts</code>, <code>jobs.schema.ts</code>, <code>ledger.schema.ts</code>, <code>payments.schema.ts</code>, and <code>operations.schema.ts</code>. Reviewed SQL migrations remain authoritative for grants, triggers, and invariants that Drizzle cannot express.</p>
+  <ol class="checklist">
+    <li>Change the TypeScript schema, then create a versioned migration with <code>drizzle-kit generate</code>.</li>
+    <li>Review generated SQL. Add a tracked custom migration—created with the Drizzle custom-migration workflow—for roles/grants, partial or deferred invariants, immutable triggers, wallet provisioning, and ledger/cache functions.</li>
+    <li>Apply migrations with <code>drizzle-kit migrate</code> using <code>kuquest_migrator</code>. Never use <code>drizzle-kit push</code> on shared or production databases.</li>
+    <li>Test both a clean database and upgrade from the previous migration. Include rollback/recovery instructions for non-transactional operations.</li>
+    <li>Use only Drizzle's migration journal; do not retain the checkpoint's separate custom migration runner. Readiness probes the expected schema/journal version and fails when migrations are absent. The API runtime never attempts DDL.</li>
+  </ol>
+  <p class="small">PostgreSQL <code>bigint</code> maps to JavaScript <code>bigint</code> when values may exceed the safe-number range. API serializers must convert deliberately because JSON cannot encode native <code>bigint</code>; never silently cast an unsafe amount to <code>number</code>.</p>
+  <div class="callout"><strong>Better Auth caution:</strong> preserve the adapter's expected table and column contract when changing auth. Generate and inspect its required schema changes rather than renaming library-owned columns casually.</div>
+</section>
+
+<section id="docker">
+  <h2>11. Local Docker Topology</h2>
+  <div class="mermaid">
+flowchart LR
+  D[developer: docker compose up --build] --> P[(postgres)]
+  P -->|healthy| M[migrate: one-shot]
+  M -->|kuquest_migrator URL; exit 0| A[api]
+  A -->|kuquest_app URL| P
+  A --> H[HTTP + Better Auth cookie]
+  A --> L[small background loops]
+  L -->|claim tasks/webhooks| P
+  </div>
+  <table><tr><th>Service</th><th>Lifecycle</th><th>Responsibility</th></tr>
+    <tr><td><code>postgres</code></td><td>Long-running, health-checked, persistent named volume</td><td>One PostgreSQL database; fresh-volume initialization creates restricted roles and permits the migrator to initialize Drizzle's journal; no default application-superuser use.</td></tr>
+    <tr><td><code>migrate</code></td><td>One-shot; waits for health; must complete successfully</td><td>Same backend image, migration command, migrator credential. API depends on successful completion.</td></tr>
+    <tr><td><code>api</code></td><td>Long-running; starts after migration success</td><td>HTTP, Better Auth, domain services, and bounded internal background loops using only the runtime credential.</td></tr>
+  </table>
+  <p>Teammates use one command. PostgreSQL <code>/docker-entrypoint-initdb.d</code> role bootstrap runs only for a fresh volume, so changing bootstrap role/password settings locally requires an explicit data-reset procedure such as <code>docker compose down -v</code> (which destroys local database data). The API image must not contain a baked-in environment file. The image used by <code>migrate</code> must include <code>drizzle-kit</code>; the API container receives only the runtime URL.</p>
+</section>
+
+<section id="deferred">
+  <h2>12. Explicit Deferrals and Production Gates</h2>
+  <h3>Chat and media</h3>
+  <p>Detailed chat and media-server schemas are deliberately out of scope for this implementation. Do not add file paths, storage URLs, blobs, or chat-specific attachment tables to the domain schema now. The future boundary is an opaque <code>mediaId</code>: submissions, disputes, avatars, portfolios, and chat messages will reference centralized media assets without knowing their physical storage location. A later design must add typed link tables and authorization/lifecycle rules.</p>
+  <h3>Unspecified product features</h3>
+  <p>Categories, skills, ratings, favorites, organizations, notifications, profiles, portfolios, and other marketplace discovery features have no approved requirements in the reviewed sources. They are intentionally absent rather than guessed into the schema.</p>
+  <h3>Before live money</h3>
+  <ul class="checklist">
+    <li>Replace development plaintext payout fields with authenticated encryption and a tested rotation/key-management design.</li>
+    <li>Confirm Xendit Thai collection/payout APIs, callbacks, routing fields, fee/tax behavior, late success, reversals, permissions, and one-merchant marketplace use.</li>
+    <li>Obtain legal/accounting review and define reconciliation ownership, alerting, shortfall response, and dispute staffing.</li>
+    <li>Pass concurrency, double-spend, idempotency, duplicate/missed webhook, task crash-retry, ledger rebuild, reversal, and negative-balance tests.</li>
+    <li>Threat-model database privileges, session/cookie/CORS behavior, admin separation of duties, raw provider payloads, logs, backups, and production network exposure.</li>
+  </ul>
+  <div class="callout danger"><strong>Design status:</strong> the MVP schema, migrations, Better Auth session integration, wallet conversion slice, and Docker verification are implemented. This is not production approval: the runtime role still inserts the narrowly required ledger rows for the implemented conversion flow. Before production, move financial mutations behind reviewed database functions or a dedicated financial role, complete encryption/key management for payout data, and validate real provider delivery identifiers and raw-payload handling.</div>
+</section>
+</main>
+<footer>KUQuest database design v0.1 · Database-first MVP target · 2026-07-14</footer>
+</body>
+</html>

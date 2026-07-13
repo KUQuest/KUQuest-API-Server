@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm';
-import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
+import { sql } from 'drizzle-orm';
+import { pgTable, text, timestamp, boolean, check, index, unique } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("user_id").primaryKey(),
@@ -14,7 +15,7 @@ export const user = pgTable("user", {
     .notNull(),
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
-});
+}, (table) => [check('user_ku_email_chk', sql`lower(${table.email}) ~ '^[^@]+@ku[.]th$'`)]);
 
 export const session = pgTable(
   "session",
@@ -32,7 +33,7 @@ export const session = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
   },
-  (table) => [index("session_userId_idx").on(table.userId)],
+  (table) => [index("session_userId_idx").on(table.userId), index('session_expires_at_idx').on(table.expiresAt)],
 );
 
 export const account = pgTable(
@@ -56,7 +57,7 @@ export const account = pgTable(
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [index("account_userId_idx").on(table.userId)],
+  (table) => [index("account_userId_idx").on(table.userId), unique('account_provider_identity_uq').on(table.providerId, table.accountId)],
 );
 
 export const verification = pgTable(
@@ -72,7 +73,7 @@ export const verification = pgTable(
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [index("verification_identifier_idx").on(table.identifier)],
+  (table) => [index("verification_identifier_idx").on(table.identifier), index('verification_expires_at_idx').on(table.expiresAt)],
 );
 
 export const userRelations = relations(user, ({ many }) => ({

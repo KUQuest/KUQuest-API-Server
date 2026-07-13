@@ -43,4 +43,22 @@ export const validateRuntimeEnv = (): void => {
   if (env.betterAuthSecret && env.betterAuthSecret.length < 32) {
     throw new Error('BETTER_AUTH_SECRET must be at least 32 characters long');
   }
+
+  if (
+    env.nodeEnv === 'production' &&
+    env.betterAuthSecret === 'local-development-only-secret-change-me'
+  ) {
+    throw new Error('The development BETTER_AUTH_SECRET cannot be used in production');
+  }
+
+  if (env.nodeEnv === 'production') {
+    const knownDevelopmentValues = [
+      env.databaseUrl?.includes('app-local-only@'),
+      env.googleClientId === 'docker-test-client-id',
+      env.googleClientSecret === 'docker-test-client-secret',
+    ];
+    if (knownDevelopmentValues.some(Boolean)) {
+      throw new Error('Repository development credentials cannot be used in production');
+    }
+  }
 };

@@ -8,6 +8,27 @@
       "when": 1783953671418,
       "tag": "0000_cloudy_oracle",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784030400000,
+      "tag": "0001_full_marketplace_schema",
+      "breakpoints": false
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784030460000,
+      "tag": "0002_security_and_ledger_invariants",
+      "breakpoints": false
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783968543882,
+      "tag": "0003_pretty_ben_parker",
+      "breakpoints": true
     }
   ]
 }

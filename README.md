@@ -4,18 +4,23 @@ Backend API for KUQuest Mobile and CMS, built with Elysia and Bun.
 
 ## Requirements
 
-- Bun: see `.bun-version`
 - Docker with Docker Compose
 
-## Local setup
+No local Bun or PostgreSQL installation is required. The application, migration
+tooling, checks, and integration database all run in containers.
+
+## Docker setup
 
 ```bash
 cp .env.example .env
-bun install --frozen-lockfile
-docker compose up -d postgres
-bun run db:migrate
-bun run dev
+docker compose up --build
 ```
+
+Compose waits for PostgreSQL to become healthy, runs all pending Drizzle
+migrations once with the schema-owner role, and starts the API only after the
+migration container exits successfully. The running API receives only the
+restricted application-role database URL. PostgreSQL and API are the only
+long-running services.
 
 Open `http://localhost:5000` in a browser to use the built-in Google login,
 session inspection, and sign-out test page.
@@ -63,32 +68,48 @@ disabled. On first sign-in, Google profile data is saved in the `user` table as
 `user_id` (primary key), `first_name`, and `last_name`, along with Better Auth's
 required email and profile fields.
 
-## Database commands
+## Database and migration commands
 
 ```bash
-bun run db:generate  # generate a SQL migration after schema changes
-bun run db:migrate   # apply pending migrations
-bun run db:studio    # open Drizzle Studio
+# Apply pending migrations with the dedicated migrator role
+docker compose run --rm migrate
+
+# Generate SQL after changing a Drizzle schema
+docker compose build migrate
+docker compose run --rm migrate bun run db:generate
 ```
 
 PostgreSQL data is persisted in the `postgres_data` Docker volume.
+The bootstrap script creates the fixed `kuquest_migrator` and `kuquest_app`
+roles on a fresh volume. Keeping these names fixed makes the reviewed migration
+grants predictable; configure their passwords and matching database URLs. It
+also creates an isolated `kuquest_test` database. Changing bootstrap credentials
+after a volume already exists does not rotate database passwords; recreate the
+development volume or rotate the roles explicitly.
 
 ## Verification
 
-Run every repository check with:
+Run every repository check, including PostgreSQL-backed integration tests, in
+Docker with:
 
 ```bash
-bun run check
+docker compose --profile test run --rm test
 ```
 
 This runs linting, TypeScript validation, unit/integration tests, and the Bun
-production build. Tests are grouped by production boundary under `tests/` so a
-specific area can also be run independently, for example:
+production build. The test container first migrates the isolated test database
+as the migrator, then runs checks using the restricted app-role URL. Tests are
+grouped by production boundary under `tests/`; a specific area can also be run
+without installing Bun locally, for example:
 
 ```bash
-bun test tests/modules/auth
-bun test tests/database
+docker compose --profile test run --rm test sh -euc \
+  'DATABASE_URL="$MIGRATOR_TEST_DATABASE_URL" bun run db:migrate && DATABASE_URL="$TEST_DATABASE_URL" bun test tests/modules/auth'
 ```
+
+To stop the stack, use `docker compose down`. To intentionally discard all
+local database data and force the role bootstrap to run again, use
+`docker compose down --volumes`.
 
 ## Project structure
 

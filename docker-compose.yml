@@ -1,25 +1,105 @@
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: kuquest-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-kuquest}
-      POSTGRES_USER: ${POSTGRES_USER:-kuquest}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kuquest-local-only}
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-postgres-local-admin-only}
+      KUQUEST_TEST_DB: ${KUQUEST_TEST_DB:-kuquest_test}
+      KUQUEST_MIGRATOR_PASSWORD: ${KUQUEST_MIGRATOR_PASSWORD:-migrator-local-only}
+      KUQUEST_APP_PASSWORD: ${KUQUEST_APP_PASSWORD:-app-local-only}
     ports:
       - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro
     healthcheck:
       test:
         [
           'CMD-SHELL',
-          'pg_isready -U ${POSTGRES_USER:-kuquest} -d ${POSTGRES_DB:-kuquest}',
+          'pg_isready -U ${POSTGRES_ADMIN_USER:-postgres} -d ${POSTGRES_DB:-kuquest}',
         ]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 5s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: 'no'
+    environment:
+      DATABASE_URL: ${KUQUEST_MIGRATOR_DATABASE_URL:-postgresql://kuquest_migrator:migrator-local-only@postgres:5432/kuquest}
+    volumes:
+      - ./drizzle:/app/drizzle
+    command: ['bun', 'run', 'db:migrate']
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      HOST: 0.0.0.0
+      PORT: 5000
+      DATABASE_URL: ${KUQUEST_APP_DATABASE_URL:-postgresql://kuquest_app:app-local-only@postgres:5432/kuquest}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:5000}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-development-only-secret-change-me}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-docker-test-client-id}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-docker-test-client-secret}
+      XENDIT_SECRET_KEY: ${XENDIT_SECRET_KEY:-}
+      XENDIT_WEBHOOK_TOKEN: ${XENDIT_WEBHOOK_TOKEN:-}
+      CMS_ORIGIN: ${CMS_ORIGIN:-http://localhost:3000}
+    ports:
+      - '${API_PORT:-5000}:5000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'bun',
+          '-e',
+          "const response = await fetch('http://127.0.0.1:5000/health'); if (!response.ok) process.exit(1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  test:
+    profiles: ['test']
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: 'no'
+    environment:
+      NODE_ENV: test
+      HOST: 0.0.0.0
+      PORT: 5000
+      MIGRATOR_TEST_DATABASE_URL: ${KUQUEST_MIGRATOR_TEST_DATABASE_URL:-postgresql://kuquest_migrator:migrator-local-only@postgres:5432/kuquest_test}
+      TEST_DATABASE_URL: ${KUQUEST_APP_TEST_DATABASE_URL:-postgresql://kuquest_app:app-local-only@postgres:5432/kuquest_test}
+      BETTER_AUTH_URL: http://localhost:5000
+      BETTER_AUTH_SECRET: docker-test-secret-at-least-32-characters
+      GOOGLE_CLIENT_ID: docker-test-client-id
+      GOOGLE_CLIENT_SECRET: docker-test-client-secret
+      CMS_ORIGIN: http://localhost:3000
+    command:
+      - sh
+      - -euc
+      - |
+        DATABASE_URL="$${MIGRATOR_TEST_DATABASE_URL}" bun run db:migrate
+        DATABASE_URL="$${TEST_DATABASE_URL}" bun run check
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:

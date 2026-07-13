@@ -31,6 +31,12 @@ describe('authentication OpenAPI documentation', () => {
     expect(document.paths?.['/api/auth/callback/google']?.get).toBeDefined();
     expect(document.paths?.['/api/auth/get-session']?.get).toBeDefined();
     expect(document.paths?.['/api/auth/sign-out']?.post).toBeDefined();
+    expect(document.paths?.['/v1/wallet']?.get).toBeDefined();
+    expect(document.paths?.['/v1/wallet/policy']?.get).toBeDefined();
+    expect(document.paths?.['/v1/wallet/activities']?.get).toBeDefined();
+    expect(
+      document.paths?.['/v1/wallet/earnings-conversions']?.post,
+    ).toBeDefined();
   });
 
   it('defines the auth tag, session security, and reusable schemas', async () => {

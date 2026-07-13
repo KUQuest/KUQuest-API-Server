@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
 import { env } from '@/config/env';
-import * as schema from '@/database/schema/auth.schema';
+import * as schema from '@/database/schema';
 
 const connectionString =
   env.databaseUrl ||
