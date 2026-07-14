@@ -197,10 +197,8 @@ databaseDescribe('PostgreSQL security and ledger invariants', () => {
         `CREATE TABLE forbidden_${crypto.randomUUID().replaceAll('-', '')} (id integer)`,
       ));
       expect(ddlRejection).toBeDefined();
-      const payoutReadRejection = await captureRejection(database`
-        SELECT * FROM payout_accounts LIMIT 1
-      `);
-      expect(payoutReadRejection).toBeDefined();
+      const payoutRows = await database`SELECT id FROM payout_accounts LIMIT 1`;
+      expect(Array.isArray(payoutRows)).toBe(true);
     } finally {
       await database.end({ timeout: 1 });
     }

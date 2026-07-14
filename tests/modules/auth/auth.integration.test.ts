@@ -10,10 +10,10 @@ describe('authentication integration', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/html');
-    expect(body).toContain('KUQuest Auth Test');
-    expect(body).toContain('/api/auth/sign-in/social');
-    expect(body).toContain("window.location.protocol === 'file:'");
-    expect(body).toContain('http://localhost:5000');
+    expect(body).toContain('KUQuest — ทดสอบการไหลของเงิน');
+    expect(body).toContain('เข้าสู่ระบบด้วย Google');
+    expect(body).toContain('/app.js');
+    expect(body).toContain('รายละเอียด API');
   });
 
   it('enables only Google sign-in', () => {

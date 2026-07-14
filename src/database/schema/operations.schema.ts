@@ -18,3 +18,20 @@ export const scheduledTasks = pgTable('scheduled_tasks', { id: id(), type: text(
 export const scheduledTaskStatusHistory = pgTable('scheduled_task_status_history', { id: id(), taskId: uuid('task_id').notNull().references(() => scheduledTasks.id), fromStatus: text('from_status'), toStatus: text('to_status').notNull(), source: text('source').notNull(), reason: text('reason'), error: text('error'), occurredAt: time('occurred_at').defaultNow().notNull() }, (t) => [index('scheduled_task_history_idx').on(t.taskId, t.occurredAt)]);
 
 export const auditEvents = pgTable('audit_events', { id: id(), actorUserId: text('actor_user_id').references(() => user.id), source: text('source').notNull(), action: text('action').notNull(), resourceType: text('resource_type').notNull(), resourceId: text('resource_id'), reason: text('reason'), before: jsonb('before'), after: jsonb('after'), requestId: text('request_id'), traceId: text('trace_id'), ipAddress: inet('ip_address'), occurredAt: time('occurred_at').defaultNow().notNull() }, (t) => [index('audit_events_resource_idx').on(t.resourceType, t.resourceId, t.occurredAt), index('audit_events_actor_idx').on(t.actorUserId, t.occurredAt)]);
+
+export const developmentTestUsers = pgTable('development_test_users', {
+  userId: text('user_id').primaryKey().references(() => user.id),
+  createdByUserId: text('created_by_user_id').notNull().references(() => user.id),
+  createdAt: time('created_at').defaultNow().notNull(),
+}, (t) => [index('development_test_users_created_by_idx').on(t.createdByUserId, t.createdAt)]);
+
+export const developmentActorSessions = pgTable('development_actor_sessions', {
+  tokenHash: text('token_hash').primaryKey(),
+  userId: text('user_id').notNull().references(() => user.id),
+  activatedByUserId: text('activated_by_user_id').notNull().references(() => user.id),
+  expiresAt: time('expires_at').notNull(),
+  createdAt: time('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('development_actor_sessions_user_idx').on(t.userId),
+  index('development_actor_sessions_expiry_idx').on(t.expiresAt),
+]);

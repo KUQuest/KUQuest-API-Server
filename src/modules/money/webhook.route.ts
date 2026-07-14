@@ -16,6 +16,7 @@ const failureResponse = (description: string) => ({
 const recordWebhook = async (
   repository: MoneyRepository,
   payload: unknown,
+  family: 'payment' | 'payout',
 ) => {
   const envelope: object =
     payload && typeof payload === 'object'
@@ -28,7 +29,7 @@ const recordWebhook = async (
   const eventType =
     'event' in envelope && typeof envelope.event === 'string'
       ? envelope.event
-      : 'unknown';
+      : `${family}.status`;
   const objectIdCandidate =
     data && 'id' in data
       ? data.id
@@ -48,7 +49,7 @@ const recordWebhook = async (
       ? data.status
       : 'unknown';
   const eventKey = objectId
-    ? await sha256(stableJson({ eventType, objectId, status }))
+    ? await sha256(stableJson({ eventType, objectId, status, payloadHash }))
     : payloadHash;
 
   return repository.storeWebhook({
@@ -65,6 +66,7 @@ const recordWebhook = async (
 export const createXenditWebhookRoute = (
   repository: MoneyRepository,
   verificationToken: string | undefined,
+  processStoredWebhooks?: () => Promise<unknown>,
 ) =>
   new Elysia({
     name: 'xendit-webhook-route',
@@ -92,7 +94,8 @@ export const createXenditWebhookRoute = (
           .post(
             '/payments',
             async ({ body }) => {
-              await recordWebhook(repository, body);
+              await recordWebhook(repository, body, 'payment');
+              void processStoredWebhooks?.();
               return new Response(null, { status: 202 });
             },
             {
@@ -118,7 +121,8 @@ export const createXenditWebhookRoute = (
           .post(
             '/payouts',
             async ({ body }) => {
-              await recordWebhook(repository, body);
+              await recordWebhook(repository, body, 'payout');
+              void processStoredWebhooks?.();
               return new Response(null, { status: 202 });
             },
             {

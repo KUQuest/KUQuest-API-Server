@@ -3,341 +3,144 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>KUQuest Auth Test</title>
-    <style>
-      :root {
-        color-scheme: light;
-        font-family:
-          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-          "Segoe UI", sans-serif;
-        color: #17211b;
-        background: #f3f6f4;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        min-width: 320px;
-        min-height: 100dvh;
-        margin: 0;
-        display: grid;
-        place-items: center;
-        padding: 24px;
-      }
-
-      main {
-        width: min(100%, 680px);
-      }
-
-      header {
-        margin-bottom: 24px;
-      }
-
-      .eyebrow {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 12px;
-        color: #17653a;
-        font-size: 0.875rem;
-        font-weight: 700;
-      }
-
-      .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 999px;
-        background: #1b7f49;
-      }
-
-      h1 {
-        margin: 0;
-        font-size: clamp(2rem, 8vw, 3.5rem);
-        line-height: 1.05;
-        text-wrap: balance;
-      }
-
-      header p {
-        max-width: 58ch;
-        margin: 14px 0 0;
-        color: #58635c;
-        line-height: 1.6;
-        text-wrap: pretty;
-      }
-
-      .card {
-        padding: clamp(20px, 5vw, 32px);
-        border: 1px solid #dce4df;
-        border-radius: 18px;
-        background: #ffffff;
-        box-shadow: 0 8px 24px rgb(20 44 30 / 8%);
-      }
-
-      .actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-      }
-
-      button {
-        min-height: 44px;
-        border: 1px solid #cbd6cf;
-        border-radius: 10px;
-        padding: 10px 16px;
-        font: inherit;
-        font-weight: 700;
-        cursor: pointer;
-        background: #ffffff;
-        color: #26332b;
-      }
-
-      button:hover:not(:disabled) {
-        background: #f3f6f4;
-      }
-
-      button:focus-visible {
-        outline: 3px solid #89c7a3;
-        outline-offset: 2px;
-      }
-
-      button:disabled {
-        cursor: wait;
-        opacity: 0.6;
-      }
-
-      .primary {
-        border-color: #17653a;
-        background: #17653a;
-        color: #ffffff;
-      }
-
-      .primary:hover:not(:disabled) {
-        background: #11542f;
-      }
-
-      .status {
-        min-height: 24px;
-        margin: 18px 0 0;
-        color: #455149;
-        line-height: 1.5;
-      }
-
-      .status[data-type="error"] {
-        color: #a12622;
-      }
-
-      .status[data-type="success"] {
-        color: #17653a;
-      }
-
-      .session {
-        margin-top: 22px;
-        padding-top: 22px;
-        border-top: 1px solid #e5ebe7;
-      }
-
-      .session h2 {
-        margin: 0 0 10px;
-        font-size: 1rem;
-      }
-
-      pre {
-        min-height: 92px;
-        margin: 0;
-        overflow-x: auto;
-        border-radius: 10px;
-        padding: 14px;
-        background: #17211b;
-        color: #e8f2ec;
-        font: 0.8125rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-
-      .note {
-        margin: 18px 0 0;
-        color: #69746d;
-        font-size: 0.875rem;
-        line-height: 1.5;
-      }
-
-      @media (max-width: 520px) {
-        body {
-          align-items: start;
-          padding: 20px 16px;
-        }
-
-        .actions,
-        button {
-          width: 100%;
-        }
-      }
-    </style>
+    <meta name="color-scheme" content="light" />
+    <title>KUQuest — ทดสอบการไหลของเงิน</title>
+    <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
-    <main>
-      <header>
-        <div class="eyebrow"><span class="dot" aria-hidden="true"></span>KUQuest API</div>
-        <h1>ทดสอบระบบเข้าสู่ระบบ</h1>
-        <p>
-          หน้าเครื่องมือสำหรับตรวจ Google OAuth, session และข้อมูลผู้ใช้ที่บันทึกโดย Better Auth
-        </p>
+    <noscript>หน้านี้ต้องเปิด JavaScript เพื่อทดสอบ API</noscript>
+
+    <section class="auth-shell" id="auth-shell">
+      <div class="auth-card">
+        <div class="brand"><span class="brand-mark">KQ</span><span>KUQuest</span></div>
+        <p class="eyebrow">Development money journey</p>
+        <h1>ทดลองใช้งานเหมือนผู้ใช้จริง</h1>
+        <p class="lead">เข้าสู่ระบบด้วยบัญชีมหาวิทยาลัย แล้วทดลองเติมเงิน จ้างงาน รับรายได้ และถอนเงินผ่าน Xendit test mode</p>
+        <div class="button-row">
+          <button class="button primary" id="sign-in" type="button">เข้าสู่ระบบด้วย Google</button>
+          <button class="button quiet" id="refresh-session" type="button">ตรวจสอบ Session</button>
+        </div>
+        <p class="notice" id="auth-status" role="status" aria-live="polite">กำลังตรวจสอบ session…</p>
+        <details class="session-detail">
+          <summary>ดูข้อมูล session ที่ปลอดภัย</summary>
+          <pre id="session-output">กำลังโหลด…</pre>
+        </details>
+        <p class="fine-print">อนุญาตเฉพาะ Google Workspace ที่ลงท้ายด้วย <code>@ku.th</code></p>
+      </div>
+    </section>
+
+    <div class="app-shell" id="app-shell" hidden>
+      <header class="topbar">
+        <div class="brand"><span class="brand-mark">KQ</span><span>KUQuest</span><span class="environment">DEV</span></div>
+        <div class="topbar-actions">
+          <span class="sync-state" id="sync-state"><span class="live-dot"></span>พร้อมใช้งาน</span>
+          <button class="icon-button" id="refresh-all" type="button" title="โหลดข้อมูลล่าสุด" aria-label="โหลดข้อมูลล่าสุด">↻</button>
+          <button class="button quiet small" id="sign-out" type="button">ออกจากระบบ</button>
+        </div>
       </header>
 
-      <section class="card" aria-labelledby="auth-heading">
-        <h2 id="auth-heading" hidden>Authentication controls</h2>
-        <div class="actions">
-          <button class="primary" id="sign-in" type="button">เข้าสู่ระบบด้วย Google</button>
-          <button id="refresh-session" type="button">ตรวจสอบ Session</button>
-          <button id="sign-out" type="button" hidden>ออกจากระบบ</button>
-        </div>
-
-        <p class="status" id="status" role="status" aria-live="polite">
-          กำลังตรวจสอบ session…
-        </p>
-
-        <div class="session">
-          <h2>Session result</h2>
-          <pre id="session-output" aria-live="polite">กำลังโหลด…</pre>
-        </div>
-
-        <p class="note">อนุญาตเฉพาะบัญชี Google ที่มีอีเมลลงท้ายด้วย @ku.th เท่านั้น</p>
+      <section class="actor-strip" aria-label="พื้นที่ทำงานของผู้ใช้">
+        <div class="actor-tabs" id="actor-tabs"></div>
+        <button class="add-actor" id="add-actor" type="button">＋ สร้างผู้ใช้ทดสอบ</button>
       </section>
-    </main>
 
-    <script>
-      const signInButton = document.querySelector('#sign-in');
-      const refreshButton = document.querySelector('#refresh-session');
-      const signOutButton = document.querySelector('#sign-out');
-      const statusElement = document.querySelector('#status');
-      const sessionOutput = document.querySelector('#session-output');
+      <div class="workspace">
+        <aside class="sidebar">
+          <div class="actor-summary">
+            <div class="avatar" id="active-avatar">K</div>
+            <div><strong id="active-name">ผู้ใช้</strong><small id="active-email">—</small></div>
+          </div>
+          <nav class="main-nav" id="main-nav" aria-label="เมนูหลัก">
+            <button class="nav-item active" data-view="wallet" type="button"><span>◫</span> กระเป๋าเงิน</button>
+            <button class="nav-item" data-view="topup" type="button"><span>＋</span> เติมเงิน</button>
+            <button class="nav-item" data-view="jobs" type="button"><span>▣</span> งาน</button>
+            <button class="nav-item" data-view="earnings" type="button"><span>฿</span> รายได้และถอนเงิน</button>
+            <button class="nav-item" data-view="activity" type="button"><span>↕</span> กิจกรรม</button>
+          </nav>
+          <div class="scenario-guide">
+            <span class="eyebrow">เส้นทางแนะนำ</span>
+            <ol>
+              <li>เติมเงินให้นายจ้าง</li><li>สร้างและจ่ายเงินให้งาน</li><li>สลับเป็นคนทำงานแล้วสมัคร</li><li>ส่งงานและอนุมัติ</li><li>ถอนรายได้ทดสอบ</li>
+            </ol>
+          </div>
+        </aside>
 
-      const setBusy = (busy) => {
-        signInButton.disabled = busy;
-        refreshButton.disabled = busy;
-        signOutButton.disabled = busy;
-      };
+        <main class="content">
+          <div id="toast-region" class="toast-region" aria-live="polite"></div>
 
-      const setStatus = (message, type = 'info') => {
-        statusElement.textContent = message;
-        statusElement.dataset.type = type;
-      };
+          <section class="view active" data-view-panel="wallet">
+            <div class="page-heading"><div><p class="eyebrow">ภาพรวม</p><h1>กระเป๋าเงินของคุณ</h1><p>ยอดทั้งหมดมาจาก ledger ของเซิร์ฟเวอร์</p></div><button class="button quiet" data-refresh-view="wallet" type="button">โหลดล่าสุด</button></div>
+            <div class="balance-grid">
+              <article class="balance-card hero"><span>ใช้จ่ายได้</span><strong id="balance-spending">—</strong><small>Spending balance</small></article>
+              <article class="balance-card"><span>รายได้</span><strong id="balance-earnings">—</strong><small>Earnings balance</small></article>
+              <article class="balance-card"><span>พักไว้ในงาน</span><strong id="balance-held">—</strong><small>Held for jobs</small></article>
+              <article class="balance-card"><span>รอถอน</span><strong id="balance-reserved">—</strong><small>Reserved for payouts</small></article>
+            </div>
+            <div class="two-column">
+              <article class="panel"><div class="panel-title"><div><h2>เริ่มทดสอบเงิน</h2><p>เติมเงินด้วย PromptPay test mode ก่อนสร้างงาน</p></div></div><button class="button primary" data-go="topup" type="button">ไปที่เติมเงิน</button></article>
+              <article class="panel"><div class="panel-title"><div><h2>สถานะกระเป๋า</h2><p id="wallet-as-of">ยังไม่ได้โหลด</p></div><span class="badge" id="wallet-status">—</span></div><dl class="facts" id="policy-facts"><div><dt>สกุลเงิน</dt><dd>THB</dd></div><div><dt>ค่าธรรมเนียมงาน</dt><dd>—</dd></div></dl></article>
+            </div>
+          </section>
 
-      const readJson = async (response) => {
-        const body = await response.json().catch(() => null);
+          <section class="view" data-view-panel="topup">
+            <div class="page-heading"><div><p class="eyebrow">Xendit test mode</p><h1>เติมเงินด้วย PromptPay</h1><p>ยอดจะเข้ากระเป๋าหลัง webhook ที่ยืนยันแล้วเท่านั้น</p></div><button class="button quiet" data-refresh-view="topup" type="button">โหลดสถานะล่าสุด</button></div>
+            <div class="two-column align-start">
+              <article class="panel">
+                <div class="step-label">1 · ขอราคา</div>
+                <form id="topup-quote-form"><label>จำนวนเงินที่ต้องการเติม (บาท)<input id="topup-amount" name="credit_baht" type="number" min="1" step="1" value="1500" required /></label><button class="button primary full" type="submit">ดูยอดที่ต้องชำระ</button></form>
+                <div class="quote-box" id="topup-quote" hidden></div>
+              </article>
+              <article class="panel payment-panel" id="topup-payment-panel">
+                <div class="step-label">2 · ชำระและรอ webhook</div>
+                <div class="empty-state" id="topup-empty"><span class="empty-icon">⌁</span><h3>ยังไม่มีรายการเติมเงิน</h3><p>ขอราคาและยืนยันเพื่อรับข้อมูล PromptPay จาก Xendit</p></div>
+                <div id="topup-current" hidden></div>
+              </article>
+            </div>
+            <article class="panel"><div class="panel-title"><div><h2>รายการเติมเงิน</h2><p>กดรายการเพื่อกลับมาตรวจสอบสถานะได้</p></div></div><div class="table-wrap"><table><thead><tr><th>Reference</th><th>เครดิต</th><th>ยอดชำระ</th><th>สถานะ</th><th>สร้างเมื่อ</th><th></th></tr></thead><tbody id="topup-list"></tbody></table></div></article>
+          </section>
 
-        if (!response.ok) {
-          throw new Error(body?.message ?? `Request failed (${response.status})`);
-        }
+          <section class="view" data-view-panel="jobs">
+            <div class="page-heading"><div><p class="eyebrow">Funded jobs</p><h1>จ้างงานและรับงาน</h1><p>เงินจะถูกพักทันทีเมื่อประกาศงาน และเข้ารายได้เมื่ออนุมัติ</p></div><button class="button primary" id="open-job-form" type="button">＋ สร้างงาน</button></div>
+            <article class="panel job-form-panel" id="job-form-panel" hidden>
+              <div class="panel-title"><div><h2>สร้างงานใหม่</h2><p>ข้อความเท่านั้นสำหรับ MVP</p></div><button class="icon-button" id="close-job-form" type="button">×</button></div>
+              <form id="job-form" class="form-grid"><label class="span-2">ชื่องาน<input name="title" value="ช่วยตรวจเอกสารโครงการ" maxlength="200" required /></label><label class="span-2">รายละเอียด<textarea name="description" maxlength="10000" required>ตรวจความถูกต้องของเอกสารและสรุปข้อเสนอแนะ</textarea></label><label>ค่าจ้าง (บาท)<input name="job_amount" type="number" min="1" value="1000" required /></label><label>ปิดรับสมัคร<input name="application_deadline" type="datetime-local" required /></label><label>กำหนดส่งงาน<input name="work_deadline" type="datetime-local" required /></label><div class="span-2 preview" id="job-preview">เงินพักในงาน 1,000 บาท · ค่าธรรมเนียมคำนวณจากนโยบายปัจจุบัน</div><button class="button primary span-2" type="submit">ยืนยันและพักเงินในงาน</button></form>
+            </article>
+            <div class="segmented" id="job-scope"><button class="active" data-scope="marketplace" type="button">ค้นหางาน</button><button data-scope="mine" type="button">งานที่ฉันจ้าง</button><button data-scope="assigned" type="button">งานที่ได้รับเลือก</button></div>
+            <div class="job-grid" id="job-list"></div>
+          </section>
 
-        return body;
-      };
+          <section class="view" data-view-panel="earnings">
+            <div class="page-heading"><div><p class="eyebrow">รายได้</p><h1>จัดการรายได้และถอนเงิน</h1><p>รายได้เปลี่ยนเป็นเงินใช้จ่ายได้แบบย้อนกลับไม่ได้ หรือถอนผ่าน Xendit test mode</p></div><button class="button quiet" data-refresh-view="earnings" type="button">โหลดล่าสุด</button></div>
+            <div class="balance-strip"><div><span>รายได้พร้อมใช้</span><strong id="earnings-available">—</strong></div><div><span>พักไว้รอถอน</span><strong id="earnings-reserved">—</strong></div></div>
+            <div class="two-column align-start">
+              <article class="panel"><div class="panel-title"><div><h2>เปลี่ยนเป็นเงินใช้จ่าย</h2><p>การเปลี่ยนนี้ย้อนกลับไม่ได้</p></div></div><form id="conversion-form"><label>จำนวนเงิน (บาท)<input name="amount" type="number" min="1" value="100" required /></label><button class="button primary full" type="submit">ยืนยันการเปลี่ยน</button></form></article>
+              <article class="panel"><div class="panel-title"><div><h2>บัญชีรับเงินทดสอบ</h2><p>API จะแสดงกลับมาเฉพาะเลขที่ปกปิดแล้ว</p></div></div><form id="payout-account-form" class="form-grid"><label>ชื่อ<input name="given_name" value="Somchai" required /></label><label>นามสกุล<input name="surname" value="Test" required /></label><label class="span-2">ชื่อบัญชี<input name="account_holder_name" value="Somchai Test" required /></label><label>ธนาคาร<input name="bank_code" value="BBL" required /></label><label>เลขบัญชี<input name="account_number" value="1234567890" autocomplete="off" required /></label><button class="button quiet span-2" type="submit">บันทึกบัญชีรับเงิน</button></form><details class="test-presets"><summary>สถานการณ์ Xendit test mode</summary><div class="preset-row"><button type="button" data-account-preset="123456">ล้มเหลวชั่วคราว</button><button type="button" data-account-preset="999999">ถูกปฏิเสธ</button><button type="button" data-account-preset="121212">ข้อมูลไม่ถูกต้อง</button><button type="button" data-account-preset="654321">สำเร็จแล้ว reversal</button></div></details></article>
+            </div>
+            <article class="panel"><div class="panel-title"><div><h2>ขอถอนรายได้</h2><p id="payout-account-summary">กรุณาบันทึกบัญชีรับเงินก่อน</p></div></div><form id="payout-quote-form" class="inline-form"><label>ยอดที่ต้องการได้รับ (บาท)<input name="receipt_baht" type="number" min="1" value="100" required /></label><button class="button primary" type="submit">ดูราคาและยืนยันถอน</button></form><div class="quote-box" id="payout-quote" hidden></div><div class="table-wrap"><table><thead><tr><th>Reference</th><th>ยอดเงิน</th><th>ปลายทาง</th><th>สถานะ</th><th>สร้างเมื่อ</th></tr></thead><tbody id="payout-list"></tbody></table></div></article>
+          </section>
 
-      const safeSessionView = (data) => {
-        if (!data) return null;
+          <section class="view" data-view-panel="activity">
+            <div class="page-heading"><div><p class="eyebrow">Ledger-backed</p><h1>กิจกรรมกระเป๋าเงิน</h1><p>ประวัติอ่านอย่างเดียวจากรายการทางการเงินที่บันทึกแล้ว</p></div><button class="button quiet" data-refresh-view="activity" type="button">โหลดล่าสุด</button></div>
+            <article class="panel"><div class="activity-list" id="activity-list"></div></article>
+          </section>
+        </main>
+      </div>
 
-        return {
-          user: data.user,
-          session: {
-            id: data.session?.id,
-            userId: data.session?.userId,
-            createdAt: data.session?.createdAt,
-            updatedAt: data.session?.updatedAt,
-            expiresAt: data.session?.expiresAt,
-          },
-        };
-      };
+      <aside class="debug-drawer" id="debug-drawer" aria-label="รายละเอียดการทดสอบ">
+        <button class="debug-handle" id="debug-toggle" type="button" aria-expanded="false"><span>⌘</span> รายละเอียด API <strong id="debug-count">0</strong></button>
+        <div class="debug-body">
+          <div class="debug-header"><div><span class="eyebrow">Ephemeral · sanitized</span><h2>รายละเอียดการทดสอบ</h2></div><button class="icon-button" id="debug-close" type="button">×</button></div>
+          <p class="debug-note">บันทึกอยู่ในหน่วยความจำของแท็บนี้เท่านั้น และตัด cookie, token, QR payload, raw webhook และเลขบัญชีออกแล้ว</p>
+          <div class="button-row"><button class="button quiet small" id="debug-export" type="button">ดาวน์โหลด JSON</button><button class="button quiet small" id="debug-copy" type="button">คัดลอก</button><button class="button danger small" id="debug-clear" type="button">ล้าง</button></div>
+          <div class="replay-tools" id="replay-tools" hidden><p>คำขอเปลี่ยนแปลงล่าสุด</p><div class="button-row"><button class="button quiet small" id="replay-same" type="button">Replay เดิม</button><button class="button quiet small" id="replay-conflict" type="button">ใช้ key เดิมแต่เปลี่ยนข้อมูล</button></div></div>
+          <section class="evidence" id="diagnostic-evidence"><div class="debug-empty">กำลังรอข้อมูล ledger และ webhook</div></section>
+          <div class="debug-log" id="debug-log"></div>
+        </div>
+      </aside>
+    </div>
 
-      const refreshSession = async () => {
-        setBusy(true);
-        setStatus('กำลังตรวจสอบ session…');
+    <dialog id="actor-dialog"><form method="dialog" class="dialog-card" id="actor-form"><div class="panel-title"><div><p class="eyebrow">ผู้ใช้ปกติใน development</p><h2>สร้างผู้ใช้ทดสอบ</h2></div><button class="icon-button" value="cancel" type="submit">×</button></div><p>ผู้ใช้ใหม่เริ่มต้นที่ 0 บาท และทำรายการผ่าน API เดียวกับผู้ใช้ทั่วไป</p><label>ชื่อที่แสดง<input name="name" value="KUQuest Test Worker" maxlength="100" required /></label><div class="dialog-actions"><button class="button quiet" value="cancel" type="submit">ยกเลิก</button><button class="button primary" value="create" type="submit">สร้างผู้ใช้</button></div></form></dialog>
 
-        try {
-          const response = await fetch('/api/auth/get-session', {
-            credentials: 'include',
-          });
-          const data = await readJson(response);
-
-          sessionOutput.textContent = JSON.stringify(safeSessionView(data), null, 2);
-          signInButton.hidden = Boolean(data);
-          signOutButton.hidden = !data;
-          setStatus(
-            data ? `เข้าสู่ระบบแล้ว: ${data.user.email}` : 'ยังไม่ได้เข้าสู่ระบบ',
-            data ? 'success' : 'info',
-          );
-        } catch (error) {
-          sessionOutput.textContent = 'null';
-          setStatus(error instanceof Error ? error.message : 'ตรวจสอบ session ไม่สำเร็จ', 'error');
-        } finally {
-          setBusy(false);
-        }
-      };
-
-      const signIn = async () => {
-        setBusy(true);
-        setStatus('กำลังเปิด Google account selector…');
-
-        try {
-          const response = await fetch('/api/auth/sign-in/social', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              provider: 'google',
-              callbackURL: `${window.location.origin}/`,
-              errorCallbackURL: `${window.location.origin}/`,
-              disableRedirect: true,
-            }),
-          });
-          const data = await readJson(response);
-
-          if (!data?.url) throw new Error('ไม่ได้รับ Google authorization URL');
-
-          window.location.assign(data.url);
-        } catch (error) {
-          setStatus(error instanceof Error ? error.message : 'เริ่ม Google login ไม่สำเร็จ', 'error');
-          setBusy(false);
-        }
-      };
-
-      const signOut = async () => {
-        setBusy(true);
-        setStatus('กำลังออกจากระบบ…');
-
-        try {
-          const response = await fetch('/api/auth/sign-out', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: '{}',
-          });
-          await readJson(response);
-          await refreshSession();
-        } catch (error) {
-          setStatus(error instanceof Error ? error.message : 'ออกจากระบบไม่สำเร็จ', 'error');
-          setBusy(false);
-        }
-      };
-
-      if (window.location.protocol === 'file:') {
-        setBusy(true);
-        setStatus('ไม่สามารถเปิดหน้า Auth Test ผ่าน file:// ได้', 'error');
-        sessionOutput.textContent =
-          'เริ่ม API ด้วยคำสั่ง bun run dev แล้วเปิด http://localhost:5000 ใน browser';
-      } else {
-        const oauthError = new URLSearchParams(window.location.search).get('error');
-        if (oauthError) {
-          setStatus(`Google login ไม่สำเร็จ: ${oauthError}`, 'error');
-          history.replaceState({}, '', window.location.pathname);
-        }
-
-        signInButton.addEventListener('click', signIn);
-        refreshButton.addEventListener('click', refreshSession);
-        signOutButton.addEventListener('click', signOut);
-        refreshSession();
-      }
-    </script>
+    <script src="/app.js" defer></script>
   </body>
 </html>

@@ -327,11 +327,8 @@ describe('Xendit durable webhook acceptance', () => {
     );
     expect(accepted.status).toBe(202);
     expect(duplicate.status).toBe(202);
-    expect(conflictingRedelivery.status).toBe(409);
-    expect((await conflictingRedelivery.json()).error.code).toBe(
-      'IDEMPOTENCY_CONFLICT',
-    );
-    expect(repository.storedWebhookCount).toBe(1);
+    expect(conflictingRedelivery.status).toBe(202);
+    expect(repository.storedWebhookCount).toBe(2);
 
     const payoutPayload = {
       event: 'payout.succeeded',
@@ -353,7 +350,7 @@ describe('Xendit durable webhook acceptance', () => {
       }),
     );
     expect(payoutAccepted.status).toBe(202);
-    expect(payoutRedelivery.status).toBe(409);
-    expect(repository.storedWebhookCount).toBe(2);
+    expect(payoutRedelivery.status).toBe(202);
+    expect(repository.storedWebhookCount).toBe(4);
   });
 });

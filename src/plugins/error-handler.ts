@@ -6,6 +6,8 @@ import {
 } from '@/http/api-response';
 import { CsrfError } from '@/modules/auth';
 import { MoneyError } from '@/modules/money/money.errors';
+import { JobError } from '@/modules/jobs/job.errors';
+import { DevelopmentTestError } from '@/modules/dev-test/dev-test.errors';
 
 const validationIssues = (
   errors: Array<{ path?: string; summary?: string; message?: string }>,
@@ -21,7 +23,12 @@ export const errorHandlerPlugin = new Elysia({
 }).onError({ as: 'global' }, ({ code, error, request, set, status }) => {
   set.headers['content-type'] = 'application/json; charset=utf-8';
 
-  if (error instanceof MoneyError || error instanceof CsrfError) {
+  if (
+    error instanceof MoneyError ||
+    error instanceof JobError ||
+    error instanceof DevelopmentTestError ||
+    error instanceof CsrfError
+  ) {
     return status(
       error.status,
       apiFailure(error.status, error.code, error.message, request),

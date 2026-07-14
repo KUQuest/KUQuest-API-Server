@@ -19,7 +19,10 @@ export const env = {
   googleClientId: process.env.GOOGLE_CLIENT_ID,
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
   xenditSecretKey: process.env.XENDIT_SECRET_KEY,
-  xenditWebhookToken: process.env.XENDIT_WEBHOOK_TOKEN,
+  xenditWebhookToken:
+    process.env.XENDIT_WEBHOOK_TOKEN ??
+    process.env.XENDIT_WEBHOOK_VERIFICATION_TOKEN,
+  publicApiUrl: process.env.PUBLIC_API_URL,
   cmsOrigin: process.env.CMS_ORIGIN,
 } as const;
 
