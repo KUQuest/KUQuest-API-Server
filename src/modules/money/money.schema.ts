@@ -1,14 +1,5 @@
 import { t } from 'elysia';
 
-export const problemSchema = t.Object({
-  type: t.String(),
-  title: t.String(),
-  status: t.Integer({ minimum: 400, maximum: 599 }),
-  code: t.String(),
-  detail: t.String(),
-  trace_id: t.String(),
-});
-
 export const walletSchema = t.Object({
   id: t.String(),
   currency: t.Literal('THB'),

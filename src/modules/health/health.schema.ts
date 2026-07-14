@@ -1,8 +1,9 @@
 import { t } from 'elysia';
 
-export const healthResponseSchema = t.Object({
-  success: t.Literal(true),
-  data: t.Object({
+import { apiSuccessSchema } from '@/http/api-response';
+
+export const healthResponseSchema = apiSuccessSchema(
+  t.Object({
     status: t.Literal('ok'),
     service: t.String({
       examples: ['kuquest-api-server'],
@@ -12,4 +13,4 @@ export const healthResponseSchema = t.Object({
       examples: ['2026-07-11T10:56:36.657Z'],
     }),
   }),
-});
+);

@@ -4,6 +4,15 @@ import { constantTimeEqual, sha256, stableJson } from './money.crypto';
 import { MoneyError } from './money.errors';
 import type { MoneyRepository } from './money.types';
 
+const failureResponse = (description: string) => ({
+  description,
+  content: {
+    'application/json': {
+      schema: { $ref: '#/components/schemas/ApiFailure' },
+    },
+  },
+});
+
 const recordWebhook = async (
   repository: MoneyRepository,
   payload: unknown,
@@ -98,11 +107,10 @@ export const createXenditWebhookRoute = (
                     description:
                       'Authenticated event durably recorded or duplicate acknowledged.',
                   },
-                  401: { description: 'Invalid webhook authentication.' },
-                  409: {
-                    description:
-                      'Provider event identifier reused with a different payload.',
-                  },
+                  401: failureResponse('Invalid webhook authentication.'),
+                  409: failureResponse(
+                    'Provider event identifier reused with a different payload.',
+                  ),
                 },
               },
             },
@@ -125,11 +133,10 @@ export const createXenditWebhookRoute = (
                     description:
                       'Authenticated event durably recorded or duplicate acknowledged.',
                   },
-                  401: { description: 'Invalid webhook authentication.' },
-                  409: {
-                    description:
-                      'Provider event identifier reused with a different payload.',
-                  },
+                  401: failureResponse('Invalid webhook authentication.'),
+                  409: failureResponse(
+                    'Provider event identifier reused with a different payload.',
+                  ),
                 },
               },
             },

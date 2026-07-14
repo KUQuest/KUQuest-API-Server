@@ -12,6 +12,8 @@ describe('health integration: GET /health', () => {
 
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
+    expect(body.error).toBeNull();
+    expect(body.trace_id).toEqual(expect.any(String));
     expect(body.data.status).toBe('ok');
     expect(body.data.service).toBe('kuquest-api-server');
     expect(body.data.timestamp).toEqual(expect.any(String));

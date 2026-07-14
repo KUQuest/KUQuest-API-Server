@@ -1,5 +1,6 @@
 import { openapi } from '@elysia/openapi';
 
+import { apiResponseOpenAPIComponents } from '@/http/api-response.openapi';
 import {
   authOpenAPIComponents,
   authOpenAPIPaths,
@@ -27,7 +28,13 @@ export const openapiPlugin = openapi({
           'Google OAuth and database-backed session endpoints. Only @ku.th accounts are allowed.',
       },
     ],
-    components: authOpenAPIComponents,
+    components: {
+      ...authOpenAPIComponents,
+      schemas: {
+        ...authOpenAPIComponents.schemas,
+        ...apiResponseOpenAPIComponents.schemas,
+      },
+    },
     paths: authOpenAPIPaths,
   },
 });

@@ -1,19 +1,22 @@
 import { Elysia } from 'elysia';
 
+import { apiSuccess } from '@/http/api-response';
+
 import { healthResponseSchema } from './health.schema';
 
 export const healthRoute = new Elysia({
   name: 'health-route',
 }).get(
   '/health',
-  () => ({
-    success: true as const,
-    data: {
+  ({ request }) =>
+    apiSuccess(
+      {
       status: 'ok' as const,
       service: 'kuquest-api-server',
       timestamp: new Date().toISOString(),
-    },
-  }),
+      },
+      request,
+    ),
   {
     detail: {
       tags: ['Health'],

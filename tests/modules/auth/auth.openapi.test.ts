@@ -4,7 +4,23 @@ import { app } from '@/app';
 
 type OpenAPIDocument = {
   tags?: Array<{ name?: string }>;
-  paths?: Record<string, Record<string, unknown>>;
+  paths?: Record<
+    string,
+    Record<
+      string,
+      {
+        responses?: Record<
+          string,
+          {
+            content?: Record<
+              string,
+              { schema?: { properties?: Record<string, unknown> } }
+            >;
+          }
+        >;
+      }
+    >
+  >;
   components?: {
     securitySchemes?: Record<string, unknown>;
     schemas?: Record<string, unknown>;
@@ -49,5 +65,21 @@ describe('authentication OpenAPI documentation', () => {
     expect(document.components?.schemas?.AuthUser).toBeDefined();
     expect(document.components?.schemas?.AuthSessionResponse).toBeDefined();
     expect(document.components?.schemas?.AuthError).toBeDefined();
+    expect(document.components?.schemas?.ApiFailure).toBeDefined();
+    expect(document.components?.schemas?.ApiError).toBeDefined();
+    expect(document.components?.schemas?.ValidationIssue).toBeDefined();
+  });
+
+  it('documents the universal first-party success envelope', async () => {
+    const document = await getOpenAPIDocument();
+    const healthOperation = document.paths?.['/health']?.get;
+    const properties =
+      healthOperation?.responses?.['200']?.content?.['application/json']?.schema
+        ?.properties;
+
+    expect(properties?.success).toBeDefined();
+    expect(properties?.data).toBeDefined();
+    expect(properties?.error).toBeDefined();
+    expect(properties?.trace_id).toBeDefined();
   });
 });

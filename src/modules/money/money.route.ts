@@ -1,6 +1,11 @@
 import { Elysia, t } from 'elysia';
 
 import {
+  apiFailureSchema,
+  apiSuccess,
+  apiSuccessSchema,
+} from '@/http/api-response';
+import {
   assertTrustedBrowserOrigin,
   type SessionResolver,
 } from '@/modules/auth';
@@ -12,7 +17,6 @@ import {
   activityTypeSchema,
   earningsConversionSchema,
   moneyPolicySchema,
-  problemSchema,
   walletSchema,
 } from './money.schema';
 import type { MoneyRepository } from './money.types';
@@ -38,9 +42,14 @@ export const createMoneyRoute = (
     .get(
       '',
       async ({ request }) =>
-        repository.getWallet(await currentUserId(request.headers, resolveSession)),
+        apiSuccess(
+          await repository.getWallet(
+            await currentUserId(request.headers, resolveSession),
+          ),
+          request,
+        ),
       {
-        response: { 200: walletSchema, 401: problemSchema },
+        response: { 200: apiSuccessSchema(walletSchema), 401: apiFailureSchema },
         detail: {
           tags: ['Wallet'],
           summary: "Get the authenticated user's wallet summary",
@@ -53,10 +62,13 @@ export const createMoneyRoute = (
       '/policy',
       async ({ request }) => {
         await currentUserId(request.headers, resolveSession);
-        return repository.getPolicy();
+        return apiSuccess(await repository.getPolicy(), request);
       },
       {
-        response: { 200: moneyPolicySchema, 401: problemSchema },
+        response: {
+          200: apiSuccessSchema(moneyPolicySchema),
+          401: apiFailureSchema,
+        },
         detail: {
           tags: ['Wallet'],
           summary: 'Get effective user-visible money policy',
@@ -69,12 +81,15 @@ export const createMoneyRoute = (
       '/activities',
       async ({ request, query }) => {
         const userId = await currentUserId(request.headers, resolveSession);
-        return repository.listActivities(userId, {
-          cursor: query.cursor,
-          limit: query.limit ?? 20,
-          type: query.type,
-          status: query.status,
-        });
+        return apiSuccess(
+          await repository.listActivities(userId, {
+            cursor: query.cursor,
+            limit: query.limit ?? 20,
+            type: query.type,
+            status: query.status,
+          }),
+          request,
+        );
       },
       {
         query: t.Object({
@@ -84,9 +99,9 @@ export const createMoneyRoute = (
           status: t.Optional(t.String()),
         }),
         response: {
-          200: activityPageSchema,
-          401: problemSchema,
-          422: problemSchema,
+          200: apiSuccessSchema(activityPageSchema),
+          401: apiFailureSchema,
+          422: apiFailureSchema,
         },
         detail: {
           tags: ['Wallet'],
@@ -117,7 +132,7 @@ export const createMoneyRoute = (
           requestHash: await sha256(stableJson(body)),
         });
 
-        return status(201, conversion);
+        return status(201, apiSuccess(conversion, request));
       },
       {
         body: t.Object({ amount: t.Integer({ minimum: 1 }) }),
@@ -130,12 +145,12 @@ export const createMoneyRoute = (
           { additionalProperties: true },
         ),
         response: {
-          201: earningsConversionSchema,
-          401: problemSchema,
-          403: problemSchema,
-          409: problemSchema,
-          422: problemSchema,
-          423: problemSchema,
+          201: apiSuccessSchema(earningsConversionSchema),
+          401: apiFailureSchema,
+          403: apiFailureSchema,
+          409: apiFailureSchema,
+          422: apiFailureSchema,
+          423: apiFailureSchema,
         },
         detail: {
           tags: ['Earnings conversion'],

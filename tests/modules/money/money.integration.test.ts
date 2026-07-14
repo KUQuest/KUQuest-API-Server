@@ -57,15 +57,18 @@ describe('money wallet vertical slice', () => {
     const walletResponse = await app.handle(
       jsonRequest('/v1/wallet'),
     );
-    const wallet = await walletResponse.json();
+    const walletEnvelope = await walletResponse.json();
+    const wallet = walletEnvelope.data;
     expect(walletResponse.status).toBe(200);
+    expect(walletEnvelope).toMatchObject({ success: true, error: null });
+    expect(walletEnvelope.trace_id).toEqual(expect.any(String));
     expect(wallet.spending_balance).toBe(100);
     expect(wallet.earnings_balance).toBe(500);
 
     const policyResponse = await app.handle(
       jsonRequest('/v1/wallet/policy'),
     );
-    const policy = await policyResponse.json();
+    const policy = (await policyResponse.json()).data;
     expect(policyResponse.status).toBe(200);
     expect(policy.platform_fee_bps).toBe(200);
     expect(policy.quote_ttl_seconds).toBe(300);
@@ -102,10 +105,10 @@ describe('money wallet vertical slice', () => {
     );
     const body = await response.json();
     expect(response.status).toBe(401);
-    expect(response.headers.get('content-type')).toContain(
-      'application/problem+json',
-    );
-    expect(body.code).toBe('UNAUTHORIZED');
+    expect(response.headers.get('content-type')).toContain('application/json');
+    expect(body.success).toBe(false);
+    expect(body.data).toBeNull();
+    expect(body.error.code).toBe('UNAUTHORIZED');
     expect(body.trace_id).toEqual(expect.any(String));
   });
 
@@ -117,15 +120,17 @@ describe('money wallet vertical slice', () => {
         body: { amount: 300 },
       }),
     );
-    const conversion = await response.json();
+    const conversionEnvelope = await response.json();
+    const conversion = conversionEnvelope.data;
     expect(response.status).toBe(201);
+    expect(conversionEnvelope).toMatchObject({ success: true, error: null });
     expect(conversion.earnings_balance_after).toBe(200);
     expect(conversion.spending_balance_after).toBe(400);
 
     const activityResponse = await app.handle(
       jsonRequest('/v1/wallet/activities'),
     );
-    const page = await activityResponse.json();
+    const page = (await activityResponse.json()).data;
     expect(activityResponse.status).toBe(200);
     expect(page.items).toHaveLength(1);
     expect(page.items[0]).toMatchObject({
@@ -149,7 +154,7 @@ describe('money wallet vertical slice', () => {
     const replayBody = await replay.json();
 
     expect(replay.status).toBe(201);
-    expect(replayBody).toEqual(firstBody);
+    expect(replayBody.data).toEqual(firstBody.data);
     const wallet = await repository.getWallet('user-1');
     expect(wallet.earnings_balance).toBe(400);
     expect(wallet.spending_balance).toBe(200);
@@ -173,7 +178,7 @@ describe('money wallet vertical slice', () => {
     );
     const body = await conflict.json();
     expect(conflict.status).toBe(409);
-    expect(body.code).toBe('IDEMPOTENCY_CONFLICT');
+    expect(body.error.code).toBe('IDEMPOTENCY_CONFLICT');
   });
 
   it('prevents insufficient, frozen, fractional, and concurrent overspending', async () => {
@@ -185,7 +190,7 @@ describe('money wallet vertical slice', () => {
       }),
     );
     expect(tooLarge.status).toBe(422);
-    expect((await tooLarge.json()).code).toBe(
+    expect((await tooLarge.json()).error.code).toBe(
       'INSUFFICIENT_EARNINGS_BALANCE',
     );
 
@@ -234,7 +239,7 @@ describe('money wallet vertical slice', () => {
       }),
     );
     expect(frozen.status).toBe(423);
-    expect((await frozen.json()).code).toBe('WALLET_FROZEN');
+    expect((await frozen.json()).error.code).toBe('WALLET_FROZEN');
   });
 
   it('rejects a cross-site earnings conversion before changing balances', async () => {
@@ -248,7 +253,7 @@ describe('money wallet vertical slice', () => {
 
     const response = await app.handle(request);
     expect(response.status).toBe(403);
-    expect((await response.json()).code).toBe('FORBIDDEN');
+    expect((await response.json()).error.code).toBe('FORBIDDEN');
     expect((await repository.getWallet('user-1')).earnings_balance).toBe(500);
   });
 
@@ -323,7 +328,7 @@ describe('Xendit durable webhook acceptance', () => {
     expect(accepted.status).toBe(202);
     expect(duplicate.status).toBe(202);
     expect(conflictingRedelivery.status).toBe(409);
-    expect((await conflictingRedelivery.json()).code).toBe(
+    expect((await conflictingRedelivery.json()).error.code).toBe(
       'IDEMPOTENCY_CONFLICT',
     );
     expect(repository.storedWebhookCount).toBe(1);

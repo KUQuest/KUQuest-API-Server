@@ -19,21 +19,3 @@ export class MoneyError extends Error {
     this.name = 'MoneyError';
   }
 }
-
-export const problem = (
-  status: number,
-  code: ProblemCode,
-  detail: string,
-  traceId: string,
-) => ({
-  type: `/problems/${code.toLowerCase().replaceAll('_', '-')}`,
-  title: code
-    .toLowerCase()
-    .split('_')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' '),
-  status,
-  code,
-  detail,
-  trace_id: traceId,
-});

@@ -68,6 +68,53 @@ disabled. On first sign-in, Google profile data is saved in the `user` table as
 `user_id` (primary key), `first_name`, and `last_name`, along with Better Auth's
 required email and profile fields.
 
+## First-party response contract
+
+KUQuest-owned JSON endpoints such as `/health` and `/v1/wallet/*` always return
+a discriminated response envelope. HTTP status codes remain truthful; clients
+must check the HTTP status and can use `success` for type narrowing.
+
+Successful response:
+
+```json
+{
+  "success": true,
+  "data": {},
+  "error": null,
+  "trace_id": "request-correlation-id"
+}
+```
+
+Failed response:
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "type": "https://api.kuquest.app/problems/validation-failed",
+    "title": "Validation Failed",
+    "status": 422,
+    "code": "VALIDATION_FAILED",
+    "detail": "The request did not match the required schema.",
+    "issues": [
+      { "path": "/amount", "message": "Expected an integer" }
+    ]
+  },
+  "trace_id": "request-correlation-id"
+}
+```
+
+`error.code` is the stable value for frontend branching. `error.detail` and
+`error.issues[].message` are display-oriented and must not be parsed. The
+`issues` array is always present and is empty for errors unrelated to request
+fields.
+
+Protocol-owned routes keep their native contracts: `/api/auth/*` is controlled
+by Better Auth, `/openapi*` serves OpenAPI assets, `/` serves HTML, and Xendit
+webhook success acknowledgements remain empty HTTP 202 responses. KUQuest errors
+raised while processing webhook requests still use the failure envelope.
+
 ## Database and migration commands
 
 ```bash
