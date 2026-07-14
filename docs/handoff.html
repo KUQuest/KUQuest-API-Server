@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KUQuest MVP · Developer handoff</title>
+  <style>
+    :root{--ink:#17231c;--muted:#647168;--paper:#f5f7f4;--card:#fff;--line:#dce4de;--accent:#18794e;--soft:#e8f4ed;--warn:#9a5b13;--danger:#b42318;--code:#102018}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.65 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.shell{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100vh}.side{position:sticky;top:0;height:100vh;padding:28px 22px;background:#12251a;color:#dce9e0;overflow:auto}.brand{display:flex;align-items:center;gap:10px;margin-bottom:28px}.mark{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;background:#56b57f;color:#0c2718;font-weight:900}.brand strong{display:block;font-size:17px}.brand small{display:block;color:#93ad9d;text-transform:uppercase;letter-spacing:.12em}.side a{display:block;padding:6px 8px;border-radius:7px;color:#bcd0c3;text-decoration:none;font-size:13px}.side a:hover{background:#1d3828;color:#fff}.side .meta{margin-top:24px;padding-top:18px;border-top:1px solid #31503c;color:#93ad9d;font-size:12px}.main{width:100%;max-width:1180px;padding:48px 56px 80px}.hero{padding:38px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(135deg,#fff 0%,#edf7f1 100%);box-shadow:0 18px 50px rgba(25,55,37,.07)}.eyebrow{margin:0;color:var(--accent);font-size:12px;font-weight:800;letter-spacing:.15em;text-transform:uppercase}h1{max-width:800px;margin:8px 0 14px;font-size:clamp(34px,5vw,58px);line-height:1.05;letter-spacing:-.04em}.lead{max-width:780px;color:#4e5e54;font-size:18px}.badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}.badge{padding:6px 10px;border:1px solid #bfd8c8;border-radius:999px;background:#fff;color:#285d3d;font-size:12px;font-weight:750}section{scroll-margin-top:24px;margin-top:42px}h2{margin:0 0 16px;font-size:28px;letter-spacing:-.025em}h3{margin:24px 0 8px;font-size:18px}p{margin:8px 0 14px;color:#34443a}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{padding:20px;border:1px solid var(--line);border-radius:14px;background:var(--card)}.card h3{margin-top:0}.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.flow .card{position:relative}.num{display:grid;place-items:center;width:27px;height:27px;margin-bottom:12px;border-radius:50%;background:var(--soft);color:var(--accent);font-size:12px;font-weight:900}.arch{padding:22px;border-radius:14px;background:var(--code);color:#d9e9df;overflow:auto;white-space:pre;font:13px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);font-size:13px}th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#eef3ef;color:#405047;font-size:11px;letter-spacing:.06em;text-transform:uppercase}tr:last-child td{border-bottom:0}code{padding:.14em .38em;border-radius:5px;background:#e8eeea;color:#164d32;font:12px ui-monospace,SFMono-Regular,Consolas,monospace}pre{padding:17px;border-radius:12px;background:var(--code);color:#e1eee5;overflow:auto}pre code{padding:0;background:transparent;color:inherit}.callout{padding:16px 18px;border-left:4px solid var(--warn);border-radius:0 10px 10px 0;background:#fff7e8}.callout.danger{border-color:var(--danger);background:#fff0ee}.good{color:var(--accent);font-weight:750}.warn{color:var(--warn);font-weight:750}ol,ul{padding-left:22px;color:#34443a}.footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}@media(max-width:900px){.shell{display:block}.side{position:relative;height:auto}.side nav{columns:2}.main{padding:30px 18px 60px}.grid,.flow{grid-template-columns:1fr}.hero{padding:25px}table{display:block;overflow-x:auto}}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><span class="mark">KQ</span><span><strong>KUQuest</strong><small>MVP handoff</small></span></div>
+    <nav>
+      <a href="#overview">Overview</a><a href="#architecture">Architecture</a><a href="#flow">Money flow</a><a href="#modules">Modules</a><a href="#api">API map</a><a href="#database">Database</a><a href="#run">Run locally</a><a href="#xendit">Xendit setup</a><a href="#issues">Known issues</a><a href="#verification">Verification</a><a href="#commits">Commits</a><a href="#security">Security</a>
+    </nav>
+    <div class="meta">Snapshot 14 Jul 2026<br>Branch<br><code>feature/better-auth-api-integration</code></div>
+  </aside>
+  <main class="main">
+    <header class="hero" id="overview">
+      <p class="eyebrow">Developer handoff · current state</p>
+      <h1>A working, auditable MVP money journey.</h1>
+      <p class="lead">KUQuest now demonstrates Google sign-in, Xendit PromptPay top-up, funded work, worker earnings, and Xendit test payouts through a Vue user experience backed by Elysia and PostgreSQL.</p>
+      <div class="badges"><span class="badge">Vue 3 + Vite</span><span class="badge">Elysia + Bun</span><span class="badge">PostgreSQL ledger</span><span class="badge">Better Auth</span><span class="badge">Xendit test mode</span><span class="badge">Cloudflare tunnel</span></div>
+    </header>
+
+    <section id="architecture"><p class="eyebrow">System map</p><h2>Architecture</h2><div class="arch">Vue browser journey
+  ├─ user session + synthetic actor switcher
+  ├─ top-up / job / submission / payout tabs
+  └─ redacted API and ledger diagnostics
+                │ canonical JSON envelopes
+                ▼
+Elysia API ─ Better Auth ─ CSRF ─ idempotency
+  ├─ development actor module
+  ├─ wallet + durable Xendit webhook module
+  ├─ top-up and payout module
+  └─ funded job and settlement module
+                │ transactions + constraints
+                ▼
+PostgreSQL ─ wallets ─ balanced ledger ─ jobs ─ payments
+                ▲
+                │ authenticated callbacks
+Xendit test mode ◄── Cloudflare Quick Tunnel</div></section>
+
+    <section id="flow"><p class="eyebrow">Showcase journey</p><h2>Money flow</h2><div class="flow">
+      <article class="card"><span class="num">1</span><h3>Top up</h3><p>Create a PromptPay request. Xendit's payment webhook credits spending exactly once.</p></article>
+      <article class="card"><span class="num">2</span><h3>Fund work</h3><p>Creating a job moves employer spending into held-for-jobs atomically.</p></article>
+      <article class="card"><span class="num">3</span><h3>Earn</h3><p>A normal synthetic worker applies, submits, and receives earnings after approval.</p></article>
+      <article class="card"><span class="num">4</span><h3>Payout</h3><p>Earnings are reserved, sent through Payouts V2, then finalized or released by webhook.</p></article>
+    </div><div class="callout"><strong>Product boundary:</strong> there is no generic user-to-user transfer. Value reaches a worker only after an employer approves funded work. Disputes are deferred but their schema was retained.</div></section>
+
+    <section id="modules"><p class="eyebrow">Code organization</p><h2>Main modules</h2><div class="grid">
+      <article class="card"><h3>Frontend</h3><p><code>web/src/App.vue</code> is the five-step journey. <code>api.ts</code> handles canonical envelopes and redacted logging. <code>job-flow.ts</code> normalizes selected-worker identity.</p></article>
+      <article class="card"><h3>Auth and actors</h3><p><code>src/modules/auth/</code> owns Google/Better Auth and KU email policy. <code>src/modules/dev-test/</code> owns synthetic users and opaque actor sessions.</p></article>
+      <article class="card"><h3>Money and payments</h3><p><code>src/modules/money/</code> exposes wallet/activity and accepts webhooks. <code>src/modules/payments/</code> creates Xendit top-ups and payouts.</p></article>
+      <article class="card"><h3>Funded jobs</h3><p><code>src/modules/jobs/</code> implements fund, apply, select, submit, approve, and atomic settlement.</p></article>
+    </div></section>
+
+    <section><p class="eyebrow">Correctness</p><h2>Money invariants</h2><ul><li>Whole-baht API balances; provider fee/tax snapshots may use satang.</li><li>Four user compartments: spending, earnings, held-for-jobs, reserved-for-payouts.</li><li>Every movement is a balanced, sealed ledger transaction.</li><li>Policy and fee snapshots preserve historical meaning.</li><li>Mutations use idempotency keys and stable request hashes.</li><li>Provider webhooks—not create responses—are authoritative for final value.</li><li>Webhook intake authenticates, persists, deduplicates, acknowledges, then drains with retry.</li></ul></section>
+
+    <section id="api"><p class="eyebrow">HTTP surface</p><h2>API map</h2><table><thead><tr><th>Area</th><th>Methods and paths</th><th>Purpose</th></tr></thead><tbody>
+      <tr><td>Core</td><td><code>GET /health</code><br><code>ALL /api/auth/*</code></td><td>Health and Better Auth</td></tr>
+      <tr><td>Test users</td><td><code>GET/POST /v1/development/test-users</code><br><code>POST /v1/development/actor-sessions</code><br><code>DELETE /v1/development/actor-session</code></td><td>Create and act as zero-balance normal users</td></tr>
+      <tr><td>Wallet</td><td><code>GET /v1/wallet</code><br><code>GET /v1/wallet/activities</code></td><td>Balances and activity</td></tr>
+      <tr><td>Top-ups</td><td><code>POST /v1/wallet/top-up-quotes</code><br><code>POST/GET /v1/wallet/top-ups</code><br><code>POST /v1/wallet/top-ups/:id/simulate</code></td><td>PromptPay quote, request, status, simulation</td></tr>
+      <tr><td>Payouts</td><td><code>GET/POST /v1/wallet/payout-account</code><br><code>POST /v1/wallet/payout-quotes</code><br><code>POST/GET /v1/wallet/payouts</code></td><td>Destination, quote, create and inspect payout</td></tr>
+      <tr><td>Jobs</td><td><code>GET/POST /v1/jobs</code><br><code>POST .../applications</code><br><code>POST .../worker-selection</code><br><code>POST .../work-submission</code><br><code>POST .../approval</code></td><td>Complete funded-job lifecycle</td></tr>
+      <tr><td>Webhooks</td><td><code>POST /v1/webhooks/xendit/payments</code><br><code>POST /v1/webhooks/xendit/payouts</code></td><td>Authenticated durable inbox; HTTP 202</td></tr>
+    </tbody></table></section>
+
+    <section id="database"><p class="eyebrow">Persistence</p><h2>Database structure</h2><table><thead><tr><th>Group</th><th>Tables</th></tr></thead><tbody>
+      <tr><td>Auth</td><td><code>user</code>, <code>session</code>, <code>account</code>, <code>verification</code></td></tr>
+      <tr><td>Ledger</td><td><code>wallets</code>, <code>ledger_accounts</code>, <code>ledger_transactions</code>, <code>ledger_postings</code>, <code>wallet_activities</code></td></tr>
+      <tr><td>Jobs</td><td><code>jobs</code>, applications/submissions and their status histories</td></tr>
+      <tr><td>Payments</td><td>Top-up and payout quotes, resources, destinations and histories</td></tr>
+      <tr><td>Operations</td><td>Webhook inbox/history, idempotency, policies, scheduled tasks, audit and reconciliation</td></tr>
+      <tr><td>Development</td><td><code>development_test_users</code>, <code>development_actor_sessions</code></td></tr>
+      <tr><td>Deferred</td><td>Disputes, resolutions and approvals</td></tr>
+    </tbody></table><p>Valid KU users are provisioned with a wallet and four ledger accounts by database triggers. Migrations seed five system ledger accounts.</p></section>
+
+    <section id="run"><p class="eyebrow">Operations</p><h2>Run locally</h2><pre><code>docker compose up -d postgres
+docker compose run --rm migrate
+bun run dev:local</code></pre><p>Open <code>http://localhost:5000</code>. Start the temporary public callback origin separately:</p><pre><code>bun run tunnel</code></pre><p>Real local credentials are read from <code>../../.env</code>. Do not commit or copy their values into docs.</p><h3>Destructive local reset</h3><pre><code>docker compose down -v
+docker compose up -d postgres
+docker compose run --rm migrate</code></pre><p>This clears application data while preserving source and Git history.</p></section>
+
+    <section id="xendit"><p class="eyebrow">Provider integration</p><h2>Xendit test mode</h2><table><thead><tr><th>Dashboard product</th><th>Callback</th></tr></thead><tbody><tr><td>Payment Requests V3 · Payment Status / Request Status</td><td><code>https://&lt;host&gt;/v1/webhooks/xendit/payments</code></td></tr><tr><td>Payouts v2</td><td><code>https://&lt;host&gt;/v1/webhooks/xendit/payouts</code></td></tr></tbody></table><h3>Payout simulation numbers</h3><table><thead><tr><th>Number</th><th>Expected result</th></tr></thead><tbody><tr><td>Ordinary valid-looking value</td><td class="good">SUCCEEDED</td></tr><tr><td><code>121212</code></td><td>FAILED · INVALID_DESTINATION</td></tr><tr><td><code>123456</code></td><td>FAILED · TEMPORARY_TRANSFER_ERROR</td></tr><tr><td><code>999999</code></td><td>FAILED · REJECTED_BY_CHANNEL</td></tr><tr><td><code>131313</code></td><td>Remains ACCEPTED for cancellation</td></tr><tr><td><code>654321</code></td><td>SUCCEEDED, then REVERSED</td></tr></tbody></table><div class="callout danger"><strong>Latest finding:</strong> the UI default is <code>121212</code>. Xendit accepted it initially, then correctly sent <code>payout.failed</code> with <code>INVALID_DESTINATION</code>. The backend processed that callback and released the reservation.</div></section>
+
+    <section id="issues"><p class="eyebrow">Next developer</p><h2>Known issues and priority work</h2><ol><li><strong>Payout status polling:</strong> the database can reach a terminal state while the UI still displays PENDING. Poll like the top-up flow and refresh wallet/activity on terminal status.</li><li><strong>Successful payout default:</strong> replace <code>121212</code> with a non-reserved value; expose special failure scenarios separately.</li><li><strong>Failure detail:</strong> safely project the Xendit failure code into the payout response and UI.</li><li><strong>Test database:</strong> provide an isolated migrated <code>TEST_DATABASE_URL</code> to execute the seven PostgreSQL integration tests.</li><li><strong>Lint baseline:</strong> fix two existing <code>no-base-to-string</code> errors in the Xendit client tests before relying on <code>bun run check</code>.</li><li><strong>Deferred scope:</strong> disputes, reconciliation controls and production deployment remain unfinished.</li></ol></section>
+
+    <section id="verification"><p class="eyebrow">Evidence</p><h2>Verification snapshot</h2><div class="grid"><article class="card"><h3 class="good">49 passed · 0 failed</h3><p>Seven PostgreSQL tests skipped without an isolated test URL.</p></article><article class="card"><h3 class="good">Type-check + build passed</h3><p>Vue, TypeScript, frontend bundle, and Bun server bundle completed.</p></article><article class="card"><h3 class="good">Runtime healthy</h3><p>Local health, UI, and temporary tunnel returned HTTP 200.</p></article><article class="card"><h3 class="good">Webhook proven</h3><p>Real Xendit payment and payout callbacks were authenticated, stored, and processed.</p></article></div></section>
+
+    <section id="commits"><p class="eyebrow">Change history</p><h2>Relevant commits</h2><table><thead><tr><th>Commit</th><th>Purpose</th></tr></thead><tbody><tr><td><code>48141b1</code></td><td>Complete selected-worker submission flow and tests</td></tr><tr><td><code>e7f88ef</code></td><td>Send stored amount to Xendit payment simulation</td></tr><tr><td><code>38812dd</code></td><td>Use enabled PROMPTPAY channel</td></tr><tr><td><code>23d2b34</code></td><td>Rebuild test UI with Vue 3</td></tr><tr><td><code>1b1b37e</code></td><td>Add local launcher</td></tr><tr><td><code>3c0b7e2</code></td><td>Persist and safely log webhooks</td></tr><tr><td><code>101c6f2</code></td><td>Add MVP money-flow experience</td></tr><tr><td><code>2f8a68b</code></td><td>Integrate Better Auth wallet foundation</td></tr></tbody></table></section>
+
+    <section id="security"><p class="eyebrow">Do not regress</p><h2>Security handoff</h2><ul><li>Secrets and callback tokens are deliberately absent from this page.</li><li>Rotate any secret copied into chat, tickets, or screenshots.</li><li>Keep constant-time webhook authentication, CSRF origin checks, idempotency, and database ledger constraints.</li><li>Do not expose full bank accounts, QR strings, raw callback payloads, cookies, or tokens in browser diagnostics.</li><li>The synthetic actor feature must remain development-only.</li><li>Replace Quick Tunnels with a stable HTTPS domain and managed secrets before production.</li></ul></section>
+    <footer class="footer">KUQuest MVP developer handoff · generated from the repository state on 14 July 2026 · See <code>docs/HANDOFF.md</code> for the detailed source document.</footer>
+  </main>
+</div>
+</body>
+</html>
