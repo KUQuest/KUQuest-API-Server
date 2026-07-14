@@ -699,7 +699,7 @@ export class PostgresJobRepository implements JobRepository {
   ): Promise<void> {
     await transaction`
       UPDATE idempotency_keys SET resource_type = ${resourceType}, resource_id = ${resourceId},
-        response_status = ${status}, response_body = ${transaction.json(JSON.parse(JSON.stringify(response)))}
+        response_status = ${status}, response_body = ${JSON.stringify(response)}::text::jsonb
       WHERE id = ${id}
     `;
   }

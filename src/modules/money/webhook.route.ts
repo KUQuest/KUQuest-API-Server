@@ -52,7 +52,7 @@ const recordWebhook = async (
     ? await sha256(stableJson({ eventType, objectId, status, payloadHash }))
     : payloadHash;
 
-  return repository.storeWebhook({
+  const stored = await repository.storeWebhook({
     provider: 'XENDIT',
     eventKey,
     payloadHash,
@@ -60,6 +60,28 @@ const recordWebhook = async (
     objectId,
     payload,
     receivedAt: new Date().toISOString(),
+  });
+  console.info('Xendit webhook durably received', {
+    family,
+    eventType,
+    status,
+    objectId: objectId ?? 'missing',
+    duplicate: stored.duplicate,
+    payloadHashPrefix: payloadHash.slice(0, 12),
+  });
+  return stored;
+};
+
+const startWebhookDrain = (
+  processStoredWebhooks: (() => Promise<unknown>) | undefined,
+) => {
+  if (!processStoredWebhooks) return;
+  void processStoredWebhooks().catch((error: unknown) => {
+    console.error('Xendit webhook background drain failed', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      errorMessage:
+        error instanceof Error ? error.message : 'Unknown webhook drain error',
+    });
   });
 };
 
@@ -95,7 +117,7 @@ export const createXenditWebhookRoute = (
             '/payments',
             async ({ body }) => {
               await recordWebhook(repository, body, 'payment');
-              void processStoredWebhooks?.();
+              startWebhookDrain(processStoredWebhooks);
               return new Response(null, { status: 202 });
             },
             {
@@ -122,7 +144,7 @@ export const createXenditWebhookRoute = (
             '/payouts',
             async ({ body }) => {
               await recordWebhook(repository, body, 'payout');
-              void processStoredWebhooks?.();
+              startWebhookDrain(processStoredWebhooks);
               return new Response(null, { status: 202 });
             },
             {

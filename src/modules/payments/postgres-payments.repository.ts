@@ -193,7 +193,7 @@ export class PostgresPaymentsRepository implements PaymentsRepository {
           VALUES (${prepared.id},'CREATING','REQUIRES_ACTION',${provider.status},'PROVIDER_RESPONSE')`;
         const result = await this.getTopUpIn(transaction, userId, prepared.id);
         await transaction`UPDATE idempotency_keys SET resource_type='TOP_UP', resource_id=${prepared.id},
-          response_status=201,response_body=${transaction.json(JSON.parse(JSON.stringify(result)))} WHERE id=${prepared.idempotencyId}`;
+          response_status=201,response_body=${JSON.stringify(result)}::text::jsonb WHERE id=${prepared.idempotencyId}`;
         return result;
       });
     } catch (error) {
@@ -203,7 +203,7 @@ export class PostgresPaymentsRepository implements PaymentsRepository {
         await transaction`INSERT INTO top_up_status_history(top_up_id,from_status,to_status,source,reason)
           VALUES(${prepared.id},'CREATING',${next},'PROVIDER_RESPONSE','Xendit did not create an actionable payment request')`;
         if(next==='FAILED')await transaction`UPDATE idempotency_keys SET resource_type='TOP_UP',resource_id=${prepared.id},
-          response_status=422,response_body=${transaction.json({error_code:'PROVIDER_REJECTED'})}
+          response_status=422,response_body=${JSON.stringify({error_code:'PROVIDER_REJECTED'})}::text::jsonb
           WHERE id=${prepared.idempotencyId}`;
       });
       throw error;
@@ -351,7 +351,7 @@ export class PostgresPaymentsRepository implements PaymentsRepository {
           VALUES(${prepared.id},'CREATING','PENDING',${provider.status},'PROVIDER_RESPONSE')`;
         const result=await this.getPayoutIn(transaction,userId,prepared.id);
         await transaction`UPDATE idempotency_keys SET resource_type='PAYOUT',resource_id=${prepared.id},response_status=201,
-          response_body=${transaction.json(JSON.parse(JSON.stringify(result)))} WHERE id=${prepared.idemId}`;
+          response_body=${JSON.stringify(result)}::text::jsonb WHERE id=${prepared.idemId}`;
         return result;
       });
     } catch(error) {
@@ -381,7 +381,7 @@ export class PostgresPaymentsRepository implements PaymentsRepository {
       await transaction`INSERT INTO wallet_activities(user_id,type,status,earnings_delta_baht,payout_reserved_delta_baht,resource_type,resource_id)
         VALUES(${userId},'PAYOUT_RELEASE','FAILED',${amount},${-amount},'PAYOUT',${payoutId})`;
       await transaction`UPDATE idempotency_keys SET resource_type='PAYOUT',resource_id=${payoutId},
-        response_status=422,response_body=${transaction.json({error_code:'PROVIDER_REJECTED'})}
+        response_status=422,response_body=${JSON.stringify({error_code:'PROVIDER_REJECTED'})}::text::jsonb
         WHERE id=${idempotencyId}`;
     });
   }

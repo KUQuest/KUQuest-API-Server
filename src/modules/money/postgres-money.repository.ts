@@ -322,7 +322,7 @@ export class PostgresMoneyRepository implements MoneyRepository {
       await transaction`
         UPDATE idempotency_keys
         SET resource_type = 'CONVERSION', resource_id = ${conversionId},
-            response_status = 201, response_body = ${transaction.json(JSON.parse(JSON.stringify(response)))}
+            response_status = 201, response_body = ${JSON.stringify(response)}::text::jsonb
         WHERE id = ${idempotencyId}
       `;
       return response;
@@ -336,7 +336,7 @@ export class PostgresMoneyRepository implements MoneyRepository {
         payload, payload_hash, received_at
       ) VALUES (
         ${webhook.provider}, ${webhook.eventKey}, ${webhook.eventType},
-        ${webhook.receivedAt}, ${this.database.json(JSON.parse(JSON.stringify(webhook.payload)))},
+        ${webhook.receivedAt}, ${JSON.stringify(webhook.payload)}::text::jsonb,
         ${webhook.payloadHash}, ${webhook.receivedAt}
       )
       ON CONFLICT (provider, provider_event_id) DO NOTHING RETURNING id

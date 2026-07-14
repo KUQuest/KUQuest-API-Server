@@ -28,6 +28,8 @@ https://<generated-host>.trycloudflare.com/v1/webhooks/xendit/payouts
 
 Use the same verification token configured as `XENDIT_WEBHOOK_TOKEN`. Keep the browser and Google OAuth callback on `http://localhost:5000`; the tunnel exists only for inbound Xendit webhooks. Quick Tunnel URLs are temporary and change after restart.
 
+In Xendit, route Payment Requests V3 `Payment Status` and `Payment Request Status` to the payments endpoint. Route `Payouts v2` to the payouts endpoint. The API writes a sanitized `Xendit webhook durably received` log containing only the event family, type, status, provider object identifier, duplicate flag, and a short payload-hash prefix. Raw payloads, callback tokens, QR strings, and bank-account data are not written to application logs.
+
 The Xendit simulation button calls Xendit's real test-only payment simulator. A simulator response does not credit KUQuest by itself: the authenticated webhook remains authoritative.
 
 ## Diagnostics and privacy
