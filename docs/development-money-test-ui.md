@@ -13,6 +13,8 @@ The suggested journey is employer top-up, funded job creation, worker applicatio
 
 For local development, put the real Google and Xendit credentials in the shared `../../.env`, start PostgreSQL with `docker compose up -d postgres`, then run `bun run dev:local`. The launcher selects KUQuest's local database and supplies safe local-only Better Auth defaults, so the shared environment can continue serving adjacent applications.
 
+The browser application is a Vue 3 + Vite project in `web/`. `bun run build:web` type-compiles the single-page application into the fixed `public/index.html`, `public/app.css`, and `public/app.js` assets served by Elysia. `bun run dev:local` performs this build automatically before starting the API.
+
 ## Receive real Xendit test webhooks
 
 Start the API first, then run:

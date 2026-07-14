@@ -11,6 +11,7 @@
   "ignorePatterns": [
     "dist/**",
     "coverage/**",
-    "node_modules/**"
+    "node_modules/**",
+    "public/app.js"
   ]
 }

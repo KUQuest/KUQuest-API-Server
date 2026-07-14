@@ -10,10 +10,19 @@ describe('authentication integration', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/html');
-    expect(body).toContain('KUQuest — ทดสอบการไหลของเงิน');
-    expect(body).toContain('เข้าสู่ระบบด้วย Google');
+    expect(body).toContain('<title>KUQuest · Money Flow</title>');
     expect(body).toContain('/app.js');
-    expect(body).toContain('รายละเอียด API');
+    expect(body).toContain('/app.css');
+  });
+
+  it('serves the compiled Vue application stylesheet', async () => {
+    const response = await app.handle(new Request('http://localhost/app.css'));
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/css');
+    expect(body).toContain('.login-card{');
+    expect(body).toContain('width:min(100%,660px)');
   });
 
   it('enables only Google sign-in', () => {

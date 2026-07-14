@@ -2,20 +2,19 @@ import { resolve } from 'node:path';
 
 import { Elysia } from 'elysia';
 
-const authTestPage = Bun.file(resolve(process.cwd(), 'public/index.html'));
-const appStyles = Bun.file(resolve(process.cwd(), 'public/app.css'));
-const appScript = Bun.file(resolve(process.cwd(), 'public/app.js'));
+const publicFile = (name: string) =>
+  Bun.file(resolve(process.cwd(), 'public', name));
 
 export const authTestRoute = new Elysia({
   name: 'auth-test-route',
 })
-  .get('/app.css', () => appStyles, {
+  .get('/app.css', () => publicFile('app.css'), {
     detail: { hide: true },
   })
-  .get('/app.js', () => appScript, {
+  .get('/app.js', () => publicFile('app.js'), {
     detail: { hide: true },
   })
-  .get('/', () => authTestPage, {
+  .get('/', () => publicFile('index.html'), {
   detail: {
     tags: ['General'],
     summary: 'Authentication test page',
