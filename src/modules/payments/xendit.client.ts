@@ -8,6 +8,7 @@ import type {
 } from './payments.types';
 
 interface XenditAction { descriptor?: unknown; value?: unknown }
+type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
 const text = (value: unknown): string | null =>
   typeof value === 'string' && value.length > 0 ? value : null;
@@ -16,6 +17,7 @@ export class HttpXenditClient implements XenditClient {
   constructor(
     private readonly secretKey: string | undefined,
     private readonly baseUrl = 'https://api.xendit.co',
+    private readonly fetcher: Fetcher = globalThis.fetch,
   ) {}
 
   private async request(path: string, init: RequestInit): Promise<Record<string, unknown>> {
@@ -27,7 +29,7 @@ export class HttpXenditClient implements XenditClient {
       const headers = new Headers(init.headers);
       headers.set('authorization', `Basic ${btoa(`${this.secretKey}:`)}`);
       headers.set('content-type', 'application/json');
-      response = await fetch(`${this.baseUrl}${path}`, {
+      response = await this.fetcher(`${this.baseUrl}${path}`, {
         ...init,
         headers,
       });
@@ -63,7 +65,7 @@ export class HttpXenditClient implements XenditClient {
         currency: 'THB',
         request_amount: input.amountBaht,
         capture_method: 'AUTOMATIC',
-        channel_code: 'QRPROMPTPAY',
+        channel_code: 'PROMPTPAY',
         channel_properties: { expires_at: input.expiresAt, qr_string_type: 'DYNAMIC' },
         description: 'KUQuest wallet top-up',
         metadata: { kuquest_reference: input.reference },
