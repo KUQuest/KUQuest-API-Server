@@ -11,6 +11,8 @@ The root page is a Thai, development-only user journey for verifying the KUQuest
 
 The suggested journey is employer top-up, funded job creation, worker application and submission, employer approval, then worker earnings conversion or payout. Synthetic users start with zero balances and invoke the same money and job endpoints as ordinary users.
 
+For local development, put the real Google and Xendit credentials in the shared `../../.env`, start PostgreSQL with `docker compose up -d postgres`, then run `bun run dev:local`. The launcher selects KUQuest's local database and supplies safe local-only Better Auth defaults, so the shared environment can continue serving adjacent applications.
+
 ## Receive real Xendit test webhooks
 
 Start the API first, then run:
