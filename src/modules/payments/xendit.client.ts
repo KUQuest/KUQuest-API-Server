@@ -83,11 +83,11 @@ export class HttpXenditClient implements XenditClient {
     };
   }
 
-  async simulatePayment(paymentRequestId: string): Promise<{ status: string }> {
+  async simulatePayment(paymentRequestId: string, amountBaht: number): Promise<{ status: string }> {
     const payload = await this.request(`/v3/payment_requests/${encodeURIComponent(paymentRequestId)}/simulate`, {
       method: 'POST',
       headers: { 'api-version': '2024-11-11' },
-      body: '{}',
+      body: JSON.stringify({ amount: amountBaht }),
     });
     return { status: text(payload.status) ?? 'PENDING' };
   }

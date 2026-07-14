@@ -78,7 +78,7 @@ export interface XenditClient {
     amountBaht: number;
     expiresAt: string;
   }): Promise<XenditPaymentRequest>;
-  simulatePayment(paymentRequestId: string): Promise<{ status: string }>;
+  simulatePayment(paymentRequestId: string, amountBaht: number): Promise<{ status: string }>;
   createPayout(input: {
     reference: string;
     amountSatang: number;

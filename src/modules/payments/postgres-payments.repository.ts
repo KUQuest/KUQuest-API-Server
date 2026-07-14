@@ -227,7 +227,7 @@ export class PostgresPaymentsRepository implements PaymentsRepository {
   async simulateTopUp(userId: string, topUpId: string): Promise<TopUp> {
     const current = await this.getTopUp(userId, topUpId);
     if (!current.provider_reference) throw new MoneyError(409, 'PROVIDER_UNAVAILABLE', 'The top-up has no Xendit reference.');
-    await this.xendit.simulatePayment(current.provider_reference);
+    await this.xendit.simulatePayment(current.provider_reference, current.payment_total_baht);
     return this.getTopUp(userId, topUpId);
   }
 
