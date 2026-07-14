@@ -220,7 +220,10 @@ describe('funded job HTTP contract', () => {
       }),
     );
     expect(selection.status).toBe(200);
-    expect((await selection.json()).data.status).toBe('ASSIGNED');
+    expect((await selection.json()).data).toMatchObject({
+      status: 'ASSIGNED',
+      intended_payee_user_id: 'worker-1',
+    });
 
     const submission = await app.handle(
       request(`/v1/jobs/${job.id}/work-submission`, {

@@ -6,6 +6,7 @@ import { ApiError, createApi, idempotencyKey, type RequestLog } from './api';
 import DebugPanel from './components/DebugPanel.vue';
 import FlowSteps from './components/FlowSteps.vue';
 import MoneyCard from './components/MoneyCard.vue';
+import { findUserByIdentifier, isSelectedWorker, userIdentifier } from './job-flow';
 
 interface User { id?: string; user_id?: string; name: string; email: string }
 interface Session { user: User; session: { id: string } }
@@ -13,7 +14,7 @@ interface Context { root_user: User; active_user: User; acting_as_test_user: boo
 interface Wallet { spending_balance: number; earnings_balance: number; held_for_jobs: number; reserved_for_payouts: number; status: string; as_of: string }
 interface Quote { id: string; credit_baht: number; payment_total_baht: number; fee_baht: number; tax_baht: number; expires_at: string }
 interface TopUp { id: string; reference: string; credit_baht: number; payment_total_baht: number; status: string; qr_string?: string; provider_reference?: string; created_at: string }
-interface Job { id: string; employer_user_id: string; intended_payee_user_id?: string; title: string; description: string; status: string; job_amount: number; worker_net_amount: number; application_deadline: string; work_deadline: string }
+interface Job { id: string; employer_user_id: string; intended_payee_user_id?: string | null; selected_worker_user_id?: string | null; title: string; description: string; status: string; job_amount: number; worker_net_amount: number; application_deadline: string; work_deadline: string }
 interface Application { id: string; worker_user_id: string; message: string; status: string; created_at: string }
 interface PayoutAccount { id: string; account_holder_name: string; bank_code: string; masked_account_number: string }
 interface PayoutQuote { id: string; receipt_baht: number; maximum_debit_baht: number; expires_at: string }
@@ -69,7 +70,7 @@ const payoutAmount = ref(100);
 const payoutQuote = ref<PayoutQuote | null>(null);
 const activePayout = ref<Payout | null>(null);
 
-const userId = (user?: User | null) => user?.user_id ?? user?.id ?? '';
+const userId = userIdentifier;
 const activeUser = computed(() => context.value?.active_user ?? session.value?.user ?? null);
 const rootUser = computed(() => context.value?.root_user ?? session.value?.user ?? null);
 const allUsers = computed(() => {
@@ -77,7 +78,7 @@ const allUsers = computed(() => {
   return [rootUser.value, ...users.value].filter((user): user is User => Boolean(user) && !seen.has(userId(user)) && Boolean(seen.add(userId(user))));
 });
 const isEmployer = computed(() => flowJob.value?.employer_user_id === userId(activeUser.value));
-const isWorker = computed(() => flowJob.value?.intended_payee_user_id === userId(activeUser.value));
+const isWorker = computed(() => isSelectedWorker(flowJob.value, activeUser.value));
 const completed = computed(() => {
   const result: number[] = [];
   if (topUps.value.some((item) => item.status === 'SUCCEEDED')) result.push(0);
@@ -153,6 +154,10 @@ async function switchActor(target: User) {
     if (root) await request(endpoint.actorSession, { method: 'DELETE' });
     else await request(endpoint.actorSessions, { method: 'POST', body: JSON.stringify({ user_id: userId(target) }) });
     await loadAll();
+    if (flowJob.value?.status === 'OPEN' && flowJob.value.employer_user_id === userId(activeUser.value)) {
+      const result = await request<{ items: Application[] }>(`${endpoint.jobs}/${flowJob.value.id}/applications?limit=100`);
+      applications.value = result.items;
+    }
   }, `กำลังใช้งานเป็น ${target.name}`);
 }
 
@@ -195,7 +200,11 @@ async function createJob() {
   if (created) { flowJob.value = created; activeStep.value = 1; await loadAll(); }
 }
 
-async function chooseJob(job: Job) { flowJob.value = job; applications.value = []; }
+async function chooseJob(job: Job) {
+  flowJob.value = job;
+  applications.value = [];
+  if (job.status === 'OPEN' && job.employer_user_id === userId(activeUser.value)) await loadApplications();
+}
 
 async function applyForJob() {
   if (!flowJob.value) return;
@@ -212,8 +221,18 @@ async function loadApplications() {
 async function selectWorker(application: Application) {
   if (!flowJob.value) return;
   const updated = await run(() => command<Job>(`${endpoint.jobs}/${flowJob.value?.id}/worker-selection`, { application_id: application.id }, 'select'), 'เลือกผู้ทำงานแล้ว');
-  if (updated) flowJob.value = updated;
+  if (!updated) return;
+  flowJob.value = updated;
+  activeStep.value = 2;
   await loadAll();
+
+  const selectedUser = findUserByIdentifier(allUsers.value, application.worker_user_id);
+  if (selectedUser) {
+    await switchActor(selectedUser);
+    notice.value = `เลือก ${selectedUser.name} เป็นผู้ทำงานแล้ว — พร้อมส่งงาน`;
+  } else {
+    notice.value = 'เลือกผู้ทำงานแล้ว — สลับเป็นผู้ใช้ที่ได้รับเลือกเพื่อส่งงาน';
+  }
 }
 
 async function submitWork() {
@@ -283,7 +302,7 @@ onBeforeUnmount(() => window.clearInterval(topUpPoll));
       <div class="actor-label"><small>กำลังใช้งานเป็น</small><strong>{{ activeUser?.name }}</strong></div>
       <div class="actor-list">
         <button v-for="user in allUsers" :key="userId(user)" type="button" class="actor-button"
-          :class="{ active: userId(user) === userId(activeUser) }" @click="switchActor(user)">
+          :class="{ active: userId(user) === userId(activeUser) }" :disabled="busy > 0" @click="switchActor(user)">
           <span>{{ user.name.slice(0, 1).toUpperCase() }}</span><span>{{ user.name }}<small>{{ user.email }}</small></span>
         </button>
       </div>
@@ -368,7 +387,7 @@ onBeforeUnmount(() => window.clearInterval(topUpPoll));
             <div v-if="flowJob.status === 'OPEN' && !isEmployer" class="inline-action"><input v-model="applicationMessage" aria-label="ข้อความสมัครงาน" /><button class="button primary" type="button" @click="applyForJob">สมัครงาน</button></div>
             <div v-if="flowJob.status === 'OPEN' && isEmployer">
               <button class="button primary" type="button" @click="loadApplications">โหลดผู้สมัคร</button>
-              <div v-for="item in applications" :key="item.id" class="application-row"><span><strong>{{ item.worker_user_id.slice(0, 8) }}</strong><small>{{ item.message }}</small></span><button class="button secondary small" type="button" @click="selectWorker(item)">เลือกคนนี้</button></div>
+              <div v-for="item in applications" :key="item.id" class="application-row"><span><strong>{{ findUserByIdentifier(allUsers, item.worker_user_id)?.name ?? item.worker_user_id.slice(0, 8) }}</strong><small>{{ item.message }}</small></span><button class="button secondary small" type="button" :disabled="busy > 0" @click="selectWorker(item)">เลือกเป็นผู้ทำงาน</button></div>
             </div>
           </article>
         </section>
@@ -379,8 +398,9 @@ onBeforeUnmount(() => window.clearInterval(topUpPoll));
             <template v-if="flowJob">
               <p><strong>{{ flowJob.title }}</strong></p><p class="muted">สถานะ {{ flowJob.status }}</p>
               <label>สรุปงาน<textarea v-model="submissionSummary"></textarea></label>
-              <button class="button primary full" type="button" :disabled="!isWorker || flowJob.status !== 'ASSIGNED'" @click="submitWork">ส่งงาน</button>
-              <p v-if="!isWorker" class="hint">สลับเป็นผู้ใช้ที่ได้รับเลือกก่อน</p>
+              <button class="button primary full" type="button" :disabled="busy > 0 || !isWorker || !['ASSIGNED', 'OVERDUE'].includes(flowJob.status)" @click="submitWork">ส่งงาน</button>
+              <p v-if="!flowJob.intended_payee_user_id && !flowJob.selected_worker_user_id" class="hint">ผู้สร้างงานต้องเลือกผู้สมัครก่อน จึงจะส่งงานได้</p>
+              <p v-else-if="!isWorker" class="hint">สลับเป็นผู้ใช้ที่ได้รับเลือกก่อน</p>
             </template>
             <div v-else class="empty compact">เลือกงานในขั้นก่อนหน้า</div>
           </article>
