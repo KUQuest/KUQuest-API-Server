@@ -1,5 +1,4 @@
 import { openapi } from '@elysia/openapi';
-
 import {
   authOpenAPIComponents,
   authOpenAPIPaths,
