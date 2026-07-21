@@ -3,7 +3,6 @@ import { env } from './config/env';
 import { sql } from './database/client';
 import {
   authPlugin,
-  authTestRoute,
   resolveBetterAuthSession,
   type SessionResolver,
 } from './modules/auth';
@@ -90,7 +89,6 @@ export const createApp = (dependencies: AppDependencies = {}) => {
     .use(corsPlugin)
     .use(authPlugin)
     .use(openapiPlugin)
-    .use(developmentEnabled ? authTestRoute : new Elysia())
     .use(healthRoute)
     .use(
       createDevelopmentTestRoute({

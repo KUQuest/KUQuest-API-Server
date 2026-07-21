@@ -5,17 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/index.ts",
-    "dev:local": "bun run build:web && bash scripts/dev-local.sh",
-    "dev:web": "vite --config vite.config.ts",
+    "dev:local": "bash scripts/dev-local.sh",
     "start": "bun src/index.ts",
     "tunnel": "bash scripts/dev-tunnel.sh",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
-    "typecheck": "tsc --noEmit && vue-tsc --noEmit -p web/tsconfig.json",
+    "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "build:web": "vite build --config vite.config.ts",
-    "build": "bun run build:web && bun build src/index.ts --target=bun --outdir=dist",
+    "build": "bun build src/index.ts --target=bun --outdir=dist",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
@@ -27,19 +25,13 @@
     "better-auth": "^1.6.23",
     "drizzle-orm": "^0.45.2",
     "elysia": "latest",
-    "postgres": "^3.4.9",
-    "qrcode": "^1.5.4",
-    "vue": "^3.5.39"
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/qrcode": "^1.5.6",
-    "@vitejs/plugin-vue": "^6.0.8",
     "drizzle-kit": "^0.31.10",
     "oxlint": "^1.73.0",
     "oxlint-tsgolint": "^0.24.0",
-    "typescript": "6.0.3",
-    "vite": "^8.1.4",
-    "vue-tsc": "^3.3.7"
+    "typescript": "6.0.3"
   }
 }

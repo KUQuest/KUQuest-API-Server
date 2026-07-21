@@ -38,10 +38,9 @@ const getOpenAPIDocument = async (): Promise<OpenAPIDocument> => {
 };
 
 describe('authentication OpenAPI documentation', () => {
-  it('documents the auth endpoints without removing existing paths', async () => {
+  it('documents the auth and API endpoints', async () => {
     const document = await getOpenAPIDocument();
 
-    expect(document.paths?.['/']).toBeDefined();
     expect(document.paths?.['/health']).toBeDefined();
     expect(document.paths?.['/api/auth/sign-in/social']?.post).toBeDefined();
     expect(document.paths?.['/api/auth/callback/google']?.get).toBeDefined();

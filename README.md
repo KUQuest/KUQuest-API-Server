@@ -22,12 +22,6 @@ migration container exits successfully. The running API receives only the
 restricted application-role database URL. PostgreSQL and API are the only
 long-running services.
 
-Open `http://localhost:5000` in a browser to use the built-in Google login,
-session inspection, and sign-out test page.
-
-Do not open `public/index.html` directly with a `file://` URL. OAuth state and
-session cookies require the page to be served by the API origin.
-
 Generate a secure Better Auth secret and put the result in
 `BETTER_AUTH_SECRET`:
 
@@ -111,7 +105,7 @@ Failed response:
 fields.
 
 Protocol-owned routes keep their native contracts: `/api/auth/*` is controlled
-by Better Auth, `/openapi*` serves OpenAPI assets, `/` serves HTML, and Xendit
+by Better Auth, `/openapi*` serves OpenAPI assets, and Xendit
 webhook success acknowledgements remain empty HTTP 202 responses. KUQuest errors
 raised while processing webhook requests still use the failure envelope.
 
@@ -172,7 +166,6 @@ src/
 ├── plugins/                   # Cross-cutting Elysia plugins
 ├── app.ts                     # Application composition
 └── index.ts                   # Runtime validation and HTTP startup
-public/                        # Browser-based auth test page
 drizzle/                       # Versioned SQL migrations and metadata
 tests/                         # Tests mirroring production boundaries
 ```

@@ -39,3 +39,7 @@ yarn-error.log*
 package-lock.json
 **/*.bun
 dist/
+
+# frontend workspace and local review artifacts (this repository is API-only)
+/web/
+/for_chat.html

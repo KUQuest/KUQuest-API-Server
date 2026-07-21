@@ -8,7 +8,8 @@ describe('Xendit HTTP client', () => {
     let requestBody: Record<string, unknown> = {};
     const fetcher = async (input: string, init?: RequestInit) => {
       requestUrl = String(input);
-      requestBody = JSON.parse(String(init?.body));
+      if (typeof init?.body !== 'string') throw new TypeError('Expected a JSON request body.');
+      requestBody = JSON.parse(init.body);
       return new Response(JSON.stringify({
         payment_request_id: 'pr-35c82074-06c5-44c3-8d13-8f3ea81c4dff',
         status: 'REQUIRES_ACTION',
@@ -43,7 +44,8 @@ describe('Xendit HTTP client', () => {
     let requestBody: Record<string, unknown> = {};
     const fetcher = async (input: string, init?: RequestInit) => {
       requestUrl = String(input);
-      requestBody = JSON.parse(String(init?.body));
+      if (typeof init?.body !== 'string') throw new TypeError('Expected a JSON request body.');
+      requestBody = JSON.parse(init.body);
       return new Response(JSON.stringify({ status: 'PENDING' }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
