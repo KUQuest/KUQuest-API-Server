@@ -11,5 +11,13 @@ export const app = new Elysia({
   .use(corsPlugin)
   .use(authPlugin)
   .use(openapiPlugin)
+  .get('/', () => 'Hello Elysia', {
+    detail: {
+      tags: ['General'],
+      summary: 'API root',
+      description: 'Returns a basic response from the KUQuest API.',
+      operationId: 'getApiRoot',
+    },
+  })
   .use(authTestRoute)
   .use(healthRoute);
