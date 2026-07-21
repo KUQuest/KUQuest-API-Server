@@ -92,6 +92,7 @@ export interface ListActivitiesQuery {
 
 export interface ProviderWebhook {
   provider: 'XENDIT';
+  family: 'payment' | 'payout';
   eventKey: string;
   payloadHash: string;
   eventType: string;
@@ -103,7 +104,10 @@ export interface ProviderWebhook {
 export interface MoneyRepository {
   getWallet(userId: string): Promise<WalletSummary>;
   getPolicy(): Promise<MoneyPolicy>;
-  listActivities(userId: string, query: ListActivitiesQuery): Promise<ActivityPage>;
+  listActivities(
+    userId: string,
+    query: ListActivitiesQuery,
+  ): Promise<ActivityPage>;
   convertEarnings(command: ConvertEarningsCommand): Promise<EarningsConversion>;
   storeWebhook(webhook: ProviderWebhook): Promise<{ duplicate: boolean }>;
 }

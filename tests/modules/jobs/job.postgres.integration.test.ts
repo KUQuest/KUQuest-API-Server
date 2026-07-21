@@ -15,18 +15,19 @@ databaseDescribe('PostgreSQL funded job settlement',()=>{
     const repository=new PostgresJobRepository(database);
     const employer=`employer-${crypto.randomUUID()}`; const worker=`worker-${crypto.randomUUID()}`;
     try{
-      for(const [id,name] of [[employer,'Employer'],[worker,'Worker']]){
-        await database`INSERT INTO "user"(user_id,name,email,email_verified,first_name,last_name,updated_at)
-          VALUES(${id},${name},${`${id}@ku.th`},true,${name},'Test',now())`;
-      }
+      await Promise.all([[employer,'Employer'],[worker,'Worker']].map(([id,name]) =>
+        database`INSERT INTO "user"(user_id,name,email,email_verified,first_name,last_name,updated_at)
+          VALUES(${id},${name},${`${id}@ku.th`},true,${name},'Test',now())`,
+      ));
       const [wallet]=await database`SELECT id::text FROM wallets WHERE user_id=${employer}`;
-      const [spending]=await database`SELECT id::text FROM ledger_accounts WHERE wallet_id=${wallet!.id} AND type='SPENDING'`;
+      const [spending]=await database`SELECT id::text FROM ledger_accounts WHERE wallet_id=${wallet?.id} AND type='SPENDING'`;
       const [adjustment]=await database`SELECT id::text FROM ledger_accounts WHERE code='SYSTEM:ADJUSTMENTS'`;
+      if (!wallet || !spending || !adjustment) throw new Error('Expected provisioned job ledger accounts.');
       const seed=crypto.randomUUID();
       await database.begin(async transaction=>{
         await transaction`INSERT INTO ledger_transactions(id,business_reference,event_type) VALUES(${seed},${`test-job:${seed}`},'TEST_SEED')`;
         await transaction`INSERT INTO ledger_postings(transaction_id,account_id,amount_baht) VALUES
-          (${seed},${spending!.id},300),(${seed},${adjustment!.id},-300)`;
+          (${seed},${spending.id},300),(${seed},${adjustment.id},-300)`;
         await transaction`UPDATE ledger_transactions SET sealed_at=now() WHERE id=${seed}`;
       });
       const createPayload={title:'Test a KUQuest flow',description:'Complete the text-only MVP task.',amount:200,
@@ -49,7 +50,7 @@ databaseDescribe('PostgreSQL funded job settlement',()=>{
         t.sealed_at FROM ledger_transactions t JOIN ledger_postings p ON p.transaction_id=t.id
         WHERE t.business_reference=${`job-settlement:${job.id}`} GROUP BY t.sealed_at`;
       expect(ledger).toMatchObject({postings:2,balance:0});
-      expect(ledger!.sealed_at).not.toBeNull();
+      expect(ledger?.sealed_at).not.toBeNull();
     }finally{await database.end({timeout:1});}
   },20_000);
 });

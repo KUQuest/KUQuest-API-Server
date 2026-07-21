@@ -120,17 +120,18 @@ const request = (
   });
 };
 
+const makeApp = (routeRepository: RouteRepository) => new Elysia()
+  .use(errorHandlerPlugin)
+  .use(
+    createJobRoute(
+      routeRepository,
+      async () => ({ user: { id: 'employer-1' } }),
+      ['http://localhost:3000'],
+    ),
+  );
+
 describe('funded job HTTP contract', () => {
   let repository: RouteRepository;
-  const makeApp = (routeRepository: RouteRepository) => new Elysia()
-    .use(errorHandlerPlugin)
-    .use(
-      createJobRoute(
-        routeRepository,
-        async () => ({ user: { id: 'employer-1' } }),
-        ['http://localhost:3000'],
-      ),
-    );
   let app: ReturnType<typeof makeApp>;
 
   beforeEach(() => {

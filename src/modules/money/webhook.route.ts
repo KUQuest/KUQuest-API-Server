@@ -54,6 +54,7 @@ const recordWebhook = async (
 
   const stored = await repository.storeWebhook({
     provider: 'XENDIT',
+    family,
     eventKey,
     payloadHash,
     eventType,

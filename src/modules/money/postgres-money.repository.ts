@@ -14,6 +14,8 @@ import type {
   WalletSummary,
 } from './money.types';
 
+type Database = Sql | TransactionSql<Record<string, never>>;
+
 interface WalletRow {
   id: string;
   spending_balance: string;
@@ -110,7 +112,11 @@ export class PostgresMoneyRepository implements MoneyRepository {
   }
 
   async getPolicy(): Promise<MoneyPolicy> {
-    const [row] = (await this.database`
+    return this.getPolicyFrom(this.database);
+  }
+
+  private async getPolicyFrom(database: Database): Promise<MoneyPolicy> {
+    const [row] = (await database`
       SELECT revision::text AS revision,
              platform_fee_bps::text AS platform_fee_bps,
              dispute_two_person_threshold_baht::text AS dispute_two_person_threshold_baht,
@@ -238,7 +244,7 @@ export class PostgresMoneyRepository implements MoneyRepository {
         throw new MoneyError(423, 'WALLET_FROZEN', 'The wallet is frozen.');
       }
 
-      const policy = await this.getPolicyInTransaction(transaction);
+      const policy = await this.getPolicyFrom(transaction);
       const range = policy.limits.earnings_conversion;
       if (command.amount < range.minimum || command.amount > range.maximum) {
         throw new MoneyError(422, 'VALIDATION_FAILED',
@@ -335,7 +341,7 @@ export class PostgresMoneyRepository implements MoneyRepository {
         provider, provider_event_id, kind, authenticated_at,
         payload, payload_hash, received_at
       ) VALUES (
-        ${webhook.provider}, ${webhook.eventKey}, ${webhook.eventType},
+        ${webhook.provider}, ${webhook.eventKey}, ${webhook.family},
         ${webhook.receivedAt}, ${JSON.stringify(webhook.payload)}::text::jsonb,
         ${webhook.payloadHash}, ${webhook.receivedAt}
       )
@@ -356,32 +362,6 @@ export class PostgresMoneyRepository implements MoneyRepository {
       );
     }
     return { duplicate: true };
-  }
-
-  private async getPolicyInTransaction(transaction: TransactionSql): Promise<MoneyPolicy> {
-    const [row] = (await transaction`
-      SELECT revision::text AS revision,
-             platform_fee_bps::text AS platform_fee_bps,
-             dispute_two_person_threshold_baht::text AS dispute_two_person_threshold_baht,
-             minimum_top_up_baht::text AS minimum_top_up_baht,
-             maximum_top_up_baht::text AS maximum_top_up_baht,
-             minimum_funded_job_baht::text AS minimum_funded_job_baht,
-             maximum_funded_job_baht::text AS maximum_funded_job_baht,
-             minimum_earnings_conversion_baht::text AS minimum_earnings_conversion_baht,
-             maximum_earnings_conversion_baht::text AS maximum_earnings_conversion_baht,
-             minimum_payout_baht::text AS minimum_payout_baht,
-             maximum_payout_baht::text AS maximum_payout_baht,
-             quote_lifetime_seconds::text AS quote_lifetime_seconds,
-             review_window_seconds::text AS review_window_seconds,
-             default_application_window_seconds::text AS default_application_window_seconds,
-             effective_from
-      FROM money_policy_revisions
-      WHERE effective_from <= now()
-        AND (effective_until IS NULL OR effective_until > now())
-      ORDER BY revision DESC LIMIT 1
-    `) as unknown as PolicyRow[];
-    if (!row) throw new Error('Money policy is not configured.');
-    return this.policyFromRow(row);
   }
 
   private policyFromRow(row: PolicyRow): MoneyPolicy {

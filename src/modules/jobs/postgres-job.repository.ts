@@ -764,12 +764,12 @@ export class PostgresJobRepository implements JobRepository {
         ${args.idempotencyId}, ${args.userId}, ${args.description}
       )
     `;
-    for (const [accountId, amount] of postings) {
-      await transaction`
+    await Promise.all(
+      postings.map(([accountId, amount]) => transaction`
         INSERT INTO ledger_postings (transaction_id, account_id, amount_baht)
         VALUES (${args.transactionId}, ${accountId}, ${amount})
-      `;
-    }
+      `),
+    );
     await transaction`
       UPDATE ledger_transactions SET sealed_at = now() WHERE id = ${args.transactionId}
     `;

@@ -43,6 +43,10 @@ add `http://localhost:3000` as an authorized JavaScript origin as well.
 `CMS_ORIGIN` must match the frontend origin that sends cookie-based auth
 requests. The local default is `http://localhost:3000`.
 
+`NODE_ENV` is required and must be `development`, `test`, or `production`.
+Development-only actor, diagnostics, and payment-simulation routes are enabled
+only when it is explicitly set to `development`.
+
 ## Authentication API
 
 Better Auth is mounted at `/api/auth`. The main endpoints are:
@@ -161,13 +165,17 @@ src/
 │   ├── client.ts              # Shared Drizzle/PostgreSQL client
 │   └── schema/                # Database schemas grouped by concern
 ├── modules/
-│   ├── auth/                  # Auth config, policy, routes, and plugin
-│   └── health/                # Health route and response schema
+│   ├── auth/                  # Auth policy, sessions, CSRF, and request identity
+│   ├── dev-test/              # Explicitly development-only test support
+│   ├── health/                # Health route and response schema
+│   ├── jobs/                  # Funded-job HTTP and persistence boundary
+│   ├── money/                 # Wallet, ledger, policy, and webhook ingestion
+│   └── payments/              # Top-up, payout, provider, and response schemas
 ├── plugins/                   # Cross-cutting Elysia plugins
 ├── app.ts                     # Application composition
 └── index.ts                   # Runtime validation and HTTP startup
 drizzle/                       # Versioned SQL migrations and metadata
-tests/                         # Tests mirroring production boundaries
+tests/                         # Single test root mirroring production boundaries
 ```
 
 The service uses a feature-first modular monolith. Business rules such as the

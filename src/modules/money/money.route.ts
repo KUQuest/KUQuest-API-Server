@@ -6,7 +6,8 @@ import {
   apiSuccessSchema,
 } from '@/http/api-response';
 import {
-  assertTrustedBrowserOrigin,
+  requireAuthenticatedUserId,
+  requireTrustedMutationUserId,
   type SessionResolver,
 } from '@/modules/auth';
 
@@ -21,18 +22,6 @@ import {
 } from './money.schema';
 import type { MoneyRepository } from './money.types';
 
-const currentUserId = async (
-  headers: Headers,
-  resolveSession: SessionResolver,
-): Promise<string> => {
-  const session = await resolveSession(headers);
-  if (!session?.user.id) {
-    throw new MoneyError(401, 'UNAUTHORIZED', 'A valid session is required.');
-  }
-
-  return session.user.id;
-};
-
 export const createMoneyRoute = (
   repository: MoneyRepository,
   resolveSession: SessionResolver,
@@ -44,12 +33,15 @@ export const createMoneyRoute = (
       async ({ request }) =>
         apiSuccess(
           await repository.getWallet(
-            await currentUserId(request.headers, resolveSession),
+            await requireAuthenticatedUserId(request.headers, resolveSession),
           ),
           request,
         ),
       {
-        response: { 200: apiSuccessSchema(walletSchema), 401: apiFailureSchema },
+        response: {
+          200: apiSuccessSchema(walletSchema),
+          401: apiFailureSchema,
+        },
         detail: {
           tags: ['Wallet'],
           summary: "Get the authenticated user's wallet summary",
@@ -61,7 +53,7 @@ export const createMoneyRoute = (
     .get(
       '/policy',
       async ({ request }) => {
-        await currentUserId(request.headers, resolveSession);
+        await requireAuthenticatedUserId(request.headers, resolveSession);
         return apiSuccess(await repository.getPolicy(), request);
       },
       {
@@ -80,7 +72,10 @@ export const createMoneyRoute = (
     .get(
       '/activities',
       async ({ request, query }) => {
-        const userId = await currentUserId(request.headers, resolveSession);
+        const userId = await requireAuthenticatedUserId(
+          request.headers,
+          resolveSession,
+        );
         return apiSuccess(
           await repository.listActivities(userId, {
             cursor: query.cursor,
@@ -94,7 +89,9 @@ export const createMoneyRoute = (
       {
         query: t.Object({
           cursor: t.Optional(t.String()),
-          limit: t.Optional(t.Integer({ minimum: 1, maximum: 100, default: 20 })),
+          limit: t.Optional(
+            t.Integer({ minimum: 1, maximum: 100, default: 20 }),
+          ),
           type: t.Optional(activityTypeSchema),
           status: t.Optional(t.String()),
         }),
@@ -114,8 +111,11 @@ export const createMoneyRoute = (
     .post(
       '/earnings-conversions',
       async ({ body, headers, request, status }) => {
-        const userId = await currentUserId(request.headers, resolveSession);
-        assertTrustedBrowserOrigin(request.headers, trustedOrigins);
+        const userId = await requireTrustedMutationUserId(
+          request.headers,
+          resolveSession,
+          trustedOrigins,
+        );
         const idempotencyKey = headers['idempotency-key'];
         if (!idempotencyKey || idempotencyKey.length < 16) {
           throw new MoneyError(
