@@ -82,7 +82,7 @@ export const errorHandlerPlugin = new Elysia({
     traceId: failure.trace_id,
     code,
     errorName: error instanceof Error ? error.name : 'UnknownError',
-    ...(process.env.NODE_ENV !== 'production' && error instanceof Error
+    ...(process.env.NODE_ENV === 'development' && error instanceof Error
       ? { errorMessage: error.message, stack: error.stack }
       : {}),
   });

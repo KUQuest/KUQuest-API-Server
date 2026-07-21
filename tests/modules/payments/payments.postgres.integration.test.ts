@@ -22,6 +22,41 @@ class RejectingXendit extends FakeXendit{
   override async createPayout():Promise<never>{throw new MoneyError(422,'VALIDATION_FAILED','Provider rejected test payout.');}
 }
 
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+};
+
+class BlockingXendit extends FakeXendit {
+  readonly topUpStarted = deferred();
+  readonly payoutStarted = deferred();
+  readonly releaseTopUp = deferred();
+  readonly releasePayout = deferred();
+  topUpRequests = 0;
+  payoutRequests = 0;
+
+  override async createPromptPay(input: {
+    reference: string;
+    amountBaht: number;
+    expiresAt: string;
+  }) {
+    this.topUpRequests += 1;
+    this.topUpStarted.resolve();
+    await this.releaseTopUp.promise;
+    return super.createPromptPay(input);
+  }
+
+  override async createPayout(input: { reference: string }) {
+    this.payoutRequests += 1;
+    this.payoutStarted.resolve();
+    await this.releasePayout.promise;
+    return super.createPayout(input);
+  }
+}
+
 databaseDescribe('PostgreSQL top-up and payout flow',()=>{
   it('credits PromptPay once and reserves/finalizes worker earnings',async()=>{
     const database=postgres(databaseUrl!,{prepare:false});
@@ -110,4 +145,99 @@ databaseDescribe('PostgreSQL top-up and payout flow',()=>{
       expect(await rejection(payments.createPayout(userId,quote.id,'payout-rejected-0001'))).toMatchObject({status:422});
     }finally{await database.end({timeout:1});}
   },20_000);
+
+  it('atomically claims top-up and payout idempotency keys', async () => {
+    const database = postgres(databaseUrl!, { prepare: false });
+    const userId = `payment-idempotency-${crypto.randomUUID()}`;
+    const xendit = new BlockingXendit();
+    const payments = new PostgresPaymentsRepository(database, xendit);
+
+    try {
+      await database`
+        INSERT INTO "user" (
+          user_id, name, email, email_verified, first_name, last_name, updated_at
+        ) VALUES (
+          ${userId}, 'Idempotency Worker', ${`${userId}@ku.th`}, true,
+          'Idempotency', 'Worker', now()
+        )
+      `;
+
+      const topUpQuote = await payments.createTopUpQuote(userId, 100);
+      const firstTopUp = payments.createTopUp(
+        userId,
+        topUpQuote.id,
+        'concurrent-topup-key-0001',
+      );
+      await xendit.topUpStarted.promise;
+      expect(
+        await rejection(
+          payments.createTopUp(
+            userId,
+            topUpQuote.id,
+            'concurrent-topup-key-0001',
+          ),
+        ),
+      ).toMatchObject({ status: 409, code: 'IDEMPOTENCY_CONFLICT' });
+      xendit.releaseTopUp.resolve();
+      await firstTopUp;
+      expect(xendit.topUpRequests).toBe(1);
+
+      const [wallet] = await database`
+        SELECT id::text FROM wallets WHERE user_id = ${userId}
+      `;
+      const [earnings] = await database`
+        SELECT id::text FROM ledger_accounts
+        WHERE wallet_id = ${wallet!.id} AND type = 'EARNINGS'
+      `;
+      const [adjustments] = await database`
+        SELECT id::text FROM ledger_accounts WHERE code = 'SYSTEM:ADJUSTMENTS'
+      `;
+      const seedId = crypto.randomUUID();
+      await database.begin(async (transaction) => {
+        await transaction`
+          INSERT INTO ledger_transactions (id, business_reference, event_type)
+          VALUES (${seedId}, ${`idempotency-test:${seedId}`}, 'TEST_SEED')
+        `;
+        await transaction`
+          INSERT INTO ledger_postings (transaction_id, account_id, amount_baht)
+          VALUES
+            (${seedId}, ${earnings!.id}, 500),
+            (${seedId}, ${adjustments!.id}, -500)
+        `;
+        await transaction`
+          UPDATE ledger_transactions SET sealed_at = now() WHERE id = ${seedId}
+        `;
+      });
+      await payments.savePayoutAccount(userId, {
+        given_name: 'Idempotency',
+        surname: 'Worker',
+        account_holder_name: 'Idempotency Worker',
+        account_number: '1234567890',
+        bank_code: 'BBL',
+      });
+      const payoutQuote = await payments.createPayoutQuote(userId, 100);
+      const firstPayout = payments.createPayout(
+        userId,
+        payoutQuote.id,
+        'concurrent-payout-key-0001',
+      );
+      await xendit.payoutStarted.promise;
+      expect(
+        await rejection(
+          payments.createPayout(
+            userId,
+            payoutQuote.id,
+            'concurrent-payout-key-0001',
+          ),
+        ),
+      ).toMatchObject({ status: 409, code: 'IDEMPOTENCY_CONFLICT' });
+      xendit.releasePayout.resolve();
+      await firstPayout;
+      expect(xendit.payoutRequests).toBe(1);
+    } finally {
+      xendit.releaseTopUp.resolve();
+      xendit.releasePayout.resolve();
+      await database.end({ timeout: 1 });
+    }
+  }, 20_000);
 });

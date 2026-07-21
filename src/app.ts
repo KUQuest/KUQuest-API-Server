@@ -57,7 +57,7 @@ export const createApp = (dependencies: AppDependencies = {}) => {
     new PostgresPaymentsRepository(sql, new HttpXenditClient(env.xenditSecretKey));
   const jobRepository = dependencies.jobRepository ?? new PostgresJobRepository(sql);
   const rootSessionResolver = dependencies.sessionResolver ?? resolveBetterAuthSession;
-  const developmentEnabled = env.nodeEnv !== 'production';
+  const developmentEnabled = env.nodeEnv === 'development';
   const developmentRepository = new PostgresDevelopmentTestRepository();
   const effectiveSessionResolver = dependencies.sessionResolver ??
     createDevelopmentActorSessionResolver(
@@ -112,7 +112,7 @@ export const createApp = (dependencies: AppDependencies = {}) => {
         paymentsRepository,
         effectiveSessionResolver,
         trustedOrigins,
-        env.nodeEnv !== 'production',
+        developmentEnabled,
       ),
     )
     .use(

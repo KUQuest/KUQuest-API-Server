@@ -139,30 +139,58 @@ export class PostgresPaymentsRepository implements PaymentsRepository {
   async createTopUp(userId: string, quoteId: string, idempotencyKey: string): Promise<TopUp> {
     const requestHash = await sha256(stableJson({ quote_id: quoteId }));
     const prepared = await this.database.begin(async (transaction) => {
-      const [existing] = (await transaction`
-        SELECT request_hash,response_status,response_body FROM idempotency_keys
-        WHERE principal_user_id=${userId} AND operation_scope='TOP_UP_CREATE' AND key=${idempotencyKey}
-      `) as unknown as Array<{ request_hash:string;response_status:number|null;response_body: TopUp | null }>;
-      if(existing&&existing.request_hash!==requestHash) throw new MoneyError(409,'IDEMPOTENCY_CONFLICT','The idempotency key was reused with another request.');
-      if(existing?.response_status===422)throw new MoneyError(422,'VALIDATION_FAILED','Xendit rejected this top-up request.');
-      if (existing?.response_body) return { replay: existing.response_body };
-      if (existing) throw new MoneyError(409, 'IDEMPOTENCY_CONFLICT', 'This top-up request is still being reconciled.');
+      const idempotencyId = crypto.randomUUID();
+      const inserted = await transaction`
+        INSERT INTO idempotency_keys (
+          id, principal_user_id, operation_scope, key, request_hash, expires_at
+        ) VALUES (
+          ${idempotencyId}, ${userId}, 'TOP_UP_CREATE', ${idempotencyKey},
+          ${requestHash}, now() + interval '24 hours'
+        )
+        ON CONFLICT DO NOTHING RETURNING id
+      `;
+      if (inserted.length === 0) {
+        const [existing] = (await transaction`
+          SELECT request_hash, response_status, response_body
+          FROM idempotency_keys
+          WHERE principal_user_id = ${userId}
+            AND operation_scope = 'TOP_UP_CREATE'
+            AND key = ${idempotencyKey}
+          FOR UPDATE
+        `) as unknown as Array<{
+          request_hash: string;
+          response_status: number | null;
+          response_body: TopUp | null;
+        }>;
+        if (!existing || existing.request_hash !== requestHash) {
+          throw new MoneyError(
+            409,
+            'IDEMPOTENCY_CONFLICT',
+            'The idempotency key was reused with another request.',
+          );
+        }
+        if (existing.response_status === 422) {
+          throw new MoneyError(
+            422,
+            'VALIDATION_FAILED',
+            'Xendit rejected this top-up request.',
+          );
+        }
+        if (existing.response_body) return { replay: existing.response_body };
+        throw new MoneyError(
+          409,
+          'IDEMPOTENCY_CONFLICT',
+          'This top-up request is still being reconciled.',
+        );
+      }
       const [quote] = (await transaction`
         SELECT *, id::text, policy_revision_id::text
         FROM top_up_quotes WHERE id=${quoteId} AND user_id=${userId} FOR UPDATE
       `) as unknown as Array<Record<string, string | Date | null>>;
       if (!quote) throw new MoneyError(404, 'NOT_FOUND', 'The top-up quote was not found.');
       if (quote.consumed_at || new Date(quote.expires_at as string | Date) <= new Date()) {
-        const [recheck]=(await transaction`SELECT request_hash,response_body FROM idempotency_keys
-          WHERE principal_user_id=${userId} AND operation_scope='TOP_UP_CREATE' AND key=${idempotencyKey}`) as unknown as Array<{request_hash:string;response_body:TopUp|null}>;
-        if(recheck?.request_hash===requestHash&&recheck.response_body)return {replay:recheck.response_body};
-        if(recheck?.request_hash===requestHash)throw new MoneyError(409,'IDEMPOTENCY_CONFLICT','This top-up request is still being reconciled.');
         throw new MoneyError(422, 'VALIDATION_FAILED', 'The top-up quote has expired or was already used.');
       }
-      const idempotencyId = crypto.randomUUID();
-      await transaction`INSERT INTO idempotency_keys
-        (id, principal_user_id, operation_scope, key, request_hash, expires_at)
-        VALUES (${idempotencyId},${userId},'TOP_UP_CREATE',${idempotencyKey},${requestHash},now()+interval '24 hours')`;
       const id = crypto.randomUUID();
       const reference = `kuquest-topup-${id}`;
       await transaction`
@@ -286,25 +314,57 @@ export class PostgresPaymentsRepository implements PaymentsRepository {
   }
 
   async createPayout(userId: string, quoteId: string, idempotencyKey: string): Promise<Payout> {
+    const requestHash = await sha256(stableJson({ quote_id: quoteId }));
     const prepared = await this.database.begin(async (transaction) => {
-      const requestHash=await sha256(stableJson({quote_id:quoteId}));
-      const [existing]=(await transaction`SELECT request_hash,response_status,response_body FROM idempotency_keys
-        WHERE principal_user_id=${userId} AND operation_scope='PAYOUT_CREATE' AND key=${idempotencyKey}`) as unknown as Array<{request_hash:string;response_status:number|null;response_body:Payout|null}>;
-      if(existing){
-        if(existing.request_hash!==requestHash) throw new MoneyError(409,'IDEMPOTENCY_CONFLICT','The idempotency key was reused with another request.');
-        if(existing.response_status===422)throw new MoneyError(422,'VALIDATION_FAILED','Xendit rejected this payout request.');
-        if(existing.response_body) return {replay:existing.response_body};
-        throw new MoneyError(409,'IDEMPOTENCY_CONFLICT','This payout is still being reconciled.');
+      const idempotencyId = crypto.randomUUID();
+      const inserted = await transaction`
+        INSERT INTO idempotency_keys (
+          id, principal_user_id, operation_scope, key, request_hash, expires_at
+        ) VALUES (
+          ${idempotencyId}, ${userId}, 'PAYOUT_CREATE', ${idempotencyKey},
+          ${requestHash}, now() + interval '24 hours'
+        )
+        ON CONFLICT DO NOTHING RETURNING id
+      `;
+      if (inserted.length === 0) {
+        const [existing] = (await transaction`
+          SELECT request_hash, response_status, response_body
+          FROM idempotency_keys
+          WHERE principal_user_id = ${userId}
+            AND operation_scope = 'PAYOUT_CREATE'
+            AND key = ${idempotencyKey}
+          FOR UPDATE
+        `) as unknown as Array<{
+          request_hash: string;
+          response_status: number | null;
+          response_body: Payout | null;
+        }>;
+        if (!existing || existing.request_hash !== requestHash) {
+          throw new MoneyError(
+            409,
+            'IDEMPOTENCY_CONFLICT',
+            'The idempotency key was reused with another request.',
+          );
+        }
+        if (existing.response_status === 422) {
+          throw new MoneyError(
+            422,
+            'VALIDATION_FAILED',
+            'Xendit rejected this payout request.',
+          );
+        }
+        if (existing.response_body) return { replay: existing.response_body };
+        throw new MoneyError(
+          409,
+          'IDEMPOTENCY_CONFLICT',
+          'This payout is still being reconciled.',
+        );
       }
       const [quote] = (await transaction`SELECT q.*,q.id::text,a.given_name,a.surname,a.account_holder_name,
         a.account_number,a.bank_code FROM payout_quotes q JOIN payout_accounts a ON a.id=q.payout_account_id
         WHERE q.id=${quoteId} AND q.user_id=${userId} FOR UPDATE OF q`) as unknown as Array<Record<string,string|Date|null>>;
       if (!quote) throw new MoneyError(404,'NOT_FOUND','The payout quote was not found.');
       if (quote.consumed_at || new Date(quote.expires_at as Date|string) <= new Date()) {
-        const [recheck]=(await transaction`SELECT request_hash,response_body FROM idempotency_keys
-          WHERE principal_user_id=${userId} AND operation_scope='PAYOUT_CREATE' AND key=${idempotencyKey}`) as unknown as Array<{request_hash:string;response_body:Payout|null}>;
-        if(recheck?.request_hash===requestHash&&recheck.response_body)return {replay:recheck.response_body};
-        if(recheck?.request_hash===requestHash)throw new MoneyError(409,'IDEMPOTENCY_CONFLICT','This payout is still being reconciled.');
         throw new MoneyError(422,'VALIDATION_FAILED','The payout quote has expired or was already used.');
       }
       const [wallet]=(await transaction`SELECT id::text,status,earnings_balance_baht::text AS earnings
@@ -317,11 +377,9 @@ export class PostgresPaymentsRepository implements PaymentsRepository {
         AND type IN ('EARNINGS','PAYOUT_RESERVED')`) as unknown as Array<{id:string;type:string}>;
       const earnings=accounts.find(a=>a.type==='EARNINGS')?.id; const reserved=accounts.find(a=>a.type==='PAYOUT_RESERVED')?.id;
       if(!earnings||!reserved) throw new Error('Payout ledger accounts are not provisioned.');
-      const idemId=crypto.randomUUID(); const id=crypto.randomUUID(); const ledgerId=crypto.randomUUID();
-      await transaction`INSERT INTO idempotency_keys(id,principal_user_id,operation_scope,key,request_hash,expires_at)
-        VALUES(${idemId},${userId},'PAYOUT_CREATE',${idempotencyKey},${requestHash},now()+interval '24 hours')`;
+      const id=crypto.randomUUID(); const ledgerId=crypto.randomUUID();
       await transaction`INSERT INTO ledger_transactions(id,business_reference,event_type,idempotency_key_id,created_by_user_id,description)
-        VALUES(${ledgerId},${`payout-reserve:${id}`},'PAYOUT_RESERVE',${idemId},${userId},'Reserve worker earnings for payout')`;
+        VALUES(${ledgerId},${`payout-reserve:${id}`},'PAYOUT_RESERVE',${idempotencyId},${userId},'Reserve worker earnings for payout')`;
       await transaction`INSERT INTO ledger_postings(transaction_id,account_id,amount_baht) VALUES
         (${ledgerId},${earnings},${-debit}),(${ledgerId},${reserved},${debit})`;
       await transaction`UPDATE ledger_transactions SET sealed_at=now() WHERE id=${ledgerId}`;
@@ -338,7 +396,7 @@ export class PostgresPaymentsRepository implements PaymentsRepository {
         VALUES(${id},'CREATING',${userId},'USER')`;
       await transaction`INSERT INTO wallet_activities(user_id,type,status,earnings_delta_baht,payout_reserved_delta_baht,resource_type,resource_id)
         VALUES(${userId},'PAYOUT','PENDING',${-debit},${debit},'PAYOUT',${id})`;
-      return {id,idemId,debit,principal:integer(quote.receipt_baht as string,'receipt_baht'),account:{given_name:quote.given_name as string,surname:quote.surname as string,
+      return {id,idemId:idempotencyId,debit,principal:integer(quote.receipt_baht as string,'receipt_baht'),account:{given_name:quote.given_name as string,surname:quote.surname as string,
         account_holder_name:quote.account_holder_name as string,account_number:quote.account_number as string,bank_code:quote.bank_code as string}};
     });
     if('replay' in prepared) return prepared.replay!;
