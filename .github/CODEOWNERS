@@ -2,3 +2,4 @@
 # With branch protection 'Require review from Code Owners',
 # at least one owner below must approve before merge.
 *  @KUQuest/be
+/tests/  @KUQuest/be @KUQuest/tester
