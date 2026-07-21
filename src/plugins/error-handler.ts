@@ -4,7 +4,7 @@ import {
   apiFailure,
   type ValidationIssue,
 } from '@/http/api-response';
-import { CsrfError } from '@/modules/auth';
+import { AuthenticationError, CsrfError } from '@/modules/auth';
 import { MoneyError } from '@/modules/money/money.errors';
 import { JobError } from '@/modules/jobs/job.errors';
 import { DevelopmentTestError } from '@/modules/dev-test/dev-test.errors';
@@ -18,6 +18,17 @@ const validationIssues = (
       issue.summary || issue.message || 'The value did not match its schema.',
   }));
 
+const isAuthenticationError = (
+  error: unknown,
+): error is AuthenticationError =>
+  error instanceof AuthenticationError ||
+  (error instanceof Error &&
+    error.name === 'AuthenticationError' &&
+    'status' in error &&
+    error.status === 401 &&
+    'code' in error &&
+    error.code === 'UNAUTHORIZED');
+
 export const errorHandlerPlugin = new Elysia({
   name: 'error-handler',
 }).onError({ as: 'global' }, ({ code, error, request, set, status }) => {
@@ -27,6 +38,7 @@ export const errorHandlerPlugin = new Elysia({
     error instanceof MoneyError ||
     error instanceof JobError ||
     error instanceof DevelopmentTestError ||
+    isAuthenticationError(error) ||
     error instanceof CsrfError
   ) {
     return status(
