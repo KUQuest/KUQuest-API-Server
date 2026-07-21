@@ -6,5 +6,7 @@
 node_modules
 dist
 coverage
+web
+for_chat.html
 *.log
 .DS_Store
