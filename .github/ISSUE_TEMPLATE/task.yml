@@ -1,0 +1,45 @@
+name: Task
+description: Sprint task tracked on KUQuestBoard
+title: "[Task]: "
+body:
+  - type: dropdown
+    id: team
+    attributes:
+      label: Team
+      description: Also add the matching team:* label to this issue
+      options:
+        - be
+        - fe
+        - mb
+        - pm
+        - tester
+    validations:
+      required: true
+  - type: input
+    id: deadline
+    attributes:
+      label: Deadline
+      placeholder: "YYYY-MM-DD"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: input
+    id: blocked-by
+    attributes:
+      label: Blocked by (issue refs, e.g. owner/repo#N)
+    validations:
+      required: false
