@@ -160,7 +160,7 @@ jobs:
           umask 077
 
           {
-            printf 'NODE_ENV=development\n'
+            printf 'NODE_ENV=production\n'
             printf 'HOST=0.0.0.0\n'
             printf 'PORT=5000\n'
 
