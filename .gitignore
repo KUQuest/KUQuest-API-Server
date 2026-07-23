@@ -39,3 +39,6 @@ yarn-error.log*
 package-lock.json
 **/*.bun
 dist/
+
+#testing api fontend 
+/web
