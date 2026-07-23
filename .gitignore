@@ -39,3 +39,5 @@ yarn-error.log*
 package-lock.json
 **/*.bun
 dist/
+
+/web

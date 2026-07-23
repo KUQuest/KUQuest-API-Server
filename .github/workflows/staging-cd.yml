@@ -236,7 +236,13 @@ jobs:
           export APP_IMAGE
 
           docker compose pull
-          docker compose up -d --remove-orphans
+
+          docker compose up \
+            -d \
+            --remove-orphans \
+            --wait \
+            --wait-timeout 60
+
           docker compose ps
           REMOTE
 
