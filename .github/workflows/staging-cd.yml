@@ -1,0 +1,256 @@
+name: Backend Staging CD
+
+on:
+  workflow_run:
+    workflows:
+      - Backend CI
+    types:
+      - completed
+    branches:
+      - develop
+
+concurrency:
+  group: backend-staging
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  IMAGE_NAME: ghcr.io/kuquest/kuquest-api-server
+  STAGING_SERVER: 192.168.1.210
+
+jobs:
+  build:
+    name: Build staging image
+
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'develop'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout validated commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push staging image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
+            ${{ env.IMAGE_NAME }}:staging
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy staging API
+
+    needs:
+      - build
+
+    runs-on:
+      - self-hosted
+      - linux
+      - deploy-staging
+
+    environment: staging
+
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Prepare SSH credentials
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "Missing GitHub secret: STAGING_SSH_KEY"
+            exit 1
+          fi
+
+          if [ -z "$SSH_KNOWN_HOSTS" ]; then
+            echo "Missing GitHub secret: STAGING_KNOWN_HOSTS"
+            exit 1
+          fi
+
+          KEY_FILE="$RUNNER_TEMP/staging_key"
+          HOSTS_FILE="$RUNNER_TEMP/staging_known_hosts"
+
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY_FILE"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOSTS_FILE"
+
+          chmod 600 "$KEY_FILE"
+          chmod 600 "$HOSTS_FILE"
+
+      - name: Test SSH connection
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            'echo "SSH connection successful"'
+
+      - name: Create application environment file
+        shell: bash
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+          BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+
+          XENDIT_SECRET_KEY: ${{ secrets.XENDIT_SECRET_KEY }}
+          XENDIT_WEBHOOK_TOKEN: ${{ secrets.XENDIT_WEBHOOK_TOKEN }}
+
+          CMS_ORIGIN: ${{ secrets.CMS_ORIGIN }}
+        run: |
+          set -euo pipefail
+
+          REQUIRED_SECRETS=(
+            POSTGRES_PASSWORD
+            DATABASE_URL
+            BETTER_AUTH_URL
+            BETTER_AUTH_SECRET
+            GOOGLE_CLIENT_ID
+            GOOGLE_CLIENT_SECRET
+            XENDIT_SECRET_KEY
+            XENDIT_WEBHOOK_TOKEN
+            CMS_ORIGIN
+          )
+
+          for SECRET_NAME in "${REQUIRED_SECRETS[@]}"; do
+            if [ -z "${!SECRET_NAME}" ]; then
+              echo "Missing GitHub secret: $SECRET_NAME"
+              exit 1
+            fi
+          done
+
+          ENV_FILE="$RUNNER_TEMP/backend.env"
+          umask 077
+
+          {
+            printf 'NODE_ENV=production\n'
+            printf 'HOST=0.0.0.0\n'
+            printf 'PORT=5000\n'
+
+            printf 'POSTGRES_DB=kuquest\n'
+            printf 'POSTGRES_USER=kuquest\n'
+            printf 'POSTGRES_PASSWORD=%s\n' "$POSTGRES_PASSWORD"
+            printf 'POSTGRES_PORT=5432\n'
+            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+
+            printf 'BETTER_AUTH_URL=%s\n' "$BETTER_AUTH_URL"
+            printf 'BETTER_AUTH_SECRET=%s\n' "$BETTER_AUTH_SECRET"
+            printf 'GOOGLE_CLIENT_ID=%s\n' "$GOOGLE_CLIENT_ID"
+            printf 'GOOGLE_CLIENT_SECRET=%s\n' "$GOOGLE_CLIENT_SECRET"
+
+            printf 'XENDIT_SECRET_KEY=%s\n' "$XENDIT_SECRET_KEY"
+            printf 'XENDIT_WEBHOOK_TOKEN=%s\n' "$XENDIT_WEBHOOK_TOKEN"
+
+            printf 'CMS_ORIGIN=%s\n' "$CMS_ORIGIN"
+          } > "$ENV_FILE"
+
+      - name: Upload application environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat "$RUNNER_TEMP/backend.env" |
+            ssh \
+              -i "$RUNNER_TEMP/staging_key" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+              deploy@"$STAGING_SERVER" \
+              'set -e
+               TEMP_FILE=$(mktemp /opt/backend/.env.XXXXXX)
+               cat > "$TEMP_FILE"
+               chmod 600 "$TEMP_FILE"
+               mv "$TEMP_FILE" /opt/backend/.env'
+
+      - name: Log staging server into GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+
+          printf '%s' "$GHCR_TOKEN" |
+            ssh \
+              -i "$RUNNER_TEMP/staging_key" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+              deploy@"$STAGING_SERVER" \
+              "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+
+      - name: Deploy API container
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            "APP_IMAGE='$IMAGE_TAG' bash -se" <<'REMOTE'
+          set -euo pipefail
+
+          cd /opt/backend
+          export APP_IMAGE
+
+          docker compose pull
+
+          docker compose up \
+            -d \
+            --remove-orphans \
+            --wait \
+            --wait-timeout 60
+
+          docker compose ps
+          REMOTE
+
+      - name: Clean temporary secret files
+        if: always()
+        shell: bash
+        run: |
+          rm -f \
+            "$RUNNER_TEMP/staging_key" \
+            "$RUNNER_TEMP/staging_known_hosts" \
+            "$RUNNER_TEMP/backend.env"
