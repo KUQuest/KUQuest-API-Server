@@ -42,6 +42,7 @@ See `src/modules/onboarding/` as the reference shape.
 ## Elysia-specific patterns
 
 - **Auth**: use the shared `authGuard` plugin (`src/modules/auth/auth.guard.ts`) via `.use(authGuard)` — never re-implement a session check inline in a route.
+- **Chaining guards**: guards are Elysia plugins, applied in the order their checks depend on each other — `.use(authGuard).use(adminGuard)`, not the reverse, since `adminGuard` reads `session` off the context `authGuard` derives. Each guard does exactly one check (`onBeforeHandle` + `status(...)`/`set.status`); don't fold multiple unrelated checks into one guard file — add a new guard plugin and chain it instead.
 - **Session typing**: controllers type their context's `session` as `AuthenticatedSession` (exported from `auth.guard.ts`), not the raw nullable session — the guard has already narrowed it. Don't write `session!`.
 - **Response codes**: build `response` schema objects with the shared `responses()` helper (`src/shared/api-response.schema.ts`), e.g. `responses(mySuccessSchema, 401, 404)`. Don't hand-write `{ 200: ..., 401: ..., 404: ... }` per route.
 - **Status codes in handlers**: set `set.status = 404` (etc.) and return the error body directly, rather than Elysia's `status()` helper — `status()`'s return type is narrowed per-route by TypeBox generics and doesn't compose across a controller file extracted from the route.
