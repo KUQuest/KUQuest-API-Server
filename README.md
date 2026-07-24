@@ -67,11 +67,124 @@ required email and profile fields.
 
 ```bash
 bun run db:generate  # generate a SQL migration after schema changes
+bun run db:check     # verify schema sync and inherited migration history
 bun run db:migrate   # apply pending migrations
 bun run db:studio    # open Drizzle Studio
 ```
 
 PostgreSQL data is persisted in the `postgres_data` Docker volume.
+
+### Database-change workflow
+
+Use this sequence for every Drizzle schema change:
+
+1. Edit the schema under `src/database/schema/`.
+2. Run `bun run db:generate`.
+3. Inspect the generated SQL under `drizzle/` and its metadata under
+   `drizzle/meta/`.
+4. Run `bun run db:check`.
+5. Commit the schema, generated SQL, and Drizzle metadata together.
+
+`db:check` runs the same generation contract used by CI. It fails when
+generation produces tracked or untracked artifacts that were not present
+before the check. In CI it also compares against the pull-request target or
+pre-push revision.
+
+Migration SQL and journal entries already inherited from `develop` are
+immutable: do not edit, rename, reorder, or delete them. Correct an applied or
+merged migration with a new forward migration. Drizzle metadata may advance
+when that new migration is generated.
+
+Database changes must follow expand-and-contract compatibility:
+
+- Expand first with backward-compatible tables, columns, and indexes.
+- Deploy code that works with both the old and expanded schema.
+- Contract obsolete structures in a later migration after no deployed code
+  depends on them.
+
+There are no automatic down migrations. Fix an applied defect with a new
+forward migration and restore from a verified backup only when an operator
+deliberately chooses database recovery.
+
+### CI migration validation
+
+Backend CI:
+
+- runs `db:check` with the correct pull-request or pre-push comparison base;
+- keeps linting, type validation, tests, and the production build required;
+- builds the production image;
+- applies that image's complete committed migration chain to PostgreSQL 17;
+- runs the same image migration command again against the current database;
+- starts the image and checks `/health`.
+
+This proves that committed artifacts are coherent, executable, repeatable, and
+present in the deployed image. It cannot prove that an arbitrary data
+transformation is correct for the business. Data migrations still need
+meaningful fixtures, assertions, and human SQL review.
+
+### Staging migration and recovery
+
+After successful CI on `develop`, staging CD records the running API image,
+pulls the validated image, and then performs:
+
+1. a compressed PostgreSQL 17 logical backup through the protected
+   `DATABASE_URL`;
+2. non-empty-file and `pg_restore --list` validation;
+3. rotation to the two newest valid backups;
+4. `bun run db:migrate` in a removable one-off instance of the Compose `api`
+   service;
+5. API replacement and the existing Compose readiness check.
+
+CD publishes the PostgreSQL 17 client as a commit-tagged image in the same GHCR
+package as the API, so the staging host does not need direct Docker Hub access.
+
+The current API keeps serving during backup and migration. Backup or migration
+failure stops before replacement. If the new API fails readiness, CD restores
+the exact previous image and leaves successfully applied compatible migrations
+in place. An initial deployment with no previous image remains failed if
+readiness fails.
+
+Backups are stored in `/opt/backend/backups` on the staging host with restrictive
+permissions. Credentials stay in `/opt/backend/.env` and are not printed.
+
+### One-time staging bootstrap
+
+The currently empty staging database needs one deliberate bootstrap before
+recurring migration CD is enabled. This command is never called by CI or
+staging CD:
+
+```bash
+APP_IMAGE=ghcr.io/kuquest/kuquest-api-server:<validated-sha> \
+STAGING_DIR=/opt/backend \
+ENV_FILE=/opt/backend/.env \
+BACKUP_DIR=/opt/backend/backups \
+STAGING_NETWORK=kuquest-staging_default \
+bash scripts/staging-operations.sh bootstrap
+```
+
+The operation pulls the migration-capable image and creates and validates a
+final backup before prompting for the exact text:
+
+```text
+RESET staging public schema
+```
+
+Only the target database's `public` schema is dropped and recreated.
+PostgreSQL roles, the server instance, and unrelated databases are untouched.
+The image then applies the complete committed chain and verifies the
+authentication tables and Drizzle journal. Any post-backup failure prints the
+recovery backup path. This is not a routine deployment or recovery command.
+
+Exercise the complete bootstrap safely against disposable PostgreSQL 17 with:
+
+```bash
+bash scripts/verify-staging-bootstrap.sh
+```
+
+This opt-in verification builds the production image, uses an isolated Docker
+network and database, runs the real typed-confirmation/reset/migration path,
+and validates the resulting custom-format backup with `pg_restore --list`. It
+is deliberately not part of recurring CI or staging CD.
 
 ## Verification
 
@@ -82,8 +195,9 @@ bun run check
 ```
 
 This runs linting, TypeScript validation, unit/integration tests, and the Bun
-production build. Tests are grouped by production boundary under `tests/` so a
-specific area can also be run independently, for example:
+production build, including the local migration-artifact contract. Tests are
+grouped by production boundary under `tests/` so a specific area can also be
+run independently, for example:
 
 ```bash
 bun test tests/modules/auth

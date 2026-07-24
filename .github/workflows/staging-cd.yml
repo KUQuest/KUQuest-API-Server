@@ -58,8 +58,18 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
             ${{ env.IMAGE_NAME }}:staging
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Publish PostgreSQL client image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: postgres-client
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:postgres-client-${{ github.event.workflow_run.head_sha }}
+          cache-from: type=gha,scope=postgres-client
+          cache-to: type=gha,mode=max,scope=postgres-client
 
   deploy:
     name: Deploy staging API
@@ -79,6 +89,11 @@ jobs:
       packages: read
 
     steps:
+      - name: Checkout validated commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
       - name: Prepare SSH credentials
         shell: bash
         env:
@@ -186,18 +201,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          cat "$RUNNER_TEMP/backend.env" |
-            ssh \
-              -i "$RUNNER_TEMP/staging_key" \
-              -o BatchMode=yes \
-              -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
-              deploy@"$STAGING_SERVER" \
-              'set -e
-               TEMP_FILE=$(mktemp /opt/backend/.env.XXXXXX)
-               cat > "$TEMP_FILE"
-               chmod 600 "$TEMP_FILE"
-               mv "$TEMP_FILE" /opt/backend/.env'
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            'set -e
+             TEMP_FILE=$(mktemp /opt/backend/.env.XXXXXX)
+             cat > "$TEMP_FILE"
+             chmod 600 "$TEMP_FILE"
+             mv "$TEMP_FILE" /opt/backend/.env' \
+            < "$RUNNER_TEMP/backend.env"
 
       - name: Log staging server into GHCR
         shell: bash
@@ -229,22 +244,14 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
             deploy@"$STAGING_SERVER" \
-            "APP_IMAGE='$IMAGE_TAG' bash -se" <<'REMOTE'
-          set -euo pipefail
-
-          cd /opt/backend
-          export APP_IMAGE
-
-          docker compose pull
-
-          docker compose up \
-            -d \
-            --remove-orphans \
-            --wait \
-            --wait-timeout 60
-
-          docker compose ps
-          REMOTE
+            "APP_IMAGE='$IMAGE_TAG' \
+             STAGING_DIR=/opt/backend \
+             ENV_FILE=/opt/backend/.env \
+             BACKUP_DIR=/opt/backend/backups \
+             STAGING_NETWORK=kuquest-staging_default \
+             POSTGRES_CLIENT_IMAGE='${IMAGE_NAME}:postgres-client-${{ github.event.workflow_run.head_sha }}' \
+             bash -s -- deploy" \
+            < scripts/staging-operations.sh
 
       - name: Clean temporary secret files
         if: always()

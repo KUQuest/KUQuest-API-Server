@@ -21,9 +21,37 @@ jobs:
   validate:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: kuquest
+          POSTGRES_PASSWORD: kuquest-ci-only
+          POSTGRES_USER: kuquest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kuquest -d kuquest"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+
+    env:
+      DATABASE_URL: postgresql://kuquest:kuquest-ci-only@localhost:5432/kuquest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate GitHub Actions workflows
+        run: |
+          docker run \
+            --rm \
+            --volume "$PWD:/repo" \
+            --workdir /repo \
+            rhysd/actionlint:1.7.7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -33,5 +61,82 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Resolve migration comparison base
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            MIGRATION_BASE="$BASE_SHA"
+          else
+            MIGRATION_BASE="$BEFORE_SHA"
+          fi
+
+          if [[ -z "$MIGRATION_BASE" || "$MIGRATION_BASE" =~ ^0+$ ]]; then
+            MIGRATION_BASE=$(git rev-parse HEAD^)
+          fi
+
+          git cat-file -e "$MIGRATION_BASE^{commit}"
+          printf 'MIGRATION_BASE_REF=%s\n' "$MIGRATION_BASE" >> "$GITHUB_ENV"
+
       - name: Run validation
         run: bun run check
+
+      - name: Build production image
+        run: docker build --tag kuquest-api:ci .
+
+      - name: Apply complete migration chain from production image
+        run: |
+          docker run \
+            --rm \
+            --network host \
+            --env DATABASE_URL \
+            kuquest-api:ci \
+            bun run db:migrate
+
+      - name: Verify migration repeat execution
+        run: |
+          docker run \
+            --rm \
+            --network host \
+            --env DATABASE_URL \
+            kuquest-api:ci \
+            bun run db:migrate
+
+      - name: Verify production image health
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker run \
+            --detach \
+            --rm \
+            --name kuquest-api-ci \
+            --network host \
+            --env DATABASE_URL \
+            --env BETTER_AUTH_URL=http://localhost:5000 \
+            --env BETTER_AUTH_SECRET=ci-only-secret-at-least-32-characters \
+            --env GOOGLE_CLIENT_ID=ci-only-client-id \
+            --env GOOGLE_CLIENT_SECRET=ci-only-client-secret \
+            kuquest-api:ci
+
+          for ATTEMPT in $(seq 1 30); do
+            if curl --fail --silent http://localhost:5000/health >/dev/null; then
+              exit 0
+            fi
+
+            if [ "$ATTEMPT" -eq 30 ]; then
+              docker logs kuquest-api-ci
+              exit 1
+            fi
+
+            sleep 1
+          done
+
+      - name: Clean production image smoke-test container
+        if: always()
+        run: docker stop kuquest-api-ci 2>/dev/null || true
