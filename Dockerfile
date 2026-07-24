@@ -1,3 +1,6 @@
+FROM postgres:17-alpine AS postgres-client
+
+
 FROM oven/bun:1.3.14 AS base
 
 WORKDIR /app
@@ -46,6 +49,9 @@ COPY --from=production-dependencies \
   ./node_modules
 
 COPY --chown=bun:bun package.json ./
+COPY --chown=bun:bun drizzle.config.ts ./
+COPY --chown=bun:bun drizzle ./drizzle
+COPY --chown=bun:bun src/database/schema ./src/database/schema
 
 USER bun
 
