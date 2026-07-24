@@ -1,10 +1,9 @@
-import { db } from '@/database/client';
-import { user } from '@/database/schema/auth.schema';
 import { auth} from '@/modules/auth/auth.config';
 import { apiError, apiSuccess } from '@/shared/api-response';
 
-import { eq } from 'drizzle-orm';
 import { Elysia } from 'elysia';
+
+import { getOnboardingData, getOnboardingStatusFields, updateOnboardingInfo } from './onboarding.service';
 
 
 import { onboardingSchema, onboardingResponseSchema, onboardingUpdateSchema, onboardingDataResponseSchema, onboardingErrorSchema } from './onboarding.schema';
@@ -22,11 +21,7 @@ export const onboardingRoute =  new Elysia({
                 return status(401, apiError('UNAUTHORIZED', 'Unauthorized'));
 
             }
-            const [currentUser] = await db.select({
-                telephone: user.telephone,
-                faculty: user.faculty,
-                studentId: user.studentId,
-            }).from(user).where(eq(user.id, session.user.id)).limit(1);
+            const currentUser = await getOnboardingStatusFields(session.user.id);
 
             if (!currentUser) {
                 return status(404, apiError('USER_NOT_FOUND', 'User not found'));
@@ -65,14 +60,7 @@ export const onboardingRoute =  new Elysia({
                 return status(401, apiError('UNAUTHORIZED', 'Unauthorized'));
 
             }
-            await db
-                .update(user)
-                .set({
-                    telephone: body.telephone,
-                    faculty: body.faculty,
-                    studentId: body.studentId,
-
-                 }).where(eq(user.id, session.user.id));
+            await updateOnboardingInfo(session.user.id, body);
             return apiSuccess();
         },
         {
@@ -104,18 +92,7 @@ export const onboardingRoute =  new Elysia({
                 return status(401, apiError('UNAUTHORIZED', 'Unauthorized'));
 
             }
-            const [currentUser] = await db.select({
-                name: user.name,
-                email: user.email,
-                firstName: user.firstName,
-                lastName: user.lastName,
-                telephone: user.telephone,
-                faculty: user.faculty,
-                studentId: user.studentId,
-            })
-            .from(user)
-            .where(eq(user.id, session.user.id))
-            .limit(1);
+            const currentUser = await getOnboardingData(session.user.id);
 
             if (!currentUser) {
                 return status(404, apiError('USER_NOT_FOUND', 'User not found'));
