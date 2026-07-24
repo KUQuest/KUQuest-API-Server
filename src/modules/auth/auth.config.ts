@@ -1,6 +1,6 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { expo } from '@better-auth/expo' 
+import { expo } from '@better-auth/expo';
 
 import { env } from '@/config/env';
 import { db } from '@/database/client';
@@ -56,7 +56,7 @@ export const auth = betterAuth({
   account: {
     encryptOAuthTokens: true,
   },
-  trustedOrigins: [env.cmsOrigin || 'http://localhost:3000' , 'kuquest://'],
+  trustedOrigins: [env.cmsOrigin || 'http://localhost:3000', 'kuquest://'],
 });
 
 export type AuthSession = typeof auth.$Infer.Session;
