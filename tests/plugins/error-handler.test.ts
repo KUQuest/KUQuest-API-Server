@@ -17,7 +17,7 @@ describe('errorHandlerPlugin', () => {
     expect(res.status).toBe(500);
     expect(body).toEqual({
       success: false,
-      error: { code: 'UNKNOWN', message: 'kaboom' },
+      error: { code: 'UNKNOWN', message: 'Internal server error' },
     });
   });
 

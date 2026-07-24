@@ -4,17 +4,12 @@ import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
 import { Elysia } from 'elysia';
 
-import {
-  getOnboardingStatus,
-  updateOnboarding,
-  getOnboardingInfo }
-from './onboarding.controller';
-
+import { getOnboardingStatus, updateOnboarding, getOnboardingInfo } from './onboarding.controller';
 import {
   onboardingSchema,
   onboardingResponseSchema,
   onboardingUpdateSchema,
-  onboardingDataResponseSchema
+  onboardingDataResponseSchema,
 } from './onboarding.schema';
 
 export const onboardingRoute = new Elysia({

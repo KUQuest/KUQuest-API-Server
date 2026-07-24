@@ -1,6 +1,6 @@
 # Code Styles
 
-Observed conventions in this repo — there's no Prettier/ESLint config enforcing formatting (`oxlint` only checks correctness/suspicious/perf, no style rules), so this file is the source of truth until one exists.
+Observed conventions in this repo — there's no Prettier config enforcing formatting, and `oxlint` only enforces `import/no-default-export` beyond correctness/suspicious/perf (no quote-style or import-order rules exist in oxlint), so this file is the source of truth for everything else until tooling covers it.
 
 ## Formatting
 

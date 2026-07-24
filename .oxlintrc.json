@@ -5,6 +5,10 @@
     "suspicious": "warn",
     "perf": "warn"
   },
+  "plugins": ["import"],
+  "rules": {
+    "import/no-default-export": "error"
+  },
   "options": {
     "typeAware": true
   },
@@ -12,5 +16,13 @@
     "dist/**",
     "coverage/**",
     "node_modules/**"
+  ],
+  "overrides": [
+    {
+      "files": ["drizzle.config.ts"],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    }
   ]
 }
