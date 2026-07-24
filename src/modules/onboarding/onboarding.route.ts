@@ -1,180 +1,50 @@
-import { db } from '@/database/client';
-import { user } from '@/database/schema/auth.schema';
-import { auth} from '@/modules/auth/auth.config';
+import { authGuard } from '@/modules/auth';
+import { API_V1_PREFIX } from '@/shared/api-version';
+import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
-import { eq } from 'drizzle-orm';
 import { Elysia } from 'elysia';
 
+import { getOnboardingStatus, updateOnboarding, getOnboardingInfo } from './onboarding.controller';
+import {
+  onboardingSchema,
+  onboardingResponseSchema,
+  onboardingUpdateSchema,
+  onboardingDataResponseSchema,
+} from './onboarding.schema';
 
-import { onboardingSchema, onboardingResponseSchema, onboardingUpdateSchema, onboardingDataResponseSchema, onboardingErrorSchema } from './onboarding.schema';
-
-export const onboardingRoute =  new Elysia({
-    name : 'onboarding-route',
+export const onboardingRoute = new Elysia({
+    name: 'onboarding-route',
+    prefix: `${API_V1_PREFIX}/onboarding`,
 })
-    .onError(({ code, error ,set }) => {
-        if (code === 'VALIDATION') {
-            set.status = 400;
-
-        return {
-            success: false,
-            message: error.message,
-        };
-    }
-  })
-    .get( '/api/onboarding/status',
-        async ({ request: req , status}) => {
-            const session = await auth.api.getSession({
-                headers: req.headers,
-            });
-            if (!session) {
-                return status(401,{
-                    success: false,
-                    message: 'Unauthorized',
-                });
-
-            }
-            const [currentUser] = await db.select({
-                telephone: user.telephone,
-                faculty: user.faculty,
-                studentId: user.studentId,
-            }).from(user).where(eq(user.id, session.user.id)).limit(1);
-
-            if (!currentUser) {
-                return status(404, {
-                    success: false,
-                    message: 'User not found',
-                });
-            }
-
-            const completed = Boolean(currentUser.telephone && currentUser.faculty && currentUser.studentId);
-            return {
-                success: true,
-                data: {
-                    completed,
-                },
-            }
+    .use(authGuard)
+    .get('/status', getOnboardingStatus, {
+        response: responses(onboardingResponseSchema, 401, 404),
+        detail: {
+            tags: ['Onboarding'],
+            summary: 'Get onboarding status',
+            description: 'Get the onboarding status of the current user',
+            operationId: 'getOnboardingStatus',
+            security: betterAuthSecurity,
         },
-        {
-            response: {
-                200: onboardingResponseSchema,
-                401: onboardingErrorSchema,
-                404: onboardingErrorSchema,
-            },
-            detail: {
-                tags: ['Onboarding'],
-                summary: 'Get onboarding status',
-                description: 'Get the onboarding status of the current user',
-                operationId: 'getOnboardingStatus',
-                security: [
-                    {
-                        betterAuthSession: [],
-                    },
-                ],
-
-            }
-        }
-        
-    )
-    .patch( '/api/onboarding/update',
-        async ({ request: req , body ,status}) => {
-            const session = await auth.api.getSession({
-                headers: req.headers,
-            });
-            if (!session) {
-                return status(401,{
-                    success: false,
-                    message: 'Unauthorized',
-                });
-
-            }
-            await db
-                .update(user)
-                .set({
-                    telephone: body.telephone,
-                    faculty: body.faculty,
-                    studentId: body.studentId,
-
-                 }).where(eq(user.id, session.user.id));
-            return {
-                success: true,
-            }
+    })
+    .patch('/update', updateOnboarding, {
+        body: onboardingSchema,
+        response: responses(onboardingUpdateSchema, 401, 400),
+        detail: {
+            tags: ['Onboarding'],
+            summary: 'Update onboarding information',
+            description: 'Update the onboarding information of the current user',
+            operationId: 'updateOnboardingInfo',
+            security: betterAuthSecurity,
         },
-        {
-            body: onboardingSchema,
-            response: {
-                200: onboardingUpdateSchema,
-                401: onboardingErrorSchema,
-                400: onboardingErrorSchema,
-            },
-            detail: {
-                tags: ['Onboarding'],
-                summary: 'Update onboarding information',
-                description: 'Update the onboarding information of the current user',
-                operationId: 'updateOnboardingInfo',
-                security: [
-                    {
-                        betterAuthSession: [],
-                    },
-                ],
-            }
-        }
-    )
-    .get( '/api/onboarding/get-data' , 
-        async ({ request: req , status}) => {
-            const session = await auth.api.getSession({
-                headers: req.headers,
-            });
-            if (!session) {
-                return status(401,{
-                    success: false,
-                    message: 'Unauthorized',
-                });
-
-            }
-            const [currentUser] = await db.select({
-                name: user.name,
-                email: user.email,
-                firstName: user.firstName,
-                lastName: user.lastName,
-                telephone: user.telephone,
-                faculty: user.faculty,
-                studentId: user.studentId,
-            })
-            .from(user)
-            .where(eq(user.id, session.user.id))
-            .limit(1);
-
-            if (!currentUser) {
-                return status(404, {
-                    success: false,
-                    message: 'User not found',
-                });
-            }
-
-            return {
-                success: true,
-                data: {
-                    currentUser
-                }
-            }
-
+    })
+    .get('/get-data', getOnboardingInfo, {
+        response: responses(onboardingDataResponseSchema, 401, 404),
+        detail: {
+            tags: ['Onboarding'],
+            summary: 'Get onboarding information',
+            description: 'Get the onboarding information of the current user',
+            operationId: 'getOnboardingData',
+            security: betterAuthSecurity,
         },
-        {
-            response: {
-                200: onboardingDataResponseSchema,
-                401: onboardingErrorSchema,
-                404: onboardingErrorSchema,
-            },
-            detail: {
-                tags: ['Onboarding'],
-                summary: 'Get onboarding information',
-                description: 'Get the onboarding information of the current user',
-                operationId: 'getOnboardingData',
-                security: [
-                    {
-                        betterAuthSession: [],
-                    },
-                ],
-            },
-        }
-    )
+    });

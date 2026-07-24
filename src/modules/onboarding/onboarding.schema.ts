@@ -1,4 +1,4 @@
-import { t } from "elysia"
+import { t } from 'elysia';
 
 export const onboardingSchema = t.Object({
     telephone : t.String({
@@ -30,7 +30,7 @@ export const onboardingResponseSchema = t.Object({
 
 export const onboardingUpdateSchema = t.Object({
     success: t.Literal(true),
-})
+});
 
 export const onboardingDataResponseSchema = t.Object({
     success: t.Literal(true),
@@ -45,9 +45,4 @@ export const onboardingDataResponseSchema = t.Object({
             studentId: t.Nullable(t.String()),
         }),
     }),
-})
-
-export const onboardingErrorSchema = t.Object({
-    success: t.Literal(false),
-    message: t.String(),
 })
