@@ -11,8 +11,9 @@ import { onboardingSchema, onboardingResponseSchema, onboardingUpdateSchema, onb
 
 export const onboardingRoute =  new Elysia({
     name : 'onboarding-route',
+    prefix: '/api/onboarding',
 })
-    .get( '/api/onboarding/status',
+    .get( '/status',
         async ({ request: req , status}) => {
             const session = await auth.api.getSession({
                 headers: req.headers,
@@ -55,7 +56,7 @@ export const onboardingRoute =  new Elysia({
         }
         
     )
-    .patch( '/api/onboarding/update',
+    .patch( '/update',
         async ({ request: req , body ,status}) => {
             const session = await auth.api.getSession({
                 headers: req.headers,
@@ -94,7 +95,7 @@ export const onboardingRoute =  new Elysia({
             }
         }
     )
-    .get( '/api/onboarding/get-data' , 
+    .get( '/get-data' ,
         async ({ request: req , status}) => {
             const session = await auth.api.getSession({
                 headers: req.headers,
