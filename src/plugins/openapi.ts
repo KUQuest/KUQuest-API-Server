@@ -25,6 +25,10 @@ export const openapiPlugin = openapi({
         description:
           'Google OAuth and database-backed session endpoints. Only @ku.th accounts are allowed.',
       },
+      {
+        name: 'Onboarding',
+        description: 'Authenticated endpoints for completing and reading onboarding information.',
+      },
     ],
     components: authOpenAPIComponents,
     paths: authOpenAPIPaths,

@@ -1,5 +1,6 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { expo } from '@better-auth/expo' 
 
 import { env } from '@/config/env';
 import { db } from '@/database/client';
@@ -15,6 +16,7 @@ export const auth = betterAuth({
   appName: 'KUQuest',
   baseURL: env.betterAuthUrl || 'http://localhost:5000',
   secret: env.betterAuthSecret || configurationPlaceholder('auth-secret'),
+  plugins: [expo()],
   database: drizzleAdapter(db, {
     provider: 'pg',
     schema,
@@ -54,7 +56,7 @@ export const auth = betterAuth({
   account: {
     encryptOAuthTokens: true,
   },
-  trustedOrigins: [env.cmsOrigin || 'http://localhost:3000'],
+  trustedOrigins: [env.cmsOrigin || 'http://localhost:3000' , 'kuquest://' , 'kuquest://*'],
 });
 
 export type AuthSession = typeof auth.$Infer.Session;
