@@ -9,6 +9,10 @@ describe('apiSuccess', () => {
       data: { completed: true },
     });
   });
+
+  it('omits data when called with no argument', () => {
+    expect(apiSuccess()).toEqual({ success: true });
+  });
 });
 
 describe('apiError', () => {

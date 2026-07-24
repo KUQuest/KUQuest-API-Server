@@ -1,7 +1,7 @@
 import { db } from '@/database/client';
 import { user } from '@/database/schema/auth.schema';
 import { auth} from '@/modules/auth/auth.config';
-import { apiError } from '@/shared/api-response';
+import { apiError, apiSuccess } from '@/shared/api-response';
 
 import { eq } from 'drizzle-orm';
 import { Elysia } from 'elysia';
@@ -32,12 +32,7 @@ export const onboardingRoute =  new Elysia({
             }
 
             const completed = Boolean(currentUser.telephone && currentUser.faculty && currentUser.studentId);
-            return {
-                success: true,
-                data: {
-                    completed,
-                },
-            }
+            return apiSuccess({ completed });
         },
         {
             response: {
@@ -77,9 +72,7 @@ export const onboardingRoute =  new Elysia({
                     studentId: body.studentId,
 
                  }).where(eq(user.id, session.user.id));
-            return {
-                success: true,
-            }
+            return apiSuccess();
         },
         {
             body: onboardingSchema,
@@ -127,12 +120,7 @@ export const onboardingRoute =  new Elysia({
                 return status(404, apiError('USER_NOT_FOUND', 'User not found'));
             }
 
-            return {
-                success: true,
-                data: {
-                    currentUser
-                }
-            }
+            return apiSuccess({ currentUser });
 
         },
         {
