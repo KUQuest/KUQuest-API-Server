@@ -56,7 +56,14 @@ export const auth = betterAuth({
   account: {
     encryptOAuthTokens: true,
   },
-  trustedOrigins: [env.cmsOrigin || 'http://localhost:3000', 'kuquest://'],
+  advanced: {
+  defaultCookieAttributes: {
+    sameSite: 'none',
+    secure: true,
+    httpOnly: true,
+  },
+  },
+  trustedOrigins: [env.cmsOrigin || 'http://localhost:5000', 'kuquest://', 'http://localhost:3000'],
 });
 
 export type AuthSession = typeof auth.$Infer.Session;
