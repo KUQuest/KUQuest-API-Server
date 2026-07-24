@@ -1,5 +1,7 @@
 import { Elysia } from 'elysia';
 
+import { responses } from '@/shared/api-response.schema';
+
 import { healthResponseSchema } from './health.schema';
 
 export const healthRoute = new Elysia({
@@ -21,8 +23,6 @@ export const healthRoute = new Elysia({
       description: 'Checks whether the KUQuest API server is available.',
       operationId: 'getHealth',
     },
-    response: {
-      200: healthResponseSchema,
-    },
+    response: responses(healthResponseSchema),
   },
 );

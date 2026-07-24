@@ -30,7 +30,7 @@ export const onboardingResponseSchema = t.Object({
 
 export const onboardingUpdateSchema = t.Object({
     success: t.Literal(true),
-})
+});
 
 export const onboardingDataResponseSchema = t.Object({
     success: t.Literal(true),
@@ -44,13 +44,5 @@ export const onboardingDataResponseSchema = t.Object({
             faculty: t.Nullable(t.String()),
             studentId: t.Nullable(t.String()),
         }),
-    }),
-})
-
-export const onboardingErrorSchema = t.Object({
-    success: t.Literal(false),
-    error: t.Object({
-        code: t.String(),
-        message: t.String(),
     }),
 })
