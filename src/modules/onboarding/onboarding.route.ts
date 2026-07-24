@@ -38,7 +38,14 @@ export const onboardingRoute =  new Elysia({
                 faculty: user.faculty,
                 studentId: user.studentId,
             }).from(user).where(eq(user.id, session.user.id)).limit(1);
-            
+
+            if (!currentUser) {
+                return status(404, {
+                    success: false,
+                    message: 'User not found',
+                });
+            }
+
             const completed = Boolean(currentUser.telephone && currentUser.faculty && currentUser.studentId);
             return {
                 success: true,
@@ -51,6 +58,7 @@ export const onboardingRoute =  new Elysia({
             response: {
                 200: onboardingResponseSchema,
                 401: onboardingErrorSchema,
+                404: onboardingErrorSchema,
             },
             detail: {
                 tags: ['Onboarding'],
@@ -135,6 +143,14 @@ export const onboardingRoute =  new Elysia({
             .from(user)
             .where(eq(user.id, session.user.id))
             .limit(1);
+
+            if (!currentUser) {
+                return status(404, {
+                    success: false,
+                    message: 'User not found',
+                });
+            }
+
             return {
                 success: true,
                 data: {
@@ -146,7 +162,8 @@ export const onboardingRoute =  new Elysia({
         {
             response: {
                 200: onboardingDataResponseSchema,
-                401: onboardingErrorSchema
+                401: onboardingErrorSchema,
+                404: onboardingErrorSchema,
             },
             detail: {
                 tags: ['Onboarding'],
