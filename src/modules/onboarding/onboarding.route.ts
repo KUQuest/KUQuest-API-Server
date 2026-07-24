@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import { user } from '@/database/schema/auth.schema';
 import { auth} from '@/modules/auth/auth.config';
+import { apiError } from '@/shared/api-response';
 
 import { eq } from 'drizzle-orm';
 import { Elysia } from 'elysia';
@@ -11,26 +12,13 @@ import { onboardingSchema, onboardingResponseSchema, onboardingUpdateSchema, onb
 export const onboardingRoute =  new Elysia({
     name : 'onboarding-route',
 })
-    .onError(({ code, error ,set }) => {
-        if (code === 'VALIDATION') {
-            set.status = 400;
-
-        return {
-            success: false,
-            message: error.message,
-        };
-    }
-  })
     .get( '/api/onboarding/status',
         async ({ request: req , status}) => {
             const session = await auth.api.getSession({
                 headers: req.headers,
             });
             if (!session) {
-                return status(401,{
-                    success: false,
-                    message: 'Unauthorized',
-                });
+                return status(401, apiError('UNAUTHORIZED', 'Unauthorized'));
 
             }
             const [currentUser] = await db.select({
@@ -40,10 +28,7 @@ export const onboardingRoute =  new Elysia({
             }).from(user).where(eq(user.id, session.user.id)).limit(1);
 
             if (!currentUser) {
-                return status(404, {
-                    success: false,
-                    message: 'User not found',
-                });
+                return status(404, apiError('USER_NOT_FOUND', 'User not found'));
             }
 
             const completed = Boolean(currentUser.telephone && currentUser.faculty && currentUser.studentId);
@@ -81,10 +66,7 @@ export const onboardingRoute =  new Elysia({
                 headers: req.headers,
             });
             if (!session) {
-                return status(401,{
-                    success: false,
-                    message: 'Unauthorized',
-                });
+                return status(401, apiError('UNAUTHORIZED', 'Unauthorized'));
 
             }
             await db
@@ -125,10 +107,7 @@ export const onboardingRoute =  new Elysia({
                 headers: req.headers,
             });
             if (!session) {
-                return status(401,{
-                    success: false,
-                    message: 'Unauthorized',
-                });
+                return status(401, apiError('UNAUTHORIZED', 'Unauthorized'));
 
             }
             const [currentUser] = await db.select({
@@ -145,10 +124,7 @@ export const onboardingRoute =  new Elysia({
             .limit(1);
 
             if (!currentUser) {
-                return status(404, {
-                    success: false,
-                    message: 'User not found',
-                });
+                return status(404, apiError('USER_NOT_FOUND', 'User not found'));
             }
 
             return {

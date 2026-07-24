@@ -4,11 +4,13 @@ import { healthRoute } from './modules/health/health.route';
 import { onboardingRoute } from './modules/onboarding/onboarding.route';
 
 import { corsPlugin } from './plugins/cors';
+import { errorHandlerPlugin } from './plugins/error-handler';
 import { openapiPlugin } from './plugins/openapi';
 
 export const app = new Elysia({
   name: 'kuquest-api',
 })
+  .use(errorHandlerPlugin)
   .use(corsPlugin)
   .use(authPlugin)
   .use(openapiPlugin)

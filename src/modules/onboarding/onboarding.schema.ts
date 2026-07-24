@@ -49,5 +49,8 @@ export const onboardingDataResponseSchema = t.Object({
 
 export const onboardingErrorSchema = t.Object({
     success: t.Literal(false),
-    message: t.String(),
+    error: t.Object({
+        code: t.String(),
+        message: t.String(),
+    }),
 })
