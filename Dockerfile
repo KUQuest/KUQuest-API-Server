@@ -46,6 +46,9 @@ COPY --from=production-dependencies \
   ./node_modules
 
 COPY --chown=bun:bun package.json ./
+COPY --chown=bun:bun drizzle.config.ts ./
+COPY --chown=bun:bun drizzle ./drizzle
+COPY --chown=bun:bun src/database/schema ./src/database/schema
 
 USER bun
 
