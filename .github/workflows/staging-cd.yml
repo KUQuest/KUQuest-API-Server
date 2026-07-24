@@ -58,8 +58,18 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
             ${{ env.IMAGE_NAME }}:staging
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Publish PostgreSQL client image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: postgres-client
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:postgres-client-${{ github.event.workflow_run.head_sha }}
+          cache-from: type=gha,scope=postgres-client
+          cache-to: type=gha,mode=max,scope=postgres-client
 
   deploy:
     name: Deploy staging API
@@ -239,6 +249,7 @@ jobs:
              ENV_FILE=/opt/backend/.env \
              BACKUP_DIR=/opt/backend/backups \
              STAGING_NETWORK=kuquest-staging_default \
+             POSTGRES_CLIENT_IMAGE='${IMAGE_NAME}:postgres-client-${{ github.event.workflow_run.head_sha }}' \
              bash -s -- deploy" \
             < scripts/staging-operations.sh
 

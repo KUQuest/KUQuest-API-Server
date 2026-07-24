@@ -135,6 +135,9 @@ pulls the validated image, and then performs:
    service;
 5. API replacement and the existing Compose readiness check.
 
+CD publishes the PostgreSQL 17 client as a commit-tagged image in the same GHCR
+package as the API, so the staging host does not need direct Docker Hub access.
+
 The current API keeps serving during backup and migration. Backup or migration
 failure stops before replacement. If the new API fails readiness, CD restores
 the exact previous image and leaves successfully applied compatible migrations

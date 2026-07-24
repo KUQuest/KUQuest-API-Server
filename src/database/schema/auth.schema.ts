@@ -14,6 +14,9 @@ export const user = pgTable("user", {
     .notNull(),
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
+  studentId: text("student_id"),
+  telephone: text("telephone"),
+  faculty: text("faculty"),
 });
 
 export const session = pgTable(

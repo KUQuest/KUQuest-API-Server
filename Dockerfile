@@ -1,3 +1,6 @@
+FROM postgres:17-alpine AS postgres-client
+
+
 FROM oven/bun:1.3.14 AS base
 
 WORKDIR /app

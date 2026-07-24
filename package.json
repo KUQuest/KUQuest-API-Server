@@ -19,9 +19,10 @@
     "check": "bun run db:check && bun run lint && bun run typecheck && bun test && bun run build"
   },
   "dependencies": {
+    "@better-auth/expo": "1.6.23",
     "@elysia/openapi": "^1.4.15",
     "@elysiajs/cors": "^1.4.2",
-    "better-auth": "^1.6.23",
+    "better-auth": "^1.6.25",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
     "elysia": "latest",
