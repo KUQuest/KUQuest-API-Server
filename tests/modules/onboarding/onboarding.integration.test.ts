@@ -25,7 +25,7 @@ describe('onboarding integration', () => {
           telephone: '080-000-0000',
           majorId: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
           studentId: '6500000000',
-          academicYear: 2,
+          academicYear: 2026,
         }),
       }),
     );
@@ -68,12 +68,46 @@ describe('onboarding integration', () => {
     expect(body.error.code).toBe('VALIDATION');
   });
 
-  it('rejects academic years outside the allowed range', async () => {
+  it('accepts a four-digit Gregorian academic year', async () => {
     const response = await app.handle(
       new Request('http://localhost/api/v1/onboarding/update', {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ academicYear: 9 }),
+        body: JSON.stringify({ academicYear: 2026 }),
+      }),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it('rejects academic years outside the four-digit range', async () => {
+    const cases = await Promise.all(
+      [999, 10000].map(async (academicYear) => {
+        const validationResponse = await app.handle(
+          new Request('http://localhost/api/v1/onboarding/update', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ academicYear }),
+          }),
+        );
+
+        return { body: await validationResponse.json(), validationResponse };
+      }),
+    );
+
+    for (const { body, validationResponse } of cases) {
+      expect(validationResponse.status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe('VALIDATION');
+    }
+  });
+
+  it('rejects a string Gregorian academic year', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/onboarding/update', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ academicYear: '2026' }),
       }),
     );
     const body = await response.json();

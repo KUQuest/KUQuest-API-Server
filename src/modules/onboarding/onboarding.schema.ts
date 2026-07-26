@@ -15,7 +15,7 @@ export const onboardingSchema = t.Object({
         example: '6500000000',
         error: 'Student ID must be a 10-digit number',
     })),
-    academicYear: t.Optional(t.Integer({ minimum: 1, maximum: 8 })),
+    academicYear: t.Optional(t.Number({ minimum: 1000, maximum: 9999, multipleOf: 1 })),
 }, {
     additionalProperties: false,
     minProperties: 1,
