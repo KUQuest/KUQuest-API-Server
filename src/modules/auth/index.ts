@@ -5,4 +5,4 @@ export { authGuard } from './auth.guard';
 export { authTestRoute } from './auth-test.route';
 export { assertAllowedEmail, isAllowedEmail } from './auth.policy';
 export type { AuthSession } from './auth.config';
-export type { AuthenticatedSession } from './auth.guard';
+export type { AuthedContext, AuthenticatedSession } from './auth.guard';

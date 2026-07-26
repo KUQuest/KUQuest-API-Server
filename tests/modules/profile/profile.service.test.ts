@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 
 import { db, sql } from '@/database/client';
 import { faculty, major } from '@/database/schema/academic.schema';
@@ -14,6 +14,13 @@ const studentB = `test-profile-b-${randomUUID()}`;
 
 let facultyId: string;
 let majorId: string;
+let facultyName: string;
+
+// Every test starts from these values, so no test depends on what an earlier one wrote.
+const startingState = {
+  [studentA]: { firstName: 'Student', lastName: 'One', bio: 'first bio', telephone: '0800000001' },
+  [studentB]: { firstName: 'Student', lastName: 'Two', bio: 'second bio', telephone: '0800000002' },
+};
 
 beforeAll(async () => {
   try {
@@ -25,9 +32,11 @@ beforeAll(async () => {
     );
   }
 
+  facultyName = `Test Faculty ${randomUUID()}`;
+
   [{ id: facultyId }] = await db
     .insert(faculty)
-    .values({ name: `Test Faculty ${randomUUID()}` })
+    .values({ name: facultyName })
     .returning({ id: faculty.id });
 
   [{ id: majorId }] = await db
@@ -39,22 +48,21 @@ beforeAll(async () => {
     {
       id: studentA,
       email: `${studentA}@ku.th`,
-      firstName: 'Student',
-      lastName: 'One',
-      bio: 'first bio',
-      telephone: '0800000001',
+      ...startingState[studentA]!,
       studentId: `65${Math.floor(10_000_000 + Math.random() * 89_999_999)}`,
       majorId,
     },
     {
       id: studentB,
       email: `${studentB}@ku.th`,
-      firstName: 'Student',
-      lastName: 'Two',
-      bio: 'second bio',
-      telephone: '0800000002',
+      ...startingState[studentB]!,
     },
   ]);
+});
+
+beforeEach(async () => {
+  await db.update(authUser).set(startingState[studentA]!).where(eq(authUser.id, studentA));
+  await db.update(authUser).set(startingState[studentB]!).where(eq(authUser.id, studentB));
 });
 
 afterAll(async () => {
@@ -78,7 +86,7 @@ describe('reading a profile', () => {
     expect(profile?.major).toEqual({
       id: majorId,
       name: 'Test Major',
-      faculty: { id: facultyId, name: expect.stringContaining('Test Faculty') },
+      faculty: { name: facultyName },
     });
   });
 
@@ -112,7 +120,8 @@ describe('updating a profile', () => {
     const profile = await getProfile(studentA);
 
     expect(profile?.bio).toBe('only the bio changes');
-    expect(profile?.telephone).toBe('0899999999');
+    expect(profile?.telephone).toBe(startingState[studentA]!.telephone);
+    expect(profile?.firstName).toBe(startingState[studentA]!.firstName);
     expect(profile?.major?.id).toBe(majorId);
   });
 
@@ -122,6 +131,22 @@ describe('updating a profile', () => {
     await updateProfile(studentA, {});
 
     expect(await getProfile(studentA)).toEqual(before!);
+  });
+
+  it('reports the student was found when something changed', async () => {
+    expect(await updateProfile(studentA, { bio: 'changed' })).toBe(true);
+  });
+
+  it('reports the student was found even when nothing changed', async () => {
+    expect(await updateProfile(studentA, {})).toBe(true);
+  });
+
+  it('refuses to call a write that matched nobody a success', async () => {
+    expect(await updateProfile(randomUUID(), { bio: 'nobody' })).toBe(false);
+  });
+
+  it('refuses an empty update against a student that does not exist', async () => {
+    expect(await updateProfile(randomUUID(), {})).toBe(false);
   });
 });
 

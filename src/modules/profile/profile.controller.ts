@@ -1,16 +1,19 @@
-import type { AuthenticatedSession } from '@/modules/auth';
+import type { AuthedContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 
 import type { Static } from 'elysia';
-import type { StatusMap } from 'elysia/utils';
 
-import type { profileUpdateSchema } from './profile.schema';
+import type { profileResponseSchema, profileUpdateSchema } from './profile.schema';
 import { getProfile, majorExists, updateProfile } from './profile.service';
 
-type AuthedContext = { session: AuthenticatedSession; set: { status?: number | keyof StatusMap } };
+type Profile = Static<typeof profileResponseSchema>['data'];
 
-type Profile = NonNullable<Awaited<ReturnType<typeof getProfile>>>;
+const userNotFound = (set: AuthedContext['set']) => {
+  set.status = 404;
+
+  return apiError('USER_NOT_FOUND', 'User not found');
+};
 
 export const getOwnProfile = async ({
   session,
@@ -18,10 +21,7 @@ export const getOwnProfile = async ({
 }: AuthedContext): Promise<ApiResponse<Profile>> => {
   const profile = await getProfile(session.user.id);
 
-  if (!profile) {
-    set.status = 404;
-    return apiError('USER_NOT_FOUND', 'User not found');
-  }
+  if (!profile) return userNotFound(set);
 
   return apiSuccess(profile);
 };
@@ -36,7 +36,9 @@ export const updateOwnProfile = async ({
     return apiError('MAJOR_NOT_FOUND', 'Major not found');
   }
 
-  await updateProfile(session.user.id, body);
+  const updated = await updateProfile(session.user.id, body);
+
+  if (!updated) return userNotFound(set);
 
   return apiSuccess();
 };

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { describe, expect, it } from 'bun:test';
 
 import { app } from '@/app';
@@ -54,11 +56,17 @@ describe('profile integration', () => {
       ['a major cleared with an empty string', { majorId: '' }],
       ['a bio beyond the maximum length', { bio: 'a'.repeat(501) }],
       ['a major that is not a uuid', { majorId: 'not-a-uuid' }],
+      ['a first name beyond the maximum length', { firstName: 'a'.repeat(101) }],
+      ['a last name beyond the maximum length', { lastName: 'a'.repeat(101) }],
       ['a student id, which this endpoint does not own', { studentId: '6500000001' }],
       ['an academic year, which this endpoint does not own', { academicYear: 2026 }],
       ['an email, which this endpoint does not own', { email: 'other@ku.th' }],
+      ['a verified flag, which this endpoint does not own', { emailVerified: true }],
+      ['an avatar, which a different endpoint owns', { imageFileId: randomUUID() }],
+      ['a legacy image field, which this endpoint does not own', { image: 'http://example.com' }],
       ['another student id smuggled alongside a valid field', { bio: 'x', id: 'someone-else' }],
       ['a first name of the wrong type', { firstName: 123 }],
+      ['a property named with the empty string', { '': 'x' }],
     ];
 
     for (const [description, body] of cases) {
@@ -87,13 +95,31 @@ describe('profile integration', () => {
     });
   });
 
-  it('publishes both operations without a trailing slash', async () => {
+  it('refuses a body it cannot read as an object', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/profile', {
+        method: 'PATCH',
+        headers: { 'content-type': 'text/plain' },
+        body: 'hello',
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('VALIDATION');
+  });
+
+  it('publishes both operations without a trailing slash, marked as authenticated', async () => {
     const document = await (
       await app.handle(new Request('http://localhost/openapi/json'))
     ).json();
 
     expect(Object.keys(document.paths)).toContain('/api/v1/profile');
     expect(Object.keys(document.paths)).not.toContain('/api/v1/profile/');
+
+    const profilePath = document.paths['/api/v1/profile'];
+
+    expect(profilePath.get.security).toEqual([{ betterAuthSession: [] }]);
+    expect(profilePath.patch.security).toEqual([{ betterAuthSession: [] }]);
   });
 
   it('accepts a bio at exactly the maximum length', async () => {

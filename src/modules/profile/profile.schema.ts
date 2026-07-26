@@ -4,7 +4,6 @@ const majorSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   name: t.String({ example: 'Computer Engineering' }),
   faculty: t.Object({
-    id: t.String({ format: 'uuid' }),
     name: t.String({ example: 'Engineering' }),
   }),
 });
@@ -24,22 +23,6 @@ export const profileUpdateSchema = t.Object(
   },
   { additionalProperties: false },
 );
-
-export const profileUpdateResponseSchema = t.Object({
-  success: t.Literal(true),
-});
-
-const editableFields = new Set(Object.keys(profileUpdateSchema.properties));
-
-// Elysia strips body properties the schema does not declare rather than rejecting
-// them, so writing a field this endpoint does not own would otherwise look like it
-// succeeded. `normalize: false` would fix it, but only from the root application,
-// where it would change every other module's behaviour too.
-export const unknownProfileField = (body: unknown) => {
-  if (!body || typeof body !== 'object') return undefined;
-
-  return Object.keys(body).find((field) => !editableFields.has(field));
-};
 
 export const profileResponseSchema = t.Object({
   success: t.Literal(true),

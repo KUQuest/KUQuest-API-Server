@@ -19,11 +19,29 @@ export const majorExists = async (majorId: string) => {
   return Boolean(row);
 };
 
-export const updateProfile = async (userId: string, data: ProfileUpdate) => {
-  // A request that changes nothing is a no-op; Drizzle rejects an empty update.
-  if (Object.keys(data).length === 0) return;
+const studentExists = async (userId: string) => {
+  const [row] = await db
+    .select({ id: authUser.id })
+    .from(authUser)
+    .where(eq(authUser.id, userId))
+    .limit(1);
 
-  await db.update(authUser).set(data).where(eq(authUser.id, userId));
+  return Boolean(row);
+};
+
+/** Reports whether the student was found; a write that matched nobody is not a success. */
+export const updateProfile = async (userId: string, data: ProfileUpdate) => {
+  // A request that changes nothing still has to say whether the student is there, and
+  // Drizzle rejects an empty update, so ask the row directly.
+  if (Object.keys(data).length === 0) return studentExists(userId);
+
+  const updated = await db
+    .update(authUser)
+    .set(data)
+    .where(eq(authUser.id, userId))
+    .returning({ id: authUser.id });
+
+  return updated.length > 0;
 };
 
 export const getProfile = async (userId: string) => {
@@ -38,7 +56,6 @@ export const getProfile = async (userId: string) => {
       academicYear: authUser.academicYear,
       majorId: major.id,
       majorName: major.name,
-      facultyId: faculty.id,
       facultyName: faculty.name,
     })
     .from(authUser)
@@ -49,14 +66,14 @@ export const getProfile = async (userId: string) => {
 
   if (!row) return undefined;
 
-  const { majorId, majorName, facultyId, facultyName, ...profile } = row;
+  const { majorId, majorName, facultyName, ...profile } = row;
 
   return {
     ...profile,
     // A major always belongs to a faculty, so the joins either all resolve or none do.
     major:
-      majorId && majorName && facultyId && facultyName
-        ? { id: majorId, name: majorName, faculty: { id: facultyId, name: facultyName } }
+      majorId && majorName && facultyName
+        ? { id: majorId, name: majorName, faculty: { name: facultyName } }
         : null,
   };
 };

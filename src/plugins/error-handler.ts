@@ -2,36 +2,30 @@ import { Elysia } from 'elysia';
 
 import { apiError } from '@/shared/api-response';
 
-const statusByCode: Record<string, number> = {
-  PARSE: 400,
-  VALIDATION: 400,
+// Codes a client caused and may safely be told about. Everything absent from this map
+// — including arbitrary thrown Errors — becomes a generic 500 so internals never leak.
+// `forwardMessage` marks the codes whose own message is already client-safe.
+const clientErrors: Record<string, { status: number; message?: string; forwardMessage?: true }> = {
+  VALIDATION: { status: 400, forwardMessage: true },
+  PARSE: { status: 400, message: 'Malformed request body' },
 };
-
-// A body that is not the declared content type never reached the application's own
-// rules, so its own message describes the parser rather than anything a caller can act
-// on. Saying so plainly keeps a malformed request a client error, not a server fault.
-const PARSE_MESSAGE = 'Malformed request body';
 
 export const errorHandlerPlugin = new Elysia({ name: 'error-handler' }).onError(
   { as: 'global' },
   ({ code, error, set }) => {
     const codeName = String(code);
-    const status = statusByCode[codeName] ?? 500;
+    const clientError = clientErrors[codeName];
 
-    // Only client-safe codes forward their real message; anything else (including
-    // arbitrary thrown Errors) gets a generic message so internals never leak.
     const message =
-      codeName === 'VALIDATION' && error instanceof Error
+      clientError?.forwardMessage && error instanceof Error
         ? error.message
-        : codeName === 'PARSE'
-          ? PARSE_MESSAGE
-          : 'Internal server error';
+        : (clientError?.message ?? 'Internal server error');
 
-    if (status === 500 && error instanceof Error) {
+    if (!clientError && error instanceof Error) {
       console.error(error);
     }
 
-    set.status = status;
+    set.status = clientError?.status ?? 500;
 
     return apiError(codeName, message);
   },
