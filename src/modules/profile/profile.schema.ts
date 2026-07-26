@@ -9,6 +9,36 @@ const majorSchema = t.Object({
   }),
 });
 
+// `pattern: '\\S'` rejects names made only of whitespace, which minLength alone allows.
+const nameSchema = t.String({ minLength: 1, maxLength: 100, pattern: '\\S' });
+
+export const profileUpdateSchema = t.Object(
+  {
+    firstName: t.Optional(nameSchema),
+    lastName: t.Optional(nameSchema),
+    bio: t.Optional(t.String({ maxLength: 500 })),
+    telephone: t.Optional(t.String({ pattern: '^0[0-9]{9}$', example: '0800000000' })),
+    majorId: t.Optional(t.String({ format: 'uuid' })),
+  },
+  { additionalProperties: false },
+);
+
+export const profileUpdateResponseSchema = t.Object({
+  success: t.Literal(true),
+});
+
+const editableFields = new Set(Object.keys(profileUpdateSchema.properties));
+
+// Elysia strips body properties the schema does not declare rather than rejecting
+// them, so writing a field this endpoint does not own would otherwise look like it
+// succeeded. `normalize: false` would fix it, but only from the root application,
+// where it would change every other module's behaviour too.
+export const unknownProfileField = (body: unknown) => {
+  if (!body || typeof body !== 'object') return undefined;
+
+  return Object.keys(body).find((field) => !editableFields.has(field));
+};
+
 export const profileResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({

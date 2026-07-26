@@ -4,6 +4,31 @@ import { authUser } from '@/database/schema/auth.schema';
 
 import { eq } from 'drizzle-orm';
 
+type ProfileUpdate = {
+  firstName?: string;
+  lastName?: string;
+  bio?: string;
+  telephone?: string;
+  majorId?: string;
+};
+
+export const majorExists = async (majorId: string) => {
+  const [row] = await db
+    .select({ id: major.id })
+    .from(major)
+    .where(eq(major.id, majorId))
+    .limit(1);
+
+  return Boolean(row);
+};
+
+export const updateProfile = async (userId: string, data: ProfileUpdate) => {
+  // A request that changes nothing is a no-op; Drizzle rejects an empty update.
+  if (Object.keys(data).length === 0) return;
+
+  await db.update(authUser).set(data).where(eq(authUser.id, userId));
+};
+
 export const getProfile = async (userId: string) => {
   const [row] = await db
     .select({
