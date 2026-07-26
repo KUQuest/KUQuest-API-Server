@@ -21,7 +21,7 @@ export const getOnboardingStatus = async ({
         return apiError('USER_NOT_FOUND', 'User not found');
     }
 
-    const completed = Boolean(currentUser.telephone && currentUser.faculty && currentUser.studentId);
+    const completed = Boolean(currentUser.telephone && currentUser.majorId && currentUser.studentId);
     return apiSuccess({ completed });
 };
 

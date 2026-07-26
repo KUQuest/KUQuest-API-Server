@@ -15,6 +15,13 @@
       "when": 1784862750090,
       "tag": "0001_needy_wild_child",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785072257277,
+      "tag": "0002_groovy_vertigo",
+      "breakpoints": true
     }
   ]
 }

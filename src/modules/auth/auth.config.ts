@@ -42,6 +42,10 @@ export const auth = betterAuth({
     },
   },
   user: {
+    modelName: 'authUser',
+    fields: {
+      name: 'firstName',
+    },
     additionalFields: {
       firstName: {
         type: 'string',
@@ -53,8 +57,15 @@ export const auth = betterAuth({
       },
     },
   },
+  session: {
+    modelName: 'authSession',
+  },
   account: {
+    modelName: 'authAccount',
     encryptOAuthTokens: true,
+  },
+  verification: {
+    modelName: 'authVerification',
   },
   advanced: {
   defaultCookieAttributes: {

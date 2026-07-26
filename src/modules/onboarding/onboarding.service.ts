@@ -1,40 +1,39 @@
 import { eq } from 'drizzle-orm';
 
 import { db } from '@/database/client';
-import { user } from '@/database/schema/auth.schema';
+import { authUser } from '@/database/schema/auth.schema';
 
 export const getOnboardingStatusFields = async (userId: string) => {
     const [currentUser] = await db.select({
-        telephone: user.telephone,
-        faculty: user.faculty,
-        studentId: user.studentId,
-    }).from(user).where(eq(user.id, userId)).limit(1);
+        telephone: authUser.telephone,
+        majorId: authUser.majorId,
+        studentId: authUser.studentId,
+    }).from(authUser).where(eq(authUser.id, userId)).limit(1);
 
     return currentUser;
 };
 
 export const updateOnboardingInfo = async (
     userId: string,
-    data: { telephone: string; faculty: string; studentId: string },
+    data: { telephone: string; majorId: string; studentId: string },
 ) => {
     await db
-        .update(user)
+        .update(authUser)
         .set(data)
-        .where(eq(user.id, userId));
+        .where(eq(authUser.id, userId));
 };
 
 export const getOnboardingData = async (userId: string) => {
     const [currentUser] = await db.select({
-        name: user.name,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        telephone: user.telephone,
-        faculty: user.faculty,
-        studentId: user.studentId,
+        firstName: authUser.firstName,
+        lastName: authUser.lastName,
+        email: authUser.email,
+        telephone: authUser.telephone,
+        majorId: authUser.majorId,
+        studentId: authUser.studentId,
     })
-    .from(user)
-    .where(eq(user.id, userId))
+    .from(authUser)
+    .where(eq(authUser.id, userId))
     .limit(1);
 
     return currentUser;

@@ -8,8 +8,9 @@ export const onboardingSchema = t.Object({
 
 
     }),
-    faculty : t.String({
-        example: 'Engineering',
+    majorId : t.String({
+        format: 'uuid',
+        example: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
     }),
     studentId : t.String({
         pattern: '^[0-9]{10}$',
@@ -36,12 +37,11 @@ export const onboardingDataResponseSchema = t.Object({
     success: t.Literal(true),
     data: t.Object({
         currentUser: t.Object({
-            name: t.String(),
             email: t.String({ format: 'email' , example: 'student@ku.th'}),
             firstName: t.String(),
             lastName: t.String(),
             telephone: t.Nullable(t.String()),
-            faculty: t.Nullable(t.String()),
+            majorId: t.Nullable(t.String()),
             studentId: t.Nullable(t.String()),
         }),
     }),

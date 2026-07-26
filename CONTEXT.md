@@ -5,33 +5,38 @@ Backend serving the KUQuest Mobile app and Admin web app: authentication, onboar
 ## Language
 
 **Student**:
-The end user of KUQuest — a KU account holder signed in via Google OAuth. Represented by the `user` table.
+The end user of KUQuest — a KU account holder signed in via Google OAuth. Represented by the `auth_user` table.
 _Avoid_: User, account holder (use Student when the KU-specific identity matters, User when referring generically to the auth record).
 
+**Admin**:
+A KUQuest Admin web app operator, signed in with credentials (not Google). Represented by the `auth_admin` table — a separate identity space from Student, sharing `auth_account`/`auth_session` via a nullable `userId`/`adminId` pair (exactly one set per row). Schema landed in [[BE-32]]; the second better-auth instance wiring credential login for Admins is a follow-up, not yet built.
+_Avoid_: User (Admins are never Students and vice versa).
+
 **Onboarding**:
-The one-time step after first sign-in where a Student supplies Telephone, Faculty, and Student ID. A Student is considered onboarded once all three fields are set.
+The one-time step after first sign-in where a Student supplies Telephone, Major, and Student ID. A Student is considered onboarded once all three fields are set.
 _Avoid_: Profile setup, registration.
 
 **Student ID**:
-A KU-issued 10-digit identifier a Student provides during Onboarding. Distinct from the internal `user.id` (a generated auth identifier) — Student ID is KU's own number, stored in `user.studentId`.
+A KU-issued 10-digit identifier a Student provides during Onboarding. Distinct from the internal `auth_user.id` (a generated auth identifier) — Student ID is KU's own number, stored in `auth_user.studentId`.
 _Avoid_: User ID, student number.
 
-**Faculty**:
-The academic faculty a Student belongs to at KU (e.g. Engineering), captured during Onboarding as free text in `user.faculty`.
+**Major** / **Faculty**:
+A Student's academic major (`major` table) belongs to a Faculty (`faculty` table, e.g. Engineering). Captured during Onboarding as `auth_user.majorId`, a foreign key — no more free-text faculty field.
+_Avoid_: storing faculty/major as free text.
 
 **Allowed Email Domain**:
-The `@ku.th` restriction enforced at sign-in — only Google accounts under this domain may authenticate. Encoded in `auth.constants.ts` (`ALLOWED_EMAIL_DOMAIN`) and enforced by `assertAllowedEmail`/`isAllowedEmail` in `auth.policy.ts`.
+The `@ku.th` restriction enforced at sign-in — only Google accounts under this domain may authenticate. Applies to Students only (Admins use credential login). Encoded in `auth.constants.ts` (`ALLOWED_EMAIL_DOMAIN`) and enforced by `assertAllowedEmail`/`isAllowedEmail` in `auth.policy.ts`.
 _Avoid_: Email whitelist, domain check.
 
 **Session**:
-A better-auth session record (`session` table) representing one authenticated Student's login, tied to a `user` via `userId`. Distinct from Account, which holds the underlying Google OAuth tokens.
+A better-auth session record (`auth_session` table) representing one authenticated Student or Admin login, tied to `auth_user` or `auth_admin` via `userId`/`adminId`. Distinct from Account, which holds the underlying OAuth/credential secrets.
 _Avoid_: Token (Token refers to the raw session/access token value, not the Session record).
 
 **Account** (auth):
-The `account` table row linking a Student's `user` record to their Google OAuth identity (access/refresh/id tokens, provider id). Not to be confused with a Student's KUQuest identity itself.
+The `auth_account` table row linking a Student's or Admin's identity to their OAuth (Google) or credential auth method (access/refresh/id tokens, provider id, password hash). Not to be confused with a Student's KUQuest identity itself.
 
 **Better Auth**:
-The auth library (`better-auth`) providing session management, Google OAuth, and the `/api/auth/*` HTTP surface, configured in `auth.config.ts`.
+The auth library (`better-auth`) providing session management, Google OAuth, and the `/api/auth/*` HTTP surface, configured in `auth.config.ts`. Its core `name`/`image` user fields are remapped: `name` aliases `firstName` (no separate `name` column exists), `image` is an unused legacy-compat column — real avatars are `auth_user.imageFileId` → `file`.
 
 ## Consumers
 
