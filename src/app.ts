@@ -3,6 +3,7 @@ import { Elysia } from 'elysia';
 import { authPlugin, authTestRoute } from './modules/auth';
 import { healthRoute } from './modules/health';
 import { onboardingRoute } from './modules/onboarding';
+import { profileRoute } from './modules/profile';
 import { corsPlugin } from './plugins/cors';
 import { errorHandlerPlugin } from './plugins/error-handler';
 import { openapiPlugin } from './plugins/openapi';
@@ -24,4 +25,5 @@ export const app = new Elysia({
   })
   .use(authTestRoute)
   .use(healthRoute)
-  .use(onboardingRoute);
+  .use(onboardingRoute)
+  .use(profileRoute);
