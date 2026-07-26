@@ -2,15 +2,12 @@ import { db } from '@/database/client';
 import { faculty, major } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
 
+import type { Static } from 'elysia';
 import { eq } from 'drizzle-orm';
 
-type ProfileUpdate = {
-  firstName?: string;
-  lastName?: string;
-  bio?: string;
-  telephone?: string;
-  majorId?: string;
-};
+import type { profileUpdateSchema } from './profile.schema';
+
+type ProfileUpdate = Static<typeof profileUpdateSchema>;
 
 export const majorExists = async (majorId: string) => {
   const [row] = await db

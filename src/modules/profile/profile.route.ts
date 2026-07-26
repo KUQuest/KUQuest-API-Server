@@ -24,7 +24,7 @@ export const profileRoute = new Elysia({
   .onTransform({ as: 'scoped' }, ({ body }) => {
     if (unknownProfileField(body)) throw new ValidationError('body', profileUpdateSchema, body);
   })
-  .get('/', getOwnProfile, {
+  .get('', getOwnProfile, {
     response: responses(profileResponseSchema, 401, 404),
     detail: {
       tags: ['Profile'],
@@ -34,7 +34,7 @@ export const profileRoute = new Elysia({
       security: betterAuthSecurity,
     },
   })
-  .patch('/', updateOwnProfile, {
+  .patch('', updateOwnProfile, {
     body: profileUpdateSchema,
     response: responses(profileUpdateResponseSchema, 400, 401),
     detail: {

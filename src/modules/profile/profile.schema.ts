@@ -9,14 +9,16 @@ const majorSchema = t.Object({
   }),
 });
 
-// `pattern: '\\S'` rejects names made only of whitespace, which minLength alone allows.
+// A value may be replaced but never cleared, so every editable field has to reject
+// what amounts to erasing it: `pattern: '\\S'` turns away whitespace-only input,
+// which minLength alone accepts.
 const nameSchema = t.String({ minLength: 1, maxLength: 100, pattern: '\\S' });
 
 export const profileUpdateSchema = t.Object(
   {
     firstName: t.Optional(nameSchema),
     lastName: t.Optional(nameSchema),
-    bio: t.Optional(t.String({ maxLength: 500 })),
+    bio: t.Optional(t.String({ minLength: 1, maxLength: 500, pattern: '\\S' })),
     telephone: t.Optional(t.String({ pattern: '^0[0-9]{9}$', example: '0800000000' })),
     majorId: t.Optional(t.String({ format: 'uuid' })),
   },
