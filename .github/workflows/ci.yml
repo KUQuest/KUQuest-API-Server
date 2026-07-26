@@ -83,7 +83,30 @@ jobs:
           git cat-file -e "$MIGRATION_BASE^{commit}"
           printf 'MIGRATION_BASE_REF=%s\n' "$MIGRATION_BASE" >> "$GITHUB_ENV"
 
+      # Tests read and write real tables, so they need a migrated database. They use a
+      # database of their own to leave the one below pristine, which is what lets the
+      # production image still prove it can apply the whole chain from empty.
+      - name: Create the test database
+        run: |
+          docker run \
+            --rm \
+            --network host \
+            --env PGPASSWORD=kuquest-ci-only \
+            postgres:17-alpine \
+            psql \
+            --host localhost \
+            --username kuquest \
+            --dbname kuquest \
+            --command 'CREATE DATABASE kuquest_test;'
+
+      - name: Apply migrations to the test database
+        env:
+          DATABASE_URL: postgresql://kuquest:kuquest-ci-only@localhost:5432/kuquest_test
+        run: bun run db:migrate
+
       - name: Run validation
+        env:
+          DATABASE_URL: postgresql://kuquest:kuquest-ci-only@localhost:5432/kuquest_test
         run: bun run check
 
       - name: Build production image

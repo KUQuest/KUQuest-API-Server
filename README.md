@@ -195,9 +195,23 @@ bun run check
 ```
 
 This runs linting, TypeScript validation, unit/integration tests, and the Bun
-production build, including the local migration-artifact contract. Tests are
-grouped by production boundary under `tests/` so a specific area can also be
-run independently, for example:
+production build, including the local migration-artifact contract.
+
+Some tests read and write real tables, so PostgreSQL must be running and
+migrated before `bun test` or `bun run check`:
+
+```bash
+docker compose up -d postgres
+bun run db:migrate
+```
+
+They connect through `DATABASE_URL`, the same variable the application uses, and
+clean up the rows they create. Point `DATABASE_URL` at a throwaway database to
+keep development data out of their way. CI does exactly that, running the suite
+against a `kuquest_test` database of its own.
+
+Tests are grouped by production boundary under `tests/` so a specific area can
+also be run independently, for example:
 
 ```bash
 bun test tests/modules/auth
