@@ -29,7 +29,7 @@ export const onboardingRoute = new Elysia({
     })
     .patch('/update', updateOnboarding, {
         body: onboardingSchema,
-        response: responses(onboardingUpdateSchema, 401, 400),
+        response: responses(onboardingUpdateSchema, 401, 400, 404, 409),
         detail: {
             tags: ['Onboarding'],
             summary: 'Update onboarding information',

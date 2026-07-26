@@ -25,6 +25,7 @@ describe('onboarding integration', () => {
           telephone: '080-000-0000',
           majorId: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
           studentId: '6500000000',
+          academicYear: 2,
         }),
       }),
     );
@@ -35,6 +36,51 @@ describe('onboarding integration', () => {
       success: false,
       error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
     });
+  });
+
+  it('rejects an empty onboarding update', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/onboarding/update', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('VALIDATION');
+  });
+
+  it('rejects null onboarding values', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/onboarding/update', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ academicYear: null }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('VALIDATION');
+  });
+
+  it('rejects academic years outside the allowed range', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/onboarding/update', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ academicYear: 9 }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('VALIDATION');
   });
 
   it('returns the shared error shape for an unauthenticated get-data request', async () => {

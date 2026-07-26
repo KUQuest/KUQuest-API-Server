@@ -27,9 +27,26 @@ export const getOnboardingStatus = async ({
 
 export const updateOnboarding = async ({
     session,
+    set,
     body,
 }: AuthedContext & { body: Static<typeof onboardingSchema> }): Promise<ApiResponse> => {
-    await updateOnboardingInfo(session.user.id, body);
+    const result = await updateOnboardingInfo(session.user.id, body);
+
+    if (result === 'USER_NOT_FOUND') {
+        set.status = 404;
+        return apiError('USER_NOT_FOUND', 'User not found');
+    }
+
+    if (result === 'MAJOR_NOT_FOUND') {
+        set.status = 400;
+        return apiError('MAJOR_NOT_FOUND', 'Major not found');
+    }
+
+    if (result === 'STUDENT_ID_ALREADY_EXISTS') {
+        set.status = 409;
+        return apiError('STUDENT_ID_ALREADY_EXISTS', 'Student ID already exists');
+    }
+
     return apiSuccess();
 };
 
