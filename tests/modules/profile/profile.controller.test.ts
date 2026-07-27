@@ -74,13 +74,20 @@ describe('setAvatar', () => {
       fileId,
       previousFileId,
     });
-    const returning = mock(async () => [
-      { objectKey: `avatars/${studentAuthId}/old.png` },
-    ]);
-    spyOn(db, 'delete').mockReturnValue({
-      where: mock(() => ({ returning })),
+    const limit = mock(async () => [{
+      bucket: 'old-avatar-bucket',
+      objectKey: `avatars/${studentAuthId}/old.png`,
+    }]);
+    spyOn(db, 'select').mockReturnValue({
+      from: mock(() => ({
+        where: mock(() => ({ limit })),
+      })),
     } as never);
-    spyOn(avatarStorage, 'delete').mockResolvedValue();
+    const markDeleted = mock(async () => undefined);
+    spyOn(db, 'update').mockReturnValue({
+      set: mock(() => ({ where: markDeleted })),
+    } as never);
+    const deleteObject = spyOn(avatarStorage, 'delete').mockResolvedValue();
 
     const { result } = invokeSetAvatar(
       new File(['image-content'], 'avatar.png', { type: 'image/png' }),
@@ -90,9 +97,14 @@ describe('setAvatar', () => {
       success: true,
       data: { fileId },
     });
-    expect(returning).toHaveBeenCalledTimes(1);
+    expect(limit).toHaveBeenCalledTimes(1);
     expect(avatarStorage.delete).toHaveBeenCalledWith(
+      'old-avatar-bucket',
       `avatars/${studentAuthId}/old.png`,
+    );
+    expect(markDeleted).toHaveBeenCalledTimes(1);
+    expect(deleteObject.mock.invocationCallOrder[0]).toBeLessThan(
+      markDeleted.mock.invocationCallOrder[0],
     );
   });
 
@@ -128,7 +140,7 @@ describe('setAvatar', () => {
       success: false,
       error: {
         code: 'UNSUPPORTED_AVATAR_TYPE',
-        message: 'Avatar must be a JPEG, PNG, or WebP image',
+        message: 'Avatar must be a valid JPEG, PNG, or WebP image',
       },
     });
     expect(set.status).toBe(415);

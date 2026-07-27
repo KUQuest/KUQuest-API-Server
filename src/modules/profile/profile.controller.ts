@@ -7,7 +7,8 @@ import type { StatusMap } from 'elysia/utils';
 
 import type { avatarUploadSchema } from './profile.schema';
 import {
-  removePreviousAvatarFile,
+  getPreviousAvatarFile,
+  markAvatarDeleted,
   replaceStudentAvatar,
 } from './profile.service';
 import {
@@ -23,9 +24,12 @@ type AvatarUploadContext = {
   set: { status?: number | keyof StatusMap };
 };
 
-const discardUploadedAvatar = async (objectKey: string): Promise<void> => {
+const discardUploadedAvatar = async (
+  bucket: string,
+  objectKey: string,
+): Promise<void> => {
   try {
-    await avatarStorage.delete(objectKey);
+    await avatarStorage.delete(bucket, objectKey);
   } catch {
     // The object is unreferenced, and cleanup must not hide the original failure.
   }
@@ -59,18 +63,21 @@ export const setAvatar = async ({
   try {
     const result = await replaceStudentAvatar(session.user.id, storedAvatar);
     if (!result) {
-      await discardUploadedAvatar(storedAvatar.objectKey);
+      await discardUploadedAvatar(storedAvatar.bucket, storedAvatar.objectKey);
       set.status = 404;
       return apiError('STUDENT_NOT_FOUND', 'Student not found');
     }
 
     if (result.previousFileId) {
       try {
-        const previousFile = await removePreviousAvatarFile(
+        const previousFile = await getPreviousAvatarFile(
           session.user.id,
           result.previousFileId,
         );
-        if (previousFile) await avatarStorage.delete(previousFile.objectKey);
+        if (previousFile) {
+          await avatarStorage.delete(previousFile.bucket, previousFile.objectKey);
+          await markAvatarDeleted(session.user.id, result.previousFileId);
+        }
       } catch (error) {
         console.error('Previous avatar cleanup failed', error);
       }
@@ -78,7 +85,7 @@ export const setAvatar = async ({
 
     return apiSuccess({ fileId: result.fileId });
   } catch (error) {
-    await discardUploadedAvatar(storedAvatar.objectKey);
+    await discardUploadedAvatar(storedAvatar.bucket, storedAvatar.objectKey);
     throw error;
   }
 };

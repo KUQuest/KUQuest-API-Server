@@ -23,7 +23,7 @@ export const profileRoute = new Elysia({
       tags: ['Profile'],
       summary: 'Set the current Student avatar',
       description:
-        'Uploads a JPEG, PNG, or WebP avatar up to 5 MB and stores its file reference. The previous file is retained when replaced.',
+        'Uploads a valid JPEG, PNG, or WebP avatar up to 5 MB and stores its file reference. After replacement commits, the previous object is deleted and its file metadata is retained as a tombstone.',
       operationId: 'setProfileAvatar',
       security: betterAuthSecurity,
     },

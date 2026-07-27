@@ -14,6 +14,7 @@ export const file = pgTable(
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
     uploadedByUserId: text('uploaded_by_user_id').references((): AnyPgColumn => authUser.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => [
     unique('file_bucket_object_key_key').on(table.bucket, table.objectKey),

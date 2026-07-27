@@ -1,6 +1,9 @@
 import { env } from '@/config/env';
 
-const MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024;
+import sharp from 'sharp';
+
+const maxAvatarSizeBytes = 5 * 1024 * 1024;
+const maxAvatarPixels = 25_000_000;
 
 const extensionByContentType = {
   'image/jpeg': 'jpg',
@@ -14,50 +17,11 @@ export class AvatarTooLargeError extends Error {}
 export class UnsupportedAvatarTypeError extends Error {}
 export class AvatarUploadError extends Error {}
 
-const hasBytes = (bytes: Uint8Array, expected: number[], offset = 0): boolean =>
-  expected.every((value, index) => bytes[offset + index] === value);
-
-const readUint32 = (
-  bytes: Uint8Array,
-  offset: number,
-  littleEndian = false,
-): number => new DataView(
-  bytes.buffer,
-  bytes.byteOffset,
-  bytes.byteLength,
-).getUint32(offset, littleEndian);
-
-const detectAvatarContentType = (bytes: Uint8Array): AvatarContentType | undefined => {
-  if (
-    bytes.length >= 4 &&
-    hasBytes(bytes, [0xff, 0xd8, 0xff]) &&
-    hasBytes(bytes, [0xff, 0xd9], bytes.length - 2)
-  ) {
-    return 'image/jpeg';
-  }
-  if (
-    bytes.length >= 24 &&
-    hasBytes(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) &&
-    hasBytes(bytes, [0x49, 0x48, 0x44, 0x52], 12) &&
-    readUint32(bytes, 16) > 0 &&
-    readUint32(bytes, 20) > 0
-  ) {
-    return 'image/png';
-  }
-  if (
-    bytes.length >= 16 &&
-    hasBytes(bytes, [0x52, 0x49, 0x46, 0x46]) &&
-    hasBytes(bytes, [0x57, 0x45, 0x42, 0x50], 8) &&
-    readUint32(bytes, 4, true) + 8 === bytes.length &&
-    (
-      hasBytes(bytes, [0x56, 0x50, 0x38, 0x20], 12) ||
-      hasBytes(bytes, [0x56, 0x50, 0x38, 0x4c], 12) ||
-      hasBytes(bytes, [0x56, 0x50, 0x38, 0x58], 12)
-    )
-  ) {
-    return 'image/webp';
-  }
-};
+const contentTypeByFormat = {
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+} as const;
 
 const s3 = new Bun.S3Client({
   accessKeyId: env.s3AccessKeyId,
@@ -78,15 +42,29 @@ const uploadAvatar = async (userId: string, avatar: File): Promise<StoredAvatar>
   if (avatar.size === 0) {
     throw new UnsupportedAvatarTypeError('Avatar file is empty');
   }
-  if (avatar.size > MAX_AVATAR_SIZE_BYTES) {
+  if (avatar.size > maxAvatarSizeBytes) {
     throw new AvatarTooLargeError('Avatar must be 5 MB or smaller');
   }
 
   const bytes = new Uint8Array(await avatar.arrayBuffer());
-  const contentType = detectAvatarContentType(bytes);
+  let contentType: AvatarContentType | undefined;
+
+  try {
+    const image = sharp(bytes, {
+      failOn: 'warning',
+      limitInputPixels: maxAvatarPixels,
+    });
+    const metadata = await image.metadata();
+    contentType = metadata.format
+      ? contentTypeByFormat[metadata.format as keyof typeof contentTypeByFormat]
+      : undefined;
+    await image.clone().raw().toBuffer();
+  } catch {
+    throw new UnsupportedAvatarTypeError('Avatar must be a valid JPEG, PNG, or WebP image');
+  }
 
   if (!contentType || avatar.type !== contentType) {
-    throw new UnsupportedAvatarTypeError('Avatar must be a JPEG, PNG, or WebP image');
+    throw new UnsupportedAvatarTypeError('Avatar must be a valid JPEG, PNG, or WebP image');
   }
 
   const bucket = env.s3Bucket;
@@ -111,13 +89,8 @@ const uploadAvatar = async (userId: string, avatar: File): Promise<StoredAvatar>
   };
 };
 
-const deleteAvatar = async (objectKey: string): Promise<void> => {
-  try {
-    await s3.delete(objectKey);
-  } catch {
-    // Compensation is best-effort. The object is unreferenced if persistence failed.
-  }
-};
+const deleteAvatar = async (bucket: string, objectKey: string): Promise<void> =>
+  s3.delete(objectKey, { bucket });
 
 export const avatarStorage = {
   delete: deleteAvatar,
