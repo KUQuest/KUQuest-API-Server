@@ -22,6 +22,13 @@
       "when": 1785072257277,
       "tag": "0002_groovy_vertigo",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785143463103,
+      "tag": "0003_small_tigra",
+      "breakpoints": true
     }
   ]
 }

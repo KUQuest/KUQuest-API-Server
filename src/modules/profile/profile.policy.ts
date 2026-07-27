@@ -1,4 +1,4 @@
-import { Elysia, ValidationError } from 'elysia';
+import { ValidationError } from 'elysia';
 
 import { profileUpdateSchema } from './profile.schema';
 
@@ -17,10 +17,11 @@ const isRejectable = (body: unknown) => {
   return Object.keys(body).some((field) => !editableFields.has(field));
 };
 
-export const profileBodyGuard = new Elysia({ name: 'profile-body-guard' })
-  // Transform is the last point at which a body property the schema does not declare
-  // is still visible. Raising Elysia's own validation error makes the rejection
-  // indistinguishable from every other rejected body, including status and error code.
-  .onTransform({ as: 'scoped' }, ({ body }) => {
-    if (isRejectable(body)) throw new ValidationError('body', profileUpdateSchema, body);
-  });
+/**
+ * Runs as the profile update's transform, the last point at which a body property the
+ * schema does not declare is still visible. Raising Elysia's own validation error makes
+ * the rejection indistinguishable from every other rejected body, status and code alike.
+ */
+export const rejectUnknownProfileFields = ({ body }: { body: unknown }) => {
+  if (isRejectable(body)) throw new ValidationError('body', profileUpdateSchema, body);
+};

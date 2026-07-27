@@ -36,6 +36,25 @@ describe('profile integration', () => {
     });
   });
 
+  it('requires authentication before accepting an avatar', async () => {
+    const form = new FormData();
+    form.set('avatar', new File(['not-an-image'], 'avatar.png', { type: 'image/png' }));
+
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/profile/avatar', {
+        method: 'POST',
+        body: form,
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body).toEqual({
+      success: false,
+      error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
+    });
+  });
+
   // Elysia validates the body before the auth guard runs, so every rejected-input
   // case below is reachable without a session.
   describe('rejected input', () => {
@@ -62,7 +81,7 @@ describe('profile integration', () => {
       ['an academic year, which this endpoint does not own', { academicYear: 2026 }],
       ['an email, which this endpoint does not own', { email: 'other@ku.th' }],
       ['a verified flag, which this endpoint does not own', { emailVerified: true }],
-      ['an avatar, which a different endpoint owns', { imageFileId: randomUUID() }],
+      ['an avatar, which the avatar endpoint owns', { imageFileId: randomUUID() }],
       ['a legacy image field, which this endpoint does not own', { image: 'http://example.com' }],
       ['another student id smuggled alongside a valid field', { bio: 'x', id: 'someone-else' }],
       ['a first name of the wrong type', { firstName: 123 }],
@@ -108,24 +127,51 @@ describe('profile integration', () => {
     expect((await response.json()).error.code).toBe('VALIDATION');
   });
 
-  it('publishes both operations without a trailing slash, marked as authenticated', async () => {
-    const document = await (
-      await app.handle(new Request('http://localhost/openapi/json'))
-    ).json();
-
-    expect(Object.keys(document.paths)).toContain('/api/v1/profile');
-    expect(Object.keys(document.paths)).not.toContain('/api/v1/profile/');
-
-    const profilePath = document.paths['/api/v1/profile'];
-
-    expect(profilePath.get.security).toEqual([{ betterAuthSession: [] }]);
-    expect(profilePath.patch.security).toEqual([{ betterAuthSession: [] }]);
-  });
-
   it('accepts a bio at exactly the maximum length', async () => {
     // Reaching the auth guard proves validation passed.
     const response = await patchProfile({ bio: 'a'.repeat(500) });
 
     expect(response.status).toBe(401);
+  });
+
+  describe('published documentation', () => {
+    const openapiDocument = async () =>
+      (await (await app.handle(new Request('http://localhost/openapi/json'))).json()) as {
+        paths: Record<
+          string,
+          Record<
+            string,
+            {
+              requestBody?: { content?: Record<string, unknown> };
+              security?: Array<Record<string, unknown>>;
+            }
+          >
+        >;
+      };
+
+    it('publishes the read and update operations without a trailing slash', async () => {
+      const document = await openapiDocument();
+
+      expect(Object.keys(document.paths)).toContain('/api/v1/profile');
+      expect(Object.keys(document.paths)).not.toContain('/api/v1/profile/');
+    });
+
+    it('marks every profile operation as requiring authentication', async () => {
+      const document = await openapiDocument();
+      const profilePath = document.paths['/api/v1/profile'];
+      const avatarOperation = document.paths['/api/v1/profile/avatar']?.post;
+
+      expect(profilePath?.get?.security).toEqual([{ betterAuthSession: [] }]);
+      expect(profilePath?.patch?.security).toEqual([{ betterAuthSession: [] }]);
+      expect(avatarOperation?.security).toEqual([{ betterAuthSession: [] }]);
+    });
+
+    it('documents the avatar endpoint as multipart', async () => {
+      const document = await openapiDocument();
+      const operation = document.paths['/api/v1/profile/avatar']?.post;
+
+      expect(operation).toBeDefined();
+      expect(operation?.requestBody?.content?.['multipart/form-data']).toBeDefined();
+    });
   });
 });

@@ -31,7 +31,7 @@ export const openapiPlugin = openapi({
       },
       {
         name: 'Profile',
-        description: 'Authenticated endpoints for reading and updating a student profile.',
+        description: 'Authenticated Student profile endpoints.',
       },
     ],
     components: authOpenAPIComponents,

@@ -1,11 +1,13 @@
 import { db } from '@/database/client';
 import { faculty, major } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
+import { file } from '@/database/schema/file.schema';
 
 import type { Static } from 'elysia';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 
 import type { profileUpdateSchema } from './profile.schema';
+import type { StoredAvatar } from './profile.storage';
 
 type ProfileUpdate = Static<typeof profileUpdateSchema>;
 
@@ -57,16 +59,29 @@ export const getProfile = async (userId: string) => {
       majorId: major.id,
       majorName: major.name,
       facultyName: faculty.name,
+      avatarFileId: file.id,
+      avatarBucket: file.bucket,
+      avatarObjectKey: file.objectKey,
     })
     .from(authUser)
     .leftJoin(major, eq(authUser.majorId, major.id))
     .leftJoin(faculty, eq(major.facultyId, faculty.id))
+    // A tombstoned file is a deleted avatar, so it must read as no avatar at all.
+    .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
     .where(eq(authUser.id, userId))
     .limit(1);
 
   if (!row) return undefined;
 
-  const { majorId, majorName, facultyName, ...profile } = row;
+  const {
+    majorId,
+    majorName,
+    facultyName,
+    avatarFileId,
+    avatarBucket,
+    avatarObjectKey,
+    ...profile
+  } = row;
 
   return {
     ...profile,
@@ -75,5 +90,82 @@ export const getProfile = async (userId: string) => {
       majorId && majorName && facultyName
         ? { id: majorId, name: majorName, faculty: { name: facultyName } }
         : null,
+    avatar:
+      avatarFileId && avatarBucket && avatarObjectKey
+        ? { fileId: avatarFileId, bucket: avatarBucket, objectKey: avatarObjectKey }
+        : null,
   };
+};
+
+export const replaceStudentAvatar = async (
+  userId: string,
+  storedAvatar: StoredAvatar,
+): Promise<{ fileId: string; previousFileId: string | null } | undefined> =>
+  db.transaction(async (transaction) => {
+    const [student] = await transaction
+      .select({
+        id: authUser.id,
+        previousFileId: authUser.imageFileId,
+      })
+      .from(authUser)
+      .where(eq(authUser.id, userId))
+      .limit(1)
+      .for('update');
+
+    if (!student) return undefined;
+
+    const [createdFile] = await transaction
+      .insert(file)
+      .values({
+        ...storedAvatar,
+        uploadedByUserId: userId,
+      })
+      .returning({ fileId: file.id });
+
+    await transaction
+      .update(authUser)
+      .set({ imageFileId: createdFile.fileId })
+      .where(eq(authUser.id, userId));
+
+    return {
+      ...createdFile,
+      previousFileId: student.previousFileId,
+    };
+  });
+
+export const getPreviousAvatarFile = async (
+  userId: string,
+  fileId: string,
+): Promise<{ bucket: string; objectKey: string } | undefined> => {
+  const [previousFile] = await db
+    .select({
+      bucket: file.bucket,
+      objectKey: file.objectKey,
+    })
+    .from(file)
+    .where(
+      and(
+        eq(file.id, fileId),
+        eq(file.uploadedByUserId, userId),
+        isNull(file.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  return previousFile;
+};
+
+export const markAvatarDeleted = async (
+  userId: string,
+  fileId: string,
+): Promise<void> => {
+  await db
+    .update(file)
+    .set({ deletedAt: new Date() })
+    .where(
+      and(
+        eq(file.id, fileId),
+        eq(file.uploadedByUserId, userId),
+      ),
+    );
 };

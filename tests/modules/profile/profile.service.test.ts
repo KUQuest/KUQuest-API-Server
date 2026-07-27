@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto';
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
 import { db, sql } from '@/database/client';
 import { faculty, major } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
-import { getProfile, majorExists, updateProfile } from '@/modules/profile/profile.service';
+import { file } from '@/database/schema/file.schema';
+import {
+  getProfile,
+  majorExists,
+  replaceStudentAvatar,
+  updateProfile,
+} from '@/modules/profile/profile.service';
 
 import { eq, inArray } from 'drizzle-orm';
 
@@ -15,6 +21,10 @@ const studentB = `test-profile-b-${randomUUID()}`;
 let facultyId: string;
 let majorId: string;
 let facultyName: string;
+let avatarFileId: string;
+let tombstonedFileId: string;
+
+const avatarObject = { bucket: 'kuquest-test', objectKey: `avatars/${studentA}/current.png` };
 
 // Every test starts from these values, so no test depends on what an earlier one wrote.
 const startingState = {
@@ -58,14 +68,49 @@ beforeAll(async () => {
       ...startingState[studentB]!,
     },
   ]);
+
+  [{ id: avatarFileId }] = await db
+    .insert(file)
+    .values({
+      ...avatarObject,
+      contentType: 'image/png',
+      sizeBytes: 1024,
+      uploadedByUserId: studentA,
+    })
+    .returning({ id: file.id });
+
+  [{ id: tombstonedFileId }] = await db
+    .insert(file)
+    .values({
+      bucket: avatarObject.bucket,
+      objectKey: `avatars/${studentA}/deleted.png`,
+      contentType: 'image/png',
+      sizeBytes: 1024,
+      uploadedByUserId: studentA,
+      deletedAt: new Date(),
+    })
+    .returning({ id: file.id });
 });
 
 beforeEach(async () => {
-  await db.update(authUser).set(startingState[studentA]!).where(eq(authUser.id, studentA));
-  await db.update(authUser).set(startingState[studentB]!).where(eq(authUser.id, studentB));
+  await db
+    .update(authUser)
+    .set({ ...startingState[studentA]!, imageFileId: null })
+    .where(eq(authUser.id, studentA));
+  await db
+    .update(authUser)
+    .set({ ...startingState[studentB]!, imageFileId: null })
+    .where(eq(authUser.id, studentB));
 });
 
 afterAll(async () => {
+  // The student points at the file and the file points back at the student, so the
+  // pointer has to go before either row can.
+  await db
+    .update(authUser)
+    .set({ imageFileId: null })
+    .where(inArray(authUser.id, [studentA, studentB]));
+  await db.delete(file).where(inArray(file.id, [avatarFileId, tombstonedFileId]));
   await db.delete(authUser).where(inArray(authUser.id, [studentA, studentB]));
   await db.delete(major).where(eq(major.id, majorId));
   await db.delete(faculty).where(eq(faculty.id, facultyId));
@@ -101,6 +146,45 @@ describe('reading a profile', () => {
   });
 });
 
+describe('reading the avatar', () => {
+  it('returns the stored reference when the student has an avatar', async () => {
+    await db
+      .update(authUser)
+      .set({ imageFileId: avatarFileId })
+      .where(eq(authUser.id, studentA));
+
+    const profile = await getProfile(studentA);
+
+    expect(profile?.avatar).toEqual({ fileId: avatarFileId, ...avatarObject });
+  });
+
+  it('reports no avatar when the student has none', async () => {
+    const profile = await getProfile(studentB);
+
+    expect(profile?.avatar).toBeNull();
+  });
+
+  it('treats a deleted avatar as no avatar at all', async () => {
+    await db
+      .update(authUser)
+      .set({ imageFileId: tombstonedFileId })
+      .where(eq(authUser.id, studentA));
+
+    const profile = await getProfile(studentA);
+
+    expect(profile?.avatar).toBeNull();
+  });
+
+  it('never exposes another student avatar', async () => {
+    await db
+      .update(authUser)
+      .set({ imageFileId: avatarFileId })
+      .where(eq(authUser.id, studentA));
+
+    expect((await getProfile(studentB))?.avatar).toBeNull();
+  });
+});
+
 describe('updating a profile', () => {
   it('leaves every other student untouched', async () => {
     const before = await getProfile(studentB);
@@ -123,6 +207,20 @@ describe('updating a profile', () => {
     expect(profile?.telephone).toBe(startingState[studentA]!.telephone);
     expect(profile?.firstName).toBe(startingState[studentA]!.firstName);
     expect(profile?.major?.id).toBe(majorId);
+  });
+
+  it('leaves the avatar alone', async () => {
+    await db
+      .update(authUser)
+      .set({ imageFileId: avatarFileId })
+      .where(eq(authUser.id, studentA));
+
+    await updateProfile(studentA, { bio: 'a new bio' });
+
+    expect((await getProfile(studentA))?.avatar).toEqual({
+      fileId: avatarFileId,
+      ...avatarObject,
+    });
   });
 
   it('changes nothing when asked to change nothing', async () => {
@@ -157,5 +255,59 @@ describe('checking a major', () => {
 
   it('rejects a major that does not exist', async () => {
     expect(await majorExists(randomUUID())).toBe(false);
+  });
+});
+
+describe('profile avatar persistence', () => {
+  afterEach(() => {
+    mock.restore();
+  });
+
+  it('creates file metadata and updates only the Student file pointer', async () => {
+    const insertValues = mock((_value: unknown) => ({
+      returning: mock(async () => [{ fileId: '018f47a7-1c7d-7c98-9a11-690d7e83430c' }]),
+    }));
+    const updateValues = mock(() => ({
+      where: mock(async () => undefined),
+    }));
+    const transaction = {
+      select: mock(() => ({
+        from: mock(() => ({
+          where: mock(() => ({
+            limit: mock(() => ({
+              for: mock(async () => [{ id: 'student-1', previousFileId: null }]),
+            })),
+          })),
+        })),
+      })),
+      insert: mock(() => ({ values: insertValues })),
+      update: mock(() => ({ set: updateValues })),
+    };
+    spyOn(db, 'transaction').mockImplementation(
+      (async (callback: (value: unknown) => Promise<unknown>) =>
+        callback(transaction)) as never,
+    );
+
+    const result = await replaceStudentAvatar('student-1', {
+      bucket: 'kuquest',
+      objectKey: 'avatars/student-1/new.png',
+      contentType: 'image/png',
+      sizeBytes: 123,
+    });
+
+    expect(result).toEqual({
+      fileId: '018f47a7-1c7d-7c98-9a11-690d7e83430c',
+      previousFileId: null,
+    });
+    expect(insertValues).toHaveBeenCalledWith({
+      bucket: 'kuquest',
+      objectKey: 'avatars/student-1/new.png',
+      contentType: 'image/png',
+      sizeBytes: 123,
+      uploadedByUserId: 'student-1',
+    });
+    expect(updateValues).toHaveBeenCalledWith({
+      imageFileId: '018f47a7-1c7d-7c98-9a11-690d7e83430c',
+    });
   });
 });

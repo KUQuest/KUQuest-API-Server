@@ -1,11 +1,34 @@
 import { t } from 'elysia';
 
+export const avatarUploadSchema = t.Object(
+  {
+    avatar: t.File(),
+  },
+  {
+    additionalProperties: false,
+  },
+);
+
+export const avatarUploadResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    fileId: t.String({ format: 'uuid' }),
+  }),
+});
+
 const majorSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   name: t.String({ example: 'Computer Engineering' }),
   faculty: t.Object({
     name: t.String({ example: 'Engineering' }),
   }),
+});
+
+// The stored file reference plus a link that expires, so no permanent storage URL is
+// persisted or handed out. Upload and replacement stay with the avatar endpoint.
+const avatarSchema = t.Object({
+  fileId: t.String({ format: 'uuid' }),
+  url: t.String({ format: 'uri' }),
 });
 
 // A value may be replaced but never cleared, so every editable field has to reject
@@ -35,5 +58,6 @@ export const profileResponseSchema = t.Object({
     studentId: t.Nullable(t.String({ example: '6500000000' })),
     academicYear: t.Nullable(t.Integer()),
     major: t.Nullable(majorSchema),
+    avatar: t.Nullable(avatarSchema),
   }),
 });
