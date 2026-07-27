@@ -122,6 +122,11 @@ jobs:
             --env BETTER_AUTH_SECRET=ci-only-secret-at-least-32-characters \
             --env GOOGLE_CLIENT_ID=ci-only-client-id \
             --env GOOGLE_CLIENT_SECRET=ci-only-client-secret \
+            --env S3_ENDPOINT=http://localhost:9000 \
+            --env S3_REGION=us-east-1 \
+            --env S3_BUCKET=ci-only \
+            --env S3_ACCESS_KEY_ID=ci-only-access-key \
+            --env S3_SECRET_ACCESS_KEY=ci-only-secret-key \
             kuquest-api:ci
 
           for ATTEMPT in $(seq 1 30); do
