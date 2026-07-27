@@ -5,6 +5,12 @@ import sharp from 'sharp';
 const maxAvatarSizeBytes = 5 * 1024 * 1024;
 const maxAvatarPixels = 25_000_000;
 
+const debugAvatarUpload = (message: string, details?: unknown): void => {
+  if (env.nodeEnv !== 'test') {
+    console.info(`[avatar-upload] ${message}`, details ?? '');
+  }
+};
+
 const extensionByContentType = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -39,10 +45,22 @@ export type StoredAvatar = {
 };
 
 const uploadAvatar = async (userId: string, avatar: File): Promise<StoredAvatar> => {
+  debugAvatarUpload('Validating file', {
+    declaredContentType: avatar.type,
+    sizeBytes: avatar.size,
+    userId,
+  });
+
   if (avatar.size === 0) {
+    debugAvatarUpload('Rejected empty file', { userId });
     throw new UnsupportedAvatarTypeError('Avatar file is empty');
   }
   if (avatar.size > maxAvatarSizeBytes) {
+    debugAvatarUpload('Rejected oversized file', {
+      maxAvatarSizeBytes,
+      sizeBytes: avatar.size,
+      userId,
+    });
     throw new AvatarTooLargeError('Avatar must be 5 MB or smaller');
   }
 
@@ -60,24 +78,57 @@ const uploadAvatar = async (userId: string, avatar: File): Promise<StoredAvatar>
       : undefined;
     await image.clone().raw().toBuffer();
   } catch {
+    debugAvatarUpload('Decoder rejected file', {
+      declaredContentType: avatar.type,
+      sizeBytes: avatar.size,
+      userId,
+    });
     throw new UnsupportedAvatarTypeError('Avatar must be a valid JPEG, PNG, or WebP image');
   }
 
   if (!contentType || avatar.type !== contentType) {
+    debugAvatarUpload('Rejected content-type mismatch', {
+      declaredContentType: avatar.type,
+      detectedContentType: contentType,
+      userId,
+    });
     throw new UnsupportedAvatarTypeError('Avatar must be a valid JPEG, PNG, or WebP image');
   }
 
   const bucket = env.s3Bucket;
-  if (!bucket) throw new AvatarUploadError('S3 bucket is not configured');
+  if (!bucket) {
+    debugAvatarUpload('RustFS bucket is not configured');
+    throw new AvatarUploadError('S3 bucket is not configured');
+  }
 
   const objectKey = `avatars/${userId}/${crypto.randomUUID()}.${extensionByContentType[contentType]}`;
 
   try {
+    debugAvatarUpload('Writing object to RustFS', {
+      bucket,
+      contentType,
+      endpoint: env.s3Endpoint,
+      objectKey,
+      region: env.s3Region,
+      sizeBytes: avatar.size,
+    });
     const writtenBytes = await s3.write(objectKey, avatar, { type: contentType });
     if (writtenBytes !== avatar.size) {
       throw new Error(`Expected ${avatar.size} bytes but wrote ${writtenBytes}`);
     }
+    debugAvatarUpload('RustFS write succeeded', {
+      bucket,
+      objectKey,
+      writtenBytes,
+    });
   } catch (error) {
+    console.error('[avatar-upload] RustFS write failed', {
+      bucket,
+      endpoint: env.s3Endpoint,
+      error,
+      objectKey,
+      region: env.s3Region,
+    });
     throw new AvatarUploadError('Avatar upload failed', { cause: error });
   }
 
@@ -89,8 +140,11 @@ const uploadAvatar = async (userId: string, avatar: File): Promise<StoredAvatar>
   };
 };
 
-const deleteAvatar = async (bucket: string, objectKey: string): Promise<void> =>
-  s3.delete(objectKey, { bucket });
+const deleteAvatar = async (bucket: string, objectKey: string): Promise<void> => {
+  debugAvatarUpload('Deleting object from RustFS', { bucket, objectKey });
+  await s3.delete(objectKey, { bucket });
+  debugAvatarUpload('RustFS delete succeeded', { bucket, objectKey });
+};
 
 export const avatarStorage = {
   delete: deleteAvatar,

@@ -143,6 +143,22 @@
         font-size: 1rem;
       }
 
+      .avatar-upload {
+        margin-top: 22px;
+        padding-top: 22px;
+        border-top: 1px solid #e5ebe7;
+      }
+
+      .avatar-upload h2 {
+        margin: 0 0 10px;
+        font-size: 1rem;
+      }
+
+      input[type="file"] {
+        max-width: 100%;
+        font: inherit;
+      }
+
       pre {
         min-height: 92px;
         margin: 0;
@@ -203,6 +219,25 @@
           <pre id="session-output" aria-live="polite">กำลังโหลด…</pre>
         </div>
 
+        <div class="avatar-upload" id="avatar-upload" hidden>
+          <h2>Avatar upload</h2>
+          <div class="actions">
+            <input
+              id="avatar-file"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+            />
+            <button class="primary" id="upload-avatar" type="button">อัปโหลด</button>
+          </div>
+          <p
+            class="status"
+            id="upload-status"
+            role="status"
+            aria-live="polite"
+            hidden
+          ></p>
+        </div>
+
         <p class="note">อนุญาตเฉพาะบัญชี Google ที่มีอีเมลลงท้ายด้วย @ku.th เท่านั้น</p>
       </section>
     </main>
@@ -215,11 +250,17 @@
       const signOutButton = document.querySelector('#sign-out');
       const statusElement = document.querySelector('#status');
       const sessionOutput = document.querySelector('#session-output');
+      const avatarUpload = document.querySelector('#avatar-upload');
+      const avatarFile = document.querySelector('#avatar-file');
+      const uploadAvatarButton = document.querySelector('#upload-avatar');
+      const uploadStatus = document.querySelector('#upload-status');
 
       const setBusy = (busy) => {
         signInButton.disabled = busy;
         refreshButton.disabled = busy;
         signOutButton.disabled = busy;
+        avatarFile.disabled = busy;
+        uploadAvatarButton.disabled = busy;
       };
 
       const setStatus = (message, type = 'info') => {
@@ -265,6 +306,8 @@
           sessionOutput.textContent = JSON.stringify(safeSessionView(data), null, 2);
           signInButton.hidden = Boolean(data);
           signOutButton.hidden = !data;
+          avatarUpload.hidden = !data;
+          if (!data) uploadStatus.hidden = true;
           setStatus(
             data ? `เข้าสู่ระบบแล้ว: ${data.user.email}` : 'ยังไม่ได้เข้าสู่ระบบ',
             data ? 'success' : 'info',
@@ -323,6 +366,69 @@
         }
       };
 
+      const uploadAvatar = async () => {
+        const file = avatarFile.files?.[0];
+        uploadStatus.hidden = true;
+
+        if (!file) {
+          console.warn('[avatar-upload] No file selected');
+          uploadStatus.textContent = 'อัปโหลดไม่สำเร็จ';
+          uploadStatus.dataset.type = 'error';
+          uploadStatus.hidden = false;
+          return;
+        }
+
+        console.info('[avatar-upload] File selected', {
+          name: file.name,
+          size: file.size,
+          type: file.type,
+        });
+
+        setBusy(true);
+        const form = new FormData();
+        form.set('avatar', file);
+        const uploadUrl = `${localAppUrl}/api/v1/profile/avatar`;
+
+        try {
+          console.info('[avatar-upload] Sending request', {
+            method: 'POST',
+            url: uploadUrl,
+            credentials: 'include',
+          });
+
+          const response = await fetch(uploadUrl, {
+            method: 'POST',
+            credentials: 'include',
+            body: form,
+          });
+          const responseBody = await response.clone().json().catch(() => null);
+
+          console.info('[avatar-upload] Response received', {
+            body: responseBody,
+            status: response.status,
+            statusText: response.statusText,
+          });
+
+          if (!response.ok) {
+            throw new Error(
+              responseBody?.error?.message ?? `Upload failed (${response.status})`,
+            );
+          }
+
+          uploadStatus.textContent = 'อัปโหลดสำเร็จ';
+          uploadStatus.dataset.type = 'success';
+          avatarFile.value = '';
+          console.info('[avatar-upload] Upload succeeded');
+        } catch (error) {
+          console.error('[avatar-upload] Upload failed', error);
+          uploadStatus.textContent = 'อัปโหลดไม่สำเร็จ';
+          uploadStatus.dataset.type = 'error';
+        } finally {
+          uploadStatus.hidden = false;
+          setBusy(false);
+        }
+      };
+
       if (window.location.protocol === 'file:') {
         setBusy(true);
         setStatus('ไม่สามารถเปิดหน้า Auth Test ผ่าน file:// ได้', 'error');
@@ -338,6 +444,7 @@
         signInButton.addEventListener('click', signIn);
         refreshButton.addEventListener('click', refreshSession);
         signOutButton.addEventListener('click', signOut);
+        uploadAvatarButton.addEventListener('click', uploadAvatar);
         refreshSession();
       }
     </script>
