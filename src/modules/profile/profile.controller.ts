@@ -6,7 +6,10 @@ import type { Static } from 'elysia';
 import type { StatusMap } from 'elysia/utils';
 
 import type { avatarUploadSchema } from './profile.schema';
-import { replaceStudentAvatar } from './profile.service';
+import {
+  removePreviousAvatarFile,
+  replaceStudentAvatar,
+} from './profile.service';
 import {
   AvatarTooLargeError,
   AvatarUploadError,
@@ -18,6 +21,14 @@ type AvatarUploadContext = {
   body: Static<typeof avatarUploadSchema>;
   session: AuthenticatedSession;
   set: { status?: number | keyof StatusMap };
+};
+
+const discardUploadedAvatar = async (objectKey: string): Promise<void> => {
+  try {
+    await avatarStorage.delete(objectKey);
+  } catch {
+    // The object is unreferenced, and cleanup must not hide the original failure.
+  }
 };
 
 export const setAvatar = async ({
@@ -48,14 +59,26 @@ export const setAvatar = async ({
   try {
     const result = await replaceStudentAvatar(session.user.id, storedAvatar);
     if (!result) {
-      await avatarStorage.delete(storedAvatar.objectKey);
+      await discardUploadedAvatar(storedAvatar.objectKey);
       set.status = 404;
       return apiError('STUDENT_NOT_FOUND', 'Student not found');
     }
 
-    return apiSuccess(result);
+    if (result.previousFileId) {
+      try {
+        const previousFile = await removePreviousAvatarFile(
+          session.user.id,
+          result.previousFileId,
+        );
+        if (previousFile) await avatarStorage.delete(previousFile.objectKey);
+      } catch (error) {
+        console.error('Previous avatar cleanup failed', error);
+      }
+    }
+
+    return apiSuccess({ fileId: result.fileId });
   } catch (error) {
-    await avatarStorage.delete(storedAvatar.objectKey);
+    await discardUploadedAvatar(storedAvatar.objectKey);
     throw error;
   }
 };

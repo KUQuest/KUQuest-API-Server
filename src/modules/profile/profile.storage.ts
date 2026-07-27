@@ -17,14 +17,43 @@ export class AvatarUploadError extends Error {}
 const hasBytes = (bytes: Uint8Array, expected: number[], offset = 0): boolean =>
   expected.every((value, index) => bytes[offset + index] === value);
 
+const readUint32 = (
+  bytes: Uint8Array,
+  offset: number,
+  littleEndian = false,
+): number => new DataView(
+  bytes.buffer,
+  bytes.byteOffset,
+  bytes.byteLength,
+).getUint32(offset, littleEndian);
+
 const detectAvatarContentType = (bytes: Uint8Array): AvatarContentType | undefined => {
-  if (hasBytes(bytes, [0xff, 0xd8, 0xff])) return 'image/jpeg';
-  if (hasBytes(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
+  if (
+    bytes.length >= 4 &&
+    hasBytes(bytes, [0xff, 0xd8, 0xff]) &&
+    hasBytes(bytes, [0xff, 0xd9], bytes.length - 2)
+  ) {
+    return 'image/jpeg';
+  }
+  if (
+    bytes.length >= 24 &&
+    hasBytes(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) &&
+    hasBytes(bytes, [0x49, 0x48, 0x44, 0x52], 12) &&
+    readUint32(bytes, 16) > 0 &&
+    readUint32(bytes, 20) > 0
+  ) {
     return 'image/png';
   }
   if (
+    bytes.length >= 16 &&
     hasBytes(bytes, [0x52, 0x49, 0x46, 0x46]) &&
-    hasBytes(bytes, [0x57, 0x45, 0x42, 0x50], 8)
+    hasBytes(bytes, [0x57, 0x45, 0x42, 0x50], 8) &&
+    readUint32(bytes, 4, true) + 8 === bytes.length &&
+    (
+      hasBytes(bytes, [0x56, 0x50, 0x38, 0x20], 12) ||
+      hasBytes(bytes, [0x56, 0x50, 0x38, 0x4c], 12) ||
+      hasBytes(bytes, [0x56, 0x50, 0x38, 0x58], 12)
+    )
   ) {
     return 'image/webp';
   }
@@ -53,8 +82,8 @@ const uploadAvatar = async (userId: string, avatar: File): Promise<StoredAvatar>
     throw new AvatarTooLargeError('Avatar must be 5 MB or smaller');
   }
 
-  const header = new Uint8Array(await avatar.slice(0, 12).arrayBuffer());
-  const contentType = detectAvatarContentType(header);
+  const bytes = new Uint8Array(await avatar.arrayBuffer());
+  const contentType = detectAvatarContentType(bytes);
 
   if (!contentType || avatar.type !== contentType) {
     throw new UnsupportedAvatarTypeError('Avatar must be a JPEG, PNG, or WebP image');

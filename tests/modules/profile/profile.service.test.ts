@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
-
 import { db } from '@/database/client';
 import { replaceStudentAvatar } from '@/modules/profile/profile.service';
+
+import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
 afterEach(() => {
   mock.restore();
@@ -22,7 +22,9 @@ describe('profile avatar persistence', () => {
         from: mock(() => ({
           where: mock(() => ({
             limit: mock(() => ({
-              for: mock(async () => [{ id: 'student-1' }]),
+              for: mock(async () => [
+                { id: 'student-1', previousFileId: null },
+              ]),
             })),
           })),
         })),
@@ -44,6 +46,7 @@ describe('profile avatar persistence', () => {
 
     expect(result).toEqual({
       fileId: '018f47a7-1c7d-7c98-9a11-690d7e83430c',
+      previousFileId: null,
     });
     expect(insertValues).toHaveBeenCalledWith({
       bucket: 'kuquest',

@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'bun:test';
-import { getTableColumns } from 'drizzle-orm';
-
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
+
+import { describe, expect, it } from 'bun:test';
+import { getTableColumns } from 'drizzle-orm';
 
 describe('file reference database schema', () => {
   it('stores an avatar as metadata and an auth_user file pointer', () => {
