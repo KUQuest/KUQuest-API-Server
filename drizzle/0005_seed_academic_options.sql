@@ -1,6 +1,8 @@
--- Names and programs are sourced from KU's official faculty list and KUIC's
--- undergraduate-programs page. Keep this migration idempotent so deployments
--- can safely apply it to databases that already contain catalog rows.
+-- Sources:
+-- https://www.ku.ac.th/en/faculty-bangkhen/faculty-bangkhen
+-- https://kuic.ku.ac.th/undergraduate-programs/
+-- Keep this migration idempotent so deployments can safely apply it to databases
+-- that already contain catalog rows.
 INSERT INTO "faculty" ("name") VALUES
   ('Agriculture'),
   ('Business Administration'),
@@ -22,7 +24,8 @@ INSERT INTO "faculty" ("name") VALUES
   ('Nurse'),
   ('Pharmaceutical Sciences'),
   ('Interdisciplinary Management and Technology'),
-  ('School of Integrated Science (SIS)')
+  ('School of Integrated Science (SIS)'),
+  ('Engineering at Sriracha')
 ON CONFLICT ("name") DO NOTHING;
 --> statement-breakpoint
 INSERT INTO "major" ("faculty_id", "name")
@@ -32,7 +35,7 @@ JOIN (VALUES
   ('Agriculture', 'Tropical Agriculture'),
   ('Business Administration', 'Marketing'),
   ('Business Administration', 'Business Administration'),
-  ('Business Administration', 'Accountancy'),
+  ('Business Administration', 'Bachelor of Accountancy'),
   ('Humanities', 'Communicative Thai Language for Foreigners'),
   ('Humanities', 'Integrated Tourism Management'),
   ('Economics', 'Economics'),
@@ -47,16 +50,17 @@ JOIN (VALUES
   ('Engineering', 'Industrial Engineering'),
   ('Engineering', 'Software and Knowledge Engineering'),
   ('Engineering', 'Environmental Engineering'),
+  ('Engineering', 'Engineering'),
   ('Engineering', 'Civil Engineering'),
   ('Agro-Industry', 'Agro-Industrial Innovation and Technology'),
   ('Management Sciences', 'International Business'),
   ('Management Sciences', 'Management'),
   ('Management Sciences', 'Digital Marketing and Branding'),
   ('Management Sciences', 'Accounting'),
-  ('Management Sciences', 'Hospitality Industry Management'),
+  ('Management Sciences', 'Hospitality Industry'),
   ('Management Sciences', 'Logistics Management'),
   ('Fisheries', 'Fisheries Management'),
-  ('Fisheries', 'Fishery Biology'),
+  ('Fisheries', 'Fisheries Biology'),
   ('Fisheries', 'Fishery Products'),
   ('Fisheries', 'Aquaculture'),
   ('Fisheries', 'Marine Science'),
@@ -76,6 +80,9 @@ JOIN (VALUES
   ('Nurse', 'Nursing'),
   ('Pharmaceutical Sciences', 'Pharmaceutical Sciences'),
   ('Interdisciplinary Management and Technology', 'Interdisciplinary Management and Technology'),
-  ('School of Integrated Science (SIS)', 'Integrated Science')
+  ('School of Integrated Science (SIS)', 'Knowledge of The Land for Sustainable Development'),
+  ('Engineering at Sriracha', 'Automotive Engineering'),
+  ('Engineering at Sriracha', 'Digital Manufacturing System Engineering'),
+  ('Engineering at Sriracha', 'Robotic and Automation Systems Engineering')
 ) AS major(faculty_name, name) ON major.faculty_name = faculty.name
 ON CONFLICT ("faculty_id", "name") DO NOTHING;

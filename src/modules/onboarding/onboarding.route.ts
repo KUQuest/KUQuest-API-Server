@@ -11,11 +11,11 @@ import {
     getOnboardingInfo,
 } from './onboarding.controller';
 import {
-  onboardingSchema,
-  onboardingResponseSchema,
-  onboardingUpdateSchema,
-  onboardingDataResponseSchema,
-  academicOptionsResponseSchema,
+    academicOptionsResponseSchema,
+    onboardingDataResponseSchema,
+    onboardingResponseSchema,
+    onboardingSchema,
+    onboardingUpdateSchema,
 } from './onboarding.schema';
 
 export const onboardingRoute = new Elysia({
