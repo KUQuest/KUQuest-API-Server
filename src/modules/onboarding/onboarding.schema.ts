@@ -42,6 +42,19 @@ export const onboardingDataResponseSchema = t.Object({
             telephone: t.Nullable(t.String()),
             majorId: t.Nullable(t.String()),
             studentId: t.Nullable(t.String()),
+            academicYear: t.Nullable(t.Integer()),
         }),
     }),
 })
+
+export const academicOptionsResponseSchema = t.Object({
+    success: t.Literal(true),
+    data: t.Array(t.Object({
+        id: t.String({ format: 'uuid' }),
+        name: t.String(),
+        majors: t.Array(t.Object({
+            id: t.String({ format: 'uuid' }),
+            name: t.String(),
+        })),
+    })),
+});

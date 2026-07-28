@@ -3,6 +3,19 @@ import { describe, expect, it } from 'bun:test';
 import { app } from '@/app';
 
 describe('onboarding integration', () => {
+  it('returns the shared error shape for an unauthenticated academic options request', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/onboarding/academic-options'),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body).toEqual({
+      success: false,
+      error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
+    });
+  });
+
   it('returns the shared error shape for an unauthenticated status request', async () => {
     const response = await app.handle(
       new Request('http://localhost/api/v1/onboarding/status'),

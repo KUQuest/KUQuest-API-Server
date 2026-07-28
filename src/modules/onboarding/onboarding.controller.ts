@@ -5,7 +5,12 @@ import type { AuthenticatedSession } from '@/modules/auth';
 import type { Static } from 'elysia';
 import type { StatusMap } from 'elysia/utils';
 
-import { getOnboardingData, getOnboardingStatusFields, updateOnboardingInfo } from './onboarding.service';
+import {
+    getAcademicOptions,
+    getOnboardingData,
+    getOnboardingStatusFields,
+    updateOnboardingInfo,
+} from './onboarding.service';
 import type { onboardingSchema } from './onboarding.schema';
 
 type AuthedContext = { session: AuthenticatedSession; set: { status?: number | keyof StatusMap } };
@@ -63,3 +68,7 @@ export const getOnboardingInfo = async ({
 
     return apiSuccess({ currentUser });
 };
+
+export const getAcademicOptionsController = async (): Promise<
+    ApiResponse<Awaited<ReturnType<typeof getAcademicOptions>>>
+> => apiSuccess(await getAcademicOptions());
