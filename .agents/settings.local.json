@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cmd /c mklink /J .agents .claude)"
+    ]
+  }
+}

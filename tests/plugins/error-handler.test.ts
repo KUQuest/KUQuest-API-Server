@@ -21,6 +21,29 @@ describe('errorHandlerPlugin', () => {
     });
   });
 
+  it('maps an unparseable body to status 400 without echoing the parser', async () => {
+    const parsingPlugin = new Elysia({ name: 'parsing' }).post('/parse', ({ body }) => body, {
+      body: t.Object({ field: t.String() }),
+    });
+
+    const app = new Elysia().use(errorHandlerPlugin).use(parsingPlugin);
+
+    const res = await app.handle(
+      new Request('http://localhost/parse', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{not json',
+      }),
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body).toEqual({
+      success: false,
+      error: { code: 'PARSE', message: 'Malformed request body' },
+    });
+  });
+
   it('maps a VALIDATION error to status 400', async () => {
     const validatedPlugin = new Elysia({ name: 'validated' }).get(
       '/validate',

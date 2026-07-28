@@ -1,5 +1,5 @@
 {
-  "id": "4e5d681a-8e79-41d7-8d28-0840f3319a9f",
+  "id": "744dffe9-dc49-4b77-bb11-d02b5a641283",
   "prevId": "e4d420d1-fb3f-4ada-b61a-4fed6efc6dc5",
   "version": "7",
   "dialect": "postgresql",
@@ -690,7 +690,7 @@
       "checkConstraints": {
         "auth_user_academic_year_check": {
           "name": "auth_user_academic_year_check",
-          "value": "\"auth_user\".\"academic_year\" IS NULL OR (\"auth_user\".\"academic_year\" >= 1000 AND \"auth_user\".\"academic_year\" <= 9999)"
+          "value": "\"auth_user\".\"academic_year\" IS NULL OR (\"auth_user\".\"academic_year\" >= 1 AND \"auth_user\".\"academic_year\" <= 8)"
         }
       },
       "isRLSEnabled": false
@@ -809,6 +809,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
