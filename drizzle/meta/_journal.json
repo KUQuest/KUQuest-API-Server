@@ -29,6 +29,13 @@
       "when": 1785143463103,
       "tag": "0003_small_tigra",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785230369737,
+      "tag": "0004_bent_frightful_four",
+      "breakpoints": true
     }
   ]
 }
