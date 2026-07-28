@@ -22,8 +22,8 @@ export const authGuard = new Elysia({ name: 'auth-guard' })
 
 export type AuthenticatedSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
 
-// The context every controller behind this guard receives. Declared here so each new
-// module types against the guard rather than restating its shape.
+// The context every controller behind this guard receives, declared beside the guard
+// that produces it rather than restated by each controller that consumes it.
 export type AuthedContext = {
   session: AuthenticatedSession;
   set: { status?: number | keyof StatusMap };

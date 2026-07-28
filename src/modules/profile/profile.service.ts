@@ -11,14 +11,18 @@ import type { StoredAvatar } from './profile.storage';
 
 type ProfileUpdate = Static<typeof profileUpdateSchema>;
 
-export const majorExists = async (majorId: string) => {
-  const [row] = await db
-    .select({ id: major.id })
-    .from(major)
-    .where(eq(major.id, majorId))
-    .limit(1);
+export type ProfileUpdateOutcome = 'updated' | 'student-not-found' | 'major-not-found';
 
-  return Boolean(row);
+const foreignKeyViolation = '23503';
+
+// Drizzle wraps the driver's error, so the SQLSTATE that names the cause sits further
+// down the chain than the error we are handed.
+const isMissingMajor = (error: unknown): boolean => {
+  if (typeof error !== 'object' || error === null) return false;
+
+  if ((error as { code?: unknown }).code === foreignKeyViolation) return true;
+
+  return isMissingMajor((error as { cause?: unknown }).cause);
 };
 
 const studentExists = async (userId: string) => {
@@ -31,19 +35,34 @@ const studentExists = async (userId: string) => {
   return Boolean(row);
 };
 
-/** Reports whether the student was found; a write that matched nobody is not a success. */
-export const updateProfile = async (userId: string, data: ProfileUpdate) => {
+/**
+ * A write that matched nobody is not a success, and neither is one naming a major that
+ * is not there. The foreign key decides the latter: checking first would only tell us
+ * what was true a moment ago, and the write would still fail if it changed since.
+ */
+export const updateProfile = async (
+  userId: string,
+  data: ProfileUpdate,
+): Promise<ProfileUpdateOutcome> => {
   // A request that changes nothing still has to say whether the student is there, and
   // Drizzle rejects an empty update, so ask the row directly.
-  if (Object.keys(data).length === 0) return studentExists(userId);
+  if (Object.keys(data).length === 0) {
+    return (await studentExists(userId)) ? 'updated' : 'student-not-found';
+  }
 
-  const updated = await db
-    .update(authUser)
-    .set(data)
-    .where(eq(authUser.id, userId))
-    .returning({ id: authUser.id });
+  try {
+    const updated = await db
+      .update(authUser)
+      .set(data)
+      .where(eq(authUser.id, userId))
+      .returning({ id: authUser.id });
 
-  return updated.length > 0;
+    return updated.length > 0 ? 'updated' : 'student-not-found';
+  } catch (error) {
+    if (isMissingMajor(error)) return 'major-not-found';
+
+    throw error;
+  }
 };
 
 export const getProfile = async (userId: string) => {

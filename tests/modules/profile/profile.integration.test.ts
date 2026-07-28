@@ -1,8 +1,8 @@
+import { app } from '@/app';
+
 import { randomUUID } from 'node:crypto';
 
 import { describe, expect, it } from 'bun:test';
-
-import { app } from '@/app';
 
 const patchProfile = (body: unknown) =>
   app.handle(

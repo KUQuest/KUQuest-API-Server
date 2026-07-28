@@ -1,6 +1,8 @@
 import { db } from '@/database/client';
-import { setAvatar } from '@/modules/profile/profile.controller';
+import { getOwnProfile, setAvatar, updateOwnProfile } from '@/modules/profile/profile.controller';
+import * as profileService from '@/modules/profile/profile.service';
 import {
+  AvatarLinkUnavailableError,
   AvatarUploadError,
   avatarStorage,
 } from '@/modules/profile/profile.storage';
@@ -165,5 +167,141 @@ describe('setAvatar', () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain('secret RustFS detail');
+  });
+});
+
+const storedProfile = {
+  email: 'student@ku.th',
+  firstName: 'Student',
+  lastName: 'One',
+  bio: null,
+  telephone: null,
+  studentId: null,
+  academicYear: null,
+  major: null,
+  avatar: null,
+};
+
+const storedAvatar = {
+  fileId,
+  bucket: 'kuquest',
+  objectKey: `avatars/${studentAuthId}/current.png`,
+};
+
+const invokeGetOwnProfile = () => {
+  const set: { status?: number | string } = {};
+
+  return { result: getOwnProfile({ session: session as never, set: set as never }), set };
+};
+
+const invokeUpdateOwnProfile = (body: Record<string, unknown> = { bio: 'a new bio' }) => {
+  const set: { status?: number | string } = {};
+
+  return {
+    result: updateOwnProfile({
+      body: body as never,
+      session: session as never,
+      set: set as never,
+    }),
+    set,
+  };
+};
+
+describe('getOwnProfile', () => {
+  it('turns a stored avatar reference into a link that expires', async () => {
+    spyOn(profileService, 'getProfile').mockResolvedValue({
+      ...storedProfile,
+      avatar: storedAvatar,
+    });
+    spyOn(avatarStorage, 'linkFor').mockReturnValue('https://storage.test/signed-link');
+
+    const { result, set } = invokeGetOwnProfile();
+
+    expect(await result).toEqual({
+      success: true,
+      data: { ...storedProfile, avatar: { fileId, url: 'https://storage.test/signed-link' } },
+    });
+    expect(set.status).toBeUndefined();
+    expect(avatarStorage.linkFor).toHaveBeenCalledWith(storedAvatar);
+  });
+
+  it('reports no avatar when the student has none, without asking storage', async () => {
+    spyOn(profileService, 'getProfile').mockResolvedValue(storedProfile);
+    spyOn(avatarStorage, 'linkFor');
+
+    const { result } = invokeGetOwnProfile();
+
+    expect((await result) as { data: { avatar: unknown } }).toHaveProperty('data.avatar', null);
+    expect(avatarStorage.linkFor).not.toHaveBeenCalled();
+  });
+
+  it('still answers with the profile when the avatar link cannot be built', async () => {
+    spyOn(profileService, 'getProfile').mockResolvedValue({
+      ...storedProfile,
+      avatar: storedAvatar,
+    });
+    spyOn(avatarStorage, 'linkFor').mockImplementation(() => {
+      throw new AvatarLinkUnavailableError('Object storage is not configured');
+    });
+
+    const { result, set } = invokeGetOwnProfile();
+
+    expect(await result).toEqual({ success: true, data: storedProfile });
+    expect(set.status).toBeUndefined();
+  });
+
+  it('reports a missing student as not found rather than a server fault', async () => {
+    spyOn(profileService, 'getProfile').mockResolvedValue(undefined);
+
+    const { result, set } = invokeGetOwnProfile();
+    const body = await result;
+
+    expect(set.status).toBe(404);
+    expect(body).toEqual({
+      success: false,
+      error: { code: 'USER_NOT_FOUND', message: 'User not found' },
+    });
+  });
+});
+
+describe('updateOwnProfile', () => {
+  it('answers a completed update without echoing the profile back', async () => {
+    spyOn(profileService, 'updateProfile').mockResolvedValue('updated');
+
+    const { result, set } = invokeUpdateOwnProfile();
+
+    expect(await result).toEqual({ success: true });
+    expect(set.status).toBeUndefined();
+    expect(profileService.updateProfile).toHaveBeenCalledWith(studentAuthId, {
+      bio: 'a new bio',
+    });
+  });
+
+  it('reports a missing student as not found', async () => {
+    spyOn(profileService, 'updateProfile').mockResolvedValue('student-not-found');
+
+    const { result, set } = invokeUpdateOwnProfile();
+    const body = await result;
+
+    expect(set.status).toBe(404);
+    expect(body).toEqual({
+      success: false,
+      error: { code: 'USER_NOT_FOUND', message: 'User not found' },
+    });
+  });
+
+  it('reports an unknown major as the caller mistake it is', async () => {
+    spyOn(profileService, 'updateProfile').mockResolvedValue('major-not-found');
+
+    const { result, set } = invokeUpdateOwnProfile({
+      majorId: '018f47a7-1c7d-7c98-9a11-690d7e834300',
+    });
+    const body = await result;
+
+    expect(set.status).toBe(400);
+    expect(body).toEqual({
+      success: false,
+      error: { code: 'MAJOR_NOT_FOUND', message: 'Major not found' },
+    });
   });
 });

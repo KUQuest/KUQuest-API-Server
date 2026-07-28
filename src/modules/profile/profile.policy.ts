@@ -9,7 +9,7 @@ const editableFields = new Set(Object.keys(profileUpdateSchema.properties));
 // request that writes a field this endpoint does not own would look like it succeeded.
 // `normalize: false` fixes the first case but only from the root application, where it
 // would change every other module's behaviour too.
-const isRejectable = (body: unknown) => {
+const isUnacceptableUpdateBody = (body: unknown) => {
   if (body === undefined || body === null) return false;
 
   if (typeof body !== 'object' || Array.isArray(body)) return true;
@@ -23,5 +23,7 @@ const isRejectable = (body: unknown) => {
  * the rejection indistinguishable from every other rejected body, status and code alike.
  */
 export const rejectUnknownProfileFields = ({ body }: { body: unknown }) => {
-  if (isRejectable(body)) throw new ValidationError('body', profileUpdateSchema, body);
+  if (isUnacceptableUpdateBody(body)) {
+    throw new ValidationError('body', profileUpdateSchema, body);
+  }
 };

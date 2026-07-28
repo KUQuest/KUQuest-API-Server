@@ -12,7 +12,6 @@ import type {
 import {
   getPreviousAvatarFile,
   getProfile,
-  majorExists,
   markAvatarDeleted,
   replaceStudentAvatar,
   updateProfile,
@@ -25,6 +24,8 @@ import {
 } from './profile.storage';
 
 type Profile = Static<typeof profileResponseSchema>['data'];
+
+type StoredProfileAvatar = NonNullable<Awaited<ReturnType<typeof getProfile>>>['avatar'];
 
 const debugAvatarUpload = (message: string, details?: unknown): void => {
   if (process.env.NODE_ENV !== 'test') {
@@ -54,6 +55,21 @@ const userNotFound = (set: AuthedContext['set']) => {
   return apiError('USER_NOT_FOUND', 'User not found');
 };
 
+// The stored reference becomes a link only here, at the moment of answering, so nothing
+// durable ever holds a storage URL. A profile is still readable without its picture, so
+// a storage problem costs the caller the image rather than the whole response.
+const describeAvatar = (avatar: StoredProfileAvatar): Profile['avatar'] => {
+  if (!avatar) return null;
+
+  try {
+    return { fileId: avatar.fileId, url: avatarStorage.linkFor(avatar) };
+  } catch (error) {
+    console.error('Building the avatar link failed', error);
+
+    return null;
+  }
+};
+
 export const getOwnProfile = async ({
   session,
   set,
@@ -64,14 +80,7 @@ export const getOwnProfile = async ({
 
   const { avatar, ...rest } = profile;
 
-  return apiSuccess({
-    ...rest,
-    // The stored reference becomes a link only here, at the moment of answering, so
-    // nothing durable ever holds a storage URL.
-    avatar: avatar
-      ? { fileId: avatar.fileId, url: avatarStorage.url(avatar.bucket, avatar.objectKey) }
-      : null,
-  });
+  return apiSuccess({ ...rest, avatar: describeAvatar(avatar) });
 };
 
 export const updateOwnProfile = async ({
@@ -79,14 +88,14 @@ export const updateOwnProfile = async ({
   body,
   set,
 }: AuthedContext & { body: Static<typeof profileUpdateSchema> }): Promise<ApiResponse> => {
-  if (body.majorId && !(await majorExists(body.majorId))) {
+  const outcome = await updateProfile(session.user.id, body);
+
+  if (outcome === 'student-not-found') return userNotFound(set);
+
+  if (outcome === 'major-not-found') {
     set.status = 400;
     return apiError('MAJOR_NOT_FOUND', 'Major not found');
   }
-
-  const updated = await updateProfile(session.user.id, body);
-
-  if (!updated) return userNotFound(set);
 
   return apiSuccess();
 };

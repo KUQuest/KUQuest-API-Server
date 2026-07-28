@@ -1,18 +1,26 @@
-import { randomUUID } from 'node:crypto';
-
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
-
 import { db, sql } from '@/database/client';
 import { faculty, major } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
   getProfile,
-  majorExists,
   replaceStudentAvatar,
   updateProfile,
 } from '@/modules/profile/profile.service';
 
+import { randomUUID } from 'node:crypto';
+
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test';
 import { eq, inArray } from 'drizzle-orm';
 
 const studentA = `test-profile-a-${randomUUID()}`;
@@ -37,7 +45,7 @@ beforeAll(async () => {
     await sql`select 1`;
   } catch (cause) {
     throw new Error(
-      'These tests need PostgreSQL. Start it with `docker compose up -d`, then apply the schema with `bun run db:migrate`.',
+      'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
       { cause },
     );
   }
@@ -232,29 +240,35 @@ describe('updating a profile', () => {
   });
 
   it('reports the student was found when something changed', async () => {
-    expect(await updateProfile(studentA, { bio: 'changed' })).toBe(true);
+    expect(await updateProfile(studentA, { bio: 'changed' })).toBe('updated');
   });
 
   it('reports the student was found even when nothing changed', async () => {
-    expect(await updateProfile(studentA, {})).toBe(true);
+    expect(await updateProfile(studentA, {})).toBe('updated');
   });
 
   it('refuses to call a write that matched nobody a success', async () => {
-    expect(await updateProfile(randomUUID(), { bio: 'nobody' })).toBe(false);
+    expect(await updateProfile(randomUUID(), { bio: 'nobody' })).toBe('student-not-found');
   });
 
   it('refuses an empty update against a student that does not exist', async () => {
-    expect(await updateProfile(randomUUID(), {})).toBe(false);
+    expect(await updateProfile(randomUUID(), {})).toBe('student-not-found');
   });
 });
 
-describe('checking a major', () => {
-  it('recognises a major that exists', async () => {
-    expect(await majorExists(majorId)).toBe(true);
+describe('choosing a major', () => {
+  it('accepts a major that exists', async () => {
+    expect(await updateProfile(studentB, { majorId })).toBe('updated');
+    expect((await getProfile(studentB))?.major?.id).toBe(majorId);
   });
 
-  it('rejects a major that does not exist', async () => {
-    expect(await majorExists(randomUUID())).toBe(false);
+  it('refuses a major that does not exist, without leaving the profile changed', async () => {
+    const before = await getProfile(studentA);
+
+    expect(await updateProfile(studentA, { bio: 'new', majorId: randomUUID() })).toBe(
+      'major-not-found',
+    );
+    expect(await getProfile(studentA)).toEqual(before!);
   });
 });
 
