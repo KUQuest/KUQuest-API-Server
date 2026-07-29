@@ -1,0 +1,2 @@
+ALTER TABLE "auth_user" DROP CONSTRAINT "auth_user_academic_year_check";--> statement-breakpoint
+ALTER TABLE "auth_user" ADD CONSTRAINT "auth_user_academic_year_check" CHECK ("auth_user"."academic_year" IS NULL OR ("auth_user"."academic_year" >= 1000 AND "auth_user"."academic_year" <= 9999));

@@ -43,7 +43,7 @@ export const authUser = pgTable(
     unique('auth_user_email_key').on(table.email),
     check(
       'auth_user_academic_year_check',
-      sql`${table.academicYear} IS NULL OR (${table.academicYear} >= 1 AND ${table.academicYear} <= 8)`,
+      sql`${table.academicYear} IS NULL OR (${table.academicYear} >= 1000 AND ${table.academicYear} <= 9999)`,
     ),
     index('auth_user_major_id_idx').on(table.majorId),
     uniqueIndex('auth_user_student_id_uidx')

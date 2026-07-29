@@ -12,6 +12,9 @@ describe('authentication integration', () => {
     expect(response.headers.get('content-type')).toContain('text/html');
     expect(body).toContain('KUQuest Auth Test');
     expect(body).toContain('/api/auth/sign-in/social');
+    expect(body).toContain('/api/v1/profile/avatar');
+    expect(body).toContain('upload-status');
+    expect(body).toContain('[avatar-upload] Response received');
     expect(body).toContain("window.location.protocol === 'file:'");
     expect(body).toContain('http://localhost:5000');
   });

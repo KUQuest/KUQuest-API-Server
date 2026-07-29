@@ -1,0 +1,88 @@
+-- Sources:
+-- https://www.ku.ac.th/en/faculty-bangkhen/faculty-bangkhen
+-- https://kuic.ku.ac.th/undergraduate-programs/
+-- Keep this migration idempotent so deployments can safely apply it to databases
+-- that already contain catalog rows.
+INSERT INTO "faculty" ("name") VALUES
+  ('Agriculture'),
+  ('Business Administration'),
+  ('Humanities'),
+  ('Economics'),
+  ('Science'),
+  ('Engineering'),
+  ('Agro-Industry'),
+  ('Management Sciences'),
+  ('Fisheries'),
+  ('Forestry'),
+  ('Education'),
+  ('Architecture'),
+  ('Social Sciences'),
+  ('Veterinary Medicine'),
+  ('Veterinary Technology'),
+  ('Environment'),
+  ('Medicine'),
+  ('Nurse'),
+  ('Pharmaceutical Sciences'),
+  ('Interdisciplinary Management and Technology'),
+  ('School of Integrated Science (SIS)'),
+  ('Engineering at Sriracha')
+ON CONFLICT ("name") DO NOTHING;
+--> statement-breakpoint
+INSERT INTO "major" ("faculty_id", "name")
+SELECT faculty.id, major.name
+FROM "faculty" AS faculty
+JOIN (VALUES
+  ('Agriculture', 'Tropical Agriculture'),
+  ('Business Administration', 'Marketing'),
+  ('Business Administration', 'Business Administration'),
+  ('Business Administration', 'Bachelor of Accountancy'),
+  ('Humanities', 'Communicative Thai Language for Foreigners'),
+  ('Humanities', 'Integrated Tourism Management'),
+  ('Economics', 'Economics'),
+  ('Economics', 'Entrepreneurial Economics'),
+  ('Science', 'Integrated Chemistry'),
+  ('Science', 'Bioscience and Technology'),
+  ('Science', 'Polymer Science and Technology'),
+  ('Engineering', 'Aerospace Engineering and Business Management'),
+  ('Engineering', 'Mechanical Engineering'),
+  ('Engineering', 'Electrical Engineering'),
+  ('Engineering', 'Digital Manufacturing and Robotics Integration Engineering'),
+  ('Engineering', 'Industrial Engineering'),
+  ('Engineering', 'Software and Knowledge Engineering'),
+  ('Engineering', 'Environmental Engineering'),
+  ('Engineering', 'Engineering'),
+  ('Engineering', 'Civil Engineering'),
+  ('Agro-Industry', 'Agro-Industrial Innovation and Technology'),
+  ('Management Sciences', 'International Business'),
+  ('Management Sciences', 'Management'),
+  ('Management Sciences', 'Digital Marketing and Branding'),
+  ('Management Sciences', 'Accounting'),
+  ('Management Sciences', 'Hospitality Industry'),
+  ('Management Sciences', 'Logistics Management'),
+  ('Fisheries', 'Fisheries Management'),
+  ('Fisheries', 'Fisheries Biology'),
+  ('Fisheries', 'Fishery Products'),
+  ('Fisheries', 'Aquaculture'),
+  ('Fisheries', 'Marine Science'),
+  ('Forestry', 'Forestry'),
+  ('Education', 'Education'),
+  ('Architecture', 'Architecture'),
+  ('Social Sciences', 'Psychology'),
+  ('Social Sciences', 'Law'),
+  ('Social Sciences', 'History'),
+  ('Social Sciences', 'Southeast Asian Studies'),
+  ('Social Sciences', 'Geography'),
+  ('Social Sciences', 'Political Science'),
+  ('Veterinary Medicine', 'Veterinary Medicine'),
+  ('Veterinary Technology', 'Veterinary Technology'),
+  ('Environment', 'Environmental Science'),
+  ('Medicine', 'Medicine'),
+  ('Nurse', 'Nursing'),
+  ('Pharmaceutical Sciences', 'Pharmaceutical Sciences'),
+  ('Interdisciplinary Management and Technology', 'Interdisciplinary Management and Technology'),
+  ('School of Integrated Science (SIS)', 'Knowledge of The Land for Sustainable Development'),
+  ('Engineering at Sriracha', 'Automotive Engineering'),
+  ('Engineering at Sriracha', 'Digital Manufacturing System Engineering'),
+  ('Engineering at Sriracha', 'Robotic and Automation Systems Engineering')
+) AS major(faculty_name, name) ON major.faculty_name = faculty.name
+ON CONFLICT ("faculty_id", "name") DO NOTHING;

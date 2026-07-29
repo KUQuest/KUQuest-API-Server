@@ -1,26 +1,25 @@
 import { t } from 'elysia';
 
 export const onboardingSchema = t.Object({
-    telephone : t.String({
+    telephone: t.Optional(t.String({
         pattern: '^0[6-9][0-9]-[0-9]{3}-[0-9]{4}$',
         example: '080-000-0000',
         error: 'Telephone number must be in the format 0XX-XXX-XXXX',
-
-
-    }),
-    majorId : t.String({
+    })),
+    majorId: t.Optional(t.String({
         format: 'uuid',
         example: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
-    }),
-    studentId : t.String({
+    })),
+    studentId: t.Optional(t.String({
         pattern: '^[0-9]{10}$',
         example: '6500000000',
         error: 'Student ID must be a 10-digit number',
-        
-    }),
-},{
+    })),
+    academicYear: t.Optional(t.Number({ minimum: 1000, maximum: 9999, multipleOf: 1 })),
+}, {
     additionalProperties: false,
-})
+    minProperties: 1,
+});
 
 export const onboardingResponseSchema = t.Object({
     success: t.Literal(true),
@@ -39,6 +38,19 @@ export const onboardingDataResponseSchema = t.Object({
             telephone: t.Nullable(t.String()),
             majorId: t.Nullable(t.String()),
             studentId: t.Nullable(t.String()),
+            academicYear: t.Nullable(t.Integer()),
         }),
     }),
 })
+
+export const academicOptionsResponseSchema = t.Object({
+    success: t.Literal(true),
+    data: t.Array(t.Object({
+        id: t.String({ format: 'uuid' }),
+        name: t.String(),
+        majors: t.Array(t.Object({
+            id: t.String({ format: 'uuid' }),
+            name: t.String(),
+        })),
+    })),
+});

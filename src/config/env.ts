@@ -18,6 +18,11 @@ export const env = {
   betterAuthSecret: process.env.BETTER_AUTH_SECRET,
   googleClientId: process.env.GOOGLE_CLIENT_ID,
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  s3Endpoint: process.env.S3_ENDPOINT,
+  s3Region: process.env.S3_REGION,
+  s3Bucket: process.env.S3_BUCKET,
+  s3AccessKeyId: process.env.S3_ACCESS_KEY_ID,
+  s3SecretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
   xenditSecretKey: process.env.XENDIT_SECRET_KEY,
   xenditWebhookToken: process.env.XENDIT_WEBHOOK_TOKEN,
   cmsOrigin: process.env.CMS_ORIGIN,
@@ -29,6 +34,11 @@ const requiredRuntimeVariables = {
   BETTER_AUTH_SECRET: env.betterAuthSecret,
   GOOGLE_CLIENT_ID: env.googleClientId,
   GOOGLE_CLIENT_SECRET: env.googleClientSecret,
+  S3_ENDPOINT: env.s3Endpoint,
+  S3_REGION: env.s3Region,
+  S3_BUCKET: env.s3Bucket,
+  S3_ACCESS_KEY_ID: env.s3AccessKeyId,
+  S3_SECRET_ACCESS_KEY: env.s3SecretAccessKey,
 } as const;
 
 export const validateRuntimeEnv = (): void => {

@@ -4,11 +4,17 @@ import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-re
 
 import { Elysia } from 'elysia';
 
-import { getOnboardingStatus, updateOnboarding, getOnboardingInfo } from './onboarding.controller';
 import {
-  onboardingSchema,
-  onboardingResponseSchema,
-  onboardingDataResponseSchema,
+    getAcademicOptionsController,
+    getOnboardingStatus,
+    updateOnboarding,
+    getOnboardingInfo,
+} from './onboarding.controller';
+import {
+    academicOptionsResponseSchema,
+    onboardingDataResponseSchema,
+    onboardingResponseSchema,
+    onboardingSchema,
 } from './onboarding.schema';
 
 export const onboardingRoute = new Elysia({
@@ -16,6 +22,16 @@ export const onboardingRoute = new Elysia({
     prefix: `${API_V1_PREFIX}/onboarding`,
 })
     .use(authGuard)
+    .get('/academic-options', getAcademicOptionsController, {
+        response: responses(academicOptionsResponseSchema, 401),
+        detail: {
+            tags: ['Onboarding'],
+            summary: 'List faculty and major options',
+            description: 'Lists the seeded faculties and their majors for the onboarding form',
+            operationId: 'getOnboardingAcademicOptions',
+            security: betterAuthSecurity,
+        },
+    })
     .get('/status', getOnboardingStatus, {
         response: responses(onboardingResponseSchema, 401, 404),
         detail: {
@@ -28,7 +44,7 @@ export const onboardingRoute = new Elysia({
     })
     .patch('/update', updateOnboarding, {
         body: onboardingSchema,
-        response: responses(apiSuccessSchema, 401, 400),
+        response: responses(apiSuccessSchema, 401, 400, 404, 409),
         detail: {
             tags: ['Onboarding'],
             summary: 'Update onboarding information',

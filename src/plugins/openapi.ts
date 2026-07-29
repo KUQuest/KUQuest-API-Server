@@ -30,8 +30,12 @@ export const openapiPlugin = openapi({
         description: 'Authenticated endpoints for completing and reading onboarding information.',
       },
       {
+        name: 'Profile',
+        description: 'Authenticated Student profile endpoints.',
+      },
+      {
         name: 'Certificates',
-        description: "Authenticated endpoints for managing the current user's profile certificates.",
+        description: "Authenticated endpoints for managing the current Student's profile certificates.",
       },
     ],
     components: authOpenAPIComponents,
