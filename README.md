@@ -228,7 +228,10 @@ src/
 │   └── schema/                # Database schemas grouped by concern
 ├── modules/
 │   ├── auth/                  # Auth config, policy, routes, and plugin
-│   └── health/                # Health route and response schema
+│   ├── certificate/           # Student profile certificates
+│   ├── health/                # Health route and response schema
+│   ├── onboarding/            # First sign-in details and academic options
+│   └── profile/               # Student profile fields and avatar
 ├── plugins/                   # Cross-cutting Elysia plugins
 ├── app.ts                     # Application composition
 └── index.ts                   # Runtime validation and HTTP startup
