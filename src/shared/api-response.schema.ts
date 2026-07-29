@@ -8,6 +8,11 @@ export const apiErrorSchema = t.Object({
     }),
 });
 
+// The success envelope for endpoints that return no data.
+export const apiSuccessSchema = t.Object({
+    success: t.Literal(true),
+});
+
 export const betterAuthSecurity = [{ betterAuthSession: [] }];
 
 type ErrorCode = 400 | 401 | 404;

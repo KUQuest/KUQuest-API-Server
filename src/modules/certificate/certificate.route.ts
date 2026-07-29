@@ -1,5 +1,5 @@
 import { authGuard } from '@/modules/auth';
-import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 
 import { Elysia } from 'elysia';
@@ -13,7 +13,6 @@ import {
 } from './certificate.controller';
 import {
   certificateCreateSchema,
-  certificateDeleteResponseSchema,
   certificateListResponseSchema,
   certificateParamsSchema,
   certificateResponseSchema,
@@ -71,7 +70,7 @@ export const certificateRoute = new Elysia({
   })
   .delete('/:certificateId', removeCertificate, {
     params: certificateParamsSchema,
-    response: responses(certificateDeleteResponseSchema, 400, 401, 404),
+    response: responses(apiSuccessSchema, 400, 401, 404),
     detail: {
       tags: ['Certificates'],
       summary: 'Delete a certificate',

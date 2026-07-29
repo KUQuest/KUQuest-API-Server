@@ -57,7 +57,3 @@ export const certificateListResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({ certificates: t.Array(certificateSchema) }),
 });
-
-export const certificateDeleteResponseSchema = t.Object({
-  success: t.Literal(true),
-});

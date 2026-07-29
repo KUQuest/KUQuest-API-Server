@@ -2,8 +2,8 @@ import { describe, expect, it } from 'bun:test';
 
 import { app } from '@/app';
 
-const CERTIFICATES_URL = 'http://localhost/api/v1/profile/certificates';
-const CERTIFICATE_ID = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
+const certificatesUrl = 'http://localhost/api/v1/profile/certificates';
+const certificateId = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
 
 const validBody = {
   name: 'AWS Certified Cloud Practitioner',
@@ -25,21 +25,21 @@ const unauthorized = {
 
 describe('certificate integration — authentication', () => {
   it('rejects an unauthenticated collection read', async () => {
-    const response = await app.handle(new Request(CERTIFICATES_URL));
+    const response = await app.handle(new Request(certificatesUrl));
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual(unauthorized);
   });
 
   it('rejects an unauthenticated single-record read', async () => {
-    const response = await app.handle(new Request(`${CERTIFICATES_URL}/${CERTIFICATE_ID}`));
+    const response = await app.handle(new Request(`${certificatesUrl}/${certificateId}`));
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual(unauthorized);
   });
 
   it('rejects an unauthenticated create', async () => {
-    const response = await app.handle(json('POST', CERTIFICATES_URL, validBody));
+    const response = await app.handle(json('POST', certificatesUrl, validBody));
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual(unauthorized);
@@ -47,7 +47,7 @@ describe('certificate integration — authentication', () => {
 
   it('rejects an unauthenticated update', async () => {
     const response = await app.handle(
-      json('PATCH', `${CERTIFICATES_URL}/${CERTIFICATE_ID}`, { name: 'Renamed' }),
+      json('PATCH', `${certificatesUrl}/${certificateId}`, { name: 'Renamed' }),
     );
 
     expect(response.status).toBe(401);
@@ -56,7 +56,7 @@ describe('certificate integration — authentication', () => {
 
   it('rejects an unauthenticated delete', async () => {
     const response = await app.handle(
-      new Request(`${CERTIFICATES_URL}/${CERTIFICATE_ID}`, { method: 'DELETE' }),
+      new Request(`${certificatesUrl}/${certificateId}`, { method: 'DELETE' }),
     );
 
     expect(response.status).toBe(401);
@@ -77,46 +77,46 @@ describe('certificate integration — validation', () => {
   };
 
   it('rejects a create missing required fields', async () => {
-    await expectValidationError(json('POST', CERTIFICATES_URL, { name: 'Only a name' }));
+    await expectValidationError(json('POST', certificatesUrl, { name: 'Only a name' }));
   });
 
   it('rejects an empty name', async () => {
-    await expectValidationError(json('POST', CERTIFICATES_URL, { ...validBody, name: '' }));
+    await expectValidationError(json('POST', certificatesUrl, { ...validBody, name: '' }));
   });
 
   it('rejects an empty issuer', async () => {
-    await expectValidationError(json('POST', CERTIFICATES_URL, { ...validBody, issuer: '' }));
+    await expectValidationError(json('POST', certificatesUrl, { ...validBody, issuer: '' }));
   });
 
   it('rejects a malformed issuedAt', async () => {
     await expectValidationError(
-      json('POST', CERTIFICATES_URL, { ...validBody, issuedAt: 'last tuesday' }),
+      json('POST', certificatesUrl, { ...validBody, issuedAt: 'last tuesday' }),
     );
   });
 
   it('rejects a malformed verifyUrl', async () => {
     await expectValidationError(
-      json('POST', CERTIFICATES_URL, { ...validBody, verifyUrl: 'not a url' }),
+      json('POST', certificatesUrl, { ...validBody, verifyUrl: 'not a url' }),
     );
   });
 
   it('rejects a malformed verifyUrl on update', async () => {
     await expectValidationError(
-      json('PATCH', `${CERTIFICATES_URL}/${CERTIFICATE_ID}`, { verifyUrl: 'not a url' }),
+      json('PATCH', `${certificatesUrl}/${certificateId}`, { verifyUrl: 'not a url' }),
     );
   });
 
   it('rejects a non-uuid certificate id on read', async () => {
-    await expectValidationError(new Request(`${CERTIFICATES_URL}/not-a-uuid`));
+    await expectValidationError(new Request(`${certificatesUrl}/not-a-uuid`));
   });
 
   it('rejects a non-uuid certificate id on update', async () => {
-    await expectValidationError(json('PATCH', `${CERTIFICATES_URL}/not-a-uuid`, { name: 'x' }));
+    await expectValidationError(json('PATCH', `${certificatesUrl}/not-a-uuid`, { name: 'x' }));
   });
 
   it('rejects a non-uuid certificate id on delete', async () => {
     await expectValidationError(
-      new Request(`${CERTIFICATES_URL}/not-a-uuid`, { method: 'DELETE' }),
+      new Request(`${certificatesUrl}/not-a-uuid`, { method: 'DELETE' }),
     );
   });
 });

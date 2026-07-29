@@ -21,6 +21,10 @@ const certificateColumns = {
 // the route validates.
 export type CertificateInput = Static<typeof certificateCreateSchema>;
 
+// One name for a certificate row as callers receive it — inferred from the query
+// so it tracks the `certificateColumns` projection, and so excludes `userId`.
+export type Certificate = Awaited<ReturnType<typeof listCertificates>>[number];
+
 // Every query is scoped by `userId`, so a certificate belonging to another
 // Student is indistinguishable from one that does not exist — ownership is
 // enforced by the query itself rather than by a separate read-then-check.

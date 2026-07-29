@@ -83,6 +83,9 @@ jobs:
           git cat-file -e "$MIGRATION_BASE^{commit}"
           printf 'MIGRATION_BASE_REF=%s\n' "$MIGRATION_BASE" >> "$GITHUB_ENV"
 
+      - name: Apply migrations before validation
+        run: bun run db:migrate
+
       - name: Run validation
         run: bun run check
 

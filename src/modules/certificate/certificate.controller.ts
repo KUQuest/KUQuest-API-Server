@@ -1,11 +1,11 @@
-import type { AuthenticatedSession } from '@/modules/auth';
+import type { AuthedContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 
 import type { Static } from 'elysia';
-import type { StatusMap } from 'elysia/utils';
 
 import type { certificateCreateSchema, certificateUpdateSchema } from './certificate.schema';
+import type { Certificate } from './certificate.service';
 import {
   createCertificate,
   deleteCertificate,
@@ -14,20 +14,13 @@ import {
   updateCertificate,
 } from './certificate.service';
 
-type AuthedContext = {
-  session: AuthenticatedSession;
-  set: { status?: number | keyof StatusMap };
-};
-
 type CertificateParams = { params: { certificateId: string } };
 
-type CertificateRecord = Awaited<ReturnType<typeof findCertificate>>;
-
-const NOT_FOUND = apiError('CERTIFICATE_NOT_FOUND', 'Certificate not found');
+const notFound = apiError('CERTIFICATE_NOT_FOUND', 'Certificate not found');
 
 export const getCertificates = async ({
   session,
-}: AuthedContext): Promise<ApiResponse<{ certificates: NonNullable<CertificateRecord>[] }>> => {
+}: AuthedContext): Promise<ApiResponse<{ certificates: Certificate[] }>> => {
   const certificates = await listCertificates(session.user.id);
 
   return apiSuccess({ certificates });
@@ -37,14 +30,12 @@ export const getCertificate = async ({
   session,
   params,
   set,
-}: AuthedContext & CertificateParams): Promise<
-  ApiResponse<{ certificate: NonNullable<CertificateRecord> }>
-> => {
+}: AuthedContext & CertificateParams): Promise<ApiResponse<{ certificate: Certificate }>> => {
   const certificate = await findCertificate(session.user.id, params.certificateId);
 
   if (!certificate) {
     set.status = 404;
-    return NOT_FOUND;
+    return notFound;
   }
 
   return apiSuccess({ certificate });
@@ -54,7 +45,7 @@ export const postCertificate = async ({
   session,
   body,
 }: AuthedContext & { body: Static<typeof certificateCreateSchema> }): Promise<
-  ApiResponse<{ certificate: NonNullable<CertificateRecord> }>
+  ApiResponse<{ certificate: Certificate }>
 > => {
   const certificate = await createCertificate(session.user.id, body);
 
@@ -68,13 +59,13 @@ export const patchCertificate = async ({
   set,
 }: AuthedContext &
   CertificateParams & { body: Static<typeof certificateUpdateSchema> }): Promise<
-  ApiResponse<{ certificate: NonNullable<CertificateRecord> }>
+  ApiResponse<{ certificate: Certificate }>
 > => {
   const certificate = await updateCertificate(session.user.id, params.certificateId, body);
 
   if (!certificate) {
     set.status = 404;
-    return NOT_FOUND;
+    return notFound;
   }
 
   return apiSuccess({ certificate });
@@ -89,7 +80,7 @@ export const removeCertificate = async ({
 
   if (!deleted) {
     set.status = 404;
-    return NOT_FOUND;
+    return notFound;
   }
 
   return apiSuccess();
