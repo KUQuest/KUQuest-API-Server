@@ -65,8 +65,8 @@ describe('certificate integration — authentication', () => {
 });
 
 describe('certificate integration — validation', () => {
-  // Elysia validates body/params before the guard's onBeforeHandle runs, so these
-  // assert the validation rules without needing an authenticated session.
+  // Elysia validates body and params before the guard's onBeforeHandle runs (ADR
+  // 0003), so these reach the validation rules without an authenticated Session.
   const expectValidationError = async (request: Request) => {
     const response = await app.handle(request);
     const body = await response.json();

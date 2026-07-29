@@ -12,10 +12,13 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { inArray } from 'drizzle-orm';
 
-// Ownership isolation is the security-critical half of this module and can only be
-// exercised against a migrated database, which CI provides. The guard keeps the
-// suite from failing for contributors with no local database; to run it, use
-// `docker compose up -d postgres && bun run db:migrate` with DATABASE_URL set.
+// Ownership sits at the database seam for the reason ADR 0002 gives for Profile: no
+// test here can hold a Session, so a successful read or write is unreachable over
+// HTTP, and only a real database with two Students in it can show that a `where`
+// clause selected the right row. Fold these into the integration test once BE-50
+// lands a Session fixture — until then, moving them up stops them testing anything.
+// The guard keeps the suite from failing for contributors with no local database;
+// run it with `docker compose up -d postgres && bun run db:migrate`.
 const databaseIsMigrated = await db
   .select()
   .from(profileCertificate)
