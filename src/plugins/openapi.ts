@@ -29,6 +29,10 @@ export const openapiPlugin = openapi({
         name: 'Onboarding',
         description: 'Authenticated endpoints for completing and reading onboarding information.',
       },
+      {
+        name: 'Certificates',
+        description: "Authenticated endpoints for managing the current user's profile certificates.",
+      },
     ],
     components: authOpenAPIComponents,
     paths: authOpenAPIPaths,
