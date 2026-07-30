@@ -36,8 +36,20 @@ const avatarObject = { bucket: 'kuquest-test', objectKey: `avatars/${studentA}/c
 
 // Every test starts from these values, so no test depends on what an earlier one wrote.
 const startingState = {
-  [studentA]: { firstName: 'Student', lastName: 'One', bio: 'first bio', telephone: '0800000001' },
-  [studentB]: { firstName: 'Student', lastName: 'Two', bio: 'second bio', telephone: '0800000002' },
+  [studentA]: {
+    firstName: 'Student',
+    lastName: 'One',
+    bio: 'first bio',
+    telephone: '0800000001',
+    academicYear: 2025,
+  },
+  [studentB]: {
+    firstName: 'Student',
+    lastName: 'Two',
+    bio: 'second bio',
+    telephone: '0800000002',
+    academicYear: null,
+  },
 };
 
 beforeAll(async () => {
@@ -151,6 +163,45 @@ describe('reading a profile', () => {
 
   it('finds nothing for a student that does not exist', async () => {
     expect(await getProfile(randomUUID())).toBeUndefined();
+  });
+
+  it('returns every field the profile owns, not only the ones a caller reads', async () => {
+    const profile = await getProfile(studentA);
+
+    expect(profile?.email).toBe(`${studentA}@ku.th`);
+    expect(profile?.firstName).toBe('Student');
+    expect(profile?.lastName).toBe('One');
+    expect(profile?.bio).toBe('first bio');
+    expect(profile?.telephone).toBe('0800000001');
+    expect(profile?.studentId).toMatch(/^65\d{8}$/);
+    expect(profile?.academicYear).toBe(2025);
+  });
+
+  it('returns a field that was never filled in as null rather than leaving it out', async () => {
+    await db
+      .update(authUser)
+      .set({ bio: null, telephone: null })
+      .where(eq(authUser.id, studentB));
+
+    const profile = await getProfile(studentB);
+
+    // An absent key and a null one are both undefined through optional access, so
+    // only the key list separates "returned as null" from "dropped from the result".
+    expect(Object.keys(profile!).sort()).toEqual([
+      'academicYear',
+      'avatar',
+      'bio',
+      'email',
+      'firstName',
+      'lastName',
+      'major',
+      'studentId',
+      'telephone',
+    ]);
+    expect(profile?.bio).toBeNull();
+    expect(profile?.telephone).toBeNull();
+    expect(profile?.studentId).toBeNull();
+    expect(profile?.academicYear).toBeNull();
   });
 });
 
