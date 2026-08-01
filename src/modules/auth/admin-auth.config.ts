@@ -5,8 +5,11 @@ import * as schema from '@/database/schema/auth.schema';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 
-const configurationPlaceholder = (name: string): string =>
-  `missing-${name}-configure-it-before-starting-the-server`;
+import {
+  configurationPlaceholder,
+  defaultCookieAttributes,
+  getTrustedOrigins,
+} from './auth.config.shared';
 
 type AdminAuthOptions = {
   allowSignUp?: boolean;
@@ -79,16 +82,9 @@ export const createAdminAuth = ({
     },
     advanced: {
       cookiePrefix: 'kuquest-admin',
-      defaultCookieAttributes: {
-        sameSite: 'none',
-        secure: true,
-        httpOnly: true,
-      },
+      defaultCookieAttributes,
     },
-    trustedOrigins: [
-      env.cmsOrigin || 'http://localhost:5000',
-      'http://localhost:3000',
-    ],
+    trustedOrigins: getTrustedOrigins(),
     databaseHooks: markEmailVerified
       ? {
           user: {

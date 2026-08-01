@@ -1,5 +1,5 @@
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
-import { adminGuard, enabledAdminGuard } from '@/modules/auth/admin.guard';
+import { enabledAdminGuard } from '@/modules/auth/admin-auth.guard';
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import {
@@ -17,7 +17,6 @@ import { eq } from 'drizzle-orm';
 const adminEmail = `admin-${randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';
 const protectedAdminApp = new Elysia({ name: 'admin-auth-test-app' })
-  .use(adminGuard)
   .use(enabledAdminGuard)
   .get('/admin-only', ({ admin }) => ({ email: admin.email }));
 
@@ -112,7 +111,7 @@ describe('Admin authentication with PostgreSQL', () => {
     expect(after).toHaveLength(before.length);
   });
 
-  it('allows a valid Admin session through adminGuard', async () => {
+  it('allows a valid Admin session through adminAuthenticationGuard', async () => {
     const loginResponse = await requestAdminLogin(adminPassword);
     const cookie = getCookieHeader(loginResponse);
     const response = await protectedAdminApp.handle(

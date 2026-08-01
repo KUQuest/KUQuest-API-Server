@@ -8,6 +8,12 @@ const parsePort = (value: string | undefined): number => {
   return port;
 };
 
+export const assertAuthSecretLength = (name: string, value: string): void => {
+  if (value.length < 32) {
+    throw new Error(`${name} must be at least 32 characters long`);
+  }
+};
+
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   host: process.env.HOST ?? '0.0.0.0',
@@ -52,11 +58,11 @@ export const validateRuntimeEnv = (): void => {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
 
-  if (env.betterAuthSecret && env.betterAuthSecret.length < 32) {
-    throw new Error('BETTER_AUTH_SECRET must be at least 32 characters long');
+  if (env.betterAuthSecret) {
+    assertAuthSecretLength('BETTER_AUTH_SECRET', env.betterAuthSecret);
   }
 
-  if (env.adminBetterAuthSecret && env.adminBetterAuthSecret.length < 32) {
-    throw new Error('ADMIN_BETTER_AUTH_SECRET must be at least 32 characters long');
+  if (env.adminBetterAuthSecret) {
+    assertAuthSecretLength('ADMIN_BETTER_AUTH_SECRET', env.adminBetterAuthSecret);
   }
 };

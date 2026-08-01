@@ -24,7 +24,7 @@ export const authOpenAPIComponents = {
       in: 'cookie',
       name: 'better-auth.session_token',
       description:
-        'Better Auth session cookie. Browsers receive it after a successful Google callback and must send requests with credentials enabled. In Expo Mobile, @better-auth/expo stores and sends this cookie through SecureStore.',
+        'Better Auth session cookie. Browsers receive it after a successful Google callback and must send requests with credentials enabled.',
     },
     betterAuthAdminSession: {
       type: 'apiKey',
@@ -192,8 +192,7 @@ export const authOpenAPIComponents = {
         callbackURL: {
           type: 'string',
           format: 'uri',
-          description:
-            'Trusted application URL used after successful sign-in. Use kuquest:// for the Expo Mobile app callback.',
+          description: 'Trusted application URL used after successful sign-in.',
         },
         errorCallbackURL: {
           type: 'string',
@@ -253,33 +252,14 @@ export const authOpenAPIPaths = {
     post: {
       tags: ['Auth'],
       summary: 'Start Google sign-in',
-      description: `Creates a state- and PKCE-protected Google OAuth request. Only verified Google Workspace accounts in the ${ALLOWED_EMAIL_DOMAIN} domain may complete sign-in. For Expo Mobile, use the Better Auth Expo client; it adds the Expo origin, opens the authorization proxy, and stores the resulting session cookie in SecureStore.`,
+      description: `Creates a state- and PKCE-protected Google OAuth request. Only verified Google Workspace accounts in the ${ALLOWED_EMAIL_DOMAIN} domain may complete sign-in.`,
       operationId: 'signInWithGoogle',
       security: [],
-      parameters: [
-        {
-          name: 'expo-origin',
-          in: 'header',
-          required: false,
-          description:
-            'Expo Mobile app origin. Set to kuquest:// when calling the API directly; the @better-auth/expo client adds this header automatically.',
-          schema: { type: 'string', example: 'kuquest://' },
-        },
-      ],
       requestBody: {
         required: true,
         content: {
           'application/json': {
             schema: { $ref: '#/components/schemas/SocialSignInRequest' },
-            examples: {
-              expoMobile: {
-                summary: 'Expo Mobile Google sign-in',
-                value: {
-                  provider: 'google',
-                  callbackURL: 'kuquest://',
-                },
-              },
-            },
           },
         },
       },

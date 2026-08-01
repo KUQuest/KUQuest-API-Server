@@ -15,7 +15,7 @@ export type AdminContext = {
   set: { status?: number | keyof StatusMap };
 };
 
-const adminAuthenticationGuard = new Elysia({ name: 'admin-authentication-guard' })
+export const adminAuthenticationGuard = new Elysia({ name: 'admin-authentication-guard' })
   .derive({ as: 'scoped' }, async ({ request }) => {
     const session = await adminAuth.api.getSession({ headers: request.headers });
     return { adminSession: session };
@@ -35,19 +35,18 @@ const adminAuthenticationGuard = new Elysia({ name: 'admin-authentication-guard'
     };
   });
 
-export const adminGuard = adminAuthenticationGuard;
+export const enabledAdminGuard = (app: Elysia) =>
+  app.use(adminAuthenticationGuard).onBeforeHandle(
+    { as: 'scoped' },
+    ({ adminSession, set }) => {
+      if (!adminSession) {
+        set.status = 401;
+        return apiError('UNAUTHORIZED', 'Unauthorized');
+      }
 
-export const enabledAdminGuard = new Elysia({ name: 'enabled-admin-guard' }).onBeforeHandle(
-  { as: 'scoped' },
-  (context) => {
-    const { adminSession, set } = context as unknown as Pick<
-      AdminContext,
-      'adminSession' | 'set'
-    >;
-
-    if (adminSession.user.disabledAt) {
-      set.status = 403;
-      return apiError('ADMIN_DISABLED', 'Admin account is disabled');
-    }
-  },
-);
+      if (adminSession.user.disabledAt) {
+        set.status = 403;
+        return apiError('ADMIN_DISABLED', 'Admin account is disabled');
+      }
+    },
+  );

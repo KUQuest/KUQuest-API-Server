@@ -1,7 +1,8 @@
-import { createAdminAuth } from '@/modules/auth/admin-auth.config';
-import { isValidAdminPassword } from '@/modules/auth/admin-auth.policy';
+import { assertAuthSecretLength } from '@/config/env';
 import { db, sql } from '@/database/client';
 import { authAdmin } from '@/database/schema/auth.schema';
+import { createAdminAuth } from '@/modules/auth/admin-auth.config';
+import { isValidAdminPassword } from '@/modules/auth/admin-auth.policy';
 
 import { sql as drizzleSql } from 'drizzle-orm';
 
@@ -21,9 +22,7 @@ const main = async (): Promise<void> => {
   const firstName = readRequiredEnv('ADMIN_FIRST_NAME');
   const lastName = readRequiredEnv('ADMIN_LAST_NAME');
 
-  if (adminSecret.length < 32) {
-    throw new Error('ADMIN_BETTER_AUTH_SECRET must be at least 32 characters long');
-  }
+  assertAuthSecretLength('ADMIN_BETTER_AUTH_SECRET', adminSecret);
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error('ADMIN_EMAIL must be a valid email address');
