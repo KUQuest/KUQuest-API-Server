@@ -56,6 +56,12 @@ Better Auth is mounted at `/api/auth`. The main endpoints are:
 - `GET /api/auth/get-session`
 - `POST /api/auth/sign-out`
 
+For Expo Mobile, use the Better Auth Expo client with `expo-secure-store`.
+Configure the app scheme as `kuquest` and call the Google social sign-in method
+with `callbackURL: 'kuquest://'`. The Expo client adds `expo-origin`, opens the
+authorization proxy, and stores the session cookie; do not call the Google
+callback endpoint with `fetch` manually. The API already trusts `kuquest://`.
+
 Admin Better Auth is mounted separately at `/api/admin/auth` and supports login
 only. Public Admin signup is disabled. Create the first Admin from an
 operations environment with a local, ignored environment file:

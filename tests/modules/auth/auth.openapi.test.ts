@@ -34,6 +34,13 @@ describe('authentication OpenAPI documentation', () => {
     expect(document.paths?.['/api/admin/auth/sign-in/email']?.post).toBeDefined();
     expect(document.paths?.['/api/admin/auth/get-session']?.get).toBeDefined();
     expect(document.paths?.['/api/admin/auth/sign-out']?.post).toBeDefined();
+
+    const socialSignIn = document.paths?.['/api/auth/sign-in/social']?.post as {
+      parameters?: Array<{ name?: string }>;
+    };
+    expect(socialSignIn.parameters?.some(({ name }) => name === 'expo-origin')).toBe(
+      true,
+    );
   });
 
   it('defines the auth tag, session security, and reusable schemas', async () => {
