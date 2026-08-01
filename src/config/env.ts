@@ -16,6 +16,7 @@ export const env = {
   databaseUrl: process.env.DATABASE_URL,
   betterAuthUrl: process.env.BETTER_AUTH_URL,
   betterAuthSecret: process.env.BETTER_AUTH_SECRET,
+  adminBetterAuthSecret: process.env.ADMIN_BETTER_AUTH_SECRET,
   googleClientId: process.env.GOOGLE_CLIENT_ID,
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
   s3Endpoint: process.env.S3_ENDPOINT,
@@ -32,6 +33,7 @@ const requiredRuntimeVariables = {
   DATABASE_URL: env.databaseUrl,
   BETTER_AUTH_URL: env.betterAuthUrl,
   BETTER_AUTH_SECRET: env.betterAuthSecret,
+  ADMIN_BETTER_AUTH_SECRET: env.adminBetterAuthSecret,
   GOOGLE_CLIENT_ID: env.googleClientId,
   GOOGLE_CLIENT_SECRET: env.googleClientSecret,
   S3_ENDPOINT: env.s3Endpoint,
@@ -52,5 +54,9 @@ export const validateRuntimeEnv = (): void => {
 
   if (env.betterAuthSecret && env.betterAuthSecret.length < 32) {
     throw new Error('BETTER_AUTH_SECRET must be at least 32 characters long');
+  }
+
+  if (env.adminBetterAuthSecret && env.adminBetterAuthSecret.length < 32) {
+    throw new Error('ADMIN_BETTER_AUTH_SECRET must be at least 32 characters long');
   }
 };

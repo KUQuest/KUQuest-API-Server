@@ -143,6 +143,7 @@ jobs:
             --env DATABASE_URL \
             --env BETTER_AUTH_URL=http://localhost:5000 \
             --env BETTER_AUTH_SECRET=ci-only-secret-at-least-32-characters \
+            --env ADMIN_BETTER_AUTH_SECRET=ci-only-admin-secret-at-least-32-characters \
             --env GOOGLE_CLIENT_ID=ci-only-client-id \
             --env GOOGLE_CLIENT_SECRET=ci-only-client-secret \
             --env S3_ENDPOINT=http://localhost:9000 \

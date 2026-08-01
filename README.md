@@ -30,6 +30,10 @@ Generate a secure Better Auth secret and put the result in
 openssl rand -base64 32
 ```
 
+Generate a separate secret for Admin authentication and put it in
+`ADMIN_BETTER_AUTH_SECRET` as well. Both secrets must be at least 32 characters
+long.
+
 Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to credentials from a Google
 Cloud OAuth 2.0 Web application. Add this authorized redirect URI in Google
 Cloud for local development:
@@ -51,6 +55,36 @@ Better Auth is mounted at `/api/auth`. The main endpoints are:
 - `POST /api/auth/sign-in/social` with `{ "provider": "google" }`
 - `GET /api/auth/get-session`
 - `POST /api/auth/sign-out`
+
+Admin Better Auth is mounted separately at `/api/admin/auth` and supports login
+only. Public Admin signup is disabled. Create the first Admin from an
+operations environment with a local, ignored environment file:
+
+```env
+DATABASE_URL=postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest
+ADMIN_BETTER_AUTH_SECRET=replace-with-a-32-character-secret
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=replace-with-a-compliant-password
+ADMIN_FIRST_NAME=System
+ADMIN_LAST_NAME=Administrator
+```
+
+Run the seed once with:
+
+```bash
+bun --env-file=.env.admin run db:seed-admin
+```
+
+The password must be 8–25 characters and include uppercase, lowercase, a
+number, and an ASCII special character without whitespace. The seed lowercases
+the email, refuses to modify an existing Admin, and never prints or stores the
+plaintext password. Do not commit `.env.admin` or any real credentials.
+
+The Admin endpoints are:
+
+- `POST /api/admin/auth/sign-in/email`
+- `GET /api/admin/auth/get-session`
+- `POST /api/admin/auth/sign-out`
 
 Interactive OpenAPI documentation, including request examples, session cookie
 security, response schemas, and OAuth errors, is available at
