@@ -84,7 +84,7 @@ describe('Admin authentication with PostgreSQL', () => {
 
     expect(response.status).toBe(200);
     expect(body.user.email).toBe(adminEmail);
-    expect(getCookieHeader(response)).toContain('__Secure-kuquest-admin.session_token=');
+    expect(getCookieHeader(response)).toContain('kuquest-admin.session_token=');
 
     const sessions = await db
       .select({ userId: authSession.userId, adminId: authSession.adminId })

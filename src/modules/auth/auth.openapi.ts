@@ -29,7 +29,7 @@ export const authOpenAPIComponents = {
     betterAuthAdminSession: {
       type: 'apiKey',
       in: 'cookie',
-      name: '__Secure-kuquest-admin.session_token',
+      name: 'kuquest-admin.session_token',
       description:
         'Admin Better Auth session cookie. Browsers receive it after a successful Admin credential login and must send requests with credentials enabled.',
     },
