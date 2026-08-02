@@ -24,9 +24,6 @@ export type PortfolioItem = {
   images: PortfolioImage[];
 };
 
-// One row per image, item rows repeated across their images, so the flat result is
-// grouped back into items here. `orderBy` already sorted items by creation and images
-// by position, and a Map preserves that first-seen order while grouping.
 export const listPortfolio = async (userId: string): Promise<PortfolioItem[]> => {
   const rows = await db
     .select({
@@ -106,9 +103,6 @@ export const createPortfolio = async (
 
 export type PortfolioUpdateOutcome = 'updated' | 'not-found';
 
-// Scoping the WHERE to id and userId together, rather than checking ownership
-// separately, means a portfolio item owned by someone else reads as not found
-// instead of leaking that it exists.
 export const updatePortfolio = async (
   userId: string,
   portfolioId: string,
@@ -152,8 +146,6 @@ export const deletePortfolio = async (
       eq(profilePortfolioItem.userId, userId),
     );
 
-    // Read the image storage refs before the delete removes the join rows that
-    // reach them (image rows cascade with their portfolio item).
     const images = await transaction
       .select({ fileId: file.id, bucket: file.bucket, objectKey: file.objectKey })
       .from(profilePortfolioItem)

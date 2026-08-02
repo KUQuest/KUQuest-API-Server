@@ -29,5 +29,5 @@ export const app = new Elysia({
   .use(healthRoute)
   .use(onboardingRoute)
   .use(profileRoute)
-  .use(certificateRoute);
-  .use(portfolioRoute);
+  .use(certificateRoute)
+  .use(portfolioRoute)

@@ -50,9 +50,6 @@ const discardUploadedImages = async (images: StoredPortfolioImage[]): Promise<vo
   );
 };
 
-// The stored reference becomes a link only here, at the moment of answering, so nothing
-// durable ever holds a storage URL. A broken link costs the caller that one image
-// rather than the whole portfolio entry.
 const buildImage = (image: PortfolioImage): PortfolioListItem['images'][number] | undefined => {
   try {
     return { fileId: image.fileId, position: image.position, url: portfolioStorage.linkFor(image) };
