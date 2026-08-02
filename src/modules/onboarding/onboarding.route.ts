@@ -1,6 +1,6 @@
 import { authGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
-import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
 import { Elysia } from 'elysia';
 
@@ -15,6 +15,7 @@ import {
     onboardingDataResponseSchema,
     onboardingResponseSchema,
     onboardingSchema,
+    onboardingUpdateSchema,
 } from './onboarding.schema';
 
 export const onboardingRoute = new Elysia({
@@ -44,7 +45,7 @@ export const onboardingRoute = new Elysia({
     })
     .patch('/update', updateOnboarding, {
         body: onboardingSchema,
-        response: responses(apiSuccessSchema, 401, 400, 404, 409),
+        response: responses(onboardingUpdateSchema, 401, 400, 404, 409),
         detail: {
             tags: ['Onboarding'],
             summary: 'Update onboarding information',

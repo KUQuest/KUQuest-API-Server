@@ -28,6 +28,10 @@ export const onboardingResponseSchema = t.Object({
     })
 })
 
+export const onboardingUpdateSchema = t.Object({
+    success: t.Literal(true),
+});
+
 export const onboardingDataResponseSchema = t.Object({
     success: t.Literal(true),
     data: t.Object({

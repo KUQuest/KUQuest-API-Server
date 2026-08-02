@@ -1,8 +1,9 @@
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
-import type { AuthedContext } from '@/modules/auth';
+import type { AuthenticatedSession } from '@/modules/auth';
 
 import type { Static } from 'elysia';
+import type { StatusMap } from 'elysia/utils';
 
 import {
     getAcademicOptions,
@@ -11,6 +12,8 @@ import {
     updateOnboardingInfo,
 } from './onboarding.service';
 import type { onboardingSchema } from './onboarding.schema';
+
+type AuthedContext = { session: AuthenticatedSession; set: { status?: number | keyof StatusMap } };
 
 export const getOnboardingStatus = async ({
     session,
