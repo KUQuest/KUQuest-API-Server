@@ -23,7 +23,7 @@ export const openapiPlugin = openapi({
       {
         name: 'Auth',
         description:
-          'Google OAuth and database-backed session endpoints. Only @ku.th accounts are allowed.',
+          'Student Google OAuth and Admin credential authentication with separate database-backed sessions.',
       },
       {
         name: 'Onboarding',
@@ -32,6 +32,10 @@ export const openapiPlugin = openapi({
       {
         name: 'Profile',
         description: 'Authenticated Student profile endpoints.',
+      },
+      {
+        name: 'Certificates',
+        description: "Authenticated endpoints for managing the current Student's profile certificates.",
       },
     ],
     components: authOpenAPIComponents,

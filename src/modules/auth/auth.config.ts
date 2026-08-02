@@ -1,16 +1,18 @@
-import { betterAuth } from 'better-auth';
-import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { expo } from '@better-auth/expo';
-
 import { env } from '@/config/env';
 import { db } from '@/database/client';
 import * as schema from '@/database/schema/auth.schema';
 
-import { ALLOWED_EMAIL_DOMAIN } from './auth.constants';
-import { assertAllowedEmail } from './auth.policy';
+import { expo } from '@better-auth/expo';
+import { betterAuth } from 'better-auth';
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 
-const configurationPlaceholder = (name: string): string =>
-  `missing-${name}-configure-it-before-starting-the-server`;
+import { ALLOWED_EMAIL_DOMAIN } from './auth.constants';
+import {
+  configurationPlaceholder,
+  defaultCookieAttributes,
+  getTrustedOrigins,
+} from './auth.config.shared';
+import { assertAllowedEmail } from './auth.policy';
 
 export const auth = betterAuth({
   appName: 'KUQuest',
@@ -68,13 +70,9 @@ export const auth = betterAuth({
     modelName: 'authVerification',
   },
   advanced: {
-  defaultCookieAttributes: {
-    sameSite: 'none',
-    secure: true,
-    httpOnly: true,
+    defaultCookieAttributes,
   },
-  },
-  trustedOrigins: [env.cmsOrigin || 'http://localhost:5000', 'kuquest://', 'http://localhost:3000'],
+  trustedOrigins: getTrustedOrigins(true),
 });
 
 export type AuthSession = typeof auth.$Infer.Session;

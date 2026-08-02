@@ -58,6 +58,8 @@ export const authAdmin = pgTable(
     id: text('id').primaryKey(),
     username: text('username'),
     email: text('email').notNull(),
+    emailVerified: boolean('email_verified').default(false).notNull(),
+    image: text('image'),
     firstName: text('first_name').notNull(),
     lastName: text('last_name').notNull(),
     imageFileId: uuid('image_file_id').references(() => file.id),
