@@ -45,7 +45,6 @@ const discardUploadedAvatar = async (
       error,
       objectKey,
     });
-    // The object is unreferenced, and cleanup must not hide the original failure.
   }
 };
 
@@ -55,9 +54,7 @@ const userNotFound = (set: AuthedContext['set']) => {
   return apiError('USER_NOT_FOUND', 'User not found');
 };
 
-// The stored reference becomes a link only here, at the moment of answering, so nothing
-// durable ever holds a storage URL. A profile is still readable without its picture, so
-// a storage problem costs the caller the image rather than the whole response.
+
 const describeAvatar = (avatar: StoredProfileAvatar): Profile['avatar'] => {
   if (!avatar) return null;
 

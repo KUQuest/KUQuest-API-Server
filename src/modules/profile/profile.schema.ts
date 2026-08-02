@@ -24,16 +24,11 @@ const majorSchema = t.Object({
   }),
 });
 
-// The stored file reference plus a link that expires, so no permanent storage URL is
-// persisted or handed out. Upload and replacement stay with the avatar endpoint.
 const avatarSchema = t.Object({
   fileId: t.String({ format: 'uuid' }),
   url: t.String({ format: 'uri' }),
 });
 
-// A value may be replaced but never cleared, so every editable field has to reject
-// what amounts to erasing it: `pattern: '\\S'` turns away whitespace-only input,
-// which minLength alone accepts.
 const nameSchema = t.String({ minLength: 1, maxLength: 100, pattern: '\\S' });
 
 export const profileUpdateSchema = t.Object(

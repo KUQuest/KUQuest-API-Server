@@ -26,6 +26,13 @@ export const authOpenAPIComponents = {
       description:
         'Better Auth session cookie. Browsers receive it after a successful Google callback and must send requests with credentials enabled.',
     },
+    betterAuthAdminSession: {
+      type: 'apiKey',
+      in: 'cookie',
+      name: 'kuquest-admin.session_token',
+      description:
+        'Admin Better Auth session cookie. Browsers receive it after a successful Admin credential login and must send requests with credentials enabled.',
+    },
   },
   schemas: {
     AuthError: {
@@ -131,6 +138,48 @@ export const authOpenAPIComponents = {
         user: { $ref: '#/components/schemas/AuthUser' },
       },
     },
+    AdminAuthUser: {
+      type: 'object',
+      required: [
+        'id',
+        'name',
+        'email',
+        'emailVerified',
+        'firstName',
+        'lastName',
+        'createdAt',
+        'updatedAt',
+      ],
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string', description: 'Admin display name.' },
+        email: { type: 'string', format: 'email' },
+        emailVerified: { type: 'boolean' },
+        firstName: { type: 'string' },
+        lastName: { type: 'string' },
+        disabledAt: { type: 'string', format: 'date-time', nullable: true },
+        createdAt: { type: 'string', format: 'date-time' },
+        updatedAt: { type: 'string', format: 'date-time' },
+      },
+    },
+    AdminAuthSessionResponse: {
+      type: 'object',
+      required: ['session', 'user'],
+      properties: {
+        session: { $ref: '#/components/schemas/AuthSession' },
+        user: { $ref: '#/components/schemas/AdminAuthUser' },
+      },
+    },
+    AdminAuthSignInResponse: {
+      type: 'object',
+      required: ['redirect', 'token', 'user'],
+      properties: {
+        redirect: { type: 'boolean' },
+        token: { type: 'string' },
+        url: { type: 'string', format: 'uri', nullable: true },
+        user: { $ref: '#/components/schemas/AdminAuthUser' },
+      },
+    },
     SocialSignInRequest: {
       type: 'object',
       required: ['provider'],
@@ -227,6 +276,47 @@ export const authOpenAPIPaths = {
         403: errorResponse(`The Google account is not in the ${ALLOWED_EMAIL_DOMAIN} domain.`),
         429: errorResponse('Too many authentication requests.'),
         500: errorResponse('The authorization request could not be created.'),
+      },
+    },
+  },
+  '/api/admin/auth/sign-in/email': {
+    post: {
+      tags: ['Auth'],
+      summary: 'Sign in an Admin with email and password',
+      description:
+        'Authenticates an Admin with credentials and sets the isolated Admin Better Auth session cookie. Public Admin signup is disabled.',
+      operationId: 'signInAdminWithEmail',
+      security: [],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['email', 'password'],
+              properties: {
+                email: { type: 'string', format: 'email' },
+                password: { type: 'string', minLength: 8, maxLength: 25 },
+                rememberMe: {
+                  type: 'boolean',
+                  default: true,
+                  description: 'Whether the session should be remembered.',
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: 'Admin authenticated successfully.',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AdminAuthSignInResponse' },
+            },
+          },
+        },
+        401: errorResponse('The Admin email or password is invalid.'),
       },
     },
   },
@@ -327,6 +417,30 @@ export const authOpenAPIPaths = {
       },
     },
   },
+  '/api/admin/auth/get-session': {
+    get: {
+      tags: ['Auth'],
+      summary: 'Get the current Admin session',
+      description:
+        'Returns the current Admin session. An unauthenticated request returns JSON null with status 200.',
+      operationId: 'getAdminAuthSession',
+      security: [{ betterAuthAdminSession: [] }],
+      responses: {
+        200: {
+          description: 'Current Admin session details, or null when unauthenticated.',
+          content: {
+            'application/json': {
+              schema: {
+                allOf: [{ $ref: '#/components/schemas/AdminAuthSessionResponse' }],
+                nullable: true,
+              },
+            },
+          },
+        },
+        500: errorResponse('The Admin session could not be read.'),
+      },
+    },
+  },
   '/api/auth/sign-out': {
     post: {
       tags: ['Auth'],
@@ -345,6 +459,27 @@ export const authOpenAPIPaths = {
           },
         },
         500: errorResponse('The session could not be deleted.'),
+      },
+    },
+  },
+  '/api/admin/auth/sign-out': {
+    post: {
+      tags: ['Auth'],
+      summary: 'Sign out the current Admin',
+      description:
+        'Deletes the database Admin session when present and clears the isolated Admin Better Auth session cookie.',
+      operationId: 'signOutAdmin',
+      security: [{ betterAuthAdminSession: [] }],
+      responses: {
+        200: {
+          description: 'Admin session cookie cleared successfully.',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/SignOutResponse' },
+            },
+          },
+        },
+        500: errorResponse('The Admin session could not be deleted.'),
       },
     },
   },

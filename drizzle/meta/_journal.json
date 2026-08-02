@@ -43,6 +43,13 @@
       "when": 1785230369738,
       "tag": "0005_seed_academic_options",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785595206463,
+      "tag": "0006_add-auth-admin-better-auth-fields",
+      "breakpoints": true
     }
   ]
 }

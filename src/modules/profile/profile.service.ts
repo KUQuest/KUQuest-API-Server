@@ -15,8 +15,6 @@ export type ProfileUpdateOutcome = 'updated' | 'student-not-found' | 'major-not-
 
 const foreignKeyViolation = '23503';
 
-// Drizzle wraps the driver's error, so the SQLSTATE that names the cause sits further
-// down the chain than the error we are handed.
 const isMissingMajor = (error: unknown): boolean => {
   if (typeof error !== 'object' || error === null) return false;
 
@@ -35,17 +33,11 @@ const studentExists = async (userId: string) => {
   return Boolean(row);
 };
 
-/**
- * A write that matched nobody is not a success, and neither is one naming a major that
- * is not there. The foreign key decides the latter: checking first would only tell us
- * what was true a moment ago, and the write would still fail if it changed since.
- */
 export const updateProfile = async (
   userId: string,
   data: ProfileUpdate,
 ): Promise<ProfileUpdateOutcome> => {
-  // A request that changes nothing still has to say whether the student is there, and
-  // Drizzle rejects an empty update, so ask the row directly.
+
   if (Object.keys(data).length === 0) {
     return (await studentExists(userId)) ? 'updated' : 'student-not-found';
   }
@@ -85,7 +77,6 @@ export const getProfile = async (userId: string) => {
     .from(authUser)
     .leftJoin(major, eq(authUser.majorId, major.id))
     .leftJoin(faculty, eq(major.facultyId, faculty.id))
-    // A tombstoned file is a deleted avatar, so it must read as no avatar at all.
     .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
     .where(eq(authUser.id, userId))
     .limit(1);
@@ -104,7 +95,6 @@ export const getProfile = async (userId: string) => {
 
   return {
     ...profile,
-    // A major always belongs to a faculty, so the joins either all resolve or none do.
     major:
       majorId && majorName && facultyName
         ? { id: majorId, name: majorName, faculty: { name: facultyName } }
