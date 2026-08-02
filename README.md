@@ -169,6 +169,9 @@ pulls the validated image, and then performs:
    service;
 5. API replacement and the existing Compose readiness check.
 
+A pull request targeting `develop` runs CI only. Staging CD starts after that
+pull request is merged and the resulting push to `develop` passes Backend CI.
+
 CD publishes the PostgreSQL 17 client as a commit-tagged image in the same GHCR
 package as the API, so the staging host does not need direct Docker Hub access.
 
