@@ -1,8 +1,8 @@
 import { ValidationError } from 'elysia';
 
-import { profileUpdateSchema } from './profile.schema';
+import { portfolioUpdateSchema } from './portfolio.schema';
 
-const editableFields = new Set(Object.keys(profileUpdateSchema.properties));
+const editableFields = new Set(Object.keys(portfolioUpdateSchema.properties));
 
 const isUnacceptableUpdateBody = (body: unknown) => {
   if (body === undefined || body === null) return false;
@@ -12,8 +12,8 @@ const isUnacceptableUpdateBody = (body: unknown) => {
   return Object.keys(body).some((field) => !editableFields.has(field));
 };
 
-export const rejectUnknownProfileFields = ({ body }: { body: unknown }) => {
+export const rejectUnknownPortfolioFields = ({ body }: { body: unknown }) => {
   if (isUnacceptableUpdateBody(body)) {
-    throw new ValidationError('body', profileUpdateSchema, body);
+    throw new ValidationError('body', portfolioUpdateSchema, body);
   }
 };

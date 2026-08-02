@@ -146,20 +146,10 @@ const deleteAvatar = async (bucket: string, objectKey: string): Promise<void> =>
   debugAvatarUpload('RustFS delete succeeded', { bucket, objectKey });
 };
 
-// Long enough for a profile screen to load the image, short enough that a leaked link
-// stops working. Nothing durable is stored: the link is built per request from the
-// bucket and key the file reference already holds.
 const avatarUrlLifetimeSeconds = 15 * 60;
 
 export class AvatarLinkUnavailableError extends Error {}
 
-/**
- * Builds a link to a stored object that expires.
- *
- * Signing with credentials missing aborts the process rather than throwing, and a
- * profile read must never be able to take the server down, so the configuration is
- * checked here where the failure is still catchable.
- */
 const linkForAvatar = ({ bucket, objectKey }: Pick<StoredAvatar, 'bucket' | 'objectKey'>): string => {
   if (!env.s3AccessKeyId || !env.s3SecretAccessKey || !env.s3Endpoint || !env.s3Region) {
     throw new AvatarLinkUnavailableError('Object storage is not configured');
