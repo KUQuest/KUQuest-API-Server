@@ -36,17 +36,17 @@ export const adminAuthenticationGuard = new Elysia({ name: 'admin-authentication
   });
 
 export const enabledAdminGuard = (app: Elysia) =>
-  app.use(adminAuthenticationGuard).onBeforeHandle(
-    { as: 'scoped' },
-    ({ adminSession, set }) => {
-      if (!adminSession) {
-        set.status = 401;
-        return apiError('UNAUTHORIZED', 'Unauthorized');
-      }
-
+  app
+    .use(adminAuthenticationGuard)
+    // adminAuthenticationGuard's own resolve() narrows adminSession, but that
+    // narrowing doesn't cross the plugin boundary here (see ADR 0001) — re-derive
+    // it once rather than repeat the onBeforeHandle null check it already covers.
+    .resolve({ as: 'scoped' }, ({ adminSession }) => ({
+      adminSession: adminSession as NonNullable<typeof adminSession>,
+    }))
+    .onBeforeHandle({ as: 'scoped' }, ({ adminSession, set }) => {
       if (adminSession.user.disabledAt) {
         set.status = 403;
         return apiError('ADMIN_DISABLED', 'Admin account is disabled');
       }
-    },
-  );
+    });

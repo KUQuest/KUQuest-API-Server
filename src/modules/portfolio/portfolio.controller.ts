@@ -1,6 +1,7 @@
 import type { AuthedContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
+import { ImageTooLargeError, ImageUploadError, UnsupportedImageTypeError } from '@/shared/image-storage';
 
 import type { Static } from 'elysia';
 
@@ -18,12 +19,7 @@ import {
   updatePortfolio,
 } from './portfolio.service';
 import type { PortfolioImage } from './portfolio.service';
-import {
-  PortfolioImageTooLargeError,
-  PortfolioImageUploadError,
-  portfolioStorage,
-  UnsupportedPortfolioImageTypeError,
-} from './portfolio.storage';
+import { portfolioStorage } from './portfolio.storage';
 import type { StoredPortfolioImage } from './portfolio.storage';
 
 type PortfolioListItem = Static<typeof portfolioListRespondSchema>['data'][number];
@@ -94,15 +90,15 @@ export const createOwnPortfolio = async ({
   } catch (error) {
     await discardUploadedImages(uploaded);
 
-    if (error instanceof PortfolioImageTooLargeError) {
+    if (error instanceof ImageTooLargeError) {
       set.status = 413;
       return apiError('IMAGE_TOO_LARGE', error.message);
     }
-    if (error instanceof UnsupportedPortfolioImageTypeError) {
+    if (error instanceof UnsupportedImageTypeError) {
       set.status = 415;
       return apiError('UNSUPPORTED_IMAGE_TYPE', error.message);
     }
-    if (error instanceof PortfolioImageUploadError) {
+    if (error instanceof ImageUploadError) {
       set.status = 502;
       return apiError('IMAGE_UPLOAD_FAILED', 'Image upload failed');
     }

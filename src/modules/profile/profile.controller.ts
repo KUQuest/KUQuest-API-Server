@@ -1,6 +1,12 @@
 import type { AuthedContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
+import {
+  ImageTooLargeError,
+  ImageUploadError,
+  UnsupportedImageTypeError,
+  debugLog,
+} from '@/shared/image-storage';
 
 import type { Static } from 'elysia';
 
@@ -16,22 +22,13 @@ import {
   replaceStudentAvatar,
   updateProfile,
 } from './profile.service';
-import {
-  AvatarTooLargeError,
-  AvatarUploadError,
-  avatarStorage,
-  UnsupportedAvatarTypeError,
-} from './profile.storage';
+import { avatarStorage } from './profile.storage';
 
 type Profile = Static<typeof profileResponseSchema>['data'];
 
 type StoredProfileAvatar = NonNullable<Awaited<ReturnType<typeof getProfile>>>['avatar'];
 
-const debugAvatarUpload = (message: string, details?: unknown): void => {
-  if (process.env.NODE_ENV !== 'test') {
-    console.info(`[avatar-upload] ${message}`, details ?? '');
-  }
-};
+const debugAvatarUpload = debugLog('avatar-upload');
 
 const discardUploadedAvatar = async (
   bucket: string,
@@ -115,15 +112,15 @@ export const setAvatar = async ({
   try {
     storedAvatar = await avatarStorage.upload(session.user.id, body.avatar);
   } catch (error) {
-    if (error instanceof AvatarTooLargeError) {
+    if (error instanceof ImageTooLargeError) {
       set.status = 413;
       return apiError('AVATAR_TOO_LARGE', error.message);
     }
-    if (error instanceof UnsupportedAvatarTypeError) {
+    if (error instanceof UnsupportedImageTypeError) {
       set.status = 415;
       return apiError('UNSUPPORTED_AVATAR_TYPE', error.message);
     }
-    if (error instanceof AvatarUploadError) {
+    if (error instanceof ImageUploadError) {
       set.status = 502;
       return apiError('AVATAR_UPLOAD_FAILED', 'Avatar upload failed');
     }

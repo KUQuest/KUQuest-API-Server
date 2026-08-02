@@ -1,11 +1,8 @@
 import { db } from '@/database/client';
 import { getOwnProfile, setAvatar, updateOwnProfile } from '@/modules/profile/profile.controller';
 import * as profileService from '@/modules/profile/profile.service';
-import {
-  AvatarLinkUnavailableError,
-  AvatarUploadError,
-  avatarStorage,
-} from '@/modules/profile/profile.storage';
+import { avatarStorage } from '@/modules/profile/profile.storage';
+import { ImageLinkUnavailableError, ImageUploadError } from '@/shared/image-storage';
 
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
@@ -150,7 +147,7 @@ describe('setAvatar', () => {
 
   it('returns a safe error when object storage rejects the upload', async () => {
     spyOn(avatarStorage, 'upload').mockRejectedValue(
-      new AvatarUploadError('secret RustFS detail'),
+      new ImageUploadError('secret RustFS detail'),
     );
 
     const { result, set } = invokeSetAvatar(
@@ -241,7 +238,7 @@ describe('getOwnProfile', () => {
       avatar: storedAvatar,
     });
     spyOn(avatarStorage, 'linkFor').mockImplementation(() => {
-      throw new AvatarLinkUnavailableError('Object storage is not configured');
+      throw new ImageLinkUnavailableError('Object storage is not configured');
     });
 
     const { result, set } = invokeGetOwnProfile();

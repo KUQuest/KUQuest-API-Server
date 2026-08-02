@@ -24,6 +24,9 @@ export type PortfolioItem = {
   images: PortfolioImage[];
 };
 
+const ownedBy = (userId: string, portfolioId: string) =>
+  and(eq(profilePortfolioItem.id, portfolioId), eq(profilePortfolioItem.userId, userId));
+
 export const listPortfolio = async (userId: string): Promise<PortfolioItem[]> => {
   const rows = await db
     .select({
@@ -108,16 +111,11 @@ export const updatePortfolio = async (
   portfolioId: string,
   data: { title?: string; description?: string },
 ): Promise<PortfolioUpdateOutcome> => {
-  const ownedByUser = and(
-    eq(profilePortfolioItem.id, portfolioId),
-    eq(profilePortfolioItem.userId, userId),
-  );
-
   if (Object.keys(data).length === 0) {
     const [row] = await db
       .select({ id: profilePortfolioItem.id })
       .from(profilePortfolioItem)
-      .where(ownedByUser)
+      .where(ownedBy(userId, portfolioId))
       .limit(1);
 
     return row ? 'updated' : 'not-found';
@@ -126,7 +124,7 @@ export const updatePortfolio = async (
   const updated = await db
     .update(profilePortfolioItem)
     .set({ ...data, updatedAt: new Date() })
-    .where(ownedByUser)
+    .where(ownedBy(userId, portfolioId))
     .returning({ id: profilePortfolioItem.id });
 
   return updated.length > 0 ? 'updated' : 'not-found';
@@ -141,11 +139,6 @@ export const deletePortfolio = async (
   portfolioId: string,
 ): Promise<PortfolioDeleteOutcome> =>
   db.transaction(async (transaction) => {
-    const ownedByUser = and(
-      eq(profilePortfolioItem.id, portfolioId),
-      eq(profilePortfolioItem.userId, userId),
-    );
-
     const images = await transaction
       .select({ fileId: file.id, bucket: file.bucket, objectKey: file.objectKey })
       .from(profilePortfolioItem)
@@ -154,12 +147,12 @@ export const deletePortfolio = async (
         eq(profilePortfolioItemImage.portfolioItemId, profilePortfolioItem.id),
       )
       .innerJoin(file, eq(profilePortfolioItemImage.fileId, file.id))
-      .where(ownedByUser)
+      .where(ownedBy(userId, portfolioId))
       .for('update');
 
     const deleted = await transaction
       .delete(profilePortfolioItem)
-      .where(ownedByUser)
+      .where(ownedBy(userId, portfolioId))
       .returning({ id: profilePortfolioItem.id });
 
     if (deleted.length === 0) return { outcome: 'not-found' };

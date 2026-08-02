@@ -5,11 +5,8 @@ import {
   updateOwnPortfolio,
 } from '@/modules/portfolio/portfolio.controller';
 import * as portfolioService from '@/modules/portfolio/portfolio.service';
-import {
-  PortfolioImageUploadError,
-  portfolioStorage,
-  UnsupportedPortfolioImageTypeError,
-} from '@/modules/portfolio/portfolio.storage';
+import { portfolioStorage } from '@/modules/portfolio/portfolio.storage';
+import { ImageUploadError, UnsupportedImageTypeError } from '@/shared/image-storage';
 
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
@@ -137,7 +134,7 @@ describe('createOwnPortfolio', () => {
     const upload = spyOn(portfolioStorage, 'upload')
       .mockResolvedValueOnce(uploadedA)
       .mockRejectedValueOnce(
-        new UnsupportedPortfolioImageTypeError('Image must be a valid JPEG, PNG, or WebP file'),
+        new UnsupportedImageTypeError('Image must be a valid JPEG, PNG, or WebP file'),
       );
     const deleteObject = spyOn(portfolioStorage, 'delete').mockResolvedValue();
 
@@ -174,7 +171,7 @@ describe('createOwnPortfolio', () => {
 
   it('returns a safe error when object storage rejects the upload', async () => {
     spyOn(portfolioStorage, 'upload').mockRejectedValue(
-      new PortfolioImageUploadError('secret storage detail'),
+      new ImageUploadError('secret storage detail'),
     );
 
     const { result, set } = invokeCreate([png('a.png')]);

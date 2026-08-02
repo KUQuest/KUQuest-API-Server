@@ -1,11 +1,11 @@
 import { authGuard } from '@/modules/auth';
 import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
+import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
 import { Elysia } from 'elysia';
 
 import { getOwnProfile, setAvatar, updateOwnProfile } from './profile.controller';
-import { rejectUnknownProfileFields } from './profile.policy';
 import {
   avatarUploadResponseSchema,
   avatarUploadSchema,
@@ -31,7 +31,7 @@ export const profileRoute = new Elysia({
   })
   .patch('', updateOwnProfile, {
     body: profileUpdateSchema,
-    transform: rejectUnknownProfileFields,
+    transform: rejectUnknownFields(profileUpdateSchema),
     response: responses(apiSuccessSchema, 400, 401, 404),
     detail: {
       tags: ['Profile'],

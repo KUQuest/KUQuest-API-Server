@@ -1,6 +1,7 @@
 import { authGuard } from '@/modules/auth';
 import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
+import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
 import { Elysia } from 'elysia';
 
@@ -10,7 +11,6 @@ import {
   listOwnPortfolio,
   updateOwnPortfolio,
 } from './portfolio.controller';
-import { rejectUnknownPortfolioFields } from './portfolio.policy';
 import {
   portfolioCreateResponseSchema,
   portfolioCreateSchema,
@@ -50,7 +50,7 @@ export const portfolioRoute = new Elysia({
   .patch('/:portfolioId', updateOwnPortfolio, {
     params: portfolioParamSchema,
     body: portfolioUpdateSchema,
-    transform: rejectUnknownPortfolioFields,
+    transform: rejectUnknownFields(portfolioUpdateSchema),
     response: responses(apiSuccessSchema, 400, 401, 404),
     detail: {
       tags: ['Portfolio'],
