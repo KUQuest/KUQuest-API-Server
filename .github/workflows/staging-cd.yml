@@ -142,6 +142,7 @@ jobs:
 
           BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          ADMIN_BETTER_AUTH_SECRET: ${{ secrets.ADMIN_BETTER_AUTH_SECRET }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
 
@@ -163,6 +164,7 @@ jobs:
             DATABASE_URL
             BETTER_AUTH_URL
             BETTER_AUTH_SECRET
+            ADMIN_BETTER_AUTH_SECRET
             GOOGLE_CLIENT_ID
             GOOGLE_CLIENT_SECRET
             S3_ENDPOINT
@@ -198,6 +200,7 @@ jobs:
 
             printf 'BETTER_AUTH_URL=%s\n' "$BETTER_AUTH_URL"
             printf 'BETTER_AUTH_SECRET=%s\n' "$BETTER_AUTH_SECRET"
+            printf 'ADMIN_BETTER_AUTH_SECRET=%s\n' "$ADMIN_BETTER_AUTH_SECRET"
             printf 'GOOGLE_CLIENT_ID=%s\n' "$GOOGLE_CLIENT_ID"
             printf 'GOOGLE_CLIENT_SECRET=%s\n' "$GOOGLE_CLIENT_SECRET"
 

@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'bun:test';
-
 import { app } from '@/app';
 import { ALLOWED_EMAIL_DOMAIN, auth } from '@/modules/auth';
+
+import { describe, expect, it } from 'bun:test';
 
 describe('authentication integration', () => {
   it('serves the browser authentication test page', async () => {
@@ -32,5 +32,27 @@ describe('authentication integration', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toBeNull();
+  });
+
+  it('routes the Admin session endpoint to the Admin Better Auth instance', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/admin/auth/get-session'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toBeNull();
+  });
+
+  it.each([
+    '/api/admin/auth/sign-up/email',
+    '/api/admin/auth/change-password',
+    '/api/admin/auth/request-password-reset',
+    '/api/admin/auth/reset-password',
+  ])('does not expose Admin %s', async (path) => {
+    const response = await app.handle(
+      new Request(`http://localhost${path}`, { method: 'POST' }),
+    );
+
+    expect(response.status).toBe(404);
   });
 });

@@ -14,6 +14,7 @@
     "build": "bun build src/index.ts --target=bun --outdir=dist",
     "db:generate": "drizzle-kit generate",
     "db:check": "bun scripts/check-migrations.ts",
+    "db:seed-admin": "bun scripts/seed-admin.ts",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "check": "bun run db:check && bun run lint && bun run typecheck && bun test && bun run build"
