@@ -44,6 +44,7 @@ type ImageStorageConfig = {
   keyPrefix: string;
   logLabel?: string;
   maxSizeBytes?: number;
+  urlLifetimeSeconds?: number;
   emptyFileMessage?: string;
   tooLargeMessage?: string;
   unsupportedTypeMessage?: string;
@@ -53,6 +54,7 @@ export const createImageStorage = ({
   keyPrefix,
   logLabel = `${keyPrefix}-upload`,
   maxSizeBytes = defaultMaxSizeBytes,
+  urlLifetimeSeconds = defaultUrlLifetimeSeconds,
   emptyFileMessage = 'Image file is empty',
   tooLargeMessage = `Image must be ${Math.floor(maxSizeBytes / (1024 * 1024))} MB or smaller`,
   unsupportedTypeMessage = 'Image must be a valid JPEG, PNG, or WebP file',
@@ -134,7 +136,7 @@ export const createImageStorage = ({
       throw new ImageLinkUnavailableError('Object storage is not configured');
     }
 
-    return s3.presign(objectKey, { bucket, expiresIn: defaultUrlLifetimeSeconds });
+    return s3.presign(objectKey, { bucket, expiresIn: urlLifetimeSeconds });
   };
 
   return {

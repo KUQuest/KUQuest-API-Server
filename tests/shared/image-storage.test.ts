@@ -10,6 +10,11 @@ const validPngBuffer = () =>
     .png()
     .toBuffer();
 
+const validGifBuffer = () =>
+  sharp({ create: { width: 1, height: 1, channels: 3, background: { r: 0, g: 255, b: 0 } } })
+    .gif()
+    .toBuffer();
+
 describe('createImageStorage upload validation', () => {
   it('rejects an empty file', async () => {
     const file = new File([], 'empty.png', { type: 'image/png' });
@@ -35,6 +40,13 @@ describe('createImageStorage upload validation', () => {
   it('rejects a declared content type that does not match the detected image format', async () => {
     const buffer = await validPngBuffer();
     const file = new File([buffer], 'mismatch.jpg', { type: 'image/jpeg' });
+
+    await expect(storage.upload('user-1', file)).rejects.toThrow(UnsupportedImageTypeError);
+  });
+
+  it('rejects a valid image of an unsupported content type', async () => {
+    const buffer = await validGifBuffer();
+    const file = new File([buffer], 'valid.gif', { type: 'image/gif' });
 
     await expect(storage.upload('user-1', file)).rejects.toThrow(UnsupportedImageTypeError);
   });
