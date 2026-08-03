@@ -5,7 +5,7 @@ import {
   ImageTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
-  debugLog,
+  createDebugLogger,
 } from '@/shared/image-storage';
 
 import type { Static } from 'elysia';
@@ -28,7 +28,7 @@ type Profile = Static<typeof profileResponseSchema>['data'];
 
 type StoredProfileAvatar = NonNullable<Awaited<ReturnType<typeof getProfile>>>['avatar'];
 
-const debugAvatarUpload = debugLog('avatar-upload');
+const debugAvatarUpload = createDebugLogger('avatar-upload');
 
 const discardUploadedAvatar = async (
   bucket: string,

@@ -3,7 +3,7 @@ import type { TSchema } from 'elysia';
 
 type ObjectSchema = TSchema & { properties: Record<string, TSchema> };
 
-const isUnacceptableUpdateBody = (body: unknown, editableFields: Set<string>): boolean => {
+const isInvalidBody = (body: unknown, editableFields: Set<string>): boolean => {
   if (body === undefined || body === null) return false;
 
   if (typeof body !== 'object' || Array.isArray(body)) return true;
@@ -15,7 +15,7 @@ export const rejectUnknownFields = (schema: ObjectSchema) => {
   const editableFields = new Set(Object.keys(schema.properties));
 
   return ({ body }: { body: unknown }) => {
-    if (isUnacceptableUpdateBody(body, editableFields)) {
+    if (isInvalidBody(body, editableFields)) {
       throw new ValidationError('body', schema, body);
     }
   };

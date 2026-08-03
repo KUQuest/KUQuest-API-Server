@@ -1,7 +1,6 @@
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
 import { ValidationError, t } from 'elysia';
-
 import { describe, expect, it } from 'bun:test';
 
 const schema = t.Object({

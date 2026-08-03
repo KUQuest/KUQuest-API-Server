@@ -28,7 +28,7 @@ export class UnsupportedImageTypeError extends Error {}
 export class ImageUploadError extends Error {}
 export class ImageLinkUnavailableError extends Error {}
 
-export const debugLog =
+export const createDebugLogger =
   (label: string) =>
   (message: string, details?: unknown): void => {
     if (env.nodeEnv !== 'test') {
@@ -44,7 +44,6 @@ type ImageStorageConfig = {
   keyPrefix: string;
   logLabel?: string;
   maxSizeBytes?: number;
-  urlLifetimeSeconds?: number;
   emptyFileMessage?: string;
   tooLargeMessage?: string;
   unsupportedTypeMessage?: string;
@@ -54,12 +53,11 @@ export const createImageStorage = ({
   keyPrefix,
   logLabel = `${keyPrefix}-upload`,
   maxSizeBytes = defaultMaxSizeBytes,
-  urlLifetimeSeconds = defaultUrlLifetimeSeconds,
   emptyFileMessage = 'Image file is empty',
-  tooLargeMessage = `Image must be ${Math.floor(defaultMaxSizeBytes / (1024 * 1024))} MB or smaller`,
+  tooLargeMessage = `Image must be ${Math.floor(maxSizeBytes / (1024 * 1024))} MB or smaller`,
   unsupportedTypeMessage = 'Image must be a valid JPEG, PNG, or WebP file',
 }: ImageStorageConfig) => {
-  const log = debugLog(logLabel);
+  const log = createDebugLogger(logLabel);
 
   const s3 = new Bun.S3Client({
     accessKeyId: env.s3AccessKeyId,
@@ -136,7 +134,7 @@ export const createImageStorage = ({
       throw new ImageLinkUnavailableError('Object storage is not configured');
     }
 
-    return s3.presign(objectKey, { bucket, expiresIn: urlLifetimeSeconds });
+    return s3.presign(objectKey, { bucket, expiresIn: defaultUrlLifetimeSeconds });
   };
 
   return {
