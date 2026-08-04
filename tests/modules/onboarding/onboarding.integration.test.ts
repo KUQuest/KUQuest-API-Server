@@ -149,6 +149,21 @@ describe('onboarding integration', () => {
     expect(body.error.code).toBe('VALIDATION');
   });
 
+  it('rejects floating-point academic years', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/onboarding/update', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ academicYear: 2026.5 }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('VALIDATION');
+  });
+
   it('returns the shared error shape for an unauthenticated get-data request', async () => {
     const response = await app.handle(
       new Request('http://localhost/api/v1/onboarding/get-data'),
