@@ -93,6 +93,25 @@ describe('onboarding integration', () => {
     expect(response.status).toBe(401);
   });
 
+  it('accepts the exact four-digit boundaries', async () => {
+    // Reaching the auth guard proves validation passed.
+    const responses = await Promise.all(
+      [1000, 9999].map((academicYear) =>
+        app.handle(
+          new Request('http://localhost/api/v1/onboarding/update', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ academicYear }),
+          }),
+        ),
+      ),
+    );
+
+    for (const response of responses) {
+      expect(response.status).toBe(401);
+    }
+  });
+
   it('rejects academic years outside the four-digit range', async () => {
     const cases = await Promise.all(
       [999, 10000].map(async (academicYear) => {
