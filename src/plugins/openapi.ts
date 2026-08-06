@@ -27,7 +27,13 @@ export const openapiPlugin = openapi({
       },
       {
         name: 'Onboarding',
-        description: 'Authenticated endpoints for completing and reading onboarding information.',
+        description:
+          'Debug scaffolding, not a contract — superseded by Academic Registration below. Do not integrate against these routes or treat their validation rules as canonical.',
+      },
+      {
+        name: 'Academic Registration',
+        description:
+          "Authenticated endpoints for the Student's resumable first-run registration step (name, telephone, occupation, Student ID, Faculty/Department, Terms acceptance) — the canonical contract mobile integrates against.",
       },
       {
         name: 'Profile',
