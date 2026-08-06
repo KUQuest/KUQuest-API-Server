@@ -92,4 +92,38 @@ describe('authentication integration', () => {
 
     expect(response.status).toBe(404);
   });
+
+  it.each([
+    '/api/auth/sign-up/email',
+    '/api/auth/change-password',
+    '/api/auth/request-password-reset',
+    '/api/auth/reset-password',
+  ])('does not expose Student %s', async (path) => {
+    const response = await app.handle(
+      new Request(`http://localhost${path}`, { method: 'POST' }),
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it.each([
+    ['POST', '/api/auth/sign-in/social'],
+    ['GET', '/api/auth/callback/google'],
+    ['GET', '/api/auth/get-session'],
+    ['GET', '/api/auth/list-sessions'],
+    ['POST', '/api/auth/revoke-session'],
+    ['POST', '/api/auth/revoke-sessions'],
+    ['POST', '/api/auth/revoke-other-sessions'],
+    ['POST', '/api/auth/sign-out'],
+  ])('still exposes allow-listed Student %s %s', async (method, path) => {
+    const response = await app.handle(
+      new Request(`http://localhost${path}`, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: method === 'POST' ? JSON.stringify({}) : undefined,
+      }),
+    );
+
+    expect(response.status).not.toBe(404);
+  });
 });

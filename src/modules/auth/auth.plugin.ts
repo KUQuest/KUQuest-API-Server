@@ -10,6 +10,18 @@ const adminAuthPaths = new Set([
   `${adminAuthBasePath}/sign-out`,
 ]);
 
+const studentAuthBasePath = '/api/auth';
+const studentAuthPaths = new Set([
+  `${studentAuthBasePath}/sign-in/social`,
+  `${studentAuthBasePath}/callback/google`,
+  `${studentAuthBasePath}/get-session`,
+  `${studentAuthBasePath}/list-sessions`,
+  `${studentAuthBasePath}/revoke-session`,
+  `${studentAuthBasePath}/revoke-sessions`,
+  `${studentAuthBasePath}/revoke-other-sessions`,
+  `${studentAuthBasePath}/sign-out`,
+]);
+
 const authHandler = (request: Request) => {
   const pathname = new URL(request.url).pathname;
 
@@ -21,6 +33,8 @@ const authHandler = (request: Request) => {
 
     return adminAuth.handler(request);
   }
+
+  if (!studentAuthPaths.has(pathname)) return new Response(null, { status: 404 });
 
   return auth.handler(request);
 };
