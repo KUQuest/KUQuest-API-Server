@@ -7,32 +7,35 @@ export const certificateParamsSchema = t.Object({
   }),
 });
 
-export const certificateCreateSchema = t.Object({
-  name: t.String({
-    minLength: 1,
-    example: 'AWS Certified Cloud Practitioner',
-    error: 'Certificate name is required',
-  }),
-  issuer: t.String({
-    minLength: 1,
-    example: 'Amazon Web Services',
-    error: 'Certificate issuer is required',
-  }),
-  issuedAt: t.String({
-    format: 'date',
-    example: '2024-05-01',
-    error: 'Issue date must be a calendar date in YYYY-MM-DD format',
-  }),
-  verifyUrl: t.Optional(
-    t.Nullable(
-      t.String({
-        format: 'uri',
-        example: 'https://verify.example.com/abc123',
-        error: 'Verification link must be a valid URL',
-      }),
+export const certificateCreateSchema = t.Object(
+  {
+    name: t.String({
+      minLength: 1,
+      example: 'AWS Certified Cloud Practitioner',
+      error: 'Certificate name is required',
+    }),
+    issuer: t.String({
+      minLength: 1,
+      example: 'Amazon Web Services',
+      error: 'Certificate issuer is required',
+    }),
+    issuedAt: t.String({
+      format: 'date',
+      example: '2024-05-01',
+      error: 'Issue date must be a calendar date in YYYY-MM-DD format',
+    }),
+    verifyUrl: t.Optional(
+      t.Nullable(
+        t.String({
+          format: 'uri',
+          example: 'https://verify.example.com/abc123',
+          error: 'Verification link must be a valid URL',
+        }),
+      ),
     ),
-  ),
-});
+  },
+  { additionalProperties: false },
+);
 
 // Every field optional so a caller may patch a subset; each supplied field is
 // still validated by the create schema's rules.

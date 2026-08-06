@@ -1,6 +1,7 @@
 import { authGuard } from '@/modules/auth';
 import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
+import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
 import { Elysia } from 'elysia';
 
@@ -47,6 +48,7 @@ export const certificateRoute = new Elysia({
   })
   .post('/', postCertificate, {
     body: certificateCreateSchema,
+    transform: rejectUnknownFields(certificateCreateSchema),
     response: responses(certificateResponseSchema, 400, 401),
     detail: {
       tags: ['Certificates'],
@@ -59,6 +61,7 @@ export const certificateRoute = new Elysia({
   .patch('/:certificateId', patchCertificate, {
     params: certificateParamsSchema,
     body: certificateUpdateSchema,
+    transform: rejectUnknownFields(certificateUpdateSchema),
     response: responses(certificateResponseSchema, 400, 401, 404),
     detail: {
       tags: ['Certificates'],
