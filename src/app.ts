@@ -1,5 +1,6 @@
 import { Elysia } from 'elysia';
 
+import { academicRegistrationRoute } from './modules/academic-registration';
 import { authPlugin, authTestRoute } from './modules/auth';
 import { certificateRoute } from './modules/certificate';
 import { healthRoute } from './modules/health';
@@ -28,6 +29,7 @@ export const app = new Elysia({
   .use(authTestRoute)
   .use(healthRoute)
   .use(onboardingRoute)
+  .use(academicRegistrationRoute)
   .use(profileRoute)
   .use(certificateRoute)
   .use(portfolioRoute)
