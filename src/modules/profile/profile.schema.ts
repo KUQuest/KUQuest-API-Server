@@ -35,7 +35,7 @@ export const profileUpdateSchema = t.Object(
   {
     firstName: t.Optional(nameSchema),
     lastName: t.Optional(nameSchema),
-    bio: t.Optional(t.String({ minLength: 1, maxLength: 500, pattern: '\\S' })),
+    bio: t.Optional(t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' })),
     telephone: t.Optional(t.String({ pattern: '^0[0-9]{9}$', example: '0800000000' })),
     majorId: t.Optional(t.String({ format: 'uuid' })),
   },

@@ -73,7 +73,7 @@ describe('profile integration', () => {
       ['a bio cleared with whitespace', { bio: '   ' }],
       ['a telephone cleared with an empty string', { telephone: '' }],
       ['a major cleared with an empty string', { majorId: '' }],
-      ['a bio beyond the maximum length', { bio: 'a'.repeat(501) }],
+      ['a bio beyond the maximum length', { bio: 'a'.repeat(1001) }],
       ['a major that is not a uuid', { majorId: 'not-a-uuid' }],
       ['a first name beyond the maximum length', { firstName: 'a'.repeat(101) }],
       ['a last name beyond the maximum length', { lastName: 'a'.repeat(101) }],
@@ -129,7 +129,7 @@ describe('profile integration', () => {
 
   it('accepts a bio at exactly the maximum length', async () => {
     // Reaching the auth guard proves validation passed.
-    const response = await patchProfile({ bio: 'a'.repeat(500) });
+    const response = await patchProfile({ bio: 'a'.repeat(1000) });
 
     expect(response.status).toBe(401);
   });
