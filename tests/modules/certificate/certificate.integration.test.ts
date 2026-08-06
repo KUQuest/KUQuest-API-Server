@@ -119,4 +119,14 @@ describe('certificate integration — validation', () => {
       new Request(`${certificatesUrl}/not-a-uuid`, { method: 'DELETE' }),
     );
   });
+
+  it('rejects an unknown field on create', async () => {
+    await expectValidationError(json('POST', certificatesUrl, { ...validBody, bogus: 'x' }));
+  });
+
+  it('rejects an unknown field on update', async () => {
+    await expectValidationError(
+      json('PATCH', `${certificatesUrl}/${certificateId}`, { name: 'Renamed', bogus: 'x' }),
+    );
+  });
 });
