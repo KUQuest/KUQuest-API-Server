@@ -34,6 +34,10 @@ export const openapiPlugin = openapi({
         description: 'Authenticated Student profile endpoints.',
       },
       {
+        name: 'Portfolio',
+        description: "Authenticated endpoints for managing the current Student's portfolio gallery.",
+      },
+      {
         name: 'Certificates',
         description: "Authenticated endpoints for managing the current Student's profile certificates.",
       },
