@@ -42,7 +42,7 @@ export const portfolioRoute = new Elysia({
       tags: ['Portfolio'],
       summary: 'Create a portfolio entry',
       description:
-        'Creates a portfolio entry with up to 10 images and stores their file references.',
+        'Creates a portfolio entry with up to 10 images (each a valid JPEG, PNG, or WebP file up to 5 MB) and stores their file references.',
       operationId: 'createOwnPortfolio',
       security: betterAuthSecurity,
     },

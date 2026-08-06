@@ -2,8 +2,18 @@ import {t} from 'elysia';
 
 export const maxPortfolioImages = 10;
 
-const titleSchema = t.String({ minLength: 1, maxLength: 120, pattern: '\\S' });
-const descriptionSchema = t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' });
+const titleSchema = t.String({
+  minLength: 1,
+  maxLength: 120,
+  pattern: '\\S',
+  example: 'Capstone Project',
+});
+const descriptionSchema = t.String({
+  minLength: 1,
+  maxLength: 1000,
+  pattern: '\\S',
+  example: 'A short description of the work.',
+});
 
 export const portfolioParamSchema = t.Object({
   portfolioId: t.String({ format: 'uuid'}),
@@ -27,17 +37,17 @@ export const portfolioUpdateSchema = t.Object(
 );
 
 const portfolioImageSchema = t.Object({
-  fileId: t.String({format: 'uuid'}),
+  fileId: t.String({ format: 'uuid' }),
   position: t.Integer(),
-  url: t.String({format: 'uri'}),
+  url: t.String({ format: 'uri', example: 'https://storage.example.com/portfolio/a.png' }),
 });
 
 const portfolioItemSchema = t.Object({
-  id: t.String({format:'uuid'}),
-  title: t.String(),
-  description: t.Nullable(t.String()),
+  id: t.String({ format: 'uuid' }),
+  title: t.String({ example: 'Capstone Project' }),
+  description: t.Nullable(t.String({ example: 'A short description of the work.' })),
   images: t.Array(portfolioImageSchema),
-  createdAt: t.String({format: 'date-time'}),
+  createdAt: t.String({ format: 'date-time' }),
 });
 
 export const portfolioListRespondSchema = 
