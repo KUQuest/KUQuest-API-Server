@@ -41,11 +41,11 @@ export const authOpenAPIComponents = {
       properties: {
         code: {
           type: 'string',
-          example: 'EMAIL_DOMAIN_NOT_ALLOWED',
+          example: 'INVALID_TOKEN',
         },
         message: {
           type: 'string',
-          example: `Only @${ALLOWED_EMAIL_DOMAIN} Google accounts can sign in`,
+          example: 'Invalid token',
         },
       },
     },
@@ -273,7 +273,9 @@ export const authOpenAPIPaths = {
           },
         },
         400: errorResponse('Invalid provider, callback URL, or request body.'),
-        403: errorResponse(`The Google account is not in the ${ALLOWED_EMAIL_DOMAIN} domain.`),
+        401: errorResponse(
+          `A native ID token (the mobile sign-in flow) fails Google's own hosted-domain check before this app's own validation ever runs, for e.g. an account outside the ${ALLOWED_EMAIL_DOMAIN} domain. Returns the generic Better Auth shape { code: "INVALID_TOKEN", message: "Invalid token" }, not a domain-specific error.`,
+        ),
         429: errorResponse('Too many authentication requests.'),
         500: errorResponse('The authorization request could not be created.'),
       },
@@ -351,16 +353,15 @@ export const authOpenAPIPaths = {
       responses: {
         302: {
           description:
-            'Redirects to the trusted callback URL and sets the Better Auth session cookie after successful authentication.',
+            `Redirects to the trusted callback URL and sets the Better Auth session cookie after successful authentication. On failure — including an account outside the ${ALLOWED_EMAIL_DOMAIN} domain, which fails Google's own hosted-domain check before this app's own validation ever runs — redirects to the trusted error callback URL instead, with an \`?error=<code>\` query param appended (e.g. \`unable_to_get_user_info\` for a rejected domain) rather than a JSON error body.`,
           headers: {
             Location: {
-              description: 'Trusted frontend or API callback URL.',
+              description: 'Trusted frontend or API callback URL, or the error callback URL with an appended `error` query param on failure.',
               schema: { type: 'string', format: 'uri' },
             },
           },
         },
         400: errorResponse('Google rejected the request or OAuth state validation failed.'),
-        403: errorResponse(`Only @${ALLOWED_EMAIL_DOMAIN} Google accounts are allowed.`),
       },
     },
   },

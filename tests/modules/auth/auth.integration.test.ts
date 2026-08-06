@@ -43,6 +43,24 @@ describe('authentication integration', () => {
     expect(await response.json()).toBeNull();
   });
 
+  it('rejects an unverifiable native ID token', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/auth/sign-in/social', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'google',
+          idToken: { token: 'not-a-real-google-id-token' },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.code).toBe('INVALID_TOKEN');
+    expect(body.code).not.toBe('EMAIL_DOMAIN_NOT_ALLOWED');
+  });
+
   it.each([
     '/api/admin/auth/sign-up/email',
     '/api/admin/auth/change-password',
