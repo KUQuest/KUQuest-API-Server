@@ -1,5 +1,5 @@
 import { db } from '@/database/client';
-import { faculty, major } from '@/database/schema/academic.schema';
+import { department, faculty } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
 
 import { and, asc, eq, ne } from 'drizzle-orm';
@@ -28,7 +28,7 @@ const isStudentIdUniquenessViolation = (error: unknown): boolean => {
 export const getOnboardingStatusFields = async (userId: string) => {
     const [currentUser] = await db.select({
         telephone: authUser.telephone,
-        majorId: authUser.majorId,
+        departmentId: authUser.departmentId,
         studentId: authUser.studentId,
     }).from(authUser).where(eq(authUser.id, userId)).limit(1);
 
@@ -38,7 +38,7 @@ export const getOnboardingStatusFields = async (userId: string) => {
 export const updateOnboardingInfo = async (
     userId: string,
     data: Static<typeof onboardingSchema>,
-): Promise<'ok' | 'USER_NOT_FOUND' | 'MAJOR_NOT_FOUND' | 'STUDENT_ID_ALREADY_EXISTS'> => {
+): Promise<'ok' | 'USER_NOT_FOUND' | 'DEPARTMENT_NOT_FOUND' | 'STUDENT_ID_ALREADY_EXISTS'> => {
     const [currentUser] = await db
         .select({ id: authUser.id })
         .from(authUser)
@@ -47,14 +47,14 @@ export const updateOnboardingInfo = async (
 
     if (!currentUser) return 'USER_NOT_FOUND';
 
-    if (data.majorId !== undefined) {
-        const [currentMajor] = await db
-            .select({ id: major.id })
-            .from(major)
-            .where(eq(major.id, data.majorId))
+    if (data.departmentId !== undefined) {
+        const [currentDepartment] = await db
+            .select({ id: department.id })
+            .from(department)
+            .where(eq(department.id, data.departmentId))
             .limit(1);
 
-        if (!currentMajor) return 'MAJOR_NOT_FOUND';
+        if (!currentDepartment) return 'DEPARTMENT_NOT_FOUND';
     }
 
     if (data.studentId !== undefined) {
@@ -89,7 +89,7 @@ export const getOnboardingData = async (userId: string) => {
         lastName: authUser.lastName,
         email: authUser.email,
         telephone: authUser.telephone,
-        majorId: authUser.majorId,
+        departmentId: authUser.departmentId,
         studentId: authUser.studentId,
         academicYear: authUser.academicYear,
     })
@@ -105,28 +105,28 @@ export const getAcademicOptions = async () => {
         .select({
             facultyId: faculty.id,
             facultyName: faculty.name,
-            majorId: major.id,
-            majorName: major.name,
+            departmentId: department.id,
+            departmentName: department.name,
         })
         .from(faculty)
-        .leftJoin(major, eq(major.facultyId, faculty.id))
-        .orderBy(asc(faculty.name), asc(major.name));
+        .leftJoin(department, eq(department.facultyId, faculty.id))
+        .orderBy(asc(faculty.name), asc(department.name));
 
     const options = new Map<string, {
         id: string;
         name: string;
-        majors: { id: string; name: string }[];
+        departments: { id: string; name: string }[];
     }>();
 
     for (const row of rows) {
         const option = options.get(row.facultyId) ?? {
             id: row.facultyId,
             name: row.facultyName,
-            majors: [],
+            departments: [],
         };
 
-        if (row.majorId && row.majorName) {
-            option.majors.push({ id: row.majorId, name: row.majorName });
+        if (row.departmentId && row.departmentName) {
+            option.departments.push({ id: row.departmentId, name: row.departmentName });
         }
 
         options.set(row.facultyId, option);

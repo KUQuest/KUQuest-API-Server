@@ -36,7 +36,7 @@ describe('onboarding integration', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           telephone: '080-000-0000',
-          majorId: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+          departmentId: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
           studentId: '6500000000',
           academicYear: 2026,
         }),

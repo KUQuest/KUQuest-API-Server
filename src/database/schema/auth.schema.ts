@@ -13,7 +13,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
-import { major } from './academic.schema';
+import { department, occupation } from './academic.schema';
 import { file } from './file.schema';
 
 export const authUser = pgTable(
@@ -31,8 +31,11 @@ export const authUser = pgTable(
     bio: text('bio'),
     studentId: text('student_id'),
     telephone: text('telephone'),
-    majorId: uuid('major_id').references(() => major.id),
+    departmentId: uuid('department_id').references(() => department.id),
     academicYear: integer('academic_year'),
+    occupationId: uuid('occupation_id').references(() => occupation.id),
+    termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
+    termsVersion: text('terms_version'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
@@ -45,7 +48,7 @@ export const authUser = pgTable(
       'auth_user_academic_year_check',
       sql`${table.academicYear} IS NULL OR (${table.academicYear} >= 1000 AND ${table.academicYear} <= 9999)`,
     ),
-    index('auth_user_major_id_idx').on(table.majorId),
+    index('auth_user_department_id_idx').on(table.departmentId),
     uniqueIndex('auth_user_student_id_uidx')
       .on(table.studentId)
       .where(sql`${table.studentId} IS NOT NULL`),
@@ -151,9 +154,13 @@ export const authVerification = pgTable(
 export const authUserRelations = relations(authUser, ({ many, one }) => ({
   sessions: many(authSession),
   accounts: many(authAccount),
-  major: one(major, {
-    fields: [authUser.majorId],
-    references: [major.id],
+  department: one(department, {
+    fields: [authUser.departmentId],
+    references: [department.id],
+  }),
+  occupation: one(occupation, {
+    fields: [authUser.occupationId],
+    references: [occupation.id],
   }),
   image: one(file, {
     fields: [authUser.imageFileId],

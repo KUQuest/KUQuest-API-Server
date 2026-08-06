@@ -50,6 +50,20 @@
       "when": 1785595206463,
       "tag": "0006_add-auth-admin-better-auth-fields",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786012153909,
+      "tag": "0007_robust_swarm",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786012153910,
+      "tag": "0008_seed_occupation_options",
+      "breakpoints": true
     }
   ]
 }

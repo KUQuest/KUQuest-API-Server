@@ -86,9 +86,9 @@ export const updateOwnProfile = async ({
 
   if (outcome === 'student-not-found') return userNotFound(set);
 
-  if (outcome === 'major-not-found') {
+  if (outcome === 'department-not-found') {
     set.status = 400;
-    return apiError('MAJOR_NOT_FOUND', 'Major not found');
+    return apiError('DEPARTMENT_NOT_FOUND', 'Department not found');
   }
 
   return apiSuccess();

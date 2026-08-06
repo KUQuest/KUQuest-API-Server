@@ -54,14 +54,14 @@ describe('onboarding academic options', () => {
 
     expect(options.find(({ name }) => name === 'Engineering at Sriracha')).toMatchObject({
       name: 'Engineering at Sriracha',
-      majors: [
+      departments: [
         { name: 'Automotive Engineering' },
         { name: 'Digital Manufacturing System Engineering' },
         { name: 'Robotic and Automation Systems Engineering' },
       ],
     });
 
-    expect(options.find(({ name }) => name === 'Engineering')?.majors).toContainEqual({
+    expect(options.find(({ name }) => name === 'Engineering')?.departments).toContainEqual({
       id: expect.any(String),
       name: 'Engineering',
     });
@@ -71,22 +71,22 @@ describe('onboarding academic options', () => {
 describe('updating onboarding information', () => {
   it('persists a partial update and returns all collected fields', async () => {
     const options = await getAcademicOptions();
-    const majorId = options
+    const departmentId = options
       .find(({ name }) => name === 'Engineering at Sriracha')
-      ?.majors.find(({ name }) => name === 'Automotive Engineering')?.id;
+      ?.departments.find(({ name }) => name === 'Automotive Engineering')?.id;
 
-    expect(majorId).toBeDefined();
+    expect(departmentId).toBeDefined();
     expect(
       await updateOnboardingInfo(studentA, {
         academicYear: 2026,
-        majorId: majorId!,
+        departmentId: departmentId!,
         telephone: '080-000-0000',
       }),
     ).toBe('ok');
 
     expect(await getOnboardingData(studentA)).toMatchObject({
       academicYear: 2026,
-      majorId,
+      departmentId,
       studentId: studentAId,
       telephone: '080-000-0000',
     });
@@ -102,7 +102,7 @@ describe('updating onboarding information', () => {
     expect(await updateOnboardingInfo(studentB, { academicYear: 2026 })).toBe('ok');
     expect(await getOnboardingData(studentB)).toMatchObject({
       academicYear: 2026,
-      majorId: null,
+      departmentId: null,
       telephone: null,
     });
   });

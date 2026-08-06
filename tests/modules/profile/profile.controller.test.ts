@@ -175,7 +175,7 @@ const storedProfile = {
   telephone: null,
   studentId: null,
   academicYear: null,
-  major: null,
+  department: null,
   avatar: null,
 };
 
@@ -287,18 +287,18 @@ describe('updateOwnProfile', () => {
     });
   });
 
-  it('reports an unknown major as the caller mistake it is', async () => {
-    spyOn(profileService, 'updateProfile').mockResolvedValue('major-not-found');
+  it('reports an unknown department as the caller mistake it is', async () => {
+    spyOn(profileService, 'updateProfile').mockResolvedValue('department-not-found');
 
     const { result, set } = invokeUpdateOwnProfile({
-      majorId: '018f47a7-1c7d-7c98-9a11-690d7e834300',
+      departmentId: '018f47a7-1c7d-7c98-9a11-690d7e834300',
     });
     const body = await result;
 
     expect(set.status).toBe(400);
     expect(body).toEqual({
       success: false,
-      error: { code: 'MAJOR_NOT_FOUND', message: 'Major not found' },
+      error: { code: 'DEPARTMENT_NOT_FOUND', message: 'Department not found' },
     });
   });
 });

@@ -33,6 +33,10 @@ export const env = {
   xenditSecretKey: process.env.XENDIT_SECRET_KEY,
   xenditWebhookToken: process.env.XENDIT_WEBHOOK_TOKEN,
   cmsOrigin: process.env.CMS_ORIGIN,
+  termsUrl: process.env.TERMS_URL,
+  privacyUrl: process.env.PRIVACY_URL,
+  dataUsageUrl: process.env.DATA_USAGE_URL,
+  contactUsUrl: process.env.CONTACT_US_URL,
 } as const;
 
 const requiredRuntimeVariables = {
@@ -47,6 +51,10 @@ const requiredRuntimeVariables = {
   S3_BUCKET: env.s3Bucket,
   S3_ACCESS_KEY_ID: env.s3AccessKeyId,
   S3_SECRET_ACCESS_KEY: env.s3SecretAccessKey,
+  TERMS_URL: env.termsUrl,
+  PRIVACY_URL: env.privacyUrl,
+  DATA_USAGE_URL: env.dataUsageUrl,
+  CONTACT_US_URL: env.contactUsUrl,
 } as const;
 
 export const validateRuntimeEnv = (): void => {

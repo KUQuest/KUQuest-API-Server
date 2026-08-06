@@ -16,7 +16,7 @@ export const avatarUploadResponseSchema = t.Object({
   }),
 });
 
-const majorSchema = t.Object({
+const departmentSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   name: t.String({ example: 'Computer Engineering' }),
   faculty: t.Object({
@@ -37,7 +37,7 @@ export const profileUpdateSchema = t.Object(
     lastName: t.Optional(nameSchema),
     bio: t.Optional(t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' })),
     telephone: t.Optional(t.String({ pattern: '^0[0-9]{9}$', example: '0800000000' })),
-    majorId: t.Optional(t.String({ format: 'uuid' })),
+    departmentId: t.Optional(t.String({ format: 'uuid' })),
   },
   { additionalProperties: false },
 );
@@ -52,7 +52,7 @@ export const profileResponseSchema = t.Object({
     telephone: t.Nullable(t.String({ example: '0800000000' })),
     studentId: t.Nullable(t.String({ example: '6500000000' })),
     academicYear: t.Nullable(t.Integer()),
-    major: t.Nullable(majorSchema),
+    department: t.Nullable(departmentSchema),
     avatar: t.Nullable(avatarSchema),
   }),
 });

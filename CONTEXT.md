@@ -13,11 +13,11 @@ A KUQuest Admin web app operator, signed in with credentials (not Google). Repre
 _Avoid_: User (Admins are never Students and vice versa).
 
 **Onboarding**:
-The one-time step after first sign-in where a Student supplies Telephone, Major, and Student ID. A Student is considered onboarded once all three fields are set. The routes under `/api/v1/onboarding/*` are debug scaffolding, not a contract — do not build against them, and do not treat their validation rules as canonical.
+The one-time step after first sign-in where a Student supplies Telephone, Department, and Student ID. A Student is considered onboarded once all three fields are set. The routes under `/api/v1/onboarding/*` are debug scaffolding, not a contract — do not build against them, and do not treat their validation rules as canonical.
 _Avoid_: Profile setup, registration.
 
 **Profile**:
-The scalar fields a Student holds on `auth_user` — name, bio, Telephone, Student ID, academic year, Major — served by `/api/v1/profile`. A Student may edit only their own, and only the subset the endpoint owns (first name, last name, bio, Telephone, Major); the rest is read-only there. Values can be replaced but never cleared, so nobody un-onboards themselves through the edit screen. The current avatar is read here as a file reference plus a link that expires, built per request — no storage URL is ever persisted — while uploading and replacing it belongs to `POST /api/v1/profile/avatar` ([[BE-41]]). A tombstoned `file` row reads as no avatar. Portfolio items (`profile_portfolio_item`, [[BE-39]]) and certificates (`profile_certificate`, [[BE-40]]) are separate resources, each owned by its own endpoint under `/api/v1/profile/*`, and are deliberately absent from the Profile response. Work experience (`profile_work_experience`) has a table but no owning endpoint yet.
+The scalar fields a Student holds on `auth_user` — name, bio, Telephone, Student ID, academic year, Department — served by `/api/v1/profile`. A Student may edit only their own, and only the subset the endpoint owns (first name, last name, bio, Telephone, Department); the rest is read-only there. Values can be replaced but never cleared, so nobody un-onboards themselves through the edit screen. The current avatar is read here as a file reference plus a link that expires, built per request — no storage URL is ever persisted — while uploading and replacing it belongs to `POST /api/v1/profile/avatar` ([[BE-41]]). A tombstoned `file` row reads as no avatar. Portfolio items (`profile_portfolio_item`, [[BE-39]]) and certificates (`profile_certificate`, [[BE-40]]) are separate resources, each owned by its own endpoint under `/api/v1/profile/*`, and are deliberately absent from the Profile response. Work experience (`profile_work_experience`) has a table but no owning endpoint yet.
 _Avoid_: Account (that is the auth record), treating Profile as the whole of a Student's data.
 
 **Certificate**:
@@ -28,9 +28,13 @@ _Avoid_: Qualification, badge (a badge is gamification, not a Certificate); trea
 A KU-issued 10-digit identifier a Student provides during Onboarding. Distinct from the internal `auth_user.id` (a generated auth identifier) — Student ID is KU's own number, stored in `auth_user.studentId`.
 _Avoid_: User ID, student number.
 
-**Major** / **Faculty**:
-A Student's academic major (`major` table) belongs to a Faculty (`faculty` table, e.g. Engineering). Captured during Onboarding as `auth_user.majorId`, a foreign key — no more free-text faculty field.
-_Avoid_: storing faculty/major as free text.
+**Department** / **Faculty**:
+A Student's academic department (`department` table) belongs to a Faculty (`faculty` table, e.g. Engineering). Captured during Onboarding as `auth_user.departmentId`, a foreign key — no more free-text faculty field. Formerly called Major; the `major` table and `auth_user.majorId` column were renamed to `department`/`departmentId` (no third hierarchy level was introduced — Academic Registration's own field list never asked for a Major on top of Faculty/Department).
+_Avoid_: storing faculty/department as free text; the term Major (superseded by Department).
+
+**Occupation**:
+What a Student is at KU — e.g. Student or Teacher — captured during Academic Registration as `auth_user.occupationId`, a foreign key into the `occupation` table. Each Occupation row carries a `requiresStudentId` flag the server reads to decide whether Student ID is required for that Occupation, rather than hardcoding a name comparison.
+_Avoid_: hardcoding Occupation name checks instead of reading `requiresStudentId`.
 
 **Allowed Email Domain**:
 The `@ku.th` restriction enforced at sign-in — only Google accounts under this domain may authenticate. Applies to Students only (Admins use credential login). Encoded in `auth.constants.ts` (`ALLOWED_EMAIL_DOMAIN`) and enforced by `assertAllowedEmail`/`isAllowedEmail` in `auth.policy.ts`.

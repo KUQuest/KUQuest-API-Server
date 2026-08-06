@@ -1,5 +1,5 @@
 import { db, sql } from '@/database/client';
-import { faculty, major } from '@/database/schema/academic.schema';
+import { department, faculty } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
@@ -27,7 +27,7 @@ const studentA = `test-profile-a-${randomUUID()}`;
 const studentB = `test-profile-b-${randomUUID()}`;
 
 let facultyId: string;
-let majorId: string;
+let departmentId: string;
 let facultyName: string;
 let avatarFileId: string;
 let tombstonedFileId: string;
@@ -69,10 +69,10 @@ beforeAll(async () => {
     .values({ name: facultyName })
     .returning({ id: faculty.id });
 
-  [{ id: majorId }] = await db
-    .insert(major)
-    .values({ facultyId, name: 'Test Major' })
-    .returning({ id: major.id });
+  [{ id: departmentId }] = await db
+    .insert(department)
+    .values({ facultyId, name: 'Test Department' })
+    .returning({ id: department.id });
 
   await db.insert(authUser).values([
     {
@@ -80,7 +80,7 @@ beforeAll(async () => {
       email: `${studentA}@ku.th`,
       ...startingState[studentA]!,
       studentId: `65${Math.floor(10_000_000 + Math.random() * 89_999_999)}`,
-      majorId,
+      departmentId,
     },
     {
       id: studentB,
@@ -132,7 +132,7 @@ afterAll(async () => {
     .where(inArray(authUser.id, [studentA, studentB]));
   await db.delete(file).where(inArray(file.id, [avatarFileId, tombstonedFileId]));
   await db.delete(authUser).where(inArray(authUser.id, [studentA, studentB]));
-  await db.delete(major).where(eq(major.id, majorId));
+  await db.delete(department).where(eq(department.id, departmentId));
   await db.delete(faculty).where(eq(faculty.id, facultyId));
 });
 
@@ -145,20 +145,20 @@ describe('reading a profile', () => {
     expect(profile?.telephone).toBe('0800000001');
   });
 
-  it('resolves the major and its faculty to names', async () => {
+  it('resolves the department and its faculty to names', async () => {
     const profile = await getProfile(studentA);
 
-    expect(profile?.major).toEqual({
-      id: majorId,
-      name: 'Test Major',
+    expect(profile?.department).toEqual({
+      id: departmentId,
+      name: 'Test Department',
       faculty: { name: facultyName },
     });
   });
 
-  it('reports no major rather than a hollow one when none is chosen', async () => {
+  it('reports no department rather than a hollow one when none is chosen', async () => {
     const profile = await getProfile(studentB);
 
-    expect(profile?.major).toBeNull();
+    expect(profile?.department).toBeNull();
   });
 
   it('finds nothing for a student that does not exist', async () => {
@@ -191,10 +191,10 @@ describe('reading a profile', () => {
       'academicYear',
       'avatar',
       'bio',
+      'department',
       'email',
       'firstName',
       'lastName',
-      'major',
       'studentId',
       'telephone',
     ]);
@@ -265,7 +265,7 @@ describe('updating a profile', () => {
     expect(profile?.bio).toBe('only the bio changes');
     expect(profile?.telephone).toBe(startingState[studentA]!.telephone);
     expect(profile?.firstName).toBe(startingState[studentA]!.firstName);
-    expect(profile?.major?.id).toBe(majorId);
+    expect(profile?.department?.id).toBe(departmentId);
   });
 
   it('leaves the avatar alone', async () => {
@@ -307,17 +307,17 @@ describe('updating a profile', () => {
   });
 });
 
-describe('choosing a major', () => {
-  it('accepts a major that exists', async () => {
-    expect(await updateProfile(studentB, { majorId })).toBe('updated');
-    expect((await getProfile(studentB))?.major?.id).toBe(majorId);
+describe('choosing a department', () => {
+  it('accepts a department that exists', async () => {
+    expect(await updateProfile(studentB, { departmentId })).toBe('updated');
+    expect((await getProfile(studentB))?.department?.id).toBe(departmentId);
   });
 
-  it('refuses a major that does not exist, without leaving the profile changed', async () => {
+  it('refuses a department that does not exist, without leaving the profile changed', async () => {
     const before = await getProfile(studentA);
 
-    expect(await updateProfile(studentA, { bio: 'new', majorId: randomUUID() })).toBe(
-      'major-not-found',
+    expect(await updateProfile(studentA, { bio: 'new', departmentId: randomUUID() })).toBe(
+      'department-not-found',
     );
     expect(await getProfile(studentA)).toEqual(before!);
   });

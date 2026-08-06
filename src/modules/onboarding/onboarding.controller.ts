@@ -26,7 +26,7 @@ export const getOnboardingStatus = async ({
         return apiError('USER_NOT_FOUND', 'User not found');
     }
 
-    const completed = Boolean(currentUser.telephone && currentUser.majorId && currentUser.studentId);
+    const completed = Boolean(currentUser.telephone && currentUser.departmentId && currentUser.studentId);
     return apiSuccess({ completed });
 };
 
@@ -42,9 +42,9 @@ export const updateOnboarding = async ({
         return apiError('USER_NOT_FOUND', 'User not found');
     }
 
-    if (result === 'MAJOR_NOT_FOUND') {
+    if (result === 'DEPARTMENT_NOT_FOUND') {
         set.status = 400;
-        return apiError('MAJOR_NOT_FOUND', 'Major not found');
+        return apiError('DEPARTMENT_NOT_FOUND', 'Department not found');
     }
 
     if (result === 'STUDENT_ID_ALREADY_EXISTS') {

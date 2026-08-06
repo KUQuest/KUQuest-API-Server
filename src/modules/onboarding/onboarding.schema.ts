@@ -6,7 +6,7 @@ export const onboardingSchema = t.Object({
         example: '080-000-0000',
         error: 'Telephone number must be in the format 0XX-XXX-XXXX',
     })),
-    majorId: t.Optional(t.String({
+    departmentId: t.Optional(t.String({
         format: 'uuid',
         example: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
     })),
@@ -40,7 +40,7 @@ export const onboardingDataResponseSchema = t.Object({
             firstName: t.String(),
             lastName: t.String(),
             telephone: t.Nullable(t.String()),
-            majorId: t.Nullable(t.String()),
+            departmentId: t.Nullable(t.String()),
             studentId: t.Nullable(t.String()),
             academicYear: t.Nullable(t.Integer()),
         }),
@@ -52,7 +52,7 @@ export const academicOptionsResponseSchema = t.Object({
     data: t.Array(t.Object({
         id: t.String({ format: 'uuid' }),
         name: t.String(),
-        majors: t.Array(t.Object({
+        departments: t.Array(t.Object({
             id: t.String({ format: 'uuid' }),
             name: t.String(),
         })),

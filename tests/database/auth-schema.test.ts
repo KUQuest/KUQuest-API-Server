@@ -12,4 +12,14 @@ describe('authentication database schema', () => {
     expect(columns.firstName.name).toBe('first_name');
     expect(columns.lastName.name).toBe('last_name');
   });
+
+  it('stores Academic Registration fields renamed/added for BE-94', () => {
+    const columns = getTableColumns(authUser);
+
+    expect(columns.departmentId.name).toBe('department_id');
+    expect(columns.occupationId.name).toBe('occupation_id');
+    expect(columns.termsAcceptedAt.name).toBe('terms_accepted_at');
+    expect(columns.termsVersion.name).toBe('terms_version');
+    expect(columns).not.toHaveProperty('majorId');
+  });
 });
