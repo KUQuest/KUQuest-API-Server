@@ -62,6 +62,25 @@ describe('authentication integration', () => {
   });
 
   it.each([
+    ['GET', '/api/auth/list-sessions'],
+    ['POST', '/api/auth/revoke-session'],
+    ['POST', '/api/auth/revoke-sessions'],
+    ['POST', '/api/auth/revoke-other-sessions'],
+  ])('rejects an unauthenticated %s %s', async (method, path) => {
+    const response = await app.handle(
+      new Request(`http://localhost${path}`, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: method === 'POST' ? JSON.stringify({ token: 'x' }) : undefined,
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.code).toBe('UNAUTHORIZED');
+  });
+
+  it.each([
     '/api/admin/auth/sign-up/email',
     '/api/admin/auth/change-password',
     '/api/admin/auth/request-password-reset',

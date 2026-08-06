@@ -30,6 +30,10 @@ describe('authentication OpenAPI documentation', () => {
     expect(document.paths?.['/api/auth/sign-in/social']?.post).toBeDefined();
     expect(document.paths?.['/api/auth/callback/google']?.get).toBeDefined();
     expect(document.paths?.['/api/auth/get-session']?.get).toBeDefined();
+    expect(document.paths?.['/api/auth/list-sessions']?.get).toBeDefined();
+    expect(document.paths?.['/api/auth/revoke-session']?.post).toBeDefined();
+    expect(document.paths?.['/api/auth/revoke-sessions']?.post).toBeDefined();
+    expect(document.paths?.['/api/auth/revoke-other-sessions']?.post).toBeDefined();
     expect(document.paths?.['/api/auth/sign-out']?.post).toBeDefined();
     expect(document.paths?.['/api/admin/auth/sign-in/email']?.post).toBeDefined();
     expect(document.paths?.['/api/admin/auth/get-session']?.get).toBeDefined();
@@ -49,5 +53,7 @@ describe('authentication OpenAPI documentation', () => {
     expect(document.components?.schemas?.AuthUser).toBeDefined();
     expect(document.components?.schemas?.AuthSessionResponse).toBeDefined();
     expect(document.components?.schemas?.AuthError).toBeDefined();
+    expect(document.components?.schemas?.SocialSignInIdTokenResponse).toBeDefined();
+    expect(document.components?.schemas?.RevokeSessionResult).toBeDefined();
   });
 });

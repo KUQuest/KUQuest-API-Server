@@ -210,6 +210,19 @@ export const authOpenAPIComponents = {
           description:
             'When true, return the Google authorization URL for the browser to navigate manually.',
         },
+        idToken: {
+          type: 'object',
+          description:
+            'Presence switches this endpoint from the browser redirect flow to the native flow: the Google ID token from a mobile Google Sign-In SDK (the flow `@better-auth/expo` drives on Android), verified and signed in synchronously — no authorization URL is returned.',
+          required: ['token'],
+          properties: {
+            token: { type: 'string', description: 'ID token issued by Google.' },
+            nonce: { type: 'string', description: 'Nonce used to generate the token, if one was set.' },
+            accessToken: { type: 'string', description: 'Google\'s OAuth access token, stored against the linked account.' },
+            refreshToken: { type: 'string', description: 'Google\'s OAuth refresh token, stored against the linked account.' },
+            expiresAt: { type: 'number', description: 'Unix timestamp the access token expires at.' },
+          },
+        },
       },
       example: {
         provider: 'google',
@@ -233,6 +246,24 @@ export const authOpenAPIComponents = {
         },
       },
     },
+    SocialSignInIdTokenResponse: {
+      type: 'object',
+      description: 'Returned instead of SocialSignInResponse when the request included idToken.',
+      required: ['redirect', 'token', 'user'],
+      properties: {
+        redirect: {
+          type: 'boolean',
+          enum: [false],
+          description: 'Always false for this flow — the caller already has a session, no authorization URL to follow.',
+        },
+        token: {
+          type: 'string',
+          description:
+            'Session token as a flat string — unlike GET /api/auth/get-session\'s nested {session, user} shape. The Better Auth session cookie is also set on this response.',
+        },
+        user: { $ref: '#/components/schemas/AuthUser' },
+      },
+    },
     SignOutResponse: {
       type: 'object',
       required: ['success'],
@@ -244,6 +275,17 @@ export const authOpenAPIComponents = {
       },
       example: { success: true },
     },
+    RevokeSessionResult: {
+      type: 'object',
+      required: ['status'],
+      properties: {
+        status: {
+          type: 'boolean',
+          description: 'Whether the revocation completed successfully.',
+        },
+      },
+      example: { status: true },
+    },
   },
 } satisfies OpenAPIComponents;
 
@@ -252,7 +294,7 @@ export const authOpenAPIPaths = {
     post: {
       tags: ['Auth'],
       summary: 'Start Google sign-in',
-      description: `Creates a state- and PKCE-protected Google OAuth request. Only verified Google Workspace accounts in the ${ALLOWED_EMAIL_DOMAIN} domain may complete sign-in.`,
+      description: `Two flows share this endpoint, distinguished by whether the request body includes idToken. Without it (browser/redirect flow): creates a state- and PKCE-protected Google OAuth request and returns an authorization URL to navigate to. With it (native flow, e.g. Android via @better-auth/expo): verifies the ID token and signs in synchronously, returning a session. Only verified Google Workspace accounts in the ${ALLOWED_EMAIL_DOMAIN} domain may complete sign-in, on either flow.`,
       operationId: 'signInWithGoogle',
       security: [],
       requestBody: {
@@ -265,10 +307,16 @@ export const authOpenAPIPaths = {
       },
       responses: {
         200: {
-          description: 'Google authorization request created successfully.',
+          description:
+            'Redirect flow: Google authorization request created successfully. Native idToken flow: signed in successfully, session established.',
           content: {
             'application/json': {
-              schema: { $ref: '#/components/schemas/SocialSignInResponse' },
+              schema: {
+                oneOf: [
+                  { $ref: '#/components/schemas/SocialSignInResponse' },
+                  { $ref: '#/components/schemas/SocialSignInIdTokenResponse' },
+                ],
+              },
             },
           },
         },
@@ -439,6 +487,103 @@ export const authOpenAPIPaths = {
           },
         },
         500: errorResponse('The Admin session could not be read.'),
+      },
+    },
+  },
+  '/api/auth/list-sessions': {
+    get: {
+      tags: ['Auth'],
+      summary: 'List active sessions',
+      description:
+        'Lists every active (non-expired) session for the current user. Requires a fresh session — one created within the last 24 hours — even though the session itself may still be valid and rolling; a session kept alive purely by refresh without a recent sign-in is rejected with 403.',
+      operationId: 'listUserSessions',
+      security: [{ betterAuthSession: [] }],
+      responses: {
+        200: {
+          description: 'Active sessions for the current user.',
+          content: {
+            'application/json': {
+              schema: { type: 'array', items: { $ref: '#/components/schemas/AuthSession' } },
+            },
+          },
+        },
+        401: errorResponse('No active session.'),
+        403: errorResponse('The session is valid but not fresh (created more than 24 hours ago); sign in again to refresh it.'),
+      },
+    },
+  },
+  '/api/auth/revoke-session': {
+    post: {
+      tags: ['Auth'],
+      summary: 'Revoke a single session',
+      description:
+        'Revokes one of the current user\'s own sessions by token. Immediate — sessions are database-backed, no token blocklisting involved.',
+      operationId: 'revokeSession',
+      security: [{ betterAuthSession: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['token'],
+              properties: {
+                token: { type: 'string', description: 'The session token to revoke.' },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: 'Session revoked (or was already gone/not owned by the caller — same response either way).',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/RevokeSessionResult' },
+            },
+          },
+        },
+        401: errorResponse('No active session.'),
+      },
+    },
+  },
+  '/api/auth/revoke-sessions': {
+    post: {
+      tags: ['Auth'],
+      summary: 'Revoke every session',
+      description: 'Revokes every session for the current user, including the one making this request.',
+      operationId: 'revokeSessions',
+      security: [{ betterAuthSession: [] }],
+      responses: {
+        200: {
+          description: 'All sessions revoked.',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/RevokeSessionResult' },
+            },
+          },
+        },
+        401: errorResponse('No active session.'),
+      },
+    },
+  },
+  '/api/auth/revoke-other-sessions': {
+    post: {
+      tags: ['Auth'],
+      summary: 'Revoke every other session',
+      description: 'Revokes every session for the current user except the one making this request.',
+      operationId: 'revokeOtherSessions',
+      security: [{ betterAuthSession: [] }],
+      responses: {
+        200: {
+          description: 'All other sessions revoked.',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/RevokeSessionResult' },
+            },
+          },
+        },
+        401: errorResponse('No active session.'),
       },
     },
   },
