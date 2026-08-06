@@ -25,7 +25,7 @@ export const certificateRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/profile/certificates`,
 })
   .use(authGuard)
-  .get('/', getCertificates, {
+  .get('', getCertificates, {
     response: responses(certificateListResponseSchema, 401),
     detail: {
       tags: ['Certificates'],
@@ -46,7 +46,7 @@ export const certificateRoute = new Elysia({
       security: betterAuthSecurity,
     },
   })
-  .post('/', postCertificate, {
+  .post('', postCertificate, {
     body: certificateCreateSchema,
     transform: rejectUnknownFields(certificateCreateSchema),
     response: responses(certificateResponseSchema, 400, 401),

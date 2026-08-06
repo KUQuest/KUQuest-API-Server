@@ -47,8 +47,8 @@ const certificateSchema = t.Object({
   issuer: t.String(),
   issuedAt: t.String({ format: 'date' }),
   verifyUrl: t.Nullable(t.String()),
-  createdAt: t.Date(),
-  updatedAt: t.Date(),
+  createdAt: t.String({ format: 'date-time' }),
+  updatedAt: t.String({ format: 'date-time' }),
 });
 
 export const certificateResponseSchema = t.Object({

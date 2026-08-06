@@ -130,3 +130,31 @@ describe('certificate integration — validation', () => {
     );
   });
 });
+
+describe('certificate integration — published documentation', () => {
+  const openapiDocument = async () =>
+    (await (await app.handle(new Request('http://localhost/openapi/json'))).json()) as {
+      paths: Record<string, Record<string, { security?: Array<Record<string, unknown>> }>>;
+    };
+
+  it('publishes the collection operations without a trailing slash', async () => {
+    const document = await openapiDocument();
+
+    expect(Object.keys(document.paths)).toContain('/api/v1/profile/certificates');
+    expect(Object.keys(document.paths)).not.toContain('/api/v1/profile/certificates/');
+  });
+
+  it('marks every certificate operation as requiring authentication', async () => {
+    const document = await openapiDocument();
+    const collectionPath = document.paths['/api/v1/profile/certificates'];
+    const recordPath =
+      document.paths['/api/v1/profile/certificates/:certificateId'] ??
+      document.paths['/api/v1/profile/certificates/{certificateId}'];
+
+    expect(collectionPath?.get?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(collectionPath?.post?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(recordPath?.get?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(recordPath?.patch?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(recordPath?.delete?.security).toEqual([{ betterAuthSession: [] }]);
+  });
+});
