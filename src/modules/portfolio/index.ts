@@ -1,0 +1,1 @@
+export { portfolioRoute } from './portfolio.route';

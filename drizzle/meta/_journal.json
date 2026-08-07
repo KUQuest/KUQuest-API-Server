@@ -15,6 +15,55 @@
       "when": 1784862750090,
       "tag": "0001_needy_wild_child",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785072257277,
+      "tag": "0002_groovy_vertigo",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785143463103,
+      "tag": "0003_small_tigra",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785230369737,
+      "tag": "0004_bent_frightful_four",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785230369738,
+      "tag": "0005_seed_academic_options",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785595206463,
+      "tag": "0006_add-auth-admin-better-auth-fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786012153909,
+      "tag": "0007_robust_swarm",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786012153910,
+      "tag": "0008_seed_occupation_options",
+      "breakpoints": true
     }
   ]
 }

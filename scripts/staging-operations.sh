@@ -177,6 +177,7 @@ deploy() {
 
   if (( rollout_status != 0 )); then
     printf 'New API image failed readiness: %s\n' "$APP_IMAGE" >&2
+    docker compose logs --no-color --tail 200 api >&2 || true
 
     if [[ -z "$previous_image" ]]; then
       fail 'no previous API image is available for rollback'

@@ -156,6 +156,11 @@ jobs:
           XENDIT_WEBHOOK_TOKEN: ${{ secrets.XENDIT_WEBHOOK_TOKEN }}
 
           CMS_ORIGIN: ${{ secrets.CMS_ORIGIN }}
+
+          TERMS_URL: ${{ secrets.TERMS_URL }}
+          PRIVACY_URL: ${{ secrets.PRIVACY_URL }}
+          DATA_USAGE_URL: ${{ secrets.DATA_USAGE_URL }}
+          CONTACT_US_URL: ${{ secrets.CONTACT_US_URL }}
         run: |
           set -euo pipefail
 
@@ -175,6 +180,10 @@ jobs:
             XENDIT_SECRET_KEY
             XENDIT_WEBHOOK_TOKEN
             CMS_ORIGIN
+            TERMS_URL
+            PRIVACY_URL
+            DATA_USAGE_URL
+            CONTACT_US_URL
           )
 
           for SECRET_NAME in "${REQUIRED_SECRETS[@]}"; do
@@ -214,6 +223,11 @@ jobs:
             printf 'XENDIT_WEBHOOK_TOKEN=%s\n' "$XENDIT_WEBHOOK_TOKEN"
 
             printf 'CMS_ORIGIN=%s\n' "$CMS_ORIGIN"
+
+            printf 'TERMS_URL=%s\n' "$TERMS_URL"
+            printf 'PRIVACY_URL=%s\n' "$PRIVACY_URL"
+            printf 'DATA_USAGE_URL=%s\n' "$DATA_USAGE_URL"
+            printf 'CONTACT_US_URL=%s\n' "$CONTACT_US_URL"
           } > "$ENV_FILE"
 
       - name: Upload application environment
