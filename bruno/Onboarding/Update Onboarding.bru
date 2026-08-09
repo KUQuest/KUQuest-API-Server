@@ -1,0 +1,30 @@
+meta {
+  name: Update Onboarding
+  type: http
+  seq: 3
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/onboarding/update
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "telephone": "080-000-0000",
+    "departmentId": "{{departmentId}}",
+    "studentId": "6500000000",
+    "academicYear": 2026
+  }
+}
+
+docs {
+  At least one field required (minProperties: 1). Get a valid departmentId
+  from "List Academic Options" first.
+}

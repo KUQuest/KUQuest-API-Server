@@ -1,0 +1,23 @@
+meta {
+  name: Update Portfolio Entry
+  type: http
+  seq: 3
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/profile/portfolio/{{portfolioId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "title": "Updated Portfolio Title",
+    "description": "Updated description."
+  }
+}

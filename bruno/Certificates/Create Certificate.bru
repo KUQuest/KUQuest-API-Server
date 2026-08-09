@@ -1,0 +1,32 @@
+meta {
+  name: Create Certificate
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v1/profile/certificates
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "name": "AWS Certified Cloud Practitioner",
+    "issuer": "Amazon Web Services",
+    "issuedAt": "2024-05-01",
+    "verifyUrl": "https://verify.example.com/abc123"
+  }
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.data && data.data.certificate) {
+    bru.setEnvVar("certificateId", data.data.certificate.id);
+  }
+}

@@ -1,0 +1,22 @@
+meta {
+  name: Update Certificate
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/profile/certificates/{{certificateId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "verifyUrl": "https://verify.example.com/updated"
+  }
+}
