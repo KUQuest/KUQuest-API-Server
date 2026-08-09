@@ -1,11 +1,15 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
+import { file } from '@/database/schema/file.schema';
 import { profileCertificate } from '@/database/schema/profile.schema';
 import {
   createCertificate,
   deleteCertificate,
   findCertificate,
+  getPreviousCertificateImageFile,
   listCertificates,
+  markCertificateImageDeleted,
+  replaceCertificateImage,
   updateCertificate,
 } from '@/modules/certificate/certificate.service';
 
@@ -72,26 +76,24 @@ describe.skipIf(!databaseIsMigrated)('certificate service against the database',
   it('creates a certificate owned by the Student, without exposing userId', async () => {
     const created = await createCertificate(owner, certificate);
 
-    expect(created.name).toBe(certificate.name);
-    expect(created.issuer).toBe(certificate.issuer);
-    expect(created.issuedAt).toBe(certificate.issuedAt);
-    expect(created.verifyUrl).toBeNull();
+    expect(created!.name).toBe(certificate.name);
+    expect(created!.issuer).toBe(certificate.issuer);
+    expect(created!.issuedAt).toBe(certificate.issuedAt);
+    expect(created!.imageFileId).toBeNull();
     expect(created).not.toHaveProperty('userId');
   });
 
-  it('persists an optional verifyUrl and orders the collection by issue date', async () => {
+  it('orders the collection by issue date', async () => {
     await createCertificate(owner, {
       name: 'Certified Kubernetes Administrator',
       issuer: 'CNCF',
       issuedAt: '2023-01-15',
-      verifyUrl: 'https://verify.example.com/cka',
     });
 
     const certificates = await listCertificates(owner);
 
     expect(certificates).toHaveLength(2);
     expect(certificates.map((record) => record.issuedAt)).toEqual(['2024-05-01', '2023-01-15']);
-    expect(certificates[1]!.verifyUrl).toBe('https://verify.example.com/cka');
   });
 
   it('never returns another Student’s certificates', async () => {
@@ -124,13 +126,6 @@ describe.skipIf(!databaseIsMigrated)('certificate service against the database',
     expect(patched!.updatedAt > owned!.updatedAt).toBe(true);
   });
 
-  it('clears verifyUrl when it is explicitly set to null', async () => {
-    const withUrl = (await listCertificates(owner)).find((record) => record.verifyUrl !== null);
-    const patched = await updateCertificate(owner, withUrl!.id, { verifyUrl: null });
-
-    expect(patched?.verifyUrl).toBeNull();
-  });
-
   it('returns the current record for an empty patch', async () => {
     const [owned] = await listCertificates(owner);
 
@@ -157,5 +152,92 @@ describe.skipIf(!databaseIsMigrated)('certificate service against the database',
     expect((await deleteCertificate(owner, owned!.id))?.id).toBe(owned!.id);
     expect(await findCertificate(owner, owned!.id)).toBeUndefined();
     expect(await deleteCertificate(owner, owned!.id)).toBeUndefined();
+  });
+});
+
+const imageOwner = 'certificate-image-test-owner';
+const imageOther = 'certificate-image-test-other';
+
+describe.skipIf(!databaseIsMigrated)('certificate image against the database', () => {
+  let certificateId: string;
+  let objectKeyCounter = 0;
+
+  const makeStoredImage = () => ({
+    bucket: 'kuquest',
+    objectKey: `certificates/${imageOwner}/${objectKeyCounter++}.png`,
+    contentType: 'image/png' as const,
+    sizeBytes: 12,
+  });
+
+  const removeFixtures = async () => {
+    await db
+      .delete(profileCertificate)
+      .where(inArray(profileCertificate.userId, [imageOwner, imageOther]));
+    await db.delete(file).where(inArray(file.uploadedByUserId, [imageOwner, imageOther]));
+    await db.delete(authUser).where(inArray(authUser.id, [imageOwner, imageOther]));
+  };
+
+  beforeAll(async () => {
+    await removeFixtures();
+
+    const student = (id: string, email: string) => ({
+      id,
+      email,
+      firstName: 'Test',
+      lastName: 'Student',
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await db
+      .insert(authUser)
+      .values([
+        student(imageOwner, 'certificate-image-owner@ku.th'),
+        student(imageOther, 'certificate-image-other@ku.th'),
+      ]);
+
+    const created = await createCertificate(imageOwner, certificate);
+    certificateId = created!.id;
+  });
+
+  afterAll(removeFixtures);
+
+  it('attaches an image to an owned certificate', async () => {
+    const storedImage = makeStoredImage();
+    const result = await replaceCertificateImage(imageOwner, certificateId, storedImage);
+
+    expect(result?.previousFileId).toBeNull();
+    expect(await findCertificate(imageOwner, certificateId)).toMatchObject({
+      imageFileId: result!.fileId,
+      imageBucket: storedImage.bucket,
+      imageObjectKey: storedImage.objectKey,
+    });
+  });
+
+  it('does not attach an image to another Student’s certificate', async () => {
+    expect(
+      await replaceCertificateImage(imageOther, certificateId, makeStoredImage()),
+    ).toBeUndefined();
+  });
+
+  it('does not attach an image to a certificate that does not exist', async () => {
+    expect(
+      await replaceCertificateImage(imageOwner, missingId, makeStoredImage()),
+    ).toBeUndefined();
+  });
+
+  it('replaces an image, tombstoning the previous file', async () => {
+    const first = await replaceCertificateImage(imageOwner, certificateId, makeStoredImage());
+    const second = await replaceCertificateImage(imageOwner, certificateId, makeStoredImage());
+
+    expect(second?.previousFileId).toBe(first!.fileId);
+
+    const previousFile = await getPreviousCertificateImageFile(imageOwner, first!.fileId);
+    expect(previousFile).toBeDefined();
+
+    await markCertificateImageDeleted(imageOwner, first!.fileId);
+
+    expect(await getPreviousCertificateImageFile(imageOwner, first!.fileId)).toBeUndefined();
   });
 });
