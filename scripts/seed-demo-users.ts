@@ -10,7 +10,24 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { testUtils } from 'better-auth/plugins';
 import { eq } from 'drizzle-orm';
 
+import { join } from 'node:path';
+
 import * as schema from '@/database/schema/auth.schema';
+
+const bruEnvironmentPath = (name: string): string =>
+  join(import.meta.dir, '..', 'bruno', 'environments', `Demo - ${name}.bru`);
+
+const writeSessionCookieToBruEnvironment = async (name: string, cookie: string): Promise<void> => {
+  const path = bruEnvironmentPath(name);
+  const file = Bun.file(path);
+  if (!(await file.exists())) return;
+
+  const updated = (await file.text()).replace(
+    /^( *userSessionCookie:).*$/m,
+    `$1 ${cookie}`,
+  );
+  await Bun.write(path, updated);
+};
 
 const DEMO_USERS = [
   { firstName: 'Nattapong', lastName: 'Srisawat', department: 'Software and Knowledge Engineering' },
@@ -121,8 +138,11 @@ const main = async (): Promise<void> => {
 
     const headers = await ctx.test.getAuthHeaders({ userId: user.id });
     const cookie = headers.get('cookie') ?? '';
+    const name = `${demo.firstName} ${demo.lastName}`;
 
-    results.push({ email, name: `${demo.firstName} ${demo.lastName}`, cookie });
+    await writeSessionCookieToBruEnvironment(name, cookie);
+
+    results.push({ email, name, cookie });
   }
 
   console.log('Seeded demo users:\n');
