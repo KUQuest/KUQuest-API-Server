@@ -130,6 +130,50 @@ describe('onboarding integration', () => {
     expect(body.error.code).toBe('VALIDATION');
   });
 
+  it('rejects a malformed telephone', async () => {
+    const cases = await Promise.all(
+      ['not-a-phone', '0800000000', '000-000-0000', '080-000-000'].map(async (telephone) => {
+        const response = await app.handle(
+          new Request('http://localhost/api/v1/onboarding/update', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ telephone }),
+          }),
+        );
+
+        return { body: await response.json(), response };
+      }),
+    );
+
+    for (const { body, response } of cases) {
+      expect(response.status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe('VALIDATION');
+    }
+  });
+
+  it('rejects a malformed student ID', async () => {
+    const cases = await Promise.all(
+      ['650', '65000000000', 'ABCDEFGHIJ'].map(async (studentId) => {
+        const response = await app.handle(
+          new Request('http://localhost/api/v1/onboarding/update', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ studentId }),
+          }),
+        );
+
+        return { body: await response.json(), response };
+      }),
+    );
+
+    for (const { body, response } of cases) {
+      expect(response.status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe('VALIDATION');
+    }
+  });
+
   it('returns the shared error shape for an unauthenticated get-data request', async () => {
     const response = await app.handle(
       new Request('http://localhost/api/v1/onboarding/get-data'),
