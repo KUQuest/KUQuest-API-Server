@@ -55,6 +55,43 @@ describe('seeded occupation options', () => {
   });
 });
 
+describe('seeded academic options', () => {
+  it('seeds the KU faculty catalog the onboarding form reads from', async () => {
+    const rows = await db.select({ name: faculty.name }).from(faculty);
+    const names = rows.map(({ name }) => name);
+
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'Agriculture',
+        'Business Administration',
+        'Economics',
+        'Engineering',
+        'Humanities',
+        'Science',
+        'Social Sciences',
+        'Veterinary Medicine',
+      ]),
+    );
+  });
+
+  it('seeds each faculty with the departments it offers', async () => {
+    const rows = await db
+      .select({ name: department.name })
+      .from(department)
+      .innerJoin(faculty, eq(department.facultyId, faculty.id))
+      .where(eq(faculty.name, 'Engineering'));
+    const names = rows.map(({ name }) => name);
+
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'Electrical Engineering',
+        'Industrial Engineering',
+        'Mechanical Engineering',
+      ]),
+    );
+  });
+});
+
 describe('faculty to department relationship', () => {
   it('still relates a department to its faculty after the rename', async () => {
     const [row] = await db
