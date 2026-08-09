@@ -12,10 +12,18 @@ Backend API for KUQuest Mobile and CMS, built with Elysia and Bun.
 ```bash
 cp .env.example .env
 bun install --frozen-lockfile
-docker compose up -d postgres
+docker compose up -d
 bun run db:migrate
 bun run dev
 ```
+
+`docker compose up -d` starts PostgreSQL and a local RustFS container that the
+`.env.example` defaults already point at, so avatar and certificate image
+uploads work without real `kubits.org` credentials. A one-shot `rustfs-init`
+container creates the `kuquest` bucket the first time RustFS becomes healthy;
+it exits immediately afterward, which is expected. The RustFS console is at
+`http://localhost:9001`, signed in with `S3_ACCESS_KEY_ID` /
+`S3_SECRET_ACCESS_KEY`.
 
 Open `http://localhost:5000` in a browser to use the built-in Google login,
 session inspection, and sign-out test page.
