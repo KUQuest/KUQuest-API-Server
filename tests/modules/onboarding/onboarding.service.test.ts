@@ -148,8 +148,8 @@ describe('updating onboarding information', () => {
   });
 
   it('replaces stored non-null values with other valid values', async () => {
-    const departments = (await getAcademicOptions()).flatMap(({ departments }) => departments);
-    const replacementDepartmentId = departments[1]?.id;
+    const allDepartments = (await getAcademicOptions()).flatMap((faculty) => faculty.departments);
+    const replacementDepartmentId = allDepartments[1]?.id;
 
     expect(replacementDepartmentId).toBeDefined();
     expect(
