@@ -3,6 +3,7 @@ import { department, faculty } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
+  getPublicProfile,
   getProfile,
   replaceStudentAvatar,
   updateProfile,
@@ -202,6 +203,49 @@ describe('reading a profile', () => {
     expect(profile?.telephone).toBeNull();
     expect(profile?.studentId).toBeNull();
     expect(profile?.academicYear).toBeNull();
+  });
+});
+
+describe('reading a public profile', () => {
+  it('returns the public fields without Telephone, Student ID, or email', async () => {
+    const publicProfile = await getPublicProfile(studentA);
+
+    expect(Object.keys(publicProfile!).sort()).toEqual([
+      'academicYear',
+      'avatar',
+      'bio',
+      'department',
+      'firstName',
+      'lastName',
+    ]);
+    expect(publicProfile).toEqual({
+      firstName: 'Student',
+      lastName: 'One',
+      bio: 'first bio',
+      academicYear: 2025,
+      department: {
+        id: departmentId,
+        name: 'Test Department',
+        faculty: { name: facultyName },
+      },
+      avatar: null,
+    });
+  });
+
+  it('returns a public avatar reference when one is stored', async () => {
+    await db
+      .update(authUser)
+      .set({ imageFileId: avatarFileId })
+      .where(eq(authUser.id, studentA));
+
+    expect((await getPublicProfile(studentA))?.avatar).toEqual({
+      fileId: avatarFileId,
+      ...avatarObject,
+    });
+  });
+
+  it('finds nothing for a public profile that does not exist', async () => {
+    expect(await getPublicProfile(randomUUID())).toBeUndefined();
   });
 });
 

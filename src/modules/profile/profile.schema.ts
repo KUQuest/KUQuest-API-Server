@@ -1,3 +1,6 @@
+import { certificateSchema } from '@/modules/certificate/certificate.schema';
+import { portfolioItemSchema } from '@/modules/portfolio/portfolio.schema';
+
 import { t } from 'elysia';
 
 export const avatarUploadSchema = t.Object(
@@ -54,5 +57,24 @@ export const profileResponseSchema = t.Object({
     academicYear: t.Nullable(t.Integer()),
     department: t.Nullable(departmentSchema),
     avatar: t.Nullable(avatarSchema),
+  }),
+});
+
+export const publicProfileParamsSchema = t.Object({
+  // Better Auth Student IDs are text identifiers, not UUIDs.
+  userId: t.String({ minLength: 1 }),
+});
+
+export const publicProfileResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    firstName: t.String(),
+    lastName: t.String(),
+    bio: t.Nullable(t.String()),
+    academicYear: t.Nullable(t.Integer()),
+    department: t.Nullable(departmentSchema),
+    avatar: t.Nullable(avatarSchema),
+    portfolio: t.Array(portfolioItemSchema),
+    certificates: t.Array(certificateSchema),
   }),
 });

@@ -5,10 +5,12 @@ import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
 import { Elysia } from 'elysia';
 
-import { getOwnProfile, setAvatar, updateOwnProfile } from './profile.controller';
+import { getOwnProfile, getPublicProfile, setAvatar, updateOwnProfile } from './profile.controller';
 import {
   avatarUploadResponseSchema,
   avatarUploadSchema,
+  publicProfileParamsSchema,
+  publicProfileResponseSchema,
   profileResponseSchema,
   profileUpdateSchema,
 } from './profile.schema';
@@ -26,6 +28,18 @@ export const profileRoute = new Elysia({
       description:
         'Returns the profile of the authenticated student, including a temporary link to the current avatar when one is set.',
       operationId: 'getOwnProfile',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:userId', getPublicProfile, {
+    params: publicProfileParamsSchema,
+    response: responses(publicProfileResponseSchema, 400, 401, 404),
+    detail: {
+      tags: ['Profile'],
+      summary: 'Get a public profile',
+      description:
+        'Returns the browsable profile of any Student, including temporary links to the avatar, portfolio images, and certificate images when available. Telephone and Student ID are excluded.',
+      operationId: 'getPublicProfile',
       security: betterAuthSecurity,
     },
   })

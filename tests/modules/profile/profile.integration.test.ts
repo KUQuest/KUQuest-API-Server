@@ -25,6 +25,29 @@ describe('profile integration', () => {
     });
   });
 
+  it('rejects an unauthenticated public profile read', async () => {
+    const response = await app.handle(
+      new Request(`http://localhost/api/v1/profile/${randomUUID()}`),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body).toEqual({
+      success: false,
+      error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
+    });
+  });
+
+  it('accepts a text public profile id through validation before authentication runs', async () => {
+    const response = await app.handle(new Request('http://localhost/api/v1/profile/not-a-uuid'));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
+    });
+  });
+
   it('rejects an unauthenticated update', async () => {
     const response = await patchProfile({ bio: 'hello' });
     const body = await response.json();
@@ -142,7 +165,12 @@ describe('profile integration', () => {
           Record<
             string,
             {
+              operationId?: string;
+              parameters?: Array<Record<string, unknown>>;
               requestBody?: { content?: Record<string, unknown> };
+              responses?: Record<string, {
+                content?: Record<string, { schema?: Record<string, unknown> }>;
+              }>;
               security?: Array<Record<string, unknown>>;
             }
           >
@@ -159,11 +187,39 @@ describe('profile integration', () => {
     it('marks every profile operation as requiring authentication', async () => {
       const document = await openapiDocument();
       const profilePath = document.paths['/api/v1/profile'];
+      const publicProfilePath = document.paths['/api/v1/profile/{userId}'];
       const avatarOperation = document.paths['/api/v1/profile/avatar']?.post;
 
       expect(profilePath?.get?.security).toEqual([{ betterAuthSession: [] }]);
       expect(profilePath?.patch?.security).toEqual([{ betterAuthSession: [] }]);
+      expect(publicProfilePath?.get?.security).toEqual([{ betterAuthSession: [] }]);
       expect(avatarOperation?.security).toEqual([{ betterAuthSession: [] }]);
+    });
+
+    it('publishes the public profile route with its narrower response shape', async () => {
+      const document = await openapiDocument();
+      const publicProfilePath = document.paths['/api/v1/profile/{userId}'];
+      const operation = publicProfilePath?.get;
+
+      expect(operation).toBeDefined();
+      expect(operation?.operationId).toBe('getPublicProfile');
+      expect(operation?.parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'userId', in: 'path', required: true }),
+        ]),
+      );
+
+      const responseSchema = operation?.responses?.['200']?.content?.['application/json']?.schema as {
+        properties?: Record<string, unknown>;
+      };
+      const responseProperties = responseSchema.properties ?? {};
+
+      expect(responseProperties).toHaveProperty('data');
+      expect(JSON.stringify(responseProperties)).not.toContain('telephone');
+      expect(JSON.stringify(responseProperties)).not.toContain('studentId');
+      expect(JSON.stringify(responseProperties)).not.toContain('email');
+      expect(JSON.stringify(responseProperties)).toContain('portfolio');
+      expect(JSON.stringify(responseProperties)).toContain('certificates');
     });
 
     it('documents the avatar endpoint as multipart', async () => {

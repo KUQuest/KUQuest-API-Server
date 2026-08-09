@@ -36,13 +36,13 @@ export const portfolioUpdateSchema = t.Object(
   {additionalProperties: false},
 );
 
-const portfolioImageSchema = t.Object({
+export const portfolioImageSchema = t.Object({
   fileId: t.String({ format: 'uuid' }),
   position: t.Integer(),
   url: t.String({ format: 'uri', example: 'https://storage.example.com/portfolio/a.png' }),
 });
 
-const portfolioItemSchema = t.Object({
+export const portfolioItemSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   title: t.String({ example: 'Capstone Project' }),
   description: t.Nullable(t.String({ example: 'A short description of the work.' })),

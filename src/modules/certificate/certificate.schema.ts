@@ -32,12 +32,12 @@ export const certificateCreateSchema = t.Object(
 // still validated by the create schema's rules.
 export const certificateUpdateSchema = t.Partial(certificateCreateSchema);
 
-const certificateImageSchema = t.Object({
+export const certificateImageSchema = t.Object({
   fileId: t.String({ format: 'uuid' }),
   url: t.String({ format: 'uri' }),
 });
 
-const certificateSchema = t.Object({
+export const certificateSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   name: t.String(),
   issuer: t.String(),
