@@ -18,7 +18,7 @@ import {
   markPortfolioImageDeleted,
   updatePortfolio,
 } from './portfolio.service';
-import type { PortfolioImage } from './portfolio.service';
+import type { PortfolioImage, PortfolioItem } from './portfolio.service';
 import { portfolioStorage } from './portfolio.storage';
 import type { StoredPortfolioImage } from './portfolio.storage';
 
@@ -56,22 +56,22 @@ const buildImage = (image: PortfolioImage): PortfolioListItem['images'][number] 
   }
 };
 
+export const serializePortfolioItem = (item: PortfolioItem): PortfolioListItem => ({
+  id: item.id,
+  title: item.title,
+  description: item.description,
+  createdAt: item.createdAt.toISOString(),
+  images: item.images
+    .map(buildImage)
+    .filter((image): image is NonNullable<typeof image> => image !== undefined),
+});
+
 export const listOwnPortfolio = async ({
   session,
 }: AuthedContext): Promise<ApiResponse<PortfolioListItem[]>> => {
   const items = await listPortfolio(session.user.id);
 
-  return apiSuccess(
-    items.map((item) => ({
-      id: item.id,
-      title: item.title,
-      description: item.description,
-      createdAt: item.createdAt.toISOString(),
-      images: item.images
-        .map(buildImage)
-        .filter((image): image is NonNullable<typeof image> => image !== undefined),
-    })),
-  );
+  return apiSuccess(items.map(serializePortfolioItem));
 };
 
 export const createOwnPortfolio = async ({

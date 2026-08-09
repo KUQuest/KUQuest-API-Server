@@ -1,4 +1,6 @@
+import { serializeCertificate, listCertificates } from '@/modules/certificate';
 import type { AuthedContext } from '@/modules/auth';
+import { serializePortfolioItem, listPortfolio } from '@/modules/portfolio';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import {
@@ -12,11 +14,14 @@ import type { Static } from 'elysia';
 
 import type {
   avatarUploadSchema,
+  publicProfileParamsSchema,
+  publicProfileResponseSchema,
   profileResponseSchema,
   profileUpdateSchema,
 } from './profile.schema';
 import {
   getPreviousAvatarFile,
+  getPublicProfile as getPublicProfileRecord,
   getProfile,
   markAvatarDeleted,
   replaceStudentAvatar,
@@ -25,6 +30,7 @@ import {
 import { avatarStorage } from './profile.storage';
 
 type Profile = Static<typeof profileResponseSchema>['data'];
+type PublicProfile = Static<typeof publicProfileResponseSchema>['data'];
 
 type StoredProfileAvatar = NonNullable<Awaited<ReturnType<typeof getProfile>>>['avatar'];
 
@@ -51,6 +57,12 @@ const userNotFound = (set: AuthedContext['set']) => {
   return apiError('USER_NOT_FOUND', 'User not found');
 };
 
+const publicProfileNotFound = (set: AuthedContext['set']) => {
+  set.status = 404;
+
+  return apiError('PROFILE_NOT_FOUND', 'Profile not found');
+};
+
 
 const describeAvatar = (avatar: StoredProfileAvatar): Profile['avatar'] => {
   if (!avatar) return null;
@@ -75,6 +87,29 @@ export const getOwnProfile = async ({
   const { avatar, ...rest } = profile;
 
   return apiSuccess({ ...rest, avatar: describeAvatar(avatar) });
+};
+
+export const getPublicProfile = async ({
+  params,
+  set,
+}: AuthedContext & { params: Static<typeof publicProfileParamsSchema> }): Promise<
+  ApiResponse<PublicProfile>
+> => {
+  const profile = await getPublicProfileRecord(params.userId);
+
+  if (!profile) return publicProfileNotFound(set);
+
+  const [portfolio, certificates] = await Promise.all([
+    listPortfolio(params.userId),
+    listCertificates(params.userId),
+  ]);
+
+  return apiSuccess({
+    ...profile,
+    avatar: describeAvatar(profile.avatar),
+    portfolio: portfolio.map(serializePortfolioItem),
+    certificates: certificates.map(serializeCertificate),
+  });
 };
 
 export const updateOwnProfile = async ({

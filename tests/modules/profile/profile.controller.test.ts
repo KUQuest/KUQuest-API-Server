@@ -1,5 +1,14 @@
 import { db } from '@/database/client';
-import { getOwnProfile, setAvatar, updateOwnProfile } from '@/modules/profile/profile.controller';
+import * as certificateModule from '@/modules/certificate';
+import { certificateStorage } from '@/modules/certificate/certificate.storage';
+import * as portfolioModule from '@/modules/portfolio';
+import { portfolioStorage } from '@/modules/portfolio/portfolio.storage';
+import {
+  getOwnProfile,
+  getPublicProfile,
+  setAvatar,
+  updateOwnProfile,
+} from '@/modules/profile/profile.controller';
 import * as profileService from '@/modules/profile/profile.service';
 import { avatarStorage } from '@/modules/profile/profile.storage';
 import { ImageLinkUnavailableError, ImageUploadError } from '@/shared/image-storage';
@@ -191,6 +200,19 @@ const invokeGetOwnProfile = () => {
   return { result: getOwnProfile({ session: session as never, set: set as never }), set };
 };
 
+const invokeGetPublicProfile = (userId = 'student-2') => {
+  const set: { status?: number | string } = {};
+
+  return {
+    result: getPublicProfile({
+      params: { userId },
+      session: session as never,
+      set: set as never,
+    }),
+    set,
+  };
+};
+
 const invokeUpdateOwnProfile = (body: Record<string, unknown> = { bio: 'a new bio' }) => {
   const set: { status?: number | string } = {};
 
@@ -258,6 +280,123 @@ describe('getOwnProfile', () => {
       success: false,
       error: { code: 'USER_NOT_FOUND', message: 'User not found' },
     });
+  });
+});
+
+describe('getPublicProfile', () => {
+  it('inlines public resources without exposing private fields', async () => {
+    spyOn(profileService, 'getPublicProfile').mockResolvedValue({
+      firstName: 'Student',
+      lastName: 'Two',
+      bio: 'A public bio',
+      academicYear: 2025,
+      department: {
+        id: 'department-1',
+        name: 'Computer Engineering',
+        faculty: { name: 'Engineering' },
+      },
+      avatar: {
+        fileId,
+        bucket: 'kuquest',
+        objectKey: 'avatars/student-2/current.png',
+      },
+    });
+    spyOn(portfolioModule, 'listPortfolio').mockResolvedValue([
+      {
+        id: 'portfolio-1',
+        title: 'Capstone Project',
+        description: 'A project description',
+        createdAt: new Date('2025-01-01T00:00:00.000Z'),
+        images: [
+          {
+            fileId,
+            position: 0,
+            bucket: 'kuquest',
+            objectKey: 'portfolio/student-2/project.png',
+          },
+        ],
+      },
+    ]);
+    spyOn(certificateModule, 'listCertificates').mockResolvedValue([
+      {
+        id: 'certificate-1',
+        name: 'AWS Certified Cloud Practitioner',
+        issuer: 'Amazon Web Services',
+        issuedAt: '2024-05-01',
+        createdAt: new Date('2025-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2025-01-02T00:00:00.000Z'),
+        imageFileId: previousFileId,
+        imageBucket: 'kuquest',
+        imageObjectKey: 'certificates/student-2/certificate.png',
+      },
+    ]);
+    spyOn(avatarStorage, 'linkFor').mockReturnValue('https://storage.test/avatar.png');
+    spyOn(portfolioStorage, 'linkFor').mockReturnValue('https://storage.test/portfolio.png');
+    spyOn(certificateStorage, 'linkFor').mockReturnValue('https://storage.test/certificate.png');
+
+    const { result, set } = invokeGetPublicProfile();
+
+    expect(await result).toEqual({
+      success: true,
+      data: {
+        firstName: 'Student',
+        lastName: 'Two',
+        bio: 'A public bio',
+        academicYear: 2025,
+        department: {
+          id: 'department-1',
+          name: 'Computer Engineering',
+          faculty: { name: 'Engineering' },
+        },
+        avatar: { fileId, url: 'https://storage.test/avatar.png' },
+        portfolio: [
+          {
+            id: 'portfolio-1',
+            title: 'Capstone Project',
+            description: 'A project description',
+            createdAt: '2025-01-01T00:00:00.000Z',
+            images: [
+              {
+                fileId,
+                position: 0,
+                url: 'https://storage.test/portfolio.png',
+              },
+            ],
+          },
+        ],
+        certificates: [
+          {
+            id: 'certificate-1',
+            name: 'AWS Certified Cloud Practitioner',
+            issuer: 'Amazon Web Services',
+            issuedAt: '2024-05-01',
+            image: { fileId: previousFileId, url: 'https://storage.test/certificate.png' },
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-02T00:00:00.000Z',
+          },
+        ],
+      },
+    });
+    expect(set.status).toBeUndefined();
+    expect(profileService.getPublicProfile).toHaveBeenCalledWith('student-2');
+    expect(portfolioModule.listPortfolio).toHaveBeenCalledWith('student-2');
+    expect(certificateModule.listCertificates).toHaveBeenCalledWith('student-2');
+  });
+
+  it('reports a missing target profile as PROFILE_NOT_FOUND', async () => {
+    spyOn(profileService, 'getPublicProfile').mockResolvedValue(undefined);
+    const listPortfolio = spyOn(portfolioModule, 'listPortfolio');
+    const listCertificates = spyOn(certificateModule, 'listCertificates');
+
+    const { result, set } = invokeGetPublicProfile('missing-student');
+
+    expect(await result).toEqual({
+      success: false,
+      error: { code: 'PROFILE_NOT_FOUND', message: 'Profile not found' },
+    });
+    expect(set.status).toBe(404);
+    expect(listPortfolio).not.toHaveBeenCalled();
+    expect(listCertificates).not.toHaveBeenCalled();
   });
 });
 

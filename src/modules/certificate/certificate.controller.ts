@@ -56,7 +56,7 @@ const describeImage = (certificate: Certificate): CertificateImage => {
 
 // Drizzle returns `createdAt`/`updatedAt` as `Date` instances; the response schema
 // documents them as ISO date-time strings, so serialize before they reach a response.
-const serialize = (certificate: Certificate) => {
+export const serializeCertificate = (certificate: Certificate) => {
   const {
     imageFileId: _imageFileId,
     imageBucket: _imageBucket,
@@ -88,10 +88,12 @@ const discardUploadedImage = async (bucket: string, objectKey: string): Promise<
 
 export const getCertificates = async ({
   session,
-}: AuthedContext): Promise<ApiResponse<{ certificates: ReturnType<typeof serialize>[] }>> => {
+}: AuthedContext): Promise<
+  ApiResponse<{ certificates: ReturnType<typeof serializeCertificate>[] }>
+> => {
   const certificates = await listCertificates(session.user.id);
 
-  return apiSuccess({ certificates: certificates.map(serialize) });
+  return apiSuccess({ certificates: certificates.map(serializeCertificate) });
 };
 
 export const getCertificate = async ({
@@ -99,7 +101,7 @@ export const getCertificate = async ({
   params,
   set,
 }: AuthedContext & CertificateParams): Promise<
-  ApiResponse<{ certificate: ReturnType<typeof serialize> }>
+  ApiResponse<{ certificate: ReturnType<typeof serializeCertificate> }>
 > => {
   const certificate = await findCertificate(session.user.id, params.certificateId);
 
@@ -108,18 +110,18 @@ export const getCertificate = async ({
     return notFound;
   }
 
-  return apiSuccess({ certificate: serialize(certificate) });
+  return apiSuccess({ certificate: serializeCertificate(certificate) });
 };
 
 export const postCertificate = async ({
   session,
   body,
 }: AuthedContext & { body: Static<typeof certificateCreateSchema> }): Promise<
-  ApiResponse<{ certificate: ReturnType<typeof serialize> }>
+  ApiResponse<{ certificate: ReturnType<typeof serializeCertificate> }>
 > => {
   const certificate = await createCertificate(session.user.id, body);
 
-  return apiSuccess({ certificate: serialize(certificate) });
+  return apiSuccess({ certificate: serializeCertificate(certificate) });
 };
 
 export const patchCertificate = async ({
@@ -129,7 +131,7 @@ export const patchCertificate = async ({
   set,
 }: AuthedContext &
   CertificateParams & { body: Static<typeof certificateUpdateSchema> }): Promise<
-  ApiResponse<{ certificate: ReturnType<typeof serialize> }>
+  ApiResponse<{ certificate: ReturnType<typeof serializeCertificate> }>
 > => {
   const certificate = await updateCertificate(session.user.id, params.certificateId, body);
 
@@ -138,7 +140,7 @@ export const patchCertificate = async ({
     return notFound;
   }
 
-  return apiSuccess({ certificate: serialize(certificate) });
+  return apiSuccess({ certificate: serializeCertificate(certificate) });
 };
 
 export const removeCertificate = async ({

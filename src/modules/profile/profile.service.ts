@@ -106,6 +106,52 @@ export const getProfile = async (userId: string) => {
   };
 };
 
+export const getPublicProfile = async (userId: string) => {
+  const [row] = await db
+    .select({
+      firstName: authUser.firstName,
+      lastName: authUser.lastName,
+      bio: authUser.bio,
+      academicYear: authUser.academicYear,
+      departmentId: department.id,
+      departmentName: department.name,
+      facultyName: faculty.name,
+      avatarFileId: file.id,
+      avatarBucket: file.bucket,
+      avatarObjectKey: file.objectKey,
+    })
+    .from(authUser)
+    .leftJoin(department, eq(authUser.departmentId, department.id))
+    .leftJoin(faculty, eq(department.facultyId, faculty.id))
+    .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
+    .where(eq(authUser.id, userId))
+    .limit(1);
+
+  if (!row) return undefined;
+
+  const {
+    departmentId,
+    departmentName,
+    facultyName,
+    avatarFileId,
+    avatarBucket,
+    avatarObjectKey,
+    ...profile
+  } = row;
+
+  return {
+    ...profile,
+    department:
+      departmentId && departmentName && facultyName
+        ? { id: departmentId, name: departmentName, faculty: { name: facultyName } }
+        : null,
+    avatar:
+      avatarFileId && avatarBucket && avatarObjectKey
+        ? { fileId: avatarFileId, bucket: avatarBucket, objectKey: avatarObjectKey }
+        : null,
+  };
+};
+
 export const replaceStudentAvatar = async (
   userId: string,
   storedAvatar: StoredAvatar,
