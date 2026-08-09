@@ -1,0 +1,22 @@
+meta {
+  name: Sign Out
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/auth/sign-out
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+  Origin: http://localhost:3000
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    bru.setEnvVar("userSessionCookie", "");
+  }
+}

@@ -1,0 +1,33 @@
+meta {
+  name: Start Google Sign-In
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/auth/sign-in/social
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Origin: http://localhost:3000
+}
+
+body:json {
+  {
+    "provider": "google",
+    "callbackURL": "{{baseUrl}}/",
+    "errorCallbackURL": "{{baseUrl}}/",
+    "disableRedirect": true
+  }
+}
+
+docs {
+  Returns a Google authorization URL (does not redirect). Open the returned
+  `url` in a real browser to complete Google sign-in (only @ku.th accounts
+  allowed), then read the `better-auth.session_token` cookie from devtools
+  and paste it into the `userSessionCookie` env var as:
+  `better-auth.session_token=<value>`
+}
