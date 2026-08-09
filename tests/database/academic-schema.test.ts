@@ -92,6 +92,39 @@ describe('seeded academic options', () => {
   });
 });
 
+describe('catalog seed idempotency', () => {
+  const countCatalog = async () => {
+    const [counts] = await sql`
+      select
+        (select count(*) from faculty) as faculties,
+        (select count(*) from department) as departments
+    `;
+
+    return counts;
+  };
+
+  it('adds no rows when the catalog seed is applied a second time', async () => {
+    const before = await countCatalog();
+
+    // The same two statements 0005_seed_academic_options.sql applies, against the
+    // post-rename table. Their ON CONFLICT clauses only hold while the unique
+    // constraints they name exist.
+    await sql`
+      insert into faculty (name) values ('Engineering')
+      on conflict (name) do nothing
+    `;
+    await sql`
+      insert into department (faculty_id, name)
+      select faculty.id, 'Mechanical Engineering'
+      from faculty
+      where faculty.name = 'Engineering'
+      on conflict (faculty_id, name) do nothing
+    `;
+
+    expect(await countCatalog()).toEqual(before);
+  });
+});
+
 describe('faculty to department relationship', () => {
   it('still relates a department to its faculty after the rename', async () => {
     const [row] = await db
