@@ -11,9 +11,12 @@ import {
   patchCertificate,
   postCertificate,
   removeCertificate,
+  setCertificateImage,
 } from './certificate.controller';
 import {
   certificateCreateSchema,
+  certificateImageUploadResponseSchema,
+  certificateImageUploadSchema,
   certificateListResponseSchema,
   certificateParamsSchema,
   certificateResponseSchema,
@@ -79,6 +82,20 @@ export const certificateRoute = new Elysia({
       summary: 'Delete a certificate',
       description: 'Delete a certificate owned by the current user.',
       operationId: 'deleteCertificate',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/:certificateId/image', setCertificateImage, {
+    params: certificateParamsSchema,
+    body: certificateImageUploadSchema,
+    type: 'multipart/form-data',
+    response: responses(certificateImageUploadResponseSchema, 400, 401, 404, 413, 415, 502),
+    detail: {
+      tags: ['Certificates'],
+      summary: 'Set a certificate image',
+      description:
+        'Uploads a valid JPEG, PNG, or WebP image up to 5 MB and attaches it to a certificate owned by the current user. After replacement commits, the previous object is deleted and its file metadata is retained as a tombstone.',
+      operationId: 'setCertificateImage',
       security: betterAuthSecurity,
     },
   });

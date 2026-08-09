@@ -24,7 +24,7 @@ export const profileCertificate = pgTable(
     name: text('name').notNull(),
     issuer: text('issuer').notNull(),
     issuedAt: date('issued_at').notNull(),
-    verifyUrl: text('verify_url'),
+    imageFileId: uuid('image_file_id').references(() => file.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -96,6 +96,10 @@ export const profileCertificateRelations = relations(profileCertificate, ({ one 
   user: one(authUser, {
     fields: [profileCertificate.userId],
     references: [authUser.id],
+  }),
+  image: one(file, {
+    fields: [profileCertificate.imageFileId],
+    references: [file.id],
   }),
 }));
 
