@@ -2,7 +2,7 @@
 
 Use this as the description for a Backend team issue template in Linear.
 The authoritative design and the Frontend, Mobile, QA Automation and manual
-Verification variants are in [linear-issue-templates-draft.md](../../linear-issue-templates-draft.md).
+Verification variants are in [linear-issue-templates-draft.md](../linear-issue-templates-draft.md).
 
 ## Linear defaults
 
