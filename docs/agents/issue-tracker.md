@@ -10,6 +10,9 @@ Issues for this repository live in the **KUQuest Linear workspace**.
 
 Use the connected Linear integration to search, create, and update issues.
 
+For Backend implementation issues, use the repository's
+[Linear Backend implementation template](linear-backend-implementation-template.md).
+
 ## Projects
 
 Assign a project only when the work clearly belongs to an existing Linear

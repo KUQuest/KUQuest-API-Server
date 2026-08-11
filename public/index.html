@@ -243,8 +243,7 @@
     </main>
 
     <script>
-      const authServerUrl = 'http://localhost:5000';
-      const localAppUrl = 'http://localhost:5000';
+      const appOrigin = window.location.origin;
       const signInButton = document.querySelector('#sign-in');
       const refreshButton = document.querySelector('#refresh-session');
       const signOutButton = document.querySelector('#sign-out');
@@ -298,7 +297,7 @@
         setStatus('กำลังตรวจสอบ session…');
 
         try {
-          const response = await fetch(`${authServerUrl}/api/auth/get-session`, {
+          const response = await fetch(`${appOrigin}/api/auth/get-session`, {
             credentials: 'include',
           });
           const data = await readJson(response);
@@ -325,14 +324,14 @@
         setStatus('กำลังเปิด Google account selector…');
 
         try {
-          const response = await fetch(`${authServerUrl}/api/auth/sign-in/social`, {
+          const response = await fetch(`${appOrigin}/api/auth/sign-in/social`, {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               provider: 'google',
-              callbackURL: `${localAppUrl}/`,
-              errorCallbackURL: `${localAppUrl}/`,
+              callbackURL: `${appOrigin}/`,
+              errorCallbackURL: `${appOrigin}/`,
               disableRedirect: true,
             }),
           });
@@ -352,7 +351,7 @@
         setStatus('กำลังออกจากระบบ…');
 
         try {
-          const response = await fetch(`${authServerUrl}/api/auth/sign-out`, {
+          const response = await fetch(`${appOrigin}/api/auth/sign-out`, {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
@@ -387,7 +386,7 @@
         setBusy(true);
         const form = new FormData();
         form.set('avatar', file);
-        const uploadUrl = `${localAppUrl}/api/v1/profile/avatar`;
+        const uploadUrl = `${appOrigin}/api/v1/profile/avatar`;
 
         try {
           console.info('[avatar-upload] Sending request', {
