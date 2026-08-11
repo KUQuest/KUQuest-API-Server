@@ -163,13 +163,13 @@ token: session.token, url: undefined, user }` — a **flat `token` string**, not
 `{session, user}` shape `get-session` returns. This is a real shape difference between the two
 better-auth responses a mobile client will see (sign-in vs. get-session) that isn't documented
 anywhere in `auth.openapi.ts` (which, per Criterion 1, doesn't document the `idToken` response at
-all). Cookie delivery: `defaultCookieAttributes` (`auth.config.shared.ts:6-10`,
-`sameSite: 'none', secure: true, httpOnly: true`) applies to both; the `expo()` plugin
-(`node_modules/@better-auth/expo/dist/index.js:62-84`) also appends the `Set-Cookie` value as a
-query param on the OAuth redirect URL for the redirect flow, so an Expo client can capture it
-manually and replay it as a `Cookie` header on future requests (no bearer-token plugin is
-registered in `auth.config.ts`, so this cookie-replay mechanism is the only session-transport path
-available to mobile for the redirect flow).
+all). Cookie delivery: `defaultCookieAttributes` (`auth.config.shared.ts:6-12`) derives
+`sameSite` and `secure` from `BETTER_AUTH_URL`: HTTP development uses `lax` and `false`,
+while HTTPS deployments use `none` and `true`; `httpOnly: true` applies to both. The `expo()` plugin
+(`node_modules/@better-auth/expo/dist/index.js:62-84`) persists Better Auth cookies through the
+configured Expo storage and exposes them through `authClient.getCookie()` for custom requests.
+The native ID-token flow does not use the browser redirect path or a separately persisted bearer
+token.
 
 ### Expiry / refresh behavior
 
