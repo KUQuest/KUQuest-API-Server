@@ -1,5 +1,6 @@
 import { certificateSchema } from '@/modules/certificate/certificate.schema';
 import { portfolioItemSchema } from '@/modules/portfolio/portfolio.schema';
+import { workExperienceSchema } from '@/modules/work-experience/work-experience.schema';
 
 import { t } from 'elysia';
 
@@ -32,6 +33,11 @@ const avatarSchema = t.Object({
   url: t.String({ format: 'uri' }),
 });
 
+const occupationSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  name: t.Union([t.Literal('Staff'), t.Literal('Lecturer'), t.Literal('Student')]),
+});
+
 const nameSchema = t.String({ minLength: 1, maxLength: 100, pattern: '\\S' });
 
 export const profileUpdateSchema = t.Object(
@@ -57,6 +63,7 @@ export const profileResponseSchema = t.Object({
     academicYear: t.Nullable(t.Integer()),
     department: t.Nullable(departmentSchema),
     avatar: t.Nullable(avatarSchema),
+    occupation: t.Nullable(occupationSchema),
   }),
 });
 
@@ -74,6 +81,8 @@ export const publicProfileResponseSchema = t.Object({
     academicYear: t.Nullable(t.Integer()),
     department: t.Nullable(departmentSchema),
     avatar: t.Nullable(avatarSchema),
+    occupation: t.Nullable(occupationSchema),
+    experience: t.Array(workExperienceSchema),
     portfolio: t.Array(portfolioItemSchema),
     certificates: t.Array(certificateSchema),
   }),

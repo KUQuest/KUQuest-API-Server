@@ -3,6 +3,7 @@ import * as certificateModule from '@/modules/certificate';
 import { certificateStorage } from '@/modules/certificate/certificate.storage';
 import * as portfolioModule from '@/modules/portfolio';
 import { portfolioStorage } from '@/modules/portfolio/portfolio.storage';
+import * as workExperienceModule from '@/modules/work-experience';
 import {
   getOwnProfile,
   getPublicProfile,
@@ -185,6 +186,7 @@ const storedProfile = {
   studentId: null,
   academicYear: null,
   department: null,
+  occupation: null,
   avatar: null,
 };
 
@@ -295,6 +297,7 @@ describe('getPublicProfile', () => {
         name: 'Computer Engineering',
         faculty: { name: 'Engineering' },
       },
+      occupation: null,
       avatar: {
         fileId,
         bucket: 'kuquest',
@@ -330,6 +333,19 @@ describe('getPublicProfile', () => {
         imageObjectKey: 'certificates/student-2/certificate.png',
       },
     ]);
+    spyOn(workExperienceModule, 'listWorkExperiences').mockResolvedValue([
+      {
+        id: 'experience-1',
+        title: 'Senior Peer Tutor',
+        employmentType: 'Part-time',
+        organization: 'University Academic Center',
+        description: 'Assisted students.',
+        startedAt: '2022-06-01',
+        endedAt: null,
+        createdAt: new Date('2025-01-03T00:00:00.000Z'),
+        updatedAt: new Date('2025-01-04T00:00:00.000Z'),
+      },
+    ]);
     spyOn(avatarStorage, 'linkFor').mockReturnValue('https://storage.test/avatar.png');
     spyOn(portfolioStorage, 'linkFor').mockReturnValue('https://storage.test/portfolio.png');
     spyOn(certificateStorage, 'linkFor').mockReturnValue('https://storage.test/certificate.png');
@@ -349,6 +365,20 @@ describe('getPublicProfile', () => {
           faculty: { name: 'Engineering' },
         },
         avatar: { fileId, url: 'https://storage.test/avatar.png' },
+        occupation: null,
+        experience: [
+          {
+            id: 'experience-1',
+            title: 'Senior Peer Tutor',
+            employmentType: 'Part-time',
+            organization: 'University Academic Center',
+            description: 'Assisted students.',
+            startedAt: '2022-06-01',
+            endedAt: null,
+            createdAt: '2025-01-03T00:00:00.000Z',
+            updatedAt: '2025-01-04T00:00:00.000Z',
+          },
+        ],
         portfolio: [
           {
             id: 'portfolio-1',
@@ -381,12 +411,14 @@ describe('getPublicProfile', () => {
     expect(profileService.getPublicProfile).toHaveBeenCalledWith('student-2');
     expect(portfolioModule.listPortfolio).toHaveBeenCalledWith('student-2');
     expect(certificateModule.listCertificates).toHaveBeenCalledWith('student-2');
+    expect(workExperienceModule.listWorkExperiences).toHaveBeenCalledWith('student-2');
   });
 
   it('reports a missing target profile as PROFILE_NOT_FOUND', async () => {
     spyOn(profileService, 'getPublicProfile').mockResolvedValue(undefined);
     const listPortfolio = spyOn(portfolioModule, 'listPortfolio');
     const listCertificates = spyOn(certificateModule, 'listCertificates');
+    const listWorkExperiences = spyOn(workExperienceModule, 'listWorkExperiences');
 
     const { result, set } = invokeGetPublicProfile('missing-student');
 
@@ -397,6 +429,7 @@ describe('getPublicProfile', () => {
     expect(set.status).toBe(404);
     expect(listPortfolio).not.toHaveBeenCalled();
     expect(listCertificates).not.toHaveBeenCalled();
+    expect(listWorkExperiences).not.toHaveBeenCalled();
   });
 });
 
