@@ -1,5 +1,5 @@
 import { db } from '@/database/client';
-import { department, faculty } from '@/database/schema/academic.schema';
+import { department, faculty, occupation } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 
@@ -14,6 +14,11 @@ type ProfileUpdate = Static<typeof profileUpdateSchema>;
 export type ProfileUpdateOutcome = 'updated' | 'student-not-found' | 'department-not-found';
 
 const foreignKeyViolation = '23503';
+const occupationNames = ['Staff', 'Lecturer', 'Student'] as const;
+type OccupationName = (typeof occupationNames)[number];
+
+const isOccupationName = (name: string): name is OccupationName =>
+  occupationNames.includes(name as OccupationName);
 
 const isMissingDepartment = (error: unknown): boolean => {
   if (typeof error !== 'object' || error === null) return false;
@@ -67,6 +72,8 @@ export const getProfile = async (userId: string) => {
       telephone: authUser.telephone,
       studentId: authUser.studentId,
       academicYear: authUser.academicYear,
+      occupationId: occupation.id,
+      occupationName: occupation.name,
       departmentId: department.id,
       departmentName: department.name,
       facultyName: faculty.name,
@@ -77,6 +84,7 @@ export const getProfile = async (userId: string) => {
     .from(authUser)
     .leftJoin(department, eq(authUser.departmentId, department.id))
     .leftJoin(faculty, eq(department.facultyId, faculty.id))
+    .leftJoin(occupation, eq(authUser.occupationId, occupation.id))
     .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
     .where(eq(authUser.id, userId))
     .limit(1);
@@ -87,6 +95,8 @@ export const getProfile = async (userId: string) => {
     departmentId,
     departmentName,
     facultyName,
+    occupationId,
+    occupationName,
     avatarFileId,
     avatarBucket,
     avatarObjectKey,
@@ -98,6 +108,10 @@ export const getProfile = async (userId: string) => {
     department:
       departmentId && departmentName && facultyName
         ? { id: departmentId, name: departmentName, faculty: { name: facultyName } }
+        : null,
+    occupation:
+      occupationId && occupationName && isOccupationName(occupationName)
+        ? { id: occupationId, name: occupationName }
         : null,
     avatar:
       avatarFileId && avatarBucket && avatarObjectKey
@@ -113,6 +127,8 @@ export const getPublicProfile = async (userId: string) => {
       lastName: authUser.lastName,
       bio: authUser.bio,
       academicYear: authUser.academicYear,
+      occupationId: occupation.id,
+      occupationName: occupation.name,
       departmentId: department.id,
       departmentName: department.name,
       facultyName: faculty.name,
@@ -123,6 +139,7 @@ export const getPublicProfile = async (userId: string) => {
     .from(authUser)
     .leftJoin(department, eq(authUser.departmentId, department.id))
     .leftJoin(faculty, eq(department.facultyId, faculty.id))
+    .leftJoin(occupation, eq(authUser.occupationId, occupation.id))
     .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
     .where(eq(authUser.id, userId))
     .limit(1);
@@ -133,6 +150,8 @@ export const getPublicProfile = async (userId: string) => {
     departmentId,
     departmentName,
     facultyName,
+    occupationId,
+    occupationName,
     avatarFileId,
     avatarBucket,
     avatarObjectKey,
@@ -144,6 +163,10 @@ export const getPublicProfile = async (userId: string) => {
     department:
       departmentId && departmentName && facultyName
         ? { id: departmentId, name: departmentName, faculty: { name: facultyName } }
+        : null,
+    occupation:
+      occupationId && occupationName && isOccupationName(occupationName)
+        ? { id: occupationId, name: occupationName }
         : null,
     avatar:
       avatarFileId && avatarBucket && avatarObjectKey

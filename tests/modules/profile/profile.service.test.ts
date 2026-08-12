@@ -196,6 +196,7 @@ describe('reading a profile', () => {
       'email',
       'firstName',
       'lastName',
+      'occupation',
       'studentId',
       'telephone',
     ]);
@@ -217,6 +218,7 @@ describe('reading a public profile', () => {
       'department',
       'firstName',
       'lastName',
+      'occupation',
     ]);
     expect(publicProfile).toEqual({
       firstName: 'Student',
@@ -228,6 +230,7 @@ describe('reading a public profile', () => {
         name: 'Test Department',
         faculty: { name: facultyName },
       },
+      occupation: null,
       avatar: null,
     });
   });

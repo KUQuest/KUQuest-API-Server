@@ -7,6 +7,7 @@ import { healthRoute } from './modules/health';
 import { onboardingRoute } from './modules/onboarding';
 import { portfolioRoute } from './modules/portfolio';
 import { profileRoute } from './modules/profile';
+import { workExperienceRoute } from './modules/work-experience';
 import { corsPlugin } from './plugins/cors';
 import { errorHandlerPlugin } from './plugins/error-handler';
 import { openapiPlugin } from './plugins/openapi';
@@ -33,3 +34,4 @@ export const app = new Elysia({
   .use(profileRoute)
   .use(certificateRoute)
   .use(portfolioRoute)
+  .use(workExperienceRoute)

@@ -220,6 +220,8 @@ describe('profile integration', () => {
       expect(JSON.stringify(responseProperties)).not.toContain('email');
       expect(JSON.stringify(responseProperties)).toContain('portfolio');
       expect(JSON.stringify(responseProperties)).toContain('certificates');
+      expect(JSON.stringify(responseProperties)).toContain('experience');
+      expect(JSON.stringify(responseProperties)).toContain('occupation');
     });
 
     it('documents the avatar endpoint as multipart', async () => {

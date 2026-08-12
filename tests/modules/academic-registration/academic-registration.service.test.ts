@@ -52,6 +52,12 @@ describe('academic registration options', () => {
   it('lists the seeded occupations with their studentId requirement', async () => {
     const options = await getAcademicRegistrationOptions();
 
+    expect(options.occupations.map(({ name }) => name).sort()).toEqual([
+      'Lecturer',
+      'Staff',
+      'Student',
+    ]);
+
     expect(options.occupations).toContainEqual({
       id: expect.any(String),
       name: 'Student',
@@ -59,7 +65,12 @@ describe('academic registration options', () => {
     });
     expect(options.occupations).toContainEqual({
       id: expect.any(String),
-      name: 'Teacher',
+      name: 'Lecturer',
+      requiresStudentId: false,
+    });
+    expect(options.occupations).toContainEqual({
+      id: expect.any(String),
+      name: 'Staff',
       requiresStudentId: false,
     });
   });
@@ -160,29 +171,29 @@ describe('academic registration completeness', () => {
       .find(({ name }) => name === 'Engineering at Sriracha')
       ?.departments.find(({ name }) => name === 'Automotive Engineering')?.id;
     const studentOccupationId = options.occupations.find(({ name }) => name === 'Student')?.id;
-    const teacherOccupationId = options.occupations.find(({ name }) => name === 'Teacher')?.id;
+    const lecturerOccupationId = options.occupations.find(({ name }) => name === 'Lecturer')?.id;
 
-    const teacher = `test-academic-registration-teacher-${randomUUID()}`;
+    const lecturer = `test-academic-registration-lecturer-${randomUUID()}`;
     await db.insert(authUser).values({
-      id: teacher,
-      email: `${teacher}@ku.th`,
-      firstName: 'Teacher',
+      id: lecturer,
+      email: `${lecturer}@ku.th`,
+      firstName: 'Lecturer',
       lastName: 'One',
     });
 
     try {
-      await updateAcademicRegistration(teacher, {
+      await updateAcademicRegistration(lecturer, {
         telephone: '0800000003',
         departmentId: departmentId!,
         occupationId: studentOccupationId!,
         termsVersion: '2026-01-01',
       });
-      expect((await getAcademicRegistrationStatus(teacher))?.completed).toBe(false);
+      expect((await getAcademicRegistrationStatus(lecturer))?.completed).toBe(false);
 
-      await updateAcademicRegistration(teacher, { occupationId: teacherOccupationId! });
-      expect((await getAcademicRegistrationStatus(teacher))?.completed).toBe(true);
+      await updateAcademicRegistration(lecturer, { occupationId: lecturerOccupationId! });
+      expect((await getAcademicRegistrationStatus(lecturer))?.completed).toBe(true);
     } finally {
-      await db.delete(authUser).where(inArray(authUser.id, [teacher]));
+      await db.delete(authUser).where(inArray(authUser.id, [lecturer]));
     }
   });
 });

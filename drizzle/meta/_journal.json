@@ -71,6 +71,20 @@
       "when": 1786257361502,
       "tag": "0009_last_ulik",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786257361503,
+      "tag": "0010_migrate_teacher_to_lecturer",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786518034625,
+      "tag": "0011_harsh_rick_jones",
+      "breakpoints": true
     }
   ]
 }
