@@ -120,56 +120,72 @@ The pull request must contain these sections:
 
 ```markdown
 ## Summary
+
 - User-visible or operational behavior changed
 - Why the change is needed
 
 ## Linear issue
+
 - Source: BE-123
 - Project: <project>
 - Milestone: <milestone>
 
 ## Acceptance criteria
+
 - [ ] Criterion copied or faithfully restated from the approved issue
 
 ## Implementation notes
+
 - Important implementation decisions needed by reviewers
 - Migration, configuration or deployment impact
 
 ## Automated verification
+
 - Command: `<exact command>` — Pass/Fail
 - Command: `<exact command>` — Pass/Fail
 
 ## QA Brief
+
 ### Scope
+
 What the tester must validate.
 
 ### Preconditions
+
 - Environment
 - Required account/role
 - Required feature flags or services
 - Required test data
 
 ### Test cases
+
 #### QA-1: <behavior>
+
 1. Action
 2. Action
 
 Expected:
+
 - Observable result
 
 ### Edge and failure cases
+
 - Case and expected behavior
 
 ### Regression focus
+
 - Existing behavior at risk from this change
 
 ### Evidence
+
 - Screenshot, response, log or test output link
 
 ## Known limitations and out of scope
+
 - Explicit exclusions
 
 ## Risk and rollback
+
 - Risk level and reason
 - Rollback or recovery notes where relevant
 ```
@@ -237,12 +253,12 @@ The QA issue must not carry product story points. Its lifecycle gates the earned
 
 The skill must preserve the approved binary earned-progress contract:
 
-| State | Earned progress |
-|---|---:|
-| Backlog/Todo/In Progress | 0% |
-| `Ready for QA` / QA created / QA in progress / Blocked / Failed | 0% |
-| QA Passed and source Done | 100% of source estimate |
-| `QA Policy/Exempt` source Done | 100% of source estimate |
+| State                                                           |         Earned progress |
+| --------------------------------------------------------------- | ----------------------: |
+| Backlog/Todo/In Progress                                        |                      0% |
+| `Ready for QA` / QA created / QA in progress / Blocked / Failed |                      0% |
+| QA Passed and source Done                                       | 100% of source estimate |
+| `QA Policy/Exempt` source Done                                  | 100% of source estimate |
 
 The QA verification issue has no product estimate. A generated QA-failure rework bug may have an estimate for workload reporting but must carry machine-readable rework provenance and is excluded from the product S-curve and QA trigger.
 
