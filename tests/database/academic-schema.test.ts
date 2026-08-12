@@ -44,14 +44,14 @@ describe('seeded occupation options', () => {
     expect(student?.requiresStudentId).toBe(true);
   });
 
-  it('seeds Teacher as not requiring a Student ID', async () => {
-    const [teacher] = await db
+  it('seeds Lecturer as not requiring a Student ID', async () => {
+    const [lecturer] = await db
       .select({ requiresStudentId: occupation.requiresStudentId })
       .from(occupation)
-      .where(eq(occupation.name, 'Teacher'))
+      .where(eq(occupation.name, 'Lecturer'))
       .limit(1);
 
-    expect(teacher?.requiresStudentId).toBe(false);
+    expect(lecturer?.requiresStudentId).toBe(false);
   });
 });
 

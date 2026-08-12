@@ -1,5 +1,5 @@
-import { relations } from 'drizzle-orm';
-import { boolean, pgTable, text, uuid, unique } from 'drizzle-orm/pg-core';
+import { relations, sql } from 'drizzle-orm';
+import { boolean, check, pgTable, text, uuid, unique } from 'drizzle-orm/pg-core';
 
 export const faculty = pgTable(
   'faculty',
@@ -31,7 +31,13 @@ export const occupation = pgTable(
     // instead of the server hardcoding a name comparison.
     requiresStudentId: boolean('requires_student_id').notNull(),
   },
-  (table) => [unique('occupation_name_key').on(table.name)],
+  (table) => [
+    unique('occupation_name_key').on(table.name),
+    check(
+      'occupation_name_check',
+      sql`${table.name} IN ('Staff', 'Lecturer', 'Student')`,
+    ),
+  ],
 );
 
 export const facultyRelations = relations(faculty, ({ many }) => ({

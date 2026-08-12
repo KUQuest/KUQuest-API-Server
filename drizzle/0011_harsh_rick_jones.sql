@@ -1,0 +1,1 @@
+ALTER TABLE "occupation" ADD CONSTRAINT "occupation_name_check" CHECK ("occupation"."name" IN ('Staff', 'Lecturer', 'Student'));

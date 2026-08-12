@@ -1,6 +1,7 @@
 import { serializeCertificate, listCertificates } from '@/modules/certificate';
 import type { AuthedContext } from '@/modules/auth';
 import { serializePortfolioItem, listPortfolio } from '@/modules/portfolio';
+import { listWorkExperiences, serializeWorkExperience } from '@/modules/work-experience';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import {
@@ -99,9 +100,10 @@ export const getPublicProfile = async ({
 
   if (!profile) return publicProfileNotFound(set);
 
-  const [portfolio, certificates] = await Promise.all([
+  const [portfolio, certificates, experience] = await Promise.all([
     listPortfolio(params.userId),
     listCertificates(params.userId),
+    listWorkExperiences(params.userId),
   ]);
 
   return apiSuccess({
@@ -109,6 +111,7 @@ export const getPublicProfile = async ({
     avatar: describeAvatar(profile.avatar),
     portfolio: portfolio.map(serializePortfolioItem),
     certificates: certificates.map(serializeCertificate),
+    experience: experience.map(serializeWorkExperience),
   });
 };
 
