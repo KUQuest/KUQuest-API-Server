@@ -85,6 +85,20 @@
       "when": 1786518034625,
       "tag": "0011_harsh_rick_jones",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786610304591,
+      "tag": "0012_new_masque",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786610519662,
+      "tag": "0013_moaning_blazing_skull",
+      "breakpoints": true
     }
   ]
 }
