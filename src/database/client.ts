@@ -1,13 +1,20 @@
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
-
 import { env } from '@/config/env';
 import * as academicSchema from '@/database/schema/academic.schema';
 import * as authSchema from '@/database/schema/auth.schema';
 import * as fileSchema from '@/database/schema/file.schema';
 import * as profileSchema from '@/database/schema/profile.schema';
+import * as walletSchema from '@/database/schema/wallet.schema';
 
-const schema = { ...academicSchema, ...authSchema, ...fileSchema, ...profileSchema };
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+
+const schema = {
+  ...academicSchema,
+  ...authSchema,
+  ...fileSchema,
+  ...profileSchema,
+  ...walletSchema,
+};
 
 const connectionString =
   env.databaseUrl ||
