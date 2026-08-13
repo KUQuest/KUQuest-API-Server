@@ -41,7 +41,7 @@ A credential a Student claims — `name`, `issuer`, and the date it was issued, 
 _Avoid_: Qualification, badge (a badge is gamification, not a Certificate); treating a Certificate as a Profile field; verifyUrl/verification link (superseded term).
 
 **Student ID**:
-A KU-issued 10-digit identifier a Student provides during Onboarding. Distinct from the internal `auth_user.id` (a generated auth identifier) — Student ID is KU's own number, stored in `auth_user.studentId`.
+A KU-issued 10-digit identifier a Student provides during Onboarding. Distinct from the internal `auth_user.id` (a generated UUID auth identifier) — Student ID is KU's own number, stored in `auth_user.studentId`.
 _Avoid_: User ID, student number.
 
 **Department** / **Faculty**:

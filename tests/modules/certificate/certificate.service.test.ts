@@ -13,6 +13,8 @@ import {
   updateCertificate,
 } from '@/modules/certificate/certificate.service';
 
+import { randomUUID } from 'node:crypto';
+
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { inArray } from 'drizzle-orm';
 
@@ -30,8 +32,8 @@ const databaseIsMigrated = await db
   .then(() => true)
   .catch(() => false);
 
-const owner = 'certificate-test-owner';
-const other = 'certificate-test-other';
+const owner = randomUUID();
+const other = randomUUID();
 const missingId = '00000000-0000-4000-8000-000000000000';
 
 const certificate = {
@@ -155,8 +157,8 @@ describe.skipIf(!databaseIsMigrated)('certificate service against the database',
   });
 });
 
-const imageOwner = 'certificate-image-test-owner';
-const imageOther = 'certificate-image-test-other';
+const imageOwner = randomUUID();
+const imageOther = randomUUID();
 
 describe.skipIf(!databaseIsMigrated)('certificate image against the database', () => {
   let certificateId: string;

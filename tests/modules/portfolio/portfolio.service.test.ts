@@ -15,8 +15,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { eq, inArray } from 'drizzle-orm';
 
-const studentA = `test-portfolio-a-${randomUUID()}`;
-const studentB = `test-portfolio-b-${randomUUID()}`;
+const studentA = randomUUID();
+const studentB = randomUUID();
 
 const storedImage = (suffix: string) => ({
   bucket: 'kuquest-test',

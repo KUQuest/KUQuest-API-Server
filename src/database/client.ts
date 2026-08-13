@@ -5,9 +5,20 @@ import { env } from '@/config/env';
 import * as academicSchema from '@/database/schema/academic.schema';
 import * as authSchema from '@/database/schema/auth.schema';
 import * as fileSchema from '@/database/schema/file.schema';
+import * as paymentSchema from '@/database/schema/payment.schema';
 import * as profileSchema from '@/database/schema/profile.schema';
+import * as questSchema from '@/database/schema/quest.schema';
+import * as walletSchema from '@/database/schema/wallet.schema';
 
-const schema = { ...academicSchema, ...authSchema, ...fileSchema, ...profileSchema };
+const schema = {
+  ...academicSchema,
+  ...authSchema,
+  ...fileSchema,
+  ...paymentSchema,
+  ...profileSchema,
+  ...questSchema,
+  ...walletSchema,
+};
 
 const connectionString =
   env.databaseUrl ||

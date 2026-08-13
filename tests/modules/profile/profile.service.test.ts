@@ -24,8 +24,8 @@ import {
 } from 'bun:test';
 import { eq, inArray } from 'drizzle-orm';
 
-const studentA = `test-profile-a-${randomUUID()}`;
-const studentB = `test-profile-b-${randomUUID()}`;
+const studentA = randomUUID();
+const studentB = randomUUID();
 
 let facultyId: string;
 let departmentId: string;

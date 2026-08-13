@@ -1,6 +1,13 @@
 import { relations } from 'drizzle-orm';
-import type { AnyPgColumn } from 'drizzle-orm/pg-core';
-import { bigint, index, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  index,
+  pgTable,
+  timestamp,
+  unique,
+  uuid,
+  varchar,
+} from 'drizzle-orm/pg-core';
 
 import { authUser } from './auth.schema';
 
@@ -8,11 +15,11 @@ export const file = pgTable(
   'file',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    bucket: text('bucket').notNull(),
-    objectKey: text('object_key').notNull(),
-    contentType: text('content_type').notNull(),
+    bucket: varchar('bucket', { length: 63 }).notNull(),
+    objectKey: varchar('object_key', { length: 1024 }).notNull(),
+    contentType: varchar('content_type', { length: 255 }).notNull(),
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
-    uploadedByUserId: text('uploaded_by_user_id').references((): AnyPgColumn => authUser.id),
+    uploadedByUserId: uuid('uploaded_by_user_id').references(() => authUser.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },

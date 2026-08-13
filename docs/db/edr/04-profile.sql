@@ -21,6 +21,7 @@ CREATE TABLE profile_work_experience (
   ended_at        DATE,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at      TIMESTAMPTZ,
   CHECK (ended_at IS NULL OR ended_at >= started_at)
 );
 CREATE INDEX profile_work_experience_user_idx ON profile_work_experience (user_id);
@@ -33,7 +34,8 @@ CREATE TABLE profile_certificate (
   issued_at      DATE NOT NULL,
   image_file_id  UUID REFERENCES file(id),
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at     TIMESTAMPTZ
 );
 CREATE INDEX profile_certificate_user_idx ON profile_certificate (user_id);
 
@@ -43,7 +45,8 @@ CREATE TABLE profile_portfolio_item (
   title       VARCHAR(120) NOT NULL,
   description VARCHAR(1000),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at  TIMESTAMPTZ
 );
 CREATE INDEX profile_portfolio_item_user_idx ON profile_portfolio_item (user_id);
 

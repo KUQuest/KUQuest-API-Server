@@ -14,9 +14,10 @@ CREATE TABLE department (
   UNIQUE (faculty_id, name)
 );
 
--- added migration 0007 (BE-94, Academic Registration). Distinct from Student/Teacher role —
+-- added migration 0007 (BE-94, Academic Registration). Distinct from the application flow —
 -- drives whether Academic Registration requires a student_id for this occupation, so the
--- server doesn't hardcode a name comparison. Seeded (migration 0008): Student (true), Teacher (false).
+-- server doesn't hardcode a name comparison. Seeded (migrations 0008/0010): Student (true),
+-- Lecturer and Staff (false).
 CREATE TABLE occupation (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name                VARCHAR(100) NOT NULL UNIQUE,
@@ -45,7 +46,7 @@ CREATE TABLE auth_user (
   image_file_id     UUID,
   bio               VARCHAR(1000),
   student_id        VARCHAR(10),
-  telephone         VARCHAR(10),
+  telephone         VARCHAR(12),
   department_id     UUID REFERENCES department(id),
   academic_year     INTEGER,
   occupation_id     UUID REFERENCES occupation(id),

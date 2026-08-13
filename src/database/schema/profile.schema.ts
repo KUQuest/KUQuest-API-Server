@@ -5,24 +5,33 @@ import {
   index,
   integer,
   pgTable,
-  text,
   timestamp,
   unique,
   uuid,
+  varchar,
 } from 'drizzle-orm/pg-core';
 
 import { authUser } from './auth.schema';
 import { file } from './file.schema';
 
+export const tag = pgTable(
+  'tag',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: varchar('name', { length: 100 }).notNull(),
+  },
+  (table) => [unique('tag_name_key').on(table.name)],
+);
+
 export const profileCertificate = pgTable(
   'profile_certificate',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: text('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => authUser.id),
-    name: text('name').notNull(),
-    issuer: text('issuer').notNull(),
+    name: varchar('name', { length: 200 }).notNull(),
+    issuer: varchar('issuer', { length: 200 }).notNull(),
     issuedAt: date('issued_at').notNull(),
     imageFileId: uuid('image_file_id').references(() => file.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -35,11 +44,11 @@ export const profilePortfolioItem = pgTable(
   'profile_portfolio_item',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: text('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => authUser.id),
-    title: text('title').notNull(),
-    description: text('description'),
+    title: varchar('title', { length: 120 }).notNull(),
+    description: varchar('description', { length: 1000 }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -71,13 +80,13 @@ export const profileWorkExperience = pgTable(
   'profile_work_experience',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: text('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => authUser.id),
-    title: text('title').notNull(),
-    employmentType: text('employment_type').notNull(),
-    org: text('org'),
-    description: text('description'),
+    title: varchar('title', { length: 120 }).notNull(),
+    employmentType: varchar('employment_type', { length: 50 }).notNull(),
+    org: varchar('org', { length: 200 }),
+    description: varchar('description', { length: 1000 }),
     startedAt: date('started_at').notNull(),
     endedAt: date('ended_at'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

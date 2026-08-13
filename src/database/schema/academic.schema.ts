@@ -1,11 +1,11 @@
 import { relations, sql } from 'drizzle-orm';
-import { boolean, check, pgTable, text, uuid, unique } from 'drizzle-orm/pg-core';
+import { boolean, check, pgTable, uuid, unique, varchar } from 'drizzle-orm/pg-core';
 
 export const faculty = pgTable(
   'faculty',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    name: text('name').notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
   },
   (table) => [unique('faculty_name_key').on(table.name)],
 );
@@ -17,7 +17,7 @@ export const department = pgTable(
     facultyId: uuid('faculty_id')
       .notNull()
       .references(() => faculty.id),
-    name: text('name').notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
   },
   (table) => [unique('department_faculty_id_name_key').on(table.facultyId, table.name)],
 );
@@ -26,9 +26,7 @@ export const occupation = pgTable(
   'occupation',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    name: text('name').notNull(),
-    // Drives whether Academic Registration requires a Student ID for this Occupation,
-    // instead of the server hardcoding a name comparison.
+    name: varchar('name', { length: 100 }).notNull(),
     requiresStudentId: boolean('requires_student_id').notNull(),
   },
   (table) => [

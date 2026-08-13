@@ -13,8 +13,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { inArray } from 'drizzle-orm';
 
-const studentA = `test-work-experience-a-${randomUUID()}`;
-const studentB = `test-work-experience-b-${randomUUID()}`;
+const studentA = randomUUID();
+const studentB = randomUUID();
 
 beforeAll(async () => {
   try {
