@@ -36,28 +36,12 @@ _Avoid_: conflating with own-Profile's response shape — they share a resource 
 A shared Quest skill label used to describe the ability demonstrated by a Quest. Each Quest has exactly one canonical Tag. A Student's profile Tags are derived from their three most frequent Tags across successfully completed Quest participation; they are not manually assigned profile data.
 _Avoid_: profile skill, occupation, treating Tags as editable Student fields.
 
-**Hirer**:
-A Quest role for any authenticated KU account holder who creates and funds a Quest. The role is available regardless of Occupation. A person can be a Hirer on one Quest and a Worker on another Quest.
-_Avoid_: Giver (superseded term), employer (a Hirer pays for a Quest, but is not necessarily an employer).
-
-**Worker**:
-A Quest role for any authenticated KU account holder who performs a Quest. In a Group Quest, each participating person is a Worker and the group acts as the working unit. The role is available regardless of Occupation. A person can be a Worker on one Quest and a Hirer on another Quest.
-_Avoid_: Hunter (superseded term), Student (the Worker role is not limited to the Student Occupation).
-
-**Reward**:
-The money a Hirer offers for successful completion of a Quest. A Worker or Worker team earns the Reward under the Quest's completion and payment rules.
-_Avoid_: wage (superseded term), payment (a payment is a broader money movement).
-
-**Deadline**:
-The latest time by which a Quest should be completed. It is optional and comes after the Quest's Start Time. It is not the deadline for joining a Quest or for giving Consent; the Quest Board stops showing the Quest at its Start Time.
-_Avoid_: treating the Deadline as the Quest Board closing time.
-
 **Certificate**:
 A credential a Student claims — `name`, `issuer`, and the date it was issued, plus an optional image of the credential. Stored one row per credential in `profile_certificate`, owned by the Student who created it, and served by `/api/v1/profile/certificates` ([[BE-40]]). Deliberately not part of the Profile response (see Public Profile above for the one exception): a Student may hold any number of them, and each is created, edited, and deleted on its own. Ownership is scoped in the query rather than checked after reading, so another Student's Certificate is indistinguishable from one that does not exist — both are `404 CERTIFICATE_NOT_FOUND`. The image is a file reference plus an expiring link, same pattern as the avatar — no storage URL is ever persisted — uploaded via its own sub-route after the certificate row exists. Formerly carried a `verifyUrl` link instead of an image (settled via /grilling, 2026-08-09: replaced, not additive — existing `verifyUrl` values are dropped on migration, no backfill path from a URL to an image).
 _Avoid_: Qualification, badge (a badge is gamification, not a Certificate); treating a Certificate as a Profile field; verifyUrl/verification link (superseded term).
 
 **Student ID**:
-A KU-issued 10-digit identifier a Student provides during Onboarding. Distinct from the internal `auth_user.id` (a generated UUID auth identifier) — Student ID is KU's own number, stored in `auth_user.studentId`.
+A KU-issued 10-digit identifier a Student provides during Onboarding. Distinct from the internal `auth_user.id` (a generated auth identifier) — Student ID is KU's own number, stored in `auth_user.studentId`.
 _Avoid_: User ID, student number.
 
 **Department** / **Faculty**:

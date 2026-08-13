@@ -1,6 +1,6 @@
 # Spec: Prepare PR for QA
 
-Status: Decision-complete; ready for skill implementation
+Status: Decision-complete; implemented by [`.agents/skills/prepare-pr-for-qa`](../.agents/skills/prepare-pr-for-qa/SKILL.md)
 
 ## Problem statement
 
