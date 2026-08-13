@@ -16,6 +16,7 @@ import {
 import {
   portfolioCreateResponseSchema,
   portfolioCreateSchema,
+  portfolioImageCollectionParamSchema,
   portfolioImageParamSchema,
   portfolioImageUploadSchema,
   portfolioListRespondSchema,
@@ -78,6 +79,18 @@ export const portfolioRoute = new Elysia({
       security: betterAuthSecurity,
     },
   })
+  .post('/:portfolioId/image', replaceOwnPortfolioImage, {
+    params: portfolioImageCollectionParamSchema,
+    body: portfolioImageUploadSchema,
+    type: 'multipart/form-data',
+    response: responses(portfolioMutationResponseSchema, 400, 401, 404, 409, 413, 415, 502),
+    detail: {
+      tags: ['Portfolio'],
+      summary: 'Replace a portfolio image',
+      operationId: 'replaceFirstPortfolioImage',
+      security: betterAuthSecurity,
+    },
+  })
   .post('/:portfolioId/image/:fileId', replaceOwnPortfolioImage, {
     params: portfolioImageParamSchema,
     body: portfolioImageUploadSchema,
@@ -87,6 +100,16 @@ export const portfolioRoute = new Elysia({
       tags: ['Portfolio'],
       summary: 'Replace a portfolio image',
       operationId: 'replacePortfolioImage',
+      security: betterAuthSecurity,
+    },
+  })
+  .delete('/:portfolioId/image', deleteOwnPortfolioImage, {
+    params: portfolioImageCollectionParamSchema,
+    response: responses(portfolioMutationResponseSchema, 400, 401, 404, 409),
+    detail: {
+      tags: ['Portfolio'],
+      summary: 'Delete a portfolio image',
+      operationId: 'deleteFirstPortfolioImage',
       security: betterAuthSecurity,
     },
   })

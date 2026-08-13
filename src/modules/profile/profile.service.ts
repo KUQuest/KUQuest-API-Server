@@ -60,6 +60,27 @@ export const getProfileTags = async (userId: string) =>
     .orderBy(desc(count(questAssignment.id)), asc(tag.id))
     .limit(3);
 
+export const getProfileReputation = async (userId: string) => {
+  const [completed] = await db
+    .select({ totalQuests: count(questAssignment.id) })
+    .from(questAssignment)
+    .where(
+      and(
+        eq(questAssignment.hunterId, userId),
+        eq(questAssignment.assignmentStatus, 'COMPLETED'),
+      ),
+    );
+
+  return {
+    totalQuests: Number(completed?.totalQuests ?? 0),
+    rating: {
+      average: null,
+      count: 0,
+      distribution: { '5': 0, '4': 0, '3': 0, '2': 0, '1': 0 },
+    },
+  };
+};
+
 export const updateProfile = async (
   userId: string,
   data: ProfileUpdate,

@@ -1,4 +1,4 @@
-import {t} from 'elysia';
+import { t, type Static } from 'elysia';
 
 export const maxPortfolioImages = 10;
 
@@ -24,6 +24,14 @@ export const portfolioImageParamSchema = t.Object({
   fileId: t.String({ format: 'uuid' }),
 });
 
+export const portfolioImageCollectionParamSchema = t.Object({
+  portfolioId: t.String({ format: 'uuid' }),
+});
+
+export type PortfolioImageTarget =
+  | Static<typeof portfolioImageParamSchema>
+  | Static<typeof portfolioImageCollectionParamSchema>;
+
 export const portfolioImageUploadSchema = t.Object(
   { image: t.File() },
   { additionalProperties: false },
@@ -38,7 +46,7 @@ export const portfolioCreateSchema = t.Object(
   {
     title: titleSchema,
     description: t.Optional(descriptionSchema),
-    images: t.Files({maxItems: maxPortfolioImages}),
+    images: t.Optional(t.Files({ maxItems: maxPortfolioImages })),
   },
   { additionalProperties: false},
 );

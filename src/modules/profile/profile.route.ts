@@ -9,6 +9,8 @@ import {
   deleteAvatar,
   getOwnProfile,
   getPublicProfile,
+  getReputation,
+  getReviews,
   setAvatar,
   updateOwnProfile,
 } from './profile.controller';
@@ -19,6 +21,9 @@ import {
   publicProfileResponseSchema,
   profileResponseSchema,
   profileUpdateSchema,
+  reputationResponseSchema,
+  reviewsQuerySchema,
+  reviewsResponseSchema,
 } from './profile.schema';
 
 export const profileRoute = new Elysia({
@@ -34,6 +39,25 @@ export const profileRoute = new Elysia({
       description:
         'Returns the profile of the authenticated student, including a temporary link to the current avatar when one is set.',
       operationId: 'getOwnProfile',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/reputation', getReputation, {
+    response: responses(reputationResponseSchema, 401),
+    detail: {
+      tags: ['Profile'],
+      summary: 'Get own Profile Rating and completed Quest count',
+      operationId: 'getProfileReputation',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/reviews', getReviews, {
+    query: reviewsQuerySchema,
+    response: responses(reviewsResponseSchema, 400, 401),
+    detail: {
+      tags: ['Profile'],
+      summary: 'List own Profile Reviews',
+      operationId: 'listProfileReviews',
       security: betterAuthSecurity,
     },
   })

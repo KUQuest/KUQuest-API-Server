@@ -5,8 +5,11 @@ import * as portfolioModule from '@/modules/portfolio';
 import { portfolioStorage } from '@/modules/portfolio/portfolio.storage';
 import * as workExperienceModule from '@/modules/work-experience';
 import {
+  deleteAvatar,
   getOwnProfile,
   getPublicProfile,
+  getReputation,
+  getReviews,
   setAvatar,
   updateOwnProfile,
 } from '@/modules/profile/profile.controller';
@@ -26,6 +29,15 @@ const session = {
   },
 };
 
+const invokeDeleteAvatar = () => {
+  const set: { status?: number | string } = {};
+
+  return {
+    result: deleteAvatar({ session: session as never, set: set as never }),
+    set,
+  };
+};
+
 const invokeSetAvatar = (avatar: File) => {
   const set: { status?: number | string } = {};
 
@@ -41,6 +53,24 @@ const invokeSetAvatar = (avatar: File) => {
 
 afterEach(() => {
   mock.restore();
+});
+
+describe('deleteAvatar', () => {
+  it('returns a null fileId when the current avatar is removed', async () => {
+    spyOn(profileService, 'removeStudentAvatar').mockResolvedValue({
+      bucket: null,
+      objectKey: null,
+      version: 2,
+    });
+
+    const { result, set } = invokeDeleteAvatar();
+
+    expect(await result).toEqual({
+      success: true,
+      data: { fileId: null, version: 2, avatar: null },
+    });
+    expect(set.status).toBeUndefined();
+  });
 });
 
 describe('setAvatar', () => {
@@ -62,9 +92,9 @@ describe('setAvatar', () => {
       new File(['image-content'], 'avatar.png', { type: 'image/png' }),
     );
 
-    expect(await result).toEqual({
+    expect(await result).toMatchObject({
       success: true,
-      data: { version: 2, avatar: expect.any(Object) },
+      data: { fileId, version: 2, avatar: expect.any(Object) },
     });
     expect(set.status).toBeUndefined();
     expect(avatarStorage.upload).toHaveBeenCalledWith(
@@ -104,9 +134,9 @@ describe('setAvatar', () => {
       new File(['image-content'], 'avatar.png', { type: 'image/png' }),
     );
 
-    expect(await result).toEqual({
+    expect(await result).toMatchObject({
       success: true,
-      data: { version: 2, avatar: expect.any(Object) },
+      data: { fileId, version: 2, avatar: expect.any(Object) },
     });
     expect(limit).toHaveBeenCalledTimes(1);
     expect(avatarStorage.delete).toHaveBeenCalledWith(
@@ -286,6 +316,29 @@ describe('getOwnProfile', () => {
     expect(body).toEqual({
       success: false,
       error: { code: 'USER_NOT_FOUND', message: 'User not found' },
+    });
+  });
+});
+
+describe('getReputation', () => {
+  it('returns completed Quest count with an empty rating aggregate until Reviews exist', async () => {
+    spyOn(profileService, 'getProfileReputation').mockResolvedValue({
+      totalQuests: 3,
+      rating: { average: null, count: 0, distribution: { '5': 0, '4': 0, '3': 0, '2': 0, '1': 0 } },
+    });
+
+    expect(await getReputation({ session: session as never, set: {} as never })).toEqual({
+      success: true,
+      data: expect.objectContaining({ totalQuests: 3 }),
+    });
+  });
+});
+
+describe('getReviews', () => {
+  it('returns the empty Reviews collection until the Review domain is available', async () => {
+    expect(await getReviews()).toEqual({
+      success: true,
+      data: { items: [], total: 0, nextCursor: null },
     });
   });
 });

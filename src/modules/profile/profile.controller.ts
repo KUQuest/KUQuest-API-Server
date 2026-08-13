@@ -20,9 +20,11 @@ import type {
   publicProfileResponseSchema,
   profileResponseSchema,
   profileUpdateSchema,
+  reviewsResponseSchema,
 } from './profile.schema';
 import {
   getPreviousAvatarFile,
+  getProfileReputation,
   getPublicProfile as getPublicProfileRecord,
   getProfile,
   markAvatarDeleted,
@@ -92,6 +94,16 @@ export const getOwnProfile = async ({
   return apiSuccess({ ...rest, avatar: describeAvatar(avatar) });
 };
 
+export const getReputation = async ({
+  session,
+}: AuthedContext): Promise<ApiResponse<Awaited<ReturnType<typeof getProfileReputation>>>> =>
+  apiSuccess(await getProfileReputation(session.user.id));
+
+type Reviews = Static<typeof reviewsResponseSchema>['data'];
+
+export const getReviews = async (): Promise<ApiResponse<Reviews>> =>
+  apiSuccess({ items: [], total: 0, nextCursor: null });
+
 export const getPublicProfile = async ({
   params,
   set,
@@ -154,7 +166,7 @@ export const updateOwnProfile = async ({
 export const deleteAvatar = async ({
   session,
   set,
-}: AuthedContext): Promise<ApiResponse<{ version: number; avatar: null }>> => {
+}: AuthedContext): Promise<ApiResponse<{ fileId: string | null; version: number; avatar: null }>> => {
   const result = await removeStudentAvatar(session.user.id);
   if (!result) return userNotFound(set);
 
@@ -166,7 +178,7 @@ export const deleteAvatar = async ({
     }
   }
 
-  return apiSuccess({ version: result.version, avatar: null });
+  return apiSuccess({ fileId: null, version: result.version, avatar: null });
 };
 
 export const setAvatar = async ({
@@ -174,7 +186,7 @@ export const setAvatar = async ({
   session,
   set,
 }: AuthedContext & { body: Static<typeof avatarUploadSchema> }): Promise<
-  ApiResponse<{ version: number; avatar: Profile['avatar'] }>
+  ApiResponse<{ fileId: string; version: number; avatar: Profile['avatar'] }>
 > => {
   let storedAvatar;
 
@@ -243,9 +255,11 @@ export const setAvatar = async ({
       }
     }
 
+    const avatar = describeAvatar({ fileId: result.fileId, ...storedAvatar });
     return apiSuccess({
+      fileId: result.fileId,
       version: result.version,
-      avatar: describeAvatar({ fileId: result.fileId, ...storedAvatar }),
+      avatar,
     });
   } catch (error) {
     await discardUploadedAvatar(storedAvatar.bucket, storedAvatar.objectKey);

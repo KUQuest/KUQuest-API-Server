@@ -8,11 +8,11 @@ import type { Static } from 'elysia';
 
 import type {
   portfolioCreateSchema,
-  portfolioImageParamSchema,
   portfolioImageUploadSchema,
   portfolioListRespondSchema,
   portfolioParamSchema,
   portfolioUpdateSchema,
+  PortfolioImageTarget,
 } from './portfolio.schema';
 import {
   createPortfolio,
@@ -90,7 +90,7 @@ export const createOwnPortfolio = async ({
   const uploaded: StoredPortfolioImage[] = [];
 
   try {
-    for (const image of body.images) {
+    for (const image of body.images ?? []) {
       uploaded.push(await portfolioStorage.upload(session.user.id, image));
     }
   } catch (error) {
@@ -164,7 +164,7 @@ export const replaceOwnPortfolioImage = async ({
   session,
   set,
 }: AuthedContext & {
-  params: Static<typeof portfolioImageParamSchema>;
+  params: PortfolioImageTarget;
   body: Static<typeof portfolioImageUploadSchema>;
 }): Promise<ApiResponse<{ version: number }>> => {
   const versionHeader = readResourceVersion(request);
@@ -195,7 +195,7 @@ export const replaceOwnPortfolioImage = async ({
       session.user.id,
       params.portfolioId,
       uploaded,
-      params.fileId,
+      'fileId' in params ? params.fileId : undefined,
       versionHeader.value,
     );
     if ('outcome' in result) {
@@ -206,14 +206,16 @@ export const replaceOwnPortfolioImage = async ({
       }
       return portfolioNotFound(set);
     }
-    try {
-      await portfolioStorage.delete(result.previousBucket, result.previousObjectKey);
-      await markPortfolioImageDeleted(session.user.id, result.previousFileId);
-    } catch (error) {
-      console.error('[portfolio-image-replacement] Previous image cleanup failed', {
-        error,
-        fileId: result.previousFileId,
-      });
+    if (result.previousFileId && result.previousBucket && result.previousObjectKey) {
+      try {
+        await portfolioStorage.delete(result.previousBucket, result.previousObjectKey);
+        await markPortfolioImageDeleted(session.user.id, result.previousFileId);
+      } catch (error) {
+        console.error('[portfolio-image-replacement] Previous image cleanup failed', {
+          error,
+          fileId: result.previousFileId,
+        });
+      }
     }
 
     return apiSuccess({ version: result.version });
@@ -228,13 +230,20 @@ export const deleteOwnPortfolioImage = async ({
   request,
   session,
   set,
-}: AuthedContext & { params: Static<typeof portfolioImageParamSchema> }): Promise<ApiResponse<{ version: number }>> => {
+}: AuthedContext & {
+  params: PortfolioImageTarget;
+}): Promise<ApiResponse<{ version: number }>> => {
   const versionHeader = readResourceVersion(request);
   if (versionHeader.invalid) {
     set.status = 400;
     return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
   }
-  const result = await deletePortfolioImage(session.user.id, params.portfolioId, params.fileId, versionHeader.value);
+  const result = await deletePortfolioImage(
+    session.user.id,
+    params.portfolioId,
+    'fileId' in params ? params.fileId : undefined,
+    versionHeader.value,
+  );
   if (result.outcome === 'not-found') return portfolioNotFound(set);
   if (result.outcome === 'conflict') {
     set.status = 409;

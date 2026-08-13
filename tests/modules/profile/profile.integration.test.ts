@@ -38,17 +38,26 @@ describe('profile integration', () => {
     });
   });
 
-  it.each(['reputation', 'reviews', 'not-a-uuid'])(
-    'rejects the non-UUID public profile id %s before authentication runs',
-    async (userId) => {
+  it.each(['reputation', 'reviews'])(
+    'requires authentication for the %s endpoint',
+    async (resource) => {
       const response = await app.handle(
-        new Request(`http://localhost/api/v1/profile/${userId}`),
+        new Request(`http://localhost/api/v1/profile/${resource}`),
       );
 
-      expect(response.status).toBe(400);
-      expect((await response.json()).error.code).toBe('VALIDATION');
+      expect(response.status).toBe(401);
+      expect((await response.json()).error.code).toBe('UNAUTHORIZED');
     },
   );
+
+  it('rejects a non-UUID public profile id before authentication runs', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/profile/not-a-uuid'),
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('VALIDATION');
+  });
 
   it('rejects an unauthenticated update', async () => {
     const response = await patchProfile({ bio: 'hello' });
@@ -187,15 +196,26 @@ describe('profile integration', () => {
       expect(Object.keys(document.paths)).not.toContain('/api/v1/profile/');
     });
 
+    it('publishes the reputation and Reviews endpoints before the dynamic public-profile route', async () => {
+      const document = await openapiDocument();
+      expect(document.paths['/api/v1/profile/reputation']?.get).toBeDefined();
+      expect(document.paths['/api/v1/profile/reviews']?.get).toBeDefined();
+      expect(document.paths['/api/v1/profile/{userId}']?.get).toBeDefined();
+    });
+
     it('marks every profile operation as requiring authentication', async () => {
       const document = await openapiDocument();
       const profilePath = document.paths['/api/v1/profile'];
       const publicProfilePath = document.paths['/api/v1/profile/{userId}'];
+      const reputationOperation = document.paths['/api/v1/profile/reputation']?.get;
+      const reviewsOperation = document.paths['/api/v1/profile/reviews']?.get;
       const avatarOperation = document.paths['/api/v1/profile/avatar']?.post;
 
       expect(profilePath?.get?.security).toEqual([{ betterAuthSession: [] }]);
       expect(profilePath?.patch?.security).toEqual([{ betterAuthSession: [] }]);
       expect(publicProfilePath?.get?.security).toEqual([{ betterAuthSession: [] }]);
+      expect(reputationOperation?.security).toEqual([{ betterAuthSession: [] }]);
+      expect(reviewsOperation?.security).toEqual([{ betterAuthSession: [] }]);
       expect(avatarOperation?.security).toEqual([{ betterAuthSession: [] }]);
     });
 

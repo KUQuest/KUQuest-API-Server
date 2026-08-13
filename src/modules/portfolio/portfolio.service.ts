@@ -81,7 +81,7 @@ export const listPortfolio = async (userId: string): Promise<PortfolioItem[]> =>
 
 export const createPortfolio = async (
   userId: string,
-  data: { title: string; description?: string; images: StoredPortfolioImage[] },
+  data: { title: string; description?: string; images?: StoredPortfolioImage[] },
 ): Promise<{ id: string }> =>
   db.transaction(async (transaction) => {
     const [item] = await transaction
@@ -90,7 +90,7 @@ export const createPortfolio = async (
       .returning({ id: profilePortfolioItem.id });
 
     await Promise.all(
-      data.images.map(async (image, position) => {
+      (data.images ?? []).map(async (image, position) => {
         const [createdFile] = await transaction
           .insert(file)
           .values({ ...image, uploadedByUserId: userId })
@@ -186,14 +186,14 @@ export const replacePortfolioImage = async (
   userId: string,
   portfolioId: string,
   fileData: StoredPortfolioImage,
-  targetFileId: string,
+  targetFileId: string | undefined,
   expectedVersion?: number,
 ): Promise<
   | {
       fileId: string;
-      previousFileId: string;
-      previousBucket: string;
-      previousObjectKey: string;
+      previousFileId: string | null;
+      previousBucket: string | null;
+      previousObjectKey: string | null;
       version: number;
     }
   | { outcome: 'not-found' }
@@ -213,33 +213,50 @@ export const replacePortfolioImage = async (
     }
 
     const [oldImage] = await transaction
-      .select({ fileId: file.id, bucket: file.bucket, objectKey: file.objectKey })
+      .select({
+        fileId: file.id,
+        bucket: file.bucket,
+        objectKey: file.objectKey,
+        position: profilePortfolioItemImage.position,
+      })
       .from(profilePortfolioItemImage)
       .innerJoin(file, eq(profilePortfolioItemImage.fileId, file.id))
       .where(
-        and(
-          eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
-          eq(profilePortfolioItemImage.fileId, targetFileId),
-        ),
+        targetFileId
+          ? and(
+              eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
+              eq(profilePortfolioItemImage.fileId, targetFileId),
+            )
+          : eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
       )
+      .orderBy(asc(profilePortfolioItemImage.position))
       .limit(1);
 
-    if (!oldImage) return { outcome: 'not-found' };
+    if (targetFileId && !oldImage) return { outcome: 'not-found' };
 
     const [createdFile] = await transaction
       .insert(file)
       .values({ ...fileData, uploadedByUserId: userId })
       .returning({ fileId: file.id });
 
-    await transaction
-      .update(profilePortfolioItemImage)
-      .set({ fileId: createdFile.fileId })
-      .where(
-        and(
-          eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
-          eq(profilePortfolioItemImage.fileId, oldImage.fileId),
-        ),
-      );
+    if (oldImage) {
+      await transaction
+        .update(profilePortfolioItemImage)
+        .set({ fileId: createdFile.fileId })
+        .where(
+          and(
+            eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
+            eq(profilePortfolioItemImage.fileId, oldImage.fileId),
+          ),
+        );
+    } else {
+      await transaction.insert(profilePortfolioItemImage).values({
+        portfolioItemId: portfolioId,
+        fileId: createdFile.fileId,
+        position: 0,
+      });
+    }
+
     await transaction
       .update(profilePortfolioItem)
       .set({ version: sql`${profilePortfolioItem.version} + 1`, updatedAt: new Date() })
@@ -247,9 +264,9 @@ export const replacePortfolioImage = async (
 
     return {
       fileId: createdFile.fileId,
-      previousFileId: oldImage.fileId,
-      previousBucket: oldImage.bucket,
-      previousObjectKey: oldImage.objectKey,
+      previousFileId: oldImage?.fileId ?? null,
+      previousBucket: oldImage?.bucket ?? null,
+      previousObjectKey: oldImage?.objectKey ?? null,
       version: item.version + 1,
     };
   });
@@ -257,7 +274,7 @@ export const replacePortfolioImage = async (
 export const deletePortfolioImage = async (
   userId: string,
   portfolioId: string,
-  fileId: string,
+  fileId: string | undefined,
   expectedVersion?: number,
 ): Promise<{ outcome: 'deleted'; bucket: string; objectKey: string; version: number } | { outcome: 'not-found' } | { outcome: 'conflict' }> =>
   db.transaction(async (transaction) => {
@@ -271,15 +288,18 @@ export const deletePortfolioImage = async (
     if (expectedVersion !== undefined && item.version !== expectedVersion) return { outcome: 'conflict' };
 
     const [image] = await transaction
-      .select({ bucket: file.bucket, objectKey: file.objectKey })
+      .select({ fileId: file.id, bucket: file.bucket, objectKey: file.objectKey })
       .from(profilePortfolioItemImage)
       .innerJoin(file, eq(profilePortfolioItemImage.fileId, file.id))
       .where(
-        and(
-          eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
-          eq(profilePortfolioItemImage.fileId, fileId),
-        ),
+        fileId
+          ? and(
+              eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
+              eq(profilePortfolioItemImage.fileId, fileId),
+            )
+          : eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
       )
+      .orderBy(asc(profilePortfolioItemImage.position))
       .limit(1);
     if (!image) return { outcome: 'not-found' };
 
@@ -288,13 +308,13 @@ export const deletePortfolioImage = async (
       .where(
         and(
           eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
-          eq(profilePortfolioItemImage.fileId, fileId),
+          eq(profilePortfolioItemImage.fileId, image.fileId),
         ),
       );
     await transaction
       .update(file)
       .set({ deletedAt: new Date() })
-      .where(eq(file.id, fileId));
+      .where(eq(file.id, image.fileId));
     await transaction
       .update(profilePortfolioItem)
       .set({ version: sql`${profilePortfolioItem.version} + 1`, updatedAt: new Date() })

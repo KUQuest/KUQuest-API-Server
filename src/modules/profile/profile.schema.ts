@@ -33,6 +33,7 @@ export const profileAvatarSchema = t.Nullable(avatarSchema);
 export const avatarUploadResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
+    fileId: t.Nullable(t.String({ format: 'uuid' })),
     version: versionSchema,
     avatar: profileAvatarSchema,
   }),
@@ -76,6 +77,54 @@ export const profileResponseSchema = t.Object({
     avatar: t.Nullable(avatarSchema),
     occupation: t.Nullable(occupationSchema),
     tags: t.Array(tagSchema, { maxItems: 3 }),
+  }),
+});
+
+const ratingDistributionSchema = t.Object({
+  '5': t.Integer({ minimum: 0 }),
+  '4': t.Integer({ minimum: 0 }),
+  '3': t.Integer({ minimum: 0 }),
+  '2': t.Integer({ minimum: 0 }),
+  '1': t.Integer({ minimum: 0 }),
+});
+
+export const reputationResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    totalQuests: t.Integer({ minimum: 0 }),
+    rating: t.Object({
+      average: t.Nullable(t.Number({ minimum: 0, maximum: 5 })),
+      count: t.Integer({ minimum: 0 }),
+      distribution: ratingDistributionSchema,
+    }),
+  }),
+});
+
+const reviewSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  reviewer: t.Object({
+    displayName: t.String(),
+    avatar: t.Optional(t.Nullable(t.Object({ url: t.String({ format: 'uri' }) }))),
+  }),
+  rating: t.Integer({ minimum: 1, maximum: 5 }),
+  comment: t.String(),
+  createdAt: t.String({ format: 'date-time' }),
+  quest: t.Optional(t.Nullable(t.Object({
+    id: t.String({ format: 'uuid' }),
+    title: t.String(),
+  }))),
+});
+
+export const reviewsQuerySchema = t.Object({
+  rating: t.Optional(t.Integer({ minimum: 1, maximum: 5 })),
+});
+
+export const reviewsResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    items: t.Array(reviewSchema),
+    total: t.Integer({ minimum: 0 }),
+    nextCursor: t.Nullable(t.String()),
   }),
 });
 
