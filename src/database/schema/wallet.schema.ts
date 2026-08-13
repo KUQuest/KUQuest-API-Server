@@ -94,7 +94,6 @@ export const walletLedgerAccount = pgTable(
     code: text('code').notNull().unique(),
     type: text('type').$type<LedgerAccountType>().notNull(),
     walletId: uuid('wallet_id').references(() => walletWallet.id),
-    userId: text('user_id').references(() => authUser.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -102,7 +101,6 @@ export const walletLedgerAccount = pgTable(
       .on(table.walletId, table.type)
       .where(sql`${table.walletId} IS NOT NULL`),
     check('wallet_ledger_accounts_type_check', sql`${table.type} IN ('SPENDING', 'EARNINGS', 'FUNDING_RESERVED', 'RESERVED_FOR_PAYOUTS', 'PLATFORM_REVENUE', 'PLATFORM_SUSPENSE')`),
-    check('wallet_ledger_accounts_owner_check', sql`(${table.walletId} IS NULL) = (${table.userId} IS NULL)`),
     check('wallet_ledger_accounts_platform_check', sql`(${table.walletId} IS NULL) = (${table.type} IN ('PLATFORM_REVENUE', 'PLATFORM_SUSPENSE'))`),
   ],
 );
@@ -244,7 +242,6 @@ export const walletStatusHistoryRelations = relations(walletStatusHistory, ({ on
 
 export const walletLedgerAccountRelations = relations(walletLedgerAccount, ({ one, many }) => ({
   wallet: one(walletWallet, { fields: [walletLedgerAccount.walletId], references: [walletWallet.id] }),
-  user: one(authUser, { fields: [walletLedgerAccount.userId], references: [authUser.id] }),
   postings: many(walletLedgerPosting),
 }));
 

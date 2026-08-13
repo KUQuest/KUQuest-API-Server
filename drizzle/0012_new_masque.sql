@@ -69,11 +69,9 @@ CREATE TABLE "wallet_ledger_accounts" (
 	"code" text NOT NULL,
 	"type" text NOT NULL,
 	"wallet_id" uuid,
-	"user_id" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "wallet_ledger_accounts_code_unique" UNIQUE("code"),
 	CONSTRAINT "wallet_ledger_accounts_type_check" CHECK ("wallet_ledger_accounts"."type" IN ('SPENDING', 'EARNINGS', 'FUNDING_RESERVED', 'RESERVED_FOR_PAYOUTS', 'PLATFORM_REVENUE', 'PLATFORM_SUSPENSE')),
-	CONSTRAINT "wallet_ledger_accounts_owner_check" CHECK (("wallet_ledger_accounts"."wallet_id" IS NULL) = ("wallet_ledger_accounts"."user_id" IS NULL)),
 	CONSTRAINT "wallet_ledger_accounts_platform_check" CHECK (("wallet_ledger_accounts"."wallet_id" IS NULL) = ("wallet_ledger_accounts"."type" IN ('PLATFORM_REVENUE', 'PLATFORM_SUSPENSE')))
 );
 --> statement-breakpoint
@@ -136,7 +134,6 @@ ALTER TABLE "wallet_activities" ADD CONSTRAINT "wallet_activities_ledger_transac
 ALTER TABLE "wallet_activities" ADD CONSTRAINT "wallet_activities_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "wallet_idempotency_keys" ADD CONSTRAINT "wallet_idempotency_keys_principal_user_id_auth_user_id_fk" FOREIGN KEY ("principal_user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "wallet_ledger_accounts" ADD CONSTRAINT "wallet_ledger_accounts_wallet_id_wallet_wallets_id_fk" FOREIGN KEY ("wallet_id") REFERENCES "public"."wallet_wallets"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_ledger_accounts" ADD CONSTRAINT "wallet_ledger_accounts_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "wallet_ledger_postings" ADD CONSTRAINT "wallet_ledger_postings_transaction_id_wallet_ledger_transactions_id_fk" FOREIGN KEY ("transaction_id") REFERENCES "public"."wallet_ledger_transactions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "wallet_ledger_postings" ADD CONSTRAINT "wallet_ledger_postings_account_id_wallet_ledger_accounts_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."wallet_ledger_accounts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "wallet_ledger_transactions" ADD CONSTRAINT "wallet_ledger_transactions_idempotency_key_id_wallet_idempotency_keys_id_fk" FOREIGN KEY ("idempotency_key_id") REFERENCES "public"."wallet_idempotency_keys"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -165,15 +162,25 @@ $$;
 --> statement-breakpoint
 CREATE OR REPLACE FUNCTION wallet_reject_sealed_posting_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
-  transaction_sealed timestamptz;
+  touches_sealed_transaction boolean;
 BEGIN
-  SELECT sealed_at INTO transaction_sealed
-  FROM wallet_ledger_transactions
-  WHERE id = COALESCE(OLD.transaction_id, NEW.transaction_id);
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'ledger postings may not be hard deleted';
   END IF;
-  IF transaction_sealed IS NOT NULL THEN
+
+  PERFORM id
+  FROM wallet_ledger_transactions
+  WHERE id = NEW.transaction_id
+    OR (TG_OP = 'UPDATE' AND id = OLD.transaction_id)
+  ORDER BY id
+  FOR UPDATE;
+
+  SELECT bool_or(sealed_at IS NOT NULL) INTO touches_sealed_transaction
+  FROM wallet_ledger_transactions
+  WHERE id = NEW.transaction_id
+    OR (TG_OP = 'UPDATE' AND id = OLD.transaction_id);
+
+  IF touches_sealed_transaction THEN
     RAISE EXCEPTION 'sealed ledger postings are immutable';
   END IF;
   RETURN NEW;
@@ -203,30 +210,12 @@ BEFORE UPDATE OR DELETE ON wallet_ledger_transactions
 FOR EACH ROW EXECUTE FUNCTION wallet_reject_sealed_mutation();
 --> statement-breakpoint
 CREATE TRIGGER wallet_ledger_postings_immutable
-BEFORE UPDATE OR DELETE ON wallet_ledger_postings
+BEFORE INSERT OR UPDATE OR DELETE ON wallet_ledger_postings
 FOR EACH ROW EXECUTE FUNCTION wallet_reject_sealed_posting_mutation();
 --> statement-breakpoint
 CREATE TRIGGER wallet_ledger_transactions_validate_seal
 BEFORE INSERT OR UPDATE ON wallet_ledger_transactions
 FOR EACH ROW EXECUTE FUNCTION wallet_validate_ledger_seal();
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION wallet_validate_account_owner() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE
-  wallet_user_id text;
-BEGIN
-  IF NEW.wallet_id IS NOT NULL THEN
-    SELECT user_id INTO wallet_user_id FROM wallet_wallets WHERE id = NEW.wallet_id;
-    IF wallet_user_id IS NULL OR wallet_user_id <> NEW.user_id THEN
-      RAISE EXCEPTION 'ledger account owner must match Wallet owner';
-    END IF;
-  END IF;
-  RETURN NEW;
-END;
-$$;
---> statement-breakpoint
-CREATE TRIGGER wallet_ledger_accounts_owner_validate
-BEFORE INSERT OR UPDATE ON wallet_ledger_accounts
-FOR EACH ROW EXECUTE FUNCTION wallet_validate_account_owner();
 --> statement-breakpoint
 CREATE OR REPLACE FUNCTION wallet_reject_owner_change() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -259,12 +248,10 @@ CREATE TRIGGER wallet_ledger_accounts_no_hard_delete
 BEFORE DELETE ON wallet_ledger_accounts
 FOR EACH ROW EXECUTE FUNCTION wallet_reject_financial_delete();
 --> statement-breakpoint
-CREATE TRIGGER wallet_activities_no_hard_delete
-BEFORE DELETE ON wallet_activities
-FOR EACH ROW EXECUTE FUNCTION wallet_reject_financial_delete();
---> statement-breakpoint
 CREATE OR REPLACE FUNCTION wallet_reject_overlapping_policy() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('payment_money_policy_revisions'));
+
   IF EXISTS (
     SELECT 1 FROM payment_money_policy_revisions AS other
     WHERE other.id <> NEW.id
@@ -283,15 +270,7 @@ FOR EACH ROW EXECUTE FUNCTION wallet_reject_overlapping_policy();
 --> statement-breakpoint
 CREATE OR REPLACE FUNCTION wallet_reject_policy_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF TG_OP = 'DELETE' THEN
-    RAISE EXCEPTION 'Money Policy revisions are immutable';
-  END IF;
-  IF OLD.effective_until IS NULL
-    AND NEW.effective_until IS NOT NULL
-    AND (to_jsonb(NEW) - 'effective_until') = (to_jsonb(OLD) - 'effective_until') THEN
-    RETURN NEW;
-  END IF;
-  RAISE EXCEPTION 'Money Policy revision values are immutable';
+  RAISE EXCEPTION 'Money Policy revisions are immutable';
 END;
 $$;
 --> statement-breakpoint

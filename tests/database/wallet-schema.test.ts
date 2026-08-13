@@ -1,11 +1,12 @@
-import { describe, expect, it } from 'bun:test';
-import { getTableColumns } from 'drizzle-orm';
-
 import {
   paymentMoneyPolicyRevision,
+  walletLedgerAccount,
   walletLedgerPosting,
   walletWallet,
 } from '@/database/schema/wallet.schema';
+
+import { describe, expect, it } from 'bun:test';
+import { getTableColumns } from 'drizzle-orm';
 
 describe('Wallet & Payments database schema', () => {
   it('stores all Wallet balances and postings as integer satang', () => {
@@ -27,5 +28,12 @@ describe('Wallet & Payments database schema', () => {
     expect(columns.minimumFundingReservationSatang.dataType).toBe('number');
     expect(columns).not.toHaveProperty('reviewWindowSeconds');
     expect(columns).not.toHaveProperty('defaultApplicationWindowSeconds');
+  });
+
+  it('derives a Wallet account owner through its Wallet reference', () => {
+    const columns = getTableColumns(walletLedgerAccount);
+
+    expect(columns).toHaveProperty('walletId');
+    expect(columns).not.toHaveProperty('userId');
   });
 });

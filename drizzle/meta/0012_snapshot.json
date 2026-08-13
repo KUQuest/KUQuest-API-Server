@@ -1857,12 +1857,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1908,19 +1902,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "wallet_ledger_accounts_user_id_auth_user_id_fk": {
-          "name": "wallet_ledger_accounts_user_id_auth_user_id_fk",
-          "tableFrom": "wallet_ledger_accounts",
-          "tableTo": "auth_user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1938,10 +1919,6 @@
         "wallet_ledger_accounts_type_check": {
           "name": "wallet_ledger_accounts_type_check",
           "value": "\"wallet_ledger_accounts\".\"type\" IN ('SPENDING', 'EARNINGS', 'FUNDING_RESERVED', 'RESERVED_FOR_PAYOUTS', 'PLATFORM_REVENUE', 'PLATFORM_SUSPENSE')"
-        },
-        "wallet_ledger_accounts_owner_check": {
-          "name": "wallet_ledger_accounts_owner_check",
-          "value": "(\"wallet_ledger_accounts\".\"wallet_id\" IS NULL) = (\"wallet_ledger_accounts\".\"user_id\" IS NULL)"
         },
         "wallet_ledger_accounts_platform_check": {
           "name": "wallet_ledger_accounts_platform_check",

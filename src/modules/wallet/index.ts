@@ -3,8 +3,15 @@ export {
   MoneyDomainError,
   positiveSatang,
   satang,
+  satangDelta,
+  signedSatang,
 } from './wallet.money';
-export type { Satang } from './wallet.money';
+export type {
+  MoneyDomainErrorCode,
+  Satang,
+  SatangDelta,
+  SignedSatang,
+} from './wallet.money';
 export {
   ensureInitialMoneyPolicy,
   ensureWallet,

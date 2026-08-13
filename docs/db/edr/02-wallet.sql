@@ -55,9 +55,7 @@ CREATE TABLE wallet_ledger_accounts (
     'PLATFORM_SUSPENSE'
   )),
   wallet_id  UUID REFERENCES wallet_wallets(id),
-  user_id    TEXT REFERENCES auth_user(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CHECK ((wallet_id IS NULL) = (user_id IS NULL)),
   CHECK ((wallet_id IS NULL) = (type IN ('PLATFORM_REVENUE', 'PLATFORM_SUSPENSE')))
 );
 CREATE UNIQUE INDEX wallet_ledger_accounts_wallet_type_uidx
@@ -133,9 +131,10 @@ CREATE INDEX wallet_activities_user_time_idx
   ON wallet_activities (user_id, occurred_at);
 
 -- Migration triggers additionally enforce these cross-row invariants:
--- 1. a Wallet-linked account's user_id must equal its Wallet owner;
+-- 1. Wallet account ownership is derived only through wallet_id;
 -- 2. Wallet ownership cannot be reassigned;
 -- 3. sealing requires at least two postings whose exact satang sum is zero;
--- 4. financial records cannot be hard deleted; sealed transactions and their
---    postings also cannot be updated. Close/freeze by status and correct ledger
---    facts with a new balanced correction transaction.
+-- 4. authoritative financial records cannot be hard deleted; sealed transactions
+--    and their postings also cannot be updated. Wallet activities are rebuildable
+--    projections. Close/freeze by status and correct ledger facts with a new
+--    balanced correction transaction.
