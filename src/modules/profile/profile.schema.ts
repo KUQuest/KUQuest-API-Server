@@ -13,12 +13,7 @@ export const avatarUploadSchema = t.Object(
   },
 );
 
-export const avatarUploadResponseSchema = t.Object({
-  success: t.Literal(true),
-  data: t.Object({
-    fileId: t.String({ format: 'uuid' }),
-  }),
-});
+const versionSchema = t.Integer({ minimum: 1 });
 
 const departmentSchema = t.Object({
   id: t.String({ format: 'uuid' }),
@@ -33,9 +28,24 @@ const avatarSchema = t.Object({
   url: t.String({ format: 'uri' }),
 });
 
+export const profileAvatarSchema = t.Nullable(avatarSchema);
+
+export const avatarUploadResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    version: versionSchema,
+    avatar: profileAvatarSchema,
+  }),
+});
+
 const occupationSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   name: t.Union([t.Literal('Staff'), t.Literal('Lecturer'), t.Literal('Student')]),
+});
+
+const tagSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  name: t.String(),
 });
 
 const nameSchema = t.String({ minLength: 1, maxLength: 100, pattern: '\\S' });
@@ -54,6 +64,7 @@ export const profileUpdateSchema = t.Object(
 export const profileResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
+    version: versionSchema,
     email: t.String({ format: 'email', example: 'student@ku.th' }),
     firstName: t.String(),
     lastName: t.String(),
@@ -64,17 +75,18 @@ export const profileResponseSchema = t.Object({
     department: t.Nullable(departmentSchema),
     avatar: t.Nullable(avatarSchema),
     occupation: t.Nullable(occupationSchema),
+    tags: t.Array(tagSchema, { maxItems: 3 }),
   }),
 });
 
 export const publicProfileParamsSchema = t.Object({
-  // Better Auth Student IDs are text identifiers, not UUIDs.
-  userId: t.String({ minLength: 1 }),
+  userId: t.String({ format: 'uuid' }),
 });
 
 export const publicProfileResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
+    version: versionSchema,
     firstName: t.String(),
     lastName: t.String(),
     bio: t.Nullable(t.String()),

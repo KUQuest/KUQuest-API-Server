@@ -2,6 +2,8 @@ import { db, sql } from '@/database/client';
 import { department, faculty } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
+import { quest, questAssignment } from '@/database/schema/quest.schema';
+import { tag } from '@/database/schema/profile.schema';
 import {
   getPublicProfile,
   getProfile,
@@ -22,7 +24,7 @@ import {
   mock,
   spyOn,
 } from 'bun:test';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 
 const studentA = randomUUID();
 const studentB = randomUUID();
@@ -32,6 +34,8 @@ let departmentId: string;
 let facultyName: string;
 let avatarFileId: string;
 let tombstonedFileId: string;
+let profileTagIds: string[];
+let profileQuestIds: string[];
 
 const avatarObject = { bucket: 'kuquest-test', objectKey: `avatars/${studentA}/current.png` };
 
@@ -111,6 +115,50 @@ beforeAll(async () => {
       deletedAt: new Date(),
     })
     .returning({ id: file.id });
+
+  const createdTags = await db
+    .insert(tag)
+    .values([
+      { name: `Profile tag 1 ${randomUUID()}` },
+      { name: `Profile tag 2 ${randomUUID()}` },
+      { name: `Profile tag 3 ${randomUUID()}` },
+      { name: `Profile tag 4 ${randomUUID()}` },
+    ])
+    .returning({ id: tag.id, name: tag.name });
+  profileTagIds = createdTags.map(({ id }) => id);
+
+  const tagFrequency = [4, 3, 2, 1];
+  const createdQuests = await db
+    .insert(quest)
+    .values(
+      createdTags.flatMap(({ id }, tagIndex) =>
+        Array.from({ length: tagFrequency[tagIndex]! }, () => ({
+          giverId: studentB,
+          title: `Completed quest ${randomUUID()}`,
+          description: null,
+          condition: 'Complete the Quest',
+          mode: 'FIRST_COME_FIRST_SERVED' as const,
+          participation: 'SINGLE' as const,
+          questStatus: 'COMPLETED' as const,
+          wageBaht: 100n,
+          tagId: id,
+          headcount: 1,
+          startTime: new Date('2025-01-01T00:00:00.000Z'),
+          dueAt: null,
+          proofRequired: true,
+        })),
+      ),
+    )
+    .returning({ id: quest.id });
+  profileQuestIds = createdQuests.map(({ id }) => id);
+
+  await db.insert(questAssignment).values(
+    profileQuestIds.map((questId) => ({
+      questId,
+      hunterId: studentA,
+      assignmentStatus: 'COMPLETED' as const,
+    })),
+  );
 });
 
 beforeEach(async () => {
@@ -132,6 +180,9 @@ afterAll(async () => {
     .set({ imageFileId: null })
     .where(inArray(authUser.id, [studentA, studentB]));
   await db.delete(file).where(inArray(file.id, [avatarFileId, tombstonedFileId]));
+  await db.delete(questAssignment).where(inArray(questAssignment.questId, profileQuestIds));
+  await db.delete(quest).where(inArray(quest.id, profileQuestIds));
+  await db.delete(tag).where(inArray(tag.id, profileTagIds));
   await db.delete(authUser).where(inArray(authUser.id, [studentA, studentB]));
   await db.delete(department).where(eq(department.id, departmentId));
   await db.delete(faculty).where(eq(faculty.id, facultyId));
@@ -198,12 +249,49 @@ describe('reading a profile', () => {
       'lastName',
       'occupation',
       'studentId',
+      'tags',
       'telephone',
+      'version',
     ]);
     expect(profile?.bio).toBeNull();
     expect(profile?.telephone).toBeNull();
     expect(profile?.studentId).toBeNull();
     expect(profile?.academicYear).toBeNull();
+  });
+
+  it('derives the three most frequent completed Quest Tags', async () => {
+    const profile = await getProfile(studentA);
+
+    expect(profile?.tags).toEqual([
+      expect.objectContaining({ id: profileTagIds[0] }),
+      expect.objectContaining({ id: profileTagIds[1] }),
+      expect.objectContaining({ id: profileTagIds[2] }),
+    ]);
+  });
+
+  it('ignores incomplete assignments and assignments owned by another Student', async () => {
+    await db
+      .update(questAssignment)
+      .set({ assignmentStatus: 'INCOMPLETE' })
+      .where(
+        and(
+          eq(questAssignment.questId, profileQuestIds[3]!),
+          eq(questAssignment.hunterId, studentA),
+        ),
+      );
+    await db.insert(questAssignment).values({
+      questId: profileQuestIds[3]!,
+      hunterId: studentB,
+      assignmentStatus: 'COMPLETED',
+    });
+
+    const tags = (await getProfile(studentA))?.tags ?? [];
+
+    expect(tags).toHaveLength(3);
+    expect(tags.map(({ id }) => id)).not.toContain(profileTagIds[3]);
+    expect(tags.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([profileTagIds[0], profileTagIds[1], profileTagIds[2]]),
+    );
   });
 });
 
@@ -219,8 +307,10 @@ describe('reading a public profile', () => {
       'firstName',
       'lastName',
       'occupation',
+      'version',
     ]);
     expect(publicProfile).toEqual({
+      version: 1,
       firstName: 'Student',
       lastName: 'One',
       bio: 'first bio',
@@ -345,6 +435,10 @@ describe('updating a profile', () => {
     expect(await updateProfile(studentA, {})).toBe('updated');
   });
 
+  it('rejects an empty update with a stale resource version', async () => {
+    expect(await updateProfile(studentA, {}, 0)).toBe('conflict');
+  });
+
   it('refuses to call a write that matched nobody a success', async () => {
     expect(await updateProfile(randomUUID(), { bio: 'nobody' })).toBe('student-not-found');
   });
@@ -410,6 +504,7 @@ describe('profile avatar persistence', () => {
     expect(result).toEqual({
       fileId: '018f47a7-1c7d-7c98-9a11-690d7e83430c',
       previousFileId: null,
+      version: 2,
     });
     expect(insertValues).toHaveBeenCalledWith({
       bucket: 'kuquest',
@@ -420,6 +515,7 @@ describe('profile avatar persistence', () => {
     });
     expect(updateValues).toHaveBeenCalledWith({
       imageFileId: '018f47a7-1c7d-7c98-9a11-690d7e83430c',
+      version: expect.anything(),
     });
   });
 });

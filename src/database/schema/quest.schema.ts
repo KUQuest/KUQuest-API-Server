@@ -22,11 +22,12 @@ import { tag } from './profile.schema';
 
 const time = (name: string) => timestamp(name, { withTimezone: true });
 
-export const questMode = pgEnum('quest_mode', ['NO_CANDIDATE', 'CANDIDATE']);
-export const questParticipation = pgEnum('quest_participation', ['SOLO', 'GROUP']);
+export const questMode = pgEnum('quest_mode', ['FIRST_COME_FIRST_SERVED', 'CANDIDATE']);
+export const questParticipation = pgEnum('quest_participation', ['SINGLE', 'GROUP']);
 export const questStatus = pgEnum('quest_status', [
   'DRAFT',
   'OPEN',
+  'AWAITING_CONSENT',
   'ASSIGNED',
   'IN_PROGRESS',
   'SUBMITTED',
@@ -36,6 +37,7 @@ export const questStatus = pgEnum('quest_status', [
   'CANCELLED',
   'DISPUTED',
   'HIDDEN',
+  'UNFILLED',
 ]);
 
 export const quest = pgTable(
@@ -47,7 +49,7 @@ export const quest = pgTable(
     description: varchar('description', { length: 2000 }),
     condition: varchar('condition', { length: 4000 }).notNull(),
     mode: questMode('mode').notNull(),
-    participation: questParticipation('participation').default('SOLO').notNull(),
+    participation: questParticipation('participation').default('SINGLE').notNull(),
     questStatus: questStatus('quest_status').default('DRAFT').notNull(),
     wageBaht: bigint('wage_baht', { mode: 'bigint' }).notNull(),
     tagId: uuid('tag_id').references(() => tag.id),

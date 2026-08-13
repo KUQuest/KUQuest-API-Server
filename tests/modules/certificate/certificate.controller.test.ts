@@ -18,6 +18,7 @@ const session = { user: { id: studentAuthId } };
 
 const certificate = {
   id: certificateId,
+  version: 1,
   name: 'AWS Certified Cloud Practitioner',
   issuer: 'Amazon Web Services',
   issuedAt: '2024-05-01',
@@ -30,6 +31,7 @@ const certificate = {
 
 const serialized = {
   id: certificate.id,
+  version: certificate.version,
   name: certificate.name,
   issuer: certificate.issuer,
   issuedAt: certificate.issuedAt,
@@ -191,7 +193,7 @@ describe('removeCertificate', () => {
       set: set as never,
     });
 
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({ success: true, data: { version: 1 } });
     expect(set.status).toBeUndefined();
   });
 
@@ -242,6 +244,7 @@ describe('setCertificateImage', () => {
     spyOn(certificateService, 'replaceCertificateImage').mockResolvedValue({
       fileId,
       previousFileId: null,
+      version: 2,
     });
     spyOn(certificateStorage, 'linkFor').mockReturnValue('https://storage.test/signed-link');
 
@@ -251,7 +254,7 @@ describe('setCertificateImage', () => {
 
     expect(await result).toEqual({
       success: true,
-      data: { image: { fileId, url: 'https://storage.test/signed-link' } },
+      data: { image: { fileId, url: 'https://storage.test/signed-link' }, version: 2 },
     });
     expect(set.status).toBeUndefined();
     expect(certificateStorage.upload).toHaveBeenCalledWith(studentAuthId, expect.any(File));
@@ -272,6 +275,7 @@ describe('setCertificateImage', () => {
     spyOn(certificateService, 'replaceCertificateImage').mockResolvedValue({
       fileId,
       previousFileId,
+      version: 2,
     });
     spyOn(certificateService, 'getPreviousCertificateImageFile').mockResolvedValue({
       bucket: 'old-bucket',
@@ -289,7 +293,7 @@ describe('setCertificateImage', () => {
 
     expect(await result).toEqual({
       success: true,
-      data: { image: { fileId, url: 'https://storage.test/signed-link' } },
+      data: { image: { fileId, url: 'https://storage.test/signed-link' }, version: 2 },
     });
     expect(certificateStorage.delete).toHaveBeenCalledWith(
       'old-bucket',

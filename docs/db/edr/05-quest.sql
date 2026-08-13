@@ -3,7 +3,7 @@
 --  - riskLevel/riskCheckedAt: cut, no consumer anywhere in the schema, no product
 --    requirement surfaced for it — revisit only if a moderation module needs it.
 --  - reworkAllowed/reworkLimit: cut from quest entirely — rework count is proposed by
---    the hunter, not set by the giver, so it belongs on QuestApplication/QuestAssignment
+--    the Worker, not set by the Hirer, so it belongs on QuestApplication/QuestAssignment
 --    (not yet walked), not here.
 --  - reworkUsed: cut as a stored column — will be derived from ProofSubmission
 --    (count of rework-triggering rejections) once that table is walked. Same
@@ -25,10 +25,10 @@
 -- VARCHAR+CHECK's plain DROP/ADD CONSTRAINT — status is the most volatile column here
 -- (quest lifecycle, most likely to grow a value), so this is the sharpest test of whether
 -- that cost is worth it.
-CREATE TYPE quest_mode AS ENUM ('NO_CANDIDATE', 'CANDIDATE');
-CREATE TYPE quest_participation AS ENUM ('SOLO', 'GROUP');
-CREATE TYPE quest_status AS ENUM ('DRAFT', 'OPEN', 'ASSIGNED', 'IN_PROGRESS', 'SUBMITTED',
-                                   'APPROVED', 'REWORK', 'COMPLETED', 'CANCELLED', 'DISPUTED', 'HIDDEN');
+CREATE TYPE quest_mode AS ENUM ('FIRST_COME_FIRST_SERVED', 'CANDIDATE');
+CREATE TYPE quest_participation AS ENUM ('SINGLE', 'GROUP');
+CREATE TYPE quest_status AS ENUM ('DRAFT', 'OPEN', 'AWAITING_CONSENT', 'ASSIGNED', 'IN_PROGRESS', 'SUBMITTED',
+                                   'APPROVED', 'REWORK', 'COMPLETED', 'CANCELLED', 'DISPUTED', 'HIDDEN', 'UNFILLED');
 
 CREATE TABLE quest (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -37,8 +37,9 @@ CREATE TABLE quest (
   description  VARCHAR(2000),
   condition    VARCHAR(4000) NOT NULL,
   mode         quest_mode NOT NULL,
-  participation quest_participation NOT NULL DEFAULT 'SOLO',
+  participation quest_participation NOT NULL DEFAULT 'SINGLE',
   quest_status quest_status NOT NULL DEFAULT 'DRAFT',
+  -- Domain term: Reward. The persisted column keeps the existing wage_baht name for schema compatibility.
   wage_baht    BIGINT NOT NULL CHECK (wage_baht > 0),
   tag_id       UUID REFERENCES tag(id),
   headcount    INTEGER NOT NULL DEFAULT 1 CHECK (headcount > 0),
@@ -49,18 +50,19 @@ CREATE TABLE quest (
   cancelled_by_user_id  UUID REFERENCES auth_user(id),
   cancelled_by_admin_id UUID REFERENCES auth_admin(id),
   -- HIDDEN is moderation only: an admin unlists a published quest, escrow stays held,
-  -- and the quest can go back to OPEN (which clears these). Givers cannot hide their
+  -- and the quest can go back to OPEN (which clears these). Hirers cannot hide their
   -- own quest — they cancel it. Hence admin-only, unlike cancelled_by_*, which is
-  -- polymorphic because a giver can cancel too. Reason text belongs to Trust & Safety,
+  -- polymorphic because a Hirer can cancel too. Reason text belongs to Trust & Safety,
   -- not here.
   hidden_at    TIMESTAMPTZ,
   hidden_by_admin_id UUID REFERENCES auth_admin(id),
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  -- SOLO quests always have exactly one slot; GROUP sizing is checked at team-submit time (app-layer)
+  deleted_at   TIMESTAMPTZ,
+  -- SINGLE quests always have exactly one slot; GROUP sizing is checked at team-submit time (app-layer)
   CHECK (participation = 'GROUP' OR headcount = 1),
   CHECK (due_at IS NULL OR due_at > start_time),
-  -- draft quests can be tagless while giver is still filling the form
+  -- draft quests can be tagless while the Hirer is still filling the form
   CHECK (quest_status = 'DRAFT' OR tag_id IS NOT NULL),
   CHECK (num_nonnulls(cancelled_by_user_id, cancelled_by_admin_id) <= 1),
   CHECK ((cancelled_at IS NULL) = (quest_status <> 'CANCELLED')),
@@ -74,7 +76,7 @@ CREATE INDEX quest_tag_id_idx ON quest (tag_id);
 CREATE INDEX quest_start_time_idx ON quest (start_time);
 
 -- quest_location: where the quest happens. position is a real visit-order sequence
--- (not just display order) — hunter must complete location N before N+1 — so it's
+-- (not just display order) — the Worker must complete location N before N+1 — so it's
 -- unique per quest, not just a UI sort hint. No location rows at all is valid and
 -- stays valid at publish — online-only quests (design, tutoring over video) are real,
 -- and forcing a location on them only produces junk addresses that poison the radius
@@ -82,7 +84,7 @@ CREATE INDEX quest_start_time_idx ON quest (start_time);
 -- Edits after SELECTED go through quest_edit_request like any other quest field —
 -- no separate consent mechanism for locations.
 --
--- lat/lng are NOT NULL, address is not: the giver picks a location by dropping a pin
+-- lat/lng are NOT NULL, address is not: the Hirer picks a location by dropping a pin
 -- on a map, so coordinates are the thing actually captured, while the address string
 -- is reverse-geocoded and often blank or wrong on campus. This way every location row
 -- is guaranteed to answer a radius query — no "has a location but can't be found
@@ -114,9 +116,9 @@ CREATE TABLE quest_image (
 CREATE INDEX quest_image_quest_id_idx ON quest_image (quest_id);
 
 -- ==================== quest_lifecycle (Quest Lifecycle) ====================
--- quest_edit_request: consent gate for edits made after a hunter/team is SELECTED or
+-- quest_edit_request: consent gate for edits made after a Worker/team is SELECTED or
 -- work is IN_PROGRESS (per Quest Timeline spec — pre-SELECTED edits go straight to
--- quest_edit_history, no consent needed). requested_by is always the giver; who must
+-- quest_edit_history, no consent needed). requested_by is always the Hirer; who must
 -- respond is derived at apply-time from the current quest_assignment/quest_team roster,
 -- not stored here — avoids denormalizing a roster snapshot into a table whose whole job
 -- is being a short-lived approval gate.
@@ -131,7 +133,7 @@ CREATE TABLE quest_edit_request (
 );
 CREATE INDEX quest_edit_request_quest_idx ON quest_edit_request (quest_id);
 
--- one row per hunter who must consent (all of them, for GROUP); unanimous required —
+-- one row per Worker who must consent (all of them, for GROUP); unanimous required —
 -- a single REJECTED fails the whole request immediately (fail-fast), not waited out
 CREATE TABLE quest_edit_request_response (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -165,12 +167,12 @@ CREATE INDEX quest_edit_history_quest_idx ON quest_edit_history (quest_id, edite
 -- ==================== quest_team (team formation, GROUP+CANDIDATE only) (Quest Application & Fulfillment) ====================
 -- Settled via /grilling + /batch-grill-me interview.
 -- quest_team/quest_team_member exist only for QuestParticipation=GROUP +
--- QuestMode=CANDIDATE. For GROUP + NO_CANDIDATE (join-until-headcount-reached),
+-- QuestMode=CANDIDATE. For GROUP + FIRST_COME_FIRST_SERVED (join-until-headcount-reached),
 -- no team identity is created — plain QuestAssignment rows against
--- Quest.headcount, same mechanism as Individual+NoCandidate (deferred to
+-- Quest.headcount, same mechanism as SINGLE+FIRST_COME_FIRST_SERVED (deferred to
 -- QuestAssignment walk).
 
--- rework_limit: hunter-proposed rework cap, proposed once by the leader for the
+-- rework_limit: Worker-proposed rework cap, proposed once by the leader for the
 -- whole team (rework quota is shared across the team, not per-member — settled
 -- during the QuestApplication/QuestAssignment walk). reworkUsed is NOT stored
 -- here — derives from ProofSubmission once that table is walked, same
@@ -206,15 +208,15 @@ CREATE TABLE quest_team_member (
 );
 CREATE INDEX quest_team_member_user_id_idx ON quest_team_member (user_id);
 
--- ==================== quest_application (SOLO+CANDIDATE only) (Quest Application & Fulfillment) ====================
+-- ==================== quest_application (SINGLE+CANDIDATE only) (Quest Application & Fulfillment) ====================
 -- Settled via /batch-grill-me interview. quest_application exists only for
--- QuestParticipation=SOLO + QuestMode=CANDIDATE — GROUP+CANDIDATE never
+-- QuestParticipation=SINGLE + QuestMode=CANDIDATE — GROUP+CANDIDATE never
 -- creates rows here, it goes through quest_team instead. Old QuestApplication
 -- (prisma.ts:233) shape kept close to as-is: no new fields added (YAGNI —
 -- nothing in either session's interview called for one, e.g. no cover-note).
 --
--- rework_limit: hunter-proposed rework cap, proposed at apply time (before
--- selection) — for SOLO this is per-individual (contrast quest_team.rework_limit,
+-- rework_limit: Worker-proposed rework cap, proposed at apply time (before
+-- selection) — for SINGLE this is per-individual (contrast quest_team.rework_limit,
 -- which is one shared value for the whole team). reworkUsed is NOT stored here —
 -- derives from ProofSubmission once that table is walked, same
 -- derive-don't-store pattern used elsewhere.
@@ -234,25 +236,25 @@ CREATE UNIQUE INDEX quest_application_one_selected_uidx ON quest_application (qu
 
 -- ==================== quest_assignment (universal roster, all 4 mode×participation combos) (Quest Application & Fulfillment) ====================
 -- Settled via /batch-grill-me interview. The single "who is actually working
--- this quest" table across every combo: NO_CANDIDATE direct-joiners (SOLO or
+-- this quest" table across every combo: FIRST_COME_FIRST_SERVED direct-joiners (SINGLE or
 -- GROUP, up to Quest.headcount — headcount-vs-joined-count enforcement is
 -- app-layer, same precedent as quest_team size-vs-headcount, not a DB
--- constraint), SOLO+CANDIDATE's selected applicant, and GROUP+CANDIDATE's
+-- constraint), SINGLE+CANDIDATE's selected applicant, and GROUP+CANDIDATE's
 -- selected team's members (one row per member, fanned out at selection time).
 --
 -- Deliberately does NOT store, vs old QuestAssignment (prisma.ts:246):
 --  - team_id / application_id (origin traceability) — always derivable via
 --    (quest_id, hunter_id) join back to quest_team_member / quest_application;
---    NO_CANDIDATE rows have no origin row at all, so a stored FK would be
+--    FIRST_COME_FIRST_SERVED rows have no origin row at all, so a stored FK would be
 --    null there regardless. Same derive-don't-store call as reworkUsed.
 --  - escrowLocked — derives from wallet_activities (resource_type =
 --    'quest_assignment', resource_id = this row's id) instead of a
 --    denormalized boolean; wallet_activities already carries the generic
 --    resource_type/resource_id hooks for exactly this.
---  - rework_limit — moved to quest_application (SOLO+CANDIDATE) / quest_team
+--  - rework_limit — moved to quest_application (SINGLE+CANDIDATE) / quest_team
 --    (GROUP+CANDIDATE), since it's proposed by the applying party at
 --    commit-to-quest time, which predates and is separate from this table's
---    row (created at selection/join time). NULL/unused for NO_CANDIDATE.
+--    row (created at selection/join time). NULL/unused for FIRST_COME_FIRST_SERVED.
 --  - submittedAt / approvedAt — these are proof-review timestamps, belong on
 --    ProofSubmission once that table is walked, not duplicated here.
 --
@@ -260,14 +262,14 @@ CREATE UNIQUE INDEX quest_application_one_selected_uidx ON quest_application (qu
 -- status field. Replaced with an explicit status column, consistent with the
 -- quest.quest_status / quest_team.team_status convention:
 --  - ACTIVE: default, currently working.
---  - COMPLETED: proof approved, quest fulfilled by this hunter.
---  - INCOMPLETE: hunter failed to deliver (no-show / never finished / proof
+--  - COMPLETED: proof approved, quest fulfilled by this Worker.
+--  - INCOMPLETE: Worker failed to deliver (no-show / never finished / proof
 --    rejected with no rework left) — this platform has no voluntary
 --    post-selection leave (confirmed: team members can't leave after
 --    SELECTED), so this is always a failure state attributable to the
---    hunter, the future home for the deferred hunter "red flag" behavior.
+--    Worker, the future home for the deferred Worker "red flag" behavior.
 --  - CANCELLED: assignment ended because the quest itself was cancelled —
---    explicitly NOT the hunter's fault, kept distinct from INCOMPLETE so
+--    explicitly NOT the Worker's fault, kept distinct from INCOMPLETE so
 --    penalty/red-flag logic can tell the two apart.
 CREATE TABLE quest_assignment (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -286,15 +288,15 @@ CREATE INDEX quest_assignment_status_idx ON quest_assignment (assignment_status)
 -- ==================== proof_submission (Quest Application & Fulfillment) ====================
 -- Settled via /batch-grill-me interview. Old ProofSubmission (prisma.ts:261).
 --
--- owner: polymorphic hunter_id OR team_id (same dual-nullable-FK + CHECK shape
+-- owner: polymorphic Worker reference (hunter_id) OR team_id (same dual-nullable-FK + CHECK shape
 -- as quest.cancelled_by_* / quest_edit_history.edited_by_*, except here
 -- exactly one must be set, not <=1 — every submission belongs to somebody).
 -- GROUP+CANDIDATE submits as one shared row per attempt (team_id set) since
 -- rework quota is shared team-wide (see quest_team.rework_limit); everyone
--- else (SOLO+CANDIDATE, and both NO_CANDIDATE paths, which have no team
--- identity at all) is owned by hunter_id individually.
+-- else (SINGLE+CANDIDATE, and both FIRST_COME_FIRST_SERVED paths, which have no team
+-- identity at all) is owned by an individual Worker.
 -- submitted_by_user_id: which specific member physically hit submit — always
--- populated (for hunter-owned rows this is just hunter_id restated, for
+-- populated (for Worker-owned rows this is just hunter_id restated, for
 -- team-owned rows it's whichever member submitted) — not derivable, kept for
 -- audit trail.
 --
@@ -307,7 +309,7 @@ CREATE INDEX quest_assignment_status_idx ON quest_assignment (assignment_status)
 --
 -- autoApproveDeadline: NOT stored (unlike old schema's snapshotted column).
 -- The SLA is a fixed function of quest.mode, not a versioned policy value:
--- NO_CANDIDATE quests must be reviewed within 1 hour of submitted_at, CANDIDATE
+-- FIRST_COME_FIRST_SERVED quests must be reviewed within 1 hour of submitted_at, CANDIDATE
 -- quests within 2 hours — past that, auto-approve. Derived at read/worker time
 -- as submitted_at + (1h or 2h depending on joined quest.mode), never snapshotted.
 --
@@ -316,7 +318,7 @@ CREATE INDEX quest_assignment_status_idx ON quest_assignment (assignment_status)
 -- imageUrls text array — gets file metadata (bucket/content_type/size) for free.
 --
 -- Deliberately NOT linked to quest_assignment: team-owned rows can't map 1:1 to
--- a single (per-hunter) quest_assignment row, so this only links via quest_id +
+-- a single (per-Worker) quest_assignment row, so this only links via quest_id +
 -- the polymorphic owner, consistent with the assignment table's own
 -- derive-don't-store stance on team/application traceability.
 CREATE TABLE proof_submission (

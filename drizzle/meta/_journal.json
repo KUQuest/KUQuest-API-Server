@@ -99,6 +99,27 @@
       "when": 1786603755405,
       "tag": "0013_add-profile-soft-delete",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786604094273,
+      "tag": "0014_add-quest-soft-delete",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786620885004,
+      "tag": "0015_soft_nebula",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786621606146,
+      "tag": "0016_nervous_pretty_boy",
+      "breakpoints": true
     }
   ]
 }

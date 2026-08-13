@@ -39,6 +39,7 @@ export const certificateImageSchema = t.Object({
 
 export const certificateSchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  version: t.Integer({ minimum: 1 }),
   name: t.String(),
   issuer: t.String(),
   issuedAt: t.String({ format: 'date' }),
@@ -62,7 +63,12 @@ export const certificateImageUploadSchema = t.Object(
   { additionalProperties: false },
 );
 
+export const certificateMutationResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({ version: t.Integer({ minimum: 1 }) }),
+});
+
 export const certificateImageUploadResponseSchema = t.Object({
   success: t.Literal(true),
-  data: t.Object({ image: certificateImageSchema }),
+  data: t.Object({ image: certificateImageSchema, version: t.Integer({ minimum: 1 }) }),
 });

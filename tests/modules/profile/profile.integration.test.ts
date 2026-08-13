@@ -38,15 +38,17 @@ describe('profile integration', () => {
     });
   });
 
-  it('accepts a text public profile id through validation before authentication runs', async () => {
-    const response = await app.handle(new Request('http://localhost/api/v1/profile/not-a-uuid'));
+  it.each(['reputation', 'reviews', 'not-a-uuid'])(
+    'rejects the non-UUID public profile id %s before authentication runs',
+    async (userId) => {
+      const response = await app.handle(
+        new Request(`http://localhost/api/v1/profile/${userId}`),
+      );
 
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({
-      success: false,
-      error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
-    });
-  });
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe('VALIDATION');
+    },
+  );
 
   it('rejects an unauthenticated update', async () => {
     const response = await patchProfile({ bio: 'hello' });
@@ -105,6 +107,7 @@ describe('profile integration', () => {
       ['an email, which this endpoint does not own', { email: 'other@ku.th' }],
       ['a verified flag, which this endpoint does not own', { emailVerified: true }],
       ['an avatar, which the avatar endpoint owns', { imageFileId: randomUUID() }],
+      ['tags, which are derived and read-only', { tagIds: [randomUUID()] }],
       ['a legacy image field, which this endpoint does not own', { image: 'http://example.com' }],
       ['another student id smuggled alongside a valid field', { bio: 'x', id: 'someone-else' }],
       ['a first name of the wrong type', { firstName: 123 }],
@@ -222,6 +225,17 @@ describe('profile integration', () => {
       expect(JSON.stringify(responseProperties)).toContain('certificates');
       expect(JSON.stringify(responseProperties)).toContain('experience');
       expect(JSON.stringify(responseProperties)).toContain('occupation');
+    });
+
+    it('documents derived Tags on own Profile but not tagIds on PATCH', async () => {
+      const document = await openapiDocument();
+      const profilePath = document.paths['/api/v1/profile'];
+      const getSchema = profilePath?.get?.responses?.['200']?.content?.['application/json']?.schema;
+      const patchBody = profilePath?.patch?.requestBody?.content?.['application/json'];
+
+      expect(JSON.stringify(getSchema)).toContain('tags');
+      expect(JSON.stringify(patchBody)).not.toContain('tagIds');
+      expect(Object.keys(document.paths)).not.toContain('/api/v1/tags/options');
     });
 
     it('documents the avatar endpoint as multipart', async () => {

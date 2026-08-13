@@ -1,7 +1,7 @@
 import { db } from '@/database/client';
 import { profileWorkExperience } from '@/database/schema/profile.schema';
 
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { Static } from 'elysia';
 
 import type {
@@ -14,6 +14,7 @@ export type WorkExperienceUpdate = Static<typeof workExperienceUpdateSchema>;
 
 export type WorkExperience = {
   id: string;
+  version: number;
   title: string;
   employmentType: string;
   organization: string | null;
@@ -26,6 +27,7 @@ export type WorkExperience = {
 
 const workExperienceColumns = {
   id: profileWorkExperience.id,
+  version: profileWorkExperience.version,
   title: profileWorkExperience.title,
   employmentType: profileWorkExperience.employmentType,
   organization: profileWorkExperience.org,
@@ -95,15 +97,20 @@ export const createWorkExperience = async (
 export type UpdateWorkExperienceOutcome =
   | WorkExperience
   | { outcome: 'invalid-date-range' }
+  | { outcome: 'conflict' }
   | undefined;
 
 export const updateWorkExperience = async (
   userId: string,
   experienceId: string,
   data: WorkExperienceUpdate,
+  expectedVersion?: number,
 ): Promise<UpdateWorkExperienceOutcome> => {
   const current = await findWorkExperience(userId, experienceId);
   if (!current) return undefined;
+  if (expectedVersion !== undefined && current.version !== expectedVersion) {
+    return { outcome: 'conflict' };
+  }
   if (Object.keys(data).length === 0) return current;
 
   const startedAt = data.startedAt ?? current.startedAt;
@@ -112,7 +119,7 @@ export const updateWorkExperience = async (
     return { outcome: 'invalid-date-range' };
   }
 
-  await db
+  const updated = await db
     .update(profileWorkExperience)
     .set({
       title: data.title ?? current.title,
@@ -122,20 +129,46 @@ export const updateWorkExperience = async (
       startedAt,
       endedAt,
       updatedAt: new Date(),
+      version: sql`${profileWorkExperience.version} + 1`,
     })
-    .where(ownedBy(userId, experienceId));
+    .where(
+      expectedVersion === undefined
+        ? ownedBy(userId, experienceId)
+        : and(ownedBy(userId, experienceId), eq(profileWorkExperience.version, expectedVersion)),
+    )
+    .returning({ id: profileWorkExperience.id });
+
+  if (updated.length === 0) return { outcome: 'conflict' };
 
   return findWorkExperience(userId, experienceId);
 };
 
+export type DeleteWorkExperienceOutcome =
+  | { outcome: 'deleted'; id: string; version: number }
+  | { id: string; version?: number }
+  | { outcome: 'conflict' }
+  | undefined;
+
 export const deleteWorkExperience = async (
   userId: string,
   experienceId: string,
-): Promise<{ id: string } | undefined> => {
+  expectedVersion?: number,
+): Promise<DeleteWorkExperienceOutcome> => {
+  const current = await findWorkExperience(userId, experienceId);
+  if (!current) return undefined;
+  if (expectedVersion !== undefined && current.version !== expectedVersion) {
+    return { outcome: 'conflict' };
+  }
+
   const [deleted] = await db
     .delete(profileWorkExperience)
-    .where(ownedBy(userId, experienceId))
+    .where(
+      expectedVersion === undefined
+        ? ownedBy(userId, experienceId)
+        : and(ownedBy(userId, experienceId), eq(profileWorkExperience.version, expectedVersion)),
+    )
     .returning({ id: profileWorkExperience.id });
 
-  return deleted;
+  if (!deleted) return { outcome: 'conflict' };
+  return { outcome: 'deleted', id: deleted.id, version: current.version + 1 };
 };

@@ -19,6 +19,21 @@ export const portfolioParamSchema = t.Object({
   portfolioId: t.String({ format: 'uuid'}),
 });
 
+export const portfolioImageParamSchema = t.Object({
+  portfolioId: t.String({ format: 'uuid' }),
+  fileId: t.String({ format: 'uuid' }),
+});
+
+export const portfolioImageUploadSchema = t.Object(
+  { image: t.File() },
+  { additionalProperties: false },
+);
+
+export const portfolioMutationResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({ version: t.Integer({ minimum: 1 }) }),
+});
+
 export const portfolioCreateSchema = t.Object(
   {
     title: titleSchema,
@@ -44,6 +59,7 @@ export const portfolioImageSchema = t.Object({
 
 export const portfolioItemSchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  version: t.Integer({ minimum: 1 }),
   title: t.String({ example: 'Capstone Project' }),
   description: t.Nullable(t.String({ example: 'A short description of the work.' })),
   images: t.Array(portfolioImageSchema),

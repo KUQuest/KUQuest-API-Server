@@ -36,6 +36,7 @@ export const authUser = pgTable(
     occupationId: uuid('occupation_id').references(() => occupation.id),
     termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
     termsVersion: varchar('terms_version', { length: 50 }),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()

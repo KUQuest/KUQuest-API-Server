@@ -1,5 +1,6 @@
 import type { AuthedContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
+import { readResourceVersion } from '@/shared/resource-version';
 import type { ApiResponse } from '@/shared/api-response';
 import {
   ImageTooLargeError,
@@ -20,6 +21,7 @@ import {
   createCertificate,
   deleteCertificate,
   findCertificate,
+  deleteCertificateImage,
   getPreviousCertificateImageFile,
   listCertificates,
   markCertificateImageDeleted,
@@ -128,16 +130,30 @@ export const patchCertificate = async ({
   session,
   params,
   body,
+  request,
   set,
 }: AuthedContext &
   CertificateParams & { body: Static<typeof certificateUpdateSchema> }): Promise<
   ApiResponse<{ certificate: ReturnType<typeof serializeCertificate> }>
 > => {
-  const certificate = await updateCertificate(session.user.id, params.certificateId, body);
+  const versionHeader = readResourceVersion(request);
+  if (versionHeader.invalid) {
+    set.status = 400;
+    return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
+  }
+  const expectedVersion = versionHeader.value;
+  const certificate =
+    expectedVersion === undefined
+      ? await updateCertificate(session.user.id, params.certificateId, body)
+      : await updateCertificate(session.user.id, params.certificateId, body, expectedVersion);
 
   if (!certificate) {
     set.status = 404;
     return notFound;
+  }
+  if ('outcome' in certificate) {
+    set.status = 409;
+    return apiError('CONFLICT', 'Certificate was changed by another request');
   }
 
   return apiSuccess({ certificate: serializeCertificate(certificate) });
@@ -146,26 +162,74 @@ export const patchCertificate = async ({
 export const removeCertificate = async ({
   session,
   params,
+  request,
   set,
-}: AuthedContext & CertificateParams): Promise<ApiResponse> => {
-  const deleted = await deleteCertificate(session.user.id, params.certificateId);
+}: AuthedContext & CertificateParams): Promise<ApiResponse<{ version: number }>> => {
+  const versionHeader = readResourceVersion(request);
+  if (versionHeader.invalid) {
+    set.status = 400;
+    return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
+  }
+  const expectedVersion = versionHeader.value;
+  const deleted =
+    expectedVersion === undefined
+      ? await deleteCertificate(session.user.id, params.certificateId)
+      : await deleteCertificate(session.user.id, params.certificateId, expectedVersion);
 
   if (!deleted) {
     set.status = 404;
     return notFound;
   }
+  if ('outcome' in deleted && deleted.outcome === 'conflict') {
+    set.status = 409;
+    return apiError('CONFLICT', 'Certificate was changed by another request');
+  }
 
-  return apiSuccess();
+  const version = 'version' in deleted && typeof deleted.version === 'number' ? deleted.version : 1;
+  return apiSuccess({ version });
+};
+
+export const deleteCertificateImageController = async ({
+  session,
+  params,
+  request,
+  set,
+}: AuthedContext & CertificateParams): Promise<ApiResponse<{ version: number }>> => {
+  const versionHeader = readResourceVersion(request);
+  if (versionHeader.invalid) {
+    set.status = 400;
+    return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
+  }
+  const result = await deleteCertificateImage(
+    session.user.id,
+    params.certificateId,
+    versionHeader.value,
+  );
+  if ('outcome' in result) {
+    if (result.outcome === 'conflict') {
+      set.status = 409;
+      return apiError('CONFLICT', 'Certificate was changed by another request');
+    }
+    set.status = 404;
+    return notFound;
+  }
+  try {
+    await certificateStorage.delete(result.bucket, result.objectKey);
+  } catch (error) {
+    console.error('[certificate-image-delete] Object cleanup failed', error);
+  }
+  return apiSuccess({ version: result.version });
 };
 
 export const setCertificateImage = async ({
   body,
   session,
   params,
+  request,
   set,
 }: AuthedContext &
   CertificateParams & { body: Static<typeof certificateImageUploadSchema> }): Promise<
-  ApiResponse<{ image: { fileId: string; url: string } }>
+  ApiResponse<{ image: { fileId: string; url: string }; version?: number }>
 > => {
   let storedImage;
 
@@ -195,7 +259,24 @@ export const setCertificateImage = async ({
   }
 
   try {
-    const result = await replaceCertificateImage(session.user.id, params.certificateId, storedImage);
+    const versionHeader = readResourceVersion(request);
+    if (versionHeader.invalid) {
+      await discardUploadedImage(storedImage.bucket, storedImage.objectKey);
+      set.status = 400;
+      return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
+    }
+    const expectedVersion = versionHeader.value;
+    const result = (expectedVersion === undefined
+      ? await replaceCertificateImage(session.user.id, params.certificateId, storedImage)
+      : await replaceCertificateImage(
+          session.user.id,
+          params.certificateId,
+          storedImage,
+          expectedVersion,
+        )) as
+      | { fileId: string; previousFileId: string | null; version?: number }
+      | { outcome: 'conflict' }
+      | undefined;
 
     if (!result) {
       debugCertificateImageUpload('Certificate not found or not owned', {
@@ -205,6 +286,12 @@ export const setCertificateImage = async ({
       await discardUploadedImage(storedImage.bucket, storedImage.objectKey);
       set.status = 404;
       return notFound;
+    }
+
+    if ('outcome' in result) {
+      await discardUploadedImage(storedImage.bucket, storedImage.objectKey);
+      set.status = 409;
+      return apiError('CONFLICT', 'Certificate was changed by another request');
     }
 
     debugCertificateImageUpload('Database pointer updated', {
@@ -234,6 +321,7 @@ export const setCertificateImage = async ({
 
     return apiSuccess({
       image: { fileId: result.fileId, url: certificateStorage.linkFor(storedImage) },
+      version: result.version ?? 1,
     });
   } catch (error) {
     await discardUploadedImage(storedImage.bucket, storedImage.objectKey);

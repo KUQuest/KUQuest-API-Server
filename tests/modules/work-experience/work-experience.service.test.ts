@@ -117,7 +117,7 @@ describe('work experience persistence', () => {
     const created = await createValidExperience(studentA);
 
     expect(await deleteWorkExperience(studentB, created!.id)).toBeUndefined();
-    expect(await deleteWorkExperience(studentA, created!.id)).toEqual({ id: created!.id });
+    expect(await deleteWorkExperience(studentA, created!.id)).toEqual({ outcome: 'deleted', id: created!.id, version: 2 });
     expect(await listWorkExperiences(studentA)).toEqual([]);
   });
 
