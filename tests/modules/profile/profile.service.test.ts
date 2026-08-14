@@ -140,7 +140,7 @@ beforeAll(async () => {
           mode: 'FIRST_COME_FIRST_SERVED' as const,
           participation: 'SINGLE' as const,
           questStatus: 'COMPLETED' as const,
-          wageBaht: 100n,
+          rewardBaht: 100n,
           tagId: id,
           headcount: 1,
           startTime: new Date('2025-01-01T00:00:00.000Z'),

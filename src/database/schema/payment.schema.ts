@@ -13,7 +13,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import { authAdmin, authUser } from './auth.schema';
-import { walletLedgerTransactions } from './wallet.schema';
+import { walletLedgerTransaction } from './wallet.schema';
 
 const amount = (name: string) => bigint(name, { mode: 'bigint' });
 const time = (name: string) => timestamp(name, { withTimezone: true });
@@ -118,7 +118,7 @@ export const paymentTopUps = pgTable(
     topUpStatus: text('top_up_status').notNull(),
     creditedLedgerTransactionId: uuid('credited_ledger_transaction_id')
       .unique()
-      .references(() => walletLedgerTransactions.id),
+      .references(() => walletLedgerTransaction.id),
     createdAt: time('created_at').defaultNow().notNull(),
     updatedAt: time('updated_at').defaultNow().notNull(),
   },
@@ -269,10 +269,10 @@ export const paymentPayouts = pgTable(
     reserveLedgerTransactionId: uuid('reserve_ledger_transaction_id')
       .notNull()
       .unique()
-      .references(() => walletLedgerTransactions.id),
+      .references(() => walletLedgerTransaction.id),
     finalLedgerTransactionId: uuid('final_ledger_transaction_id')
       .unique()
-      .references(() => walletLedgerTransactions.id),
+      .references(() => walletLedgerTransaction.id),
     createdAt: time('created_at').defaultNow().notNull(),
     updatedAt: time('updated_at').defaultNow().notNull(),
   },

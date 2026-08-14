@@ -36,6 +36,10 @@ _Avoid_: conflating with own-Profile's response shape — they share a resource 
 A shared Quest skill label used to describe the ability demonstrated by a Quest. Each Quest has exactly one canonical Tag. A Student's profile Tags are derived from their three most frequent Tags across successfully completed Quest participation; they are not manually assigned profile data.
 _Avoid_: profile skill, occupation, treating Tags as editable Student fields.
 
+**Review**:
+A rating and comment that a Hirer or Worker gives to the other after a Quest is completed. A Review is tied to one Quest, each direction is allowed once per Quest, and the author may edit it later. Reviews contribute to the reviewed Student's Reputation.
+_Avoid_: reviewing before Quest completion; treating a Review as a Profile field that can be edited by someone else.
+
 **Certificate**:
 A credential a Student claims — `name`, `issuer`, and the date it was issued, plus an optional image of the credential. Stored one row per credential in `profile_certificate`, owned by the Student who created it, and served by `/api/v1/profile/certificates` ([[BE-40]]). Deliberately not part of the Profile response (see Public Profile above for the one exception): a Student may hold any number of them, and each is created, edited, and deleted on its own. Ownership is scoped in the query rather than checked after reading, so another Student's Certificate is indistinguishable from one that does not exist — both are `404 CERTIFICATE_NOT_FOUND`. The image is a file reference plus an expiring link, same pattern as the avatar — no storage URL is ever persisted — uploaded via its own sub-route after the certificate row exists. Formerly carried a `verifyUrl` link instead of an image (settled via /grilling, 2026-08-09: replaced, not additive — existing `verifyUrl` values are dropped on migration, no backfill path from a URL to an image).
 _Avoid_: Qualification, badge (a badge is gamification, not a Certificate); treating a Certificate as a Profile field; verifyUrl/verification link (superseded term).

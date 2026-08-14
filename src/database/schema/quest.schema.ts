@@ -9,6 +9,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  smallint,
   timestamp,
   unique,
   uniqueIndex,
@@ -51,7 +52,7 @@ export const quest = pgTable(
     mode: questMode('mode').notNull(),
     participation: questParticipation('participation').default('SINGLE').notNull(),
     questStatus: questStatus('quest_status').default('DRAFT').notNull(),
-    wageBaht: bigint('wage_baht', { mode: 'bigint' }).notNull(),
+    rewardBaht: bigint('reward_baht', { mode: 'bigint' }).notNull(),
     tagId: uuid('tag_id').references(() => tag.id),
     headcount: integer('headcount').default(1).notNull(),
     startTime: time('start_time').notNull(),
@@ -66,7 +67,7 @@ export const quest = pgTable(
     updatedAt: time('updated_at').defaultNow().notNull(),
   },
   (table) => [
-    check('quest_wage_check', sql`${table.wageBaht} > 0`),
+    check('quest_reward_check', sql`${table.rewardBaht} > 0`),
     check('quest_headcount_check', sql`${table.headcount} > 0`),
     check(
       'quest_participation_headcount_check',
@@ -95,6 +96,31 @@ export const quest = pgTable(
     index('quest_mode_idx').on(table.mode),
     index('quest_tag_id_idx').on(table.tagId),
     index('quest_start_time_idx').on(table.startTime),
+  ],
+);
+
+export const review = pgTable(
+  'review',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id').notNull().references(() => quest.id),
+    reviewerId: uuid('reviewer_id').notNull().references(() => authUser.id),
+    revieweeId: uuid('reviewee_id').notNull().references(() => authUser.id),
+    rating: smallint('rating').notNull(),
+    comment: varchar('comment', { length: 1000 }).notNull(),
+    createdAt: time('created_at').defaultNow().notNull(),
+    updatedAt: time('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    check('review_rating_check', sql`${table.rating} BETWEEN 1 AND 5`),
+    check('review_participants_check', sql`${table.reviewerId} <> ${table.revieweeId}`),
+    unique('review_quest_reviewer_reviewee_key').on(
+      table.questId,
+      table.reviewerId,
+      table.revieweeId,
+    ),
+    index('review_quest_id_idx').on(table.questId),
+    index('review_reviewee_id_idx').on(table.revieweeId),
   ],
 );
 

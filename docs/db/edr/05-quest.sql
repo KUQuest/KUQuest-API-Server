@@ -39,7 +39,7 @@ CREATE TABLE quest (
   mode         quest_mode NOT NULL,
   participation quest_participation NOT NULL DEFAULT 'SOLO',
   quest_status quest_status NOT NULL DEFAULT 'DRAFT',
-  wage_baht    BIGINT NOT NULL CHECK (wage_baht > 0),
+  reward_baht    BIGINT NOT NULL CHECK (reward_baht > 0),
   tag_id       UUID REFERENCES tag(id),
   headcount    INTEGER NOT NULL DEFAULT 1 CHECK (headcount > 0),
   start_time   TIMESTAMPTZ NOT NULL,
@@ -73,29 +73,31 @@ CREATE INDEX quest_mode_idx ON quest (mode);
 CREATE INDEX quest_tag_id_idx ON quest (tag_id);
 CREATE INDEX quest_start_time_idx ON quest (start_time);
 
--- quest_location: where the quest happens. position is a real visit-order sequence
--- (not just display order) — hunter must complete location N before N+1 — so it's
--- unique per quest, not just a UI sort hint. No location rows at all is valid and
--- stays valid at publish — online-only quests (design, tutoring over video) are real,
--- and forcing a location on them only produces junk addresses that poison the radius
--- filter. Such a quest simply never matches a lat/lng/radius search, which is correct.
+-- Review is available after a Quest is COMPLETED. A Hirer and Worker may review
+-- each other once per Quest, and the Review can be edited later.
+CREATE TABLE review (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  quest_id    UUID NOT NULL REFERENCES quest(id),
+  reviewer_id UUID NOT NULL REFERENCES auth_user(id),
+  reviewee_id UUID NOT NULL REFERENCES auth_user(id),
+  rating      SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment     VARCHAR(1000) NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (reviewer_id <> reviewee_id),
+  UNIQUE (quest_id, reviewer_id, reviewee_id)
+);
+CREATE INDEX review_quest_id_idx ON review (quest_id);
+CREATE INDEX review_reviewee_id_idx ON review (reviewee_id);
+
+-- quest_location: where the quest happens. No location rows at all is valid and
+-- stays valid at publish — online-only quests (design, tutoring over video) are real.
 -- Edits after SELECTED go through quest_edit_request like any other quest field —
 -- no separate consent mechanism for locations.
---
--- lat/lng are NOT NULL, address is not: the giver picks a location by dropping a pin
--- on a map, so coordinates are the thing actually captured, while the address string
--- is reverse-geocoded and often blank or wrong on campus. This way every location row
--- is guaranteed to answer a radius query — no "has a location but can't be found
--- nearby" case, and no WHERE lat IS NOT NULL hidden in every discovery query.
 CREATE TABLE quest_location (
   id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   quest_id UUID NOT NULL REFERENCES quest(id) ON DELETE CASCADE,
-  label    VARCHAR(100),
-  address  VARCHAR(500),
-  lat      NUMERIC(9, 6) NOT NULL CHECK (lat BETWEEN -90 AND 90),
-  lng      NUMERIC(9, 6) NOT NULL CHECK (lng BETWEEN -180 AND 180),
-  position INTEGER NOT NULL DEFAULT 1,
-  UNIQUE (quest_id, position)
+  label    VARCHAR(100)
 );
 CREATE INDEX quest_location_quest_id_idx ON quest_location (quest_id);
 
