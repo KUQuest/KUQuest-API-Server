@@ -13,6 +13,7 @@ CREATE TABLE wallet_wallets (
                               CHECK (wallet_status IN ('ACTIVE', 'FROZEN', 'SUSPENDED', 'CLOSED')),
   created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (id, user_id),
   CHECK (
     spending_balance_satang >= 0
     AND earnings_balance_satang >= 0
@@ -87,6 +88,7 @@ CREATE TABLE wallet_ledger_transactions (
     'PAYOUT',
     'FUNDING_RESERVE',
     'FUNDING_RELEASE',
+    'FUNDING_SETTLEMENT',
     'ADJUSTMENT',
     'EARNINGS_CONVERSION'
   )),
@@ -111,6 +113,47 @@ CREATE INDEX wallet_ledger_postings_transaction_idx
   ON wallet_ledger_postings (transaction_id);
 CREATE INDEX wallet_ledger_postings_account_idx
   ON wallet_ledger_postings (account_id, created_at);
+
+CREATE TABLE wallet_funding_reservations (
+  id                            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  wallet_id                     UUID NOT NULL,
+  owner_user_id                 TEXT NOT NULL REFERENCES auth_user(id),
+  caller_scope                  TEXT NOT NULL,
+  caller_reference              TEXT NOT NULL,
+  policy_revision_id            UUID NOT NULL REFERENCES payment_money_policy_revisions(id),
+  total_reserved_satang         INTEGER NOT NULL,
+  remaining_satang              INTEGER NOT NULL,
+  status                        TEXT NOT NULL DEFAULT 'ACTIVE'
+                                CHECK (status IN ('ACTIVE', 'RELEASED', 'SETTLED')),
+  created_ledger_transaction_id UUID NOT NULL UNIQUE REFERENCES wallet_ledger_transactions(id),
+  created_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (owner_user_id, caller_scope, caller_reference),
+  FOREIGN KEY (wallet_id, owner_user_id) REFERENCES wallet_wallets(id, user_id),
+  CHECK (total_reserved_satang > 0 AND remaining_satang BETWEEN 0 AND total_reserved_satang),
+  CHECK ((status = 'ACTIVE') = (remaining_satang > 0))
+);
+
+CREATE TABLE wallet_funding_reservation_settlements (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  reservation_id          UUID NOT NULL REFERENCES wallet_funding_reservations(id),
+  settlement_reference    TEXT NOT NULL,
+  recipient_wallet_id     UUID NOT NULL,
+  recipient_user_id       TEXT NOT NULL REFERENCES auth_user(id),
+  recipient_amount_satang INTEGER NOT NULL,
+  platform_fee_satang     INTEGER NOT NULL DEFAULT 0,
+  total_amount_satang     INTEGER NOT NULL,
+  ledger_transaction_id   UUID NOT NULL UNIQUE REFERENCES wallet_ledger_transactions(id),
+  idempotency_key_id      UUID NOT NULL UNIQUE REFERENCES wallet_idempotency_keys(id),
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (reservation_id, settlement_reference),
+  FOREIGN KEY (recipient_wallet_id, recipient_user_id) REFERENCES wallet_wallets(id, user_id),
+  CHECK (
+    recipient_amount_satang > 0
+    AND platform_fee_satang >= 0
+    AND total_amount_satang = recipient_amount_satang + platform_fee_satang
+  )
+);
 
 CREATE TABLE wallet_activities (
   id                           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -138,3 +181,5 @@ CREATE INDEX wallet_activities_user_time_idx
 --    and their postings also cannot be updated. Wallet activities are rebuildable
 --    projections. Close/freeze by status and correct ledger facts with a new
 --    balanced correction transaction.
+-- 5. Funding Reservation ownership and policy snapshots cannot change;
+--    completed reservations and every settlement record are immutable.
