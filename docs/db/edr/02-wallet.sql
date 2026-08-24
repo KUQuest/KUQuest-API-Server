@@ -1,5 +1,5 @@
 -- ==================== wallet / ledger (Wallet & Payments) ====================
--- Implemented by BE-109. PostgreSQL INTEGER values are exact satang; THB currency is
+-- Implemented by BE-109 and BE-110. PostgreSQL INTEGER values are exact satang; THB currency is
 -- implicit and is formatted only at API/UI boundaries. Quest tables are not referenced.
 
 CREATE TABLE wallet_wallets (
@@ -112,11 +112,21 @@ CREATE INDEX wallet_ledger_postings_transaction_idx
 CREATE INDEX wallet_ledger_postings_account_idx
   ON wallet_ledger_postings (account_id, created_at);
 
+CREATE TABLE wallet_earnings_conversions (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  principal_user_id     TEXT NOT NULL REFERENCES auth_user(id),
+  amount_satang         INTEGER NOT NULL CHECK (amount_satang > 0 AND amount_satang <= 2000000000),
+  business_reference    TEXT NOT NULL UNIQUE,
+  ledger_transaction_id UUID NOT NULL UNIQUE REFERENCES wallet_ledger_transactions(id),
+  idempotency_key_id    UUID NOT NULL UNIQUE REFERENCES wallet_idempotency_keys(id),
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE wallet_activities (
   id                           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   ledger_transaction_id        UUID NOT NULL REFERENCES wallet_ledger_transactions(id),
   user_id                      TEXT NOT NULL REFERENCES auth_user(id),
-  type                         TEXT NOT NULL CHECK (type IN ('TOP_UP', 'SPEND', 'EARN', 'HOLD', 'RELEASE')),
+  type                         TEXT NOT NULL CHECK (type IN ('TOP_UP', 'SPEND', 'EARN', 'HOLD', 'RELEASE', 'CONVERT')),
   activity_status              TEXT NOT NULL CHECK (activity_status IN ('PENDING', 'COMPLETED', 'FAILED')),
   spending_delta_satang        INTEGER NOT NULL DEFAULT 0,
   earnings_delta_satang        INTEGER NOT NULL DEFAULT 0,

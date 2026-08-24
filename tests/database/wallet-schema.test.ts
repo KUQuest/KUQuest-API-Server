@@ -1,5 +1,6 @@
 import {
   paymentMoneyPolicyRevision,
+  walletEarningsConversion,
   walletLedgerAccount,
   walletLedgerPosting,
   walletWallet,
@@ -35,5 +36,13 @@ describe('Wallet & Payments database schema', () => {
 
     expect(columns).toHaveProperty('walletId');
     expect(columns).not.toHaveProperty('userId');
+  });
+
+  it('stores the Earnings Conversion domain record in satang and links it to the ledger', () => {
+    const columns = getTableColumns(walletEarningsConversion);
+
+    expect(columns.amountSatang.dataType).toBe('number');
+    expect(columns).toHaveProperty('ledgerTransactionId');
+    expect(columns).toHaveProperty('idempotencyKeyId');
   });
 });

@@ -13,6 +13,14 @@ export type {
   SignedSatang,
 } from './wallet.money';
 export {
+  convertEarnings,
+  earningsConversionScope,
+} from './wallet.service';
+export type {
+  EarningsConversion,
+  EarningsConversionInput,
+} from './wallet.service';
+export {
   ensureInitialMoneyPolicy,
   ensureWallet,
   createSealedLedgerTransaction,
