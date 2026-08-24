@@ -212,11 +212,11 @@ export const ensureInitialMoneyPolicy = async () => {
   return validatePolicyAmounts(raceWinner);
 };
 
-const getEffectiveMoneyPolicyInTransaction = async (
-  transaction: WalletTransaction,
+const getEffectiveMoneyPolicyWith = async (
+  executor: Pick<WalletTransaction, 'select'>,
   at = new Date(),
 ) => {
-  const policies = await transaction
+  const policies = await executor
     .select()
     .from(paymentMoneyPolicyRevision)
     .where(
@@ -238,7 +238,7 @@ const getEffectiveMoneyPolicyInTransaction = async (
 };
 
 export const getEffectiveMoneyPolicy = async (at = new Date()) =>
-  db.transaction((transaction) => getEffectiveMoneyPolicyInTransaction(transaction, at));
+  getEffectiveMoneyPolicyWith(db, at);
 
 const deriveWalletProjectionInTransaction = async (
   transaction: WalletTransaction,
@@ -406,17 +406,27 @@ const createSealedLedgerTransactionInTransaction = async (
     throw new MoneyDomainError('UNBALANCED_LEDGER', 'Ledger postings must balance to zero.');
   }
   if (input.correctionOfTransactionId) {
-    const [correctedTransaction] = await transaction
-      .select({ id: walletLedgerTransaction.id })
+    const correctedPostings = await transaction
+      .select({ accountId: walletLedgerPosting.accountId })
       .from(walletLedgerTransaction)
+      .innerJoin(
+        walletLedgerPosting,
+        eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id),
+      )
       .where(and(
         eq(walletLedgerTransaction.id, input.correctionOfTransactionId),
         isNotNull(walletLedgerTransaction.sealedAt),
       ));
-    if (!correctedTransaction) {
+    const correctedAccountIds = new Set(correctedPostings.map(({ accountId }) => accountId));
+    const correctionAccountIds = new Set(input.postings.map(({ accountId }) => accountId));
+    if (
+      correctedAccountIds.size === 0 ||
+      correctedAccountIds.size !== correctionAccountIds.size ||
+      [...correctedAccountIds].some((accountId) => !correctionAccountIds.has(accountId))
+    ) {
       throw new MoneyDomainError(
         'INVALID_LEDGER_CORRECTION',
-        'A correction must link to an existing sealed ledger transaction.',
+        'A correction must use the accounts of an existing sealed ledger transaction.',
       );
     }
   }
@@ -680,13 +690,6 @@ export const convertEarnings = async (input: EarningsConversionInput) => {
   const requestHash = await conversionRequestHash(input.amountSatang);
 
   return db.transaction(async (transaction) => {
-    const [student] = await transaction
-      .select({ id: authUser.id })
-      .from(authUser)
-      .where(eq(authUser.id, input.principalUserId))
-      .limit(1);
-    if (!student) throw new MoneyDomainError('STUDENT_NOT_FOUND', 'Student does not exist.');
-
     const idempotency = await acquireEarningsConversionIdempotency(
       transaction,
       input,
@@ -706,24 +709,13 @@ export const convertEarnings = async (input: EarningsConversionInput) => {
       throw new MoneyDomainError('WALLET_NOT_ACTIVE', 'The Wallet is not active.');
     }
 
-    const policy = await getEffectiveMoneyPolicyInTransaction(transaction);
+    const policy = await getEffectiveMoneyPolicyWith(transaction);
     const amount = validateOperationAmount(
       input.amountSatang,
       Number(policy.minimumEarningsConversionSatang),
       Number(policy.maximumEarningsConversionSatang),
     );
-    satang(wallet.spendingBalanceSatang);
     const earningsBalance = satang(wallet.earningsBalanceSatang);
-    satang(wallet.fundingReservedSatang);
-    satang(wallet.reservedForPayoutsSatang);
-    const walletTotal = wallet.spendingBalanceSatang +
-      wallet.earningsBalanceSatang +
-      wallet.fundingReservedSatang +
-      wallet.reservedForPayoutsSatang;
-    // Conversion conserves the Wallet total; this guard only protects against an invalid projection.
-    if (walletTotal > MAX_WALLET_CAPACITY_SATANG) {
-      throw new MoneyDomainError('WALLET_CAPACITY_EXCEEDED', 'The Wallet capacity would be exceeded.');
-    }
     if (earningsBalance < amount) {
       throw new MoneyDomainError('INSUFFICIENT_EARNINGS_BALANCE', 'The Wallet has insufficient Earnings Balance.');
     }

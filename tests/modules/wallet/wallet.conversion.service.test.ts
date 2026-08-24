@@ -127,6 +127,19 @@ describe('Earnings Conversion service', () => {
     });
   });
 
+  it('preserves total Wallet capacity when converting at the capacity limit', async () => {
+    const { id, wallet } = await createStudent('be110-capacity');
+    await creditEarnings(wallet.id, 2_000_000_000, `be110-credit-${crypto.randomUUID()}`);
+
+    await convertEarnings(earningsConversionInput(id, 70_000_000));
+
+    const [updatedWallet] = await db.select().from(walletWallet).where(eq(walletWallet.id, wallet.id));
+    expect(updatedWallet).toMatchObject({
+      spendingBalanceSatang: 70_000_000,
+      earningsBalanceSatang: 1_930_000_000,
+    });
+  });
+
   it('replays the original conversion and rejects a conflicting retry', async () => {
     const { id, wallet } = await createStudent('be110-idempotency');
     await creditEarnings(wallet.id, 500, `be110-credit-${crypto.randomUUID()}`);
@@ -242,6 +255,28 @@ describe('Earnings Conversion service', () => {
       postings: [
         { accountId: spendingId, amountSatang: signedSatang(-125) },
         { accountId: earningsId, amountSatang: signedSatang(125) },
+      ],
+    })).rejects.toMatchObject({ code: 'INVALID_LEDGER_CORRECTION' });
+  });
+
+  it('rejects a correction whose postings belong to a different Wallet', async () => {
+    const first = await createStudent('be110-correction-owner-a');
+    const second = await createStudent('be110-correction-owner-b');
+    await creditEarnings(first.wallet.id, 500, `be110-credit-a-${crypto.randomUUID()}`);
+    await creditEarnings(second.wallet.id, 500, `be110-credit-b-${crypto.randomUUID()}`);
+    const firstConversion = await convertEarnings(earningsConversionInput(first.id, 125));
+    await convertEarnings(earningsConversionInput(second.id, 125));
+    const secondSpendingId = await accountId(second.wallet.id, 'SPENDING');
+    const secondEarningsId = await accountId(second.wallet.id, 'EARNINGS');
+
+    await expect(createSealedLedgerTransaction({
+      businessReference: `be110-cross-wallet-correction-${crypto.randomUUID()}`,
+      eventType: 'ADJUSTMENT',
+      correctionOfTransactionId: firstConversion.ledgerTransactionId,
+      createdByUserId: first.id,
+      postings: [
+        { accountId: secondSpendingId, amountSatang: signedSatang(-125) },
+        { accountId: secondEarningsId, amountSatang: signedSatang(125) },
       ],
     })).rejects.toMatchObject({ code: 'INVALID_LEDGER_CORRECTION' });
   });
