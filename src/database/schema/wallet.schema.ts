@@ -169,6 +169,25 @@ export const walletLedgerPosting = pgTable(
   ],
 );
 
+export const walletEarningsConversion = pgTable(
+  'wallet_earnings_conversions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    principalUserId: text('principal_user_id').notNull().references(() => authUser.id),
+    amountSatang: integer('amount_satang').notNull(),
+    businessReference: text('business_reference').notNull().unique(),
+    ledgerTransactionId: uuid('ledger_transaction_id').notNull().unique().references(() => walletLedgerTransaction.id),
+    idempotencyKeyId: uuid('idempotency_key_id').notNull().unique().references(() => walletIdempotencyKey.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check(
+      'wallet_earnings_conversions_amount_check',
+      sql`${table.amountSatang} > 0 AND ${table.amountSatang} <= 2000000000`,
+    ),
+  ],
+);
+
 export const paymentMoneyPolicyRevision = pgTable(
   'payment_money_policy_revisions',
   {
@@ -223,7 +242,7 @@ export const walletActivity = pgTable(
   (table) => [
     unique('wallet_activities_transaction_user_key').on(table.ledgerTransactionId, table.userId),
     index('wallet_activities_user_time_idx').on(table.userId, table.occurredAt),
-    check('wallet_activities_type_check', sql`${table.type} IN ('TOP_UP', 'SPEND', 'EARN', 'HOLD', 'RELEASE')`),
+    check('wallet_activities_type_check', sql`${table.type} IN ('TOP_UP', 'SPEND', 'EARN', 'HOLD', 'RELEASE', 'CONVERT')`),
     check('wallet_activities_status_check', sql`${table.activityStatus} IN ('PENDING', 'COMPLETED', 'FAILED')`),
   ],
 );
@@ -253,4 +272,10 @@ export const walletLedgerTransactionRelations = relations(walletLedgerTransactio
 export const walletLedgerPostingRelations = relations(walletLedgerPosting, ({ one }) => ({
   transaction: one(walletLedgerTransaction, { fields: [walletLedgerPosting.transactionId], references: [walletLedgerTransaction.id] }),
   account: one(walletLedgerAccount, { fields: [walletLedgerPosting.accountId], references: [walletLedgerAccount.id] }),
+}));
+
+export const walletEarningsConversionRelations = relations(walletEarningsConversion, ({ one }) => ({
+  principal: one(authUser, { fields: [walletEarningsConversion.principalUserId], references: [authUser.id] }),
+  ledgerTransaction: one(walletLedgerTransaction, { fields: [walletEarningsConversion.ledgerTransactionId], references: [walletLedgerTransaction.id] }),
+  idempotencyKey: one(walletIdempotencyKey, { fields: [walletEarningsConversion.idempotencyKeyId], references: [walletIdempotencyKey.id] }),
 }));
