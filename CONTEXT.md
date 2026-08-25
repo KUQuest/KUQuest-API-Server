@@ -70,6 +70,60 @@ The `auth_account` table row linking a Student's or Admin's identity to their OA
 **Better Auth**:
 The auth library (`better-auth`) providing session management, Google OAuth, and the `/api/auth/*` HTTP surface, configured in `auth.config.ts`. Its core `name`/`image` user fields are remapped: `name` aliases `firstName` (no separate `name` column exists), `image` is an unused legacy-compat column — real avatars are `auth_user.imageFileId` → `file`.
 
+## Quest and Work Chat
+
+**Hirer**:
+The Student who creates a Quest, commissions its work, and remains its current owner for MVP.
+_Avoid_: Giver, client
+
+**Worker**:
+A Student accepted to perform work on a Quest.
+_Avoid_: Hunter, candidate, assignee
+
+**Candidate**:
+A Student or team that has applied to a Candidate Quest but has not been accepted as a Worker.
+_Avoid_: Chat member, assigned Worker
+
+**Accepted Participant**:
+The current Hirer or an Active Worker. Only Accepted Participants have current Work Conversation membership.
+_Avoid_: Candidate, departed Worker
+
+**Quest**:
+One bounded agreement for work, owned by one Hirer and progressing through its lifecycle.
+_Avoid_: Job, task
+
+**Assignment**:
+The accepted participation of one Worker in a Quest. It is the canonical record that a Worker is working on that Quest.
+_Avoid_: Application, team membership
+
+**Active Worker**:
+A Worker whose Assignment has not ended.
+_Avoid_: Candidate, former Worker
+
+**Departed Worker**:
+A former Active Worker whose Assignment ended before the Quest completed.
+_Avoid_: Active Worker, Candidate
+
+**Work Membership Window**:
+The inclusive period in which an accepted participant has access to the Work Conversation. A former Worker retains only the history from their own window.
+_Avoid_: Chat permission, participant status
+
+**Quest Edit**:
+A change to a Quest's details proposed by its Hirer.
+_Avoid_: Assignment change, membership transition
+
+**Work Conversation**:
+The one working Chat conversation associated with a Quest. Its participants are the Hirer and the Active Workers, never Candidates.
+_Avoid_: Group chat, team chat
+
+**Terminal Quest**:
+A Quest in `COMPLETED` or `CANCELLED`. Its Work Conversation is read-only.
+_Avoid_: Closed conversation
+
+**Work Membership Transition**:
+A change to accepted Quest participation or terminal lifecycle state that changes Work Conversation membership or write access.
+_Avoid_: Chat event, message event
+
 ## Consumers
 
 - **KUQuest Mobile** — Expo app, uses native Google Sign-In (not a webview redirect) to reach this API.
