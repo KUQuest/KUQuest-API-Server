@@ -1,3 +1,5 @@
+import { questRoute } from '@/modules/quest/quest.route';
+
 import { Elysia } from 'elysia';
 
 import { academicRegistrationRoute } from './modules/academic-registration';
@@ -33,6 +35,7 @@ export const app = new Elysia({
   .use(onboardingRoute)
   .use(academicRegistrationRoute)
   .use(profileRoute)
+  .use(questRoute)
   .use(certificateRoute)
   .use(portfolioRoute)
   .use(workExperienceRoute)
