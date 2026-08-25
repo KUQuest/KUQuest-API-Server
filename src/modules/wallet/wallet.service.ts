@@ -330,7 +330,7 @@ const activityTypeFor = (eventType: LedgerEventType, deltas: {
   return deltas.earnings > 0 ? 'EARN' as const : 'SPEND' as const;
 };
 
-const rebuildWalletProjectionInTransaction = async (
+export const rebuildWalletProjectionInTransaction = async (
   transaction: WalletTransaction,
   walletId: string,
 ) => {

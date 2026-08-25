@@ -63,11 +63,6 @@ BEGIN
   IF OLD.status <> 'ACTIVE' THEN
     RAISE EXCEPTION 'completed Funding Reservations are immutable';
   END IF;
-  IF NEW.total_reserved_satang < OLD.total_reserved_satang
-    OR NEW.remaining_satang - OLD.remaining_satang
-      > NEW.total_reserved_satang - OLD.total_reserved_satang THEN
-    RAISE EXCEPTION 'invalid Funding Reservation balance transition';
-  END IF;
   RETURN NEW;
 END;
 $$;--> statement-breakpoint

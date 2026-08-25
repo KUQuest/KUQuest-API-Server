@@ -40,6 +40,12 @@ export const ledgerEventTypes = [
 ] as const;
 export type LedgerEventType = (typeof ledgerEventTypes)[number];
 
+export const fundingReservationStatuses = ['ACTIVE', 'RELEASED', 'SETTLED'] as const;
+export type FundingReservationStatus = (typeof fundingReservationStatuses)[number];
+
+export const fundingReservationOperationTypes = ['RESERVE', 'INCREASE', 'RELEASE'] as const;
+export type FundingReservationOperationType = (typeof fundingReservationOperationTypes)[number];
+
 export const walletWallet = pgTable(
   'wallet_wallets',
   {
@@ -218,7 +224,7 @@ export const walletFundingReservation = pgTable(
     policyRevisionId: uuid('policy_revision_id').notNull().references(() => paymentMoneyPolicyRevision.id),
     totalReservedSatang: integer('total_reserved_satang').notNull(),
     remainingSatang: integer('remaining_satang').notNull(),
-    status: text('status').default('ACTIVE').notNull(),
+    status: text('status').$type<FundingReservationStatus>().default('ACTIVE').notNull(),
     createdLedgerTransactionId: uuid('created_ledger_transaction_id').notNull().unique().references(() => walletLedgerTransaction.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -236,7 +242,7 @@ export const walletFundingReservation = pgTable(
     }),
     check(
       'wallet_funding_reservations_amounts_check',
-      sql`${table.totalReservedSatang} > 0 AND ${table.remainingSatang} BETWEEN 0 AND ${table.totalReservedSatang}`,
+      sql`${table.totalReservedSatang} BETWEEN 1 AND 2000000000 AND ${table.remainingSatang} BETWEEN 0 AND ${table.totalReservedSatang}`,
     ),
     check(
       'wallet_funding_reservations_status_check',
@@ -245,6 +251,41 @@ export const walletFundingReservation = pgTable(
     check(
       'wallet_funding_reservations_completion_check',
       sql`(${table.status} = 'ACTIVE') = (${table.remainingSatang} > 0)`,
+    ),
+  ],
+);
+
+export const walletFundingReservationOperation = pgTable(
+  'wallet_funding_reservation_operations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reservationId: uuid('reservation_id').notNull().references(() => walletFundingReservation.id),
+    operationType: text('operation_type').$type<FundingReservationOperationType>().notNull(),
+    operationReference: text('operation_reference').notNull(),
+    amountSatang: integer('amount_satang').notNull(),
+    resultingTotalReservedSatang: integer('resulting_total_reserved_satang').notNull(),
+    resultingRemainingSatang: integer('resulting_remaining_satang').notNull(),
+    resultingStatus: text('resulting_status').$type<FundingReservationStatus>().notNull(),
+    ledgerTransactionId: uuid('ledger_transaction_id').notNull().unique().references(() => walletLedgerTransaction.id),
+    idempotencyKeyId: uuid('idempotency_key_id').notNull().unique().references(() => walletIdempotencyKey.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('wallet_funding_operations_reservation_reference_key').on(
+      table.reservationId,
+      table.operationReference,
+    ),
+    check(
+      'wallet_funding_operations_type_check',
+      sql`${table.operationType} IN ('RESERVE', 'INCREASE', 'RELEASE')`,
+    ),
+    check(
+      'wallet_funding_operations_amounts_check',
+      sql`${table.amountSatang} BETWEEN 1 AND 2000000000 AND ${table.resultingTotalReservedSatang} BETWEEN 1 AND 2000000000 AND ${table.resultingRemainingSatang} BETWEEN 0 AND ${table.resultingTotalReservedSatang}`,
+    ),
+    check(
+      'wallet_funding_operations_status_check',
+      sql`${table.resultingStatus} IN ('ACTIVE', 'RELEASED', 'SETTLED') AND (${table.resultingStatus} = 'ACTIVE') = (${table.resultingRemainingSatang} > 0)`,
     ),
   ],
 );
@@ -353,6 +394,25 @@ export const walletFundingReservationRelations = relations(
       references: [walletLedgerTransaction.id],
     }),
     settlements: many(walletFundingReservationSettlement),
+    operations: many(walletFundingReservationOperation),
+  }),
+);
+
+export const walletFundingReservationOperationRelations = relations(
+  walletFundingReservationOperation,
+  ({ one }) => ({
+    reservation: one(walletFundingReservation, {
+      fields: [walletFundingReservationOperation.reservationId],
+      references: [walletFundingReservation.id],
+    }),
+    ledgerTransaction: one(walletLedgerTransaction, {
+      fields: [walletFundingReservationOperation.ledgerTransactionId],
+      references: [walletLedgerTransaction.id],
+    }),
+    idempotencyKey: one(walletIdempotencyKey, {
+      fields: [walletFundingReservationOperation.idempotencyKeyId],
+      references: [walletIdempotencyKey.id],
+    }),
   }),
 );
 

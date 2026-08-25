@@ -1,7 +1,9 @@
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import {
+  paymentMoneyPolicyRevision,
   walletFundingReservation,
+  walletFundingReservationOperation,
   walletFundingReservationSettlement,
   walletLedgerAccount,
   walletLedgerPosting,
@@ -13,8 +15,10 @@ import {
   ensureInitialMoneyPolicy,
   ensureWallet,
   increaseFundingReservation,
+  positiveSatang,
   releaseFundingReservation,
   reserveSpending,
+  satang,
   signedSatang,
   settleFundingReservation,
   verifyWalletProjection,
@@ -25,6 +29,8 @@ import { and, eq } from 'drizzle-orm';
 
 const ownerUserId = `be111-owner-${crypto.randomUUID()}`;
 const recipientUserId = `be111-recipient-${crypto.randomUUID()}`;
+const amount = (value: number) => positiveSatang(value);
+const fee = (value: number) => satang(value);
 
 const accountId = async (userId: string, type: 'SPENDING' | 'EARNINGS' | 'FUNDING_RESERVED') => {
   const [wallet] = await db
@@ -104,7 +110,7 @@ describe('Funding Reservation service', () => {
       ownerUserId,
       callerScope: 'generic-workflow',
       callerReference,
-      amountSatang: 4_000,
+      amountSatang: amount(4_000),
     }));
 
     expect(reservation).toMatchObject({
@@ -115,6 +121,11 @@ describe('Funding Reservation service', () => {
       remainingSatang: 4_000,
       status: 'ACTIVE',
     });
+    const [policy] = await db
+      .select({ id: paymentMoneyPolicyRevision.id })
+      .from(paymentMoneyPolicyRevision)
+      .where(eq(paymentMoneyPolicyRevision.revision, 1));
+    expect(reservation.policyRevisionId).toBe(policy.id);
     expect(await db.select().from(walletWallet).where(eq(walletWallet.userId, ownerUserId))).toMatchObject([
       { spendingBalanceSatang: 6_000, fundingReservedSatang: 4_000 },
     ]);
@@ -136,19 +147,58 @@ describe('Funding Reservation service', () => {
     expect(postings.map(({ amountSatang }) => amountSatang).sort((a, b) => a - b)).toEqual([-4_000, 4_000]);
   });
 
+  it('replays reserve, increase, and release operation results', async () => {
+    const payerUserId = await createFundedStudent('be111-operation-replay', 2_000);
+    const reserveInput = {
+      ownerUserId: payerUserId,
+      callerScope: 'generic-workflow',
+      callerReference: `operation-replay-${crypto.randomUUID()}`,
+      amountSatang: amount(1_000),
+    };
+    const reserved = await db.transaction((transaction) => reserveSpending(transaction, reserveInput));
+    const reserveReplay = await db.transaction((transaction) => reserveSpending(transaction, reserveInput));
+    expect(reserveReplay).toEqual(reserved);
+
+    const increaseInput = {
+      ownerUserId: payerUserId,
+      reservationId: reserved.id,
+      operationReference: `increase-replay-${crypto.randomUUID()}`,
+      amountSatang: amount(400),
+    };
+    const increased = await db.transaction((transaction) => increaseFundingReservation(transaction, increaseInput));
+    const increaseReplay = await db.transaction((transaction) => increaseFundingReservation(transaction, increaseInput));
+    expect(increaseReplay).toEqual(increased);
+
+    const releaseInput = {
+      ownerUserId: payerUserId,
+      reservationId: reserved.id,
+      operationReference: `release-replay-${crypto.randomUUID()}`,
+    };
+    const released = await db.transaction((transaction) => releaseFundingReservation(transaction, releaseInput));
+    const releaseReplay = await db.transaction((transaction) => releaseFundingReservation(transaction, releaseInput));
+    expect(releaseReplay).toEqual(released);
+    expect(await db.select().from(walletWallet).where(eq(walletWallet.userId, payerUserId)))
+      .toMatchObject([{ spendingBalanceSatang: 2_000, fundingReservedSatang: 0 }]);
+
+    await expect(db.transaction((transaction) => reserveSpending(transaction, {
+      ...reserveInput,
+      amountSatang: amount(1_001),
+    }))).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+  });
+
   it('increases an active reservation with additional Spending', async () => {
     const reservation = await db.transaction((transaction) => reserveSpending(transaction, {
       ownerUserId,
       callerScope: 'generic-workflow',
       callerReference: `increase-${crypto.randomUUID()}`,
-      amountSatang: 1_000,
+      amountSatang: amount(1_000),
     }));
 
     const increased = await db.transaction((transaction) => increaseFundingReservation(transaction, {
       ownerUserId,
       reservationId: reservation.id,
       operationReference: `increase-operation-${crypto.randomUUID()}`,
-      amountSatang: 500,
+      amountSatang: amount(500),
     }));
 
     expect(increased).toMatchObject({ totalReservedSatang: 1_500, remainingSatang: 1_500 });
@@ -162,7 +212,7 @@ describe('Funding Reservation service', () => {
       ownerUserId,
       callerScope: 'generic-workflow',
       callerReference: `release-${crypto.randomUUID()}`,
-      amountSatang: 1_000,
+      amountSatang: amount(1_000),
     }));
     await db
       .update(walletWallet)
@@ -190,7 +240,7 @@ describe('Funding Reservation service', () => {
       ownerUserId,
       callerScope: 'generic-workflow',
       callerReference: `settle-${crypto.randomUUID()}`,
-      amountSatang: 2_000,
+      amountSatang: amount(2_000),
     }));
 
     const settlement = await db.transaction((transaction) => settleFundingReservation(transaction, {
@@ -198,15 +248,15 @@ describe('Funding Reservation service', () => {
       reservationId: reservation.id,
       settlementReference: `partial-${crypto.randomUUID()}`,
       recipientUserId,
-      recipientAmountSatang: 1_000,
-      platformFeeSatang: 20,
+      recipientAmountSatang: amount(1_000),
+      platformFeeSatang: fee(20),
     }));
 
     expect(settlement).toMatchObject({
       reservationId: reservation.id,
       recipientUserId,
-      recipientAmountSatang: 1_000,
-      platformFeeSatang: 20,
+      recipientAmountSatang: amount(1_000),
+      platformFeeSatang: fee(20),
       totalAmountSatang: 1_020,
     });
     expect(await db.select().from(walletFundingReservation).where(eq(walletFundingReservation.id, reservation.id)))
@@ -225,7 +275,7 @@ describe('Funding Reservation service', () => {
       ownerUserId: payerUserId,
       callerScope: 'generic-workflow',
       callerReference: `retry-${crypto.randomUUID()}`,
-      amountSatang: 1_000,
+      amountSatang: amount(1_000),
     }));
     const settlementReference = `settlement-${crypto.randomUUID()}`;
     const input = {
@@ -233,8 +283,8 @@ describe('Funding Reservation service', () => {
       reservationId: reservation.id,
       settlementReference,
       recipientUserId: payeeUserId,
-      recipientAmountSatang: 600,
-      platformFeeSatang: 12,
+      recipientAmountSatang: amount(600),
+      platformFeeSatang: fee(12),
     };
 
     const first = await db.transaction((transaction) => settleFundingReservation(transaction, input));
@@ -245,8 +295,8 @@ describe('Funding Reservation service', () => {
       .toMatchObject([{ earningsBalanceSatang: 600 }]);
     await expect(db.transaction((transaction) => settleFundingReservation(transaction, {
       ...input,
-      recipientAmountSatang: 601,
-      platformFeeSatang: 13,
+      recipientAmountSatang: amount(601),
+      platformFeeSatang: fee(13),
     }))).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
   });
 
@@ -257,7 +307,7 @@ describe('Funding Reservation service', () => {
       ownerUserId: payerUserId,
       callerScope: 'generic-workflow',
       callerReference: `concurrent-${crypto.randomUUID()}`,
-      amountSatang: 1_000,
+      amountSatang: amount(1_000),
     }));
     const settle = (settlementReference: string) => db.transaction((transaction) =>
       settleFundingReservation(transaction, {
@@ -265,7 +315,7 @@ describe('Funding Reservation service', () => {
         reservationId: reservation.id,
         settlementReference,
         recipientUserId: payeeUserId,
-        recipientAmountSatang: 700,
+        recipientAmountSatang: amount(700),
       }));
 
     const results = await Promise.allSettled([
@@ -289,7 +339,7 @@ describe('Funding Reservation service', () => {
       ownerUserId: payerUserId,
       callerScope: 'generic-workflow',
       callerReference,
-      amountSatang: 600,
+      amountSatang: amount(600),
     }))).rejects.toMatchObject({ code: 'INSUFFICIENT_SPENDING_BALANCE' });
     expect(await db.select().from(walletFundingReservation).where(
       eq(walletFundingReservation.callerReference, callerReference),
@@ -301,14 +351,22 @@ describe('Funding Reservation service', () => {
       ownerUserId: payerUserId,
       callerScope: 'generic-workflow',
       callerReference: `active-${crypto.randomUUID()}`,
-      amountSatang: 400,
+      amountSatang: amount(400),
     }));
+    await expect(db.transaction((transaction) => increaseFundingReservation(transaction, {
+      ownerUserId: payerUserId,
+      reservationId: reservation.id,
+      operationReference: `overspend-increase-${crypto.randomUUID()}`,
+      amountSatang: amount(200),
+    }))).rejects.toMatchObject({ code: 'INSUFFICIENT_SPENDING_BALANCE' });
+    expect(await db.select().from(walletFundingReservation).where(eq(walletFundingReservation.id, reservation.id)))
+      .toMatchObject([{ totalReservedSatang: 400, remainingSatang: 400 }]);
     await db.update(walletWallet).set({ walletStatus: 'SUSPENDED' }).where(eq(walletWallet.userId, payerUserId));
     await expect(db.transaction((transaction) => increaseFundingReservation(transaction, {
       ownerUserId: payerUserId,
       reservationId: reservation.id,
       operationReference: `blocked-${crypto.randomUUID()}`,
-      amountSatang: 100,
+      amountSatang: amount(100),
     }))).rejects.toMatchObject({ code: 'WALLET_NOT_ACTIVE' });
     expect(await db.select().from(walletFundingReservation).where(eq(walletFundingReservation.id, reservation.id)))
       .toMatchObject([{ totalReservedSatang: 400, remainingSatang: 400 }]);
@@ -321,7 +379,7 @@ describe('Funding Reservation service', () => {
       ownerUserId: payerUserId,
       callerScope: 'generic-workflow',
       callerReference: `capacity-${crypto.randomUUID()}`,
-      amountSatang: 200,
+      amountSatang: amount(200),
     }));
 
     await expect(db.transaction((transaction) => settleFundingReservation(transaction, {
@@ -329,7 +387,7 @@ describe('Funding Reservation service', () => {
       reservationId: reservation.id,
       settlementReference: `capacity-settlement-${crypto.randomUUID()}`,
       recipientUserId: payeeUserId,
-      recipientAmountSatang: 100,
+      recipientAmountSatang: amount(100),
     }))).rejects.toMatchObject({ code: 'WALLET_CAPACITY_EXCEEDED' });
 
     expect(await db.select().from(walletFundingReservation).where(eq(walletFundingReservation.id, reservation.id)))
@@ -347,7 +405,7 @@ describe('Funding Reservation service', () => {
         ownerUserId: payerUserId,
         callerScope: 'generic-workflow',
         callerReference,
-        amountSatang: 400,
+        amountSatang: amount(400),
       });
       throw new Error('caller workflow failed');
     })).rejects.toThrow('caller workflow failed');
@@ -366,7 +424,7 @@ describe('Funding Reservation service', () => {
       ownerUserId: payerUserId,
       callerScope: 'generic-workflow',
       callerReference: `status-${crypto.randomUUID()}`,
-      amountSatang: 200,
+      amountSatang: amount(200),
     }));
     await db.update(walletWallet).set({ walletStatus: 'FROZEN' }).where(eq(walletWallet.userId, payerUserId));
     await db.update(walletWallet).set({ walletStatus: 'CLOSED' }).where(eq(walletWallet.userId, payeeUserId));
@@ -376,7 +434,7 @@ describe('Funding Reservation service', () => {
       reservationId: reservation.id,
       settlementReference: `status-settlement-${crypto.randomUUID()}`,
       recipientUserId: payeeUserId,
-      recipientAmountSatang: 100,
+      recipientAmountSatang: amount(100),
     }));
 
     expect(settlement.recipientAmountSatang).toBe(100);
@@ -390,7 +448,7 @@ describe('Funding Reservation service', () => {
       ownerUserId: payerUserId,
       callerScope: 'generic-workflow',
       callerReference: `self-${crypto.randomUUID()}`,
-      amountSatang: 200,
+      amountSatang: amount(200),
     }));
 
     await db.transaction((transaction) => settleFundingReservation(transaction, {
@@ -398,7 +456,7 @@ describe('Funding Reservation service', () => {
       reservationId: reservation.id,
       settlementReference: `self-settlement-${crypto.randomUUID()}`,
       recipientUserId: payerUserId,
-      recipientAmountSatang: 100,
+      recipientAmountSatang: amount(100),
     }));
 
     expect(await db.select().from(walletWallet).where(eq(walletWallet.userId, payerUserId)))
@@ -416,15 +474,15 @@ describe('Funding Reservation service', () => {
       ownerUserId: payerUserId,
       callerScope: 'generic-workflow',
       callerReference: `projection-${crypto.randomUUID()}`,
-      amountSatang: 400,
+      amountSatang: amount(400),
     }));
     await db.transaction((transaction) => settleFundingReservation(transaction, {
       ownerUserId: payerUserId,
       reservationId: reservation.id,
       settlementReference: `projection-settlement-${crypto.randomUUID()}`,
       recipientUserId: payeeUserId,
-      recipientAmountSatang: 200,
-      platformFeeSatang: 4,
+      recipientAmountSatang: amount(200),
+      platformFeeSatang: fee(4),
     }));
     const [payerWallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, payerUserId));
     const [payeeWallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, payeeUserId));
@@ -440,21 +498,31 @@ describe('Funding Reservation service', () => {
       ownerUserId: payerUserId,
       callerScope: 'generic-workflow',
       callerReference: `invariant-${crypto.randomUUID()}`,
-      amountSatang: 300,
+      amountSatang: amount(300),
     }));
     const settlement = await db.transaction((transaction) => settleFundingReservation(transaction, {
       ownerUserId: payerUserId,
       reservationId: reservation.id,
       settlementReference: `invariant-settlement-${crypto.randomUUID()}`,
       recipientUserId: payeeUserId,
-      recipientAmountSatang: 100,
+      recipientAmountSatang: amount(100),
     }));
     const releasable = await db.transaction((transaction) => reserveSpending(transaction, {
       ownerUserId: payerUserId,
       callerScope: 'generic-workflow',
       callerReference: `immutable-${crypto.randomUUID()}`,
-      amountSatang: 100,
+      amountSatang: amount(100),
     }));
+    const [operation] = await db
+      .select()
+      .from(walletFundingReservationOperation)
+      .where(eq(walletFundingReservationOperation.reservationId, reservation.id));
+
+    await expect(db
+      .update(walletFundingReservation)
+      .set({ remainingSatang: releasable.remainingSatang - 1 })
+      .where(eq(walletFundingReservation.id, releasable.id))
+      .execute()).rejects.toThrow();
 
     await expect(db
       .update(walletFundingReservation)
@@ -473,6 +541,15 @@ describe('Funding Reservation service', () => {
     await expect(db
       .delete(walletFundingReservationSettlement)
       .where(eq(walletFundingReservationSettlement.id, settlement.id))
+      .execute()).rejects.toThrow();
+    await expect(db
+      .update(walletFundingReservationOperation)
+      .set({ operationReference: 'rewritten-operation' })
+      .where(eq(walletFundingReservationOperation.id, operation.id))
+      .execute()).rejects.toThrow();
+    await expect(db
+      .delete(walletFundingReservationOperation)
+      .where(eq(walletFundingReservationOperation.id, operation.id))
       .execute()).rejects.toThrow();
   });
 });

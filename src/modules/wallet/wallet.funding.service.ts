@@ -2,6 +2,7 @@ import {
   paymentMoneyPolicyRevision,
   walletActivity,
   walletFundingReservation,
+  walletFundingReservationOperation,
   walletFundingReservationSettlement,
   walletIdempotencyKey,
   walletLedgerAccount,
@@ -15,6 +16,7 @@ import { and, desc, eq, gt, inArray, isNull, lte, or } from 'drizzle-orm';
 import {
   MAX_WALLET_CAPACITY_SATANG,
   MoneyDomainError,
+  type Satang,
   positiveSatang,
   satang,
 } from './wallet.money';
@@ -24,14 +26,14 @@ export type ReserveSpendingInput = {
   ownerUserId: string;
   callerScope: string;
   callerReference: string;
-  amountSatang: number;
+  amountSatang: Satang;
 };
 
 export type IncreaseFundingReservationInput = {
   ownerUserId: string;
   reservationId: string;
   operationReference: string;
-  amountSatang: number;
+  amountSatang: Satang;
 };
 
 export type ReleaseFundingReservationInput = {
@@ -45,8 +47,8 @@ export type SettleFundingReservationInput = {
   reservationId: string;
   settlementReference: string;
   recipientUserId: string;
-  recipientAmountSatang: number;
-  platformFeeSatang?: number;
+  recipientAmountSatang: Satang;
+  platformFeeSatang?: Satang;
 };
 
 const requireOpaqueReference = (value: string, field: string) => {
@@ -102,6 +104,94 @@ const walletAccountIds = async (transaction: WalletTransaction, walletId: string
   return new Map(accounts.map(({ id, type }) => [type, id]));
 };
 
+const acquireIdempotency = async (
+  transaction: WalletTransaction,
+  principalUserId: string,
+  operationScope: string,
+  key: string,
+  requestHash: string,
+) => {
+  const [created] = await transaction
+    .insert(walletIdempotencyKey)
+    .values({
+      principalUserId,
+      operationScope,
+      key,
+      requestHash,
+      expiresAt: idempotencyExpiry(),
+    })
+    .onConflictDoNothing()
+    .returning();
+  const [idempotency] = created
+    ? [created]
+    : await transaction
+      .select()
+      .from(walletIdempotencyKey)
+      .where(and(
+        eq(walletIdempotencyKey.principalUserId, principalUserId),
+        eq(walletIdempotencyKey.operationScope, operationScope),
+        eq(walletIdempotencyKey.key, key),
+      ))
+      .for('update');
+
+  if (!idempotency) {
+    throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key could not be acquired.');
+  }
+  if (idempotency.requestHash !== requestHash) {
+    throw new MoneyDomainError('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request.');
+  }
+
+  return { created: Boolean(created), idempotency };
+};
+
+const replayFundingOperation = async (
+  transaction: WalletTransaction,
+  idempotencyKeyId: string,
+) => {
+  const [operation] = await transaction
+    .select()
+    .from(walletFundingReservationOperation)
+    .where(eq(walletFundingReservationOperation.idempotencyKeyId, idempotencyKeyId));
+  if (!operation) {
+    throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'The idempotent Funding Reservation operation is missing.');
+  }
+
+  const [reservation] = await transaction
+    .select()
+    .from(walletFundingReservation)
+    .where(eq(walletFundingReservation.id, operation.reservationId));
+  if (!reservation) {
+    throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'The idempotent Funding Reservation is missing.');
+  }
+
+  return reservation;
+};
+
+const completeFundingOperation = async (
+  transaction: WalletTransaction,
+  values: typeof walletFundingReservationOperation.$inferInsert,
+) => {
+  const [operation] = await transaction
+    .insert(walletFundingReservationOperation)
+    .values(values)
+    .returning();
+  if (!operation) {
+    throw new MoneyDomainError('FUNDING_RESERVATION_OPERATION_FAILED', 'Funding Reservation operation could not be created.');
+  }
+
+  await transaction
+    .update(walletIdempotencyKey)
+    .set({
+      resourceType: 'wallet_funding_reservation_operation',
+      resourceId: operation.id,
+      processingStatus: 'COMPLETED',
+      completedAt: new Date(),
+    })
+    .where(eq(walletIdempotencyKey.id, values.idempotencyKeyId));
+
+  return operation;
+};
+
 export const reserveSpending = async (
   transaction: WalletTransaction,
   input: ReserveSpendingInput,
@@ -109,6 +199,24 @@ export const reserveSpending = async (
   requireOpaqueReference(input.callerScope, 'Caller scope');
   requireOpaqueReference(input.callerReference, 'Caller reference');
   const amountSatang = positiveSatang(input.amountSatang);
+  const operationScope = `wallet.funding-reservation:${input.callerScope}`;
+  const requestHash = await sha256Json({
+    callerScope: input.callerScope,
+    callerReference: input.callerReference,
+    amountSatang,
+  });
+  const { created, idempotency } = await acquireIdempotency(
+    transaction,
+    input.ownerUserId,
+    operationScope,
+    input.callerReference,
+    requestHash,
+  );
+  if (idempotency.resourceId) return replayFundingOperation(transaction, idempotency.id);
+  if (!created) {
+    throw new MoneyDomainError('IDEMPOTENCY_IN_PROGRESS', 'A Funding Reservation operation is still processing.');
+  }
+
   const policy = await effectivePolicyInTransaction(transaction);
   if (
     amountSatang < policy.minimumFundingReservationSatang ||
@@ -146,6 +254,7 @@ export const reserveSpending = async (
         input.callerReference,
       ])}`,
       eventType: 'FUNDING_RESERVE',
+      idempotencyKeyId: idempotency.id,
       createdByUserId: input.ownerUserId,
       description: 'Reserve Spending for a caller-owned workflow',
     })
@@ -202,6 +311,18 @@ export const reserveSpending = async (
     resourceId: ledgerTransaction.id,
   });
 
+  await completeFundingOperation(transaction, {
+    reservationId: reservation.id,
+    operationType: 'RESERVE',
+    operationReference: input.callerReference,
+    amountSatang,
+    resultingTotalReservedSatang: reservation.totalReservedSatang,
+    resultingRemainingSatang: reservation.remainingSatang,
+    resultingStatus: reservation.status,
+    ledgerTransactionId: ledgerTransaction.id,
+    idempotencyKeyId: idempotency.id,
+  });
+
   return reservation;
 };
 
@@ -211,6 +332,22 @@ export const increaseFundingReservation = async (
 ) => {
   requireOpaqueReference(input.operationReference, 'Operation reference');
   const amountSatang = positiveSatang(input.amountSatang);
+  const operationScope = `wallet.funding-reservation:${input.reservationId}`;
+  const requestHash = await sha256Json({
+    reservationId: input.reservationId,
+    amountSatang,
+  });
+  const { created, idempotency } = await acquireIdempotency(
+    transaction,
+    input.ownerUserId,
+    operationScope,
+    input.operationReference,
+    requestHash,
+  );
+  if (idempotency.resourceId) return replayFundingOperation(transaction, idempotency.id);
+  if (!created) {
+    throw new MoneyDomainError('IDEMPOTENCY_IN_PROGRESS', 'A Funding Reservation operation is still processing.');
+  }
 
   const [reservation] = await transaction
     .select()
@@ -265,6 +402,7 @@ export const increaseFundingReservation = async (
         input.operationReference,
       ])}`,
       eventType: 'FUNDING_RESERVE',
+      idempotencyKeyId: idempotency.id,
       createdByUserId: input.ownerUserId,
       description: 'Increase a Funding Reservation',
     })
@@ -309,6 +447,21 @@ export const increaseFundingReservation = async (
     resourceId: ledgerTransaction.id,
   });
 
+  if (!updatedReservation) {
+    throw new MoneyDomainError('FUNDING_RESERVATION_OPERATION_FAILED', 'Funding Reservation could not be increased.');
+  }
+  await completeFundingOperation(transaction, {
+    reservationId: updatedReservation.id,
+    operationType: 'INCREASE',
+    operationReference: input.operationReference,
+    amountSatang,
+    resultingTotalReservedSatang: updatedReservation.totalReservedSatang,
+    resultingRemainingSatang: updatedReservation.remainingSatang,
+    resultingStatus: updatedReservation.status,
+    ledgerTransactionId: ledgerTransaction.id,
+    idempotencyKeyId: idempotency.id,
+  });
+
   return updatedReservation;
 };
 
@@ -317,6 +470,20 @@ export const releaseFundingReservation = async (
   input: ReleaseFundingReservationInput,
 ) => {
   requireOpaqueReference(input.operationReference, 'Operation reference');
+  const operationScope = `wallet.funding-reservation:${input.reservationId}`;
+  const requestHash = await sha256Json({ reservationId: input.reservationId });
+  const { created, idempotency } = await acquireIdempotency(
+    transaction,
+    input.ownerUserId,
+    operationScope,
+    input.operationReference,
+    requestHash,
+  );
+  if (idempotency.resourceId) return replayFundingOperation(transaction, idempotency.id);
+  if (!created) {
+    throw new MoneyDomainError('IDEMPOTENCY_IN_PROGRESS', 'A Funding Reservation operation is still processing.');
+  }
+
   const [reservation] = await transaction
     .select()
     .from(walletFundingReservation)
@@ -358,6 +525,7 @@ export const releaseFundingReservation = async (
         input.operationReference,
       ])}`,
       eventType: 'FUNDING_RELEASE',
+      idempotencyKeyId: idempotency.id,
       createdByUserId: input.ownerUserId,
       description: 'Release a Funding Reservation',
     })
@@ -396,6 +564,21 @@ export const releaseFundingReservation = async (
     fundingReservedDeltaSatang: -amountSatang,
     resourceType: 'wallet_ledger_transaction',
     resourceId: ledgerTransaction.id,
+  });
+
+  if (!updatedReservation) {
+    throw new MoneyDomainError('FUNDING_RESERVATION_OPERATION_FAILED', 'Funding Reservation could not be released.');
+  }
+  await completeFundingOperation(transaction, {
+    reservationId: updatedReservation.id,
+    operationType: 'RELEASE',
+    operationReference: input.operationReference,
+    amountSatang,
+    resultingTotalReservedSatang: updatedReservation.totalReservedSatang,
+    resultingRemainingSatang: updatedReservation.remainingSatang,
+    resultingStatus: updatedReservation.status,
+    ledgerTransactionId: ledgerTransaction.id,
+    idempotencyKeyId: idempotency.id,
   });
 
   return updatedReservation;

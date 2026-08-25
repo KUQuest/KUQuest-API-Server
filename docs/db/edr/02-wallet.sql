@@ -130,8 +130,26 @@ CREATE TABLE wallet_funding_reservations (
   updated_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (owner_user_id, caller_scope, caller_reference),
   FOREIGN KEY (wallet_id, owner_user_id) REFERENCES wallet_wallets(id, user_id),
-  CHECK (total_reserved_satang > 0 AND remaining_satang BETWEEN 0 AND total_reserved_satang),
+  CHECK (total_reserved_satang BETWEEN 1 AND 2000000000 AND remaining_satang BETWEEN 0 AND total_reserved_satang),
   CHECK ((status = 'ACTIVE') = (remaining_satang > 0))
+);
+
+CREATE TABLE wallet_funding_reservation_operations (
+  id                              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  reservation_id                  UUID NOT NULL REFERENCES wallet_funding_reservations(id),
+  operation_type                  TEXT NOT NULL CHECK (operation_type IN ('RESERVE', 'INCREASE', 'RELEASE')),
+  operation_reference             TEXT NOT NULL,
+  amount_satang                   INTEGER NOT NULL CHECK (amount_satang BETWEEN 1 AND 2000000000),
+  resulting_total_reserved_satang INTEGER NOT NULL CHECK (resulting_total_reserved_satang BETWEEN 1 AND 2000000000),
+  resulting_remaining_satang      INTEGER NOT NULL CHECK (resulting_remaining_satang BETWEEN 0 AND resulting_total_reserved_satang),
+  resulting_status                TEXT NOT NULL CHECK (
+    resulting_status IN ('ACTIVE', 'RELEASED', 'SETTLED')
+    AND (resulting_status = 'ACTIVE') = (resulting_remaining_satang > 0)
+  ),
+  ledger_transaction_id           UUID NOT NULL UNIQUE REFERENCES wallet_ledger_transactions(id),
+  idempotency_key_id              UUID NOT NULL UNIQUE REFERENCES wallet_idempotency_keys(id),
+  created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (reservation_id, operation_reference)
 );
 
 CREATE TABLE wallet_funding_reservation_settlements (
@@ -182,4 +200,9 @@ CREATE INDEX wallet_activities_user_time_idx
 --    projections. Close/freeze by status and correct ledger facts with a new
 --    balanced correction transaction.
 -- 5. Funding Reservation ownership and policy snapshots cannot change;
---    completed reservations and every settlement record are immutable.
+--    completed reservations, every operation record, and every settlement record
+--    are immutable. Deferred history triggers require reservation projections to
+--    reconcile to retained operations/settlements and enforce snapshotted policy
+--    limits for new reserve/increase operations.
+-- 6. Wallet balance projections are checked against sealed ledger postings by
+--    deferred triggers, so direct balance edits and nonzero Wallet inserts fail.
