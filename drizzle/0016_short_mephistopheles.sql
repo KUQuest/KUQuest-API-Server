@@ -348,6 +348,11 @@ CREATE TABLE "review" (
 );
 --> statement-breakpoint
 ALTER TABLE "occupation" DROP CONSTRAINT "occupation_name_check";--> statement-breakpoint
+ALTER TABLE "auth_account" ALTER COLUMN "id" SET DEFAULT gen_random_uuid()::text;--> statement-breakpoint
+ALTER TABLE "auth_admin" ALTER COLUMN "id" SET DEFAULT gen_random_uuid()::text;--> statement-breakpoint
+ALTER TABLE "auth_session" ALTER COLUMN "id" SET DEFAULT gen_random_uuid()::text;--> statement-breakpoint
+ALTER TABLE "auth_user" ALTER COLUMN "id" SET DEFAULT gen_random_uuid()::text;--> statement-breakpoint
+ALTER TABLE "auth_verification" ALTER COLUMN "id" SET DEFAULT gen_random_uuid()::text;--> statement-breakpoint
 ALTER TABLE "auth_user" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE "profile_certificate" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE "profile_portfolio_item" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint

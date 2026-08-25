@@ -1,5 +1,5 @@
 {
-  "id": "fb93b3f2-1da7-46e1-a5bb-aab3d4d97cb0",
+  "id": "edd5b644-cd10-45ff-92b3-21533e042fb5",
   "prevId": "3f3b45aa-1171-4ff0-b738-ea72bf39708d",
   "version": "7",
   "dialect": "postgresql",
@@ -146,7 +146,8 @@
           "name": "id",
           "type": "text",
           "primaryKey": true,
-          "notNull": true
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
         },
         "user_id": {
           "name": "user_id",
@@ -321,7 +322,8 @@
           "name": "id",
           "type": "text",
           "primaryKey": true,
-          "notNull": true
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
         },
         "username": {
           "name": "username",
@@ -449,7 +451,8 @@
           "name": "id",
           "type": "text",
           "primaryKey": true,
-          "notNull": true
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
         },
         "user_id": {
           "name": "user_id",
@@ -589,7 +592,8 @@
           "name": "id",
           "type": "text",
           "primaryKey": true,
-          "notNull": true
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
         },
         "email": {
           "name": "email",
@@ -799,7 +803,8 @@
           "name": "id",
           "type": "text",
           "primaryKey": true,
-          "notNull": true
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
         },
         "identifier": {
           "name": "identifier",
