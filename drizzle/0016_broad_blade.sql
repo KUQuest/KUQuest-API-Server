@@ -1,10 +1,9 @@
 CREATE TYPE "public"."quest_mode" AS ENUM('FIRST_COME_FIRST_SERVED', 'CANDIDATE');--> statement-breakpoint
-CREATE EXTENSION IF NOT EXISTS citext;--> statement-breakpoint
 CREATE TYPE "public"."quest_participation" AS ENUM('SINGLE', 'GROUP');--> statement-breakpoint
 CREATE TYPE "public"."quest_status" AS ENUM('DRAFT', 'OPEN', 'AWAITING_CONSENT', 'ASSIGNED', 'IN_PROGRESS', 'SUBMITTED', 'APPROVED', 'REWORK', 'COMPLETED', 'CANCELLED', 'DISPUTED', 'HIDDEN', 'UNFILLED');--> statement-breakpoint
 CREATE TABLE "payment_payout_accounts" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" uuid NOT NULL,
+	"user_id" text NOT NULL,
 	"recipient_type" text NOT NULL,
 	"given_name" text NOT NULL,
 	"surname" text NOT NULL,
@@ -26,7 +25,7 @@ CREATE TABLE "payment_payout_accounts" (
 CREATE TABLE "payment_payout_cancellation_attempts" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"payout_id" uuid NOT NULL,
-	"admin_id" uuid NOT NULL,
+	"admin_id" text NOT NULL,
 	"reason" text NOT NULL,
 	"attempt_status" text NOT NULL,
 	"provider_response" jsonb,
@@ -36,7 +35,7 @@ CREATE TABLE "payment_payout_cancellation_attempts" (
 --> statement-breakpoint
 CREATE TABLE "payment_payout_quotes" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" uuid NOT NULL,
+	"user_id" text NOT NULL,
 	"payout_account_id" uuid NOT NULL,
 	"policy_revision_id" uuid NOT NULL,
 	"receipt_baht" bigint NOT NULL,
@@ -60,8 +59,8 @@ CREATE TABLE "payment_payout_status_history" (
 	"from_status" text,
 	"to_status" text NOT NULL,
 	"provider_status" text,
-	"actor_user_id" uuid,
-	"actor_admin_id" uuid,
+	"actor_user_id" text,
+	"actor_admin_id" text,
 	"source" text NOT NULL,
 	"reason" text,
 	"occurred_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -72,7 +71,7 @@ CREATE TABLE "payment_payout_status_history" (
 --> statement-breakpoint
 CREATE TABLE "payment_payouts" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" uuid NOT NULL,
+	"user_id" text NOT NULL,
 	"quote_id" uuid NOT NULL,
 	"payout_account_id" uuid NOT NULL,
 	"destination_recipient_type" text NOT NULL,
@@ -112,7 +111,7 @@ CREATE TABLE "payment_payouts" (
 --> statement-breakpoint
 CREATE TABLE "payment_top_up_quotes" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" uuid NOT NULL,
+	"user_id" text NOT NULL,
 	"policy_revision_id" uuid NOT NULL,
 	"credit_baht" bigint NOT NULL,
 	"charged_fee_baht" bigint NOT NULL,
@@ -135,8 +134,8 @@ CREATE TABLE "payment_top_up_status_history" (
 	"from_status" text,
 	"to_status" text NOT NULL,
 	"provider_status" text,
-	"actor_user_id" uuid,
-	"actor_admin_id" uuid,
+	"actor_user_id" text,
+	"actor_admin_id" text,
 	"source" text NOT NULL,
 	"reason" text,
 	"occurred_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -148,7 +147,7 @@ CREATE TABLE "payment_top_up_status_history" (
 CREATE TABLE "payment_top_ups" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"internal_reference" text NOT NULL,
-	"user_id" uuid NOT NULL,
+	"user_id" text NOT NULL,
 	"quote_id" uuid NOT NULL,
 	"provider" text NOT NULL,
 	"provider_reference" text,
@@ -177,16 +176,16 @@ CREATE TABLE "payment_top_ups" (
 --> statement-breakpoint
 CREATE TABLE "tag" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"name" varchar(100) NOT NULL,
+	"name" text NOT NULL,
 	CONSTRAINT "tag_name_key" UNIQUE("name")
 );
 --> statement-breakpoint
 CREATE TABLE "proof_submission" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"quest_id" uuid NOT NULL,
-	"hunter_id" uuid,
+	"hunter_id" text,
 	"team_id" uuid,
-	"submitted_by_user_id" uuid NOT NULL,
+	"submitted_by_user_id" text NOT NULL,
 	"content" varchar(5000) NOT NULL,
 	"submission_status" varchar(32) DEFAULT 'PENDING' NOT NULL,
 	"review_note" varchar(1000),
@@ -206,7 +205,7 @@ CREATE TABLE "proof_submission_image" (
 --> statement-breakpoint
 CREATE TABLE "quest" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"giver_id" uuid NOT NULL,
+	"giver_id" text NOT NULL,
 	"title" varchar(200) NOT NULL,
 	"description" varchar(2000),
 	"condition" varchar(4000) NOT NULL,
@@ -220,10 +219,10 @@ CREATE TABLE "quest" (
 	"due_at" timestamp with time zone,
 	"proof_required" boolean DEFAULT true NOT NULL,
 	"cancelled_at" timestamp with time zone,
-	"cancelled_by_user_id" uuid,
-	"cancelled_by_admin_id" uuid,
+	"cancelled_by_user_id" text,
+	"cancelled_by_admin_id" text,
 	"hidden_at" timestamp with time zone,
-	"hidden_by_admin_id" uuid,
+	"hidden_by_admin_id" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "quest_reward_check" CHECK ("quest"."reward_satang" > 0),
@@ -240,7 +239,7 @@ CREATE TABLE "quest" (
 CREATE TABLE "quest_application" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"quest_id" uuid NOT NULL,
-	"hunter_id" uuid NOT NULL,
+	"hunter_id" text NOT NULL,
 	"application_status" varchar(32) DEFAULT 'APPLIED' NOT NULL,
 	"rework_limit" integer DEFAULT 0 NOT NULL,
 	"applied_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -252,7 +251,7 @@ CREATE TABLE "quest_application" (
 CREATE TABLE "quest_assignment" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"quest_id" uuid NOT NULL,
-	"hunter_id" uuid NOT NULL,
+	"hunter_id" text NOT NULL,
 	"assignment_status" varchar(32) DEFAULT 'ACTIVE' NOT NULL,
 	"started_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -268,15 +267,15 @@ CREATE TABLE "quest_edit_history" (
 	"old_value" jsonb,
 	"new_value" jsonb,
 	"edited_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"edited_by_user_id" uuid,
-	"edited_by_admin_id" uuid,
+	"edited_by_user_id" text,
+	"edited_by_admin_id" text,
 	CONSTRAINT "quest_edit_history_editor_check" CHECK (num_nonnulls("quest_edit_history"."edited_by_user_id", "quest_edit_history"."edited_by_admin_id") <= 1)
 );
 --> statement-breakpoint
 CREATE TABLE "quest_edit_request" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"quest_id" uuid NOT NULL,
-	"requested_by_user_id" uuid NOT NULL,
+	"requested_by_user_id" text NOT NULL,
 	"proposed_changes" jsonb NOT NULL,
 	"request_status" varchar(32) DEFAULT 'PENDING' NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -287,7 +286,7 @@ CREATE TABLE "quest_edit_request" (
 CREATE TABLE "quest_edit_request_response" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"request_id" uuid NOT NULL,
-	"user_id" uuid NOT NULL,
+	"user_id" text NOT NULL,
 	"decision" varchar(32) NOT NULL,
 	"responded_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "quest_edit_request_response_request_id_user_id_key" UNIQUE("request_id","user_id"),
@@ -318,7 +317,7 @@ CREATE TABLE "quest_location" (
 CREATE TABLE "quest_team" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"quest_id" uuid NOT NULL,
-	"leader_id" uuid NOT NULL,
+	"leader_id" text NOT NULL,
 	"name" varchar(100) NOT NULL,
 	"team_status" varchar(32) DEFAULT 'FORMING' NOT NULL,
 	"rework_limit" integer DEFAULT 0 NOT NULL,
@@ -329,7 +328,7 @@ CREATE TABLE "quest_team" (
 --> statement-breakpoint
 CREATE TABLE "quest_team_member" (
 	"team_id" uuid NOT NULL,
-	"user_id" uuid NOT NULL,
+	"user_id" text NOT NULL,
 	"joined_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "quest_team_member_team_id_user_id_key" UNIQUE("team_id","user_id")
 );
@@ -337,8 +336,8 @@ CREATE TABLE "quest_team_member" (
 CREATE TABLE "review" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"quest_id" uuid NOT NULL,
-	"reviewer_id" uuid NOT NULL,
-	"reviewee_id" uuid NOT NULL,
+	"reviewer_id" text NOT NULL,
+	"reviewee_id" text NOT NULL,
 	"rating" smallint NOT NULL,
 	"comment" varchar(1000) NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -348,65 +347,7 @@ CREATE TABLE "review" (
 	CONSTRAINT "review_participants_check" CHECK ("review"."reviewer_id" <> "review"."reviewee_id")
 );
 --> statement-breakpoint
-ALTER TABLE "auth_user" DROP CONSTRAINT "auth_user_academic_year_check";--> statement-breakpoint
-DROP INDEX "auth_admin_email_uidx";--> statement-breakpoint
-ALTER TABLE "department" ALTER COLUMN "name" SET DATA TYPE varchar(100);--> statement-breakpoint
-ALTER TABLE "faculty" ALTER COLUMN "name" SET DATA TYPE varchar(100);--> statement-breakpoint
-ALTER TABLE "occupation" ALTER COLUMN "name" SET DATA TYPE varchar(100);--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "user_id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "admin_id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "account_id" SET DATA TYPE varchar(255);--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "provider_id" SET DATA TYPE varchar(100);--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "access_token" SET DATA TYPE varchar(8192);--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "refresh_token" SET DATA TYPE varchar(8192);--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "id_token" SET DATA TYPE varchar(8192);--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "scope" SET DATA TYPE varchar(2048);--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "password" SET DATA TYPE varchar(255);--> statement-breakpoint
-ALTER TABLE "auth_admin" ALTER COLUMN "id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "auth_admin" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_admin" ALTER COLUMN "username" SET DATA TYPE varchar(100);--> statement-breakpoint
-ALTER TABLE "auth_admin" ALTER COLUMN "email" SET DATA TYPE citext;--> statement-breakpoint
-ALTER TABLE "auth_admin" ALTER COLUMN "image" SET DATA TYPE varchar(2048);--> statement-breakpoint
-ALTER TABLE "auth_admin" ALTER COLUMN "first_name" SET DATA TYPE varchar(100);--> statement-breakpoint
-ALTER TABLE "auth_admin" ALTER COLUMN "last_name" SET DATA TYPE varchar(100);--> statement-breakpoint
-ALTER TABLE "auth_session" ALTER COLUMN "id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "auth_session" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_session" ALTER COLUMN "user_id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "auth_session" ALTER COLUMN "admin_id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "auth_session" ALTER COLUMN "token" SET DATA TYPE varchar(255);--> statement-breakpoint
-ALTER TABLE "auth_session" ALTER COLUMN "ip_address" SET DATA TYPE inet;--> statement-breakpoint
-ALTER TABLE "auth_session" ALTER COLUMN "user_agent" SET DATA TYPE varchar(512);--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "email" SET DATA TYPE citext;--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "image" SET DATA TYPE varchar(2048);--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "first_name" SET DATA TYPE varchar(100);--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "last_name" SET DATA TYPE varchar(100);--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "bio" SET DATA TYPE varchar(1000);--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "student_id" SET DATA TYPE varchar(10);--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "telephone" SET DATA TYPE varchar(12);--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "terms_version" SET DATA TYPE varchar(50);--> statement-breakpoint
-ALTER TABLE "auth_verification" ALTER COLUMN "id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "auth_verification" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_verification" ALTER COLUMN "identifier" SET DATA TYPE citext;--> statement-breakpoint
-ALTER TABLE "auth_verification" ALTER COLUMN "value" SET DATA TYPE varchar(2048);--> statement-breakpoint
-ALTER TABLE "file" ALTER COLUMN "bucket" SET DATA TYPE varchar(63);--> statement-breakpoint
-ALTER TABLE "file" ALTER COLUMN "object_key" SET DATA TYPE varchar(1024);--> statement-breakpoint
-ALTER TABLE "file" ALTER COLUMN "content_type" SET DATA TYPE varchar(255);--> statement-breakpoint
-ALTER TABLE "file" ALTER COLUMN "uploaded_by_user_id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "profile_certificate" ALTER COLUMN "user_id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "profile_certificate" ALTER COLUMN "name" SET DATA TYPE varchar(200);--> statement-breakpoint
-ALTER TABLE "profile_certificate" ALTER COLUMN "issuer" SET DATA TYPE varchar(200);--> statement-breakpoint
-ALTER TABLE "profile_portfolio_item" ALTER COLUMN "user_id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "profile_portfolio_item" ALTER COLUMN "title" SET DATA TYPE varchar(120);--> statement-breakpoint
-ALTER TABLE "profile_portfolio_item" ALTER COLUMN "description" SET DATA TYPE varchar(1000);--> statement-breakpoint
-ALTER TABLE "profile_work_experience" ALTER COLUMN "user_id" SET DATA TYPE uuid;--> statement-breakpoint
-ALTER TABLE "profile_work_experience" ALTER COLUMN "title" SET DATA TYPE varchar(120);--> statement-breakpoint
-ALTER TABLE "profile_work_experience" ALTER COLUMN "employment_type" SET DATA TYPE varchar(50);--> statement-breakpoint
-ALTER TABLE "profile_work_experience" ALTER COLUMN "org" SET DATA TYPE varchar(200);--> statement-breakpoint
-ALTER TABLE "profile_work_experience" ALTER COLUMN "description" SET DATA TYPE varchar(1000);--> statement-breakpoint
+ALTER TABLE "occupation" DROP CONSTRAINT "occupation_name_check";--> statement-breakpoint
 ALTER TABLE "auth_user" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE "profile_certificate" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE "profile_portfolio_item" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
@@ -500,5 +441,4 @@ CREATE UNIQUE INDEX "quest_team_one_selected_uidx" ON "quest_team" USING btree (
 CREATE INDEX "quest_team_member_user_id_idx" ON "quest_team_member" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "review_quest_id_idx" ON "review" USING btree ("quest_id");--> statement-breakpoint
 CREATE INDEX "review_reviewee_id_idx" ON "review" USING btree ("reviewee_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "auth_admin_email_uidx" ON "auth_admin" USING btree ("email");--> statement-breakpoint
-ALTER TABLE "auth_user" ADD CONSTRAINT "auth_user_academic_year_check" CHECK ("auth_user"."academic_year" IS NULL OR "auth_user"."academic_year" BETWEEN 1000 AND 9999);
+ALTER TABLE "occupation" ADD CONSTRAINT "occupation_name_nonempty" CHECK (length(trim(name)) > 0);

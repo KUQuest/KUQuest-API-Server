@@ -1,5 +1,5 @@
 {
-  "id": "3e35c2bc-f7a2-45ca-adeb-0fd84f14039e",
+  "id": "fb93b3f2-1da7-46e1-a5bb-aab3d4d97cb0",
   "prevId": "3f3b45aa-1171-4ff0-b738-ea72bf39708d",
   "version": "7",
   "dialect": "postgresql",
@@ -23,7 +23,7 @@
         },
         "name": {
           "name": "name",
-          "type": "varchar(100)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         }
@@ -72,7 +72,7 @@
         },
         "name": {
           "name": "name",
-          "type": "varchar(100)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         }
@@ -106,7 +106,7 @@
         },
         "name": {
           "name": "name",
-          "type": "varchar(100)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -131,9 +131,9 @@
       },
       "policies": {},
       "checkConstraints": {
-        "occupation_name_check": {
-          "name": "occupation_name_check",
-          "value": "\"occupation\".\"name\" IN ('Staff', 'Lecturer', 'Student')"
+        "occupation_name_nonempty": {
+          "name": "occupation_name_nonempty",
+          "value": "length(trim(name)) > 0"
         }
       },
       "isRLSEnabled": false
@@ -144,50 +144,49 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "notNull": true
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "admin_id": {
           "name": "admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "account_id": {
           "name": "account_id",
-          "type": "varchar(255)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "provider_id": {
           "name": "provider_id",
-          "type": "varchar(100)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "access_token": {
           "name": "access_token",
-          "type": "varchar(8192)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "refresh_token": {
           "name": "refresh_token",
-          "type": "varchar(8192)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "id_token": {
           "name": "id_token",
-          "type": "varchar(8192)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -205,13 +204,13 @@
         },
         "scope": {
           "name": "scope",
-          "type": "varchar(2048)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "password": {
           "name": "password",
-          "type": "varchar(255)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -320,20 +319,19 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "notNull": true
         },
         "username": {
           "name": "username",
-          "type": "varchar(100)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "email": {
           "name": "email",
-          "type": "citext",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -346,19 +344,19 @@
         },
         "image": {
           "name": "image",
-          "type": "varchar(2048)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "first_name": {
           "name": "first_name",
-          "type": "varchar(100)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "last_name": {
           "name": "last_name",
-          "type": "varchar(100)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -394,9 +392,9 @@
           "name": "auth_admin_email_uidx",
           "columns": [
             {
-              "expression": "email",
-              "isExpression": false,
+              "expression": "lower(\"email\")",
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
@@ -449,26 +447,25 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "notNull": true
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "admin_id": {
           "name": "admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "token": {
           "name": "token",
-          "type": "varchar(255)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -480,13 +477,13 @@
         },
         "ip_address": {
           "name": "ip_address",
-          "type": "inet",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "user_agent": {
           "name": "user_agent",
-          "type": "varchar(512)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -590,14 +587,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "notNull": true
         },
         "email": {
           "name": "email",
-          "type": "citext",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -610,19 +606,19 @@
         },
         "image": {
           "name": "image",
-          "type": "varchar(2048)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "first_name": {
           "name": "first_name",
-          "type": "varchar(100)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "last_name": {
           "name": "last_name",
-          "type": "varchar(100)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -634,19 +630,19 @@
         },
         "bio": {
           "name": "bio",
-          "type": "varchar(1000)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "student_id": {
           "name": "student_id",
-          "type": "varchar(10)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "telephone": {
           "name": "telephone",
-          "type": "varchar(12)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -676,7 +672,7 @@
         },
         "terms_version": {
           "name": "terms_version",
-          "type": "varchar(50)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -790,7 +786,7 @@
       "checkConstraints": {
         "auth_user_academic_year_check": {
           "name": "auth_user_academic_year_check",
-          "value": "\"auth_user\".\"academic_year\" IS NULL OR \"auth_user\".\"academic_year\" BETWEEN 1000 AND 9999"
+          "value": "\"auth_user\".\"academic_year\" IS NULL OR (\"auth_user\".\"academic_year\" >= 1000 AND \"auth_user\".\"academic_year\" <= 9999)"
         }
       },
       "isRLSEnabled": false
@@ -801,20 +797,19 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "notNull": true
         },
         "identifier": {
           "name": "identifier",
-          "type": "citext",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "value": {
           "name": "value",
-          "type": "varchar(2048)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -876,19 +871,19 @@
         },
         "bucket": {
           "name": "bucket",
-          "type": "varchar(63)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "object_key": {
           "name": "object_key",
-          "type": "varchar(1024)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "content_type": {
           "name": "content_type",
-          "type": "varchar(255)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -900,7 +895,7 @@
         },
         "uploaded_by_user_id": {
           "name": "uploaded_by_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -1173,7 +1168,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -1332,7 +1327,7 @@
         },
         "admin_id": {
           "name": "admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -1437,7 +1432,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -1632,13 +1627,13 @@
         },
         "actor_user_id": {
           "name": "actor_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "actor_admin_id": {
           "name": "actor_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -1758,7 +1753,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -2080,7 +2075,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -2256,13 +2251,13 @@
         },
         "actor_user_id": {
           "name": "actor_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "actor_admin_id": {
           "name": "actor_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -2388,7 +2383,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -2623,19 +2618,19 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "name": {
           "name": "name",
-          "type": "varchar(200)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "issuer": {
           "name": "issuer",
-          "type": "varchar(200)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -2737,19 +2732,19 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "title": {
           "name": "title",
-          "type": "varchar(120)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "description": {
           "name": "description",
-          "type": "varchar(1000)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -2917,31 +2912,31 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "title": {
           "name": "title",
-          "type": "varchar(120)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "employment_type": {
           "name": "employment_type",
-          "type": "varchar(50)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "org": {
           "name": "org",
-          "type": "varchar(200)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "description": {
           "name": "description",
-          "type": "varchar(1000)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -3035,7 +3030,7 @@
         },
         "name": {
           "name": "name",
-          "type": "varchar(100)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         }
@@ -3075,7 +3070,7 @@
         },
         "hunter_id": {
           "name": "hunter_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -3087,7 +3082,7 @@
         },
         "submitted_by_user_id": {
           "name": "submitted_by_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -3359,7 +3354,7 @@
         },
         "giver_id": {
           "name": "giver_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -3450,13 +3445,13 @@
         },
         "cancelled_by_user_id": {
           "name": "cancelled_by_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "cancelled_by_admin_id": {
           "name": "cancelled_by_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -3468,7 +3463,7 @@
         },
         "hidden_by_admin_id": {
           "name": "hidden_by_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -3693,7 +3688,7 @@
         },
         "hunter_id": {
           "name": "hunter_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -3838,7 +3833,7 @@
         },
         "hunter_id": {
           "name": "hunter_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -4008,13 +4003,13 @@
         },
         "edited_by_user_id": {
           "name": "edited_by_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "edited_by_admin_id": {
           "name": "edited_by_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         }
@@ -4126,7 +4121,7 @@
         },
         "requested_by_user_id": {
           "name": "requested_by_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -4232,7 +4227,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -4530,7 +4525,7 @@
         },
         "leader_id": {
           "name": "leader_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -4650,7 +4645,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -4741,13 +4736,13 @@
         },
         "reviewer_id": {
           "name": "reviewer_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "reviewee_id": {
           "name": "reviewee_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },

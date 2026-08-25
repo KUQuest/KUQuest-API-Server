@@ -9,6 +9,7 @@ import {
   pgEnum,
   pgTable,
   smallint,
+  text,
   timestamp,
   unique,
   uniqueIndex,
@@ -44,7 +45,7 @@ export const quest = pgTable(
   'quest',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    giverId: uuid('giver_id').notNull().references(() => authUser.id),
+    giverId: text('giver_id').notNull().references(() => authUser.id),
     title: varchar('title', { length: 200 }).notNull(),
     description: varchar('description', { length: 2000 }),
     condition: varchar('condition', { length: 4000 }).notNull(),
@@ -58,10 +59,10 @@ export const quest = pgTable(
     dueAt: time('due_at'),
     proofRequired: boolean('proof_required').default(true).notNull(),
     cancelledAt: time('cancelled_at'),
-    cancelledByUserId: uuid('cancelled_by_user_id').references(() => authUser.id),
-    cancelledByAdminId: uuid('cancelled_by_admin_id').references(() => authAdmin.id),
+    cancelledByUserId: text('cancelled_by_user_id').references(() => authUser.id),
+    cancelledByAdminId: text('cancelled_by_admin_id').references(() => authAdmin.id),
     hiddenAt: time('hidden_at'),
-    hiddenByAdminId: uuid('hidden_by_admin_id').references(() => authAdmin.id),
+    hiddenByAdminId: text('hidden_by_admin_id').references(() => authAdmin.id),
     createdAt: time('created_at').defaultNow().notNull(),
     updatedAt: time('updated_at').defaultNow().notNull(),
   },
@@ -103,8 +104,8 @@ export const review = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     questId: uuid('quest_id').notNull().references(() => quest.id),
-    reviewerId: uuid('reviewer_id').notNull().references(() => authUser.id),
-    revieweeId: uuid('reviewee_id').notNull().references(() => authUser.id),
+    reviewerId: text('reviewer_id').notNull().references(() => authUser.id),
+    revieweeId: text('reviewee_id').notNull().references(() => authUser.id),
     rating: smallint('rating').notNull(),
     comment: varchar('comment', { length: 1000 }).notNull(),
     createdAt: time('created_at').defaultNow().notNull(),
@@ -161,7 +162,7 @@ export const questEditRequest = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     questId: uuid('quest_id').notNull().references(() => quest.id, { onDelete: 'cascade' }),
-    requestedByUserId: uuid('requested_by_user_id').notNull().references(() => authUser.id),
+    requestedByUserId: text('requested_by_user_id').notNull().references(() => authUser.id),
     proposedChanges: jsonb('proposed_changes').notNull(),
     requestStatus: varchar('request_status', { length: 32 }).default('PENDING').notNull(),
     createdAt: time('created_at').defaultNow().notNull(),
@@ -183,7 +184,7 @@ export const questEditRequestResponse = pgTable(
     requestId: uuid('request_id')
       .notNull()
       .references(() => questEditRequest.id, { onDelete: 'cascade' }),
-    userId: uuid('user_id').notNull().references(() => authUser.id),
+    userId: text('user_id').notNull().references(() => authUser.id),
     decision: varchar('decision', { length: 32 }).notNull(),
     respondedAt: time('responded_at').defaultNow().notNull(),
   },
@@ -210,8 +211,8 @@ export const questEditHistory = pgTable(
     oldValue: jsonb('old_value'),
     newValue: jsonb('new_value'),
     editedAt: time('edited_at').defaultNow().notNull(),
-    editedByUserId: uuid('edited_by_user_id').references(() => authUser.id),
-    editedByAdminId: uuid('edited_by_admin_id').references(() => authAdmin.id),
+    editedByUserId: text('edited_by_user_id').references(() => authUser.id),
+    editedByAdminId: text('edited_by_admin_id').references(() => authAdmin.id),
   },
   (table) => [
     check(
@@ -227,7 +228,7 @@ export const questTeam = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     questId: uuid('quest_id').notNull().references(() => quest.id, { onDelete: 'cascade' }),
-    leaderId: uuid('leader_id').notNull().references(() => authUser.id),
+    leaderId: text('leader_id').notNull().references(() => authUser.id),
     name: varchar('name', { length: 100 }).notNull(),
     teamStatus: varchar('team_status', { length: 32 }).default('FORMING').notNull(),
     reworkLimit: integer('rework_limit').default(0).notNull(),
@@ -250,7 +251,7 @@ export const questTeamMember = pgTable(
   'quest_team_member',
   {
     teamId: uuid('team_id').notNull().references(() => questTeam.id, { onDelete: 'cascade' }),
-    userId: uuid('user_id').notNull().references(() => authUser.id),
+    userId: text('user_id').notNull().references(() => authUser.id),
     joinedAt: time('joined_at').defaultNow().notNull(),
   },
   (table) => [
@@ -264,7 +265,7 @@ export const questApplication = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     questId: uuid('quest_id').notNull().references(() => quest.id, { onDelete: 'cascade' }),
-    hunterId: uuid('hunter_id').notNull().references(() => authUser.id),
+    hunterId: text('hunter_id').notNull().references(() => authUser.id),
     applicationStatus: varchar('application_status', { length: 32 })
       .default('APPLIED')
       .notNull(),
@@ -291,7 +292,7 @@ export const questAssignment = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     questId: uuid('quest_id').notNull().references(() => quest.id, { onDelete: 'cascade' }),
-    hunterId: uuid('hunter_id').notNull().references(() => authUser.id),
+    hunterId: text('hunter_id').notNull().references(() => authUser.id),
     assignmentStatus: varchar('assignment_status', { length: 32 })
       .default('ACTIVE')
       .notNull(),
@@ -315,9 +316,9 @@ export const proofSubmission = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     questId: uuid('quest_id').notNull().references(() => quest.id, { onDelete: 'cascade' }),
-    hunterId: uuid('hunter_id').references(() => authUser.id),
+    hunterId: text('hunter_id').references(() => authUser.id),
     teamId: uuid('team_id').references(() => questTeam.id),
-    submittedByUserId: uuid('submitted_by_user_id').notNull().references(() => authUser.id),
+    submittedByUserId: text('submitted_by_user_id').notNull().references(() => authUser.id),
     content: varchar('content', { length: 5000 }).notNull(),
     submissionStatus: varchar('submission_status', { length: 32 })
       .default('PENDING')

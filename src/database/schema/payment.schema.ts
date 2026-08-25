@@ -40,7 +40,7 @@ export const paymentMoneyPolicyRevisions = pgTable(
     quoteLifetimeSeconds: amount('quote_lifetime_seconds').notNull(),
     reviewWindowSeconds: amount('review_window_seconds').notNull(),
     defaultApplicationWindowSeconds: amount('default_application_window_seconds').notNull(),
-    authoredByAdminId: uuid('authored_by_admin_id').references(() => authAdmin.id),
+    authoredByAdminId: text('authored_by_admin_id').references(() => authAdmin.id),
     reason: text('reason').notNull(),
     effectiveFrom: time('effective_from').notNull(),
     effectiveUntil: time('effective_until'),
@@ -70,7 +70,7 @@ export const paymentTopUpQuotes = pgTable(
   'payment_top_up_quotes',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: uuid('user_id').notNull().references(() => authUser.id),
+    userId: text('user_id').notNull().references(() => authUser.id),
     policyRevisionId: uuid('policy_revision_id')
       .notNull()
       .references(() => paymentMoneyPolicyRevisions.id),
@@ -101,7 +101,7 @@ export const paymentTopUps = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     internalReference: text('internal_reference').notNull().unique(),
-    userId: uuid('user_id').notNull().references(() => authUser.id),
+    userId: text('user_id').notNull().references(() => authUser.id),
     quoteId: uuid('quote_id').notNull().unique().references(() => paymentTopUpQuotes.id),
     provider: text('provider').notNull(),
     providerReference: text('provider_reference').unique(),
@@ -144,8 +144,8 @@ export const paymentTopUpStatusHistory = pgTable(
     fromStatus: text('from_status'),
     toStatus: text('to_status').notNull(),
     providerStatus: text('provider_status'),
-    actorUserId: uuid('actor_user_id').references(() => authUser.id),
-    actorAdminId: uuid('actor_admin_id').references(() => authAdmin.id),
+    actorUserId: text('actor_user_id').references(() => authUser.id),
+    actorAdminId: text('actor_admin_id').references(() => authAdmin.id),
     source: text('source').notNull(),
     reason: text('reason'),
     occurredAt: time('occurred_at').defaultNow().notNull(),
@@ -171,7 +171,7 @@ export const paymentPayoutAccounts = pgTable(
   'payment_payout_accounts',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: uuid('user_id').notNull().references(() => authUser.id),
+    userId: text('user_id').notNull().references(() => authUser.id),
     recipientType: text('recipient_type').notNull(),
     givenName: text('given_name').notNull(),
     surname: text('surname').notNull(),
@@ -206,7 +206,7 @@ export const paymentPayoutQuotes = pgTable(
   'payment_payout_quotes',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: uuid('user_id').notNull().references(() => authUser.id),
+    userId: text('user_id').notNull().references(() => authUser.id),
     payoutAccountId: uuid('payout_account_id')
       .notNull()
       .references(() => paymentPayoutAccounts.id),
@@ -239,7 +239,7 @@ export const paymentPayouts = pgTable(
   'payment_payouts',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: uuid('user_id').notNull().references(() => authUser.id),
+    userId: text('user_id').notNull().references(() => authUser.id),
     quoteId: uuid('quote_id').notNull().unique().references(() => paymentPayoutQuotes.id),
     payoutAccountId: uuid('payout_account_id')
       .notNull()
@@ -303,8 +303,8 @@ export const paymentPayoutStatusHistory = pgTable(
     fromStatus: text('from_status'),
     toStatus: text('to_status').notNull(),
     providerStatus: text('provider_status'),
-    actorUserId: uuid('actor_user_id').references(() => authUser.id),
-    actorAdminId: uuid('actor_admin_id').references(() => authAdmin.id),
+    actorUserId: text('actor_user_id').references(() => authUser.id),
+    actorAdminId: text('actor_admin_id').references(() => authAdmin.id),
     source: text('source').notNull(),
     reason: text('reason'),
     occurredAt: time('occurred_at').defaultNow().notNull(),
@@ -331,7 +331,7 @@ export const paymentPayoutCancellationAttempts = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     payoutId: uuid('payout_id').notNull().references(() => paymentPayouts.id),
-    adminId: uuid('admin_id').notNull().references(() => authAdmin.id),
+    adminId: text('admin_id').notNull().references(() => authAdmin.id),
     reason: text('reason').notNull(),
     attemptStatus: text('attempt_status').notNull(),
     providerResponse: jsonb('provider_response'),
