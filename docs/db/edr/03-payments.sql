@@ -20,7 +20,7 @@ CREATE TABLE payment_money_policy_revisions (
   payout_provider_fee_satang      INTEGER NOT NULL DEFAULT 0,
   payout_provider_tax_bps         SMALLINT NOT NULL DEFAULT 0,
   quote_lifetime_seconds          INTEGER NOT NULL,
-  authored_by_admin_id            TEXT REFERENCES auth_admin(id),
+  authored_by_admin_id            UUID REFERENCES auth_admin(id),
   reason                          TEXT NOT NULL,
   effective_from                  TIMESTAMPTZ NOT NULL,
   effective_until                 TIMESTAMPTZ,
@@ -33,7 +33,7 @@ CREATE TABLE payment_money_policy_revisions (
 
 CREATE TABLE payment_top_up_quotes (
   id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id              TEXT NOT NULL REFERENCES auth_user(id),
+  user_id              UUID NOT NULL REFERENCES auth_user(id),
   policy_revision_id   UUID NOT NULL REFERENCES payment_money_policy_revisions(id),
   credit_satang          INTEGER NOT NULL,
   charged_fee_satang     INTEGER NOT NULL,
@@ -52,7 +52,7 @@ CREATE INDEX payment_top_up_quotes_expiry_idx ON payment_top_up_quotes (expires_
 CREATE TABLE payment_top_ups (
   id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   internal_reference          TEXT NOT NULL UNIQUE,
-  user_id                     TEXT NOT NULL REFERENCES auth_user(id),
+  user_id                     UUID NOT NULL REFERENCES auth_user(id),
   quote_id                    UUID NOT NULL UNIQUE REFERENCES payment_top_up_quotes(id),
   provider                    TEXT NOT NULL,
   provider_reference          TEXT UNIQUE,
@@ -81,8 +81,8 @@ CREATE TABLE payment_top_up_status_history (
   from_status     TEXT CHECK (from_status IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED')),
   to_status       TEXT NOT NULL CHECK (to_status IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED')),
   provider_status TEXT,
-  actor_user_id   TEXT REFERENCES auth_user(id),
-  actor_admin_id  TEXT REFERENCES auth_admin(id),
+  actor_user_id   UUID REFERENCES auth_user(id),
+  actor_admin_id  UUID REFERENCES auth_admin(id),
   source          TEXT NOT NULL,
   reason          TEXT,
   occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -92,7 +92,7 @@ CREATE INDEX payment_top_up_status_history_idx ON payment_top_up_status_history 
 
 CREATE TABLE payment_payout_accounts (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id             TEXT NOT NULL REFERENCES auth_user(id),
+  user_id             UUID NOT NULL REFERENCES auth_user(id),
   -- recipient_type/routing_type settled via /grilling (2026-08-09): recipient_type is a
   -- real fixed vocab (does payout go to the account-holder or someone else, per
   -- `relationship` below) — CHECK added. routing_type deliberately left open TEXT, no
@@ -118,7 +118,7 @@ CREATE UNIQUE INDEX payment_payout_accounts_active_user_uidx ON payment_payout_a
 
 CREATE TABLE payment_payout_quotes (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id             TEXT NOT NULL REFERENCES auth_user(id),
+  user_id             UUID NOT NULL REFERENCES auth_user(id),
   payout_account_id   UUID NOT NULL REFERENCES payment_payout_accounts(id),
   policy_revision_id  UUID NOT NULL REFERENCES payment_money_policy_revisions(id),
   receipt_satang        INTEGER NOT NULL,
@@ -137,7 +137,7 @@ CREATE INDEX payment_payout_quotes_expiry_idx ON payment_payout_quotes (expires_
 
 CREATE TABLE payment_payouts (
   id                            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id                       TEXT NOT NULL REFERENCES auth_user(id),
+  user_id                       UUID NOT NULL REFERENCES auth_user(id),
   quote_id                      UUID NOT NULL UNIQUE REFERENCES payment_payout_quotes(id),
   payout_account_id             UUID NOT NULL REFERENCES payment_payout_accounts(id),
   destination_recipient_type    TEXT NOT NULL CHECK (destination_recipient_type IN ('SELF', 'THIRD_PARTY')),
@@ -181,8 +181,8 @@ CREATE TABLE payment_payout_status_history (
   from_status     TEXT CHECK (from_status IN ('CREATING', 'PENDING', 'AWAITING_RECONCILIATION', 'COMPLETED', 'FAILED', 'CANCELLED')),
   to_status       TEXT NOT NULL CHECK (to_status IN ('CREATING', 'PENDING', 'AWAITING_RECONCILIATION', 'COMPLETED', 'FAILED', 'CANCELLED')),
   provider_status TEXT,
-  actor_user_id   TEXT REFERENCES auth_user(id),
-  actor_admin_id  TEXT REFERENCES auth_admin(id),
+  actor_user_id   UUID REFERENCES auth_user(id),
+  actor_admin_id  UUID REFERENCES auth_admin(id),
   source          TEXT NOT NULL,
   reason          TEXT,
   occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -193,7 +193,7 @@ CREATE INDEX payment_payout_status_history_idx ON payment_payout_status_history 
 CREATE TABLE payment_payout_cancellation_attempts (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   payout_id        UUID NOT NULL REFERENCES payment_payouts(id),
-  admin_id         TEXT NOT NULL REFERENCES auth_admin(id),
+  admin_id         UUID NOT NULL REFERENCES auth_admin(id),
   reason           TEXT NOT NULL,
   -- attempt_status vocab settled via /grilling (2026-08-09).
   attempt_status   TEXT NOT NULL CHECK (attempt_status IN ('PENDING', 'SUCCEEDED', 'FAILED')),

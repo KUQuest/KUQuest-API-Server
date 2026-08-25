@@ -1,6 +1,7 @@
 import type { AuthedContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
+import { readResourceVersion } from '@/shared/resource-version';
 
 import type { Static } from 'elysia';
 
@@ -61,15 +62,31 @@ export const createOwnWorkExperience = async ({
 export const updateOwnWorkExperience = async ({
   body,
   params,
+  request,
   session,
   set,
 }: AuthedContext &
   WorkExperienceParams & {
     body: Static<typeof workExperienceUpdateSchema>;
   }): Promise<ApiResponse<{ experience: WorkExperienceResponse }>> => {
-  const experience = await updateWorkExperience(session.user.id, params.experienceId, body);
+  const versionHeader = readResourceVersion(request);
+  if (versionHeader.invalid) {
+    set.status = 400;
+    return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
+  }
+
+  const experience = await updateWorkExperience(
+    session.user.id,
+    params.experienceId,
+    body,
+    versionHeader.value,
+  );
 
   if (!experience) return notFound(set);
+  if ('outcome' in experience && experience.outcome === 'conflict') {
+    set.status = 409;
+    return apiError('CONFLICT', 'Work Experience was changed by another request');
+  }
   if ('outcome' in experience) return invalidDateRange(set);
 
   return apiSuccess({ experience: serializeWorkExperience(experience) });
@@ -77,12 +94,28 @@ export const updateOwnWorkExperience = async ({
 
 export const deleteOwnWorkExperience = async ({
   params,
+  request,
   session,
   set,
-}: AuthedContext & WorkExperienceParams): Promise<ApiResponse> => {
-  const deleted = await deleteWorkExperience(session.user.id, params.experienceId);
+}: AuthedContext & WorkExperienceParams): Promise<ApiResponse<{ version: number }>> => {
+  const versionHeader = readResourceVersion(request);
+  if (versionHeader.invalid) {
+    set.status = 400;
+    return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
+  }
+
+  const deleted = await deleteWorkExperience(
+    session.user.id,
+    params.experienceId,
+    versionHeader.value,
+  );
 
   if (!deleted) return notFound(set);
+  if (!('outcome' in deleted)) return apiSuccess({ version: deleted.version ?? 1 });
+  if (deleted.outcome === 'conflict') {
+    set.status = 409;
+    return apiError('CONFLICT', 'Work Experience was changed by another request');
+  }
 
-  return apiSuccess();
+  return apiSuccess({ version: deleted.version });
 };

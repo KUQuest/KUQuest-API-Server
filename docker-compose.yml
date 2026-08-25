@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-kuquest}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kuquest-local-only}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "0.0.0.0:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -16,6 +16,30 @@ services:
         [
           "CMD-SHELL",
           "pg_isready -U ${POSTGRES_USER:-kuquest} -d ${POSTGRES_DB:-kuquest}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-edr:
+    image: postgres:17-alpine
+    container_name: kuquest-postgres-edr
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${EDR_POSTGRES_DB:-kuquest_edr}
+      POSTGRES_USER: ${EDR_POSTGRES_USER:-kuquest}
+      POSTGRES_PASSWORD: ${EDR_POSTGRES_PASSWORD:-kuquest-local-only}
+    ports:
+      - "0.0.0.0:${EDR_POSTGRES_PORT:-6767}:5432"
+    volumes:
+      - postgres_edr_data:/var/lib/postgresql/data
+      - ./docs/db/edr:/edr:ro
+      - ./scripts/init-edr-postgres.sh:/docker-entrypoint-initdb.d/00-init-edr.sh:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${EDR_POSTGRES_USER:-kuquest} -d ${EDR_POSTGRES_DB:-kuquest_edr}",
         ]
       interval: 5s
       timeout: 5s
@@ -58,4 +82,5 @@ services:
 
 volumes:
   postgres_data:
+  postgres_edr_data:
   rustfs_data:

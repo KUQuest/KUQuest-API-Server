@@ -40,4 +40,7 @@ package-lock.json
 **/*.bun
 dist/
 
+# local Bruno demo session cookies
+/bruno/environments/local-demo/
+
 /web

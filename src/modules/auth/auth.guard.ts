@@ -25,6 +25,7 @@ export type AuthenticatedSession = NonNullable<Awaited<ReturnType<typeof auth.ap
 // The context every controller behind this guard receives, declared beside the guard
 // that produces it rather than restated by each controller that consumes it.
 export type AuthedContext = {
+  request?: Request;
   session: AuthenticatedSession;
   set: { status?: number | keyof StatusMap };
 };

@@ -38,14 +38,25 @@ describe('profile integration', () => {
     });
   });
 
-  it('accepts a text public profile id through validation before authentication runs', async () => {
-    const response = await app.handle(new Request('http://localhost/api/v1/profile/not-a-uuid'));
+  it.each(['reputation', 'reviews'])(
+    'requires authentication for the %s endpoint',
+    async (resource) => {
+      const response = await app.handle(
+        new Request(`http://localhost/api/v1/profile/${resource}`),
+      );
 
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({
-      success: false,
-      error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
-    });
+      expect(response.status).toBe(401);
+      expect((await response.json()).error.code).toBe('UNAUTHORIZED');
+    },
+  );
+
+  it('rejects a non-UUID public profile id before authentication runs', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/profile/not-a-uuid'),
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('VALIDATION');
   });
 
   it('rejects an unauthenticated update', async () => {
@@ -105,6 +116,7 @@ describe('profile integration', () => {
       ['an email, which this endpoint does not own', { email: 'other@ku.th' }],
       ['a verified flag, which this endpoint does not own', { emailVerified: true }],
       ['an avatar, which the avatar endpoint owns', { imageFileId: randomUUID() }],
+      ['tags, which are derived and read-only', { tagIds: [randomUUID()] }],
       ['a legacy image field, which this endpoint does not own', { image: 'http://example.com' }],
       ['another student id smuggled alongside a valid field', { bio: 'x', id: 'someone-else' }],
       ['a first name of the wrong type', { firstName: 123 }],
@@ -184,15 +196,26 @@ describe('profile integration', () => {
       expect(Object.keys(document.paths)).not.toContain('/api/v1/profile/');
     });
 
+    it('publishes the reputation and Reviews endpoints before the dynamic public-profile route', async () => {
+      const document = await openapiDocument();
+      expect(document.paths['/api/v1/profile/reputation']?.get).toBeDefined();
+      expect(document.paths['/api/v1/profile/reviews']?.get).toBeDefined();
+      expect(document.paths['/api/v1/profile/{userId}']?.get).toBeDefined();
+    });
+
     it('marks every profile operation as requiring authentication', async () => {
       const document = await openapiDocument();
       const profilePath = document.paths['/api/v1/profile'];
       const publicProfilePath = document.paths['/api/v1/profile/{userId}'];
+      const reputationOperation = document.paths['/api/v1/profile/reputation']?.get;
+      const reviewsOperation = document.paths['/api/v1/profile/reviews']?.get;
       const avatarOperation = document.paths['/api/v1/profile/avatar']?.post;
 
       expect(profilePath?.get?.security).toEqual([{ betterAuthSession: [] }]);
       expect(profilePath?.patch?.security).toEqual([{ betterAuthSession: [] }]);
       expect(publicProfilePath?.get?.security).toEqual([{ betterAuthSession: [] }]);
+      expect(reputationOperation?.security).toEqual([{ betterAuthSession: [] }]);
+      expect(reviewsOperation?.security).toEqual([{ betterAuthSession: [] }]);
       expect(avatarOperation?.security).toEqual([{ betterAuthSession: [] }]);
     });
 
@@ -222,6 +245,17 @@ describe('profile integration', () => {
       expect(JSON.stringify(responseProperties)).toContain('certificates');
       expect(JSON.stringify(responseProperties)).toContain('experience');
       expect(JSON.stringify(responseProperties)).toContain('occupation');
+    });
+
+    it('documents derived Tags on own Profile but not tagIds on PATCH', async () => {
+      const document = await openapiDocument();
+      const profilePath = document.paths['/api/v1/profile'];
+      const getSchema = profilePath?.get?.responses?.['200']?.content?.['application/json']?.schema;
+      const patchBody = profilePath?.patch?.requestBody?.content?.['application/json'];
+
+      expect(JSON.stringify(getSchema)).toContain('tags');
+      expect(JSON.stringify(patchBody)).not.toContain('tagIds');
+      expect(Object.keys(document.paths)).not.toContain('/api/v1/tags/options');
     });
 
     it('documents the avatar endpoint as multipart', async () => {

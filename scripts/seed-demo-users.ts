@@ -6,23 +6,27 @@ import { profileCertificate, profilePortfolioItem } from '@/database/schema/prof
 import { defaultCookieAttributes } from '@/modules/auth/auth.config.shared';
 
 import { betterAuth } from 'better-auth';
+import { makeSignature } from 'better-auth/crypto';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { testUtils } from 'better-auth/plugins';
 import { eq } from 'drizzle-orm';
 
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { mkdir } from 'node:fs/promises';
 
 import * as schema from '@/database/schema/auth.schema';
 
 const bruEnvironmentPath = (name: string): string =>
-  join(import.meta.dir, '..', 'bruno', 'environments', `Demo - ${name}.bru`);
+  join(import.meta.dir, '..', 'bruno', 'environments', 'local-demo', `Demo - ${name}.bru`);
 
 const writeSessionCookieToBruEnvironment = async (name: string, cookie: string): Promise<void> => {
   const path = bruEnvironmentPath(name);
+  await mkdir(dirname(path), { recursive: true });
   const file = Bun.file(path);
-  if (!(await file.exists())) return;
-
-  const updated = (await file.text()).replace(
+  const template = (await file.exists())
+    ? await file.text()
+    : `vars {\n  baseUrl: http://localhost:5000\n  userSessionCookie: \n}\n`;
+  const updated = template.replace(
     /^( *userSessionCookie:).*$/m,
     `$1 ${cookie}`,
   );
@@ -69,9 +73,21 @@ const seedAuth = betterAuth({
   session: { modelName: 'authSession' },
   account: { modelName: 'authAccount' },
   verification: { modelName: 'authVerification' },
-  advanced: { defaultCookieAttributes },
+  advanced: {
+    database: { generateId: 'uuid' },
+    defaultCookieAttributes,
+  },
   plugins: [testUtils()],
 });
+
+const createDemoCookie = async (context: Awaited<typeof seedAuth.$context>, userId: string): Promise<string> => {
+  const session = await context.internalAdapter.createSession(userId, false, {
+    ipAddress: '127.0.0.1',
+    userAgent: 'KUQuest demo seed',
+  });
+  const signedToken = `${session.token}.${await makeSignature(session.token, context.secret)}`;
+  return `${context.authCookies.sessionToken.name}=${signedToken}`;
+};
 
 const main = async (): Promise<void> => {
   const departments = await db.select().from(department);
@@ -136,8 +152,7 @@ const main = async (): Promise<void> => {
       }
     }
 
-    const headers = await ctx.test.getAuthHeaders({ userId: user.id });
-    const cookie = headers.get('cookie') ?? '';
+    const cookie = await createDemoCookie(ctx, user.id);
     const name = `${demo.firstName} ${demo.lastName}`;
 
     await writeSessionCookieToBruEnvironment(name, cookie);

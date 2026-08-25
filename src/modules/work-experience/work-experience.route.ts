@@ -1,5 +1,5 @@
 import { authGuard } from '@/modules/auth';
-import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
@@ -13,6 +13,7 @@ import {
 } from './work-experience.controller';
 import {
   workExperienceCreateSchema,
+  workExperienceDeleteResponseSchema,
   workExperienceListResponseSchema,
   workExperienceParamsSchema,
   workExperienceResponseSchema,
@@ -50,7 +51,7 @@ export const workExperienceRoute = new Elysia({
     params: workExperienceParamsSchema,
     body: workExperienceUpdateSchema,
     transform: rejectUnknownFields(workExperienceUpdateSchema),
-    response: responses(workExperienceResponseSchema, 400, 401, 404),
+    response: responses(workExperienceResponseSchema, 400, 401, 404, 409),
     detail: {
       tags: ['Profile'],
       summary: 'Update work experience',
@@ -61,7 +62,7 @@ export const workExperienceRoute = new Elysia({
   })
   .delete('/:experienceId', deleteOwnWorkExperience, {
     params: workExperienceParamsSchema,
-    response: responses(apiSuccessSchema, 401, 404),
+    response: responses(workExperienceDeleteResponseSchema, 400, 401, 404, 409),
     detail: {
       tags: ['Profile'],
       summary: 'Delete work experience',

@@ -16,6 +16,8 @@
     "db:check": "bun scripts/check-migrations.ts",
     "db:seed-admin": "bun scripts/seed-admin.ts",
     "db:seed-demo-users": "bun scripts/seed-demo-users.ts",
+    "db:seed-frontend-demo": "bun scripts/seed-frontend-demo.ts",
+    "db:seed-frontend-images": "bun scripts/seed-frontend-images.ts",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "check": "bun run db:check && bun run lint && bun run typecheck && bun test && bun run build"

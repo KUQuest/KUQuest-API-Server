@@ -7,15 +7,142 @@ Backend API for KUQuest Mobile and CMS, built with Elysia and Bun.
 - Bun: see `.bun-version`
 - Docker with Docker Compose
 
-## Local setup
+## Run locally
+
+Follow these steps from the repository root. The API uses Bun, PostgreSQL, and
+local RustFS object storage.
+
+### 1. Create the local environment file
 
 ```bash
 cp .env.example .env
+```
+
+Set these values in `.env` before the API starts:
+
+- `BETTER_AUTH_SECRET` and `ADMIN_BETTER_AUTH_SECRET`: separate values with at
+  least 32 characters.
+- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`: local Google OAuth Web
+  application credentials.
+- `TERMS_URL`, `PRIVACY_URL`, `DATA_USAGE_URL`, and `CONTACT_US_URL`: URLs the
+  mobile app can open.
+
+Generate either Auth secret with:
+
+```bash
+openssl rand -base64 32
+```
+
+Do not commit `.env` or share its secrets.
+
+### 2. Install dependencies
+
+```bash
 bun install --frozen-lockfile
+```
+
+### 3. Start local services
+
+```bash
 docker compose up -d
+docker compose ps
+```
+
+Wait until `kuquest-postgres` and `kuquest-rustfs` are healthy. The
+`rustfs-init` container creates the `kuquest` bucket once, then exits. That is
+expected.
+
+### 4. Apply database migrations
+
+```bash
 bun run db:migrate
+```
+
+Run this command after pulling a branch that changes `drizzle/`. It preserves
+existing data and applies only migrations not recorded in the Drizzle ledger.
+
+### 5. Start the API
+
+```bash
 bun run dev
 ```
+
+The API prints this message when it is ready:
+
+```text
+KUQuest API running at http://localhost:5000
+```
+
+Keep this terminal open while you use the API.
+
+### 6. Verify local services
+
+In a second terminal, run:
+
+```bash
+curl --fail http://localhost:5000/health
+curl --fail http://localhost:5000/openapi/json
+```
+
+Open these URLs in a browser:
+
+- API auth test page: `http://localhost:5000`
+- OpenAPI: `http://localhost:5000/openapi`
+- RustFS console: `http://localhost:9001`
+
+The RustFS console uses `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` from
+`.env`.
+
+### 7. Configure Google sign-in
+
+Create a Google OAuth 2.0 **Web application** client. Add this redirect URI:
+
+```text
+http://localhost:5000/api/auth/callback/google
+```
+
+If KUQuest Admin runs locally, also add `http://localhost:3000` as an
+authorized JavaScript origin. Google sign-in accepts only a Student email that
+ends exactly in `@ku.th`.
+
+Do not open `public/index.html` with a `file://` URL. OAuth state and Session
+cookies require the API origin.
+
+### 8. Stop local services
+
+```bash
+docker compose stop
+```
+
+This keeps the PostgreSQL and RustFS volumes. Use `docker compose down` only
+when you also want to remove the containers; it still keeps volumes unless you
+add `--volumes`.
+
+### Auth ID recovery
+
+If Google sign-in logs `null value in column "id" of relation "auth_user"`, the
+local database has an old Auth schema without ID defaults. First apply pending
+migrations:
+
+```bash
+bun run db:migrate
+```
+
+Then confirm PostgreSQL now generates IDs automatically:
+
+```bash
+docker exec kuquest-postgres \
+  psql -U kuquest -d kuquest -c \
+  "SELECT table_name, column_default
+   FROM information_schema.columns
+   WHERE table_schema = 'public'
+     AND table_name IN ('auth_user', 'auth_admin', 'auth_session', 'auth_account', 'auth_verification')
+     AND column_name = 'id'
+   ORDER BY table_name;"
+```
+
+Each row must show `(gen_random_uuid())::text`. This fix does not delete
+Students, Admins, Sessions, or Accounts.
 
 `docker compose up -d` starts PostgreSQL and a local RustFS container that the
 `.env.example` defaults already point at, so avatar and certificate image
@@ -24,34 +151,6 @@ container creates the `kuquest` bucket the first time RustFS becomes healthy;
 it exits immediately afterward, which is expected. The RustFS console is at
 `http://localhost:9001`, signed in with `S3_ACCESS_KEY_ID` /
 `S3_SECRET_ACCESS_KEY`.
-
-Open `http://localhost:5000` in a browser to use the built-in Google login,
-session inspection, and sign-out test page.
-
-Do not open `public/index.html` directly with a `file://` URL. OAuth state and
-session cookies require the page to be served by the API origin.
-
-Generate a secure Better Auth secret and put the result in
-`BETTER_AUTH_SECRET`:
-
-```bash
-openssl rand -base64 32
-```
-
-Generate a separate secret for Admin authentication and put it in
-`ADMIN_BETTER_AUTH_SECRET` as well. Both secrets must be at least 32 characters
-long.
-
-Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to credentials from a Google
-Cloud OAuth 2.0 Web application. Add this authorized redirect URI in Google
-Cloud for local development:
-
-```text
-http://localhost:5000/api/auth/callback/google
-```
-
-The OAuth client must use the **Web application** type. If the CMS runs locally,
-add `http://localhost:3000` as an authorized JavaScript origin as well.
 
 `CMS_ORIGIN` must match the frontend origin that sends cookie-based auth
 requests. The local default is `http://localhost:3000`.
@@ -99,11 +198,10 @@ security, response schemas, and OAuth errors, is available at
 `http://localhost:5000/openapi`. The raw specification is available at
 `http://localhost:5000/openapi/json`.
 
-Google is the only enabled sign-in provider, and the Google account must have an
-email address ending exactly in `@ku.th`. Email/password authentication is
-disabled. On first sign-in, Google profile data is saved in the `user` table as
-`user_id` (primary key), `first_name`, and `last_name`, along with Better Auth's
-required email and profile fields.
+Google is the only enabled sign-in provider, and email/password authentication
+is disabled. On first sign-in, Google profile data is saved in `auth_user` as
+the Student's `id`, `first_name`, and `last_name`, with Better Auth's required
+email and profile fields.
 
 ## Database commands
 

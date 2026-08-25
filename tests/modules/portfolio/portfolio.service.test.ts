@@ -7,6 +7,7 @@ import {
   deletePortfolio,
   listPortfolio,
   markPortfolioImageDeleted,
+  replacePortfolioImage,
   updatePortfolio,
 } from '@/modules/portfolio/portfolio.service';
 
@@ -15,8 +16,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { eq, inArray } from 'drizzle-orm';
 
-const studentA = `test-portfolio-a-${randomUUID()}`;
-const studentB = `test-portfolio-b-${randomUUID()}`;
+const studentA = randomUUID();
+const studentB = randomUUID();
 
 const storedImage = (suffix: string) => ({
   bucket: 'kuquest-test',
@@ -184,6 +185,42 @@ describe('deleting a portfolio entry', () => {
     await deletePortfolio(studentA, created.id);
 
     expect(await deletePortfolio(studentA, created.id)).toEqual({ outcome: 'not-found' });
+  });
+});
+
+describe('changing a portfolio image', () => {
+  it('adds the first image when no target file is supplied', async () => {
+    const created = await createPortfolio(studentA, { title: 'Image later', images: [] });
+    const result = await replacePortfolioImage(studentA, created.id, storedImage('added'), undefined);
+
+    expect(result).toEqual(expect.objectContaining({
+      fileId: expect.any(String),
+      previousFileId: null,
+      version: 2,
+    }));
+    expect((await listPortfolio(studentA)).find((item) => item.id === created.id)?.images).toHaveLength(1);
+  });
+
+  it('replaces the first image when no target file is supplied', async () => {
+    const created = await createPortfolio(studentA, {
+      title: 'Replace first',
+      images: [storedImage('before')],
+    });
+    const before = (await listPortfolio(studentA)).find((item) => item.id === created.id)?.images[0];
+    const result = await replacePortfolioImage(studentA, created.id, storedImage('after'), undefined);
+
+    expect(result).toEqual(expect.objectContaining({
+      previousFileId: before?.fileId,
+      version: 2,
+    }));
+    expect((await listPortfolio(studentA)).find((item) => item.id === created.id)?.images[0]?.objectKey).toContain('after');
+  });
+
+  it('reports a missing targeted image without storing a replacement', async () => {
+    const created = await createPortfolio(studentA, { title: 'Missing target', images: [] });
+    const result = await replacePortfolioImage(studentA, created.id, storedImage('unused'), randomUUID());
+
+    expect(result).toEqual({ outcome: 'not-found' });
   });
 });
 

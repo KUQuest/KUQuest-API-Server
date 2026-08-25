@@ -14,6 +14,15 @@ import {
 import { authUser } from './auth.schema';
 import { file } from './file.schema';
 
+export const tag = pgTable(
+  'tag',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name').notNull(),
+  },
+  (table) => [unique('tag_name_key').on(table.name)],
+);
+
 export const profileCertificate = pgTable(
   'profile_certificate',
   {
@@ -25,6 +34,7 @@ export const profileCertificate = pgTable(
     issuer: text('issuer').notNull(),
     issuedAt: date('issued_at').notNull(),
     imageFileId: uuid('image_file_id').references(() => file.id),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -40,6 +50,7 @@ export const profilePortfolioItem = pgTable(
       .references(() => authUser.id),
     title: text('title').notNull(),
     description: text('description'),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -80,6 +91,7 @@ export const profileWorkExperience = pgTable(
     description: text('description'),
     startedAt: date('started_at').notNull(),
     endedAt: date('ended_at'),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

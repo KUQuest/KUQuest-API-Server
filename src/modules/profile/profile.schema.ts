@@ -13,12 +13,7 @@ export const avatarUploadSchema = t.Object(
   },
 );
 
-export const avatarUploadResponseSchema = t.Object({
-  success: t.Literal(true),
-  data: t.Object({
-    fileId: t.String({ format: 'uuid' }),
-  }),
-});
+const versionSchema = t.Integer({ minimum: 1 });
 
 const departmentSchema = t.Object({
   id: t.String({ format: 'uuid' }),
@@ -33,9 +28,25 @@ const avatarSchema = t.Object({
   url: t.String({ format: 'uri' }),
 });
 
+export const profileAvatarSchema = t.Nullable(avatarSchema);
+
+export const avatarUploadResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    fileId: t.Nullable(t.String({ format: 'uuid' })),
+    version: versionSchema,
+    avatar: profileAvatarSchema,
+  }),
+});
+
 const occupationSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   name: t.Union([t.Literal('Staff'), t.Literal('Lecturer'), t.Literal('Student')]),
+});
+
+const tagSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  name: t.String(),
 });
 
 const nameSchema = t.String({ minLength: 1, maxLength: 100, pattern: '\\S' });
@@ -54,6 +65,7 @@ export const profileUpdateSchema = t.Object(
 export const profileResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
+    version: versionSchema,
     email: t.String({ format: 'email', example: 'student@ku.th' }),
     firstName: t.String(),
     lastName: t.String(),
@@ -64,17 +76,66 @@ export const profileResponseSchema = t.Object({
     department: t.Nullable(departmentSchema),
     avatar: t.Nullable(avatarSchema),
     occupation: t.Nullable(occupationSchema),
+    tags: t.Array(tagSchema, { maxItems: 3 }),
+  }),
+});
+
+const ratingDistributionSchema = t.Object({
+  '5': t.Integer({ minimum: 0 }),
+  '4': t.Integer({ minimum: 0 }),
+  '3': t.Integer({ minimum: 0 }),
+  '2': t.Integer({ minimum: 0 }),
+  '1': t.Integer({ minimum: 0 }),
+});
+
+export const reputationResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    totalQuests: t.Integer({ minimum: 0 }),
+    rating: t.Object({
+      average: t.Nullable(t.Number({ minimum: 0, maximum: 5 })),
+      count: t.Integer({ minimum: 0 }),
+      distribution: ratingDistributionSchema,
+    }),
+  }),
+});
+
+const reviewSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  reviewer: t.Object({
+    displayName: t.String(),
+    avatar: t.Optional(t.Nullable(t.Object({ url: t.String({ format: 'uri' }) }))),
+  }),
+  rating: t.Integer({ minimum: 1, maximum: 5 }),
+  comment: t.String(),
+  createdAt: t.String({ format: 'date-time' }),
+  quest: t.Optional(t.Nullable(t.Object({
+    id: t.String({ format: 'uuid' }),
+    title: t.String(),
+  }))),
+});
+
+export const reviewsQuerySchema = t.Object({
+  rating: t.Optional(t.Integer({ minimum: 1, maximum: 5 })),
+});
+
+export const reviewsResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    items: t.Array(reviewSchema),
+    total: t.Integer({ minimum: 0 }),
+    nextCursor: t.Nullable(t.String()),
   }),
 });
 
 export const publicProfileParamsSchema = t.Object({
-  // Better Auth Student IDs are text identifiers, not UUIDs.
-  userId: t.String({ minLength: 1 }),
+  userId: t.String({ format: 'uuid' }),
 });
 
 export const publicProfileResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
+    version: versionSchema,
     firstName: t.String(),
     lastName: t.String(),
     bio: t.Nullable(t.String()),

@@ -11,8 +11,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { inArray } from 'drizzle-orm';
 
-const studentA = `test-academic-registration-a-${randomUUID()}`;
-const studentB = `test-academic-registration-b-${randomUUID()}`;
+const studentA = randomUUID();
+const studentB = randomUUID();
 const studentAId = `65${Math.floor(10_000_000 + Math.random() * 89_999_999)}`;
 const studentBId = `66${Math.floor(10_000_000 + Math.random() * 89_999_999)}`;
 
@@ -173,7 +173,7 @@ describe('academic registration completeness', () => {
     const studentOccupationId = options.occupations.find(({ name }) => name === 'Student')?.id;
     const lecturerOccupationId = options.occupations.find(({ name }) => name === 'Lecturer')?.id;
 
-    const lecturer = `test-academic-registration-lecturer-${randomUUID()}`;
+    const lecturer = randomUUID();
     await db.insert(authUser).values({
       id: lecturer,
       email: `${lecturer}@ku.th`,

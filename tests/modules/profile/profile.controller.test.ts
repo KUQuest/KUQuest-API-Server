@@ -5,8 +5,11 @@ import * as portfolioModule from '@/modules/portfolio';
 import { portfolioStorage } from '@/modules/portfolio/portfolio.storage';
 import * as workExperienceModule from '@/modules/work-experience';
 import {
+  deleteAvatar,
   getOwnProfile,
   getPublicProfile,
+  getReputation,
+  getReviews,
   setAvatar,
   updateOwnProfile,
 } from '@/modules/profile/profile.controller';
@@ -26,6 +29,15 @@ const session = {
   },
 };
 
+const invokeDeleteAvatar = () => {
+  const set: { status?: number | string } = {};
+
+  return {
+    result: deleteAvatar({ session: session as never, set: set as never }),
+    set,
+  };
+};
+
 const invokeSetAvatar = (avatar: File) => {
   const set: { status?: number | string } = {};
 
@@ -43,6 +55,24 @@ afterEach(() => {
   mock.restore();
 });
 
+describe('deleteAvatar', () => {
+  it('returns a null fileId when the current avatar is removed', async () => {
+    spyOn(profileService, 'removeStudentAvatar').mockResolvedValue({
+      bucket: null,
+      objectKey: null,
+      version: 2,
+    });
+
+    const { result, set } = invokeDeleteAvatar();
+
+    expect(await result).toEqual({
+      success: true,
+      data: { fileId: null, version: 2, avatar: null },
+    });
+    expect(set.status).toBeUndefined();
+  });
+});
+
 describe('setAvatar', () => {
   it('returns only the stored file reference', async () => {
     const storedAvatar = {
@@ -52,18 +82,20 @@ describe('setAvatar', () => {
       sizeBytes: 12,
     };
     spyOn(avatarStorage, 'upload').mockResolvedValue(storedAvatar);
+    spyOn(avatarStorage, 'linkFor').mockReturnValue('http://localhost:9000/kuquest/avatars/student-1/current.png');
     spyOn(db, 'transaction').mockResolvedValue({
       fileId,
       previousFileId: null,
+      version: 2,
     });
 
     const { result, set } = invokeSetAvatar(
       new File(['image-content'], 'avatar.png', { type: 'image/png' }),
     );
 
-    expect(await result).toEqual({
+    expect(await result).toMatchObject({
       success: true,
-      data: { fileId },
+      data: { fileId, version: 2, avatar: expect.any(Object) },
     });
     expect(set.status).toBeUndefined();
     expect(avatarStorage.upload).toHaveBeenCalledWith(
@@ -79,9 +111,11 @@ describe('setAvatar', () => {
       contentType: 'image/png',
       sizeBytes: 12,
     });
+    spyOn(avatarStorage, 'linkFor').mockReturnValue('http://localhost:9000/kuquest/avatars/student-1/current.png');
     spyOn(db, 'transaction').mockResolvedValue({
       fileId,
       previousFileId,
+      version: 2,
     });
     const limit = mock(async () => [{
       bucket: 'old-avatar-bucket',
@@ -102,9 +136,9 @@ describe('setAvatar', () => {
       new File(['image-content'], 'avatar.png', { type: 'image/png' }),
     );
 
-    expect(await result).toEqual({
+    expect(await result).toMatchObject({
       success: true,
-      data: { fileId },
+      data: { fileId, version: 2, avatar: expect.any(Object) },
     });
     expect(limit).toHaveBeenCalledTimes(1);
     expect(avatarStorage.delete).toHaveBeenCalledWith(
@@ -178,6 +212,7 @@ describe('setAvatar', () => {
 });
 
 const storedProfile = {
+  version: 1,
   email: 'student@ku.th',
   firstName: 'Student',
   lastName: 'One',
@@ -188,6 +223,7 @@ const storedProfile = {
   department: null,
   occupation: null,
   avatar: null,
+  tags: [],
 };
 
 const storedAvatar = {
@@ -220,6 +256,7 @@ const invokeUpdateOwnProfile = (body: Record<string, unknown> = { bio: 'a new bi
 
   return {
     result: updateOwnProfile({
+      request: new Request('http://localhost/api/v1/profile', { method: 'PATCH' }),
       body: body as never,
       session: session as never,
       set: set as never,
@@ -285,9 +322,33 @@ describe('getOwnProfile', () => {
   });
 });
 
+describe('getReputation', () => {
+  it('returns completed Quest count with an empty rating aggregate until Reviews exist', async () => {
+    spyOn(profileService, 'getProfileReputation').mockResolvedValue({
+      totalQuests: 3,
+      rating: { average: null, count: 0, distribution: { '5': 0, '4': 0, '3': 0, '2': 0, '1': 0 } },
+    });
+
+    expect(await getReputation({ session: session as never, set: {} as never })).toEqual({
+      success: true,
+      data: expect.objectContaining({ totalQuests: 3 }),
+    });
+  });
+});
+
+describe('getReviews', () => {
+  it('returns the empty Reviews collection until the Review domain is available', async () => {
+    expect(await getReviews()).toEqual({
+      success: true,
+      data: { items: [], total: 0, nextCursor: null },
+    });
+  });
+});
+
 describe('getPublicProfile', () => {
   it('inlines public resources without exposing private fields', async () => {
     spyOn(profileService, 'getPublicProfile').mockResolvedValue({
+      version: 1,
       firstName: 'Student',
       lastName: 'Two',
       bio: 'A public bio',
@@ -307,6 +368,7 @@ describe('getPublicProfile', () => {
     spyOn(portfolioModule, 'listPortfolio').mockResolvedValue([
       {
         id: 'portfolio-1',
+        version: 1,
         title: 'Capstone Project',
         description: 'A project description',
         createdAt: new Date('2025-01-01T00:00:00.000Z'),
@@ -323,6 +385,7 @@ describe('getPublicProfile', () => {
     spyOn(certificateModule, 'listCertificates').mockResolvedValue([
       {
         id: 'certificate-1',
+        version: 1,
         name: 'AWS Certified Cloud Practitioner',
         issuer: 'Amazon Web Services',
         issuedAt: '2024-05-01',
@@ -336,6 +399,7 @@ describe('getPublicProfile', () => {
     spyOn(workExperienceModule, 'listWorkExperiences').mockResolvedValue([
       {
         id: 'experience-1',
+        version: 1,
         title: 'Senior Peer Tutor',
         employmentType: 'Part-time',
         organization: 'University Academic Center',
@@ -355,6 +419,7 @@ describe('getPublicProfile', () => {
     expect(await result).toEqual({
       success: true,
       data: {
+        version: 1,
         firstName: 'Student',
         lastName: 'Two',
         bio: 'A public bio',
@@ -369,6 +434,7 @@ describe('getPublicProfile', () => {
         experience: [
           {
             id: 'experience-1',
+            version: 1,
             title: 'Senior Peer Tutor',
             employmentType: 'Part-time',
             organization: 'University Academic Center',
@@ -382,6 +448,7 @@ describe('getPublicProfile', () => {
         portfolio: [
           {
             id: 'portfolio-1',
+            version: 1,
             title: 'Capstone Project',
             description: 'A project description',
             createdAt: '2025-01-01T00:00:00.000Z',
@@ -397,6 +464,7 @@ describe('getPublicProfile', () => {
         certificates: [
           {
             id: 'certificate-1',
+            version: 1,
             name: 'AWS Certified Cloud Practitioner',
             issuer: 'Amazon Web Services',
             issuedAt: '2024-05-01',
@@ -434,16 +502,17 @@ describe('getPublicProfile', () => {
 });
 
 describe('updateOwnProfile', () => {
-  it('answers a completed update without echoing the profile back', async () => {
+  it('answers a completed update with the refreshed profile', async () => {
     spyOn(profileService, 'updateProfile').mockResolvedValue('updated');
+    spyOn(profileService, 'getProfile').mockResolvedValue(storedProfile);
 
     const { result, set } = invokeUpdateOwnProfile();
 
-    expect(await result).toEqual({ success: true });
+    expect(await result).toEqual({ success: true, data: storedProfile });
     expect(set.status).toBeUndefined();
     expect(profileService.updateProfile).toHaveBeenCalledWith(studentAuthId, {
       bio: 'a new bio',
-    });
+    }, undefined);
   });
 
   it('reports a missing student as not found', async () => {

@@ -70,6 +70,9 @@ export const auth = betterAuth({
     modelName: 'authVerification',
   },
   advanced: {
+    database: {
+      generateId: 'uuid',
+    },
     defaultCookieAttributes,
   },
   trustedOrigins: getTrustedOrigins(true),
