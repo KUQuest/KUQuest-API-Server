@@ -1,6 +1,6 @@
 {
-  "id": "3a0e5e4f-0993-4f57-bd98-8d2584dfc1e6",
-  "prevId": "0ae567bf-2500-4138-870d-8353078c699f",
+  "id": "3e35c2bc-f7a2-45ca-adeb-0fd84f14039e",
+  "prevId": "3f3b45aa-1171-4ff0-b738-ea72bf39708d",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -978,55 +978,55 @@
         },
         "revision": {
           "name": "revision",
-          "type": "bigint",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "minimum_top_up_baht": {
-          "name": "minimum_top_up_baht",
-          "type": "bigint",
+        "minimum_top_up_satang": {
+          "name": "minimum_top_up_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "maximum_top_up_baht": {
-          "name": "maximum_top_up_baht",
-          "type": "bigint",
+        "maximum_top_up_satang": {
+          "name": "maximum_top_up_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "minimum_funded_job_baht": {
-          "name": "minimum_funded_job_baht",
-          "type": "bigint",
+        "minimum_funding_reservation_satang": {
+          "name": "minimum_funding_reservation_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "maximum_funded_job_baht": {
-          "name": "maximum_funded_job_baht",
-          "type": "bigint",
+        "maximum_funding_reservation_satang": {
+          "name": "maximum_funding_reservation_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "minimum_earnings_conversion_baht": {
-          "name": "minimum_earnings_conversion_baht",
-          "type": "bigint",
+        "minimum_earnings_conversion_satang": {
+          "name": "minimum_earnings_conversion_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "maximum_earnings_conversion_baht": {
-          "name": "maximum_earnings_conversion_baht",
-          "type": "bigint",
+        "maximum_earnings_conversion_satang": {
+          "name": "maximum_earnings_conversion_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "minimum_payout_baht": {
-          "name": "minimum_payout_baht",
-          "type": "bigint",
+        "minimum_payout_satang": {
+          "name": "minimum_payout_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "maximum_payout_baht": {
-          "name": "maximum_payout_baht",
-          "type": "bigint",
+        "maximum_payout_satang": {
+          "name": "maximum_payout_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
@@ -1036,12 +1036,19 @@
           "primaryKey": false,
           "notNull": true
         },
-        "top_up_provider_fee_satang": {
-          "name": "top_up_provider_fee_satang",
-          "type": "bigint",
+        "fee_rounding_mode": {
+          "name": "fee_rounding_mode",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "0"
+          "default": "'UP'"
+        },
+        "top_up_provider_fee_satang": {
+          "name": "top_up_provider_fee_satang",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "top_up_provider_tax_bps": {
           "name": "top_up_provider_tax_bps",
@@ -1052,10 +1059,10 @@
         },
         "payout_provider_fee_satang": {
           "name": "payout_provider_fee_satang",
-          "type": "bigint",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": "0"
+          "default": 0
         },
         "payout_provider_tax_bps": {
           "name": "payout_provider_tax_bps",
@@ -1064,33 +1071,15 @@
           "notNull": true,
           "default": 0
         },
-        "dispute_two_person_threshold_baht": {
-          "name": "dispute_two_person_threshold_baht",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
         "quote_lifetime_seconds": {
           "name": "quote_lifetime_seconds",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "review_window_seconds": {
-          "name": "review_window_seconds",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "default_application_window_seconds": {
-          "name": "default_application_window_seconds",
-          "type": "bigint",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
         "authored_by_admin_id": {
           "name": "authored_by_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -1148,20 +1137,24 @@
       },
       "policies": {},
       "checkConstraints": {
-        "payment_money_policy_revisions_amount_range_check": {
-          "name": "payment_money_policy_revisions_amount_range_check",
-          "value": "\"payment_money_policy_revisions\".\"minimum_top_up_baht\" > 0 AND \"payment_money_policy_revisions\".\"maximum_top_up_baht\" >= \"payment_money_policy_revisions\".\"minimum_top_up_baht\" AND \"payment_money_policy_revisions\".\"minimum_funded_job_baht\" > 0 AND \"payment_money_policy_revisions\".\"maximum_funded_job_baht\" >= \"payment_money_policy_revisions\".\"minimum_funded_job_baht\" AND \"payment_money_policy_revisions\".\"minimum_earnings_conversion_baht\" > 0 AND \"payment_money_policy_revisions\".\"maximum_earnings_conversion_baht\" >= \"payment_money_policy_revisions\".\"minimum_earnings_conversion_baht\" AND \"payment_money_policy_revisions\".\"minimum_payout_baht\" > 0 AND \"payment_money_policy_revisions\".\"maximum_payout_baht\" >= \"payment_money_policy_revisions\".\"minimum_payout_baht\""
+        "payment_money_policy_amounts_check": {
+          "name": "payment_money_policy_amounts_check",
+          "value": "\"payment_money_policy_revisions\".\"minimum_top_up_satang\" > 0 AND \"payment_money_policy_revisions\".\"maximum_top_up_satang\" >= \"payment_money_policy_revisions\".\"minimum_top_up_satang\" AND \"payment_money_policy_revisions\".\"minimum_funding_reservation_satang\" > 0 AND \"payment_money_policy_revisions\".\"maximum_funding_reservation_satang\" >= \"payment_money_policy_revisions\".\"minimum_funding_reservation_satang\" AND \"payment_money_policy_revisions\".\"minimum_earnings_conversion_satang\" > 0 AND \"payment_money_policy_revisions\".\"maximum_earnings_conversion_satang\" >= \"payment_money_policy_revisions\".\"minimum_earnings_conversion_satang\" AND \"payment_money_policy_revisions\".\"minimum_payout_satang\" > 0 AND \"payment_money_policy_revisions\".\"maximum_payout_satang\" >= \"payment_money_policy_revisions\".\"minimum_payout_satang\""
         },
-        "payment_money_policy_revisions_fee_check": {
-          "name": "payment_money_policy_revisions_fee_check",
+        "payment_money_policy_rates_check": {
+          "name": "payment_money_policy_rates_check",
           "value": "\"payment_money_policy_revisions\".\"platform_fee_bps\" BETWEEN 0 AND 10000 AND \"payment_money_policy_revisions\".\"top_up_provider_fee_satang\" >= 0 AND \"payment_money_policy_revisions\".\"top_up_provider_tax_bps\" BETWEEN 0 AND 10000 AND \"payment_money_policy_revisions\".\"payout_provider_fee_satang\" >= 0 AND \"payment_money_policy_revisions\".\"payout_provider_tax_bps\" BETWEEN 0 AND 10000"
         },
-        "payment_money_policy_revisions_duration_check": {
-          "name": "payment_money_policy_revisions_duration_check",
-          "value": "\"payment_money_policy_revisions\".\"quote_lifetime_seconds\" > 0 AND \"payment_money_policy_revisions\".\"review_window_seconds\" > 0 AND \"payment_money_policy_revisions\".\"default_application_window_seconds\" > 0"
+        "payment_money_policy_rounding_check": {
+          "name": "payment_money_policy_rounding_check",
+          "value": "\"payment_money_policy_revisions\".\"fee_rounding_mode\" = 'UP'"
         },
-        "payment_money_policy_revisions_effective_range_check": {
-          "name": "payment_money_policy_revisions_effective_range_check",
+        "payment_money_policy_windows_check": {
+          "name": "payment_money_policy_windows_check",
+          "value": "\"payment_money_policy_revisions\".\"quote_lifetime_seconds\" > 0"
+        },
+        "payment_money_policy_effective_check": {
+          "name": "payment_money_policy_effective_check",
           "value": "\"payment_money_policy_revisions\".\"effective_until\" IS NULL OR \"payment_money_policy_revisions\".\"effective_until\" > \"payment_money_policy_revisions\".\"effective_from\""
         }
       },
@@ -3411,9 +3404,9 @@
           "notNull": true,
           "default": "'DRAFT'"
         },
-        "wage_baht": {
-          "name": "wage_baht",
-          "type": "bigint",
+        "reward_satang": {
+          "name": "reward_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
@@ -3642,9 +3635,9 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "quest_wage_check": {
-          "name": "quest_wage_check",
-          "value": "\"quest\".\"wage_baht\" > 0"
+        "quest_reward_check": {
+          "name": "quest_reward_check",
+          "value": "\"quest\".\"reward_satang\" > 0"
         },
         "quest_headcount_check": {
           "name": "quest_headcount_check",
@@ -4729,6 +4722,160 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.review": {
+      "name": "review",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "quest_id": {
+          "name": "quest_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reviewer_id": {
+          "name": "reviewer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reviewee_id": {
+          "name": "reviewee_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rating": {
+          "name": "rating",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "comment": {
+          "name": "comment",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "review_quest_id_idx": {
+          "name": "review_quest_id_idx",
+          "columns": [
+            {
+              "expression": "quest_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "review_reviewee_id_idx": {
+          "name": "review_reviewee_id_idx",
+          "columns": [
+            {
+              "expression": "reviewee_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "review_quest_id_quest_id_fk": {
+          "name": "review_quest_id_quest_id_fk",
+          "tableFrom": "review",
+          "tableTo": "quest",
+          "columnsFrom": [
+            "quest_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "review_reviewer_id_auth_user_id_fk": {
+          "name": "review_reviewer_id_auth_user_id_fk",
+          "tableFrom": "review",
+          "tableTo": "auth_user",
+          "columnsFrom": [
+            "reviewer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "review_reviewee_id_auth_user_id_fk": {
+          "name": "review_reviewee_id_auth_user_id_fk",
+          "tableFrom": "review",
+          "tableTo": "auth_user",
+          "columnsFrom": [
+            "reviewee_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "review_quest_reviewer_reviewee_key": {
+          "name": "review_quest_reviewer_reviewee_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "quest_id",
+            "reviewer_id",
+            "reviewee_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "review_rating_check": {
+          "name": "review_rating_check",
+          "value": "\"review\".\"rating\" BETWEEN 1 AND 5"
+        },
+        "review_participants_check": {
+          "name": "review_participants_check",
+          "value": "\"review\".\"reviewer_id\" <> \"review\".\"reviewee_id\""
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.wallet_activities": {
       "name": "wallet_activities",
       "schema": "",
@@ -4740,9 +4887,15 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "ledger_transaction_id": {
+          "name": "ledger_transaction_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -4758,33 +4911,33 @@
           "primaryKey": false,
           "notNull": true
         },
-        "spending_delta_baht": {
-          "name": "spending_delta_baht",
-          "type": "bigint",
+        "spending_delta_satang": {
+          "name": "spending_delta_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": "0"
+          "default": 0
         },
-        "earnings_delta_baht": {
-          "name": "earnings_delta_baht",
-          "type": "bigint",
+        "earnings_delta_satang": {
+          "name": "earnings_delta_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": "0"
+          "default": 0
         },
-        "job_held_delta_baht": {
-          "name": "job_held_delta_baht",
-          "type": "bigint",
+        "funding_reserved_delta_satang": {
+          "name": "funding_reserved_delta_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": "0"
+          "default": 0
         },
-        "payout_reserved_delta_baht": {
-          "name": "payout_reserved_delta_baht",
-          "type": "bigint",
+        "payout_reserved_delta_satang": {
+          "name": "payout_reserved_delta_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": "0"
+          "default": 0
         },
         "resource_type": {
           "name": "resource_type",
@@ -4830,6 +4983,19 @@
         }
       },
       "foreignKeys": {
+        "wallet_activities_ledger_transaction_id_wallet_ledger_transactions_id_fk": {
+          "name": "wallet_activities_ledger_transaction_id_wallet_ledger_transactions_id_fk",
+          "tableFrom": "wallet_activities",
+          "tableTo": "wallet_ledger_transactions",
+          "columnsFrom": [
+            "ledger_transaction_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "wallet_activities_user_id_auth_user_id_fk": {
           "name": "wallet_activities_user_id_auth_user_id_fk",
           "tableFrom": "wallet_activities",
@@ -4845,236 +5011,25 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "wallet_activities_type_check": {
-          "name": "wallet_activities_type_check",
-          "value": "\"wallet_activities\".\"type\" IN ('TOP_UP', 'SPEND', 'EARN', 'HOLD', 'RELEASE')"
-        },
-        "wallet_activities_status_check": {
-          "name": "wallet_activities_status_check",
-          "value": "\"wallet_activities\".\"activity_status\" IN ('PENDING', 'COMPLETED', 'FAILED')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.wallet_adjustments": {
-      "name": "wallet_adjustments",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "wallet_id": {
-          "name": "wallet_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "admin_id": {
-          "name": "admin_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "compartment": {
-          "name": "compartment",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "amount_baht": {
-          "name": "amount_baht",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ledger_transaction_id": {
-          "name": "ledger_transaction_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "wallet_adjustments_wallet_id_wallet_wallets_id_fk": {
-          "name": "wallet_adjustments_wallet_id_wallet_wallets_id_fk",
-          "tableFrom": "wallet_adjustments",
-          "tableTo": "wallet_wallets",
-          "columnsFrom": [
-            "wallet_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "wallet_adjustments_admin_id_auth_admin_id_fk": {
-          "name": "wallet_adjustments_admin_id_auth_admin_id_fk",
-          "tableFrom": "wallet_adjustments",
-          "tableTo": "auth_admin",
-          "columnsFrom": [
-            "admin_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "wallet_adjustments_ledger_transaction_id_wallet_ledger_transactions_id_fk": {
-          "name": "wallet_adjustments_ledger_transaction_id_wallet_ledger_transactions_id_fk",
-          "tableFrom": "wallet_adjustments",
-          "tableTo": "wallet_ledger_transactions",
-          "columnsFrom": [
-            "ledger_transaction_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "wallet_adjustments_ledger_transaction_id_unique": {
-          "name": "wallet_adjustments_ledger_transaction_id_unique",
+        "wallet_activities_transaction_user_key": {
+          "name": "wallet_activities_transaction_user_key",
           "nullsNotDistinct": false,
           "columns": [
-            "ledger_transaction_id"
+            "ledger_transaction_id",
+            "user_id"
           ]
         }
       },
       "policies": {},
       "checkConstraints": {
-        "wallet_adjustments_compartment_check": {
-          "name": "wallet_adjustments_compartment_check",
-          "value": "\"wallet_adjustments\".\"compartment\" IN ('SPENDING', 'EARNINGS', 'HELD_FOR_JOBS', 'RESERVED_FOR_PAYOUTS')"
+        "wallet_activities_type_check": {
+          "name": "wallet_activities_type_check",
+          "value": "\"wallet_activities\".\"type\" IN ('TOP_UP', 'SPEND', 'EARN', 'HOLD', 'RELEASE', 'CONVERT')"
         },
-        "wallet_adjustments_amount_check": {
-          "name": "wallet_adjustments_amount_check",
-          "value": "\"wallet_adjustments\".\"amount_baht\" <> 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.wallet_amounts_owed": {
-      "name": "wallet_amounts_owed",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "amount_baht": {
-          "name": "amount_baht",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "recovered_baht": {
-          "name": "recovered_baht",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "0"
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_type": {
-          "name": "source_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_id": {
-          "name": "source_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "owed_status": {
-          "name": "owed_status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "wallet_amounts_owed_user_id_auth_user_id_fk": {
-          "name": "wallet_amounts_owed_user_id_auth_user_id_fk",
-          "tableFrom": "wallet_amounts_owed",
-          "tableTo": "auth_user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "wallet_amounts_owed_status_check": {
-          "name": "wallet_amounts_owed_status_check",
-          "value": "\"wallet_amounts_owed\".\"owed_status\" IN ('OUTSTANDING', 'RECOVERED', 'WRITTEN_OFF')"
-        },
-        "wallet_amounts_owed_range_check": {
-          "name": "wallet_amounts_owed_range_check",
-          "value": "\"wallet_amounts_owed\".\"amount_baht\" > 0 AND \"wallet_amounts_owed\".\"recovered_baht\" >= 0 AND \"wallet_amounts_owed\".\"recovered_baht\" <= \"wallet_amounts_owed\".\"amount_baht\""
+        "wallet_activities_status_check": {
+          "name": "wallet_activities_status_check",
+          "value": "\"wallet_activities\".\"activity_status\" IN ('PENDING', 'COMPLETED', 'FAILED')"
         }
       },
       "isRLSEnabled": false
@@ -5090,20 +5045,32 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
+        "principal_user_id": {
+          "name": "principal_user_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "amount_baht": {
-          "name": "amount_baht",
-          "type": "bigint",
+        "amount_satang": {
+          "name": "amount_satang",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "business_reference": {
+          "name": "business_reference",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "ledger_transaction_id": {
           "name": "ledger_transaction_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key_id": {
+          "name": "idempotency_key_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -5118,12 +5085,12 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "wallet_earnings_conversions_user_id_auth_user_id_fk": {
-          "name": "wallet_earnings_conversions_user_id_auth_user_id_fk",
+        "wallet_earnings_conversions_principal_user_id_auth_user_id_fk": {
+          "name": "wallet_earnings_conversions_principal_user_id_auth_user_id_fk",
           "tableFrom": "wallet_earnings_conversions",
           "tableTo": "auth_user",
           "columnsFrom": [
-            "user_id"
+            "principal_user_id"
           ],
           "columnsTo": [
             "id"
@@ -5143,15 +5110,42 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "wallet_earnings_conversions_idempotency_key_id_wallet_idempotency_keys_id_fk": {
+          "name": "wallet_earnings_conversions_idempotency_key_id_wallet_idempotency_keys_id_fk",
+          "tableFrom": "wallet_earnings_conversions",
+          "tableTo": "wallet_idempotency_keys",
+          "columnsFrom": [
+            "idempotency_key_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "wallet_earnings_conversions_business_reference_unique": {
+          "name": "wallet_earnings_conversions_business_reference_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "business_reference"
+          ]
+        },
         "wallet_earnings_conversions_ledger_transaction_id_unique": {
           "name": "wallet_earnings_conversions_ledger_transaction_id_unique",
           "nullsNotDistinct": false,
           "columns": [
             "ledger_transaction_id"
+          ]
+        },
+        "wallet_earnings_conversions_idempotency_key_id_unique": {
+          "name": "wallet_earnings_conversions_idempotency_key_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "idempotency_key_id"
           ]
         }
       },
@@ -5159,7 +5153,7 @@
       "checkConstraints": {
         "wallet_earnings_conversions_amount_check": {
           "name": "wallet_earnings_conversions_amount_check",
-          "value": "\"wallet_earnings_conversions\".\"amount_baht\" > 0"
+          "value": "\"wallet_earnings_conversions\".\"amount_satang\" > 0 AND \"wallet_earnings_conversions\".\"amount_satang\" <= 2000000000"
         }
       },
       "isRLSEnabled": false
@@ -5177,7 +5171,7 @@
         },
         "principal_user_id": {
           "name": "principal_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -5211,17 +5205,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "response_status": {
-          "name": "response_status",
-          "type": "integer",
+        "processing_status": {
+          "name": "processing_status",
+          "type": "text",
           "primaryKey": false,
-          "notNull": false
-        },
-        "response_body": {
-          "name": "response_body",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "'PROCESSING'"
         },
         "created_at": {
           "name": "created_at",
@@ -5229,6 +5218,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "expires_at": {
           "name": "expires_at",
@@ -5282,7 +5277,16 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "wallet_idempotency_keys_processing_status_check": {
+          "name": "wallet_idempotency_keys_processing_status_check",
+          "value": "\"wallet_idempotency_keys\".\"processing_status\" IN ('PROCESSING', 'COMPLETED')"
+        },
+        "wallet_idempotency_keys_completion_check": {
+          "name": "wallet_idempotency_keys_completion_check",
+          "value": "(\"wallet_idempotency_keys\".\"processing_status\" = 'COMPLETED') = (\"wallet_idempotency_keys\".\"completed_at\" IS NOT NULL)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.wallet_ledger_accounts": {
@@ -5308,21 +5312,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "currency": {
-          "name": "currency",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'THB'"
-        },
         "wallet_id": {
           "name": "wallet_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "user_id": {
-          "name": "user_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -5372,19 +5363,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "wallet_ledger_accounts_user_id_auth_user_id_fk": {
-          "name": "wallet_ledger_accounts_user_id_auth_user_id_fk",
-          "tableFrom": "wallet_ledger_accounts",
-          "tableTo": "auth_user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5401,18 +5379,10 @@
       "checkConstraints": {
         "wallet_ledger_accounts_type_check": {
           "name": "wallet_ledger_accounts_type_check",
-          "value": "\"wallet_ledger_accounts\".\"type\" IN ('SPENDING', 'EARNINGS', 'HELD_FOR_JOBS', 'RESERVED_FOR_PAYOUTS', 'PLATFORM_REVENUE', 'PLATFORM_SUSPENSE')"
+          "value": "\"wallet_ledger_accounts\".\"type\" IN ('SPENDING', 'EARNINGS', 'FUNDING_RESERVED', 'RESERVED_FOR_PAYOUTS', 'PLATFORM_REVENUE', 'PLATFORM_SUSPENSE')"
         },
-        "wallet_ledger_accounts_currency_check": {
-          "name": "wallet_ledger_accounts_currency_check",
-          "value": "\"wallet_ledger_accounts\".\"currency\" = 'THB'"
-        },
-        "wallet_ledger_accounts_owner_pair_check": {
-          "name": "wallet_ledger_accounts_owner_pair_check",
-          "value": "(\"wallet_ledger_accounts\".\"wallet_id\" IS NULL) = (\"wallet_ledger_accounts\".\"user_id\" IS NULL)"
-        },
-        "wallet_ledger_accounts_platform_type_check": {
-          "name": "wallet_ledger_accounts_platform_type_check",
+        "wallet_ledger_accounts_platform_check": {
+          "name": "wallet_ledger_accounts_platform_check",
           "value": "(\"wallet_ledger_accounts\".\"wallet_id\" IS NULL) = (\"wallet_ledger_accounts\".\"type\" IN ('PLATFORM_REVENUE', 'PLATFORM_SUSPENSE'))"
         }
       },
@@ -5441,18 +5411,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "amount_baht": {
-          "name": "amount_baht",
-          "type": "bigint",
+        "amount_satang": {
+          "name": "amount_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
-        },
-        "currency": {
-          "name": "currency",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'THB'"
         },
         "created_at": {
           "name": "created_at",
@@ -5534,11 +5497,7 @@
       "checkConstraints": {
         "wallet_ledger_postings_amount_check": {
           "name": "wallet_ledger_postings_amount_check",
-          "value": "\"wallet_ledger_postings\".\"amount_baht\" <> 0"
-        },
-        "wallet_ledger_postings_currency_check": {
-          "name": "wallet_ledger_postings_currency_check",
-          "value": "\"wallet_ledger_postings\".\"currency\" = 'THB'"
+          "value": "\"wallet_ledger_postings\".\"amount_satang\" <> 0 AND \"wallet_ledger_postings\".\"amount_satang\" BETWEEN -2000000000 AND 2000000000"
         }
       },
       "isRLSEnabled": false
@@ -5580,7 +5539,7 @@
         },
         "created_by_user_id": {
           "name": "created_by_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -5667,7 +5626,7 @@
       "checkConstraints": {
         "wallet_ledger_transactions_event_type_check": {
           "name": "wallet_ledger_transactions_event_type_check",
-          "value": "\"wallet_ledger_transactions\".\"event_type\" IN ('TOP_UP', 'PAYOUT', 'ESCROW_HOLD', 'ESCROW_RELEASE', 'ADJUSTMENT', 'EARNINGS_CONVERSION')"
+          "value": "\"wallet_ledger_transactions\".\"event_type\" IN ('TOP_UP', 'PAYOUT', 'FUNDING_RESERVE', 'FUNDING_RELEASE', 'ADJUSTMENT', 'EARNINGS_CONVERSION')"
         }
       },
       "isRLSEnabled": false
@@ -5703,13 +5662,13 @@
         },
         "actor_user_id": {
           "name": "actor_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "actor_admin_id": {
           "name": "actor_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -5745,6 +5704,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "wallet_status_history_initial_uidx": {
+          "name": "wallet_status_history_initial_uidx",
+          "columns": [
+            {
+              "expression": "wallet_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"wallet_status_history\".\"from_status\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -5795,12 +5770,12 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "wallet_status_history_from_status_check": {
-          "name": "wallet_status_history_from_status_check",
+        "wallet_status_history_from_check": {
+          "name": "wallet_status_history_from_check",
           "value": "\"wallet_status_history\".\"from_status\" IS NULL OR \"wallet_status_history\".\"from_status\" IN ('ACTIVE', 'FROZEN', 'SUSPENDED', 'CLOSED')"
         },
-        "wallet_status_history_to_status_check": {
-          "name": "wallet_status_history_to_status_check",
+        "wallet_status_history_to_check": {
+          "name": "wallet_status_history_to_check",
           "value": "\"wallet_status_history\".\"to_status\" IN ('ACTIVE', 'FROZEN', 'SUSPENDED', 'CLOSED')"
         },
         "wallet_status_history_actor_check": {
@@ -5823,37 +5798,37 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "spending_balance_baht": {
-          "name": "spending_balance_baht",
-          "type": "bigint",
+        "spending_balance_satang": {
+          "name": "spending_balance_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": "0"
+          "default": 0
         },
-        "earnings_balance_baht": {
-          "name": "earnings_balance_baht",
-          "type": "bigint",
+        "earnings_balance_satang": {
+          "name": "earnings_balance_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": "0"
+          "default": 0
         },
-        "held_for_jobs_baht": {
-          "name": "held_for_jobs_baht",
-          "type": "bigint",
+        "funding_reserved_satang": {
+          "name": "funding_reserved_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": "0"
+          "default": 0
         },
-        "reserved_for_payouts_baht": {
-          "name": "reserved_for_payouts_baht",
-          "type": "bigint",
+        "reserved_for_payouts_satang": {
+          "name": "reserved_for_payouts_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": "0"
+          "default": 0
         },
         "wallet_status": {
           "name": "wallet_status",
@@ -5905,13 +5880,17 @@
       },
       "policies": {},
       "checkConstraints": {
-        "wallet_wallets_balance_check": {
-          "name": "wallet_wallets_balance_check",
-          "value": "\"wallet_wallets\".\"spending_balance_baht\" >= 0 AND \"wallet_wallets\".\"earnings_balance_baht\" >= 0 AND \"wallet_wallets\".\"held_for_jobs_baht\" >= 0 AND \"wallet_wallets\".\"reserved_for_payouts_baht\" >= 0"
-        },
         "wallet_wallets_status_check": {
           "name": "wallet_wallets_status_check",
           "value": "\"wallet_wallets\".\"wallet_status\" IN ('ACTIVE', 'FROZEN', 'SUSPENDED', 'CLOSED')"
+        },
+        "wallet_wallets_balances_check": {
+          "name": "wallet_wallets_balances_check",
+          "value": "\"wallet_wallets\".\"spending_balance_satang\" >= 0 AND \"wallet_wallets\".\"earnings_balance_satang\" >= 0 AND \"wallet_wallets\".\"funding_reserved_satang\" >= 0 AND \"wallet_wallets\".\"reserved_for_payouts_satang\" >= 0"
+        },
+        "wallet_wallets_capacity_check": {
+          "name": "wallet_wallets_capacity_check",
+          "value": "\"wallet_wallets\".\"spending_balance_satang\" + \"wallet_wallets\".\"earnings_balance_satang\" + \"wallet_wallets\".\"funding_reserved_satang\" + \"wallet_wallets\".\"reserved_for_payouts_satang\" <= 2000000000"
         }
       },
       "isRLSEnabled": false

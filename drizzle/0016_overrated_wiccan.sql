@@ -1,40 +1,7 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;--> statement-breakpoint
+CREATE TYPE "public"."quest_mode" AS ENUM('FIRST_COME_FIRST_SERVED', 'CANDIDATE');--> statement-breakpoint
 CREATE EXTENSION IF NOT EXISTS citext;--> statement-breakpoint
-CREATE TYPE "public"."quest_mode" AS ENUM('NO_CANDIDATE', 'CANDIDATE');--> statement-breakpoint
-CREATE TYPE "public"."quest_participation" AS ENUM('SOLO', 'GROUP');--> statement-breakpoint
-CREATE TYPE "public"."quest_status" AS ENUM('DRAFT', 'OPEN', 'ASSIGNED', 'IN_PROGRESS', 'SUBMITTED', 'APPROVED', 'REWORK', 'COMPLETED', 'CANCELLED', 'DISPUTED', 'HIDDEN');--> statement-breakpoint
-CREATE TABLE "payment_money_policy_revisions" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"revision" bigint NOT NULL,
-	"minimum_top_up_baht" bigint NOT NULL,
-	"maximum_top_up_baht" bigint NOT NULL,
-	"minimum_funded_job_baht" bigint NOT NULL,
-	"maximum_funded_job_baht" bigint NOT NULL,
-	"minimum_earnings_conversion_baht" bigint NOT NULL,
-	"maximum_earnings_conversion_baht" bigint NOT NULL,
-	"minimum_payout_baht" bigint NOT NULL,
-	"maximum_payout_baht" bigint NOT NULL,
-	"platform_fee_bps" smallint NOT NULL,
-	"top_up_provider_fee_satang" bigint DEFAULT 0 NOT NULL,
-	"top_up_provider_tax_bps" smallint DEFAULT 0 NOT NULL,
-	"payout_provider_fee_satang" bigint DEFAULT 0 NOT NULL,
-	"payout_provider_tax_bps" smallint DEFAULT 0 NOT NULL,
-	"dispute_two_person_threshold_baht" bigint NOT NULL,
-	"quote_lifetime_seconds" bigint NOT NULL,
-	"review_window_seconds" bigint NOT NULL,
-	"default_application_window_seconds" bigint NOT NULL,
-	"authored_by_admin_id" uuid,
-	"reason" text NOT NULL,
-	"effective_from" timestamp with time zone NOT NULL,
-	"effective_until" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "payment_money_policy_revisions_revision_unique" UNIQUE("revision"),
-	CONSTRAINT "payment_money_policy_revisions_amount_range_check" CHECK ("payment_money_policy_revisions"."minimum_top_up_baht" > 0 AND "payment_money_policy_revisions"."maximum_top_up_baht" >= "payment_money_policy_revisions"."minimum_top_up_baht" AND "payment_money_policy_revisions"."minimum_funded_job_baht" > 0 AND "payment_money_policy_revisions"."maximum_funded_job_baht" >= "payment_money_policy_revisions"."minimum_funded_job_baht" AND "payment_money_policy_revisions"."minimum_earnings_conversion_baht" > 0 AND "payment_money_policy_revisions"."maximum_earnings_conversion_baht" >= "payment_money_policy_revisions"."minimum_earnings_conversion_baht" AND "payment_money_policy_revisions"."minimum_payout_baht" > 0 AND "payment_money_policy_revisions"."maximum_payout_baht" >= "payment_money_policy_revisions"."minimum_payout_baht"),
-	CONSTRAINT "payment_money_policy_revisions_fee_check" CHECK ("payment_money_policy_revisions"."platform_fee_bps" BETWEEN 0 AND 10000 AND "payment_money_policy_revisions"."top_up_provider_fee_satang" >= 0 AND "payment_money_policy_revisions"."top_up_provider_tax_bps" BETWEEN 0 AND 10000 AND "payment_money_policy_revisions"."payout_provider_fee_satang" >= 0 AND "payment_money_policy_revisions"."payout_provider_tax_bps" BETWEEN 0 AND 10000),
-	CONSTRAINT "payment_money_policy_revisions_duration_check" CHECK ("payment_money_policy_revisions"."quote_lifetime_seconds" > 0 AND "payment_money_policy_revisions"."review_window_seconds" > 0 AND "payment_money_policy_revisions"."default_application_window_seconds" > 0),
-	CONSTRAINT "payment_money_policy_revisions_effective_range_check" CHECK ("payment_money_policy_revisions"."effective_until" IS NULL OR "payment_money_policy_revisions"."effective_until" > "payment_money_policy_revisions"."effective_from")
-);
---> statement-breakpoint
+CREATE TYPE "public"."quest_participation" AS ENUM('SINGLE', 'GROUP');--> statement-breakpoint
+CREATE TYPE "public"."quest_status" AS ENUM('DRAFT', 'OPEN', 'AWAITING_CONSENT', 'ASSIGNED', 'IN_PROGRESS', 'SUBMITTED', 'APPROVED', 'REWORK', 'COMPLETED', 'CANCELLED', 'DISPUTED', 'HIDDEN', 'UNFILLED');--> statement-breakpoint
 CREATE TABLE "payment_payout_accounts" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" uuid NOT NULL,
@@ -244,9 +211,9 @@ CREATE TABLE "quest" (
 	"description" varchar(2000),
 	"condition" varchar(4000) NOT NULL,
 	"mode" "quest_mode" NOT NULL,
-	"participation" "quest_participation" DEFAULT 'SOLO' NOT NULL,
+	"participation" "quest_participation" DEFAULT 'SINGLE' NOT NULL,
 	"quest_status" "quest_status" DEFAULT 'DRAFT' NOT NULL,
-	"wage_baht" bigint NOT NULL,
+	"reward_satang" integer NOT NULL,
 	"tag_id" uuid,
 	"headcount" integer DEFAULT 1 NOT NULL,
 	"start_time" timestamp with time zone NOT NULL,
@@ -259,7 +226,7 @@ CREATE TABLE "quest" (
 	"hidden_by_admin_id" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "quest_wage_check" CHECK ("quest"."wage_baht" > 0),
+	CONSTRAINT "quest_reward_check" CHECK ("quest"."reward_satang" > 0),
 	CONSTRAINT "quest_headcount_check" CHECK ("quest"."headcount" > 0),
 	CONSTRAINT "quest_participation_headcount_check" CHECK ("quest"."participation" = 'GROUP' OR "quest"."headcount" = 1),
 	CONSTRAINT "quest_due_at_check" CHECK ("quest"."due_at" IS NULL OR "quest"."due_at" > "quest"."start_time"),
@@ -367,144 +334,18 @@ CREATE TABLE "quest_team_member" (
 	CONSTRAINT "quest_team_member_team_id_user_id_key" UNIQUE("team_id","user_id")
 );
 --> statement-breakpoint
-CREATE TABLE "wallet_activities" (
+CREATE TABLE "review" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" uuid NOT NULL,
-	"type" text NOT NULL,
-	"activity_status" text NOT NULL,
-	"spending_delta_baht" bigint DEFAULT 0 NOT NULL,
-	"earnings_delta_baht" bigint DEFAULT 0 NOT NULL,
-	"job_held_delta_baht" bigint DEFAULT 0 NOT NULL,
-	"payout_reserved_delta_baht" bigint DEFAULT 0 NOT NULL,
-	"resource_type" text,
-	"resource_id" text,
-	"occurred_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "wallet_activities_type_check" CHECK ("wallet_activities"."type" IN ('TOP_UP', 'SPEND', 'EARN', 'HOLD', 'RELEASE')),
-	CONSTRAINT "wallet_activities_status_check" CHECK ("wallet_activities"."activity_status" IN ('PENDING', 'COMPLETED', 'FAILED'))
-);
---> statement-breakpoint
-CREATE TABLE "wallet_adjustments" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"wallet_id" uuid NOT NULL,
-	"admin_id" uuid NOT NULL,
-	"compartment" text NOT NULL,
-	"amount_baht" bigint NOT NULL,
-	"reason" text NOT NULL,
-	"ledger_transaction_id" uuid NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "wallet_adjustments_ledger_transaction_id_unique" UNIQUE("ledger_transaction_id"),
-	CONSTRAINT "wallet_adjustments_compartment_check" CHECK ("wallet_adjustments"."compartment" IN ('SPENDING', 'EARNINGS', 'HELD_FOR_JOBS', 'RESERVED_FOR_PAYOUTS')),
-	CONSTRAINT "wallet_adjustments_amount_check" CHECK ("wallet_adjustments"."amount_baht" <> 0)
-);
---> statement-breakpoint
-CREATE TABLE "wallet_amounts_owed" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" uuid NOT NULL,
-	"amount_baht" bigint NOT NULL,
-	"recovered_baht" bigint DEFAULT 0 NOT NULL,
-	"reason" text NOT NULL,
-	"source_type" text NOT NULL,
-	"source_id" text,
-	"owed_status" text NOT NULL,
+	"quest_id" uuid NOT NULL,
+	"reviewer_id" uuid NOT NULL,
+	"reviewee_id" uuid NOT NULL,
+	"rating" smallint NOT NULL,
+	"comment" varchar(1000) NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "wallet_amounts_owed_status_check" CHECK ("wallet_amounts_owed"."owed_status" IN ('OUTSTANDING', 'RECOVERED', 'WRITTEN_OFF')),
-	CONSTRAINT "wallet_amounts_owed_range_check" CHECK ("wallet_amounts_owed"."amount_baht" > 0 AND "wallet_amounts_owed"."recovered_baht" >= 0 AND "wallet_amounts_owed"."recovered_baht" <= "wallet_amounts_owed"."amount_baht")
-);
---> statement-breakpoint
-CREATE TABLE "wallet_earnings_conversions" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" uuid NOT NULL,
-	"amount_baht" bigint NOT NULL,
-	"ledger_transaction_id" uuid NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "wallet_earnings_conversions_ledger_transaction_id_unique" UNIQUE("ledger_transaction_id"),
-	CONSTRAINT "wallet_earnings_conversions_amount_check" CHECK ("wallet_earnings_conversions"."amount_baht" > 0)
-);
---> statement-breakpoint
-CREATE TABLE "wallet_idempotency_keys" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"principal_user_id" uuid NOT NULL,
-	"operation_scope" text NOT NULL,
-	"key" text NOT NULL,
-	"request_hash" text NOT NULL,
-	"resource_type" text,
-	"resource_id" text,
-	"response_status" integer,
-	"response_body" jsonb,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"expires_at" timestamp with time zone NOT NULL,
-	CONSTRAINT "wallet_idempotency_keys_principal_scope_key" UNIQUE("principal_user_id","operation_scope","key")
-);
---> statement-breakpoint
-CREATE TABLE "wallet_ledger_accounts" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"code" text NOT NULL,
-	"type" text NOT NULL,
-	"currency" text DEFAULT 'THB' NOT NULL,
-	"wallet_id" uuid,
-	"user_id" uuid,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "wallet_ledger_accounts_code_unique" UNIQUE("code"),
-	CONSTRAINT "wallet_ledger_accounts_type_check" CHECK ("wallet_ledger_accounts"."type" IN ('SPENDING', 'EARNINGS', 'HELD_FOR_JOBS', 'RESERVED_FOR_PAYOUTS', 'PLATFORM_REVENUE', 'PLATFORM_SUSPENSE')),
-	CONSTRAINT "wallet_ledger_accounts_currency_check" CHECK ("wallet_ledger_accounts"."currency" = 'THB'),
-	CONSTRAINT "wallet_ledger_accounts_owner_pair_check" CHECK (("wallet_ledger_accounts"."wallet_id" IS NULL) = ("wallet_ledger_accounts"."user_id" IS NULL)),
-	CONSTRAINT "wallet_ledger_accounts_platform_type_check" CHECK (("wallet_ledger_accounts"."wallet_id" IS NULL) = ("wallet_ledger_accounts"."type" IN ('PLATFORM_REVENUE', 'PLATFORM_SUSPENSE')))
-);
---> statement-breakpoint
-CREATE TABLE "wallet_ledger_postings" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"transaction_id" uuid NOT NULL,
-	"account_id" uuid NOT NULL,
-	"amount_baht" bigint NOT NULL,
-	"currency" text DEFAULT 'THB' NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "wallet_ledger_postings_amount_check" CHECK ("wallet_ledger_postings"."amount_baht" <> 0),
-	CONSTRAINT "wallet_ledger_postings_currency_check" CHECK ("wallet_ledger_postings"."currency" = 'THB')
-);
---> statement-breakpoint
-CREATE TABLE "wallet_ledger_transactions" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"business_reference" text NOT NULL,
-	"event_type" text NOT NULL,
-	"idempotency_key_id" uuid,
-	"correction_of_transaction_id" uuid,
-	"created_by_user_id" uuid,
-	"description" text,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"sealed_at" timestamp with time zone,
-	CONSTRAINT "wallet_ledger_transactions_business_reference_unique" UNIQUE("business_reference"),
-	CONSTRAINT "wallet_ledger_transactions_idempotency_key_id_unique" UNIQUE("idempotency_key_id"),
-	CONSTRAINT "wallet_ledger_transactions_event_type_check" CHECK ("wallet_ledger_transactions"."event_type" IN ('TOP_UP', 'PAYOUT', 'ESCROW_HOLD', 'ESCROW_RELEASE', 'ADJUSTMENT', 'EARNINGS_CONVERSION'))
-);
---> statement-breakpoint
-CREATE TABLE "wallet_status_history" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"wallet_id" uuid NOT NULL,
-	"from_status" text,
-	"to_status" text NOT NULL,
-	"actor_user_id" uuid,
-	"actor_admin_id" uuid,
-	"reason" text,
-	"occurred_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "wallet_status_history_from_status_check" CHECK ("wallet_status_history"."from_status" IS NULL OR "wallet_status_history"."from_status" IN ('ACTIVE', 'FROZEN', 'SUSPENDED', 'CLOSED')),
-	CONSTRAINT "wallet_status_history_to_status_check" CHECK ("wallet_status_history"."to_status" IN ('ACTIVE', 'FROZEN', 'SUSPENDED', 'CLOSED')),
-	CONSTRAINT "wallet_status_history_actor_check" CHECK (num_nonnulls("wallet_status_history"."actor_user_id", "wallet_status_history"."actor_admin_id") <= 1)
-);
---> statement-breakpoint
-CREATE TABLE "wallet_wallets" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" uuid NOT NULL,
-	"spending_balance_baht" bigint DEFAULT 0 NOT NULL,
-	"earnings_balance_baht" bigint DEFAULT 0 NOT NULL,
-	"held_for_jobs_baht" bigint DEFAULT 0 NOT NULL,
-	"reserved_for_payouts_baht" bigint DEFAULT 0 NOT NULL,
-	"wallet_status" text DEFAULT 'ACTIVE' NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "wallet_wallets_user_id_unique" UNIQUE("user_id"),
-	CONSTRAINT "wallet_wallets_balance_check" CHECK ("wallet_wallets"."spending_balance_baht" >= 0 AND "wallet_wallets"."earnings_balance_baht" >= 0 AND "wallet_wallets"."held_for_jobs_baht" >= 0 AND "wallet_wallets"."reserved_for_payouts_baht" >= 0),
-	CONSTRAINT "wallet_wallets_status_check" CHECK ("wallet_wallets"."wallet_status" IN ('ACTIVE', 'FROZEN', 'SUSPENDED', 'CLOSED'))
+	CONSTRAINT "review_quest_reviewer_reviewee_key" UNIQUE("quest_id","reviewer_id","reviewee_id"),
+	CONSTRAINT "review_rating_check" CHECK ("review"."rating" BETWEEN 1 AND 5),
+	CONSTRAINT "review_participants_check" CHECK ("review"."reviewer_id" <> "review"."reviewee_id")
 );
 --> statement-breakpoint
 ALTER TABLE "auth_user" DROP CONSTRAINT "auth_user_academic_year_check";--> statement-breakpoint
@@ -512,6 +353,10 @@ DROP INDEX "auth_admin_email_uidx";--> statement-breakpoint
 ALTER TABLE "department" ALTER COLUMN "name" SET DATA TYPE varchar(100);--> statement-breakpoint
 ALTER TABLE "faculty" ALTER COLUMN "name" SET DATA TYPE varchar(100);--> statement-breakpoint
 ALTER TABLE "occupation" ALTER COLUMN "name" SET DATA TYPE varchar(100);--> statement-breakpoint
+ALTER TABLE "auth_account" ALTER COLUMN "id" SET DATA TYPE uuid;--> statement-breakpoint
+ALTER TABLE "auth_account" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
+ALTER TABLE "auth_account" ALTER COLUMN "user_id" SET DATA TYPE uuid;--> statement-breakpoint
+ALTER TABLE "auth_account" ALTER COLUMN "admin_id" SET DATA TYPE uuid;--> statement-breakpoint
 ALTER TABLE "auth_account" ALTER COLUMN "account_id" SET DATA TYPE varchar(255);--> statement-breakpoint
 ALTER TABLE "auth_account" ALTER COLUMN "provider_id" SET DATA TYPE varchar(100);--> statement-breakpoint
 ALTER TABLE "auth_account" ALTER COLUMN "access_token" SET DATA TYPE varchar(8192);--> statement-breakpoint
@@ -519,13 +364,23 @@ ALTER TABLE "auth_account" ALTER COLUMN "refresh_token" SET DATA TYPE varchar(81
 ALTER TABLE "auth_account" ALTER COLUMN "id_token" SET DATA TYPE varchar(8192);--> statement-breakpoint
 ALTER TABLE "auth_account" ALTER COLUMN "scope" SET DATA TYPE varchar(2048);--> statement-breakpoint
 ALTER TABLE "auth_account" ALTER COLUMN "password" SET DATA TYPE varchar(255);--> statement-breakpoint
+ALTER TABLE "auth_admin" ALTER COLUMN "id" SET DATA TYPE uuid;--> statement-breakpoint
+ALTER TABLE "auth_admin" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
 ALTER TABLE "auth_admin" ALTER COLUMN "username" SET DATA TYPE varchar(100);--> statement-breakpoint
+ALTER TABLE "auth_admin" ALTER COLUMN "email" SET DATA TYPE citext;--> statement-breakpoint
 ALTER TABLE "auth_admin" ALTER COLUMN "image" SET DATA TYPE varchar(2048);--> statement-breakpoint
 ALTER TABLE "auth_admin" ALTER COLUMN "first_name" SET DATA TYPE varchar(100);--> statement-breakpoint
 ALTER TABLE "auth_admin" ALTER COLUMN "last_name" SET DATA TYPE varchar(100);--> statement-breakpoint
+ALTER TABLE "auth_session" ALTER COLUMN "id" SET DATA TYPE uuid;--> statement-breakpoint
+ALTER TABLE "auth_session" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
+ALTER TABLE "auth_session" ALTER COLUMN "user_id" SET DATA TYPE uuid;--> statement-breakpoint
+ALTER TABLE "auth_session" ALTER COLUMN "admin_id" SET DATA TYPE uuid;--> statement-breakpoint
 ALTER TABLE "auth_session" ALTER COLUMN "token" SET DATA TYPE varchar(255);--> statement-breakpoint
-ALTER TABLE "auth_session" ALTER COLUMN "ip_address" SET DATA TYPE inet USING NULLIF("ip_address", '')::inet;--> statement-breakpoint
+ALTER TABLE "auth_session" ALTER COLUMN "ip_address" SET DATA TYPE inet;--> statement-breakpoint
 ALTER TABLE "auth_session" ALTER COLUMN "user_agent" SET DATA TYPE varchar(512);--> statement-breakpoint
+ALTER TABLE "auth_user" ALTER COLUMN "id" SET DATA TYPE uuid;--> statement-breakpoint
+ALTER TABLE "auth_user" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
+ALTER TABLE "auth_user" ALTER COLUMN "email" SET DATA TYPE citext;--> statement-breakpoint
 ALTER TABLE "auth_user" ALTER COLUMN "image" SET DATA TYPE varchar(2048);--> statement-breakpoint
 ALTER TABLE "auth_user" ALTER COLUMN "first_name" SET DATA TYPE varchar(100);--> statement-breakpoint
 ALTER TABLE "auth_user" ALTER COLUMN "last_name" SET DATA TYPE varchar(100);--> statement-breakpoint
@@ -533,108 +388,29 @@ ALTER TABLE "auth_user" ALTER COLUMN "bio" SET DATA TYPE varchar(1000);--> state
 ALTER TABLE "auth_user" ALTER COLUMN "student_id" SET DATA TYPE varchar(10);--> statement-breakpoint
 ALTER TABLE "auth_user" ALTER COLUMN "telephone" SET DATA TYPE varchar(12);--> statement-breakpoint
 ALTER TABLE "auth_user" ALTER COLUMN "terms_version" SET DATA TYPE varchar(50);--> statement-breakpoint
+ALTER TABLE "auth_verification" ALTER COLUMN "id" SET DATA TYPE uuid;--> statement-breakpoint
+ALTER TABLE "auth_verification" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
+ALTER TABLE "auth_verification" ALTER COLUMN "identifier" SET DATA TYPE citext;--> statement-breakpoint
 ALTER TABLE "auth_verification" ALTER COLUMN "value" SET DATA TYPE varchar(2048);--> statement-breakpoint
 ALTER TABLE "file" ALTER COLUMN "bucket" SET DATA TYPE varchar(63);--> statement-breakpoint
 ALTER TABLE "file" ALTER COLUMN "object_key" SET DATA TYPE varchar(1024);--> statement-breakpoint
 ALTER TABLE "file" ALTER COLUMN "content_type" SET DATA TYPE varchar(255);--> statement-breakpoint
+ALTER TABLE "file" ALTER COLUMN "uploaded_by_user_id" SET DATA TYPE uuid;--> statement-breakpoint
+ALTER TABLE "profile_certificate" ALTER COLUMN "user_id" SET DATA TYPE uuid;--> statement-breakpoint
 ALTER TABLE "profile_certificate" ALTER COLUMN "name" SET DATA TYPE varchar(200);--> statement-breakpoint
 ALTER TABLE "profile_certificate" ALTER COLUMN "issuer" SET DATA TYPE varchar(200);--> statement-breakpoint
+ALTER TABLE "profile_portfolio_item" ALTER COLUMN "user_id" SET DATA TYPE uuid;--> statement-breakpoint
 ALTER TABLE "profile_portfolio_item" ALTER COLUMN "title" SET DATA TYPE varchar(120);--> statement-breakpoint
 ALTER TABLE "profile_portfolio_item" ALTER COLUMN "description" SET DATA TYPE varchar(1000);--> statement-breakpoint
+ALTER TABLE "profile_work_experience" ALTER COLUMN "user_id" SET DATA TYPE uuid;--> statement-breakpoint
 ALTER TABLE "profile_work_experience" ALTER COLUMN "title" SET DATA TYPE varchar(120);--> statement-breakpoint
 ALTER TABLE "profile_work_experience" ALTER COLUMN "employment_type" SET DATA TYPE varchar(50);--> statement-breakpoint
 ALTER TABLE "profile_work_experience" ALTER COLUMN "org" SET DATA TYPE varchar(200);--> statement-breakpoint
 ALTER TABLE "profile_work_experience" ALTER COLUMN "description" SET DATA TYPE varchar(1000);--> statement-breakpoint
-ALTER TABLE "auth_user" ADD COLUMN "id_uuid" uuid DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_admin" ADD COLUMN "id_uuid" uuid DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_session" ADD COLUMN "id_uuid" uuid DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_account" ADD COLUMN "id_uuid" uuid DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_verification" ADD COLUMN "id_uuid" uuid DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_session" ADD COLUMN "user_id_uuid" uuid;--> statement-breakpoint
-ALTER TABLE "auth_session" ADD COLUMN "admin_id_uuid" uuid;--> statement-breakpoint
-ALTER TABLE "auth_account" ADD COLUMN "user_id_uuid" uuid;--> statement-breakpoint
-ALTER TABLE "auth_account" ADD COLUMN "admin_id_uuid" uuid;--> statement-breakpoint
-ALTER TABLE "file" ADD COLUMN "uploaded_by_user_id_uuid" uuid;--> statement-breakpoint
-ALTER TABLE "profile_certificate" ADD COLUMN "user_id_uuid" uuid;--> statement-breakpoint
-ALTER TABLE "profile_portfolio_item" ADD COLUMN "user_id_uuid" uuid;--> statement-breakpoint
-ALTER TABLE "profile_work_experience" ADD COLUMN "user_id_uuid" uuid;--> statement-breakpoint
-UPDATE "auth_session" AS s SET "user_id_uuid" = u."id_uuid" FROM "auth_user" AS u WHERE s."user_id" = u."id";--> statement-breakpoint
-UPDATE "auth_session" AS s SET "admin_id_uuid" = a."id_uuid" FROM "auth_admin" AS a WHERE s."admin_id" = a."id";--> statement-breakpoint
-UPDATE "auth_account" AS a SET "user_id_uuid" = u."id_uuid" FROM "auth_user" AS u WHERE a."user_id" = u."id";--> statement-breakpoint
-UPDATE "auth_account" AS a SET "admin_id_uuid" = ad."id_uuid" FROM "auth_admin" AS ad WHERE a."admin_id" = ad."id";--> statement-breakpoint
-UPDATE "file" AS f SET "uploaded_by_user_id_uuid" = u."id_uuid" FROM "auth_user" AS u WHERE f."uploaded_by_user_id" = u."id";--> statement-breakpoint
-UPDATE "profile_certificate" AS p SET "user_id_uuid" = u."id_uuid" FROM "auth_user" AS u WHERE p."user_id" = u."id";--> statement-breakpoint
-UPDATE "profile_portfolio_item" AS p SET "user_id_uuid" = u."id_uuid" FROM "auth_user" AS u WHERE p."user_id" = u."id";--> statement-breakpoint
-UPDATE "profile_work_experience" AS p SET "user_id_uuid" = u."id_uuid" FROM "auth_user" AS u WHERE p."user_id" = u."id";--> statement-breakpoint
-ALTER TABLE "auth_account" DROP CONSTRAINT "auth_account_admin_id_auth_admin_id_fk";--> statement-breakpoint
-ALTER TABLE "auth_account" DROP CONSTRAINT "auth_account_user_id_auth_user_id_fk";--> statement-breakpoint
-ALTER TABLE "auth_session" DROP CONSTRAINT "auth_session_admin_id_auth_admin_id_fk";--> statement-breakpoint
-ALTER TABLE "auth_session" DROP CONSTRAINT "auth_session_user_id_auth_user_id_fk";--> statement-breakpoint
-ALTER TABLE "file" DROP CONSTRAINT "file_uploaded_by_user_id_auth_user_id_fk";--> statement-breakpoint
-ALTER TABLE "profile_certificate" DROP CONSTRAINT "profile_certificate_user_id_auth_user_id_fk";--> statement-breakpoint
-ALTER TABLE "profile_portfolio_item" DROP CONSTRAINT "profile_portfolio_item_user_id_auth_user_id_fk";--> statement-breakpoint
-ALTER TABLE "profile_work_experience" DROP CONSTRAINT "profile_work_experience_user_id_auth_user_id_fk";--> statement-breakpoint
-ALTER TABLE "auth_user" DROP CONSTRAINT "auth_user_pkey";--> statement-breakpoint
-ALTER TABLE "auth_admin" DROP CONSTRAINT "auth_admin_pkey";--> statement-breakpoint
-ALTER TABLE "auth_session" DROP CONSTRAINT "auth_session_pkey";--> statement-breakpoint
-ALTER TABLE "auth_account" DROP CONSTRAINT "auth_account_pkey";--> statement-breakpoint
-ALTER TABLE "auth_verification" DROP CONSTRAINT "auth_verification_pkey";--> statement-breakpoint
-ALTER TABLE "auth_user" DROP COLUMN "id";--> statement-breakpoint
-ALTER TABLE "auth_user" RENAME COLUMN "id_uuid" TO "id";--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "id" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "auth_user" ADD CONSTRAINT "auth_user_pkey" PRIMARY KEY ("id");--> statement-breakpoint
-ALTER TABLE "auth_admin" DROP COLUMN "id";--> statement-breakpoint
-ALTER TABLE "auth_admin" RENAME COLUMN "id_uuid" TO "id";--> statement-breakpoint
-ALTER TABLE "auth_admin" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_admin" ALTER COLUMN "id" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "auth_admin" ADD CONSTRAINT "auth_admin_pkey" PRIMARY KEY ("id");--> statement-breakpoint
-ALTER TABLE "auth_session" DROP COLUMN "id";--> statement-breakpoint
-ALTER TABLE "auth_session" RENAME COLUMN "id_uuid" TO "id";--> statement-breakpoint
-ALTER TABLE "auth_session" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_session" ALTER COLUMN "id" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "auth_session" ADD CONSTRAINT "auth_session_pkey" PRIMARY KEY ("id");--> statement-breakpoint
-ALTER TABLE "auth_account" DROP COLUMN "id";--> statement-breakpoint
-ALTER TABLE "auth_account" RENAME COLUMN "id_uuid" TO "id";--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_account" ALTER COLUMN "id" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "auth_account" ADD CONSTRAINT "auth_account_pkey" PRIMARY KEY ("id");--> statement-breakpoint
-ALTER TABLE "auth_verification" DROP COLUMN "id";--> statement-breakpoint
-ALTER TABLE "auth_verification" RENAME COLUMN "id_uuid" TO "id";--> statement-breakpoint
-ALTER TABLE "auth_verification" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
-ALTER TABLE "auth_verification" ALTER COLUMN "id" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "auth_verification" ADD CONSTRAINT "auth_verification_pkey" PRIMARY KEY ("id");--> statement-breakpoint
-ALTER TABLE "auth_session" DROP COLUMN "user_id";--> statement-breakpoint
-ALTER TABLE "auth_session" RENAME COLUMN "user_id_uuid" TO "user_id";--> statement-breakpoint
-ALTER TABLE "auth_session" DROP COLUMN "admin_id";--> statement-breakpoint
-ALTER TABLE "auth_session" RENAME COLUMN "admin_id_uuid" TO "admin_id";--> statement-breakpoint
-ALTER TABLE "auth_account" DROP COLUMN "user_id";--> statement-breakpoint
-ALTER TABLE "auth_account" RENAME COLUMN "user_id_uuid" TO "user_id";--> statement-breakpoint
-ALTER TABLE "auth_account" DROP COLUMN "admin_id";--> statement-breakpoint
-ALTER TABLE "auth_account" RENAME COLUMN "admin_id_uuid" TO "admin_id";--> statement-breakpoint
-ALTER TABLE "file" DROP COLUMN "uploaded_by_user_id";--> statement-breakpoint
-ALTER TABLE "file" RENAME COLUMN "uploaded_by_user_id_uuid" TO "uploaded_by_user_id";--> statement-breakpoint
-ALTER TABLE "profile_certificate" DROP COLUMN "user_id";--> statement-breakpoint
-ALTER TABLE "profile_certificate" RENAME COLUMN "user_id_uuid" TO "user_id";--> statement-breakpoint
-ALTER TABLE "profile_certificate" ALTER COLUMN "user_id" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "profile_portfolio_item" DROP COLUMN "user_id";--> statement-breakpoint
-ALTER TABLE "profile_portfolio_item" RENAME COLUMN "user_id_uuid" TO "user_id";--> statement-breakpoint
-ALTER TABLE "profile_portfolio_item" ALTER COLUMN "user_id" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "profile_work_experience" DROP COLUMN "user_id";--> statement-breakpoint
-ALTER TABLE "profile_work_experience" RENAME COLUMN "user_id_uuid" TO "user_id";--> statement-breakpoint
-ALTER TABLE "profile_work_experience" ALTER COLUMN "user_id" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "auth_user" ALTER COLUMN "email" SET DATA TYPE citext USING "email"::citext;--> statement-breakpoint
-ALTER TABLE "auth_admin" ALTER COLUMN "email" SET DATA TYPE citext USING "email"::citext;--> statement-breakpoint
-ALTER TABLE "auth_verification" ALTER COLUMN "identifier" SET DATA TYPE citext USING "identifier"::citext;--> statement-breakpoint
-ALTER TABLE "auth_account" ADD CONSTRAINT "auth_account_admin_id_auth_admin_id_fk" FOREIGN KEY ("admin_id") REFERENCES "public"."auth_admin"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "auth_account" ADD CONSTRAINT "auth_account_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "auth_session" ADD CONSTRAINT "auth_session_admin_id_auth_admin_id_fk" FOREIGN KEY ("admin_id") REFERENCES "public"."auth_admin"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "auth_session" ADD CONSTRAINT "auth_session_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "file" ADD CONSTRAINT "file_uploaded_by_user_id_auth_user_id_fk" FOREIGN KEY ("uploaded_by_user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "profile_certificate" ADD CONSTRAINT "profile_certificate_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "profile_portfolio_item" ADD CONSTRAINT "profile_portfolio_item_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "profile_work_experience" ADD CONSTRAINT "profile_work_experience_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "payment_money_policy_revisions" ADD CONSTRAINT "payment_money_policy_revisions_authored_by_admin_id_auth_admin_id_fk" FOREIGN KEY ("authored_by_admin_id") REFERENCES "public"."auth_admin"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "auth_user" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "profile_certificate" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "profile_portfolio_item" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "profile_work_experience" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE "payment_payout_accounts" ADD CONSTRAINT "payment_payout_accounts_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payment_payout_cancellation_attempts" ADD CONSTRAINT "payment_payout_cancellation_attempts_payout_id_payment_payouts_id_fk" FOREIGN KEY ("payout_id") REFERENCES "public"."payment_payouts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payment_payout_cancellation_attempts" ADD CONSTRAINT "payment_payout_cancellation_attempts_admin_id_auth_admin_id_fk" FOREIGN KEY ("admin_id") REFERENCES "public"."auth_admin"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -687,25 +463,9 @@ ALTER TABLE "quest_team" ADD CONSTRAINT "quest_team_quest_id_quest_id_fk" FOREIG
 ALTER TABLE "quest_team" ADD CONSTRAINT "quest_team_leader_id_auth_user_id_fk" FOREIGN KEY ("leader_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "quest_team_member" ADD CONSTRAINT "quest_team_member_team_id_quest_team_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."quest_team"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "quest_team_member" ADD CONSTRAINT "quest_team_member_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_activities" ADD CONSTRAINT "wallet_activities_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_adjustments" ADD CONSTRAINT "wallet_adjustments_wallet_id_wallet_wallets_id_fk" FOREIGN KEY ("wallet_id") REFERENCES "public"."wallet_wallets"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_adjustments" ADD CONSTRAINT "wallet_adjustments_admin_id_auth_admin_id_fk" FOREIGN KEY ("admin_id") REFERENCES "public"."auth_admin"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_adjustments" ADD CONSTRAINT "wallet_adjustments_ledger_transaction_id_wallet_ledger_transactions_id_fk" FOREIGN KEY ("ledger_transaction_id") REFERENCES "public"."wallet_ledger_transactions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_amounts_owed" ADD CONSTRAINT "wallet_amounts_owed_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_earnings_conversions" ADD CONSTRAINT "wallet_earnings_conversions_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_earnings_conversions" ADD CONSTRAINT "wallet_earnings_conversions_ledger_transaction_id_wallet_ledger_transactions_id_fk" FOREIGN KEY ("ledger_transaction_id") REFERENCES "public"."wallet_ledger_transactions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_idempotency_keys" ADD CONSTRAINT "wallet_idempotency_keys_principal_user_id_auth_user_id_fk" FOREIGN KEY ("principal_user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_ledger_accounts" ADD CONSTRAINT "wallet_ledger_accounts_wallet_id_wallet_wallets_id_fk" FOREIGN KEY ("wallet_id") REFERENCES "public"."wallet_wallets"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_ledger_accounts" ADD CONSTRAINT "wallet_ledger_accounts_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_ledger_postings" ADD CONSTRAINT "wallet_ledger_postings_transaction_id_wallet_ledger_transactions_id_fk" FOREIGN KEY ("transaction_id") REFERENCES "public"."wallet_ledger_transactions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_ledger_postings" ADD CONSTRAINT "wallet_ledger_postings_account_id_wallet_ledger_accounts_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."wallet_ledger_accounts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_ledger_transactions" ADD CONSTRAINT "wallet_ledger_transactions_idempotency_key_id_wallet_idempotency_keys_id_fk" FOREIGN KEY ("idempotency_key_id") REFERENCES "public"."wallet_idempotency_keys"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_ledger_transactions" ADD CONSTRAINT "wallet_ledger_transactions_correction_of_transaction_id_wallet_ledger_transactions_id_fk" FOREIGN KEY ("correction_of_transaction_id") REFERENCES "public"."wallet_ledger_transactions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_ledger_transactions" ADD CONSTRAINT "wallet_ledger_transactions_created_by_user_id_auth_user_id_fk" FOREIGN KEY ("created_by_user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_status_history" ADD CONSTRAINT "wallet_status_history_wallet_id_wallet_wallets_id_fk" FOREIGN KEY ("wallet_id") REFERENCES "public"."wallet_wallets"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_status_history" ADD CONSTRAINT "wallet_status_history_actor_user_id_auth_user_id_fk" FOREIGN KEY ("actor_user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_status_history" ADD CONSTRAINT "wallet_status_history_actor_admin_id_auth_admin_id_fk" FOREIGN KEY ("actor_admin_id") REFERENCES "public"."auth_admin"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallet_wallets" ADD CONSTRAINT "wallet_wallets_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "review" ADD CONSTRAINT "review_quest_id_quest_id_fk" FOREIGN KEY ("quest_id") REFERENCES "public"."quest"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "review" ADD CONSTRAINT "review_reviewer_id_auth_user_id_fk" FOREIGN KEY ("reviewer_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "review" ADD CONSTRAINT "review_reviewee_id_auth_user_id_fk" FOREIGN KEY ("reviewee_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "payment_payout_accounts_active_user_uidx" ON "payment_payout_accounts" USING btree ("user_id") WHERE "payment_payout_accounts"."retired_at" IS NULL;--> statement-breakpoint
 CREATE INDEX "payment_payout_cancellation_attempts_payout_idx" ON "payment_payout_cancellation_attempts" USING btree ("payout_id","attempted_at");--> statement-breakpoint
 CREATE INDEX "payment_payout_quotes_expiry_idx" ON "payment_payout_quotes" USING btree ("expires_at");--> statement-breakpoint
@@ -738,11 +498,7 @@ CREATE INDEX "quest_location_quest_id_idx" ON "quest_location" USING btree ("que
 CREATE INDEX "quest_team_quest_id_idx" ON "quest_team" USING btree ("quest_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "quest_team_one_selected_uidx" ON "quest_team" USING btree ("quest_id") WHERE "quest_team"."team_status" = 'SELECTED';--> statement-breakpoint
 CREATE INDEX "quest_team_member_user_id_idx" ON "quest_team_member" USING btree ("user_id");--> statement-breakpoint
-CREATE INDEX "wallet_activities_user_time_idx" ON "wallet_activities" USING btree ("user_id","occurred_at");--> statement-breakpoint
-CREATE INDEX "wallet_idempotency_keys_expiry_idx" ON "wallet_idempotency_keys" USING btree ("expires_at");--> statement-breakpoint
-CREATE UNIQUE INDEX "wallet_ledger_accounts_wallet_type_uidx" ON "wallet_ledger_accounts" USING btree ("wallet_id","type") WHERE "wallet_ledger_accounts"."wallet_id" IS NOT NULL;--> statement-breakpoint
-CREATE INDEX "wallet_ledger_postings_transaction_idx" ON "wallet_ledger_postings" USING btree ("transaction_id");--> statement-breakpoint
-CREATE INDEX "wallet_ledger_postings_account_idx" ON "wallet_ledger_postings" USING btree ("account_id","created_at");--> statement-breakpoint
-CREATE INDEX "wallet_status_history_wallet_idx" ON "wallet_status_history" USING btree ("wallet_id","occurred_at");--> statement-breakpoint
+CREATE INDEX "review_quest_id_idx" ON "review" USING btree ("quest_id");--> statement-breakpoint
+CREATE INDEX "review_reviewee_id_idx" ON "review" USING btree ("reviewee_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "auth_admin_email_uidx" ON "auth_admin" USING btree ("email");--> statement-breakpoint
 ALTER TABLE "auth_user" ADD CONSTRAINT "auth_user_academic_year_check" CHECK ("auth_user"."academic_year" IS NULL OR "auth_user"."academic_year" BETWEEN 1000 AND 9999);
