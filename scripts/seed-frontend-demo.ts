@@ -5,8 +5,8 @@ import {
   profileCertificate,
   profilePortfolioItem,
   profileWorkExperience,
-  tag,
 } from '@/database/schema/profile.schema';
+import { tag } from '@/database/schema/tag.schema';
 import {
   quest,
   questAssignment,

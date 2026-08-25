@@ -14,15 +14,6 @@ import {
 import { authUser } from './auth.schema';
 import { file } from './file.schema';
 
-export const tag = pgTable(
-  'tag',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    name: text('name').notNull(),
-  },
-  (table) => [unique('tag_name_key').on(table.name)],
-);
-
 export const profileCertificate = pgTable(
   'profile_certificate',
   {

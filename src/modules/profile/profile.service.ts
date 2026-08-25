@@ -2,8 +2,8 @@ import { db } from '@/database/client';
 import { department, faculty, occupation } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
-import { tag } from '@/database/schema/profile.schema';
 import { quest, questAssignment } from '@/database/schema/quest.schema';
+import { tag } from '@/database/schema/tag.schema';
 
 import type { Static } from 'elysia';
 import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';

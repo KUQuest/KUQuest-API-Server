@@ -19,7 +19,7 @@ import {
 
 import { authAdmin, authUser } from './auth.schema';
 import { file } from './file.schema';
-import { tag } from './profile.schema';
+import { tag } from './tag.schema';
 
 const time = (name: string) => timestamp(name, { withTimezone: true });
 

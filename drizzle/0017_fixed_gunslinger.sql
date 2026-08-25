@@ -1,0 +1,1 @@
+ALTER TABLE "tag" ALTER COLUMN "name" SET DATA TYPE varchar(100);
