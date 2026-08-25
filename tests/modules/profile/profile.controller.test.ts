@@ -82,6 +82,7 @@ describe('setAvatar', () => {
       sizeBytes: 12,
     };
     spyOn(avatarStorage, 'upload').mockResolvedValue(storedAvatar);
+    spyOn(avatarStorage, 'linkFor').mockReturnValue('http://localhost:9000/kuquest/avatars/student-1/current.png');
     spyOn(db, 'transaction').mockResolvedValue({
       fileId,
       previousFileId: null,
@@ -110,6 +111,7 @@ describe('setAvatar', () => {
       contentType: 'image/png',
       sizeBytes: 12,
     });
+    spyOn(avatarStorage, 'linkFor').mockReturnValue('http://localhost:9000/kuquest/avatars/student-1/current.png');
     spyOn(db, 'transaction').mockResolvedValue({
       fileId,
       previousFileId,
