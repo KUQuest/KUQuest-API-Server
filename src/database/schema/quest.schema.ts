@@ -1,6 +1,5 @@
 import { sql } from 'drizzle-orm';
 import {
-  bigint,
   boolean,
   check,
   index,
@@ -52,7 +51,7 @@ export const quest = pgTable(
     mode: questMode('mode').notNull(),
     participation: questParticipation('participation').default('SINGLE').notNull(),
     questStatus: questStatus('quest_status').default('DRAFT').notNull(),
-    rewardBaht: bigint('reward_baht', { mode: 'bigint' }).notNull(),
+    rewardSatang: integer('reward_satang').notNull(),
     tagId: uuid('tag_id').references(() => tag.id),
     headcount: integer('headcount').default(1).notNull(),
     startTime: time('start_time').notNull(),
@@ -67,7 +66,7 @@ export const quest = pgTable(
     updatedAt: time('updated_at').defaultNow().notNull(),
   },
   (table) => [
-    check('quest_reward_check', sql`${table.rewardBaht} > 0`),
+    check('quest_reward_check', sql`${table.rewardSatang} > 0`),
     check('quest_headcount_check', sql`${table.headcount} > 0`),
     check(
       'quest_participation_headcount_check',
@@ -361,4 +360,3 @@ export const proofSubmissionImage = pgTable(
     index('proof_submission_image_submission_idx').on(table.proofSubmissionId),
   ],
 );
-

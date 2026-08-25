@@ -160,17 +160,17 @@ const main = async (): Promise<void> => {
 
   const now = new Date();
   const openQuests = [
-    ['Design a KU event poster', 'Design', 0, 500n],
-    ['Translate an event announcement', 'Content', 1, 350n],
-    ['Analyse student survey data', 'Data Analysis', 2, 800n],
-    ['Create a student club landing page', 'Frontend', 3, 1200n],
-    ['Plan a campus activity campaign', 'Content', 4, 600n],
+    ['Design a KU event poster', 'Design', 0, 50_000],
+    ['Translate an event announcement', 'Content', 1, 35_000],
+    ['Analyse student survey data', 'Data Analysis', 2, 80_000],
+    ['Create a student club landing page', 'Frontend', 3, 120_000],
+    ['Plan a campus activity campaign', 'Content', 4, 60_000],
   ] as const;
 
   const openRows = await db
     .insert(quest)
     .values(
-      openQuests.map(([title, tagName, hirerIndex, rewardBaht]) => ({
+      openQuests.map(([title, tagName, hirerIndex, rewardSatang]) => ({
         giverId: orderedUsers[hirerIndex]!.id,
         title: `[Demo] ${title}`,
         description: `A demo Quest created by ${DEMO_USERS[hirerIndex]!.firstName} for the frontend showcase.`,
@@ -178,7 +178,7 @@ const main = async (): Promise<void> => {
         mode: 'FIRST_COME_FIRST_SERVED' as const,
         participation: 'SINGLE' as const,
         questStatus: 'OPEN' as const,
-        rewardBaht,
+        rewardSatang,
         tagId: tagIds.get(tagName)!,
         headcount: 1,
         startTime: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
@@ -189,21 +189,21 @@ const main = async (): Promise<void> => {
     .returning({ id: quest.id });
 
   const completedQuests = [
-    ['Build a student club landing page', 'Frontend', 0, 1, 1200n],
-    ['Prepare an event budget report', 'Data Analysis', 1, 2, 900n],
-    ['Create a campus activity poster', 'Design', 2, 3, 700n],
-    ['Write a campus newsletter', 'Content', 3, 4, 450n],
-    ['Design a student club logo', 'Design', 4, 5, 550n],
-    ['Analyse a club member survey', 'Data Analysis', 5, 6, 650n],
-    ['Build a volunteer signup page', 'Frontend', 6, 7, 1000n],
-    ['Translate a campus guide', 'Content', 7, 8, 400n],
-    ['Create a student event dashboard', 'Frontend', 8, 9, 1100n],
+    ['Build a student club landing page', 'Frontend', 0, 1, 120_000],
+    ['Prepare an event budget report', 'Data Analysis', 1, 2, 90_000],
+    ['Create a campus activity poster', 'Design', 2, 3, 70_000],
+    ['Write a campus newsletter', 'Content', 3, 4, 45_000],
+    ['Design a student club logo', 'Design', 4, 5, 55_000],
+    ['Analyse a club member survey', 'Data Analysis', 5, 6, 65_000],
+    ['Build a volunteer signup page', 'Frontend', 6, 7, 100_000],
+    ['Translate a campus guide', 'Content', 7, 8, 40_000],
+    ['Create a student event dashboard', 'Frontend', 8, 9, 110_000],
   ] as const;
 
   const completedRows = await db
     .insert(quest)
     .values(
-      completedQuests.map(([title, tagName, hirerIndex, _workerIndex, rewardBaht]) => ({
+      completedQuests.map(([title, tagName, hirerIndex, _workerIndex, rewardSatang]) => ({
         giverId: orderedUsers[hirerIndex]!.id,
         title: `[Demo] ${title}`,
         description: 'A completed demo Quest for the Profile Reputation and Review showcase.',
@@ -211,7 +211,7 @@ const main = async (): Promise<void> => {
         mode: 'FIRST_COME_FIRST_SERVED' as const,
         participation: 'SINGLE' as const,
         questStatus: 'COMPLETED' as const,
-        rewardBaht,
+        rewardSatang,
         tagId: tagIds.get(tagName)!,
         headcount: 1,
         startTime: new Date('2025-06-01T09:00:00.000Z'),

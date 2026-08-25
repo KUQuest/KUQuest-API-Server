@@ -39,7 +39,7 @@ CREATE TABLE quest (
   mode         quest_mode NOT NULL,
   participation quest_participation NOT NULL DEFAULT 'SOLO',
   quest_status quest_status NOT NULL DEFAULT 'DRAFT',
-  reward_baht    BIGINT NOT NULL CHECK (reward_baht > 0),
+  reward_satang  INTEGER NOT NULL CHECK (reward_satang > 0),
   tag_id       UUID REFERENCES tag(id),
   headcount    INTEGER NOT NULL DEFAULT 1 CHECK (headcount > 0),
   start_time   TIMESTAMPTZ NOT NULL,
