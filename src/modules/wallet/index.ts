@@ -24,6 +24,14 @@ export type {
   ReserveSpendingInput,
   SettleFundingReservationInput,
 } from './wallet.funding.service';
+export {
+  convertEarnings,
+  earningsConversionScope,
+} from './wallet.service';
+export type {
+  EarningsConversion,
+  EarningsConversionInput,
+} from './wallet.service';
 export type { WalletTransaction } from './wallet.service';
 export {
   ensureInitialMoneyPolicy,

@@ -1,5 +1,6 @@
 import type { AuthedContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
+import { readResourceVersion } from '@/shared/resource-version';
 import type { ApiResponse } from '@/shared/api-response';
 import { ImageTooLargeError, ImageUploadError, UnsupportedImageTypeError } from '@/shared/image-storage';
 
@@ -7,15 +8,19 @@ import type { Static } from 'elysia';
 
 import type {
   portfolioCreateSchema,
+  portfolioImageUploadSchema,
   portfolioListRespondSchema,
   portfolioParamSchema,
   portfolioUpdateSchema,
+  PortfolioImageTarget,
 } from './portfolio.schema';
 import {
   createPortfolio,
   deletePortfolio,
   listPortfolio,
   markPortfolioImageDeleted,
+  deletePortfolioImage,
+  replacePortfolioImage,
   updatePortfolio,
 } from './portfolio.service';
 import type { PortfolioImage, PortfolioItem } from './portfolio.service';
@@ -58,6 +63,7 @@ const buildImage = (image: PortfolioImage): PortfolioListItem['images'][number] 
 
 export const serializePortfolioItem = (item: PortfolioItem): PortfolioListItem => ({
   id: item.id,
+  version: item.version,
   title: item.title,
   description: item.description,
   createdAt: item.createdAt.toISOString(),
@@ -84,7 +90,7 @@ export const createOwnPortfolio = async ({
   const uploaded: StoredPortfolioImage[] = [];
 
   try {
-    for (const image of body.images) {
+    for (const image of body.images ?? []) {
       uploaded.push(await portfolioStorage.upload(session.user.id, image));
     }
   } catch (error) {
@@ -122,27 +128,150 @@ export const createOwnPortfolio = async ({
 export const updateOwnPortfolio = async ({
   params,
   body,
+  request,
   session,
   set,
 }: AuthedContext & {
   params: Static<typeof portfolioParamSchema>;
   body: Static<typeof portfolioUpdateSchema>;
 }): Promise<ApiResponse> => {
-  const outcome = await updatePortfolio(session.user.id, params.portfolioId, body);
+  const versionHeader = readResourceVersion(request);
+  if (versionHeader.invalid) {
+    set.status = 400;
+    return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
+  }
+
+  const outcome = await updatePortfolio(
+    session.user.id,
+    params.portfolioId,
+    body,
+    versionHeader.value,
+  );
 
   if (outcome === 'not-found') return portfolioNotFound(set);
+  if (outcome === 'conflict') {
+    set.status = 409;
+    return apiError('CONFLICT', 'Portfolio was changed by another request');
+  }
 
   return apiSuccess();
 };
 
-export const deleteOwnPortfolio = async ({
+export const replaceOwnPortfolioImage = async ({
+  body,
   params,
+  request,
   session,
   set,
-}: AuthedContext & { params: Static<typeof portfolioParamSchema> }): Promise<ApiResponse> => {
-  const result = await deletePortfolio(session.user.id, params.portfolioId);
+}: AuthedContext & {
+  params: PortfolioImageTarget;
+  body: Static<typeof portfolioImageUploadSchema>;
+}): Promise<ApiResponse<{ version: number }>> => {
+  const versionHeader = readResourceVersion(request);
+  if (versionHeader.invalid) {
+    set.status = 400;
+    return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
+  }
+  let uploaded: StoredPortfolioImage;
+  try {
+    uploaded = await portfolioStorage.upload(session.user.id, body.image);
+  } catch (error) {
+    if (error instanceof ImageTooLargeError) {
+      set.status = 413;
+      return apiError('IMAGE_TOO_LARGE', error.message);
+    }
+    if (error instanceof UnsupportedImageTypeError) {
+      set.status = 415;
+      return apiError('UNSUPPORTED_IMAGE_TYPE', error.message);
+    }
+    if (error instanceof ImageUploadError) {
+      set.status = 502;
+      return apiError('IMAGE_UPLOAD_FAILED', 'Image upload failed');
+    }
+    throw error;
+  }
+  try {
+    const result = await replacePortfolioImage(
+      session.user.id,
+      params.portfolioId,
+      uploaded,
+      'fileId' in params ? params.fileId : undefined,
+      versionHeader.value,
+    );
+    if ('outcome' in result) {
+      await portfolioStorage.delete(uploaded.bucket, uploaded.objectKey);
+      if (result.outcome === 'conflict') {
+        set.status = 409;
+        return apiError('CONFLICT', 'Portfolio was changed by another request');
+      }
+      return portfolioNotFound(set);
+    }
+    if (result.previousFileId && result.previousBucket && result.previousObjectKey) {
+      try {
+        await portfolioStorage.delete(result.previousBucket, result.previousObjectKey);
+        await markPortfolioImageDeleted(session.user.id, result.previousFileId);
+      } catch (error) {
+        console.error('[portfolio-image-replacement] Previous image cleanup failed', {
+          error,
+          fileId: result.previousFileId,
+        });
+      }
+    }
+
+    return apiSuccess({ version: result.version });
+  } catch (error) {
+    await portfolioStorage.delete(uploaded.bucket, uploaded.objectKey).catch(() => undefined);
+    throw error;
+  }
+};
+
+export const deleteOwnPortfolioImage = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & {
+  params: PortfolioImageTarget;
+}): Promise<ApiResponse<{ version: number }>> => {
+  const versionHeader = readResourceVersion(request);
+  if (versionHeader.invalid) {
+    set.status = 400;
+    return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
+  }
+  const result = await deletePortfolioImage(
+    session.user.id,
+    params.portfolioId,
+    'fileId' in params ? params.fileId : undefined,
+    versionHeader.value,
+  );
+  if (result.outcome === 'not-found') return portfolioNotFound(set);
+  if (result.outcome === 'conflict') {
+    set.status = 409;
+    return apiError('CONFLICT', 'Portfolio was changed by another request');
+  }
+  await portfolioStorage.delete(result.bucket, result.objectKey).catch(() => undefined);
+  return apiSuccess({ version: result.version });
+};
+
+export const deleteOwnPortfolio = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & { params: Static<typeof portfolioParamSchema> }): Promise<ApiResponse<{ version: number }>> => {
+  const versionHeader = readResourceVersion(request);
+  if (versionHeader.invalid) {
+    set.status = 400;
+    return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
+  }
+
+  const result = await deletePortfolio(session.user.id, params.portfolioId, versionHeader.value);
 
   if (result.outcome === 'not-found') return portfolioNotFound(set);
+  if (result.outcome === 'conflict') {
+    set.status = 409;
+    return apiError('CONFLICT', 'Portfolio was changed by another request');
+  }
 
   await Promise.all(
     result.images.map(async (image) => {
@@ -158,5 +287,5 @@ export const deleteOwnPortfolio = async ({
     }),
   );
 
-  return apiSuccess();
+  return apiSuccess({ version: result.version });
 };

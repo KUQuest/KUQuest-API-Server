@@ -13,8 +13,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { inArray } from 'drizzle-orm';
 
-const studentA = `test-work-experience-a-${randomUUID()}`;
-const studentB = `test-work-experience-b-${randomUUID()}`;
+const studentA = randomUUID();
+const studentB = randomUUID();
 
 beforeAll(async () => {
   try {
@@ -117,7 +117,7 @@ describe('work experience persistence', () => {
     const created = await createValidExperience(studentA);
 
     expect(await deleteWorkExperience(studentB, created!.id)).toBeUndefined();
-    expect(await deleteWorkExperience(studentA, created!.id)).toEqual({ id: created!.id });
+    expect(await deleteWorkExperience(studentA, created!.id)).toEqual({ outcome: 'deleted', id: created!.id, version: 2 });
     expect(await listWorkExperiences(studentA)).toEqual([]);
   });
 

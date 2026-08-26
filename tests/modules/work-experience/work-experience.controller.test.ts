@@ -12,6 +12,7 @@ const session = { user: { id: 'student-1' } };
 
 const storedExperience = {
   id: '018f47a7-1c7d-7c98-9a11-690d7e83430c',
+  version: 1,
   title: 'Senior Peer Tutor',
   employmentType: 'Part-time',
   organization: 'University Academic Center',

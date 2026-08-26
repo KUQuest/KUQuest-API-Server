@@ -1,3 +1,5 @@
+import { questRoute } from '@/modules/quest/quest.route';
+
 import { Elysia } from 'elysia';
 
 import { academicRegistrationRoute } from './modules/academic-registration';
@@ -7,6 +9,7 @@ import { healthRoute } from './modules/health';
 import { onboardingRoute } from './modules/onboarding';
 import { portfolioRoute } from './modules/portfolio';
 import { profileRoute } from './modules/profile';
+import { tagRoute } from '@/modules/tag';
 import { workExperienceRoute } from './modules/work-experience';
 import { corsPlugin } from './plugins/cors';
 import { errorHandlerPlugin } from './plugins/error-handler';
@@ -32,6 +35,8 @@ export const app = new Elysia({
   .use(onboardingRoute)
   .use(academicRegistrationRoute)
   .use(profileRoute)
+  .use(questRoute)
   .use(certificateRoute)
   .use(portfolioRoute)
   .use(workExperienceRoute)
+  .use(tagRoute)

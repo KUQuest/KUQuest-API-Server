@@ -1,5 +1,5 @@
 import { relations, sql } from 'drizzle-orm';
-import { boolean, check, pgTable, text, uuid, unique } from 'drizzle-orm/pg-core';
+import { boolean, check, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 
 export const faculty = pgTable(
   'faculty',
@@ -33,10 +33,7 @@ export const occupation = pgTable(
   },
   (table) => [
     unique('occupation_name_key').on(table.name),
-    check(
-      'occupation_name_check',
-      sql`${table.name} IN ('Staff', 'Lecturer', 'Student')`,
-    ),
+    check('occupation_name_nonempty', sql`length(trim(name)) > 0`),
   ],
 );
 

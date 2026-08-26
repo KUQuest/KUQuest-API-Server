@@ -26,6 +26,7 @@ export const workExperienceUpdateSchema = t.Partial(workExperienceCreateSchema);
 
 export const workExperienceSchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  version: t.Integer({ minimum: 1 }),
   title: t.String(),
   employmentType: t.String(),
   organization: t.Nullable(t.String()),
@@ -39,6 +40,11 @@ export const workExperienceSchema = t.Object({
 export const workExperienceResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({ experience: workExperienceSchema }),
+});
+
+export const workExperienceDeleteResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({ version: t.Integer({ minimum: 1 }) }),
 });
 
 export const workExperienceListResponseSchema = t.Object({

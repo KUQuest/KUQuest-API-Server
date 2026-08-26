@@ -1,6 +1,6 @@
 {
-  "id": "c179732c-4e19-49bf-9753-c329c161959f",
-  "prevId": "50deaf2e-47fe-493b-879b-38825aab3577",
+  "id": "3f3b45aa-1171-4ff0-b738-ea72bf39708d",
+  "prevId": "e6eca2b8-4ea7-4e28-bae0-74fd6ae1f96f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1688,7 +1688,7 @@
       "checkConstraints": {
         "wallet_activities_type_check": {
           "name": "wallet_activities_type_check",
-          "value": "\"wallet_activities\".\"type\" IN ('TOP_UP', 'SPEND', 'EARN', 'HOLD', 'RELEASE')"
+          "value": "\"wallet_activities\".\"type\" IN ('TOP_UP', 'SPEND', 'EARN', 'HOLD', 'RELEASE', 'CONVERT')"
         },
         "wallet_activities_status_check": {
           "name": "wallet_activities_status_check",
@@ -1697,8 +1697,8 @@
       },
       "isRLSEnabled": false
     },
-    "public.wallet_funding_reservations": {
-      "name": "wallet_funding_reservations",
+    "public.wallet_earnings_conversions": {
+      "name": "wallet_earnings_conversions",
       "schema": "",
       "columns": {
         "id": {
@@ -1708,194 +1708,8 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "wallet_id": {
-          "name": "wallet_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "owner_user_id": {
-          "name": "owner_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "caller_scope": {
-          "name": "caller_scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "caller_reference": {
-          "name": "caller_reference",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "policy_revision_id": {
-          "name": "policy_revision_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "total_reserved_satang": {
-          "name": "total_reserved_satang",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "remaining_satang": {
-          "name": "remaining_satang",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'ACTIVE'"
-        },
-        "created_ledger_transaction_id": {
-          "name": "created_ledger_transaction_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "wallet_funding_reservations_owner_user_id_auth_user_id_fk": {
-          "name": "wallet_funding_reservations_owner_user_id_auth_user_id_fk",
-          "tableFrom": "wallet_funding_reservations",
-          "tableTo": "auth_user",
-          "columnsFrom": [
-            "owner_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "wallet_funding_reservations_policy_revision_id_payment_money_policy_revisions_id_fk": {
-          "name": "wallet_funding_reservations_policy_revision_id_payment_money_policy_revisions_id_fk",
-          "tableFrom": "wallet_funding_reservations",
-          "tableTo": "payment_money_policy_revisions",
-          "columnsFrom": [
-            "policy_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "wallet_funding_reservations_created_ledger_transaction_id_wallet_ledger_transactions_id_fk": {
-          "name": "wallet_funding_reservations_created_ledger_transaction_id_wallet_ledger_transactions_id_fk",
-          "tableFrom": "wallet_funding_reservations",
-          "tableTo": "wallet_ledger_transactions",
-          "columnsFrom": [
-            "created_ledger_transaction_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "wallet_funding_reservations_wallet_owner_fk": {
-          "name": "wallet_funding_reservations_wallet_owner_fk",
-          "tableFrom": "wallet_funding_reservations",
-          "tableTo": "wallet_wallets",
-          "columnsFrom": [
-            "wallet_id",
-            "owner_user_id"
-          ],
-          "columnsTo": [
-            "id",
-            "user_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "wallet_funding_reservations_created_ledger_transaction_id_unique": {
-          "name": "wallet_funding_reservations_created_ledger_transaction_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "created_ledger_transaction_id"
-          ]
-        },
-        "wallet_funding_reservations_owner_scope_reference_key": {
-          "name": "wallet_funding_reservations_owner_scope_reference_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "owner_user_id",
-            "caller_scope",
-            "caller_reference"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "wallet_funding_reservations_amounts_check": {
-          "name": "wallet_funding_reservations_amounts_check",
-          "value": "\"wallet_funding_reservations\".\"total_reserved_satang\" BETWEEN 1 AND 2000000000 AND \"wallet_funding_reservations\".\"remaining_satang\" BETWEEN 0 AND \"wallet_funding_reservations\".\"total_reserved_satang\""
-        },
-        "wallet_funding_reservations_status_check": {
-          "name": "wallet_funding_reservations_status_check",
-          "value": "\"wallet_funding_reservations\".\"status\" IN ('ACTIVE', 'RELEASED', 'SETTLED')"
-        },
-        "wallet_funding_reservations_completion_check": {
-          "name": "wallet_funding_reservations_completion_check",
-          "value": "(\"wallet_funding_reservations\".\"status\" = 'ACTIVE') = (\"wallet_funding_reservations\".\"remaining_satang\" > 0)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.wallet_funding_reservation_operations": {
-      "name": "wallet_funding_reservation_operations",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "reservation_id": {
-          "name": "reservation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "operation_type": {
-          "name": "operation_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "operation_reference": {
-          "name": "operation_reference",
+        "principal_user_id": {
+          "name": "principal_user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1906,20 +1720,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "resulting_total_reserved_satang": {
-          "name": "resulting_total_reserved_satang",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "resulting_remaining_satang": {
-          "name": "resulting_remaining_satang",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "resulting_status": {
-          "name": "resulting_status",
+        "business_reference": {
+          "name": "business_reference",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1946,183 +1748,12 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "wallet_funding_reservation_operations_reservation_id_wallet_funding_reservations_id_fk": {
-          "name": "wallet_funding_reservation_operations_reservation_id_wallet_funding_reservations_id_fk",
-          "tableFrom": "wallet_funding_reservation_operations",
-          "tableTo": "wallet_funding_reservations",
-          "columnsFrom": [
-            "reservation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "wallet_funding_reservation_operations_ledger_transaction_id_wallet_ledger_transactions_id_fk": {
-          "name": "wallet_funding_reservation_operations_ledger_transaction_id_wallet_ledger_transactions_id_fk",
-          "tableFrom": "wallet_funding_reservation_operations",
-          "tableTo": "wallet_ledger_transactions",
-          "columnsFrom": [
-            "ledger_transaction_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "wallet_funding_reservation_operations_idempotency_key_id_wallet_idempotency_keys_id_fk": {
-          "name": "wallet_funding_reservation_operations_idempotency_key_id_wallet_idempotency_keys_id_fk",
-          "tableFrom": "wallet_funding_reservation_operations",
-          "tableTo": "wallet_idempotency_keys",
-          "columnsFrom": [
-            "idempotency_key_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "wallet_funding_reservation_operations_ledger_transaction_id_unique": {
-          "name": "wallet_funding_reservation_operations_ledger_transaction_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "ledger_transaction_id"
-          ]
-        },
-        "wallet_funding_reservation_operations_idempotency_key_id_unique": {
-          "name": "wallet_funding_reservation_operations_idempotency_key_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "idempotency_key_id"
-          ]
-        },
-        "wallet_funding_operations_reservation_reference_key": {
-          "name": "wallet_funding_operations_reservation_reference_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "reservation_id",
-            "operation_reference"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "wallet_funding_operations_type_check": {
-          "name": "wallet_funding_operations_type_check",
-          "value": "\"wallet_funding_reservation_operations\".\"operation_type\" IN ('RESERVE', 'INCREASE', 'RELEASE')"
-        },
-        "wallet_funding_operations_amounts_check": {
-          "name": "wallet_funding_operations_amounts_check",
-          "value": "\"wallet_funding_reservation_operations\".\"amount_satang\" BETWEEN 1 AND 2000000000 AND \"wallet_funding_reservation_operations\".\"resulting_total_reserved_satang\" BETWEEN 1 AND 2000000000 AND \"wallet_funding_reservation_operations\".\"resulting_remaining_satang\" BETWEEN 0 AND \"wallet_funding_reservation_operations\".\"resulting_total_reserved_satang\""
-        },
-        "wallet_funding_operations_status_check": {
-          "name": "wallet_funding_operations_status_check",
-          "value": "\"wallet_funding_reservation_operations\".\"resulting_status\" IN ('ACTIVE', 'RELEASED', 'SETTLED') AND (\"wallet_funding_reservation_operations\".\"resulting_status\" = 'ACTIVE') = (\"wallet_funding_reservation_operations\".\"resulting_remaining_satang\" > 0)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.wallet_funding_reservation_settlements": {
-      "name": "wallet_funding_reservation_settlements",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "reservation_id": {
-          "name": "reservation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "settlement_reference": {
-          "name": "settlement_reference",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "recipient_wallet_id": {
-          "name": "recipient_wallet_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "recipient_user_id": {
-          "name": "recipient_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "recipient_amount_satang": {
-          "name": "recipient_amount_satang",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "platform_fee_satang": {
-          "name": "platform_fee_satang",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "total_amount_satang": {
-          "name": "total_amount_satang",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ledger_transaction_id": {
-          "name": "ledger_transaction_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "idempotency_key_id": {
-          "name": "idempotency_key_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "wallet_funding_reservation_settlements_reservation_id_wallet_funding_reservations_id_fk": {
-          "name": "wallet_funding_reservation_settlements_reservation_id_wallet_funding_reservations_id_fk",
-          "tableFrom": "wallet_funding_reservation_settlements",
-          "tableTo": "wallet_funding_reservations",
-          "columnsFrom": [
-            "reservation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "wallet_funding_reservation_settlements_recipient_user_id_auth_user_id_fk": {
-          "name": "wallet_funding_reservation_settlements_recipient_user_id_auth_user_id_fk",
-          "tableFrom": "wallet_funding_reservation_settlements",
+        "wallet_earnings_conversions_principal_user_id_auth_user_id_fk": {
+          "name": "wallet_earnings_conversions_principal_user_id_auth_user_id_fk",
+          "tableFrom": "wallet_earnings_conversions",
           "tableTo": "auth_user",
           "columnsFrom": [
-            "recipient_user_id"
+            "principal_user_id"
           ],
           "columnsTo": [
             "id"
@@ -2130,9 +1761,9 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "wallet_funding_reservation_settlements_ledger_transaction_id_wallet_ledger_transactions_id_fk": {
-          "name": "wallet_funding_reservation_settlements_ledger_transaction_id_wallet_ledger_transactions_id_fk",
-          "tableFrom": "wallet_funding_reservation_settlements",
+        "wallet_earnings_conversions_ledger_transaction_id_wallet_ledger_transactions_id_fk": {
+          "name": "wallet_earnings_conversions_ledger_transaction_id_wallet_ledger_transactions_id_fk",
+          "tableFrom": "wallet_earnings_conversions",
           "tableTo": "wallet_ledger_transactions",
           "columnsFrom": [
             "ledger_transaction_id"
@@ -2143,9 +1774,9 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "wallet_funding_reservation_settlements_idempotency_key_id_wallet_idempotency_keys_id_fk": {
-          "name": "wallet_funding_reservation_settlements_idempotency_key_id_wallet_idempotency_keys_id_fk",
-          "tableFrom": "wallet_funding_reservation_settlements",
+        "wallet_earnings_conversions_idempotency_key_id_wallet_idempotency_keys_id_fk": {
+          "name": "wallet_earnings_conversions_idempotency_key_id_wallet_idempotency_keys_id_fk",
+          "tableFrom": "wallet_earnings_conversions",
           "tableTo": "wallet_idempotency_keys",
           "columnsFrom": [
             "idempotency_key_id"
@@ -2155,53 +1786,37 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "wallet_funding_settlements_recipient_owner_fk": {
-          "name": "wallet_funding_settlements_recipient_owner_fk",
-          "tableFrom": "wallet_funding_reservation_settlements",
-          "tableTo": "wallet_wallets",
-          "columnsFrom": [
-            "recipient_wallet_id",
-            "recipient_user_id"
-          ],
-          "columnsTo": [
-            "id",
-            "user_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "wallet_funding_reservation_settlements_ledger_transaction_id_unique": {
-          "name": "wallet_funding_reservation_settlements_ledger_transaction_id_unique",
+        "wallet_earnings_conversions_business_reference_unique": {
+          "name": "wallet_earnings_conversions_business_reference_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "business_reference"
+          ]
+        },
+        "wallet_earnings_conversions_ledger_transaction_id_unique": {
+          "name": "wallet_earnings_conversions_ledger_transaction_id_unique",
           "nullsNotDistinct": false,
           "columns": [
             "ledger_transaction_id"
           ]
         },
-        "wallet_funding_reservation_settlements_idempotency_key_id_unique": {
-          "name": "wallet_funding_reservation_settlements_idempotency_key_id_unique",
+        "wallet_earnings_conversions_idempotency_key_id_unique": {
+          "name": "wallet_earnings_conversions_idempotency_key_id_unique",
           "nullsNotDistinct": false,
           "columns": [
             "idempotency_key_id"
-          ]
-        },
-        "wallet_funding_settlements_reservation_reference_key": {
-          "name": "wallet_funding_settlements_reservation_reference_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "reservation_id",
-            "settlement_reference"
           ]
         }
       },
       "policies": {},
       "checkConstraints": {
-        "wallet_funding_settlements_amounts_check": {
-          "name": "wallet_funding_settlements_amounts_check",
-          "value": "\"wallet_funding_reservation_settlements\".\"recipient_amount_satang\" > 0 AND \"wallet_funding_reservation_settlements\".\"platform_fee_satang\" >= 0 AND \"wallet_funding_reservation_settlements\".\"total_amount_satang\" = \"wallet_funding_reservation_settlements\".\"recipient_amount_satang\" + \"wallet_funding_reservation_settlements\".\"platform_fee_satang\""
+        "wallet_earnings_conversions_amount_check": {
+          "name": "wallet_earnings_conversions_amount_check",
+          "value": "\"wallet_earnings_conversions\".\"amount_satang\" > 0 AND \"wallet_earnings_conversions\".\"amount_satang\" <= 2000000000"
         }
       },
       "isRLSEnabled": false
@@ -2674,7 +2289,7 @@
       "checkConstraints": {
         "wallet_ledger_transactions_event_type_check": {
           "name": "wallet_ledger_transactions_event_type_check",
-          "value": "\"wallet_ledger_transactions\".\"event_type\" IN ('TOP_UP', 'PAYOUT', 'FUNDING_RESERVE', 'FUNDING_RELEASE', 'FUNDING_SETTLEMENT', 'ADJUSTMENT', 'EARNINGS_CONVERSION')"
+          "value": "\"wallet_ledger_transactions\".\"event_type\" IN ('TOP_UP', 'PAYOUT', 'FUNDING_RESERVE', 'FUNDING_RELEASE', 'ADJUSTMENT', 'EARNINGS_CONVERSION')"
         }
       },
       "isRLSEnabled": false
@@ -2922,14 +2537,6 @@
           "name": "wallet_wallets_user_id_unique",
           "nullsNotDistinct": false,
           "columns": [
-            "user_id"
-          ]
-        },
-        "wallet_wallets_id_user_key": {
-          "name": "wallet_wallets_id_user_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "id",
             "user_id"
           ]
         }

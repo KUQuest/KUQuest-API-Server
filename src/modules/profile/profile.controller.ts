@@ -3,6 +3,7 @@ import type { AuthedContext } from '@/modules/auth';
 import { serializePortfolioItem, listPortfolio } from '@/modules/portfolio';
 import { listWorkExperiences, serializeWorkExperience } from '@/modules/work-experience';
 import { apiError, apiSuccess } from '@/shared/api-response';
+import { readResourceVersion } from '@/shared/resource-version';
 import type { ApiResponse } from '@/shared/api-response';
 import {
   ImageTooLargeError,
@@ -19,12 +20,15 @@ import type {
   publicProfileResponseSchema,
   profileResponseSchema,
   profileUpdateSchema,
+  reviewsResponseSchema,
 } from './profile.schema';
 import {
   getPreviousAvatarFile,
+  getProfileReputation,
   getPublicProfile as getPublicProfileRecord,
   getProfile,
   markAvatarDeleted,
+  removeStudentAvatar,
   replaceStudentAvatar,
   updateProfile,
 } from './profile.service';
@@ -90,6 +94,16 @@ export const getOwnProfile = async ({
   return apiSuccess({ ...rest, avatar: describeAvatar(avatar) });
 };
 
+export const getReputation = async ({
+  session,
+}: AuthedContext): Promise<ApiResponse<Awaited<ReturnType<typeof getProfileReputation>>>> =>
+  apiSuccess(await getProfileReputation(session.user.id));
+
+type Reviews = Static<typeof reviewsResponseSchema>['data'];
+
+export const getReviews = async (): Promise<ApiResponse<Reviews>> =>
+  apiSuccess({ items: [], total: 0, nextCursor: null });
+
 export const getPublicProfile = async ({
   params,
   set,
@@ -109,6 +123,7 @@ export const getPublicProfile = async ({
   return apiSuccess({
     ...profile,
     avatar: describeAvatar(profile.avatar),
+    version: profile.version,
     portfolio: portfolio.map(serializePortfolioItem),
     certificates: certificates.map(serializeCertificate),
     experience: experience.map(serializeWorkExperience),
@@ -116,11 +131,18 @@ export const getPublicProfile = async ({
 };
 
 export const updateOwnProfile = async ({
+  request,
   session,
   body,
   set,
-}: AuthedContext & { body: Static<typeof profileUpdateSchema> }): Promise<ApiResponse> => {
-  const outcome = await updateProfile(session.user.id, body);
+}: AuthedContext & { body: Static<typeof profileUpdateSchema> }): Promise<ApiResponse<Profile>> => {
+  const versionHeader = readResourceVersion(request);
+  if (versionHeader.invalid) {
+    set.status = 400;
+    return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
+  }
+
+  const outcome = await updateProfile(session.user.id, body, versionHeader.value);
 
   if (outcome === 'student-not-found') return userNotFound(set);
 
@@ -129,7 +151,34 @@ export const updateOwnProfile = async ({
     return apiError('DEPARTMENT_NOT_FOUND', 'Department not found');
   }
 
-  return apiSuccess();
+  if (outcome === 'conflict') {
+    set.status = 409;
+    return apiError('CONFLICT', 'Profile was changed by another request');
+  }
+
+  const profile = await getProfile(session.user.id);
+  if (!profile) return userNotFound(set);
+
+  const { avatar, ...rest } = profile;
+  return apiSuccess({ ...rest, avatar: describeAvatar(avatar) });
+};
+
+export const deleteAvatar = async ({
+  session,
+  set,
+}: AuthedContext): Promise<ApiResponse<{ fileId: string | null; version: number; avatar: null }>> => {
+  const result = await removeStudentAvatar(session.user.id);
+  if (!result) return userNotFound(set);
+
+  if (result.bucket && result.objectKey) {
+    try {
+      await avatarStorage.delete(result.bucket, result.objectKey);
+    } catch (error) {
+      console.error('[avatar-delete] Object deletion failed', error);
+    }
+  }
+
+  return apiSuccess({ fileId: null, version: result.version, avatar: null });
 };
 
 export const setAvatar = async ({
@@ -137,7 +186,7 @@ export const setAvatar = async ({
   session,
   set,
 }: AuthedContext & { body: Static<typeof avatarUploadSchema> }): Promise<
-  ApiResponse<{ fileId: string }>
+  ApiResponse<{ fileId: string; version: number; avatar: Profile['avatar'] }>
 > => {
   let storedAvatar;
 
@@ -206,7 +255,12 @@ export const setAvatar = async ({
       }
     }
 
-    return apiSuccess({ fileId: result.fileId });
+    const avatar = describeAvatar({ fileId: result.fileId, ...storedAvatar });
+    return apiSuccess({
+      fileId: result.fileId,
+      version: result.version,
+      avatar,
+    });
   } catch (error) {
     await discardUploadedAvatar(storedAvatar.bucket, storedAvatar.objectKey);
     throw error;
