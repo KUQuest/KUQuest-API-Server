@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
+import { file } from '@/database/schema/file.schema';
 import { quest, questImage, questLocation } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
@@ -9,15 +10,18 @@ import {
   type CursorPayload,
 } from '@/shared/cursor';
 
-import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 
 import {
   buildQuestPublishCheck,
   type QuestPublishCheck,
 } from './quest.publish.policy';
+import { maxQuestImages } from './quest.schema';
 import type { QuestCreateInput } from './quest.schema';
+import type { StoredQuestImage } from './quest.storage';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type QuestDatabase = typeof db | QuestTransaction;
 
 type QuestPublishRow = {
   id: string;
@@ -60,6 +64,36 @@ type LocationRow = {
   latitude: string;
   longitude: string;
   position: number;
+};
+
+export type QuestImage = {
+  fileId: string;
+  position: number;
+  bucket: string;
+  objectKey: string;
+};
+
+export type AddQuestImagesOutcome =
+  | { images: QuestImage[] }
+  | { outcome: 'not-found' | 'not-editable' | 'limit-reached' };
+
+const selectQuestImages = async (
+  database: QuestDatabase,
+  questId: string,
+): Promise<QuestImage[]> => {
+  const rows = await database
+    .select({
+      fileId: questImage.fileId,
+      position: questImage.position,
+      bucket: file.bucket,
+      objectKey: file.objectKey,
+    })
+    .from(questImage)
+    .innerJoin(file, and(eq(questImage.fileId, file.id), isNull(file.deletedAt)))
+    .where(eq(questImage.questId, questId))
+    .orderBy(asc(questImage.position));
+
+  return rows;
 };
 
 export type QuestListFilters = {
@@ -362,6 +396,105 @@ export const createQuest = async (
   });
 };
 
+export const addQuestImages = async (
+  userId: string,
+  questId: string,
+  images: StoredQuestImage[],
+): Promise<AddQuestImagesOutcome> =>
+  db.transaction(async (transaction) => {
+    const [ownedQuest] = await transaction
+      .select({ id: quest.id, questStatus: quest.questStatus })
+      .from(quest)
+      .where(and(eq(quest.id, questId), eq(quest.giverId, userId)))
+      .limit(1)
+      .for('update');
+
+    if (!ownedQuest) return { outcome: 'not-found' };
+    if (ownedQuest.questStatus !== 'DRAFT') return { outcome: 'not-editable' };
+
+    const [imageCount] = await transaction
+      .select({ count: sql<number>`count(*)` })
+      .from(questImage)
+      .where(eq(questImage.questId, questId));
+    const currentCount = Number(imageCount?.count ?? 0);
+
+    if (currentCount + images.length > maxQuestImages) return { outcome: 'limit-reached' };
+
+    for (const [index, image] of images.entries()) {
+      const [createdFile] = await transaction
+        .insert(file)
+        .values({ ...image, uploadedByUserId: userId })
+        .returning({ id: file.id });
+
+      await transaction.insert(questImage).values({
+        questId,
+        fileId: createdFile.id,
+        position: currentCount + index,
+      });
+    }
+
+    return { images: await selectQuestImages(transaction, questId) };
+  });
+
+export type DeleteQuestImageOutcome =
+  | { outcome: 'deleted'; bucket: string; objectKey: string }
+  | { outcome: 'not-found' | 'not-editable' };
+
+export const deleteQuestImage = async (
+  userId: string,
+  questId: string,
+  imageId: string,
+): Promise<DeleteQuestImageOutcome> =>
+  db.transaction(async (transaction) => {
+    const [ownedQuest] = await transaction
+      .select({ id: quest.id, questStatus: quest.questStatus })
+      .from(quest)
+      .where(and(eq(quest.id, questId), eq(quest.giverId, userId)))
+      .limit(1)
+      .for('update');
+
+    if (!ownedQuest) return { outcome: 'not-found' };
+    if (ownedQuest.questStatus !== 'DRAFT') return { outcome: 'not-editable' };
+
+    const [image] = await transaction
+      .select({
+        id: questImage.id,
+        fileId: file.id,
+        bucket: file.bucket,
+        objectKey: file.objectKey,
+      })
+      .from(questImage)
+      .innerJoin(file, and(eq(questImage.fileId, file.id), isNull(file.deletedAt)))
+      .where(and(eq(questImage.questId, questId), eq(questImage.fileId, imageId)))
+      .limit(1)
+      .for('update');
+
+    if (!image) return { outcome: 'not-found' };
+
+    await transaction.delete(questImage).where(eq(questImage.id, image.id));
+    await transaction.update(file).set({ deletedAt: new Date() }).where(eq(file.id, image.fileId));
+
+    await transaction
+      .update(questImage)
+      .set({ position: sql`${questImage.position} + ${maxQuestImages}` })
+      .where(eq(questImage.questId, questId));
+
+    const remainingImages = await transaction
+      .select({ id: questImage.id })
+      .from(questImage)
+      .where(eq(questImage.questId, questId))
+      .orderBy(asc(questImage.position));
+
+    for (const [position, remainingImage] of remainingImages.entries()) {
+      await transaction
+        .update(questImage)
+        .set({ position })
+        .where(eq(questImage.id, remainingImage.id));
+    }
+
+    return { outcome: 'deleted', bucket: image.bucket, objectKey: image.objectKey };
+  });
+
 export const listOwnQuests = async (userId: string, filters: QuestListFilters) => {
   const result = await listRows(filters, userId);
   const coordinates =
@@ -424,11 +557,7 @@ export const getQuestDetail = async (userId: string, questId: string) => {
     .where(eq(questLocation.questId, questId))
     .orderBy(asc(questLocation.position));
 
-  const images = await db
-    .select({ fileId: questImage.fileId })
-    .from(questImage)
-    .where(eq(questImage.questId, questId))
-    .orderBy(asc(questImage.position));
+  const images = await selectQuestImages(db, questId);
 
   return {
     id: row.id,

@@ -2,6 +2,7 @@ import type { AuthedContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import { CursorInputError, decodeCursor, parsePageLimit } from '@/shared/cursor';
+import { ImageTooLargeError, ImageUploadError, UnsupportedImageTypeError } from '@/shared/image-storage';
 
 import type { Static } from 'elysia';
 
@@ -10,6 +11,9 @@ import type {
   questCreateResponseSchema,
   questCreateSchema,
   questDetailResponseSchema,
+  questImageParamsSchema,
+  questImagesUploadResponseSchema,
+  questImagesUploadSchema,
   questListQuerySchema,
   questMineQuerySchema,
   questMineResponseSchema,
@@ -17,19 +21,26 @@ import type {
   questPublishCheckResponseSchema,
 } from './quest.schema';
 import {
+  addQuestImages,
   createQuest,
+  deleteQuestImage,
   getQuestDetail,
   getQuestPublishCheck,
   listBoardQuests,
   listOwnQuests,
   publishQuest,
 } from './quest.service';
+import type { QuestImage } from './quest.service';
+import { questStorage } from './quest.storage';
+import type { StoredQuestImage } from './quest.storage';
 
 type CreateResponse = Static<typeof questCreateResponseSchema>['data'];
 type BoardResponse = Static<typeof questBoardResponseSchema>['data'];
 type MineResponse = Static<typeof questMineResponseSchema>['data'];
 type DetailResponse = Static<typeof questDetailResponseSchema>['data'];
+type QuestImagesUploadResponse = Static<typeof questImagesUploadResponseSchema>['data'];
 type CreateInput = Static<typeof questCreateSchema>;
+type QuestImagesUploadInput = Static<typeof questImagesUploadSchema>;
 type ListQuery = Static<typeof questListQuerySchema>;
 type MineQuery = Static<typeof questMineQuerySchema>;
 type QuestParams = Static<typeof questParamsSchema>;
@@ -38,6 +49,60 @@ type PublishCheckResponse = Static<typeof questPublishCheckResponseSchema>['data
 const invalidInput = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 400;
   return apiError(code, message);
+};
+
+const discardUploadedImages = async (images: StoredQuestImage[]): Promise<void> => {
+  await Promise.all(
+    images.map(async (image) => {
+      try {
+        await questStorage.delete(image.bucket, image.objectKey);
+      } catch (error) {
+        console.error('[quest-image-upload] Compensating object deletion failed', {
+          bucket: image.bucket,
+          error,
+          objectKey: image.objectKey,
+        });
+      }
+    }),
+  );
+};
+
+const buildQuestImage = (
+  image: QuestImage,
+): QuestImagesUploadResponse['images'][number] | undefined => {
+  try {
+    return {
+      fileId: image.fileId,
+      position: image.position,
+      url: questStorage.linkFor(image),
+    };
+  } catch (error) {
+    console.error('Building the Quest Image link failed', error);
+
+    return undefined;
+  }
+};
+
+const serializeQuestImages = (images: QuestImage[]) =>
+  images
+    .map(buildQuestImage)
+    .filter((image): image is NonNullable<typeof image> => image !== undefined);
+
+const mapImageUploadError = (set: AuthedContext['set'], error: unknown) => {
+  if (error instanceof ImageTooLargeError) {
+    set.status = 413;
+    return apiError('IMAGE_TOO_LARGE', error.message);
+  }
+  if (error instanceof UnsupportedImageTypeError) {
+    set.status = 415;
+    return apiError('UNSUPPORTED_IMAGE_TYPE', error.message);
+  }
+  if (error instanceof ImageUploadError) {
+    set.status = 502;
+    return apiError('IMAGE_UPLOAD_FAILED', 'Image upload failed');
+  }
+
+  return undefined;
 };
 
 const toFilters = (query: ListQuery) => ({
@@ -95,6 +160,84 @@ export const createQuestController = async ({
   return apiSuccess(result);
 };
 
+export const addQuestImagesController = async ({
+  body,
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  body: QuestImagesUploadInput;
+  params: QuestParams;
+}): Promise<ApiResponse<QuestImagesUploadResponse>> => {
+  const uploaded: StoredQuestImage[] = [];
+
+  try {
+    for (const image of body.images) {
+      uploaded.push(await questStorage.upload(session.user.id, image));
+    }
+  } catch (error) {
+    await discardUploadedImages(uploaded);
+    const mapped = mapImageUploadError(set, error);
+    if (mapped) return mapped;
+    throw error;
+  }
+
+  try {
+    const result = await addQuestImages(session.user.id, params.questId, uploaded);
+    if ('outcome' in result) {
+      await discardUploadedImages(uploaded);
+      if (result.outcome === 'not-found') {
+        set.status = 404;
+        return apiError('QUEST_NOT_FOUND', 'Quest not found');
+      }
+      if (result.outcome === 'not-editable') {
+        set.status = 409;
+        return apiError('QUEST_NOT_EDITABLE', 'Only Draft Quests can be edited');
+      }
+
+      set.status = 409;
+      return apiError('QUEST_IMAGE_LIMIT_REACHED', 'A Quest can have at most 3 images');
+    }
+
+    return apiSuccess({ images: serializeQuestImages(result.images) });
+  } catch (error) {
+    await discardUploadedImages(uploaded);
+    throw error;
+  }
+};
+
+export const deleteQuestImageController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  params: Static<typeof questImageParamsSchema>;
+}): Promise<ApiResponse> => {
+  const result = await deleteQuestImage(session.user.id, params.questId, params.imageId);
+
+  if (result.outcome !== 'deleted') {
+    if (result.outcome === 'not-found') {
+      set.status = 404;
+      return apiError('QUEST_NOT_FOUND', 'Quest not found');
+    }
+
+    set.status = 409;
+    return apiError('QUEST_NOT_EDITABLE', 'Only Draft Quests can be edited');
+  }
+
+  try {
+    await questStorage.delete(result.bucket, result.objectKey);
+  } catch (error) {
+    console.error('[quest-image-delete] Object deletion failed', {
+      bucket: result.bucket,
+      error,
+      objectKey: result.objectKey,
+    });
+  }
+
+  return apiSuccess();
+};
+
 export const listBoardQuestsController = async ({
   query,
   set,
@@ -127,7 +270,7 @@ export const getQuestDetailController = async ({
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
 
-  return apiSuccess(questDetail);
+  return apiSuccess({ ...questDetail, images: serializeQuestImages(questDetail.images) });
 };
 
 const notDraft = (set: AuthedContext['set']) => {

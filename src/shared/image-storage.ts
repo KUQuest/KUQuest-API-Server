@@ -43,6 +43,7 @@ const defaultUrlLifetimeSeconds = 15 * 60;
 type ImageStorageConfig = {
   keyPrefix: string;
   logLabel?: string;
+  client?: Pick<Bun.S3Client, 'write' | 'delete' | 'presign'>;
   maxSizeBytes?: number;
   urlLifetimeSeconds?: number;
   emptyFileMessage?: string;
@@ -53,6 +54,7 @@ type ImageStorageConfig = {
 export const createImageStorage = ({
   keyPrefix,
   logLabel = `${keyPrefix}-upload`,
+  client,
   maxSizeBytes = defaultMaxSizeBytes,
   urlLifetimeSeconds = defaultUrlLifetimeSeconds,
   emptyFileMessage = 'Image file is empty',
@@ -61,13 +63,15 @@ export const createImageStorage = ({
 }: ImageStorageConfig) => {
   const log = createDebugLogger(logLabel);
 
-  const s3 = new Bun.S3Client({
-    accessKeyId: env.s3AccessKeyId,
-    secretAccessKey: env.s3SecretAccessKey,
-    bucket: env.s3Bucket,
-    endpoint: env.s3Endpoint,
-    region: env.s3Region,
-  });
+  const s3 =
+    client ??
+    new Bun.S3Client({
+      accessKeyId: env.s3AccessKeyId,
+      secretAccessKey: env.s3SecretAccessKey,
+      bucket: env.s3Bucket,
+      endpoint: env.s3Endpoint,
+      region: env.s3Region,
+    });
 
   const upload = async (userId: string, image: File): Promise<StoredImage> => {
     log('Validating file', {
@@ -118,6 +122,15 @@ export const createImageStorage = ({
       }
     } catch (error) {
       console.error(`[${logLabel}] Upload failed`, { bucket, error, objectKey });
+      try {
+        await s3.delete(objectKey, { bucket });
+      } catch (cleanupError) {
+        console.error(`[${logLabel}] Compensating object deletion failed`, {
+          bucket,
+          cleanupError,
+          objectKey,
+        });
+      }
       throw new ImageUploadError('Image upload failed', { cause: error });
     }
 
