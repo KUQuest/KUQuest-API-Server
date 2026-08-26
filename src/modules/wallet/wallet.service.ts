@@ -55,7 +55,7 @@ const initialPolicy = {
   effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
 };
 
-type WalletTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type WalletTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const accountCode = (walletId: string, type: string): string => `wallet:${walletId}:${type}`;
 const platformAccountCode = (type: 'PLATFORM_REVENUE' | 'PLATFORM_SUSPENSE'): string => `platform:${type}`;
@@ -111,7 +111,7 @@ const validateActivityAmounts = <T extends {
   payoutReservedDeltaSatang: satangDelta(activity.payoutReservedDeltaSatang),
 });
 
-const ensureWalletInTransaction = async (transaction: WalletTransaction, userId: string) => {
+export const ensureWalletInTransaction = async (transaction: WalletTransaction, userId: string) => {
   const [student] = await transaction
     .select({ id: authUser.id })
     .from(authUser)
@@ -339,7 +339,7 @@ const activityTypeFor = (eventType: LedgerEventType, deltas: {
   return deltas.earnings > 0 ? 'EARN' as const : 'SPEND' as const;
 };
 
-const rebuildWalletProjectionInTransaction = async (
+export const rebuildWalletProjectionInTransaction = async (
   transaction: WalletTransaction,
   walletId: string,
 ) => {

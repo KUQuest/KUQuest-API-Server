@@ -270,7 +270,11 @@ describe('Wallet provisioning service', () => {
     const [wallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, studentId));
     const [activity] = await db.select().from(walletActivity).where(eq(walletActivity.userId, studentId));
 
-    await db.update(walletWallet).set({ spendingBalanceSatang: 1 }).where(eq(walletWallet.id, wallet.id));
+    await expect(db
+      .update(walletWallet)
+      .set({ spendingBalanceSatang: 1 })
+      .where(eq(walletWallet.id, wallet.id))
+      .execute()).rejects.toThrow();
     await db.update(walletActivity).set({ spendingDeltaSatang: 1 }).where(eq(walletActivity.id, activity.id));
 
     expect((await verifyWalletProjection(wallet.id)).matches).toBe(false);

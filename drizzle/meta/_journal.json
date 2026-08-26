@@ -127,6 +127,13 @@
       "when": 1787689799335,
       "tag": "0017_fixed_gunslinger",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787750017825,
+      "tag": "0018_stiff_ikaris",
+      "breakpoints": true
     }
   ]
 }

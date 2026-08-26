@@ -13,6 +13,18 @@ export type {
   SignedSatang,
 } from './wallet.money';
 export {
+  increaseFundingReservation,
+  releaseFundingReservation,
+  reserveSpending,
+  settleFundingReservation,
+} from './wallet.funding.service';
+export type {
+  IncreaseFundingReservationInput,
+  ReleaseFundingReservationInput,
+  ReserveSpendingInput,
+  SettleFundingReservationInput,
+} from './wallet.funding.service';
+export {
   convertEarnings,
   earningsConversionScope,
 } from './wallet.service';
@@ -20,6 +32,7 @@ export type {
   EarningsConversion,
   EarningsConversionInput,
 } from './wallet.service';
+export type { WalletTransaction } from './wallet.service';
 export {
   ensureInitialMoneyPolicy,
   ensureWallet,

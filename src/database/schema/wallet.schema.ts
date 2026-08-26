@@ -1,6 +1,7 @@
 import { relations, sql } from 'drizzle-orm';
 import {
   check,
+  foreignKey,
   index,
   integer,
   pgTable,
@@ -33,10 +34,17 @@ export const ledgerEventTypes = [
   'PAYOUT',
   'FUNDING_RESERVE',
   'FUNDING_RELEASE',
+  'FUNDING_SETTLEMENT',
   'ADJUSTMENT',
   'EARNINGS_CONVERSION',
 ] as const;
 export type LedgerEventType = (typeof ledgerEventTypes)[number];
+
+export const fundingReservationStatuses = ['ACTIVE', 'RELEASED', 'SETTLED'] as const;
+export type FundingReservationStatus = (typeof fundingReservationStatuses)[number];
+
+export const fundingReservationOperationTypes = ['RESERVE', 'INCREASE', 'RELEASE'] as const;
+export type FundingReservationOperationType = (typeof fundingReservationOperationTypes)[number];
 
 export const walletWallet = pgTable(
   'wallet_wallets',
@@ -52,6 +60,7 @@ export const walletWallet = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
+    unique('wallet_wallets_id_user_key').on(table.id, table.userId),
     check('wallet_wallets_status_check', sql`${table.walletStatus} IN ('ACTIVE', 'FROZEN', 'SUSPENDED', 'CLOSED')`),
     check(
       'wallet_wallets_balances_check',
@@ -146,7 +155,7 @@ export const walletLedgerTransaction = pgTable(
     sealedAt: timestamp('sealed_at', { withTimezone: true }),
   },
   (table) => [
-    check('wallet_ledger_transactions_event_type_check', sql`${table.eventType} IN ('TOP_UP', 'PAYOUT', 'FUNDING_RESERVE', 'FUNDING_RELEASE', 'ADJUSTMENT', 'EARNINGS_CONVERSION')`),
+    check('wallet_ledger_transactions_event_type_check', sql`${table.eventType} IN ('TOP_UP', 'PAYOUT', 'FUNDING_RESERVE', 'FUNDING_RELEASE', 'FUNDING_SETTLEMENT', 'ADJUSTMENT', 'EARNINGS_CONVERSION')`),
   ],
 );
 
@@ -223,6 +232,115 @@ export const paymentMoneyPolicyRevision = pgTable(
   ],
 );
 
+export const walletFundingReservation = pgTable(
+  'wallet_funding_reservations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    walletId: uuid('wallet_id').notNull(),
+    ownerUserId: text('owner_user_id').notNull().references(() => authUser.id),
+    callerScope: text('caller_scope').notNull(),
+    callerReference: text('caller_reference').notNull(),
+    policyRevisionId: uuid('policy_revision_id').notNull().references(() => paymentMoneyPolicyRevision.id),
+    totalReservedSatang: integer('total_reserved_satang').notNull(),
+    remainingSatang: integer('remaining_satang').notNull(),
+    status: text('status').$type<FundingReservationStatus>().default('ACTIVE').notNull(),
+    createdLedgerTransactionId: uuid('created_ledger_transaction_id').notNull().unique().references(() => walletLedgerTransaction.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('wallet_funding_reservations_owner_scope_reference_key').on(
+      table.ownerUserId,
+      table.callerScope,
+      table.callerReference,
+    ),
+    foreignKey({
+      columns: [table.walletId, table.ownerUserId],
+      foreignColumns: [walletWallet.id, walletWallet.userId],
+      name: 'wallet_funding_reservations_wallet_owner_fk',
+    }),
+    check(
+      'wallet_funding_reservations_amounts_check',
+      sql`${table.totalReservedSatang} BETWEEN 1 AND 2000000000 AND ${table.remainingSatang} BETWEEN 0 AND ${table.totalReservedSatang}`,
+    ),
+    check(
+      'wallet_funding_reservations_status_check',
+      sql`${table.status} IN ('ACTIVE', 'RELEASED', 'SETTLED')`,
+    ),
+    check(
+      'wallet_funding_reservations_completion_check',
+      sql`(${table.status} = 'ACTIVE') = (${table.remainingSatang} > 0)`,
+    ),
+  ],
+);
+
+export const walletFundingReservationOperation = pgTable(
+  'wallet_funding_reservation_operations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reservationId: uuid('reservation_id').notNull().references(() => walletFundingReservation.id),
+    operationType: text('operation_type').$type<FundingReservationOperationType>().notNull(),
+    operationReference: text('operation_reference').notNull(),
+    amountSatang: integer('amount_satang').notNull(),
+    resultingTotalReservedSatang: integer('resulting_total_reserved_satang').notNull(),
+    resultingRemainingSatang: integer('resulting_remaining_satang').notNull(),
+    resultingStatus: text('resulting_status').$type<FundingReservationStatus>().notNull(),
+    ledgerTransactionId: uuid('ledger_transaction_id').notNull().unique().references(() => walletLedgerTransaction.id),
+    idempotencyKeyId: uuid('idempotency_key_id').notNull().unique().references(() => walletIdempotencyKey.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('wallet_funding_operations_reservation_reference_key').on(
+      table.reservationId,
+      table.operationReference,
+    ),
+    check(
+      'wallet_funding_operations_type_check',
+      sql`${table.operationType} IN ('RESERVE', 'INCREASE', 'RELEASE')`,
+    ),
+    check(
+      'wallet_funding_operations_amounts_check',
+      sql`${table.amountSatang} BETWEEN 1 AND 2000000000 AND ${table.resultingTotalReservedSatang} BETWEEN 1 AND 2000000000 AND ${table.resultingRemainingSatang} BETWEEN 0 AND ${table.resultingTotalReservedSatang}`,
+    ),
+    check(
+      'wallet_funding_operations_status_check',
+      sql`${table.resultingStatus} IN ('ACTIVE', 'RELEASED', 'SETTLED') AND (${table.resultingStatus} = 'ACTIVE') = (${table.resultingRemainingSatang} > 0)`,
+    ),
+  ],
+);
+
+export const walletFundingReservationSettlement = pgTable(
+  'wallet_funding_reservation_settlements',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reservationId: uuid('reservation_id').notNull().references(() => walletFundingReservation.id),
+    settlementReference: text('settlement_reference').notNull(),
+    recipientWalletId: uuid('recipient_wallet_id').notNull(),
+    recipientUserId: text('recipient_user_id').notNull().references(() => authUser.id),
+    recipientAmountSatang: integer('recipient_amount_satang').notNull(),
+    platformFeeSatang: integer('platform_fee_satang').default(0).notNull(),
+    totalAmountSatang: integer('total_amount_satang').notNull(),
+    ledgerTransactionId: uuid('ledger_transaction_id').notNull().unique().references(() => walletLedgerTransaction.id),
+    idempotencyKeyId: uuid('idempotency_key_id').notNull().unique().references(() => walletIdempotencyKey.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('wallet_funding_settlements_reservation_reference_key').on(
+      table.reservationId,
+      table.settlementReference,
+    ),
+    foreignKey({
+      columns: [table.recipientWalletId, table.recipientUserId],
+      foreignColumns: [walletWallet.id, walletWallet.userId],
+      name: 'wallet_funding_settlements_recipient_owner_fk',
+    }),
+    check(
+      'wallet_funding_settlements_amounts_check',
+      sql`${table.recipientAmountSatang} > 0 AND ${table.platformFeeSatang} >= 0 AND ${table.totalAmountSatang} = ${table.recipientAmountSatang} + ${table.platformFeeSatang}`,
+    ),
+  ],
+);
+
 export const walletActivity = pgTable(
   'wallet_activities',
   {
@@ -251,6 +369,7 @@ export const walletWalletRelations = relations(walletWallet, ({ one, many }) => 
   user: one(authUser, { fields: [walletWallet.userId], references: [authUser.id] }),
   statusHistory: many(walletStatusHistory),
   accounts: many(walletLedgerAccount),
+  fundingReservations: many(walletFundingReservation),
 }));
 
 export const walletStatusHistoryRelations = relations(walletStatusHistory, ({ one }) => ({
@@ -273,6 +392,74 @@ export const walletLedgerPostingRelations = relations(walletLedgerPosting, ({ on
   transaction: one(walletLedgerTransaction, { fields: [walletLedgerPosting.transactionId], references: [walletLedgerTransaction.id] }),
   account: one(walletLedgerAccount, { fields: [walletLedgerPosting.accountId], references: [walletLedgerAccount.id] }),
 }));
+
+export const walletFundingReservationRelations = relations(
+  walletFundingReservation,
+  ({ one, many }) => ({
+    wallet: one(walletWallet, {
+      fields: [walletFundingReservation.walletId],
+      references: [walletWallet.id],
+    }),
+    owner: one(authUser, {
+      fields: [walletFundingReservation.ownerUserId],
+      references: [authUser.id],
+    }),
+    policyRevision: one(paymentMoneyPolicyRevision, {
+      fields: [walletFundingReservation.policyRevisionId],
+      references: [paymentMoneyPolicyRevision.id],
+    }),
+    createdLedgerTransaction: one(walletLedgerTransaction, {
+      fields: [walletFundingReservation.createdLedgerTransactionId],
+      references: [walletLedgerTransaction.id],
+    }),
+    settlements: many(walletFundingReservationSettlement),
+    operations: many(walletFundingReservationOperation),
+  }),
+);
+
+export const walletFundingReservationOperationRelations = relations(
+  walletFundingReservationOperation,
+  ({ one }) => ({
+    reservation: one(walletFundingReservation, {
+      fields: [walletFundingReservationOperation.reservationId],
+      references: [walletFundingReservation.id],
+    }),
+    ledgerTransaction: one(walletLedgerTransaction, {
+      fields: [walletFundingReservationOperation.ledgerTransactionId],
+      references: [walletLedgerTransaction.id],
+    }),
+    idempotencyKey: one(walletIdempotencyKey, {
+      fields: [walletFundingReservationOperation.idempotencyKeyId],
+      references: [walletIdempotencyKey.id],
+    }),
+  }),
+);
+
+export const walletFundingReservationSettlementRelations = relations(
+  walletFundingReservationSettlement,
+  ({ one }) => ({
+    reservation: one(walletFundingReservation, {
+      fields: [walletFundingReservationSettlement.reservationId],
+      references: [walletFundingReservation.id],
+    }),
+    recipientWallet: one(walletWallet, {
+      fields: [walletFundingReservationSettlement.recipientWalletId],
+      references: [walletWallet.id],
+    }),
+    recipient: one(authUser, {
+      fields: [walletFundingReservationSettlement.recipientUserId],
+      references: [authUser.id],
+    }),
+    ledgerTransaction: one(walletLedgerTransaction, {
+      fields: [walletFundingReservationSettlement.ledgerTransactionId],
+      references: [walletLedgerTransaction.id],
+    }),
+    idempotencyKey: one(walletIdempotencyKey, {
+      fields: [walletFundingReservationSettlement.idempotencyKeyId],
+      references: [walletIdempotencyKey.id],
+    }),
+  }),
+);
 
 export const walletEarningsConversionRelations = relations(walletEarningsConversion, ({ one }) => ({
   principal: one(authUser, { fields: [walletEarningsConversion.principalUserId], references: [authUser.id] }),

@@ -40,6 +40,70 @@ _Avoid_: profile skill, occupation, treating Tags as editable Member fields.
 A rating and comment that a Hirer or Worker gives to the other after a Quest is completed. A Review is tied to one Quest, each direction is allowed once per Quest, and the author may edit it later. Reviews contribute to the reviewed Member's Reputation.
 _Avoid_: reviewing before Quest completion; treating a Review as a Profile field that can be edited by someone else.
 
+**Giver**:
+The Student who creates a Quest and funds its rewards.
+_Avoid_: Employer, client, job owner.
+
+**Hunter**:
+A Student who performs a Quest in exchange for its reward.
+_Avoid_: Worker, employee, contractor.
+
+**Quest Reward**:
+The amount earned by each Hunter who successfully completes a Quest; for a group Quest, the same reward applies independently to every Hunter slot. The displayed Quest Reward is the Hunter's full earnings and excludes the Platform Fee paid by the Giver.
+_Avoid_: Wage, salary, shared prize pool.
+
+**Platform Fee**:
+An amount paid by the Giver in addition to the Quest Rewards when Hunters successfully complete a Quest.
+_Avoid_: deducting the Platform Fee from a Hunter's displayed Quest Reward.
+
+**Wallet**:
+A Student's KUQuest funds, separated by whether they can be spent, paid out, or are temporarily committed to a Quest or Payout.
+_Avoid_: Bank account, Account (auth), treating the Wallet as one undifferentiated balance.
+
+**Wallet Status**:
+The Wallet's permission state: Active permits Student-initiated operations, Frozen is a temporary administrative hold, Suspended is a policy hold requiring review, and Closed is terminal. Non-active Wallets still receive or release money required to reconcile commitments already in progress.
+_Avoid_: treating a hold as permission to discard confirmed inbound money or existing obligations.
+
+**Spending Balance**:
+Wallet funds a Student can commit to Quest rewards. A Top-up increases this balance.
+_Avoid_: Credit, available earnings.
+
+**Earnings Balance**:
+Wallet funds a Student earned by completing Quests and can either convert to Spending Balance or withdraw through a Payout.
+_Avoid_: Spending Balance, income account.
+
+**Earnings Conversion**:
+An immediate, fee-free, and irreversible transfer from a Student's Earnings Balance to their Spending Balance.
+_Avoid_: Payout, reversible exchange.
+
+**Quest Escrow**:
+Spending Balance committed by a Giver to cover Quest Rewards and Platform Fees until the future Quest workflow settles or releases it. The Quest domain owns the timing and lifecycle; the Wallet only owns the reserved funds.
+_Avoid_: Job hold, locked balance, inferring escrow from Wallet activity.
+
+**Funding Reservation**:
+Spending Balance set aside for a caller-owned workflow until that workflow releases it or settles it into a recipient's Earnings Balance and optional Platform Fee revenue.
+_Avoid_: assuming every Funding Reservation is Quest Escrow or embedding the caller's lifecycle in the Wallet.
+
+**Payout Reserve**:
+Earnings Balance committed to an in-progress Payout and unavailable for another Payout or conversion until that Payout settles or fails.
+_Avoid_: Quest Escrow, withdrawn balance.
+
+**Top-up**:
+An inbound payment that adds its quoted amount to a Student's Spending Balance after the payment provider confirms it. The Student pays the provider fee and tax in addition to the amount credited.
+_Avoid_: Deposit, earnings, Wallet credit (too broad).
+
+**Payout**:
+An outbound transfer of a Student's Earnings Balance to their chosen payout destination. The transfer amount, provider fee, and tax are all debited from Earnings Balance.
+_Avoid_: Withdrawal request (the Payout includes the full transfer lifecycle), Quest Reward.
+
+**Payout Destination**:
+The Student's own Thai bank or PromptPay destination to which a Payout is sent. A Student has at most one active destination; replacing or removing it retires the old destination without erasing its historical association with prior Payouts.
+_Avoid_: Wallet, bank account stored as disposable profile data.
+
+**Money Policy**:
+A versioned set of financial amount limits and rates used to quote and commit money operations. Quest timing and dispute-approval rules belong to their own domains rather than Money Policy.
+_Avoid_: treating all configurable product rules as financial policy.
+
 **Certificate**:
 A credential a Member claims — `name`, `issuer`, and the date it was issued, plus an optional image of the credential. Stored one row per credential in `profile_certificate`, owned by the Member who created it, and served by `/api/v1/profile/certificates` ([[BE-40]]). Deliberately not part of the Profile response (see Public Profile above for the one exception): a Member may hold any number of them, and each is created, edited, and deleted on its own. Ownership is scoped in the query rather than checked after reading, so another Member's Certificate is indistinguishable from one that does not exist — both are `404 CERTIFICATE_NOT_FOUND`. The image is a file reference plus an expiring link, same pattern as the avatar — no storage URL is ever persisted — uploaded via its own sub-route after the certificate row exists. Formerly carried a `verifyUrl` link instead of an image (settled via /grilling, 2026-08-09: replaced, not additive — existing `verifyUrl` values are dropped on migration, no backfill path from a URL to an image).
 _Avoid_: Qualification, badge (a badge is gamification, not a Certificate); treating a Certificate as a Profile field; verifyUrl/verification link (superseded term).
