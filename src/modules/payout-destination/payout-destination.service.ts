@@ -58,11 +58,6 @@ export type PayoutDestination = {
   retiredAt: Date | null;
 };
 
-export type PayoutDestinationForProvider = PayoutDestination & {
-  accountNumber: string;
-  routingValue: string;
-};
-
 const requiredText = (value: string | undefined) => typeof value === 'string' && value.trim().length > 0;
 
 const normalizeInput = (input: PayoutDestinationInput) => {
@@ -129,7 +124,7 @@ const encryptedDestinationSecrets = (
   routingValueAuthTag: routingValue.authTag,
 });
 
-const destinationFromRecord = (
+export const destinationFromRecord = (
   record: typeof paymentPayoutAccounts.$inferSelect,
 ): PayoutDestination => ({
   id: record.id,
@@ -147,27 +142,6 @@ const destinationFromRecord = (
   createdAt: record.createdAt,
   retiredAt: record.retiredAt,
 });
-
-const providerDestinationFromRecord = (
-  record: typeof paymentPayoutAccounts.$inferSelect,
-  encryption: PayoutDestinationEncryption,
-): PayoutDestinationForProvider => {
-  const destination = destinationFromRecord(record);
-  const accountNumber = encryption.decrypt({
-    keyVersion: record.accountNumberKeyVersion,
-    nonce: record.accountNumberNonce,
-    ciphertext: record.accountNumberCiphertext,
-    authTag: record.accountNumberAuthTag,
-  });
-  const routingValue = encryption.decrypt({
-    keyVersion: record.routingValueKeyVersion,
-    nonce: record.routingValueNonce,
-    ciphertext: record.routingValueCiphertext,
-    authTag: record.routingValueAuthTag,
-  });
-
-  return { ...destination, accountNumber, routingValue };
-};
 
 const encryptSecret = (encryption: PayoutDestinationEncryption, value: string) => {
   try {
@@ -277,20 +251,6 @@ export const getPayoutDestination = async (
     .limit(1);
 
   return record ? destinationFromRecord(record) : undefined;
-};
-
-export const getPayoutDestinationForProvider = async (
-  principalUserId: string,
-  destinationId: string,
-  encryption: PayoutDestinationEncryption = createPayoutDestinationEncryption(),
-): Promise<PayoutDestinationForProvider | undefined> => {
-  const [record] = await db
-    .select()
-    .from(paymentPayoutAccounts)
-    .where(and(eq(paymentPayoutAccounts.userId, principalUserId), eq(paymentPayoutAccounts.id, destinationId)))
-    .limit(1);
-
-  return record ? providerDestinationFromRecord(record, encryption) : undefined;
 };
 
 export const retirePayoutDestination = async (

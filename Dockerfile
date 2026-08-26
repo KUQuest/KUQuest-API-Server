@@ -50,8 +50,12 @@ COPY --from=production-dependencies \
 
 COPY --chown=bun:bun package.json ./
 COPY --chown=bun:bun drizzle.config.ts ./
+COPY --chown=bun:bun tsconfig.json ./
 COPY --chown=bun:bun drizzle ./drizzle
 COPY --chown=bun:bun src/database/schema ./src/database/schema
+COPY --chown=bun:bun src/config ./src/config
+COPY --chown=bun:bun src/modules/payout-destination/payout-destination.crypto.ts ./src/modules/payout-destination/payout-destination.crypto.ts
+COPY --chown=bun:bun scripts/migrate.ts ./scripts/migrate.ts
 
 USER bun
 

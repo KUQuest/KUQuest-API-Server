@@ -7,7 +7,7 @@ import {
   retirePayoutDestination,
   savePayoutDestination,
 } from '@/modules/payout-destination';
-import { getPayoutDestinationForProvider } from '@/modules/payout-destination/payout-destination.service';
+import { getPayoutDestinationForProvider } from '@/modules/payout-destination/payout-destination.provider';
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { and, eq, isNull } from 'drizzle-orm';
