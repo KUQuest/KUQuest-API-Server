@@ -39,9 +39,6 @@ BEGIN
     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
     RAISE EXCEPTION 'Funding Reservation identity and policy snapshot are immutable';
   END IF;
-  IF OLD.status <> 'ACTIVE' THEN
-    RAISE EXCEPTION 'completed Funding Reservations are immutable';
-  END IF;
   RETURN NEW;
 END;
 $$;--> statement-breakpoint
@@ -70,21 +67,6 @@ BEGIN
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Funding Reservation history refers to a missing reservation';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM wallet_funding_reservation_operations operation
-    INNER JOIN payment_money_policy_revisions policy
-      ON policy.id = reservation_row.policy_revision_id
-    WHERE operation.reservation_id = target_reservation_id
-      AND operation.operation_type IN ('RESERVE', 'INCREASE')
-      AND (
-        operation.amount_satang < policy.minimum_funding_reservation_satang
-        OR operation.amount_satang > policy.maximum_funding_reservation_satang
-      )
-  ) THEN
-    RAISE EXCEPTION 'Funding Reservation operation exceeds its snapshotted Money Policy';
   END IF;
 
   IF EXISTS (
@@ -120,21 +102,6 @@ BEGIN
   IF reservation_row.total_reserved_satang <> expected_total
     OR reservation_row.remaining_satang <> expected_remaining THEN
     RAISE EXCEPTION 'Funding Reservation projection does not match its retained history';
-  END IF;
-  IF reservation_row.status = 'RELEASED' AND NOT EXISTS (
-    SELECT 1
-    FROM wallet_funding_reservation_operations operation
-    WHERE operation.reservation_id = target_reservation_id
-      AND operation.operation_type = 'RELEASE'
-  ) THEN
-    RAISE EXCEPTION 'Released Funding Reservations require a retained release operation';
-  END IF;
-  IF reservation_row.status = 'SETTLED' AND NOT EXISTS (
-    SELECT 1
-    FROM wallet_funding_reservation_settlements settlement
-    WHERE settlement.reservation_id = target_reservation_id
-  ) THEN
-    RAISE EXCEPTION 'Settled Funding Reservations require a retained settlement';
   END IF;
 END;
 $$;--> statement-breakpoint

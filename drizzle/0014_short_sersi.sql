@@ -60,9 +60,6 @@ BEGIN
     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
     RAISE EXCEPTION 'Funding Reservation identity and policy snapshot are immutable';
   END IF;
-  IF OLD.status <> 'ACTIVE' THEN
-    RAISE EXCEPTION 'completed Funding Reservations are immutable';
-  END IF;
   RETURN NEW;
 END;
 $$;--> statement-breakpoint

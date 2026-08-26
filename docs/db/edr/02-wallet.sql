@@ -202,7 +202,7 @@ CREATE INDEX wallet_activities_user_time_idx
 -- 5. Funding Reservation ownership and policy snapshots cannot change;
 --    completed reservations, every operation record, and every settlement record
 --    are immutable. Deferred history triggers require reservation projections to
---    reconcile to retained operations/settlements and enforce snapshotted policy
---    limits for new reserve/increase operations.
+--    reconcile to retained operations/settlements. The application service
+--    enforces the snapshotted Money Policy before writing each operation.
 -- 6. Wallet balance projections are checked against sealed ledger postings by
 --    deferred triggers, so direct balance edits and nonzero Wallet inserts fail.

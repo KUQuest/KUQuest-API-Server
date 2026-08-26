@@ -32,6 +32,26 @@ const recipientUserId = `be111-recipient-${crypto.randomUUID()}`;
 const amount = (value: number) => positiveSatang(value);
 const fee = (value: number) => satang(value);
 
+const withCurrentDate = async <T>(at: Date, callback: () => Promise<T>) => {
+  const RealDate = globalThis.Date;
+  const fixedTime = at.getTime();
+  const FrozenDate = class extends RealDate {
+    constructor(value?: string | number | Date) {
+      super(value === undefined ? fixedTime : value instanceof RealDate ? value.getTime() : value);
+    }
+
+    static now() {
+      return fixedTime;
+    }
+  };
+  globalThis.Date = FrozenDate as DateConstructor;
+  try {
+    return await callback();
+  } finally {
+    globalThis.Date = RealDate;
+  }
+};
+
 const accountId = async (userId: string, type: 'SPENDING' | 'EARNINGS' | 'FUNDING_RESERVED') => {
   const [wallet] = await db
     .select({ id: walletWallet.id })
@@ -266,6 +286,129 @@ describe('Funding Reservation service', () => {
     expect(await db.select().from(walletFundingReservationSettlement).where(
       eq(walletFundingReservationSettlement.id, settlement.id),
     )).toHaveLength(1);
+  });
+
+  it('continues using the reservation policy snapshot after a newer policy becomes effective', async () => {
+    const payerUserId = await createFundedStudent('be111-policy-snapshot-payer', 1_000);
+    const payeeUserId = await createFundedStudent('be111-policy-snapshot-payee', 100);
+    const activePolicy = await ensureInitialMoneyPolicy();
+    const revision = Math.floor(Math.random() * 1_000_000) + 1_000_000;
+    const existingPolicies = await db
+      .select({ effectiveFrom: paymentMoneyPolicyRevision.effectiveFrom, effectiveUntil: paymentMoneyPolicyRevision.effectiveUntil })
+      .from(paymentMoneyPolicyRevision);
+    let windowStart = 0;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const candidateStart = Date.UTC(2020, 0, 1) + Math.floor(Math.random() * (Date.UTC(2024, 0, 1) - Date.UTC(2020, 0, 1) - 3_600_000));
+      const candidateEnd = candidateStart + 7_200_000;
+      const overlaps = existingPolicies.some((policy) =>
+        policy.effectiveFrom.getTime() < candidateEnd &&
+        (policy.effectiveUntil === null || policy.effectiveUntil.getTime() > candidateStart),
+      );
+      if (!overlaps) {
+        windowStart = candidateStart;
+        break;
+      }
+    }
+    if (windowStart === 0) throw new Error('Could not find an unused Money Policy test window.');
+    const newerPolicyAt = new Date(windowStart + 3_600_000);
+    const olderPolicy = {
+      ...activePolicy,
+      id: crypto.randomUUID(),
+      revision,
+      minimumFundingReservationSatang: 100,
+      maximumFundingReservationSatang: 500,
+      platformFeeBps: 1_000,
+      effectiveFrom: new Date(windowStart),
+      effectiveUntil: newerPolicyAt,
+      reason: 'BE-111 policy snapshot source',
+    };
+    const newerPolicy = {
+      ...activePolicy,
+      id: crypto.randomUUID(),
+      revision: revision + 1,
+      minimumFundingReservationSatang: 100,
+      maximumFundingReservationSatang: 100,
+      platformFeeBps: 5_000,
+      effectiveFrom: newerPolicyAt,
+      effectiveUntil: new Date(windowStart + 7_200_000),
+      reason: 'BE-111 policy snapshot replacement',
+    };
+    await db.insert(paymentMoneyPolicyRevision).values([olderPolicy, newerPolicy]);
+
+    const reservation = await withCurrentDate(
+      new Date(windowStart + 1_800_000),
+      () => db.transaction((transaction) => reserveSpending(transaction, {
+        ownerUserId: payerUserId,
+        callerScope: 'generic-workflow',
+        callerReference: `policy-snapshot-${crypto.randomUUID()}`,
+        amountSatang: amount(400),
+      })),
+    );
+    expect(reservation.policyRevisionId).toBe(olderPolicy.id);
+
+    await withCurrentDate(
+      new Date(windowStart + 5_400_000),
+      () => db.transaction((transaction) => increaseFundingReservation(transaction, {
+        ownerUserId: payerUserId,
+        reservationId: reservation.id,
+        operationReference: `policy-increase-${crypto.randomUUID()}`,
+        amountSatang: amount(200),
+      })),
+    );
+    const settlement = await withCurrentDate(
+      new Date(windowStart + 5_400_000),
+      () => db.transaction((transaction) => settleFundingReservation(transaction, {
+        ownerUserId: payerUserId,
+        reservationId: reservation.id,
+        settlementReference: `policy-settlement-${crypto.randomUUID()}`,
+        recipientUserId: payeeUserId,
+        recipientAmountSatang: amount(100),
+        platformFeeSatang: fee(10),
+      })),
+    );
+
+    expect(settlement.platformFeeSatang).toBe(10);
+  });
+
+  it('releases exactly the remaining funds after a partial settlement', async () => {
+    const payerUserId = await createFundedStudent('be111-release-remainder-payer', 1_000);
+    const payeeUserId = await createFundedStudent('be111-release-remainder-payee', 100);
+    const reservation = await db.transaction((transaction) => reserveSpending(transaction, {
+      ownerUserId: payerUserId,
+      callerScope: 'generic-workflow',
+      callerReference: `release-remainder-${crypto.randomUUID()}`,
+      amountSatang: amount(400),
+    }));
+    await db.transaction((transaction) => settleFundingReservation(transaction, {
+      ownerUserId: payerUserId,
+      reservationId: reservation.id,
+      settlementReference: `release-remainder-settlement-${crypto.randomUUID()}`,
+      recipientUserId: payeeUserId,
+      recipientAmountSatang: amount(150),
+    }));
+
+    const released = await db.transaction((transaction) => releaseFundingReservation(transaction, {
+      ownerUserId: payerUserId,
+      reservationId: reservation.id,
+      operationReference: `release-remainder-operation-${crypto.randomUUID()}`,
+    }));
+    expect(released).toMatchObject({ remainingSatang: 0, status: 'RELEASED' });
+    expect(await db.select().from(walletWallet).where(eq(walletWallet.userId, payerUserId)))
+      .toMatchObject([{ spendingBalanceSatang: 850, fundingReservedSatang: 0 }]);
+
+    const [releaseOperation] = await db
+      .select()
+      .from(walletFundingReservationOperation)
+      .where(and(
+        eq(walletFundingReservationOperation.reservationId, reservation.id),
+        eq(walletFundingReservationOperation.operationType, 'RELEASE'),
+      ));
+    expect(releaseOperation.amountSatang).toBe(250);
+    expect(await db
+      .select({ amountSatang: walletLedgerPosting.amountSatang })
+      .from(walletLedgerPosting)
+      .where(eq(walletLedgerPosting.transactionId, releaseOperation.ledgerTransactionId)))
+      .toMatchObject([{ amountSatang: -250 }, { amountSatang: 250 }]);
   });
 
   it('replays the same settlement and rejects conflicting key reuse', async () => {
