@@ -3,7 +3,7 @@ import { department, faculty } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment } from '@/database/schema/quest.schema';
-import { tag } from '@/database/schema/profile.schema';
+import { tag } from '@/database/schema/tag.schema';
 import {
   getPublicProfile,
   getProfile,

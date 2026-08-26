@@ -120,6 +120,13 @@
       "when": 1787684975600,
       "tag": "0016_short_mephistopheles",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787689799335,
+      "tag": "0017_fixed_gunslinger",
+      "breakpoints": true
     }
   ]
 }

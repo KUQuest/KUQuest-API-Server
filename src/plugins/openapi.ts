@@ -47,6 +47,10 @@ export const openapiPlugin = openapi({
         name: 'Certificates',
         description: "Authenticated endpoints for managing the current Student's profile certificates.",
       },
+      {
+        name: 'Tags',
+        description: 'Authenticated Member reference data for Quest Tags.',
+      },
     ],
     components: authOpenAPIComponents,
     paths: authOpenAPIPaths,
