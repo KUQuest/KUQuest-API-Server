@@ -73,9 +73,13 @@ export type QuestImage = {
   objectKey: string;
 };
 
+export type QuestImageMutationOutcome = {
+  outcome: 'not-found' | 'not-editable' | 'limit-reached';
+};
+
 export type AddQuestImagesOutcome =
   | { images: QuestImage[] }
-  | { outcome: 'not-found' | 'not-editable' | 'limit-reached' };
+  | QuestImageMutationOutcome;
 
 const selectQuestImages = async (
   database: QuestDatabase,
@@ -94,6 +98,43 @@ const selectQuestImages = async (
     .orderBy(asc(questImage.position));
 
   return rows;
+};
+
+const lockOwnedQuest = async (
+  transaction: QuestTransaction,
+  userId: string,
+  questId: string,
+) => {
+  const [ownedQuest] = await transaction
+    .select({ id: quest.id, questStatus: quest.questStatus })
+    .from(quest)
+    .where(and(eq(quest.id, questId), eq(quest.giverId, userId)))
+    .limit(1)
+    .for('update');
+
+  return ownedQuest;
+};
+
+const checkQuestImageUploadInTransaction = async (
+  transaction: QuestTransaction,
+  userId: string,
+  questId: string,
+  imageCountToAdd: number,
+): Promise<QuestImageMutationOutcome | { currentCount: number }> => {
+  const ownedQuest = await lockOwnedQuest(transaction, userId, questId);
+
+  if (!ownedQuest) return { outcome: 'not-found' };
+  if (ownedQuest.questStatus !== 'DRAFT') return { outcome: 'not-editable' };
+
+  const [imageCount] = await transaction
+    .select({ count: sql<number>`count(*)` })
+    .from(questImage)
+    .where(eq(questImage.questId, questId));
+  const currentCount = Number(imageCount?.count ?? 0);
+
+  return currentCount + imageCountToAdd > maxQuestImages
+    ? { outcome: 'limit-reached' }
+    : { currentCount };
 };
 
 export type QuestListFilters = {
@@ -402,23 +443,13 @@ export const addQuestImages = async (
   images: StoredQuestImage[],
 ): Promise<AddQuestImagesOutcome> =>
   db.transaction(async (transaction) => {
-    const [ownedQuest] = await transaction
-      .select({ id: quest.id, questStatus: quest.questStatus })
-      .from(quest)
-      .where(and(eq(quest.id, questId), eq(quest.giverId, userId)))
-      .limit(1)
-      .for('update');
-
-    if (!ownedQuest) return { outcome: 'not-found' };
-    if (ownedQuest.questStatus !== 'DRAFT') return { outcome: 'not-editable' };
-
-    const [imageCount] = await transaction
-      .select({ count: sql<number>`count(*)` })
-      .from(questImage)
-      .where(eq(questImage.questId, questId));
-    const currentCount = Number(imageCount?.count ?? 0);
-
-    if (currentCount + images.length > maxQuestImages) return { outcome: 'limit-reached' };
+    const uploadCheck = await checkQuestImageUploadInTransaction(
+      transaction,
+      userId,
+      questId,
+      images.length,
+    );
+    if ('outcome' in uploadCheck) return uploadCheck;
 
     for (const [index, image] of images.entries()) {
       const [createdFile] = await transaction
@@ -429,11 +460,27 @@ export const addQuestImages = async (
       await transaction.insert(questImage).values({
         questId,
         fileId: createdFile.id,
-        position: currentCount + index,
+        position: uploadCheck.currentCount + index,
       });
     }
 
     return { images: await selectQuestImages(transaction, questId) };
+  });
+
+export const checkQuestImageUpload = async (
+  userId: string,
+  questId: string,
+  imageCountToAdd: number,
+): Promise<QuestImageMutationOutcome | undefined> =>
+  db.transaction(async (transaction) => {
+    const result = await checkQuestImageUploadInTransaction(
+      transaction,
+      userId,
+      questId,
+      imageCountToAdd,
+    );
+
+    return 'outcome' in result ? result : undefined;
   });
 
 export type DeleteQuestImageOutcome =
@@ -443,15 +490,10 @@ export type DeleteQuestImageOutcome =
 export const deleteQuestImage = async (
   userId: string,
   questId: string,
-  imageId: string,
+  fileId: string,
 ): Promise<DeleteQuestImageOutcome> =>
   db.transaction(async (transaction) => {
-    const [ownedQuest] = await transaction
-      .select({ id: quest.id, questStatus: quest.questStatus })
-      .from(quest)
-      .where(and(eq(quest.id, questId), eq(quest.giverId, userId)))
-      .limit(1)
-      .for('update');
+    const ownedQuest = await lockOwnedQuest(transaction, userId, questId);
 
     if (!ownedQuest) return { outcome: 'not-found' };
     if (ownedQuest.questStatus !== 'DRAFT') return { outcome: 'not-editable' };
@@ -465,7 +507,7 @@ export const deleteQuestImage = async (
       })
       .from(questImage)
       .innerJoin(file, and(eq(questImage.fileId, file.id), isNull(file.deletedAt)))
-      .where(and(eq(questImage.questId, questId), eq(questImage.fileId, imageId)))
+      .where(and(eq(questImage.questId, questId), eq(questImage.fileId, fileId)))
       .limit(1)
       .for('update');
 

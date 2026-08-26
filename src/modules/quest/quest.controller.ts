@@ -22,6 +22,7 @@ import type {
 } from './quest.schema';
 import {
   addQuestImages,
+  checkQuestImageUpload,
   createQuest,
   deleteQuestImage,
   getQuestDetail,
@@ -30,7 +31,7 @@ import {
   listOwnQuests,
   publishQuest,
 } from './quest.service';
-import type { QuestImage } from './quest.service';
+import type { QuestImage, QuestImageMutationOutcome } from './quest.service';
 import { questStorage } from './quest.storage';
 import type { StoredQuestImage } from './quest.storage';
 
@@ -105,6 +106,23 @@ const mapImageUploadError = (set: AuthedContext['set'], error: unknown) => {
   return undefined;
 };
 
+const mapQuestImageMutationOutcome = (
+  set: AuthedContext['set'],
+  outcome: QuestImageMutationOutcome,
+) => {
+  if (outcome.outcome === 'not-found') {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+  if (outcome.outcome === 'not-editable') {
+    set.status = 409;
+    return apiError('QUEST_NOT_EDITABLE', 'Only Draft Quests can be edited');
+  }
+
+  set.status = 409;
+  return apiError('QUEST_IMAGE_LIMIT_REACHED', 'A Quest can have at most 3 images');
+};
+
 const toFilters = (query: ListQuery) => ({
   ...query,
   startFrom: query.startFrom ? new Date(query.startFrom) : undefined,
@@ -169,6 +187,13 @@ export const addQuestImagesController = async ({
   body: QuestImagesUploadInput;
   params: QuestParams;
 }): Promise<ApiResponse<QuestImagesUploadResponse>> => {
+  const uploadCheck = await checkQuestImageUpload(
+    session.user.id,
+    params.questId,
+    body.images.length,
+  );
+  if (uploadCheck) return mapQuestImageMutationOutcome(set, uploadCheck);
+
   const uploaded: StoredQuestImage[] = [];
 
   try {
@@ -186,17 +211,7 @@ export const addQuestImagesController = async ({
     const result = await addQuestImages(session.user.id, params.questId, uploaded);
     if ('outcome' in result) {
       await discardUploadedImages(uploaded);
-      if (result.outcome === 'not-found') {
-        set.status = 404;
-        return apiError('QUEST_NOT_FOUND', 'Quest not found');
-      }
-      if (result.outcome === 'not-editable') {
-        set.status = 409;
-        return apiError('QUEST_NOT_EDITABLE', 'Only Draft Quests can be edited');
-      }
-
-      set.status = 409;
-      return apiError('QUEST_IMAGE_LIMIT_REACHED', 'A Quest can have at most 3 images');
+      return mapQuestImageMutationOutcome(set, result);
     }
 
     return apiSuccess({ images: serializeQuestImages(result.images) });
@@ -216,13 +231,7 @@ export const deleteQuestImageController = async ({
   const result = await deleteQuestImage(session.user.id, params.questId, params.imageId);
 
   if (result.outcome !== 'deleted') {
-    if (result.outcome === 'not-found') {
-      set.status = 404;
-      return apiError('QUEST_NOT_FOUND', 'Quest not found');
-    }
-
-    set.status = 409;
-    return apiError('QUEST_NOT_EDITABLE', 'Only Draft Quests can be edited');
+    return mapQuestImageMutationOutcome(set, result);
   }
 
   try {

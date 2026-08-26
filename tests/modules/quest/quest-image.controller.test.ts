@@ -5,9 +5,13 @@ import {
   getQuestDetailController,
 } from '@/modules/quest/quest.controller';
 import { questStorage } from '@/modules/quest/quest.storage';
-import { ImageUploadError, UnsupportedImageTypeError } from '@/shared/image-storage';
+import {
+  ImageTooLargeError,
+  ImageUploadError,
+  UnsupportedImageTypeError,
+} from '@/shared/image-storage';
 
-import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
 const hirerId = 'hirer-1';
 const questId = '018f47a7-1c7d-7c98-9a11-690d7e83430c';
@@ -32,6 +36,15 @@ const uploadedImage = {
 afterEach(() => mock.restore());
 
 describe('addQuestImagesController', () => {
+  let uploadCheckOutcome: Awaited<ReturnType<typeof questService.checkQuestImageUpload>>;
+
+  beforeEach(() => {
+    uploadCheckOutcome = undefined;
+    spyOn(questService, 'checkQuestImageUpload').mockImplementation(
+      async () => uploadCheckOutcome,
+    );
+  });
+
   it('returns the complete ordered image list with expiring links', async () => {
     spyOn(questService, 'addQuestImages').mockResolvedValue({ images: [storedImage] });
     spyOn(questStorage, 'upload').mockResolvedValue({
@@ -67,6 +80,46 @@ describe('addQuestImagesController', () => {
         objectKey: storedImage.objectKey,
       }),
     ]);
+  });
+
+  it('rejects a non-Draft Quest before uploading files', async () => {
+    uploadCheckOutcome = { outcome: 'not-editable' };
+    const upload = spyOn(questStorage, 'upload');
+    const set: { status?: number } = {};
+
+    const result = await addQuestImagesController({
+      body: { images: [image] },
+      params: { questId },
+      session: session as never,
+      set: set as never,
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: { code: 'QUEST_NOT_EDITABLE', message: 'Only Draft Quests can be edited' },
+    });
+    expect(set.status).toBe(409);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unowned Quest before uploading files', async () => {
+    uploadCheckOutcome = { outcome: 'not-found' };
+    const upload = spyOn(questStorage, 'upload');
+    const set: { status?: number } = {};
+
+    const result = await addQuestImagesController({
+      body: { images: [image] },
+      params: { questId },
+      session: session as never,
+      set: set as never,
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: { code: 'QUEST_NOT_FOUND', message: 'Quest not found' },
+    });
+    expect(set.status).toBe(404);
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it('deletes earlier objects when a later image upload fails', async () => {
@@ -124,6 +177,24 @@ describe('addQuestImagesController', () => {
     });
     expect(set.status).toBe(502);
     expect(JSON.stringify(result)).not.toContain('secret detail');
+  });
+
+  it('maps an oversized Quest image to the shared image error', async () => {
+    spyOn(questStorage, 'upload').mockRejectedValue(new ImageTooLargeError('too large'));
+    const set: { status?: number } = {};
+
+    const result = await addQuestImagesController({
+      body: { images: [image] },
+      params: { questId },
+      session: session as never,
+      set: set as never,
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: { code: 'IMAGE_TOO_LARGE', message: 'too large' },
+    });
+    expect(set.status).toBe(413);
   });
 
   it('maps a Quest image limit result and compensates uploaded objects', async () => {
@@ -255,6 +326,58 @@ describe('getQuestDetailController', () => {
       success: true,
       data: {
         images: [{ fileId: imageId, position: 0, url: 'https://storage.test/signed-link' }],
+      },
+    });
+  });
+
+  it('omits only the Quest Image whose link cannot be built', async () => {
+    const secondStoredImage = {
+      ...storedImage,
+      fileId: '018f47a7-1c7d-7c98-9a11-690d7e834302',
+      position: 1,
+      objectKey: 'quests/hirer-1/second.png',
+    };
+    spyOn(questService, 'getQuestDetail').mockResolvedValue({
+      id: questId,
+      title: 'Quest title',
+      description: null,
+      condition: 'Complete the work',
+      reward: 500,
+      tag: null,
+      mode: 'FIRST_COME_FIRST_SERVED',
+      participation: 'SINGLE',
+      questStatus: 'DRAFT',
+      headcount: 1,
+      startTime: '2030-08-27T10:00:00.000Z',
+      dueAt: '2030-08-27T12:00:00.000Z',
+      estimatedDurationMinutes: 120,
+      proofRequired: true,
+      hirerName: 'Image Hirer',
+      locations: [],
+      images: [storedImage, secondStoredImage],
+    } as never);
+    spyOn(questStorage, 'linkFor').mockImplementation((questImage) => {
+      if (questImage.objectKey === storedImage.objectKey) throw new Error('storage unavailable');
+
+      return 'https://storage.test/second-signed-link';
+    });
+
+    const result = await getQuestDetailController({
+      params: { questId },
+      session: session as never,
+      set: {} as never,
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        images: [
+          {
+            fileId: secondStoredImage.fileId,
+            position: secondStoredImage.position,
+            url: 'https://storage.test/second-signed-link',
+          },
+        ],
       },
     });
   });
