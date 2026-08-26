@@ -92,10 +92,6 @@ _Avoid_: Candidate, departed Worker
 One bounded agreement for work, owned by one Hirer and progressing through its lifecycle.
 _Avoid_: Job, task
 
-**Quest Status**:
-The lifecycle state of a Quest: `DRAFT`, `OPEN`, `AWAITING_CONSENT`, `ASSIGNED`, `IN_PROGRESS`, `SUBMITTED`, `APPROVED`, `REWORK`, `COMPLETED`, `CANCELLED`, `DISPUTED`, `HIDDEN`, or `UNFILLED`. `AWAITING_CONSENT` means a Quest Edit is waiting for the required Worker consent. `UNFILLED` means the Quest did not obtain its required Worker roster; its transition rules are not defined yet.
-_Avoid_: confusing Quest Status with Quest Mode or Quest Participation.
-
 **Assignment**:
 The accepted participation of one Worker in a Quest. It is the canonical record that a Worker is working on that Quest.
 _Avoid_: Application, team membership

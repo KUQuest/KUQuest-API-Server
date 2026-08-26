@@ -1,10 +1,11 @@
 import { db, sql } from '@/database/client';
 import { tag } from '@/database/schema/tag.schema';
+import { fixedTagNames } from '@/shared/tag';
 
 import { asc, inArray } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'bun:test';
 
-const expectedTagNames = ['Content', 'Data Analysis', 'Design', 'Frontend'];
+const expectedTagNames = [...fixedTagNames];
 
 beforeAll(async () => {
   try {

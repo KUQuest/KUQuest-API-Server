@@ -12,6 +12,7 @@ import {
   questAssignment,
   review,
 } from '@/database/schema/quest.schema';
+import { fixedTagNames } from '@/shared/tag';
 
 import { and, eq, inArray, like } from 'drizzle-orm';
 
@@ -154,7 +155,7 @@ const main = async (): Promise<void> => {
   }
 
   const tagIds = new Map<string, string>();
-  for (const name of ['Frontend', 'Design', 'Data Analysis', 'Content']) {
+  for (const name of fixedTagNames) {
     tagIds.set(name, await getOrCreateTag(name));
   }
 
