@@ -34,13 +34,23 @@ export type {
 } from './wallet.service';
 export type { WalletTransaction } from './wallet.service';
 export {
+  assertWalletOperationAllowed,
+  changeWalletStatus,
+  changeWalletStatusInTransaction,
+  listWalletStatusHistory,
+  walletOperations,
+} from './wallet.status.service';
+export type {
+  ChangeWalletStatusInput,
+  WalletOperation,
+} from './wallet.status.service';
+export {
   ensureInitialMoneyPolicy,
   ensureWallet,
   createSealedLedgerTransaction,
   getEffectiveMoneyPolicy,
   getWallet,
   getWalletActivities,
-  listWalletStatusHistory,
   rebuildWalletProjection,
   validateOperationAmount,
   verifyWalletProjection,

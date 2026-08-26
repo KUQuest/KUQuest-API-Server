@@ -20,6 +20,7 @@ import {
   positiveSatang,
   satang,
 } from './wallet.money';
+import { assertWalletOperationAllowed } from './wallet.status.service';
 import { ensureWalletInTransaction, type WalletTransaction } from './wallet.service';
 
 export type ReserveSpendingInput = {
@@ -231,9 +232,7 @@ export const reserveSpending = async (
     .where(eq(walletWallet.userId, input.ownerUserId))
     .for('update');
   if (!wallet) throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
-  if (wallet.walletStatus !== 'ACTIVE') {
-    throw new MoneyDomainError('WALLET_NOT_ACTIVE', 'Wallet status does not permit new reservations.');
-  }
+  assertWalletOperationAllowed(wallet.walletStatus, 'FUNDING_RESERVATION');
   if (wallet.spendingBalanceSatang < amountSatang) {
     throw new MoneyDomainError('INSUFFICIENT_SPENDING_BALANCE', 'Spending Balance is insufficient.');
   }
@@ -380,9 +379,7 @@ export const increaseFundingReservation = async (
     .where(eq(walletWallet.id, reservation.walletId))
     .for('update');
   if (!wallet) throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
-  if (wallet.walletStatus !== 'ACTIVE') {
-    throw new MoneyDomainError('WALLET_NOT_ACTIVE', 'Wallet status does not permit reservation increases.');
-  }
+  assertWalletOperationAllowed(wallet.walletStatus, 'FUNDING_RESERVATION');
   if (wallet.spendingBalanceSatang < amountSatang) {
     throw new MoneyDomainError('INSUFFICIENT_SPENDING_BALANCE', 'Spending Balance is insufficient.');
   }

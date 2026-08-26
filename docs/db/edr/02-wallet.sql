@@ -1,5 +1,5 @@
 -- ==================== wallet / ledger (Wallet & Payments) ====================
--- Implemented by BE-109 and BE-110. PostgreSQL INTEGER values are exact satang; THB currency is
+-- Implemented by BE-109 through BE-112. PostgreSQL INTEGER values are exact satang; THB currency is
 -- implicit and is formatted only at API/UI boundaries. Quest tables are not referenced.
 
 CREATE TABLE wallet_wallets (
@@ -43,6 +43,15 @@ CREATE INDEX wallet_status_history_wallet_idx
   ON wallet_status_history (wallet_id, occurred_at);
 CREATE UNIQUE INDEX wallet_status_history_initial_uidx
   ON wallet_status_history (wallet_id) WHERE from_status IS NULL;
+
+CREATE OR REPLACE FUNCTION wallet_reject_status_history_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'Wallet status history is immutable';
+END;
+$$;
+CREATE TRIGGER wallet_status_history_immutable
+  BEFORE UPDATE OR DELETE ON wallet_status_history
+  FOR EACH ROW EXECUTE FUNCTION wallet_reject_status_history_mutation();
 
 CREATE TABLE wallet_ledger_accounts (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),

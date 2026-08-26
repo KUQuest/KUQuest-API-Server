@@ -13,7 +13,7 @@ import {
   walletWallet,
 } from '@/database/schema/wallet.schema';
 
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 
 import {
   MAX_OPERATION_SATANG,
@@ -26,6 +26,7 @@ import {
   satangDelta,
   signedSatang,
 } from './wallet.money';
+import { assertWalletOperationAllowed } from './wallet.status.service';
 
 const walletAccountTypes = [
   'SPENDING',
@@ -557,9 +558,6 @@ export const verifyWalletProjection = async (walletId: string) => {
   });
 };
 
-export const listWalletStatusHistory = async (walletId: string) =>
-  db.select().from(walletStatusHistory).where(eq(walletStatusHistory.walletId, walletId)).orderBy(asc(walletStatusHistory.occurredAt));
-
 export const validateOperationAmount = (amount: number, minimum: number, maximum: number): Satang => {
   const value = positiveSatang(amount);
   if (value < minimum || value > maximum) {
@@ -705,9 +703,7 @@ export const convertEarnings = async (input: EarningsConversionInput) => {
       .where(eq(walletWallet.userId, input.principalUserId))
       .for('update');
     if (!wallet) throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
-    if (wallet.walletStatus !== 'ACTIVE') {
-      throw new MoneyDomainError('WALLET_NOT_ACTIVE', 'The Wallet is not active.');
-    }
+    assertWalletOperationAllowed(wallet.walletStatus, 'EARNINGS_CONVERSION');
 
     const policy = await getEffectiveMoneyPolicyWith(transaction);
     const amount = validateOperationAmount(
