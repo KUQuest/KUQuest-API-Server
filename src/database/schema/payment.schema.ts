@@ -151,10 +151,16 @@ export const paymentPayoutAccounts = pgTable(
     accountCountry: text('account_country').default('TH').notNull(),
     accountCurrency: text('account_currency').default('THB').notNull(),
     bankCode: text('bank_code').notNull(),
-    accountNumber: text('account_number').notNull(),
+    accountNumberKeyVersion: text('account_number_key_version').notNull(),
+    accountNumberNonce: text('account_number_nonce').notNull(),
+    accountNumberCiphertext: text('account_number_ciphertext').notNull(),
+    accountNumberAuthTag: text('account_number_auth_tag').notNull(),
     accountHolderName: text('account_holder_name').notNull(),
     routingType: text('routing_type').notNull(),
-    routingValue: text('routing_value').notNull(),
+    routingValueKeyVersion: text('routing_value_key_version').notNull(),
+    routingValueNonce: text('routing_value_nonce').notNull(),
+    routingValueCiphertext: text('routing_value_ciphertext').notNull(),
+    routingValueAuthTag: text('routing_value_auth_tag').notNull(),
     maskedLastFour: text('masked_last_four').notNull(),
     createdAt: time('created_at').defaultNow().notNull(),
     retiredAt: time('retired_at'),
@@ -162,7 +168,11 @@ export const paymentPayoutAccounts = pgTable(
   (table) => [
     check(
       'payment_payout_accounts_recipient_type_check',
-      sql`${table.recipientType} IN ('SELF', 'THIRD_PARTY')`,
+      sql`${table.recipientType} = 'SELF'`,
+    ),
+    check(
+      'payment_payout_accounts_routing_type_check',
+      sql`${table.routingType} IN ('BANK_ACCOUNT', 'PROMPTPAY')`,
     ),
     check(
       'payment_payout_accounts_country_currency_check',
@@ -171,6 +181,7 @@ export const paymentPayoutAccounts = pgTable(
     uniqueIndex('payment_payout_accounts_active_user_uidx')
       .on(table.userId)
       .where(sql`${table.retiredAt} IS NULL`),
+    unique('payment_payout_accounts_id_user_key').on(table.id, table.userId),
   ],
 );
 
@@ -203,6 +214,12 @@ export const paymentPayoutQuotes = pgTable(
       sql`${table.receiptBaht} > 0 AND ${table.maximumFeeBaht} >= 0 AND ${table.maximumTaxBaht} >= 0 AND ${table.maximumDebitBaht} = ${table.receiptBaht} + ${table.maximumFeeBaht} + ${table.maximumTaxBaht} AND ${table.quotedFeeSatang} >= 0 AND ${table.quotedTaxSatang} >= 0 AND ${table.quotedDebitSatang} > 0`,
     ),
     check('payment_payout_quotes_currency_check', sql`${table.currency} = 'THB'`),
+    unique('payment_payout_quotes_id_user_key').on(table.id, table.userId),
+    foreignKey({
+      columns: [table.payoutAccountId, table.userId],
+      foreignColumns: [paymentPayoutAccounts.id, paymentPayoutAccounts.userId],
+      name: 'payment_payout_quotes_account_user_fk',
+    }),
     index('payment_payout_quotes_expiry_idx').on(table.expiresAt),
   ],
 );
@@ -223,10 +240,16 @@ export const paymentPayouts = pgTable(
     destinationAccountCountry: text('destination_account_country').notNull(),
     destinationAccountCurrency: text('destination_account_currency').notNull(),
     destinationBankCode: text('destination_bank_code').notNull(),
-    destinationAccountNumber: text('destination_account_number').notNull(),
+    destinationAccountNumberKeyVersion: text('destination_account_number_key_version').notNull(),
+    destinationAccountNumberNonce: text('destination_account_number_nonce').notNull(),
+    destinationAccountNumberCiphertext: text('destination_account_number_ciphertext').notNull(),
+    destinationAccountNumberAuthTag: text('destination_account_number_auth_tag').notNull(),
     destinationAccountHolderName: text('destination_account_holder_name').notNull(),
     destinationRoutingType: text('destination_routing_type').notNull(),
-    destinationRoutingValue: text('destination_routing_value').notNull(),
+    destinationRoutingValueKeyVersion: text('destination_routing_value_key_version').notNull(),
+    destinationRoutingValueNonce: text('destination_routing_value_nonce').notNull(),
+    destinationRoutingValueCiphertext: text('destination_routing_value_ciphertext').notNull(),
+    destinationRoutingValueAuthTag: text('destination_routing_value_auth_tag').notNull(),
     provider: text('provider').notNull(),
     providerReference: text('provider_reference').unique(),
     principalBaht: amount('principal_baht').notNull(),
@@ -264,6 +287,17 @@ export const paymentPayouts = pgTable(
     uniqueIndex('payment_payouts_active_user_uidx')
       .on(table.userId)
       .where(sql`${table.payoutStatus} IN ('CREATING', 'PENDING', 'AWAITING_RECONCILIATION')`),
+    unique('payment_payouts_id_user_key').on(table.id, table.userId),
+    foreignKey({
+      columns: [table.quoteId, table.userId],
+      foreignColumns: [paymentPayoutQuotes.id, paymentPayoutQuotes.userId],
+      name: 'payment_payouts_quote_user_fk',
+    }),
+    foreignKey({
+      columns: [table.payoutAccountId, table.userId],
+      foreignColumns: [paymentPayoutAccounts.id, paymentPayoutAccounts.userId],
+      name: 'payment_payouts_account_user_fk',
+    }),
   ],
 );
 

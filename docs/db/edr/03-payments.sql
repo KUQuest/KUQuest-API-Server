@@ -104,26 +104,30 @@ CREATE INDEX payment_top_up_status_history_idx ON payment_top_up_status_history 
 CREATE TABLE payment_payout_accounts (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id             UUID NOT NULL REFERENCES auth_user(id),
-  -- recipient_type/routing_type settled via /grilling (2026-08-09): recipient_type is a
-  -- real fixed vocab (does payout go to the account-holder or someone else, per
-  -- `relationship` below) — CHECK added. routing_type deliberately left open TEXT, no
-  -- CHECK — genuinely provider/bank-rail-defined (e.g. PROMPTPAY/BANK_ACCOUNT), may grow
-  -- without a schema decision.
-  recipient_type      TEXT NOT NULL CHECK (recipient_type IN ('SELF', 'THIRD_PARTY')),
+  -- Only a Student's own destination is supported. Account and routing secrets
+  -- are application-encrypted AES-256-GCM envelopes, not plaintext values.
+  recipient_type      TEXT NOT NULL CHECK (recipient_type = 'SELF'),
   given_name          TEXT NOT NULL,
   surname             TEXT NOT NULL,
   relationship        TEXT NOT NULL,
   account_country     TEXT NOT NULL DEFAULT 'TH',
   account_currency    TEXT NOT NULL DEFAULT 'THB',
   bank_code           TEXT NOT NULL,
-  account_number      TEXT NOT NULL,
+  account_number_key_version TEXT NOT NULL,
+  account_number_nonce TEXT NOT NULL,
+  account_number_ciphertext TEXT NOT NULL,
+  account_number_auth_tag TEXT NOT NULL,
   account_holder_name TEXT NOT NULL,
-  routing_type        TEXT NOT NULL,
-  routing_value       TEXT NOT NULL,
+  routing_type        TEXT NOT NULL CHECK (routing_type IN ('BANK_ACCOUNT', 'PROMPTPAY')),
+  routing_value_key_version TEXT NOT NULL,
+  routing_value_nonce TEXT NOT NULL,
+  routing_value_ciphertext TEXT NOT NULL,
+  routing_value_auth_tag TEXT NOT NULL,
   masked_last_four    TEXT NOT NULL,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   retired_at          TIMESTAMPTZ,
-  CHECK (account_country = 'TH' AND account_currency = 'THB')
+  CHECK (account_country = 'TH' AND account_currency = 'THB'),
+  UNIQUE (id, user_id)
 );
 CREATE UNIQUE INDEX payment_payout_accounts_active_user_uidx ON payment_payout_accounts (user_id) WHERE retired_at IS NULL;
 
@@ -142,6 +146,8 @@ CREATE TABLE payment_payout_quotes (
   expires_at          TIMESTAMPTZ NOT NULL,
   consumed_at         TIMESTAMPTZ,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (id, user_id),
+  FOREIGN KEY (payout_account_id, user_id) REFERENCES payment_payout_accounts(id, user_id),
   CHECK (receipt_satang > 0 AND maximum_fee_satang >= 0 AND maximum_tax_satang >= 0 AND maximum_debit_satang = receipt_satang + maximum_fee_satang + maximum_tax_satang AND quoted_fee_satang >= 0 AND quoted_tax_satang >= 0 AND quoted_debit_satang = receipt_satang + quoted_fee_satang + quoted_tax_satang)
 );
 CREATE INDEX payment_payout_quotes_expiry_idx ON payment_payout_quotes (expires_at);
@@ -158,10 +164,16 @@ CREATE TABLE payment_payouts (
   destination_account_country   TEXT NOT NULL,
   destination_account_currency  TEXT NOT NULL,
   destination_bank_code         TEXT NOT NULL,
-  destination_account_number    TEXT NOT NULL,
+  destination_account_number_key_version TEXT NOT NULL,
+  destination_account_number_nonce TEXT NOT NULL,
+  destination_account_number_ciphertext TEXT NOT NULL,
+  destination_account_number_auth_tag TEXT NOT NULL,
   destination_account_holder_name TEXT NOT NULL,
   destination_routing_type      TEXT NOT NULL,
-  destination_routing_value     TEXT NOT NULL,
+  destination_routing_value_key_version TEXT NOT NULL,
+  destination_routing_value_nonce TEXT NOT NULL,
+  destination_routing_value_ciphertext TEXT NOT NULL,
+  destination_routing_value_auth_tag TEXT NOT NULL,
   provider                      TEXT NOT NULL,
   provider_reference            TEXT UNIQUE,
   principal_satang                INTEGER NOT NULL,
@@ -181,6 +193,9 @@ CREATE TABLE payment_payouts (
   CHECK (principal_satang > 0 AND maximum_fee_satang >= 0 AND maximum_tax_satang >= 0 AND maximum_debit_satang = principal_satang + maximum_fee_satang + maximum_tax_satang),
   CHECK (num_nonnulls(actual_fee_satang, actual_tax_satang, actual_debit_satang) IN (0, 3)),
   CHECK (actual_fee_satang IS NULL OR (actual_fee_satang >= 0 AND actual_tax_satang >= 0 AND actual_debit_satang = principal_satang + actual_fee_satang + actual_tax_satang AND actual_debit_satang <= maximum_debit_satang)),
+  FOREIGN KEY (quote_id, user_id) REFERENCES payment_payout_quotes(id, user_id),
+  FOREIGN KEY (payout_account_id, user_id) REFERENCES payment_payout_accounts(id, user_id),
+  UNIQUE (id, user_id),
   CHECK (destination_account_country = 'TH' AND destination_account_currency = 'THB')
 );
 CREATE UNIQUE INDEX payment_payouts_active_user_uidx ON payment_payouts (user_id) WHERE payout_status IN ('CREATING','PENDING','AWAITING_RECONCILIATION');
