@@ -84,6 +84,27 @@ describe('Xendit PromptPay provider', () => {
     });
   });
 
+  it('maps a successful response without a provider amount to an uncertain result', async () => {
+    const provider = new XenditPromptPayProvider({
+      secretKey: 'test-secret',
+      fetcher: async () => new Response(JSON.stringify({
+        payment_request_id: 'pr-incomplete-response',
+        reference_id: 'top-up:incomplete-response',
+        status: 'REQUIRES_ACTION',
+        country: 'TH',
+        currency: 'THB',
+        channel_code: 'QRPROMPTPAY',
+        actions: [{ descriptor: 'QR_STRING', value: 'promptpay-qr' }],
+      }), { status: 201 }),
+    });
+
+    await expect(provider.createPayment({
+      internalReference: 'top-up:incomplete-response',
+      paymentTotalSatang: positiveSatang(100),
+      expiresAt: new Date('2026-08-26T10:05:00.000Z'),
+    })).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+  });
+
   it('maps a timeout to an uncertain provider result', async () => {
     const provider = new XenditPromptPayProvider({
       secretKey: 'test-secret',

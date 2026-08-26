@@ -97,8 +97,9 @@ CREATE TABLE payment_top_up_status_history (
   CHECK (num_nonnulls(actor_user_id, actor_admin_id) <= 1)
 );
 CREATE INDEX payment_top_up_status_history_idx ON payment_top_up_status_history (top_up_id, occurred_at);
--- Top-up status history and Top-up rows are retained. Status changes update the
--- current row and append a history row; history rows and Top-up rows cannot be deleted.
+-- Top-up Quotes, Top-up status history, and Top-up rows are retained. Status
+-- changes update the current row and append a history row; these records cannot
+-- be hard-deleted.
 
 CREATE TABLE payment_payout_accounts (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),

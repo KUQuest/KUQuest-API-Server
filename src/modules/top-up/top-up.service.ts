@@ -35,7 +35,7 @@ export const topUpOperationScope = 'wallet.top-up';
 
 export type TopUpQuoteInput = {
   principalUserId: string;
-  creditSatang: number;
+  creditSatang: Satang;
 };
 
 export type TopUpQuote = {
@@ -160,7 +160,7 @@ const assertMemberExists = async (principalUserId: string) => {
     .from(authUser)
     .where(eq(authUser.id, principalUserId))
     .limit(1);
-  if (!member) throw new MoneyDomainError('STUDENT_NOT_FOUND', 'Member does not exist.');
+  if (!member) throw new MoneyDomainError('MEMBER_NOT_FOUND', 'Member does not exist.');
 };
 
 const calculateTopUpTerms = (creditSatang: Satang, policy: {
@@ -441,6 +441,7 @@ const finalizeProviderRejection = async (
     .update(paymentTopUp)
     .set({
       providerStatus: error.providerCode ?? error.code,
+      providerApiVersion: error.providerApiVersion,
       updatedAt: new Date(),
       topUpStatus: 'FAILED',
     })

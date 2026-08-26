@@ -148,6 +148,13 @@
       "when": 1787754297594,
       "tag": "0020_right_synch",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787755950131,
+      "tag": "0021_retain_top_up_quotes",
+      "breakpoints": true
     }
   ]
 }

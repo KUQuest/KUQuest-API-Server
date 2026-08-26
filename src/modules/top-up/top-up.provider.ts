@@ -12,21 +12,29 @@ export type InboundPaymentProviderErrorCode =
   | 'PROVIDER_REJECTED'
   | 'PROVIDER_UNCERTAIN';
 
+type InboundPaymentProviderErrorDetails = {
+  providerCode?: string;
+  providerStatus?: number;
+  providerApiVersion?: string;
+};
+
 export class InboundPaymentProviderError extends Error {
   readonly code: InboundPaymentProviderErrorCode;
   readonly providerCode?: string;
   readonly providerStatus?: number;
+  readonly providerApiVersion?: string;
 
   constructor(
     code: InboundPaymentProviderErrorCode,
     message: string,
-    details: { providerCode?: string; providerStatus?: number } = {},
+    details: InboundPaymentProviderErrorDetails = {},
   ) {
     super(message);
     this.name = 'InboundPaymentProviderError';
     this.code = code;
     this.providerCode = details.providerCode;
     this.providerStatus = details.providerStatus;
+    this.providerApiVersion = details.providerApiVersion;
   }
 }
 
@@ -125,15 +133,26 @@ export class XenditPromptPayProvider implements InboundPaymentProvider {
     this.fetcher = options.fetcher ?? globalThis.fetch;
   }
 
+  private error(
+    code: InboundPaymentProviderErrorCode,
+    message: string,
+    details: Omit<InboundPaymentProviderErrorDetails, 'providerApiVersion'> = {},
+  ) {
+    return new InboundPaymentProviderError(code, message, {
+      ...details,
+      providerApiVersion: this.apiVersion,
+    });
+  }
+
   private async request(input: InboundPaymentRequest): Promise<JsonObject> {
     if (!this.secretKey) {
-      throw new InboundPaymentProviderError(
+      throw this.error(
         'PROVIDER_CONFIGURATION',
         'Xendit is not configured.',
       );
     }
     if (!Number.isInteger(this.timeoutMs) || this.timeoutMs < 1) {
-      throw new InboundPaymentProviderError(
+      throw this.error(
         'PROVIDER_CONFIGURATION',
         'Xendit timeout is not configured correctly.',
       );
@@ -169,7 +188,7 @@ export class XenditPromptPayProvider implements InboundPaymentProvider {
         }),
       });
     } catch {
-      throw new InboundPaymentProviderError(
+      throw this.error(
         'PROVIDER_UNCERTAIN',
         'Xendit did not return a response.',
       );
@@ -186,14 +205,14 @@ export class XenditPromptPayProvider implements InboundPaymentProvider {
     if (!response.ok) {
       const details = providerErrorDetails(payload);
       const uncertain = response.status >= 500 || response.status === 408 || response.status === 409 || response.status === 429;
-      throw new InboundPaymentProviderError(
+      throw this.error(
         uncertain ? 'PROVIDER_UNCERTAIN' : 'PROVIDER_REJECTED',
         responseMessage(payload),
         { ...details, providerStatus: response.status },
       );
     }
     if (!payload) {
-      throw new InboundPaymentProviderError(
+      throw this.error(
         'PROVIDER_UNCERTAIN',
         'Xendit returned an invalid response.',
       );
@@ -207,37 +226,46 @@ export class XenditPromptPayProvider implements InboundPaymentProvider {
     const providerStatus = asText(payload.status);
     const qrPayload = responseAction(payload);
     if (!providerReference || !providerStatus || !qrPayload) {
-      throw new InboundPaymentProviderError(
+      throw this.error(
         'PROVIDER_UNCERTAIN',
         'Xendit returned an incomplete PromptPay response.',
       );
     }
     if (payload.reference_id !== undefined && payload.reference_id !== input.internalReference) {
-      throw new InboundPaymentProviderError(
+      throw this.error(
         'PROVIDER_UNCERTAIN',
         'Xendit returned a different internal reference.',
       );
     }
-    if (payload.request_amount !== undefined && fromThb(payload.request_amount) !== input.paymentTotalSatang) {
-      throw new InboundPaymentProviderError(
+    let providerAmountSatang: Satang;
+    try {
+      providerAmountSatang = fromThb(payload.request_amount);
+    } catch (reason: unknown) {
+      if (reason instanceof InboundPaymentProviderError) {
+        throw this.error(reason.code, reason.message, { providerCode: reason.providerCode });
+      }
+      throw reason;
+    }
+    if (providerAmountSatang !== input.paymentTotalSatang) {
+      throw this.error(
         'PROVIDER_UNCERTAIN',
         'Xendit returned a different payment amount.',
       );
     }
     if (payload.country !== undefined && payload.country !== 'TH') {
-      throw new InboundPaymentProviderError(
+      throw this.error(
         'PROVIDER_UNCERTAIN',
         'Xendit returned a different payment country.',
       );
     }
     if (payload.currency !== undefined && payload.currency !== 'THB') {
-      throw new InboundPaymentProviderError(
+      throw this.error(
         'PROVIDER_UNCERTAIN',
         'Xendit returned a different payment currency.',
       );
     }
     if (payload.channel_code !== undefined && payload.channel_code !== 'QRPROMPTPAY') {
-      throw new InboundPaymentProviderError(
+      throw this.error(
         'PROVIDER_UNCERTAIN',
         'Xendit returned a different payment channel.',
       );
@@ -247,7 +275,7 @@ export class XenditPromptPayProvider implements InboundPaymentProvider {
     const qrExpiresAtText = asText(channelProperties?.expires_at);
     const qrExpiresAt = qrExpiresAtText ? new Date(qrExpiresAtText) : input.expiresAt;
     if (Number.isNaN(qrExpiresAt.getTime())) {
-      throw new InboundPaymentProviderError(
+      throw this.error(
         'PROVIDER_UNCERTAIN',
         'Xendit returned an invalid QR expiry.',
       );
@@ -256,9 +284,7 @@ export class XenditPromptPayProvider implements InboundPaymentProvider {
     return {
       providerReference,
       providerStatus,
-      providerAmountSatang: payload.request_amount === undefined
-        ? input.paymentTotalSatang
-        : fromThb(payload.request_amount),
+      providerAmountSatang,
       providerApiVersion: this.apiVersion,
       providerChannelCode: asText(payload.channel_code) ?? 'QRPROMPTPAY',
       qrPayload,
