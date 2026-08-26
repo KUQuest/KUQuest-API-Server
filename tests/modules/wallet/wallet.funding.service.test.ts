@@ -11,6 +11,7 @@ import {
   walletWallet,
 } from '@/database/schema/wallet.schema';
 import {
+  changeWalletStatus,
   createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
   ensureWallet,
@@ -234,10 +235,17 @@ describe('Funding Reservation service', () => {
       callerReference: `release-${crypto.randomUUID()}`,
       amountSatang: amount(1_000),
     }));
-    await db
-      .update(walletWallet)
-      .set({ walletStatus: 'FROZEN' })
+    const [ownerWallet] = await db
+      .select({ id: walletWallet.id })
+      .from(walletWallet)
       .where(eq(walletWallet.userId, ownerUserId));
+    if (!ownerWallet) throw new Error('Missing owner Wallet');
+    await changeWalletStatus({
+      walletId: ownerWallet.id,
+      toStatus: 'FROZEN',
+      actorUserId: ownerUserId,
+      reason: 'Freeze Wallet for release test',
+    });
 
     const released = await db.transaction((transaction) => releaseFundingReservation(transaction, {
       ownerUserId,
@@ -249,10 +257,12 @@ describe('Funding Reservation service', () => {
     expect(await db.select().from(walletWallet).where(eq(walletWallet.userId, ownerUserId))).toMatchObject([
       { spendingBalanceSatang: 4_500, fundingReservedSatang: 5_500, walletStatus: 'FROZEN' },
     ]);
-    await db
-      .update(walletWallet)
-      .set({ walletStatus: 'ACTIVE' })
-      .where(eq(walletWallet.userId, ownerUserId));
+    await changeWalletStatus({
+      walletId: ownerWallet.id,
+      toStatus: 'ACTIVE',
+      actorUserId: ownerUserId,
+      reason: 'Resume Wallet after release test',
+    });
   });
 
   it('partially settles to recipient Earnings plus a Platform Fee', async () => {
@@ -504,7 +514,17 @@ describe('Funding Reservation service', () => {
     }))).rejects.toMatchObject({ code: 'INSUFFICIENT_SPENDING_BALANCE' });
     expect(await db.select().from(walletFundingReservation).where(eq(walletFundingReservation.id, reservation.id)))
       .toMatchObject([{ totalReservedSatang: 400, remainingSatang: 400 }]);
-    await db.update(walletWallet).set({ walletStatus: 'SUSPENDED' }).where(eq(walletWallet.userId, payerUserId));
+    const [payerWallet] = await db
+      .select({ id: walletWallet.id })
+      .from(walletWallet)
+      .where(eq(walletWallet.userId, payerUserId));
+    if (!payerWallet) throw new Error('Missing payer Wallet');
+    await changeWalletStatus({
+      walletId: payerWallet.id,
+      toStatus: 'SUSPENDED',
+      actorUserId: payerUserId,
+      reason: 'Suspend Wallet for commitment test',
+    });
     await expect(db.transaction((transaction) => increaseFundingReservation(transaction, {
       ownerUserId: payerUserId,
       reservationId: reservation.id,
@@ -569,8 +589,27 @@ describe('Funding Reservation service', () => {
       callerReference: `status-${crypto.randomUUID()}`,
       amountSatang: amount(200),
     }));
-    await db.update(walletWallet).set({ walletStatus: 'FROZEN' }).where(eq(walletWallet.userId, payerUserId));
-    await db.update(walletWallet).set({ walletStatus: 'CLOSED' }).where(eq(walletWallet.userId, payeeUserId));
+    const [payerWallet] = await db
+      .select({ id: walletWallet.id })
+      .from(walletWallet)
+      .where(eq(walletWallet.userId, payerUserId));
+    const [payeeWallet] = await db
+      .select({ id: walletWallet.id })
+      .from(walletWallet)
+      .where(eq(walletWallet.userId, payeeUserId));
+    if (!payerWallet || !payeeWallet) throw new Error('Missing status-test Wallet');
+    await changeWalletStatus({
+      walletId: payerWallet.id,
+      toStatus: 'FROZEN',
+      actorUserId: payerUserId,
+      reason: 'Freeze payer Wallet for settlement test',
+    });
+    await changeWalletStatus({
+      walletId: payeeWallet.id,
+      toStatus: 'CLOSED',
+      actorUserId: payerUserId,
+      reason: 'Close recipient Wallet for settlement test',
+    });
 
     const settlement = await db.transaction((transaction) => settleFundingReservation(transaction, {
       ownerUserId: payerUserId,

@@ -134,6 +134,13 @@
       "when": 1787750017825,
       "tag": "0018_stiff_ikaris",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787751093080,
+      "tag": "0019_wallet_status_history_immutable",
+      "breakpoints": true
     }
   ]
 }

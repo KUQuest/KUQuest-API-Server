@@ -57,5 +57,5 @@ See `src/modules/onboarding/` as the reference shape.
 
 ## Testing
 
-- Integration-first: `tests/modules/<name>/<name>.integration.test.ts` hits the real `app` via `app.handle(new Request(...))`, not mocks.
+- Integration-first: HTTP integration tests in `tests/modules/<name>/<name>.integration.test.ts` hit the real `app` via `app.handle(new Request(...))`, not mocks. Plain TypeScript application-service tests without an HTTP contract use the same `.integration.test.ts` suffix and execute the public service against real PostgreSQL.
 - Test structure mirrors `src/` — one test dir per module/shared/plugin/database area.

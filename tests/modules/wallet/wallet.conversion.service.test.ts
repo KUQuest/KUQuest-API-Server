@@ -10,6 +10,7 @@ import {
   walletWallet,
 } from '@/database/schema/wallet.schema';
 import {
+  changeWalletStatus,
   convertEarnings,
   createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
@@ -149,9 +150,19 @@ describe('Earnings Conversion service', () => {
     const replay = await convertEarnings(input);
     expect(replay).toEqual(first);
 
-    await db.update(walletWallet).set({ walletStatus: 'FROZEN' }).where(eq(walletWallet.id, wallet.id));
+    await changeWalletStatus({
+      walletId: wallet.id,
+      toStatus: 'FROZEN',
+      actorUserId: id,
+      reason: 'Freeze Wallet for retry test',
+    });
     expect(await convertEarnings(input)).toEqual(first);
-    await db.update(walletWallet).set({ walletStatus: 'ACTIVE' }).where(eq(walletWallet.id, wallet.id));
+    await changeWalletStatus({
+      walletId: wallet.id,
+      toStatus: 'ACTIVE',
+      actorUserId: id,
+      reason: 'Resume Wallet after retry test',
+    });
 
     await expect(convertEarnings({
       ...input,
@@ -319,7 +330,12 @@ describe('Earnings Conversion service', () => {
 
     for (const status of ['FROZEN', 'SUSPENDED', 'CLOSED'] as const) {
       // eslint-disable-next-line no-await-in-loop
-      await db.update(walletWallet).set({ walletStatus: status }).where(eq(walletWallet.id, wallet.id));
+      await changeWalletStatus({
+        walletId: wallet.id,
+        toStatus: status,
+        actorUserId: id,
+        reason: `Set Wallet status to ${status}`,
+      });
       // eslint-disable-next-line no-await-in-loop
       await expect(convertEarnings(earningsConversionInput(id, 125))).rejects.toMatchObject({
         code: 'WALLET_NOT_ACTIVE',
