@@ -43,7 +43,14 @@ export type MoneyDomainErrorCode =
   | 'WALLET_CAPACITY_EXCEEDED'
   | 'WALLET_NOT_ACTIVE'
   | 'INSUFFICIENT_SPENDING_BALANCE'
-  | 'WALLET_PROVISION_FAILED';
+  | 'WALLET_PROVISION_FAILED'
+  | 'TOP_UP_QUOTE_CREATE_FAILED'
+  | 'TOP_UP_QUOTE_NOT_FOUND'
+  | 'TOP_UP_QUOTE_CONSUMED'
+  | 'TOP_UP_QUOTE_EXPIRED'
+  | 'TOP_UP_CREATE_FAILED'
+  | 'TOP_UP_NOT_FOUND'
+  | 'TOP_UP_UPDATE_FAILED';
 
 export class MoneyDomainError extends Error {
   readonly code: MoneyDomainErrorCode;

@@ -33,6 +33,7 @@ CREATE TABLE payment_money_policy_revisions (
 
 CREATE TABLE payment_top_up_quotes (
   id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  fee_rounding_mode    TEXT NOT NULL DEFAULT 'UP' CHECK (fee_rounding_mode = 'UP'),
   user_id              UUID NOT NULL REFERENCES auth_user(id),
   policy_revision_id   UUID NOT NULL REFERENCES payment_money_policy_revisions(id),
   credit_satang          INTEGER NOT NULL,
@@ -45,6 +46,7 @@ CREATE TABLE payment_top_up_quotes (
   expires_at           TIMESTAMPTZ NOT NULL,
   consumed_at          TIMESTAMPTZ,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (id, user_id),
   CHECK (credit_satang > 0 AND charged_fee_satang >= 0 AND charged_tax_satang >= 0 AND payment_total_satang = credit_satang + charged_fee_satang + charged_tax_satang AND provider_fee_satang >= 0 AND provider_tax_satang >= 0 AND provider_total_satang = credit_satang + provider_fee_satang + provider_tax_satang)
 );
 CREATE INDEX payment_top_up_quotes_expiry_idx ON payment_top_up_quotes (expires_at);
@@ -56,6 +58,10 @@ CREATE TABLE payment_top_ups (
   quote_id                    UUID NOT NULL UNIQUE REFERENCES payment_top_up_quotes(id),
   provider                    TEXT NOT NULL,
   provider_reference          TEXT UNIQUE,
+  provider_api_version        TEXT,
+  provider_status             TEXT,
+  provider_amount_satang      INTEGER,
+  provider_channel_code       TEXT,
   credit_satang                 INTEGER NOT NULL,
   charged_fee_satang            INTEGER NOT NULL,
   charged_tax_satang            INTEGER NOT NULL,
@@ -70,7 +76,9 @@ CREATE TABLE payment_top_ups (
   credited_ledger_transaction_id UUID UNIQUE REFERENCES wallet_ledger_transactions(id),
   created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CHECK (credit_satang > 0 AND charged_fee_satang >= 0 AND charged_tax_satang >= 0 AND payment_total_satang = credit_satang + charged_fee_satang + charged_tax_satang AND provider_fee_satang >= 0 AND provider_tax_satang >= 0 AND provider_total_satang = credit_satang + provider_fee_satang + provider_tax_satang)
+  UNIQUE (id, user_id),
+  FOREIGN KEY (quote_id, user_id) REFERENCES payment_top_up_quotes(id, user_id),
+  CHECK (credit_satang > 0 AND charged_fee_satang >= 0 AND charged_tax_satang >= 0 AND payment_total_satang = credit_satang + charged_fee_satang + charged_tax_satang AND provider_fee_satang >= 0 AND provider_tax_satang >= 0 AND provider_total_satang = credit_satang + provider_fee_satang + provider_tax_satang AND (provider_amount_satang IS NULL OR provider_amount_satang = payment_total_satang))
 );
 CREATE INDEX payment_top_ups_user_status_idx ON payment_top_ups (user_id, top_up_status);
 
@@ -89,6 +97,8 @@ CREATE TABLE payment_top_up_status_history (
   CHECK (num_nonnulls(actor_user_id, actor_admin_id) <= 1)
 );
 CREATE INDEX payment_top_up_status_history_idx ON payment_top_up_status_history (top_up_id, occurred_at);
+-- Top-up status history and Top-up rows are retained. Status changes update the
+-- current row and append a history row; history rows and Top-up rows cannot be deleted.
 
 CREATE TABLE payment_payout_accounts (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),

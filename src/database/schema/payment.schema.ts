@@ -2,86 +2,46 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   check,
+  foreignKey,
+  integer,
   index,
   jsonb,
   pgTable,
-  smallint,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
 import { authAdmin, authUser } from './auth.schema';
-import { walletLedgerTransaction } from './wallet.schema';
+import { paymentMoneyPolicyRevision, walletLedgerTransaction } from './wallet.schema';
 
 const amount = (name: string) => bigint(name, { mode: 'bigint' });
 const time = (name: string) => timestamp(name, { withTimezone: true });
 
-export const paymentMoneyPolicyRevisions = pgTable(
-  'payment_money_policy_revisions',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    revision: bigint('revision', { mode: 'bigint' }).notNull().unique(),
-    minimumTopUpBaht: amount('minimum_top_up_baht').notNull(),
-    maximumTopUpBaht: amount('maximum_top_up_baht').notNull(),
-    minimumFundedJobBaht: amount('minimum_funded_job_baht').notNull(),
-    maximumFundedJobBaht: amount('maximum_funded_job_baht').notNull(),
-    minimumEarningsConversionBaht: amount('minimum_earnings_conversion_baht').notNull(),
-    maximumEarningsConversionBaht: amount('maximum_earnings_conversion_baht').notNull(),
-    minimumPayoutBaht: amount('minimum_payout_baht').notNull(),
-    maximumPayoutBaht: amount('maximum_payout_baht').notNull(),
-    platformFeeBps: smallint('platform_fee_bps').notNull(),
-    topUpProviderFeeSatang: amount('top_up_provider_fee_satang').default(sql`0`).notNull(),
-    topUpProviderTaxBps: smallint('top_up_provider_tax_bps').default(0).notNull(),
-    payoutProviderFeeSatang: amount('payout_provider_fee_satang').default(sql`0`).notNull(),
-    payoutProviderTaxBps: smallint('payout_provider_tax_bps').default(0).notNull(),
-    disputeTwoPersonThresholdBaht: amount('dispute_two_person_threshold_baht').notNull(),
-    quoteLifetimeSeconds: amount('quote_lifetime_seconds').notNull(),
-    reviewWindowSeconds: amount('review_window_seconds').notNull(),
-    defaultApplicationWindowSeconds: amount('default_application_window_seconds').notNull(),
-    authoredByAdminId: text('authored_by_admin_id').references(() => authAdmin.id),
-    reason: text('reason').notNull(),
-    effectiveFrom: time('effective_from').notNull(),
-    effectiveUntil: time('effective_until'),
-    createdAt: time('created_at').defaultNow().notNull(),
-  },
-  (table) => [
-    check(
-      'payment_money_policy_revisions_amount_range_check',
-      sql`${table.minimumTopUpBaht} > 0 AND ${table.maximumTopUpBaht} >= ${table.minimumTopUpBaht} AND ${table.minimumFundedJobBaht} > 0 AND ${table.maximumFundedJobBaht} >= ${table.minimumFundedJobBaht} AND ${table.minimumEarningsConversionBaht} > 0 AND ${table.maximumEarningsConversionBaht} >= ${table.minimumEarningsConversionBaht} AND ${table.minimumPayoutBaht} > 0 AND ${table.maximumPayoutBaht} >= ${table.minimumPayoutBaht}`,
-    ),
-    check(
-      'payment_money_policy_revisions_fee_check',
-      sql`${table.platformFeeBps} BETWEEN 0 AND 10000 AND ${table.topUpProviderFeeSatang} >= 0 AND ${table.topUpProviderTaxBps} BETWEEN 0 AND 10000 AND ${table.payoutProviderFeeSatang} >= 0 AND ${table.payoutProviderTaxBps} BETWEEN 0 AND 10000`,
-    ),
-    check(
-      'payment_money_policy_revisions_duration_check',
-      sql`${table.quoteLifetimeSeconds} > 0 AND ${table.reviewWindowSeconds} > 0 AND ${table.defaultApplicationWindowSeconds} > 0`,
-    ),
-    check(
-      'payment_money_policy_revisions_effective_range_check',
-      sql`${table.effectiveUntil} IS NULL OR ${table.effectiveUntil} > ${table.effectiveFrom}`,
-    ),
-  ],
-);
+export { paymentMoneyPolicyRevision };
+export const paymentMoneyPolicyRevisions = paymentMoneyPolicyRevision;
 
-export const paymentTopUpQuotes = pgTable(
+export const topUpStatuses = ['PENDING', 'PAID', 'EXPIRED', 'FAILED'] as const;
+export type TopUpStatus = (typeof topUpStatuses)[number];
+
+export const paymentTopUpQuote = pgTable(
   'payment_top_up_quotes',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    feeRoundingMode: text('fee_rounding_mode').default('UP').notNull(),
     userId: text('user_id').notNull().references(() => authUser.id),
     policyRevisionId: uuid('policy_revision_id')
       .notNull()
-      .references(() => paymentMoneyPolicyRevisions.id),
-    creditBaht: amount('credit_baht').notNull(),
-    chargedFeeBaht: amount('charged_fee_baht').notNull(),
-    chargedTaxBaht: amount('charged_tax_baht').notNull(),
-    paymentTotalBaht: amount('payment_total_baht').notNull(),
-    providerFeeSatang: amount('provider_fee_satang').notNull(),
-    providerTaxSatang: amount('provider_tax_satang').notNull(),
-    providerTotalSatang: amount('provider_total_satang').notNull(),
-    currency: text('currency').default('THB').notNull(),
+      .references(() => paymentMoneyPolicyRevision.id),
+    creditSatang: integer('credit_satang').notNull(),
+    chargedFeeSatang: integer('charged_fee_satang').notNull(),
+    chargedTaxSatang: integer('charged_tax_satang').notNull(),
+    paymentTotalSatang: integer('payment_total_satang').notNull(),
+    providerFeeSatang: integer('provider_fee_satang').notNull(),
+    providerTaxSatang: integer('provider_tax_satang').notNull(),
+    providerTotalSatang: integer('provider_total_satang').notNull(),
     expiresAt: time('expires_at').notNull(),
     consumedAt: time('consumed_at'),
     createdAt: time('created_at').defaultNow().notNull(),
@@ -89,33 +49,37 @@ export const paymentTopUpQuotes = pgTable(
   (table) => [
     check(
       'payment_top_up_quotes_amount_check',
-      sql`${table.creditBaht} > 0 AND ${table.chargedFeeBaht} >= 0 AND ${table.chargedTaxBaht} >= 0 AND ${table.paymentTotalBaht} = ${table.creditBaht} + ${table.chargedFeeBaht} + ${table.chargedTaxBaht} AND ${table.providerFeeSatang} >= 0 AND ${table.providerTaxSatang} >= 0 AND ${table.providerTotalSatang} > 0`,
+      sql`${table.creditSatang} > 0 AND ${table.chargedFeeSatang} >= 0 AND ${table.chargedTaxSatang} >= 0 AND ${table.paymentTotalSatang} = ${table.creditSatang} + ${table.chargedFeeSatang} + ${table.chargedTaxSatang} AND ${table.providerFeeSatang} >= 0 AND ${table.providerTaxSatang} >= 0 AND ${table.providerTotalSatang} = ${table.creditSatang} + ${table.providerFeeSatang} + ${table.providerTaxSatang}`,
     ),
-    check('payment_top_up_quotes_currency_check', sql`${table.currency} = 'THB'`),
+    check('payment_top_up_quotes_rounding_check', sql`${table.feeRoundingMode} = 'UP'`),
+    unique('payment_top_up_quotes_id_user_key').on(table.id, table.userId),
     index('payment_top_up_quotes_expiry_idx').on(table.expiresAt),
   ],
 );
 
-export const paymentTopUps = pgTable(
+export const paymentTopUp = pgTable(
   'payment_top_ups',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     internalReference: text('internal_reference').notNull().unique(),
     userId: text('user_id').notNull().references(() => authUser.id),
-    quoteId: uuid('quote_id').notNull().unique().references(() => paymentTopUpQuotes.id),
+    quoteId: uuid('quote_id').notNull().unique().references(() => paymentTopUpQuote.id),
     provider: text('provider').notNull(),
     providerReference: text('provider_reference').unique(),
-    creditBaht: amount('credit_baht').notNull(),
-    chargedFeeBaht: amount('charged_fee_baht').notNull(),
-    chargedTaxBaht: amount('charged_tax_baht').notNull(),
-    paymentTotalBaht: amount('payment_total_baht').notNull(),
-    providerFeeSatang: amount('provider_fee_satang').notNull(),
-    providerTaxSatang: amount('provider_tax_satang').notNull(),
-    providerTotalSatang: amount('provider_total_satang').notNull(),
-    currency: text('currency').default('THB').notNull(),
+    providerApiVersion: text('provider_api_version'),
+    providerStatus: text('provider_status'),
+    providerAmountSatang: integer('provider_amount_satang'),
+    providerChannelCode: text('provider_channel_code'),
+    creditSatang: integer('credit_satang').notNull(),
+    chargedFeeSatang: integer('charged_fee_satang').notNull(),
+    chargedTaxSatang: integer('charged_tax_satang').notNull(),
+    paymentTotalSatang: integer('payment_total_satang').notNull(),
+    providerFeeSatang: integer('provider_fee_satang').notNull(),
+    providerTaxSatang: integer('provider_tax_satang').notNull(),
+    providerTotalSatang: integer('provider_total_satang').notNull(),
     qrPayload: text('qr_payload'),
     qrExpiresAt: time('qr_expires_at'),
-    topUpStatus: text('top_up_status').notNull(),
+    topUpStatus: text('top_up_status').$type<TopUpStatus>().notNull(),
     creditedLedgerTransactionId: uuid('credited_ledger_transaction_id')
       .unique()
       .references(() => walletLedgerTransaction.id),
@@ -129,9 +93,14 @@ export const paymentTopUps = pgTable(
     ),
     check(
       'payment_top_ups_amount_check',
-      sql`${table.creditBaht} > 0 AND ${table.chargedFeeBaht} >= 0 AND ${table.chargedTaxBaht} >= 0 AND ${table.paymentTotalBaht} = ${table.creditBaht} + ${table.chargedFeeBaht} + ${table.chargedTaxBaht} AND ${table.providerFeeSatang} >= 0 AND ${table.providerTaxSatang} >= 0 AND ${table.providerTotalSatang} > 0`,
+      sql`${table.creditSatang} > 0 AND ${table.chargedFeeSatang} >= 0 AND ${table.chargedTaxSatang} >= 0 AND ${table.paymentTotalSatang} = ${table.creditSatang} + ${table.chargedFeeSatang} + ${table.chargedTaxSatang} AND ${table.providerFeeSatang} >= 0 AND ${table.providerTaxSatang} >= 0 AND ${table.providerTotalSatang} = ${table.creditSatang} + ${table.providerFeeSatang} + ${table.providerTaxSatang} AND (${table.providerAmountSatang} IS NULL OR ${table.providerAmountSatang} = ${table.paymentTotalSatang})`,
     ),
-    check('payment_top_ups_currency_check', sql`${table.currency} = 'THB'`),
+    unique('payment_top_ups_id_user_key').on(table.id, table.userId),
+    foreignKey({
+      columns: [table.quoteId, table.userId],
+      foreignColumns: [paymentTopUpQuote.id, paymentTopUpQuote.userId],
+      name: 'payment_top_ups_quote_user_fk',
+    }),
     index('payment_top_ups_user_status_idx').on(table.userId, table.topUpStatus),
   ],
 );
@@ -140,9 +109,9 @@ export const paymentTopUpStatusHistory = pgTable(
   'payment_top_up_status_history',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    topUpId: uuid('top_up_id').notNull().references(() => paymentTopUps.id),
-    fromStatus: text('from_status'),
-    toStatus: text('to_status').notNull(),
+    topUpId: uuid('top_up_id').notNull().references(() => paymentTopUp.id),
+    fromStatus: text('from_status').$type<TopUpStatus>(),
+    toStatus: text('to_status').$type<TopUpStatus>().notNull(),
     providerStatus: text('provider_status'),
     actorUserId: text('actor_user_id').references(() => authUser.id),
     actorAdminId: text('actor_admin_id').references(() => authAdmin.id),
@@ -166,6 +135,9 @@ export const paymentTopUpStatusHistory = pgTable(
     index('payment_top_up_status_history_idx').on(table.topUpId, table.occurredAt),
   ],
 );
+
+export const paymentTopUpQuotes = paymentTopUpQuote;
+export const paymentTopUps = paymentTopUp;
 
 export const paymentPayoutAccounts = pgTable(
   'payment_payout_accounts',
