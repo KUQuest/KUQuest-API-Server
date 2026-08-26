@@ -14,12 +14,15 @@ import type {
   questMineQuerySchema,
   questMineResponseSchema,
   questParamsSchema,
+  questPublishCheckResponseSchema,
 } from './quest.schema';
 import {
   createQuest,
   getQuestDetail,
+  getQuestPublishCheck,
   listBoardQuests,
   listOwnQuests,
+  publishQuest,
 } from './quest.service';
 
 type CreateResponse = Static<typeof questCreateResponseSchema>['data'];
@@ -30,6 +33,7 @@ type CreateInput = Static<typeof questCreateSchema>;
 type ListQuery = Static<typeof questListQuerySchema>;
 type MineQuery = Static<typeof questMineQuerySchema>;
 type QuestParams = Static<typeof questParamsSchema>;
+type PublishCheckResponse = Static<typeof questPublishCheckResponseSchema>['data'];
 
 const invalidInput = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 400;
@@ -124,4 +128,44 @@ export const getQuestDetailController = async ({
   }
 
   return apiSuccess(questDetail);
+};
+
+const notDraft = (set: AuthedContext['set']) => {
+  set.status = 409;
+  return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be published');
+};
+
+export const getQuestPublishCheckController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: QuestParams }): Promise<ApiResponse<PublishCheckResponse>> => {
+  const result = await getQuestPublishCheck(session.user.id, params.questId);
+  if (!result) {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+  if ('outcome' in result) return notDraft(set);
+
+  return apiSuccess(result);
+};
+
+export const publishQuestController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: QuestParams }): Promise<ApiResponse> => {
+  const result = await publishQuest(session.user.id, params.questId);
+  if (!result) {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+  if (result.outcome === 'not-draft') return notDraft(set);
+  if (result.outcome === 'blocked') {
+    const [firstReason] = result.check.blockingReasons;
+    set.status = 409;
+    return apiError(firstReason.code, firstReason.message);
+  }
+
+  return apiSuccess();
 };
