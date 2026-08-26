@@ -1,5 +1,3 @@
-import { describe, expect, it } from 'bun:test';
-
 import {
   CursorInputError,
   DEFAULT_PAGE_LIMIT,
@@ -9,8 +7,12 @@ import {
   parsePageLimit,
 } from '@/shared/cursor';
 
+import { describe, expect, it } from 'bun:test';
+
 const id = '018f47a7-1c7d-7c98-9a11-690d7e83430c';
 const startTime = '2026-08-26T00:00:00.000Z';
+const encodeRawCursor = (payload: unknown) =>
+  btoa(JSON.stringify(payload)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 
 describe('Quest cursor', () => {
   it('round-trips the canonical sort key as opaque base64url text', () => {
@@ -24,6 +26,16 @@ describe('Quest cursor', () => {
   it('rejects malformed cursors', () => {
     expect(() => decodeCursor('not a cursor')).toThrow(CursorInputError);
     expect(() => decodeCursor('eyJ2IjoyfQ')).toThrow('cursor is invalid');
+  });
+
+  it('rejects an empty cursor', () => {
+    expect(() => decodeCursor('')).toThrow('cursor must be a non-empty string');
+  });
+
+  it('rejects cursor payloads with extra fields', () => {
+    const cursor = encodeRawCursor({ v: 1, startTime, id, extra: true });
+
+    expect(() => decodeCursor(cursor)).toThrow('cursor is invalid');
   });
 
   it('uses the approved page-limit range', () => {

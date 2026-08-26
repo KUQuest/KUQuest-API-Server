@@ -141,11 +141,11 @@ const buildCursorCondition = (cursor: CursorPayload | undefined) => {
   );
 };
 
-const listRows = async (filters: QuestListFilters, giverId?: string) => {
+const listRows = async (filters: QuestListFilters, hirerId?: string) => {
   const limit = parsePageLimit(filters.limit);
   const cursor = decodeCursor(filters.cursor);
   const conditions = [
-    giverId ? eq(quest.giverId, giverId) : eq(quest.questStatus, 'OPEN'),
+    hirerId ? eq(quest.giverId, hirerId) : eq(quest.questStatus, 'OPEN'),
   ];
 
   if (filters.q) {
@@ -167,7 +167,7 @@ const listRows = async (filters: QuestListFilters, giverId?: string) => {
   if (filters.startTo) conditions.push(sql`${quest.startTime} <= ${filters.startTo}`);
   if (filters.maxDurationMinutes !== undefined) {
     conditions.push(
-      sql`${quest.dueAt} IS NOT NULL AND EXTRACT(EPOCH FROM (${quest.dueAt} - ${quest.startTime})) / 60 <= ${filters.maxDurationMinutes}`,
+      sql`${quest.dueAt} IS NOT NULL AND GREATEST(1, ROUND(EXTRACT(EPOCH FROM (${quest.dueAt} - ${quest.startTime})) / 60)) <= ${filters.maxDurationMinutes}`,
     );
   }
 

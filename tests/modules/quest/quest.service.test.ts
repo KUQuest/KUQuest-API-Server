@@ -152,6 +152,24 @@ describe('Quest persistence', () => {
     expect(result.items.map((item) => item.id)).not.toContain(draftId);
   });
 
+  it('uses whole-minute duration consistently for Board filtering', async () => {
+    const questId = await createFixture({
+      title: 'duration-test',
+      startTime: '2026-08-26T10:00:00.000Z',
+      dueAt: '2026-08-26T10:01:01.000Z',
+    });
+    await openQuest(questId);
+
+    const result = await listBoardQuests({
+      q: 'duration-test',
+      maxDurationMinutes: 1,
+      limit: 20,
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.estimatedDurationMinutes).toBe(1);
+  });
+
   it('uses the approved total cursor order without repeats', async () => {
     const ids = await Promise.all([
       createFixture({ title: 'cursor-test one' }),

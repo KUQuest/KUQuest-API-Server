@@ -53,7 +53,7 @@ export const questListQuerySchema = t.Object(
     latitude: t.Optional(t.Number({ minimum: -90, maximum: 90 })),
     longitude: t.Optional(t.Number({ minimum: -180, maximum: 180 })),
     limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
-    cursor: t.Optional(t.String({ minLength: 1 })),
+    cursor: t.Optional(t.String()),
   },
   { additionalProperties: false },
 );
@@ -61,7 +61,7 @@ export const questListQuerySchema = t.Object(
 export const questMineQuerySchema = t.Object(
   {
     limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
-    cursor: t.Optional(t.String({ minLength: 1 })),
+    cursor: t.Optional(t.String()),
   },
   { additionalProperties: false },
 );

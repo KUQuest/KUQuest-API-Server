@@ -66,21 +66,39 @@ export const decodeCursor = (value: unknown): CursorPayload | undefined => {
   }
 
   try {
-    const parsed = JSON.parse(fromBase64Url(value)) as Partial<CursorPayload>;
-    const startTime = typeof parsed.startTime === 'string' ? new Date(parsed.startTime) : null;
+    const parsed = JSON.parse(fromBase64Url(value));
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('invalid cursor payload');
+    }
 
+    const payload = parsed as Record<string, unknown>;
+    const keys = Object.keys(payload);
     if (
-      parsed.v !== 1 ||
-      !startTime ||
-      Number.isNaN(startTime.getTime()) ||
-      startTime.toISOString() !== parsed.startTime ||
-      typeof parsed.id !== 'string' ||
-      !uuidPattern.test(parsed.id)
+      keys.length !== 3 ||
+      !keys.includes('v') ||
+      !keys.includes('startTime') ||
+      !keys.includes('id')
     ) {
       throw new Error('invalid cursor payload');
     }
 
-    return { v: 1, startTime: parsed.startTime, id: parsed.id };
+    const parsedStartTime = payload.startTime;
+    const parsedId = payload.id;
+    const startTime = typeof parsedStartTime === 'string' ? new Date(parsedStartTime) : null;
+
+    if (
+      payload.v !== 1 ||
+      typeof parsedStartTime !== 'string' ||
+      !startTime ||
+      Number.isNaN(startTime.getTime()) ||
+      startTime.toISOString() !== parsedStartTime ||
+      typeof parsedId !== 'string' ||
+      !uuidPattern.test(parsedId)
+    ) {
+      throw new Error('invalid cursor payload');
+    }
+
+    return { v: 1, startTime: parsedStartTime, id: parsedId };
   } catch {
     throw new CursorInputError('INVALID_CURSOR', 'cursor is invalid');
   }

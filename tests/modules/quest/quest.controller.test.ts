@@ -79,6 +79,21 @@ describe('Quest controllers', () => {
     });
   });
 
+  it('maps an empty cursor to INVALID_CURSOR', async () => {
+    const set: { status?: number } = {};
+    const result = await listBoardQuestsController({
+      query: { cursor: '' } as never,
+      session: session as never,
+      set: set as never,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result).toEqual({
+      success: false,
+      error: { code: 'INVALID_CURSOR', message: 'cursor must be a non-empty string' },
+    });
+  });
+
   it('returns the approved cursor list shape', async () => {
     spyOn(questService, 'listBoardQuests').mockResolvedValue({
       items: [],
