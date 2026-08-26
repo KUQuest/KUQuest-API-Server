@@ -102,6 +102,10 @@ describe('Quest publishing service', () => {
 
   it('returns the first blocking reason and leaves the Quest as Draft', async () => {
     const questId = await createFixture({ tagId: null, dueAt: null });
+    const [before] = await db
+      .select({ status: quest.questStatus, updatedAt: quest.updatedAt })
+      .from(quest)
+      .where(eq(quest.id, questId));
 
     const result = await publishQuest(hirerId, questId);
 
@@ -121,8 +125,11 @@ describe('Quest publishing service', () => {
       },
     });
 
-    const [stored] = await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId));
-    expect(stored?.status).toBe('DRAFT');
+    const [after] = await db
+      .select({ status: quest.questStatus, updatedAt: quest.updatedAt })
+      .from(quest)
+      .where(eq(quest.id, questId));
+    expect(after).toEqual(before);
   });
 
   it('changes a valid Draft to Open', async () => {
