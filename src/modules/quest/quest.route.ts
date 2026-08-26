@@ -1,5 +1,5 @@
 import { authGuard } from '@/modules/auth';
-import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
@@ -8,8 +8,10 @@ import { Elysia } from 'elysia';
 import {
   createQuestController,
   getQuestDetailController,
+  getQuestPublishCheckController,
   listBoardQuestsController,
   listOwnQuestsController,
+  publishQuestController,
 } from './quest.controller';
 import {
   questBoardResponseSchema,
@@ -20,6 +22,7 @@ import {
   questMineQuerySchema,
   questMineResponseSchema,
   questParamsSchema,
+  questPublishCheckResponseSchema,
 } from './quest.schema';
 
 export const questRoute = new Elysia({
@@ -47,6 +50,28 @@ export const questRoute = new Elysia({
       summary: "List the Hirer's Quests",
       description: 'Returns the authenticated Hirer’s Quests across all Quest Status values.',
       operationId: 'listOwnQuests',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:questId/publish-check', getQuestPublishCheckController, {
+    params: questParamsSchema,
+    response: responses(questPublishCheckResponseSchema, 401, 404, 409),
+    detail: {
+      tags: ['Quests'],
+      summary: 'Check whether a Quest Draft can be published',
+      description: 'Returns publish blockers, warnings, and the required Escrow amount for the Hirer.',
+      operationId: 'getQuestPublishCheck',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/:questId/publish', publishQuestController, {
+    params: questParamsSchema,
+    response: responses(apiSuccessSchema, 401, 404, 409),
+    detail: {
+      tags: ['Quests'],
+      summary: 'Publish a Quest Draft',
+      description: 'Moves the authenticated Hirer’s Quest from DRAFT to OPEN without moving money.',
+      operationId: 'publishQuest',
       security: betterAuthSecurity,
     },
   })

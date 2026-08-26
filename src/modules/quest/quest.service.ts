@@ -11,7 +11,28 @@ import {
 
 import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 
+import {
+  buildQuestPublishCheck,
+  type QuestPublishCheck,
+} from './quest.publish.policy';
 import type { QuestCreateInput } from './quest.schema';
+
+type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+type QuestPublishRow = {
+  id: string;
+  questStatus: string;
+  tagId: string | null;
+  rewardSatang: number;
+  headcount: number;
+  startTime: Date;
+  dueAt: Date | null;
+};
+
+export type QuestPublishOutcome =
+  | { outcome: 'published' }
+  | { outcome: 'not-draft' }
+  | { outcome: 'blocked'; check: QuestPublishCheck };
 
 type QuestRow = {
   id: string;
@@ -432,3 +453,91 @@ export const getQuestDetail = async (userId: string, questId: string) => {
     images,
   };
 };
+
+const selectPublishRow = async (
+  transaction: QuestTransaction,
+  userId: string,
+  questId: string,
+  lock: boolean,
+) => {
+  const query = transaction
+    .select({
+      id: quest.id,
+      questStatus: quest.questStatus,
+      tagId: quest.tagId,
+      rewardSatang: quest.rewardSatang,
+      headcount: quest.headcount,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
+    })
+    .from(quest)
+    .where(and(eq(quest.id, questId), eq(quest.giverId, userId)))
+    .limit(1);
+
+  const rows = lock ? await query.for('update') : await query;
+  return rows[0] as QuestPublishRow | undefined;
+};
+
+const buildPublishCheck = async (
+  transaction: QuestTransaction,
+  row: QuestPublishRow,
+) => {
+  const [imageRows] = await transaction
+    .select({ count: sql<number>`count(*)` })
+    .from(questImage)
+    .where(eq(questImage.questId, row.id));
+  const [locationRows] = await transaction
+    .select({ count: sql<number>`count(*)` })
+    .from(questLocation)
+    .where(eq(questLocation.questId, row.id));
+
+  return buildQuestPublishCheck({
+    tagId: row.tagId,
+    startTime: row.startTime,
+    dueAt: row.dueAt,
+    hasImages: Number(imageRows?.count ?? 0) > 0,
+    hasLocations: Number(locationRows?.count ?? 0) > 0,
+    rewardSatang: row.rewardSatang,
+    headcount: row.headcount,
+    now: new Date(),
+  });
+};
+
+export const getQuestPublishCheck = async (
+  userId: string,
+  questId: string,
+): Promise<QuestPublishCheck | { outcome: 'not-draft' } | undefined> =>
+  db.transaction(async (transaction) => {
+    const row = await selectPublishRow(transaction, userId, questId, false);
+    if (!row) return undefined;
+    if (row.questStatus !== 'DRAFT') return { outcome: 'not-draft' };
+
+    return buildPublishCheck(transaction, row);
+  });
+
+export const publishQuest = async (
+  userId: string,
+  questId: string,
+): Promise<QuestPublishOutcome | undefined> =>
+  db.transaction(async (transaction) => {
+    const row = await selectPublishRow(transaction, userId, questId, true);
+    if (!row) return undefined;
+    if (row.questStatus !== 'DRAFT') return { outcome: 'not-draft' };
+
+    const check = await buildPublishCheck(transaction, row);
+    if (!check.canPublish) return { outcome: 'blocked', check };
+
+    const [updated] = await transaction
+      .update(quest)
+      .set({ questStatus: 'OPEN', updatedAt: new Date() })
+      .where(
+        and(
+          eq(quest.id, questId),
+          eq(quest.giverId, userId),
+          eq(quest.questStatus, 'DRAFT'),
+        ),
+      )
+      .returning({ id: quest.id });
+
+    return updated ? { outcome: 'published' } : { outcome: 'not-draft' };
+  });

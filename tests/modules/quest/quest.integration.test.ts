@@ -47,5 +47,29 @@ describe('Quest integration', () => {
     expect(document.paths['/api/v1/quests']?.get?.security).toEqual([
       { betterAuthSession: [] },
     ]);
+    expect(document.paths['/api/v1/quests/{questId}/publish-check']?.get?.operationId).toBe(
+      'getQuestPublishCheck',
+    );
+    expect(document.paths['/api/v1/quests/{questId}/publish-check']?.get?.security).toEqual([
+      { betterAuthSession: [] },
+    ]);
+    expect(document.paths['/api/v1/quests/{questId}/publish']?.post?.operationId).toBe(
+      'publishQuest',
+    );
+    expect(document.paths['/api/v1/quests/{questId}/publish']?.post?.security).toEqual([
+      { betterAuthSession: [] },
+    ]);
+  });
+
+  it.each([
+    ['GET', '/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/publish-check'],
+    ['POST', '/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/publish'],
+  ])('%s %s requires Member authentication', async (method, path) => {
+    const response = await app.handle(
+      new Request(`http://localhost${path}`, { method }),
+    );
+
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe('UNAUTHORIZED');
   });
 });

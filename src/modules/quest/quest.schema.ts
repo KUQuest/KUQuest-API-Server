@@ -158,6 +158,21 @@ export const questDetailResponseSchema = t.Object({
   data: questDetailSchema,
 });
 
+const questPublishReasonSchema = t.Object({
+  code: t.String(),
+  message: t.String(),
+});
+
+export const questPublishCheckResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    blockingReasons: t.Array(questPublishReasonSchema),
+    warnings: t.Array(questPublishReasonSchema),
+    escrowRequirement: t.Integer({ minimum: 0 }),
+    canPublish: t.Boolean(),
+  }),
+});
+
 export type QuestCreateInput = typeof questCreateSchema.static;
 export type QuestListQuery = typeof questListQuerySchema.static;
 export type QuestMineQuery = typeof questMineQuerySchema.static;
