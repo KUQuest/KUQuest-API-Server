@@ -8,6 +8,7 @@ import {
 import {
   assertWalletOperationAllowed,
   changeWalletStatus,
+  changeWalletStatusInTransaction,
   listWalletStatusHistory,
   MoneyDomainError,
   type MoneyDomainErrorCode,
@@ -15,7 +16,7 @@ import {
 } from '@/modules/wallet';
 
 import { beforeAll, describe, expect, it } from 'bun:test';
-import { eq } from 'drizzle-orm';
+import { eq, sql as drizzleSql } from 'drizzle-orm';
 
 const createStudentWallet = async (prefix: string) => {
   const userId = `${prefix}-${crypto.randomUUID()}`;
@@ -126,7 +127,7 @@ describe('Wallet status service', () => {
       walletId: wallet.id,
       toStatus: 'CLOSED',
       actorAdminId: adminId,
-      reason: 'Account closed',
+      reason: 'Wallet closed',
     });
 
     await expect(changeWalletStatus({
@@ -176,6 +177,42 @@ describe('Wallet status service', () => {
     expect(new Set(history.slice(1).map(({ toStatus }) => toStatus))).toEqual(
       new Set<WalletStatus>(['FROZEN', 'SUSPENDED']),
     );
+  });
+
+  it('orders history by the serialized transition time', async () => {
+    const { wallet } = await createStudentWallet('be112-ordering');
+    const adminId = await createAdmin();
+    let delayedTransactionStarted!: () => void;
+    const delayedTransactionReady = new Promise<void>((resolve) => {
+      delayedTransactionStarted = resolve;
+    });
+
+    const delayedChange = db.transaction(async (transaction) => {
+      await transaction.execute(drizzleSql`select 1`);
+      delayedTransactionStarted();
+      await Bun.sleep(50);
+      return changeWalletStatusInTransaction(transaction, {
+        walletId: wallet.id,
+        toStatus: 'FROZEN',
+        actorAdminId: adminId,
+        reason: 'Delayed freeze',
+      });
+    });
+    await delayedTransactionReady;
+
+    const immediateChange = changeWalletStatus({
+      walletId: wallet.id,
+      toStatus: 'SUSPENDED',
+      actorAdminId: adminId,
+      reason: 'Immediate suspension',
+    });
+    await Promise.all([delayedChange, immediateChange]);
+
+    const history = await listWalletStatusHistory(wallet.id);
+    expect(history.slice(1).map(({ fromStatus }) => fromStatus)).toEqual([
+      history[0]?.toStatus,
+      history[1]?.toStatus,
+    ]);
   });
 
   it('rolls back the status change when the actor reference fails', async () => {

@@ -6,7 +6,7 @@ import {
   walletWallet,
 } from '@/database/schema/wallet.schema';
 
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 
 import { MoneyDomainError } from './wallet.money';
 import type { WalletTransaction } from './wallet.service';
@@ -94,6 +94,7 @@ export const changeWalletStatusInTransaction = async (
       actorUserId: input.actorUserId,
       actorAdminId: input.actorAdminId,
       reason: input.reason,
+      occurredAt: sql`clock_timestamp()`,
     })
     .returning();
   if (!history) {
