@@ -3,6 +3,7 @@ import { department, faculty, occupation } from '@/database/schema/academic.sche
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment } from '@/database/schema/quest.schema';
+import { countReviews, getReceivedRatings, listReviews } from '@/modules/quest/quest-review.service';
 import { tag } from '@/database/schema/tag.schema';
 
 import type { Static } from 'elysia';
@@ -52,8 +53,9 @@ export const getProfileTags = async (userId: string) =>
     .innerJoin(tag, eq(quest.tagId, tag.id))
     .where(
       and(
-        eq(questAssignment.hunterId, userId),
-        eq(questAssignment.assignmentStatus, 'COMPLETED'),
+        eq(questAssignment.workerId, userId),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_COMPLETED'),
+        eq(quest.questStatus, 'QUEST_COMPLETED'),
       ),
     )
     .groupBy(tag.id, tag.name)
@@ -64,21 +66,33 @@ export const getProfileReputation = async (userId: string) => {
   const [completed] = await db
     .select({ totalQuests: count(questAssignment.id) })
     .from(questAssignment)
+    .innerJoin(quest, eq(questAssignment.questId, quest.id))
     .where(
       and(
-        eq(questAssignment.hunterId, userId),
-        eq(questAssignment.assignmentStatus, 'COMPLETED'),
+        eq(questAssignment.workerId, userId),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_COMPLETED'),
+        eq(quest.questStatus, 'QUEST_COMPLETED'),
       ),
     );
 
+  const ratings = await getReceivedRatings(userId);
+  const distribution = { '5': 0, '4': 0, '3': 0, '2': 0, '1': 0 };
+  for (const rating of ratings) distribution[String(rating) as keyof typeof distribution] += 1;
+
+  const validCount = ratings.length;
+  const average = validCount === 0 ? null : ratings.reduce((sum, rating) => sum + rating, 0) / validCount;
   return {
     totalQuests: Number(completed?.totalQuests ?? 0),
-    rating: {
-      average: null,
-      count: 0,
-      distribution: { '5': 0, '4': 0, '3': 0, '2': 0, '1': 0 },
-    },
+    rating: { average, count: validCount, distribution },
   };
+};
+
+export const getProfileReviews = async (
+  userId: string,
+  options: { rating?: number; limit?: number; cursor?: { startTime: string; id: string } } = {},
+) => {
+  const result = await listReviews(userId, options);
+  return { ...result, total: await countReviews(userId, options.rating) };
 };
 
 export const updateProfile = async (

@@ -18,7 +18,7 @@ export const profileCertificate = pgTable(
   'profile_certificate',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: text('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => authUser.id),
     name: text('name').notNull(),
@@ -36,7 +36,7 @@ export const profilePortfolioItem = pgTable(
   'profile_portfolio_item',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: text('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => authUser.id),
     title: text('title').notNull(),
@@ -73,7 +73,7 @@ export const profileWorkExperience = pgTable(
   'profile_work_experience',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: text('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => authUser.id),
     title: text('title').notNull(),

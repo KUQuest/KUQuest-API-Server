@@ -1,26 +1,34 @@
 /**
- * BE-119 Work Chat planning contract.
+ * BE-119 Work Chat planning contract, revised by BE-170 to the canonical
+ * Quest domain vocabulary (see ./quest.contract.ts and
+ * docs/db/edr/05-quest.sql). Behavior implementation is BE-174.
  *
  * Quest is the source of truth for accepted participation and lifecycle.
  * The caller invokes WorkChatMembershipWriter inside the Quest database transaction.
- * Identifiers are opaque: the API implementation chooses their physical type.
+ * Identities are native UUIDs (BE-170): a Member is auth_user.id, an Admin is
+ * auth_admin.id.
  * This contract deliberately does not cover private Inquiry Conversations.
  * It also has no ownership-transfer transition because MVP ownership is immutable.
  */
 
+import type {
+  InactiveAssignmentStatus as QuestInactiveAssignmentStatus,
+  TerminalQuestStatus as QuestTerminalQuestStatus,
+} from './quest.contract';
+
 /** A retained Work Conversation referencing this ID prevents hard deletion of the Quest. */
 export type QuestId = string;
-export type StudentId = string;
+export type MemberId = string;
 export type AssignmentId = string;
 export type CommandId = string;
 export type EventId = string;
 export type IsoTimestamp = string;
 
-export type TerminalQuestStatus = 'COMPLETED' | 'CANCELLED';
-export type InactiveAssignmentStatus = 'INCOMPLETE' | 'CANCELLED';
+export type TerminalQuestStatus = QuestTerminalQuestStatus;
+export type InactiveAssignmentStatus = QuestInactiveAssignmentStatus;
 
 export type AcceptedWorker = {
-  workerId: StudentId;
+  workerId: MemberId;
   assignmentId: AssignmentId;
   joinedAt: IsoTimestamp;
 };
@@ -31,7 +39,7 @@ type TransitionBase = {
   /** Stable event identity used to deduplicate Chat-side system messages. */
   eventId: EventId;
   questId: QuestId;
-  actorId: StudentId;
+  actorId: MemberId;
   occurredAt: IsoTimestamp;
 };
 
@@ -43,10 +51,10 @@ export type QuestWorkChatMembershipTransition =
        * the Work Conversation, where Chat writes the Hirer's joinedAt as
        * occurredAt and each Worker's joinedAt from this payload. Later calls
        * add Workers only.
-       * A GROUP direct-join Quest can still be OPEN at this point.
+       * A GROUP direct-join Quest can still be QUEST_OPEN at this point.
        */
       type: 'workersAccepted';
-      hirerId: StudentId;
+      hirerId: MemberId;
       workers: readonly [
         firstWorker: AcceptedWorker,
         ...otherWorkers: AcceptedWorker[],
@@ -56,7 +64,7 @@ export type QuestWorkChatMembershipTransition =
       /** Chat closes this Worker's membership window at leftAt. */
       type: 'workerBecameInactive';
       assignmentId: AssignmentId;
-      workerId: StudentId;
+      workerId: MemberId;
       assignmentStatus: InactiveAssignmentStatus;
       leftAt: IsoTimestamp;
     })

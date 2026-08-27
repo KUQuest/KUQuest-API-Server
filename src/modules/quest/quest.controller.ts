@@ -1,4 +1,5 @@
 import type { AuthedContext } from '@/modules/auth';
+import { MoneyDomainError } from '@/modules/wallet';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import { CursorInputError, decodeCursor, parsePageLimit } from '@/shared/cursor';
@@ -16,6 +17,11 @@ import type {
   questCreateResponseSchema,
   questCreateSchema,
   questDetailResponseSchema,
+  questEditDecisionSchema,
+  questEditRequestCreateResponseSchema,
+  questEditRequestResponseSchema,
+  questEditResponseSchema,
+  questDirectEditSchema,
   questImageParamsSchema,
   questImagesUploadResponseSchema,
   questImagesUploadSchema,
@@ -30,13 +36,16 @@ import {
   addQuestImages,
   checkQuestImageUpload,
   createQuest,
+  createQuestEditRequest,
   deleteQuestImage,
   editQuest,
   getQuestDetail,
+  getQuestEditRequest,
   getQuestPublishCheck,
   listBoardQuests,
   listOwnQuests,
   publishQuest,
+  respondToQuestEditRequest,
 } from './quest.service';
 import type { QuestImage, QuestImageMutationOutcome } from './quest.service';
 import { questStorage } from './quest.storage';
@@ -49,6 +58,11 @@ type DetailResponse = Static<typeof questDetailResponseSchema>['data'];
 type QuestImagesUploadResponse = Static<typeof questImagesUploadResponseSchema>['data'];
 type CreateInput = Static<typeof questCreateSchema>;
 type EditInput = Static<typeof questEditSchema>;
+type DirectEditInput = Static<typeof questDirectEditSchema>;
+type EditDecisionInput = Static<typeof questEditDecisionSchema>;
+type EditRequestCreateResponse = Static<typeof questEditRequestCreateResponseSchema>['data'];
+type EditRequestResponse = Static<typeof questEditResponseSchema>['data'];
+type EditRequestDetailResponse = Static<typeof questEditRequestResponseSchema>['data'];
 type QuestImagesUploadInput = Static<typeof questImagesUploadSchema>;
 type ListQuery = Static<typeof questListQuerySchema>;
 type MineQuery = Static<typeof questMineQuerySchema>;
@@ -184,6 +198,11 @@ const mapQuestEditOutcome = (
     return apiError('TAG_REQUIRED', 'An OPEN Quest must have a Tag');
   }
 
+  if (outcome === 'forbidden-fields') {
+    set.status = 409;
+    return apiError('QUEST_EDIT_FIELD_NOT_ALLOWED', 'Core Quest commitments cannot be edited');
+  }
+
   set.status = 400;
   return apiError('EMPTY_QUEST_EDIT', 'At least one Quest field must be supplied');
 };
@@ -195,10 +214,6 @@ const toFilters = (query: ListQuery) => ({
 });
 
 const validateListQuery = (query: ListQuery, set: AuthedContext['set']) => {
-  if ((query.latitude === undefined) !== (query.longitude === undefined)) {
-    return invalidInput(set, 'INVALID_COORDINATES', 'latitude and longitude must be supplied together');
-  }
-
   try {
     parsePageLimit(query.limit);
     decodeCursor(query.cursor);
@@ -247,7 +262,7 @@ export const createQuestController = async ({
       return invalidInput(set, 'INVALID_QUEST_DATES', 'dueAt must be after startTime');
     }
 
-    return invalidInput(set, 'INVALID_HEADCOUNT', 'SINGLE participation requires headcount 1');
+    return invalidInput(set, 'INVALID_HEADCOUNT', 'SOLO participation requires headcount 1');
   }
 
   return apiSuccess(result);
@@ -358,13 +373,80 @@ export const getQuestDetailController = async ({
   return serializeQuestDetailResponse(set, questDetail);
 };
 
+export const createQuestEditRequestController = async ({
+  body,
+  params,
+  session,
+  set,
+}: AuthedContext & { body: EditInput; params: QuestParams }): Promise<ApiResponse<EditRequestCreateResponse>> => {
+  const result = await createQuestEditRequest(session.user.id, params.questId, body);
+  if ('outcome' in result) {
+    if (result.outcome === 'not-found') return questNotFound(set);
+    if (result.outcome === 'pending-request') {
+      set.status = 409;
+      return apiError('QUEST_EDIT_REQUEST_PENDING', 'A Quest already has a pending edit request');
+    }
+    if (result.outcome === 'not-editable') {
+      set.status = 409;
+      return apiError('QUEST_NOT_EDITABLE', 'This Quest cannot accept an edit request');
+    }
+    if (result.outcome === 'invalid-dates') return invalidInput(set, 'INVALID_QUEST_DATES', 'dueAt must be after startTime');
+    if (result.outcome === 'invalid-files') return invalidInput(set, 'QUEST_EDIT_IMAGES_INVALID', 'A proposed Quest Image is unavailable');
+    if (result.outcome === 'forbidden-fields') return invalidInput(set, 'QUEST_EDIT_FIELD_NOT_ALLOWED', 'Core Quest commitments cannot be edited');
+    return invalidInput(set, 'EMPTY_QUEST_EDIT', 'At least one Quest field must be supplied');
+  }
+  return apiSuccess({ requestId: result.requestId, status: result.status, expiresAt: result.expiresAt.toISOString() });
+};
+
+export const respondToQuestEditRequestController = async ({
+  body,
+  params,
+  session,
+  set,
+}: AuthedContext & { body: EditDecisionInput; params: { requestId: string } }): Promise<ApiResponse<EditRequestResponse>> => {
+  const result = await respondToQuestEditRequest(session.user.id, params.requestId, body.decision);
+  if ('outcome' in result) {
+    if (result.outcome === 'not-found' || result.outcome === 'not-authorized') return questNotFound(set);
+    if (result.outcome === 'expired') {
+      set.status = 409;
+      return apiError('QUEST_EDIT_REQUEST_EXPIRED', 'The edit request expired');
+    }
+    if (result.outcome === 'invalid-files') {
+      set.status = 409;
+      return apiError('QUEST_EDIT_IMAGES_INVALID', 'A proposed Quest Image is unavailable');
+    }
+    set.status = 409;
+    return apiError('QUEST_EDIT_REQUEST_RESOLVED', 'The edit request is already resolved');
+  }
+  return apiSuccess(result);
+};
+
+export const getQuestEditRequestController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: { requestId: string } }): Promise<ApiResponse<EditRequestDetailResponse>> => {
+  const result = await getQuestEditRequest(session.user.id, params.requestId);
+  if (!result) return questNotFound(set);
+  return apiSuccess({
+    ...result,
+    proposedChanges: (result.proposedChanges ?? {}) as Record<string, unknown>,
+    createdAt: result.createdAt.toISOString(),
+    expiresAt: result.expiresAt.toISOString(),
+    responses: result.responses.map((response) => ({
+      ...response,
+      respondedAt: response.respondedAt?.toISOString() ?? null,
+    })),
+  });
+};
+
 export const editQuestController = async ({
   body,
   params,
   session,
   set,
 }: AuthedContext & {
-  body: EditInput;
+  body: DirectEditInput;
   params: QuestParams;
 }): Promise<ApiResponse<DetailResponse>> => {
   const result = await editQuest(session.user.id, params.questId, body);
@@ -379,6 +461,24 @@ export const editQuestController = async ({
 const notDraft = (set: AuthedContext['set']) => {
   set.status = 409;
   return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be published');
+};
+
+const mapQuestEscrowError = (set: AuthedContext['set'], error: MoneyDomainError) => {
+  const clientSafeCodes = new Set([
+    'AMOUNT_OUT_OF_RANGE',
+    'INSUFFICIENT_SPENDING_BALANCE',
+    'INVALID_WALLET_STATUS',
+    'SATANG_OVERFLOW',
+    'WALLET_NOT_ACTIVE',
+    'WALLET_NOT_FOUND',
+  ]);
+  if (clientSafeCodes.has(error.code)) {
+    set.status = 409;
+    return apiError(error.code, error.message);
+  }
+
+  set.status = 503;
+  return apiError('QUEST_ESCROW_UNAVAILABLE', 'Quest Escrow could not be reserved');
 };
 
 export const getQuestPublishCheckController = async ({
@@ -401,7 +501,13 @@ export const publishQuestController = async ({
   session,
   set,
 }: AuthedContext & { params: QuestParams }): Promise<ApiResponse> => {
-  const result = await publishQuest(session.user.id, params.questId);
+  let result: Awaited<ReturnType<typeof publishQuest>>;
+  try {
+    result = await publishQuest(session.user.id, params.questId);
+  } catch (error) {
+    if (error instanceof MoneyDomainError) return mapQuestEscrowError(set, error);
+    throw error;
+  }
   if (!result) {
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');

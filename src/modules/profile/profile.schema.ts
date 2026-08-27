@@ -107,7 +107,7 @@ const reviewSchema = t.Object({
     avatar: t.Optional(t.Nullable(t.Object({ url: t.String({ format: 'uri' }) }))),
   }),
   rating: t.Integer({ minimum: 1, maximum: 5 }),
-  comment: t.String(),
+  comment: t.Nullable(t.String()),
   createdAt: t.String({ format: 'date-time' }),
   quest: t.Optional(t.Nullable(t.Object({
     id: t.String({ format: 'uuid' }),
@@ -117,7 +117,9 @@ const reviewSchema = t.Object({
 
 export const reviewsQuerySchema = t.Object({
   rating: t.Optional(t.Integer({ minimum: 1, maximum: 5 })),
-});
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+  cursor: t.Optional(t.String()),
+}, { additionalProperties: false });
 
 export const reviewsResponseSchema = t.Object({
   success: t.Literal(true),

@@ -1,8 +1,11 @@
 -- KUQuest schema — REDESIGN IN PROGRESS
 -- Settled via /grilling interview: user, admin, session, account, verification, wallet/ledger, payments, profile,
--- quest (core), quest_location, quest_edit_request/_response, quest_edit_history, quest_team/quest_team_member,
--- quest_application, quest_assignment, proof_submission/proof_submission_image.
--- ChatMessage/Review/Report/Dispute/AdminAction/Notification onward still on old design, not yet walked.
+-- quest (core), quest_location, quest_image, quest_edit_request/_response, quest_edit_history,
+-- quest_team/quest_team_member/quest_team_invitation, quest_application, quest_assignment,
+-- quest_candidate_selection_commands, proof_submission/proof_submission_image, quest_completion_confirmation, review. The dedicated Work Conversation's agreed
+-- requirements are recorded at the bottom of 05-quest.sql (BE-170); its tables arrive with the
+-- Chat module walk. ChatMessage/Report/Dispute/AdminAction/Notification onward still on old
+-- design, not yet walked.
 -- Tables prefixed by module: auth_, wallet_, payment_, profile_.
 --
 -- Sync note (2026-08-06): auth/academic/file/profile sections below re-synced against
@@ -11,6 +14,12 @@
 -- BE-96, admin better-auth wiring) without this file being updated alongside it. wallet_*/
 -- payment_*/quest*/tag are still design-only below — no migration exists for them yet, so
 -- they're unchanged from the interview-derived design.
+--
+-- Sync note (2026-08-27, BE-170/BE-173): quest* below is the CANONICAL domain
+-- contract and the runtime Drizzle schema now matches it — Hirer/Worker actor columns
+-- (hirer_id/worker_id), entity-prefixed statuses, native Quest mode/participation
+-- enums, label-only quest_location, quest_image cap 3, and persisted invitations.
+-- HTTP workflows remain outside the Quest schema migration.
 --
 -- Design decision (2026-08-07, via /grilling): auth_user/auth_admin/auth_session/
 -- auth_account/auth_verification's id columns changed TEXT -> UUID (DEFAULT
@@ -29,7 +38,6 @@
 --   120  portfolio/work titles (matches the portfolio API)
 --   200  certificate names/issuers and quest/team titles
 --   255  MIME/provider/hash-like values and password hashes
---   500  reverse-geocoded addresses
 --   512  HTTP User-Agent values
 --   1,000 user-authored bios, descriptions, and review notes
 --   1,024 S3 object keys

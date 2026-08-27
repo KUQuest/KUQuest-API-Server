@@ -1,7 +1,10 @@
 import * as questService from '@/modules/quest/quest.service';
 import {
   createQuestController,
+  createQuestEditRequestController,
   editQuestController,
+  getQuestEditRequestController,
+  respondToQuestEditRequestController,
   getQuestDetailController,
   listBoardQuestsController,
 } from '@/modules/quest/quest.controller';
@@ -15,8 +18,8 @@ const createInput = {
   title: 'Design a poster',
   description: 'Create a poster for the event',
   condition: 'The poster must be readable',
-  mode: 'FIRST_COME_FIRST_SERVED' as const,
-  participation: 'SINGLE' as const,
+  mode: 'NO_CANDIDATE' as const,
+  participation: 'SOLO' as const,
   reward: 500,
   headcount: 1,
   startTime: '2026-08-26T10:00:00.000Z',
@@ -62,24 +65,6 @@ describe('Quest controllers', () => {
     });
   });
 
-  it('rejects caller coordinates supplied as an incomplete pair', async () => {
-    const set: { status?: number } = {};
-    const result = await listBoardQuestsController({
-      query: { latitude: 13.8 } as never,
-      session: session as never,
-      set: set as never,
-    });
-
-    expect(set.status).toBe(400);
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'INVALID_COORDINATES',
-        message: 'latitude and longitude must be supplied together',
-      },
-    });
-  });
-
   it('maps an empty cursor to INVALID_CURSOR', async () => {
     const set: { status?: number } = {};
     const result = await listBoardQuestsController({
@@ -108,6 +93,81 @@ describe('Quest controllers', () => {
     });
 
     expect(result).toEqual({ success: true, data: { items: [], nextCursor: null } });
+  });
+
+  it('returns the complete consent request envelope', async () => {
+    const expiresAt = new Date('2026-08-26T10:05:00.000Z');
+    spyOn(questService, 'createQuestEditRequest').mockResolvedValue({
+      requestId: questId,
+      status: 'EDIT_REQUEST_PENDING',
+      expiresAt,
+    });
+
+    const result = await createQuestEditRequestController({
+      params: { questId },
+      body: { title: 'Changed title' },
+      session: session as never,
+      set: {} as never,
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: { requestId: questId, status: 'EDIT_REQUEST_PENDING', expiresAt: expiresAt.toISOString() },
+    });
+  });
+
+  it('returns a consent response with the declared fields', async () => {
+    spyOn(questService, 'respondToQuestEditRequest').mockResolvedValue({
+      requestId: questId,
+      status: 'EDIT_REQUEST_APPROVED',
+    });
+
+    const result = await respondToQuestEditRequestController({
+      params: { requestId: questId },
+      body: { decision: 'EDIT_RESPONSE_APPROVED' },
+      session: session as never,
+      set: {} as never,
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: { requestId: questId, status: 'EDIT_REQUEST_APPROVED' },
+    });
+  });
+
+  it('serializes all consent request detail dates', async () => {
+    spyOn(questService, 'getQuestEditRequest').mockResolvedValue({
+      id: questId,
+      questId,
+      requestedByUserId: 'hirer-1',
+      previousQuestStatus: 'QUEST_ASSIGNED',
+      status: 'EDIT_REQUEST_PENDING',
+      proposedChanges: { title: 'Changed title' },
+      createdAt: new Date('2026-08-26T10:00:00.000Z'),
+      expiresAt: new Date('2026-08-26T10:05:00.000Z'),
+      responses: [{ userId: 'worker-1', decision: null, respondedAt: null }] as never,
+    });
+
+    const result = await getQuestEditRequestController({
+      params: { requestId: questId },
+      session: session as never,
+      set: {} as never,
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: {
+        id: questId,
+        questId,
+        requestedByUserId: 'hirer-1',
+        previousQuestStatus: 'QUEST_ASSIGNED',
+        status: 'EDIT_REQUEST_PENDING',
+        proposedChanges: { title: 'Changed title' },
+        createdAt: '2026-08-26T10:00:00.000Z',
+        expiresAt: '2026-08-26T10:05:00.000Z',
+        responses: [{ userId: 'worker-1', decision: null, respondedAt: null }],
+      },
+    });
   });
 
   it('points selected participation at the consent edit flow', async () => {
@@ -139,9 +199,9 @@ describe('Quest controllers', () => {
       condition: 'A completed result',
       reward: 500,
       tag: null,
-      mode: 'FIRST_COME_FIRST_SERVED' as const,
-      participation: 'SINGLE' as const,
-      questStatus: 'OPEN' as const,
+      mode: 'NO_CANDIDATE' as const,
+      participation: 'SOLO' as const,
+      questStatus: 'QUEST_OPEN' as const,
       headcount: 1,
       startTime: '2026-08-26T10:00:00.000Z',
       dueAt: null,

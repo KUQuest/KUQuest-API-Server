@@ -81,6 +81,11 @@ export const positiveSatang = (value: number): Satang => {
   return amount;
 };
 
+export const calculatePlatformFeeSatang = (
+  recipientAmountSatang: Satang,
+  platformFeeBps: number,
+): Satang => satang(Math.ceil(recipientAmountSatang * platformFeeBps / 10_000));
+
 export const signedSatang = (value: number): SignedSatang => {
   if (
     !Number.isSafeInteger(value) ||

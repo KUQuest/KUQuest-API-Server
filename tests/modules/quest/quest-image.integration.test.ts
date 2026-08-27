@@ -27,8 +27,8 @@ const baseInput: QuestCreateInput = {
   title: 'A Quest with images',
   description: 'A description',
   condition: 'A completed result',
-  mode: 'FIRST_COME_FIRST_SERVED',
-  participation: 'SINGLE',
+  mode: 'NO_CANDIDATE',
+  participation: 'SOLO',
   reward: 500,
   headcount: 1,
   startTime: '2030-08-27T10:00:00.000Z',
@@ -164,7 +164,7 @@ describe('Quest Image persistence', () => {
       outcome: 'not-found',
     });
 
-    await db.update(quest).set({ questStatus: 'OPEN' }).where(eq(quest.id, questId));
+    await db.update(quest).set({ questStatus: 'QUEST_OPEN' }).where(eq(quest.id, questId));
 
     expect(await addQuestImages(hirerId, questId, [storedImage('not-editable')])).toEqual({
       outcome: 'not-editable',
@@ -188,7 +188,7 @@ describe('Quest Image persistence', () => {
     const added = await addQuestImages(hirerId, questId, [storedImage('published')]);
     if (!('images' in added)) throw new Error('Fixture image upload failed');
 
-    await db.update(quest).set({ questStatus: 'OPEN' }).where(eq(quest.id, questId));
+    await db.update(quest).set({ questStatus: 'QUEST_OPEN' }).where(eq(quest.id, questId));
 
     expect(await deleteQuestImage(hirerId, questId, added.images[0]!.fileId)).toEqual({
       outcome: 'not-editable',

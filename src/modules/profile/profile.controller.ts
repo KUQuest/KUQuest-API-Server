@@ -4,6 +4,7 @@ import { serializePortfolioItem, listPortfolio } from '@/modules/portfolio';
 import { listWorkExperiences, serializeWorkExperience } from '@/modules/work-experience';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import { readResourceVersion } from '@/shared/resource-version';
+import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import type { ApiResponse } from '@/shared/api-response';
 import {
   ImageTooLargeError,
@@ -20,11 +21,13 @@ import type {
   publicProfileResponseSchema,
   profileResponseSchema,
   profileUpdateSchema,
+  reviewsQuerySchema,
   reviewsResponseSchema,
 } from './profile.schema';
 import {
   getPreviousAvatarFile,
   getProfileReputation,
+  getProfileReviews,
   getPublicProfile as getPublicProfileRecord,
   getProfile,
   markAvatarDeleted,
@@ -101,8 +104,73 @@ export const getReputation = async ({
 
 type Reviews = Static<typeof reviewsResponseSchema>['data'];
 
-export const getReviews = async (): Promise<ApiResponse<Reviews>> =>
-  apiSuccess({ items: [], total: 0, nextCursor: null });
+type ReviewQuery = Static<typeof reviewsQuerySchema>;
+
+const serializeReviews = (rows: Awaited<ReturnType<typeof getProfileReviews>>['rows']): Reviews['items'] =>
+  rows.map((row) => {
+    let avatar: { url: string } | null = null;
+    if (row.avatarBucket && row.avatarObjectKey) {
+      try {
+        avatar = { url: avatarStorage.linkFor({ bucket: row.avatarBucket, objectKey: row.avatarObjectKey }) };
+      } catch {
+        avatar = null;
+      }
+    }
+    return {
+      id: row.id,
+      reviewer: { displayName: `${row.reviewerFirstName} ${row.reviewerLastName}`.trim(), avatar },
+      rating: row.rating,
+      comment: row.comment,
+      createdAt: row.createdAt.toISOString(),
+      quest: { id: row.questId, title: row.questTitle },
+    };
+  });
+
+export const getReviews = async (context?: AuthedContext & { query: ReviewQuery }): Promise<ApiResponse<Reviews>> => {
+  if (!context) return apiSuccess({ items: [], total: 0, nextCursor: null });
+  const { query, session, set } = context;
+  try {
+    const limit = parsePageLimit(query.limit);
+    const cursor = decodeCursor(query.cursor);
+    const result = await getProfileReviews(session.user.id, { rating: query.rating, limit, cursor });
+    const last = result.rows[result.rows.length - 1];
+    return apiSuccess({
+      items: serializeReviews(result.rows),
+      total: result.total,
+      nextCursor: result.hasNext && last ? encodeCursor({ startTime: last.createdAt.toISOString(), id: last.id }) : null,
+    });
+  } catch (error) {
+    if (!(error instanceof CursorInputError)) throw error;
+    set.status = 400;
+    return apiError(error.code, error.message);
+  }
+};
+
+export const getPublicReviews = async ({
+  params,
+  query,
+  set,
+}: AuthedContext & { params: Static<typeof publicProfileParamsSchema>; query: ReviewQuery }): Promise<ApiResponse<Reviews>> => {
+  try {
+    if (!(await getPublicProfileRecord(params.userId))) {
+      set.status = 404;
+      return apiError('PROFILE_NOT_FOUND', 'Profile not found');
+    }
+    const limit = parsePageLimit(query.limit);
+    const cursor = decodeCursor(query.cursor);
+    const result = await getProfileReviews(params.userId, { rating: query.rating, limit, cursor });
+    const last = result.rows[result.rows.length - 1];
+    return apiSuccess({
+      items: serializeReviews(result.rows),
+      total: result.total,
+      nextCursor: result.hasNext && last ? encodeCursor({ startTime: last.createdAt.toISOString(), id: last.id }) : null,
+    });
+  } catch (error) {
+    if (!(error instanceof CursorInputError)) throw error;
+    set.status = 400;
+    return apiError(error.code, error.message);
+  }
+};
 
 export const getPublicProfile = async ({
   params,

@@ -1,4 +1,9 @@
 import { questRoute } from '@/modules/quest/quest.route';
+import { questAssignmentRoute } from '@/modules/quest/quest-assignment.route';
+import { questCandidateRoute } from '@/modules/quest/quest-candidate.route';
+import { questProofRoute } from '@/modules/quest/quest-proof.route';
+import { questReviewRoute } from '@/modules/quest/quest-review.route';
+import { questDisputeRoute, questSettlementRoute } from '@/modules/quest/quest-settlement.route';
 
 import { Elysia } from 'elysia';
 
@@ -35,6 +40,12 @@ export const app = new Elysia({
   .use(onboardingRoute)
   .use(academicRegistrationRoute)
   .use(profileRoute)
+  .use(questAssignmentRoute)
+  .use(questCandidateRoute)
+  .use(questProofRoute)
+  .use(questReviewRoute)
+  .use(questSettlementRoute)
+  .use(questDisputeRoute)
   .use(questRoute)
   .use(certificateRoute)
   .use(portfolioRoute)

@@ -12,7 +12,7 @@ export const file = pgTable(
     objectKey: text('object_key').notNull(),
     contentType: text('content_type').notNull(),
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
-    uploadedByUserId: text('uploaded_by_user_id').references((): AnyPgColumn => authUser.id),
+    uploadedByUserId: uuid('uploaded_by_user_id').references((): AnyPgColumn => authUser.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },

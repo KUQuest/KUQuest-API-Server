@@ -3,15 +3,26 @@ import { authUser } from '@/database/schema/auth.schema';
 import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
+  walletFundingReservation,
+  walletLedgerAccount,
+  walletWallet,
+} from '@/database/schema/wallet.schema';
+import {
   createQuest,
   getQuestPublishCheck,
   publishQuest,
 } from '@/modules/quest/quest.service';
 import type { QuestCreateInput } from '@/modules/quest/quest.schema';
+import {
+  createSealedLedgerTransaction,
+  ensureInitialMoneyPolicy,
+  ensureWallet,
+  signedSatang,
+} from '@/modules/wallet';
 
 import { randomUUID } from 'node:crypto';
 
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 
 const hirerId = randomUUID();
@@ -23,8 +34,8 @@ const baseInput: QuestCreateInput = {
   title: 'A Quest for publishing',
   description: 'A description',
   condition: 'A completed result',
-  mode: 'FIRST_COME_FIRST_SERVED',
-  participation: 'SINGLE',
+  mode: 'NO_CANDIDATE',
+  participation: 'SOLO',
   reward: 500,
   headcount: 1,
   startTime: '2030-08-27T10:00:00.000Z',
@@ -34,7 +45,33 @@ const baseInput: QuestCreateInput = {
   locations: [],
 };
 
+const fundHirer = async (amountSatang: number) => {
+  const wallet = await ensureWallet(hirerId);
+  const [spendingAccount] = await db
+    .select({ id: walletLedgerAccount.id })
+    .from(walletLedgerAccount)
+    .where(and(
+      eq(walletLedgerAccount.walletId, wallet.id),
+      eq(walletLedgerAccount.type, 'SPENDING'),
+    ));
+  const [suspenseAccount] = await db
+    .select({ id: walletLedgerAccount.id })
+    .from(walletLedgerAccount)
+    .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
+  if (!spendingAccount || !suspenseAccount) throw new Error('Missing funding accounts');
+
+  await createSealedLedgerTransaction({
+    businessReference: `quest-publish-funding-${randomUUID()}`,
+    eventType: 'TOP_UP',
+    postings: [
+      { accountId: spendingAccount.id, amountSatang: signedSatang(amountSatang) },
+      { accountId: suspenseAccount.id, amountSatang: signedSatang(-amountSatang) },
+    ],
+  });
+};
+
 const createFixture = async (input: Partial<QuestCreateInput> = {}) => {
+  await fundHirer(100_000);
   const result = await createQuest(hirerId, { ...baseInput, ...input });
   if ('outcome' in result) throw new Error(`Fixture creation failed: ${result.outcome}`);
 
@@ -64,6 +101,7 @@ beforeAll(async () => {
     },
   ]);
   await db.insert(tag).values({ id: tagId, name: `Publish test ${tagId}` });
+  await ensureInitialMoneyPolicy();
 });
 
 beforeEach(async () => {
@@ -76,7 +114,6 @@ beforeEach(async () => {
 afterAll(async () => {
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(tag).where(eq(tag.id, tagId));
-  await db.delete(authUser).where(inArray(authUser.id, [hirerId, otherMemberId]));
 });
 
 describe('Quest publishing service', () => {
@@ -95,7 +132,7 @@ describe('Quest publishing service', () => {
           message: 'Quest has no locations',
         },
       ],
-      escrowRequirement: 500,
+      escrowRequirement: 510,
       canPublish: true,
     });
   });
@@ -132,13 +169,67 @@ describe('Quest publishing service', () => {
     expect(after).toEqual(before);
   });
 
-  it('changes a valid Draft to Open', async () => {
+  it('reserves Quest Escrow before changing a valid Draft to Open', async () => {
     const questId = await createFixture();
+    const [beforeWallet] = await db
+      .select({ spending: walletWallet.spendingBalanceSatang, reserved: walletWallet.fundingReservedSatang })
+      .from(walletWallet)
+      .where(eq(walletWallet.userId, hirerId));
 
     expect(await publishQuest(hirerId, questId)).toEqual({ outcome: 'published' });
 
+    const preview = await getQuestPublishCheck(hirerId, questId);
+    const [reservation] = await db
+      .select()
+      .from(walletFundingReservation)
+      .where(and(
+        eq(walletFundingReservation.ownerUserId, hirerId),
+        eq(walletFundingReservation.callerScope, 'quest'),
+        eq(walletFundingReservation.callerReference, questId),
+      ));
+    expect(reservation).toMatchObject({
+      totalReservedSatang: 51_000,
+      remainingSatang: 51_000,
+      status: 'ACTIVE',
+    });
+    if (!preview || 'outcome' in preview) throw new Error('Missing publish preview');
+    expect(preview).toMatchObject({ escrowRequirement: 510, canPublish: true });
+    expect(preview.escrowRequirement * 100).toBe(reservation?.totalReservedSatang);
+    const [wallet] = await db
+      .select({ spending: walletWallet.spendingBalanceSatang, reserved: walletWallet.fundingReservedSatang })
+      .from(walletWallet)
+      .where(eq(walletWallet.userId, hirerId));
+    expect(wallet).toEqual({
+      spending: (beforeWallet?.spending ?? 0) - 51_000,
+      reserved: (beforeWallet?.reserved ?? 0) + 51_000,
+    });
+
     const [stored] = await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId));
-    expect(stored?.status).toBe('OPEN');
+    expect(stored?.status).toBe('QUEST_OPEN');
+  });
+
+  it('keeps the Draft and Wallet unchanged when Escrow cannot be funded', async () => {
+    const questId = await createFixture({ reward: 600_000 });
+    const [beforeWallet] = await db
+      .select({ spending: walletWallet.spendingBalanceSatang, reserved: walletWallet.fundingReservedSatang })
+      .from(walletWallet)
+      .where(eq(walletWallet.userId, hirerId));
+
+    await expect(publishQuest(hirerId, questId)).rejects.toMatchObject({
+      code: 'INSUFFICIENT_SPENDING_BALANCE',
+    });
+
+    const [stored] = await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId));
+    const [afterWallet] = await db
+      .select({ spending: walletWallet.spendingBalanceSatang, reserved: walletWallet.fundingReservedSatang })
+      .from(walletWallet)
+      .where(eq(walletWallet.userId, hirerId));
+    expect(stored?.status).toBe('QUEST_DRAFT');
+    expect(afterWallet).toEqual(beforeWallet);
+    expect(await db
+      .select()
+      .from(walletFundingReservation)
+      .where(eq(walletFundingReservation.callerReference, questId))).toHaveLength(0);
   });
 
   it('does not expose another Member\'s Quest and rejects a non-Draft', async () => {
@@ -162,5 +253,9 @@ describe('Quest publishing service', () => {
 
     expect(results.filter((result) => result?.outcome === 'published')).toHaveLength(1);
     expect(results.filter((result) => result?.outcome === 'not-draft')).toHaveLength(1);
+    expect(await db
+      .select()
+      .from(walletFundingReservation)
+      .where(eq(walletFundingReservation.callerReference, questId))).toHaveLength(1);
   });
 });

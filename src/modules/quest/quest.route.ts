@@ -8,6 +8,7 @@ import { Elysia } from 'elysia';
 import {
   addQuestImagesController,
   createQuestController,
+  createQuestEditRequestController,
   deleteQuestImageController,
   editQuestController,
   getQuestDetailController,
@@ -15,12 +16,20 @@ import {
   listBoardQuestsController,
   listOwnQuestsController,
   publishQuestController,
+  getQuestEditRequestController,
+  respondToQuestEditRequestController,
 } from './quest.controller';
 import {
   questBoardResponseSchema,
   questCreateResponseSchema,
   questCreateSchema,
   questDetailResponseSchema,
+  questEditDecisionSchema,
+  questEditRequestCreateResponseSchema,
+  questEditRequestParamsSchema,
+  questEditRequestResponseSchema,
+  questEditResponseSchema,
+  questDirectEditSchema,
   questEditSchema,
   questImageParamsSchema,
   questImagesUploadResponseSchema,
@@ -73,26 +82,62 @@ export const questRoute = new Elysia({
   })
   .post('/:questId/publish', publishQuestController, {
     params: questParamsSchema,
-    response: responses(apiSuccessSchema, 401, 404, 409),
+    response: responses(apiSuccessSchema, 401, 404, 409, 503),
     detail: {
       tags: ['Quests'],
       summary: 'Publish a Quest Draft',
-      description: 'Moves the authenticated Hirer’s Quest from DRAFT to OPEN without moving money.',
+      description:
+        'Reserves Quest Escrow for the authenticated Hirer, then moves the Quest from QUEST_DRAFT to QUEST_OPEN.',
       operationId: 'publishQuest',
       security: betterAuthSecurity,
     },
   })
   .patch('/:questId', editQuestController, {
     params: questParamsSchema,
-    body: questEditSchema,
-    transform: rejectUnknownFields(questEditSchema),
+    body: questDirectEditSchema,
+    transform: rejectUnknownFields(questDirectEditSchema),
     response: responses(questDetailResponseSchema, 400, 401, 404, 409, 502),
     detail: {
       tags: ['Quests'],
-      summary: 'Edit an OPEN Quest before participation starts',
+      summary: 'Edit an eligible QUEST_OPEN Quest before participation starts',
       description:
-        'Updates the supplied fields of an OPEN Quest owned by the authenticated Hirer when no Candidate exists and no Worker or Team has been selected.',
+        'Updates the supplied fields of an eligible QUEST_OPEN Quest owned by the authenticated Hirer when no Candidate exists and no Worker or Team has been selected.',
       operationId: 'editQuest',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/:questId/edit-requests', createQuestEditRequestController, {
+    params: questParamsSchema,
+    body: questEditSchema,
+    transform: rejectUnknownFields(questEditSchema),
+    response: responses(questEditRequestCreateResponseSchema, 400, 401, 404, 409),
+    detail: {
+      tags: ['Quests'],
+      summary: 'Request consent for a post-Assignment Quest edit',
+      description: 'Pauses an assigned Quest and asks every Active Worker to approve the proposed mutable changes within five minutes.',
+      operationId: 'createQuestEditRequest',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/edit-requests/:requestId', getQuestEditRequestController, {
+    params: questEditRequestParamsSchema,
+    response: responses(questEditRequestResponseSchema, 401, 404),
+    detail: {
+      tags: ['Quests'],
+      summary: 'Get a Quest edit consent request',
+      operationId: 'getQuestEditRequest',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/edit-requests/:requestId/respond', respondToQuestEditRequestController, {
+    params: questEditRequestParamsSchema,
+    body: questEditDecisionSchema,
+    transform: rejectUnknownFields(questEditDecisionSchema),
+    response: responses(questEditResponseSchema, 401, 404, 409),
+    detail: {
+      tags: ['Quests'],
+      summary: 'Respond to a Quest edit consent request',
+      operationId: 'respondToQuestEditRequest',
       security: betterAuthSecurity,
     },
   })
@@ -126,7 +171,7 @@ export const questRoute = new Elysia({
     detail: {
       tags: ['Quests'],
       summary: 'Get Quest detail',
-      description: 'Returns full detail for an owned Quest or an OPEN Quest visible to the caller.',
+      description: 'Returns full detail for an owned Quest or a QUEST_OPEN Quest visible to the caller.',
       operationId: 'getQuestDetail',
       security: betterAuthSecurity,
     },
@@ -137,7 +182,7 @@ export const questRoute = new Elysia({
     detail: {
       tags: ['Quests'],
       summary: 'Search the Quest Board',
-      description: 'Returns OPEN Quest cards with filters, search, and cursor paging.',
+      description: 'Returns QUEST_OPEN Quest cards with filters, search, and cursor paging.',
       operationId: 'listQuestBoard',
       security: betterAuthSecurity,
     },

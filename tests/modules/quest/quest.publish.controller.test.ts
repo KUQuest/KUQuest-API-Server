@@ -1,4 +1,5 @@
 import * as questService from '@/modules/quest/quest.service';
+import { MoneyDomainError } from '@/modules/wallet';
 import {
   getQuestPublishCheckController,
   publishQuestController,
@@ -16,7 +17,7 @@ describe('Quest publishing controllers', () => {
     spyOn(questService, 'getQuestPublishCheck').mockResolvedValue({
       blockingReasons: [],
       warnings: [],
-      escrowRequirement: 500,
+      escrowRequirement: 510,
       canPublish: true,
     });
 
@@ -31,7 +32,7 @@ describe('Quest publishing controllers', () => {
       data: {
         blockingReasons: [],
         warnings: [],
-        escrowRequirement: 500,
+        escrowRequirement: 510,
         canPublish: true,
       },
     });
@@ -89,7 +90,7 @@ describe('Quest publishing controllers', () => {
           { code: 'QUEST_DURATION_REQUIRED', message: 'Quest requires an estimated duration' },
         ],
         warnings: [],
-        escrowRequirement: 500,
+        escrowRequirement: 510,
         canPublish: false,
       },
     });
@@ -105,6 +106,28 @@ describe('Quest publishing controllers', () => {
     expect(result).toEqual({
       success: false,
       error: { code: 'QUEST_TAG_REQUIRED', message: 'Quest requires a Tag' },
+    });
+  });
+
+  it('maps insufficient Spending Balance when Escrow reservation fails', async () => {
+    spyOn(questService, 'publishQuest').mockRejectedValue(
+      new MoneyDomainError('INSUFFICIENT_SPENDING_BALANCE', 'Spending Balance is insufficient.'),
+    );
+    const set: { status?: number } = {};
+
+    const result = await publishQuestController({
+      params: { questId },
+      session: session as never,
+      set: set as never,
+    });
+
+    expect(set.status).toBe(409);
+    expect(result).toEqual({
+      success: false,
+      error: {
+        code: 'INSUFFICIENT_SPENDING_BALANCE',
+        message: 'Spending Balance is insufficient.',
+      },
     });
   });
 
