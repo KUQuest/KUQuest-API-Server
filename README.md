@@ -203,6 +203,47 @@ is disabled. On first sign-in, Google profile data is saved in `auth_user` as
 the Student's `id`, `first_name`, and `last_name`, with Better Auth's required
 email and profile fields.
 
+### Staging Student test account
+
+Staging can expose a narrowly scoped Student test-login route for API
+verification. It is disabled by default and requires both
+`DEPLOYMENT_ENV=staging` and `STAGING_TEST_AUTH_ENABLED=true`; the application
+refuses to start when the required test-account variables are missing or the
+deployment environment is not staging.
+
+Configure these as protected staging secrets, never in source control:
+
+```env
+DEPLOYMENT_ENV=staging
+STAGING_TEST_AUTH_ENABLED=true
+STAGING_TEST_AUTH_EMAIL=staging-test@ku.th
+STAGING_TEST_AUTH_PASSWORD=replace-with-a-compliant-password
+STAGING_TEST_AUTH_FIRST_NAME=Staging
+STAGING_TEST_AUTH_LAST_NAME=Test Student
+```
+
+The email must end in `@ku.th`, and the password must be 8–25 ASCII characters
+containing uppercase, lowercase, a number, and a special character. The first
+valid login creates the configured Student if it does not exist, then returns
+an ordinary Better Auth session cookie. Only that configured email can use the
+route; it does not enable Student email/password login generally.
+
+Use the dedicated staging route:
+
+```bash
+curl -i -c staging.cookies \
+  -H 'content-type: application/json' \
+  -d '{"email":"staging-test@ku.th","password":"replace-with-a-compliant-password"}' \
+  https://kuquest-dev-api.kubits.org/api/staging/test-auth/sign-in/email
+
+curl -b staging.cookies \
+  https://kuquest-dev-api.kubits.org/api/v1/profile
+```
+
+The existing `db:seed-admin` workflow remains the path for creating an Admin.
+This Student route is separate because an Admin session cannot access
+Student-owned endpoints.
+
 ## Database commands
 
 ```bash
