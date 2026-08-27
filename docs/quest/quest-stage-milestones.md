@@ -89,7 +89,7 @@ stateDiagram-v2
 ## Quest Image response behavior
 
 - Quest Images are returned in persisted position order in Quest detail and successful image-upload responses. Each returned Quest Image includes its file reference and a viewing link that expires.
-- If the server cannot build a viewing link, it logs the failure and omits only that Quest Image from the successful response. It does not fail the whole response or renumber the remaining positions, so a returned list can contain a position gap. The stored file reference remains unchanged.
+- If the server cannot build a viewing link, it logs the failure and returns `502 IMAGE_LINK_FAILED` for the whole response. It does not return a partial list or renumber the remaining positions. The stored file reference remains unchanged.
 - Quest Board responses remain text-only and do not include Quest Images.
 
 ## Completion, cancellation, and dispute milestones

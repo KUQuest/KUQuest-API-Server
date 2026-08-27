@@ -106,7 +106,7 @@ export const questRoute = new Elysia({
   })
   .get('/:questId', getQuestDetailController, {
     params: questParamsSchema,
-    response: responses(questDetailResponseSchema, 400, 401, 404),
+    response: responses(questDetailResponseSchema, 400, 401, 404, 502),
     detail: {
       tags: ['Quests'],
       summary: 'Get Quest detail',

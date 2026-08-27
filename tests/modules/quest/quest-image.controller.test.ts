@@ -46,17 +46,22 @@ describe('addQuestImagesController', () => {
   });
 
   it('returns the complete ordered image list with expiring links', async () => {
-    spyOn(questService, 'addQuestImages').mockResolvedValue({ images: [storedImage] });
-    spyOn(questStorage, 'upload').mockResolvedValue({
-      bucket: storedImage.bucket,
-      objectKey: storedImage.objectKey,
-      contentType: 'image/png',
-      sizeBytes: image.size,
+    const secondStoredImage = {
+      ...storedImage,
+      fileId: '018f47a7-1c7d-7c98-9a11-690d7e834302',
+      position: 1,
+      objectKey: 'quests/hirer-1/second.png',
+    };
+    spyOn(questService, 'addQuestImages').mockResolvedValue({
+      images: [storedImage, secondStoredImage],
     });
+    spyOn(questStorage, 'upload')
+      .mockResolvedValueOnce(uploadedImage)
+      .mockResolvedValueOnce({ ...uploadedImage, objectKey: secondStoredImage.objectKey });
     spyOn(questStorage, 'linkFor').mockReturnValue('https://storage.test/signed-link');
 
     const result = await addQuestImagesController({
-      body: { images: [image] },
+      body: { images: [image, secondImage] },
       params: { questId },
       session: session as never,
       set: {} as never,
@@ -71,15 +76,52 @@ describe('addQuestImagesController', () => {
             position: 0,
             url: 'https://storage.test/signed-link',
           },
+          {
+            fileId: secondStoredImage.fileId,
+            position: 1,
+            url: 'https://storage.test/signed-link',
+          },
         ],
       },
     });
-    expect(questService.addQuestImages).toHaveBeenCalledWith(hirerId, questId, [
-      expect.objectContaining({
-        bucket: storedImage.bucket,
-        objectKey: storedImage.objectKey,
-      }),
-    ]);
+    expect(questService.addQuestImages).toHaveBeenCalledWith(
+      hirerId,
+      questId,
+      [
+        expect.objectContaining({
+          bucket: storedImage.bucket,
+          objectKey: storedImage.objectKey,
+        }),
+        expect.objectContaining({
+          bucket: secondStoredImage.bucket,
+          objectKey: secondStoredImage.objectKey,
+        }),
+      ],
+    );
+  });
+
+  it('fails the response when a Quest Image link cannot be built', async () => {
+    spyOn(questService, 'addQuestImages').mockResolvedValue({ images: [storedImage] });
+    spyOn(questStorage, 'upload').mockResolvedValue(uploadedImage);
+    spyOn(questStorage, 'linkFor').mockImplementation(() => {
+      throw new Error('storage unavailable');
+    });
+    const deleteObject = spyOn(questStorage, 'delete').mockResolvedValue();
+    const set: { status?: number } = {};
+
+    const result = await addQuestImagesController({
+      body: { images: [image] },
+      params: { questId },
+      session: session as never,
+      set: set as never,
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: { code: 'IMAGE_LINK_FAILED', message: 'Image link generation failed' },
+    });
+    expect(set.status).toBe(502);
+    expect(deleteObject).not.toHaveBeenCalled();
   });
 
   it('rejects a non-Draft Quest before uploading files', async () => {
@@ -330,7 +372,7 @@ describe('getQuestDetailController', () => {
     });
   });
 
-  it('omits only the Quest Image whose link cannot be built', async () => {
+  it('fails instead of omitting a Quest Image whose link cannot be built', async () => {
     const secondStoredImage = {
       ...storedImage,
       fileId: '018f47a7-1c7d-7c98-9a11-690d7e834302',
@@ -362,23 +404,17 @@ describe('getQuestDetailController', () => {
       return 'https://storage.test/second-signed-link';
     });
 
+    const set: { status?: number } = {};
     const result = await getQuestDetailController({
       params: { questId },
       session: session as never,
-      set: {} as never,
+      set: set as never,
     });
 
-    expect(result).toMatchObject({
-      success: true,
-      data: {
-        images: [
-          {
-            fileId: secondStoredImage.fileId,
-            position: secondStoredImage.position,
-            url: 'https://storage.test/second-signed-link',
-          },
-        ],
-      },
+    expect(result).toEqual({
+      success: false,
+      error: { code: 'IMAGE_LINK_FAILED', message: 'Image link generation failed' },
     });
+    expect(set.status).toBe(502);
   });
 });
