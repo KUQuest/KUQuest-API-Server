@@ -28,11 +28,12 @@ describe('Xendit Top-up webhook route', () => {
   });
 
   it('persists a valid callback before returning 202 without applying financial effects', async () => {
-    const eventId = `be116-route-${crypto.randomUUID()}`;
+    const paymentId = `py-${crypto.randomUUID()}`;
     const internalReference = `top-up:be116-route-${crypto.randomUUID()}`;
     const rawPayload = JSON.stringify({
-      event: 'payment_request.status_updated',
+      event: 'payment.capture',
       data: {
+        payment_id: paymentId,
         reference_id: internalReference,
         payment_request_id: `pr-${crypto.randomUUID()}`,
         status: 'SUCCEEDED',
@@ -59,7 +60,6 @@ describe('Xendit Top-up webhook route', () => {
           method: 'POST',
           headers: {
             'x-callback-token': 'be116-route-token',
-            'webhook-id': eventId,
           },
           body: rawPayload,
         }),
@@ -71,10 +71,10 @@ describe('Xendit Top-up webhook route', () => {
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ success: true });
     const [stored] = await db.select().from(paymentProviderEventInbox).where(
-      eq(paymentProviderEventInbox.providerEventId, eventId),
+      eq(paymentProviderEventInbox.providerEventId, `derived:payment.capture:${paymentId}:PAID`),
     );
     expect(stored).toMatchObject({
-      providerEventId: eventId,
+      providerEventId: `derived:payment.capture:${paymentId}:PAID`,
       internalReference,
       processingStatus: 'RECEIVED',
       rawPayloadCiphertext: expect.any(String),

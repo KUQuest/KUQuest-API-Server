@@ -177,10 +177,6 @@ export const parseTopUpProviderEvent = (
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'A paid Provider event must include an amount.');
   }
 
-  const resolvedProviderEventId = firstText(providerEventId, payload.event_id, payload.id, data.event_id);
-  if (!resolvedProviderEventId) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event identifier is required.');
-  }
   const eventType = firstText(payload.event, payload.event_type, data.event_type) ?? 'payment.status';
   const providerApiVersion = firstText(data.api_version, payload.api_version) ?? '2024-11-11';
   const providerChannelCode = firstText(data.channel_code, payload.channel_code);
@@ -188,6 +184,21 @@ export const parseTopUpProviderEvent = (
     data.updated_at ?? data.updated ?? data.created_at ?? data.created ?? payload.created_at ?? payload.created,
     receivedAt,
   );
+  const captures = Array.isArray(data.captures)
+    ? data.captures.map(asObject).filter((value): value is Record<string, unknown> => value !== null)
+    : [];
+  const providerEventIdentity = firstText(
+    captures[0]?.capture_id,
+    data.payment_id,
+    data.payment_request_id,
+    providerReference,
+    internalReference,
+  );
+  const resolvedProviderEventId = firstText(providerEventId, payload.event_id, payload.id, data.event_id)
+    ?? (providerEventIdentity ? `derived:${eventType}:${providerEventIdentity}:${normalizedStatus}` : null);
+  if (!resolvedProviderEventId) {
+    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event identifier is required.');
+  }
 
   return {
     provider: 'XENDIT',

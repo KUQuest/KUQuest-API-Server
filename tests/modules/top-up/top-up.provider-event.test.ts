@@ -56,16 +56,21 @@ describe('Top-up Provider event parsing', () => {
     }))).toThrow(ProviderEventError);
   });
 
-  it('rejects an event without a Provider Event ID', () => {
-    expect(() => parseTopUpProviderEvent(JSON.stringify({
-      event: 'payment_request.succeeded',
+  it('derives a stable event identifier from a Xendit payment callback', () => {
+    const event = parseTopUpProviderEvent(JSON.stringify({
+      event: 'payment.capture',
+      created: '2026-08-27T00:00:00.000Z',
       data: {
+        payment_id: 'py-3',
         payment_request_id: 'pr-3',
         reference_id: 'top-up:top-up-3',
         status: 'SUCCEEDED',
         request_amount: 1,
+        updated: '2026-08-27T00:00:00.000Z',
       },
-    }))).toThrow('Provider event identifier is required.');
+    }));
+
+    expect(event.providerEventId).toBe('derived:payment.capture:py-3:PAID');
   });
 });
 
