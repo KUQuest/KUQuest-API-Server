@@ -145,71 +145,120 @@
     {
       "idx": 20,
       "version": "7",
-      "when": 1787843000000,
-      "tag": "0022_migrate_auth_ids_to_uuid",
+      "when": 1787754297594,
+      "tag": "0020_right_synch",
       "breakpoints": true
     },
     {
       "idx": 21,
       "version": "7",
-      "when": 1787843443953,
-      "tag": "0023_migrate_quest_schema_to_revised_edr",
+      "when": 1787755950131,
+      "tag": "0021_retain_top_up_quotes",
       "breakpoints": true
     },
     {
       "idx": 22,
       "version": "7",
-      "when": 1787845000000,
-      "tag": "0024_quest_edit_consent",
+      "when": 1787759160522,
+      "tag": "0022_misty_gateway",
       "breakpoints": true
     },
     {
       "idx": 23,
       "version": "7",
-      "when": 1787849693566,
-      "tag": "0025_quest_completion_confirmation",
+      "when": 1787810513956,
+      "tag": "0023_smooth_wendell_rand",
       "breakpoints": true
     },
     {
       "idx": 24,
       "version": "7",
-      "when": 1787853676523,
-      "tag": "0026_direct_join_idempotency",
+      "when": 1787812521479,
+      "tag": "0024_aromatic_risque",
       "breakpoints": true
     },
     {
       "idx": 25,
       "version": "7",
-      "when": 1787853856803,
-      "tag": "0027_direct_join_result",
+      "when": 1787837285671,
+      "tag": "0025_parched_thunderbolt_ross",
       "breakpoints": true
     },
     {
       "idx": 26,
       "version": "7",
-      "when": 1787855171854,
-      "tag": "0028_candidate_selection_commands",
+      "when": 1787854030379,
+      "tag": "0026_tearful_squadron_sinister",
       "breakpoints": true
     },
     {
       "idx": 27,
       "version": "7",
-      "when": 1787856161328,
-      "tag": "0029_quest_settlement_commands",
+      "when": 1787854090379,
+      "tag": "0032_migrate_auth_ids_to_uuid",
       "breakpoints": true
     },
     {
       "idx": 28,
       "version": "7",
-      "when": 1787858000000,
-      "tag": "0030_review_comment_nullable",
+      "when": 1787854150379,
+      "tag": "0033_migrate_quest_schema_to_revised_edr",
       "breakpoints": true
     },
     {
       "idx": 29,
       "version": "7",
-      "when": 1787859744701,
-      "tag": "0031_team_disbanded_status",
+      "when": 1787854210379,
+      "tag": "0034_quest_edit_consent",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1787854270379,
+      "tag": "0035_quest_completion_confirmation",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1787854330379,
+      "tag": "0036_direct_join_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787854390379,
+      "tag": "0037_direct_join_result",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787854450379,
+      "tag": "0038_candidate_selection_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787854510379,
+      "tag": "0039_quest_settlement_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1787854570379,
+      "tag": "0040_review_comment_nullable",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787854630379,
+      "tag": "0041_team_disbanded_status",
       "breakpoints": true
     }
   ]

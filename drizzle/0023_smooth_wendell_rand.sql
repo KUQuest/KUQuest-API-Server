@@ -1,0 +1,1 @@
+ALTER TABLE "payment_payout_accounts" ADD COLUMN "masked_routing_value" text DEFAULT '****' NOT NULL;

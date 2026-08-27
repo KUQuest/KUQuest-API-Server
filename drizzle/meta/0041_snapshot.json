@@ -1,6 +1,6 @@
 {
-  "id": "6da5eb8e-b38c-458d-96b9-c531806a0e72",
-  "prevId": "60524d80-1d30-48c1-87f5-2cf9928eb00d",
+  "id": "bfb906a9-9041-4a24-bd16-82cc0ceed6cd",
+  "prevId": "1ecdfac2-0849-44da-b03c-0bca42fcc2c7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1221,8 +1221,26 @@
           "primaryKey": false,
           "notNull": true
         },
-        "account_number": {
-          "name": "account_number",
+        "account_number_key_version": {
+          "name": "account_number_key_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_number_nonce": {
+          "name": "account_number_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_number_ciphertext": {
+          "name": "account_number_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_number_auth_tag": {
+          "name": "account_number_auth_tag",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1239,8 +1257,26 @@
           "primaryKey": false,
           "notNull": true
         },
-        "routing_value": {
-          "name": "routing_value",
+        "routing_value_key_version": {
+          "name": "routing_value_key_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "routing_value_nonce": {
+          "name": "routing_value_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "routing_value_ciphertext": {
+          "name": "routing_value_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "routing_value_auth_tag": {
+          "name": "routing_value_auth_tag",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1250,6 +1286,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "masked_routing_value": {
+          "name": "masked_routing_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'****'"
         },
         "created_at": {
           "name": "created_at",
@@ -1299,12 +1342,25 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "payment_payout_accounts_id_user_key": {
+          "name": "payment_payout_accounts_id_user_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "user_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "payment_payout_accounts_recipient_type_check": {
           "name": "payment_payout_accounts_recipient_type_check",
-          "value": "\"payment_payout_accounts\".\"recipient_type\" IN ('SELF', 'THIRD_PARTY')"
+          "value": "\"payment_payout_accounts\".\"recipient_type\" = 'SELF'"
+        },
+        "payment_payout_accounts_routing_type_check": {
+          "name": "payment_payout_accounts_routing_type_check",
+          "value": "\"payment_payout_accounts\".\"routing_type\" IN ('BANK_ACCOUNT', 'PROMPTPAY')"
         },
         "payment_payout_accounts_country_currency_check": {
           "name": "payment_payout_accounts_country_currency_check",
@@ -1435,6 +1491,13 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "fee_rounding_mode": {
+          "name": "fee_rounding_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'UP'"
+        },
         "user_id": {
           "name": "user_id",
           "type": "uuid",
@@ -1453,54 +1516,29 @@
           "primaryKey": false,
           "notNull": true
         },
-        "receipt_baht": {
-          "name": "receipt_baht",
-          "type": "bigint",
+        "receipt_satang": {
+          "name": "receipt_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "maximum_fee_baht": {
-          "name": "maximum_fee_baht",
-          "type": "bigint",
+        "maximum_fee_satang": {
+          "name": "maximum_fee_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "maximum_tax_baht": {
-          "name": "maximum_tax_baht",
-          "type": "bigint",
+        "maximum_tax_satang": {
+          "name": "maximum_tax_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "maximum_debit_baht": {
-          "name": "maximum_debit_baht",
-          "type": "bigint",
+        "maximum_debit_satang": {
+          "name": "maximum_debit_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
-        },
-        "quoted_fee_satang": {
-          "name": "quoted_fee_satang",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "quoted_tax_satang": {
-          "name": "quoted_tax_satang",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "quoted_debit_satang": {
-          "name": "quoted_debit_satang",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "currency": {
-          "name": "currency",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'THB'"
         },
         "expires_at": {
           "name": "expires_at",
@@ -1578,19 +1616,43 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "payment_payout_quotes_account_user_fk": {
+          "name": "payment_payout_quotes_account_user_fk",
+          "tableFrom": "payment_payout_quotes",
+          "tableTo": "payment_payout_accounts",
+          "columnsFrom": [
+            "payout_account_id",
+            "user_id"
+          ],
+          "columnsTo": [
+            "id",
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "payment_payout_quotes_id_user_key": {
+          "name": "payment_payout_quotes_id_user_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "user_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "payment_payout_quotes_amount_check": {
           "name": "payment_payout_quotes_amount_check",
-          "value": "\"payment_payout_quotes\".\"receipt_baht\" > 0 AND \"payment_payout_quotes\".\"maximum_fee_baht\" >= 0 AND \"payment_payout_quotes\".\"maximum_tax_baht\" >= 0 AND \"payment_payout_quotes\".\"maximum_debit_baht\" = \"payment_payout_quotes\".\"receipt_baht\" + \"payment_payout_quotes\".\"maximum_fee_baht\" + \"payment_payout_quotes\".\"maximum_tax_baht\" AND \"payment_payout_quotes\".\"quoted_fee_satang\" >= 0 AND \"payment_payout_quotes\".\"quoted_tax_satang\" >= 0 AND \"payment_payout_quotes\".\"quoted_debit_satang\" > 0"
+          "value": "\"payment_payout_quotes\".\"receipt_satang\" > 0 AND \"payment_payout_quotes\".\"maximum_fee_satang\" >= 0 AND \"payment_payout_quotes\".\"maximum_tax_satang\" >= 0 AND \"payment_payout_quotes\".\"maximum_debit_satang\" = \"payment_payout_quotes\".\"receipt_satang\" + \"payment_payout_quotes\".\"maximum_fee_satang\" + \"payment_payout_quotes\".\"maximum_tax_satang\""
         },
-        "payment_payout_quotes_currency_check": {
-          "name": "payment_payout_quotes_currency_check",
-          "value": "\"payment_payout_quotes\".\"currency\" = 'THB'"
+        "payment_payout_quotes_rounding_check": {
+          "name": "payment_payout_quotes_rounding_check",
+          "value": "\"payment_payout_quotes\".\"fee_rounding_mode\" = 'UP'"
         }
       },
       "isRLSEnabled": false
@@ -1756,6 +1818,12 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "internal_reference": {
+          "name": "internal_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "user_id": {
           "name": "user_id",
           "type": "uuid",
@@ -1816,8 +1884,26 @@
           "primaryKey": false,
           "notNull": true
         },
-        "destination_account_number": {
-          "name": "destination_account_number",
+        "destination_account_number_key_version": {
+          "name": "destination_account_number_key_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_account_number_nonce": {
+          "name": "destination_account_number_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_account_number_ciphertext": {
+          "name": "destination_account_number_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_account_number_auth_tag": {
+          "name": "destination_account_number_auth_tag",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1834,8 +1920,26 @@
           "primaryKey": false,
           "notNull": true
         },
-        "destination_routing_value": {
-          "name": "destination_routing_value",
+        "destination_routing_value_key_version": {
+          "name": "destination_routing_value_key_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_routing_value_nonce": {
+          "name": "destination_routing_value_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_routing_value_ciphertext": {
+          "name": "destination_routing_value_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_routing_value_auth_tag": {
+          "name": "destination_routing_value_auth_tag",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1852,54 +1956,65 @@
           "primaryKey": false,
           "notNull": false
         },
-        "principal_baht": {
-          "name": "principal_baht",
-          "type": "bigint",
+        "provider_api_version": {
+          "name": "provider_api_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_status": {
+          "name": "provider_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_amount_satang": {
+          "name": "provider_amount_satang",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "principal_satang": {
+          "name": "principal_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "maximum_fee_baht": {
-          "name": "maximum_fee_baht",
-          "type": "bigint",
+        "maximum_fee_satang": {
+          "name": "maximum_fee_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "maximum_tax_baht": {
-          "name": "maximum_tax_baht",
-          "type": "bigint",
+        "maximum_tax_satang": {
+          "name": "maximum_tax_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "maximum_debit_baht": {
-          "name": "maximum_debit_baht",
-          "type": "bigint",
+        "maximum_debit_satang": {
+          "name": "maximum_debit_satang",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
         "actual_fee_satang": {
           "name": "actual_fee_satang",
-          "type": "bigint",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
         "actual_tax_satang": {
           "name": "actual_tax_satang",
-          "type": "bigint",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
         "actual_debit_satang": {
           "name": "actual_debit_satang",
-          "type": "bigint",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
-        },
-        "currency": {
-          "name": "currency",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'THB'"
         },
         "payout_status": {
           "name": "payout_status",
@@ -2017,10 +2132,47 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "payment_payouts_quote_user_fk": {
+          "name": "payment_payouts_quote_user_fk",
+          "tableFrom": "payment_payouts",
+          "tableTo": "payment_payout_quotes",
+          "columnsFrom": [
+            "quote_id",
+            "user_id"
+          ],
+          "columnsTo": [
+            "id",
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "payment_payouts_account_user_fk": {
+          "name": "payment_payouts_account_user_fk",
+          "tableFrom": "payment_payouts",
+          "tableTo": "payment_payout_accounts",
+          "columnsFrom": [
+            "payout_account_id",
+            "user_id"
+          ],
+          "columnsTo": [
+            "id",
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "payment_payouts_internal_reference_unique": {
+          "name": "payment_payouts_internal_reference_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "internal_reference"
+          ]
+        },
         "payment_payouts_quote_id_unique": {
           "name": "payment_payouts_quote_id_unique",
           "nullsNotDistinct": false,
@@ -2048,6 +2200,14 @@
           "columns": [
             "final_ledger_transaction_id"
           ]
+        },
+        "payment_payouts_id_user_key": {
+          "name": "payment_payouts_id_user_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "user_id"
+          ]
         }
       },
       "policies": {},
@@ -2058,11 +2218,386 @@
         },
         "payment_payouts_amount_check": {
           "name": "payment_payouts_amount_check",
-          "value": "\"payment_payouts\".\"principal_baht\" > 0 AND \"payment_payouts\".\"maximum_fee_baht\" >= 0 AND \"payment_payouts\".\"maximum_tax_baht\" >= 0 AND \"payment_payouts\".\"maximum_debit_baht\" = \"payment_payouts\".\"principal_baht\" + \"payment_payouts\".\"maximum_fee_baht\" + \"payment_payouts\".\"maximum_tax_baht\""
+          "value": "\"payment_payouts\".\"principal_satang\" > 0 AND \"payment_payouts\".\"maximum_fee_satang\" >= 0 AND \"payment_payouts\".\"maximum_tax_satang\" >= 0 AND \"payment_payouts\".\"maximum_debit_satang\" = \"payment_payouts\".\"principal_satang\" + \"payment_payouts\".\"maximum_fee_satang\" + \"payment_payouts\".\"maximum_tax_satang\" AND (\"payment_payouts\".\"provider_amount_satang\" IS NULL OR \"payment_payouts\".\"provider_amount_satang\" = \"payment_payouts\".\"principal_satang\")"
         },
-        "payment_payouts_currency_check": {
-          "name": "payment_payouts_currency_check",
-          "value": "\"payment_payouts\".\"currency\" = 'THB' AND \"payment_payouts\".\"destination_account_country\" = 'TH' AND \"payment_payouts\".\"destination_account_currency\" = 'THB'"
+        "payment_payouts_actual_amount_check": {
+          "name": "payment_payouts_actual_amount_check",
+          "value": "num_nonnulls(\"payment_payouts\".\"actual_fee_satang\", \"payment_payouts\".\"actual_tax_satang\", \"payment_payouts\".\"actual_debit_satang\") IN (0, 3) AND (\"payment_payouts\".\"actual_fee_satang\" IS NULL OR (\"payment_payouts\".\"actual_fee_satang\" >= 0 AND \"payment_payouts\".\"actual_tax_satang\" >= 0 AND \"payment_payouts\".\"actual_debit_satang\" = \"payment_payouts\".\"principal_satang\" + \"payment_payouts\".\"actual_fee_satang\" + \"payment_payouts\".\"actual_tax_satang\" AND \"payment_payouts\".\"actual_debit_satang\" <= \"payment_payouts\".\"maximum_debit_satang\"))"
+        },
+        "payment_payouts_destination_currency_check": {
+          "name": "payment_payouts_destination_currency_check",
+          "value": "\"payment_payouts\".\"destination_account_country\" = 'TH' AND \"payment_payouts\".\"destination_account_currency\" = 'THB'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payment_provider_event_history": {
+      "name": "payment_provider_event_history",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_status": {
+          "name": "from_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "to_status": {
+          "name": "to_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "payment_provider_event_history_event_idx": {
+          "name": "payment_provider_event_history_event_idx",
+          "columns": [
+            {
+              "expression": "event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "occurred_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "payment_provider_event_history_event_id_payment_provider_event_inbox_id_fk": {
+          "name": "payment_provider_event_history_event_id_payment_provider_event_inbox_id_fk",
+          "tableFrom": "payment_provider_event_history",
+          "tableTo": "payment_provider_event_inbox",
+          "columnsFrom": [
+            "event_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "payment_provider_event_history_from_status_check": {
+          "name": "payment_provider_event_history_from_status_check",
+          "value": "\"payment_provider_event_history\".\"from_status\" IS NULL OR \"payment_provider_event_history\".\"from_status\" IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')"
+        },
+        "payment_provider_event_history_to_status_check": {
+          "name": "payment_provider_event_history_to_status_check",
+          "value": "\"payment_provider_event_history\".\"to_status\" IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payment_provider_event_inbox": {
+      "name": "payment_provider_event_inbox",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_event_id": {
+          "name": "provider_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource_type": {
+          "name": "resource_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "internal_reference": {
+          "name": "internal_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_reference": {
+          "name": "provider_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_api_version": {
+          "name": "provider_api_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_status": {
+          "name": "provider_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "normalized_status": {
+          "name": "normalized_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_amount_satang": {
+          "name": "provider_amount_satang",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_actual_fee_satang": {
+          "name": "provider_actual_fee_satang",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_actual_tax_satang": {
+          "name": "provider_actual_tax_satang",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_actual_debit_satang": {
+          "name": "provider_actual_debit_satang",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_channel_code": {
+          "name": "provider_channel_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_occurred_at": {
+          "name": "provider_occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload_hash": {
+          "name": "payload_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "raw_payload_key_version": {
+          "name": "raw_payload_key_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "raw_payload_nonce": {
+          "name": "raw_payload_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "raw_payload_ciphertext": {
+          "name": "raw_payload_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "raw_payload_auth_tag": {
+          "name": "raw_payload_auth_tag",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "raw_payload_expires_at": {
+          "name": "raw_payload_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "processing_status": {
+          "name": "processing_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'RECEIVED'"
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "claimed_at": {
+          "name": "claimed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "processed_at": {
+          "name": "processed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "payment_provider_event_inbox_processing_idx": {
+          "name": "payment_provider_event_inbox_processing_idx",
+          "columns": [
+            {
+              "expression": "processing_status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "received_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_provider_event_inbox_expiry_idx": {
+          "name": "payment_provider_event_inbox_expiry_idx",
+          "columns": [
+            {
+              "expression": "raw_payload_expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "payment_provider_event_inbox_provider_event_key": {
+          "name": "payment_provider_event_inbox_provider_event_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "provider",
+            "provider_event_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "payment_provider_event_inbox_amount_check": {
+          "name": "payment_provider_event_inbox_amount_check",
+          "value": "\"payment_provider_event_inbox\".\"provider_amount_satang\" IS NULL OR \"payment_provider_event_inbox\".\"provider_amount_satang\" > 0"
+        },
+        "payment_provider_event_inbox_attempt_check": {
+          "name": "payment_provider_event_inbox_attempt_check",
+          "value": "\"payment_provider_event_inbox\".\"attempt_count\" BETWEEN 0 AND 5"
+        },
+        "payment_provider_event_inbox_normalized_status_check": {
+          "name": "payment_provider_event_inbox_normalized_status_check",
+          "value": "\"payment_provider_event_inbox\".\"normalized_status\" IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED', 'COMPLETED', 'CANCELLED')"
+        },
+        "payment_provider_event_inbox_actual_amount_check": {
+          "name": "payment_provider_event_inbox_actual_amount_check",
+          "value": "num_nonnulls(\"payment_provider_event_inbox\".\"provider_actual_fee_satang\", \"payment_provider_event_inbox\".\"provider_actual_tax_satang\", \"payment_provider_event_inbox\".\"provider_actual_debit_satang\") IN (0, 3) AND (\"payment_provider_event_inbox\".\"provider_actual_fee_satang\" IS NULL OR (\"payment_provider_event_inbox\".\"provider_actual_fee_satang\" >= 0 AND \"payment_provider_event_inbox\".\"provider_actual_tax_satang\" >= 0 AND \"payment_provider_event_inbox\".\"provider_actual_debit_satang\" = \"payment_provider_event_inbox\".\"provider_amount_satang\" + \"payment_provider_event_inbox\".\"provider_actual_fee_satang\" + \"payment_provider_event_inbox\".\"provider_actual_tax_satang\"))"
+        },
+        "payment_provider_event_inbox_processing_status_check": {
+          "name": "payment_provider_event_inbox_processing_status_check",
+          "value": "\"payment_provider_event_inbox\".\"processing_status\" IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')"
+        },
+        "payment_provider_event_inbox_raw_payload_check": {
+          "name": "payment_provider_event_inbox_raw_payload_check",
+          "value": "num_nonnulls(\"payment_provider_event_inbox\".\"raw_payload_key_version\", \"payment_provider_event_inbox\".\"raw_payload_nonce\", \"payment_provider_event_inbox\".\"raw_payload_ciphertext\", \"payment_provider_event_inbox\".\"raw_payload_auth_tag\") IN (0, 4)"
         }
       },
       "isRLSEnabled": false

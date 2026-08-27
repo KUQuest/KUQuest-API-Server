@@ -51,7 +51,16 @@ export type MoneyDomainErrorCode =
   | 'TOP_UP_QUOTE_EXPIRED'
   | 'TOP_UP_CREATE_FAILED'
   | 'TOP_UP_NOT_FOUND'
-  | 'TOP_UP_UPDATE_FAILED';
+  | 'TOP_UP_UPDATE_FAILED'
+  | 'PAYOUT_ACTIVE_EXISTS'
+  | 'PAYOUT_CREATE_FAILED'
+  | 'PAYOUT_DESTINATION_NOT_FOUND'
+  | 'PAYOUT_NOT_FOUND'
+  | 'PAYOUT_QUOTE_CONSUMED'
+  | 'PAYOUT_QUOTE_CREATE_FAILED'
+  | 'PAYOUT_QUOTE_EXPIRED'
+  | 'PAYOUT_QUOTE_NOT_FOUND'
+  | 'PAYOUT_UPDATE_FAILED';
 
 export class MoneyDomainError extends Error {
   readonly code: MoneyDomainErrorCode;

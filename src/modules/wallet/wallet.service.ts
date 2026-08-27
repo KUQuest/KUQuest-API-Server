@@ -394,7 +394,7 @@ export type SealedLedgerTransactionInput = {
   };
 };
 
-const createSealedLedgerTransactionInTransaction = async (
+export const createSealedLedgerTransactionInTransaction = async (
   transaction: WalletTransaction,
   input: SealedLedgerTransactionInput,
 ) => {

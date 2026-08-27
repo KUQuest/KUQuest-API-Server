@@ -169,23 +169,67 @@ A former Active Worker whose Assignment ended before the Quest completed.
 _Avoid_: Active Worker, Candidate
 
 **Work Membership Window**:
-The inclusive period in which an accepted participant has access to the Work Conversation. A former Worker retains only the history from their own window.
+The inclusive period in which an Accepted Participant has current access to the Work Conversation. After the window ends, the former Worker may read only Messages created no later than their departure.
 _Avoid_: Chat permission, participant status
 
 **Quest Edit**:
 A change to a Quest's details proposed by its Hirer.
 _Avoid_: Assignment change, membership transition
 
+**Conversation**:
+A persisted room for coordinating work on one Quest. In this context, the only Conversation is a Work Conversation.
+_Avoid_: Direct message, group chat, team chat
+
 **Work Conversation**:
-The one working Chat conversation associated with a Quest. Its participants are the Hirer and the Active Workers, never Candidates.
+The one working Chat Conversation associated with a Quest. Its current Accepted Participants are the Hirer and the Active Workers, never Candidates.
 _Avoid_: Group chat, team chat
+
+**Chat Membership**:
+The relationship between an Accepted Participant and a Work Conversation. It records whether the Accepted Participant may read current content, send Messages, and retain historical access after departure.
+_Avoid_: Chat permission, participant status
+
+**Message**:
+A piece of content in a Work Conversation, sent by an Accepted Participant or created by the system. It may contain text, Attachments, or both, and becomes part of the retained Conversation history.
+_Avoid_: Notification, post
+
+**Attachment**:
+A private file shared in a Message in a Work Conversation. A Member can access it only when the Member may read the containing Message. An Admin can access it only as retained evidence for an authorized Report Case. Both paths require the Attachment to pass the required safety checks.
+_Avoid_: Public file, image URL
+
+**Read Cursor**:
+A private position that a Member has acknowledged in a Work Conversation. It only moves forward and supports unread counts and resume position; it is not a read receipt.
+_Avoid_: Read receipt, last seen
+
+**System Message**:
+An immutable Message created from a Work Membership Transition to record a membership or Work Conversation lifecycle change.
+_Avoid_: Notification, audit log
+
+**Report Case**:
+A Trust & Safety record that groups Reporter Entries for one Message and tracks its moderation status: `PENDING`, `DISMISSED`, `HIDDEN`, or `RESTORED`. `PENDING` and `HIDDEN` are open statuses; `DISMISSED` and `RESTORED` are closed statuses. It retains the bounded evidence needed for moderation under the retention policy.
+_Avoid_: single Reporter Entry, Message flag
+
+**Evidence Reference**:
+A bounded reference from a Report Case to a Message or Attachment required for moderation. It identifies the retained domain record and its hold without copying Message text, file bytes, or signed URLs.
+_Avoid_: evidence copy, public file link
+
+**Reporter Entry**:
+A Member's reason and optional detail about one visible Message. A Member can create one Reporter Entry for one Message, and the entry belongs to that Message's Report Case.
+_Avoid_: Report Case, Moderation Decision
+
+**Moderation Decision**:
+An immutable record of an Admin's decision to dismiss, hide, or restore a Report Case. It records the previous status, the new status, the Admin, and the time of the decision.
+_Avoid_: Reporter Entry, Admin Action
+
+**Admin Action**:
+An immutable audit record of an Admin's Work Chat evidence access or moderation operation. It records the action and result for the affected domain records without storing Message text, file bytes, or signed URLs.
+_Avoid_: Reporter Entry, Moderation Decision
 
 **Terminal Quest**:
 A Quest in `COMPLETED` or `CANCELLED`. Its Work Conversation is read-only.
 _Avoid_: Closed conversation
 
 **Work Membership Transition**:
-A change to accepted Quest participation or terminal lifecycle state that changes Work Conversation membership or write access.
+A change to Accepted Participant membership or terminal lifecycle state that changes Work Conversation membership or write access.
 _Avoid_: Chat event, message event
 
 ## Consumers

@@ -1,6 +1,6 @@
 {
-  "id": "8aa79e2e-e202-4fb5-91b4-04a5891e56ed",
-  "prevId": "e93eada8-bf64-493a-8073-b06b3972b65e",
+  "id": "61d068c4-bd75-4d7f-8aea-1ed793e42353",
+  "prevId": "e4010b1c-4f3c-4c34-9124-3ed6bd38df35",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -151,13 +151,13 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "admin_id": {
           "name": "admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -320,10 +320,10 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": true,
           "notNull": true,
-          "default": "gen_random_uuid()"
+          "default": "gen_random_uuid()::text"
         },
         "username": {
           "name": "username",
@@ -456,13 +456,13 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "admin_id": {
           "name": "admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -590,10 +590,10 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": true,
           "notNull": true,
-          "default": "gen_random_uuid()"
+          "default": "gen_random_uuid()::text"
         },
         "email": {
           "name": "email",
@@ -900,7 +900,7 @@
         },
         "uploaded_by_user_id": {
           "name": "uploaded_by_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -1079,7 +1079,7 @@
         },
         "authored_by_admin_id": {
           "name": "authored_by_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -1173,7 +1173,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -1221,8 +1221,26 @@
           "primaryKey": false,
           "notNull": true
         },
-        "account_number": {
-          "name": "account_number",
+        "account_number_key_version": {
+          "name": "account_number_key_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_number_nonce": {
+          "name": "account_number_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_number_ciphertext": {
+          "name": "account_number_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_number_auth_tag": {
+          "name": "account_number_auth_tag",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1239,8 +1257,26 @@
           "primaryKey": false,
           "notNull": true
         },
-        "routing_value": {
-          "name": "routing_value",
+        "routing_value_key_version": {
+          "name": "routing_value_key_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "routing_value_nonce": {
+          "name": "routing_value_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "routing_value_ciphertext": {
+          "name": "routing_value_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "routing_value_auth_tag": {
+          "name": "routing_value_auth_tag",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1299,12 +1335,25 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "payment_payout_accounts_id_user_key": {
+          "name": "payment_payout_accounts_id_user_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "user_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "payment_payout_accounts_recipient_type_check": {
           "name": "payment_payout_accounts_recipient_type_check",
-          "value": "\"payment_payout_accounts\".\"recipient_type\" IN ('SELF', 'THIRD_PARTY')"
+          "value": "\"payment_payout_accounts\".\"recipient_type\" = 'SELF'"
+        },
+        "payment_payout_accounts_routing_type_check": {
+          "name": "payment_payout_accounts_routing_type_check",
+          "value": "\"payment_payout_accounts\".\"routing_type\" IN ('BANK_ACCOUNT', 'PROMPTPAY')"
         },
         "payment_payout_accounts_country_currency_check": {
           "name": "payment_payout_accounts_country_currency_check",
@@ -1332,7 +1381,7 @@
         },
         "admin_id": {
           "name": "admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -1437,7 +1486,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -1578,10 +1627,34 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "payment_payout_quotes_account_user_fk": {
+          "name": "payment_payout_quotes_account_user_fk",
+          "tableFrom": "payment_payout_quotes",
+          "tableTo": "payment_payout_accounts",
+          "columnsFrom": [
+            "payout_account_id",
+            "user_id"
+          ],
+          "columnsTo": [
+            "id",
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "payment_payout_quotes_id_user_key": {
+          "name": "payment_payout_quotes_id_user_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "user_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "payment_payout_quotes_amount_check": {
@@ -1632,13 +1705,13 @@
         },
         "actor_user_id": {
           "name": "actor_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "actor_admin_id": {
           "name": "actor_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -1758,7 +1831,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -1816,8 +1889,26 @@
           "primaryKey": false,
           "notNull": true
         },
-        "destination_account_number": {
-          "name": "destination_account_number",
+        "destination_account_number_key_version": {
+          "name": "destination_account_number_key_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_account_number_nonce": {
+          "name": "destination_account_number_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_account_number_ciphertext": {
+          "name": "destination_account_number_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_account_number_auth_tag": {
+          "name": "destination_account_number_auth_tag",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1834,8 +1925,26 @@
           "primaryKey": false,
           "notNull": true
         },
-        "destination_routing_value": {
-          "name": "destination_routing_value",
+        "destination_routing_value_key_version": {
+          "name": "destination_routing_value_key_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_routing_value_nonce": {
+          "name": "destination_routing_value_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_routing_value_ciphertext": {
+          "name": "destination_routing_value_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_routing_value_auth_tag": {
+          "name": "destination_routing_value_auth_tag",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -2017,6 +2126,36 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "payment_payouts_quote_user_fk": {
+          "name": "payment_payouts_quote_user_fk",
+          "tableFrom": "payment_payouts",
+          "tableTo": "payment_payout_quotes",
+          "columnsFrom": [
+            "quote_id",
+            "user_id"
+          ],
+          "columnsTo": [
+            "id",
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "payment_payouts_account_user_fk": {
+          "name": "payment_payouts_account_user_fk",
+          "tableFrom": "payment_payouts",
+          "tableTo": "payment_payout_accounts",
+          "columnsFrom": [
+            "payout_account_id",
+            "user_id"
+          ],
+          "columnsTo": [
+            "id",
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2047,6 +2186,14 @@
           "nullsNotDistinct": false,
           "columns": [
             "final_ledger_transaction_id"
+          ]
+        },
+        "payment_payouts_id_user_key": {
+          "name": "payment_payouts_id_user_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "user_id"
           ]
         }
       },
@@ -2086,7 +2233,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -2364,7 +2511,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -2542,13 +2689,13 @@
         },
         "actor_user_id": {
           "name": "actor_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "actor_admin_id": {
           "name": "actor_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -2668,7 +2815,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -2782,7 +2929,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -2962,7 +3109,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -3084,9 +3231,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "worker_id": {
-          "name": "worker_id",
-          "type": "uuid",
+        "hunter_id": {
+          "name": "hunter_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -3098,7 +3245,7 @@
         },
         "submitted_by_user_id": {
           "name": "submitted_by_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -3113,7 +3260,7 @@
           "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
-          "default": "'PROOF_PENDING'"
+          "default": "'PENDING'"
         },
         "review_note": {
           "name": "review_note",
@@ -3166,11 +3313,11 @@
           "method": "btree",
           "with": {}
         },
-        "proof_submission_worker_id_idx": {
-          "name": "proof_submission_worker_id_idx",
+        "proof_submission_hunter_id_idx": {
+          "name": "proof_submission_hunter_id_idx",
           "columns": [
             {
-              "expression": "worker_id",
+              "expression": "hunter_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3211,12 +3358,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "proof_submission_worker_id_auth_user_id_fk": {
-          "name": "proof_submission_worker_id_auth_user_id_fk",
+        "proof_submission_hunter_id_auth_user_id_fk": {
+          "name": "proof_submission_hunter_id_auth_user_id_fk",
           "tableFrom": "proof_submission",
           "tableTo": "auth_user",
           "columnsFrom": [
-            "worker_id"
+            "hunter_id"
           ],
           "columnsTo": [
             "id"
@@ -3257,11 +3404,11 @@
       "checkConstraints": {
         "proof_submission_owner_check": {
           "name": "proof_submission_owner_check",
-          "value": "num_nonnulls(\"proof_submission\".\"worker_id\", \"proof_submission\".\"team_id\") = 1"
+          "value": "num_nonnulls(\"proof_submission\".\"hunter_id\", \"proof_submission\".\"team_id\") = 1"
         },
         "proof_submission_status_check": {
           "name": "proof_submission_status_check",
-          "value": "\"proof_submission\".\"submission_status\" IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_REJECTED', 'PROOF_AUTO_APPROVED')"
+          "value": "\"proof_submission\".\"submission_status\" IN ('PENDING', 'APPROVED', 'REJECTED', 'AUTO_APPROVED')"
         }
       },
       "isRLSEnabled": false
@@ -3368,9 +3515,9 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "hirer_id": {
-          "name": "hirer_id",
-          "type": "uuid",
+        "giver_id": {
+          "name": "giver_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -3405,7 +3552,7 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'SOLO'"
+          "default": "'SINGLE'"
         },
         "quest_status": {
           "name": "quest_status",
@@ -3413,7 +3560,7 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'QUEST_DRAFT'"
+          "default": "'DRAFT'"
         },
         "reward_satang": {
           "name": "reward_satang",
@@ -3461,13 +3608,13 @@
         },
         "cancelled_by_user_id": {
           "name": "cancelled_by_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "cancelled_by_admin_id": {
           "name": "cancelled_by_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -3479,7 +3626,7 @@
         },
         "hidden_by_admin_id": {
           "name": "hidden_by_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -3499,11 +3646,11 @@
         }
       },
       "indexes": {
-        "quest_hirer_id_idx": {
-          "name": "quest_hirer_id_idx",
+        "quest_giver_id_idx": {
+          "name": "quest_giver_id_idx",
           "columns": [
             {
-              "expression": "hirer_id",
+              "expression": "giver_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3576,12 +3723,12 @@
         }
       },
       "foreignKeys": {
-        "quest_hirer_id_auth_user_id_fk": {
-          "name": "quest_hirer_id_auth_user_id_fk",
+        "quest_giver_id_auth_user_id_fk": {
+          "name": "quest_giver_id_auth_user_id_fk",
           "tableFrom": "quest",
           "tableTo": "auth_user",
           "columnsFrom": [
-            "hirer_id"
+            "giver_id"
           ],
           "columnsTo": [
             "id"
@@ -3664,7 +3811,7 @@
         },
         "quest_tag_check": {
           "name": "quest_tag_check",
-          "value": "\"quest\".\"quest_status\" = 'QUEST_DRAFT' OR \"quest\".\"tag_id\" IS NOT NULL"
+          "value": "\"quest\".\"quest_status\" = 'DRAFT' OR \"quest\".\"tag_id\" IS NOT NULL"
         },
         "quest_cancelled_by_check": {
           "name": "quest_cancelled_by_check",
@@ -3672,11 +3819,11 @@
         },
         "quest_cancelled_at_check": {
           "name": "quest_cancelled_at_check",
-          "value": "(\"quest\".\"cancelled_at\" IS NULL) = (\"quest\".\"quest_status\" <> 'QUEST_CANCELLED')"
+          "value": "(\"quest\".\"cancelled_at\" IS NULL) = (\"quest\".\"quest_status\" <> 'CANCELLED')"
         },
         "quest_hidden_at_check": {
           "name": "quest_hidden_at_check",
-          "value": "(\"quest\".\"hidden_at\" IS NULL) = (\"quest\".\"quest_status\" <> 'QUEST_HIDDEN')"
+          "value": "(\"quest\".\"hidden_at\" IS NULL) = (\"quest\".\"quest_status\" <> 'HIDDEN')"
         },
         "quest_hidden_by_check": {
           "name": "quest_hidden_by_check",
@@ -3702,9 +3849,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "worker_id": {
-          "name": "worker_id",
-          "type": "uuid",
+        "hunter_id": {
+          "name": "hunter_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -3713,7 +3860,7 @@
           "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
-          "default": "'APPLICATION_APPLIED'"
+          "default": "'APPLIED'"
         },
         "rework_limit": {
           "name": "rework_limit",
@@ -3772,7 +3919,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"quest_application\".\"application_status\" = 'APPLICATION_SELECTED'",
+          "where": "\"quest_application\".\"application_status\" = 'SELECTED'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -3792,12 +3939,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "quest_application_worker_id_auth_user_id_fk": {
-          "name": "quest_application_worker_id_auth_user_id_fk",
+        "quest_application_hunter_id_auth_user_id_fk": {
+          "name": "quest_application_hunter_id_auth_user_id_fk",
           "tableFrom": "quest_application",
           "tableTo": "auth_user",
           "columnsFrom": [
-            "worker_id"
+            "hunter_id"
           ],
           "columnsTo": [
             "id"
@@ -3808,12 +3955,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "quest_application_quest_id_worker_id_key": {
-          "name": "quest_application_quest_id_worker_id_key",
+        "quest_application_quest_id_hunter_id_key": {
+          "name": "quest_application_quest_id_hunter_id_key",
           "nullsNotDistinct": false,
           "columns": [
             "quest_id",
-            "worker_id"
+            "hunter_id"
           ]
         }
       },
@@ -3821,7 +3968,7 @@
       "checkConstraints": {
         "quest_application_status_check": {
           "name": "quest_application_status_check",
-          "value": "\"quest_application\".\"application_status\" IN ('APPLICATION_APPLIED', 'APPLICATION_SELECTED', 'APPLICATION_REJECTED', 'APPLICATION_WITHDRAWN')"
+          "value": "\"quest_application\".\"application_status\" IN ('APPLIED', 'SELECTED', 'REJECTED')"
         },
         "quest_application_rework_limit_check": {
           "name": "quest_application_rework_limit_check",
@@ -3847,9 +3994,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "worker_id": {
-          "name": "worker_id",
-          "type": "uuid",
+        "hunter_id": {
+          "name": "hunter_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -3858,7 +4005,7 @@
           "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
-          "default": "'ASSIGNMENT_ACTIVE'"
+          "default": "'ACTIVE'"
         },
         "started_at": {
           "name": "started_at",
@@ -3890,11 +4037,11 @@
           "method": "btree",
           "with": {}
         },
-        "quest_assignment_worker_id_idx": {
-          "name": "quest_assignment_worker_id_idx",
+        "quest_assignment_hunter_id_idx": {
+          "name": "quest_assignment_hunter_id_idx",
           "columns": [
             {
-              "expression": "worker_id",
+              "expression": "hunter_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3935,12 +4082,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "quest_assignment_worker_id_auth_user_id_fk": {
-          "name": "quest_assignment_worker_id_auth_user_id_fk",
+        "quest_assignment_hunter_id_auth_user_id_fk": {
+          "name": "quest_assignment_hunter_id_auth_user_id_fk",
           "tableFrom": "quest_assignment",
           "tableTo": "auth_user",
           "columnsFrom": [
-            "worker_id"
+            "hunter_id"
           ],
           "columnsTo": [
             "id"
@@ -3951,12 +4098,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "quest_assignment_quest_id_worker_id_key": {
-          "name": "quest_assignment_quest_id_worker_id_key",
+        "quest_assignment_quest_id_hunter_id_key": {
+          "name": "quest_assignment_quest_id_hunter_id_key",
           "nullsNotDistinct": false,
           "columns": [
             "quest_id",
-            "worker_id"
+            "hunter_id"
           ]
         }
       },
@@ -3964,7 +4111,7 @@
       "checkConstraints": {
         "quest_assignment_status_check": {
           "name": "quest_assignment_status_check",
-          "value": "\"quest_assignment\".\"assignment_status\" IN ('ASSIGNMENT_ACTIVE', 'ASSIGNMENT_COMPLETED', 'ASSIGNMENT_INCOMPLETE', 'ASSIGNMENT_CANCELLED')"
+          "value": "\"quest_assignment\".\"assignment_status\" IN ('ACTIVE', 'COMPLETED', 'INCOMPLETE', 'CANCELLED')"
         }
       },
       "isRLSEnabled": false
@@ -4019,13 +4166,13 @@
         },
         "edited_by_user_id": {
           "name": "edited_by_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "edited_by_admin_id": {
           "name": "edited_by_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         }
@@ -4137,7 +4284,7 @@
         },
         "requested_by_user_id": {
           "name": "requested_by_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -4147,19 +4294,12 @@
           "primaryKey": false,
           "notNull": true
         },
-        "previous_quest_status": {
-          "name": "previous_quest_status",
-          "type": "quest_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
         "request_status": {
           "name": "request_status",
           "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
-          "default": "'EDIT_REQUEST_PENDING'"
+          "default": "'PENDING'"
         },
         "created_at": {
           "name": "created_at",
@@ -4187,22 +4327,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "quest_edit_request_one_pending_uidx": {
-          "name": "quest_edit_request_one_pending_uidx",
-          "columns": [
-            {
-              "expression": "quest_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"quest_edit_request\".\"request_status\" = 'EDIT_REQUEST_PENDING'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -4242,7 +4366,7 @@
       "checkConstraints": {
         "quest_edit_request_status_check": {
           "name": "quest_edit_request_status_check",
-          "value": "\"quest_edit_request\".\"request_status\" IN ('EDIT_REQUEST_PENDING', 'EDIT_REQUEST_APPROVED', 'EDIT_REQUEST_REJECTED')"
+          "value": "\"quest_edit_request\".\"request_status\" IN ('PENDING', 'APPROVED', 'REJECTED')"
         }
       },
       "isRLSEnabled": false
@@ -4266,7 +4390,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -4274,7 +4398,7 @@
           "name": "decision",
           "type": "varchar(32)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "responded_at": {
           "name": "responded_at",
@@ -4344,7 +4468,7 @@
       "checkConstraints": {
         "quest_edit_request_response_decision_check": {
           "name": "quest_edit_request_response_decision_check",
-          "value": "\"quest_edit_request_response\".\"decision\" IS NULL OR \"quest_edit_request_response\".\"decision\" IN ('EDIT_RESPONSE_APPROVED', 'EDIT_RESPONSE_REJECTED')"
+          "value": "\"quest_edit_request_response\".\"decision\" IN ('APPROVED', 'REJECTED')"
         }
       },
       "isRLSEnabled": false
@@ -4462,6 +4586,31 @@
           "type": "varchar(100)",
           "primaryKey": false,
           "notNull": false
+        },
+        "address": {
+          "name": "address",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lat": {
+          "name": "lat",
+          "type": "numeric(9, 6)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lng": {
+          "name": "lng",
+          "type": "numeric(9, 6)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
         }
       },
       "indexes": {
@@ -4497,9 +4646,27 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "quest_location_quest_id_position_key": {
+          "name": "quest_location_quest_id_position_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "quest_id",
+            "position"
+          ]
+        }
+      },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "quest_location_lat_check": {
+          "name": "quest_location_lat_check",
+          "value": "\"quest_location\".\"lat\" BETWEEN -90 AND 90"
+        },
+        "quest_location_lng_check": {
+          "name": "quest_location_lng_check",
+          "value": "\"quest_location\".\"lng\" BETWEEN -180 AND 180"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.quest_team": {
@@ -4521,7 +4688,7 @@
         },
         "leader_id": {
           "name": "leader_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -4536,7 +4703,7 @@
           "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
-          "default": "'TEAM_FORMING'"
+          "default": "'FORMING'"
         },
         "rework_limit": {
           "name": "rework_limit",
@@ -4580,7 +4747,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"quest_team\".\"team_status\" = 'TEAM_SELECTED'",
+          "where": "\"quest_team\".\"team_status\" = 'SELECTED'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -4615,197 +4782,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "quest_team_id_leader_id_key": {
-          "name": "quest_team_id_leader_id_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "id",
-            "leader_id"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
         "quest_team_status_check": {
           "name": "quest_team_status_check",
-          "value": "\"quest_team\".\"team_status\" IN ('TEAM_FORMING', 'TEAM_SUBMITTED', 'TEAM_SELECTED', 'TEAM_REJECTED')"
+          "value": "\"quest_team\".\"team_status\" IN ('FORMING', 'SUBMITTED', 'SELECTED', 'REJECTED')"
         },
         "quest_team_rework_limit_check": {
           "name": "quest_team_rework_limit_check",
           "value": "\"quest_team\".\"rework_limit\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.quest_team_invitation": {
-      "name": "quest_team_invitation",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "invited_user_id": {
-          "name": "invited_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "invited_by_user_id": {
-          "name": "invited_by_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "invitation_status": {
-          "name": "invitation_status",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'INVITATION_PENDING'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "responded_at": {
-          "name": "responded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "quest_team_invitation_team_id_idx": {
-          "name": "quest_team_invitation_team_id_idx",
-          "columns": [
-            {
-              "expression": "team_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "quest_team_invitation_invited_user_id_idx": {
-          "name": "quest_team_invitation_invited_user_id_idx",
-          "columns": [
-            {
-              "expression": "invited_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "quest_team_invitation_one_pending_uidx": {
-          "name": "quest_team_invitation_one_pending_uidx",
-          "columns": [
-            {
-              "expression": "team_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "invited_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"quest_team_invitation\".\"invitation_status\" = 'INVITATION_PENDING'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "quest_team_invitation_invited_user_id_auth_user_id_fk": {
-          "name": "quest_team_invitation_invited_user_id_auth_user_id_fk",
-          "tableFrom": "quest_team_invitation",
-          "tableTo": "auth_user",
-          "columnsFrom": [
-            "invited_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "quest_team_invitation_invited_by_user_id_auth_user_id_fk": {
-          "name": "quest_team_invitation_invited_by_user_id_auth_user_id_fk",
-          "tableFrom": "quest_team_invitation",
-          "tableTo": "auth_user",
-          "columnsFrom": [
-            "invited_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "quest_team_invitation_team_id_invited_by_user_id_quest_team_id_leader_id_fk": {
-          "name": "quest_team_invitation_team_id_invited_by_user_id_quest_team_id_leader_id_fk",
-          "tableFrom": "quest_team_invitation",
-          "tableTo": "quest_team",
-          "columnsFrom": [
-            "team_id",
-            "invited_by_user_id"
-          ],
-          "columnsTo": [
-            "id",
-            "leader_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "quest_team_invitation_status_check": {
-          "name": "quest_team_invitation_status_check",
-          "value": "\"quest_team_invitation\".\"invitation_status\" IN ('INVITATION_PENDING', 'INVITATION_ACCEPTED', 'INVITATION_DECLINED', 'INVITATION_EXPIRED', 'INVITATION_REVOKED')"
-        },
-        "quest_team_invitation_expires_at_check": {
-          "name": "quest_team_invitation_expires_at_check",
-          "value": "\"quest_team_invitation\".\"expires_at\" > \"quest_team_invitation\".\"created_at\""
-        },
-        "quest_team_invitation_responded_at_check": {
-          "name": "quest_team_invitation_responded_at_check",
-          "value": "(\"quest_team_invitation\".\"responded_at\" IS NULL) = (\"quest_team_invitation\".\"invitation_status\" = 'INVITATION_PENDING')"
         }
       },
       "isRLSEnabled": false
@@ -4822,7 +4808,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -4879,16 +4865,17 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {
-        "quest_team_member_team_id_user_id_pk": {
-          "name": "quest_team_member_team_id_user_id_pk",
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "quest_team_member_team_id_user_id_key": {
+          "name": "quest_team_member_team_id_user_id_key",
+          "nullsNotDistinct": false,
           "columns": [
             "team_id",
             "user_id"
           ]
         }
       },
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -4912,13 +4899,13 @@
         },
         "reviewer_id": {
           "name": "reviewer_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "reviewee_id": {
           "name": "reviewee_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -5100,7 +5087,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -5252,7 +5239,7 @@
         },
         "principal_user_id": {
           "name": "principal_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -5382,7 +5369,7 @@
         },
         "owner_user_id": {
           "name": "owner_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -5725,7 +5712,7 @@
         },
         "recipient_user_id": {
           "name": "recipient_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -5885,7 +5872,7 @@
         },
         "principal_user_id": {
           "name": "principal_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -6253,7 +6240,7 @@
         },
         "created_by_user_id": {
           "name": "created_by_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -6376,13 +6363,13 @@
         },
         "actor_user_id": {
           "name": "actor_user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
         "actor_admin_id": {
           "name": "actor_admin_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -6512,7 +6499,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -6623,7 +6610,7 @@
       "name": "quest_mode",
       "schema": "public",
       "values": [
-        "NO_CANDIDATE",
+        "FIRST_COME_FIRST_SERVED",
         "CANDIDATE"
       ]
     },
@@ -6631,7 +6618,7 @@
       "name": "quest_participation",
       "schema": "public",
       "values": [
-        "SOLO",
+        "SINGLE",
         "GROUP"
       ]
     },
@@ -6639,18 +6626,19 @@
       "name": "quest_status",
       "schema": "public",
       "values": [
-        "QUEST_DRAFT",
-        "QUEST_OPEN",
-        "QUEST_AWAITING_CONSENT",
-        "QUEST_ASSIGNED",
-        "QUEST_IN_PROGRESS",
-        "QUEST_SUBMITTED",
-        "QUEST_APPROVED",
-        "QUEST_REWORK",
-        "QUEST_COMPLETED",
-        "QUEST_CANCELLED",
-        "QUEST_DISPUTED",
-        "QUEST_HIDDEN"
+        "DRAFT",
+        "OPEN",
+        "AWAITING_CONSENT",
+        "ASSIGNED",
+        "IN_PROGRESS",
+        "SUBMITTED",
+        "APPROVED",
+        "REWORK",
+        "COMPLETED",
+        "CANCELLED",
+        "DISPUTED",
+        "HIDDEN",
+        "UNFILLED"
       ]
     }
   },

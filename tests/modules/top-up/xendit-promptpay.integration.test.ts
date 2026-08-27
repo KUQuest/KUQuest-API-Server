@@ -84,6 +84,81 @@ describe('Xendit PromptPay provider', () => {
     });
   });
 
+  it('reconciles a Payment Request status and validates permanent references', async () => {
+    let requestUrl = '';
+    let requestInit: RequestInit | undefined;
+    const provider = new XenditPromptPayProvider({
+      secretKey: 'test-secret',
+      baseUrl: 'https://xendit.test',
+      fetcher: async (input, init) => {
+        requestUrl = input.toString();
+        requestInit = init;
+        return new Response(JSON.stringify({
+          payment_request_id: 'pr-test-request',
+          reference_id: 'top-up:test-reference',
+          request_amount: 1.23,
+          status: 'SUCCEEDED',
+          channel_code: 'QRPROMPTPAY',
+          updated: '2026-08-27T00:00:00.000Z',
+        }), { status: 200 });
+      },
+    });
+
+    const result = await provider.getPaymentStatus({
+      providerReference: 'pr-test-request',
+      internalReference: 'top-up:test-reference',
+      expectedPaymentTotalSatang: positiveSatang(123),
+    });
+
+    expect(requestUrl).toBe('https://xendit.test/v3/payment_requests/pr-test-request');
+    expect(requestInit?.method).toBe('GET');
+    expect(requestInit?.headers).toMatchObject({ 'api-version': '2024-11-11' });
+    expect(result).toEqual({
+      providerReference: 'pr-test-request',
+      providerStatus: 'SUCCEEDED',
+      normalizedStatus: 'PAID',
+      providerAmountSatang: positiveSatang(123),
+      providerApiVersion: '2024-11-11',
+      providerChannelCode: 'QRPROMPTPAY',
+      occurredAt: new Date('2026-08-27T00:00:00.000Z'),
+    });
+  });
+
+  it('reconciles by internal reference when the Provider reference is unknown', async () => {
+    let requestUrl = '';
+    const provider = new XenditPromptPayProvider({
+      secretKey: 'test-secret',
+      baseUrl: 'https://xendit.test',
+      fetcher: async (input) => {
+        requestUrl = input.toString();
+        return new Response(JSON.stringify({
+          data: [{
+            payment_request_id: 'pr-recovered-request',
+            reference_id: 'top-up:recovered-reference',
+            request_amount: 1.23,
+            status: 'SUCCEEDED',
+            channel_code: 'QRPROMPTPAY',
+            updated: '2026-08-27T00:00:00.000Z',
+          }],
+        }), { status: 200 });
+      },
+    });
+
+    const result = await provider.getPaymentStatus({
+      providerReference: null,
+      internalReference: 'top-up:recovered-reference',
+      expectedPaymentTotalSatang: positiveSatang(123),
+    });
+
+    expect(requestUrl).toBe('https://xendit.test/v3/payment_requests?reference_id=top-up%3Arecovered-reference&limit=2');
+    expect(result).toMatchObject({
+      providerReference: 'pr-recovered-request',
+      providerStatus: 'SUCCEEDED',
+      normalizedStatus: 'PAID',
+      providerAmountSatang: positiveSatang(123),
+    });
+  });
+
   it('maps a successful response without a provider amount to an uncertain result', async () => {
     const provider = new XenditPromptPayProvider({
       secretKey: 'test-secret',
@@ -102,6 +177,42 @@ describe('Xendit PromptPay provider', () => {
       internalReference: 'top-up:incomplete-response',
       paymentTotalSatang: positiveSatang(100),
       expiresAt: new Date('2026-08-26T10:05:00.000Z'),
+    })).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+  });
+
+  it('does not reconcile a confirmed payment without an exact amount', async () => {
+    const provider = new XenditPromptPayProvider({
+      secretKey: 'test-secret',
+      fetcher: async () => new Response(JSON.stringify({
+        payment_request_id: 'pr-no-amount',
+        reference_id: 'top-up:no-amount',
+        status: 'SUCCEEDED',
+      }), { status: 200 }),
+    });
+
+    await expect(provider.getPaymentStatus({
+      providerReference: 'pr-no-amount',
+      internalReference: 'top-up:no-amount',
+      expectedPaymentTotalSatang: positiveSatang(100),
+    })).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+  });
+
+  it('does not reconcile a partial capture as the full Payment Request amount', async () => {
+    const provider = new XenditPromptPayProvider({
+      secretKey: 'test-secret',
+      fetcher: async () => new Response(JSON.stringify({
+        payment_request_id: 'pr-partial-capture',
+        reference_id: 'top-up:partial-capture',
+        request_amount: 10,
+        status: 'SUCCEEDED',
+        captures: [{ capture_id: 'cap-partial-capture', capture_amount: 1 }],
+      }), { status: 200 }),
+    });
+
+    await expect(provider.getPaymentStatus({
+      providerReference: 'pr-partial-capture',
+      internalReference: 'top-up:partial-capture',
+      expectedPaymentTotalSatang: positiveSatang(1_000),
     })).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
   });
 

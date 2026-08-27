@@ -4,7 +4,7 @@ give me a little bit of context, talk in ASD-STE100 Simplified Technical English
 
 ### Issue tracker
 
-Issues live in this repository's GitHub Issues. Use the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues live in this GitHub repository's Issues. Use the `gh` CLI by default, and link GitHub PRs to their related issue. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

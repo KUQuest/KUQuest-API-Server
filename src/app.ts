@@ -1,4 +1,7 @@
 import { questRoute } from '@/modules/quest/quest.route';
+import { tagRoute } from '@/modules/tag';
+import { payoutWebhookRoute } from '@/modules/payout';
+import { topUpWebhookRoute } from '@/modules/top-up';
 import { questAssignmentRoute } from '@/modules/quest/quest-assignment.route';
 import { questCandidateRoute } from '@/modules/quest/quest-candidate.route';
 import { questProofRoute } from '@/modules/quest/quest-proof.route';
@@ -8,13 +11,12 @@ import { questDisputeRoute, questSettlementRoute } from '@/modules/quest/quest-s
 import { Elysia } from 'elysia';
 
 import { academicRegistrationRoute } from './modules/academic-registration';
-import { authPlugin, authTestRoute } from './modules/auth';
+import { authPlugin, authTestRoute, stagingTestAuthRoute } from './modules/auth';
 import { certificateRoute } from './modules/certificate';
 import { healthRoute } from './modules/health';
 import { onboardingRoute } from './modules/onboarding';
 import { portfolioRoute } from './modules/portfolio';
 import { profileRoute } from './modules/profile';
-import { tagRoute } from '@/modules/tag';
 import { workExperienceRoute } from './modules/work-experience';
 import { corsPlugin } from './plugins/cors';
 import { errorHandlerPlugin } from './plugins/error-handler';
@@ -26,6 +28,7 @@ export const app = new Elysia({
   .use(errorHandlerPlugin)
   .use(corsPlugin)
   .use(authPlugin)
+  .use(stagingTestAuthRoute)
   .use(openapiPlugin)
   .get('/', () => 'Hello Elysia', {
     detail: {
@@ -51,3 +54,5 @@ export const app = new Elysia({
   .use(portfolioRoute)
   .use(workExperienceRoute)
   .use(tagRoute)
+  .use(payoutWebhookRoute)
+  .use(topUpWebhookRoute)

@@ -51,8 +51,23 @@ export const openapiPlugin = openapi({
         name: 'Tags',
         description: 'Authenticated Member reference data for Quest Tags.',
       },
+      {
+        name: 'Xendit webhooks',
+        description: 'Provider callbacks for durable Top-up outcome processing.',
+      },
     ],
-    components: authOpenAPIComponents,
+    components: {
+      ...authOpenAPIComponents,
+      securitySchemes: {
+        ...authOpenAPIComponents.securitySchemes,
+        xenditWebhookAuth: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-callback-token',
+          description: 'Xendit webhook callback token.',
+        },
+      },
+    },
     paths: authOpenAPIPaths,
   },
 });
