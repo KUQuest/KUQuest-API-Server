@@ -71,6 +71,7 @@ describe('createImageStorage upload compensation', () => {
     const deleted: string[] = [];
     const partialStorage = createImageStorage({
       keyPrefix: 'partial-upload',
+      bucket: 'kuquest-test',
       client: {
         write: async () => {
           throw new Error('write failed');

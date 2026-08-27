@@ -42,6 +42,7 @@ const defaultUrlLifetimeSeconds = 15 * 60;
 
 type ImageStorageConfig = {
   keyPrefix: string;
+  bucket?: string;
   logLabel?: string;
   client?: Pick<Bun.S3Client, 'write' | 'delete' | 'presign'>;
   maxSizeBytes?: number;
@@ -53,6 +54,7 @@ type ImageStorageConfig = {
 
 export const createImageStorage = ({
   keyPrefix,
+  bucket: configuredBucket,
   logLabel = `${keyPrefix}-upload`,
   client,
   maxSizeBytes = defaultMaxSizeBytes,
@@ -62,13 +64,14 @@ export const createImageStorage = ({
   unsupportedTypeMessage = 'Image must be a valid JPEG, PNG, or WebP file',
 }: ImageStorageConfig) => {
   const log = createDebugLogger(logLabel);
+  const storageBucket = configuredBucket ?? env.s3Bucket;
 
   const s3 =
     client ??
     new Bun.S3Client({
       accessKeyId: env.s3AccessKeyId,
       secretAccessKey: env.s3SecretAccessKey,
-      bucket: env.s3Bucket,
+      bucket: storageBucket,
       endpoint: env.s3Endpoint,
       region: env.s3Region,
     });
@@ -108,8 +111,7 @@ export const createImageStorage = ({
       throw new UnsupportedImageTypeError(unsupportedTypeMessage);
     }
 
-    const bucket = env.s3Bucket;
-    if (!bucket) {
+    if (!storageBucket) {
       throw new ImageUploadError('S3 bucket is not configured');
     }
 
@@ -121,12 +123,12 @@ export const createImageStorage = ({
         throw new Error(`Expected ${image.size} bytes but wrote ${writtenBytes}`);
       }
     } catch (error) {
-      console.error(`[${logLabel}] Upload failed`, { bucket, error, objectKey });
+      console.error(`[${logLabel}] Upload failed`, { bucket: storageBucket, error, objectKey });
       try {
-        await s3.delete(objectKey, { bucket });
+        await s3.delete(objectKey, { bucket: storageBucket });
       } catch (cleanupError) {
         console.error(`[${logLabel}] Compensating object deletion failed`, {
-          bucket,
+          bucket: storageBucket,
           cleanupError,
           objectKey,
         });
@@ -134,9 +136,9 @@ export const createImageStorage = ({
       throw new ImageUploadError('Image upload failed', { cause: error });
     }
 
-    log('Upload succeeded', { bucket, objectKey, userId });
+    log('Upload succeeded', { bucket: storageBucket, objectKey, userId });
 
-    return { bucket, objectKey, contentType, sizeBytes: image.size };
+    return { bucket: storageBucket, objectKey, contentType, sizeBytes: image.size };
   };
 
   const deleteImage = async (bucket: string, objectKey: string): Promise<void> => {
