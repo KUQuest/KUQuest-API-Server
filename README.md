@@ -247,6 +247,8 @@ Student-owned endpoints.
 Staging CD starts only after a successful Backend CI run for a push to
 `develop`. Opening a pull request runs CI but does not deploy; merge the pull
 request into `develop` to trigger staging deployment.
+Changing protected staging secrets alone does not start a deployment; merge a
+new `develop` change after rotating them.
 
 ## Database commands
 
