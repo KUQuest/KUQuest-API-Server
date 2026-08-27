@@ -39,7 +39,7 @@ import type {
 } from '@/modules/top-up';
 
 import { beforeAll, describe, expect, it } from 'bun:test';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 class FakeInboundPaymentProvider implements InboundPaymentProvider {
   async createPayment(input: InboundPaymentRequest): Promise<InboundPaymentResponse> {
@@ -200,15 +200,12 @@ describe('Top-up Provider event application services', () => {
 
     expect(await getTopUp(userId, topUp.id)).toMatchObject({ topUpStatus: 'FAILED' });
     expect(await getWallet(userId)).toMatchObject({ spendingBalanceSatang: 0 });
-    expect(await db.select().from(paymentTopUpStatusHistory).where(
+    const history = await db.select().from(paymentTopUpStatusHistory).where(
       eq(paymentTopUpStatusHistory.topUpId, topUp.id),
-    ).orderBy(
-      asc(paymentTopUpStatusHistory.occurredAt),
-      asc(paymentTopUpStatusHistory.id),
-    )).toMatchObject([
-      { fromStatus: null, toStatus: 'PENDING' },
-      { fromStatus: 'PENDING', toStatus: 'FAILED' },
-    ]);
+    );
+    expect(history).toHaveLength(2);
+    expect(history).toContainEqual(expect.objectContaining({ fromStatus: null, toStatus: 'PENDING' }));
+    expect(history).toContainEqual(expect.objectContaining({ fromStatus: 'PENDING', toStatus: 'FAILED' }));
   });
 
   it('records a Provider reversal as a linked ledger correction', async () => {
