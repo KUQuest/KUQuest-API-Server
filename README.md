@@ -253,6 +253,7 @@ This deployment trigger verifies the rotated staging test-auth and Admin-seed fl
 This trigger also verifies the staging Admin seed uses the deployed image.
 This trigger verifies the staging test-auth enablement value is loaded exactly.
 This trigger runs the final staging runtime configuration check.
+This trigger captures the final non-secret runtime flag diagnostics.
 
 ## Database commands
 
