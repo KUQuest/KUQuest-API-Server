@@ -15,7 +15,7 @@ import {
 import { getPayoutDestinationForProvider } from '@/modules/payout-destination/payout-destination.provider';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { beforeAll, describe, expect, it } from 'bun:test';
 import { and, eq, isNull } from 'drizzle-orm';
 
 const studentA = `be114-a-${crypto.randomUUID()}`;
@@ -48,16 +48,6 @@ beforeAll(async () => {
     { id: studentA, email: `${studentA}@ku.th`, firstName: 'Payout', lastName: 'A' },
     { id: studentB, email: `${studentB}@ku.th`, firstName: 'Payout', lastName: 'B' },
   ]);
-});
-
-afterAll(async () => {
-  await db.delete(paymentPayouts).where(eq(paymentPayouts.userId, studentA));
-  await db.delete(paymentPayoutQuotes).where(eq(paymentPayoutQuotes.userId, studentA));
-  await db.delete(paymentPayoutQuotes).where(eq(paymentPayoutQuotes.userId, studentB));
-  await db.delete(paymentPayoutAccounts).where(eq(paymentPayoutAccounts.userId, studentA));
-  await db.delete(paymentPayoutAccounts).where(eq(paymentPayoutAccounts.userId, studentB));
-  await db.delete(authUser).where(eq(authUser.id, studentA));
-  await db.delete(authUser).where(eq(authUser.id, studentB));
 });
 
 describe('Payout Destination application services', () => {
@@ -249,13 +239,10 @@ describe('Payout Destination application services', () => {
       userId: studentA,
       payoutAccountId: destination.id,
       policyRevisionId: policy.id,
-      receiptBaht: 100n,
-      maximumFeeBaht: 0n,
-      maximumTaxBaht: 0n,
-      maximumDebitBaht: 100n,
-      quotedFeeSatang: 0n,
-      quotedTaxSatang: 0n,
-      quotedDebitSatang: 100n,
+      receiptSatang: 100,
+      maximumFeeSatang: 0,
+      maximumTaxSatang: 0,
+      maximumDebitSatang: 100,
       expiresAt: new Date(Date.now() + 60_000),
     }).execute()).rejects.toThrow();
 
@@ -263,13 +250,10 @@ describe('Payout Destination application services', () => {
       userId: studentB,
       payoutAccountId: destination.id,
       policyRevisionId: policy.id,
-      receiptBaht: 100n,
-      maximumFeeBaht: 0n,
-      maximumTaxBaht: 0n,
-      maximumDebitBaht: 100n,
-      quotedFeeSatang: 0n,
-      quotedTaxSatang: 0n,
-      quotedDebitSatang: 100n,
+      receiptSatang: 100,
+      maximumFeeSatang: 0,
+      maximumTaxSatang: 0,
+      maximumDebitSatang: 100,
       expiresAt: new Date(Date.now() + 60_000),
     }).returning();
 
@@ -285,6 +269,7 @@ describe('Payout Destination application services', () => {
       .where(eq(walletLedgerTransaction.businessReference, crossOwnerPayoutReference));
 
     await expect(db.insert(paymentPayouts).values({
+      internalReference: `be114-cross-owner-payout-${crypto.randomUUID()}`,
       userId: studentA,
       quoteId: quote.id,
       payoutAccountId: destination.id,
@@ -306,11 +291,10 @@ describe('Payout Destination application services', () => {
       destinationRoutingValueCiphertext: routingValue.ciphertext,
       destinationRoutingValueAuthTag: routingValue.authTag,
       provider: 'TEST',
-      principalBaht: 100n,
-      maximumFeeBaht: 0n,
-      maximumTaxBaht: 0n,
-      maximumDebitBaht: 100n,
-      currency: 'THB',
+      principalSatang: 100,
+      maximumFeeSatang: 0,
+      maximumTaxSatang: 0,
+      maximumDebitSatang: 100,
       payoutStatus: 'CREATING',
       reserveLedgerTransactionId: ledgerTransaction.id,
     }).execute()).rejects.toThrow();

@@ -134,6 +134,7 @@ CREATE UNIQUE INDEX payment_payout_accounts_active_user_uidx ON payment_payout_a
 
 CREATE TABLE payment_payout_quotes (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  fee_rounding_mode   TEXT NOT NULL DEFAULT 'UP',
   user_id             UUID NOT NULL REFERENCES auth_user(id),
   payout_account_id   UUID NOT NULL REFERENCES payment_payout_accounts(id),
   policy_revision_id  UUID NOT NULL REFERENCES payment_money_policy_revisions(id),
@@ -141,20 +142,19 @@ CREATE TABLE payment_payout_quotes (
   maximum_fee_satang    INTEGER NOT NULL,
   maximum_tax_satang    INTEGER NOT NULL,
   maximum_debit_satang  INTEGER NOT NULL,
-  quoted_fee_satang   INTEGER NOT NULL,
-  quoted_tax_satang   INTEGER NOT NULL,
-  quoted_debit_satang INTEGER NOT NULL,
   expires_at          TIMESTAMPTZ NOT NULL,
   consumed_at         TIMESTAMPTZ,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (id, user_id),
   FOREIGN KEY (payout_account_id, user_id) REFERENCES payment_payout_accounts(id, user_id),
-  CHECK (receipt_satang > 0 AND maximum_fee_satang >= 0 AND maximum_tax_satang >= 0 AND maximum_debit_satang = receipt_satang + maximum_fee_satang + maximum_tax_satang AND quoted_fee_satang >= 0 AND quoted_tax_satang >= 0 AND quoted_debit_satang = receipt_satang + quoted_fee_satang + quoted_tax_satang)
+  CHECK (receipt_satang > 0 AND maximum_fee_satang >= 0 AND maximum_tax_satang >= 0 AND maximum_debit_satang = receipt_satang + maximum_fee_satang + maximum_tax_satang),
+  CHECK (fee_rounding_mode = 'UP')
 );
 CREATE INDEX payment_payout_quotes_expiry_idx ON payment_payout_quotes (expires_at);
 
 CREATE TABLE payment_payouts (
   id                            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  internal_reference            TEXT NOT NULL UNIQUE,
   user_id                       UUID NOT NULL REFERENCES auth_user(id),
   quote_id                      UUID NOT NULL UNIQUE REFERENCES payment_payout_quotes(id),
   payout_account_id             UUID NOT NULL REFERENCES payment_payout_accounts(id),
@@ -177,6 +177,9 @@ CREATE TABLE payment_payouts (
   destination_routing_value_auth_tag TEXT NOT NULL,
   provider                      TEXT NOT NULL,
   provider_reference            TEXT UNIQUE,
+  provider_api_version          TEXT,
+  provider_status               TEXT,
+  provider_amount_satang        INTEGER,
   principal_satang                INTEGER NOT NULL,
   maximum_fee_satang               INTEGER NOT NULL,
   maximum_tax_satang                INTEGER NOT NULL,
@@ -191,7 +194,7 @@ CREATE TABLE payment_payouts (
   final_ledger_transaction_id    UUID UNIQUE REFERENCES wallet_ledger_transactions(id),
   created_at                     TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at                     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CHECK (principal_satang > 0 AND maximum_fee_satang >= 0 AND maximum_tax_satang >= 0 AND maximum_debit_satang = principal_satang + maximum_fee_satang + maximum_tax_satang),
+  CHECK (principal_satang > 0 AND maximum_fee_satang >= 0 AND maximum_tax_satang >= 0 AND maximum_debit_satang = principal_satang + maximum_fee_satang + maximum_tax_satang AND (provider_amount_satang IS NULL OR provider_amount_satang = principal_satang)),
   CHECK (num_nonnulls(actual_fee_satang, actual_tax_satang, actual_debit_satang) IN (0, 3)),
   CHECK (actual_fee_satang IS NULL OR (actual_fee_satang >= 0 AND actual_tax_satang >= 0 AND actual_debit_satang = principal_satang + actual_fee_satang + actual_tax_satang AND actual_debit_satang <= maximum_debit_satang)),
   FOREIGN KEY (quote_id, user_id) REFERENCES payment_payout_quotes(id, user_id),
