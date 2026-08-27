@@ -134,6 +134,7 @@ ALTER TABLE "quest_team_member" ADD CONSTRAINT "quest_team_member_team_id_user_i
 
 ALTER TABLE "quest_team_invitation" ADD CONSTRAINT "quest_team_invitation_invited_user_id_auth_user_id_fk" FOREIGN KEY ("invited_user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "quest_team_invitation" ADD CONSTRAINT "quest_team_invitation_invited_by_user_id_auth_user_id_fk" FOREIGN KEY ("invited_by_user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "quest_team" ADD CONSTRAINT "quest_team_id_leader_id_key" UNIQUE("id","leader_id");--> statement-breakpoint
 ALTER TABLE "quest_team_invitation" ADD CONSTRAINT "quest_team_invitation_team_id_invited_by_user_id_quest_team_id_leader_id_fk" FOREIGN KEY ("team_id","invited_by_user_id") REFERENCES "public"."quest_team"("id","leader_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "quest_team_invitation_team_id_idx" ON "quest_team_invitation" USING btree ("team_id");--> statement-breakpoint
 CREATE INDEX "quest_team_invitation_invited_user_id_idx" ON "quest_team_invitation" USING btree ("invited_user_id");--> statement-breakpoint
@@ -156,7 +157,6 @@ ALTER TABLE "quest_location" DROP COLUMN "lng";--> statement-breakpoint
 ALTER TABLE "quest_location" DROP COLUMN "position";--> statement-breakpoint
 ALTER TABLE "quest_application" ADD CONSTRAINT "quest_application_quest_id_worker_id_key" UNIQUE("quest_id","worker_id");--> statement-breakpoint
 ALTER TABLE "quest_assignment" ADD CONSTRAINT "quest_assignment_quest_id_worker_id_key" UNIQUE("quest_id","worker_id");--> statement-breakpoint
-ALTER TABLE "quest_team" ADD CONSTRAINT "quest_team_id_leader_id_key" UNIQUE("id","leader_id");--> statement-breakpoint
 ALTER TABLE "proof_submission" ADD CONSTRAINT "proof_submission_owner_check" CHECK (num_nonnulls("proof_submission"."worker_id", "proof_submission"."team_id") = 1);--> statement-breakpoint
 ALTER TABLE "proof_submission" ADD CONSTRAINT "proof_submission_status_check" CHECK ("proof_submission"."submission_status" IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_REJECTED', 'PROOF_AUTO_APPROVED'));--> statement-breakpoint
 ALTER TABLE "quest" ADD CONSTRAINT "quest_tag_check" CHECK ("quest"."quest_status" = 'QUEST_DRAFT' OR "quest"."tag_id" IS NOT NULL);--> statement-breakpoint
