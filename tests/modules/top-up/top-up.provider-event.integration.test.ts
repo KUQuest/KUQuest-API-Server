@@ -39,7 +39,7 @@ import type {
 } from '@/modules/top-up';
 
 import { beforeAll, describe, expect, it } from 'bun:test';
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 
 class FakeInboundPaymentProvider implements InboundPaymentProvider {
   async createPayment(input: InboundPaymentRequest): Promise<InboundPaymentResponse> {
@@ -90,7 +90,7 @@ const eventPayload = (input: {
   updatedAt?: string;
 }) => JSON.stringify({
   event_id: input.eventId,
-  event: 'payment_request.status_updated',
+  event: input.status === 'FAILED' ? 'payment.failure' : 'payment.capture',
   data: {
     reference_id: input.internalReference,
     payment_request_id: input.providerReference,
@@ -202,6 +202,9 @@ describe('Top-up Provider event application services', () => {
     expect(await getWallet(userId)).toMatchObject({ spendingBalanceSatang: 0 });
     expect(await db.select().from(paymentTopUpStatusHistory).where(
       eq(paymentTopUpStatusHistory.topUpId, topUp.id),
+    ).orderBy(
+      asc(paymentTopUpStatusHistory.occurredAt),
+      asc(paymentTopUpStatusHistory.id),
     )).toMatchObject([
       { fromStatus: null, toStatus: 'PENDING' },
       { fromStatus: 'PENDING', toStatus: 'FAILED' },
@@ -342,7 +345,7 @@ describe('Top-up Provider event application services', () => {
       .set({ processingStatus: 'PROCESSING', attemptCount: 5, claimedAt: staleClaimedAt })
       .where(eq(paymentProviderEventInbox.id, deadEvent.id));
 
-    await expect(claimTopUpProviderEvents({ now })).resolves.toEqual([]);
+    await expect(claimTopUpProviderEvents({ now, eventId: deadEvent.id })).resolves.toEqual([]);
     const [dead] = await db.select().from(paymentProviderEventInbox)
       .where(eq(paymentProviderEventInbox.id, deadEvent.id));
     expect(dead).toMatchObject({

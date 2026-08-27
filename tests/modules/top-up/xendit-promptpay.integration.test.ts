@@ -197,6 +197,25 @@ describe('Xendit PromptPay provider', () => {
     })).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
   });
 
+  it('does not reconcile a partial capture as the full Payment Request amount', async () => {
+    const provider = new XenditPromptPayProvider({
+      secretKey: 'test-secret',
+      fetcher: async () => new Response(JSON.stringify({
+        payment_request_id: 'pr-partial-capture',
+        reference_id: 'top-up:partial-capture',
+        request_amount: 10,
+        status: 'SUCCEEDED',
+        captures: [{ capture_id: 'cap-partial-capture', capture_amount: 1 }],
+      }), { status: 200 }),
+    });
+
+    await expect(provider.getPaymentStatus({
+      providerReference: 'pr-partial-capture',
+      internalReference: 'top-up:partial-capture',
+      expectedPaymentTotalSatang: positiveSatang(1_000),
+    })).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+  });
+
   it('maps a timeout to an uncertain provider result', async () => {
     const provider = new XenditPromptPayProvider({
       secretKey: 'test-secret',

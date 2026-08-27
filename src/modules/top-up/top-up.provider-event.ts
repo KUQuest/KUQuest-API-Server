@@ -99,6 +99,19 @@ const parseProviderAmount = (value: unknown): Satang => {
   return positiveSatang(amount);
 };
 
+const parseProviderCaptureAmount = (
+  captures: Record<string, unknown>[],
+): Satang => {
+  const amount = captures.reduce(
+    (total, capture) => total + parseProviderAmount(capture.capture_amount),
+    0,
+  );
+  if (!Number.isSafeInteger(amount) || amount <= 0 || amount > MAX_WALLET_CAPACITY_SATANG) {
+    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider capture amount is out of range.');
+  }
+  return positiveSatang(amount);
+};
+
 const parseProviderDate = (value: unknown, fallback: Date): Date => {
   if (value === undefined || value === null) return fallback;
   const text = asText(value);
@@ -124,6 +137,14 @@ export const isTopUpProviderReversal = (providerStatus: string): boolean => [
   'CHARGEBACKED',
 ].includes(providerStatus.trim().toUpperCase().replaceAll('-', '_').replaceAll(' ', '_'));
 
+const supportedProviderEventTypes = [
+  'payment.capture',
+  'payment.authorization',
+  'payment.failure',
+  'payment.expiry',
+  'payment_request.expiry',
+] as const;
+
 export const parseTopUpProviderEvent = (
   rawPayload: string,
   receivedAt = new Date(),
@@ -146,6 +167,10 @@ export const parseTopUpProviderEvent = (
   const data = asObject(payload.data) ?? payload;
   const canonicalPayload = canonicalizeProviderPayload(parsed);
   const payloadHash = providerPayloadHash(canonicalPayload);
+  const eventType = firstText(payload.event, payload.event_type, data.event_type);
+  if (!eventType || !supportedProviderEventTypes.includes(eventType as (typeof supportedProviderEventTypes)[number])) {
+    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event type is not supported.');
+  }
   const providerStatus = firstText(data.status, payload.status);
   if (!providerStatus) throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider status is required.');
 
@@ -168,25 +193,41 @@ export const parseTopUpProviderEvent = (
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event has no payment reference.');
   }
 
-  const providerAmount = data.request_amount ?? data.amount ?? data.paid_amount ?? payload.request_amount ?? payload.amount;
+  const providerCountry = firstText(data.country, payload.country);
+  if (providerCountry && providerCountry !== 'TH') {
+    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event country is not supported.');
+  }
+  const providerCurrency = firstText(data.currency, payload.currency);
+  if (providerCurrency && providerCurrency !== 'THB') {
+    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event currency is not supported.');
+  }
+  const providerChannelCode = firstText(data.channel_code, payload.channel_code);
+  if (providerChannelCode && providerChannelCode !== 'QRPROMPTPAY') {
+    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event channel is not supported.');
+  }
+
+  const captures = Array.isArray(data.captures)
+    ? data.captures.map((capture) => {
+      const object = asObject(capture);
+      if (!object) throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider capture is invalid.');
+      return object;
+    })
+    : [];
+  const capturedAmountSatang = captures.length > 0 ? parseProviderCaptureAmount(captures) : null;
+  const providerAmount = capturedAmountSatang ?? data.request_amount ?? data.amount ?? data.paid_amount ?? payload.request_amount ?? payload.amount;
   const normalizedStatus = normalizeTopUpOutcomeStatus(providerStatus);
   const providerAmountSatang = providerAmount === undefined || providerAmount === null
     ? null
-    : parseProviderAmount(providerAmount);
+    : capturedAmountSatang ?? parseProviderAmount(providerAmount);
   if (normalizedStatus === 'PAID' && providerAmountSatang === null) {
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'A paid Provider event must include an amount.');
   }
 
-  const eventType = firstText(payload.event, payload.event_type, data.event_type) ?? 'payment.status';
   const providerApiVersion = firstText(data.api_version, payload.api_version) ?? '2024-11-11';
-  const providerChannelCode = firstText(data.channel_code, payload.channel_code);
   const providerOccurredAt = parseProviderDate(
     data.updated_at ?? data.updated ?? data.created_at ?? data.created ?? payload.created_at ?? payload.created,
     receivedAt,
   );
-  const captures = Array.isArray(data.captures)
-    ? data.captures.map(asObject).filter((value): value is Record<string, unknown> => value !== null)
-    : [];
   const providerEventIdentity = firstText(
     captures[0]?.capture_id,
     data.payment_id,

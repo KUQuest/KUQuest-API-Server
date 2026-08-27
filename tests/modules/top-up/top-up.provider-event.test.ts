@@ -5,6 +5,7 @@ import {
   parseTopUpProviderEvent,
   providerPayloadHash,
 } from '@/modules/top-up';
+import { positiveSatang } from '@/modules/wallet';
 
 import { describe, expect, it } from 'bun:test';
 
@@ -21,7 +22,7 @@ describe('Top-up Provider event parsing', () => {
     const receivedAt = new Date('2026-08-27T00:00:00.000Z');
     const event = parseTopUpProviderEvent(JSON.stringify({
       id: 'xnd-event-1',
-      event: 'payment_request.succeeded',
+      event: 'payment.capture',
       api_version: '2024-11-11',
       data: {
         payment_request_id: 'pr-1',
@@ -35,7 +36,7 @@ describe('Top-up Provider event parsing', () => {
 
     expect(event).toMatchObject({
       providerEventId: 'xnd-event-1',
-      eventType: 'payment_request.succeeded',
+      eventType: 'payment.capture',
       internalReference: 'top-up:top-up-1',
       providerReference: 'pr-1',
       providerAmountSatang: 12_345,
@@ -71,6 +72,45 @@ describe('Top-up Provider event parsing', () => {
     }));
 
     expect(event.providerEventId).toBe('derived:payment.capture:py-3:PAID');
+  });
+
+  it('uses captured amount instead of the requested amount', () => {
+    const event = parseTopUpProviderEvent(JSON.stringify({
+      event: 'payment.capture',
+      data: {
+        payment_id: 'py-partial',
+        payment_request_id: 'pr-partial',
+        reference_id: 'top-up:partial',
+        status: 'SUCCEEDED',
+        request_amount: 10,
+        captures: [{ capture_id: 'cap-partial', capture_amount: 1 }],
+      },
+    }));
+
+    expect(event.providerAmountSatang).toBe(positiveSatang(100));
+  });
+
+  it('rejects unsupported Provider event types and currencies', () => {
+    expect(() => parseTopUpProviderEvent(JSON.stringify({
+      event: 'refund.succeeded',
+      data: {
+        payment_request_id: 'pr-refund',
+        reference_id: 'top-up:refund',
+        status: 'SUCCEEDED',
+        request_amount: 1,
+      },
+    }))).toThrow('Provider event type is not supported.');
+
+    expect(() => parseTopUpProviderEvent(JSON.stringify({
+      event: 'payment.capture',
+      data: {
+        payment_request_id: 'pr-currency',
+        reference_id: 'top-up:currency',
+        status: 'SUCCEEDED',
+        request_amount: 1,
+        currency: 'IDR',
+      },
+    }))).toThrow('Provider event currency is not supported.');
   });
 });
 

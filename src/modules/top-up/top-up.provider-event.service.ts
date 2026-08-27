@@ -96,6 +96,7 @@ export type ReceiveTopUpProviderEventInput = {
 };
 
 export type ProviderEventClaimInput = {
+  eventId?: string;
   limit?: number;
   now?: Date;
   leaseMs?: number;
@@ -338,7 +339,7 @@ const claimEvents = async (
 
 export const claimTopUpProviderEvents = async (
   input: ProviderEventClaimInput = {},
-): Promise<TopUpProviderEvent[]> => db.transaction((transaction) => claimEvents(transaction, input));
+): Promise<TopUpProviderEvent[]> => db.transaction((transaction) => claimEvents(transaction, input, input.eventId));
 
 const topUpForEvent = async (
   transaction: WalletTransaction,
@@ -445,12 +446,7 @@ const applyTopUpOutcomeInTransaction = async (
     if (topUp.topUpStatus === 'PAID' && isTopUpProviderReversal(facts.providerStatus)) {
       await reversePaidTopUpInTransaction(transaction, topUp);
     }
-    const [updated] = await transaction
-      .update(paymentTopUp)
-      .set(baseUpdate)
-      .where(eq(paymentTopUp.id, topUp.id))
-      .returning();
-    return updated ?? topUp;
+    return topUp;
   }
 
   if (facts.normalizedStatus === 'PENDING') {

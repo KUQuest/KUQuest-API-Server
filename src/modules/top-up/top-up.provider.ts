@@ -123,6 +123,28 @@ const fromThb = (value: unknown): Satang => {
   return positiveSatang(amount);
 };
 
+const fromCaptureAmounts = (value: unknown): Satang | null => {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  let total = 0;
+  for (const capture of value) {
+    const object = asObject(capture);
+    if (!object) {
+      throw new InboundPaymentProviderError(
+        'PROVIDER_UNCERTAIN',
+        'Xendit returned an invalid payment capture.',
+      );
+    }
+    total += fromThb(object.capture_amount);
+  }
+  if (!Number.isSafeInteger(total) || total <= 0 || total > MAX_WALLET_CAPACITY_SATANG) {
+    throw new InboundPaymentProviderError(
+      'PROVIDER_UNCERTAIN',
+      'Xendit returned an out-of-range payment capture amount.',
+    );
+  }
+  return positiveSatang(total);
+};
+
 const providerErrorDetails = (payload: JsonObject | null) => ({
   providerCode: asText(payload?.error_code) ?? asText(payload?.code) ?? undefined,
 });
@@ -385,9 +407,17 @@ export class XenditPromptPayProvider implements InboundPaymentProvider, InboundP
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different internal reference.');
     }
 
+    let providerAmountSatang: Satang | null;
+    try {
+      providerAmountSatang = fromCaptureAmounts(paymentRequest.captures);
+    } catch (reason: unknown) {
+      if (reason instanceof InboundPaymentProviderError) {
+        throw this.error(reason.code, reason.message, { providerCode: reason.providerCode });
+      }
+      throw reason;
+    }
     const amountValue = paymentRequest.request_amount ?? paymentRequest.amount ?? paymentRequest.paid_amount;
-    let providerAmountSatang: Satang | null = null;
-    if (amountValue !== undefined && amountValue !== null) {
+    if (providerAmountSatang === null && amountValue !== undefined && amountValue !== null) {
       try {
         providerAmountSatang = fromThb(amountValue);
       } catch (reason: unknown) {
@@ -396,12 +426,12 @@ export class XenditPromptPayProvider implements InboundPaymentProvider, InboundP
         }
         throw reason;
       }
-      if (normalizeTopUpOutcomeStatus(providerStatus) === 'PAID' && providerAmountSatang !== input.expectedPaymentTotalSatang) {
-        throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different payment amount.');
-      }
     }
     if (normalizeTopUpOutcomeStatus(providerStatus) === 'PAID' && providerAmountSatang === null) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit did not return the confirmed payment amount.');
+    }
+    if (normalizeTopUpOutcomeStatus(providerStatus) === 'PAID' && providerAmountSatang !== input.expectedPaymentTotalSatang) {
+      throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different payment amount.');
     }
 
     const occurredAtText = asText(paymentRequest.updated_at) ?? asText(paymentRequest.updated) ?? asText(paymentRequest.created_at) ?? asText(paymentRequest.created);
