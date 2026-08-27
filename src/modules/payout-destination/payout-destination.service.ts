@@ -10,6 +10,10 @@ import {
   type PayoutDestinationEncryptedSecret,
   type PayoutDestinationEncryption,
 } from './payout-destination.crypto';
+import {
+  payoutDestinationForProvider,
+  type PayoutDestinationForProvider,
+} from './payout-destination.provider-boundary';
 
 export type PayoutDestinationErrorCode =
   | 'PAYOUT_DESTINATION_INVALID'
@@ -290,6 +294,26 @@ export const getPayoutDestination = async (
     .limit(1);
 
   return record ? destinationFromRecord(record) : undefined;
+};
+
+export const getPayoutDestinationForProvider = async (
+  principalUserId: string,
+  destinationId: string,
+  encryption: PayoutDestinationEncryption = createPayoutDestinationEncryption(),
+): Promise<PayoutDestinationForProvider | undefined> => {
+  const [record] = await db
+    .select()
+    .from(paymentPayoutAccounts)
+    .where(and(eq(paymentPayoutAccounts.userId, principalUserId), eq(paymentPayoutAccounts.id, destinationId)))
+    .limit(1);
+
+  return record
+    ? payoutDestinationForProvider(
+      destinationFromRecord(record),
+      record,
+      encryption,
+    )
+    : undefined;
 };
 
 export const retirePayoutDestination = async (

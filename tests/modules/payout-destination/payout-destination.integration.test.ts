@@ -20,6 +20,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 
 const studentA = `be114-a-${crypto.randomUUID()}`;
 const studentB = `be114-b-${crypto.randomUUID()}`;
+const studentC = `be114-c-${crypto.randomUUID()}`;
 const crossOwnerPayoutReference = `be114-cross-owner-payout-${crypto.randomUUID()}`;
 const encryption = createPayoutDestinationEncryption({
   activeKeyVersion: 'v1',
@@ -47,6 +48,7 @@ beforeAll(async () => {
   await db.insert(authUser).values([
     { id: studentA, email: `${studentA}@ku.th`, firstName: 'Payout', lastName: 'A' },
     { id: studentB, email: `${studentB}@ku.th`, firstName: 'Payout', lastName: 'B' },
+    { id: studentC, email: `${studentC}@ku.th`, firstName: 'Payout', lastName: 'C' },
   ]);
 });
 
@@ -133,6 +135,80 @@ describe('Payout Destination application services', () => {
     expect(await db.select().from(paymentPayoutAccounts).where(eq(paymentPayoutAccounts.id, active.id))).toHaveLength(1);
   });
 
+  it('retains an existing Payout relationship when its destination is retired', async () => {
+    const destination = await savePayoutDestination(destinationInput(studentC), encryption);
+    const [policy] = await db
+      .select({ id: paymentMoneyPolicyRevision.id })
+      .from(paymentMoneyPolicyRevision)
+      .where(eq(paymentMoneyPolicyRevision.revision, 1));
+    if (!policy) throw new Error('Missing initial Money Policy');
+
+    const [quote] = await db.insert(paymentPayoutQuotes).values({
+      userId: studentC,
+      payoutAccountId: destination.id,
+      policyRevisionId: policy.id,
+      receiptSatang: 100,
+      maximumFeeSatang: 0,
+      maximumTaxSatang: 0,
+      maximumDebitSatang: 100,
+      expiresAt: new Date(Date.now() + 60_000),
+    }).returning();
+    const [ledgerTransaction] = await db.insert(walletLedgerTransaction).values({
+      businessReference: `be114-retained-payout-${crypto.randomUUID()}`,
+      eventType: 'PAYOUT',
+    }).returning();
+    if (!quote || !ledgerTransaction) throw new Error('Failed to create Payout fixture');
+
+    const accountNumber = encryption.encrypt('1234567890');
+    const routingValue = encryption.encrypt('1234567890');
+    const [payout] = await db.insert(paymentPayouts).values({
+      internalReference: `be114-retained-payout-${crypto.randomUUID()}`,
+      userId: studentC,
+      quoteId: quote.id,
+      payoutAccountId: destination.id,
+      destinationRecipientType: 'SELF',
+      destinationGivenName: 'Payout',
+      destinationSurname: 'Student',
+      destinationRelationship: 'SELF',
+      destinationAccountCountry: 'TH',
+      destinationAccountCurrency: 'THB',
+      destinationBankCode: 'KBANK',
+      destinationAccountNumberKeyVersion: accountNumber.keyVersion,
+      destinationAccountNumberNonce: accountNumber.nonce,
+      destinationAccountNumberCiphertext: accountNumber.ciphertext,
+      destinationAccountNumberAuthTag: accountNumber.authTag,
+      destinationAccountHolderName: 'Payout Student',
+      destinationRoutingType: 'BANK_ACCOUNT',
+      destinationRoutingValueKeyVersion: routingValue.keyVersion,
+      destinationRoutingValueNonce: routingValue.nonce,
+      destinationRoutingValueCiphertext: routingValue.ciphertext,
+      destinationRoutingValueAuthTag: routingValue.authTag,
+      provider: 'TEST',
+      principalSatang: 100,
+      maximumFeeSatang: 0,
+      maximumTaxSatang: 0,
+      maximumDebitSatang: 100,
+      payoutStatus: 'CREATING',
+      reserveLedgerTransactionId: ledgerTransaction.id,
+    }).returning();
+    if (!payout) throw new Error('Failed to create Payout fixture');
+
+    const retired = await retirePayoutDestination(studentC, destination.id);
+
+    expect(retired?.retiredAt).toBeInstanceOf(Date);
+    expect(await getPayoutDestination(studentC, destination.id)).toMatchObject({
+      id: destination.id,
+      retiredAt: expect.any(Date),
+    });
+    expect(await db
+      .select({ id: paymentPayouts.id, payoutAccountId: paymentPayouts.payoutAccountId })
+      .from(paymentPayouts)
+      .where(eq(paymentPayouts.id, payout.id))).toEqual([{
+      id: payout.id,
+      payoutAccountId: destination.id,
+    }]);
+  });
+
   it('does not expose or change another Student\'s destination', async () => {
     const destination = await savePayoutDestination(destinationInput(studentB), encryption);
 
@@ -156,9 +232,13 @@ describe('Payout Destination application services', () => {
     expect(replacements.map(({ id }) => id)).toContain(active[0]!.id);
   });
 
-  it('rolls back retirement when the replacement insert fails', async () => {
+  it('preserves failure atomicity when a Payout Destination replacement insert fails', async () => {
     const activeBefore = await getPayoutDestination(studentB);
     if (!activeBefore) throw new Error('Missing active Payout Destination');
+    const rowsBefore = await db
+      .select({ id: paymentPayoutAccounts.id, retiredAt: paymentPayoutAccounts.retiredAt })
+      .from(paymentPayoutAccounts)
+      .where(eq(paymentPayoutAccounts.userId, studentB));
 
     await sql`CREATE OR REPLACE FUNCTION be114_fail_payout_destination_insert() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
@@ -176,6 +256,10 @@ describe('Payout Destination application services', () => {
       expect(await db.select().from(paymentPayoutAccounts).where(eq(paymentPayoutAccounts.id, activeBefore.id)))
         .toHaveLength(1);
       expect((await getPayoutDestination(studentB, activeBefore.id))?.retiredAt).toBeNull();
+      expect(await db
+        .select({ id: paymentPayoutAccounts.id, retiredAt: paymentPayoutAccounts.retiredAt })
+        .from(paymentPayoutAccounts)
+        .where(eq(paymentPayoutAccounts.userId, studentB))).toEqual(rowsBefore);
     } finally {
       await sql`DROP TRIGGER IF EXISTS be114_fail_payout_destination_insert_trigger ON payment_payout_accounts`;
       await sql`DROP FUNCTION IF EXISTS be114_fail_payout_destination_insert()`;
