@@ -169,16 +169,40 @@ A former Active Worker whose Assignment ended before the Quest completed.
 _Avoid_: Active Worker, Candidate
 
 **Work Membership Window**:
-The inclusive period in which an accepted participant has access to the Work Conversation. A former Worker retains only the history from their own window.
+The inclusive period in which an accepted participant has current access to the Work Conversation. After the window ends, the former Worker may read only Messages created no later than their departure.
 _Avoid_: Chat permission, participant status
 
 **Quest Edit**:
 A change to a Quest's details proposed by its Hirer.
 _Avoid_: Assignment change, membership transition
 
+**Conversation**:
+A persisted room for coordinating work on one Quest. In this context, the only Conversation is a Work Conversation.
+_Avoid_: Direct message, group chat, team chat
+
 **Work Conversation**:
-The one working Chat conversation associated with a Quest. Its participants are the Hirer and the Active Workers, never Candidates.
+The one working Chat Conversation associated with a Quest. Its current participants are the Hirer and the Active Workers, never Candidates.
 _Avoid_: Group chat, team chat
+
+**Chat Membership**:
+The relationship between an Accepted Participant and a Work Conversation. It records whether the participant may read current content, send Messages, and retain historical access after departure.
+_Avoid_: Chat permission, participant status
+
+**Message**:
+A piece of content in a Work Conversation, sent by an accepted participant or created by the system. It may contain text, Attachments, or both, and becomes part of the retained Conversation history.
+_Avoid_: Notification, post
+
+**Attachment**:
+A private file shared in a Message in a Work Conversation. It is available only to a Member who may read the containing Message and only after it passes the required safety checks.
+_Avoid_: Public file, image URL
+
+**Read Cursor**:
+A private position that a Member has acknowledged in a Work Conversation. It only moves forward and supports unread counts and resume position; it is not a read receipt.
+_Avoid_: Read receipt, last seen
+
+**System Message**:
+An immutable Message created from a Work Membership Transition to record a membership or Work Conversation lifecycle change.
+_Avoid_: Notification, audit log
 
 **Terminal Quest**:
 A Quest in `COMPLETED` or `CANCELLED`. Its Work Conversation is read-only.
