@@ -1,12 +1,12 @@
 # Quest owns Work Chat membership
 
-**Status:** proposed — awaiting planning review
+**Status:** accepted
 
-Quest is the sole authority for accepted Workers and lifecycle state. Within the same database transaction that changes an Assignment or terminal Quest state, Quest calls a typed Work Chat membership writer; Work Chat never fetches members over HTTP and never independently creates or closes a membership window. This favors one atomic write over an independently maintained Work Chat roster, preventing assignment, `joinedAt`/`leftAt`, conversation creation, and system-message history from drifting apart.
+Quest is the sole authority for Accepted Participants and lifecycle state. Within the same database transaction that changes an Assignment or terminal Quest state, Quest calls a typed Work Chat membership writer; Work Chat never fetches members over HTTP and never independently creates or closes a membership window. This favors one atomic write over an independently maintained Work Chat roster, preventing assignment, `joinedAt`/`leftAt`, conversation creation, and system-message history from drifting apart.
 
 ## Atomic membership write boundary
 
-Quest opens the transaction and owns the commit or rollback. When a Worker becomes accepted, Quest writes the `ACTIVE` Assignment and calls the writer with `workersAccepted`; Work Chat creates the conversation when needed, writes the Hirer's `joinedAt` as the transition `occurredAt`, and writes each Worker's supplied `joinedAt`. When a Worker departs, Quest writes the inactive Assignment and calls the writer with `workerBecameInactive`; Work Chat writes that Worker's supplied `leftAt`. The transaction commits only after both the Quest change and the Chat membership write succeed; either failure rolls back both.
+Quest opens the transaction and owns the commit or rollback. When a Worker becomes an Accepted Participant, Quest writes the `ACTIVE` Assignment and calls the writer with `workersAccepted`; Work Chat creates the conversation when needed, writes the Hirer's `joinedAt` as the transition `occurredAt`, and writes each Worker's supplied `joinedAt`. When a Worker departs, Quest writes the inactive Assignment and calls the writer with `workerBecameInactive`; Work Chat writes that Worker's supplied `leftAt`. The transaction commits only after both the Quest change and the Chat membership write succeed; either failure rolls back both.
 
 ## Retained Chat deletion guard
 
