@@ -196,6 +196,12 @@ export const receiveTopUpProviderEvent = async (
       ))
       .for('update');
     if (existing) {
+      if (existing.resourceType !== 'TOP_UP') {
+        throw new ProviderEventError(
+          'PROVIDER_EVENT_CONFLICT',
+          'The Provider event identifier belongs to a different payment resource.',
+        );
+      }
       if (existing.payloadHash !== parsed.payloadHash) {
         throw new ProviderEventError(
           'PROVIDER_EVENT_CONFLICT',
@@ -248,6 +254,12 @@ export const receiveTopUpProviderEvent = async (
       ))
       .for('update');
     if (!raced) throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event could not be stored.');
+    if (raced.resourceType !== 'TOP_UP') {
+      throw new ProviderEventError(
+        'PROVIDER_EVENT_CONFLICT',
+        'The Provider event identifier belongs to a different payment resource.',
+      );
+    }
     if (raced.payloadHash !== parsed.payloadHash) {
       throw new ProviderEventError(
         'PROVIDER_EVENT_CONFLICT',
@@ -279,10 +291,12 @@ const claimEvents = async (
   const staleBefore = new Date(now.getTime() - leaseMs);
   const ready = or(
     and(
+      eq(paymentProviderEventInbox.resourceType, 'TOP_UP'),
       inArray(paymentProviderEventInbox.processingStatus, ['RECEIVED', 'RETRYABLE']),
       lt(paymentProviderEventInbox.attemptCount, providerEventMaxAttempts),
     ),
     and(
+      eq(paymentProviderEventInbox.resourceType, 'TOP_UP'),
       eq(paymentProviderEventInbox.processingStatus, 'PROCESSING'),
       or(isNull(paymentProviderEventInbox.claimedAt), lt(paymentProviderEventInbox.claimedAt, staleBefore)),
     ),
@@ -604,7 +618,10 @@ export const retryTopUpProviderEvent = async (eventId: string): Promise<TopUpPro
   const [event] = await transaction
     .select()
     .from(paymentProviderEventInbox)
-    .where(eq(paymentProviderEventInbox.id, eventId))
+    .where(and(
+      eq(paymentProviderEventInbox.id, eventId),
+      eq(paymentProviderEventInbox.resourceType, 'TOP_UP'),
+    ))
     .for('update');
   if (!event) throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event does not exist.');
   if (event.processingStatus !== 'RETRYABLE') throw new ProviderEventError('PROVIDER_EVENT_NOT_RETRYABLE', 'Provider event is not ready for retry.');
@@ -675,6 +692,7 @@ export const listTopUpProviderEvents = async (limit = 50): Promise<TopUpProvider
   const records = await db
     .select()
     .from(paymentProviderEventInbox)
+    .where(eq(paymentProviderEventInbox.resourceType, 'TOP_UP'))
     .orderBy(desc(paymentProviderEventInbox.receivedAt), desc(paymentProviderEventInbox.id))
     .limit(limit);
   return records.map(providerEventFromRecord);
@@ -684,7 +702,10 @@ export const listTopUpProviderEventHistory = async (eventId: string) => {
   const [event] = await db
     .select({ id: paymentProviderEventInbox.id })
     .from(paymentProviderEventInbox)
-    .where(eq(paymentProviderEventInbox.id, eventId));
+    .where(and(
+      eq(paymentProviderEventInbox.id, eventId),
+      eq(paymentProviderEventInbox.resourceType, 'TOP_UP'),
+    ));
   if (!event) throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event does not exist.');
   return db
     .select()

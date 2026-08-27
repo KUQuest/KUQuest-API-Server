@@ -7,6 +7,12 @@ import {
 } from '@/modules/wallet/wallet.money';
 import type { PayoutDestinationForProvider } from '@/modules/payout-destination';
 
+import {
+  normalizePayoutOutcomeStatus,
+  parsePayoutProviderEvent,
+  type PayoutOutcomeStatus,
+} from './payout.provider-event';
+
 export const XENDIT_PAYOUT_API_VERSION = '2020-02-01';
 
 export type PayoutProviderErrorCode =
@@ -59,8 +65,31 @@ export type OutboundPayoutResponse = {
   providerApiVersion: string;
 };
 
+export type OutboundPayoutStatusRequest = {
+  providerReference: string | null;
+  internalReference: string;
+  expectedPrincipalSatang: Satang;
+  maximumDebitSatang: Satang;
+};
+
+export type OutboundPayoutStatusResponse = {
+  providerReference: string;
+  providerStatus: string;
+  normalizedStatus: PayoutOutcomeStatus;
+  providerAmountSatang: Satang | null;
+  actualFeeSatang: Satang | null;
+  actualTaxSatang: Satang | null;
+  actualDebitSatang: Satang | null;
+  providerApiVersion: string;
+  occurredAt: Date;
+};
+
 export interface OutboundPayoutProvider {
   createPayout(input: OutboundPayoutRequest): Promise<OutboundPayoutResponse>;
+}
+
+export interface OutboundPayoutReconciliationProvider {
+  getPayoutStatus(input: OutboundPayoutStatusRequest): Promise<OutboundPayoutStatusResponse>;
 }
 
 export type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
@@ -217,6 +246,57 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
     return payload;
   }
 
+  private async requestStatus(input: OutboundPayoutStatusRequest): Promise<JsonObject> {
+    if (!this.secretKey) throw this.error('PROVIDER_CONFIGURATION', 'Xendit is not configured.');
+    if (!Number.isInteger(this.timeoutMs) || this.timeoutMs < 1) {
+      throw this.error('PROVIDER_CONFIGURATION', 'Xendit timeout is not configured correctly.');
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    let response: Response;
+    try {
+      const endpoint = input.providerReference
+        ? `/v3/payouts/${encodeURIComponent(input.providerReference)}`
+        : `/v3/payouts?reference_id=${encodeURIComponent(input.internalReference)}&limit=2`;
+      response = await this.fetcher(`${this.baseUrl}${endpoint}`, {
+        method: 'GET',
+        headers: {
+          authorization: `Basic ${btoa(`${this.secretKey}:`)}`,
+          'api-version': this.apiVersion,
+        },
+        signal: controller.signal,
+      });
+    } catch {
+      throw this.error('PROVIDER_UNCERTAIN', 'Xendit did not return a response.');
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    let payload: JsonObject | null = null;
+    try {
+      payload = asObject(await response.json());
+    } catch {
+      payload = null;
+    }
+    if (!response.ok) {
+      const details = providerErrorDetails(payload);
+      throw this.error('PROVIDER_UNCERTAIN', 'Xendit Payout reconciliation is uncertain.', {
+        ...details,
+        providerStatus: response.status,
+      });
+    }
+    if (!payload) throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an invalid Payout status.');
+
+    if (!input.providerReference && Array.isArray(payload.data)) {
+      const matches = payload.data.map(asObject).filter((value): value is JsonObject => value !== null);
+      if (matches.length !== 1) {
+        throw this.error('PROVIDER_UNCERTAIN', 'Xendit did not return one Payout for the internal reference.');
+      }
+      return matches[0]!;
+    }
+    return payload;
+  }
+
   async createPayout(input: OutboundPayoutRequest): Promise<OutboundPayoutResponse> {
     const payload = await this.request(input);
     const providerReference = asText(payload.id) ?? asText(payload.payout_id);
@@ -273,6 +353,61 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
       actualTaxSatang,
       actualDebitSatang: satang(actualDebitSatang),
       providerApiVersion: this.apiVersion,
+    };
+  }
+
+  async getPayoutStatus(
+    input: OutboundPayoutStatusRequest,
+  ): Promise<OutboundPayoutStatusResponse> {
+    const payload = await this.requestStatus(input);
+    const providerStatus = asText(payload.status);
+    if (!providerStatus) throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an incomplete Payout status.');
+    const normalizedStatus = normalizePayoutOutcomeStatus(providerStatus);
+    const eventType = normalizedStatus === 'COMPLETED'
+      ? 'v3_payout.succeeded'
+      : normalizedStatus === 'CANCELLED'
+        ? 'v3_payout.failed'
+        : normalizedStatus === 'FAILED'
+          ? 'v3_payout.failed'
+          : 'v3_payout.pending_compliance';
+    let parsed;
+    try {
+      parsed = parsePayoutProviderEvent(JSON.stringify({
+        ...payload,
+        event: eventType,
+        api_version: payload.api_version ?? this.apiVersion,
+      }));
+    } catch (reason: unknown) {
+      if (reason instanceof Error) {
+        throw this.error('PROVIDER_UNCERTAIN', reason.message);
+      }
+      throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an invalid Payout status.');
+    }
+    if (!parsed.providerReference) {
+      throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned no Payout reference.');
+    }
+    if (input.providerReference && parsed.providerReference !== input.providerReference) {
+      throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different Payout reference.');
+    }
+    if (parsed.internalReference && parsed.internalReference !== input.internalReference) {
+      throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different internal reference.');
+    }
+    if (parsed.providerAmountSatang !== null && parsed.providerAmountSatang !== input.expectedPrincipalSatang) {
+      throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different Payout amount.');
+    }
+    if (parsed.actualDebitSatang !== null && parsed.actualDebitSatang > input.maximumDebitSatang) {
+      throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a Payout debit above the reserve.');
+    }
+    return {
+      providerReference: parsed.providerReference,
+      providerStatus: parsed.providerStatus,
+      normalizedStatus: parsed.normalizedStatus,
+      providerAmountSatang: parsed.providerAmountSatang,
+      actualFeeSatang: parsed.actualFeeSatang,
+      actualTaxSatang: parsed.actualTaxSatang,
+      actualDebitSatang: parsed.actualDebitSatang,
+      providerApiVersion: parsed.providerApiVersion ?? this.apiVersion,
+      occurredAt: parsed.providerOccurredAt,
     };
   }
 }

@@ -183,6 +183,13 @@
       "when": 1787837285671,
       "tag": "0025_parched_thunderbolt_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787854030379,
+      "tag": "0026_tearful_squadron_sinister",
+      "breakpoints": true
     }
   ]
 }

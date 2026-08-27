@@ -168,6 +168,9 @@ export const paymentProviderEventInbox = pgTable(
     providerStatus: text('provider_status').notNull(),
     normalizedStatus: text('normalized_status').notNull(),
     providerAmountSatang: integer('provider_amount_satang'),
+    providerActualFeeSatang: integer('provider_actual_fee_satang'),
+    providerActualTaxSatang: integer('provider_actual_tax_satang'),
+    providerActualDebitSatang: integer('provider_actual_debit_satang'),
     providerChannelCode: text('provider_channel_code'),
     providerOccurredAt: time('provider_occurred_at').notNull(),
     payloadHash: text('payload_hash').notNull(),
@@ -207,7 +210,11 @@ export const paymentProviderEventInbox = pgTable(
     ),
     check(
       'payment_provider_event_inbox_normalized_status_check',
-      sql`${table.normalizedStatus} IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED')`,
+      sql`${table.normalizedStatus} IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED', 'COMPLETED', 'CANCELLED')`,
+    ),
+    check(
+      'payment_provider_event_inbox_actual_amount_check',
+      sql`num_nonnulls(${table.providerActualFeeSatang}, ${table.providerActualTaxSatang}, ${table.providerActualDebitSatang}) IN (0, 3) AND (${table.providerActualFeeSatang} IS NULL OR (${table.providerActualFeeSatang} >= 0 AND ${table.providerActualTaxSatang} >= 0 AND ${table.providerActualDebitSatang} = ${table.providerAmountSatang} + ${table.providerActualFeeSatang} + ${table.providerActualTaxSatang}))`,
     ),
     check(
       'payment_provider_event_inbox_processing_status_check',

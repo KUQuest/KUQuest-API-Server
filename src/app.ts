@@ -1,5 +1,6 @@
 import { questRoute } from '@/modules/quest/quest.route';
 import { tagRoute } from '@/modules/tag';
+import { payoutWebhookRoute } from '@/modules/payout';
 import { topUpWebhookRoute } from '@/modules/top-up';
 
 import { Elysia } from 'elysia';
@@ -42,4 +43,5 @@ export const app = new Elysia({
   .use(portfolioRoute)
   .use(workExperienceRoute)
   .use(tagRoute)
+  .use(payoutWebhookRoute)
   .use(topUpWebhookRoute)
