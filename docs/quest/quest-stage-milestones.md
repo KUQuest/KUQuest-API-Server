@@ -86,6 +86,12 @@ stateDiagram-v2
 - `OPEN + CANDIDATE`: the Hirer cannot edit any Quest field.
 - From `ASSIGNED` onward: the Hirer submits an edit request. Every active Worker must approve within 5 minutes. A rejection or no response leaves the Quest unchanged.
 
+## Quest Image response behavior
+
+- Quest Images are returned in persisted position order in Quest detail and successful image-upload responses. Each returned Quest Image includes its file reference and a viewing link that expires.
+- If the server cannot build a viewing link, it logs the failure and returns `502 IMAGE_LINK_FAILED` for the whole response. It does not return a partial list or renumber the remaining positions. The stored file reference remains unchanged.
+- Quest Board responses remain text-only and do not include Quest Images.
+
 ## Completion, cancellation, and dispute milestones
 
 - The Hirer locks `wage × headcount + platform fee` before `DRAFT → OPEN`. Wage is per Worker.

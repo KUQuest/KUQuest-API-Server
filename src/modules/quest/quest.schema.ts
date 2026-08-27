@@ -1,5 +1,7 @@
 import { t } from 'elysia';
 
+export const maxQuestImages = 3;
+
 const questModeSchema = t.Union([
   t.Literal('FIRST_COME_FIRST_SERVED'),
   t.Literal('CANDIDATE'),
@@ -17,20 +19,42 @@ const locationInputSchema = t.Object(
   { additionalProperties: false },
 );
 
+const titleSchema = t.String({ minLength: 1, maxLength: 120, pattern: '\\S' });
+const descriptionSchema = t.Nullable(t.String({ maxLength: 1000, pattern: '\\S' }));
+const conditionSchema = t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' });
+const startTimeSchema = t.String({ format: 'date-time' });
+const dueAtSchema = t.Nullable(t.String({ format: 'date-time' }));
+const tagIdSchema = t.Nullable(t.String({ format: 'uuid' }));
+const locationsSchema = t.Array(locationInputSchema, { maxItems: 10 });
+
 export const questCreateSchema = t.Object(
   {
-    title: t.String({ minLength: 1, maxLength: 120, pattern: '\\S' }),
-    description: t.Optional(t.Nullable(t.String({ maxLength: 1000, pattern: '\\S' }))),
-    condition: t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' }),
+    title: titleSchema,
+    description: t.Optional(descriptionSchema),
+    condition: conditionSchema,
     mode: questModeSchema,
     participation: questParticipationSchema,
     reward: t.Integer({ minimum: 1, maximum: 700000 }),
     headcount: t.Integer({ minimum: 1, maximum: 20 }),
-    startTime: t.String({ format: 'date-time' }),
-    dueAt: t.Optional(t.Nullable(t.String({ format: 'date-time' }))),
-    tagId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
+    startTime: startTimeSchema,
+    dueAt: t.Optional(dueAtSchema),
+    tagId: t.Optional(tagIdSchema),
     proofRequired: t.Optional(t.Boolean()),
-    locations: t.Optional(t.Array(locationInputSchema, { maxItems: 10 })),
+    locations: t.Optional(locationsSchema),
+  },
+  { additionalProperties: false },
+);
+
+export const questEditSchema = t.Object(
+  {
+    title: t.Optional(titleSchema),
+    description: t.Optional(descriptionSchema),
+    condition: t.Optional(conditionSchema),
+    startTime: t.Optional(startTimeSchema),
+    dueAt: t.Optional(dueAtSchema),
+    tagId: t.Optional(tagIdSchema),
+    proofRequired: t.Optional(t.Boolean()),
+    locations: t.Optional(locationsSchema),
   },
   { additionalProperties: false },
 );
@@ -38,6 +62,18 @@ export const questCreateSchema = t.Object(
 export const questParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
 });
+
+export const questImageParamsSchema = t.Object({
+  questId: t.String({ format: 'uuid' }),
+  imageId: t.String({ format: 'uuid' }),
+});
+
+export const questImagesUploadSchema = t.Object(
+  {
+    images: t.Files({ minItems: 1, maxItems: maxQuestImages }),
+  },
+  { additionalProperties: false },
+);
 
 export const questListQuerySchema = t.Object(
   {
@@ -78,8 +114,10 @@ const locationSchema = t.Object({
   longitude: t.Number(),
 });
 
-const imageSchema = t.Object({
+export const questImageSchema = t.Object({
   fileId: t.String({ format: 'uuid' }),
+  position: t.Integer({ minimum: 0 }),
+  url: t.String({ format: 'uri' }),
 });
 
 const questSummarySchema = t.Object({
@@ -129,7 +167,7 @@ export const questDetailSchema = t.Object({
       t.Object({ position: t.Integer({ minimum: 1 }) }),
     ]),
   ),
-  images: t.Array(imageSchema),
+  images: t.Array(questImageSchema),
 });
 
 export const questCreateResponseSchema = t.Object({
@@ -158,6 +196,13 @@ export const questDetailResponseSchema = t.Object({
   data: questDetailSchema,
 });
 
+export const questImagesUploadResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    images: t.Array(questImageSchema),
+  }),
+});
+
 const questPublishReasonSchema = t.Object({
   code: t.String(),
   message: t.String(),
@@ -174,5 +219,7 @@ export const questPublishCheckResponseSchema = t.Object({
 });
 
 export type QuestCreateInput = typeof questCreateSchema.static;
+export type QuestEditInput = typeof questEditSchema.static;
+export type QuestImagesUploadInput = typeof questImagesUploadSchema.static;
 export type QuestListQuery = typeof questListQuerySchema.static;
 export type QuestMineQuery = typeof questMineQuerySchema.static;
