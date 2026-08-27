@@ -176,6 +176,13 @@
       "when": 1787812521479,
       "tag": "0024_aromatic_risque",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1787837285671,
+      "tag": "0025_parched_thunderbolt_ross",
+      "breakpoints": true
     }
   ]
 }

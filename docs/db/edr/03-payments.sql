@@ -101,6 +101,52 @@ CREATE INDEX payment_top_up_status_history_idx ON payment_top_up_status_history 
 -- changes update the current row and append a history row; these records cannot
 -- be hard-deleted.
 
+CREATE TABLE payment_provider_event_inbox (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider              TEXT NOT NULL,
+  provider_event_id     TEXT NOT NULL,
+  event_type            TEXT NOT NULL,
+  resource_type         TEXT NOT NULL,
+  internal_reference    TEXT,
+  provider_reference    TEXT,
+  provider_api_version  TEXT,
+  provider_status       TEXT NOT NULL,
+  normalized_status     TEXT NOT NULL CHECK (normalized_status IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED')),
+  provider_amount_satang INTEGER CHECK (provider_amount_satang IS NULL OR provider_amount_satang > 0),
+  provider_channel_code TEXT,
+  provider_occurred_at  TIMESTAMPTZ NOT NULL,
+  payload_hash          TEXT NOT NULL,
+  raw_payload_key_version TEXT,
+  raw_payload_nonce     TEXT,
+  raw_payload_ciphertext TEXT,
+  raw_payload_auth_tag  TEXT,
+  raw_payload_expires_at TIMESTAMPTZ NOT NULL,
+  processing_status     TEXT NOT NULL DEFAULT 'RECEIVED' CHECK (processing_status IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')),
+  attempt_count         SMALLINT NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 5),
+  claimed_at            TIMESTAMPTZ,
+  processed_at          TIMESTAMPTZ,
+  last_error            TEXT,
+  received_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (provider, provider_event_id),
+  CHECK (num_nonnulls(raw_payload_key_version, raw_payload_nonce, raw_payload_ciphertext, raw_payload_auth_tag) IN (0, 4))
+);
+CREATE INDEX payment_provider_event_inbox_processing_idx ON payment_provider_event_inbox (processing_status, received_at);
+CREATE INDEX payment_provider_event_inbox_expiry_idx ON payment_provider_event_inbox (raw_payload_expires_at);
+
+CREATE TABLE payment_provider_event_history (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id     UUID NOT NULL REFERENCES payment_provider_event_inbox(id),
+  from_status  TEXT CHECK (from_status IS NULL OR from_status IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')),
+  to_status    TEXT NOT NULL CHECK (to_status IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')),
+  source       TEXT NOT NULL,
+  reason       TEXT,
+  error        TEXT,
+  occurred_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX payment_provider_event_history_event_idx ON payment_provider_event_history (event_id, occurred_at);
+-- Provider event inbox rows cannot be hard-deleted. History rows are immutable.
+
 CREATE TABLE payment_payout_accounts (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id             UUID NOT NULL REFERENCES auth_user(id),
