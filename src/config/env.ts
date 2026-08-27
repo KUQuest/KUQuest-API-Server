@@ -48,6 +48,9 @@ export const env = {
   s3SecretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
   xenditSecretKey: process.env.XENDIT_SECRET_KEY,
   xenditWebhookToken: process.env.XENDIT_WEBHOOK_TOKEN,
+  paymentProviderEventEncryptionKey: process.env.PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY,
+  paymentProviderEventEncryptionKeyVersion:
+    process.env.PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION ?? 'v1',
   payoutDestinationEncryptionKey: process.env.PAYOUT_DESTINATION_ENCRYPTION_KEY,
   payoutDestinationEncryptionKeyVersion:
     process.env.PAYOUT_DESTINATION_ENCRYPTION_KEY_VERSION ?? 'v1',
