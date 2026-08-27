@@ -93,7 +93,7 @@ evidence route resolves Evidence References through a Report Case-scoped query.
 | Departed Worker | Messages created no later than leftAt | No | No later events |
 | Accepted Participant after rejoin | Full Conversation history through the new window | Yes, while current | Current committed events |
 | Candidate | No Conversation access | No | No subscription |
-| Terminal Quest current Accepted Participant | Full retained history | No | System and state events only |
+| Terminal Quest current Accepted Participant | Full retained history | No | Terminal System Message and state events, then `subscription.revoked`; no later events |
 
 A departure closes the Worker's current Chat Membership at the supplied
 leftAt. A reacceptance creates a new window and permits full history again.
@@ -177,6 +177,16 @@ parameters, and queries reject unknown fields and invalid values. As in the
 existing Elysia contract, request validation runs before the authentication
 hook; a malformed request may therefore return 400 VALIDATION before an
 anonymous request reaches 401 UNAUTHORIZED.
+
+The common errors apply to every route in the matching family: Member routes
+return 401 UNAUTHORIZED for a missing or invalid Member Session and 429
+RATE_LIMITED when the route limit is exceeded. Admin routes return 401
+UNAUTHORIZED for a missing or invalid Admin Session, 403 ADMIN_DISABLED for a
+disabled Admin, and 429 RATE_LIMITED when the route limit is exceeded. A route
+with request input returns 400 VALIDATION for malformed or unknown input. A
+route with a resource identifier applies the 404 non-disclosure rules above.
+The route sections below list each route's additional resource, conflict,
+payload, and infrastructure errors.
 
 The current shared response helper lists 400, 401, 404, 409, 413, 415, and 502.
 Before any Chat route implementation, extend the shared `responses` helper to
@@ -465,7 +475,43 @@ Validation:
 
 The response is 200 with data.message containing the committed Message. The
 server commits PostgreSQL before returning the response or publishing a
-WebSocket event.
+WebSocket event. The complete success response is:
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "message": {
+      "id": "message-id",
+      "conversationId": "conversation-id",
+      "sequence": 42,
+      "kind": "USER",
+      "sender": {
+        "id": "member-id",
+        "displayName": "Member name"
+      },
+      "text": "Message text",
+      "attachments": [
+        {
+          "id": "attachment-id",
+          "fileName": "brief.pdf",
+          "mediaType": "application/pdf",
+          "sizeBytes": 12000,
+          "createdAt": "2026-08-27T10:00:00.000Z"
+        }
+      ],
+      "systemType": null,
+      "createdAt": "2026-08-27T10:00:00.000Z"
+    }
+  }
+}
+~~~
+
+For an Attachment-only Message, text is null and attachments is non-empty.
+For an idempotent replay, the response is the same 200 envelope and the same
+complete data.message values as the original request: the server returns the
+original Message identifier, sequence, timestamps, text, and Attachments. It
+does not create another Message or publish another Message event.
 
 The same Member, Conversation, and clientMessageId with the same content
 returns the original Message. Reusing clientMessageId with different content
@@ -473,8 +519,9 @@ returns 409 CLIENT_MESSAGE_ID_REUSED. A missing or invalid Member Session
 returns 401 UNAUTHORIZED. A rate-limited request returns 429 RATE_LIMITED. A
 departed or non-member caller receives 404 CONVERSATION_NOT_FOUND. A Terminal
 Quest Conversation returns 409 CONVERSATION_READ_ONLY. An unavailable
-Attachment returns 404 ATTACHMENT_NOT_FOUND. Invalid content returns 400
-MESSAGE_CONTENT_REQUIRED or 400 MESSAGE_TOO_LONG.
+Attachment returns 404 ATTACHMENT_NOT_FOUND. Invalid or unknown request input
+returns 400 VALIDATION; invalid content returns 400 MESSAGE_CONTENT_REQUIRED
+or 400 MESSAGE_TOO_LONG.
 
 ### Advance a Read Cursor
 
@@ -513,8 +560,10 @@ not the older requested Message ID.
 
 Missing, other-Conversation, or invisible Messages return 404
 MESSAGE_NOT_FOUND. Missing or invalid Member authentication returns 401
-UNAUTHORIZED. Invalid request bodies return 400 VALIDATION. The Read Cursor is
-never exposed as a read receipt to other Members.
+UNAUTHORIZED. A missing or unauthorized Conversation returns 404
+CONVERSATION_NOT_FOUND. Invalid request bodies return 400 VALIDATION. A
+rate-limited request returns 429 RATE_LIMITED. The Read Cursor is never
+exposed as a read receipt to other Members.
 
 ### Upload an Attachment
 
@@ -556,9 +605,11 @@ fields return 400 VALIDATION. The response is:
 
 An unconsumed Attachment expires after 24 hours from PostgreSQL and object
 storage. Missing or invalid Member authentication returns 401 UNAUTHORIZED.
-Other errors are 404 CONVERSATION_NOT_FOUND, 409 CONVERSATION_READ_ONLY, 413
-ATTACHMENT_TOO_LARGE, 415 UNSUPPORTED_ATTACHMENT_TYPE, 429 RATE_LIMITED, 502
-ATTACHMENT_SCAN_UNAVAILABLE, or 502 ATTACHMENT_UPLOAD_FAILED.
+The complete error set is 400 VALIDATION for missing, multiple, or empty file
+fields, 401 UNAUTHORIZED, 404 CONVERSATION_NOT_FOUND, 409
+CONVERSATION_READ_ONLY, 413 ATTACHMENT_TOO_LARGE, 415
+UNSUPPORTED_ATTACHMENT_TYPE, 429 RATE_LIMITED, 502
+ATTACHMENT_SCAN_UNAVAILABLE, and 502 ATTACHMENT_UPLOAD_FAILED.
 
 ### Get an Attachment link
 
@@ -583,9 +634,10 @@ The response is:
 
 The URL is short-lived and never persisted. The server controls the lifetime
 and clients use expiresAt rather than assuming a fixed lifetime. Missing or
-invalid Member authentication returns 401 UNAUTHORIZED.
-Missing, hidden, rejected, quarantined, expired, or unauthorized Attachments
-return 404 ATTACHMENT_NOT_FOUND.
+invalid Member authentication returns 401 UNAUTHORIZED. This route has no
+query or request body, so it has no input-validation error. Missing, hidden,
+rejected, quarantined, expired, or unauthorized Attachments return 404
+ATTACHMENT_NOT_FOUND. A rate-limited request returns 429 RATE_LIMITED.
 
 ### Submit a Reporter Entry
 
@@ -995,6 +1047,21 @@ The error does not reveal whether the Conversation exists. A departed Worker
 cannot subscribe to live delivery and receives no later events. The server
 removes a subscription when the Worker's Chat Membership ends. It sends a
 `subscription.revoked` event before it removes that subscription.
+
+When a subscribed Conversation becomes terminal, the server completes the
+database transaction first. For every active subscription, it then sends these
+events in order:
+
+1. the terminal System Message as `message.created`;
+2. `conversation.state.changed` with `archived: true` and `readOnly: true`;
+3. `subscription.revoked` with reason `CONVERSATION_READ_ONLY`.
+
+The server removes the subscription only after the revocation event. The
+current Accepted Participant can still read the retained Conversation through
+REST after revocation, but receives no later WebSocket events. A membership
+departure sends `subscription.revoked` with `MEMBERSHIP_ENDED` before removal;
+it does not send the terminal state sequence unless the same committed Quest
+transition also makes the Conversation terminal.
 
 ### Events
 
