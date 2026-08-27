@@ -14,7 +14,9 @@ import {
 } from '@/database/schema/wallet.schema';
 import {
   assertXenditWebhookToken,
+  canonicalizeProviderPayload,
   ProviderEventError,
+  providerPayloadHash,
 } from '@/modules/top-up';
 import {
   createProviderEventEncryption,
@@ -107,6 +109,7 @@ export type PayoutProviderEventClaimInput = {
 };
 
 const providerEventSource = 'WEBHOOK';
+const reconciliationSource = 'RECONCILIATION';
 const rawPayloadRetentionMs = 30 * 24 * 60 * 60 * 1000;
 
 const providerEventFromRecord = (
@@ -648,6 +651,9 @@ const completeClaimedEvent = async (eventId: string) => db.transaction(async (tr
   if (event.processingStatus === 'PROCESSED') return providerEventFromRecord(event);
   if (event.processingStatus !== 'PROCESSING') throw new ProviderEventError('PROVIDER_EVENT_NOT_RETRYABLE', 'Provider event is not claimed.');
 
+  const source = event.eventType.startsWith('reconciliation.')
+    ? reconciliationSource
+    : providerEventSource;
   await applyPayoutOutcomeInTransaction(transaction, {
     eventType: event.eventType,
     internalReference: event.internalReference,
@@ -661,14 +667,14 @@ const completeClaimedEvent = async (eventId: string) => db.transaction(async (tr
     actualDebitSatang: event.providerActualDebitSatang === null ? null : positiveSatang(event.providerActualDebitSatang),
     providerChannelCode: event.providerChannelCode,
     providerOccurredAt: event.providerOccurredAt,
-  }, providerEventSource);
+  }, source);
   const [processed] = await transaction
     .update(paymentProviderEventInbox)
     .set({ processingStatus: 'PROCESSED', processedAt: new Date(), claimedAt: null, lastError: null })
     .where(eq(paymentProviderEventInbox.id, event.id))
     .returning();
   if (!processed) throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event could not be completed.');
-  await insertEventHistory(transaction, event.id, 'PROCESSING', 'PROCESSED', 'WORKER', 'Provider event applied to the Payout.');
+  await insertEventHistory(transaction, event.id, 'PROCESSING', 'PROCESSED', source, 'Provider event applied to the Payout.');
   return providerEventFromRecord(processed);
 });
 
@@ -777,7 +783,7 @@ export const reconcilePayout = async (
   if (payout.providerReference && outcome.providerReference !== payout.providerReference) {
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider reconciliation returned a different Payout reference.');
   }
-  await db.transaction((transaction) => applyPayoutOutcomeInTransaction(transaction, {
+  const facts: PayoutOutcomeFacts = {
     eventType: isPayoutProviderReversal(outcome.providerStatus)
       ? 'reconciliation.reversed'
       : `reconciliation.${outcome.normalizedStatus.toLowerCase()}`,
@@ -792,7 +798,65 @@ export const reconcilePayout = async (
     actualDebitSatang: outcome.actualDebitSatang,
     providerChannelCode: null,
     providerOccurredAt: outcome.occurredAt,
-  }, 'RECONCILIATION'));
+  };
+  const reconciliationPayload = {
+    eventType: facts.eventType,
+    internalReference: facts.internalReference,
+    providerReference: facts.providerReference,
+    providerApiVersion: facts.providerApiVersion,
+    providerStatus: facts.providerStatus,
+    normalizedStatus: facts.normalizedStatus,
+    providerAmountSatang: facts.providerAmountSatang,
+    actualFeeSatang: facts.actualFeeSatang,
+    actualTaxSatang: facts.actualTaxSatang,
+    actualDebitSatang: facts.actualDebitSatang,
+    providerOccurredAt: facts.providerOccurredAt.toISOString(),
+  };
+  const payloadHash = providerPayloadHash(canonicalizeProviderPayload(reconciliationPayload));
+  const event = await db.transaction(async (transaction) => {
+    const providerEventId = `reconciliation:${payout.id}:${payloadHash}`;
+    const [created] = await transaction
+      .insert(paymentProviderEventInbox)
+      .values({
+        provider: 'XENDIT',
+        providerEventId,
+        eventType: facts.eventType,
+        resourceType: 'PAYOUT',
+        internalReference: facts.internalReference,
+        providerReference: facts.providerReference,
+        providerApiVersion: facts.providerApiVersion,
+        providerStatus: facts.providerStatus,
+        normalizedStatus: facts.normalizedStatus,
+        providerAmountSatang: facts.providerAmountSatang,
+        providerActualFeeSatang: facts.actualFeeSatang,
+        providerActualTaxSatang: facts.actualTaxSatang,
+        providerActualDebitSatang: facts.actualDebitSatang,
+        providerOccurredAt: facts.providerOccurredAt,
+        payloadHash,
+        rawPayloadExpiresAt: new Date(),
+      })
+      .onConflictDoNothing({
+        target: [paymentProviderEventInbox.provider, paymentProviderEventInbox.providerEventId],
+      })
+      .returning();
+    if (created) {
+      await insertEventHistory(transaction, created.id, null, 'RECEIVED', reconciliationSource, 'Provider state fetched for Payout reconciliation.');
+      return providerEventFromRecord(created);
+    }
+    const [existing] = await transaction
+      .select()
+      .from(paymentProviderEventInbox)
+      .where(and(
+        eq(paymentProviderEventInbox.provider, 'XENDIT'),
+        eq(paymentProviderEventInbox.providerEventId, providerEventId),
+      ))
+      .for('update');
+    if (!existing || existing.resourceType !== 'PAYOUT' || existing.payloadHash !== payloadHash) {
+      throw new ProviderEventError('PROVIDER_EVENT_CONFLICT', 'Provider reconciliation outcome could not be retained.');
+    }
+    return providerEventFromRecord(existing);
+  });
+  await processPayoutProviderEvent(event.id);
   return getPayout(principalUserId, payoutId);
 };
 

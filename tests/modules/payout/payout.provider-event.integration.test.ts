@@ -27,6 +27,8 @@ import {
   initiatePayout,
   listPayouts,
   PayoutProviderError,
+  processPayoutProviderEvents,
+  purgeExpiredProviderEventPayloads,
   quotePayout,
   processPayoutProviderEvent,
   receivePayoutProviderEvent,
@@ -143,7 +145,7 @@ const eventPayload = (input: {
     payout_id: input.providerReference,
     reference_id: input.internalReference,
     status: input.status,
-    ...(input.amount === undefined ? {} : { source_amount: input.amount }),
+    ...(input.amount === undefined ? {} : { source_amount: input.amount / 100 }),
     source_currency: 'THB',
     destination_currency: 'THB',
     updated: '2026-08-27T00:00:00.000Z',
@@ -222,6 +224,68 @@ describe('Payout Provider event application services', () => {
     )).toContainEqual(expect.objectContaining({ fromStatus: 'PENDING', toStatus: 'FAILED' }));
   });
 
+  it('releases the full reserve for a confirmed cancellation', async () => {
+    const { userId, payout } = await createPendingPayout('be117-cancelled');
+    const cancelled = await receive(eventPayload({
+      eventId: `be117-cancelled-${crypto.randomUUID()}`,
+      internalReference: payout.internalReference,
+      providerReference: payout.providerReference!,
+      event: 'v3_payout.failed',
+      status: 'CANCELLED',
+    }));
+
+    await processPayoutProviderEvent(cancelled.id);
+
+    expect(await getPayout(userId, payout.id)).toMatchObject({ payoutStatus: 'CANCELLED' });
+    expect(await getWallet(userId)).toMatchObject({
+      earningsBalanceSatang: 1_000,
+      reservedForPayoutsSatang: 0,
+    });
+  });
+
+  it('does not settle a Payout twice when workers process one event concurrently', async () => {
+    const { userId, payout } = await createPendingPayout('be117-concurrent-process');
+    const event = await receive(eventPayload({
+      eventId: `be117-concurrent-${crypto.randomUUID()}`,
+      internalReference: payout.internalReference,
+      providerReference: payout.providerReference!,
+      status: 'SUCCEEDED',
+      amount: payout.principalSatang,
+    }));
+
+    const results = await Promise.allSettled([
+      processPayoutProviderEvent(event.id),
+      processPayoutProviderEvent(event.id),
+    ]);
+
+    expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
+    expect(await getPayout(userId, payout.id)).toMatchObject({ payoutStatus: 'COMPLETED' });
+    expect(await db.select().from(walletLedgerTransaction).where(
+      eq(walletLedgerTransaction.businessReference, `payout-settle:${payout.id}`),
+    )).toHaveLength(1);
+  });
+
+  it('processes a Payout event while its Wallet is Frozen', async () => {
+    const { userId, payout } = await createPendingPayout('be117-frozen');
+    const [wallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, userId));
+    if (!wallet) throw new Error('Wallet was not provisioned.');
+    await db.update(walletWallet).set({ walletStatus: 'FROZEN' }).where(eq(walletWallet.id, wallet.id));
+    await receive(eventPayload({
+      eventId: `be117-frozen-${crypto.randomUUID()}`,
+      internalReference: payout.internalReference,
+      providerReference: payout.providerReference!,
+      status: 'SUCCEEDED',
+      amount: payout.principalSatang,
+    }));
+
+    expect(await processPayoutProviderEvents()).toBeGreaterThanOrEqual(1);
+    expect(await getPayout(userId, payout.id)).toMatchObject({ payoutStatus: 'COMPLETED' });
+    expect(await getWallet(userId)).toMatchObject({
+      walletStatus: 'FROZEN',
+      reservedForPayoutsSatang: 0,
+    });
+  });
+
   it('reconciles an uncertain Payout through the provider status adapter', async () => {
     const { userId, payout } = await createPendingPayout(
       'be117-reconcile',
@@ -255,6 +319,21 @@ describe('Payout Provider event application services', () => {
     });
     expect(reconciled).toMatchObject({ payoutStatus: 'COMPLETED' });
     expect(await getWallet(userId)).toMatchObject({ reservedForPayoutsSatang: 0 });
+    const [retainedOutcome] = await db
+      .select()
+      .from(paymentProviderEventInbox)
+      .where(eq(paymentProviderEventInbox.internalReference, payout.internalReference));
+    expect(retainedOutcome).toMatchObject({
+      resourceType: 'PAYOUT',
+      eventType: 'reconciliation.completed',
+      processingStatus: 'PROCESSED',
+      providerAmountSatang: payout.principalSatang,
+      providerActualFeeSatang: 0,
+      providerActualTaxSatang: 0,
+      providerActualDebitSatang: payout.principalSatang,
+      payloadHash: expect.any(String),
+      rawPayloadCiphertext: null,
+    });
   });
 
   it('retains payout facts after the raw event payload is purged', async () => {
@@ -277,6 +356,15 @@ describe('Payout Provider event application services', () => {
       providerActualTaxSatang: 0,
       providerActualDebitSatang: payout.principalSatang,
       rawPayloadCiphertext: expect.any(String),
+    });
+    await expect(purgeExpiredProviderEventPayloads(new Date(Date.now() + (31 * 24 * 60 * 60 * 1000))))
+      .resolves.toBeGreaterThanOrEqual(1);
+    const [purged] = await db.select().from(paymentProviderEventInbox)
+      .where(eq(paymentProviderEventInbox.id, event.id));
+    expect(purged).toMatchObject({
+      providerAmountSatang: payout.principalSatang,
+      payloadHash: expect.any(String),
+      rawPayloadCiphertext: null,
     });
   });
 });

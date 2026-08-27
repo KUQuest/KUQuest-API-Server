@@ -3,11 +3,12 @@ import {
   normalizePayoutOutcomeStatus,
   parsePayoutProviderEvent,
 } from '@/modules/payout';
+import { positiveSatang } from '@/modules/wallet';
 
 import { describe, expect, it } from 'bun:test';
 
 describe('Payout Provider event parsing', () => {
-  it('extracts Xendit payout facts in satang', () => {
+  it('converts Xendit THB payout facts to satang', () => {
     const event = parsePayoutProviderEvent(JSON.stringify({
       event: 'v3_payout.succeeded',
       api_version: '2025-09-01',
@@ -16,9 +17,9 @@ describe('Payout Provider event parsing', () => {
         reference_id: 'payout:payout-123',
         status: 'SUCCEEDED',
         source_currency: 'THB',
-        source_amount: 12_345,
-        fee: 10,
-        tax: 5,
+        source_amount: 123.45,
+        fee: 0.1,
+        tax: 0.05,
         updated: '2026-08-27T00:01:00.000Z',
       },
     }), new Date('2026-08-27T00:00:00.000Z'));
@@ -53,12 +54,27 @@ describe('Payout Provider event parsing', () => {
         payout_id: 'po-mismatch',
         reference_id: 'payout:mismatch',
         status: 'SUCCEEDED',
-        source_amount: 100,
-        fee: 10,
-        tax: 5,
-        actual_debit: 120,
+        source_amount: 1,
+        fee: 0.1,
+        tax: 0.05,
+        actual_debit: 1.2,
       },
     }))).toThrow(ProviderEventError);
+  });
+
+  it('treats an integral Xendit amount as whole THB', () => {
+    const event = parsePayoutProviderEvent(JSON.stringify({
+      event: 'v3_payout.succeeded',
+      data: {
+        payout_id: 'po-integral',
+        reference_id: 'payout:integral',
+        status: 'SUCCEEDED',
+        source_currency: 'THB',
+        source_amount: 123,
+      },
+    }));
+
+    expect(event.providerAmountSatang).toBe(positiveSatang(12_300));
   });
 
   it('rejects unsupported payout payloads', () => {

@@ -51,15 +51,15 @@ const firstText = (...values: unknown[]) => {
 
 const firstDefined = (...values: unknown[]) => values.find((value) => value !== undefined && value !== null);
 
-const parsePayoutAmount = (value: unknown, allowZero = false): Satang => {
+// Xendit Payout amounts are denominated in the declared currency. KUQuest only
+// accepts THB at this provider boundary, so convert each amount to satang here.
+const parseThbAmount = (value: unknown, allowZero = false): Satang => {
   const text = typeof value === 'number' ? String(value) : value;
   if (typeof text !== 'string' || !/^\d+(?:\.\d{1,2})?$/.test(text)) {
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payout amount is invalid.');
   }
-  const [whole, fractional] = text.split('.');
-  const amount = fractional === undefined
-    ? Number(whole)
-    : Number(whole) * 100 + Number(fractional.padEnd(2, '0'));
+  const [whole, fractional = ''] = text.split('.');
+  const amount = Number(whole) * 100 + Number(fractional.padEnd(2, '0') || 0);
   if (
     !Number.isSafeInteger(amount) ||
     amount < 0 ||
@@ -71,8 +71,8 @@ const parsePayoutAmount = (value: unknown, allowZero = false): Satang => {
   return satang(amount);
 };
 
-const parseOptionalPayoutAmount = (value: unknown, allowZero = true): Satang | null => (
-  value === undefined || value === null ? null : parsePayoutAmount(value, allowZero)
+const parseOptionalThbAmount = (value: unknown, allowZero = true): Satang | null => (
+  value === undefined || value === null ? null : parseThbAmount(value, allowZero)
 );
 
 const parseProviderDate = (value: unknown, fallback: Date): Date => {
@@ -185,7 +185,7 @@ export const parsePayoutProviderEvent = (
   const providerChannelCode = firstText(data.channel_code, payload.channel_code);
   const normalizedStatus = normalizePayoutOutcomeStatus(providerStatus);
   const providerAmountValueResult = providerAmountValue(data);
-  const providerAmountSatang = parseOptionalPayoutAmount(providerAmountValueResult, false);
+  const providerAmountSatang = parseOptionalThbAmount(providerAmountValueResult, false);
 
   let actualFeeSatang: Satang | null = null;
   let actualTaxSatang: Satang | null = null;
@@ -194,25 +194,18 @@ export const parsePayoutProviderEvent = (
     if (providerAmountSatang === null) {
       throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'A completed Provider payout must include an amount.');
     }
-    actualFeeSatang = parseOptionalPayoutAmount(actualAmountValue(data, [
-      'actual_fee_satang',
-      'fee_satang',
+    actualFeeSatang = parseOptionalThbAmount(actualAmountValue(data, [
       'fee',
       'fee_amount',
       'payout_fee',
     ]));
-    actualTaxSatang = parseOptionalPayoutAmount(actualAmountValue(data, [
-      'actual_tax_satang',
-      'tax_satang',
+    actualTaxSatang = parseOptionalThbAmount(actualAmountValue(data, [
       'tax',
       'tax_amount',
       'payout_tax',
     ]));
-    actualDebitSatang = parseOptionalPayoutAmount(actualAmountValue(data, [
-      'actual_debit_satang',
-      'debit_satang',
+    actualDebitSatang = parseOptionalThbAmount(actualAmountValue(data, [
       'actual_debit',
-      'total_amount_satang',
       'total_amount',
     ]));
     actualFeeSatang ??= satang(0);

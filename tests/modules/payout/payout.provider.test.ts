@@ -57,9 +57,9 @@ describe('Xendit Payout provider', () => {
           reference_id: request.internalReference,
           status: 'SUCCEEDED',
           source_currency: 'THB',
-          source_amount: 12_345,
-          fee: 10,
-          tax: 5,
+          source_amount: 123.45,
+          fee: 0.1,
+          tax: 0.05,
           updated: '2026-08-27T00:01:00.000Z',
         });
       },
@@ -93,7 +93,7 @@ describe('Xendit Payout provider', () => {
         reference_id: request.internalReference,
         status: 'FAILED',
         source_currency: 'THB',
-        source_amount: 12_345,
+        source_amount: 123.45,
       }),
     });
 
