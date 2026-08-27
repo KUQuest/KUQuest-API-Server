@@ -11,9 +11,10 @@ and Admin Action.
 
 ## Scope and ownership
 
-One Work Conversation exists for one Quest. The first accepted Worker creates
-the Conversation and the Hirer joins it in the same Quest transaction. Later
-accepted Workers join the same Conversation.
+One Work Conversation exists for one Quest. The first Worker to become an
+Accepted Participant creates the Conversation and the Hirer joins it in the
+same Quest transaction. Later Workers become Accepted Participants in the same
+Conversation.
 
 Quest owns the Hirer, Worker, Assignment, Quest Status, and Accepted Participant
 membership. Quest calls the typed Work Chat membership writer from the same
@@ -26,13 +27,14 @@ Trust & Safety owns Report Case, Reporter Entry, and Moderation Decision.
 Admin Infra owns the Admin Action audit record required for moderation.
 
 The current Quest domain contract has no transition that reopens a Terminal
-Quest. BE-120 and BE-131 must treat a Terminal Quest as final for this MVP;
-neither issue may require or implement Terminal Quest reopening. In this
-document, rejoin means that a departed Worker is accepted again while the Quest
-is not terminal. Rejoin creates a new Chat Membership window; it does not
-reactivate a Terminal Quest or create a second Conversation. If a future
-decision adds reopening, the Quest, Chat, and retention contracts and their
-ADRs must be revised together before implementation.
+Quest. BE-118, BE-120, and BE-131 must treat a Terminal Quest as final for this
+MVP. Their requirements must not require or implement Terminal Quest reopening.
+In this document, rejoin means that a departed Worker becomes an Accepted
+Participant again while the Quest is not terminal. Rejoin creates a new Chat
+Membership window; it does not reactivate a Terminal Quest or create a second
+Conversation. If a future decision adds reopening, the Quest, Chat, and
+retention contracts and their ADRs must be revised together before
+implementation.
 
 ## Domain model
 
@@ -45,7 +47,8 @@ A Conversation has one immutable Quest reference. It contains:
 - ordered Member-authored Messages and immutable System Messages;
 - archived and read-only state derived from Quest lifecycle.
 
-The Conversation is created when the first Worker is accepted. It is not
+The Conversation is created when the first Worker becomes an Accepted
+Participant. It is not
 created for a Candidate who has not been accepted. A Terminal Quest makes its
 Conversation read-only. Retained Conversation data prevents physical Quest
 deletion until the retention policy permits cleanup.
@@ -80,7 +83,7 @@ locations, and signed URLs are never part of logs or Message persistence.
 | --- | --- | --- | --- |
 | Current Accepted Participant | Full Conversation history | Yes, until the Conversation is read-only | Current committed events |
 | Departed Worker | Messages created no later than leftAt | No | No later events |
-| Reaccepted Worker | Full Conversation history through the new window | Yes, while current | Current committed events |
+| Accepted Participant after rejoin | Full Conversation history through the new window | Yes, while current | Current committed events |
 | Candidate | No Conversation access | No | No subscription |
 | Terminal Quest current Accepted Participant | Full retained history | No | System and state events only |
 
@@ -168,8 +171,10 @@ hook; a malformed request may therefore return 400 VALIDATION before an
 anonymous request reaches 401 UNAUTHORIZED.
 
 The current shared response helper lists 400, 401, 404, 409, 413, 415, and 502.
-The Chat rate-limit routes must add 429 to their response metadata while
-keeping the same response envelope.
+Before any Chat route implementation, extend the shared `responses` helper to
+accept HTTP 403 and 429 and map both to the existing `apiErrorSchema` envelope.
+Chat routes use 403 for an authenticated but disallowed caller, such as
+`ADMIN_DISABLED`, and 429 `RATE_LIMITED` for a rate-limited request.
 
 Admin Chat routes require an enabled Admin Session. A missing or invalid
 Session returns 401 UNAUTHORIZED. A disabled Admin returns 403
@@ -288,10 +293,13 @@ below.
 ### Admin evidence
 
 The `reportedMessage`, `messagesBefore`, and `messagesAfter` values use the
-Message shape. Admin evidence contains the original text, including text that
-Members see as a hidden placeholder. Its Attachment values contain metadata
-only and a `linkAvailable` boolean; the signed link is returned by the separate
-Admin evidence link route. The response is:
+Message shape. `messagesBefore` and `messagesAfter` are retained context
+Messages. Hidden Messages are included in these arrays when they are still
+retained. Admin evidence contains the original text for the reported Message
+and every retained context Message, including text that Members see as a hidden
+placeholder. Its Attachment values contain metadata only and a `linkAvailable`
+boolean; the signed link is returned by the separate Admin evidence link route.
+A Message deleted by retention is not included. The response is:
 
 ~~~json
 {
@@ -348,10 +356,10 @@ Admin evidence link route. The response is:
 }
 ~~~
 
-messagesBefore and messagesAfter contain at most 20 Messages each and are
-ordered by Conversation sequence ascending. An Admin evidence Attachment link
-is available only when the Attachment belongs to one of these Messages and is
-still retained.
+messagesBefore and messagesAfter contain at most 20 retained context Messages
+each and are ordered by Conversation sequence ascending. An Admin evidence
+Attachment link is available only when the Attachment belongs to one of these
+Messages and is still retained.
 
 ## REST API
 
@@ -451,11 +459,12 @@ WebSocket event.
 
 The same Member, Conversation, and clientMessageId with the same content
 returns the original Message. Reusing clientMessageId with different content
-returns 409 CLIENT_MESSAGE_ID_REUSED. A departed or non-member caller receives
-404 CONVERSATION_NOT_FOUND. A Terminal Quest Conversation returns 409
-CONVERSATION_READ_ONLY. An unavailable Attachment returns
-404 ATTACHMENT_NOT_FOUND. Invalid content returns 400 MESSAGE_CONTENT_REQUIRED
-or 400 MESSAGE_TOO_LONG.
+returns 409 CLIENT_MESSAGE_ID_REUSED. A missing or invalid Member Session
+returns 401 UNAUTHORIZED. A rate-limited request returns 429 RATE_LIMITED. A
+departed or non-member caller receives 404 CONVERSATION_NOT_FOUND. A Terminal
+Quest Conversation returns 409 CONVERSATION_READ_ONLY. An unavailable
+Attachment returns 404 ATTACHMENT_NOT_FOUND. Invalid content returns 400
+MESSAGE_CONTENT_REQUIRED or 400 MESSAGE_TOO_LONG.
 
 ### Advance a Read Cursor
 
@@ -736,9 +745,10 @@ Opening evidence writes an immutable Admin Action in the same operation
 boundary as the evidence read.
 
 The response uses the Admin evidence shape defined above. It contains the
-reported Message, at most 20 visible Messages before and after it, the grouped
-Reporter Entries needed for moderation, and the current Report Case status. It
-contains no unrelated Conversation data. The arrays are bounded and ordered by
+reported Message, at most 20 retained context Messages before and after it, the
+grouped Reporter Entries needed for moderation, and the current Report Case
+status. Hidden Messages are included when they are still retained. It contains
+no unrelated Conversation data. The arrays are bounded and ordered by
 Conversation sequence ascending. This route does not paginate and does not
 accept or return a cursor.
 
@@ -1027,7 +1037,7 @@ WebSocket fan-out are outside this contract.
 ## Limits
 
 - one Work Conversation per Quest;
-- at most 50 accepted Members per Quest;
+- at most 50 Accepted Participants per Quest, including the Hirer;
 - at most five Attachments per Message;
 - at most 10 MB per Attachment;
 - at most 4,000 characters of Message text;
@@ -1044,16 +1054,25 @@ consumption, reusable file record, or orphaned object.
 
 ## Retention and account deletion
 
-The retention clock starts one year after the Quest's latest transition to
-COMPLETED or CANCELLED. The current Quest contract has no terminal reopen
-transition. If a future decision adds one, the Quest and Chat retention
-contracts must be revised together before implementation.
+The retention policy uses these timestamps:
 
-An open Report Case holds the Message and Attachment evidence required for
-moderation beyond normal expiry. After a case closes, its evidence remains for
-90 days, then becomes eligible for deletion. A daily retryable process removes
-expired Messages and object-storage files. It does not remove active or held
-evidence.
+- `latestTerminalAt` is the time of the Quest's latest transition to
+  `COMPLETED` or `CANCELLED`;
+- `caseClosedAt` is the time that the Report Case holding the evidence closes.
+
+An open Report Case continues to hold its Message and Attachment evidence. It
+is not eligible for deletion while the case is open. After the case closes:
+
+~~~text
+eligibleAt = max(latestTerminalAt + 1 year, caseClosedAt + 90 days)
+~~~
+
+If no Report Case exists, `eligibleAt` is `latestTerminalAt + 1 year`. A daily
+retryable process may remove retained Messages and object-storage files at or
+after `eligibleAt`. It does not remove active or held evidence. The current
+Quest contract has no terminal reopen transition; if a future decision adds
+one, the Quest and Chat retention contracts must be revised together before
+implementation.
 
 Deleting a Member anonymizes the sender as Former member in Member-facing
 history. The minimum identity linkage remains only while an open Report Case

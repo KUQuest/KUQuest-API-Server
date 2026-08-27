@@ -193,7 +193,7 @@ A piece of content in a Work Conversation, sent by an Accepted Participant or cr
 _Avoid_: Notification, post
 
 **Attachment**:
-A private file shared in a Message in a Work Conversation. It is available only to a Member who may read the containing Message and only after it passes the required safety checks.
+A private file shared in a Message in a Work Conversation. A Member can access it only when the Member may read the containing Message. An Admin can access it only as retained evidence for an authorized Report Case. Both paths require the Attachment to pass the required safety checks.
 _Avoid_: Public file, image URL
 
 **Read Cursor**:
