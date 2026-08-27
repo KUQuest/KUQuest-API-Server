@@ -143,6 +143,11 @@ jobs:
           BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           ADMIN_BETTER_AUTH_SECRET: ${{ secrets.ADMIN_BETTER_AUTH_SECRET }}
+          STAGING_ADMIN_SEED_ENABLED: ${{ secrets.STAGING_ADMIN_SEED_ENABLED }}
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          ADMIN_FIRST_NAME: ${{ secrets.ADMIN_FIRST_NAME }}
+          ADMIN_LAST_NAME: ${{ secrets.ADMIN_LAST_NAME }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
 
@@ -197,7 +202,24 @@ jobs:
             fi
           done
 
+          if [ "${STAGING_ADMIN_SEED_ENABLED:-false}" = 'true' ]; then
+            ADMIN_SEED_SECRETS=(
+              ADMIN_EMAIL
+              ADMIN_PASSWORD
+              ADMIN_FIRST_NAME
+              ADMIN_LAST_NAME
+            )
+
+            for SECRET_NAME in "${ADMIN_SEED_SECRETS[@]}"; do
+              if [ -z "${!SECRET_NAME}" ]; then
+                echo "Missing GitHub secret: $SECRET_NAME"
+                exit 1
+              fi
+            done
+          fi
+
           ENV_FILE="$RUNNER_TEMP/backend.env"
+          ADMIN_SEED_ENV_FILE="$RUNNER_TEMP/admin-seed.env"
           umask 077
 
           {
@@ -236,6 +258,15 @@ jobs:
             printf 'DATA_USAGE_URL=%s\n' "$DATA_USAGE_URL"
             printf 'CONTACT_US_URL=%s\n' "$CONTACT_US_URL"
           } > "$ENV_FILE"
+
+          if [ "${STAGING_ADMIN_SEED_ENABLED:-false}" = 'true' ]; then
+            {
+              printf 'ADMIN_EMAIL=%s\n' "$ADMIN_EMAIL"
+              printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD"
+              printf 'ADMIN_FIRST_NAME=%s\n' "$ADMIN_FIRST_NAME"
+              printf 'ADMIN_LAST_NAME=%s\n' "$ADMIN_LAST_NAME"
+            } > "$ADMIN_SEED_ENV_FILE"
+          fi
 
       - name: Upload application environment
         shell: bash
@@ -294,6 +325,92 @@ jobs:
              bash -s -- deploy" \
             < scripts/staging-operations.sh
 
+      - name: Seed staging Admin account
+        shell: bash
+        env:
+          STAGING_ADMIN_SEED_ENABLED: ${{ secrets.STAGING_ADMIN_SEED_ENABLED }}
+        run: |
+          set -euo pipefail
+
+          if [ "${STAGING_ADMIN_SEED_ENABLED:-false}" != 'true' ]; then
+            echo 'Staging Admin seed is disabled.'
+            exit 0
+          fi
+
+          SEED_DIR=$(ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            'mktemp -d /opt/backend/admin-seed.XXXXXX')
+
+          if [[ ! "$SEED_DIR" =~ ^/opt/backend/admin-seed\.[A-Za-z0-9]+$ ]]; then
+            echo 'Unexpected temporary seed directory returned by staging server.'
+            exit 1
+          fi
+
+          cleanup_seed_dir() {
+            ssh \
+              -i "$RUNNER_TEMP/staging_key" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+              deploy@"$STAGING_SERVER" \
+              "rm -rf -- '$SEED_DIR'" >/dev/null 2>&1 || true
+          }
+          trap cleanup_seed_dir EXIT
+
+          tar \
+            -C "$GITHUB_WORKSPACE" \
+            -cf - \
+            package.json \
+            tsconfig.json \
+            scripts/seed-admin.ts \
+            src/config/env.ts \
+            src/database \
+            src/modules/auth/admin-auth.config.ts \
+            src/modules/auth/admin-auth.policy.ts \
+            src/modules/auth/auth.config.shared.ts |
+            ssh \
+              -i "$RUNNER_TEMP/staging_key" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+              deploy@"$STAGING_SERVER" \
+              "tar -xf - -C '$SEED_DIR'"
+
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            "cat > '$SEED_DIR/.env.seed' && chmod 600 '$SEED_DIR/.env.seed'" \
+            < "$RUNNER_TEMP/admin-seed.env"
+
+          set +e
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            "cd /opt/backend && docker compose run --rm --no-deps --env-from-file '$SEED_DIR/.env.seed' --volume '$SEED_DIR:/app/seed:ro' --workdir /app/seed api bun scripts/seed-admin.ts" \
+            > "$RUNNER_TEMP/admin-seed-output.log" 2>&1
+          SEED_STATUS=$?
+          set -e
+
+          cat "$RUNNER_TEMP/admin-seed-output.log"
+
+          if [ "$SEED_STATUS" -ne 0 ]; then
+            if grep -Fq 'An Admin with this email already exists; no changes were made' "$RUNNER_TEMP/admin-seed-output.log"; then
+              echo 'Staging Admin already exists; no changes were made.'
+            else
+              exit "$SEED_STATUS"
+            fi
+          fi
+
       - name: Clean temporary secret files
         if: always()
         shell: bash
@@ -301,4 +418,6 @@ jobs:
           rm -f \
             "$RUNNER_TEMP/staging_key" \
             "$RUNNER_TEMP/staging_known_hosts" \
-            "$RUNNER_TEMP/backend.env"
+            "$RUNNER_TEMP/backend.env" \
+            "$RUNNER_TEMP/admin-seed.env" \
+            "$RUNNER_TEMP/admin-seed-output.log"
