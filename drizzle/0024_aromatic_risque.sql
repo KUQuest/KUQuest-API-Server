@@ -2,6 +2,10 @@ ALTER TABLE "payment_payout_quotes" DROP CONSTRAINT "payment_payout_quotes_curre
 ALTER TABLE "payment_payout_quotes" DROP CONSTRAINT "payment_payout_quotes_amount_check";--> statement-breakpoint
 ALTER TABLE "payment_payouts" DROP CONSTRAINT "payment_payouts_currency_check";--> statement-breakpoint
 ALTER TABLE "payment_payouts" DROP CONSTRAINT "payment_payouts_amount_check";--> statement-breakpoint
+-- Keep the new Satang columns nullable during this expand step. The current
+-- application writes them, but an older image still writes the legacy columns.
+-- Retain legacy amount columns for expand-and-contract compatibility. A later
+-- forward migration can remove them after all old application images are gone.
 ALTER TABLE "payment_payouts" ALTER COLUMN "actual_fee_satang" SET DATA TYPE integer USING "actual_fee_satang"::integer;--> statement-breakpoint
 ALTER TABLE "payment_payouts" ALTER COLUMN "actual_tax_satang" SET DATA TYPE integer USING "actual_tax_satang"::integer;--> statement-breakpoint
 ALTER TABLE "payment_payouts" ALTER COLUMN "actual_debit_satang" SET DATA TYPE integer USING "actual_debit_satang"::integer;--> statement-breakpoint
@@ -15,10 +19,6 @@ SET "receipt_satang" = ("receipt_baht" * 100)::integer,
     "maximum_fee_satang" = ("maximum_fee_baht" * 100)::integer,
     "maximum_tax_satang" = ("maximum_tax_baht" * 100)::integer,
     "maximum_debit_satang" = ("maximum_debit_baht" * 100)::integer;--> statement-breakpoint
-ALTER TABLE "payment_payout_quotes" ALTER COLUMN "receipt_satang" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "payment_payout_quotes" ALTER COLUMN "maximum_fee_satang" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "payment_payout_quotes" ALTER COLUMN "maximum_tax_satang" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "payment_payout_quotes" ALTER COLUMN "maximum_debit_satang" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "payment_payouts" ADD COLUMN "internal_reference" text;--> statement-breakpoint
 ALTER TABLE "payment_payouts" ADD COLUMN "provider_api_version" text;--> statement-breakpoint
 ALTER TABLE "payment_payouts" ADD COLUMN "provider_status" text;--> statement-breakpoint
@@ -33,24 +33,21 @@ SET "internal_reference" = 'payout:' || "id"::text,
     "maximum_fee_satang" = ("maximum_fee_baht" * 100)::integer,
     "maximum_tax_satang" = ("maximum_tax_baht" * 100)::integer,
     "maximum_debit_satang" = ("maximum_debit_baht" * 100)::integer;--> statement-breakpoint
-ALTER TABLE "payment_payouts" ALTER COLUMN "internal_reference" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "payment_payouts" ALTER COLUMN "principal_satang" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "payment_payouts" ALTER COLUMN "maximum_fee_satang" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "payment_payouts" ALTER COLUMN "maximum_tax_satang" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "payment_payouts" ALTER COLUMN "maximum_debit_satang" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "payment_payout_quotes" DROP COLUMN "receipt_baht";--> statement-breakpoint
-ALTER TABLE "payment_payout_quotes" DROP COLUMN "maximum_fee_baht";--> statement-breakpoint
-ALTER TABLE "payment_payout_quotes" DROP COLUMN "maximum_tax_baht";--> statement-breakpoint
-ALTER TABLE "payment_payout_quotes" DROP COLUMN "maximum_debit_baht";--> statement-breakpoint
-ALTER TABLE "payment_payout_quotes" DROP COLUMN "quoted_fee_satang";--> statement-breakpoint
-ALTER TABLE "payment_payout_quotes" DROP COLUMN "quoted_tax_satang";--> statement-breakpoint
-ALTER TABLE "payment_payout_quotes" DROP COLUMN "quoted_debit_satang";--> statement-breakpoint
-ALTER TABLE "payment_payout_quotes" DROP COLUMN "currency";--> statement-breakpoint
-ALTER TABLE "payment_payouts" DROP COLUMN "principal_baht";--> statement-breakpoint
-ALTER TABLE "payment_payouts" DROP COLUMN "maximum_fee_baht";--> statement-breakpoint
-ALTER TABLE "payment_payouts" DROP COLUMN "maximum_tax_baht";--> statement-breakpoint
-ALTER TABLE "payment_payouts" DROP COLUMN "maximum_debit_baht";--> statement-breakpoint
-ALTER TABLE "payment_payouts" DROP COLUMN "currency";--> statement-breakpoint
+ALTER TABLE "payment_payout_quotes"
+  ALTER COLUMN "receipt_baht" DROP NOT NULL,
+  ALTER COLUMN "maximum_fee_baht" DROP NOT NULL,
+  ALTER COLUMN "maximum_tax_baht" DROP NOT NULL,
+  ALTER COLUMN "maximum_debit_baht" DROP NOT NULL,
+  ALTER COLUMN "quoted_fee_satang" DROP NOT NULL,
+  ALTER COLUMN "quoted_tax_satang" DROP NOT NULL,
+  ALTER COLUMN "quoted_debit_satang" DROP NOT NULL,
+  ALTER COLUMN "currency" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "payment_payouts"
+  ALTER COLUMN "principal_baht" DROP NOT NULL,
+  ALTER COLUMN "maximum_fee_baht" DROP NOT NULL,
+  ALTER COLUMN "maximum_tax_baht" DROP NOT NULL,
+  ALTER COLUMN "maximum_debit_baht" DROP NOT NULL,
+  ALTER COLUMN "currency" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "payment_payouts" ADD CONSTRAINT "payment_payouts_internal_reference_unique" UNIQUE("internal_reference");--> statement-breakpoint
 ALTER TABLE "payment_payout_quotes" ADD CONSTRAINT "payment_payout_quotes_rounding_check" CHECK ("payment_payout_quotes"."fee_rounding_mode" = 'UP');--> statement-breakpoint
 ALTER TABLE "payment_payout_quotes" ADD CONSTRAINT "payment_payout_quotes_amount_check" CHECK ("payment_payout_quotes"."receipt_satang" > 0 AND "payment_payout_quotes"."maximum_fee_satang" >= 0 AND "payment_payout_quotes"."maximum_tax_satang" >= 0 AND "payment_payout_quotes"."maximum_debit_satang" = "payment_payout_quotes"."receipt_satang" + "payment_payout_quotes"."maximum_fee_satang" + "payment_payout_quotes"."maximum_tax_satang");--> statement-breakpoint

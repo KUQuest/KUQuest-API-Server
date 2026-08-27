@@ -1,6 +1,7 @@
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import {
+  paymentPayoutAccounts,
   paymentPayouts,
   paymentPayoutQuotes,
 } from '@/database/schema/payment.schema';
@@ -10,9 +11,11 @@ import {
 } from '@/database/schema/wallet.schema';
 import {
   createPayoutDestinationEncryption,
+  PayoutDestinationEncryptionError,
   savePayoutDestination,
 } from '@/modules/payout-destination';
 import {
+  changeWalletStatus,
   createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
   ensureWallet,
@@ -47,9 +50,14 @@ class FakePayoutProvider implements OutboundPayoutProvider {
   readonly requests: OutboundPayoutRequest[] = [];
   readonly referencePrefix = `test-payout-${crypto.randomUUID()}`;
   private attempt = 0;
-  mode: 'success' | 'rejected' | 'uncertain' = 'success';
+  mode: 'success' | 'rejected' | 'uncertain' | 'configuration' = 'success';
 
   async createPayout(input: OutboundPayoutRequest): Promise<OutboundPayoutResponse> {
+    if (this.mode === 'configuration') {
+      throw new PayoutProviderError('PROVIDER_CONFIGURATION', 'Provider configuration failed.', {
+        providerApiVersion: 'test-v1',
+      });
+    }
     this.requests.push(input);
     this.attempt += 1;
     if (this.mode === 'rejected') {
@@ -246,6 +254,87 @@ describe('Payout application services', () => {
     ]);
   });
 
+  it('releases the reserve when destination decryption fails before the Provider call', async () => {
+    const studentId = await createStudent('be115-decryption-failure');
+    await creditEarnings(studentId, 1_000);
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const provider = new FakePayoutProvider();
+    const unavailableKey = createPayoutDestinationEncryption({
+      activeKeyVersion: 'v2',
+      keys: { v2: 'v'.repeat(32) },
+    });
+
+    await expect(initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be115-decryption-failure-1' },
+    }, provider, unavailableKey)).rejects.toBeInstanceOf(PayoutDestinationEncryptionError);
+
+    expect(provider.requests).toHaveLength(0);
+    expect(await getWallet(studentId)).toMatchObject({
+      earningsBalanceSatang: 1_000,
+      reservedForPayoutsSatang: 0,
+    });
+    const [payout] = await db.select().from(paymentPayouts).where(eq(paymentPayouts.quoteId, quote.id));
+    expect(payout).toMatchObject({
+      payoutStatus: 'FAILED',
+      finalLedgerTransactionId: expect.any(String),
+    });
+  });
+
+  it('releases the reserve when the Provider is not configured', async () => {
+    const studentId = await createStudent('be115-provider-configuration');
+    await creditEarnings(studentId, 1_000);
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const provider = new FakePayoutProvider();
+    provider.mode = 'configuration';
+
+    await expect(initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be115-provider-configuration-1' },
+    }, provider, encryption)).rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION' });
+
+    expect(provider.requests).toHaveLength(0);
+    expect(await getWallet(studentId)).toMatchObject({
+      earningsBalanceSatang: 1_000,
+      reservedForPayoutsSatang: 0,
+    });
+  });
+
+  it('uses the retained Payout destination snapshot when retrying', async () => {
+    const studentId = await createStudent('be115-snapshot');
+    await creditEarnings(studentId, 1_000);
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const provider = new FakePayoutProvider();
+    provider.mode = 'uncertain';
+    const input = {
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be115-snapshot-1' },
+    };
+
+    await expect(initiatePayout(input, provider, encryption)).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+    const [payout] = await db.select().from(paymentPayouts).where(eq(paymentPayouts.quoteId, quote.id));
+    if (!payout) throw new Error('Missing Payout snapshot');
+    const replacementSecret = encryption.encrypt('9999999999');
+    await db.update(paymentPayoutAccounts)
+      .set({
+        accountNumberKeyVersion: replacementSecret.keyVersion,
+        accountNumberNonce: replacementSecret.nonce,
+        accountNumberCiphertext: replacementSecret.ciphertext,
+        accountNumberAuthTag: replacementSecret.authTag,
+      })
+      .where(eq(paymentPayoutAccounts.id, payout.payoutAccountId));
+
+    await initiatePayout(input, provider, encryption);
+
+    expect(provider.requests.map(({ destination }) => destination.accountNumber)).toEqual([
+      '1234567890',
+      '1234567890',
+    ]);
+  });
+
   it('allows at most one active Payout per Student', async () => {
     const studentId = await createStudent('be115-active');
     await creditEarnings(studentId, 1_000);
@@ -255,6 +344,64 @@ describe('Payout application services', () => {
     await initiatePayout({ principalUserId: studentId, quoteId: first.id, idempotency: { key: 'be115-active-1' } }, provider, encryption);
     await expect(initiatePayout({ principalUserId: studentId, quoteId: second.id, idempotency: { key: 'be115-active-2' } }, provider, encryption))
       .rejects.toMatchObject({ code: 'PAYOUT_ACTIVE_EXISTS' });
+  });
+
+  it('rejects initiation for a non-active Wallet', async () => {
+    const studentId = await createStudent('be115-wallet-status');
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const wallet = await getWallet(studentId);
+    await changeWalletStatus({
+      walletId: wallet.id,
+      toStatus: 'FROZEN',
+      actorUserId: studentId,
+      reason: 'Freeze Wallet for Payout test',
+    });
+    const provider = new FakePayoutProvider();
+
+    await expect(quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) }))
+      .rejects.toMatchObject({ code: 'WALLET_NOT_ACTIVE' });
+
+    await expect(initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be115-wallet-status-1' },
+    }, provider, encryption)).rejects.toMatchObject({ code: 'WALLET_NOT_ACTIVE' });
+    expect(provider.requests).toHaveLength(0);
+  });
+
+  it('rejects an expired Quote before reserving Earnings Balance', async () => {
+    const studentId = await createStudent('be115-expired-quote');
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    await db.update(paymentPayoutQuotes)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(paymentPayoutQuotes.id, quote.id));
+    const provider = new FakePayoutProvider();
+
+    await expect(initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be115-expired-quote-1' },
+    }, provider, encryption)).rejects.toMatchObject({ code: 'PAYOUT_QUOTE_EXPIRED' });
+    expect(provider.requests).toHaveLength(0);
+  });
+
+  it('rejects a consumed Quote on a new initiation attempt', async () => {
+    const studentId = await createStudent('be115-consumed-quote');
+    await creditEarnings(studentId, 1_000);
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const provider = new FakePayoutProvider();
+    provider.mode = 'rejected';
+
+    await expect(initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be115-consumed-quote-1' },
+    }, provider, encryption)).rejects.toMatchObject({ code: 'PROVIDER_REJECTED' });
+    await expect(initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be115-consumed-quote-2' },
+    }, provider, encryption)).rejects.toMatchObject({ code: 'PAYOUT_QUOTE_CONSUMED' });
   });
 
   it('serializes concurrent initiation attempts for one Student', async () => {

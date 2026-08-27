@@ -14,12 +14,11 @@ import {
 } from '@/database/schema/wallet.schema';
 import {
   createPayoutDestinationEncryption,
+  payoutDestinationForProvider,
+  type PayoutDestination,
   type PayoutDestinationEncryption,
-} from '@/modules/payout-destination';
-import {
-  getPayoutDestinationForProvider,
   type PayoutDestinationForProvider,
-} from '@/modules/payout-destination/payout-destination.provider';
+} from '@/modules/payout-destination';
 import {
   MAX_WALLET_CAPACITY_SATANG,
   MoneyDomainError,
@@ -179,6 +178,24 @@ const payoutFromRecord = (record: typeof paymentPayouts.$inferSelect): Payout =>
   updatedAt: record.updatedAt,
 });
 
+const payoutDestinationFromSnapshot = (payout: Payout): PayoutDestination => ({
+  id: payout.payoutDestinationId,
+  principalUserId: payout.principalUserId,
+  recipientType: 'SELF',
+  givenName: payout.destinationGivenName,
+  surname: payout.destinationSurname,
+  relationship: payout.destinationRelationship,
+  accountCountry: 'TH',
+  accountCurrency: 'THB',
+  bankCode: payout.destinationBankCode,
+  accountHolderName: payout.destinationAccountHolderName,
+  routingType: payout.destinationRoutingType as 'BANK_ACCOUNT' | 'PROMPTPAY',
+  maskedLastFour: '****',
+  maskedRoutingValue: '****',
+  createdAt: payout.createdAt,
+  retiredAt: null,
+});
+
 const calculatePayoutTerms = (receiptSatang: Satang, policy: {
   payoutProviderFeeSatang: number;
   payoutProviderTaxBps: number;
@@ -201,6 +218,14 @@ export const quotePayout = async (input: PayoutQuoteInput): Promise<PayoutQuote>
     .where(eq(authUser.id, input.principalUserId))
     .limit(1);
   if (!member) throw new MoneyDomainError('MEMBER_NOT_FOUND', 'Member does not exist.');
+
+  const [wallet] = await db
+    .select({ walletStatus: walletWallet.walletStatus })
+    .from(walletWallet)
+    .where(eq(walletWallet.userId, input.principalUserId))
+    .limit(1);
+  if (!wallet) throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
+  assertWalletOperationAllowed(wallet.walletStatus, 'PAYOUT');
 
   const policy = await getEffectiveMoneyPolicy();
   const receiptSatang = validateOperationAmount(
@@ -439,12 +464,30 @@ const providerRequestFor = async (
   maximumDebitSatang: Satang;
   destination: PayoutDestinationForProvider;
 }> => {
-  const destination = await getPayoutDestinationForProvider(
-    prepared.payout.principalUserId,
-    prepared.payout.payoutDestinationId,
+  const [record] = await db
+    .select()
+    .from(paymentPayouts)
+    .where(and(
+      eq(paymentPayouts.id, prepared.payout.id),
+      eq(paymentPayouts.userId, prepared.payout.principalUserId),
+    ))
+    .limit(1);
+  if (!record) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
+
+  const destination = payoutDestinationForProvider(
+    payoutDestinationFromSnapshot(prepared.payout),
+    {
+      accountNumberKeyVersion: record.destinationAccountNumberKeyVersion,
+      accountNumberNonce: record.destinationAccountNumberNonce,
+      accountNumberCiphertext: record.destinationAccountNumberCiphertext,
+      accountNumberAuthTag: record.destinationAccountNumberAuthTag,
+      routingValueKeyVersion: record.destinationRoutingValueKeyVersion,
+      routingValueNonce: record.destinationRoutingValueNonce,
+      routingValueCiphertext: record.destinationRoutingValueCiphertext,
+      routingValueAuthTag: record.destinationRoutingValueAuthTag,
+    },
     encryption,
   );
-  if (!destination) throw new MoneyDomainError('PAYOUT_DESTINATION_NOT_FOUND', 'Payout Destination does not exist.');
   return {
     internalReference: prepared.payout.internalReference,
     receiptSatang: prepared.payout.receiptSatang,
@@ -516,7 +559,7 @@ const finalizeUncertain = async (
     .for('update');
   if (!record) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
   if (!['CREATING', 'AWAITING_RECONCILIATION'].includes(record.payoutStatus)) return payoutFromRecord(record);
-  const providerStatus = error.providerCode ?? error.providerStatus?.toString() ?? error.code;
+  const providerStatus = error.providerStatus?.toString() ?? error.code;
   const nextStatus = record.payoutStatus === 'CREATING' ? 'AWAITING_RECONCILIATION' : record.payoutStatus;
   const [updated] = await transaction
     .update(paymentPayouts)
@@ -536,16 +579,23 @@ const finalizeUncertain = async (
       toStatus: nextStatus,
       providerStatus,
       source: 'PROVIDER',
-      reason: error.message,
+      reason: 'Provider response is uncertain.',
     });
   }
   return payoutFromRecord(updated);
 });
 
-const finalizeRejected = async (
+type PayoutFailureDetails = {
+  providerApiVersion?: string;
+  providerStatus: string;
+  historyReason: string;
+  historySource: 'INITIATION' | 'PROVIDER';
+};
+
+const finalizeFailed = async (
   input: InitiatePayoutInput,
   prepared: PreparedPayout,
-  error: PayoutProviderError,
+  details: PayoutFailureDetails,
 ) => db.transaction(async (transaction) => {
   const [record] = await transaction
     .select()
@@ -567,12 +617,14 @@ const finalizeRejected = async (
       { accountId: payoutReserveId, amountSatang: signedSatang(-record.maximumDebitSatang) },
     ],
   });
-  const providerStatus = error.providerCode ?? error.providerStatus?.toString() ?? error.code;
+  if (!releaseLedger) {
+    throw new MoneyDomainError('PAYOUT_UPDATE_FAILED', 'Failed Payout reserve could not be released.');
+  }
   const [updated] = await transaction
     .update(paymentPayouts)
     .set({
-      providerApiVersion: error.providerApiVersion,
-      providerStatus,
+      providerApiVersion: details.providerApiVersion,
+      providerStatus: details.providerStatus,
       payoutStatus: 'FAILED',
       finalLedgerTransactionId: releaseLedger.id,
       updatedAt: new Date(),
@@ -584,9 +636,9 @@ const finalizeRejected = async (
     payoutId: record.id,
     fromStatus: record.payoutStatus,
     toStatus: 'FAILED',
-    providerStatus,
-    source: 'PROVIDER',
-    reason: error.message,
+    providerStatus: details.providerStatus,
+    source: details.historySource,
+    reason: details.historyReason,
   });
   await transaction
     .update(walletIdempotencyKey)
@@ -595,9 +647,48 @@ const finalizeRejected = async (
   return payoutFromRecord(updated);
 });
 
-const asProviderError = (error: unknown) => error instanceof PayoutProviderError
-  ? error
-  : new PayoutProviderError('PROVIDER_UNCERTAIN', 'Provider response is uncertain.');
+const finalizeRejected = async (
+  input: InitiatePayoutInput,
+  prepared: PreparedPayout,
+  error: PayoutProviderError,
+) => finalizeFailed(input, prepared, {
+  providerApiVersion: error.providerApiVersion,
+  providerStatus: error.providerStatus?.toString() ?? error.code,
+  historyReason: 'Provider rejected the Payout.',
+  historySource: 'PROVIDER',
+});
+
+const finalizePreparationFailure = async (
+  input: InitiatePayoutInput,
+  prepared: PreparedPayout,
+  error: PayoutProviderError | undefined,
+) => finalizeFailed(input, prepared, {
+  providerApiVersion: error?.providerApiVersion,
+  providerStatus: error?.code ?? 'PAYOUT_PREPARATION_FAILED',
+  historyReason: 'Payout could not be prepared for the Provider.',
+  historySource: 'INITIATION',
+});
+
+const providerErrorMessage = (code: PayoutProviderError['code']) => {
+  if (code === 'PROVIDER_REJECTED') return 'Provider rejected the Payout.';
+  if (code === 'PROVIDER_CONFIGURATION') return 'Payout Provider is not configured.';
+  return 'Provider response is uncertain.';
+};
+
+const safeProviderCode = (value: string | undefined) => (
+  value && /^[A-Z][A-Z_]{0,63}$/.test(value) ? value : undefined
+);
+
+const asProviderError = (error: unknown) => {
+  if (!(error instanceof PayoutProviderError)) {
+    return new PayoutProviderError('PROVIDER_UNCERTAIN', 'Provider response is uncertain.');
+  }
+  return new PayoutProviderError(error.code, providerErrorMessage(error.code), {
+    providerCode: safeProviderCode(error.providerCode),
+    providerStatus: error.providerStatus,
+    providerApiVersion: error.providerApiVersion,
+  });
+};
 
 export const initiatePayout = async (
   input: InitiatePayoutInput,
@@ -610,8 +701,19 @@ export const initiatePayout = async (
     return prepared.payout;
   }
 
+  let request: Awaited<ReturnType<typeof providerRequestFor>>;
   try {
-    const request = await providerRequestFor(prepared, encryption);
+    request = await providerRequestFor(prepared, encryption);
+  } catch (reason: unknown) {
+    await finalizePreparationFailure(
+      input,
+      prepared,
+      reason instanceof PayoutProviderError ? asProviderError(reason) : undefined,
+    );
+    throw reason;
+  }
+
+  try {
     const response = await provider.createPayout(request);
     return finalizeProviderResponse(input, prepared, response);
   } catch (reason: unknown) {
@@ -619,6 +721,10 @@ export const initiatePayout = async (
     if (error.code === 'PROVIDER_REJECTED') {
       const failed = await finalizeRejected(input, prepared, error);
       throw Object.assign(error, { payout: failed });
+    }
+    if (error.code === 'PROVIDER_CONFIGURATION') {
+      await finalizePreparationFailure(input, prepared, error);
+      throw error;
     }
     await finalizeUncertain(input, prepared, error);
     throw error;

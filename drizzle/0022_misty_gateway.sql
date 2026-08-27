@@ -1,6 +1,7 @@
 -- Add encrypted columns before the application-level backfill. The migration
 -- runner completes the backfill with the configured AES-256-GCM key, then
--- removes the legacy plaintext columns in the same transaction.
+-- clears the legacy plaintext values in the same transaction. The legacy
+-- columns remain nullable until a later contract migration.
 
 ALTER TABLE "payment_payout_accounts" DROP CONSTRAINT "payment_payout_accounts_recipient_type_check";--> statement-breakpoint
 ALTER TABLE "payment_payout_accounts" ADD COLUMN "account_number_key_version" text;--> statement-breakpoint

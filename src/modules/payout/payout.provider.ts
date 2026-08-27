@@ -5,7 +5,7 @@ import {
   satang,
   type Satang,
 } from '@/modules/wallet/wallet.money';
-import type { PayoutDestinationForProvider } from '@/modules/payout-destination/payout-destination.provider';
+import type { PayoutDestinationForProvider } from '@/modules/payout-destination';
 
 export const XENDIT_PAYOUT_API_VERSION = '2020-02-01';
 
@@ -87,26 +87,47 @@ const asText = (value: unknown): string | null => (
 
 const toThb = (amountSatang: Satang): number => Number((amountSatang / 100).toFixed(2));
 
-const fromThb = (value: unknown): Satang => {
+const fromThb = (value: unknown, allowZero = false): Satang => {
   const text = typeof value === 'number' ? String(value) : value;
   if (typeof text !== 'string' || !/^\d+(?:\.\d{1,2})?$/.test(text)) {
     throw new PayoutProviderError('PROVIDER_UNCERTAIN', 'Xendit returned an invalid Payout amount.');
   }
   const [baht, satangPart = ''] = text.split('.');
   const amount = Number(baht) * 100 + Number(satangPart.padEnd(2, '0') || 0);
-  if (!Number.isSafeInteger(amount) || amount <= 0 || amount > MAX_WALLET_CAPACITY_SATANG) {
+  if (
+    !Number.isSafeInteger(amount) ||
+    amount < 0 ||
+    (!allowZero && amount === 0) ||
+    amount > MAX_WALLET_CAPACITY_SATANG
+  ) {
     throw new PayoutProviderError('PROVIDER_UNCERTAIN', 'Xendit returned an out-of-range Payout amount.');
   }
-  return positiveSatang(amount);
+  return allowZero ? satang(amount) : positiveSatang(amount);
 };
 
 const providerErrorDetails = (payload: JsonObject | null) => ({
-  providerCode: asText(payload?.error_code) ?? asText(payload?.code) ?? undefined,
+  providerCode: [asText(payload?.error_code), asText(payload?.code)]
+    .find((value): value is string => value !== null && /^[A-Z][A-Z_]{0,63}$/.test(value)) ?? undefined,
 });
 
-const responseMessage = (payload: JsonObject | null) => (
-  asText(payload?.message) ?? asText(payload?.error_message) ?? 'Xendit rejected the Payout.'
-);
+const acceptedProviderStatuses = new Set([
+  'ACCEPTED',
+  'PENDING',
+  'PROCESSING',
+  'PENDING_COMPLIANCE_REVIEW',
+  'REQUESTED',
+  'ROUTING',
+  'READY',
+  'LOCKED',
+]);
+
+const rejectedProviderStatuses = new Set([
+  'FAILED',
+  'REJECTED',
+  'CANCELLED',
+  'REVERSED',
+  'EXPIRED',
+]);
 
 const amountValue = (value: unknown): unknown => {
   const object = asObject(value);
@@ -188,7 +209,7 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
       const uncertain = response.status >= 500 || response.status === 408 || response.status === 409 || response.status === 429;
       throw this.error(
         uncertain ? 'PROVIDER_UNCERTAIN' : 'PROVIDER_REJECTED',
-        responseMessage(payload),
+        uncertain ? 'Xendit Payout response is uncertain.' : 'Xendit rejected the Payout.',
         { ...details, providerStatus: response.status },
       );
     }
@@ -199,8 +220,13 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
   async createPayout(input: OutboundPayoutRequest): Promise<OutboundPayoutResponse> {
     const payload = await this.request(input);
     const providerReference = asText(payload.id) ?? asText(payload.payout_id);
-    const providerStatus = asText(payload.status);
-    if (!providerReference || !providerStatus) {
+    const providerStatus = asText(payload.status)?.toUpperCase();
+    if (providerStatus && rejectedProviderStatuses.has(providerStatus)) {
+      throw this.error('PROVIDER_REJECTED', 'Xendit rejected the Payout.', {
+        providerCode: providerStatus,
+      });
+    }
+    if (!providerReference || !providerStatus || !acceptedProviderStatuses.has(providerStatus)) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an incomplete Payout response.');
     }
 
@@ -230,10 +256,10 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
 
     const actualFeeSatang = payload.fee === undefined && payload.fee_amount === undefined
       ? satang(0)
-      : fromThb(amountValue(payload.fee ?? payload.fee_amount));
+      : fromThb(amountValue(payload.fee ?? payload.fee_amount), true);
     const actualTaxSatang = payload.tax === undefined && payload.tax_amount === undefined
       ? satang(0)
-      : fromThb(amountValue(payload.tax ?? payload.tax_amount));
+      : fromThb(amountValue(payload.tax ?? payload.tax_amount), true);
     const actualDebitSatang = providerAmountSatang + actualFeeSatang + actualTaxSatang;
     if (!Number.isSafeInteger(actualDebitSatang) || actualDebitSatang > MAX_WALLET_CAPACITY_SATANG) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an out-of-range Payout debit.');

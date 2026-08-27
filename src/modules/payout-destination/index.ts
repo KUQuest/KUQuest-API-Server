@@ -11,6 +11,7 @@ export type {
 } from './payout-destination.crypto';
 export {
   getPayoutDestination,
+  getPayoutDestinationForProvider,
   retirePayoutDestination,
   savePayoutDestination,
   PayoutDestinationError,
@@ -20,3 +21,9 @@ export type {
   PayoutDestinationErrorCode,
   PayoutDestinationInput,
 } from './payout-destination.service';
+export {
+  payoutDestinationForProvider,
+} from './payout-destination.provider-boundary';
+export type {
+  PayoutDestinationForProvider,
+} from './payout-destination.provider-boundary';

@@ -1,4 +1,4 @@
-import { createPayoutDestinationEncryption } from '@/modules/payout-destination/payout-destination.crypto';
+import { createPayoutDestinationEncryption } from '@/modules/payout-destination';
 
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -63,8 +63,17 @@ const readLegacySchemaState = async (): Promise<LegacySchemaState> => {
 
 const readLegacyRowCounts = async (): Promise<{ accounts: number; payouts: number }> => {
   const [accounts, payouts] = await Promise.all([
-    sql<{ count: number }[]>`SELECT count(*)::int AS count FROM payment_payout_accounts`,
-    sql<{ count: number }[]>`SELECT count(*)::int AS count FROM payment_payouts`,
+    sql<{ count: number }[]>`
+      SELECT count(*)::int AS count
+      FROM payment_payout_accounts
+      WHERE account_number IS NOT NULL OR routing_value IS NOT NULL
+    `,
+    sql<{ count: number }[]>`
+      SELECT count(*)::int AS count
+      FROM payment_payouts
+      WHERE destination_account_number IS NOT NULL
+        OR destination_routing_value IS NOT NULL
+    `,
   ]);
 
   return {
@@ -84,6 +93,12 @@ const validateLegacyData = async (): Promise<void> => {
         OR routing_type NOT IN ('BANK_ACCOUNT', 'PROMPTPAY')
         OR account_number IS NULL
         OR routing_value IS NULL
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM payment_payouts
+      WHERE destination_account_number IS NULL
+        OR destination_routing_value IS NULL
     ) AS invalid
   `;
 
@@ -111,6 +126,7 @@ const finalizeLegacySecrets = async (): Promise<void> => {
         account_number AS "accountNumber",
         routing_value AS "routingValue"
       FROM payment_payout_accounts
+      WHERE account_number IS NOT NULL AND routing_value IS NOT NULL
     `;
     const payouts = await transaction<LegacySecretRow[]>`
       SELECT
@@ -118,6 +134,8 @@ const finalizeLegacySecrets = async (): Promise<void> => {
         destination_account_number AS "accountNumber",
         destination_routing_value AS "routingValue"
       FROM payment_payouts
+      WHERE destination_account_number IS NOT NULL
+        AND destination_routing_value IS NOT NULL
     `;
     const encryption = accounts.length > 0 || payouts.length > 0
       ? createPayoutDestinationEncryption()
@@ -187,13 +205,27 @@ const finalizeLegacySecrets = async (): Promise<void> => {
     `;
     await transaction`
       ALTER TABLE payment_payout_accounts
+        ALTER COLUMN account_number DROP NOT NULL,
+        ALTER COLUMN routing_value DROP NOT NULL
+    `;
+    await transaction`
+      ALTER TABLE payment_payouts
+        ALTER COLUMN destination_account_number DROP NOT NULL,
+        ALTER COLUMN destination_routing_value DROP NOT NULL
+    `;
+    await transaction`
+      ALTER TABLE payment_payout_accounts
         VALIDATE CONSTRAINT payment_payout_accounts_routing_type_check,
         VALIDATE CONSTRAINT payment_payout_accounts_recipient_type_check
     `;
-    await transaction`ALTER TABLE payment_payout_accounts DROP COLUMN account_number`;
-    await transaction`ALTER TABLE payment_payout_accounts DROP COLUMN routing_value`;
-    await transaction`ALTER TABLE payment_payouts DROP COLUMN destination_account_number`;
-    await transaction`ALTER TABLE payment_payouts DROP COLUMN destination_routing_value`;
+    await transaction`
+      UPDATE payment_payout_accounts
+      SET account_number = NULL, routing_value = NULL
+    `;
+    await transaction`
+      UPDATE payment_payouts
+      SET destination_account_number = NULL, destination_routing_value = NULL
+    `;
   });
 };
 

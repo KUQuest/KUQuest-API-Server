@@ -93,6 +93,77 @@ describe('Xendit Payout provider', () => {
     });
   });
 
+  it('accepts explicit zero Provider fee and tax values', async () => {
+    const provider = new XenditPayoutProvider({
+      secretKey: 'xnd_test_secret',
+      fetcher: async () => response({
+        id: 'xnd-payout-zero-fees',
+        reference_id: request.internalReference,
+        status: 'ACCEPTED',
+        amount: 123.45,
+        fee: 0,
+        tax: 0,
+        currency: 'THB',
+        channel_code: 'SCB',
+      }),
+    });
+
+    await expect(provider.createPayout(request)).resolves.toMatchObject({
+      actualFeeSatang: 0,
+      actualTaxSatang: 0,
+      actualDebitSatang: 12_345,
+    });
+  });
+
+  it('detects a confirmed failed Payout in a successful Xendit response', async () => {
+    const provider = new XenditPayoutProvider({
+      secretKey: 'xnd_test_secret',
+      fetcher: async () => response({
+        id: 'xnd-payout-failed',
+        reference_id: request.internalReference,
+        status: 'FAILED',
+      }),
+    });
+
+    await expect(provider.createPayout(request)).rejects.toMatchObject({
+      code: 'PROVIDER_REJECTED',
+    });
+  });
+
+  it('treats a reversed Payout as a confirmed Provider failure', async () => {
+    const provider = new XenditPayoutProvider({
+      secretKey: 'xnd_test_secret',
+      fetcher: async () => response({
+        id: 'xnd-payout-reversed',
+        reference_id: request.internalReference,
+        status: 'REVERSED',
+      }),
+    });
+
+    await expect(provider.createPayout(request)).rejects.toMatchObject({
+      code: 'PROVIDER_REJECTED',
+      providerCode: 'REVERSED',
+    });
+  });
+
+  it('does not treat a terminal success status as an in-flight response', async () => {
+    const provider = new XenditPayoutProvider({
+      secretKey: 'xnd_test_secret',
+      fetcher: async () => response({
+        id: 'xnd-payout-succeeded',
+        reference_id: request.internalReference,
+        status: 'SUCCEEDED',
+        amount: 123.45,
+        currency: 'THB',
+        channel_code: 'SCB',
+      }),
+    });
+
+    await expect(provider.createPayout(request)).rejects.toMatchObject({
+      code: 'PROVIDER_UNCERTAIN',
+    });
+  });
+
   it('uses PromptPay routing at the provider boundary', async () => {
     let body: Record<string, unknown> | undefined;
     const fetcher: Fetcher = async (_url, init) => {

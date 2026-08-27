@@ -12,7 +12,7 @@ import {
   retirePayoutDestination,
   savePayoutDestination,
 } from '@/modules/payout-destination';
-import { getPayoutDestinationForProvider } from '@/modules/payout-destination/payout-destination.provider';
+import { getPayoutDestinationForProvider } from '@/modules/payout-destination';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 
 import { beforeAll, describe, expect, it } from 'bun:test';
