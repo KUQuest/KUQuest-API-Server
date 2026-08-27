@@ -367,7 +367,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
             deploy@"$STAGING_SERVER" \
-            "cd /opt/backend && APP_IMAGE='$APP_IMAGE' docker compose run --rm --no-deps --entrypoint bun api -e 'console.log(JSON.stringify({deploymentEnv: process.env.DEPLOYMENT_ENV ?? null, stagingTestAuthEnabled: process.env.STAGING_TEST_AUTH_ENABLED ?? null}))'"
+            "cd /opt/backend && APP_IMAGE='$APP_IMAGE' docker compose run --rm --no-deps --entrypoint bun api -e 'const flag = process.env.STAGING_TEST_AUTH_ENABLED; const bundle = await Bun.file(\"dist/index.js\").text(); console.log(JSON.stringify({deploymentEnv: process.env.DEPLOYMENT_ENV ?? null, stagingTestAuthEnabledIsTrue: flag === \"true\", stagingTestAuthEnabledLength: flag?.length ?? null, bundleHasStagingTestAuth: bundle.includes(\"/api/staging/test-auth\")}))'"
 
       - name: Seed staging Admin account
         shell: bash
