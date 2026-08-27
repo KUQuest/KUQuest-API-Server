@@ -9,6 +9,7 @@ import {
   addQuestImagesController,
   createQuestController,
   deleteQuestImageController,
+  editQuestController,
   getQuestDetailController,
   getQuestPublishCheckController,
   listBoardQuestsController,
@@ -20,6 +21,7 @@ import {
   questCreateResponseSchema,
   questCreateSchema,
   questDetailResponseSchema,
+  questEditSchema,
   questImageParamsSchema,
   questImagesUploadResponseSchema,
   questImagesUploadSchema,
@@ -77,6 +79,20 @@ export const questRoute = new Elysia({
       summary: 'Publish a Quest Draft',
       description: 'Moves the authenticated Hirer’s Quest from DRAFT to OPEN without moving money.',
       operationId: 'publishQuest',
+      security: betterAuthSecurity,
+    },
+  })
+  .patch('/:questId', editQuestController, {
+    params: questParamsSchema,
+    body: questEditSchema,
+    transform: rejectUnknownFields(questEditSchema),
+    response: responses(questDetailResponseSchema, 400, 401, 404, 409, 502),
+    detail: {
+      tags: ['Quests'],
+      summary: 'Edit an OPEN Quest before participation starts',
+      description:
+        'Updates the supplied fields of an OPEN Quest owned by the authenticated Hirer when no Candidate exists and no Worker or Team has been selected.',
+      operationId: 'editQuest',
       security: betterAuthSecurity,
     },
   })

@@ -19,20 +19,42 @@ const locationInputSchema = t.Object(
   { additionalProperties: false },
 );
 
+const titleSchema = t.String({ minLength: 1, maxLength: 120, pattern: '\\S' });
+const descriptionSchema = t.Nullable(t.String({ maxLength: 1000, pattern: '\\S' }));
+const conditionSchema = t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' });
+const startTimeSchema = t.String({ format: 'date-time' });
+const dueAtSchema = t.Nullable(t.String({ format: 'date-time' }));
+const tagIdSchema = t.Nullable(t.String({ format: 'uuid' }));
+const locationsSchema = t.Array(locationInputSchema, { maxItems: 10 });
+
 export const questCreateSchema = t.Object(
   {
-    title: t.String({ minLength: 1, maxLength: 120, pattern: '\\S' }),
-    description: t.Optional(t.Nullable(t.String({ maxLength: 1000, pattern: '\\S' }))),
-    condition: t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' }),
+    title: titleSchema,
+    description: t.Optional(descriptionSchema),
+    condition: conditionSchema,
     mode: questModeSchema,
     participation: questParticipationSchema,
     reward: t.Integer({ minimum: 1, maximum: 700000 }),
     headcount: t.Integer({ minimum: 1, maximum: 20 }),
-    startTime: t.String({ format: 'date-time' }),
-    dueAt: t.Optional(t.Nullable(t.String({ format: 'date-time' }))),
-    tagId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
+    startTime: startTimeSchema,
+    dueAt: t.Optional(dueAtSchema),
+    tagId: t.Optional(tagIdSchema),
     proofRequired: t.Optional(t.Boolean()),
-    locations: t.Optional(t.Array(locationInputSchema, { maxItems: 10 })),
+    locations: t.Optional(locationsSchema),
+  },
+  { additionalProperties: false },
+);
+
+export const questEditSchema = t.Object(
+  {
+    title: t.Optional(titleSchema),
+    description: t.Optional(descriptionSchema),
+    condition: t.Optional(conditionSchema),
+    startTime: t.Optional(startTimeSchema),
+    dueAt: t.Optional(dueAtSchema),
+    tagId: t.Optional(tagIdSchema),
+    proofRequired: t.Optional(t.Boolean()),
+    locations: t.Optional(locationsSchema),
   },
   { additionalProperties: false },
 );
@@ -197,6 +219,7 @@ export const questPublishCheckResponseSchema = t.Object({
 });
 
 export type QuestCreateInput = typeof questCreateSchema.static;
+export type QuestEditInput = typeof questEditSchema.static;
 export type QuestImagesUploadInput = typeof questImagesUploadSchema.static;
 export type QuestListQuery = typeof questListQuerySchema.static;
 export type QuestMineQuery = typeof questMineQuerySchema.static;

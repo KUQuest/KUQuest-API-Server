@@ -19,6 +19,7 @@ import type {
   questImageParamsSchema,
   questImagesUploadResponseSchema,
   questImagesUploadSchema,
+  questEditSchema,
   questListQuerySchema,
   questMineQuerySchema,
   questMineResponseSchema,
@@ -30,6 +31,7 @@ import {
   checkQuestImageUpload,
   createQuest,
   deleteQuestImage,
+  editQuest,
   getQuestDetail,
   getQuestPublishCheck,
   listBoardQuests,
@@ -46,11 +48,13 @@ type MineResponse = Static<typeof questMineResponseSchema>['data'];
 type DetailResponse = Static<typeof questDetailResponseSchema>['data'];
 type QuestImagesUploadResponse = Static<typeof questImagesUploadResponseSchema>['data'];
 type CreateInput = Static<typeof questCreateSchema>;
+type EditInput = Static<typeof questEditSchema>;
 type QuestImagesUploadInput = Static<typeof questImagesUploadSchema>;
 type ListQuery = Static<typeof questListQuerySchema>;
 type MineQuery = Static<typeof questMineQuerySchema>;
 type QuestParams = Static<typeof questParamsSchema>;
 type PublishCheckResponse = Static<typeof questPublishCheckResponseSchema>['data'];
+type QuestDetail = NonNullable<Awaited<ReturnType<typeof getQuestDetail>>>;
 
 const invalidInput = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 400;
@@ -141,6 +145,49 @@ const mapQuestImageMutationOutcome = (
   return apiError('QUEST_IMAGE_LIMIT_REACHED', 'A Quest can have at most 3 images');
 };
 
+const questNotFound = (set: AuthedContext['set']) => {
+  set.status = 404;
+  return apiError('QUEST_NOT_FOUND', 'Quest not found');
+};
+
+const mapQuestEditOutcome = (
+  set: AuthedContext['set'],
+  outcome: Exclude<Awaited<ReturnType<typeof editQuest>>, { id: string }>['outcome'],
+) => {
+  if (outcome === 'not-found') return questNotFound(set);
+
+  if (outcome === 'requires-consent') {
+    set.status = 409;
+    return apiError(
+      'QUEST_EDIT_REQUIRES_CONSENT',
+      'Quest edits require consent after participation starts',
+    );
+  }
+
+  if (outcome === 'not-editable') {
+    set.status = 409;
+    return apiError('QUEST_NOT_EDITABLE', 'Only an eligible OPEN Quest can be edited');
+  }
+
+  if (outcome === 'invalid-dates') {
+    set.status = 400;
+    return apiError('INVALID_QUEST_DATES', 'dueAt must be after startTime');
+  }
+
+  if (outcome === 'tag-not-found') {
+    set.status = 400;
+    return apiError('TAG_NOT_FOUND', 'Tag not found');
+  }
+
+  if (outcome === 'tag-required') {
+    set.status = 400;
+    return apiError('TAG_REQUIRED', 'An OPEN Quest must have a Tag');
+  }
+
+  set.status = 400;
+  return apiError('EMPTY_QUEST_EDIT', 'At least one Quest field must be supplied');
+};
+
 const toFilters = (query: ListQuery) => ({
   ...query,
   startFrom: query.startFrom ? new Date(query.startFrom) : undefined,
@@ -173,6 +220,16 @@ const validateMineQuery = (query: MineQuery, set: AuthedContext['set']) => {
   }
 
   return undefined;
+};
+
+const serializeQuestDetailResponse = (
+  set: AuthedContext['set'],
+  questDetail: QuestDetail,
+): ApiResponse<DetailResponse> => {
+  const images = serializeQuestImagesOrError(set, questDetail.images);
+  if ('success' in images) return images;
+
+  return apiSuccess({ ...questDetail, images });
 };
 
 export const createQuestController = async ({
@@ -296,15 +353,27 @@ export const getQuestDetailController = async ({
   set,
 }: AuthedContext & { params: QuestParams }): Promise<ApiResponse<DetailResponse>> => {
   const questDetail = await getQuestDetail(session.user.id, params.questId);
-  if (!questDetail) {
-    set.status = 404;
-    return apiError('QUEST_NOT_FOUND', 'Quest not found');
-  }
+  if (!questDetail) return questNotFound(set);
 
-  const images = serializeQuestImagesOrError(set, questDetail.images);
-  if ('success' in images) return images;
+  return serializeQuestDetailResponse(set, questDetail);
+};
 
-  return apiSuccess({ ...questDetail, images });
+export const editQuestController = async ({
+  body,
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  body: EditInput;
+  params: QuestParams;
+}): Promise<ApiResponse<DetailResponse>> => {
+  const result = await editQuest(session.user.id, params.questId, body);
+  if ('outcome' in result) return mapQuestEditOutcome(set, result.outcome);
+
+  const questDetail = await getQuestDetail(session.user.id, result.id);
+  if (!questDetail) return questNotFound(set);
+
+  return serializeQuestDetailResponse(set, questDetail);
 };
 
 const notDraft = (set: AuthedContext['set']) => {
