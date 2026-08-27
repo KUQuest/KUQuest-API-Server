@@ -250,6 +250,7 @@ request into `develop` to trigger staging deployment.
 Changing protected staging secrets alone does not start a deployment; merge a
 new `develop` change after rotating them.
 This deployment trigger verifies the rotated staging test-auth and Admin-seed flags.
+This trigger also verifies the staging Admin seed uses the deployed image.
 
 ## Database commands
 
