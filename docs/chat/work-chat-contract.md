@@ -7,7 +7,7 @@ single-instance WebSocket delivery protocol.
 The contract uses the repository terms in CONTEXT.md: Member, Hirer, Worker,
 Accepted Participant, Work Conversation, Chat Membership, Message, Attachment,
 Read Cursor, System Message, Report Case, Reporter Entry, Moderation Decision,
-and Admin Action.
+Evidence Reference, and Admin Action.
 
 ## Scope and ownership
 
@@ -23,7 +23,8 @@ membership over HTTP and does not keep an independently editable roster. See
 ADR 0005, Quest owns Work Chat membership.
 
 Work Chat owns Conversation, Message, Attachment, and Read Cursor persistence.
-Trust & Safety owns Report Case, Reporter Entry, and Moderation Decision.
+Trust & Safety owns Report Case, Reporter Entry, Moderation Decision, and
+Evidence Reference records.
 Admin Infra owns the Admin Action audit record required for moderation.
 
 The current Quest domain contract has no transition that reopens a Terminal
@@ -76,6 +77,13 @@ An Attachment belongs to one intended Conversation and may be consumed once by
 its uploader. A signed viewing link is created only after the server verifies
 that the requester can read the containing Message. Storage keys, quarantine
 locations, and signed URLs are never part of logs or Message persistence.
+
+### Evidence Reference
+
+An Evidence Reference links a Report Case to a retained Message or Attachment
+needed for moderation. It stores the domain record identifier and retention
+hold state; it never copies Message text, file bytes, or signed URLs. The Admin
+evidence route resolves Evidence References through a Report Case-scoped query.
 
 ### Temporal access
 
@@ -294,12 +302,12 @@ below.
 
 The `reportedMessage`, `messagesBefore`, and `messagesAfter` values use the
 Message shape. `messagesBefore` and `messagesAfter` are retained context
-Messages. Hidden Messages are included in these arrays when they are still
-retained. Admin evidence contains the original text for the reported Message
-and every retained context Message, including text that Members see as a hidden
-placeholder. Its Attachment values contain metadata only and a `linkAvailable`
-boolean; the signed link is returned by the separate Admin evidence link route.
-A Message deleted by retention is not included. The response is:
+Messages that are visible to Members. Hidden context Messages are excluded.
+Admin evidence contains the original text for the reported Message, including
+text that Members see as a hidden placeholder. Its Attachment values contain
+metadata only and a `linkAvailable` boolean; the signed link is returned by the
+separate Admin evidence link route. A Message deleted by retention is not
+included. The response is:
 
 ~~~json
 {
@@ -357,9 +365,10 @@ A Message deleted by retention is not included. The response is:
 ~~~
 
 messagesBefore and messagesAfter contain at most 20 retained context Messages
-each and are ordered by Conversation sequence ascending. An Admin evidence
-Attachment link is available only when the Attachment belongs to one of these
-Messages and is still retained.
+each and are ordered by Conversation sequence ascending. They contain only
+Messages visible to Members. An Admin evidence Attachment link is available
+only when the Attachment belongs to one of these Messages and is still
+retained.
 
 ## REST API
 
@@ -405,10 +414,10 @@ Query:
 - after: optional opaque cursor for Messages after the client's last known
   Message, used for reconnect gap recovery.
 
-before and after are mutually exclusive. Without a cursor, the server returns
-the newest page. Items inside a page are ordered by Conversation sequence
-ascending. nextCursor points to the next page in the selected direction, and
-hasMore states whether that page exists.
+before and after are mutually exclusive. Providing both returns 400 VALIDATION.
+Without a cursor, the server returns the newest page. Items inside a page are
+ordered by Conversation sequence ascending. nextCursor points to the next page
+in the selected direction, and hasMore states whether that page exists.
 
 ~~~json
 {
@@ -422,8 +431,9 @@ hasMore states whether that page exists.
 ~~~
 
 Malformed, cross-Conversation, or unusable cursors return 400 INVALID_CURSOR.
-Missing or unauthorized Conversations return 404 CONVERSATION_NOT_FOUND. The
-query never returns Messages outside the caller's temporal visibility window.
+Missing or invalid Member authentication returns 401 UNAUTHORIZED. Missing or
+unauthorized Conversations return 404 CONVERSATION_NOT_FOUND. The query never
+returns Messages outside the caller's temporal visibility window.
 
 ### Send a Message
 
@@ -502,8 +512,9 @@ the stored cursor, the operation is a no-op and messageId is the stored cursor,
 not the older requested Message ID.
 
 Missing, other-Conversation, or invisible Messages return 404
-MESSAGE_NOT_FOUND. The Read Cursor is never exposed as a read receipt to other
-Members.
+MESSAGE_NOT_FOUND. Missing or invalid Member authentication returns 401
+UNAUTHORIZED. Invalid request bodies return 400 VALIDATION. The Read Cursor is
+never exposed as a read receipt to other Members.
 
 ### Upload an Attachment
 
@@ -524,7 +535,8 @@ Upload sequence:
 5. Persist the clean Attachment reference and return its identifier.
 
 On any failed, unavailable, or malware-positive scan, the object is removed and
-no reusable Attachment identifier is returned. The response is:
+no reusable Attachment identifier is returned. Missing, multiple, or empty file
+fields return 400 VALIDATION. The response is:
 
 ~~~json
 {
@@ -543,10 +555,10 @@ no reusable Attachment identifier is returned. The response is:
 ~~~
 
 An unconsumed Attachment expires after 24 hours from PostgreSQL and object
-storage. Errors are 404 CONVERSATION_NOT_FOUND, 409 CONVERSATION_READ_ONLY,
-413 ATTACHMENT_TOO_LARGE, 415 UNSUPPORTED_ATTACHMENT_TYPE,
-429 RATE_LIMITED, 502 ATTACHMENT_SCAN_UNAVAILABLE, or 502
-ATTACHMENT_UPLOAD_FAILED.
+storage. Missing or invalid Member authentication returns 401 UNAUTHORIZED.
+Other errors are 404 CONVERSATION_NOT_FOUND, 409 CONVERSATION_READ_ONLY, 413
+ATTACHMENT_TOO_LARGE, 415 UNSUPPORTED_ATTACHMENT_TYPE, 429 RATE_LIMITED, 502
+ATTACHMENT_SCAN_UNAVAILABLE, or 502 ATTACHMENT_UPLOAD_FAILED.
 
 ### Get an Attachment link
 
@@ -570,7 +582,8 @@ The response is:
 ~~~
 
 The URL is short-lived and never persisted. The server controls the lifetime
-and clients use expiresAt rather than assuming a fixed lifetime.
+and clients use expiresAt rather than assuming a fixed lifetime. Missing or
+invalid Member authentication returns 401 UNAUTHORIZED.
 Missing, hidden, rejected, quarantined, expired, or unauthorized Attachments
 return 404 ATTACHMENT_NOT_FOUND.
 
@@ -592,9 +605,9 @@ JSON body:
 
 reason is one of HARASSMENT, SPAM, INAPPROPRIATE_CONTENT, DANGER_OR_THREAT,
 or OTHER. detail is optional, non-empty when present, and at most 1,000
-characters. A Member may create one Reporter Entry for one Message. Repeating
-the same request returns the existing Reporter Entry and does not create
-another row. Unknown fields are rejected.
+characters. A Member may create one Reporter Entry for one Message. Any later
+submission for the same Member and Message returns the existing Reporter Entry
+without changing its reason or detail. Unknown fields are rejected.
 
 The response is 200 with:
 
@@ -719,6 +732,18 @@ The response is:
         "messageId": "message-id",
         "status": "PENDING",
         "reporterEntryCount": 2,
+        "reporterEntries": [
+          {
+            "id": "reporter-entry-id",
+            "reason": "HARASSMENT",
+            "createdAt": "2026-08-27T10:00:00.000Z"
+          },
+          {
+            "id": "reporter-entry-id-2",
+            "reason": "SPAM",
+            "createdAt": "2026-08-27T10:05:00.000Z"
+          }
+        ],
         "createdAt": "2026-08-27T10:00:00.000Z",
         "updatedAt": "2026-08-27T10:00:00.000Z"
       }
@@ -727,6 +752,12 @@ The response is:
   }
 }
 ~~~
+
+Each queue item includes one `reporterEntries` summary for each Reporter Entry.
+A summary contains the Reporter Entry identifier, reason, and creation time. It
+does not contain Message content, Attachment data, or a signed link. Full
+Reporter Entry detail and reporter identity are available only in Admin
+evidence.
 
 An absent or empty queue is successful. An invalid status returns 400
 INVALID_STATUS. An invalid limit returns 400 INVALID_LIMIT. A malformed,
@@ -745,10 +776,9 @@ Opening evidence writes an immutable Admin Action in the same operation
 boundary as the evidence read.
 
 The response uses the Admin evidence shape defined above. It contains the
-reported Message, at most 20 retained context Messages before and after it, the
-grouped Reporter Entries needed for moderation, and the current Report Case
-status. Hidden Messages are included when they are still retained. It contains
-no unrelated Conversation data. The arrays are bounded and ordered by
+reported Message, at most 20 visible Messages before and after it, the grouped
+Reporter Entries needed for moderation, and the current Report Case status. It
+contains no unrelated Conversation data. The arrays are bounded and ordered by
 Conversation sequence ascending. This route does not paginate and does not
 accept or return a cursor.
 
@@ -828,6 +858,10 @@ its Admin Action atomically. The response is:
 
 The `/dismiss` route allows only PENDING to DISMISSED. The `/hide` route allows
 only PENDING to HIDDEN. The `/restore` route allows only HIDDEN to RESTORED.
+PENDING and HIDDEN are open Report Case statuses. DISMISSED and RESTORED are
+closed statuses. The transition to DISMISSED or RESTORED sets `caseClosedAt`
+atomically with the Moderation Decision. `caseClosedAt` is null while the case
+is PENDING or HIDDEN, and the 90-day post-case grace starts at that timestamp.
 An invalid or repeated transition returns 409 INVALID_REPORT_STATE and creates
 no decision. A missing or unauthorized Report Case returns 404
 REPORT_CASE_NOT_FOUND. Hiding replaces the Message content with a fixed
@@ -1058,21 +1092,36 @@ The retention policy uses these timestamps:
 
 - `latestTerminalAt` is the time of the Quest's latest transition to
   `COMPLETED` or `CANCELLED`;
-- `caseClosedAt` is the time that the Report Case holding the evidence closes.
+- `caseClosedAt` is the time that a Report Case changes to DISMISSED or
+  RESTORED. It is null while the case is PENDING or HIDDEN.
 
-An open Report Case continues to hold its Message and Attachment evidence. It
-is not eligible for deletion while the case is open. After the case closes:
+A non-terminal Conversation is not eligible for retention cleanup. After the
+Quest becomes terminal, the retention eligibility applies separately to each
+Message and its Attachments:
+
+~~~text
+eligibleAt = latestTerminalAt + 1 year
+~~~
+
+For a Message held by a Report Case, use the later of the normal retention date
+and the post-case grace date:
 
 ~~~text
 eligibleAt = max(latestTerminalAt + 1 year, caseClosedAt + 90 days)
 ~~~
 
-If no Report Case exists, `eligibleAt` is `latestTerminalAt + 1 year`. A daily
-retryable process may remove retained Messages and object-storage files at or
-after `eligibleAt`. It does not remove active or held evidence. The current
-Quest contract has no terminal reopen transition; if a future decision adds
-one, the Quest and Chat retention contracts must be revised together before
-implementation.
+An open Report Case holds every Message and Attachment named by its Evidence
+References beyond normal expiry. The default references are the reported
+Message and its Attachments. Context Messages are included only while they
+remain retained under their own retention rule, unless the Report Case has an
+Evidence Reference for them. A daily retryable process may remove retained
+Messages and object-storage files at or after `eligibleAt`. It does not remove
+active or held evidence. If a Message has more than one active hold, it remains
+held until every hold has ended.
+
+The current Quest contract has no terminal reopen transition. If a future
+decision adds one, the Quest and Chat retention contracts must be revised
+together before implementation.
 
 Deleting a Member anonymizes the sender as Former member in Member-facing
 history. The minimum identity linkage remains only while an open Report Case

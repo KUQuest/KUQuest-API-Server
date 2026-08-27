@@ -205,8 +205,12 @@ An immutable Message created from a Work Membership Transition to record a membe
 _Avoid_: Notification, audit log
 
 **Report Case**:
-A Trust & Safety record that groups Reporter Entries for one Message and tracks its moderation status: `PENDING`, `DISMISSED`, `HIDDEN`, or `RESTORED`. It retains the bounded evidence needed for moderation under the retention policy.
+A Trust & Safety record that groups Reporter Entries for one Message and tracks its moderation status: `PENDING`, `DISMISSED`, `HIDDEN`, or `RESTORED`. `PENDING` and `HIDDEN` are open statuses; `DISMISSED` and `RESTORED` are closed statuses. It retains the bounded evidence needed for moderation under the retention policy.
 _Avoid_: single Reporter Entry, Message flag
+
+**Evidence Reference**:
+A bounded reference from a Report Case to a Message or Attachment required for moderation. It identifies the retained domain record and its hold without copying Message text, file bytes, or signed URLs.
+_Avoid_: evidence copy, public file link
 
 **Reporter Entry**:
 A Member's reason and optional detail about one visible Message. A Member can create one Reporter Entry for one Message, and the entry belongs to that Message's Report Case.

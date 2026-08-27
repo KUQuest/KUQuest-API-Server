@@ -1,20 +1,20 @@
 # Retain Work Chat with moderation holds and sender anonymization
 
-Work Chat history and files remain available until the retention eligibility
+Work Chat history and files remain available until their retention eligibility
 time. `latestTerminalAt` is the Quest's latest terminal transition, and
-`caseClosedAt` is the time that the Report Case holding the evidence closes. An
-open Report Case continues to hold its Message and Attachment evidence. After
-the case closes:
+`caseClosedAt` is set when a Report Case changes to `DISMISSED` or `RESTORED`.
+`PENDING` and `HIDDEN` cases remain open and continue to hold the Message and
+Attachment records named by their Evidence References. After a case closes:
 
 ~~~text
 eligibleAt = max(latestTerminalAt + 1 year, caseClosedAt + 90 days)
 ~~~
 
-If no Report Case exists, `eligibleAt` is `latestTerminalAt + 1 year`.
-Member deletion anonymizes the sender while retaining the minimum identity
-linkage needed by an open case. This keeps the coordination history and
-moderation evidence auditable without retaining personal identity longer than
-the policy allows.
+Without a Report Case, `eligibleAt` is `latestTerminalAt + 1 year`. Member
+deletion anonymizes the sender while retaining the minimum identity linkage
+needed by an open case. This keeps the coordination history and moderation
+evidence auditable without retaining personal identity longer than the policy
+allows.
 
 For the MVP, a Terminal Quest is final and cannot reopen. BE-118, BE-120, and
 BE-131 must not require or implement Terminal Quest reopening. If a future
