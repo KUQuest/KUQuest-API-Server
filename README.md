@@ -244,6 +244,10 @@ The existing `db:seed-admin` workflow remains the path for creating an Admin.
 This Student route is separate because an Admin session cannot access
 Student-owned endpoints.
 
+Staging CD starts only after a successful Backend CI run for a push to
+`develop`. Opening a pull request runs CI but does not deploy; merge the pull
+request into `develop` to trigger staging deployment.
+
 ## Database commands
 
 ```bash
