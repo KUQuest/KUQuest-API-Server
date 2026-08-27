@@ -37,6 +37,9 @@ ALTER TABLE "auth_session" DROP CONSTRAINT "auth_session_admin_id_auth_admin_id_
 ALTER TABLE "file" DROP CONSTRAINT "file_uploaded_by_user_id_auth_user_id_fk";--> statement-breakpoint
 ALTER TABLE "payment_money_policy_revisions" DROP CONSTRAINT "payment_money_policy_revisions_authored_by_admin_id_auth_admin_id_fk";--> statement-breakpoint
 ALTER TABLE "payment_payout_accounts" DROP CONSTRAINT "payment_payout_accounts_user_id_auth_user_id_fk";--> statement-breakpoint
+ALTER TABLE "payment_payout_quotes" DROP CONSTRAINT "payment_payout_quotes_account_user_fk";--> statement-breakpoint
+ALTER TABLE "payment_payouts" DROP CONSTRAINT "payment_payouts_quote_user_fk";--> statement-breakpoint
+ALTER TABLE "payment_payouts" DROP CONSTRAINT "payment_payouts_account_user_fk";--> statement-breakpoint
 ALTER TABLE "payment_payout_cancellation_attempts" DROP CONSTRAINT "payment_payout_cancellation_attempts_admin_id_auth_admin_id_fk";--> statement-breakpoint
 ALTER TABLE "payment_payout_quotes" DROP CONSTRAINT "payment_payout_quotes_user_id_auth_user_id_fk";--> statement-breakpoint
 ALTER TABLE "payment_payout_status_history" DROP CONSTRAINT "payment_payout_status_history_actor_user_id_auth_user_id_fk";--> statement-breakpoint
@@ -397,6 +400,9 @@ ALTER TABLE "payment_payout_quotes" ADD CONSTRAINT "payment_payout_quotes_user_i
 ALTER TABLE "payment_payout_status_history" ADD CONSTRAINT "payment_payout_status_history_actor_user_id_auth_user_id_fk" FOREIGN KEY ("actor_user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payment_payout_status_history" ADD CONSTRAINT "payment_payout_status_history_actor_admin_id_auth_admin_id_fk" FOREIGN KEY ("actor_admin_id") REFERENCES "public"."auth_admin"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payment_payouts" ADD CONSTRAINT "payment_payouts_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "payment_payout_quotes" ADD CONSTRAINT "payment_payout_quotes_account_user_fk" FOREIGN KEY ("payout_account_id","user_id") REFERENCES "public"."payment_payout_accounts"("id","user_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "payment_payouts" ADD CONSTRAINT "payment_payouts_quote_user_fk" FOREIGN KEY ("quote_id","user_id") REFERENCES "public"."payment_payout_quotes"("id","user_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "payment_payouts" ADD CONSTRAINT "payment_payouts_account_user_fk" FOREIGN KEY ("payout_account_id","user_id") REFERENCES "public"."payment_payout_accounts"("id","user_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payment_top_up_quotes" ADD CONSTRAINT "payment_top_up_quotes_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payment_top_up_status_history" ADD CONSTRAINT "payment_top_up_status_history_actor_user_id_auth_user_id_fk" FOREIGN KEY ("actor_user_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payment_top_up_status_history" ADD CONSTRAINT "payment_top_up_status_history_actor_admin_id_auth_admin_id_fk" FOREIGN KEY ("actor_admin_id") REFERENCES "public"."auth_admin"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
