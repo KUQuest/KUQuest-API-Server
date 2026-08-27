@@ -1,6 +1,7 @@
 import * as questService from '@/modules/quest/quest.service';
 import {
   createQuestController,
+  editQuestController,
   getQuestDetailController,
   listBoardQuestsController,
 } from '@/modules/quest/quest.controller';
@@ -107,5 +108,59 @@ describe('Quest controllers', () => {
     });
 
     expect(result).toEqual({ success: true, data: { items: [], nextCursor: null } });
+  });
+
+  it('points selected participation at the consent edit flow', async () => {
+    spyOn(questService, 'editQuest').mockResolvedValue({ outcome: 'requires-consent' });
+    const set: { status?: number } = {};
+
+    const result = await editQuestController({
+      params: { questId },
+      body: { title: 'Changed title' },
+      session: session as never,
+      set: set as never,
+    });
+
+    expect(set.status).toBe(409);
+    expect(result).toEqual({
+      success: false,
+      error: {
+        code: 'QUEST_EDIT_REQUIRES_CONSENT',
+        message: 'Quest edits require consent after participation starts',
+      },
+    });
+  });
+
+  it('returns the updated Quest detail after a successful edit', async () => {
+    const detail = {
+      id: questId,
+      title: 'Changed title',
+      description: null,
+      condition: 'A completed result',
+      reward: 500,
+      tag: null,
+      mode: 'FIRST_COME_FIRST_SERVED' as const,
+      participation: 'SINGLE' as const,
+      questStatus: 'OPEN' as const,
+      headcount: 1,
+      startTime: '2026-08-26T10:00:00.000Z',
+      dueAt: null,
+      estimatedDurationMinutes: null,
+      proofRequired: true,
+      hirerName: 'Quest Hirer',
+      locations: [],
+      images: [],
+    };
+    spyOn(questService, 'editQuest').mockResolvedValue({ id: questId });
+    spyOn(questService, 'getQuestDetail').mockResolvedValue(detail as never);
+
+    const result = await editQuestController({
+      params: { questId },
+      body: { title: 'Changed title' },
+      session: session as never,
+      set: {} as never,
+    });
+
+    expect(result).toEqual({ success: true, data: detail });
   });
 });

@@ -1,4 +1,9 @@
-import { ImageTooLargeError, UnsupportedImageTypeError, createImageStorage } from '@/shared/image-storage';
+import {
+  ImageTooLargeError,
+  ImageUploadError,
+  UnsupportedImageTypeError,
+  createImageStorage,
+} from '@/shared/image-storage';
 
 import { describe, expect, it } from 'bun:test';
 import sharp from 'sharp';
@@ -58,5 +63,29 @@ describe('createImageStorage upload size limit', () => {
     const file = new File([new Uint8Array(11)], 'small.png', { type: 'image/png' });
 
     await expect(small.upload('user-1', file)).rejects.toThrow(ImageTooLargeError);
+  });
+});
+
+describe('createImageStorage upload compensation', () => {
+  it('deletes the generated object when storage write fails', async () => {
+    const deleted: string[] = [];
+    const partialStorage = createImageStorage({
+      keyPrefix: 'partial-upload',
+      bucket: 'kuquest-test',
+      client: {
+        write: async () => {
+          throw new Error('write failed');
+        },
+        delete: async (objectKey) => {
+          deleted.push(objectKey);
+        },
+        presign: () => 'https://storage.test/signed-link',
+      },
+    });
+    const file = new File([await validPngBuffer()], 'image.png', { type: 'image/png' });
+
+    await expect(partialStorage.upload('user-1', file)).rejects.toBeInstanceOf(ImageUploadError);
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]).toMatch(/^partial-upload\/user-1\/.+\.png$/);
   });
 });
