@@ -1,10 +1,15 @@
 export { auth } from './auth.config';
+export { createStudentAuth } from './auth.config';
 export { adminAuth } from './admin-auth.config';
 export { ALLOWED_EMAIL_DOMAIN } from './auth.constants';
 export { authPlugin } from './auth.plugin';
 export { authGuard } from './auth.guard';
 export { adminAuthenticationGuard, enabledAdminGuard } from './admin-auth.guard';
 export { authTestRoute } from './auth-test.route';
+export {
+  createStagingTestAuthRoute,
+  stagingTestAuthRoute,
+} from './staging-test-auth.route';
 export { assertAllowedEmail, isAllowedEmail } from './auth.policy';
 export type { AuthSession } from './auth.config';
 export type { AuthedContext, AuthenticatedSession } from './auth.guard';

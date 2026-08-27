@@ -8,6 +8,13 @@ const parsePort = (value: string | undefined): number => {
   return port;
 };
 
+const parseBoolean = (name: string, value: string | undefined): boolean => {
+  if (value === undefined || value === 'false') return false;
+  if (value === 'true') return true;
+
+  throw new Error(`${name} must be either true or false`);
+};
+
 export const assertAuthSecretLength = (name: string, value: string): void => {
   if (value.length < 32) {
     throw new Error(`${name} must be at least 32 characters long`);
@@ -16,6 +23,7 @@ export const assertAuthSecretLength = (name: string, value: string): void => {
 
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
+  deploymentEnv: process.env.DEPLOYMENT_ENV ?? 'development',
   host: process.env.HOST ?? '0.0.0.0',
   port: parsePort(process.env.PORT),
 
@@ -23,6 +31,14 @@ export const env = {
   betterAuthUrl: process.env.BETTER_AUTH_URL,
   betterAuthSecret: process.env.BETTER_AUTH_SECRET,
   adminBetterAuthSecret: process.env.ADMIN_BETTER_AUTH_SECRET,
+  stagingTestAuthEnabled: parseBoolean(
+    'STAGING_TEST_AUTH_ENABLED',
+    process.env.STAGING_TEST_AUTH_ENABLED,
+  ),
+  stagingTestAuthEmail: process.env.STAGING_TEST_AUTH_EMAIL,
+  stagingTestAuthPassword: process.env.STAGING_TEST_AUTH_PASSWORD,
+  stagingTestAuthFirstName: process.env.STAGING_TEST_AUTH_FIRST_NAME,
+  stagingTestAuthLastName: process.env.STAGING_TEST_AUTH_LAST_NAME,
   googleClientId: process.env.GOOGLE_CLIENT_ID,
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
   s3Endpoint: process.env.S3_ENDPOINT,
@@ -75,5 +91,26 @@ export const validateRuntimeEnv = (): void => {
 
   if (env.adminBetterAuthSecret) {
     assertAuthSecretLength('ADMIN_BETTER_AUTH_SECRET', env.adminBetterAuthSecret);
+  }
+
+  if (!env.stagingTestAuthEnabled) return;
+
+  if (env.deploymentEnv !== 'staging') {
+    throw new Error('STAGING_TEST_AUTH_ENABLED requires DEPLOYMENT_ENV=staging');
+  }
+
+  const missingTestAuthVariables = Object.entries({
+    STAGING_TEST_AUTH_EMAIL: env.stagingTestAuthEmail,
+    STAGING_TEST_AUTH_PASSWORD: env.stagingTestAuthPassword,
+    STAGING_TEST_AUTH_FIRST_NAME: env.stagingTestAuthFirstName,
+    STAGING_TEST_AUTH_LAST_NAME: env.stagingTestAuthLastName,
+  })
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+
+  if (missingTestAuthVariables.length > 0) {
+    throw new Error(
+      `Missing required staging test auth variables: ${missingTestAuthVariables.join(', ')}`,
+    );
   }
 };

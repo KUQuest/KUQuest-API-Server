@@ -3,7 +3,7 @@ import { questRoute } from '@/modules/quest/quest.route';
 import { Elysia } from 'elysia';
 
 import { academicRegistrationRoute } from './modules/academic-registration';
-import { authPlugin, authTestRoute } from './modules/auth';
+import { authPlugin, authTestRoute, stagingTestAuthRoute } from './modules/auth';
 import { certificateRoute } from './modules/certificate';
 import { healthRoute } from './modules/health';
 import { onboardingRoute } from './modules/onboarding';
@@ -21,6 +21,7 @@ export const app = new Elysia({
   .use(errorHandlerPlugin)
   .use(corsPlugin)
   .use(authPlugin)
+  .use(stagingTestAuthRoute)
   .use(openapiPlugin)
   .get('/', () => 'Hello Elysia', {
     detail: {

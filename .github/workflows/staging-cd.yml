@@ -143,6 +143,11 @@ jobs:
           BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           ADMIN_BETTER_AUTH_SECRET: ${{ secrets.ADMIN_BETTER_AUTH_SECRET }}
+          STAGING_TEST_AUTH_ENABLED: ${{ secrets.STAGING_TEST_AUTH_ENABLED }}
+          STAGING_TEST_AUTH_EMAIL: ${{ secrets.STAGING_TEST_AUTH_EMAIL }}
+          STAGING_TEST_AUTH_PASSWORD: ${{ secrets.STAGING_TEST_AUTH_PASSWORD }}
+          STAGING_TEST_AUTH_FIRST_NAME: ${{ secrets.STAGING_TEST_AUTH_FIRST_NAME }}
+          STAGING_TEST_AUTH_LAST_NAME: ${{ secrets.STAGING_TEST_AUTH_LAST_NAME }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
 
@@ -193,11 +198,28 @@ jobs:
             fi
           done
 
+          if [ "${STAGING_TEST_AUTH_ENABLED:-false}" = 'true' ]; then
+            TEST_AUTH_SECRETS=(
+              STAGING_TEST_AUTH_EMAIL
+              STAGING_TEST_AUTH_PASSWORD
+              STAGING_TEST_AUTH_FIRST_NAME
+              STAGING_TEST_AUTH_LAST_NAME
+            )
+
+            for SECRET_NAME in "${TEST_AUTH_SECRETS[@]}"; do
+              if [ -z "${!SECRET_NAME}" ]; then
+                echo "Missing GitHub secret: $SECRET_NAME"
+                exit 1
+              fi
+            done
+          fi
+
           ENV_FILE="$RUNNER_TEMP/backend.env"
           umask 077
 
           {
             printf 'NODE_ENV=production\n'
+            printf 'DEPLOYMENT_ENV=staging\n'
             printf 'HOST=0.0.0.0\n'
             printf 'PORT=5000\n'
 
@@ -210,6 +232,13 @@ jobs:
             printf 'BETTER_AUTH_URL=%s\n' "$BETTER_AUTH_URL"
             printf 'BETTER_AUTH_SECRET=%s\n' "$BETTER_AUTH_SECRET"
             printf 'ADMIN_BETTER_AUTH_SECRET=%s\n' "$ADMIN_BETTER_AUTH_SECRET"
+            printf 'STAGING_TEST_AUTH_ENABLED=%s\n' "${STAGING_TEST_AUTH_ENABLED:-false}"
+            if [ "${STAGING_TEST_AUTH_ENABLED:-false}" = 'true' ]; then
+              printf 'STAGING_TEST_AUTH_EMAIL=%s\n' "$STAGING_TEST_AUTH_EMAIL"
+              printf 'STAGING_TEST_AUTH_PASSWORD=%s\n' "$STAGING_TEST_AUTH_PASSWORD"
+              printf 'STAGING_TEST_AUTH_FIRST_NAME=%s\n' "$STAGING_TEST_AUTH_FIRST_NAME"
+              printf 'STAGING_TEST_AUTH_LAST_NAME=%s\n' "$STAGING_TEST_AUTH_LAST_NAME"
+            fi
             printf 'GOOGLE_CLIENT_ID=%s\n' "$GOOGLE_CLIENT_ID"
             printf 'GOOGLE_CLIENT_SECRET=%s\n' "$GOOGLE_CLIENT_SECRET"
 
