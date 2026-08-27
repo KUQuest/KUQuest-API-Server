@@ -6,6 +6,7 @@ import {
   index,
   jsonb,
   pgTable,
+  smallint,
   text,
   timestamp,
   unique,
@@ -23,6 +24,15 @@ export const paymentMoneyPolicyRevisions = paymentMoneyPolicyRevision;
 
 export const topUpStatuses = ['PENDING', 'PAID', 'EXPIRED', 'FAILED'] as const;
 export type TopUpStatus = (typeof topUpStatuses)[number];
+
+export const providerEventProcessingStatuses = [
+  'RECEIVED',
+  'PROCESSING',
+  'RETRYABLE',
+  'PROCESSED',
+  'DEAD_LETTER',
+] as const;
+export type ProviderEventProcessingStatus = (typeof providerEventProcessingStatuses)[number];
 
 export const payoutStatuses = [
   'CREATING',
@@ -143,6 +153,107 @@ export const paymentTopUpStatusHistory = pgTable(
     index('payment_top_up_status_history_idx').on(table.topUpId, table.occurredAt),
   ],
 );
+
+export const paymentProviderEventInbox = pgTable(
+  'payment_provider_event_inbox',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    provider: text('provider').notNull(),
+    providerEventId: text('provider_event_id').notNull(),
+    eventType: text('event_type').notNull(),
+    resourceType: text('resource_type').notNull(),
+    internalReference: text('internal_reference'),
+    providerReference: text('provider_reference'),
+    providerApiVersion: text('provider_api_version'),
+    providerStatus: text('provider_status').notNull(),
+    normalizedStatus: text('normalized_status').notNull(),
+    providerAmountSatang: integer('provider_amount_satang'),
+    providerActualFeeSatang: integer('provider_actual_fee_satang'),
+    providerActualTaxSatang: integer('provider_actual_tax_satang'),
+    providerActualDebitSatang: integer('provider_actual_debit_satang'),
+    providerChannelCode: text('provider_channel_code'),
+    providerOccurredAt: time('provider_occurred_at').notNull(),
+    payloadHash: text('payload_hash').notNull(),
+    rawPayloadKeyVersion: text('raw_payload_key_version'),
+    rawPayloadNonce: text('raw_payload_nonce'),
+    rawPayloadCiphertext: text('raw_payload_ciphertext'),
+    rawPayloadAuthTag: text('raw_payload_auth_tag'),
+    rawPayloadExpiresAt: time('raw_payload_expires_at').notNull(),
+    processingStatus: text('processing_status')
+      .$type<ProviderEventProcessingStatus>()
+      .default('RECEIVED')
+      .notNull(),
+    attemptCount: smallint('attempt_count').default(0).notNull(),
+    claimedAt: time('claimed_at'),
+    processedAt: time('processed_at'),
+    lastError: text('last_error'),
+    receivedAt: time('received_at').defaultNow().notNull(),
+    createdAt: time('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    unique('payment_provider_event_inbox_provider_event_key').on(
+      table.provider,
+      table.providerEventId,
+    ),
+    index('payment_provider_event_inbox_processing_idx').on(
+      table.processingStatus,
+      table.receivedAt,
+    ),
+    index('payment_provider_event_inbox_expiry_idx').on(table.rawPayloadExpiresAt),
+    check(
+      'payment_provider_event_inbox_amount_check',
+      sql`${table.providerAmountSatang} IS NULL OR ${table.providerAmountSatang} > 0`,
+    ),
+    check(
+      'payment_provider_event_inbox_attempt_check',
+      sql`${table.attemptCount} BETWEEN 0 AND 5`,
+    ),
+    check(
+      'payment_provider_event_inbox_normalized_status_check',
+      sql`${table.normalizedStatus} IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED', 'COMPLETED', 'CANCELLED')`,
+    ),
+    check(
+      'payment_provider_event_inbox_actual_amount_check',
+      sql`num_nonnulls(${table.providerActualFeeSatang}, ${table.providerActualTaxSatang}, ${table.providerActualDebitSatang}) IN (0, 3) AND (${table.providerActualFeeSatang} IS NULL OR (${table.providerActualFeeSatang} >= 0 AND ${table.providerActualTaxSatang} >= 0 AND ${table.providerActualDebitSatang} = ${table.providerAmountSatang} + ${table.providerActualFeeSatang} + ${table.providerActualTaxSatang}))`,
+    ),
+    check(
+      'payment_provider_event_inbox_processing_status_check',
+      sql`${table.processingStatus} IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')`,
+    ),
+    check(
+      'payment_provider_event_inbox_raw_payload_check',
+      sql`num_nonnulls(${table.rawPayloadKeyVersion}, ${table.rawPayloadNonce}, ${table.rawPayloadCiphertext}, ${table.rawPayloadAuthTag}) IN (0, 4)`,
+    ),
+  ],
+);
+
+export const paymentProviderEventHistory = pgTable(
+  'payment_provider_event_history',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    eventId: uuid('event_id').notNull().references(() => paymentProviderEventInbox.id),
+    fromStatus: text('from_status').$type<ProviderEventProcessingStatus>(),
+    toStatus: text('to_status').$type<ProviderEventProcessingStatus>().notNull(),
+    source: text('source').notNull(),
+    reason: text('reason'),
+    error: text('error'),
+    occurredAt: time('occurred_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('payment_provider_event_history_event_idx').on(table.eventId, table.occurredAt),
+    check(
+      'payment_provider_event_history_from_status_check',
+      sql`${table.fromStatus} IS NULL OR ${table.fromStatus} IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')`,
+    ),
+    check(
+      'payment_provider_event_history_to_status_check',
+      sql`${table.toStatus} IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')`,
+    ),
+  ],
+);
+
+export const paymentProviderEvents = paymentProviderEventInbox;
+export const paymentProviderEventStatusHistory = paymentProviderEventHistory;
 
 export const paymentTopUpQuotes = paymentTopUpQuote;
 export const paymentTopUps = paymentTopUp;

@@ -1,39 +1,58 @@
-# Issue Tracker
+# Issue Tracker: GitHub
 
-Issues for this repository live in the **KUQuest Linear workspace**.
+Issues and specs for this repository live as GitHub Issues. Use the `gh` CLI
+for all issue operations.
 
-## Default destination
+## Repository
 
-- Team: **Backend**
-- Team key: `BE`
-- Team ID: `fe4b5ef6-dfd4-4fcc-9619-e3a8b8115579`
+- Repository: `KUQuest/KUQuest-API-Server`
+- Issues: enabled
+- CLI: `gh`
 
-Use the connected Linear integration to search, create, and update issues.
+## Conventions
 
-For Backend implementation issues, use the repository's
-[Linear Backend implementation template](linear-backend-implementation-template.md).
+- **Create an issue**: `gh issue create --title "..." --body "..."`. Use a
+  heredoc for multi-line bodies.
+- **Read an issue**: `gh issue view <number> --comments`, and include labels
+  when the issue's triage state matters.
+- **List issues**: `gh issue list --state open` with suitable label and state
+  filters.
+- **Comment on an issue**: `gh issue comment <number> --body "..."`.
+- **Apply or remove labels**: `gh issue edit <number> --add-label "..."` or
+  `--remove-label "..."`.
+- **Close an issue**: `gh issue close <number> --comment "..."`.
 
-## Projects
+## Pull requests as a triage surface
 
-Assign a project only when the work clearly belongs to an existing Linear
-project. Otherwise, leave the project unset rather than guessing.
+**PRs as a request surface: no.** External PRs do not enter the issue triage
+queue automatically. Pull requests remain implementation artifacts and must
+link to their related GitHub Issue.
 
-Examples of relevant projects include:
+GitHub shares one number space across Issues and pull requests. Resolve a
+number with `gh pr view <number>` first, then use `gh issue view <number>` when
+it is not a pull request.
 
-- Login & Auth (Google OAuth)
-- Quest Creation & Discovery (Core Loop)
+## When a skill says "publish to the issue tracker"
 
-## GitHub relationship
+Create a GitHub Issue.
 
-Linear is the source of truth for requirements, status, assignment, and triage.
+## When a skill says "fetch the relevant ticket"
 
-GitHub pull requests are implementation artifacts. Add the related PR as a link
-on the Linear issue. Do not create a duplicate GitHub issue.
+Run `gh issue view <number> --comments`.
 
-## Working with issues
+## Wayfinding operations
 
-- Refer to issues by their Linear identifier, such as `BE-123`.
-- Preserve existing state, assignment, project, priority, and labels unless the
-  task requires changing them.
-- Use the canonical triage labels defined in
-  `docs/agents/triage-labels.md`.
+The `/wayfinder` map is a single GitHub Issue with child Issues as tickets.
+
+- **Map**: create one Issue labelled `wayfinder:map` with the Notes,
+  Decisions-so-far, and Fog sections.
+- **Child ticket**: link the child Issue as a GitHub sub-issue when supported.
+  Otherwise, add `Part of #<map>` at the top of its body and keep a task list
+  in the map body. Use `wayfinder:<type>` labels for `research`, `prototype`,
+  `grilling`, or `task`.
+- **Blocking**: use GitHub native Issue dependencies when available. If they
+  are not available, add `Blocked by: #<n>, #<n>` at the top of the child body.
+- **Claim**: assign the Issue to the current user with
+  `gh issue edit <number> --add-assignee @me`.
+- **Resolve**: comment the answer, close the Issue, and append a context
+  pointer to the map's Decisions-so-far.
