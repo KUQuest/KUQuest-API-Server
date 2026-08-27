@@ -18,7 +18,7 @@ import {
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { eq, sql as drizzleSql } from 'drizzle-orm';
 
-const createStudentWallet = async (prefix: string) => {
+const createStudentWallet = async (_prefix: string) => {
   const userId = crypto.randomUUID();
   await db.insert(authUser).values({
     id: userId,

@@ -66,7 +66,7 @@ class FakeInboundPaymentProvider implements InboundPaymentProvider {
   }
 }
 
-const createMember = async (prefix: string) => {
+const createMember = async (_prefix: string) => {
   const userId = crypto.randomUUID();
   await db.insert(authUser).values({
     id: userId,

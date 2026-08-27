@@ -23,7 +23,7 @@ import {
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 
-const createStudent = async (prefix: string) => {
+const createStudent = async (_prefix: string) => {
   const id = crypto.randomUUID();
   await db.insert(authUser).values({
     id,
