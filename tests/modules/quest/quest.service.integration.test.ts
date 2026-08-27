@@ -287,12 +287,22 @@ describe('Quest persistence', () => {
     });
   });
 
+  it('checks Quest editability before rejecting an empty edit', async () => {
+    const questId = await createFixture();
+
+    expect(await editQuest(hirerId, questId, {})).toEqual({ outcome: 'not-editable' });
+  });
+
   it('treats another Member’s Quest as not found when editing', async () => {
     const questId = await createFixture();
 
     expect(await editQuest(otherMemberId, questId, { title: 'Not allowed' })).toEqual({
       outcome: 'not-found',
     });
+  });
+
+  it('checks Quest existence before rejecting an empty edit', async () => {
+    expect(await editQuest(hirerId, randomUUID(), {})).toEqual({ outcome: 'not-found' });
   });
 
   it('rejects direct edits when a Candidate exists', async () => {

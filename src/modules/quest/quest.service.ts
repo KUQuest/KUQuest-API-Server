@@ -601,11 +601,10 @@ export const editQuest = async (
   questId: string,
   data: QuestEditInput,
 ): Promise<QuestEditOutcome> => {
-  if (Object.keys(data).length === 0) return { outcome: 'empty-edit' };
-
   return db.transaction(async (transaction) => {
     const eligibility = await getQuestEditEligibility(transaction, userId, questId);
     if ('outcome' in eligibility) return eligibility;
+    if (Object.keys(data).length === 0) return { outcome: 'empty-edit' };
 
     const current = eligibility.quest;
     const history: QuestEditHistoryValue[] = [];
