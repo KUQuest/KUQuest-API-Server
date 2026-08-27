@@ -1,7 +1,7 @@
 import { app } from '@/app';
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
+import { authPlugin, createStagingTestAuthRoute } from '@/modules/auth';
 
 import { randomUUID } from 'node:crypto';
 
@@ -21,6 +21,20 @@ const stagingTestApp = new Elysia({ name: 'staging-test-auth-integration' }).use
     lastName: 'Test Student',
   }),
 );
+const composedStagingTestApp = new Elysia({
+  name: 'staging-test-auth-composition',
+})
+  .use(authPlugin)
+  .use(
+    createStagingTestAuthRoute({
+      enabled: true,
+      deploymentEnv: 'staging',
+      email: testEmail,
+      password: testPassword,
+      firstName: 'Staging',
+      lastName: 'Test Student',
+    }),
+  );
 
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? [])
@@ -56,6 +70,21 @@ describe('staging test authentication', () => {
     );
 
     expect(response.status).toBe(404);
+  });
+
+  it('routes through the auth composition when the staging flag is enabled', async () => {
+    const response = await composedStagingTestApp.handle(
+      new Request('http://localhost/api/staging/test-auth/sign-in/email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: testEmail,
+          password: 'WrongStudent1!',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(401);
   });
 
   it('creates a configured Student and issues a normal session', async () => {
