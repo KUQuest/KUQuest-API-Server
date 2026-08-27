@@ -8,12 +8,19 @@ describe('Quest integration', () => {
     ['GET', '/api/v1/quests/mine'],
     ['GET', '/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c'],
     ['POST', '/api/v1/quests'],
+    ['PATCH', '/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c'],
   ])('%s %s requires Member authentication', async (method, path) => {
+    const hasBody = method === 'POST' || method === 'PATCH';
     const response = await app.handle(
       new Request(`http://localhost${path}`, {
         method,
-        headers: method === 'POST' ? { 'content-type': 'application/json' } : undefined,
-        body: method === 'POST' ? JSON.stringify({}) : undefined,
+        headers: hasBody ? { 'content-type': 'application/json' } : undefined,
+        body:
+          method === 'POST'
+            ? JSON.stringify({})
+            : hasBody
+              ? JSON.stringify({ title: 'Edit' })
+              : undefined,
       }),
     );
 
@@ -61,6 +68,19 @@ describe('Quest integration', () => {
     expect((await response.json()).error.code).toBe('VALIDATION');
   });
 
+  it('rejects unknown Quest edit fields before authentication', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Edit', unknown: true }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('VALIDATION');
+  });
+
   it('publishes all Quest operations with Member security', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
     const document = (await response.json()) as {
@@ -71,6 +91,10 @@ describe('Quest integration', () => {
     expect(document.paths['/api/v1/quests']?.get?.operationId).toBe('listQuestBoard');
     expect(document.paths['/api/v1/quests/mine']?.get?.operationId).toBe('listOwnQuests');
     expect(document.paths['/api/v1/quests/{questId}']?.get?.operationId).toBe('getQuestDetail');
+    expect(document.paths['/api/v1/quests/{questId}']?.patch?.operationId).toBe('editQuest');
+    expect(document.paths['/api/v1/quests/{questId}']?.patch?.security).toEqual([
+      { betterAuthSession: [] },
+    ]);
     expect(document.paths['/api/v1/quests']?.get?.security).toEqual([
       { betterAuthSession: [] },
     ]);
