@@ -354,6 +354,21 @@ jobs:
              bash -s -- deploy" \
             < scripts/staging-operations.sh
 
+      - name: Verify staging auth runtime flags
+        shell: bash
+        env:
+          APP_IMAGE: ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            "cd /opt/backend && APP_IMAGE='$APP_IMAGE' docker compose run --rm --no-deps --entrypoint bun api -e 'console.log(JSON.stringify({deploymentEnv: process.env.DEPLOYMENT_ENV ?? null, stagingTestAuthEnabled: process.env.STAGING_TEST_AUTH_ENABLED ?? null}))'"
+
       - name: Seed staging Admin account
         shell: bash
         env:
