@@ -18,7 +18,7 @@ import {
 import { randomUUID } from 'node:crypto';
 
 import { and, eq, inArray } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
 let postgresAvailable = false;
 const hirerId = randomUUID();
@@ -26,6 +26,9 @@ const workerIds = [randomUUID(), randomUUID(), randomUUID()];
 const adminId = randomUUID();
 const tagId = randomUUID();
 const questIds: string[] = [];
+const successfulWorkChatWriter = {
+  applyQuestTransition: async () => ({ conversationId: 'test-conversation', outcome: 'APPLIED' as const }),
+};
 
 const request = (method: string, path: string, userId: string, body?: unknown, headers: HeadersInit = {}) => app.handle(new Request(`http://localhost${path}`, {
   method,
@@ -68,7 +71,15 @@ const createQuest = async (status: 'QUEST_OPEN' | 'QUEST_ASSIGNED' | 'QUEST_IN_P
     tagId,
     startTime: new Date('2030-01-01T10:00:00.000Z'),
   });
-  if (workers.length > 0) await db.insert(questAssignment).values(workers.map((workerId) => ({ questId, workerId, assignmentStatus: 'ASSIGNMENT_ACTIVE', createdAt: new Date() })));
+  if (workers.length > 0) {
+    const assignmentCreatedAt = new Date();
+    await db.insert(questAssignment).values(workers.map((workerId, index) => ({
+      questId,
+      workerId,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+      createdAt: new Date(assignmentCreatedAt.getTime() + index),
+    })));
+  }
   await db.transaction((transaction) => reserveSpending(transaction, {
     ownerUserId: hirerId,
     callerScope: 'quest',
@@ -95,6 +106,10 @@ beforeAll(async () => {
   await ensureWallet(hirerId);
   for (const workerId of workerIds) await ensureWallet(workerId);
   await fundWallet(hirerId, 100_000);
+});
+
+beforeEach(() => {
+  configureQuestWorkChatMembershipWriter(successfulWorkChatWriter);
 });
 
 afterEach(() => {

@@ -280,7 +280,6 @@ export const joinNoCandidateQuest = async (
       return { outcome };
     };
     if (current.mode !== questMode.noCandidate) return discardCommand('not-direct-join');
-    if (current.questStatus !== questStatus.open) return discardCommand('not-open');
     if (current.hirerId === workerId) return discardCommand('hirer-not-allowed');
 
     const [existing] = await transaction
@@ -289,6 +288,7 @@ export const joinNoCandidateQuest = async (
       .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, workerId)))
       .limit(1);
     if (existing) return discardCommand('already-assigned');
+    if (current.questStatus !== questStatus.open) return discardCommand('not-open');
 
     const [activeCount] = await transaction
       .select({ count: sql<number>`count(*)` })
@@ -350,4 +350,3 @@ export const joinNoCandidateQuest = async (
     return { ...assignment, questStatus: nextStatus };
   });
 };
-

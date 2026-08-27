@@ -175,10 +175,10 @@ describe('Quest publishing service', () => {
       .select({ spending: walletWallet.spendingBalanceSatang, reserved: walletWallet.fundingReservedSatang })
       .from(walletWallet)
       .where(eq(walletWallet.userId, hirerId));
+    const preview = await getQuestPublishCheck(hirerId, questId);
 
     expect(await publishQuest(hirerId, questId)).toEqual({ outcome: 'published' });
 
-    const preview = await getQuestPublishCheck(hirerId, questId);
     const [reservation] = await db
       .select()
       .from(walletFundingReservation)

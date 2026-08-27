@@ -12,7 +12,7 @@ import {
 import { randomUUID } from 'node:crypto';
 
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
 type Worker = { id: string; email: string; firstName: string; lastName: string };
 
@@ -26,6 +26,9 @@ const workers = [1, 2, 3].map((number) => ({
 const tagId = randomUUID();
 const questIds: string[] = [];
 let postgresAvailable = false;
+const successfulWorkChatWriter = {
+  applyQuestTransition: async () => ({ conversationId: 'test-conversation', outcome: 'APPLIED' as const }),
+};
 
 const request = (questId: string, workerId?: string, headers: HeadersInit = {}) => app.handle(new Request(`http://localhost/api/v1/quests/${questId}/join`, {
   method: 'POST',
@@ -68,6 +71,10 @@ beforeAll(async () => {
   }
   await db.insert(authUser).values([hirer, ...workers]);
   await db.insert(tag).values({ id: tagId, name: 'Direct join test tag' });
+});
+
+beforeEach(() => {
+  configureQuestWorkChatMembershipWriter(successfulWorkChatWriter);
 });
 
 afterEach(async () => {
@@ -224,7 +231,7 @@ describe('direct NO_CANDIDATE joins', () => {
     expect(response.status).toBe(503);
     expect((await response.json()).error.code).toBe('WORK_CHAT_UNAVAILABLE');
 
-    configureQuestWorkChatMembershipWriter(undefined);
+    configureQuestWorkChatMembershipWriter(successfulWorkChatWriter);
     const retry = await request(questId, workers[0].id, { 'idempotency-key': 'join-command-fails' });
     expect(retry.status).toBe(200);
 
