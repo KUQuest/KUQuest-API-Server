@@ -18,9 +18,9 @@ import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { and, eq, isNull } from 'drizzle-orm';
 
-const studentA = `be114-a-${crypto.randomUUID()}`;
-const studentB = `be114-b-${crypto.randomUUID()}`;
-const studentC = `be114-c-${crypto.randomUUID()}`;
+const studentA = crypto.randomUUID();
+const studentB = crypto.randomUUID();
+const studentC = crypto.randomUUID();
 const crossOwnerPayoutReference = `be114-cross-owner-payout-${crypto.randomUUID()}`;
 const encryption = createPayoutDestinationEncryption({
   activeKeyVersion: 'v1',

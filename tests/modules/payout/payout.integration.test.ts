@@ -84,7 +84,7 @@ class FakePayoutProvider implements OutboundPayoutProvider {
 }
 
 const createStudent = async (prefix: string) => {
-  const id = `${prefix}-${crypto.randomUUID()}`;
+  const id = crypto.randomUUID();
   await db.insert(authUser).values({
     id,
     email: `${id}@ku.th`,

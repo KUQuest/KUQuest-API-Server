@@ -26,7 +26,7 @@ import {
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 
-const studentId = `be109-${crypto.randomUUID()}`;
+const studentId = crypto.randomUUID();
 
 const getWalletAccountId = async (
   userId: string,
