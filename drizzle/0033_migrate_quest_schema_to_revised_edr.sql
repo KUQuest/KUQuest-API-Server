@@ -33,6 +33,7 @@ ALTER TABLE "proof_submission" DROP CONSTRAINT "proof_submission_status_check";-
 ALTER TABLE "quest" DROP CONSTRAINT "quest_tag_check";--> statement-breakpoint
 ALTER TABLE "quest" DROP CONSTRAINT "quest_cancelled_at_check";--> statement-breakpoint
 ALTER TABLE "quest" DROP CONSTRAINT "quest_hidden_at_check";--> statement-breakpoint
+ALTER TABLE "quest" DROP CONSTRAINT "quest_participation_headcount_check";--> statement-breakpoint
 ALTER TABLE "quest_application" DROP CONSTRAINT "quest_application_status_check";--> statement-breakpoint
 ALTER TABLE "quest_assignment" DROP CONSTRAINT "quest_assignment_status_check";--> statement-breakpoint
 ALTER TABLE "quest_edit_request" DROP CONSTRAINT "quest_edit_request_status_check";--> statement-breakpoint
@@ -159,6 +160,7 @@ ALTER TABLE "quest_team" ADD CONSTRAINT "quest_team_id_leader_id_key" UNIQUE("id
 ALTER TABLE "proof_submission" ADD CONSTRAINT "proof_submission_owner_check" CHECK (num_nonnulls("proof_submission"."worker_id", "proof_submission"."team_id") = 1);--> statement-breakpoint
 ALTER TABLE "proof_submission" ADD CONSTRAINT "proof_submission_status_check" CHECK ("proof_submission"."submission_status" IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_REJECTED', 'PROOF_AUTO_APPROVED'));--> statement-breakpoint
 ALTER TABLE "quest" ADD CONSTRAINT "quest_tag_check" CHECK ("quest"."quest_status" = 'QUEST_DRAFT' OR "quest"."tag_id" IS NOT NULL);--> statement-breakpoint
+ALTER TABLE "quest" ADD CONSTRAINT "quest_participation_headcount_check" CHECK ("quest"."participation" = 'GROUP' OR "quest"."headcount" = 1);--> statement-breakpoint
 ALTER TABLE "quest" ADD CONSTRAINT "quest_cancelled_at_check" CHECK (("quest"."cancelled_at" IS NULL) = ("quest"."quest_status" <> 'QUEST_CANCELLED'));--> statement-breakpoint
 ALTER TABLE "quest" ADD CONSTRAINT "quest_hidden_at_check" CHECK (("quest"."hidden_at" IS NULL) = ("quest"."quest_status" <> 'QUEST_HIDDEN'));--> statement-breakpoint
 ALTER TABLE "quest_application" ADD CONSTRAINT "quest_application_status_check" CHECK ("quest_application"."application_status" IN ('APPLICATION_APPLIED', 'APPLICATION_SELECTED', 'APPLICATION_REJECTED', 'APPLICATION_WITHDRAWN'));--> statement-breakpoint
