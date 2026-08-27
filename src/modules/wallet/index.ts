@@ -48,6 +48,7 @@ export {
   ensureInitialMoneyPolicy,
   ensureWallet,
   createSealedLedgerTransaction,
+  createSealedLedgerTransactionInTransaction,
   getEffectiveMoneyPolicy,
   getWallet,
   getWalletActivities,

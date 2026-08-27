@@ -141,6 +141,41 @@
       "when": 1787751093080,
       "tag": "0019_wallet_status_history_immutable",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787754297594,
+      "tag": "0020_right_synch",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787755950131,
+      "tag": "0021_retain_top_up_quotes",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1787759160522,
+      "tag": "0022_misty_gateway",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1787810513956,
+      "tag": "0023_smooth_wendell_rand",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1787812521479,
+      "tag": "0024_aromatic_risque",
+      "breakpoints": true
     }
   ]
 }

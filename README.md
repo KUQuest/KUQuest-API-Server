@@ -208,7 +208,7 @@ email and profile fields.
 ```bash
 bun run db:generate  # generate a SQL migration after schema changes
 bun run db:check     # verify schema sync and inherited migration history
-bun run db:migrate   # apply pending migrations
+bun run db:migrate   # apply migrations and re-encrypt legacy Payout secrets
 bun run db:studio    # open Drizzle Studio
 ```
 
