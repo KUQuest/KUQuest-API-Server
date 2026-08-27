@@ -1,5 +1,7 @@
 import { t } from 'elysia';
 
+export const maxQuestImages = 3;
+
 const questModeSchema = t.Union([
   t.Literal('FIRST_COME_FIRST_SERVED'),
   t.Literal('CANDIDATE'),
@@ -38,6 +40,18 @@ export const questCreateSchema = t.Object(
 export const questParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
 });
+
+export const questImageParamsSchema = t.Object({
+  questId: t.String({ format: 'uuid' }),
+  imageId: t.String({ format: 'uuid' }),
+});
+
+export const questImagesUploadSchema = t.Object(
+  {
+    images: t.Files({ minItems: 1, maxItems: maxQuestImages }),
+  },
+  { additionalProperties: false },
+);
 
 export const questListQuerySchema = t.Object(
   {
@@ -78,8 +92,10 @@ const locationSchema = t.Object({
   longitude: t.Number(),
 });
 
-const imageSchema = t.Object({
+export const questImageSchema = t.Object({
   fileId: t.String({ format: 'uuid' }),
+  position: t.Integer({ minimum: 0 }),
+  url: t.String({ format: 'uri' }),
 });
 
 const questSummarySchema = t.Object({
@@ -129,7 +145,7 @@ export const questDetailSchema = t.Object({
       t.Object({ position: t.Integer({ minimum: 1 }) }),
     ]),
   ),
-  images: t.Array(imageSchema),
+  images: t.Array(questImageSchema),
 });
 
 export const questCreateResponseSchema = t.Object({
@@ -158,6 +174,13 @@ export const questDetailResponseSchema = t.Object({
   data: questDetailSchema,
 });
 
+export const questImagesUploadResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    images: t.Array(questImageSchema),
+  }),
+});
+
 const questPublishReasonSchema = t.Object({
   code: t.String(),
   message: t.String(),
@@ -174,5 +197,6 @@ export const questPublishCheckResponseSchema = t.Object({
 });
 
 export type QuestCreateInput = typeof questCreateSchema.static;
+export type QuestImagesUploadInput = typeof questImagesUploadSchema.static;
 export type QuestListQuery = typeof questListQuerySchema.static;
 export type QuestMineQuery = typeof questMineQuerySchema.static;

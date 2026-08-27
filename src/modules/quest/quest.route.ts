@@ -6,7 +6,9 @@ import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 import { Elysia } from 'elysia';
 
 import {
+  addQuestImagesController,
   createQuestController,
+  deleteQuestImageController,
   getQuestDetailController,
   getQuestPublishCheckController,
   listBoardQuestsController,
@@ -18,6 +20,9 @@ import {
   questCreateResponseSchema,
   questCreateSchema,
   questDetailResponseSchema,
+  questImageParamsSchema,
+  questImagesUploadResponseSchema,
+  questImagesUploadSchema,
   questListQuerySchema,
   questMineQuerySchema,
   questMineResponseSchema,
@@ -75,9 +80,33 @@ export const questRoute = new Elysia({
       security: betterAuthSecurity,
     },
   })
+  .post('/:questId/images', addQuestImagesController, {
+    params: questParamsSchema,
+    body: questImagesUploadSchema,
+    type: 'multipart/form-data',
+    response: responses(questImagesUploadResponseSchema, 400, 401, 404, 409, 413, 415, 502),
+    detail: {
+      tags: ['Quests'],
+      summary: 'Add images to a Quest Draft',
+      description: 'Adds up to 3 total images to the authenticated Hirer’s Draft Quest.',
+      operationId: 'addQuestImages',
+      security: betterAuthSecurity,
+    },
+  })
+  .delete('/:questId/images/:imageId', deleteQuestImageController, {
+    params: questImageParamsSchema,
+    response: responses(apiSuccessSchema, 401, 404, 409),
+    detail: {
+      tags: ['Quests'],
+      summary: 'Delete a Quest Image',
+      description: 'Deletes one image from the authenticated Hirer’s Draft Quest.',
+      operationId: 'deleteQuestImage',
+      security: betterAuthSecurity,
+    },
+  })
   .get('/:questId', getQuestDetailController, {
     params: questParamsSchema,
-    response: responses(questDetailResponseSchema, 400, 401, 404),
+    response: responses(questDetailResponseSchema, 400, 401, 404, 502),
     detail: {
       tags: ['Quests'],
       summary: 'Get Quest detail',

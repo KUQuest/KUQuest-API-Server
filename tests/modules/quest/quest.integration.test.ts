@@ -21,6 +21,33 @@ describe('Quest integration', () => {
     expect((await response.json()).success).toBe(false);
   });
 
+  it('requires Member authentication before accepting Quest Images', async () => {
+    const form = new FormData();
+    form.set('images', new File(['not-an-image'], 'quest.png', { type: 'image/png' }));
+
+    const response = await app.handle(
+      new Request(
+        'http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/images',
+        { method: 'POST', body: form },
+      ),
+    );
+
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('requires Member authentication to delete a Quest Image', async () => {
+    const response = await app.handle(
+      new Request(
+        'http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/images/018f47a7-1c7d-7c98-9a11-690d7e834301',
+        { method: 'DELETE' },
+      ),
+    );
+
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe('UNAUTHORIZED');
+  });
+
   it('rejects unknown create fields before authentication', async () => {
     const response = await app.handle(
       new Request('http://localhost/api/v1/quests', {
@@ -59,6 +86,47 @@ describe('Quest integration', () => {
     expect(document.paths['/api/v1/quests/{questId}/publish']?.post?.security).toEqual([
       { betterAuthSession: [] },
     ]);
+    expect(document.paths['/api/v1/quests/{questId}/images']?.post?.operationId).toBe(
+      'addQuestImages',
+    );
+    expect(document.paths['/api/v1/quests/{questId}/images']?.post?.security).toEqual([
+      { betterAuthSession: [] },
+    ]);
+    expect(
+      document.paths['/api/v1/quests/{questId}/images/{imageId}']?.delete?.operationId,
+    ).toBe('deleteQuestImage');
+    expect(
+      document.paths['/api/v1/quests/{questId}/images/{imageId}']?.delete?.security,
+    ).toEqual([{ betterAuthSession: [] }]);
+  });
+
+  it('documents Quest Image upload as multipart with the images field', async () => {
+    const response = await app.handle(new Request('http://localhost/openapi/json'));
+    const document = (await response.json()) as {
+      paths: Record<string, Record<string, {
+        requestBody?: { content?: Record<string, unknown> };
+      }>>;
+    };
+    const operation = document.paths['/api/v1/quests/{questId}/images']?.post;
+
+    expect(operation?.requestBody?.content?.['multipart/form-data']).toBeDefined();
+  });
+
+  it('rejects more than three Quest Images before authentication runs', async () => {
+    const form = new FormData();
+    for (const name of ['one.png', 'two.png', 'three.png', 'four.png']) {
+      form.append('images', new File(['not-an-image'], name, { type: 'image/png' }));
+    }
+
+    const response = await app.handle(
+      new Request(
+        'http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/images',
+        { method: 'POST', body: form },
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('VALIDATION');
   });
 
   it.each([
