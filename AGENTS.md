@@ -4,7 +4,7 @@ give me a little bit of context, talk in ASD-STE100 Simplified Technical English
 
 ### Issue tracker
 
-Issues live in the KUQuest Linear workspace, using the Backend team (`BE`) by default. GitHub PRs should be linked to their Linear issue. See `docs/agents/issue-tracker.md`.
+Issues live in this GitHub repository's Issues. Use the `gh` CLI by default, and link GitHub PRs to their related issue. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
