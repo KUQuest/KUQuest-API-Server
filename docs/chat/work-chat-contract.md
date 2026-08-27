@@ -6,7 +6,8 @@ single-instance WebSocket delivery protocol.
 
 The contract uses the repository terms in CONTEXT.md: Member, Hirer, Worker,
 Accepted Participant, Work Conversation, Chat Membership, Message, Attachment,
-Read Cursor, and System Message.
+Read Cursor, System Message, Report Case, Reporter Entry, Moderation Decision,
+and Admin Action.
 
 ## Scope and ownership
 
@@ -14,8 +15,8 @@ One Work Conversation exists for one Quest. The first accepted Worker creates
 the Conversation and the Hirer joins it in the same Quest transaction. Later
 accepted Workers join the same Conversation.
 
-Quest owns the Hirer, Worker, Assignment, Quest Status, and accepted
-participation. Quest calls the typed Work Chat membership writer from the same
+Quest owns the Hirer, Worker, Assignment, Quest Status, and Accepted Participant
+membership. Quest calls the typed Work Chat membership writer from the same
 database transaction that changes the Quest. Work Chat does not fetch
 membership over HTTP and does not keep an independently editable roster. See
 ADR 0005, Quest owns Work Chat membership.
@@ -25,9 +26,13 @@ Trust & Safety owns Report Case, Reporter Entry, and Moderation Decision.
 Admin Infra owns the Admin Action audit record required for moderation.
 
 The current Quest domain contract has no transition that reopens a Terminal
-Quest. In this document, rejoin means that a departed Worker is accepted again
-while the Quest is not terminal. Rejoin creates a new Chat Membership window;
-it does not reactivate a Terminal Quest or create a second Conversation.
+Quest. BE-120 and BE-131 must treat a Terminal Quest as final for this MVP;
+neither issue may require or implement Terminal Quest reopening. In this
+document, rejoin means that a departed Worker is accepted again while the Quest
+is not terminal. Rejoin creates a new Chat Membership window; it does not
+reactivate a Terminal Quest or create a second Conversation. If a future
+decision adds reopening, the Quest, Chat, and retention contracts and their
+ADRs must be revised together before implementation.
 
 ## Domain model
 
@@ -35,7 +40,7 @@ it does not reactivate a Terminal Quest or create a second Conversation.
 
 A Conversation has one immutable Quest reference. It contains:
 
-- the Hirer and current Workers as current Chat Memberships;
+- the current Accepted Participants: the Hirer and Active Workers;
 - historical Chat Membership windows for departed Workers;
 - ordered Member-authored Messages and immutable System Messages;
 - archived and read-only state derived from Quest lifecycle.
@@ -77,18 +82,22 @@ locations, and signed URLs are never part of logs or Message persistence.
 | Departed Worker | Messages created no later than leftAt | No | No later events |
 | Reaccepted Worker | Full Conversation history through the new window | Yes, while current | Current committed events |
 | Candidate | No Conversation access | No | No subscription |
-| Terminal Quest participant | Full retained history | No | System and state events only |
+| Terminal Quest current Accepted Participant | Full retained history | No | System and state events only |
 
 A departure closes the Worker's current Chat Membership at the supplied
 leftAt. A reacceptance creates a new window and permits full history again.
+The Terminal Quest current Accepted Participant row applies only to an Accepted
+Participant whose Chat Membership was current when the Quest became terminal.
+A Departed Worker keeps the leftAt visibility limit after the Quest becomes
+terminal.
 Access is evaluated in the database query for every read, Message, Attachment,
-and Report operation.
+and Reporter Entry operation.
 
 Membership and lifecycle transitions create immutable System Messages:
-participant accepted, participant departed, and the Conversation becoming
+Accepted Participant joined, Worker departed, and the Conversation becoming
 read-only because the Quest became COMPLETED or CANCELLED. A rejoin is recorded
-as a new participant-accepted System Message. A Terminal Quest cannot reopen in
-the current MVP contract.
+as a new Accepted Participant joined System Message. A Terminal Quest cannot
+reopen in the current MVP contract.
 
 ## Authorization and privacy
 
@@ -106,7 +115,8 @@ Missing and unauthorized resources are indistinguishable:
 - an inaccessible or missing Conversation returns 404 CONVERSATION_NOT_FOUND;
 - an inaccessible or missing Message returns 404 MESSAGE_NOT_FOUND;
 - an inaccessible or missing Attachment returns 404 ATTACHMENT_NOT_FOUND;
-- an inaccessible or missing Report returns 404 REPORT_NOT_FOUND;
+- an inaccessible or missing Reporter Entry returns 404
+  REPORTER_ENTRY_NOT_FOUND;
 - an inaccessible or missing Report Case returns 404 REPORT_CASE_NOT_FOUND.
 
 These rules apply to REST identifiers, cursors that name a resource, and
@@ -120,7 +130,7 @@ and least-privilege Admin evidence access protect the content instead.
 
 Logs and metrics may contain safe resource identifiers, counts, durations,
 statuses, correlation identifiers, and error categories. They must not contain
-Message text, Report detail, file bytes, signed URLs, Session tokens, or
+Message text, Reporter Entry detail, file bytes, signed URLs, Session tokens, or
 moderation evidence.
 
 ## Common HTTP contract
@@ -147,8 +157,8 @@ All successful and failed Chat responses use the repository envelope:
 The API uses status 200 for successful operations, including an idempotent
 replay. Every route documents its success schema and error status in OpenAPI.
 Dates are ISO 8601 date-time strings. Conversation, Message, Attachment,
-Report, event, and Quest identifiers are opaque server values. Clients must
-not decode or construct them.
+Reporter Entry, Report Case, event, and Quest identifiers are opaque server
+values. Clients must not decode or construct them.
 
 Member routes use authGuard and the Member security scheme. Admin routes use
 the Admin authentication guard and the Admin security scheme. Request bodies,
@@ -160,6 +170,10 @@ anonymous request reaches 401 UNAUTHORIZED.
 The current shared response helper lists 400, 401, 404, 409, 413, 415, and 502.
 The Chat rate-limit routes must add 429 to their response metadata while
 keeping the same response envelope.
+
+Admin Chat routes require an enabled Admin Session. A missing or invalid
+Session returns 401 UNAUTHORIZED. A disabled Admin returns 403
+ADMIN_DISABLED.
 
 ## Response shapes
 
@@ -222,6 +236,122 @@ generated by the server, and a non-null systemType. A deleted Member is
 rendered as Former member and does not expose the deleted identity. Hidden
 content is returned as a fixed placeholder with no hidden text or Attachment
 link.
+
+### Reporter Entry
+
+~~~json
+{
+  "id": "reporter-entry-id",
+  "messageId": "message-id",
+  "reason": "HARASSMENT",
+  "detail": "Optional explanation",
+  "caseStatus": "PENDING",
+  "createdAt": "2026-08-27T10:00:00.000Z",
+  "updatedAt": "2026-08-27T10:00:00.000Z"
+}
+~~~
+
+detail is nullable. caseStatus is the status of the Report Case that contains
+the Reporter Entry. Member responses never include another reporter's
+identity.
+
+### Report Case summary
+
+~~~json
+{
+  "id": "case-id",
+  "messageId": "message-id",
+  "status": "PENDING",
+  "reporterEntryCount": 2,
+  "createdAt": "2026-08-27T10:00:00.000Z",
+  "updatedAt": "2026-08-27T10:00:00.000Z"
+}
+~~~
+
+### Moderation Decision
+
+~~~json
+{
+  "id": "decision-id",
+  "action": "HIDE",
+  "previousStatus": "PENDING",
+  "newStatus": "HIDDEN",
+  "adminId": "admin-id",
+  "createdAt": "2026-08-27T10:00:00.000Z"
+}
+~~~
+
+An Admin Action is an audit record and is not returned as a full object by the
+Member or Admin routes. Evidence and moderation routes create it as described
+below.
+
+### Admin evidence
+
+The `reportedMessage`, `messagesBefore`, and `messagesAfter` values use the
+Message shape. Admin evidence contains the original text, including text that
+Members see as a hidden placeholder. Its Attachment values contain metadata
+only and a `linkAvailable` boolean; the signed link is returned by the separate
+Admin evidence link route. The response is:
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "case": {
+      "id": "case-id",
+      "messageId": "message-id",
+      "status": "PENDING",
+      "reporterEntryCount": 2,
+      "createdAt": "2026-08-27T10:00:00.000Z",
+      "updatedAt": "2026-08-27T10:00:00.000Z"
+    },
+    "reportedMessage": {
+      "id": "message-id",
+      "conversationId": "conversation-id",
+      "sequence": 42,
+      "kind": "USER",
+      "sender": {
+        "id": "member-id",
+        "displayName": "Member name"
+      },
+      "text": "Message text",
+      "attachments": [
+        {
+          "id": "attachment-id",
+          "fileName": "brief.pdf",
+          "mediaType": "application/pdf",
+          "sizeBytes": 12000,
+          "createdAt": "2026-08-27T10:00:00.000Z",
+          "linkAvailable": true
+        }
+      ],
+      "systemType": null,
+      "createdAt": "2026-08-27T10:00:00.000Z"
+    },
+    "messagesBefore": [],
+    "messagesAfter": [],
+    "reporterEntries": [
+      {
+        "id": "reporter-entry-id",
+        "reporter": {
+          "id": "reporter-member-id",
+          "displayName": "Reporter name"
+        },
+        "messageId": "message-id",
+        "reason": "HARASSMENT",
+        "detail": "Optional explanation",
+        "createdAt": "2026-08-27T10:00:00.000Z",
+        "updatedAt": "2026-08-27T10:00:00.000Z"
+      }
+    ]
+  }
+}
+~~~
+
+messagesBefore and messagesAfter contain at most 20 Messages each and are
+ordered by Conversation sequence ascending. An Admin evidence Attachment link
+is available only when the Attachment belongs to one of these Messages and is
+still retained.
 
 ## REST API
 
@@ -352,10 +482,15 @@ The response is:
   "success": true,
   "data": {
     "conversationId": "conversation-id",
-    "messageId": "visible-message-id"
+    "messageId": "stored-furthest-message-id"
   }
 }
 ~~~
+
+The response always returns the stored furthest Read Cursor for this Member
+and Conversation after the operation. If the requested Message is older than
+the stored cursor, the operation is a no-op and messageId is the stored cursor,
+not the older requested Message ID.
 
 Missing, other-Conversation, or invisible Messages return 404
 MESSAGE_NOT_FOUND. The Read Cursor is never exposed as a read receipt to other
@@ -430,7 +565,7 @@ and clients use expiresAt rather than assuming a fixed lifetime.
 Missing, hidden, rejected, quarantined, expired, or unauthorized Attachments
 return 404 ATTACHMENT_NOT_FOUND.
 
-### Submit a Message Report
+### Submit a Reporter Entry
 
 POST /api/v1/chat/reports
 
@@ -449,7 +584,8 @@ JSON body:
 reason is one of HARASSMENT, SPAM, INAPPROPRIATE_CONTENT, DANGER_OR_THREAT,
 or OTHER. detail is optional, non-empty when present, and at most 1,000
 characters. A Member may create one Reporter Entry for one Message. Repeating
-the same request returns the existing entry and does not create another row.
+the same request returns the existing Reporter Entry and does not create
+another row. Unknown fields are rejected.
 
 The response is 200 with:
 
@@ -457,10 +593,12 @@ The response is 200 with:
 {
   "success": true,
   "data": {
-    "report": {
-      "id": "report-id",
+    "reporterEntry": {
+      "id": "reporter-entry-id",
       "messageId": "message-id",
-      "status": "PENDING",
+      "reason": "HARASSMENT",
+      "detail": "Optional explanation",
+      "caseStatus": "PENDING",
       "createdAt": "2026-08-27T10:00:00.000Z",
       "updatedAt": "2026-08-27T10:00:00.000Z"
     }
@@ -468,39 +606,81 @@ The response is 200 with:
 }
 ~~~
 
-An invisible or missing Message returns 404 MESSAGE_NOT_FOUND. Invalid input
-returns 400 VALIDATION. The Report response never contains another reporter's
-identity or the moderation evidence.
+An invisible, expired, or missing Message returns 404 MESSAGE_NOT_FOUND.
+Invalid input returns 400 VALIDATION. A missing or invalid Member Session
+returns 401 UNAUTHORIZED. A rate-limited request returns 429 RATE_LIMITED. The
+Reporter Entry response never contains another reporter's identity or the
+moderation evidence.
 
-### List own Message Reports
+### List own Reporter Entries
 
 GET /api/v1/chat/reports
 
 Requires a Member Session.
 
-Query limit defaults to 20 and is limited to 50. cursor is opaque and follows
-the repository cursor rules. The response contains only the current Member's
-Reporter Entries:
+Query:
+
+- limit: optional integer from 1 to 50; default 20;
+- cursor: optional opaque cursor from the previous response.
+
+The server orders Reporter Entries by createdAt descending, then by Reporter
+Entry identifier descending. The cursor is scoped to this endpoint and the
+current Member. Clients must not decode or construct it. A nextCursor is
+returned only when another page exists. The response contains only the current
+Member's Reporter Entries:
 
 ~~~json
 {
   "success": true,
   "data": {
-    "items": [],
+    "items": [
+      {
+        "id": "reporter-entry-id",
+        "messageId": "message-id",
+        "reason": "HARASSMENT",
+        "detail": "Optional explanation",
+        "caseStatus": "PENDING",
+        "createdAt": "2026-08-27T10:00:00.000Z",
+        "updatedAt": "2026-08-27T10:00:00.000Z"
+      }
+    ],
     "nextCursor": null
   }
 }
 ~~~
 
-Invalid paging returns 400 INVALID_LIMIT or INVALID_CURSOR. No other Member's
-Report is returned.
+An absent or empty collection is successful. An invalid limit returns 400
+INVALID_LIMIT. A malformed, cross-Member, wrong-endpoint, or unusable cursor
+returns 400 INVALID_CURSOR. A missing or invalid Member Session returns 401
+UNAUTHORIZED. A rate-limited request returns 429 RATE_LIMITED. No other
+Member's Reporter Entry is returned.
 
-### Get one own Message Report
+### Get one own Reporter Entry
 
-GET /api/v1/chat/reports/:reportId
+GET /api/v1/chat/reports/:reporterEntryId
 
-Requires a Member Session. A missing or another Member's Report returns 404
-REPORT_NOT_FOUND. The response is the same report shape used by submission.
+Requires a Member Session. A missing or another Member's Reporter Entry
+returns 404 REPORTER_ENTRY_NOT_FOUND. The response is:
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "reporterEntry": {
+      "id": "reporter-entry-id",
+      "messageId": "message-id",
+      "reason": "HARASSMENT",
+      "detail": "Optional explanation",
+      "caseStatus": "PENDING",
+      "createdAt": "2026-08-27T10:00:00.000Z",
+      "updatedAt": "2026-08-27T10:00:00.000Z"
+    }
+  }
+}
+~~~
+
+The response does not include another reporter's identity or moderation
+evidence. A missing or invalid Member Session returns 401 UNAUTHORIZED.
 
 ### List Report Cases as an Admin
 
@@ -514,24 +694,93 @@ Query:
 - limit: optional integer from 1 to 20; default 20;
 - cursor: optional opaque cursor.
 
-The response contains grouped Report Case summaries, Reporter Entry counts,
-the reported Message identifier, status, and timestamps. It does not include
-Conversation history or Message text.
+The status filter is applied before pagination. The server orders Report Cases
+by updatedAt descending, then by Report Case identifier descending. The cursor
+is scoped to this endpoint and the selected status filter. Clients must not
+decode or construct it. A nextCursor is returned only when another page exists.
+The response is:
 
-Missing or disabled Admin authentication returns 401 UNAUTHORIZED or 403
-ADMIN_DISABLED. Invalid paging or status returns 400 VALIDATION.
+~~~json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "case-id",
+        "messageId": "message-id",
+        "status": "PENDING",
+        "reporterEntryCount": 2,
+        "createdAt": "2026-08-27T10:00:00.000Z",
+        "updatedAt": "2026-08-27T10:00:00.000Z"
+      }
+    ],
+    "nextCursor": null
+  }
+}
+~~~
+
+An absent or empty queue is successful. An invalid status returns 400
+INVALID_STATUS. An invalid limit returns 400 INVALID_LIMIT. A malformed,
+wrong-filter, or unusable cursor returns 400 INVALID_CURSOR.
+
+Missing or invalid Admin authentication returns 401 UNAUTHORIZED. A disabled
+Admin returns 403 ADMIN_DISABLED. Unknown query fields return 400 VALIDATION.
+A rate-limited request returns 429 RATE_LIMITED.
 
 ### Read Report Case evidence as an Admin
 
 GET /api/v1/admin/chat-reports/:caseId/evidence
 
-Requires an enabled Admin Session. Opening evidence writes an immutable Admin
-Action in the same operation boundary as the evidence read.
+Requires an enabled Admin Session. This route has no query or request body.
+Opening evidence writes an immutable Admin Action in the same operation
+boundary as the evidence read.
 
-The response contains the reported Message, at most 20 visible Messages before
-and after it, the grouped Reporter Entries needed for moderation, and the
-current case status. It contains no unrelated Conversation data. Missing or
-unauthorized cases return 404 REPORT_CASE_NOT_FOUND.
+The response uses the Admin evidence shape defined above. It contains the
+reported Message, at most 20 visible Messages before and after it, the grouped
+Reporter Entries needed for moderation, and the current Report Case status. It
+contains no unrelated Conversation data. The arrays are bounded and ordered by
+Conversation sequence ascending. This route does not paginate and does not
+accept or return a cursor.
+
+A missing or unauthorized Report Case returns 404 REPORT_CASE_NOT_FOUND. A
+case whose retained evidence is no longer available returns 409
+EVIDENCE_NOT_AVAILABLE. Missing or invalid Admin authentication returns 401
+UNAUTHORIZED. A disabled Admin returns 403 ADMIN_DISABLED. A rate-limited
+request returns 429 RATE_LIMITED.
+
+### Get an Admin evidence Attachment link
+
+GET /api/v1/admin/chat-reports/:caseId/evidence/attachments/:attachmentId/link
+
+Requires an enabled Admin Session. This route has no query or request body.
+The server scopes the Attachment lookup to the Report Case and to the reported
+Message or one of the bounded context Messages returned by the evidence route.
+It writes an immutable Admin Action in the same operation boundary as the link
+creation.
+
+The response is:
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "attachment": {
+      "id": "attachment-id",
+      "url": "short-lived-signed-url",
+      "expiresAt": "2026-08-27T10:05:00.000Z"
+    }
+  }
+}
+~~~
+
+The link is available only for a clean, retained Attachment. It is short-lived
+and never persisted. A missing or unauthorized Report Case returns 404
+REPORT_CASE_NOT_FOUND. An Attachment that is not part of the case evidence,
+or is missing, expired, rejected, quarantined, or deleted, returns 404
+ATTACHMENT_NOT_FOUND. A case whose evidence is no longer available returns 409
+EVIDENCE_NOT_AVAILABLE. Missing or invalid Admin authentication returns 401
+UNAUTHORIZED. A disabled Admin returns 403 ADMIN_DISABLED. A rate-limited
+request returns 429 RATE_LIMITED.
 
 ### Moderate a Report Case as an Admin
 
@@ -539,15 +788,44 @@ POST /api/v1/admin/chat-reports/:caseId/dismiss
 POST /api/v1/admin/chat-reports/:caseId/hide
 POST /api/v1/admin/chat-reports/:caseId/restore
 
-These routes have no request body. Each valid operation writes the Moderation
-Decision and its Admin Action atomically. The response returns the updated case
-summary.
+These routes have no request body or cursor. Unknown fields or a non-empty body
+return 400 VALIDATION. Each valid operation writes the Moderation Decision and
+its Admin Action atomically. The response is:
 
-Allowed transitions are PENDING to DISMISSED, PENDING to HIDDEN, and HIDDEN to
-RESTORED. An invalid transition returns 409 INVALID_REPORT_STATE. A missing
-case returns 404 REPORT_CASE_NOT_FOUND. Hiding replaces the Message content
-with a fixed placeholder for Members and blocks Member Attachment links;
-authorized Admin evidence remains available.
+~~~json
+{
+  "success": true,
+  "data": {
+    "case": {
+      "id": "case-id",
+      "messageId": "message-id",
+      "status": "HIDDEN",
+      "reporterEntryCount": 2,
+      "createdAt": "2026-08-27T10:00:00.000Z",
+      "updatedAt": "2026-08-27T10:00:00.000Z"
+    },
+    "decision": {
+      "id": "decision-id",
+      "action": "HIDE",
+      "previousStatus": "PENDING",
+      "newStatus": "HIDDEN",
+      "adminId": "admin-id",
+      "createdAt": "2026-08-27T10:00:00.000Z"
+    }
+  }
+}
+~~~
+
+The `/dismiss` route allows only PENDING to DISMISSED. The `/hide` route allows
+only PENDING to HIDDEN. The `/restore` route allows only HIDDEN to RESTORED.
+An invalid or repeated transition returns 409 INVALID_REPORT_STATE and creates
+no decision. A missing or unauthorized Report Case returns 404
+REPORT_CASE_NOT_FOUND. Hiding replaces the Message content with a fixed
+placeholder for Members and blocks Member Attachment links; authorized Admin
+evidence and the Admin evidence Attachment link remain available.
+
+Missing or invalid Admin authentication returns 401 UNAUTHORIZED. A disabled
+Admin returns 403 ADMIN_DISABLED. A rate-limited request returns 429 RATE_LIMITED.
 
 ## WebSocket protocol
 
@@ -588,6 +866,24 @@ API. Clients send only these JSON control messages:
 }
 ~~~
 
+A control message is a JSON object with no unknown fields. `subscribe` and
+`unsubscribe` require a non-empty requestId of at most 128 characters and an
+opaque conversationId. `ack` requires an opaque eventId. A control message
+with invalid JSON, an unknown type, a missing field, an invalid identifier, or
+an unknown field returns this error and does not change the connection:
+
+~~~json
+{
+  "type": "error",
+  "requestId": null,
+  "code": "INVALID_CONTROL_MESSAGE",
+  "message": "Invalid WebSocket control message"
+}
+~~~
+
+The server echoes a valid requestId in the error. It returns null when the
+requestId is missing or invalid. The connection remains open after this error.
+
 Message creation and Read Cursor advancement use their REST endpoints. This
 keeps PostgreSQL commit as the acceptance boundary and avoids two write
 contracts for the same domain action.
@@ -602,6 +898,44 @@ A successful subscription returns:
 }
 ~~~
 
+A successful unsubscription returns:
+
+~~~json
+{
+  "type": "unsubscribed",
+  "requestId": "request-id",
+  "conversationId": "conversation-id"
+}
+~~~
+
+A duplicate `subscribe` or `unsubscribe` is idempotent. It returns the same
+successful result and does not create a second subscription or fail when the
+requested subscription is already absent. A requestId is scoped to one
+connection. Repeating the same control message with that requestId returns the
+same result. Reusing the requestId with a different control message returns:
+
+~~~json
+{
+  "type": "error",
+  "requestId": "request-id",
+  "code": "REQUEST_ID_REUSED",
+  "message": "Request ID was already used"
+}
+~~~
+
+A valid `ack` returns:
+
+~~~json
+{
+  "type": "acknowledged",
+  "eventId": "event-id"
+}
+~~~
+
+An acknowledgement for an unknown or already acknowledged event is a
+successful no-op with the same response. It does not replay an event or move a
+Read Cursor.
+
 An unauthorized or missing Conversation returns the same control error:
 
 ~~~json
@@ -615,7 +949,8 @@ An unauthorized or missing Conversation returns the same control error:
 
 The error does not reveal whether the Conversation exists. A departed Worker
 cannot subscribe to live delivery and receives no later events. The server
-removes a subscription when the Worker's Chat Membership ends.
+removes a subscription when the Worker's Chat Membership ends. It sends a
+`subscription.revoked` event before it removes that subscription.
 
 ### Events
 
@@ -640,8 +975,25 @@ The event types are:
 - conversation.state.changed: the Conversation became archived or read-only;
 - read.cursor.changed: the current Member's Read Cursor changed on another
   device; no other Member receives this event;
-- subscription.revoked: a generic control event before a departed Member's
-  subscription is removed.
+- subscription.revoked: a control event before a Worker's subscription is
+  removed because the Worker's Chat Membership ended or the Conversation
+  became read-only.
+
+The `data` payload for each event type is:
+
+- `message.created`: `{ "message": <Message> }`;
+- `conversation.state.changed`:
+  `{ "previousQuestStatus": "IN_PROGRESS", "questStatus": "COMPLETED", "archived": true, "readOnly": true }`;
+- `read.cursor.changed`:
+  `{ "messageId": "visible-message-id", "sequence": 42 }`;
+- `subscription.revoked`:
+  `{ "reason": "MEMBERSHIP_ENDED" }` or
+  `{ "reason": "CONVERSATION_READ_ONLY" }`.
+
+For `conversation.state.changed`, questStatus is COMPLETED or CANCELLED and
+archived and readOnly are both true. For `read.cursor.changed`, the event is
+sent only to the same Member's other subscribed connections. No non-message
+event contains Message text, Attachment bytes, or a signed URL.
 
 An eventId is stable for one event. The same event may be delivered more than
 once. Clients deduplicate by eventId and Message identifier, then acknowledge
@@ -704,8 +1056,8 @@ expired Messages and object-storage files. It does not remove active or held
 evidence.
 
 Deleting a Member anonymizes the sender as Former member in Member-facing
-history. The minimum identity linkage remains only while an open Report needs
-it. The retention process must be confirmed against university policy before
+history. The minimum identity linkage remains only while an open Report Case
+needs it. The retention process must be confirmed against university policy before
 production activation.
 
 ## Explicitly out of scope

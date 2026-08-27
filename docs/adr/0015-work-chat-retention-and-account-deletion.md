@@ -8,6 +8,11 @@ minimum identity linkage needed by an open case. This keeps the coordination
 history and moderation evidence auditable without retaining personal identity
 longer than the policy allows.
 
+For the MVP, a Terminal Quest is final and cannot reopen. BE-120 and BE-131
+must not require or implement Terminal Quest reopening. If a future product
+decision adds reopening, the Quest, Chat, and retention contracts and their
+ADRs must be revised together before implementation.
+
 Production activation requires confirmation of the one-year period against
 university policy.
 
