@@ -1,4 +1,7 @@
-import { buildQuestPublishCheck } from '@/modules/quest/quest.publish.policy';
+import {
+  buildQuestPublishCheck,
+  calculateQuestEscrowRequirementSatang,
+} from '@/modules/quest/quest.publish.policy';
 
 import { describe, expect, it } from 'bun:test';
 
@@ -10,6 +13,7 @@ const baseSnapshot = {
   hasLocations: true,
   rewardSatang: 50_000,
   headcount: 2,
+  platformFeeBps: 200,
   now: new Date('2026-08-26T10:00:00.000Z'),
 };
 
@@ -18,9 +22,21 @@ describe('Quest publish policy', () => {
     expect(buildQuestPublishCheck(baseSnapshot)).toEqual({
       blockingReasons: [],
       warnings: [],
-      escrowRequirement: 1000,
+      escrowRequirement: 1020,
       canPublish: true,
     });
+  });
+
+  it('uses ceiling fee rounding for every Worker Reward', () => {
+    const snapshot = {
+      ...baseSnapshot,
+      rewardSatang: 50_100,
+      headcount: 3,
+      platformFeeBps: 333,
+    };
+
+    expect(Number(calculateQuestEscrowRequirementSatang(snapshot))).toBe(155_307);
+    expect(buildQuestPublishCheck(snapshot).escrowRequirement).toBe(1_553);
   });
 
   it('returns blocking reasons in the approved order', () => {

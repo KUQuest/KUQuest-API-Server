@@ -48,6 +48,9 @@ export const enabledAdminGuard = (app: Elysia) =>
       adminSession: adminSession as NonNullable<typeof adminSession>,
     }))
     .onBeforeHandle({ as: 'scoped' }, ({ adminSession, set }) => {
+      // The 401 hook above may already have responded, but Elysia still runs
+      // this sibling hook — skip when the session is absent.
+      if (!adminSession) return;
       if (adminSession.user.disabledAt) {
         set.status = 403;
         return apiError('ADMIN_DISABLED', 'Admin account is disabled');

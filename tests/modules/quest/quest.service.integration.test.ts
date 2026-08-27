@@ -31,8 +31,8 @@ const baseInput: QuestCreateInput = {
   title: 'A Quest for testing',
   description: 'A description',
   condition: 'A completed result',
-  mode: 'FIRST_COME_FIRST_SERVED' as const,
-  participation: 'SINGLE' as const,
+  mode: 'NO_CANDIDATE' as const,
+  participation: 'SOLO' as const,
   reward: 500,
   headcount: 1,
   startTime: '2026-08-26T10:00:00.000Z',
@@ -54,7 +54,7 @@ const createFixture = async (
 const openQuest = async (questId: string) => {
   await db
     .update(quest)
-    .set({ questStatus: 'OPEN', tagId })
+    .set({ questStatus: 'QUEST_OPEN', tagId })
     .where(eq(quest.id, questId));
 };
 
@@ -102,9 +102,6 @@ describe('Quest persistence', () => {
       locations: [
         {
           label: 'First place',
-          address: 'Kasetsart University',
-          latitude: 13.8478,
-          longitude: 100.5714,
         },
       ],
     });
@@ -114,13 +111,11 @@ describe('Quest persistence', () => {
     expect(detail).toMatchObject({
       id: questId,
       reward: 250,
-      questStatus: 'DRAFT',
+      questStatus: 'QUEST_DRAFT',
       estimatedDurationMinutes: 120,
       locations: [
         {
           label: 'First place',
-          address: 'Kasetsart University',
-          position: 1,
         },
       ],
     });
@@ -133,7 +128,7 @@ describe('Quest persistence', () => {
 
     await openQuest(questId);
 
-    expect((await getQuestDetail(otherMemberId, questId))?.questStatus).toBe('OPEN');
+    expect((await getQuestDetail(otherMemberId, questId))?.questStatus).toBe('QUEST_OPEN');
   });
 
   it('lists the Hirer’s Quests across Quest Status values', async () => {
@@ -144,8 +139,8 @@ describe('Quest persistence', () => {
     const result = await listOwnQuests(hirerId, { limit: 20 });
 
     expect(result.items.map((item) => item.id)).toEqual(expect.arrayContaining([draftId, openId]));
-    expect(result.items.find((item) => item.id === draftId)?.questStatus).toBe('DRAFT');
-    expect(result.items.find((item) => item.id === openId)?.questStatus).toBe('OPEN');
+    expect(result.items.find((item) => item.id === draftId)?.questStatus).toBe('QUEST_DRAFT');
+    expect(result.items.find((item) => item.id === openId)?.questStatus).toBe('QUEST_OPEN');
   });
 
   it('returns only OPEN Quests and supports Thai substring search', async () => {
@@ -205,9 +200,6 @@ describe('Quest persistence', () => {
       locations: [
         {
           label: 'Old place',
-          address: 'Old address',
-          latitude: 13.8,
-          longitude: 100.5,
         },
       ],
     });
@@ -219,9 +211,6 @@ describe('Quest persistence', () => {
       locations: [
         {
           label: 'New place',
-          address: 'New address',
-          latitude: 13.9,
-          longitude: 100.6,
         },
       ],
     });
@@ -235,10 +224,6 @@ describe('Quest persistence', () => {
       locations: [
         {
           label: 'New place',
-          address: 'New address',
-          latitude: 13.9,
-          longitude: 100.6,
-          position: 1,
         },
       ],
     });
@@ -260,19 +245,11 @@ describe('Quest persistence', () => {
         oldValue: [
           {
             label: 'Old place',
-            address: 'Old address',
-            latitude: 13.8,
-            longitude: 100.5,
-            position: 1,
           },
         ],
         newValue: [
           {
             label: 'New place',
-            address: 'New address',
-            latitude: 13.9,
-            longitude: 100.6,
-            position: 1,
           },
         ],
       },
@@ -310,7 +287,7 @@ describe('Quest persistence', () => {
     await openQuest(questId);
     await db.insert(questApplication).values({
       questId,
-      hunterId: otherMemberId,
+      workerId: otherMemberId,
     });
 
     expect(await editQuest(hirerId, questId, { title: 'Candidate Quest edit' })).toEqual({
@@ -323,8 +300,8 @@ describe('Quest persistence', () => {
     await openQuest(questId);
     await db.insert(questApplication).values({
       questId,
-      hunterId: otherMemberId,
-      applicationStatus: 'SELECTED',
+      workerId: otherMemberId,
+      applicationStatus: 'APPLICATION_SELECTED',
     });
 
     expect(await editQuest(hirerId, questId, { title: 'Selected Worker edit' })).toEqual({
@@ -337,7 +314,7 @@ describe('Quest persistence', () => {
     await openQuest(questId);
     await db.insert(questAssignment).values({
       questId,
-      hunterId: otherMemberId,
+      workerId: otherMemberId,
     });
 
     expect(await editQuest(hirerId, questId, { title: 'Active Worker edit' })).toEqual({
@@ -352,7 +329,7 @@ describe('Quest persistence', () => {
       questId,
       leaderId: otherMemberId,
       name: 'Selected Team',
-      teamStatus: 'SELECTED',
+      teamStatus: 'TEAM_SELECTED',
     });
 
     expect(await editQuest(hirerId, questId, { title: 'Selected Team edit' })).toEqual({
@@ -382,14 +359,11 @@ describe('Quest persistence', () => {
     ).toHaveLength(0);
   });
 
-  it('does not create location history for values rounded to storage precision', async () => {
+  it('does not create location history for unchanged label values', async () => {
     const questId = await createFixture({
       locations: [
         {
           label: 'Stored place',
-          address: 'Stored address',
-          latitude: 13.8,
-          longitude: 100.5,
         },
       ],
     });
@@ -400,9 +374,6 @@ describe('Quest persistence', () => {
         locations: [
           {
             label: 'Stored place',
-            address: 'Stored address',
-            latitude: 13.8000001,
-            longitude: 100.5000001,
           },
         ],
       }),
@@ -420,9 +391,6 @@ describe('Quest persistence', () => {
       locations: [
         {
           label: 'Place to clear',
-          address: 'Address to clear',
-          latitude: 13.8,
-          longitude: 100.5,
         },
       ],
     });
@@ -440,10 +408,6 @@ describe('Quest persistence', () => {
       oldValue: [
         {
           label: 'Place to clear',
-          address: 'Address to clear',
-          latitude: 13.8,
-          longitude: 100.5,
-          position: 1,
         },
       ],
       newValue: [],

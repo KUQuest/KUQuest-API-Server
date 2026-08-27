@@ -16,6 +16,7 @@ import { and, desc, eq, gt, inArray, isNull, lte, or } from 'drizzle-orm';
 import {
   MAX_WALLET_CAPACITY_SATANG,
   MoneyDomainError,
+  calculatePlatformFeeSatang,
   type Satang,
   positiveSatang,
   satang,
@@ -96,6 +97,9 @@ const policyRevisionInTransaction = async (transaction: WalletTransaction, polic
   }
   return policy;
 };
+
+export const getEffectiveFundingReservationPolicy = async (transaction: WalletTransaction) =>
+  effectivePolicyInTransaction(transaction);
 
 const walletAccountIds = async (transaction: WalletTransaction, walletId: string) => {
   const accounts = await transaction
@@ -599,8 +603,9 @@ export const settleFundingReservation = async (
     throw new MoneyDomainError('FUNDING_RESERVATION_NOT_FOUND', 'Funding Reservation does not exist.');
   }
   const policy = await policyRevisionInTransaction(transaction, reservationSnapshot.policyRevisionId);
-  const snapshottedPlatformFeeSatang = Math.ceil(
-    recipientAmountSatang * policy.platformFeeBps / 10_000,
+  const snapshottedPlatformFeeSatang = calculatePlatformFeeSatang(
+    recipientAmountSatang,
+    policy.platformFeeBps,
   );
   if (platformFeeSatang > 0 && platformFeeSatang !== snapshottedPlatformFeeSatang) {
     throw new MoneyDomainError(

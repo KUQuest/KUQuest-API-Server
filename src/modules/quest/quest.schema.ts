@@ -1,20 +1,40 @@
 import { t } from 'elysia';
 
+import {
+  questMode,
+  questParticipation,
+  questStatuses,
+} from './quest.contract';
+
 export const maxQuestImages = 3;
 
 const questModeSchema = t.Union([
-  t.Literal('FIRST_COME_FIRST_SERVED'),
-  t.Literal('CANDIDATE'),
+  t.Literal(questMode.noCandidate),
+  t.Literal(questMode.candidate),
 ]);
 
-const questParticipationSchema = t.Union([t.Literal('SINGLE'), t.Literal('GROUP')]);
+const questParticipationSchema = t.Union([
+  t.Literal(questParticipation.solo),
+  t.Literal(questParticipation.group),
+]);
+const questStatusSchema = t.Union([
+  t.Literal(questStatuses[0]),
+  t.Literal(questStatuses[1]),
+  t.Literal(questStatuses[2]),
+  t.Literal(questStatuses[3]),
+  t.Literal(questStatuses[4]),
+  t.Literal(questStatuses[5]),
+  t.Literal(questStatuses[6]),
+  t.Literal(questStatuses[7]),
+  t.Literal(questStatuses[8]),
+  t.Literal(questStatuses[9]),
+  t.Literal(questStatuses[10]),
+  t.Literal(questStatuses[11]),
+]);
 
 const locationInputSchema = t.Object(
   {
     label: t.Optional(t.Nullable(t.String({ maxLength: 100, pattern: '\\S' }))),
-    address: t.Optional(t.Nullable(t.String({ maxLength: 500, pattern: '\\S' }))),
-    latitude: t.Number({ minimum: -90, maximum: 90 }),
-    longitude: t.Number({ minimum: -180, maximum: 180 }),
   },
   { additionalProperties: false },
 );
@@ -45,6 +65,23 @@ export const questCreateSchema = t.Object(
   { additionalProperties: false },
 );
 
+const questImageIdsSchema = t.Array(t.String({ format: 'uuid' }), {
+  maxItems: maxQuestImages,
+});
+
+export const questDirectEditSchema = t.Object(
+  {
+    title: t.Optional(titleSchema),
+    description: t.Optional(descriptionSchema),
+    condition: t.Optional(conditionSchema),
+    startTime: t.Optional(startTimeSchema),
+    dueAt: t.Optional(dueAtSchema),
+    proofRequired: t.Optional(t.Boolean()),
+    locations: t.Optional(locationsSchema),
+  },
+  { additionalProperties: false },
+);
+
 export const questEditSchema = t.Object(
   {
     title: t.Optional(titleSchema),
@@ -52,9 +89,14 @@ export const questEditSchema = t.Object(
     condition: t.Optional(conditionSchema),
     startTime: t.Optional(startTimeSchema),
     dueAt: t.Optional(dueAtSchema),
-    tagId: t.Optional(tagIdSchema),
     proofRequired: t.Optional(t.Boolean()),
     locations: t.Optional(locationsSchema),
+    images: t.Optional(questImageIdsSchema),
+    mode: t.Optional(questModeSchema),
+    participation: t.Optional(questParticipationSchema),
+    reward: t.Optional(t.Integer({ minimum: 1, maximum: 700000 })),
+    headcount: t.Optional(t.Integer({ minimum: 1, maximum: 20 })),
+    tagId: t.Optional(tagIdSchema),
   },
   { additionalProperties: false },
 );
@@ -66,6 +108,10 @@ export const questParamsSchema = t.Object({
 export const questImageParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
   imageId: t.String({ format: 'uuid' }),
+});
+
+export const questEditRequestParamsSchema = t.Object({
+  requestId: t.String({ format: 'uuid' }),
 });
 
 export const questImagesUploadSchema = t.Object(
@@ -86,8 +132,6 @@ export const questListQuerySchema = t.Object(
     maxReward: t.Optional(t.Integer({ minimum: 1, maximum: 700000 })),
     startFrom: t.Optional(t.String({ format: 'date-time' })),
     startTo: t.Optional(t.String({ format: 'date-time' })),
-    latitude: t.Optional(t.Number({ minimum: -90, maximum: 90 })),
-    longitude: t.Optional(t.Number({ minimum: -180, maximum: 180 })),
     limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
     cursor: t.Optional(t.String()),
   },
@@ -109,9 +153,6 @@ const tagSchema = t.Object({
 
 const locationSchema = t.Object({
   label: t.Nullable(t.String()),
-  address: t.Nullable(t.String()),
-  latitude: t.Number(),
-  longitude: t.Number(),
 });
 
 export const questImageSchema = t.Object({
@@ -132,7 +173,6 @@ const questSummarySchema = t.Object({
   estimatedDurationMinutes: t.Nullable(t.Integer({ minimum: 1 })),
   hirerName: t.String(),
   location: t.Nullable(locationSchema),
-  distanceKm: t.Optional(t.Nullable(t.Number({ minimum: 0 }))),
 });
 
 export const questCardSchema = t.Composite([
@@ -142,7 +182,7 @@ export const questCardSchema = t.Composite([
 
 export const questListItemSchema = t.Composite([
   questSummarySchema,
-  t.Object({ questStatus: t.String() }),
+  t.Object({ questStatus: questStatusSchema }),
 ]);
 
 export const questDetailSchema = t.Object({
@@ -154,19 +194,14 @@ export const questDetailSchema = t.Object({
   tag: t.Nullable(tagSchema),
   mode: questModeSchema,
   participation: questParticipationSchema,
-  questStatus: t.String(),
+  questStatus: questStatusSchema,
   headcount: t.Integer({ minimum: 1 }),
   startTime: t.String({ format: 'date-time' }),
   dueAt: t.Nullable(t.String({ format: 'date-time' })),
   estimatedDurationMinutes: t.Nullable(t.Integer({ minimum: 1 })),
   proofRequired: t.Boolean(),
   hirerName: t.String(),
-  locations: t.Array(
-    t.Composite([
-      locationSchema,
-      t.Object({ position: t.Integer({ minimum: 1 }) }),
-    ]),
-  ),
+  locations: t.Array(locationSchema),
   images: t.Array(questImageSchema),
 });
 
@@ -196,6 +231,51 @@ export const questDetailResponseSchema = t.Object({
   data: questDetailSchema,
 });
 
+export const questEditRequestSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  questId: t.String({ format: 'uuid' }),
+  requestedByUserId: t.String({ format: 'uuid' }),
+  status: t.String(),
+  previousQuestStatus: questStatusSchema,
+  createdAt: t.String({ format: 'date-time' }),
+  expiresAt: t.String({ format: 'date-time' }),
+  proposedChanges: t.Record(t.String(), t.Unknown()),
+  responses: t.Array(
+    t.Object({
+      userId: t.String({ format: 'uuid' }),
+      decision: t.Nullable(t.String()),
+      respondedAt: t.Nullable(t.String({ format: 'date-time' })),
+    }),
+  ),
+});
+
+export const questEditRequestResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: questEditRequestSchema,
+});
+
+export const questEditRequestCreateResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    status: t.String(),
+    requestId: t.String({ format: 'uuid' }),
+    expiresAt: t.String({ format: 'date-time' }),
+  }),
+});
+
+export const questEditResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    status: t.String(),
+    requestId: t.String({ format: 'uuid' }),
+  }),
+});
+
+export const questEditDecisionSchema = t.Object(
+  { decision: t.Union([t.Literal('EDIT_RESPONSE_APPROVED'), t.Literal('EDIT_RESPONSE_REJECTED')]) },
+  { additionalProperties: false },
+);
+
 export const questImagesUploadResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
@@ -219,6 +299,7 @@ export const questPublishCheckResponseSchema = t.Object({
 });
 
 export type QuestCreateInput = typeof questCreateSchema.static;
+export type QuestDirectEditInput = typeof questDirectEditSchema.static;
 export type QuestEditInput = typeof questEditSchema.static;
 export type QuestImagesUploadInput = typeof questImagesUploadSchema.static;
 export type QuestListQuery = typeof questListQuerySchema.static;

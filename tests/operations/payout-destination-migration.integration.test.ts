@@ -42,7 +42,7 @@ test('migration backfill failure rolls back encrypted writes and legacy cleanup'
   }
   const addedLegacyColumns = existingLegacyColumns.length === 0;
 
-  const studentId = `be114-migration-atomicity-${crypto.randomUUID()}`;
+  const studentId = crypto.randomUUID();
   await db.insert(authUser).values({
     id: studentId,
     email: `${studentId}@ku.th`,

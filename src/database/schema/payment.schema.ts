@@ -49,7 +49,7 @@ export const paymentTopUpQuote = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     feeRoundingMode: text('fee_rounding_mode').default('UP').notNull(),
-    userId: text('user_id').notNull().references(() => authUser.id),
+    userId: uuid('user_id').notNull().references(() => authUser.id),
     policyRevisionId: uuid('policy_revision_id')
       .notNull()
       .references(() => paymentMoneyPolicyRevision.id),
@@ -80,7 +80,7 @@ export const paymentTopUp = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     internalReference: text('internal_reference').notNull().unique(),
-    userId: text('user_id').notNull().references(() => authUser.id),
+    userId: uuid('user_id').notNull().references(() => authUser.id),
     quoteId: uuid('quote_id').notNull().unique().references(() => paymentTopUpQuote.id),
     provider: text('provider').notNull(),
     providerReference: text('provider_reference').unique(),
@@ -131,8 +131,8 @@ export const paymentTopUpStatusHistory = pgTable(
     fromStatus: text('from_status').$type<TopUpStatus>(),
     toStatus: text('to_status').$type<TopUpStatus>().notNull(),
     providerStatus: text('provider_status'),
-    actorUserId: text('actor_user_id').references(() => authUser.id),
-    actorAdminId: text('actor_admin_id').references(() => authAdmin.id),
+    actorUserId: uuid('actor_user_id').references(() => authUser.id),
+    actorAdminId: uuid('actor_admin_id').references(() => authAdmin.id),
     source: text('source').notNull(),
     reason: text('reason'),
     occurredAt: time('occurred_at').defaultNow().notNull(),
@@ -262,7 +262,7 @@ export const paymentPayoutAccounts = pgTable(
   'payment_payout_accounts',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: text('user_id').notNull().references(() => authUser.id),
+    userId: uuid('user_id').notNull().references(() => authUser.id),
     recipientType: text('recipient_type').notNull(),
     givenName: text('given_name').notNull(),
     surname: text('surname').notNull(),
@@ -310,7 +310,7 @@ export const paymentPayoutQuotes = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     feeRoundingMode: text('fee_rounding_mode').default('UP').notNull(),
-    userId: text('user_id').notNull().references(() => authUser.id),
+    userId: uuid('user_id').notNull().references(() => authUser.id),
     payoutAccountId: uuid('payout_account_id')
       .notNull()
       .references(() => paymentPayoutAccounts.id),
@@ -346,7 +346,7 @@ export const paymentPayouts = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     internalReference: text('internal_reference').notNull().unique(),
-    userId: text('user_id').notNull().references(() => authUser.id),
+    userId: uuid('user_id').notNull().references(() => authUser.id),
     quoteId: uuid('quote_id').notNull().unique().references(() => paymentPayoutQuotes.id),
     payoutAccountId: uuid('payout_account_id')
       .notNull()
@@ -433,8 +433,8 @@ export const paymentPayoutStatusHistory = pgTable(
     fromStatus: text('from_status').$type<PayoutStatus>(),
     toStatus: text('to_status').$type<PayoutStatus>().notNull(),
     providerStatus: text('provider_status'),
-    actorUserId: text('actor_user_id').references(() => authUser.id),
-    actorAdminId: text('actor_admin_id').references(() => authAdmin.id),
+    actorUserId: uuid('actor_user_id').references(() => authUser.id),
+    actorAdminId: uuid('actor_admin_id').references(() => authAdmin.id),
     source: text('source').notNull(),
     reason: text('reason'),
     occurredAt: time('occurred_at').defaultNow().notNull(),
@@ -461,7 +461,7 @@ export const paymentPayoutCancellationAttempts = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     payoutId: uuid('payout_id').notNull().references(() => paymentPayouts.id),
-    adminId: text('admin_id').notNull().references(() => authAdmin.id),
+    adminId: uuid('admin_id').notNull().references(() => authAdmin.id),
     reason: text('reason').notNull(),
     attemptStatus: text('attempt_status').notNull(),
     providerResponse: jsonb('provider_response'),

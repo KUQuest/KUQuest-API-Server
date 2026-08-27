@@ -1,3 +1,10 @@
+import {
+  addSatang,
+  calculatePlatformFeeSatang,
+  satang,
+  type Satang,
+} from '@/modules/wallet';
+
 export type QuestPublishReason = {
   code: string;
   message: string;
@@ -11,6 +18,7 @@ export type QuestPublishSnapshot = {
   hasLocations: boolean;
   rewardSatang: number;
   headcount: number;
+  platformFeeBps: number;
   now: Date;
 };
 
@@ -25,6 +33,23 @@ const estimatedDurationMinutes = (startTime: Date, dueAt: Date | null) => {
   if (!dueAt || dueAt <= startTime) return null;
 
   return Math.max(1, Math.round((dueAt.getTime() - startTime.getTime()) / 60_000));
+};
+
+export const calculateQuestEscrowRequirementSatang = (
+  snapshot: QuestPublishSnapshot,
+): Satang => {
+  const rewardSatang = satang(snapshot.rewardSatang);
+  const rewardTotalSatang = satang(snapshot.rewardSatang * snapshot.headcount);
+  const platformFeePerWorkerSatang = calculatePlatformFeeSatang(
+    rewardSatang,
+    snapshot.platformFeeBps,
+  );
+  let platformFeeSatang = satang(0);
+  for (let slot = 0; slot < snapshot.headcount; slot += 1) {
+    platformFeeSatang = addSatang(platformFeeSatang, platformFeePerWorkerSatang);
+  }
+
+  return addSatang(rewardTotalSatang, platformFeeSatang);
 };
 
 export const buildQuestPublishCheck = (
@@ -71,7 +96,7 @@ export const buildQuestPublishCheck = (
   return {
     blockingReasons,
     warnings,
-    escrowRequirement: Math.trunc(snapshot.rewardSatang / 100) * snapshot.headcount,
+    escrowRequirement: Math.trunc(calculateQuestEscrowRequirementSatang(snapshot) / 100),
     canPublish: blockingReasons.length === 0,
   };
 };

@@ -1,5 +1,6 @@
 export {
   addSatang,
+  calculatePlatformFeeSatang,
   MoneyDomainError,
   positiveSatang,
   satang,
@@ -13,6 +14,7 @@ export type {
   SignedSatang,
 } from './wallet.money';
 export {
+  getEffectiveFundingReservationPolicy,
   increaseFundingReservation,
   releaseFundingReservation,
   reserveSpending,

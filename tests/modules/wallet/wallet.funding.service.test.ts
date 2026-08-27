@@ -28,8 +28,8 @@ import {
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 
-const ownerUserId = `be111-owner-${crypto.randomUUID()}`;
-const recipientUserId = `be111-recipient-${crypto.randomUUID()}`;
+const ownerUserId = crypto.randomUUID();
+const recipientUserId = crypto.randomUUID();
 const amount = (value: number) => positiveSatang(value);
 const fee = (value: number) => satang(value);
 
@@ -66,7 +66,7 @@ const accountId = async (userId: string, type: 'SPENDING' | 'EARNINGS' | 'FUNDIN
 };
 
 const createFundedStudent = async (prefix: string, amountSatang = 10_000) => {
-  const userId = `${prefix}-${crypto.randomUUID()}`;
+  const userId = crypto.randomUUID();
   await db.insert(authUser).values({
     id: userId,
     email: `${userId}@ku.th`,

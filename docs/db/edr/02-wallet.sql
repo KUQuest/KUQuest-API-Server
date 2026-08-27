@@ -126,7 +126,7 @@ CREATE INDEX wallet_ledger_postings_account_idx
 CREATE TABLE wallet_funding_reservations (
   id                            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   wallet_id                     UUID NOT NULL,
-  owner_user_id                 TEXT NOT NULL REFERENCES auth_user(id),
+  owner_user_id                 UUID NOT NULL REFERENCES auth_user(id),
   caller_scope                  TEXT NOT NULL,
   caller_reference              TEXT NOT NULL,
   policy_revision_id            UUID NOT NULL REFERENCES payment_money_policy_revisions(id),
@@ -166,7 +166,7 @@ CREATE TABLE wallet_funding_reservation_settlements (
   reservation_id          UUID NOT NULL REFERENCES wallet_funding_reservations(id),
   settlement_reference    TEXT NOT NULL,
   recipient_wallet_id     UUID NOT NULL,
-  recipient_user_id       TEXT NOT NULL REFERENCES auth_user(id),
+  recipient_user_id       UUID NOT NULL REFERENCES auth_user(id),
   recipient_amount_satang INTEGER NOT NULL,
   platform_fee_satang     INTEGER NOT NULL DEFAULT 0,
   total_amount_satang     INTEGER NOT NULL,
@@ -184,7 +184,7 @@ CREATE TABLE wallet_funding_reservation_settlements (
 
 CREATE TABLE wallet_earnings_conversions (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  principal_user_id     TEXT NOT NULL REFERENCES auth_user(id),
+  principal_user_id     UUID NOT NULL REFERENCES auth_user(id),
   amount_satang         INTEGER NOT NULL CHECK (amount_satang > 0 AND amount_satang <= 2000000000),
   business_reference    TEXT NOT NULL UNIQUE,
   ledger_transaction_id UUID NOT NULL UNIQUE REFERENCES wallet_ledger_transactions(id),
@@ -195,7 +195,7 @@ CREATE TABLE wallet_earnings_conversions (
 CREATE TABLE wallet_activities (
   id                           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   ledger_transaction_id        UUID NOT NULL REFERENCES wallet_ledger_transactions(id),
-  user_id                      TEXT NOT NULL REFERENCES auth_user(id),
+  user_id                      UUID NOT NULL REFERENCES auth_user(id),
   type                         TEXT NOT NULL CHECK (type IN ('TOP_UP', 'SPEND', 'EARN', 'HOLD', 'RELEASE', 'CONVERT')),
   activity_status              TEXT NOT NULL CHECK (activity_status IN ('PENDING', 'COMPLETED', 'FAILED')),
   spending_delta_satang        INTEGER NOT NULL DEFAULT 0,

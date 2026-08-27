@@ -18,8 +18,8 @@ import {
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { eq, sql as drizzleSql } from 'drizzle-orm';
 
-const createStudentWallet = async (prefix: string) => {
-  const userId = `${prefix}-${crypto.randomUUID()}`;
+const createStudentWallet = async (_prefix: string) => {
+  const userId = crypto.randomUUID();
   await db.insert(authUser).values({
     id: userId,
     email: `${userId}@ku.th`,
@@ -37,7 +37,7 @@ const createStudentWallet = async (prefix: string) => {
 };
 
 const createAdmin = async () => {
-  const id = `be112-admin-${crypto.randomUUID()}`;
+  const id = crypto.randomUUID();
   await db.insert(authAdmin).values({
     id,
     email: `${id}@example.com`,

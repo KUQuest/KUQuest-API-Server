@@ -61,7 +61,7 @@ const encryption = createProviderEventEncryption({
 });
 
 const createPendingTopUp = async (prefix: string) => {
-  const userId = `${prefix}-${crypto.randomUUID()}`;
+  const userId = crypto.randomUUID();
   await db.insert(authUser).values({
     id: userId,
     email: `${userId}@ku.th`,

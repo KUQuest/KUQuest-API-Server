@@ -92,7 +92,7 @@ const creditEarnings = async (studentId: string, amountSatang: number) => {
 };
 
 const createPendingPayout = async (prefix: string, provider = new FakePayoutProvider()) => {
-  const userId = `${prefix}-${crypto.randomUUID()}`;
+  const userId = crypto.randomUUID();
   await db.insert(authUser).values({
     id: userId,
     email: `${userId}@ku.th`,

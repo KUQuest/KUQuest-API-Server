@@ -28,6 +28,45 @@ describe('Quest integration', () => {
     expect((await response.json()).success).toBe(false);
   });
 
+  it('validates consent request bodies before authentication', async () => {
+    const invalid = await app.handle(new Request('http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/edit-requests', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ unknown: true }),
+    }));
+    expect(invalid.status).toBe(400);
+    expect((await invalid.json()).error.code).toBe('VALIDATION');
+
+    const unauthenticated = await app.handle(new Request('http://localhost/api/v1/quests/edit-requests/018f47a7-1c7d-7c98-9a11-690d7e83430c/respond', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'EDIT_RESPONSE_APPROVED' }),
+    }));
+    expect(unauthenticated.status).toBe(401);
+    expect((await unauthenticated.json()).error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('rejects immutable fields from the direct edit endpoint before authentication', async () => {
+    const immutableFields = [
+      { mode: 'CANDIDATE' },
+      { participation: 'GROUP' },
+      { reward: 100 },
+      { headcount: 2 },
+      { tagId: '018f47a7-1c7d-7c98-9a11-690d7e834301' },
+      { images: [] },
+    ];
+
+    for (const field of immutableFields) {
+      const response = await app.handle(new Request('http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(field),
+      }));
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe('VALIDATION');
+    }
+  });
+
   it('requires Member authentication before accepting Quest Images', async () => {
     const form = new FormData();
     form.set('images', new File(['not-an-image'], 'quest.png', { type: 'image/png' }));
@@ -106,6 +145,15 @@ describe('Quest integration', () => {
     ]);
     expect(document.paths['/api/v1/quests/{questId}/publish']?.post?.operationId).toBe(
       'publishQuest',
+    );
+    expect(document.paths['/api/v1/quests/{questId}/edit-requests']?.post?.operationId).toBe(
+      'createQuestEditRequest',
+    );
+    expect(document.paths['/api/v1/quests/edit-requests/{requestId}']?.get?.operationId).toBe(
+      'getQuestEditRequest',
+    );
+    expect(document.paths['/api/v1/quests/edit-requests/{requestId}/respond']?.post?.operationId).toBe(
+      'respondToQuestEditRequest',
     );
     expect(document.paths['/api/v1/quests/{questId}/publish']?.post?.security).toEqual([
       { betterAuthSession: [] },

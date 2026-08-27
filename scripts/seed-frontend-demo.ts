@@ -12,6 +12,12 @@ import {
   questAssignment,
   review,
 } from '@/database/schema/quest.schema';
+import {
+  assignmentStatus,
+  questMode,
+  questParticipation,
+  questStatus,
+} from '@/modules/quest/quest.contract';
 import { fixedTagNames } from '@/shared/tag';
 
 import { and, eq, inArray, like } from 'drizzle-orm';
@@ -172,13 +178,13 @@ const main = async (): Promise<void> => {
     .insert(quest)
     .values(
       openQuests.map(([title, tagName, hirerIndex, rewardSatang]) => ({
-        giverId: orderedUsers[hirerIndex]!.id,
+        hirerId: orderedUsers[hirerIndex]!.id,
         title: `[Demo] ${title}`,
         description: `A demo Quest created by ${DEMO_USERS[hirerIndex]!.firstName} for the frontend showcase.`,
         condition: 'Deliver the requested work and provide a short explanation of the result.',
-        mode: 'FIRST_COME_FIRST_SERVED' as const,
-        participation: 'SINGLE' as const,
-        questStatus: 'OPEN' as const,
+        mode: questMode.noCandidate,
+        participation: questParticipation.solo,
+        questStatus: questStatus.open,
         rewardSatang,
         tagId: tagIds.get(tagName)!,
         headcount: 1,
@@ -205,13 +211,13 @@ const main = async (): Promise<void> => {
     .insert(quest)
     .values(
       completedQuests.map(([title, tagName, hirerIndex, _workerIndex, rewardSatang]) => ({
-        giverId: orderedUsers[hirerIndex]!.id,
+        hirerId: orderedUsers[hirerIndex]!.id,
         title: `[Demo] ${title}`,
         description: 'A completed demo Quest for the Profile Reputation and Review showcase.',
         condition: 'The submitted work meets the agreed acceptance criteria.',
-        mode: 'FIRST_COME_FIRST_SERVED' as const,
-        participation: 'SINGLE' as const,
-        questStatus: 'COMPLETED' as const,
+        mode: questMode.noCandidate,
+        participation: questParticipation.solo,
+        questStatus: questStatus.completed,
         rewardSatang,
         tagId: tagIds.get(tagName)!,
         headcount: 1,
@@ -227,12 +233,12 @@ const main = async (): Promise<void> => {
     .values(
       completedQuests.map(([, , , workerIndex], index) => ({
         questId: completedRows[index]!.id,
-        hunterId: orderedUsers[workerIndex]!.id,
-        assignmentStatus: 'COMPLETED' as const,
+        workerId: orderedUsers[workerIndex]!.id,
+        assignmentStatus: assignmentStatus.completed,
         startedAt: new Date('2025-06-02T09:00:00.000Z'),
       })),
     )
-    .returning({ id: questAssignment.id, questId: questAssignment.questId, hunterId: questAssignment.hunterId });
+    .returning({ id: questAssignment.id, questId: questAssignment.questId, workerId: questAssignment.workerId });
 
   await db.insert(review).values(
     assignments.flatMap((assignment, index) => {

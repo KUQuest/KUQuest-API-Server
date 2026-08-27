@@ -250,6 +250,7 @@ try {
     console.error('Payout Destination migration failed: encryption key is unavailable.');
   } else {
     console.error('Payout Destination migration did not complete. Sensitive values were not written to output.');
+    if (error instanceof Error) console.error(`Migration failure: ${error.message}`);
   }
   process.exitCode = 1;
 } finally {

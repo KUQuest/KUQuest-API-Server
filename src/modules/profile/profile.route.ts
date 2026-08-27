@@ -9,6 +9,7 @@ import {
   deleteAvatar,
   getOwnProfile,
   getPublicProfile,
+  getPublicReviews,
   getReputation,
   getReviews,
   setAvatar,
@@ -58,6 +59,18 @@ export const profileRoute = new Elysia({
       tags: ['Profile'],
       summary: 'List own Profile Reviews',
       operationId: 'listProfileReviews',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:userId/reviews', getPublicReviews, {
+    params: publicProfileParamsSchema,
+    query: reviewsQuerySchema,
+    response: responses(reviewsResponseSchema, 400, 401, 404),
+    detail: {
+      tags: ['Profile', 'Reviews'],
+      summary: 'List another Member’s Reviews',
+      description: 'Returns immediately visible Reviews received by the selected Member, with bounded stable pagination.',
+      operationId: 'listPublicProfileReviews',
       security: betterAuthSecurity,
     },
   })

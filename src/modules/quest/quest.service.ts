@@ -6,11 +6,17 @@ import {
   questApplication,
   questAssignment,
   questEditHistory,
+  questEditRequest,
+  questEditRequestResponse,
   questImage,
   questLocation,
   questTeam,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
+import {
+  getEffectiveFundingReservationPolicy,
+  reserveSpending,
+} from '@/modules/wallet';
 import {
   decodeCursor,
   encodeCursor,
@@ -22,8 +28,20 @@ import { and, asc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 
 import {
   buildQuestPublishCheck,
+  calculateQuestEscrowRequirementSatang,
   type QuestPublishCheck,
+  type QuestPublishSnapshot,
 } from './quest.publish.policy';
+import {
+  applicationStatus,
+  assignmentStatus,
+  questParticipation,
+  questStatus,
+  teamStatus,
+  type QuestMode,
+  type QuestParticipation,
+  type QuestStatus,
+} from './quest.contract';
 import { maxQuestImages } from './quest.schema';
 import type { QuestCreateInput, QuestEditInput } from './quest.schema';
 import type { StoredQuestImage } from './quest.storage';
@@ -33,7 +51,7 @@ type QuestDatabase = typeof db | QuestTransaction;
 
 type QuestPublishRow = {
   id: string;
-  questStatus: string;
+  questStatus: QuestStatus;
   tagId: string | null;
   rewardSatang: number;
   headcount: number;
@@ -54,9 +72,9 @@ type QuestRow = {
   rewardSatang: number;
   tagId: string | null;
   tagName: string | null;
-  mode: 'FIRST_COME_FIRST_SERVED' | 'CANDIDATE';
-  participation: 'SINGLE' | 'GROUP';
-  questStatus: string;
+  mode: QuestMode;
+  participation: QuestParticipation;
+  questStatus: QuestStatus;
   headcount: number;
   startTime: Date;
   dueAt: Date | null;
@@ -68,19 +86,11 @@ type QuestRow = {
 type LocationRow = {
   questId: string;
   label: string | null;
-  address: string | null;
-  latitude: string;
-  longitude: string;
-  position: number;
 };
 
 const questLocationSelection = {
   questId: questLocation.questId,
   label: questLocation.label,
-  address: questLocation.address,
-  latitude: questLocation.lat,
-  longitude: questLocation.lng,
-  position: questLocation.position,
 };
 
 export type QuestImage = {
@@ -108,8 +118,17 @@ export type QuestEditOutcome =
         | 'not-editable'
         | 'requires-consent'
         | 'tag-not-found'
-        | 'tag-required';
+        | 'tag-required'
+        | 'forbidden-fields';
     };
+
+export type QuestEditRequestOutcome =
+  | { requestId: string; status: 'EDIT_REQUEST_PENDING'; expiresAt: Date }
+  | { outcome: 'empty-edit' | 'not-found' | 'not-editable' | 'pending-request' | 'forbidden-fields' | 'invalid-dates' | 'invalid-files' };
+
+export type QuestEditResponseOutcome =
+  | { status: 'EDIT_REQUEST_PENDING' | 'EDIT_REQUEST_APPROVED' | 'EDIT_REQUEST_REJECTED'; requestId: string }
+  | { outcome: 'not-found' | 'not-authorized' | 'already-responded' | 'expired' | 'not-pending' | 'invalid-files' };
 
 type QuestEditRow = {
   id: string;
@@ -117,7 +136,7 @@ type QuestEditRow = {
   description: string | null;
   condition: string;
   tagId: string | null;
-  questStatus: string;
+  questStatus: QuestStatus;
   startTime: Date;
   dueAt: Date | null;
   proofRequired: boolean;
@@ -125,10 +144,6 @@ type QuestEditRow = {
 
 type QuestEditLocation = {
   label: string | null;
-  address: string | null;
-  latitude: number;
-  longitude: number;
-  position: number;
 };
 
 const selectQuestImages = async (
@@ -158,7 +173,7 @@ const selectQuestLocations = async (
     .select(questLocationSelection)
     .from(questLocation)
     .where(eq(questLocation.questId, questId))
-    .orderBy(asc(questLocation.position));
+    .orderBy(asc(questLocation.id));
 
   return rows;
 };
@@ -181,7 +196,7 @@ const selectOwnedQuestForEdit = async (
       proofRequired: quest.proofRequired,
     })
     .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.giverId, userId)))
+    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId)))
     .limit(1)
     .for('update');
 
@@ -213,20 +228,23 @@ const getQuestEditEligibility = async (
     .where(
       and(
         eq(questAssignment.questId, questId),
-        eq(questAssignment.assignmentStatus, 'ACTIVE'),
+        eq(questAssignment.assignmentStatus, assignmentStatus.active),
       ),
     );
 
   const hasSelectedParticipation =
-    applications.some(({ applicationStatus }) => applicationStatus === 'SELECTED') ||
-    teams.some(({ teamStatus }) => teamStatus === 'SELECTED') ||
+    applications.some(({ applicationStatus: status }) => status === applicationStatus.selected) ||
+    teams.some(({ teamStatus: status }) => status === teamStatus.selected) ||
     assignments.length > 0;
   if (hasSelectedParticipation) return { outcome: 'requires-consent' };
-  if (ownedQuest.questStatus !== 'OPEN') return { outcome: 'not-editable' };
+  if (ownedQuest.questStatus !== questStatus.open) return { outcome: 'not-editable' };
 
   const hasCandidate =
-    applications.some(({ applicationStatus }) => applicationStatus === 'APPLIED') ||
-    teams.some(({ teamStatus }) => teamStatus === 'FORMING' || teamStatus === 'SUBMITTED');
+    applications.some(({ applicationStatus: status }) => status === applicationStatus.applied) ||
+    teams.some(
+      ({ teamStatus: status }) =>
+        status === teamStatus.forming || status === teamStatus.submitted,
+    );
   if (hasCandidate) return { outcome: 'not-editable' };
 
   return { quest: ownedQuest };
@@ -240,7 +258,7 @@ const lockOwnedQuest = async (
   const [ownedQuest] = await transaction
     .select({ id: quest.id, questStatus: quest.questStatus })
     .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.giverId, userId)))
+    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId)))
     .limit(1)
     .for('update');
 
@@ -256,7 +274,7 @@ const checkQuestImageUploadInTransaction = async (
   const ownedQuest = await lockOwnedQuest(transaction, userId, questId);
 
   if (!ownedQuest) return { outcome: 'not-found' };
-  if (ownedQuest.questStatus !== 'DRAFT') return { outcome: 'not-editable' };
+  if (ownedQuest.questStatus !== questStatus.draft) return { outcome: 'not-editable' };
 
   const [imageCount] = await transaction
     .select({ count: sql<number>`count(*)` })
@@ -272,15 +290,13 @@ const checkQuestImageUploadInTransaction = async (
 export type QuestListFilters = {
   q?: string;
   tagId?: string;
-  mode?: 'FIRST_COME_FIRST_SERVED' | 'CANDIDATE';
-  participation?: 'SINGLE' | 'GROUP';
+  mode?: QuestMode;
+  participation?: QuestParticipation;
   maxDurationMinutes?: number;
   minReward?: number;
   maxReward?: number;
   startFrom?: Date;
   startTo?: Date;
-  latitude?: number;
-  longitude?: number;
   limit?: number;
   cursor?: string;
 };
@@ -304,9 +320,6 @@ const hirerName = (row: Pick<QuestRow, 'hirerFirstName' | 'hirerLastName'>) =>
 
 const toLocation = (location: LocationRow) => ({
   label: location.label,
-  address: location.address,
-  latitude: Number(location.latitude),
-  longitude: Number(location.longitude),
 });
 
 const groupLocations = (locations: LocationRow[]) => {
@@ -328,28 +341,9 @@ const loadLocations = async (questIds: string[]) => {
     .select(questLocationSelection)
     .from(questLocation)
     .where(inArray(questLocation.questId, questIds))
-    .orderBy(asc(questLocation.position));
+    .orderBy(asc(questLocation.id));
 
   return groupLocations(locations);
-};
-
-const haversineDistanceKm = (
-  fromLatitude: number,
-  fromLongitude: number,
-  toLatitude: number,
-  toLongitude: number,
-) => {
-  const earthRadiusKm = 6371;
-  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
-  const latitudeDelta = toRadians(toLatitude - fromLatitude);
-  const longitudeDelta = toRadians(toLongitude - fromLongitude);
-  const latitudeA = toRadians(fromLatitude);
-  const latitudeB = toRadians(toLatitude);
-  const a =
-    Math.sin(latitudeDelta / 2) ** 2 +
-    Math.cos(latitudeA) * Math.cos(latitudeB) * Math.sin(longitudeDelta / 2) ** 2;
-
-  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
 const buildCursorCondition = (cursor: CursorPayload | undefined) => {
@@ -366,7 +360,7 @@ const listRows = async (filters: QuestListFilters, hirerId?: string) => {
   const limit = parsePageLimit(filters.limit);
   const cursor = decodeCursor(filters.cursor);
   const conditions = [
-    hirerId ? eq(quest.giverId, hirerId) : eq(quest.questStatus, 'OPEN'),
+    hirerId ? eq(quest.hirerId, hirerId) : eq(quest.questStatus, questStatus.open),
   ];
 
   if (filters.q) {
@@ -415,7 +409,7 @@ const listRows = async (filters: QuestListFilters, hirerId?: string) => {
       hirerLastName: authUser.lastName,
     })
     .from(quest)
-    .innerJoin(authUser, eq(quest.giverId, authUser.id))
+    .innerJoin(authUser, eq(quest.hirerId, authUser.id))
     .leftJoin(tag, eq(quest.tagId, tag.id))
     .where(and(...conditions))
     .orderBy(asc(quest.startTime), asc(quest.id))
@@ -436,7 +430,6 @@ const listRows = async (filters: QuestListFilters, hirerId?: string) => {
 const serializeCard = (
   row: QuestRow,
   locations: Map<string, LocationRow[]>,
-  coordinates?: { latitude: number; longitude: number },
 ) => {
   const firstLocation = locations.get(row.id)?.[0];
   const location = firstLocation ? toLocation(firstLocation) : null;
@@ -453,27 +446,14 @@ const serializeCard = (
     estimatedDurationMinutes: durationMinutes(row.startTime, row.dueAt),
     hirerName: hirerName(row),
     location,
-    ...(coordinates
-      ? {
-          distanceKm: location
-            ? haversineDistanceKm(
-                coordinates.latitude,
-                coordinates.longitude,
-                location.latitude,
-                location.longitude,
-              )
-            : null,
-        }
-      : {}),
   };
 };
 
 const serializeBoardCard = (
   row: QuestRow,
   locations: Map<string, LocationRow[]>,
-  coordinates?: { latitude: number; longitude: number },
 ) => {
-  const card = serializeCard(row, locations, coordinates);
+  const card = serializeCard(row, locations);
   if (!card.tag) throw new Error('An OPEN Quest must have a Tag');
 
   return { ...card, tag: card.tag };
@@ -492,11 +472,7 @@ const nextCursorFor = (
 
 export const listBoardQuests = async (filters: QuestListFilters) => {
   const result = await listRows(filters);
-  const coordinates =
-    filters.latitude !== undefined && filters.longitude !== undefined
-      ? { latitude: filters.latitude, longitude: filters.longitude }
-      : undefined;
-  const items = result.rows.map((row) => serializeBoardCard(row, result.locations, coordinates));
+  const items = result.rows.map((row) => serializeBoardCard(row, result.locations));
 
   return {
     items,
@@ -508,7 +484,7 @@ export const createQuest = async (
   userId: string,
   data: QuestCreateInput,
 ): Promise<QuestCreateOutcome> => {
-  if (data.participation === 'SINGLE' && data.headcount !== 1) {
+  if (data.participation === questParticipation.solo && data.headcount !== 1) {
     return { outcome: 'invalid-headcount' };
   }
 
@@ -529,13 +505,13 @@ export const createQuest = async (
     const [created] = await transaction
       .insert(quest)
       .values({
-        giverId: userId,
+        hirerId: userId,
         title: data.title,
         description: data.description ?? null,
         condition: data.condition,
         mode: data.mode,
         participation: data.participation,
-        questStatus: 'DRAFT',
+        questStatus: questStatus.draft,
         rewardSatang: data.reward * 100,
         tagId: data.tagId ?? null,
         headcount: data.headcount,
@@ -547,13 +523,9 @@ export const createQuest = async (
 
     if (data.locations && data.locations.length > 0) {
       await transaction.insert(questLocation).values(
-        data.locations.map((location, index) => ({
+        data.locations.map((location) => ({
           questId: created.id,
           label: location.label ?? null,
-          address: location.address ?? null,
-          lat: String(location.latitude),
-          lng: String(location.longitude),
-          position: index + 1,
         })),
       );
     }
@@ -571,30 +543,243 @@ const hasEditField = <K extends keyof QuestEditInput>(
 const jsonValuesEqual = (left: unknown, right: unknown) =>
   JSON.stringify(left) === JSON.stringify(right);
 
-const normalizeLocationCoordinate = (coordinate: number) => Number(coordinate.toFixed(6));
-
 const toEditLocation = (
   location: NonNullable<QuestEditInput['locations']>[number],
-  position: number,
 ): QuestEditLocation => ({
   label: location.label ?? null,
-  address: location.address ?? null,
-  latitude: normalizeLocationCoordinate(location.latitude),
-  longitude: normalizeLocationCoordinate(location.longitude),
-  position,
 });
 
 const editLocationSnapshot = (locations: LocationRow[]): QuestEditLocation[] =>
-  locations.map((location) => ({
-    ...toLocation(location),
-    position: location.position,
-  }));
+  locations.map((location) => toLocation(location));
 
 type QuestEditHistoryValue = {
   fieldName: string;
   oldValue: unknown;
   newValue: unknown;
 };
+
+type ConsentQuestRow = QuestEditRow & {
+  mode: QuestMode;
+  participation: QuestParticipation;
+  rewardSatang: number;
+  headcount: number;
+};
+
+const consentStatuses = new Set<QuestStatus>([
+  questStatus.assigned,
+  questStatus.inProgress,
+  questStatus.submitted,
+  questStatus.approved,
+  questStatus.rework,
+  questStatus.disputed,
+]);
+
+const consentFields = new Set([
+  'title',
+  'description',
+  'condition',
+  'startTime',
+  'dueAt',
+  'proofRequired',
+  'locations',
+  'images',
+]);
+const coreEditFields = new Set(['mode', 'participation', 'reward', 'headcount', 'tagId']);
+
+const selectConsentQuest = async (
+  transaction: QuestTransaction,
+  userId: string,
+  questId: string,
+): Promise<ConsentQuestRow | undefined> => {
+  const [row] = await transaction
+    .select({
+      id: quest.id,
+      title: quest.title,
+      description: quest.description,
+      condition: quest.condition,
+      tagId: quest.tagId,
+      questStatus: quest.questStatus,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
+      proofRequired: quest.proofRequired,
+      mode: quest.mode,
+      participation: quest.participation,
+      rewardSatang: quest.rewardSatang,
+      headcount: quest.headcount,
+    })
+    .from(quest)
+    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId)))
+    .limit(1)
+    .for('update');
+  return row;
+};
+
+const normalizeConsentChanges = async (
+  transaction: QuestTransaction,
+  current: ConsentQuestRow,
+  userId: string,
+  data: QuestEditInput,
+): Promise<
+  | { outcome: 'empty-edit' | 'forbidden-fields' | 'invalid-dates' | 'invalid-files' }
+  | { changes: Record<string, unknown> }
+> => {
+  const supplied = Object.keys(data);
+  if (supplied.some((field) => coreEditFields.has(field))) return { outcome: 'forbidden-fields' };
+  if (supplied.some((field) => !consentFields.has(field))) return { outcome: 'forbidden-fields' };
+  if (supplied.length === 0) return { outcome: 'empty-edit' };
+
+  const changes: Record<string, unknown> = {};
+  const nextStartTime = hasEditField(data, 'startTime')
+    ? new Date(data.startTime)
+    : current.startTime;
+  const nextDueAt = hasEditField(data, 'dueAt')
+    ? data.dueAt
+      ? new Date(data.dueAt)
+      : null
+    : current.dueAt;
+  if (
+    Number.isNaN(nextStartTime.getTime()) ||
+    (nextDueAt !== null && Number.isNaN(nextDueAt.getTime())) ||
+    (nextDueAt !== null && nextDueAt <= nextStartTime)
+  ) return { outcome: 'invalid-dates' };
+
+  if (hasEditField(data, 'title') && data.title !== current.title) changes.title = data.title;
+  if (hasEditField(data, 'description') && data.description !== current.description) {
+    changes.description = data.description;
+  }
+  if (hasEditField(data, 'condition') && data.condition !== current.condition) {
+    changes.condition = data.condition;
+  }
+  if (hasEditField(data, 'startTime') && nextStartTime.getTime() !== current.startTime.getTime()) {
+    changes.startTime = nextStartTime.toISOString();
+  }
+  if (hasEditField(data, 'dueAt') && (nextDueAt?.getTime() ?? null) !== (current.dueAt?.getTime() ?? null)) {
+    changes.dueAt = nextDueAt?.toISOString() ?? null;
+  }
+  if (hasEditField(data, 'proofRequired') && data.proofRequired !== current.proofRequired) {
+    changes.proofRequired = data.proofRequired;
+  }
+  if (hasEditField(data, 'locations')) {
+    const oldLocations = editLocationSnapshot(await selectQuestLocations(transaction, current.id));
+    const locations = (data.locations ?? []).map(toEditLocation);
+    if (!jsonValuesEqual(oldLocations, locations)) changes.locations = locations;
+  }
+  if (hasEditField(data, 'images')) {
+    const oldImages = (await transaction
+      .select({ fileId: questImage.fileId })
+      .from(questImage)
+      .where(eq(questImage.questId, current.id))
+      .orderBy(asc(questImage.position))).map(({ fileId }) => fileId);
+    const images = data.images ?? [];
+    if (!jsonValuesEqual(oldImages, images)) {
+      if (!(await validateQuestImageIds(transaction, userId, images))) return { outcome: 'invalid-files' };
+      changes.images = images;
+    }
+  }
+
+  return Object.keys(changes).length === 0 ? { outcome: 'empty-edit' } : { changes };
+};
+
+const validateQuestImageIds = async (
+  transaction: QuestTransaction,
+  userId: string,
+  imageIds: unknown,
+) => {
+  if (!Array.isArray(imageIds) || imageIds.length > maxQuestImages || imageIds.some((id) => typeof id !== 'string')) return false;
+  if (imageIds.length === 0) return true;
+  const ownedFiles = await transaction
+    .select({ id: file.id })
+    .from(file)
+    .where(and(inArray(file.id, imageIds as string[]), eq(file.uploadedByUserId, userId), isNull(file.deletedAt)));
+  return ownedFiles.length === imageIds.length;
+};
+
+const applyConsentChanges = async (
+  transaction: QuestTransaction,
+  current: ConsentQuestRow,
+  changes: Record<string, unknown>,
+  requestId: string,
+  userId: string,
+) => {
+  if (Object.prototype.hasOwnProperty.call(changes, 'images') && !(await validateQuestImageIds(transaction, userId, changes.images))) {
+    throw new Error('Quest edit contains an invalid image reference');
+  }
+  const updates: Partial<typeof quest.$inferInsert> = { updatedAt: new Date() };
+  const history: QuestEditHistoryValue[] = [];
+  const add = (fieldName: string, oldValue: unknown, newValue: unknown, update: keyof typeof updates) => {
+    if (jsonValuesEqual(oldValue, newValue)) return;
+    updates[update] = newValue as never;
+    history.push({ fieldName, oldValue, newValue });
+  };
+  add('title', current.title, changes.title, 'title');
+  add('description', current.description, changes.description, 'description');
+  add('condition', current.condition, changes.condition, 'condition');
+  add('startTime', current.startTime.toISOString(), changes.startTime, 'startTime');
+  if (Object.prototype.hasOwnProperty.call(changes, 'startTime')) updates.startTime = new Date(changes.startTime as string);
+  add('dueAt', current.dueAt?.toISOString() ?? null, changes.dueAt, 'dueAt');
+  if (Object.prototype.hasOwnProperty.call(changes, 'dueAt')) updates.dueAt = changes.dueAt ? new Date(changes.dueAt as string) : null;
+  add('proofRequired', current.proofRequired, changes.proofRequired, 'proofRequired');
+
+  if (Object.prototype.hasOwnProperty.call(changes, 'locations')) {
+    const oldLocations = editLocationSnapshot(await selectQuestLocations(transaction, current.id));
+    const newLocations = changes.locations as QuestEditLocation[];
+    if (!jsonValuesEqual(oldLocations, newLocations)) {
+      await transaction.delete(questLocation).where(eq(questLocation.questId, current.id));
+      if (newLocations.length > 0) {
+        await transaction.insert(questLocation).values(newLocations.map((location) => ({ questId: current.id, label: location.label })));
+      }
+      history.push({ fieldName: 'locations', oldValue: oldLocations, newValue: newLocations });
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, 'images')) {
+    const oldImages = (await transaction.select({ fileId: questImage.fileId }).from(questImage).where(eq(questImage.questId, current.id)).orderBy(asc(questImage.position))).map(({ fileId }) => fileId);
+    const newImages = changes.images as string[];
+    if (!jsonValuesEqual(oldImages, newImages)) {
+      await transaction.delete(questImage).where(eq(questImage.questId, current.id));
+      if (newImages.length > 0) await transaction.insert(questImage).values(newImages.map((fileId, position) => ({ questId: current.id, fileId, position })));
+      history.push({ fieldName: 'images', oldValue: oldImages, newValue: newImages });
+    }
+  }
+  if (history.length > 0) {
+    await transaction.update(quest).set(updates).where(eq(quest.id, current.id));
+    await transaction.insert(questEditHistory).values(history.map(({ fieldName, oldValue, newValue }) => ({
+      questId: current.id,
+      editRequestId: requestId,
+      fieldName,
+      oldValue,
+      newValue,
+      editedByUserId: userId,
+    })));
+  }
+};
+
+export const createQuestEditRequest = async (
+  userId: string,
+  questId: string,
+  data: QuestEditInput,
+  now = new Date(),
+): Promise<QuestEditRequestOutcome> => db.transaction(async (transaction) => {
+  const current = await selectConsentQuest(transaction, userId, questId);
+  if (!current) return { outcome: 'not-found' };
+  const existing = await transaction.select({ id: questEditRequest.id }).from(questEditRequest).where(and(eq(questEditRequest.questId, questId), eq(questEditRequest.requestStatus, 'EDIT_REQUEST_PENDING'))).limit(1);
+  if (existing.length > 0) return { outcome: 'pending-request' };
+  if (!consentStatuses.has(current.questStatus)) return { outcome: 'not-editable' };
+  const normalized = await normalizeConsentChanges(transaction, current, userId, data);
+  if ('outcome' in normalized) return normalized;
+  const workers = await transaction.select({ workerId: questAssignment.workerId }).from(questAssignment).where(and(eq(questAssignment.questId, questId), eq(questAssignment.assignmentStatus, assignmentStatus.active))).for('update');
+  if (workers.length === 0) return { outcome: 'not-editable' };
+  const [request] = await transaction.insert(questEditRequest).values({
+    questId,
+    requestedByUserId: userId,
+    proposedChanges: normalized.changes,
+    previousQuestStatus: current.questStatus,
+    createdAt: now,
+  }).returning({ id: questEditRequest.id, createdAt: questEditRequest.createdAt });
+  await transaction.insert(questEditRequestResponse).values(workers.map(({ workerId }) => ({ requestId: request.id, userId: workerId })));
+  const [pausedQuest] = await transaction.update(quest).set({ questStatus: questStatus.awaitingConsent, updatedAt: new Date() }).where(and(eq(quest.id, questId), eq(quest.questStatus, current.questStatus))).returning({ id: quest.id });
+  if (!pausedQuest) return { outcome: 'not-editable' };
+  return { requestId: request.id, status: 'EDIT_REQUEST_PENDING', expiresAt: new Date(request.createdAt.getTime() + 5 * 60_000) };
+});
 
 export const editQuest = async (
   userId: string,
@@ -691,9 +876,7 @@ export const editQuest = async (
     if (hasEditField(data, 'locations')) {
       const currentLocations = await selectQuestLocations(transaction, questId);
       const oldValue = editLocationSnapshot(currentLocations);
-      const newValue = (data.locations ?? []).map((location, index) =>
-        toEditLocation(location, index + 1),
-      );
+      const newValue = (data.locations ?? []).map((location) => toEditLocation(location));
 
       if (!jsonValuesEqual(oldValue, newValue)) {
         await transaction.delete(questLocation).where(eq(questLocation.questId, questId));
@@ -702,10 +885,6 @@ export const editQuest = async (
             newValue.map((location) => ({
               questId,
               label: location.label,
-              address: location.address,
-              lat: String(location.latitude),
-              lng: String(location.longitude),
-              position: location.position,
             })),
           );
         }
@@ -731,6 +910,166 @@ export const editQuest = async (
 
     return { id: questId };
   });
+};
+
+const consentStateIsCurrent = async (
+  transaction: QuestTransaction,
+  questId: string,
+  previousQuestStatus: QuestStatus,
+  responseRequestId: string,
+): Promise<boolean> => {
+  const [currentQuest] = await transaction
+    .select({ questStatus: quest.questStatus })
+    .from(quest)
+    .where(eq(quest.id, questId))
+    .limit(1);
+  if (!currentQuest || currentQuest.questStatus !== questStatus.awaitingConsent || !consentStatuses.has(previousQuestStatus)) return false;
+  const snapshot = await transaction
+    .select({ userId: questEditRequestResponse.userId })
+    .from(questEditRequestResponse)
+    .where(eq(questEditRequestResponse.requestId, responseRequestId));
+  const active = await transaction
+    .select({ workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .where(and(eq(questAssignment.questId, questId), eq(questAssignment.assignmentStatus, assignmentStatus.active)));
+  const expected = snapshot.map(({ userId }) => userId).sort();
+  const actual = active.map(({ workerId }) => workerId).sort();
+  return expected.length === actual.length && expected.every((workerId, index) => workerId === actual[index]);
+};
+
+const resolveExpiredEditRequestInTransaction = async (
+  transaction: QuestTransaction,
+  requestId: string,
+  now: Date,
+): Promise<QuestEditResponseOutcome> => {
+  const [request] = await transaction.select({
+    id: questEditRequest.id,
+    questId: questEditRequest.questId,
+    requestedByUserId: questEditRequest.requestedByUserId,
+    previousQuestStatus: questEditRequest.previousQuestStatus,
+    requestStatus: questEditRequest.requestStatus,
+    createdAt: questEditRequest.createdAt,
+  }).from(questEditRequest).where(eq(questEditRequest.id, requestId)).limit(1);
+  if (!request) return { outcome: 'not-found' };
+  const current = await selectConsentQuest(transaction, request.requestedByUserId, request.questId);
+  if (!current) return { outcome: 'not-found' };
+  const [lockedRequest] = await transaction.select({
+    id: questEditRequest.id,
+    requestStatus: questEditRequest.requestStatus,
+  }).from(questEditRequest).where(eq(questEditRequest.id, requestId)).limit(1).for('update');
+  if (!lockedRequest || lockedRequest.requestStatus !== 'EDIT_REQUEST_PENDING') {
+    return { outcome: 'not-pending' };
+  }
+  if (!(await consentStateIsCurrent(transaction, request.questId, request.previousQuestStatus, requestId))) {
+    await transaction.update(questEditRequest).set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now }).where(eq(questEditRequest.id, requestId));
+    if (current.questStatus === questStatus.awaitingConsent) await transaction.update(quest).set({ questStatus: request.previousQuestStatus, updatedAt: now }).where(eq(quest.id, request.questId));
+    return { outcome: 'not-pending' };
+  }
+  if (now.getTime() < request.createdAt.getTime() + 5 * 60_000) {
+    return { status: 'EDIT_REQUEST_PENDING', requestId };
+  }
+  await transaction.update(questEditRequest).set({
+    requestStatus: 'EDIT_REQUEST_REJECTED',
+    resolvedAt: now,
+  }).where(eq(questEditRequest.id, requestId));
+  await transaction.update(quest).set({ questStatus: request.previousQuestStatus, updatedAt: now }).where(eq(quest.id, request.questId));
+  return { status: 'EDIT_REQUEST_REJECTED', requestId };
+};
+
+export const respondToQuestEditRequest = async (
+  userId: string,
+  requestId: string,
+  decision: 'EDIT_RESPONSE_APPROVED' | 'EDIT_RESPONSE_REJECTED',
+  now = new Date(),
+): Promise<QuestEditResponseOutcome> => db.transaction(async (transaction) => {
+  const [request] = await transaction.select({
+    id: questEditRequest.id,
+    questId: questEditRequest.questId,
+    requestedByUserId: questEditRequest.requestedByUserId,
+    previousQuestStatus: questEditRequest.previousQuestStatus,
+    requestStatus: questEditRequest.requestStatus,
+    proposedChanges: questEditRequest.proposedChanges,
+    createdAt: questEditRequest.createdAt,
+  }).from(questEditRequest).where(eq(questEditRequest.id, requestId)).limit(1);
+  if (!request) return { outcome: 'not-found' };
+  const current = await selectConsentQuest(transaction, request.requestedByUserId, request.questId);
+  if (!current) return { outcome: 'not-found' };
+  const [lockedRequest] = await transaction.select({
+    id: questEditRequest.id,
+    requestStatus: questEditRequest.requestStatus,
+  }).from(questEditRequest).where(eq(questEditRequest.id, requestId)).limit(1).for('update');
+  if (!lockedRequest || lockedRequest.requestStatus !== 'EDIT_REQUEST_PENDING') return { outcome: 'not-pending' };
+  if (!(await consentStateIsCurrent(transaction, request.questId, request.previousQuestStatus, requestId))) {
+    await transaction.update(questEditRequest).set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now }).where(eq(questEditRequest.id, requestId));
+    if (current.questStatus === questStatus.awaitingConsent) await transaction.update(quest).set({ questStatus: request.previousQuestStatus, updatedAt: now }).where(eq(quest.id, request.questId));
+    return { outcome: 'not-pending' };
+  }
+  if (now.getTime() >= request.createdAt.getTime() + 5 * 60_000) {
+    await transaction.update(questEditRequest).set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now }).where(eq(questEditRequest.id, requestId));
+    await transaction.update(quest).set({ questStatus: request.previousQuestStatus, updatedAt: now }).where(eq(quest.id, request.questId));
+    return { outcome: 'expired' };
+  }
+  const [response] = await transaction.select({ id: questEditRequestResponse.id, decision: questEditRequestResponse.decision }).from(questEditRequestResponse).where(and(eq(questEditRequestResponse.requestId, requestId), eq(questEditRequestResponse.userId, userId))).limit(1).for('update');
+  if (!response) return { outcome: 'not-authorized' };
+  if (response.decision !== null) return { outcome: 'already-responded' };
+  await transaction.update(questEditRequestResponse).set({ decision, respondedAt: now }).where(eq(questEditRequestResponse.id, response.id));
+  if (decision === 'EDIT_RESPONSE_REJECTED') {
+    await transaction.update(questEditRequest).set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now }).where(eq(questEditRequest.id, requestId));
+    await transaction.update(quest).set({ questStatus: request.previousQuestStatus, updatedAt: now }).where(eq(quest.id, request.questId));
+    return { status: 'EDIT_REQUEST_REJECTED', requestId };
+  }
+  const responses = await transaction.select({ decision: questEditRequestResponse.decision }).from(questEditRequestResponse).where(eq(questEditRequestResponse.requestId, requestId));
+  if (responses.some(({ decision: value }) => value !== 'EDIT_RESPONSE_APPROVED')) return { status: 'EDIT_REQUEST_PENDING', requestId };
+  if (!(await consentStateIsCurrent(transaction, request.questId, request.previousQuestStatus, requestId))) {
+    await transaction.update(questEditRequest).set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now }).where(eq(questEditRequest.id, requestId));
+    await transaction.update(quest).set({ questStatus: request.previousQuestStatus, updatedAt: now }).where(eq(quest.id, request.questId));
+    return { outcome: 'not-pending' };
+  }
+  const proposedChanges = request.proposedChanges as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(proposedChanges, 'images') && !(await validateQuestImageIds(transaction, request.requestedByUserId, proposedChanges.images))) {
+    await transaction.update(questEditRequest).set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now }).where(eq(questEditRequest.id, requestId));
+    await transaction.update(quest).set({ questStatus: request.previousQuestStatus, updatedAt: now }).where(eq(quest.id, request.questId));
+    return { outcome: 'invalid-files' };
+  }
+  await applyConsentChanges(transaction, current, proposedChanges, requestId, request.requestedByUserId);
+  await transaction.update(questEditRequest).set({ requestStatus: 'EDIT_REQUEST_APPROVED', resolvedAt: now }).where(eq(questEditRequest.id, requestId));
+  await transaction.update(quest).set({ questStatus: request.previousQuestStatus, updatedAt: now }).where(eq(quest.id, request.questId));
+  return { status: 'EDIT_REQUEST_APPROVED', requestId };
+});
+
+export const expireQuestEditRequest = async (
+  requestId: string,
+  now = new Date(),
+): Promise<QuestEditResponseOutcome> => db.transaction(async (transaction) => resolveExpiredEditRequestInTransaction(transaction, requestId, now));
+
+/** Worker entry point for BE-182. It is explicit and deterministic; no scheduler lives here. */
+export const timeoutQuestEditRequest = expireQuestEditRequest;
+
+export const expireQuestEditRequests = async (now = new Date()): Promise<string[]> => {
+  const pending = await db.select({ id: questEditRequest.id }).from(questEditRequest).where(eq(questEditRequest.requestStatus, 'EDIT_REQUEST_PENDING'));
+  const resolved: string[] = [];
+  for (const request of pending) {
+    const outcome = await expireQuestEditRequest(request.id, now);
+    if ('status' in outcome && outcome.status === 'EDIT_REQUEST_REJECTED') resolved.push(request.id);
+  }
+  return resolved;
+};
+
+export const expirePendingQuestEditRequests = expireQuestEditRequests;
+
+export const getQuestEditRequest = async (userId: string, requestId: string) => {
+  const [row] = await db.select({
+    id: questEditRequest.id,
+    questId: questEditRequest.questId,
+    requestedByUserId: questEditRequest.requestedByUserId,
+    previousQuestStatus: questEditRequest.previousQuestStatus,
+    status: questEditRequest.requestStatus,
+    proposedChanges: questEditRequest.proposedChanges,
+    createdAt: questEditRequest.createdAt,
+  }).from(questEditRequest).innerJoin(quest, eq(questEditRequest.questId, quest.id)).where(and(eq(questEditRequest.id, requestId), or(eq(quest.hirerId, userId), sql`EXISTS (SELECT 1 FROM quest_edit_request_response r WHERE r.request_id = ${questEditRequest.id} AND r.user_id = ${userId})`))).limit(1);
+  if (!row) return undefined;
+  const responses = await db.select({ userId: questEditRequestResponse.userId, decision: questEditRequestResponse.decision, respondedAt: questEditRequestResponse.respondedAt }).from(questEditRequestResponse).where(eq(questEditRequestResponse.requestId, requestId));
+  return { ...row, expiresAt: new Date(row.createdAt.getTime() + 5 * 60_000), responses };
 };
 
 export const addQuestImages = async (
@@ -792,7 +1131,7 @@ export const deleteQuestImage = async (
     const ownedQuest = await lockOwnedQuest(transaction, userId, questId);
 
     if (!ownedQuest) return { outcome: 'not-found' };
-    if (ownedQuest.questStatus !== 'DRAFT') return { outcome: 'not-editable' };
+    if (ownedQuest.questStatus !== questStatus.draft) return { outcome: 'not-editable' };
 
     const [image] = await transaction
       .select({
@@ -835,12 +1174,8 @@ export const deleteQuestImage = async (
 
 export const listOwnQuests = async (userId: string, filters: QuestListFilters) => {
   const result = await listRows(filters, userId);
-  const coordinates =
-    filters.latitude !== undefined && filters.longitude !== undefined
-      ? { latitude: filters.latitude, longitude: filters.longitude }
-      : undefined;
   const items = result.rows.map((row) => ({
-    ...serializeCard(row, result.locations, coordinates),
+    ...serializeCard(row, result.locations),
     questStatus: row.questStatus,
   }));
 
@@ -871,12 +1206,12 @@ export const getQuestDetail = async (userId: string, questId: string) => {
       hirerLastName: authUser.lastName,
     })
     .from(quest)
-    .innerJoin(authUser, eq(quest.giverId, authUser.id))
+    .innerJoin(authUser, eq(quest.hirerId, authUser.id))
     .leftJoin(tag, eq(quest.tagId, tag.id))
     .where(
       and(
         eq(quest.id, questId),
-        or(eq(quest.giverId, userId), eq(quest.questStatus, 'OPEN')),
+        or(eq(quest.hirerId, userId), eq(quest.questStatus, questStatus.open)),
       ),
     )
     .limit(1);
@@ -903,10 +1238,7 @@ export const getQuestDetail = async (userId: string, questId: string) => {
     estimatedDurationMinutes: durationMinutes(row.startTime, row.dueAt),
     proofRequired: row.proofRequired,
     hirerName: hirerName(row),
-    locations: locations.map((location) => ({
-      ...toLocation(location),
-      position: location.position,
-    })),
+    locations: locations.map((location) => toLocation(location)),
     images,
   };
 };
@@ -928,17 +1260,17 @@ const selectPublishRow = async (
       dueAt: quest.dueAt,
     })
     .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.giverId, userId)))
+    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId)))
     .limit(1);
 
   const rows = lock ? await query.for('update') : await query;
   return rows[0] as QuestPublishRow | undefined;
 };
 
-const buildPublishCheck = async (
+const buildPublishSnapshot = async (
   transaction: QuestTransaction,
   row: QuestPublishRow,
-) => {
+): Promise<QuestPublishSnapshot> => {
   const [imageRows] = await transaction
     .select({ count: sql<number>`count(*)` })
     .from(questImage)
@@ -947,8 +1279,9 @@ const buildPublishCheck = async (
     .select({ count: sql<number>`count(*)` })
     .from(questLocation)
     .where(eq(questLocation.questId, row.id));
+  const policy = await getEffectiveFundingReservationPolicy(transaction);
 
-  return buildQuestPublishCheck({
+  return {
     tagId: row.tagId,
     startTime: row.startTime,
     dueAt: row.dueAt,
@@ -956,9 +1289,15 @@ const buildPublishCheck = async (
     hasLocations: Number(locationRows?.count ?? 0) > 0,
     rewardSatang: row.rewardSatang,
     headcount: row.headcount,
+    platformFeeBps: policy.platformFeeBps,
     now: new Date(),
-  });
+  };
 };
+
+const buildPublishCheck = async (
+  transaction: QuestTransaction,
+  row: QuestPublishRow,
+) => buildQuestPublishCheck(await buildPublishSnapshot(transaction, row));
 
 export const getQuestPublishCheck = async (
   userId: string,
@@ -967,7 +1306,7 @@ export const getQuestPublishCheck = async (
   db.transaction(async (transaction) => {
     const row = await selectPublishRow(transaction, userId, questId, false);
     if (!row) return undefined;
-    if (row.questStatus !== 'DRAFT') return { outcome: 'not-draft' };
+    if (row.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
 
     return buildPublishCheck(transaction, row);
   });
@@ -979,19 +1318,27 @@ export const publishQuest = async (
   db.transaction(async (transaction) => {
     const row = await selectPublishRow(transaction, userId, questId, true);
     if (!row) return undefined;
-    if (row.questStatus !== 'DRAFT') return { outcome: 'not-draft' };
+    if (row.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
 
-    const check = await buildPublishCheck(transaction, row);
+    const snapshot = await buildPublishSnapshot(transaction, row);
+    const check = buildQuestPublishCheck(snapshot);
     if (!check.canPublish) return { outcome: 'blocked', check };
+
+    await reserveSpending(transaction, {
+      ownerUserId: userId,
+      callerScope: 'quest',
+      callerReference: questId,
+      amountSatang: calculateQuestEscrowRequirementSatang(snapshot),
+    });
 
     const [updated] = await transaction
       .update(quest)
-      .set({ questStatus: 'OPEN', updatedAt: new Date() })
+      .set({ questStatus: questStatus.open, updatedAt: new Date() })
       .where(
         and(
           eq(quest.id, questId),
-          eq(quest.giverId, userId),
-          eq(quest.questStatus, 'DRAFT'),
+          eq(quest.hirerId, userId),
+          eq(quest.questStatus, questStatus.draft),
         ),
       )
       .returning({ id: quest.id });

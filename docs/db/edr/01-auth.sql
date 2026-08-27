@@ -24,6 +24,11 @@ CREATE TABLE occupation (
 );
 
 -- auth_user (merged app User + better-auth user)
+-- id: native UUID, canonical since BE-170 (decision first made 2026-08-07, see
+-- init.sql) — every auth_user(id) FK across the schema follows suit. The runtime
+-- Drizzle schema/migrations still use better-auth's default TEXT ids
+-- (gen_random_uuid()::text); converging them needs its own migration +
+-- auth.config.ts generateId:false change — a later ticket, not an EDR change.
 -- email is CITEXT, not TEXT (design decision 2026-08-09, datatype audit): auth_admin.email
 -- already needed case-insensitive uniqueness (lower(email) functional index), auth_user.email
 -- had none — inconsistent and a real dup-account risk. CITEXT fixes both natively, no lower()
@@ -76,6 +81,7 @@ CREATE INDEX file_uploaded_by_user_id_idx ON file (uploaded_by_user_id);
 ALTER TABLE auth_user ADD CONSTRAINT auth_user_image_file_id_fkey FOREIGN KEY (image_file_id) REFERENCES file(id);
 
 -- auth_admin (fully separate identity, zero FK overlap with auth_user)
+-- id: native UUID like auth_user (BE-170 canonical identity model).
 -- login identifier is email (credentials plugin), not username — username kept as optional display handle
 -- email_verified/image: better-auth core fields wired on, added migration 0006 — same
 -- unused-but-required-by-the-library situation as auth_user.image above.

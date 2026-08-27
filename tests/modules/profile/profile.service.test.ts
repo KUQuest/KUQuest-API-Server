@@ -133,13 +133,13 @@ beforeAll(async () => {
     .values(
       createdTags.flatMap(({ id }, tagIndex) =>
         Array.from({ length: tagFrequency[tagIndex]! }, () => ({
-          giverId: studentB,
+          hirerId: studentB,
           title: `Completed quest ${randomUUID()}`,
           description: null,
           condition: 'Complete the Quest',
-          mode: 'FIRST_COME_FIRST_SERVED' as const,
-          participation: 'SINGLE' as const,
-          questStatus: 'COMPLETED' as const,
+          mode: 'NO_CANDIDATE' as const,
+          participation: 'SOLO' as const,
+          questStatus: 'QUEST_COMPLETED' as const,
           rewardSatang: 10_000,
           tagId: id,
           headcount: 1,
@@ -155,8 +155,8 @@ beforeAll(async () => {
   await db.insert(questAssignment).values(
     profileQuestIds.map((questId) => ({
       questId,
-      hunterId: studentA,
-      assignmentStatus: 'COMPLETED' as const,
+      workerId: studentA,
+      assignmentStatus: 'ASSIGNMENT_COMPLETED' as const,
     })),
   );
 });
@@ -272,17 +272,17 @@ describe('reading a profile', () => {
   it('ignores incomplete assignments and assignments owned by another Student', async () => {
     await db
       .update(questAssignment)
-      .set({ assignmentStatus: 'INCOMPLETE' })
+      .set({ assignmentStatus: 'ASSIGNMENT_INCOMPLETE' })
       .where(
         and(
           eq(questAssignment.questId, profileQuestIds[3]!),
-          eq(questAssignment.hunterId, studentA),
+          eq(questAssignment.workerId, studentA),
         ),
       );
     await db.insert(questAssignment).values({
       questId: profileQuestIds[3]!,
-      hunterId: studentB,
-      assignmentStatus: 'COMPLETED',
+      workerId: studentB,
+      assignmentStatus: 'ASSIGNMENT_COMPLETED',
     });
 
     const tags = (await getProfile(studentA))?.tags ?? [];

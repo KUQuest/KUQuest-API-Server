@@ -1,0 +1,4 @@
+ALTER TABLE "quest_direct_join_commands" ADD COLUMN "result_assignment_status" varchar(32);--> statement-breakpoint
+ALTER TABLE "quest_direct_join_commands" ADD COLUMN "result_started_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "quest_direct_join_commands" ADD COLUMN "result_created_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "quest_direct_join_commands" ADD CONSTRAINT "quest_direct_join_commands_result_check" CHECK ("quest_direct_join_commands"."processing_status" = 'PROCESSING' OR ("quest_direct_join_commands"."assignment_id" IS NOT NULL AND "quest_direct_join_commands"."result_assignment_status" IS NOT NULL AND "quest_direct_join_commands"."result_created_at" IS NOT NULL AND "quest_direct_join_commands"."result_quest_status" IS NOT NULL));

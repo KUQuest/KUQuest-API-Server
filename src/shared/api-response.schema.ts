@@ -15,7 +15,7 @@ export const apiErrorSchema = t.Object({
 
 export const betterAuthSecurity = [{ betterAuthSession: [] }];
 
-type ErrorCode = 400 | 401 | 404 | 409 | 413 | 415 | 500 | 502;
+type ErrorCode = 400 | 401 | 403 | 404 | 409 | 413 | 415 | 500 | 502 | 503;
 type ResponseOptions = { successStatus?: 200 | 202 };
 
 export const responses = <T>(

@@ -23,8 +23,8 @@ import {
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 
-const createStudent = async (prefix: string) => {
-  const id = `${prefix}-${crypto.randomUUID()}`;
+const createStudent = async (_prefix: string) => {
+  const id = crypto.randomUUID();
   await db.insert(authUser).values({
     id,
     email: `${id}@ku.th`,
@@ -197,10 +197,10 @@ describe('Earnings Conversion service', () => {
     expect(conversions).toHaveLength(1);
   });
 
-  it('keeps deterministic business references distinct for delimiter-bearing identities', async () => {
+  it('keeps deterministic business references distinct for delimiter-bearing keys', async () => {
     const suffix = crypto.randomUUID();
-    const firstId = `be110-reference:${suffix}:a`;
-    const secondId = `be110-reference:${suffix}`;
+    const firstId = crypto.randomUUID();
+    const secondId = crypto.randomUUID();
     await db.insert(authUser).values([
       { id: firstId, email: `be110-reference-a-${suffix}@ku.th`, firstName: 'First', lastName: 'Reference' },
       { id: secondId, email: `be110-reference-b-${suffix}@ku.th`, firstName: 'Second', lastName: 'Reference' },
@@ -211,8 +211,8 @@ describe('Earnings Conversion service', () => {
     await creditEarnings(secondWallet.id, 500, `be110-credit-b-${suffix}`);
 
     const [first, second] = await Promise.all([
-      convertEarnings(earningsConversionInput(firstId, 125, 'b')),
-      convertEarnings(earningsConversionInput(secondId, 125, 'a:b')),
+      convertEarnings(earningsConversionInput(firstId, 125, 'b:a')),
+      convertEarnings(earningsConversionInput(secondId, 125, 'b:a')),
     ]);
 
     expect(first.businessReference).not.toBe(second.businessReference);

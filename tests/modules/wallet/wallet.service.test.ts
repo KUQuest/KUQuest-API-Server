@@ -26,7 +26,7 @@ import {
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 
-const studentId = `be109-${crypto.randomUUID()}`;
+const studentId = crypto.randomUUID();
 
 const getWalletAccountId = async (
   userId: string,
@@ -92,7 +92,7 @@ describe('Wallet provisioning service', () => {
       reservedForPayoutsSatang: 0,
     });
 
-    const studentWithoutWallet = `be109-no-wallet-${crypto.randomUUID()}`;
+    const studentWithoutWallet = crypto.randomUUID();
     await db.insert(authUser).values({
       id: studentWithoutWallet,
       email: `${studentWithoutWallet}@ku.th`,
