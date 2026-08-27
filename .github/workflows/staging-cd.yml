@@ -358,6 +358,7 @@ jobs:
         shell: bash
         env:
           STAGING_ADMIN_SEED_ENABLED: ${{ secrets.STAGING_ADMIN_SEED_ENABLED }}
+          APP_IMAGE: ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
 
@@ -425,7 +426,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
             deploy@"$STAGING_SERVER" \
-            "cd /opt/backend && docker compose run --rm --no-deps --env-from-file '$SEED_DIR/.env.seed' --volume '$SEED_DIR:/app/seed:ro' --workdir /app/seed api bun scripts/seed-admin.ts" \
+            "cd /opt/backend && APP_IMAGE='$APP_IMAGE' docker compose run --rm --no-deps --env-from-file '$SEED_DIR/.env.seed' --volume '$SEED_DIR:/app/seed:ro' --workdir /app/seed api bun scripts/seed-admin.ts" \
             > "$RUNNER_TEMP/admin-seed-output.log" 2>&1
           SEED_STATUS=$?
           set -e
