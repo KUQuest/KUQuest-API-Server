@@ -249,6 +249,7 @@ Staging CD starts only after a successful Backend CI run for a push to
 request into `develop` to trigger staging deployment.
 Changing protected staging secrets alone does not start a deployment; merge a
 new `develop` change after rotating them.
+This deployment trigger verifies the rotated staging test-auth and Admin-seed flags.
 
 ## Database commands
 
