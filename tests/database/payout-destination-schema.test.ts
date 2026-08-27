@@ -18,6 +18,7 @@ describe('Payout Destination database schema', () => {
     expect(destinationColumns).toHaveProperty('routingValueNonce');
     expect(destinationColumns).toHaveProperty('routingValueCiphertext');
     expect(destinationColumns).toHaveProperty('routingValueAuthTag');
+    expect(destinationColumns).toHaveProperty('maskedRoutingValue');
 
     expect(payoutColumns).not.toHaveProperty('destinationAccountNumber');
     expect(payoutColumns).not.toHaveProperty('destinationRoutingValue');

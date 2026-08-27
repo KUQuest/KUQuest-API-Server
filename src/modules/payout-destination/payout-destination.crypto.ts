@@ -61,7 +61,7 @@ const keyBytes = (material: PayoutDestinationKeyMaterial): Buffer => {
   return bytes;
 };
 
-const keyFor = (
+const getEncryptionKeyForVersion = (
   keys: ReadonlyMap<string, PayoutDestinationKeyMaterial>,
   version: string,
 ): Buffer => {
@@ -91,7 +91,7 @@ export const createPayoutDestinationEncryption = (
     encrypt: (plaintext) => {
       let key: Buffer;
       try {
-        key = keyFor(keys, activeKeyVersion);
+        key = getEncryptionKeyForVersion(keys, activeKeyVersion);
       } catch (error) {
         if (error instanceof PayoutDestinationEncryptionError) {
           if (error.code === 'PAYOUT_DESTINATION_KEY_VERSION_UNKNOWN') {
@@ -127,7 +127,7 @@ export const createPayoutDestinationEncryption = (
       }
     },
     decrypt: (encrypted) => {
-      const key = keyFor(keys, encrypted.keyVersion);
+      const key = getEncryptionKeyForVersion(keys, encrypted.keyVersion);
 
       try {
         const nonce = Buffer.from(encrypted.nonce, 'base64url');

@@ -1,6 +1,11 @@
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { paymentPayoutAccounts } from '@/database/schema/payment.schema';
+import {
+  paymentPayoutAccounts,
+  paymentPayoutQuotes,
+  paymentPayouts,
+} from '@/database/schema/payment.schema';
+import { paymentMoneyPolicyRevision, walletLedgerTransaction } from '@/database/schema/wallet.schema';
 import {
   createPayoutDestinationEncryption,
   getPayoutDestination,
@@ -8,12 +13,14 @@ import {
   savePayoutDestination,
 } from '@/modules/payout-destination';
 import { getPayoutDestinationForProvider } from '@/modules/payout-destination/payout-destination.provider';
+import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { and, eq, isNull } from 'drizzle-orm';
 
 const studentA = `be114-a-${crypto.randomUUID()}`;
 const studentB = `be114-b-${crypto.randomUUID()}`;
+const crossOwnerPayoutReference = `be114-cross-owner-payout-${crypto.randomUUID()}`;
 const encryption = createPayoutDestinationEncryption({
   activeKeyVersion: 'v1',
   keys: { v1: 'a'.repeat(32) },
@@ -31,11 +38,12 @@ const destinationInput = (principalUserId: string, suffix = '') => ({
   accountNumber: `123456789${suffix ? '1' : '0'}`,
   accountHolderName: 'Payout Student',
   routingType: 'BANK_ACCOUNT' as const,
-  routingValue: `routing-${suffix || 'one'}`,
+  routingValue: '1234567890',
 });
 
 beforeAll(async () => {
   await sql`select 1`;
+  await ensureInitialMoneyPolicy();
   await db.insert(authUser).values([
     { id: studentA, email: `${studentA}@ku.th`, firstName: 'Payout', lastName: 'A' },
     { id: studentB, email: `${studentB}@ku.th`, firstName: 'Payout', lastName: 'B' },
@@ -43,6 +51,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db.delete(paymentPayouts).where(eq(paymentPayouts.userId, studentA));
+  await db.delete(paymentPayoutQuotes).where(eq(paymentPayoutQuotes.userId, studentA));
+  await db.delete(paymentPayoutQuotes).where(eq(paymentPayoutQuotes.userId, studentB));
   await db.delete(paymentPayoutAccounts).where(eq(paymentPayoutAccounts.userId, studentA));
   await db.delete(paymentPayoutAccounts).where(eq(paymentPayoutAccounts.userId, studentB));
   await db.delete(authUser).where(eq(authUser.id, studentA));
@@ -58,6 +69,7 @@ describe('Payout Destination application services', () => {
       recipientType: 'SELF',
       routingType: 'BANK_ACCOUNT',
       maskedLastFour: '7890',
+      maskedRoutingValue: '****7890',
       retiredAt: null,
     });
     expect(created).not.toHaveProperty('accountNumber');
@@ -69,7 +81,7 @@ describe('Payout Destination application services', () => {
       .where(eq(paymentPayoutAccounts.id, created.id));
     expect(stored).toBeDefined();
     expect(stored?.accountNumberCiphertext).not.toBe('1234567890');
-    expect(stored?.routingValueCiphertext).not.toBe('routing-one');
+    expect(stored?.routingValueCiphertext).not.toBe('1234567890');
     expect(stored).not.toHaveProperty('accountNumber');
     expect(stored).not.toHaveProperty('routingValue');
 
@@ -77,7 +89,7 @@ describe('Payout Destination application services', () => {
     expect(await getPayoutDestinationForProvider(studentA, created.id, encryption)).toMatchObject({
       id: created.id,
       accountNumber: '1234567890',
-      routingValue: 'routing-one',
+      routingValue: '1234567890',
     });
   });
 
@@ -206,5 +218,101 @@ describe('Payout Destination application services', () => {
       ...destinationInput(studentA, 'foreign'),
       accountCountry: 'SG',
     }, encryption)).rejects.toMatchObject({ code: 'PAYOUT_DESTINATION_INVALID' });
+
+    await expect(savePayoutDestination({
+      ...destinationInput(studentA, 'unsupported-bank'),
+      bankCode: 'UNKNOWN_BANK',
+    }, encryption)).rejects.toMatchObject({ code: 'PAYOUT_DESTINATION_INVALID' });
+
+    await expect(savePayoutDestination({
+      ...destinationInput(studentA, 'invalid-promptpay'),
+      bankCode: 'PROMPTPAY',
+      routingType: 'PROMPTPAY',
+      routingValue: 'not-a-promptpay-value',
+    }, encryption)).rejects.toMatchObject({ code: 'PAYOUT_DESTINATION_INVALID' });
+
+    await expect(savePayoutDestination({
+      ...destinationInput(studentA, 'wrong-relationship'),
+      relationship: 'FRIEND',
+    }, encryption)).rejects.toMatchObject({ code: 'PAYOUT_DESTINATION_INVALID' });
+  });
+
+  it('rejects cross-Student Payout Quote and Payout relationships in PostgreSQL', async () => {
+    const destination = await savePayoutDestination(destinationInput(studentB, 'owner'), encryption);
+    const [policy] = await db
+      .select({ id: paymentMoneyPolicyRevision.id })
+      .from(paymentMoneyPolicyRevision)
+      .where(eq(paymentMoneyPolicyRevision.revision, 1));
+    if (!policy) throw new Error('Missing initial Money Policy');
+
+    await expect(db.insert(paymentPayoutQuotes).values({
+      userId: studentA,
+      payoutAccountId: destination.id,
+      policyRevisionId: policy.id,
+      receiptBaht: 100n,
+      maximumFeeBaht: 0n,
+      maximumTaxBaht: 0n,
+      maximumDebitBaht: 100n,
+      quotedFeeSatang: 0n,
+      quotedTaxSatang: 0n,
+      quotedDebitSatang: 100n,
+      expiresAt: new Date(Date.now() + 60_000),
+    }).execute()).rejects.toThrow();
+
+    const [quote] = await db.insert(paymentPayoutQuotes).values({
+      userId: studentB,
+      payoutAccountId: destination.id,
+      policyRevisionId: policy.id,
+      receiptBaht: 100n,
+      maximumFeeBaht: 0n,
+      maximumTaxBaht: 0n,
+      maximumDebitBaht: 100n,
+      quotedFeeSatang: 0n,
+      quotedTaxSatang: 0n,
+      quotedDebitSatang: 100n,
+      expiresAt: new Date(Date.now() + 60_000),
+    }).returning();
+
+    const accountNumber = encryption.encrypt('1234567890');
+    const routingValue = encryption.encrypt('1234567890');
+    await db.insert(walletLedgerTransaction).values({
+      businessReference: crossOwnerPayoutReference,
+      eventType: 'PAYOUT',
+    });
+    const [ledgerTransaction] = await db
+      .select({ id: walletLedgerTransaction.id })
+      .from(walletLedgerTransaction)
+      .where(eq(walletLedgerTransaction.businessReference, crossOwnerPayoutReference));
+
+    await expect(db.insert(paymentPayouts).values({
+      userId: studentA,
+      quoteId: quote.id,
+      payoutAccountId: destination.id,
+      destinationRecipientType: 'SELF',
+      destinationGivenName: 'Payout',
+      destinationSurname: 'Student',
+      destinationRelationship: 'SELF',
+      destinationAccountCountry: 'TH',
+      destinationAccountCurrency: 'THB',
+      destinationBankCode: 'KBANK',
+      destinationAccountNumberKeyVersion: accountNumber.keyVersion,
+      destinationAccountNumberNonce: accountNumber.nonce,
+      destinationAccountNumberCiphertext: accountNumber.ciphertext,
+      destinationAccountNumberAuthTag: accountNumber.authTag,
+      destinationAccountHolderName: 'Payout Student',
+      destinationRoutingType: 'BANK_ACCOUNT',
+      destinationRoutingValueKeyVersion: routingValue.keyVersion,
+      destinationRoutingValueNonce: routingValue.nonce,
+      destinationRoutingValueCiphertext: routingValue.ciphertext,
+      destinationRoutingValueAuthTag: routingValue.authTag,
+      provider: 'TEST',
+      principalBaht: 100n,
+      maximumFeeBaht: 0n,
+      maximumTaxBaht: 0n,
+      maximumDebitBaht: 100n,
+      currency: 'THB',
+      payoutStatus: 'CREATING',
+      reserveLedgerTransactionId: ledgerTransaction.id,
+    }).execute()).rejects.toThrow();
   });
 });

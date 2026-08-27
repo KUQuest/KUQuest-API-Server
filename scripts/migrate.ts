@@ -1,4 +1,4 @@
-import { createPayoutDestinationEncryption } from '../src/modules/payout-destination/payout-destination.crypto';
+import { createPayoutDestinationEncryption } from '@/modules/payout-destination/payout-destination.crypto';
 
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -19,13 +19,7 @@ type LegacySchemaState = {
   payout: boolean;
 };
 
-type LegacyAccountRow = {
-  id: string;
-  accountNumber: string;
-  routingValue: string;
-};
-
-type LegacyPayoutRow = {
+type LegacySecretRow = {
   id: string;
   accountNumber: string;
   routingValue: string;
@@ -111,14 +105,14 @@ const finalizeLegacySecrets = async (): Promise<void> => {
       LOCK TABLE payment_payout_accounts, payment_payouts IN ACCESS EXCLUSIVE MODE
     `;
 
-    const accounts = await transaction<LegacyAccountRow[]>`
+    const accounts = await transaction<LegacySecretRow[]>`
       SELECT
         id,
         account_number AS "accountNumber",
         routing_value AS "routingValue"
       FROM payment_payout_accounts
     `;
-    const payouts = await transaction<LegacyPayoutRow[]>`
+    const payouts = await transaction<LegacySecretRow[]>`
       SELECT
         id,
         destination_account_number AS "accountNumber",

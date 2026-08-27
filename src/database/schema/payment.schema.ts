@@ -162,6 +162,7 @@ export const paymentPayoutAccounts = pgTable(
     routingValueCiphertext: text('routing_value_ciphertext').notNull(),
     routingValueAuthTag: text('routing_value_auth_tag').notNull(),
     maskedLastFour: text('masked_last_four').notNull(),
+    maskedRoutingValue: text('masked_routing_value').notNull().default('****'),
     createdAt: time('created_at').defaultNow().notNull(),
     retiredAt: time('retired_at'),
   },

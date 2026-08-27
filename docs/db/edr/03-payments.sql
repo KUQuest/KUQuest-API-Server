@@ -124,6 +124,7 @@ CREATE TABLE payment_payout_accounts (
   routing_value_ciphertext TEXT NOT NULL,
   routing_value_auth_tag TEXT NOT NULL,
   masked_last_four    TEXT NOT NULL,
+  masked_routing_value TEXT NOT NULL DEFAULT '****',
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   retired_at          TIMESTAMPTZ,
   CHECK (account_country = 'TH' AND account_currency = 'THB'),
