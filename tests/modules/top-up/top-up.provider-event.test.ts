@@ -90,9 +90,32 @@ describe('Top-up Provider event parsing', () => {
     expect(event.providerAmountSatang).toBe(positiveSatang(100));
   });
 
+  it('maps a successful refund webhook to a reversal without crediting a Top-up', () => {
+    const event = parseTopUpProviderEvent(JSON.stringify({
+      event: 'refund.succeeded',
+      data: {
+        event: 'refund.succeeded',
+        data: {
+          payment_request_id: 'pr-refund',
+          reference_id: 'top-up:refund',
+          status: 'SUCCEEDED',
+          amount: 1,
+        },
+      },
+    }));
+
+    expect(event).toMatchObject({
+      eventType: 'refund.succeeded',
+      providerReference: 'pr-refund',
+      normalizedStatus: 'FAILED',
+      providerAmountSatang: positiveSatang(100),
+      providerApiVersion: null,
+    });
+  });
+
   it('rejects unsupported Provider event types and currencies', () => {
     expect(() => parseTopUpProviderEvent(JSON.stringify({
-      event: 'refund.succeeded',
+      event: 'payment.refund',
       data: {
         payment_request_id: 'pr-refund',
         reference_id: 'top-up:refund',

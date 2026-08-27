@@ -15,7 +15,7 @@ export type ParsedTopUpProviderEvent = {
   resourceType: 'TOP_UP';
   internalReference: string | null;
   providerReference: string | null;
-  providerApiVersion: string;
+  providerApiVersion: string | null;
   providerStatus: string;
   normalizedStatus: TopUpOutcomeStatus;
   providerAmountSatang: Satang | null;
@@ -129,7 +129,7 @@ export const normalizeTopUpOutcomeStatus = (providerStatus: string): TopUpOutcom
   return 'PENDING';
 };
 
-export const isTopUpProviderReversal = (providerStatus: string): boolean => [
+export const isTopUpProviderReversal = (providerStatus: string, eventType?: string): boolean => eventType === 'refund.succeeded' || [
   'REVERSED',
   'REFUNDED',
   'REFUND',
@@ -143,6 +143,8 @@ const supportedProviderEventTypes = [
   'payment.failure',
   'payment.expiry',
   'payment_request.expiry',
+  'refund.succeeded',
+  'refund.failed',
 ] as const;
 
 export const parseTopUpProviderEvent = (
@@ -164,7 +166,8 @@ export const parseTopUpProviderEvent = (
 
   const payload = asObject(parsed);
   if (!payload) throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payload must be a JSON object.');
-  const data = asObject(payload.data) ?? payload;
+  const payloadData = asObject(payload.data);
+  const data = asObject(payloadData?.data) ?? payloadData ?? payload;
   const canonicalPayload = canonicalizeProviderPayload(parsed);
   const payloadHash = providerPayloadHash(canonicalPayload);
   const eventType = firstText(payload.event, payload.event_type, data.event_type);
@@ -215,7 +218,9 @@ export const parseTopUpProviderEvent = (
     : [];
   const capturedAmountSatang = captures.length > 0 ? parseProviderCaptureAmount(captures) : null;
   const providerAmount = capturedAmountSatang ?? data.request_amount ?? data.amount ?? data.paid_amount ?? payload.request_amount ?? payload.amount;
-  const normalizedStatus = normalizeTopUpOutcomeStatus(providerStatus);
+  const normalizedStatus = eventType === 'refund.succeeded'
+    ? 'FAILED'
+    : normalizeTopUpOutcomeStatus(providerStatus);
   const providerAmountSatang = providerAmount === undefined || providerAmount === null
     ? null
     : capturedAmountSatang ?? parseProviderAmount(providerAmount);
@@ -223,7 +228,7 @@ export const parseTopUpProviderEvent = (
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'A paid Provider event must include an amount.');
   }
 
-  const providerApiVersion = firstText(data.api_version, payload.api_version) ?? '2024-11-11';
+  const providerApiVersion = firstText(data.api_version, payload.api_version);
   const providerOccurredAt = parseProviderDate(
     data.updated_at ?? data.updated ?? data.created_at ?? data.created ?? payload.created_at ?? payload.created,
     receivedAt,

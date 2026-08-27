@@ -87,10 +87,11 @@ const eventPayload = (input: {
   providerReference: string;
   status: string;
   amount?: number;
+  event?: string;
   updatedAt?: string;
 }) => JSON.stringify({
   event_id: input.eventId,
-  event: input.status === 'FAILED' ? 'payment.failure' : 'payment.capture',
+  event: input.event ?? (input.status === 'FAILED' ? 'payment.failure' : 'payment.capture'),
   data: {
     reference_id: input.internalReference,
     payment_request_id: input.providerReference,
@@ -227,7 +228,9 @@ describe('Top-up Provider event application services', () => {
       eventId: `be116-reversed-${crypto.randomUUID()}`,
       internalReference: topUp.internalReference,
       providerReference: topUp.providerReference!,
-      status: 'REVERSED',
+      event: 'refund.succeeded',
+      status: 'SUCCEEDED',
+      amount: topUp.paymentTotalSatang / 100,
     }));
     await processTopUpProviderEvent(reversed.id);
 

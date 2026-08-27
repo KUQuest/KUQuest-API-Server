@@ -367,7 +367,7 @@ const topUpForEvent = async (
   return topUp;
 };
 
-type TopUpOutcomeFacts = Pick<ParsedTopUpProviderEvent, 'internalReference' | 'providerReference' | 'providerApiVersion' | 'providerStatus' | 'normalizedStatus' | 'providerAmountSatang' | 'providerChannelCode' | 'providerOccurredAt'>;
+type TopUpOutcomeFacts = Pick<ParsedTopUpProviderEvent, 'eventType' | 'internalReference' | 'providerReference' | 'providerApiVersion' | 'providerStatus' | 'normalizedStatus' | 'providerAmountSatang' | 'providerChannelCode' | 'providerOccurredAt'>;
 
 const accountIdsForTopUp = async (transaction: WalletTransaction, walletId: string) => {
   const accounts = await transaction
@@ -436,14 +436,14 @@ const applyTopUpOutcomeInTransaction = async (
 
   const baseUpdate = {
     providerReference,
-    providerApiVersion: facts.providerApiVersion,
+    providerApiVersion: facts.providerApiVersion ?? topUp.providerApiVersion,
     providerStatus: facts.providerStatus,
     providerAmountSatang: facts.providerAmountSatang ?? topUp.providerAmountSatang,
     providerChannelCode: facts.providerChannelCode ?? topUp.providerChannelCode,
     updatedAt: new Date(),
   };
   if (topUp.topUpStatus !== 'PENDING') {
-    if (topUp.topUpStatus === 'PAID' && isTopUpProviderReversal(facts.providerStatus)) {
+    if (topUp.topUpStatus === 'PAID' && isTopUpProviderReversal(facts.providerStatus, facts.eventType)) {
       await reversePaidTopUpInTransaction(transaction, topUp);
     }
     return topUp;
@@ -510,7 +510,8 @@ const completeClaimedEvent = async (eventId: string) => db.transaction(async (tr
   await applyTopUpOutcomeInTransaction(transaction, {
     internalReference: event.internalReference,
     providerReference: event.providerReference,
-    providerApiVersion: event.providerApiVersion ?? '2024-11-11',
+    eventType: event.eventType,
+    providerApiVersion: event.providerApiVersion,
     providerStatus: event.providerStatus,
     normalizedStatus: event.normalizedStatus as TopUpOutcomeStatus,
     providerAmountSatang: event.providerAmountSatang === null ? null : positiveSatang(event.providerAmountSatang),
@@ -636,6 +637,7 @@ export const reconcileTopUp = async (
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider reconciliation returned a different payment reference.');
   }
   await db.transaction((transaction) => applyTopUpOutcomeInTransaction(transaction, {
+    eventType: 'payment.capture',
     internalReference: record.internalReference,
     providerReference: outcome.providerReference,
     providerApiVersion: outcome.providerApiVersion,
