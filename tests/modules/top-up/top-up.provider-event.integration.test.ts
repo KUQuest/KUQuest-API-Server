@@ -3,6 +3,7 @@ import { authUser } from '@/database/schema/auth.schema';
 import {
   paymentProviderEventHistory,
   paymentProviderEventInbox,
+  paymentTopUp,
   paymentTopUpStatusHistory,
 } from '@/database/schema/payment.schema';
 import {
@@ -13,6 +14,7 @@ import {
   createProviderEventEncryption,
   getTopUp,
   initiateTopUp,
+  claimTopUpProviderEvents,
   listTopUpProviderEventHistory,
   processTopUpProviderEvent,
   purgeExpiredProviderEventPayloads,
@@ -155,6 +157,28 @@ describe('Top-up Provider event application services', () => {
     ]);
   });
 
+  it('does not duplicate a ledger credit when workers process one event concurrently', async () => {
+    const { userId, topUp } = await createPendingTopUp('be116-concurrent-process');
+    const event = await receive(eventPayload({
+      eventId: `be116-concurrent-${crypto.randomUUID()}`,
+      internalReference: topUp.internalReference,
+      providerReference: topUp.providerReference!,
+      status: 'SUCCEEDED',
+      amount: topUp.paymentTotalSatang / 100,
+    }));
+
+    const results = await Promise.allSettled([
+      processTopUpProviderEvent(event.id),
+      processTopUpProviderEvent(event.id),
+    ]);
+
+    expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
+    expect(await getTopUp(userId, topUp.id)).toMatchObject({ topUpStatus: 'PAID' });
+    expect(await db.select().from(walletLedgerTransaction).where(
+      eq(walletLedgerTransaction.businessReference, `top-up-credit:${topUp.id}`),
+    )).toHaveLength(1);
+  });
+
   it('does not regress a terminal Top-up when events arrive out of order', async () => {
     const { userId, topUp } = await createPendingTopUp('be116-order');
     const failed = await receive(eventPayload({
@@ -287,6 +311,54 @@ describe('Top-up Provider event application services', () => {
     )).toHaveLength(6);
   });
 
+  it('recovers stale claims and moves exhausted events to the dead-letter state', async () => {
+    const now = new Date('2026-08-27T00:10:00.000Z');
+    const staleClaimedAt = new Date('2026-08-27T00:00:00.000Z');
+    const staleEvent = await receive(eventPayload({
+      eventId: `be116-stale-${crypto.randomUUID()}`,
+      internalReference: `missing-${crypto.randomUUID()}`,
+      providerReference: `missing-provider-${crypto.randomUUID()}`,
+      status: 'REQUIRES_ACTION',
+    }));
+
+    await db.update(paymentProviderEventInbox)
+      .set({ processingStatus: 'PROCESSING', attemptCount: 1, claimedAt: staleClaimedAt })
+      .where(eq(paymentProviderEventInbox.id, staleEvent.id));
+
+    await expect(processTopUpProviderEvent(staleEvent.id, now)).rejects.toMatchObject({
+      code: 'PROVIDER_EVENT_NOT_FOUND',
+    });
+    const [recovered] = await db.select().from(paymentProviderEventInbox)
+      .where(eq(paymentProviderEventInbox.id, staleEvent.id));
+    expect(recovered).toMatchObject({ processingStatus: 'RETRYABLE', attemptCount: 2 });
+
+    const deadEvent = await receive(eventPayload({
+      eventId: `be116-dead-${crypto.randomUUID()}`,
+      internalReference: `missing-${crypto.randomUUID()}`,
+      providerReference: `missing-provider-${crypto.randomUUID()}`,
+      status: 'REQUIRES_ACTION',
+    }));
+    await db.update(paymentProviderEventInbox)
+      .set({ processingStatus: 'PROCESSING', attemptCount: 5, claimedAt: staleClaimedAt })
+      .where(eq(paymentProviderEventInbox.id, deadEvent.id));
+
+    await expect(claimTopUpProviderEvents({ now })).resolves.toEqual([]);
+    const [dead] = await db.select().from(paymentProviderEventInbox)
+      .where(eq(paymentProviderEventInbox.id, deadEvent.id));
+    expect(dead).toMatchObject({
+      processingStatus: 'DEAD_LETTER',
+      attemptCount: 5,
+      claimedAt: null,
+      lastError: 'PROVIDER_EVENT_MAX_ATTEMPTS',
+    });
+    const history = await listTopUpProviderEventHistory(deadEvent.id);
+    expect(history[history.length - 1]).toMatchObject({
+      fromStatus: 'PROCESSING',
+      toStatus: 'DEAD_LETTER',
+      error: 'PROVIDER_EVENT_MAX_ATTEMPTS',
+    });
+  });
+
   it('reconciles an uncertain Top-up through the Provider status adapter', async () => {
     const { userId, topUp } = await createPendingTopUp('be116-reconcile');
     let request: InboundPaymentStatusRequest | undefined;
@@ -314,6 +386,39 @@ describe('Top-up Provider event application services', () => {
     expect(reconciled).toMatchObject({ topUpStatus: 'PAID' });
     expect(await getWallet(userId)).toMatchObject({
       spendingBalanceSatang: topUp.creditSatang,
+    });
+  });
+
+  it('reconciles an uncertain Top-up by internal reference when Provider reference is missing', async () => {
+    const { userId, topUp } = await createPendingTopUp('be116-reconcile-by-internal-reference');
+    await db.update(paymentTopUp)
+      .set({ providerReference: null })
+      .where(eq(paymentTopUp.id, topUp.id));
+    let request: InboundPaymentStatusRequest | undefined;
+    const provider: InboundPaymentReconciliationProvider = {
+      getPaymentStatus: async (input): Promise<InboundPaymentStatusResponse> => {
+        request = input;
+        return {
+          providerReference: 'be116-recovered-provider-reference',
+          providerStatus: 'SUCCEEDED',
+          normalizedStatus: 'PAID',
+          providerAmountSatang: topUp.paymentTotalSatang,
+          providerApiVersion: 'test-v1',
+          providerChannelCode: 'QRPROMPTPAY',
+          occurredAt: new Date('2026-08-27T00:00:00.000Z'),
+        };
+      },
+    };
+
+    const reconciled = await reconcileTopUp(userId, topUp.id, provider);
+    expect(request).toMatchObject({
+      providerReference: null,
+      internalReference: topUp.internalReference,
+      expectedPaymentTotalSatang: topUp.paymentTotalSatang,
+    });
+    expect(reconciled).toMatchObject({
+      topUpStatus: 'PAID',
+      providerReference: 'be116-recovered-provider-reference',
     });
   });
 });

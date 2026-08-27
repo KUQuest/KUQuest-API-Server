@@ -124,6 +124,41 @@ describe('Xendit PromptPay provider', () => {
     });
   });
 
+  it('reconciles by internal reference when the Provider reference is unknown', async () => {
+    let requestUrl = '';
+    const provider = new XenditPromptPayProvider({
+      secretKey: 'test-secret',
+      baseUrl: 'https://xendit.test',
+      fetcher: async (input) => {
+        requestUrl = input.toString();
+        return new Response(JSON.stringify({
+          data: [{
+            payment_request_id: 'pr-recovered-request',
+            reference_id: 'top-up:recovered-reference',
+            request_amount: 1.23,
+            status: 'SUCCEEDED',
+            channel_code: 'QRPROMPTPAY',
+            updated: '2026-08-27T00:00:00.000Z',
+          }],
+        }), { status: 200 });
+      },
+    });
+
+    const result = await provider.getPaymentStatus({
+      providerReference: null,
+      internalReference: 'top-up:recovered-reference',
+      expectedPaymentTotalSatang: positiveSatang(123),
+    });
+
+    expect(requestUrl).toBe('https://xendit.test/v3/payment_requests?reference_id=top-up%3Arecovered-reference&limit=2');
+    expect(result).toMatchObject({
+      providerReference: 'pr-recovered-request',
+      providerStatus: 'SUCCEEDED',
+      normalizedStatus: 'PAID',
+      providerAmountSatang: positiveSatang(123),
+    });
+  });
+
   it('maps a successful response without a provider amount to an uncertain result', async () => {
     const provider = new XenditPromptPayProvider({
       secretKey: 'test-secret',

@@ -88,6 +88,7 @@ export type TopUpProviderEvent = {
 
 export type ReceiveTopUpProviderEventInput = {
   rawPayload: string;
+  providerEventId?: string;
   callbackToken?: string;
   webhookToken?: string;
   receivedAt?: Date;
@@ -181,7 +182,7 @@ export const receiveTopUpProviderEvent = async (
 ): Promise<TopUpProviderEvent> => {
   assertXenditWebhookToken(input.callbackToken, input.webhookToken ?? env.xenditWebhookToken);
   const receivedAt = assertDate(input.receivedAt ?? new Date());
-  const parsed = parseTopUpProviderEvent(input.rawPayload, receivedAt);
+  const parsed = parseTopUpProviderEvent(input.rawPayload, receivedAt, input.providerEventId);
   const rawPayloadExpiresAt = new Date(receivedAt.getTime() + providerEventRawPayloadRetentionMs);
 
   return db.transaction(async (transaction) => {
@@ -469,7 +470,7 @@ const applyTopUpOutcomeInTransaction = async (
       businessReference: `top-up-credit:${topUp.id}`,
       eventType: 'TOP_UP',
       createdByUserId: topUp.userId,
-      description: 'Credit confirmed Top-up to Spending Balance',
+      description: 'Apply confirmed Top-up to Spending Balance',
       postings: [
         { accountId: spendingId, amountSatang: signedSatang(topUp.creditSatang) },
         { accountId: suspenseId, amountSatang: signedSatang(-topUp.creditSatang) },
@@ -630,13 +631,12 @@ export const reconcileTopUp = async (
     .from(paymentTopUp)
     .where(and(eq(paymentTopUp.id, topUpId), eq(paymentTopUp.userId, principalUserId)));
   if (!record) throw new MoneyDomainError('TOP_UP_NOT_FOUND', 'Top-up does not exist.');
-  if (!record.providerReference) throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Top-up has no Provider reference.');
   const outcome: InboundPaymentStatusResponse = await provider.getPaymentStatus({
     providerReference: record.providerReference,
     internalReference: record.internalReference,
     expectedPaymentTotalSatang: positiveSatang(record.paymentTotalSatang),
   });
-  if (outcome.providerReference !== record.providerReference) {
+  if (record.providerReference && outcome.providerReference !== record.providerReference) {
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider reconciliation returned a different payment reference.');
   }
   await db.transaction((transaction) => applyTopUpOutcomeInTransaction(transaction, {

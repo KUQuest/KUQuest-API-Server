@@ -57,7 +57,7 @@ export type InboundPaymentResponse = {
 };
 
 export type InboundPaymentStatusRequest = {
-  providerReference: string;
+  providerReference: string | null;
   internalReference: string;
   expectedPaymentTotalSatang: Satang;
 };
@@ -325,7 +325,9 @@ export class XenditPromptPayProvider implements InboundPaymentProvider, InboundP
     let response: Response;
     try {
       response = await this.fetcher(
-        `${this.baseUrl}/v3/payment_requests/${encodeURIComponent(input.providerReference)}`,
+        input.providerReference
+          ? `${this.baseUrl}/v3/payment_requests/${encodeURIComponent(input.providerReference)}`
+          : `${this.baseUrl}/v3/payment_requests?reference_id=${encodeURIComponent(input.internalReference)}&limit=2`,
         {
           method: 'GET',
           headers: {
@@ -358,19 +360,32 @@ export class XenditPromptPayProvider implements InboundPaymentProvider, InboundP
     }
     if (!payload) throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an invalid response.');
 
-    const providerReference = asText(payload.payment_request_id) ?? asText(payload.id);
-    const providerStatus = asText(payload.status);
+    let paymentRequest = payload;
+    if (!input.providerReference) {
+      const paymentRequests = Array.isArray(payload.data)
+        ? payload.data
+          .map(asObject)
+          .filter((value): value is JsonObject => value !== null)
+        : [];
+      if (paymentRequests.length !== 1) {
+        throw this.error('PROVIDER_UNCERTAIN', 'Xendit did not return one Payment Request for the internal reference.');
+      }
+      paymentRequest = paymentRequests[0]!;
+    }
+
+    const providerReference = asText(paymentRequest.payment_request_id) ?? asText(paymentRequest.id);
+    const providerStatus = asText(paymentRequest.status);
     if (!providerReference || !providerStatus) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an incomplete payment status.');
     }
-    if (providerReference !== input.providerReference) {
+    if (input.providerReference && providerReference !== input.providerReference) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different payment reference.');
     }
-    if (payload.reference_id !== undefined && payload.reference_id !== input.internalReference) {
+    if (paymentRequest.reference_id !== undefined && paymentRequest.reference_id !== input.internalReference) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different internal reference.');
     }
 
-    const amountValue = payload.request_amount ?? payload.amount ?? payload.paid_amount;
+    const amountValue = paymentRequest.request_amount ?? paymentRequest.amount ?? paymentRequest.paid_amount;
     let providerAmountSatang: Satang | null = null;
     if (amountValue !== undefined && amountValue !== null) {
       try {
@@ -389,7 +404,7 @@ export class XenditPromptPayProvider implements InboundPaymentProvider, InboundP
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit did not return the confirmed payment amount.');
     }
 
-    const occurredAtText = asText(payload.updated_at) ?? asText(payload.updated) ?? asText(payload.created_at) ?? asText(payload.created);
+    const occurredAtText = asText(paymentRequest.updated_at) ?? asText(paymentRequest.updated) ?? asText(paymentRequest.created_at) ?? asText(paymentRequest.created);
     const occurredAt = occurredAtText ? new Date(occurredAtText) : new Date();
     if (Number.isNaN(occurredAt.getTime())) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an invalid payment timestamp.');
@@ -400,7 +415,7 @@ export class XenditPromptPayProvider implements InboundPaymentProvider, InboundP
       normalizedStatus: normalizeTopUpOutcomeStatus(providerStatus),
       providerAmountSatang,
       providerApiVersion: this.apiVersion,
-      providerChannelCode: asText(payload.channel_code),
+      providerChannelCode: asText(paymentRequest.channel_code),
       occurredAt,
     };
   }

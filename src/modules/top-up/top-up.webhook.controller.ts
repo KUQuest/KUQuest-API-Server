@@ -37,6 +37,7 @@ export const receiveTopUpWebhookController = async ({
   try {
     await receiveTopUpProviderEvent({
       rawPayload: await request.text(),
+      providerEventId: request.headers.get('webhook-id') ?? undefined,
       callbackToken: request.headers.get('x-callback-token') ?? undefined,
     });
     set.status = 202;

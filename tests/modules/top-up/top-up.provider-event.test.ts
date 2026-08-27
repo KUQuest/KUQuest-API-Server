@@ -55,6 +55,18 @@ describe('Top-up Provider event parsing', () => {
       },
     }))).toThrow(ProviderEventError);
   });
+
+  it('rejects an event without a Provider Event ID', () => {
+    expect(() => parseTopUpProviderEvent(JSON.stringify({
+      event: 'payment_request.succeeded',
+      data: {
+        payment_request_id: 'pr-3',
+        reference_id: 'top-up:top-up-3',
+        status: 'SUCCEEDED',
+        request_amount: 1,
+      },
+    }))).toThrow('Provider event identifier is required.');
+  });
 });
 
 describe('Provider event payload encryption', () => {

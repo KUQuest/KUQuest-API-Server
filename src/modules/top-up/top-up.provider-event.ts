@@ -127,6 +127,7 @@ export const isTopUpProviderReversal = (providerStatus: string): boolean => [
 export const parseTopUpProviderEvent = (
   rawPayload: string,
   receivedAt = new Date(),
+  providerEventId?: string,
 ): ParsedTopUpProviderEvent => {
   const rawPayloadBytes = new TextEncoder().encode(rawPayload).byteLength;
   if (rawPayloadBytes === 0 || rawPayloadBytes > maxRawPayloadBytes) {
@@ -176,7 +177,10 @@ export const parseTopUpProviderEvent = (
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'A paid Provider event must include an amount.');
   }
 
-  const providerEventId = firstText(payload.event_id, payload.id, data.event_id) ?? payloadHash;
+  const resolvedProviderEventId = firstText(providerEventId, payload.event_id, payload.id, data.event_id);
+  if (!resolvedProviderEventId) {
+    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event identifier is required.');
+  }
   const eventType = firstText(payload.event, payload.event_type, data.event_type) ?? 'payment.status';
   const providerApiVersion = firstText(data.api_version, payload.api_version) ?? '2024-11-11';
   const providerChannelCode = firstText(data.channel_code, payload.channel_code);
@@ -187,7 +191,7 @@ export const parseTopUpProviderEvent = (
 
   return {
     provider: 'XENDIT',
-    providerEventId,
+    providerEventId: resolvedProviderEventId,
     eventType,
     resourceType: 'TOP_UP',
     internalReference,
