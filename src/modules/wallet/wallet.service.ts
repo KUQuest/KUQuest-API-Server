@@ -121,7 +121,11 @@ export const ensureWalletInTransaction = async (transaction: WalletTransaction, 
 
   if (!student) throw new MoneyDomainError('STUDENT_NOT_FOUND', 'Student does not exist.');
 
-  await transaction.insert(walletWallet).values({ userId }).onConflictDoNothing({ target: walletWallet.userId });
+  const [createdWallet] = await transaction
+    .insert(walletWallet)
+    .values({ userId })
+    .onConflictDoNothing({ target: walletWallet.userId })
+    .returning({ id: walletWallet.id });
 
   const [wallet] = await transaction
     .select()
@@ -140,10 +144,11 @@ export const ensureWalletInTransaction = async (transaction: WalletTransaction, 
     })))
     .onConflictDoNothing({ target: walletLedgerAccount.code });
 
-  await transaction
-    .insert(walletStatusHistory)
-    .values({ walletId: wallet.id, toStatus: 'ACTIVE', reason: 'Wallet provisioned' })
-    .onConflictDoNothing();
+  if (createdWallet) {
+    await transaction
+      .insert(walletStatusHistory)
+      .values({ walletId: wallet.id, toStatus: 'ACTIVE', reason: 'Wallet provisioned' });
+  }
 
   await transaction
     .insert(walletLedgerAccount)
