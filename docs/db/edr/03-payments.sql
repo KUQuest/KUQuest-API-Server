@@ -111,8 +111,11 @@ CREATE TABLE payment_provider_event_inbox (
   provider_reference    TEXT,
   provider_api_version  TEXT,
   provider_status       TEXT NOT NULL,
-  normalized_status     TEXT NOT NULL CHECK (normalized_status IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED')),
+  normalized_status     TEXT NOT NULL CHECK (normalized_status IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED', 'COMPLETED', 'CANCELLED')),
   provider_amount_satang INTEGER CHECK (provider_amount_satang IS NULL OR provider_amount_satang > 0),
+  provider_actual_fee_satang INTEGER,
+  provider_actual_tax_satang INTEGER,
+  provider_actual_debit_satang INTEGER,
   provider_channel_code TEXT,
   provider_occurred_at  TIMESTAMPTZ NOT NULL,
   payload_hash          TEXT NOT NULL,
@@ -129,6 +132,8 @@ CREATE TABLE payment_provider_event_inbox (
   received_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (provider, provider_event_id),
+  CHECK (num_nonnulls(provider_actual_fee_satang, provider_actual_tax_satang, provider_actual_debit_satang) IN (0, 3)),
+  CHECK (provider_actual_fee_satang IS NULL OR (provider_actual_fee_satang >= 0 AND provider_actual_tax_satang >= 0 AND provider_actual_debit_satang = provider_amount_satang + provider_actual_fee_satang + provider_actual_tax_satang)),
   CHECK (num_nonnulls(raw_payload_key_version, raw_payload_nonce, raw_payload_ciphertext, raw_payload_auth_tag) IN (0, 4))
 );
 CREATE INDEX payment_provider_event_inbox_processing_idx ON payment_provider_event_inbox (processing_status, received_at);

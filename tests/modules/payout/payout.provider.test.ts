@@ -46,6 +46,65 @@ const response = (body: unknown, status = 200) => new Response(JSON.stringify(bo
 });
 
 describe('Xendit Payout provider', () => {
+  it('fetches and normalizes the current Payout state for reconciliation', async () => {
+    let called: { url: string; init?: RequestInit } | undefined;
+    const provider = new XenditPayoutProvider({
+      secretKey: 'xnd_test_secret',
+      fetcher: async (url, init) => {
+        called = { url, init };
+        return response({
+          payout_id: 'po-reconcile-123',
+          reference_id: request.internalReference,
+          status: 'SUCCEEDED',
+          source_currency: 'THB',
+          source_amount: 12_345,
+          fee: 10,
+          tax: 5,
+          updated: '2026-08-27T00:01:00.000Z',
+        });
+      },
+      baseUrl: 'https://xendit.test',
+    });
+
+    const result = await provider.getPayoutStatus({
+      providerReference: 'po-reconcile-123',
+      internalReference: request.internalReference,
+      expectedPrincipalSatang: positiveSatang(12_345),
+      maximumDebitSatang: positiveSatang(12_400),
+    });
+
+    expect(called?.url).toBe('https://xendit.test/v3/payouts/po-reconcile-123');
+    expect(called?.init?.method).toBe('GET');
+    expect(result).toMatchObject({
+      providerReference: 'po-reconcile-123',
+      normalizedStatus: 'COMPLETED',
+      providerAmountSatang: 12_345,
+      actualFeeSatang: 10,
+      actualTaxSatang: 5,
+      actualDebitSatang: 12_360,
+    });
+  });
+
+  it('keeps a Provider failure as a normal reconciliation result', async () => {
+    const provider = new XenditPayoutProvider({
+      secretKey: 'xnd_test_secret',
+      fetcher: async () => response({
+        payout_id: 'po-reconcile-failed',
+        reference_id: request.internalReference,
+        status: 'FAILED',
+        source_currency: 'THB',
+        source_amount: 12_345,
+      }),
+    });
+
+    await expect(provider.getPayoutStatus({
+      providerReference: 'po-reconcile-failed',
+      internalReference: request.internalReference,
+      expectedPrincipalSatang: positiveSatang(12_345),
+      maximumDebitSatang: positiveSatang(12_345),
+    })).resolves.toMatchObject({ normalizedStatus: 'FAILED' });
+  });
+
   it('sends the current v2 request with THB conversion and stable idempotency', async () => {
     let called: { url: string; init?: RequestInit } | undefined;
     const fetcher: Fetcher = async (url, init) => {
