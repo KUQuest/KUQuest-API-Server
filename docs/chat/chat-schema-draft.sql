@@ -148,7 +148,6 @@ CREATE TABLE public.chat_message (
   kind public.chat_message_kind NOT NULL,
   sender_membership_id uuid,
   client_message_id varchar(128),
-  content_hash varchar(64),
   content_text text,
   system_type text,
   system_payload jsonb,
@@ -171,18 +170,12 @@ CREATE TABLE public.chat_message (
     CHECK (sequence > 0),
   CONSTRAINT chat_message_content_text_check
     CHECK (content_text IS NULL OR btrim(content_text) <> ''),
-  CONSTRAINT chat_message_content_hash_check
-    CHECK (
-      content_hash IS NULL
-      OR content_hash ~ '^[0-9a-f]{64}$'
-    ),
   CONSTRAINT chat_message_kind_fields_check
     CHECK (
       (
         kind = 'USER'::public.chat_message_kind
         AND client_message_id IS NOT NULL
         AND btrim(client_message_id) <> ''
-        AND content_hash IS NOT NULL
         AND event_id IS NULL
         AND system_type IS NULL
         AND system_payload IS NULL
@@ -190,7 +183,6 @@ CREATE TABLE public.chat_message (
       OR (
         kind = 'SYSTEM'::public.chat_message_kind
         AND client_message_id IS NULL
-        AND content_hash IS NULL
         AND event_id IS NOT NULL
         AND btrim(event_id) <> ''
         AND system_type IS NOT NULL
@@ -212,15 +204,14 @@ COMMENT ON TABLE public.chat_message IS
   'Immutable ordered Message record, except for retention and soft-delete updates.';
 COMMENT ON COLUMN public.chat_message.sequence IS
   'Strictly increasing server-assigned position inside one Conversation. Gaps after rollback are allowed.';
-COMMENT ON COLUMN public.chat_message.content_hash IS
-  'SHA-256 lowercase hexadecimal hash of the canonical User Message text and ordered Attachment IDs.';
 COMMENT ON COLUMN public.chat_message.system_payload IS
   'Structured event data for a System Message. The Service owns the event protocol.';
 COMMENT ON COLUMN public.chat_message.sender_membership_id IS
   'Nullable for anonymized former Members. New User Messages require a current sender Membership in the Service.';
 
 -- A retry with the same Member, Conversation, and clientMessageId finds the
--- original Message. Soft-deleted rows remain in this key space.
+-- original Message. Soft-deleted rows remain in this key space. Payload
+-- comparison, if required, is a Service rule.
 CREATE UNIQUE INDEX chat_message_client_message_id_uidx
   ON public.chat_message (conversation_id, sender_membership_id, client_message_id)
   WHERE kind = 'USER'::public.chat_message_kind;
@@ -247,7 +238,6 @@ CREATE TABLE public.chat_attachment (
   original_filename text NOT NULL,
   mime_type text NOT NULL,
   size_bytes bigint NOT NULL,
-  sha256 varchar(64) NOT NULL,
   expires_at timestamptz,
   validated_at timestamptz,
   rejected_at timestamptz,
@@ -277,8 +267,6 @@ CREATE TABLE public.chat_attachment (
     CHECK (btrim(mime_type) <> ''),
   CONSTRAINT chat_attachment_size_check
     CHECK (size_bytes > 0),
-  CONSTRAINT chat_attachment_sha256_check
-    CHECK (sha256 ~ '^[0-9a-f]{64}$'),
   CONSTRAINT chat_attachment_initial_file_check
     CHECK (
       status NOT IN (
@@ -375,6 +363,7 @@ CREATE TABLE public.chat_read_cursor (
   conversation_id uuid NOT NULL,
   membership_id uuid NOT NULL,
   last_read_sequence bigint NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT chat_read_cursor_pk
