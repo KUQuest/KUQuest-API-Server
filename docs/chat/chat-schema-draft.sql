@@ -163,9 +163,9 @@ CREATE TABLE public.chat_message (
     REFERENCES public.chat_conversation (id)
     ON DELETE RESTRICT,
   CONSTRAINT chat_message_sender_membership_fk
-    FOREIGN KEY (sender_membership_id)
-    REFERENCES public.chat_membership (id)
-    ON DELETE SET NULL,
+    FOREIGN KEY (conversation_id, sender_membership_id)
+    REFERENCES public.chat_membership (conversation_id, id)
+    ON DELETE SET NULL (sender_membership_id),
   CONSTRAINT chat_message_sequence_check
     CHECK (sequence > 0),
   CONSTRAINT chat_message_content_text_check
@@ -174,6 +174,7 @@ CREATE TABLE public.chat_message (
     CHECK (
       (
         kind = 'USER'::public.chat_message_kind
+        AND sender_membership_id IS NOT NULL
         AND client_message_id IS NOT NULL
         AND btrim(client_message_id) <> ''
         AND event_id IS NULL
@@ -209,11 +210,11 @@ COMMENT ON COLUMN public.chat_message.system_payload IS
 COMMENT ON COLUMN public.chat_message.sender_membership_id IS
   'Nullable for anonymized former Members. New User Messages require a current sender Membership in the Service.';
 
--- A retry with the same Member, Conversation, and clientMessageId finds the
--- original Message. Soft-deleted rows remain in this key space. Payload
--- comparison, if required, is a Service rule.
+-- A retry with the same Chat Membership and clientMessageId finds the original
+-- Message. Soft-deleted rows remain in this key space. Payload comparison, if
+-- required, is a Service rule.
 CREATE UNIQUE INDEX chat_message_client_message_id_uidx
-  ON public.chat_message (conversation_id, sender_membership_id, client_message_id)
+  ON public.chat_message (sender_membership_id, client_message_id)
   WHERE kind = 'USER'::public.chat_message_kind;
 
 -- event_id is a global System Message identity. A repeated lifecycle event
@@ -252,10 +253,10 @@ CREATE TABLE public.chat_attachment (
     FOREIGN KEY (conversation_id)
     REFERENCES public.chat_conversation (id)
     ON DELETE RESTRICT,
-  CONSTRAINT chat_attachment_uploaded_by_member_fk
-    FOREIGN KEY (uploaded_by_member_id)
-    REFERENCES public.auth_user (id)
-    ON DELETE SET NULL,
+  CONSTRAINT chat_attachment_uploaded_by_membership_fk
+    FOREIGN KEY (conversation_id, uploaded_by_member_id)
+    REFERENCES public.chat_membership (conversation_id, id)
+    ON DELETE SET NULL (uploaded_by_member_id),
   CONSTRAINT chat_attachment_file_fk
     FOREIGN KEY (file_id)
     REFERENCES public.file (id)
@@ -313,6 +314,8 @@ CREATE TABLE public.chat_attachment (
 
 COMMENT ON TABLE public.chat_attachment IS
   'Private Attachment intended for one Work Conversation. Basic file validation is represented by VALIDATED.';
+COMMENT ON COLUMN public.chat_attachment.uploaded_by_member_id IS
+  'Chat Membership that created the Attachment. The composite foreign key keeps the uploader in this Work Conversation.';
 COMMENT ON COLUMN public.chat_attachment.file_id IS
   'NULL until validation. A File may be reused by creating a new Attachment, while each Attachment is linked to one Message at most.';
 COMMENT ON COLUMN public.chat_attachment.expires_at IS
@@ -385,12 +388,11 @@ COMMENT ON COLUMN public.chat_read_cursor.last_read_sequence IS
   'Furthest acknowledged Conversation sequence. The Service only moves it forward.';
 
 -- Service invariants intentionally left outside CHECK constraints:
---   * A new USER Message must have sender_membership_id and text or at least
---     one Message Attachment. A maximum of five Attachments is represented by
---     the position check above.
+--   * A new USER Message must have text or at least one Message Attachment. A
+--     maximum of five Attachments is represented by the position check above.
 --   * Message and Attachment conversation_id values must match.
 --   * A Message Attachment must be created only for a VALIDATED, unused
---     Attachment uploaded by the same Member.
+--     Attachment uploaded by the same Chat Membership as the User Message.
 --   * Sharing a File creates a new Chat Attachment. A Chat Attachment is linked
 --     to one Message at most.
 --   * A Read Cursor update must not lower last_read_sequence and must target a
