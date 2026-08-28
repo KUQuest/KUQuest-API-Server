@@ -39,7 +39,7 @@ CREATE TABLE public.chat_conversation (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   quest_id uuid NOT NULL,
   quest_title varchar(200) NOT NULL,
-  quest_status text NOT NULL,
+  quest_status varchar(50) NOT NULL,
   next_sequence bigint NOT NULL DEFAULT 1,
   read_only_at timestamptz,
   archived_at timestamptz,
@@ -76,7 +76,7 @@ COMMENT ON TABLE public.chat_conversation IS
 COMMENT ON COLUMN public.chat_conversation.quest_title IS
   'Quest title snapshot. It is not a live replacement for quest.title.';
 COMMENT ON COLUMN public.chat_conversation.quest_status IS
-  'Quest status snapshot stored as text so historical values do not depend on the Quest enum.';
+  'Quest status snapshot stored as a bounded varchar so historical values do not depend on the Quest enum.';
 COMMENT ON COLUMN public.chat_conversation.next_sequence IS
   'Next Conversation sequence to reserve. The Service increments it in the Message transaction.';
 COMMENT ON COLUMN public.chat_conversation.latest_terminal_at IS
@@ -148,10 +148,10 @@ CREATE TABLE public.chat_message (
   kind public.chat_message_kind NOT NULL,
   sender_membership_id uuid,
   client_message_id varchar(128),
-  content_text text,
-  system_type text,
+  content_text varchar(4000),
+  system_type varchar(100),
   system_payload jsonb,
-  event_id text,
+  event_id varchar(255),
   deleted_at timestamptz,
   retention_eligible_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -236,8 +236,8 @@ CREATE TABLE public.chat_attachment (
   uploaded_by_member_id uuid,
   file_id uuid,
   status public.chat_attachment_status NOT NULL DEFAULT 'QUARANTINED',
-  original_filename text NOT NULL,
-  mime_type text NOT NULL,
+  original_filename varchar(255) NOT NULL,
+  mime_type varchar(255) NOT NULL,
   size_bytes bigint NOT NULL,
   expires_at timestamptz,
   validated_at timestamptz,
