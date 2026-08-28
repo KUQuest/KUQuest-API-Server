@@ -260,7 +260,6 @@ CREATE TABLE public.chat_attachment (
     FOREIGN KEY (file_id)
     REFERENCES public.file (id)
     ON DELETE RESTRICT,
-  CONSTRAINT chat_attachment_file_id_key UNIQUE (file_id),
   CONSTRAINT chat_attachment_filename_check
     CHECK (btrim(original_filename) <> ''),
   CONSTRAINT chat_attachment_mime_type_check
@@ -315,7 +314,7 @@ CREATE TABLE public.chat_attachment (
 COMMENT ON TABLE public.chat_attachment IS
   'Private Attachment intended for one Work Conversation. Basic file validation is represented by VALIDATED.';
 COMMENT ON COLUMN public.chat_attachment.file_id IS
-  'NULL until the Attachment passes basic validation and receives a private file row.';
+  'NULL until validation. A File may be reused by creating a new Attachment, while each Attachment is linked to one Message at most.';
 COMMENT ON COLUMN public.chat_attachment.expires_at IS
   'Expiry deadline for an unconsumed upload. The retention worker owns later cleanup.';
 COMMENT ON COLUMN public.chat_attachment.rejection_reason IS
@@ -323,6 +322,10 @@ COMMENT ON COLUMN public.chat_attachment.rejection_reason IS
 
 CREATE INDEX chat_attachment_conversation_created_idx
   ON public.chat_attachment (conversation_id, created_at DESC);
+
+CREATE INDEX chat_attachment_file_idx
+  ON public.chat_attachment (file_id)
+  WHERE file_id IS NOT NULL;
 
 CREATE INDEX chat_attachment_status_expiry_idx
   ON public.chat_attachment (status, expires_at)
@@ -388,6 +391,8 @@ COMMENT ON COLUMN public.chat_read_cursor.last_read_sequence IS
 --   * Message and Attachment conversation_id values must match.
 --   * A Message Attachment must be created only for a VALIDATED, unused
 --     Attachment uploaded by the same Member.
+--   * Sharing a File creates a new Chat Attachment. A Chat Attachment is linked
+--     to one Message at most.
 --   * A Read Cursor update must not lower last_read_sequence and must target a
 --     Message visible in the caller's Work Membership Window.
 --   * Access queries must apply the inclusive joined_at/left_at visibility
