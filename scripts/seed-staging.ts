@@ -22,8 +22,14 @@ const main = async (): Promise<void> => {
   if (process.env.STAGING_FINANCE_SEED_ENABLED !== 'true') {
     throw new Error('Set STAGING_FINANCE_SEED_ENABLED=true to load the staging seed data.');
   }
-  if (process.env.NODE_ENV !== 'development' && process.env.DEPLOYMENT_ENV !== 'staging') {
-    throw new Error('The staging seed is allowed only in development or staging.');
+  const isDevelopmentSeed =
+    process.env.NODE_ENV === 'development' && process.env.DEPLOYMENT_ENV === 'development';
+  const isStagingSeed =
+    process.env.NODE_ENV === 'production' && process.env.DEPLOYMENT_ENV === 'staging';
+  if (!isDevelopmentSeed && !isStagingSeed) {
+    throw new Error(
+      'The staging seed is allowed only in development/development or production/staging.',
+    );
   }
 
   for (const command of seedCommands) {

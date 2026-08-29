@@ -24,6 +24,12 @@ read_database_url() {
   printf '%s' "$value"
 }
 
+read_environment_value() {
+  local name=$1
+
+  sed -n "s/^${name}=//p" "$environment_file" | tail -n 1
+}
+
 backup_contents_are_valid() {
   local backup_name=$1
 
@@ -141,6 +147,9 @@ prepare_operation() {
   [[ -n "${APP_IMAGE:-}" ]] || fail 'APP_IMAGE is required'
   [[ -f "$environment_file" ]] ||
     fail "environment file does not exist: $environment_file"
+
+  [[ "$(read_environment_value DEPLOYMENT_ENV)" == 'staging' ]] ||
+    fail "DEPLOYMENT_ENV=staging is required in $environment_file"
 
   cd "$staging_dir"
   export APP_IMAGE

@@ -26,7 +26,7 @@ const createFixture = async () => {
   await mkdir(backupDirectory);
   await writeFile(
     join(directory, '.env'),
-    'DATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\n',
+    'DEPLOYMENT_ENV=staging\nDATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\n',
   );
   await writeFile(
     join(binaryDirectory, 'docker'),
@@ -420,6 +420,28 @@ test('bootstrap reports its recovery backup when seed verification fails', async
     expect(result.exitCode).toBe(1);
     expect(output).toContain('Bootstrap failed; restore from');
     expect(output).toContain(fixture.backupDirectory);
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('staging operations refuse a non-staging environment file', async () => {
+  const fixture = await createFixture();
+
+  try {
+    await writeFile(
+      join(fixture.directory, '.env'),
+      'DEPLOYMENT_ENV=production\nDATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\n',
+    );
+    const result = runStagingOperation(fixture, 'bootstrap', {
+      input: 'RESET staging public schema\n',
+    });
+    const output = `${result.stdout.toString()}${result.stderr.toString()}`;
+    const commands = await readFile(fixture.dockerLog, 'utf8').catch(() => '');
+
+    expect(result.exitCode).toBe(1);
+    expect(output).toContain('DEPLOYMENT_ENV=staging is required');
+    expect(commands).not.toContain('DROP SCHEMA');
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }
