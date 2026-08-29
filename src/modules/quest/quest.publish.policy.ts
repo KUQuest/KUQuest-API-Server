@@ -19,6 +19,8 @@ export type QuestPublishSnapshot = {
   rewardSatang: number;
   headcount: number;
   platformFeeBps: number;
+  policyRevisionId?: string;
+  policyRevision?: number;
   now: Date;
 };
 
@@ -26,6 +28,11 @@ export type QuestPublishCheck = {
   blockingReasons: QuestPublishReason[];
   warnings: QuestPublishReason[];
   escrowRequirement: number;
+  escrowRequirementSatang: number;
+  platformFeeBps: number;
+  platformFeePerWorkerSatang: number;
+  policyRevisionId?: string;
+  policyRevision?: number;
   canPublish: boolean;
 };
 
@@ -39,7 +46,10 @@ export const calculateQuestEscrowRequirementSatang = (
   snapshot: QuestPublishSnapshot,
 ): Satang => {
   const rewardSatang = satang(snapshot.rewardSatang);
-  const rewardTotalSatang = satang(snapshot.rewardSatang * snapshot.headcount);
+  let rewardTotalSatang = satang(0);
+  for (let slot = 0; slot < snapshot.headcount; slot += 1) {
+    rewardTotalSatang = addSatang(rewardTotalSatang, rewardSatang);
+  }
   const platformFeePerWorkerSatang = calculatePlatformFeeSatang(
     rewardSatang,
     snapshot.platformFeeBps,
@@ -93,10 +103,21 @@ export const buildQuestPublishCheck = (
     });
   }
 
+  const escrowRequirementSatang = calculateQuestEscrowRequirementSatang(snapshot);
+  const platformFeePerWorkerSatang = calculatePlatformFeeSatang(
+    satang(snapshot.rewardSatang),
+    snapshot.platformFeeBps,
+  );
+
   return {
     blockingReasons,
     warnings,
-    escrowRequirement: Math.trunc(calculateQuestEscrowRequirementSatang(snapshot) / 100),
+    escrowRequirement: Math.trunc(escrowRequirementSatang / 100),
+    escrowRequirementSatang,
+    platformFeeBps: snapshot.platformFeeBps,
+    platformFeePerWorkerSatang,
+    ...(snapshot.policyRevisionId ? { policyRevisionId: snapshot.policyRevisionId } : {}),
+    ...(snapshot.policyRevision !== undefined ? { policyRevision: snapshot.policyRevision } : {}),
     canPublish: blockingReasons.length === 0,
   };
 };

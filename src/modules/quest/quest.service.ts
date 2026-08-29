@@ -60,7 +60,15 @@ type QuestPublishRow = {
 };
 
 export type QuestPublishOutcome =
-  | { outcome: 'published' }
+  | {
+      outcome: 'published';
+      reservationId: string;
+      policyRevisionId: string;
+      policyRevision: number;
+      platformFeeBps: number;
+      platformFeePerWorkerSatang: number;
+      questEscrowSatang: number;
+    }
   | { outcome: 'not-draft' }
   | { outcome: 'blocked'; check: QuestPublishCheck };
 
@@ -790,6 +798,9 @@ export const editQuest = async (
     const eligibility = await getQuestEditEligibility(transaction, userId, questId);
     if ('outcome' in eligibility) return eligibility;
     if (Object.keys(data).length === 0) return { outcome: 'empty-edit' };
+    if (Object.keys(data).some((field) => coreEditFields.has(field))) {
+      return { outcome: 'forbidden-fields' };
+    }
 
     const current = eligibility.quest;
     const history: QuestEditHistoryValue[] = [];
@@ -1290,6 +1301,8 @@ const buildPublishSnapshot = async (
     rewardSatang: row.rewardSatang,
     headcount: row.headcount,
     platformFeeBps: policy.platformFeeBps,
+    policyRevisionId: policy.id,
+    policyRevision: policy.revision,
     now: new Date(),
   };
 };
@@ -1324,7 +1337,7 @@ export const publishQuest = async (
     const check = buildQuestPublishCheck(snapshot);
     if (!check.canPublish) return { outcome: 'blocked', check };
 
-    await reserveSpending(transaction, {
+    const reservation = await reserveSpending(transaction, {
       ownerUserId: userId,
       callerScope: 'quest',
       callerReference: questId,
@@ -1333,7 +1346,15 @@ export const publishQuest = async (
 
     const [updated] = await transaction
       .update(quest)
-      .set({ questStatus: questStatus.open, updatedAt: new Date() })
+      .set({
+        questStatus: questStatus.open,
+        fundingReservationId: reservation.id,
+        policyRevisionId: snapshot.policyRevisionId,
+        platformFeeBps: snapshot.platformFeeBps,
+        platformFeePerWorkerSatang: Number(check.platformFeePerWorkerSatang),
+        questEscrowSatang: Number(check.escrowRequirementSatang),
+        updatedAt: new Date(),
+      })
       .where(
         and(
           eq(quest.id, questId),
@@ -1343,5 +1364,15 @@ export const publishQuest = async (
       )
       .returning({ id: quest.id });
 
-    return updated ? { outcome: 'published' } : { outcome: 'not-draft' };
+    return updated
+      ? {
+          outcome: 'published',
+          reservationId: reservation.id,
+          policyRevisionId: snapshot.policyRevisionId!,
+          policyRevision: snapshot.policyRevision!,
+          platformFeeBps: snapshot.platformFeeBps,
+          platformFeePerWorkerSatang: Number(check.platformFeePerWorkerSatang),
+          questEscrowSatang: Number(check.escrowRequirementSatang),
+        }
+      : { outcome: 'not-draft' };
   });

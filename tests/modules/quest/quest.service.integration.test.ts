@@ -256,6 +256,15 @@ describe('Quest persistence', () => {
     ]);
   });
 
+  it('rejects changes to core Quest commitments after publish', async () => {
+    const questId = await createFixture();
+    await openQuest(questId);
+
+    expect(await editQuest(hirerId, questId, { tagId: null })).toEqual({
+      outcome: 'forbidden-fields',
+    });
+  });
+
   it('rejects direct edits to a Draft Quest', async () => {
     const questId = await createFixture();
 
@@ -419,7 +428,7 @@ describe('Quest persistence', () => {
     await openQuest(questId);
 
     expect(await editQuest(hirerId, questId, { tagId: null })).toEqual({
-      outcome: 'tag-required',
+      outcome: 'forbidden-fields',
     });
   });
 
@@ -432,7 +441,7 @@ describe('Quest persistence', () => {
         title: 'Should not persist',
         tagId: randomUUID(),
       }),
-    ).toEqual({ outcome: 'tag-not-found' });
+    ).toEqual({ outcome: 'forbidden-fields' });
     expect((await getQuestDetail(hirerId, questId))?.title).toBe('Original title');
     expect(
       await db
@@ -456,7 +465,7 @@ describe('Quest persistence', () => {
     await openQuest(questId);
 
     expect(await editQuest(hirerId, questId, { tagId: randomUUID() })).toEqual({
-      outcome: 'tag-not-found',
+      outcome: 'forbidden-fields',
     });
   });
 });

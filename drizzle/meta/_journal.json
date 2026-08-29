@@ -260,6 +260,20 @@
       "when": 1787854630379,
       "tag": "0041_team_disbanded_status",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787983770706,
+      "tag": "0042_quest_finance_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787983947834,
+      "tag": "0043_quest_auto_cancel_command",
+      "breakpoints": true
     }
   ]
 }

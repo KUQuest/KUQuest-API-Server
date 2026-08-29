@@ -6,6 +6,7 @@ import { tag } from '@/database/schema/tag.schema';
 import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
 import { auth, adminAuth } from '@/modules/auth';
 import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
+import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import {
   createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
@@ -208,6 +209,76 @@ describe('Quest terminal settlement HTTP contract', () => {
     const after = (await db.select({ spending: walletWallet.spendingBalanceSatang, reserved: walletWallet.fundingReservedSatang }).from(walletWallet).where(eq(walletWallet.userId, hirerId)))[0];
     expect(after).toEqual(before);
     expect(await db.select().from(questSettlementCommand).where(eq(questSettlementCommand.commandId, 'be184-chat-failure'))).toHaveLength(0);
+  });
+
+  it('automatically cancels a partially filled GROUP Quest at its start boundary', async () => {
+    if (!postgresAvailable) return;
+
+    const questId = randomUUID();
+    questIds.push(questId);
+    const now = new Date('2026-08-29T12:00:00.000Z');
+    await db.insert(quest).values({
+      id: questId,
+      hirerId,
+      title: 'Unfilled group Quest',
+      condition: 'Complete the work',
+      mode: 'NO_CANDIDATE',
+      participation: 'GROUP',
+      questStatus: 'QUEST_OPEN',
+      rewardSatang: 1_000,
+      headcount: 2,
+      tagId,
+      startTime: new Date(now.getTime() - 1),
+      dueAt: new Date(now.getTime() + 60 * 60 * 1000),
+    });
+    await db.insert(questAssignment).values({
+      questId,
+      workerId: workerIds[0],
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    });
+    await db.transaction((transaction) => reserveSpending(transaction, {
+      ownerUserId: hirerId,
+      callerScope: 'quest',
+      callerReference: questId,
+      amountSatang: positiveSatang(2_040),
+    }));
+
+    const before = (await db.select({
+      spending: walletWallet.spendingBalanceSatang,
+      reserved: walletWallet.fundingReservedSatang,
+    }).from(walletWallet).where(eq(walletWallet.userId, hirerId)))[0];
+
+    const result = await runQuestLifecycleWorker({ clock: { now: () => now }, autoApprove: async () => [] });
+
+    expect(result.autoCancelledQuestIds).toContain(questId);
+    const [cancelled] = await db.select({
+      status: quest.questStatus,
+      cancelledByUserId: quest.cancelledByUserId,
+      cancelledByAdminId: quest.cancelledByAdminId,
+    }).from(quest).where(eq(quest.id, questId));
+    expect(cancelled).toEqual({
+      status: 'QUEST_CANCELLED',
+      cancelledByUserId: null,
+      cancelledByAdminId: null,
+    });
+    expect((await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment).where(eq(questAssignment.questId, questId)))[0]?.status).toBe('ASSIGNMENT_CANCELLED');
+    expect((await db.select({ status: questSettlementCommand.commandType, actorUserId: questSettlementCommand.actorUserId, actorAdminId: questSettlementCommand.actorAdminId }).from(questSettlementCommand).where(eq(questSettlementCommand.questId, questId)))[0]).toEqual({
+      status: 'AUTO_CANCEL',
+      actorUserId: null,
+      actorAdminId: null,
+    });
+    const after = (await db.select({
+      spending: walletWallet.spendingBalanceSatang,
+      reserved: walletWallet.fundingReservedSatang,
+    }).from(walletWallet).where(eq(walletWallet.userId, hirerId)))[0];
+    expect(after).toEqual(before && {
+      spending: before.spending + 2_040,
+      reserved: before.reserved - 2_040,
+    });
+
+    const replay = await runQuestLifecycleWorker({ clock: { now: () => now }, autoApprove: async () => [] });
+    expect(replay.autoCancelledQuestIds).not.toContain(questId);
+    expect(await db.select().from(questSettlementCommand).where(eq(questSettlementCommand.questId, questId))).toHaveLength(1);
   });
 
   it('requires a command key before authentication', async () => {

@@ -294,7 +294,25 @@ export const questPublishCheckResponseSchema = t.Object({
     blockingReasons: t.Array(questPublishReasonSchema),
     warnings: t.Array(questPublishReasonSchema),
     escrowRequirement: t.Integer({ minimum: 0 }),
+    escrowRequirementSatang: t.Integer({ minimum: 0 }),
+    platformFeeBps: t.Integer({ minimum: 0, maximum: 10000 }),
+    platformFeePerWorkerSatang: t.Integer({ minimum: 0 }),
+    policyRevisionId: t.Optional(t.String({ format: 'uuid' })),
+    policyRevision: t.Optional(t.Integer({ minimum: 1 })),
     canPublish: t.Boolean(),
+  }),
+});
+
+export const questPublishResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    outcome: t.Literal('published'),
+    reservationId: t.String({ format: 'uuid' }),
+    policyRevisionId: t.String({ format: 'uuid' }),
+    policyRevision: t.Integer({ minimum: 1 }),
+    platformFeeBps: t.Integer({ minimum: 0, maximum: 10000 }),
+    platformFeePerWorkerSatang: t.Integer({ minimum: 0 }),
+    questEscrowSatang: t.Integer({ minimum: 1 }),
   }),
 });
 

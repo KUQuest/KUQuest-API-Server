@@ -13,6 +13,7 @@ import { and, asc, eq, inArray, lte } from 'drizzle-orm';
 
 import { assignmentStatus, questMode, questParticipation, questStatus } from './quest.contract';
 import { autoApproveDueProofs } from './quest-proof.service';
+import { cancelUnfilledQuest } from './quest-settlement.service';
 import { expireQuestEditRequest } from './quest.service';
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -38,13 +39,14 @@ export type QuestLifecycleWorkerOptions = {
 };
 
 export type QuestLifecycleWorkerError = {
-  operation: 'start' | 'dispute' | 'invitation-expiry' | 'edit-timeout' | 'auto-approval';
+  operation: 'start' | 'auto-cancel' | 'dispute' | 'invitation-expiry' | 'edit-timeout' | 'auto-approval';
   id?: string;
   cause: unknown;
 };
 
 export type QuestLifecycleWorkerResult = {
   startedQuestIds: string[];
+  autoCancelledQuestIds: string[];
   disputedQuestIds: string[];
   timedOutEditRequestIds: string[];
   expiredInvitationIds: string[];
@@ -240,6 +242,13 @@ const dueQuestIds = async (now: Date, limit: number) => db
   .orderBy(asc(quest.dueAt), asc(quest.id))
   .limit(limit);
 
+const dueUnfilledQuestIds = async (now: Date, limit: number) => db
+  .select({ id: quest.id })
+  .from(quest)
+  .where(and(eq(quest.questStatus, questStatus.open), lte(quest.startTime, now)))
+  .orderBy(asc(quest.startTime), asc(quest.id))
+  .limit(limit);
+
 const pendingEditRequestIds = async (limit: number) => db
   .select({ id: questEditRequest.id })
   .from(questEditRequest)
@@ -267,6 +276,21 @@ export const startDueAssignedQuests = async (now = new Date(), limit = DEFAULT_B
     .limit(boundedSize(limit));
   const errors: QuestLifecycleWorkerError[] = [];
   return processIds(ids.map(({ id }) => id), 'start', (id) => startQuest(id, now), errors);
+};
+
+/** Cancel every due OPEN Quest that did not reach ASSIGNED. */
+export const cancelDueUnfilledQuests = async (now = new Date(), limit = DEFAULT_BATCH_SIZE) => {
+  const ids = await dueUnfilledQuestIds(now, boundedSize(limit));
+  const errors: QuestLifecycleWorkerError[] = [];
+  return processIds(
+    ids.map(({ id }) => id),
+    'auto-cancel',
+    async (id) => {
+      const result = await cancelUnfilledQuest(id, now);
+      return 'questStatus' in result && result.outcome === 'CANCELLED' && !result.replayed;
+    },
+    errors,
+  );
 };
 
 /** Dispute due Quests that still lack a proof or completion confirmation. */
@@ -319,6 +343,16 @@ export const runQuestLifecycleWorker = async (
     errors,
     options.onError,
   );
+  const autoCancelledQuestIds = await processIds(
+    (await dueUnfilledQuestIds(now, limit)).map(({ id }) => id),
+    'auto-cancel',
+    async (id) => {
+      const result = await cancelUnfilledQuest(id, now);
+      return 'questStatus' in result && result.outcome === 'CANCELLED' && !result.replayed;
+    },
+    errors,
+    options.onError,
+  );
   const disputedQuestIds = await processIds(
     (await dueQuestIds(now, limit)).map(({ id }) => id),
     'dispute',
@@ -334,7 +368,7 @@ export const runQuestLifecycleWorker = async (
     options.onError,
   );
 
-  return { startedQuestIds, disputedQuestIds, timedOutEditRequestIds, expiredInvitationIds, autoApprovedProofIds, errors };
+  return { startedQuestIds, autoCancelledQuestIds, disputedQuestIds, timedOutEditRequestIds, expiredInvitationIds, autoApprovedProofIds, errors };
 };
 
 export const runQuestLifecycle = runQuestLifecycleWorker;

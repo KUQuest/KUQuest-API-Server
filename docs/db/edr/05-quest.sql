@@ -68,6 +68,13 @@ CREATE TABLE quest (
   participation quest_participation NOT NULL DEFAULT 'SOLO',
   quest_status quest_status NOT NULL DEFAULT 'QUEST_DRAFT',
   reward_satang  INTEGER NOT NULL CHECK (reward_satang > 0),
+  -- Set at publish. These values freeze the Quest funding terms and identify
+  -- the Funding Reservation used by later settlement commands.
+  funding_reservation_id UUID UNIQUE REFERENCES wallet_funding_reservations(id),
+  policy_revision_id UUID REFERENCES payment_money_policy_revisions(id),
+  platform_fee_bps SMALLINT CHECK (platform_fee_bps IS NULL OR platform_fee_bps BETWEEN 0 AND 10000),
+  platform_fee_per_worker_satang INTEGER CHECK (platform_fee_per_worker_satang IS NULL OR platform_fee_per_worker_satang >= 0),
+  quest_escrow_satang INTEGER CHECK (quest_escrow_satang IS NULL OR quest_escrow_satang > 0),
   tag_id       UUID REFERENCES tag(id),
   headcount    INTEGER NOT NULL DEFAULT 1 CHECK (headcount > 0),
   start_time   TIMESTAMPTZ NOT NULL,
@@ -447,13 +454,15 @@ CREATE TABLE quest_settlement_commands (
   quest_id           UUID NOT NULL REFERENCES quest(id) ON DELETE CASCADE,
   actor_user_id      UUID REFERENCES auth_user(id),
   actor_admin_id     UUID REFERENCES auth_admin(id),
-  command_type       VARCHAR(32) NOT NULL CHECK (command_type IN ('COMPLETE', 'CANCEL', 'DISPUTE_REFUND', 'DISPUTE_RELEASE')),
+  command_type       VARCHAR(32) NOT NULL CHECK (command_type IN ('COMPLETE', 'CANCEL', 'DISPUTE_REFUND', 'DISPUTE_RELEASE', 'AUTO_CANCEL')),
   request_hash       VARCHAR(64) NOT NULL,
   result_data        JSONB,
   processing_status  VARCHAR(32) NOT NULL DEFAULT 'PROCESSING' CHECK (processing_status IN ('PROCESSING', 'COMPLETED')),
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   completed_at       TIMESTAMPTZ,
-  CHECK (num_nonnulls(actor_user_id, actor_admin_id) = 1),
+  -- AUTO_CANCEL is a system command and has no Hirer or Admin actor.
+  CHECK ((command_type = 'AUTO_CANCEL' AND num_nonnulls(actor_user_id, actor_admin_id) = 0)
+      OR (command_type <> 'AUTO_CANCEL' AND num_nonnulls(actor_user_id, actor_admin_id) = 1)),
   CHECK ((processing_status = 'COMPLETED') = (completed_at IS NOT NULL)),
   CHECK (processing_status = 'PROCESSING' OR result_data IS NOT NULL)
 );
@@ -483,10 +492,9 @@ CREATE INDEX quest_settlement_commands_quest_id_idx ON quest_settlement_commands
 --
 -- autoApproveDeadline: NOT stored (unlike old schema's snapshotted column).
 -- The SLA is a fixed function of quest.mode, not a versioned policy value:
--- NO_CANDIDATE quests must be reviewed within 1 hour of submitted_at, CANDIDATE
--- quests within 2 hours — past that, auto-approve. A derived proof deadline:
--- computed at read/worker time as submitted_at + (1h or 2h depending on
--- quest.mode), never snapshotted.
+-- Proof submissions and proof-free completion confirmations must be reviewed
+-- within 1 hour of submitted_at — past that, auto-approve. The derived deadline
+-- is computed at read/worker time as submitted_at + 1 hour, never snapshotted.
 --
 -- images: uses the existing file table via a junction table (proof_submission_image),
 -- same pattern as profile_portfolio_item_image, instead of old schema's raw

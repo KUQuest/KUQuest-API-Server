@@ -120,7 +120,7 @@ describe('Quest publishing service', () => {
   it('returns the publish preview for the Hirer', async () => {
     const questId = await createFixture();
 
-    expect(await getQuestPublishCheck(hirerId, questId)).toEqual({
+    expect(await getQuestPublishCheck(hirerId, questId)).toMatchObject({
       blockingReasons: [],
       warnings: [
         {
@@ -133,6 +133,9 @@ describe('Quest publishing service', () => {
         },
       ],
       escrowRequirement: 510,
+      escrowRequirementSatang: 51_000,
+      platformFeeBps: 200,
+      platformFeePerWorkerSatang: 1_000,
       canPublish: true,
     });
   });
@@ -145,7 +148,6 @@ describe('Quest publishing service', () => {
       .where(eq(quest.id, questId));
 
     const result = await publishQuest(hirerId, questId);
-
     expect(result).toMatchObject({
       outcome: 'blocked',
       check: {
@@ -177,7 +179,7 @@ describe('Quest publishing service', () => {
       .where(eq(walletWallet.userId, hirerId));
     const preview = await getQuestPublishCheck(hirerId, questId);
 
-    expect(await publishQuest(hirerId, questId)).toEqual({ outcome: 'published' });
+    expect(await publishQuest(hirerId, questId)).toMatchObject({ outcome: 'published' });
 
     const [reservation] = await db
       .select()
@@ -194,6 +196,7 @@ describe('Quest publishing service', () => {
     });
     if (!preview || 'outcome' in preview) throw new Error('Missing publish preview');
     expect(preview).toMatchObject({ escrowRequirement: 510, canPublish: true });
+    expect(preview.escrowRequirementSatang).toBe(51_000);
     expect(preview.escrowRequirement * 100).toBe(reservation?.totalReservedSatang);
     const [wallet] = await db
       .select({ spending: walletWallet.spendingBalanceSatang, reserved: walletWallet.fundingReservedSatang })
@@ -206,6 +209,47 @@ describe('Quest publishing service', () => {
 
     const [stored] = await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId));
     expect(stored?.status).toBe('QUEST_OPEN');
+  });
+
+  it('records the effective Money Policy and Quest Escrow snapshot at publish', async () => {
+    const questId = await createFixture();
+
+    const result = await publishQuest(hirerId, questId);
+    if (!result || result.outcome !== 'published') throw new Error('Quest was not published');
+    const { reservationId, policyRevisionId } = result;
+
+    expect(result).toMatchObject({
+      outcome: 'published',
+      reservationId: expect.any(String),
+      policyRevisionId: expect.any(String),
+      policyRevision: expect.any(Number),
+      platformFeeBps: 200,
+      platformFeePerWorkerSatang: 1_000,
+      questEscrowSatang: 51_000,
+    });
+
+    const [stored] = await db
+      .select({
+        fundingReservationId: quest.fundingReservationId,
+        policyRevisionId: quest.policyRevisionId,
+        platformFeeBps: quest.platformFeeBps,
+        platformFeePerWorkerSatang: quest.platformFeePerWorkerSatang,
+        questEscrowSatang: quest.questEscrowSatang,
+      })
+      .from(quest)
+      .where(eq(quest.id, questId));
+    const storedReservationId = stored?.fundingReservationId;
+    const storedPolicyRevisionId = stored?.policyRevisionId;
+
+    expect(stored).toMatchObject({
+      fundingReservationId: expect.any(String),
+      policyRevisionId: expect.any(String),
+      platformFeeBps: 200,
+      platformFeePerWorkerSatang: 1_000,
+      questEscrowSatang: 51_000,
+    });
+    expect(storedReservationId).toBe(reservationId);
+    expect(storedPolicyRevisionId).toBe(policyRevisionId);
   });
 
   it('keeps the Draft and Wallet unchanged when Escrow cannot be funded', async () => {

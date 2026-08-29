@@ -39,7 +39,8 @@ type TransitionBase = {
   /** Stable event identity used to deduplicate Chat-side system messages. */
   eventId: EventId;
   questId: QuestId;
-  actorId: MemberId;
+  /** Null for a system lifecycle transition with no Member or Admin actor. */
+  actorId: MemberId | null;
   occurredAt: IsoTimestamp;
 };
 

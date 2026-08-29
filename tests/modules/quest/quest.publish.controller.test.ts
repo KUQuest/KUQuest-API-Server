@@ -18,6 +18,9 @@ describe('Quest publishing controllers', () => {
       blockingReasons: [],
       warnings: [],
       escrowRequirement: 510,
+      escrowRequirementSatang: 51_000,
+      platformFeeBps: 200,
+      platformFeePerWorkerSatang: 1_000,
       canPublish: true,
     });
 
@@ -33,6 +36,9 @@ describe('Quest publishing controllers', () => {
         blockingReasons: [],
         warnings: [],
         escrowRequirement: 510,
+        escrowRequirementSatang: 51_000,
+        platformFeeBps: 200,
+        platformFeePerWorkerSatang: 1_000,
         canPublish: true,
       },
     });
@@ -78,7 +84,7 @@ describe('Quest publishing controllers', () => {
       success: false,
       error: { code: 'QUEST_NOT_DRAFT', message: 'Only Draft Quests can be published' },
     });
-    expect(publishResult).toEqual(checkResult);
+    expect(publishResult as unknown).toEqual(checkResult);
   });
 
   it('returns only the first blocking reason when publish fails', async () => {
@@ -91,6 +97,9 @@ describe('Quest publishing controllers', () => {
         ],
         warnings: [],
         escrowRequirement: 510,
+        escrowRequirementSatang: 51_000,
+        platformFeeBps: 200,
+        platformFeePerWorkerSatang: 1_000,
         canPublish: false,
       },
     });
@@ -132,7 +141,16 @@ describe('Quest publishing controllers', () => {
   });
 
   it('returns success after publishing', async () => {
-    spyOn(questService, 'publishQuest').mockResolvedValue({ outcome: 'published' });
+    const published = {
+      outcome: 'published' as const,
+      reservationId: '018f47a7-1c7d-7c98-9a11-690d7e834302',
+      policyRevisionId: '018f47a7-1c7d-7c98-9a11-690d7e834303',
+      policyRevision: 1,
+      platformFeeBps: 200,
+      platformFeePerWorkerSatang: 1_000,
+      questEscrowSatang: 51_000,
+    };
+    spyOn(questService, 'publishQuest').mockResolvedValue(published);
 
     const result = await publishQuestController({
       params: { questId },
@@ -140,6 +158,6 @@ describe('Quest publishing controllers', () => {
       set: {} as never,
     });
 
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({ success: true, data: published });
   });
 });
