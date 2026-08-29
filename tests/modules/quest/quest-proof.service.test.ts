@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 
 const hirerId = randomUUID();
 const workerId = randomUUID();
+const secondWorkerId = randomUUID();
 const tagId = randomUUID();
 const now = new Date('2026-08-27T12:00:00.000Z');
 const questIds: string[] = [];
@@ -47,6 +48,7 @@ beforeAll(async () => {
   await db.insert(authUser).values([
     { id: hirerId, email: `${hirerId}@ku.th`, firstName: 'Hirer', lastName: 'Test' },
     { id: workerId, email: `${workerId}@ku.th`, firstName: 'Worker', lastName: 'Test' },
+    { id: secondWorkerId, email: `${secondWorkerId}@ku.th`, firstName: 'Second', lastName: 'Worker' },
   ]);
   await db.insert(tag).values({ id: tagId, name: `Proof test ${tagId}` });
 });
@@ -54,7 +56,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(tag).where(eq(tag.id, tagId));
-  await db.delete(authUser).where(inArray(authUser.id, [hirerId, workerId]));
+  await db.delete(authUser).where(inArray(authUser.id, [hirerId, workerId, secondWorkerId]));
 });
 
 describe('Quest Proof lifecycle gates', () => {
@@ -78,5 +80,39 @@ describe('Quest Proof lifecycle gates', () => {
     const rows = await db.select({ id: proofSubmission.id, status: proofSubmission.submissionStatus }).from(proofSubmission).where(inArray(proofSubmission.id, [submitted.proofId, inProgress.proofId, terminal.proofId]));
     expect(rows.find(({ id }) => id === submitted.proofId)?.status).toBe('PROOF_AUTO_APPROVED');
     expect(rows.filter(({ id }) => id !== submitted.proofId).every(({ status }) => status === 'PROOF_PENDING')).toBe(true);
+  });
+
+  it('uses one hour for a Candidate proof review window', async () => {
+    const candidateQuestId = randomUUID();
+    const candidateProofId = randomUUID();
+    questIds.push(candidateQuestId);
+    proofIds.push(candidateProofId);
+    await db.insert(quest).values({
+      id: candidateQuestId,
+      hirerId,
+      title: 'Candidate review window',
+      condition: 'Done',
+      mode: 'CANDIDATE',
+      participation: 'GROUP',
+      questStatus: 'QUEST_SUBMITTED',
+      rewardSatang: 100,
+      headcount: 2,
+      tagId,
+      startTime: new Date('2026-08-27T08:00:00.000Z'),
+    });
+    await db.insert(questAssignment).values([
+      { questId: candidateQuestId, workerId, assignmentStatus: 'ASSIGNMENT_ACTIVE' },
+      { questId: candidateQuestId, workerId: secondWorkerId, assignmentStatus: 'ASSIGNMENT_ACTIVE' },
+    ]);
+    await db.insert(proofSubmission).values({
+      id: candidateProofId,
+      questId: candidateQuestId,
+      workerId,
+      submittedByUserId: workerId,
+      content: 'Candidate work',
+      submittedAt: new Date(now.getTime() - 60 * 60 * 1000 - 1),
+    });
+
+    expect(await autoApproveDueProofs(now)).toContain(candidateProofId);
   });
 });

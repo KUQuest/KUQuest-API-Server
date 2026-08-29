@@ -19,6 +19,7 @@ import {
 import { authAdmin, authUser } from './auth.schema';
 import { file } from './file.schema';
 import { tag } from './tag.schema';
+import { paymentMoneyPolicyRevision, walletFundingReservation } from './wallet.schema';
 
 const time = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -53,6 +54,13 @@ export const quest = pgTable(
     participation: questParticipation('participation').default('SOLO').notNull(),
     questStatus: questStatus('quest_status').default('QUEST_DRAFT').notNull(),
     rewardSatang: integer('reward_satang').notNull(),
+    fundingReservationId: uuid('funding_reservation_id')
+      .unique()
+      .references(() => walletFundingReservation.id),
+    policyRevisionId: uuid('policy_revision_id').references(() => paymentMoneyPolicyRevision.id),
+    platformFeeBps: smallint('platform_fee_bps'),
+    platformFeePerWorkerSatang: integer('platform_fee_per_worker_satang'),
+    questEscrowSatang: integer('quest_escrow_satang'),
     tagId: uuid('tag_id').references(() => tag.id),
     headcount: integer('headcount').default(1).notNull(),
     startTime: time('start_time').notNull(),
@@ -68,6 +76,9 @@ export const quest = pgTable(
   },
   (table) => [
     check('quest_reward_check', sql`${table.rewardSatang} > 0`),
+    check('quest_finance_snapshot_bps_check', sql`${table.platformFeeBps} IS NULL OR ${table.platformFeeBps} BETWEEN 0 AND 10000`),
+    check('quest_finance_snapshot_amounts_check', sql`${table.platformFeePerWorkerSatang} IS NULL OR ${table.platformFeePerWorkerSatang} >= 0`),
+    check('quest_finance_snapshot_escrow_check', sql`${table.questEscrowSatang} IS NULL OR ${table.questEscrowSatang} > 0`),
     check('quest_headcount_check', sql`${table.headcount} > 0`),
     check(
       'quest_participation_headcount_check',
@@ -404,8 +415,11 @@ export const questSettlementCommand = pgTable(
   },
   (table) => [
     unique('quest_settlement_commands_command_id_key').on(table.commandId),
-    check('quest_settlement_commands_actor_check', sql`num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) = 1`),
-    check('quest_settlement_commands_type_check', sql`${table.commandType} IN ('COMPLETE', 'CANCEL', 'DISPUTE_REFUND', 'DISPUTE_RELEASE')`),
+    check(
+      'quest_settlement_commands_actor_check',
+      sql`(${table.commandType} = 'AUTO_CANCEL' AND num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) = 0) OR (${table.commandType} <> 'AUTO_CANCEL' AND num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) = 1)`,
+    ),
+    check('quest_settlement_commands_type_check', sql`${table.commandType} IN ('COMPLETE', 'CANCEL', 'DISPUTE_REFUND', 'DISPUTE_RELEASE', 'AUTO_CANCEL')`),
     check('quest_settlement_commands_status_check', sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`),
     check('quest_settlement_commands_completion_check', sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`),
     check('quest_settlement_commands_result_check', sql`${table.processingStatus} = 'PROCESSING' OR ${table.resultData} IS NOT NULL`),

@@ -19,10 +19,11 @@ const baseSnapshot = {
 
 describe('Quest publish policy', () => {
   it('allows a complete Draft and calculates the total Escrow requirement', () => {
-    expect(buildQuestPublishCheck(baseSnapshot)).toEqual({
+    expect(buildQuestPublishCheck(baseSnapshot)).toMatchObject({
       blockingReasons: [],
       warnings: [],
       escrowRequirement: 1020,
+      escrowRequirementSatang: 102000,
       canPublish: true,
     });
   });
@@ -36,7 +37,10 @@ describe('Quest publish policy', () => {
     };
 
     expect(Number(calculateQuestEscrowRequirementSatang(snapshot))).toBe(155_307);
-    expect(buildQuestPublishCheck(snapshot).escrowRequirement).toBe(1_553);
+    expect(buildQuestPublishCheck(snapshot)).toMatchObject({
+      escrowRequirement: 1_553,
+      escrowRequirementSatang: 155_307,
+    });
   });
 
   it('returns blocking reasons in the approved order', () => {

@@ -39,6 +39,7 @@ import {
   questMineResponseSchema,
   questParamsSchema,
   questPublishCheckResponseSchema,
+  questPublishResponseSchema,
 } from './quest.schema';
 
 export const questRoute = new Elysia({
@@ -82,7 +83,7 @@ export const questRoute = new Elysia({
   })
   .post('/:questId/publish', publishQuestController, {
     params: questParamsSchema,
-    response: responses(apiSuccessSchema, 401, 404, 409, 503),
+    response: responses(questPublishResponseSchema, 401, 404, 409, 503),
     detail: {
       tags: ['Quests'],
       summary: 'Publish a Quest Draft',

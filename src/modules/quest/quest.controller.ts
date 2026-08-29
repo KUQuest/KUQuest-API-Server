@@ -31,6 +31,7 @@ import type {
   questMineResponseSchema,
   questParamsSchema,
   questPublishCheckResponseSchema,
+  questPublishResponseSchema,
 } from './quest.schema';
 import {
   addQuestImages,
@@ -68,6 +69,7 @@ type ListQuery = Static<typeof questListQuerySchema>;
 type MineQuery = Static<typeof questMineQuerySchema>;
 type QuestParams = Static<typeof questParamsSchema>;
 type PublishCheckResponse = Static<typeof questPublishCheckResponseSchema>['data'];
+type PublishResponse = Static<typeof questPublishResponseSchema>['data'];
 type QuestDetail = NonNullable<Awaited<ReturnType<typeof getQuestDetail>>>;
 
 const invalidInput = (set: AuthedContext['set'], code: string, message: string) => {
@@ -500,7 +502,7 @@ export const publishQuestController = async ({
   params,
   session,
   set,
-}: AuthedContext & { params: QuestParams }): Promise<ApiResponse> => {
+}: AuthedContext & { params: QuestParams }): Promise<ApiResponse<PublishResponse>> => {
   let result: Awaited<ReturnType<typeof publishQuest>>;
   try {
     result = await publishQuest(session.user.id, params.questId);
@@ -519,5 +521,5 @@ export const publishQuestController = async ({
     return apiError(firstReason.code, firstReason.message);
   }
 
-  return apiSuccess();
+  return apiSuccess(result);
 };

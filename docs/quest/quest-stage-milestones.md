@@ -82,7 +82,7 @@ stateDiagram-v2
 
 ## Editing rules
 
-- `OPEN + NO_CANDIDATE`: the Hirer can edit every Quest field at any time.
+- `OPEN + NO_CANDIDATE`: the Hirer can edit non-core Quest fields before participation. Reward, headcount, mode, participation, and Tag commitments are fixed after publish.
 - `OPEN + CANDIDATE`: the Hirer cannot edit any Quest field.
 - From `ASSIGNED` onward: the Hirer submits one post-Assignment Quest Edit request. The request snapshots the previous Quest Status and every Active Worker, then moves the Quest to `QUEST_AWAITING_CONSENT`. Only content/details, schedule, nullable label-only locations, and Images are mutable; Mode, Participation, Headcount, Quest Reward, Tag, identity, and Assignment membership are not. Every snapshotted Worker may respond once within five minutes. One rejection or timeout restores the previous Status and discards the proposal. Unanimous approval applies all changes atomically, records linked Quest Edit History, and restores the previous Status. Timeout is an explicit Quest service/worker operation; it is not an API scheduler.
 

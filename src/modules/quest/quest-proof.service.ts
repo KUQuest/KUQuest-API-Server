@@ -329,7 +329,7 @@ const autoApproveDueProofFreeQuests = async (tx: Tx, now: Date) => {
     .where(and(
       eq(quest.proofRequired, false),
       eq(quest.questStatus, questStatus.submitted),
-      sql`${quest.updatedAt} <= ${now.toISOString()}::timestamptz - CASE WHEN ${quest.mode} = 'NO_CANDIDATE' THEN interval '1 hour' ELSE interval '2 hours' END`,
+      sql`${quest.updatedAt} <= ${now.toISOString()}::timestamptz - interval '1 hour'`,
     ))
     .orderBy(asc(quest.updatedAt), asc(quest.id));
 
@@ -350,7 +350,7 @@ export const autoApproveDueProofs = async (now = new Date()): Promise<string[]> 
     .where(and(
       eq(proofSubmission.submissionStatus, 'PROOF_PENDING'),
       inArray(quest.questStatus, [questStatus.submitted, questStatus.rework]),
-      sql`${proofSubmission.submittedAt} <= ${now.toISOString()}::timestamptz - CASE WHEN ${quest.mode} = 'NO_CANDIDATE' THEN interval '1 hour' ELSE interval '2 hours' END`,
+      sql`${proofSubmission.submittedAt} <= ${now.toISOString()}::timestamptz - interval '1 hour'`,
     ))
     .orderBy(asc(proofSubmission.submittedAt), asc(proofSubmission.id));
   const approved: string[] = [];
