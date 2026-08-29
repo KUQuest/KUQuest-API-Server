@@ -404,6 +404,13 @@ const adminPayoutRows = (executor: typeof db) => executor
   .innerJoin(authUser, eq(authUser.id, paymentPayouts.userId));
 
 const adminPayoutHistory = async (payoutId: string): Promise<AdminPayoutStatusHistory[]> => {
+  const [payout] = await db
+    .select({ id: paymentPayouts.id })
+    .from(paymentPayouts)
+    .where(eq(paymentPayouts.id, payoutId))
+    .limit(1);
+  if (!payout) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
+
   const rows = await db
     .select({
       id: paymentPayoutStatusHistory.id,
