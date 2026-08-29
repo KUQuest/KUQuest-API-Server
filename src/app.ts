@@ -1,6 +1,6 @@
 import { questRoute } from '@/modules/quest/quest.route';
 import { tagRoute } from '@/modules/tag';
-import { payoutWebhookRoute } from '@/modules/payout';
+import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
 import { topUpWebhookRoute } from '@/modules/top-up';
 import { questAssignmentRoute } from '@/modules/quest/quest-assignment.route';
 import { questCandidateRoute } from '@/modules/quest/quest-candidate.route';
@@ -54,5 +54,7 @@ export const app = new Elysia({
   .use(portfolioRoute)
   .use(workExperienceRoute)
   .use(tagRoute)
+  .use(payoutRoute)
+  .use(adminPayoutRoute)
   .use(payoutWebhookRoute)
   .use(topUpWebhookRoute)

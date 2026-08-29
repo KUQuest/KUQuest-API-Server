@@ -1,5 +1,5 @@
 import { db, sql } from '@/database/client';
-import { authUser } from '@/database/schema/auth.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   paymentPayoutStatusHistory,
   paymentProviderEventInbox,
@@ -23,10 +23,12 @@ import {
   signedSatang,
 } from '@/modules/wallet';
 import {
+  approvePayout,
   getPayout,
   initiatePayout,
   listPayouts,
   PayoutProviderError,
+  processApprovedPayout,
   processPayoutProviderEvents,
   purgeExpiredProviderEventPayloads,
   quotePayout,
@@ -91,8 +93,19 @@ const creditEarnings = async (studentId: string, amountSatang: number) => {
   });
 };
 
-const createPendingPayout = async (prefix: string, provider = new FakePayoutProvider()) => {
+const createPendingPayout = async (
+  prefix: string,
+  provider = new FakePayoutProvider(),
+  approve = true,
+) => {
   const userId = crypto.randomUUID();
+  const adminId = crypto.randomUUID();
+  await db.insert(authAdmin).values({
+    id: adminId,
+    email: `${adminId}@example.com`,
+    firstName: 'Payout',
+    lastName: 'Admin',
+  });
   await db.insert(authUser).values({
     id: userId,
     email: `${userId}@ku.th`,
@@ -117,12 +130,15 @@ const createPendingPayout = async (prefix: string, provider = new FakePayoutProv
     receiptSatang: positiveSatang(100),
   });
   let payout;
+  payout = await initiatePayout({
+    principalUserId: userId,
+    quoteId: quote.id,
+    idempotency: { key: `${prefix}-${crypto.randomUUID()}` },
+  });
+  if (!approve) return { userId, payout };
+  await approvePayout(adminId, payout.id, { idempotencyKey: `${prefix}-approval-${crypto.randomUUID()}` });
   try {
-    payout = await initiatePayout({
-      principalUserId: userId,
-      quoteId: quote.id,
-      idempotency: { key: `${prefix}-${crypto.randomUUID()}` },
-    }, provider, encryption);
+    payout = await processApprovedPayout(payout.id, provider, encryption);
   } catch (error: unknown) {
     if (!(error instanceof PayoutProviderError) || error.code !== 'PROVIDER_UNCERTAIN') throw error;
     [payout] = await listPayouts(userId, 1);
@@ -165,6 +181,23 @@ beforeAll(async () => {
 });
 
 describe('Payout Provider event application services', () => {
+  it('does not apply a Provider outcome before Admin approval', async () => {
+    const { userId, payout } = await createPendingPayout('be117-before-approval', new FakePayoutProvider(), false);
+    const event = await receive(eventPayload({
+      eventId: `be117-before-approval-${crypto.randomUUID()}`,
+      internalReference: payout.internalReference,
+      providerReference: 'not-submitted',
+      status: 'FAILED',
+    }));
+
+    await expect(processPayoutProviderEvent(event.id)).rejects.toMatchObject({
+      code: 'PROVIDER_EVENT_NOT_RETRYABLE',
+    });
+    expect(await getPayout(userId, payout.id)).toMatchObject({
+      payoutStatus: 'PENDING_ADMIN_APPROVAL',
+    });
+  });
+
   it('settles the reserved Payout exactly once after a confirmed success', async () => {
     const { userId, payout } = await createPendingPayout('be117-success');
     const rawPayload = eventPayload({

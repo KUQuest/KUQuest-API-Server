@@ -8,6 +8,8 @@ export {
   createPayoutQuote,
   readPayout,
   payoutOperationScope,
+  processApprovedPayout,
+  processApprovedPayouts,
 } from './payout.service';
 export type {
   InitiatePayoutInput,
@@ -15,6 +17,23 @@ export type {
   PayoutQuote,
   PayoutQuoteInput,
 } from './payout.service';
+export {
+  approvePayout,
+  payoutApprovalOperationScope,
+  payoutRejectionOperationScope,
+  rejectPayout,
+  getAdminPayout,
+  listAdminPayouts,
+  listAdminPayoutStatusHistory,
+} from './payout.admin.service';
+export type {
+  AdminPayout,
+  AdminPayoutSort,
+  AdminPayoutStatusHistory,
+  ApprovePayoutInput,
+  ListAdminPayoutsInput,
+  RejectPayoutInput,
+} from './payout.admin.service';
 export {
   PayoutProviderError,
   XenditPayoutAdapter,
@@ -59,3 +78,5 @@ export type {
   PayoutOutcomeStatus,
 } from './payout.provider-event';
 export { payoutWebhookRoute } from './payout.webhook.route';
+export { payoutRoute } from './payout.route';
+export { adminPayoutRoute } from './payout.admin.route';

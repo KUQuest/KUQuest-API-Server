@@ -35,6 +35,7 @@ export const providerEventProcessingStatuses = [
 export type ProviderEventProcessingStatus = (typeof providerEventProcessingStatuses)[number];
 
 export const payoutStatuses = [
+  'PENDING_ADMIN_APPROVAL',
   'CREATING',
   'PENDING',
   'AWAITING_RECONCILIATION',
@@ -362,12 +363,14 @@ export const paymentPayouts = pgTable(
     destinationAccountNumberNonce: text('destination_account_number_nonce').notNull(),
     destinationAccountNumberCiphertext: text('destination_account_number_ciphertext').notNull(),
     destinationAccountNumberAuthTag: text('destination_account_number_auth_tag').notNull(),
+    destinationMaskedLastFour: text('destination_masked_last_four').default('****').notNull(),
     destinationAccountHolderName: text('destination_account_holder_name').notNull(),
     destinationRoutingType: text('destination_routing_type').notNull(),
     destinationRoutingValueKeyVersion: text('destination_routing_value_key_version').notNull(),
     destinationRoutingValueNonce: text('destination_routing_value_nonce').notNull(),
     destinationRoutingValueCiphertext: text('destination_routing_value_ciphertext').notNull(),
     destinationRoutingValueAuthTag: text('destination_routing_value_auth_tag').notNull(),
+    destinationMaskedRoutingValue: text('destination_masked_routing_value').default('****').notNull(),
     provider: text('provider').notNull(),
     providerReference: text('provider_reference').unique(),
     providerApiVersion: text('provider_api_version'),
@@ -388,13 +391,14 @@ export const paymentPayouts = pgTable(
     finalLedgerTransactionId: uuid('final_ledger_transaction_id')
       .unique()
       .references(() => walletLedgerTransaction.id),
+    providerSubmissionClaimedAt: time('provider_submission_claimed_at'),
     createdAt: time('created_at').defaultNow().notNull(),
     updatedAt: time('updated_at').defaultNow().notNull(),
   },
   (table) => [
     check(
       'payment_payouts_status_check',
-      sql`${table.payoutStatus} IN ('CREATING', 'PENDING', 'AWAITING_RECONCILIATION', 'COMPLETED', 'FAILED', 'CANCELLED')`,
+      sql`${table.payoutStatus} IN ('PENDING_ADMIN_APPROVAL', 'CREATING', 'PENDING', 'AWAITING_RECONCILIATION', 'COMPLETED', 'FAILED', 'CANCELLED')`,
     ),
     check(
       'payment_payouts_amount_check',
@@ -410,7 +414,7 @@ export const paymentPayouts = pgTable(
     ),
     uniqueIndex('payment_payouts_active_user_uidx')
       .on(table.userId)
-      .where(sql`${table.payoutStatus} IN ('CREATING', 'PENDING', 'AWAITING_RECONCILIATION')`),
+      .where(sql`${table.payoutStatus} IN ('PENDING_ADMIN_APPROVAL', 'CREATING', 'PENDING', 'AWAITING_RECONCILIATION')`),
     unique('payment_payouts_id_user_key').on(table.id, table.userId),
     foreignKey({
       columns: [table.quoteId, table.userId],
@@ -442,11 +446,11 @@ export const paymentPayoutStatusHistory = pgTable(
   (table) => [
     check(
       'payment_payout_status_history_from_status_check',
-      sql`${table.fromStatus} IS NULL OR ${table.fromStatus} IN ('CREATING', 'PENDING', 'AWAITING_RECONCILIATION', 'COMPLETED', 'FAILED', 'CANCELLED')`,
+      sql`${table.fromStatus} IS NULL OR ${table.fromStatus} IN ('PENDING_ADMIN_APPROVAL', 'CREATING', 'PENDING', 'AWAITING_RECONCILIATION', 'COMPLETED', 'FAILED', 'CANCELLED')`,
     ),
     check(
       'payment_payout_status_history_to_status_check',
-      sql`${table.toStatus} IN ('CREATING', 'PENDING', 'AWAITING_RECONCILIATION', 'COMPLETED', 'FAILED', 'CANCELLED')`,
+      sql`${table.toStatus} IN ('PENDING_ADMIN_APPROVAL', 'CREATING', 'PENDING', 'AWAITING_RECONCILIATION', 'COMPLETED', 'FAILED', 'CANCELLED')`,
     ),
     check(
       'payment_payout_status_history_actor_check',
