@@ -492,10 +492,9 @@ CREATE INDEX quest_settlement_commands_quest_id_idx ON quest_settlement_commands
 --
 -- autoApproveDeadline: NOT stored (unlike old schema's snapshotted column).
 -- The SLA is a fixed function of quest.mode, not a versioned policy value:
--- NO_CANDIDATE quests must be reviewed within 1 hour of submitted_at, CANDIDATE
--- quests within 2 hours — past that, auto-approve. A derived proof deadline:
--- computed at read/worker time as submitted_at + (1h or 2h depending on
--- quest.mode), never snapshotted.
+-- Proof submissions and proof-free completion confirmations must be reviewed
+-- within 1 hour of submitted_at — past that, auto-approve. The derived deadline
+-- is computed at read/worker time as submitted_at + 1 hour, never snapshotted.
 --
 -- images: uses the existing file table via a junction table (proof_submission_image),
 -- same pattern as profile_portfolio_item_image, instead of old schema's raw

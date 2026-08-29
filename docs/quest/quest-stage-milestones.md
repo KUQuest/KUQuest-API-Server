@@ -95,7 +95,7 @@ stateDiagram-v2
 ## Completion, cancellation, and dispute milestones
 
 - The Hirer locks `reward_satang × headcount + Platform Fee` before `QUEST_DRAFT → QUEST_OPEN`. The Platform Fee follows the active Wallet Money Policy and is calculated for each Worker Reward.
-- `NO_CANDIDATE` has no rework and auto-approves after 1 hour. `CANDIDATE` auto-approves after 2 hours and uses the Worker/team’s declared rework limit.
+- Proof submissions and proof-free completion confirmations use the same one-hour Proof Review Window in every Quest mode. `NO_CANDIDATE` has no rework; `CANDIDATE` uses the Worker/team’s declared rework limit.
 - A proof-free Quest still enters `SUBMITTED`; the Worker submits a completion confirmation instead of a proof file. The confirmation is persisted as a completion obligation (not as a fake Proof Submission), with one obligation per Active Worker or one shared Candidate Team.
 - Proof HTTP commands are `POST /api/v1/quests/:questId/proof` (multipart images or existing `fileIds`/`imageIds`), `POST .../proof/confirm`, `GET .../proof`, and Hirer `POST .../proof/:proofId/review` with `APPROVE` or `REJECT`. A proof owner is the individual Worker for SOLO and direct GROUP Quests, and the selected Candidate Team for Candidate GROUP Quests.
 - Hirer cancellation at `OPEN` returns the full amount. At `ASSIGNED`, return 80% and compensate Workers with 20%. From `IN_PROGRESS` onward, there is no Hirer refund.
