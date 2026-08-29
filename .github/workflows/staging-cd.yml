@@ -18,6 +18,7 @@ permissions: {}
 env:
   IMAGE_NAME: ghcr.io/kuquest/kuquest-api-server
   STAGING_SERVER: 192.168.1.210
+  STAGING_PUBLIC_URL: https://kuquest-dev-api.kubits.org
 
 jobs:
   build:
@@ -83,6 +84,9 @@ jobs:
       - deploy-staging
 
     environment: staging
+
+    env:
+      STAGING_TEST_AUTH_ENABLED: ${{ secrets.STAGING_TEST_AUTH_ENABLED }}
 
     permissions:
       contents: read
@@ -445,6 +449,48 @@ jobs:
               exit "$SEED_STATUS"
             fi
           fi
+
+      - name: Verify staging Student test account
+        if: ${{ env.STAGING_TEST_AUTH_ENABLED == 'true' }}
+        shell: bash
+        env:
+          STAGING_TEST_AUTH_EMAIL: ${{ secrets.STAGING_TEST_AUTH_EMAIL }}
+          STAGING_TEST_AUTH_PASSWORD: ${{ secrets.STAGING_TEST_AUTH_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          TEST_AUTH_DIR=$(mktemp -d "$RUNNER_TEMP/staging-test-auth.XXXXXX")
+          trap 'rm -rf -- "$TEST_AUTH_DIR"' EXIT
+
+          LOGIN_STATUS=$(curl \
+            --silent \
+            --show-error \
+            --max-time 20 \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --cookie-jar "$TEST_AUTH_DIR/cookies" \
+            --header 'content-type: application/json' \
+            --data "$(jq -cn \
+              --arg email "$STAGING_TEST_AUTH_EMAIL" \
+              --arg password "$STAGING_TEST_AUTH_PASSWORD" \
+              '{email: $email, password: $password}')" \
+            "$STAGING_PUBLIC_URL/api/staging/test-auth/sign-in/email")
+
+          if [ "$LOGIN_STATUS" != '200' ]; then
+            echo "Staging Student test login failed with HTTP $LOGIN_STATUS"
+            exit 1
+          fi
+
+          curl \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --max-time 20 \
+            --cookie "$TEST_AUTH_DIR/cookies" \
+            "$STAGING_PUBLIC_URL/api/v1/profile" \
+            > /dev/null
+
+          echo 'Staging Student test account login verified.'
 
       - name: Clean temporary secret files
         if: always()
