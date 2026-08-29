@@ -14,6 +14,46 @@ Use the five canonical labels without remapping: `needs-triage`, `needs-info`, `
 
 Single-context repository: read root `CONTEXT.md` and relevant ADRs under `docs/adr/`. See `docs/agents/domain.md`.
 
+### Clarifying domain context
+
+When a request involves a Quest or Work Chat, identify the active branch before
+planning or coding. Read the domain docs first. If the context is still missing,
+ask for these facts in this order:
+
+1. The actor: `Hirer`, `Worker`, `Candidate`, or another `Accepted Participant`.
+2. The Quest State or Status, using the prefixed values in
+   `docs/quest/work-chat-system-target.md`, such as
+   `QUEST_ASSIGNED` or `QUEST_IN_PROGRESS`.
+3. The Quest mode. Ask for the exact mode from the current contract, for example
+   `FIRST_COME_FIRST_SERVED` or `CANDIDATE`. Older documents may call the first
+   mode `NO_CANDIDATE`; flag that conflict instead of choosing silently.
+4. The participation shape, `SINGLE` or `GROUP`, when completion, proof,
+   review, due time, or Reward behavior can differ.
+5. `proofRequired` and `dueAt` when the request concerns Sent Work, Proof
+   Submission, review, deadline, failure, or Reward settlement.
+
+Ask one missing fact at a time when the user is being interviewed. State the
+known context before the question. Do not ask a generic “please give more
+context” question.
+
+Example clarification sequence for “แก้ flow ส่งงาน”:
+
+1. “ตอนนี้หมายถึง `Hirer` ที่ตรวจงาน หรือ `Worker` ที่ส่งงาน?”
+2. “Quest อยู่ใน State ไหน เช่น `QUEST_ASSIGNED` หรือ
+   `QUEST_IN_PROGRESS`?”
+3. “Quest mode เป็น `CANDIDATE` หรือ `FIRST_COME_FIRST_SERVED`?”
+4. “Quest เป็น `SINGLE` หรือ `GROUP` และ `proofRequired` เป็นค่าใด?”
+
+Use the answers to choose the branch. For example, `Hirer` +
+`QUEST_ASSIGNED` points to Quest Edit, while `Worker` +
+`QUEST_IN_PROGRESS` points to Sent Work. A `GROUP` Quest can have
+partial completion and different failure or Reward results, so do not apply a
+`SINGLE` rule without checking the mode and participation shape.
+
+The clarification is complete only when the relevant actor, Quest State or
+Status, mode, and participation shape are known, or the docs prove that a fact
+does not affect this request.
+
 ### Code style
 
 Follow `CODESTYLES.md` at the repo root — formatting, import order, module layout, and Elysia-specific conventions observed in this codebase.

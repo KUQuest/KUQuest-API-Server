@@ -41,20 +41,20 @@ A rating and optional comment that a Hirer or Worker gives to the other after a 
 _Avoid_: reviewing before Quest completion; treating a Review as a Profile field that can be edited by someone else.
 
 **Giver**:
-The Student who creates a Quest and funds its rewards.
-_Avoid_: Employer, client, job owner.
+Legacy term for Hirer. In new Quest and Work Chat text, use Hirer.
+_Avoid_: Giver in new domain text, Employer, client, job owner.
 
 **Hunter**:
-A Student who performs a Quest in exchange for its reward.
-_Avoid_: Worker, employee, contractor.
+Legacy term for Worker. In new Quest and Work Chat text, use Worker.
+_Avoid_: Hunter in new domain text, employee, contractor.
 
 **Quest Reward**:
-The amount earned by each Hunter who successfully completes a Quest; for a group Quest, the same reward applies independently to every Hunter slot. The displayed Quest Reward is the Hunter's full earnings and excludes the Platform Fee paid by the Giver.
+The amount paid from the Hirer's Quest Escrow to a Worker who successfully completes an Assignment. Settlement, visibility, failure, retry, and notification rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Wage, salary, shared prize pool.
 
 **Platform Fee**:
-An amount paid by the Giver in addition to the Quest Rewards when Hunters successfully complete a Quest.
-_Avoid_: deducting the Platform Fee from a Hunter's displayed Quest Reward.
+An amount paid by the Hirer in addition to Quest Rewards when a Quest successfully completes. The target failure and cancellation rules are defined in `docs/quest/work-chat-system-target.md`.
+_Avoid_: deducting the Platform Fee from a Worker's displayed Quest Reward.
 
 **Wallet**:
 A Student's KUQuest funds, separated by whether they can be spent, paid out, or are temporarily committed to a Quest or Payout.
@@ -77,7 +77,7 @@ An immediate, fee-free, and irreversible transfer from a Student's Earnings Bala
 _Avoid_: Payout, reversible exchange.
 
 **Quest Escrow**:
-Spending Balance committed by a Giver to cover Quest Rewards and Platform Fees until the future Quest workflow settles or releases it. The Quest domain owns the timing and lifecycle; the Wallet only owns the reserved funds.
+Spending Balance committed by a Hirer to cover Quest Rewards and Platform Fees until the Quest workflow settles or releases it. The Quest domain owns the timing and lifecycle; the target settlement rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Job hold, locked balance, inferring escrow from Wallet activity.
 
 **Funding Reservation**:
@@ -136,6 +136,10 @@ The auth library (`better-auth`) providing session management, Google OAuth, and
 
 ## Quest and Work Chat
 
+The entries below define the vocabulary. For Work Chat, Quest Condition, Quest
+Edit, Sent Work, review, notification, and reward behavior, read
+`docs/quest/work-chat-system-target.md`.
+
 **Hirer**:
 The Member who creates a Quest, commissions its work, and remains its current owner for MVP.
 _Avoid_: Giver, client
@@ -153,12 +157,28 @@ The current Hirer or an Active Worker. Only Accepted Participants have current W
 _Avoid_: Candidate, departed Worker
 
 **Quest**:
-One bounded agreement for work, owned by one Hirer and progressing through its lifecycle.
+One bounded agreement for work, owned by one Hirer and progressing through its lifecycle. Target lifecycle and `dueAt` rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Job, task
+
+**dueAt**:
+The deadline for the required Worker action on a Quest. The Server decides whether the action arrived on time; the target deadline, reminder, and failure rules are defined in `docs/quest/work-chat-system-target.md`.
+_Avoid_: client-side deadline, approximate deadline.
+
+**Quest Condition**:
+A set of separate requirements that define what a Worker must complete for a Quest. Condition size, ordering, visibility, and editing rules are defined in `docs/quest/work-chat-system-target.md`.
+_Avoid_: condition text, Quest rule
+
+**Condition Item**:
+One ordered requirement within a Quest Condition. Its validation and Quest Edit rules are defined in `docs/quest/work-chat-system-target.md`.
+_Avoid_: condition field
 
 **Assignment**:
 The accepted participation of one Worker in a Quest. It is the canonical record that a Worker is working on that Quest.
 _Avoid_: Application, team membership
+
+**Proof Submission**:
+A record of work submitted by a Worker for one Assignment when the Quest requires proof. It is separate from Chat Messages and has one decision. Its fields, lifecycle, visibility, and UI rules are defined in `docs/quest/work-chat-system-target.md`.
+_Avoid_: Work Message, treating proof as an ordinary Chat Message
 
 **Active Worker**:
 A Worker whose Assignment has not ended.
@@ -169,11 +189,11 @@ A former Active Worker whose Assignment ended before the Quest completed.
 _Avoid_: Active Worker, Candidate
 
 **Work Membership Window**:
-The inclusive period in which an Accepted Participant has current access to the Work Conversation. After the window ends, the former Worker may read only Messages created no later than their departure.
+The inclusive period in which an Accepted Participant has current access to the Work Conversation. After the window ends, the former Worker may read only Messages created no later than their departure and cannot send or receive new Messages.
 _Avoid_: Chat permission, participant status
 
 **Quest Edit**:
-A change to a Quest's details proposed by its Hirer.
+A proposed change to a Quest Condition by its Hirer. The target timing, response, diff, and Quest State rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Assignment change, membership transition
 
 **Conversation**:
@@ -181,7 +201,7 @@ A persisted room for coordinating work on one Quest. In this context, the only C
 _Avoid_: Direct message, group chat, team chat
 
 **Work Conversation**:
-The one working Chat Conversation associated with a Quest. Its current Accepted Participants are the Hirer and the Active Workers, never Candidates.
+The one Chat Conversation associated with a Quest. Current members are the Hirer and Active Workers; Candidates never join. The target membership, Message, Attachment, read, UI, offline, and Rate Limit rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Group chat, team chat
 
 **Chat Membership**:
@@ -189,20 +209,32 @@ The relationship between an Accepted Participant and a Work Conversation. It rec
 _Avoid_: Chat permission, participant status
 
 **Message**:
-A piece of content in a Work Conversation, sent by an Accepted Participant or created by the system. It may contain text, Attachments, or both, and becomes part of the retained Conversation history.
+A piece of immutable content in a Work Conversation, sent by an Accepted Participant or created by the system. The target text, Attachment, ordering, visibility, and retry rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Notification, post
 
 **Attachment**:
-A private file shared in a Message in a Work Conversation. A Member can access it only when the Member may read the containing Message. An Admin can access it only as retained evidence for an authorized Report Case. Both paths require the Attachment to pass the required safety checks.
+A private image, PDF, or video file shared in a Message. The target access, size, link, device-open, and upload-failure rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Public file, image URL
 
 **Read Cursor**:
-A private position that a Member has acknowledged in a Work Conversation. It only moves forward and supports unread counts and resume position; it is not a read receipt.
+A private position that a Member has acknowledged in a Work Conversation. It is not a Read Receipt. The target movement and unread-count rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Read receipt, last seen
 
 **System Message**:
-An immutable Message created from a Work Membership Transition to record a membership or Work Conversation lifecycle change.
+A system-created immutable Message that records a membership or Quest workflow Event and appears from KU bot. The target template, visibility, action-link, Popup, and notification rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Notification, audit log
+
+**Audit Record**:
+An immutable internal record of a domain or money change. The target covered records, fields, visibility, and retention rules are defined in `docs/quest/work-chat-system-target.md`.
+_Avoid_: System Message, editable history
+
+**Push Notification**:
+A short out-of-app alert for a Quest Event. Production targets Android through FCM; the target recipient, device, retry, deduplication, mute, foreground, and privacy rules are defined in `docs/quest/work-chat-system-target.md`.
+_Avoid_: System Message, treating a push alert as Chat history
+
+**Push Device**:
+An Android device registered by a Member to receive Push Notifications, managed as an independent destination that can be disabled without disabling the Member's other devices. Only an authenticated Member can register or disable that Member's Push Device.
+_Avoid_: phone number, treating one Member as one device
 
 **Report Case**:
 A Trust & Safety record that groups Reporter Entries for one Message and tracks its moderation status: `PENDING`, `DISMISSED`, `HIDDEN`, or `RESTORED`. `PENDING` and `HIDDEN` are open statuses; `DISMISSED` and `RESTORED` are closed statuses. It retains the bounded evidence needed for moderation under the retention policy.
@@ -225,8 +257,14 @@ An immutable audit record of an Admin's Work Chat evidence access or moderation 
 _Avoid_: Reporter Entry, Moderation Decision
 
 **Terminal Quest**:
-A Quest in `COMPLETED` or `CANCELLED`. Its Work Conversation is read-only.
+A Quest in `QUEST_COMPLETED`, `QUEST_CANCELLED`, or
+`QUEST_FAILED`. Its Work Conversation is read-only for Members, but the
+system may append System Messages for later workflow events.
 _Avoid_: Closed conversation
+
+**Failed Quest**:
+A Quest that ends because a Proof Submission was not approved or required proof was not submitted in time. It is terminal and has no Rework process.
+_Avoid_: Cancelled Quest, treating failed work as a cancellation
 
 **Work Membership Transition**:
 A change to Accepted Participant membership or terminal lifecycle state that changes Work Conversation membership or write access.

@@ -1,6 +1,11 @@
 # Work Chat REST and WebSocket contract
 
-This is the canonical contract for the Work Chat MVP. It defines the private
+> **Legacy reference — reconciliation required.** Use
+> `docs/quest/work-chat-system-target.md` for the accepted Work Chat, proof,
+> notification, and Quest workflow behavior. This file retains earlier
+> REST/WebSocket details; compare every constraint with the target before use.
+
+This is the earlier contract for the Work Chat MVP. It defines the private
 Conversation associated with a Quest, the REST read and write surfaces, and the
 single-instance WebSocket delivery protocol.
 

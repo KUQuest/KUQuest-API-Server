@@ -17,6 +17,10 @@
 -- NO_CANDIDATE joins and Assignment creation are implemented by BE-181.
 -- Candidate selection and Assignment fan-out are implemented by BE-180.
 --
+-- Target workflow note: use docs/quest/work-chat-system-target.md for the
+-- accepted Work Chat and Quest workflow. Reconcile workflow-specific values in
+-- this EDR before implementation when they differ from that target.
+--
 -- Core quest table settled via /batch-grill-me. Old Quest model (prisma.ts) split/trimmed:
 --  - riskLevel/riskCheckedAt: cut, no consumer anywhere in the schema, no product
 --    requirement surfaced for it — revisit only if a moderation module needs it.
