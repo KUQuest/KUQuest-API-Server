@@ -49,6 +49,7 @@ export type {
 export {
   ensureInitialMoneyPolicy,
   ensureWallet,
+  ensureWalletInTransaction,
   createSealedLedgerTransaction,
   createSealedLedgerTransactionInTransaction,
   getEffectiveMoneyPolicy,
