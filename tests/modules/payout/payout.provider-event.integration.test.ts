@@ -198,6 +198,25 @@ describe('Payout Provider event application services', () => {
     });
   });
 
+  it('does not reconcile a Payout before Admin approval', async () => {
+    const { userId, payout } = await createPendingPayout('be117-reconcile-before-approval', new FakePayoutProvider(), false);
+    let calls = 0;
+    const provider = {
+      getPayoutStatus: async (_input: OutboundPayoutStatusRequest): Promise<OutboundPayoutStatusResponse> => {
+        calls += 1;
+        throw new Error('The Provider must not be called before approval.');
+      },
+    };
+
+    await expect(reconcilePayout(userId, payout.id, provider)).rejects.toMatchObject({
+      code: 'PAYOUT_RECONCILIATION_NOT_ALLOWED',
+    });
+    expect(calls).toBe(0);
+    expect(await getPayout(userId, payout.id)).toMatchObject({
+      payoutStatus: 'PENDING_ADMIN_APPROVAL',
+    });
+  });
+
   it('settles the reserved Payout exactly once after a confirmed success', async () => {
     const { userId, payout } = await createPendingPayout('be117-success');
     const rawPayload = eventPayload({

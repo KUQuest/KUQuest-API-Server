@@ -31,6 +31,7 @@ import {
   getAdminPayout,
   initiatePayout,
   listAdminPayouts,
+  listAdminPayoutStatusHistory,
   listPayoutStatusHistory,
   listPayouts,
   processApprovedPayout,
@@ -337,6 +338,31 @@ describe('Payout application services', () => {
     expect(processed.payoutStatus).toBe('PENDING');
     expect(replay).toEqual(processed);
     expect(requests).toHaveLength(1);
+  });
+
+  it('does not submit a CREATING Payout without an Admin approval record', async () => {
+    const studentId = await createStudent('be199-worker-unapproved');
+    await creditEarnings(studentId, 10_000);
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const payout = await initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be199-worker-unapproved-submit-1' },
+    });
+    await db.update(paymentPayouts)
+      .set({ payoutStatus: 'CREATING' })
+      .where(eq(paymentPayouts.id, payout.id));
+    const provider = new FakePayoutProvider();
+
+    const result = await processApprovedPayout(payout.id, provider, encryption);
+
+    expect(result.payoutStatus).toBe('CREATING');
+    expect(provider.requests).toHaveLength(0);
+  });
+
+  it('returns not found for Admin history of an unknown Payout', async () => {
+    await expect(listAdminPayoutStatusHistory(crypto.randomUUID()))
+      .rejects.toMatchObject({ code: 'PAYOUT_NOT_FOUND' });
   });
 
   it('lists waiting Payouts for Admin review with masked destination data', async () => {

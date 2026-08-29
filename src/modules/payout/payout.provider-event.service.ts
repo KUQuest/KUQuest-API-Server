@@ -787,6 +787,12 @@ export const reconcilePayout = async (
   provider: OutboundPayoutReconciliationProvider = new XenditPayoutProvider(),
 ) => {
   const payout = await getPayout(principalUserId, payoutId);
+  if (payout.payoutStatus === 'PENDING_ADMIN_APPROVAL') {
+    throw new MoneyDomainError(
+      'PAYOUT_RECONCILIATION_NOT_ALLOWED',
+      'Payout reconciliation is not allowed before Admin approval.',
+    );
+  }
   const outcome: OutboundPayoutStatusResponse = await provider.getPayoutStatus({
     providerReference: payout.providerReference,
     internalReference: payout.internalReference,

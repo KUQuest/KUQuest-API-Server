@@ -36,7 +36,7 @@ import {
 } from '@/modules/wallet/wallet.service';
 import type { WalletTransaction } from '@/modules/wallet/wallet.service';
 
-import { and, asc, desc, eq, inArray, isNull, lt, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm';
 
 import {
   PayoutProviderError,
@@ -730,6 +730,18 @@ const claimApprovedPayout = async (payoutId: string) => db.transaction(async (tr
     .for('update');
   if (!record) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
   if (record.payoutStatus !== 'CREATING') return { payout: payoutFromRecord(record), claimed: false };
+
+  const [approval] = await transaction
+    .select({ id: paymentPayoutStatusHistory.id })
+    .from(paymentPayoutStatusHistory)
+    .where(and(
+      eq(paymentPayoutStatusHistory.payoutId, record.id),
+      eq(paymentPayoutStatusHistory.toStatus, 'CREATING'),
+      eq(paymentPayoutStatusHistory.source, 'ADMIN_APPROVAL'),
+      isNotNull(paymentPayoutStatusHistory.actorAdminId),
+    ))
+    .limit(1);
+  if (!approval) return { payout: payoutFromRecord(record), claimed: false };
 
   const staleBefore = new Date(Date.now() - providerSubmissionLeaseMs);
   if (record.providerSubmissionClaimedAt && record.providerSubmissionClaimedAt >= staleBefore) {
