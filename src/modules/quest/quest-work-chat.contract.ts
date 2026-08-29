@@ -23,6 +23,10 @@ export type AssignmentId = string;
 export type CommandId = string;
 export type EventId = string;
 export type IsoTimestamp = string;
+export type QuestWorkChatTransitionProducer =
+  | 'QUEST_DIRECT_JOIN'
+  | 'QUEST_CANDIDATE_SELECTION'
+  | 'QUEST_SETTLEMENT';
 
 export type TerminalQuestStatus = QuestTerminalQuestStatus;
 export type InactiveAssignmentStatus = QuestInactiveAssignmentStatus;
@@ -34,6 +38,8 @@ export type AcceptedWorker = {
 };
 
 type TransitionBase = {
+  /** The Quest command boundary that produced this transition. */
+  producer: QuestWorkChatTransitionProducer;
   /** The caller's idempotency key. Retries must return the prior result. */
   commandId: CommandId;
   /** Stable event identity used to deduplicate Chat-side system messages. */

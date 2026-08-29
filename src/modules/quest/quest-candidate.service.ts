@@ -435,7 +435,7 @@ const selectionTransition = (
   assignments: SelectionAssignment[],
 ): QuestWorkChatMembershipTransition => {
   const workers = assignments.map((assignment) => ({ workerId: assignment.workerId, assignmentId: assignment.id, joinedAt: assignment.createdAt.toISOString() })) as [AcceptedWorker, ...AcceptedWorker[]];
-  return { type: 'workersAccepted', commandId, eventId: commandId, questId, actorId: hirerId, hirerId, occurredAt: now.toISOString(), workers };
+  return { producer: 'QUEST_CANDIDATE_SELECTION', type: 'workersAccepted', commandId, eventId: commandId, questId, actorId: hirerId, hirerId, occurredAt: now.toISOString(), workers };
 };
 
 /** Select one submitted Candidate and fan out its accepted roster. */
@@ -500,4 +500,3 @@ export const selectCandidate = async (
     return { assignments, questStatus: questStatus.assigned };
   });
 };
-

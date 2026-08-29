@@ -23,6 +23,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 import { requireQuestWorkChatMembershipWriter, WorkChatTransitionError } from './quest-assignment.service';
 import { assignmentStatus, questStatus, type QuestStatus } from './quest.contract';
 import type { QuestTransaction } from './quest-assignment.service';
+import type { InactiveAssignmentStatus } from './quest-work-chat.contract';
 
 export type QuestSettlementOutcome =
   | { outcome: 'not-found' | 'not-authorized' | 'invalid-state' | 'idempotency-key-reused' | 'idempotency-key-required' | 'idempotency-unavailable' | 'allocations-invalid' }
@@ -141,6 +142,7 @@ const terminalChat = async (
   const writer = requireQuestWorkChatMembershipWriter();
   try {
     await writer.applyQuestTransition(tx, {
+      producer: 'QUEST_SETTLEMENT',
       type: 'questBecameReadOnly',
       commandId,
       eventId: commandId,
@@ -150,6 +152,36 @@ const terminalChat = async (
       questStatus: status,
       readOnlyAt: now.toISOString(),
     });
+  } catch (cause) {
+    throw new WorkChatTransitionError(cause);
+  }
+};
+
+const inactiveWorkersChat = async (
+  tx: QuestTransaction,
+  current: { id: string },
+  workers: { id: string; workerId: string }[],
+  status: InactiveAssignmentStatus,
+  now: Date,
+  actorId: string | null,
+): Promise<void> => {
+  const writer = requireQuestWorkChatMembershipWriter();
+  try {
+    for (const worker of workers) {
+      await writer.applyQuestTransition(tx, {
+        producer: 'QUEST_SETTLEMENT',
+        type: 'workerBecameInactive',
+        commandId: worker.id,
+        eventId: worker.id,
+        questId: current.id,
+        actorId,
+        occurredAt: now.toISOString(),
+        assignmentId: worker.id,
+        workerId: worker.workerId,
+        assignmentStatus: status,
+        leftAt: now.toISOString(),
+      });
+    }
   } catch (cause) {
     throw new WorkChatTransitionError(cause);
   }
@@ -278,6 +310,7 @@ const cancelInTransaction = async (tx: QuestTransaction, questId: string, hirerI
   const beforeRelease = (await reservationFor(tx, hirerId, questId, false))?.remainingSatang ?? 0;
   const releasedAmount = await releaseRemaining(tx, hirerId, reservation.id, `quest-cancel-release:${commandId}`);
   await tx.update(questAssignment).set({ assignmentStatus: assignmentStatus.cancelled }).where(and(eq(questAssignment.questId, questId), eq(questAssignment.assignmentStatus, assignmentStatus.active)));
+  await inactiveWorkersChat(tx, current, workers, assignmentStatus.cancelled, now, hirerId);
   await tx.update(quest).set({ questStatus: questStatus.cancelled, cancelledAt: now, cancelledByUserId: hirerId, updatedAt: now }).where(eq(quest.id, questId));
   await terminalChat(tx, current, questStatus.cancelled, commandId, now);
   return { questStatus: questStatus.cancelled, outcome: 'CANCELLED', paidSatang: paid, refundedSatang: beforeRelease || releasedAmount };
@@ -339,6 +372,7 @@ const autoCancelInTransaction = async (
     return { outcome: 'not-due' };
   }
 
+  const workers = await activeAssignments(tx, questId);
   const refunded = await releaseRemaining(tx, current.hirerId, reservation.id, `quest-auto-cancel-release:${questId}`);
   await tx.update(questAssignment)
     .set({ assignmentStatus: assignmentStatus.cancelled })
@@ -346,6 +380,7 @@ const autoCancelInTransaction = async (
       eq(questAssignment.questId, questId),
       eq(questAssignment.assignmentStatus, assignmentStatus.active),
     ));
+  await inactiveWorkersChat(tx, current, workers, assignmentStatus.cancelled, now, null);
   await tx.update(quest).set({
     questStatus: questStatus.cancelled,
     cancelledAt: now,
@@ -405,8 +440,10 @@ export const resolveQuestDispute = async (adminId: string, questId: string, comm
       paid = await settleWorkers(tx, current.hirerId, reservation.id, normalized, () => Promise.resolve(0), `quest-dispute:${commandId}`);
       await releaseRemaining(tx, current.hirerId, reservation.id, `quest-dispute-refund:${commandId}`);
       const awarded = new Set(normalized.map(({ workerId }) => workerId));
+      const incompleteWorkers = workers.filter(({ workerId }) => !awarded.has(workerId));
       await tx.update(questAssignment).set({ assignmentStatus: assignmentStatus.completed }).where(and(eq(questAssignment.questId, questId), eq(questAssignment.assignmentStatus, assignmentStatus.active), inArray(questAssignment.workerId, [...awarded])));
       await tx.update(questAssignment).set({ assignmentStatus: assignmentStatus.incomplete }).where(and(eq(questAssignment.questId, questId), eq(questAssignment.assignmentStatus, assignmentStatus.active)));
+      await inactiveWorkersChat(tx, current, incompleteWorkers, assignmentStatus.incomplete, now, adminId);
       await tx.update(quest).set({ questStatus: questStatus.completed, updatedAt: now }).where(eq(quest.id, questId));
       await terminalChat(tx, current, questStatus.completed, commandId, now);
       const result: CommandResult = { questStatus: questStatus.completed, outcome: 'RELEASED_TO_WORKER', paidSatang: paid, refundedSatang: remaining - paid };
@@ -415,6 +452,7 @@ export const resolveQuestDispute = async (adminId: string, questId: string, comm
     }
     const refunded = await releaseRemaining(tx, current.hirerId, reservation.id, `quest-dispute-refund:${commandId}`);
     await tx.update(questAssignment).set({ assignmentStatus: assignmentStatus.cancelled }).where(and(eq(questAssignment.questId, questId), eq(questAssignment.assignmentStatus, assignmentStatus.active)));
+    await inactiveWorkersChat(tx, current, workers, assignmentStatus.cancelled, now, adminId);
     await tx.update(quest).set({ questStatus: questStatus.cancelled, cancelledAt: now, cancelledByAdminId: adminId, updatedAt: now }).where(eq(quest.id, questId));
     await terminalChat(tx, current, questStatus.cancelled, commandId, now);
     const result: CommandResult = { questStatus: questStatus.cancelled, outcome: 'REFUNDED', paidSatang: 0, refundedSatang: refunded };

@@ -552,10 +552,11 @@ CREATE INDEX proof_submission_image_submission_idx ON proof_submission_image (pr
 
 -- ==================== work_conversation (dedicated Work Conversation — REQUIREMENTS ONLY) ====================
 -- BE-170 records the agreed requirements; the Chat module tables and the
--- WorkChatMembershipWriter implementation are a later ticket (BE-174). No
--- tables are declared here — this block is the contract the Chat EDR must
--- satisfy when it is walked. See also ADR 0005 (Quest owns Work Chat
--- membership) and src/modules/quest/quest-work-chat.contract.ts (typed
+-- WorkChatMembershipWriter implementation live in the Work Chat module and
+-- its forward migration. No tables are declared here — this block is the
+-- contract the Chat EDR must satisfy when it is walked. See also ADR 0005
+-- (Quest owns Work Chat membership) and
+-- src/modules/quest/quest-work-chat.contract.ts (typed
 -- Quest -> Chat port, already on the BE-170 canonical vocabulary).
 --  - One dedicated Work Conversation per Quest — never shared between Quests,
 --    never more than one per Quest. Participants are the Hirer and Active
