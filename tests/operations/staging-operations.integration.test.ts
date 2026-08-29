@@ -26,7 +26,7 @@ const createFixture = async () => {
   await mkdir(backupDirectory);
   await writeFile(
     join(directory, '.env'),
-    'DATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\n',
+    'DEPLOYMENT_ENV=staging\nDATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\n',
   );
   await writeFile(
     join(binaryDirectory, 'docker'),
@@ -76,6 +76,9 @@ if [[ "$*" == compose\\ up* && "\${MOCK_RESTORE_FAILURE:-}" == "1" && "$APP_IMAG
 fi
 
 if [[ "$*" == *"compose run --rm --no-deps api bun run db:migrate"* && "\${MOCK_MIGRATION_FAILURE:-}" == "1" ]]; then
+  exit 1
+fi
+if [[ "$*" == *"compose run --rm --no-deps api bun run db:seed-staging"* && "\${MOCK_SEED_FAILURE:-}" == "1" ]]; then
   exit 1
 fi
 `,
@@ -364,6 +367,9 @@ test('bootstrap backs up, resets only public, migrates, and verifies', async () 
     const reset = commands.findIndex((line) =>
       line.includes('DROP SCHEMA public CASCADE; CREATE SCHEMA public;'),
     );
+    const journalReset = commands.findIndex((line) =>
+      line.includes('TRUNCATE TABLE drizzle.__drizzle_migrations'),
+    );
     const migrate = commands.findIndex((line) =>
       line.includes('compose run --rm --no-deps api bun run db:migrate'),
     );
@@ -376,13 +382,66 @@ test('bootstrap backs up, resets only public, migrates, and verifies', async () 
     const appliedJournalCount = commands.findIndex((line) =>
       line.includes('SELECT count(*) FROM drizzle.__drizzle_migrations'),
     );
+    const exactMigrationVerification = commands.findIndex((line) =>
+      line.includes('compose run --rm --no-deps api bun run db:verify-migration-journal'),
+    );
+    const seed = commands.findIndex((line) =>
+      line.includes('compose run --rm --no-deps api bun run db:seed-staging'),
+    );
+    const seedVerification = commands.findIndex((line) =>
+      line.includes('compose run --rm --no-deps api bun run db:verify-staging-seed'),
+    );
 
     expect(result.exitCode).toBe(0);
     expect(reset).toBeGreaterThan(backup);
+    expect(journalReset).toBeGreaterThan(reset);
     expect(migrate).toBeGreaterThan(reset);
+    expect(exactMigrationVerification).toBeGreaterThan(migrate);
     expect(verify).toBeGreaterThan(migrate);
     expect(expectedJournalCount).toBeGreaterThan(migrate);
     expect(appliedJournalCount).toBeGreaterThan(expectedJournalCount);
+    expect(seed).toBeGreaterThan(appliedJournalCount);
+    expect(seedVerification).toBeGreaterThan(seed);
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('bootstrap reports its recovery backup when seed verification fails', async () => {
+  const fixture = await createFixture();
+
+  try {
+    const result = runStagingOperation(fixture, 'bootstrap', {
+      env: { MOCK_SEED_FAILURE: '1' },
+      input: 'RESET staging public schema\n',
+    });
+    const output = `${result.stdout.toString()}${result.stderr.toString()}`;
+
+    expect(result.exitCode).toBe(1);
+    expect(output).toContain('Bootstrap failed; restore from');
+    expect(output).toContain(fixture.backupDirectory);
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('staging operations refuse a non-staging environment file', async () => {
+  const fixture = await createFixture();
+
+  try {
+    await writeFile(
+      join(fixture.directory, '.env'),
+      'DEPLOYMENT_ENV=production\nDATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\n',
+    );
+    const result = runStagingOperation(fixture, 'bootstrap', {
+      input: 'RESET staging public schema\n',
+    });
+    const output = `${result.stdout.toString()}${result.stderr.toString()}`;
+    const commands = await readFile(fixture.dockerLog, 'utf8').catch(() => '');
+
+    expect(result.exitCode).toBe(1);
+    expect(output).toContain('DEPLOYMENT_ENV=staging is required');
+    expect(commands).not.toContain('DROP SCHEMA');
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }
