@@ -257,8 +257,8 @@ An immutable audit record of an Admin's Work Chat evidence access or moderation 
 _Avoid_: Reporter Entry, Moderation Decision
 
 **Terminal Quest**:
-A Quest in `QUEST_STATE_COMPLETED`, `QUEST_STATE_CANCELLED`, or
-`QUEST_STATE_FAILED`. Its Work Conversation is read-only for Members, but the
+A Quest in `QUEST_COMPLETED`, `QUEST_CANCELLED`, or
+`QUEST_FAILED`. Its Work Conversation is read-only for Members, but the
 system may append System Messages for later workflow events.
 _Avoid_: Closed conversation
 

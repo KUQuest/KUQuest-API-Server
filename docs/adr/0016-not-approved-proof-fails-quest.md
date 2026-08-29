@@ -2,7 +2,7 @@
 
 When a Hirer does not approve a Proof Submission, the work is unsuccessful and
 the Quest ends immediately. The Quest uses a distinct terminal
-`QUEST_STATE_FAILED` status instead of `QUEST_STATE_CANCELLED`, because
+`QUEST_FAILED` status instead of `QUEST_CANCELLED`, because
 cancellation means the Quest was stopped while failure means the submitted work
 did not pass review; no Rework or further Proof Submission is allowed.
 

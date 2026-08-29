@@ -24,22 +24,23 @@ The target uses `Hirer`, `Worker`, `Accepted Participant`, `Assignment`, `Quest 
 
 ## State and status naming
 
-For this target, every persisted or API state/status value uses the form
-`<OBJECT>_<FIELD>_<VALUE>`. The prefix is part of the value. A UI label may use
+For this target, every persisted or API state/status value uses an entity
+prefix in the form `<ENTITY>_<VALUE>`. The prefix is part of the value. This
+follows the entity-prefix convention in the Quest EDR. A UI label may use
 human text, but the stored and transmitted value keeps the prefix.
 
 | Object | Field | Allowed values |
 | --- | --- | --- |
-| Quest | state | `QUEST_STATE_DRAFT`, `QUEST_STATE_OPEN`, `QUEST_STATE_ASSIGNED`, `QUEST_STATE_IN_PROGRESS`, `QUEST_STATE_COMPLETED`, `QUEST_STATE_CANCELLED`, `QUEST_STATE_FAILED` |
-| Assignment | state | `ASSIGNMENT_STATE_ACTIVE`, `ASSIGNMENT_STATE_COMPLETED`, `ASSIGNMENT_STATE_INCOMPLETE`, `ASSIGNMENT_STATE_CANCELLED` |
-| Proof Submission | status | `PROOF_STATUS_PENDING`, `PROOF_STATUS_APPROVED`, `PROOF_STATUS_NOT_APPROVED` |
-| Quest Edit | status | `QUEST_EDIT_STATUS_PENDING`, `QUEST_EDIT_STATUS_APPLIED`, `QUEST_EDIT_STATUS_FAILED` |
-| Reward transfer | status | `REWARD_TRANSFER_STATUS_PENDING`, `REWARD_TRANSFER_STATUS_COMPLETED` |
-| Push delivery | status | `PUSH_DELIVERY_STATUS_PENDING`, `PUSH_DELIVERY_STATUS_DELIVERED`, `PUSH_DELIVERY_STATUS_FAILED`, `PUSH_DELIVERY_STATUS_DISABLED` |
+| Quest | state | `QUEST_DRAFT`, `QUEST_OPEN`, `QUEST_ASSIGNED`, `QUEST_IN_PROGRESS`, `QUEST_COMPLETED`, `QUEST_CANCELLED`, `QUEST_FAILED` |
+| Assignment | state | `ASSIGNMENT_ACTIVE`, `ASSIGNMENT_COMPLETED`, `ASSIGNMENT_INCOMPLETE`, `ASSIGNMENT_CANCELLED` |
+| Proof Submission | status | `PROOF_PENDING`, `PROOF_APPROVED`, `PROOF_NOT_APPROVED` |
+| Quest Edit | status | `EDIT_REQUEST_PENDING`, `EDIT_REQUEST_APPLIED`, `EDIT_REQUEST_FAILED` |
+| Reward transfer | status | `REWARD_TRANSFER_PENDING`, `REWARD_TRANSFER_COMPLETED` |
+| Push delivery | status | `PUSH_DELIVERY_PENDING`, `PUSH_DELIVERY_DELIVERED`, `PUSH_DELIVERY_FAILED`, `PUSH_DELIVERY_DISABLED` |
 
 There is no bare `PENDING`, `APPROVED`, `COMPLETED`, `FAILED`, or `CANCELLED`
-value in this target. Automatic approval uses `PROOF_STATUS_APPROVED`; there is
-no `PROOF_STATUS_REJECTED` or `PROOF_STATUS_AUTO_APPROVED`.
+value in this target. Automatic approval uses `PROOF_APPROVED`; there is no
+`PROOF_REJECTED` or `PROOF_AUTO_APPROVED`.
 
 ## Constraint contract
 
@@ -75,7 +76,7 @@ Apply constraints at three layers:
   explicitly and is stable after save.
 - `dueAt` is required before publish, uses Asia/Bangkok time, and is checked by
   Server time. It cannot change after the Quest reaches
-  `QUEST_STATE_ASSIGNED`.
+  `QUEST_ASSIGNED`.
 - Message text is optional only when the Message has an Attachment, and is at
   most 1,000 characters.
 - A Chat Message may contain any number of Attachments. There is no total-size
@@ -84,7 +85,7 @@ Apply constraints at three layers:
   up to five files, and requires a description or at least one file.
 - Chat and Proof files are limited to image, PDF, and video. Each file is at
   most 10 MB. The system does not scan these files for malware.
-- A `PROOF_STATUS_NOT_APPROVED` decision requires a reason of at most 1,000
+- A `PROOF_NOT_APPROVED` decision requires a reason of at most 1,000
   characters. A
   Quest Edit decline reason is optional and at most 255 characters.
 - A Member may send at most 30 Chat Messages and 10 Chat Attachments per
@@ -94,19 +95,19 @@ Apply constraints at three layers:
 
 - Only the allowed State/Status values in the table above may be persisted or
   returned by the target API.
-- A terminal Quest uses `QUEST_STATE_COMPLETED`, `QUEST_STATE_CANCELLED`, or
-  `QUEST_STATE_FAILED`. Members cannot create new Chat Messages in a terminal
+- A terminal Quest uses `QUEST_COMPLETED`, `QUEST_CANCELLED`, or
+  `QUEST_FAILED`. Members cannot create new Chat Messages in a terminal
   Quest.
-- A Proof decision changes only from `PROOF_STATUS_PENDING` to
-  `PROOF_STATUS_APPROVED` or `PROOF_STATUS_NOT_APPROVED`. The first Server
+- A Proof decision changes only from `PROOF_PENDING` to
+  `PROOF_APPROVED` or `PROOF_NOT_APPROVED`. The first Server
   decision wins.
 - A Quest Edit response is accepted only once per Worker. The Server deadline
   and the current Active Worker set are authoritative.
 - A retryable Reward transfer remains
-  `REWARD_TRANSFER_STATUS_PENDING` and reuses its payment record. It cannot
+  `REWARD_TRANSFER_PENDING` and reuses its payment record. It cannot
   create a duplicate payment or reclaim a transferred Reward.
 - A Push retry keeps one logical Event/recipient identity. Invalid destinations
-  end at `PUSH_DELIVERY_STATUS_DISABLED`.
+  end at `PUSH_DELIVERY_DISABLED`.
 
 ## Membership and lifecycle invariants
 
@@ -114,12 +115,12 @@ Apply constraints at three layers:
 - Current Work Conversation members are the Hirer and Active Workers. Candidates are never members.
 - A newly accepted Worker can read retained history and can receive new Messages from membership start.
 - A Worker who leaves can read only Messages created no later than departure and cannot send or receive new Messages.
-- A Terminal Quest is `QUEST_STATE_COMPLETED`, `QUEST_STATE_CANCELLED`, or
-  `QUEST_STATE_FAILED`.
+- A Terminal Quest is `QUEST_COMPLETED`, `QUEST_CANCELLED`, or
+  `QUEST_FAILED`.
 - A Terminal Quest is read-only for Members. The system may append later
   workflow System Messages.
-- `QUEST_STATE_FAILED` means work was not approved or required work was not
-  submitted by `dueAt`. It is distinct from `QUEST_STATE_CANCELLED`.
+- `QUEST_FAILED` means work was not approved or required work was not
+  submitted by `dueAt`. It is distinct from `QUEST_CANCELLED`.
 - There is no Rework flow.
 
 ## Quest Condition and Quest Edit
@@ -131,7 +132,7 @@ Apply constraints at three layers:
 - Condition Items are ordered.
 - Any Member who can view the Quest can view the ordered, read-only Condition list.
 - The Hirer may change Condition Items only while the Quest is
-  `QUEST_STATE_ASSIGNED`.
+  `QUEST_ASSIGNED`.
 
 ### Edit protocol
 
@@ -140,47 +141,47 @@ Apply constraints at three layers:
 3. The Hirer submits one Quest Edit for all Active Workers.
 4. Every Active Worker must accept within 10 minutes. Each Worker responds once.
 5. If the last Worker accepts early, the Quest Edit becomes
-   `QUEST_EDIT_STATUS_APPLIED` and the proposed Condition applies immediately.
+   `EDIT_REQUEST_APPLIED` and the proposed Condition applies immediately.
 6. If any Worker does not accept, including timeout, the old Condition remains
-   and the Quest Edit becomes `QUEST_EDIT_STATUS_FAILED` without effect.
-7. A `QUEST_EDIT_STATUS_PENDING` Quest Edit cannot be cancelled by the Hirer
-   and blocks the Quest from leaving `QUEST_STATE_ASSIGNED`.
+   and the Quest Edit becomes `EDIT_REQUEST_FAILED` without effect.
+7. An `EDIT_REQUEST_PENDING` Quest Edit cannot be cancelled by the Hirer
+   and blocks the Quest from leaving `QUEST_ASSIGNED`.
 8. If an Active Worker leaves while it has
-   `QUEST_EDIT_STATUS_PENDING`, the Quest Edit becomes
-   `QUEST_EDIT_STATUS_FAILED` immediately and the old Condition remains.
+   `EDIT_REQUEST_PENDING`, the Quest Edit becomes
+   `EDIT_REQUEST_FAILED` immediately and the old Condition remains.
 9. After it ends, the Hirer may submit a new Quest Edit.
 
 A Worker may decline without a reason. An optional decline reason is at most
 255 characters. The Hirer and the Worker who wrote it can see it; other Active
-Workers see only that the Quest Edit has `QUEST_EDIT_STATUS_FAILED`.
+Workers see only that the Quest Edit has `EDIT_REQUEST_FAILED`.
 
 ## Due time and completion
 
 - The Hirer sets `dueAt` before publishing the Quest.
-- `dueAt` cannot change after the Quest becomes `QUEST_STATE_ASSIGNED`.
+- `dueAt` cannot change after the Quest becomes `QUEST_ASSIGNED`.
 - All `dueAt` values use Asia/Bangkok time.
 - The Server decides whether a submission is on time. A submission received at or before `dueAt` is on time.
 - The UI shows a live countdown and the exact deadline.
 - Reminders go to Active Workers who have not completed the required action 24 hours and 1 hour before `dueAt`; a reminder whose time has passed is skipped.
 - The Server does not accept a late required action. The Assignment becomes
-  `ASSIGNMENT_STATE_INCOMPLETE` and the Quest becomes `QUEST_STATE_FAILED`.
+  `ASSIGNMENT_INCOMPLETE` and the Quest becomes `QUEST_FAILED`.
 
 ### Quest without proof
 
 When `proofRequired=false`, the Worker presses “ส่งงานเสร็จแล้ว”. No Proof
 Submission is created, no Hirer review is required, and that Assignment becomes
-`ASSIGNMENT_STATE_COMPLETED` immediately.
+`ASSIGNMENT_COMPLETED` immediately.
 
-- A one-Worker Quest becomes `QUEST_STATE_COMPLETED` immediately.
-- A `GROUP` Quest becomes `QUEST_STATE_COMPLETED` when every Active Worker
-  Assignment is `ASSIGNMENT_STATE_COMPLETED`.
+- A one-Worker Quest becomes `QUEST_COMPLETED` immediately.
+- A `GROUP` Quest becomes `QUEST_COMPLETED` when every Active Worker
+  Assignment is `ASSIGNMENT_COMPLETED`.
 - If a Worker does not press the button by `dueAt`, that Assignment becomes
-  `ASSIGNMENT_STATE_INCOMPLETE` and the Quest becomes `QUEST_STATE_FAILED`.
+  `ASSIGNMENT_INCOMPLETE` and the Quest becomes `QUEST_FAILED`.
 
 ### Quest with proof
 
 When proof is required, an Assignment may have one Proof Submission. For a
-`GROUP` Quest, the Quest remains `QUEST_STATE_IN_PROGRESS` until every required
+`GROUP` Quest, the Quest remains `QUEST_IN_PROGRESS` until every required
 Worker has submitted. Hirer review may start before every Worker submits.
 
 ## Proof Submission protocol
@@ -200,44 +201,44 @@ Worker has submitted. Hirer review may start before every Worker submits.
 
 ### Review and decision
 
-- Decision status is `PROOF_STATUS_PENDING`, `PROOF_STATUS_APPROVED`, or
-  `PROOF_STATUS_NOT_APPROVED`.
-- There is no `PROOF_STATUS_REJECTED` status. A Hirer records a failed review as
-  `PROOF_STATUS_NOT_APPROVED`.
+- Decision status is `PROOF_PENDING`, `PROOF_APPROVED`, or
+  `PROOF_NOT_APPROVED`.
+- There is no `PROOF_REJECTED` status. A Hirer records a failed review as
+  `PROOF_NOT_APPROVED`.
 - The Hirer reviews one Proof Submission at a time. Batch decisions are not available.
 - The Hirer review list is grouped by Assignment, with
-  `PROOF_STATUS_PENDING` first.
+  `PROOF_PENDING` first.
 - A KU bot or Push action opens the review Popup with the details, evidence, and actions.
 - The Hirer must confirm an approval or non-approval in a Popup.
 - Closing the Popup without a decision leaves the status
-  `PROOF_STATUS_PENDING`.
-- `PROOF_STATUS_NOT_APPROVED` requires a reason of at most 1,000 characters.
+  `PROOF_PENDING`.
+- `PROOF_NOT_APPROVED` requires a reason of at most 1,000 characters.
 - The reason is visible to the Hirer and submitting Worker only. Other Accepted Participants see only a summary.
 - The first confirmed decision is final. Multiple Hirer devices use the first decision accepted by the Server. Other devices refresh to that result.
 - If the decision response is unclear, the UI reloads the status before allowing
   another action. A new action is allowed only while the status is still
-  `PROOF_STATUS_PENDING`.
+  `PROOF_PENDING`.
 - If no decision exists 24 hours after sending, the system uses
-  `PROOF_STATUS_APPROVED`. The System Message says that the system approved it
+  `PROOF_APPROVED`. The System Message says that the system approved it
   automatically. This uses the same status and never changes an earlier
   decision.
 - The Server does not accept a Proof Submission received after `dueAt`.
 
 ### Failure and partial success
 
-- A `PROOF_STATUS_NOT_APPROVED` decision makes the Assignment
-  `ASSIGNMENT_STATE_INCOMPLETE`, gives that Worker no Reward, and makes the
-  Quest `QUEST_STATE_FAILED` immediately.
+- A `PROOF_NOT_APPROVED` decision makes the Assignment
+  `ASSIGNMENT_INCOMPLETE`, gives that Worker no Reward, and makes the
+  Quest `QUEST_FAILED` immediately.
 - No Rework or second Proof Submission exists.
 - A missing required submission at `dueAt` has the same result.
 - If another Worker has a Proof Submission sent on time and still
-  `PROOF_STATUS_PENDING`, the Hirer may review it after the Quest becomes
-  `QUEST_STATE_FAILED`.
+  `PROOF_PENDING`, the Hirer may review it after the Quest becomes
+  `QUEST_FAILED`.
 - If that later review approves the submission, its Assignment becomes
-  `ASSIGNMENT_STATE_COMPLETED` and its Worker receives the Reward. The Quest
-  remains `QUEST_STATE_FAILED`.
+  `ASSIGNMENT_COMPLETED` and its Worker receives the Reward. The Quest
+  remains `QUEST_FAILED`.
 - In a `GROUP` Quest, an approved or proof-free completed Worker keeps the
-  Reward even when another Worker later causes `QUEST_STATE_FAILED`.
+  Reward even when another Worker later causes `QUEST_FAILED`.
 
 ## Work Conversation contract
 
@@ -303,7 +304,7 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 - A directly affected Event notifies its affected recipient. A Quest-wide Event notifies all current Accepted Participants.
 - A Member can mute non-critical Push per Quest. Critical Events remain deliverable.
 - Critical Events include approval, non-approval, missing work at `dueAt`,
-  `QUEST_STATE_FAILED`, `QUEST_STATE_COMPLETED`, `QUEST_STATE_CANCELLED`, and a
+  `QUEST_FAILED`, `QUEST_COMPLETED`, `QUEST_CANCELLED`, and a
   Quest Edit requiring a response.
 - When the app is active, the in-app Popup replaces the duplicate Push.
 - Push contains a short update and a relevant link. It never contains private proof details or evidence.
@@ -313,17 +314,17 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 
 - Hirer funds the Quest through `Quest Escrow`.
 - The system transfers a Worker Reward immediately when that Assignment becomes
-  `ASSIGNMENT_STATE_COMPLETED`.
+  `ASSIGNMENT_COMPLETED`.
 - The Hirer can see each Worker Reward and the Quest total.
 - A Worker sees only that Worker's Reward.
-- If a Quest is `QUEST_STATE_FAILED`, unpaid Worker-slot Rewards return to the
+- If a Quest is `QUEST_FAILED`, unpaid Worker-slot Rewards return to the
   Hirer. Already transferred Rewards are not reclaimed.
 - A failed Quest has no Platform Fee; the fee returns to the Hirer.
-- A `QUEST_STATE_CANCELLED` Quest returns unpaid Rewards and the Platform Fee.
-  `ASSIGNMENT_STATE_CANCELLED` Assignments do not receive Reward.
+- A `QUEST_CANCELLED` Quest returns unpaid Rewards and the Platform Fee.
+  `ASSIGNMENT_CANCELLED` Assignments do not receive Reward.
 - If a Reward transfer fails, the Assignment remains
-  `ASSIGNMENT_STATE_COMPLETED`, the transfer remains
-  `REWARD_TRANSFER_STATUS_PENDING`, the system retries, and Hirer/Worker are
+  `ASSIGNMENT_COMPLETED`, the transfer remains
+  `REWARD_TRANSFER_PENDING`, the system retries, and Hirer/Worker are
   notified.
 - Retries use the same payment record and cannot create a duplicate payment.
 - A successful transfer notifies the receiving Worker and Hirer. Other participants see only Quest completion without the amount.
@@ -340,13 +341,12 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 
 When implementation is requested, the Agent must complete all of these checks:
 
-1. Domain state and persistence use `PROOF_STATUS_NOT_APPROVED` for the proof
-   decision and `QUEST_STATE_FAILED` for Quest failure. No implementation path
-   creates a Rework, `PROOF_STATUS_REJECTED`, or
-   `PROOF_STATUS_AUTO_APPROVED` target status.
-2. Quest Edit is available only in `QUEST_STATE_ASSIGNED`, uses the 10-minute
+1. Domain state and persistence use `PROOF_NOT_APPROVED` for the proof
+   decision and `QUEST_FAILED` for Quest failure. No implementation path
+   creates a Rework, `PROOF_REJECTED`, or `PROOF_AUTO_APPROVED` target status.
+2. Quest Edit is available only in `QUEST_ASSIGNED`, uses the 10-minute
    all-Active-Worker protocol, and blocks work start while
-   `QUEST_EDIT_STATUS_PENDING`.
+   `EDIT_REQUEST_PENDING`.
 3. Proof and no-proof paths produce the Assignment and Quest transitions in this document, including partial `GROUP` success and post-failure review.
 4. Chat membership, read cursor, immutable Message behavior, 50-message initial load, attachment rules, offline behavior, and rate limits are tested.
 5. System Message visibility, Popup actions, Android Push routing, foreground de-duplication, device retry, and invalid-device handling are tested.
@@ -362,10 +362,10 @@ These existing files still describe older behavior and must be updated before im
 
 - `docs/quest/quest-stage-milestones.md` still contains `REWORK`, a 5-minute Quest Edit window, and the older proof-free stage flow.
 - `docs/chat/work-chat-contract.md` still treats Push and video as out of scope, uses older attachment-scan rules, and has older rate-limit and scaling assumptions.
-- `docs/db/edr/05-quest.sql` still defines the earlier Quest lifecycle, including `REWORK`, unprefixed state values, and older cancellation and payment rules.
+- `docs/db/edr/05-quest.sql` still defines the earlier Quest lifecycle, including `QUEST_REWORK`, older proof/review values, and older cancellation and payment rules.
 - `docs/chat/chat-schema-draft.sql` still defines older attachment, message, malware-scan, and unprefixed status assumptions.
 - Existing Quest code still allows edits in the legacy `OPEN` state and uses
   older proof statuses such as `REJECTED` and `AUTO_APPROVED`.
-- Existing Quest and Chat schema/types use unprefixed legacy state/status values; implementation must migrate them to the prefixed values in this document.
+- Existing Quest and Chat schema/types still use values outside this target, including unprefixed Chat values and older Quest proof/review values; implementation must migrate them to the prefixed values in this document.
 - The current proof schema still requires content, while the target allows a file-only Proof Submission.
 - The repository does not yet contain the target Chat module implementation.
