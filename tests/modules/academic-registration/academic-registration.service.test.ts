@@ -125,6 +125,27 @@ describe('updating academic registration', () => {
     expect(status!.termsAcceptedAt!.getTime()).toBeGreaterThanOrEqual(before);
   });
 
+  it('persists updated first and last name', async () => {
+    const member = randomUUID();
+    await db.insert(authUser).values({
+      id: member,
+      email: `${member}@ku.th`,
+      firstName: 'Before',
+      lastName: 'Before',
+    });
+
+    try {
+      expect(
+        await updateAcademicRegistration(member, { firstName: 'After', lastName: 'Changed' }),
+      ).toBe('updated');
+
+      const status = await getAcademicRegistrationStatus(member);
+      expect(status).toMatchObject({ firstName: 'After', lastName: 'Changed' });
+    } finally {
+      await db.delete(authUser).where(inArray(authUser.id, [member]));
+    }
+  });
+
   it('does not require every field to be set at once', async () => {
     expect(await updateAcademicRegistration(studentB, { telephone: '0800000001' })).toBe(
       'updated',
