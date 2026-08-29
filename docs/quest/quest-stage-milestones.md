@@ -1,6 +1,12 @@
 # Quest stage milestones
 
-This document is the stage-by-stage product reference for a Quest. It describes what is true at each milestone and when a Quest may move to the next one.
+> **Legacy reference — reconciliation required.** Use
+> `docs/quest/work-chat-system-target.md` for the accepted Quest and Work Chat
+> behavior. This file records the earlier lifecycle contract and its stage,
+> review, Rework, cancellation, and money rules are historical.
+
+This document is the earlier stage-by-stage product reference for a Quest. It
+describes the historical milestone rules and transitions.
 
 ## Roles and participation
 

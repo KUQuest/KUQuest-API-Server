@@ -9,6 +9,12 @@ Read these sources when they exist:
 - `CONTEXT.md` at the repository root
 - Relevant architectural decisions under `docs/adr/`
 
+For any work on Work Chat, Quest Condition or Quest Edit, Sent Work, Proof
+Submission, review Popup, System Message, Android Push, or Quest Reward
+settlement, also read `docs/quest/work-chat-system-target.md` before changing
+the domain, schema, API, UI, notification, or money flow. It is the accepted
+target contract and identifies older documents that must be reconciled.
+
 If they do not exist, proceed silently. Domain-modeling skills create them
 lazily when terminology or architectural decisions are established.
 

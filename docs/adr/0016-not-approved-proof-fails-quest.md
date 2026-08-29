@@ -1,0 +1,11 @@
+# End a Quest when proof is not approved
+
+When a Hirer does not approve a Proof Submission, the work is unsuccessful and
+the Quest ends immediately. The Quest uses a distinct terminal
+`QUEST_STATE_FAILED` status instead of `QUEST_STATE_CANCELLED`, because
+cancellation means the Quest was stopped while failure means the submitted work
+did not pass review; no Rework or further Proof Submission is allowed.
+
+A Worker whose Proof Submission was approved before another Worker caused the Quest to fail keeps the Quest Reward. This also applies when the failure comes from missing required proof at `dueAt`. A Worker whose work was not approved or not submitted receives no Quest Reward.
+
+Status: accepted.
