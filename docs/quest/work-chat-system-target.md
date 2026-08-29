@@ -20,7 +20,7 @@ The feature has five user-facing surfaces:
 - one Sent Work page for a Worker;
 - one review Popup opened from KU bot or a Push Notification.
 
-The target uses `Hirer`, `Worker`, `Accepted Participant`, `Assignment`, `Quest Condition`, `Proof Submission`, `System Message`, `Quest Reward`, and `Quest Escrow` exactly as defined in `CONTEXT.md`.
+The target uses `Hirer`, `Worker`, `Accepted Participant`, `Assignment`, `Quest Condition`, `Proof Submission`, `System Message`, `Admin Review Item`, `Quest Reward`, and `Quest Escrow` exactly as defined in `CONTEXT.md`.
 
 ## State and status naming
 
@@ -62,6 +62,8 @@ Apply constraints at three layers:
   Proof Submission.
 - One Quest has at most one pending Quest Edit. One Worker has at most one
   response to one Quest Edit.
+- One confirmed `PROOF_NOT_APPROVED` decision creates at most one Admin Review
+  Item. A retry reuses that Item.
 - One Assignment has at most one Worker Reward payment record. A retry reuses
   that record.
 - One logical Push Event has at most one Push delivery record per recipient.
@@ -101,6 +103,9 @@ Apply constraints at three layers:
 - A Proof decision changes only from `PROOF_PENDING` to
   `PROOF_APPROVED` or `PROOF_NOT_APPROVED`. The first Server
   decision wins.
+- A confirmed `PROOF_NOT_APPROVED` decision creates the Admin Review Item and
+  starts its Admin notification. Notification failure does not undo
+  `QUEST_FAILED`; retry keeps the same Item and Event identity.
 - A Quest Edit response is accepted only once per Worker. The Server deadline
   and the current Active Worker set are authoritative.
 - A retryable Reward transfer remains
@@ -213,8 +218,17 @@ Worker has submitted. Hirer review may start before every Worker submits.
 - Closing the Popup without a decision leaves the status
   `PROOF_PENDING`.
 - `PROOF_NOT_APPROVED` requires a reason of at most 1,000 characters.
-- The reason is visible to the Hirer and submitting Worker only. Other Accepted Participants see only a summary.
+- The reason is visible to the Hirer, submitting Worker, and authorized Admins
+  through the Admin Review Item. Other Accepted Participants see only a
+  summary.
 - The first confirmed decision is final. Multiple Hirer devices use the first decision accepted by the Server. Other devices refresh to that result.
+- After the first confirmed `PROOF_NOT_APPROVED` decision, the system creates
+  one Admin Review Item automatically. It links the Quest, Assignment, Proof
+  Submission, Hirer, Worker, decision reason, and evidence references, and
+  sends the Item to the Admin review queue.
+- The Admin Review Item is for review and audit. It does not delay or undo
+  `QUEST_FAILED`, reopen the Quest, create Rework, or allow a second Proof
+  Submission. Authorized Admin access to the reason and evidence is audited.
 - If the decision response is unclear, the UI reloads the status before allowing
   another action. A new action is allowed only while the status is still
   `PROOF_PENDING`.
@@ -229,6 +243,9 @@ Worker has submitted. Hirer review may start before every Worker submits.
 - A `PROOF_NOT_APPROVED` decision makes the Assignment
   `ASSIGNMENT_INCOMPLETE`, gives that Worker no Reward, and makes the
   Quest `QUEST_FAILED` immediately.
+- The same decision creates one Admin Review Item automatically. A failure to
+  deliver the Admin notification does not change the Quest result; the Item
+  remains available in the Admin review queue for retry.
 - No Rework or second Proof Submission exists.
 - A missing required submission at `dueAt` has the same result.
 - If another Worker has a Proof Submission sent on time and still
@@ -290,6 +307,9 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 - They include the affected Worker's system display name and Event, but not private proof details or full Profile data.
 - They include an Event-specific action link or button. The button is shown only when the Member has permission.
 - Current Accepted Participants see membership and Quest Event summaries.
+- An Admin Review Item is separate from the Work Conversation. It is not shown
+  to other Accepted Participants and does not expose the private decision
+  reason or evidence to them.
 - On Quest completion, a Worker sees that Worker's Reward. Other participants see completion without the amount.
 
 ### Push Notification
@@ -332,8 +352,10 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 ## Audit and retention
 
 - An `Audit Record` stores actor or system, time, old value, new value, and reason where applicable.
-- It covers Quest, Assignment, Proof Submission, Quest Reward, and Platform Fee changes.
+- It covers Quest, Assignment, Proof Submission, Admin Review Item, Quest Reward, and Platform Fee changes.
 - Detailed Audit Records are visible only to authorized roles such as Hirer and Admin.
+- Admin Review Item creation and Admin access to its reason or evidence are
+  recorded as Audit Records.
 - Other Members see the applicable System Message and current status.
 - Audit Records are retained for at least one year after the Quest becomes Terminal and longer when a Report Case requires a hold.
 
@@ -344,15 +366,18 @@ When implementation is requested, the Agent must complete all of these checks:
 1. Domain state and persistence use `PROOF_NOT_APPROVED` for the proof
    decision and `QUEST_FAILED` for Quest failure. No implementation path
    creates a Rework, `PROOF_REJECTED`, or `PROOF_AUTO_APPROVED` target status.
-2. Quest Edit is available only in `QUEST_ASSIGNED`, uses the 10-minute
+2. Every confirmed `PROOF_NOT_APPROVED` decision creates exactly one Admin
+   Review Item and sends an Admin notification. Retries are idempotent, and a
+   notification failure does not reopen or change the failed Quest.
+3. Quest Edit is available only in `QUEST_ASSIGNED`, uses the 10-minute
    all-Active-Worker protocol, and blocks work start while
    `EDIT_REQUEST_PENDING`.
-3. Proof and no-proof paths produce the Assignment and Quest transitions in this document, including partial `GROUP` success and post-failure review.
-4. Chat membership, read cursor, immutable Message behavior, 50-message initial load, attachment rules, offline behavior, and rate limits are tested.
-5. System Message visibility, Popup actions, Android Push routing, foreground de-duplication, device retry, and invalid-device handling are tested.
-6. Reward settlement is idempotent, returns unpaid funds on failure/cancellation, and never reclaims a transferred Worker Reward.
-7. Every state transition and financial change has an Audit Record with the required actor, time, previous value, new value, and reason data.
-8. Tests cover single Worker, `GROUP`, proof required, proof not required, timeout, non-approval, missing submission, cancellation, offline retry, concurrent Hirer decisions, and Reward transfer retry.
+4. Proof and no-proof paths produce the Assignment and Quest transitions in this document, including partial `GROUP` success and post-failure review.
+5. Chat membership, read cursor, immutable Message behavior, 50-message initial load, attachment rules, offline behavior, and rate limits are tested.
+6. System Message visibility, Popup actions, Android Push routing, foreground de-duplication, device retry, and invalid-device handling are tested.
+7. Reward settlement is idempotent, returns unpaid funds on failure/cancellation, and never reclaims a transferred Worker Reward.
+8. Every state transition and financial change has an Audit Record with the required actor, time, previous value, new value, and reason data.
+9. Tests cover single Worker, `GROUP`, proof required, proof not required, timeout, non-approval, Admin Review Item creation and retry, missing submission, cancellation, offline retry, concurrent Hirer decisions, and Reward transfer retry.
 
 The work is complete only when the target behavior is represented in the domain model, persistence, API/UI behavior, notifications, money flow, and tests, and the known conflicts below are resolved.
 
