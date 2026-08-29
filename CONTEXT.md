@@ -37,8 +37,8 @@ A shared Quest skill label used to describe the ability demonstrated by a Quest.
 _Avoid_: profile skill, occupation, treating Tags as editable Member fields.
 
 **Review**:
-A rating and optional comment that a Hirer or Worker gives to the other after a Quest is completed. A Review is tied to one Quest, each direction is allowed once per Quest, and the author may edit it until seven days after Quest completion. Reviews cannot be deleted and contribute to the reviewed Member's Reputation.
-_Avoid_: reviewing before Quest completion; treating a Review as a Profile field that can be edited by someone else.
+A rating and optional comment that a Hirer or Worker gives to the other after a Quest reaches any Terminal State: `QUEST_COMPLETED`, `QUEST_FAILED`, or `QUEST_CANCELLED`. A Review is tied to one Quest, each direction is allowed once per Quest, and the author may edit it until seven days after the Quest becomes Terminal. Reviews cannot be deleted and contribute to the reviewed Member's Reputation.
+_Avoid_: reviewing before a Quest becomes Terminal; treating a Review as a Profile field that can be edited by someone else.
 
 **Giver**:
 Legacy term for Hirer. In new Quest and Work Chat text, use Hirer.

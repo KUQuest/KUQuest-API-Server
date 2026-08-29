@@ -12,15 +12,16 @@ This document is the target behavior for the Work Chat, Quest Condition, Quest E
 
 ## Scope
 
-The feature has five user-facing surfaces:
+The feature has six user-facing surfaces:
 
 - one Work Conversation page for one Quest;
 - one read-only View Quest Condition page;
 - one Edit Quest Condition page for the Hirer;
 - one Sent Work page for a Worker;
+- one Rating Review page for eligible Hirer/Worker pairs after any Terminal Quest;
 - one review Popup opened from KU bot or a Push Notification.
 
-The target uses `Hirer`, `Worker`, `Accepted Participant`, `Assignment`, `Quest Condition`, `Proof Submission`, `System Message`, `Admin Review Item`, `Quest Reward`, and `Quest Escrow` exactly as defined in `CONTEXT.md`.
+The target uses `Hirer`, `Worker`, `Accepted Participant`, `Assignment`, `Quest Condition`, `Proof Submission`, `Review`, `System Message`, `Admin Review Item`, `Quest Reward`, and `Quest Escrow` exactly as defined in `CONTEXT.md`.
 
 ## State and status naming
 
@@ -64,6 +65,8 @@ Apply constraints at three layers:
   response to one Quest Edit.
 - One confirmed `PROOF_NOT_APPROVED` decision creates at most one Admin Review
   Item. A retry reuses that Item.
+- One Hirer and one Worker can create at most one Review in each direction for
+  one Quest.
 - One Assignment has at most one Worker Reward payment record. A retry reuses
   that record.
 - One logical Push Event has at most one Push delivery record per recipient.
@@ -122,8 +125,9 @@ Apply constraints at three layers:
 - A Worker who leaves can read only Messages created no later than departure and cannot send or receive new Messages.
 - A Terminal Quest is `QUEST_COMPLETED`, `QUEST_CANCELLED`, or
   `QUEST_FAILED`.
-- A Terminal Quest is read-only for Members. The system may append later
-  workflow System Messages.
+- A Terminal Quest's Work Conversation is read-only for Members. Eligible
+  Hirers and Workers may still create or edit Reviews under the Rating Review
+  contract. The system may append later workflow System Messages.
 - `QUEST_FAILED` means work was not approved or required work was not
   submitted by `dueAt`. It is distinct from `QUEST_CANCELLED`.
 - There is no Rework flow.
@@ -257,6 +261,27 @@ Worker has submitted. Hirer review may start before every Worker submits.
 - In a `GROUP` Quest, an approved or proof-free completed Worker keeps the
   Reward even when another Worker later causes `QUEST_FAILED`.
 
+## Rating Review
+
+- A Review becomes available after the Quest enters any Terminal State:
+  `QUEST_COMPLETED`, `QUEST_FAILED`, or `QUEST_CANCELLED`.
+- A Review is optional and does not delay or change the terminal Quest result.
+- The Hirer may review each Worker who has an Assignment. Each Worker may
+  review the Hirer. In a `GROUP` Quest, Reviews are per Hirer/Worker pair;
+  Workers do not review each other.
+- This includes a failed Quest after `PROOF_NOT_APPROVED` and after an Admin
+  Review Item is created. A Review does not change the `QUEST_FAILED` result,
+  Assignment result, Reward, or Admin Review Item.
+- Each direction is allowed once per Quest. The author may edit the Review
+  until seven days after the Quest becomes Terminal. Reviews cannot be deleted
+  and contribute to the reviewed Member's Reputation.
+- When a Deadline Review action makes a Quest Terminal, the Hirer sees the
+  Rating Review page or its action link. A Worker receives a Review action from
+  the terminal System Message or Push Notification.
+- Any eligible Hirer or Worker can open the Rating Review page from Quest
+  Detail or Quest History during the seven-day edit window. If a `GROUP` Quest
+  is not Terminal yet, the Rating Review page is not shown.
+
 ## Work Conversation contract
 
 ### Message behavior
@@ -307,6 +332,8 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 - They include the affected Worker's system display name and Event, but not private proof details or full Profile data.
 - They include an Event-specific action link or button. The button is shown only when the Member has permission.
 - Current Accepted Participants see membership and Quest Event summaries.
+- A terminal Quest Event includes a Rating Review action link for each eligible
+  Hirer or Worker.
 - An Admin Review Item is separate from the Work Conversation. It is not shown
   to other Accepted Participants and does not expose the private decision
   reason or evidence to them.
@@ -326,6 +353,9 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 - Critical Events include approval, non-approval, missing work at `dueAt`,
   `QUEST_FAILED`, `QUEST_COMPLETED`, `QUEST_CANCELLED`, and a
   Quest Edit requiring a response.
+- A terminal Quest Push includes a Rating Review link for the eligible Hirer or
+  Worker. The link opens the Rating Review page and does not expose private
+  proof details.
 - When the app is active, the in-app Popup replaces the duplicate Push.
 - Push contains a short update and a relevant link. It never contains private proof details or evidence.
 - If Android permission is disabled, the System Message and in-app unread badge remain available.
@@ -356,6 +386,7 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 - Detailed Audit Records are visible only to authorized roles such as Hirer and Admin.
 - Admin Review Item creation and Admin access to its reason or evidence are
   recorded as Audit Records.
+- Review creation and edits are recorded with the Review author and time.
 - Other Members see the applicable System Message and current status.
 - Audit Records are retained for at least one year after the Quest becomes Terminal and longer when a Report Case requires a hold.
 
@@ -378,6 +409,10 @@ When implementation is requested, the Agent must complete all of these checks:
 7. Reward settlement is idempotent, returns unpaid funds on failure/cancellation, and never reclaims a transferred Worker Reward.
 8. Every state transition and financial change has an Audit Record with the required actor, time, previous value, new value, and reason data.
 9. Tests cover single Worker, `GROUP`, proof required, proof not required, timeout, non-approval, Admin Review Item creation and retry, missing submission, cancellation, offline retry, concurrent Hirer decisions, and Reward transfer retry.
+10. Review is available after `QUEST_COMPLETED`, `QUEST_FAILED`, and
+    `QUEST_CANCELLED`, uses one Review per direction for each Hirer/Worker pair,
+    exposes the required UI entry points, and does not change Quest or Reward
+    outcomes.
 
 The work is complete only when the target behavior is represented in the domain model, persistence, API/UI behavior, notifications, money flow, and tests, and the known conflicts below are resolved.
 
