@@ -580,5 +580,7 @@ CREATE INDEX proof_submission_image_submission_idx ON proof_submission_image (pr
 --    goes through WorkChatMembershipWriter inside the Quest database
 --    transaction. Chat never fetches members over HTTP and never creates or
 --    closes a membership window on its own.
--- Private Inquiry Conversations (Hirer <-> Candidate) are a separate Chat
--- concern, deliberately not covered by these requirements.
+-- Private Candidate Inquiry Conversations (Hirer <-> Prospective Worker) are
+-- separate from Work Conversation membership. Their target lifecycle is in
+-- docs/quest/work-chat-system-target.md; they are not part of this Quest-owned
+-- membership writer block.

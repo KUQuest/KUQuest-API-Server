@@ -2,25 +2,38 @@
 
 Status: accepted product target, 2026-08-29.
 
-This document is the target behavior for the Work Chat, Quest Condition, Quest Edit, Sent Work, Proof Submission, review, notification, and reward flow. Use it when a task changes any of those branches.
+This document is the target behavior for Candidate Inquiry Conversation,
+Work Chat, Quest Condition, Quest Edit, Sent Work, Proof Submission, review,
+notification, and reward flow. Use it when a task changes any of those
+branches.
 
 ## Read first
 
 1. Read the root `CONTEXT.md` for the canonical vocabulary, then use this document for the settled branch behavior.
-2. Read `docs/adr/0016-not-approved-proof-fails-quest.md`, `docs/adr/0017-android-only-push-notifications.md`, and `docs/adr/0018-send-android-push-directly-to-fcm.md`.
+2. Read `docs/adr/0015-work-chat-retention-and-account-deletion.md`,
+   `docs/adr/0016-not-approved-proof-fails-quest.md`,
+   `docs/adr/0017-android-only-push-notifications.md`,
+   `docs/adr/0018-send-android-push-directly-to-fcm.md`, and
+   `docs/adr/0019-separate-candidate-inquiry-conversation.md`.
 3. Treat this document as the target contract. The older Quest and Chat documents named in [Known conflicts](#known-conflicts) are not the target behavior until they are reconciled.
 
 ## Scope
 
-The feature has five user-facing surfaces:
+The feature has seven user-facing surfaces:
 
+- one Candidate Inquiry Conversation page for one Quest and one Prospective Worker;
 - one Work Conversation page for one Quest;
 - one read-only View Quest Condition page;
 - one Edit Quest Condition page for the Hirer;
 - one Sent Work page for a Worker;
+- one Rating Review page for eligible Hirer/Worker pairs after any Terminal Quest;
 - one review Popup opened from KU bot or a Push Notification.
 
-The target uses `Hirer`, `Worker`, `Accepted Participant`, `Assignment`, `Quest Condition`, `Proof Submission`, `System Message`, `Quest Reward`, and `Quest Escrow` exactly as defined in `CONTEXT.md`.
+The target uses `Hirer`, `Worker`, `Candidate`, `Prospective Worker`,
+`Accepted Participant`, `Assignment`, `Quest Condition`, `Proof Submission`,
+`Candidate Inquiry Conversation`, `Work Conversation`, `Review`,
+`System Message`, `Admin Review Item`, `Quest Reward`, and `Quest Escrow`
+exactly as defined in `CONTEXT.md`.
 
 ## State and status naming
 
@@ -33,6 +46,8 @@ human text, but the stored and transmitted value keeps the prefix.
 | --- | --- | --- |
 | Quest | state | `QUEST_DRAFT`, `QUEST_OPEN`, `QUEST_ASSIGNED`, `QUEST_IN_PROGRESS`, `QUEST_COMPLETED`, `QUEST_CANCELLED`, `QUEST_FAILED` |
 | Assignment | state | `ASSIGNMENT_ACTIVE`, `ASSIGNMENT_COMPLETED`, `ASSIGNMENT_INCOMPLETE`, `ASSIGNMENT_CANCELLED` |
+| Conversation | type | `CONVERSATION_CANDIDATE_INQUIRY`, `CONVERSATION_WORK` |
+| Candidate Inquiry Conversation | state | `INQUIRY_OPEN`, `INQUIRY_CLOSED` |
 | Proof Submission | status | `PROOF_PENDING`, `PROOF_APPROVED`, `PROOF_NOT_APPROVED` |
 | Quest Edit | status | `EDIT_REQUEST_PENDING`, `EDIT_REQUEST_APPLIED`, `EDIT_REQUEST_FAILED` |
 | Reward transfer | status | `REWARD_TRANSFER_PENDING`, `REWARD_TRANSFER_COMPLETED` |
@@ -56,18 +71,26 @@ Apply constraints at three layers:
 
 - One Quest has exactly one Hirer and at least one Condition Item.
 - One Quest has at most one Work Conversation.
+- One Quest can have many Candidate Inquiry Conversations, with at most one
+  per Prospective Worker.
+- A Candidate Inquiry Conversation has exactly one Hirer and one Prospective
+  Worker. It is never a Work Conversation and never has a third participant.
 - One Worker has at most one Assignment for one Quest.
 - One Assignment has at most one submitted Proof Submission and at most one
   active unsent draft. Replacing a draft does not create a second submitted
   Proof Submission.
 - One Quest has at most one pending Quest Edit. One Worker has at most one
   response to one Quest Edit.
+- One confirmed `PROOF_NOT_APPROVED` decision creates at most one Admin Review
+  Item. A retry reuses that Item.
+- One Hirer and one Worker can create at most one Review in each direction for
+  one Quest.
 - One Assignment has at most one Worker Reward payment record. A retry reuses
   that record.
 - One logical Push Event has at most one Push delivery record per recipient.
   One Member may still have multiple Push Devices.
-- A Message belongs to one Work Conversation. An Attachment belongs to one
-  Message at most.
+- A Message belongs to one Conversation. An Attachment belongs to one Message
+  at most.
 
 ### Value constraints
 
@@ -95,12 +118,17 @@ Apply constraints at three layers:
 
 - Only the allowed State/Status values in the table above may be persisted or
   returned by the target API.
+- `INQUIRY_OPEN` changes only to `INQUIRY_CLOSED`. A closed Candidate Inquiry
+  Conversation cannot be reopened.
 - A terminal Quest uses `QUEST_COMPLETED`, `QUEST_CANCELLED`, or
   `QUEST_FAILED`. Members cannot create new Chat Messages in a terminal
   Quest.
 - A Proof decision changes only from `PROOF_PENDING` to
   `PROOF_APPROVED` or `PROOF_NOT_APPROVED`. The first Server
   decision wins.
+- A confirmed `PROOF_NOT_APPROVED` decision creates the Admin Review Item and
+  starts its Admin notification. Notification failure does not undo
+  `QUEST_FAILED`; retry keeps the same Item and Event identity.
 - A Quest Edit response is accepted only once per Worker. The Server deadline
   and the current Active Worker set are authoritative.
 - A retryable Reward transfer remains
@@ -117,11 +145,15 @@ Apply constraints at three layers:
 - A Worker who leaves can read only Messages created no later than departure and cannot send or receive new Messages.
 - A Terminal Quest is `QUEST_COMPLETED`, `QUEST_CANCELLED`, or
   `QUEST_FAILED`.
-- A Terminal Quest is read-only for Members. The system may append later
-  workflow System Messages.
+- A Terminal Quest's Work Conversation is read-only for Members. Eligible
+  Hirers and Workers may still create or edit Reviews under the Rating Review
+  contract. The system may append later workflow System Messages.
 - `QUEST_FAILED` means work was not approved or required work was not
   submitted by `dueAt`. It is distinct from `QUEST_CANCELLED`.
 - There is no Rework flow.
+- Candidate Inquiry Conversation access is separate from Work Conversation
+  membership. A Candidate or Prospective Worker is never added to the Work
+  Conversation before an Assignment exists.
 
 ## Quest Condition and Quest Edit
 
@@ -213,8 +245,17 @@ Worker has submitted. Hirer review may start before every Worker submits.
 - Closing the Popup without a decision leaves the status
   `PROOF_PENDING`.
 - `PROOF_NOT_APPROVED` requires a reason of at most 1,000 characters.
-- The reason is visible to the Hirer and submitting Worker only. Other Accepted Participants see only a summary.
+- The reason is visible to the Hirer, submitting Worker, and authorized Admins
+  through the Admin Review Item. Other Accepted Participants see only a
+  summary.
 - The first confirmed decision is final. Multiple Hirer devices use the first decision accepted by the Server. Other devices refresh to that result.
+- After the first confirmed `PROOF_NOT_APPROVED` decision, the system creates
+  one Admin Review Item automatically. It links the Quest, Assignment, Proof
+  Submission, Hirer, Worker, decision reason, and evidence references, and
+  sends the Item to the Admin review queue.
+- The Admin Review Item is for review and audit. It does not delay or undo
+  `QUEST_FAILED`, reopen the Quest, create Rework, or allow a second Proof
+  Submission. Authorized Admin access to the reason and evidence is audited.
 - If the decision response is unclear, the UI reloads the status before allowing
   another action. A new action is allowed only while the status is still
   `PROOF_PENDING`.
@@ -229,6 +270,9 @@ Worker has submitted. Hirer review may start before every Worker submits.
 - A `PROOF_NOT_APPROVED` decision makes the Assignment
   `ASSIGNMENT_INCOMPLETE`, gives that Worker no Reward, and makes the
   Quest `QUEST_FAILED` immediately.
+- The same decision creates one Admin Review Item automatically. A failure to
+  deliver the Admin notification does not change the Quest result; the Item
+  remains available in the Admin review queue for retry.
 - No Rework or second Proof Submission exists.
 - A missing required submission at `dueAt` has the same result.
 - If another Worker has a Proof Submission sent on time and still
@@ -240,7 +284,110 @@ Worker has submitted. Hirer review may start before every Worker submits.
 - In a `GROUP` Quest, an approved or proof-free completed Worker keeps the
   Reward even when another Worker later causes `QUEST_FAILED`.
 
+## Rating Review
+
+- A Review becomes available after the Quest enters any Terminal State:
+  `QUEST_COMPLETED`, `QUEST_FAILED`, or `QUEST_CANCELLED`.
+- A Review is optional and does not delay or change the terminal Quest result.
+- The Hirer may review each Worker who has an Assignment. Each Worker may
+  review the Hirer. In a `GROUP` Quest, Reviews are per Hirer/Worker pair;
+  Workers do not review each other.
+- This includes a failed Quest after `PROOF_NOT_APPROVED` and after an Admin
+  Review Item is created. A Review does not change the `QUEST_FAILED` result,
+  Assignment result, Reward, or Admin Review Item.
+- Each direction is allowed once per Quest. The author may edit the Review
+  until seven days after the Quest becomes Terminal. Reviews cannot be deleted
+  and contribute to the reviewed Member's Reputation.
+- When a Deadline Review action makes a Quest Terminal, the Hirer sees the
+  Rating Review page or its action link. A Worker receives a Review action from
+  the terminal System Message or Push Notification.
+- Any eligible Hirer or Worker can open the Rating Review page from Quest
+  Detail or Quest History during the seven-day edit window. If a `GROUP` Quest
+  is not Terminal yet, the Rating Review page is not shown.
+
+## Candidate Inquiry Conversation contract
+
+A Candidate Inquiry Conversation lets a Prospective Worker ask the Hirer
+about a Quest before the Prospective Worker becomes a Worker. It is a private
+one-to-one Conversation and is separate from the Work Conversation.
+
+### Opening and access
+
+- A Member who can view a `QUEST_OPEN` Quest may start one Candidate Inquiry
+  Conversation with that Quest's Hirer. The Hirer cannot create a
+  self-conversation.
+- For a Candidate Quest, the Member may be a `Candidate`. For a direct-join
+  Quest, the Member is a Prospective Worker until an Assignment is created.
+- Starting the Conversation does not create an Assignment, change Quest State,
+  or make the Member an Accepted Participant.
+- The Conversation has exactly two participants: the Hirer and the
+  Prospective Worker. Other Members, Candidates, and Active Workers cannot
+  read or send in it.
+- The Prospective Worker and Hirer may ask and answer questions about visible
+  Quest information, including the Quest Condition, `dueAt`, `proofRequired`,
+  and Quest Reward. Proof Submission is always a separate resource.
+- The Conversation uses the shared immutable Message, Attachment, read,
+  offline, and Rate Limit rules in this document. It is not a Work
+  Conversation, and its Messages are not copied to one.
+
+### Closing and disappearance
+
+- A new Conversation starts as `INQUIRY_OPEN` while the Quest is
+  `QUEST_OPEN`.
+- When the Prospective Worker receives an `ASSIGNMENT_ACTIVE` Assignment, the
+  Candidate Inquiry Conversation for that Member closes immediately in the
+  same transaction.
+- When the Quest enters `QUEST_ASSIGNED`, the Server closes every remaining
+  `INQUIRY_OPEN` Conversation for that Quest. This includes inquiries from
+  Members who were not selected. The close-all operation is part of the same
+  transaction as the Quest State transition.
+- If the Quest is cancelled before assignment, the Server also closes every
+  remaining `INQUIRY_OPEN` Conversation for that Quest.
+- Closing sets the state to `INQUIRY_CLOSED` and records the close time and
+  close Event. The Conversation disappears from the normal Member inbox and
+  Quest pages. Its Members cannot list, read, send, or download its content.
+- A stale page or notification cannot restore access. A send or attachment
+  retry after closing fails without creating a Message or Attachment.
+- The closed inquiry history is not transferred to the Work Conversation and
+  is not shown to other Accepted Participants. Physical retention follows the
+  applicable Chat retention and moderation policy; “disappears” means that
+  Member access and normal UI visibility end.
+- Closing a Candidate Inquiry Conversation does not create a workflow
+  `System Message` in the Work Conversation and does not expose its content to
+  other Quest participants.
+
+### Notification behavior
+
+- A new Message notifies only the other participant in that Candidate Inquiry
+  Conversation. It never notifies other Candidates, Active Workers, or other
+  Members connected to the Quest.
+- If the recipient is on the Conversation page, the app shows the Message in
+  place. Otherwise, it uses the in-app Popup and Android Push rules in this
+  document.
+- After `INQUIRY_CLOSED`, no new Message or notification is created for that
+  Conversation. A stale Push action opens no private content.
+
 ## Work Conversation contract
+
+A Work Conversation opens when the first Worker receives an
+`ASSIGNMENT_ACTIVE` Assignment. Quest creates the Conversation and adds the
+Hirer and that Worker in the same transaction; later Active Workers join the
+same Conversation.
+
+### Opening and membership
+
+- The Work Conversation has type `CONVERSATION_WORK` and there is at most one
+  for one Quest.
+- The Hirer and current Active Workers can read and send while the Quest is
+  not terminal. Candidates and Prospective Workers have no Work Conversation
+  access.
+- If a `GROUP` Quest accepts Workers before the Quest reaches
+  `QUEST_ASSIGNED`, the Work Conversation is already open for those Active
+  Workers. Candidate Inquiry Conversations for other Prospective Workers
+  remain subject to their own closing rules.
+- When a Quest becomes terminal, the Work Conversation remains readable but
+  becomes read-only for Members. The system may append later workflow System
+  Messages.
 
 ### Message behavior
 
@@ -290,6 +437,11 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 - They include the affected Worker's system display name and Event, but not private proof details or full Profile data.
 - They include an Event-specific action link or button. The button is shown only when the Member has permission.
 - Current Accepted Participants see membership and Quest Event summaries.
+- A terminal Quest Event includes a Rating Review action link for each eligible
+  Hirer or Worker.
+- An Admin Review Item is separate from the Work Conversation. It is not shown
+  to other Accepted Participants and does not expose the private decision
+  reason or evidence to them.
 - On Quest completion, a Worker sees that Worker's Reward. Other participants see completion without the amount.
 
 ### Push Notification
@@ -300,12 +452,16 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 - Push is enabled by default after Android permission is granted.
 - Each logical Event produces at most one alert per recipient, even after retry.
 - Delivery state is recorded. Transient failures are retried. Invalid destinations are disabled.
-- A new Chat Message notifies every other current Accepted Participant, never the sender.
+- A new Message in a Work Conversation notifies every other current Accepted
+  Participant, never the sender.
 - A directly affected Event notifies its affected recipient. A Quest-wide Event notifies all current Accepted Participants.
 - A Member can mute non-critical Push per Quest. Critical Events remain deliverable.
 - Critical Events include approval, non-approval, missing work at `dueAt`,
   `QUEST_FAILED`, `QUEST_COMPLETED`, `QUEST_CANCELLED`, and a
   Quest Edit requiring a response.
+- A terminal Quest Push includes a Rating Review link for the eligible Hirer or
+  Worker. The link opens the Rating Review page and does not expose private
+  proof details.
 - When the app is active, the in-app Popup replaces the duplicate Push.
 - Push contains a short update and a relevant link. It never contains private proof details or evidence.
 - If Android permission is disabled, the System Message and in-app unread badge remain available.
@@ -332,8 +488,13 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 ## Audit and retention
 
 - An `Audit Record` stores actor or system, time, old value, new value, and reason where applicable.
-- It covers Quest, Assignment, Proof Submission, Quest Reward, and Platform Fee changes.
+- It covers Quest, Assignment, Proof Submission, Admin Review Item, Quest Reward, and Platform Fee changes.
+- It covers Candidate Inquiry Conversation creation, Message access, and
+  `INQUIRY_CLOSED` transitions.
 - Detailed Audit Records are visible only to authorized roles such as Hirer and Admin.
+- Admin Review Item creation and Admin access to its reason or evidence are
+  recorded as Audit Records.
+- Review creation and edits are recorded with the Review author and time.
 - Other Members see the applicable System Message and current status.
 - Audit Records are retained for at least one year after the Quest becomes Terminal and longer when a Report Case requires a hold.
 
@@ -344,15 +505,26 @@ When implementation is requested, the Agent must complete all of these checks:
 1. Domain state and persistence use `PROOF_NOT_APPROVED` for the proof
    decision and `QUEST_FAILED` for Quest failure. No implementation path
    creates a Rework, `PROOF_REJECTED`, or `PROOF_AUTO_APPROVED` target status.
-2. Quest Edit is available only in `QUEST_ASSIGNED`, uses the 10-minute
+2. Every confirmed `PROOF_NOT_APPROVED` decision creates exactly one Admin
+   Review Item and sends an Admin notification. Retries are idempotent, and a
+   notification failure does not reopen or change the failed Quest.
+3. Quest Edit is available only in `QUEST_ASSIGNED`, uses the 10-minute
    all-Active-Worker protocol, and blocks work start while
    `EDIT_REQUEST_PENDING`.
-3. Proof and no-proof paths produce the Assignment and Quest transitions in this document, including partial `GROUP` success and post-failure review.
-4. Chat membership, read cursor, immutable Message behavior, 50-message initial load, attachment rules, offline behavior, and rate limits are tested.
-5. System Message visibility, Popup actions, Android Push routing, foreground de-duplication, device retry, and invalid-device handling are tested.
-6. Reward settlement is idempotent, returns unpaid funds on failure/cancellation, and never reclaims a transferred Worker Reward.
-7. Every state transition and financial change has an Audit Record with the required actor, time, previous value, new value, and reason data.
-8. Tests cover single Worker, `GROUP`, proof required, proof not required, timeout, non-approval, missing submission, cancellation, offline retry, concurrent Hirer decisions, and Reward transfer retry.
+4. Proof and no-proof paths produce the Assignment and Quest transitions in this document, including partial `GROUP` success and post-failure review.
+5. Chat membership, read cursor, immutable Message behavior, 50-message initial load, attachment rules, offline behavior, and rate limits are tested.
+6. System Message visibility, Popup actions, Android Push routing, foreground de-duplication, device retry, and invalid-device handling are tested.
+7. Reward settlement is idempotent, returns unpaid funds on failure/cancellation, and never reclaims a transferred Worker Reward.
+8. Every state transition and financial change has an Audit Record with the required actor, time, previous value, new value, and reason data.
+9. Tests cover single Worker, `GROUP`, proof required, proof not required, timeout, non-approval, Admin Review Item creation and retry, missing submission, cancellation, offline retry, concurrent Hirer decisions, and Reward transfer retry.
+10. Review is available after `QUEST_COMPLETED`, `QUEST_FAILED`, and
+    `QUEST_CANCELLED`, uses one Review per direction for each Hirer/Worker pair,
+    exposes the required UI entry points, and does not change Quest or Reward
+    outcomes.
+11. Candidate Inquiry Conversation access is limited to the Hirer and one
+    Prospective Worker while `QUEST_OPEN`, closes at the individual
+    `ASSIGNMENT_ACTIVE` transition or Quest `QUEST_ASSIGNED` transition, and
+    cannot be reopened or copied into the Work Conversation.
 
 The work is complete only when the target behavior is represented in the domain model, persistence, API/UI behavior, notifications, money flow, and tests, and the known conflicts below are resolved.
 
