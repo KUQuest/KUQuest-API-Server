@@ -36,6 +36,17 @@ const composedStagingTestApp = new Elysia({
     }),
   );
 
+const disabledStagingTestApp = new Elysia({ name: 'disabled-staging-test-auth' }).use(
+  createStagingTestAuthRoute({
+    enabled: false,
+    deploymentEnv: 'staging',
+    email: testEmail,
+    password: testPassword,
+    firstName: 'Staging',
+    lastName: 'Test Student',
+  }),
+);
+
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? [])
     .map((cookie) => cookie.split(';', 1)[0])
@@ -47,7 +58,7 @@ afterAll(async () => {
 
 describe('staging test authentication', () => {
   it('is unavailable when the staging flag is off', async () => {
-    const response = await app.handle(
+    const response = await disabledStagingTestApp.handle(
       new Request('http://localhost/api/staging/test-auth/get-session'),
     );
 
@@ -117,5 +128,16 @@ describe('staging test authentication', () => {
 
     expect(profileResponse.status).toBe(200);
     expect((await profileResponse.json()).success).toBe(true);
+  });
+
+  it('issues a normal session for the default test Student without exposing credentials', async () => {
+    const response = await stagingTestApp.handle(
+      new Request('http://localhost/api/staging/test-auth/sign-in/default', {
+        method: 'POST',
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(getCookieHeader(response)).toContain('better-auth.session_token=');
   });
 });

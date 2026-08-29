@@ -54,6 +54,7 @@ COPY --chown=bun:bun drizzle.config.ts ./
 COPY --chown=bun:bun tsconfig.json ./
 COPY --chown=bun:bun drizzle ./drizzle
 COPY --chown=bun:bun scripts ./scripts
+COPY --chown=bun:bun public ./public
 
 USER bun
 

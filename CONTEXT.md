@@ -40,6 +40,10 @@ _Avoid_: profile skill, occupation, treating Tags as editable Member fields.
 A rating and optional comment that a Hirer or Worker gives to the other after a Quest is completed. A Review is tied to one Quest, each direction is allowed once per Quest, and the author may edit it until seven days after Quest completion. Reviews cannot be deleted and contribute to the reviewed Member's Reputation.
 _Avoid_: reviewing before Quest completion; treating a Review as a Profile field that can be edited by someone else.
 
+**Proof Review Window**:
+The one-hour period after a Worker or selected Candidate Team submits Proof or confirms proof-free work during which the Hirer may decide the outcome. If the Hirer does not decide within the window, the submission or confirmation is auto-approved.
+_Avoid_: mode-specific review deadlines.
+
 **Giver**:
 The Student who creates a Quest and funds its rewards.
 _Avoid_: Employer, client, job owner.
@@ -49,7 +53,7 @@ A Student who performs a Quest in exchange for its reward.
 _Avoid_: Worker, employee, contractor.
 
 **Quest Reward**:
-The amount earned by each Hunter who successfully completes a Quest; for a group Quest, the same reward applies independently to every Hunter slot. The displayed Quest Reward is the Hunter's full earnings and excludes the Platform Fee paid by the Giver.
+The amount earned by each Worker who successfully completes a Quest; for a group Quest, the same reward applies independently to every Worker slot. The displayed Quest Reward is the Worker's full earnings and excludes the Platform Fee paid by the Hirer. After a Quest is published, its Quest Reward cannot change.
 _Avoid_: Wage, salary, shared prize pool.
 
 **Platform Fee**:
@@ -77,7 +81,7 @@ An immediate, fee-free, and irreversible transfer from a Student's Earnings Bala
 _Avoid_: Payout, reversible exchange.
 
 **Quest Escrow**:
-Spending Balance committed by a Giver to cover Quest Rewards and Platform Fees until the future Quest workflow settles or releases it. The Quest domain owns the timing and lifecycle; the Wallet only owns the reserved funds.
+Spending Balance committed by a Hirer to cover Quest Rewards and Platform Fees until the future Quest workflow settles or releases it. The Quest domain owns the timing and lifecycle; the Wallet only owns the reserved funds. The Platform Fee is fixed by the Money Policy active when the Quest is published.
 _Avoid_: Job hold, locked balance, inferring escrow from Wallet activity.
 
 **Funding Reservation**:
@@ -93,8 +97,12 @@ An inbound payment that adds its quoted amount to a Student's Spending Balance a
 _Avoid_: Deposit, earnings, Wallet credit (too broad).
 
 **Payout**:
-An outbound transfer of a Student's Earnings Balance to their chosen payout destination. The transfer amount, provider fee, and tax are all debited from Earnings Balance.
+An outbound transfer of a Student's Earnings Balance to their chosen Payout Destination. The transfer amount, provider fee, and tax are all reserved from Earnings Balance first. The provider call starts only after an Admin approves the Payout. An Admin rejection releases the full Payout Reserve back to the Student's Earnings Balance.
 _Avoid_: Withdrawal request (the Payout includes the full transfer lifecycle), Quest Reward.
+
+**Payout Approval**:
+The manual Admin decision that permits or rejects one Student Payout before the provider call. The Payout remains waiting for Admin action until an Admin approves or rejects it; there is no automatic rejection after a time limit.
+_Avoid_: provider approval, automatic timeout, releasing funds without an Admin decision.
 
 **Payout Destination**:
 The Student's own Thai bank or PromptPay destination to which a Payout is sent. A Student has at most one active destination; replacing or removing it retires the old destination without erasing its historical association with prior Payouts.
@@ -153,8 +161,20 @@ The current Hirer or an Active Worker. Only Accepted Participants have current W
 _Avoid_: Candidate, departed Worker
 
 **Quest**:
-One bounded agreement for work, owned by one Hirer and progressing through its lifecycle.
+One bounded agreement for work, owned by one Hirer and progressing through its lifecycle. A Quest that remains `QUEST_OPEN` when `startTime` passes becomes `QUEST_CANCELLED` and releases its full Quest Escrow. When all required work is approved, the Quest settles Worker earnings, completes its Assignments, becomes `QUEST_COMPLETED`, and makes its Work Conversation read-only as one atomic outcome.
 _Avoid_: Job, task
+
+**Unfilled Quest**:
+A Quest that has not reached `ASSIGNED` when `startTime` passes, including a partially filled `GROUP` Quest with active Assignments. It is automatically canceled, its active Assignments are canceled without a Worker payment, and its full Quest Escrow is released.
+_Avoid_: leaving the Quest open after its start time.
+
+**Automatic Quest Cancellation**:
+The system cancellation of an Unfilled Quest after `startTime` passes. It has no Hirer or Admin actor, cancels any active Assignments without a Worker payment, and releases the full Quest Escrow.
+_Avoid_: attributing it to the Hirer or an Admin.
+
+**Hidden Quest**:
+A `QUEST_OPEN` Quest temporarily removed from the Quest Board by Admin moderation. Its Quest Escrow remains reserved until the Quest is restored or canceled; it cannot be restored after `startTime` passes and must then become `QUEST_CANCELLED`.
+_Avoid_: treating moderation hiding as financial cancellation.
 
 **Assignment**:
 The accepted participation of one Worker in a Quest. It is the canonical record that a Worker is working on that Quest.

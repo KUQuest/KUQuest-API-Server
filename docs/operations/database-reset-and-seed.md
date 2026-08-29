@@ -84,5 +84,14 @@ provider submission remains a separate Worker operation.
 Use the disposable verification before a real staging reset:
 
 ```bash
+set -a
+source .env.admin
+set +a
 bash scripts/verify-staging-bootstrap.sh
 ```
+
+The ignored `.env.admin` file must contain compliant local values for
+`ADMIN_PASSWORD` and `STAGING_TEST_AUTH_PASSWORD`. In GitHub Actions, pass
+these values from `secrets.ADMIN_PASSWORD` and
+`secrets.STAGING_TEST_AUTH_PASSWORD`; never add either password to this
+script.
