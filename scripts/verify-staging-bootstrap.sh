@@ -23,7 +23,7 @@ umask 077
 
 printf '%s\n' \
   'DATABASE_URL=postgresql://kuquest:bootstrap-only@database:5432/kuquest' \
-  'NODE_ENV=development' \
+  'NODE_ENV=production' \
   'DEPLOYMENT_ENV=staging' \
   'BETTER_AUTH_URL=http://localhost:5000' \
   'BETTER_AUTH_SECRET=bootstrap-auth-secret-at-least-32-characters' \
