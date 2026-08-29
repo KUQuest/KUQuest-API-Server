@@ -7,6 +7,7 @@ import * as profileSchema from '@/database/schema/profile.schema';
 import * as questSchema from '@/database/schema/quest.schema';
 import * as tagSchema from '@/database/schema/tag.schema';
 import * as walletSchema from '@/database/schema/wallet.schema';
+import * as workChatSchema from '@/database/schema/work-chat.schema';
 
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
@@ -20,6 +21,7 @@ const schema = {
   ...questSchema,
   ...tagSchema,
   ...walletSchema,
+  ...workChatSchema,
 };
 
 const connectionString =
