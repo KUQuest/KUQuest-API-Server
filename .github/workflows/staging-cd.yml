@@ -470,10 +470,9 @@ jobs:
             --write-out '%{http_code}' \
             --cookie-jar "$TEST_AUTH_DIR/cookies" \
             --header 'content-type: application/json' \
-            --data "$(jq -cn \
-              --arg email "$STAGING_TEST_AUTH_EMAIL" \
-              --arg password "$STAGING_TEST_AUTH_PASSWORD" \
-              '{email: $email, password: $password}')" \
+            --data "$(printf '{\"email\":\"%s\",\"password\":\"%s\"}' \
+              "$STAGING_TEST_AUTH_EMAIL" \
+              "$STAGING_TEST_AUTH_PASSWORD")" \
             "$STAGING_PUBLIC_URL/api/staging/test-auth/sign-in/email")
 
           if [ "$LOGIN_STATUS" != '200' ]; then
