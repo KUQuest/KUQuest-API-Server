@@ -1,7 +1,21 @@
-import { describe, expect, it } from 'bun:test';
-import { getTableColumns } from 'drizzle-orm';
+import { db, sql } from '@/database/client';
+import { authAdmin, authSession, authUser } from '@/database/schema/auth.schema';
 
-import { authUser } from '@/database/schema/auth.schema';
+import { randomUUID } from 'node:crypto';
+
+import { beforeAll, describe, expect, it } from 'bun:test';
+import { eq, getTableColumns } from 'drizzle-orm';
+
+beforeAll(async () => {
+  try {
+    await sql`select 1`;
+  } catch (cause) {
+    throw new Error(
+      'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
+      { cause },
+    );
+  }
+});
 
 describe('authentication database schema', () => {
   it('uses the requested user database columns', () => {
@@ -21,5 +35,52 @@ describe('authentication database schema', () => {
     expect(columns.termsAcceptedAt.name).toBe('terms_accepted_at');
     expect(columns.termsVersion.name).toBe('terms_version');
     expect(columns).not.toHaveProperty('majorId');
+  });
+});
+
+describe('auth_session ownership (QA-36)', () => {
+  it('rejects a session row owned by neither a Student nor an Admin', async () => {
+    const error = await db
+      .insert(authSession)
+      .values({ token: randomUUID(), expiresAt: new Date(Date.now() + 60_000) })
+      .catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as { cause?: { code?: string; constraint_name?: string } }).cause).toMatchObject({
+      code: '23514',
+      constraint_name: 'auth_session_check',
+    });
+  });
+
+  it('rejects a session row owned by both a Student and an Admin', async () => {
+    const [student] = await db
+      .insert(authUser)
+      .values({ email: `${randomUUID()}@ku.th`, firstName: 'Owns', lastName: 'Both' })
+      .returning({ id: authUser.id });
+    const [admin] = await db
+      .insert(authAdmin)
+      .values({ email: `${randomUUID()}@example.com`, firstName: 'Owns', lastName: 'Both' })
+      .returning({ id: authAdmin.id });
+
+    try {
+      const error = await db
+        .insert(authSession)
+        .values({
+          token: randomUUID(),
+          expiresAt: new Date(Date.now() + 60_000),
+          userId: student.id,
+          adminId: admin.id,
+        })
+        .catch((caught) => caught);
+
+      expect(error).toBeInstanceOf(Error);
+      expect((error as { cause?: { code?: string; constraint_name?: string } }).cause).toMatchObject({
+        code: '23514',
+        constraint_name: 'auth_session_check',
+      });
+    } finally {
+      await db.delete(authUser).where(eq(authUser.id, student.id));
+      await db.delete(authAdmin).where(eq(authAdmin.id, admin.id));
+    }
   });
 });

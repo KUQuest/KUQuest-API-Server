@@ -1,9 +1,25 @@
 import { app } from '@/app';
-import { ALLOWED_EMAIL_DOMAIN, auth } from '@/modules/auth';
+import { ALLOWED_EMAIL_DOMAIN, authGuard, auth } from '@/modules/auth';
+
+import { Elysia } from 'elysia';
 
 import { describe, expect, it } from 'bun:test';
 
+const protectedStudentApp = new Elysia({ name: 'auth-guard-test-app' })
+  .use(authGuard)
+  .get('/student-only', ({ session }) => ({ email: session.user.email }));
+
 describe('authentication integration', () => {
+  it('rejects an Admin cookie on a Student-protected route (QA-36)', async () => {
+    const response = await protectedStudentApp.handle(
+      new Request('http://localhost/student-only', {
+        headers: { cookie: 'kuquest-admin.session_token=admin-session' },
+      }),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
   it('serves the browser authentication test page', async () => {
     const response = await app.handle(new Request('http://localhost/'));
     const body = await response.text();
