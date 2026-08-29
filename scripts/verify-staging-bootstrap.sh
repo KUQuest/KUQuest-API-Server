@@ -23,6 +23,25 @@ umask 077
 
 printf '%s\n' \
   'DATABASE_URL=postgresql://kuquest:bootstrap-only@database:5432/kuquest' \
+  'NODE_ENV=development' \
+  'DEPLOYMENT_ENV=staging' \
+  'BETTER_AUTH_URL=http://localhost:5000' \
+  'BETTER_AUTH_SECRET=bootstrap-auth-secret-at-least-32-characters' \
+  'ADMIN_BETTER_AUTH_SECRET=bootstrap-admin-secret-at-least-32-characters' \
+  'ADMIN_EMAIL=bootstrap-admin@ku.th' \
+  'ADMIN_PASSWORD=BootstrapAdmin1!' \
+  'ADMIN_FIRST_NAME=Bootstrap' \
+  'ADMIN_LAST_NAME=Administrator' \
+  'STAGING_TEST_AUTH_ENABLED=true' \
+  'STAGING_TEST_AUTH_EMAIL=bootstrap-test@ku.th' \
+  'STAGING_TEST_AUTH_PASSWORD=BootstrapStudent1!' \
+  'STAGING_TEST_AUTH_FIRST_NAME=Bootstrap' \
+  'STAGING_TEST_AUTH_LAST_NAME=Student' \
+  'LOCAL_FINANCE_TEST_RECIPIENT_EMAIL=bootstrap-recipient@ku.th' \
+  'LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME=Bootstrap' \
+  'LOCAL_FINANCE_TEST_RECIPIENT_LAST_NAME=Recipient' \
+  'XENDIT_SECRET_KEY=xnd_development_bootstrap-only' \
+  'PAYOUT_DESTINATION_ENCRYPTION_KEY=bootstrap-payout-key-at-least-32' \
   > "$test_directory/.env"
 
 # The Compose fixture must receive these interpolation expressions literally.

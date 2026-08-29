@@ -46,6 +46,8 @@ const DEMO_USERS = [
   { firstName: 'Nichakan', lastName: 'Kaewmanee', department: 'Marketing' },
 ] as const;
 
+const writeDemoCookies = process.env.WRITE_DEMO_COOKIES !== 'false';
+
 const CERTIFICATES = [
   { name: 'AWS Certified Cloud Practitioner', issuer: 'Amazon Web Services' },
   { name: 'Google Data Analytics', issuer: 'Google' },
@@ -100,7 +102,7 @@ const main = async (): Promise<void> => {
   if (!studentOccupation) throw new Error('Seed the academic options before running this script');
 
   const ctx = await seedAuth.$context;
-  const results: { email: string; name: string; cookie: string }[] = [];
+  const results: { email: string; name: string; cookie?: string }[] = [];
 
   for (const [index, demo] of DEMO_USERS.entries()) {
     const email = `${demo.firstName.toLowerCase()}.${demo.lastName.toLowerCase()}@ku.th`;
@@ -152,18 +154,18 @@ const main = async (): Promise<void> => {
       }
     }
 
-    const cookie = await createDemoCookie(ctx, user.id);
     const name = `${demo.firstName} ${demo.lastName}`;
+    const cookie = writeDemoCookies ? await createDemoCookie(ctx, user.id) : undefined;
 
-    await writeSessionCookieToBruEnvironment(name, cookie);
+    if (cookie) await writeSessionCookieToBruEnvironment(name, cookie);
 
-    results.push({ email, name, cookie });
+    results.push({ email, name, ...(cookie ? { cookie } : {}) });
   }
 
   console.log('Seeded demo users:\n');
   for (const r of results) {
     console.log(`${r.name} <${r.email}>`);
-    console.log(`  Cookie: ${r.cookie}\n`);
+    if (r.cookie) console.log(`  Cookie: ${r.cookie}\n`);
   }
 };
 

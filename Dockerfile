@@ -48,14 +48,12 @@ COPY --from=production-dependencies \
   /app/node_modules \
   ./node_modules
 
+COPY --from=builder --chown=bun:bun /app/src ./src
 COPY --chown=bun:bun package.json ./
 COPY --chown=bun:bun drizzle.config.ts ./
 COPY --chown=bun:bun tsconfig.json ./
 COPY --chown=bun:bun drizzle ./drizzle
-COPY --chown=bun:bun src/database ./src/database
-COPY --chown=bun:bun src/config ./src/config
-COPY --chown=bun:bun src/modules/payout-destination ./src/modules/payout-destination
-COPY --chown=bun:bun scripts/migrate.ts ./scripts/migrate.ts
+COPY --chown=bun:bun scripts ./scripts
 
 USER bun
 
