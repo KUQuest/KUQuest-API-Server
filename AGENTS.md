@@ -16,11 +16,13 @@ Single-context repository: read root `CONTEXT.md` and relevant ADRs under `docs/
 
 ### Clarifying domain context
 
-When a request involves a Quest or Work Chat, identify the active branch before
-planning or coding. Read the domain docs first. If the context is still missing,
-ask for these facts in this order:
+When a request involves a Quest, Work Chat, Candidate Inquiry Conversation, or
+pre-assignment question, identify the active branch before planning or coding.
+Read the domain docs first. If the context is still missing, ask for these
+facts in this order:
 
-1. The actor: `Hirer`, `Worker`, `Candidate`, or another `Accepted Participant`.
+1. The actor: `Hirer`, `Worker`, `Candidate`, `Prospective Worker`, or another
+   `Accepted Participant`.
 2. The Quest State or Status, using the prefixed values in
    `docs/quest/work-chat-system-target.md`, such as
    `QUEST_ASSIGNED` or `QUEST_IN_PROGRESS`.
@@ -49,6 +51,9 @@ Use the answers to choose the branch. For example, `Hirer` +
 `QUEST_IN_PROGRESS` points to Sent Work. A `GROUP` Quest can have
 partial completion and different failure or Reward results, so do not apply a
 `SINGLE` rule without checking the mode and participation shape.
+For a `Prospective Worker` + `QUEST_OPEN` request, use the Candidate Inquiry
+Conversation contract. Do not treat that Member as a Worker or grant Work
+Conversation membership before an `ASSIGNMENT_ACTIVE` Assignment exists.
 
 The clarification is complete only when the relevant actor, Quest State or
 Status, mode, and participation shape are known, or the docs prove that a fact

@@ -2,18 +2,26 @@
 
 Status: accepted product target, 2026-08-29.
 
-This document is the target behavior for the Work Chat, Quest Condition, Quest Edit, Sent Work, Proof Submission, review, notification, and reward flow. Use it when a task changes any of those branches.
+This document is the target behavior for Candidate Inquiry Conversation,
+Work Chat, Quest Condition, Quest Edit, Sent Work, Proof Submission, review,
+notification, and reward flow. Use it when a task changes any of those
+branches.
 
 ## Read first
 
 1. Read the root `CONTEXT.md` for the canonical vocabulary, then use this document for the settled branch behavior.
-2. Read `docs/adr/0016-not-approved-proof-fails-quest.md`, `docs/adr/0017-android-only-push-notifications.md`, and `docs/adr/0018-send-android-push-directly-to-fcm.md`.
+2. Read `docs/adr/0015-work-chat-retention-and-account-deletion.md`,
+   `docs/adr/0016-not-approved-proof-fails-quest.md`,
+   `docs/adr/0017-android-only-push-notifications.md`,
+   `docs/adr/0018-send-android-push-directly-to-fcm.md`, and
+   `docs/adr/0019-separate-candidate-inquiry-conversation.md`.
 3. Treat this document as the target contract. The older Quest and Chat documents named in [Known conflicts](#known-conflicts) are not the target behavior until they are reconciled.
 
 ## Scope
 
-The feature has six user-facing surfaces:
+The feature has seven user-facing surfaces:
 
+- one Candidate Inquiry Conversation page for one Quest and one Prospective Worker;
 - one Work Conversation page for one Quest;
 - one read-only View Quest Condition page;
 - one Edit Quest Condition page for the Hirer;
@@ -21,7 +29,11 @@ The feature has six user-facing surfaces:
 - one Rating Review page for eligible Hirer/Worker pairs after any Terminal Quest;
 - one review Popup opened from KU bot or a Push Notification.
 
-The target uses `Hirer`, `Worker`, `Accepted Participant`, `Assignment`, `Quest Condition`, `Proof Submission`, `Review`, `System Message`, `Admin Review Item`, `Quest Reward`, and `Quest Escrow` exactly as defined in `CONTEXT.md`.
+The target uses `Hirer`, `Worker`, `Candidate`, `Prospective Worker`,
+`Accepted Participant`, `Assignment`, `Quest Condition`, `Proof Submission`,
+`Candidate Inquiry Conversation`, `Work Conversation`, `Review`,
+`System Message`, `Admin Review Item`, `Quest Reward`, and `Quest Escrow`
+exactly as defined in `CONTEXT.md`.
 
 ## State and status naming
 
@@ -34,6 +46,8 @@ human text, but the stored and transmitted value keeps the prefix.
 | --- | --- | --- |
 | Quest | state | `QUEST_DRAFT`, `QUEST_OPEN`, `QUEST_ASSIGNED`, `QUEST_IN_PROGRESS`, `QUEST_COMPLETED`, `QUEST_CANCELLED`, `QUEST_FAILED` |
 | Assignment | state | `ASSIGNMENT_ACTIVE`, `ASSIGNMENT_COMPLETED`, `ASSIGNMENT_INCOMPLETE`, `ASSIGNMENT_CANCELLED` |
+| Conversation | type | `CONVERSATION_CANDIDATE_INQUIRY`, `CONVERSATION_WORK` |
+| Candidate Inquiry Conversation | state | `INQUIRY_OPEN`, `INQUIRY_CLOSED` |
 | Proof Submission | status | `PROOF_PENDING`, `PROOF_APPROVED`, `PROOF_NOT_APPROVED` |
 | Quest Edit | status | `EDIT_REQUEST_PENDING`, `EDIT_REQUEST_APPLIED`, `EDIT_REQUEST_FAILED` |
 | Reward transfer | status | `REWARD_TRANSFER_PENDING`, `REWARD_TRANSFER_COMPLETED` |
@@ -57,6 +71,10 @@ Apply constraints at three layers:
 
 - One Quest has exactly one Hirer and at least one Condition Item.
 - One Quest has at most one Work Conversation.
+- One Quest can have many Candidate Inquiry Conversations, with at most one
+  per Prospective Worker.
+- A Candidate Inquiry Conversation has exactly one Hirer and one Prospective
+  Worker. It is never a Work Conversation and never has a third participant.
 - One Worker has at most one Assignment for one Quest.
 - One Assignment has at most one submitted Proof Submission and at most one
   active unsent draft. Replacing a draft does not create a second submitted
@@ -71,8 +89,8 @@ Apply constraints at three layers:
   that record.
 - One logical Push Event has at most one Push delivery record per recipient.
   One Member may still have multiple Push Devices.
-- A Message belongs to one Work Conversation. An Attachment belongs to one
-  Message at most.
+- A Message belongs to one Conversation. An Attachment belongs to one Message
+  at most.
 
 ### Value constraints
 
@@ -100,6 +118,8 @@ Apply constraints at three layers:
 
 - Only the allowed State/Status values in the table above may be persisted or
   returned by the target API.
+- `INQUIRY_OPEN` changes only to `INQUIRY_CLOSED`. A closed Candidate Inquiry
+  Conversation cannot be reopened.
 - A terminal Quest uses `QUEST_COMPLETED`, `QUEST_CANCELLED`, or
   `QUEST_FAILED`. Members cannot create new Chat Messages in a terminal
   Quest.
@@ -131,6 +151,9 @@ Apply constraints at three layers:
 - `QUEST_FAILED` means work was not approved or required work was not
   submitted by `dueAt`. It is distinct from `QUEST_CANCELLED`.
 - There is no Rework flow.
+- Candidate Inquiry Conversation access is separate from Work Conversation
+  membership. A Candidate or Prospective Worker is never added to the Work
+  Conversation before an Assignment exists.
 
 ## Quest Condition and Quest Edit
 
@@ -282,7 +305,89 @@ Worker has submitted. Hirer review may start before every Worker submits.
   Detail or Quest History during the seven-day edit window. If a `GROUP` Quest
   is not Terminal yet, the Rating Review page is not shown.
 
+## Candidate Inquiry Conversation contract
+
+A Candidate Inquiry Conversation lets a Prospective Worker ask the Hirer
+about a Quest before the Prospective Worker becomes a Worker. It is a private
+one-to-one Conversation and is separate from the Work Conversation.
+
+### Opening and access
+
+- A Member who can view a `QUEST_OPEN` Quest may start one Candidate Inquiry
+  Conversation with that Quest's Hirer. The Hirer cannot create a
+  self-conversation.
+- For a Candidate Quest, the Member may be a `Candidate`. For a direct-join
+  Quest, the Member is a Prospective Worker until an Assignment is created.
+- Starting the Conversation does not create an Assignment, change Quest State,
+  or make the Member an Accepted Participant.
+- The Conversation has exactly two participants: the Hirer and the
+  Prospective Worker. Other Members, Candidates, and Active Workers cannot
+  read or send in it.
+- The Prospective Worker and Hirer may ask and answer questions about visible
+  Quest information, including the Quest Condition, `dueAt`, `proofRequired`,
+  and Quest Reward. Proof Submission is always a separate resource.
+- The Conversation uses the shared immutable Message, Attachment, read,
+  offline, and Rate Limit rules in this document. It is not a Work
+  Conversation, and its Messages are not copied to one.
+
+### Closing and disappearance
+
+- A new Conversation starts as `INQUIRY_OPEN` while the Quest is
+  `QUEST_OPEN`.
+- When the Prospective Worker receives an `ASSIGNMENT_ACTIVE` Assignment, the
+  Candidate Inquiry Conversation for that Member closes immediately in the
+  same transaction.
+- When the Quest enters `QUEST_ASSIGNED`, the Server closes every remaining
+  `INQUIRY_OPEN` Conversation for that Quest. This includes inquiries from
+  Members who were not selected. The close-all operation is part of the same
+  transaction as the Quest State transition.
+- If the Quest is cancelled before assignment, the Server also closes every
+  remaining `INQUIRY_OPEN` Conversation for that Quest.
+- Closing sets the state to `INQUIRY_CLOSED` and records the close time and
+  close Event. The Conversation disappears from the normal Member inbox and
+  Quest pages. Its Members cannot list, read, send, or download its content.
+- A stale page or notification cannot restore access. A send or attachment
+  retry after closing fails without creating a Message or Attachment.
+- The closed inquiry history is not transferred to the Work Conversation and
+  is not shown to other Accepted Participants. Physical retention follows the
+  applicable Chat retention and moderation policy; “disappears” means that
+  Member access and normal UI visibility end.
+- Closing a Candidate Inquiry Conversation does not create a workflow
+  `System Message` in the Work Conversation and does not expose its content to
+  other Quest participants.
+
+### Notification behavior
+
+- A new Message notifies only the other participant in that Candidate Inquiry
+  Conversation. It never notifies other Candidates, Active Workers, or other
+  Members connected to the Quest.
+- If the recipient is on the Conversation page, the app shows the Message in
+  place. Otherwise, it uses the in-app Popup and Android Push rules in this
+  document.
+- After `INQUIRY_CLOSED`, no new Message or notification is created for that
+  Conversation. A stale Push action opens no private content.
+
 ## Work Conversation contract
+
+A Work Conversation opens when the first Worker receives an
+`ASSIGNMENT_ACTIVE` Assignment. Quest creates the Conversation and adds the
+Hirer and that Worker in the same transaction; later Active Workers join the
+same Conversation.
+
+### Opening and membership
+
+- The Work Conversation has type `CONVERSATION_WORK` and there is at most one
+  for one Quest.
+- The Hirer and current Active Workers can read and send while the Quest is
+  not terminal. Candidates and Prospective Workers have no Work Conversation
+  access.
+- If a `GROUP` Quest accepts Workers before the Quest reaches
+  `QUEST_ASSIGNED`, the Work Conversation is already open for those Active
+  Workers. Candidate Inquiry Conversations for other Prospective Workers
+  remain subject to their own closing rules.
+- When a Quest becomes terminal, the Work Conversation remains readable but
+  becomes read-only for Members. The system may append later workflow System
+  Messages.
 
 ### Message behavior
 
@@ -347,7 +452,8 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 - Push is enabled by default after Android permission is granted.
 - Each logical Event produces at most one alert per recipient, even after retry.
 - Delivery state is recorded. Transient failures are retried. Invalid destinations are disabled.
-- A new Chat Message notifies every other current Accepted Participant, never the sender.
+- A new Message in a Work Conversation notifies every other current Accepted
+  Participant, never the sender.
 - A directly affected Event notifies its affected recipient. A Quest-wide Event notifies all current Accepted Participants.
 - A Member can mute non-critical Push per Quest. Critical Events remain deliverable.
 - Critical Events include approval, non-approval, missing work at `dueAt`,
@@ -383,6 +489,8 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 
 - An `Audit Record` stores actor or system, time, old value, new value, and reason where applicable.
 - It covers Quest, Assignment, Proof Submission, Admin Review Item, Quest Reward, and Platform Fee changes.
+- It covers Candidate Inquiry Conversation creation, Message access, and
+  `INQUIRY_CLOSED` transitions.
 - Detailed Audit Records are visible only to authorized roles such as Hirer and Admin.
 - Admin Review Item creation and Admin access to its reason or evidence are
   recorded as Audit Records.
@@ -413,6 +521,10 @@ When implementation is requested, the Agent must complete all of these checks:
     `QUEST_CANCELLED`, uses one Review per direction for each Hirer/Worker pair,
     exposes the required UI entry points, and does not change Quest or Reward
     outcomes.
+11. Candidate Inquiry Conversation access is limited to the Hirer and one
+    Prospective Worker while `QUEST_OPEN`, closes at the individual
+    `ASSIGNMENT_ACTIVE` transition or Quest `QUEST_ASSIGNED` transition, and
+    cannot be reopened or copied into the Work Conversation.
 
 The work is complete only when the target behavior is represented in the domain model, persistence, API/UI behavior, notifications, money flow, and tests, and the known conflicts below are resolved.
 

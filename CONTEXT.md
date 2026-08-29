@@ -152,6 +152,10 @@ _Avoid_: Hunter, candidate, assignee
 A Member or team that has applied to a Candidate Quest but has not been accepted as a Worker.
 _Avoid_: Chat member, assigned Worker
 
+**Prospective Worker**:
+A Member who is considering work on a Quest but does not have an active Assignment for that Quest. A Prospective Worker may be a Candidate or a Member considering a direct join.
+_Avoid_: Worker, Accepted Participant
+
 **Accepted Participant**:
 The current Hirer or an Active Worker. Only Accepted Participants have current Work Conversation membership.
 _Avoid_: Candidate, departed Worker
@@ -197,11 +201,15 @@ A proposed change to a Quest Condition by its Hirer. The target timing, response
 _Avoid_: Assignment change, membership transition
 
 **Conversation**:
-A persisted room for coordinating work on one Quest. In this context, the only Conversation is a Work Conversation.
+A persisted private room for one Quest. The target has two Conversation types: Candidate Inquiry Conversation and Work Conversation.
 _Avoid_: Direct message, group chat, team chat
 
+**Candidate Inquiry Conversation**:
+A private one-to-one Conversation between the Hirer and one Prospective Worker for questions while a Quest is `QUEST_OPEN`. It becomes inaccessible when that Member gets an active Assignment, the Quest enters `QUEST_ASSIGNED`, or the Quest is cancelled before assignment; it never becomes a Work Conversation.
+_Avoid_: DM as a domain type, Work Conversation, public Quest comment
+
 **Work Conversation**:
-The one Chat Conversation associated with a Quest. Current members are the Hirer and Active Workers; Candidates never join. The target membership, Message, Attachment, read, UI, offline, and Rate Limit rules are defined in `docs/quest/work-chat-system-target.md`.
+The one Chat Conversation for coordinating work on a Quest, created when the first Worker gets an active Assignment. Current members are the Hirer and Active Workers; Candidates and Prospective Workers never join it. The target membership, Message, Attachment, read, UI, offline, and Rate Limit rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Group chat, team chat
 
 **Chat Membership**:
@@ -209,7 +217,7 @@ The relationship between an Accepted Participant and a Work Conversation. It rec
 _Avoid_: Chat permission, participant status
 
 **Message**:
-A piece of immutable content in a Work Conversation, sent by an Accepted Participant or created by the system. The target text, Attachment, ordering, visibility, and retry rules are defined in `docs/quest/work-chat-system-target.md`.
+A piece of immutable content in a Conversation, sent by a permitted participant or created by the system. The target text, Attachment, ordering, visibility, and retry rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Notification, post
 
 **Attachment**:
@@ -217,7 +225,7 @@ A private image, PDF, or video file shared in a Message. The target access, size
 _Avoid_: Public file, image URL
 
 **Read Cursor**:
-A private position that a Member has acknowledged in a Work Conversation. It is not a Read Receipt. The target movement and unread-count rules are defined in `docs/quest/work-chat-system-target.md`.
+A private position that a Member has acknowledged in a Conversation. It is not a Read Receipt. The target movement and unread-count rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Read receipt, last seen
 
 **System Message**:
