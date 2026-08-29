@@ -519,6 +519,12 @@ const applyPayoutOutcomeInTransaction = async (
   source: string,
 ) => {
   const payout = await payoutForEvent(transaction, facts);
+  if (payout.payoutStatus === 'PENDING_ADMIN_APPROVAL') {
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_NOT_RETRYABLE',
+      'A Payout must be approved before Provider outcomes can be applied.',
+    );
+  }
   if (facts.providerAmountSatang !== null && facts.providerAmountSatang !== payout.principalSatang) {
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider amount does not match the Payout principal.');
   }
@@ -544,6 +550,7 @@ const applyPayoutOutcomeInTransaction = async (
           actualFeeSatang,
           actualTaxSatang,
           actualDebitSatang,
+          providerSubmissionClaimedAt: null,
         })
         .where(eq(paymentPayouts.id, payout.id));
       return;
@@ -560,6 +567,7 @@ const applyPayoutOutcomeInTransaction = async (
         actualDebitSatang,
         payoutStatus: 'COMPLETED',
         finalLedgerTransactionId: ledger.id,
+        providerSubmissionClaimedAt: null,
       })
       .where(eq(paymentPayouts.id, payout.id))
       .returning();
@@ -597,7 +605,11 @@ const applyPayoutOutcomeInTransaction = async (
   const nextStatus = facts.normalizedStatus === 'CANCELLED' ? 'CANCELLED' : 'FAILED';
   if (facts.normalizedStatus === 'PENDING') {
     if (payout.payoutStatus === 'CREATING' || payout.payoutStatus === 'AWAITING_RECONCILIATION') {
-      await transaction.update(paymentPayouts).set({ ...providerFacts, payoutStatus: 'PENDING' }).where(eq(paymentPayouts.id, payout.id));
+      await transaction.update(paymentPayouts).set({
+        ...providerFacts,
+        payoutStatus: 'PENDING',
+        providerSubmissionClaimedAt: null,
+      }).where(eq(paymentPayouts.id, payout.id));
       await transaction.insert(paymentPayoutStatusHistory).values({
         payoutId: payout.id,
         fromStatus: payout.payoutStatus,
@@ -608,7 +620,7 @@ const applyPayoutOutcomeInTransaction = async (
         occurredAt: facts.providerOccurredAt,
       });
     } else {
-      await transaction.update(paymentPayouts).set(providerFacts).where(eq(paymentPayouts.id, payout.id));
+      await transaction.update(paymentPayouts).set({ ...providerFacts, providerSubmissionClaimedAt: null }).where(eq(paymentPayouts.id, payout.id));
     }
     return;
   }
@@ -626,6 +638,7 @@ const applyPayoutOutcomeInTransaction = async (
       ...providerFacts,
       payoutStatus: nextStatus,
       finalLedgerTransactionId: ledger.id,
+      providerSubmissionClaimedAt: null,
     })
     .where(eq(paymentPayouts.id, payout.id))
     .returning();

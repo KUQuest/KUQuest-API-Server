@@ -36,7 +36,7 @@ import {
 } from '@/modules/wallet/wallet.service';
 import type { WalletTransaction } from '@/modules/wallet/wallet.service';
 
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lt, or } from 'drizzle-orm';
 
 import {
   PayoutProviderError,
@@ -88,6 +88,8 @@ export type Payout = {
   destinationBankCode: string;
   destinationAccountHolderName: string;
   destinationRoutingType: string;
+  destinationMaskedLastFour: string;
+  destinationMaskedRoutingValue: string;
   provider: string;
   providerReference: string | null;
   providerApiVersion: string | null;
@@ -158,6 +160,8 @@ const payoutFromRecord = (record: typeof paymentPayouts.$inferSelect): Payout =>
   destinationBankCode: record.destinationBankCode,
   destinationAccountHolderName: record.destinationAccountHolderName,
   destinationRoutingType: record.destinationRoutingType,
+  destinationMaskedLastFour: record.destinationMaskedLastFour,
+  destinationMaskedRoutingValue: record.destinationMaskedRoutingValue,
   provider: record.provider,
   providerReference: record.providerReference,
   providerApiVersion: record.providerApiVersion,
@@ -190,8 +194,8 @@ const payoutDestinationFromSnapshot = (payout: Payout): PayoutDestination => ({
   bankCode: payout.destinationBankCode,
   accountHolderName: payout.destinationAccountHolderName,
   routingType: payout.destinationRoutingType as 'BANK_ACCOUNT' | 'PROMPTPAY',
-  maskedLastFour: '****',
-  maskedRoutingValue: '****',
+  maskedLastFour: payout.destinationMaskedLastFour,
+  maskedRoutingValue: payout.destinationMaskedRoutingValue,
   createdAt: payout.createdAt,
   retiredAt: null,
 });
@@ -265,7 +269,7 @@ export const quotePayout = async (input: PayoutQuoteInput): Promise<PayoutQuote>
 
 type PreparedPayout = {
   payout: Payout;
-  idempotencyKeyId: string;
+  idempotencyKeyId: string | null;
 };
 
 const acquireInitiationIdempotency = async (
@@ -354,7 +358,7 @@ const preparePayout = async (
     .from(paymentPayouts)
     .where(and(
       eq(paymentPayouts.userId, input.principalUserId),
-      inArray(paymentPayouts.payoutStatus, ['CREATING', 'PENDING', 'AWAITING_RECONCILIATION']),
+      inArray(paymentPayouts.payoutStatus, ['PENDING_ADMIN_APPROVAL', 'CREATING', 'PENDING', 'AWAITING_RECONCILIATION']),
     ))
     .limit(1);
   if (active) throw new MoneyDomainError('PAYOUT_ACTIVE_EXISTS', 'The Student already has an active Payout.');
@@ -419,25 +423,27 @@ const preparePayout = async (
       destinationAccountNumberNonce: destination.accountNumberNonce,
       destinationAccountNumberCiphertext: destination.accountNumberCiphertext,
       destinationAccountNumberAuthTag: destination.accountNumberAuthTag,
+      destinationMaskedLastFour: destination.maskedLastFour,
       destinationAccountHolderName: destination.accountHolderName,
       destinationRoutingType: destination.routingType,
       destinationRoutingValueKeyVersion: destination.routingValueKeyVersion,
       destinationRoutingValueNonce: destination.routingValueNonce,
       destinationRoutingValueCiphertext: destination.routingValueCiphertext,
       destinationRoutingValueAuthTag: destination.routingValueAuthTag,
+      destinationMaskedRoutingValue: destination.maskedRoutingValue,
       provider: 'XENDIT',
       principalSatang: quote.receiptSatang,
       maximumFeeSatang: quote.maximumFeeSatang,
       maximumTaxSatang: quote.maximumTaxSatang,
       maximumDebitSatang: quote.maximumDebitSatang,
-      payoutStatus: 'CREATING',
+      payoutStatus: 'PENDING_ADMIN_APPROVAL',
       reserveLedgerTransactionId: reserveLedger.id,
     })
     .returning();
   if (!created) throw new MoneyDomainError('PAYOUT_CREATE_FAILED', 'Payout could not be created.');
   await transaction.insert(paymentPayoutStatusHistory).values({
     payoutId: created.id,
-    toStatus: 'CREATING',
+    toStatus: 'PENDING_ADMIN_APPROVAL',
     source: 'INITIATION',
     actorUserId: input.principalUserId,
   });
@@ -447,7 +453,12 @@ const preparePayout = async (
     .where(eq(paymentPayoutQuotes.id, quote.id));
   await transaction
     .update(walletIdempotencyKey)
-    .set({ resourceType: 'payment_payout', resourceId: created.id })
+    .set({
+      resourceType: 'payment_payout',
+      resourceId: created.id,
+      processingStatus: 'COMPLETED',
+      completedAt: new Date(),
+    })
     .where(eq(walletIdempotencyKey.id, idempotency.record.id));
 
   return { payout: payoutFromRecord(created), idempotencyKeyId: idempotency.record.id };
@@ -528,6 +539,7 @@ const finalizeProviderResponse = async (
       actualTaxSatang: response.actualTaxSatang,
       actualDebitSatang: response.actualDebitSatang,
       payoutStatus: 'PENDING',
+      providerSubmissionClaimedAt: null,
       updatedAt: new Date(),
     })
     .where(eq(paymentPayouts.id, record.id))
@@ -540,10 +552,12 @@ const finalizeProviderResponse = async (
     providerStatus: response.providerStatus,
     source: 'PROVIDER',
   });
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({ processingStatus: 'COMPLETED', completedAt: new Date() })
-    .where(eq(walletIdempotencyKey.id, prepared.idempotencyKeyId));
+  if (prepared.idempotencyKeyId) {
+    await transaction
+      .update(walletIdempotencyKey)
+      .set({ processingStatus: 'COMPLETED', completedAt: new Date() })
+      .where(eq(walletIdempotencyKey.id, prepared.idempotencyKeyId));
+  }
   return payoutFromRecord(updated);
 });
 
@@ -567,6 +581,7 @@ const finalizeUncertain = async (
       providerApiVersion: error.providerApiVersion,
       providerStatus,
       payoutStatus: nextStatus,
+      providerSubmissionClaimedAt: null,
       updatedAt: new Date(),
     })
     .where(eq(paymentPayouts.id, record.id))
@@ -627,6 +642,7 @@ const finalizeFailed = async (
       providerStatus: details.providerStatus,
       payoutStatus: 'FAILED',
       finalLedgerTransactionId: releaseLedger.id,
+      providerSubmissionClaimedAt: null,
       updatedAt: new Date(),
     })
     .where(eq(paymentPayouts.id, record.id))
@@ -640,10 +656,12 @@ const finalizeFailed = async (
     source: details.historySource,
     reason: details.historyReason,
   });
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({ processingStatus: 'COMPLETED', completedAt: new Date() })
-    .where(eq(walletIdempotencyKey.id, prepared.idempotencyKeyId));
+  if (prepared.idempotencyKeyId) {
+    await transaction
+      .update(walletIdempotencyKey)
+      .set({ processingStatus: 'COMPLETED', completedAt: new Date() })
+      .where(eq(walletIdempotencyKey.id, prepared.idempotencyKeyId));
+  }
   return payoutFromRecord(updated);
 });
 
@@ -692,15 +710,55 @@ const asProviderError = (error: unknown) => {
 
 export const initiatePayout = async (
   input: InitiatePayoutInput,
-  provider: OutboundPayoutProvider = new XenditPayoutProvider(),
-  encryption: PayoutDestinationEncryption = createPayoutDestinationEncryption(),
+  // Keep the former optional arguments for callers that only used this service as a submission seam.
+  // They are intentionally ignored because Provider hand-off now belongs to the Worker.
+  _provider?: OutboundPayoutProvider,
+  _encryption?: PayoutDestinationEncryption,
 ): Promise<Payout> => {
   const requestHash = await sha256Json({ quoteId: input.quoteId });
   const prepared = await preparePayout(input, requestHash);
-  if (prepared.payout.payoutStatus === 'PENDING' || prepared.payout.payoutStatus === 'FAILED' || prepared.payout.payoutStatus === 'COMPLETED' || prepared.payout.payoutStatus === 'CANCELLED') {
-    return prepared.payout;
+  return prepared.payout;
+};
+
+const providerSubmissionLeaseMs = 5 * 60 * 1000;
+
+const claimApprovedPayout = async (payoutId: string) => db.transaction(async (transaction) => {
+  const [record] = await transaction
+    .select()
+    .from(paymentPayouts)
+    .where(eq(paymentPayouts.id, payoutId))
+    .for('update');
+  if (!record) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
+  if (record.payoutStatus !== 'CREATING') return { payout: payoutFromRecord(record), claimed: false };
+
+  const staleBefore = new Date(Date.now() - providerSubmissionLeaseMs);
+  if (record.providerSubmissionClaimedAt && record.providerSubmissionClaimedAt >= staleBefore) {
+    return { payout: payoutFromRecord(record), claimed: false };
   }
 
+  const [claimed] = await transaction
+    .update(paymentPayouts)
+    .set({ providerSubmissionClaimedAt: new Date(), updatedAt: new Date() })
+    .where(eq(paymentPayouts.id, record.id))
+    .returning();
+  if (!claimed) throw new MoneyDomainError('PAYOUT_UPDATE_FAILED', 'Payout could not be claimed by the Worker.');
+  return { payout: payoutFromRecord(claimed), claimed: true };
+});
+
+export const processApprovedPayout = async (
+  payoutId: string,
+  provider: OutboundPayoutProvider = new XenditPayoutProvider(),
+  encryption: PayoutDestinationEncryption = createPayoutDestinationEncryption(),
+): Promise<Payout> => {
+  const claim = await claimApprovedPayout(payoutId);
+  if (!claim.claimed) return claim.payout;
+
+  const prepared: PreparedPayout = { payout: claim.payout, idempotencyKeyId: null };
+  const input: InitiatePayoutInput = {
+    principalUserId: claim.payout.principalUserId,
+    quoteId: claim.payout.quoteId,
+    idempotency: { key: `payout-worker:${claim.payout.id}` },
+  };
   let request: Awaited<ReturnType<typeof providerRequestFor>>;
   try {
     request = await providerRequestFor(prepared, encryption);
@@ -729,6 +787,38 @@ export const initiatePayout = async (
     await finalizeUncertain(input, prepared, error);
     throw error;
   }
+};
+
+export const processApprovedPayouts = async (
+  limit = 20,
+  provider: OutboundPayoutProvider = new XenditPayoutProvider(),
+  encryption: PayoutDestinationEncryption = createPayoutDestinationEncryption(),
+): Promise<number> => {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new MoneyDomainError('INVALID_LIMIT', 'Payout Worker limit must be between 1 and 100.');
+  }
+  const staleBefore = new Date(Date.now() - providerSubmissionLeaseMs);
+  const candidates = await db
+    .select({ id: paymentPayouts.id })
+    .from(paymentPayouts)
+    .where(and(
+      eq(paymentPayouts.payoutStatus, 'CREATING'),
+      or(isNull(paymentPayouts.providerSubmissionClaimedAt), lt(paymentPayouts.providerSubmissionClaimedAt, staleBefore)),
+    ))
+    .orderBy(asc(paymentPayouts.createdAt), asc(paymentPayouts.id))
+    .limit(limit);
+  let processed = 0;
+  for (const candidate of candidates) {
+    try {
+      // Process one Payout at a time to keep Wallet locks ordered.
+      // eslint-disable-next-line no-await-in-loop
+      const payout = await processApprovedPayout(candidate.id, provider, encryption);
+      if (payout.payoutStatus !== 'CREATING') processed += 1;
+    } catch {
+      processed += 1;
+    }
+  }
+  return processed;
 };
 
 const readPayoutRecord = async (principalUserId: string, payoutId: string) => {
