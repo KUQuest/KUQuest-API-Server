@@ -44,6 +44,9 @@ STAGING_NETWORK=kuquest-staging_default \
 bash scripts/staging-operations.sh bootstrap
 ```
 
+The `ENV_FILE` must contain `DEPLOYMENT_ENV=staging`. The operation refuses to
+read a different deployment target before it can run a destructive command.
+
 Before the prompt, the operation creates a custom-format PostgreSQL backup and
 checks it with `pg_restore --list`. Confirm the destructive operation with:
 
@@ -53,10 +56,10 @@ RESET staging public schema
 
 The reset drops and recreates only the target database's `public` schema. It
 does not change PostgreSQL roles, the PostgreSQL server, other databases, or
-production. The operation then applies and verifies the complete migration
-chain, runs the Admin, demo Student, demo Quest, Assignment, Review, and
-finance seeds, and verifies the resulting records. Any failure after the
-backup reports the recovery backup path.
+production. The migration journal is cleared so the complete migration chain
+can be applied and verified. The operation then runs the Admin, demo Student,
+demo Quest, Assignment, Review, and finance seeds, and verifies the resulting
+records. Any failure after the backup reports the recovery backup path.
 
 To recover, stop the staging API, then restore the reported custom-format dump
 from the staging server. Replace `BACKUP_NAME` with the reported file name:

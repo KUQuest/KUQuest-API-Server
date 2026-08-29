@@ -52,8 +52,13 @@ const assertFinanceSeedEnvironment = (): {
     throw new Error('Set STAGING_FINANCE_SEED_ENABLED=true to run the finance seed.');
   }
 
-  if (env.nodeEnv !== 'development' && env.deploymentEnv !== 'staging') {
-    throw new Error('The finance seed is allowed only in development or staging.');
+  const isDevelopmentSeed =
+    env.nodeEnv === 'development' && env.deploymentEnv === 'development';
+  const isStagingSeed = env.nodeEnv === 'production' && env.deploymentEnv === 'staging';
+  if (!isDevelopmentSeed && !isStagingSeed) {
+    throw new Error(
+      'The finance seed is allowed only in development/development or production/staging.',
+    );
   }
 
   if (!env.xenditSecretKey?.startsWith('xnd_development_')) {
@@ -123,7 +128,7 @@ const ensureFinanceStudent = async (settings: ReturnType<typeof assertFinanceSee
   const [studentOccupation] = await db
     .select({ id: occupation.id })
     .from(occupation)
-    .where(eq(occupation.name, 'Student'))
+    .where(eq(occupation.requiresStudentId, true))
     .limit(1);
   const [studentDepartment] = await db
     .select({ id: department.id })
@@ -294,7 +299,7 @@ const ensureFinanceQuestDraft = async (userId: string): Promise<string> => {
       mode: questMode.noCandidate,
       participation: questParticipation.solo,
       questStatus: questStatus.draft,
-      rewardSatang: 50_000,
+      rewardSatang: positiveSatang(50_000),
       tagId: designTag.id,
       headcount: 1,
       startTime: new Date(now + 7 * 24 * 60 * 60 * 1000),
@@ -310,15 +315,15 @@ const main = async (): Promise<void> => {
   const settings = assertFinanceSeedEnvironment();
   await ensureInitialMoneyPolicy();
 
-  const studentId = await ensureFinanceStudent(settings);
+  const financeMemberId = await ensureFinanceStudent(settings);
   const recipientId = await ensureFinanceRecipient(settings);
   await ensureWallet(recipientId);
-  await seedBalance(studentId, 'spending', financeSeedSpendingSatang);
-  await seedBalance(studentId, 'earnings', financeSeedEarningsSatang);
-  const destination = await ensurePayoutDestination(studentId, settings);
-  const payout = await ensurePendingPayout(studentId);
-  const questId = await ensureFinanceQuestDraft(studentId);
-  const wallet = await getWallet(studentId);
+  await seedBalance(financeMemberId, 'spending', financeSeedSpendingSatang);
+  await seedBalance(financeMemberId, 'earnings', financeSeedEarningsSatang);
+  const destination = await ensurePayoutDestination(financeMemberId, settings);
+  const payout = await ensurePendingPayout(financeMemberId);
+  const questId = await ensureFinanceQuestDraft(financeMemberId);
+  const wallet = await getWallet(financeMemberId);
 
   console.log(`Prepared finance test Student ${settings.email}.`);
   console.log(`Prepared finance test recipient ${settings.recipientEmail}.`);

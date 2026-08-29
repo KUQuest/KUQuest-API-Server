@@ -7,6 +7,7 @@ import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.sche
 import { auth, adminAuth } from '@/modules/auth';
 import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
+import type { QuestWorkChatMembershipTransition } from '@/modules/quest';
 import {
   createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
@@ -27,9 +28,11 @@ const workerIds = [randomUUID(), randomUUID(), randomUUID()];
 const adminId = randomUUID();
 const tagId = randomUUID();
 const questIds: string[] = [];
-const successfulWorkChatWriter = {
-  applyQuestTransition: async () => ({ conversationId: 'test-conversation', outcome: 'APPLIED' as const }),
-};
+const applyQuestWorkChatTransition = mock(async (
+  _transaction: unknown,
+  _transition: QuestWorkChatMembershipTransition,
+) => ({ conversationId: 'test-conversation', outcome: 'APPLIED' as const }));
+const successfulWorkChatWriter = { applyQuestTransition: applyQuestWorkChatTransition };
 
 const request = (method: string, path: string, userId: string, body?: unknown, headers: HeadersInit = {}) => app.handle(new Request(`http://localhost${path}`, {
   method,
@@ -103,13 +106,14 @@ beforeAll(async () => {
     ...workerIds.map((id, index) => ({ id, email: `${id}@ku.th`, firstName: 'Settlement', lastName: `Worker ${index}` })),
   ]);
   await db.insert(authAdmin).values({ id: adminId, email: `${adminId}@admin.kuquest`, firstName: 'Settlement', lastName: 'Admin' });
-  await db.insert(tag).values({ id: tagId, name: 'Settlement test' });
+  await db.insert(tag).values({ id: tagId, name: `Settlement test ${tagId}` });
   await ensureWallet(hirerId);
   for (const workerId of workerIds) await ensureWallet(workerId);
   await fundWallet(hirerId, 100_000);
 });
 
 beforeEach(() => {
+  applyQuestWorkChatTransition.mockClear();
   configureQuestWorkChatMembershipWriter(successfulWorkChatWriter);
 });
 
@@ -135,6 +139,12 @@ describe('Quest terminal settlement HTTP contract', () => {
       const response = await request('POST', `/api/v1/quests/${questId}/cancel`, hirerId, undefined, { 'idempotency-key': `cancel-${questId}` });
       expect(response.status).toBe(200);
       expect((await response.json()).data).toMatchObject({ questStatus: 'QUEST_CANCELLED', paidSatang: expectedPaid, refundedSatang: expectedRefund });
+      const transitions = applyQuestWorkChatTransition.mock.calls
+        .map(([, transition]) => transition)
+        .filter((transition) => transition.questId === questId);
+      expect(transitions.map(({ type }) => type)).toEqual(workers.length === 0
+        ? ['questBecameReadOnly']
+        : ['workerBecameInactive', 'questBecameReadOnly']);
     }
     expect(authenticate).toHaveBeenCalled();
   });
@@ -183,17 +193,31 @@ describe('Quest terminal settlement HTTP contract', () => {
     const refund = await request('POST', `/api/v1/admin/quests/${refundQuest}/dispute/resolve`, adminId, { outcome: 'REFUND_HIRER' }, { 'idempotency-key': 'be184-refund' });
     expect(refund.status).toBe(200);
     expect((await refund.json()).data.outcome).toBe('REFUNDED');
+    expect(applyQuestWorkChatTransition.mock.calls
+      .map(([, transition]) => transition)
+      .filter((transition) => transition.questId === refundQuest)
+      .map(({ type }) => type)).toEqual(['workerBecameInactive', 'questBecameReadOnly']);
 
     const releaseQuest = await createQuest('QUEST_DISPUTED', [workerIds[1], workerIds[2]], 500);
     const release = await request('POST', `/api/v1/admin/quests/${releaseQuest}/dispute/resolve`, adminId, {
       outcome: 'RELEASE_TO_WORKER',
       allocations: [
         { workerId: workerIds[1], amountSatang: 601 },
-        { workerId: workerIds[2], amountSatang: 399 },
       ],
     }, { 'idempotency-key': 'be184-release' });
     expect(release.status).toBe(200);
-    expect((await release.json()).data).toMatchObject({ outcome: 'RELEASED_TO_WORKER', paidSatang: 1_000, refundedSatang: 20 });
+    expect((await release.json()).data).toMatchObject({ outcome: 'RELEASED_TO_WORKER', paidSatang: 601, refundedSatang: 419 });
+    const releaseTransitions = applyQuestWorkChatTransition.mock.calls
+      .map(([, transition]) => transition)
+      .filter((transition) => transition.questId === releaseQuest);
+    expect(releaseTransitions.map(({ type }) => type)).toEqual([
+      'workerBecameInactive',
+      'questBecameReadOnly',
+    ]);
+    expect(releaseTransitions[0]).toMatchObject({
+      assignmentStatus: 'ASSIGNMENT_INCOMPLETE',
+      workerId: workerIds[2],
+    });
   });
 
   it('rolls back Quest, Assignment, Wallet, and command changes when Work Chat rejects the terminal transition', async () => {
@@ -262,6 +286,10 @@ describe('Quest terminal settlement HTTP contract', () => {
       cancelledByAdminId: null,
     });
     expect((await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment).where(eq(questAssignment.questId, questId)))[0]?.status).toBe('ASSIGNMENT_CANCELLED');
+    expect(applyQuestWorkChatTransition.mock.calls
+      .map(([, transition]) => transition)
+      .filter((transition) => transition.questId === questId)
+      .map(({ type }) => type)).toEqual(['workerBecameInactive', 'questBecameReadOnly']);
     expect((await db.select({ status: questSettlementCommand.commandType, actorUserId: questSettlementCommand.actorUserId, actorAdminId: questSettlementCommand.actorAdminId }).from(questSettlementCommand).where(eq(questSettlementCommand.questId, questId)))[0]).toEqual({
       status: 'AUTO_CANCEL',
       actorUserId: null,

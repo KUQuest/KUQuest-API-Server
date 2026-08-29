@@ -1,5 +1,6 @@
 import { env } from '@/config/env';
 import { sql } from '@/database/client';
+import { getWallet } from '@/modules/wallet';
 
 const demoEmails = [
   'nattapong.srisawat@ku.th',
@@ -96,15 +97,21 @@ const main = async (): Promise<void> => {
   assertAtLeast('Finance test Student', financeStudentCount, 1);
   assertAtLeast('Finance test recipient', financeRecipientCount, 1);
 
-  const financeWalletCount = await readCount(sql`
-    SELECT count(*)::int AS count
-    FROM wallet_wallets wallet
-    INNER JOIN auth_user member ON member.id = wallet.user_id
-    WHERE lower(member.email) = ${financeEmail}
-      AND wallet.spending_balance_satang >= 1000000
-      AND wallet.earnings_balance_satang >= ${financeSeedRemainingEarningsSatang}
-  `);
-  assertAtLeast('Finance Wallet balances', financeWalletCount, 1);
+  const [financeStudent] = await sql<{ id: string }[]>`
+    SELECT id
+    FROM auth_user
+    WHERE lower(email) = ${financeEmail}
+    LIMIT 1
+  `;
+  if (!financeStudent) throw new Error('Finance test Student verification failed.');
+
+  const financeWallet = await getWallet(financeStudent.id);
+  if (
+    financeWallet.spendingBalanceSatang < 1_000_000 ||
+    financeWallet.earningsBalanceSatang < financeSeedRemainingEarningsSatang
+  ) {
+    throw new Error('Finance Wallet balances verification failed.');
+  }
 
   const destinationCount = await readCount(sql`
     SELECT count(*)::int AS count

@@ -225,6 +225,7 @@ const transitionFor = (
   now: Date,
   commandId: string,
 ): QuestWorkChatMembershipTransition => ({
+  producer: 'QUEST_DIRECT_JOIN',
   type: 'workersAccepted',
   commandId,
   eventId: assignmentId,
