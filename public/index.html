@@ -1113,6 +1113,11 @@
       const operationList = document.querySelector('#operation-list');
       const operationFilter = document.querySelector('#operation-filter');
 
+      const renderAdminPaginationControls = () => {
+        adminPayoutPrevious.disabled = state.adminPayoutCursorHistory.length === 0;
+        adminPayoutNext.disabled = !state.adminPayoutNextCursor;
+      };
+
       const redactKeys = new Set([
         'accountNumber',
         'account_number',
@@ -1337,6 +1342,7 @@
           );
         } finally {
           setBusy(false);
+          renderAdminPaginationControls();
         }
       };
 
@@ -1893,8 +1899,7 @@
             className: 'muted',
             textContent: 'Select a Payout to review it.',
           }));
-          adminPayoutPrevious.disabled = true;
-          adminPayoutNext.disabled = true;
+          renderAdminPaginationControls();
           setStatus(adminPayoutPageStatus, 'Sign in as Admin to load Payouts.', 'info');
         } else {
           setStatus(adminAuthStatus, `Signed in as Admin ${state.adminSession.user.email}.`, 'success');
@@ -2073,8 +2078,7 @@
         else state.selectedAdminPayout = state.adminPayouts[0] ?? null;
         renderAdminPayoutList();
         renderAdminPayoutDetail();
-        adminPayoutPrevious.disabled = state.adminPayoutCursorHistory.length === 0;
-        adminPayoutNext.disabled = !state.adminPayoutNextCursor;
+        renderAdminPaginationControls();
         setStatus(
           adminPayoutPageStatus,
           state.adminPayouts.length
