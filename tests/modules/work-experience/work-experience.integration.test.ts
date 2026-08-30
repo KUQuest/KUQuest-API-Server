@@ -45,7 +45,7 @@ describe('work experience integration', () => {
     }
   });
 
-  it('validates required fields and rejects unknown fields before authentication', async () => {
+  it('rejects an unknown field before authentication', async () => {
     const response = await request('/api/v1/profile/experience', 'POST', {
       ...experience,
       unexpected: true,
@@ -53,6 +53,20 @@ describe('work experience integration', () => {
 
     expect(response.status).toBe(400);
     expect((await response.json()).error.code).toBe('VALIDATION');
+  });
+
+  describe('required fields', () => {
+    const required: Array<keyof typeof experience> = ['title', 'employmentType', 'startedAt'];
+
+    for (const field of required) {
+      it(`rejects a missing ${field}`, async () => {
+        const { [field]: _omitted, ...body } = experience;
+        const response = await request('/api/v1/profile/experience', 'POST', body);
+
+        expect(response.status).toBe(400);
+        expect((await response.json()).error.code).toBe('VALIDATION');
+      });
+    }
   });
 
   it('publishes the CRUD operations with authentication and the documented response shapes', async () => {
