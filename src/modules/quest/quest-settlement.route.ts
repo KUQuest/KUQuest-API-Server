@@ -27,7 +27,7 @@ export const questSettlementRoute = new Elysia({ name: 'quest-settlement-route',
     detail: {
       tags: ['Quest Settlement'],
       summary: 'Cancel a Quest as its Hirer',
-      description: 'Cancels an OPEN, ASSIGNED, or IN_PROGRESS Quest and applies the stage-specific Funding Reservation settlement.',
+      description: 'Cancels a Draft without settlement, or an OPEN, ASSIGNED, or IN_PROGRESS Quest with the stage-specific Funding Reservation settlement.',
       operationId: 'cancelQuest',
       security: betterAuthSecurity,
     },

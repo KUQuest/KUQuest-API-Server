@@ -170,7 +170,7 @@ if (baseReference) {
 }
 
 const beforeGeneration = migrationArtifactSnapshot();
-const generation = Bun.spawnSync(['bun', 'run', 'db:generate'], {
+const generation = Bun.spawnSync(['bun', 'run', 'db:generate', '--', '--prefix', 'timestamp'], {
   stderr: 'inherit',
   stdout: 'inherit',
 });

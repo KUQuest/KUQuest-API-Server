@@ -19,9 +19,7 @@ CREATE INDEX "quest_condition_item_quest_id_idx" ON "quest_condition_item" USING
 ALTER TABLE "quest" ADD CONSTRAINT "quest_api_version_check" CHECK ("quest"."api_version" IN ('v1', 'v2'));--> statement-breakpoint
 ALTER TABLE "quest" ADD CONSTRAINT "quest_v2_mode_check" CHECK ("quest"."v2_mode" IS NULL OR "quest"."v2_mode" IN ('FIRST_COME_FIRST_SERVED', 'CANDIDATE'));--> statement-breakpoint
 ALTER TABLE "quest" ADD CONSTRAINT "quest_v2_participation_check" CHECK ("quest"."v2_participation" IS NULL OR "quest"."v2_participation" IN ('SINGLE', 'GROUP'));--> statement-breakpoint
-ALTER TABLE "quest" ADD CONSTRAINT "quest_funding_total_check" CHECK ("quest"."quest_funding_total_satang" IS NULL OR "quest"."quest_funding_total_satang" BETWEEN 100 AND 70000000);
---> statement-breakpoint
-ALTER TABLE "quest" ADD CONSTRAINT "quest_reward_check" CHECK ("quest"."reward_satang" IS NULL OR "quest"."reward_satang" > 0);--> statement-breakpoint
-ALTER TABLE "quest" ADD CONSTRAINT "quest_v2_draft_reward_check" CHECK ("quest"."api_version" <> 'v2' OR "quest"."quest_status" <> 'QUEST_DRAFT' OR "quest"."reward_satang" IS NULL);
---> statement-breakpoint
-ALTER TABLE "quest" ADD CONSTRAINT "quest_reward_required_check" CHECK (("quest"."api_version" = 'v2' AND "quest"."quest_status" = 'QUEST_DRAFT') OR "quest"."reward_satang" IS NOT NULL);
+ALTER TABLE "quest" ADD CONSTRAINT "quest_funding_total_check" CHECK ("quest"."quest_funding_total_satang" IS NULL OR "quest"."quest_funding_total_satang" BETWEEN 100 AND 70000000);--> statement-breakpoint
+ALTER TABLE "quest" ADD CONSTRAINT "quest_v2_draft_reward_check" CHECK ("quest"."api_version" <> 'v2' OR "quest"."quest_status" <> 'QUEST_DRAFT' OR "quest"."reward_satang" IS NULL);--> statement-breakpoint
+ALTER TABLE "quest" ADD CONSTRAINT "quest_reward_required_check" CHECK (("quest"."api_version" = 'v2' AND "quest"."quest_status" = 'QUEST_DRAFT') OR "quest"."reward_satang" IS NOT NULL);--> statement-breakpoint
+ALTER TABLE "quest" ADD CONSTRAINT "quest_reward_check" CHECK ("quest"."reward_satang" IS NULL OR "quest"."reward_satang" > 0);

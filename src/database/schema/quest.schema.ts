@@ -123,7 +123,10 @@ export const quest = pgTable(
       sql`${table.participation} = 'GROUP' OR ${table.headcount} = 1`,
     ),
     check('quest_due_at_check', sql`${table.dueAt} IS NULL OR ${table.dueAt} > ${table.startTime}`),
-    check('quest_tag_check', sql`${table.questStatus} = 'QUEST_DRAFT' OR ${table.tagId} IS NOT NULL`),
+    check(
+      'quest_tag_check',
+      sql`${table.questStatus} IN ('QUEST_DRAFT', 'QUEST_CANCELLED') OR ${table.tagId} IS NOT NULL`,
+    ),
     check(
       'quest_cancelled_by_check',
       sql`num_nonnulls(${table.cancelledByUserId}, ${table.cancelledByAdminId}) <= 1`,

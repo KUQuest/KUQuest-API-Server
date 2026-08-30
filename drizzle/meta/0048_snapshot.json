@@ -1,6 +1,6 @@
 {
-  "id": "14d22f10-051c-4bcb-bf39-2d1c743548bd",
-  "prevId": "9bf90ea9-2f6c-4a95-b908-1a82e86d8ae0",
+  "id": "3053bfbf-eb17-47ea-b3f4-3f8260193d39",
+  "prevId": "14d22f10-051c-4bcb-bf39-2d1c743548bd",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -8810,7 +8810,7 @@
         },
         "position": {
           "name": "position",
-          "type": "smallint",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
@@ -8881,7 +8881,7 @@
       "checkConstraints": {
         "chat_message_attachment_position_check": {
           "name": "chat_message_attachment_position_check",
-          "value": "\"chat_message_attachment\".\"position\" BETWEEN 1 AND 5"
+          "value": "\"chat_message_attachment\".\"position\" > 0"
         }
       },
       "isRLSEnabled": false

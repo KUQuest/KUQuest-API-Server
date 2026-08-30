@@ -8,7 +8,7 @@ import { questProofRoute } from '@/modules/quest/quest-proof.route';
 import { questReviewRoute } from '@/modules/quest/quest-review.route';
 import { questDisputeRoute, questSettlementRoute } from '@/modules/quest/quest-settlement.route';
 import { configureQuestWorkChatMembershipWriter, questV2Route } from '@/modules/quest';
-import { workChatMembershipWriter } from '@/modules/work-chat';
+import { workChatMembershipWriter, workChatRoute } from '@/modules/work-chat';
 
 import { Elysia } from 'elysia';
 
@@ -64,6 +64,7 @@ export const createApp = () => {
     .use(portfolioRoute)
     .use(workExperienceRoute)
     .use(tagRoute)
+    .use(workChatRoute)
     .use(payoutRoute)
     .use(adminPayoutRoute)
     .use(payoutWebhookRoute)

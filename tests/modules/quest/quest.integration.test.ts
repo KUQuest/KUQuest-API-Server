@@ -52,7 +52,6 @@ describe('Quest integration', () => {
       { participation: 'GROUP' },
       { reward: 100 },
       { headcount: 2 },
-      { tagId: '018f47a7-1c7d-7c98-9a11-690d7e834301' },
       { images: [] },
     ];
 
@@ -65,6 +64,17 @@ describe('Quest integration', () => {
       expect(response.status).toBe(400);
       expect((await response.json()).error.code).toBe('VALIDATION');
     }
+  });
+
+  it('accepts a Tag field for the authenticated Draft edit path', async () => {
+    const response = await app.handle(new Request('http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tagId: '018f47a7-1c7d-7c98-9a11-690d7e834301' }),
+    }));
+
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe('UNAUTHORIZED');
   });
 
   it('requires Member authentication before accepting Quest Images', async () => {
