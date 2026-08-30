@@ -393,6 +393,82 @@
         background: #f7faf8;
       }
 
+      .payout-tabs {
+        display: flex;
+        gap: 8px;
+        margin: 18px 0 10px;
+        border-bottom: 1px solid #dce4df;
+      }
+
+      .payout-tab {
+        border: 0;
+        border-bottom: 3px solid transparent;
+        border-radius: 8px 8px 0 0;
+        padding: 10px 12px;
+        background: transparent;
+        color: #58635c;
+      }
+
+      .payout-tab[aria-selected="true"] {
+        border-bottom-color: #17653a;
+        background: #e8f2ec;
+        color: #17653a;
+      }
+
+      .admin-grid {
+        display: grid;
+        grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+        gap: 16px;
+        margin-top: 16px;
+      }
+
+      .admin-payout-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .admin-payout-row {
+        display: grid;
+        gap: 4px;
+        width: 100%;
+        border: 1px solid #dce4df;
+        border-radius: 10px;
+        padding: 12px;
+        background: #ffffff;
+        color: #26332b;
+        text-align: left;
+      }
+
+      .admin-payout-row:hover,
+      .admin-payout-row[aria-selected="true"] {
+        border-color: #83b999;
+        background: #e8f2ec;
+      }
+
+      .admin-payout-row strong,
+      .admin-payout-row small {
+        display: block;
+      }
+
+      .admin-payout-row small {
+        color: #69746d;
+      }
+
+      .admin-payout-detail {
+        min-height: 180px;
+        border: 1px solid #dce4df;
+        border-radius: 12px;
+        padding: 14px;
+        background: #ffffff;
+      }
+
+      .admin-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
       .steps {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -561,7 +637,8 @@
         .grid,
         .wallet-grid,
         .field-grid,
-        .operation-fields {
+        .operation-fields,
+        .admin-grid {
           grid-template-columns: 1fr;
         }
 
@@ -797,7 +874,12 @@
         </section>
       </div>
 
-      <section class="card" aria-labelledby="payout-heading">
+      <div class="payout-tabs" role="tablist" aria-label="Payout tools">
+        <button class="payout-tab" id="student-payout-tab" type="button" role="tab" aria-selected="true" aria-controls="student-payout-panel">Student Payout</button>
+        <button class="payout-tab" id="admin-payout-tab" type="button" role="tab" aria-selected="false" aria-controls="admin-payout-panel">Admin Approval</button>
+      </div>
+
+      <section class="card" id="student-payout-panel" role="tabpanel" aria-labelledby="student-payout-tab">
         <div class="card-heading">
           <div>
             <h2 id="payout-heading">Payout</h2>
@@ -826,6 +908,60 @@
         <div class="result">
           <div class="result-heading"><h3>Latest Payout result</h3></div>
           <pre id="payout-output">No Payout request yet.</pre>
+        </div>
+      </section>
+
+      <section class="card" id="admin-payout-panel" role="tabpanel" aria-labelledby="admin-payout-tab" hidden>
+        <div class="card-heading">
+          <div>
+            <h2 id="admin-payout-heading">Admin Payout Approval</h2>
+            <p class="muted">Review a Student Payout before the Payout Worker sends it to the Provider.</p>
+          </div>
+          <span class="badge" id="admin-auth-badge" data-state="pending">Admin sign-in required</span>
+        </div>
+
+        <div class="simple-flow">
+          <div class="field-grid">
+            <label>
+              Admin email
+              <input id="admin-email" type="email" autocomplete="username" placeholder="admin@example.com" />
+            </label>
+            <label>
+              Admin password
+              <input id="admin-password" type="password" autocomplete="current-password" />
+            </label>
+          </div>
+          <div class="actions" style="margin-top: 12px">
+            <button class="primary" id="admin-sign-in" type="button">Sign in as Admin</button>
+            <button id="admin-refresh-session" type="button">Check Admin Session</button>
+            <button class="danger" id="admin-sign-out" type="button">Sign out Admin</button>
+          </div>
+          <p class="status" id="admin-auth-status" role="status" aria-live="polite">Use an Admin account to open the approval queue.</p>
+        </div>
+
+        <div id="admin-payout-workspace" hidden>
+          <div class="toolbar" style="margin-top: 16px">
+            <p class="muted">Waiting Payouts are listed first. Approving changes the Payout to <code>CREATING</code>.</p>
+            <button id="admin-refresh-payouts" type="button">Refresh Approval Queue</button>
+          </div>
+          <div class="admin-grid">
+            <div>
+              <h3>Waiting Payouts</h3>
+              <div class="admin-payout-list" id="admin-payout-list" aria-live="polite">
+                <p class="muted">Sign in as Admin to load Payouts.</p>
+              </div>
+            </div>
+            <div>
+              <h3>Selected Payout</h3>
+              <div class="admin-payout-detail" id="admin-payout-detail" aria-live="polite">
+                <p class="muted">Select a Payout to review it.</p>
+              </div>
+            </div>
+          </div>
+          <div class="result">
+            <div class="result-heading"><h3>Latest Admin result</h3></div>
+            <pre id="admin-payout-output">No Admin Payout action yet.</pre>
+          </div>
         </div>
       </section>
 
@@ -865,7 +1001,15 @@
 
     <script>
       const appOrigin = window.location.origin;
-      const state = { openApi: null, operations: [], session: null, payoutQuote: null };
+      const state = {
+        openApi: null,
+        operations: [],
+        session: null,
+        adminSession: null,
+        payoutQuote: null,
+        adminPayouts: [],
+        selectedAdminPayout: null,
+      };
       const questIdElement = document.querySelector('#quest-id');
       const debugLog = document.querySelector('#debug-log');
       const authBadge = document.querySelector('#auth-badge');
@@ -874,6 +1018,14 @@
       const financeOutput = document.querySelector('#finance-output');
       const questOutput = document.querySelector('#quest-output');
       const payoutOutput = document.querySelector('#payout-output');
+      const adminAuthBadge = document.querySelector('#admin-auth-badge');
+      const adminAuthStatus = document.querySelector('#admin-auth-status');
+      const adminEmailInput = document.querySelector('#admin-email');
+      const adminPasswordInput = document.querySelector('#admin-password');
+      const adminPayoutWorkspace = document.querySelector('#admin-payout-workspace');
+      const adminPayoutList = document.querySelector('#admin-payout-list');
+      const adminPayoutDetail = document.querySelector('#admin-payout-detail');
+      const adminPayoutOutput = document.querySelector('#admin-payout-output');
       const operationList = document.querySelector('#operation-list');
       const operationFilter = document.querySelector('#operation-filter');
 
@@ -1577,6 +1729,250 @@
         return response;
       };
 
+      const adminPayoutIsWaiting = (payout) => payout?.payoutStatus === 'PENDING_ADMIN_APPROVAL';
+
+      const setPayoutTab = (tab) => {
+        const adminSelected = tab === 'admin';
+        const studentTab = document.querySelector('#student-payout-tab');
+        const adminTab = document.querySelector('#admin-payout-tab');
+        const studentPanel = document.querySelector('#student-payout-panel');
+        const adminPanel = document.querySelector('#admin-payout-panel');
+        studentTab.setAttribute('aria-selected', String(!adminSelected));
+        adminTab.setAttribute('aria-selected', String(adminSelected));
+        studentPanel.hidden = adminSelected;
+        adminPanel.hidden = !adminSelected;
+        if (adminSelected && state.adminSession && state.adminPayouts.length === 0) {
+          void loadAdminPayouts().catch((error) => {
+            setStatus(adminAuthStatus, error instanceof Error ? error.message : 'Approval queue loading failed', 'error');
+          });
+        }
+      };
+
+      const renderAdminAuth = () => {
+        const signedIn = Boolean(state.adminSession?.user);
+        adminAuthBadge.textContent = signedIn
+          ? `Admin: ${state.adminSession.user.email}`
+          : 'Admin sign-in required';
+        adminAuthBadge.dataset.state = signedIn ? 'success' : 'pending';
+        adminPayoutWorkspace.hidden = !signedIn;
+        if (!signedIn) {
+          setStatus(adminAuthStatus, 'Use an Admin account to open the approval queue.', 'info');
+          adminPayoutList.replaceChildren(Object.assign(document.createElement('p'), {
+            className: 'muted',
+            textContent: 'Sign in as Admin to load Payouts.',
+          }));
+          adminPayoutDetail.replaceChildren(Object.assign(document.createElement('p'), {
+            className: 'muted',
+            textContent: 'Select a Payout to review it.',
+          }));
+        } else {
+          setStatus(adminAuthStatus, `Signed in as Admin ${state.adminSession.user.email}.`, 'success');
+        }
+      };
+
+      const createAdminFact = (label, value) => {
+        const row = document.createElement('div');
+        const name = document.createElement('dt');
+        const content = document.createElement('dd');
+        name.textContent = label;
+        content.textContent = value ?? '—';
+        row.append(name, content);
+        return row;
+      };
+
+      const renderAdminPayoutList = () => {
+        adminPayoutList.replaceChildren();
+        if (!state.adminPayouts.length) {
+          adminPayoutList.append(Object.assign(document.createElement('p'), {
+            className: 'muted',
+            textContent: 'No Payout is waiting for Admin approval.',
+          }));
+          return;
+        }
+        state.adminPayouts.forEach((payout) => {
+          const button = document.createElement('button');
+          const studentName = [payout.student?.firstName, payout.student?.lastName].filter(Boolean).join(' ');
+          button.className = 'admin-payout-row';
+          button.type = 'button';
+          button.setAttribute('aria-selected', String(state.selectedAdminPayout?.id === payout.id));
+          const title = document.createElement('strong');
+          const summary = document.createElement('small');
+          title.textContent = studentName || payout.student?.email || 'Student Payout';
+          summary.textContent = `${bahtTextFromSatang(payout.principalSatang)} · ${payout.payoutStatus}`;
+          button.append(title, summary);
+          button.addEventListener('click', () => {
+            state.selectedAdminPayout = payout;
+            renderAdminPayoutList();
+            renderAdminPayoutDetail();
+          });
+          adminPayoutList.append(button);
+        });
+      };
+
+      const renderAdminPayoutDetail = () => {
+        adminPayoutDetail.replaceChildren();
+        const payout = state.selectedAdminPayout;
+        if (!payout) {
+          adminPayoutDetail.append(Object.assign(document.createElement('p'), {
+            className: 'muted',
+            textContent: 'Select a Payout to review it.',
+          }));
+          return;
+        }
+
+        const studentName = [payout.student?.firstName, payout.student?.lastName].filter(Boolean).join(' ');
+        const heading = document.createElement('div');
+        const title = document.createElement('h3');
+        const status = document.createElement('span');
+        title.textContent = studentName || payout.student?.email || 'Student Payout';
+        status.className = 'status';
+        status.dataset.type = adminPayoutIsWaiting(payout) ? 'info' : 'success';
+        status.textContent = payout.payoutStatus;
+        heading.className = 'result-heading';
+        heading.append(title, status);
+
+        const facts = document.createElement('dl');
+        facts.className = 'facts';
+        facts.append(
+          createAdminFact('Student', payout.student?.email),
+          createAdminFact('Receipt amount', bahtTextFromSatang(payout.receiptSatang)),
+          createAdminFact('Maximum debit', bahtTextFromSatang(payout.maximumDebitSatang)),
+          createAdminFact('Provider fee', bahtTextFromSatang(payout.maximumFeeSatang)),
+          createAdminFact('Provider tax', bahtTextFromSatang(payout.maximumTaxSatang)),
+          createAdminFact('Destination', `${payout.bankName} · ${payout.maskedDestinationValue}`),
+          createAdminFact('Routing', payout.maskedRoutingValue),
+          createAdminFact('Created', payout.createdAt ? new Date(payout.createdAt).toLocaleString() : null),
+        );
+        adminPayoutDetail.append(heading, facts);
+
+        if (!adminPayoutIsWaiting(payout)) {
+          if (payout.rejectionReason) adminPayoutDetail.append(createAdminFact('Rejection reason', payout.rejectionReason));
+          return;
+        }
+
+        const note = document.createElement('label');
+        const noteInput = document.createElement('input');
+        note.textContent = 'Approval note (optional)';
+        noteInput.id = 'admin-approval-note';
+        noteInput.maxLength = 500;
+        noteInput.placeholder = 'Reviewed amount and destination';
+        note.append(noteInput);
+
+        const reason = document.createElement('label');
+        const reasonInput = document.createElement('textarea');
+        reason.textContent = 'Rejection reason (required only for Reject)';
+        reasonInput.id = 'admin-rejection-reason';
+        reasonInput.maxLength = 500;
+        reasonInput.placeholder = 'Explain why this Payout is rejected';
+        reason.append(reasonInput);
+
+        const actions = document.createElement('div');
+        actions.className = 'admin-actions';
+        const approve = document.createElement('button');
+        approve.className = 'primary';
+        approve.type = 'button';
+        approve.textContent = 'Approve Payout';
+        approve.addEventListener('click', () => runWithOutput(adminPayoutOutput, approveSelectedAdminPayout));
+        const reject = document.createElement('button');
+        reject.className = 'danger';
+        reject.type = 'button';
+        reject.textContent = 'Reject Payout';
+        reject.addEventListener('click', () => runWithOutput(adminPayoutOutput, rejectSelectedAdminPayout));
+        actions.append(approve, reject);
+        adminPayoutDetail.append(note, reason, actions);
+      };
+
+      const loadAdminPayouts = async () => {
+        if (!state.adminSession) return null;
+        const response = await request(
+          '/api/v1/admin/payouts?status=PENDING_ADMIN_APPROVAL&limit=50&sort=newest',
+          {},
+          'List Admin Payout approval queue',
+        );
+        const selectedId = state.selectedAdminPayout?.id;
+        state.adminPayouts = response?.data?.items ?? [];
+        const queuedSelection = state.adminPayouts.find((payout) => payout.id === selectedId);
+        if (queuedSelection) state.selectedAdminPayout = queuedSelection;
+        else if (!state.selectedAdminPayout) state.selectedAdminPayout = state.adminPayouts[0] ?? null;
+        renderAdminPayoutList();
+        renderAdminPayoutDetail();
+        return response;
+      };
+
+      const refreshAdminSession = async () => {
+        try {
+          const response = await request('/api/admin/auth/get-session', {}, 'Refresh Admin Session');
+          state.adminSession = response?.user ? response : null;
+          renderAdminAuth();
+          if (state.adminSession) await loadAdminPayouts();
+          return response;
+        } catch (error) {
+          state.adminSession = null;
+          renderAdminAuth();
+          debug('Admin session check failed', error instanceof Error ? error.message : error);
+          return null;
+        }
+      };
+
+      const signInAdmin = async () => {
+        const email = adminEmailInput.value.trim();
+        const password = adminPasswordInput.value;
+        if (!email || !password) throw new Error('Enter the Admin email and password.');
+        const response = await jsonRequest('/api/admin/auth/sign-in/email', 'POST', { email, password }, 'Admin sign-in');
+        state.adminSession = response?.user ? response : null;
+        adminPasswordInput.value = '';
+        renderAdminAuth();
+        if (!state.adminSession) throw new Error('Admin sign-in returned no Admin Session.');
+        await loadAdminPayouts();
+        setPayoutTab('admin');
+        return response;
+      };
+
+      const signOutAdmin = async () => {
+        await jsonRequest('/api/admin/auth/sign-out', 'POST', {}, 'Admin sign-out');
+        state.adminSession = null;
+        state.adminPayouts = [];
+        state.selectedAdminPayout = null;
+        renderAdminAuth();
+      };
+
+      const approveSelectedAdminPayout = async () => {
+        const payout = state.selectedAdminPayout;
+        if (!payout || !adminPayoutIsWaiting(payout)) throw new Error('Select a Payout waiting for Admin approval.');
+        if (!window.confirm('Approve this Payout? The Payout Worker can then call the Provider.')) return null;
+        const note = document.querySelector('#admin-approval-note')?.value.trim();
+        const response = await jsonRequest(
+          `/api/v1/admin/payouts/${encodeURIComponent(payout.id)}/approve`,
+          'POST',
+          note ? { note } : {},
+          'Approve Payout',
+          { 'idempotency-key': randomKey('browser-admin-approve') },
+        );
+        state.selectedAdminPayout = response?.data ?? payout;
+        await loadAdminPayouts();
+        await refreshWallet();
+        return response;
+      };
+
+      const rejectSelectedAdminPayout = async () => {
+        const payout = state.selectedAdminPayout;
+        if (!payout || !adminPayoutIsWaiting(payout)) throw new Error('Select a Payout waiting for Admin approval.');
+        const reason = document.querySelector('#admin-rejection-reason')?.value.trim() ?? '';
+        if (!reason) throw new Error('Enter a rejection reason.');
+        if (!window.confirm('Reject this Payout and release its Payout Reserve?')) return null;
+        const response = await jsonRequest(
+          `/api/v1/admin/payouts/${encodeURIComponent(payout.id)}/reject`,
+          'POST',
+          { reason },
+          'Reject Payout',
+          { 'idempotency-key': randomKey('browser-admin-reject') },
+        );
+        state.selectedAdminPayout = response?.data ?? payout;
+        await loadAdminPayouts();
+        await refreshWallet();
+        return response;
+      };
+
       const initializeDateInputs = () => {
         const localInput = (minutes) => {
           const date = new Date(Date.now() + minutes * 60_000);
@@ -1616,6 +2012,12 @@
       document.querySelector('#quote-payout').addEventListener('click', () => runWithOutput(payoutOutput, quotePayout));
       document.querySelector('#submit-payout').addEventListener('click', () => runWithOutput(payoutOutput, submitPayout));
       document.querySelector('#list-payouts').addEventListener('click', () => runWithOutput(payoutOutput, listPayouts));
+      document.querySelector('#student-payout-tab').addEventListener('click', () => setPayoutTab('student'));
+      document.querySelector('#admin-payout-tab').addEventListener('click', () => setPayoutTab('admin'));
+      document.querySelector('#admin-sign-in').addEventListener('click', () => runWithOutput(adminPayoutOutput, signInAdmin));
+      document.querySelector('#admin-refresh-session').addEventListener('click', () => runWithOutput(adminPayoutOutput, refreshAdminSession));
+      document.querySelector('#admin-sign-out').addEventListener('click', () => runWithOutput(adminPayoutOutput, signOutAdmin));
+      document.querySelector('#admin-refresh-payouts').addEventListener('click', () => runWithOutput(adminPayoutOutput, loadAdminPayouts));
       document.querySelector('#simple-quest-smoke').addEventListener('click', () => runWithOutput(questOutput, runSimpleQuestSmoke));
       document.querySelector('#create-quest').addEventListener('click', () => runWithOutput(questOutput, createQuest));
       document.querySelector('#escrow-smoke').addEventListener('click', () => runWithOutput(questOutput, runEscrowSmoke));
@@ -1638,6 +2040,7 @@
           await refreshWallet();
         }
         else await loadDefaultSession();
+        await refreshAdminSession();
         await loadOperations();
       })();
     </script>
