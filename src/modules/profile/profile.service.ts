@@ -307,7 +307,7 @@ export const removeStudentAvatar = async (
       .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
       .where(eq(authUser.id, userId))
       .limit(1)
-      .for('update');
+      .for('update', { of: authUser });
 
     if (!student) return undefined;
 
