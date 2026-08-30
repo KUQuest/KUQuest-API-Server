@@ -2,9 +2,8 @@
 
 ## Purpose
 
-This guide maps a Quest from creation to its terminal result. It separates the
-**current server implementation** from the **accepted product target**. These
-are different today.
+This reconciliation guide maps Legacy Implementation to accepted Rulebooks. It
+does not define Quest policy.
 
 **Where a Quest starts**
 
@@ -15,13 +14,13 @@ are different today.
 - Work starts when the lifecycle worker changes an assigned Quest to
   `QUEST_IN_PROGRESS` at `startTime`.
 
-**Current terminal Quest states:** `QUEST_COMPLETED` and `QUEST_CANCELLED`.
+**Legacy terminal Quest States:** `QUEST_COMPLETED` and `QUEST_CANCELLED`.
 `QUEST_DISPUTED` needs an Admin settlement decision.
 
-**Accepted target terminal Quest states:** `QUEST_COMPLETED`,
-`QUEST_CANCELLED`, and `QUEST_FAILED`.
+**Rulebook terminal Quest States:** `QUEST_COMPLETED`, `QUEST_CANCELLED`, and
+`QUEST_FAILED`.
 
-The accepted target is not fully shipped. In particular, the repository has no
+The Quest Rulebook is not fully shipped. In particular, the repository has no
 configured Work Chat membership writer, so Assignment creation fails closed
 with `WORK_CHAT_UNAVAILABLE`; no Assignment or state change commits.
 
@@ -29,29 +28,24 @@ with `WORK_CHAT_UNAVAILABLE`; no Assignment or state change commits.
 
 | Status | Meaning |
 | --- | --- |
-| **Confirmed** | Documentation and current code agree. |
-| **Docs Only** | Documented target or rule; not implemented or not verified in code. |
-| **Code Only** | Implemented behavior with no matching accepted-target rule. |
-| **Conflict** | Documentation and code, or two documents, define different behavior. |
+| **Confirmed** | The Rulebook and Legacy Implementation agree. |
+| **Docs Only** | Rulebook behavior has no verified implementation. |
+| **Code Only** | Legacy Implementation behavior has no Rulebook policy. |
+| **Conflict** | The Rulebook and Legacy Implementation define different behavior. |
 | **Unclear** | Evidence does not define one behavior. |
-| **Not Specified** | The accepted target does not define the rule. |
+| **Not Specified** | The Rulebook does not define the rule. |
 
 ### Authority
 
 1. `CONTEXT.md` defines domain language.
-2. `docs/quest/work-chat-system-target.md` is the accepted target for Quest
-   and Chat behavior, and `docs/admin/admin-role.md` is the accepted target
-   for Admin behavior. Neither is proof of shipped behavior.
-3. Accepted ADRs define architecture decisions.
-4. `src/modules/quest/*` and `src/database/schema/quest.schema.ts` define the
-   current server behavior.
-5. `docs/db/edr/05-quest.sql` documents the current data model, but explicitly
-   requires reconciliation to the accepted target.
-6. `docs/deprecated/quest-process.md`,
-   `docs/deprecated/bpmn-quest-api-comparison.md`, and
-   `docs/deprecated/bpmn-current-state-audit.md` are historical evidence.
-7. `docs/deprecated/quest-stage-milestones.md` and
-   `docs/deprecated/work-chat-contract.md` are legacy references.
+2. The Quest and Work Chat Rulebook defines Quest/Chat policy; the Admin
+   Rulebook defines Admin policy.
+3. ADRs record architecture decisions.
+4. `src/modules/quest/*` and `src/database/schema/quest.schema.ts` show
+   Legacy Implementation.
+5. `docs/db/edr/05-quest.sql` documents the current data model and requires
+   reconciliation to the Rulebook.
+6. `docs/deprecated/` is historical evidence, not policy.
 
 The investigation read the Quest, Work Chat, BPMN, EDR, Wallet, and relevant
 ADR sources listed in [Sources](#sources). A source is cited at the point where
@@ -64,7 +58,7 @@ it changes the behavior described here.
 | **Hirer** | Creates and publishes the Quest; selects a Candidate or Team; can cancel in implemented allowed states; reviews Proof Submission; writes Reviews. | `quest.service.ts`, `quest-candidate.service.ts`, `quest-settlement.service.ts`, `quest-proof.service.ts`, `quest-review.service.ts` | **Confirmed** except target cancellation and proof rules conflict. |
 | **Worker** | Joins an FCFS Quest or becomes a selected Candidate; holds one Assignment per Quest; submits proof or confirms proof-free work; writes a Review. | `quest-assignment.service.ts`, `quest-candidate.service.ts`, `quest-proof.service.ts` | **Confirmed** for current paths. |
 | **Candidate** | Applies to a Candidate Quest or forms a Candidate Team. A Candidate is not a Worker before Assignment creation. | `quest-candidate.service.ts`; `CONTEXT.md` | **Confirmed**. |
-| **Prospective Worker** | Can open one Candidate Inquiry Conversation with the Hirer while the Quest is open. | `work-chat-system-target.md` §Candidate Inquiry Conversation | **Docs Only**; no target Chat module exists. |
+| **Prospective Worker** | Can open one Candidate Inquiry Conversation with the Hirer while the Quest is open. | `quest-work-chat-rulebook.md` §Candidate Inquiry Conversation | **Docs Only**; no target Chat module exists. |
 | **Quest Board** | Lists published open Quests for discovery. | `quest.route.ts`, `quest.service.ts` | **Confirmed**. |
 | **Quest lifecycle worker** | Starts due assigned Quests, cancels unfilled open Quests, disputes overdue incomplete Quests, expires Team Invitations and Quest Edit requests, and auto-approves due proof. | `quest-lifecycle.worker.ts` | **Code Only** where it conflicts with the target. |
 | **Work Chat writer** | Creates or updates Work Conversation membership in the same transaction as Assignment and terminal transitions. | `quest-work-chat.contract.ts`; ADR `0005-quest-owns-work-chat-membership.md` | **Conflict**: architecture is confirmed, but no runtime writer is configured. |
@@ -132,7 +126,7 @@ arrows in the diagram show both possible prior states.
 
 ## Accepted target lifecycle
 
-`docs/quest/work-chat-system-target.md` §Resolved Quest lifecycle is the
+`docs/rulebook/quest/quest-work-chat-rulebook.md` §Resolved Quest lifecycle is the
 product source of truth. The target removes `QUEST_AWAITING_CONSENT`,
 `QUEST_SUBMITTED`, `QUEST_APPROVED`, `QUEST_REWORK`, `QUEST_DISPUTED`, and
 `QUEST_HIDDEN` from the Quest state set.
@@ -290,7 +284,7 @@ flowchart LR
 
 | Policy / rule | Condition | Result | Source | Status |
 | --- | --- | --- | --- | --- |
-| `dueAt` | Must be set before publish; Asia/Bangkok; server time decides; immutable after `QUEST_ASSIGNED`. | Late required actions are rejected. | `work-chat-system-target.md` §§Value constraints, Due time | **Docs Only**. |
+| `dueAt` | Must be set before publish; Asia/Bangkok; server time decides; immutable after `QUEST_ASSIGNED`. | Late required actions are rejected. | `quest-work-chat-rulebook.md` §§Value constraints, Due time | **Docs Only**. |
 | Due reminders | Active Worker has not completed required action. | Reminder at 24 hours and one hour before `dueAt`; past reminder is skipped. | Target §Due time | **Docs Only**. |
 | Quest Condition | At least one ordered, trimmed, non-empty Item of at most 255 characters. | Hirer may edit only in `QUEST_ASSIGNED`. | Target §Quest Condition | **Docs Only**. |
 | Target Quest Edit | Hirer submits one request only in `QUEST_ASSIGNED`. | All Active Workers have 10 minutes; all accept applies it, any decline/timeout/leave fails it; no Quest pause state. | Target §Edit protocol | **Docs Only / Conflict**. |
@@ -306,7 +300,7 @@ flowchart LR
 | GROUP completion | Required GROUP work completes. | A completed FCFS Worker keeps Reward if another Assignment fails. Approved or proof-free Candidate Team work completes every Active Worker Assignment. | Target §Resolved Quest lifecycle | **Docs Only**. |
 | Target cancellation settlement | Hirer cancels open, assigned, or in-progress Quest. | Open refunds Hirer; assigned pays 20% reward pool to Active Workers; in-progress settles full Rewards and Platform Fee. | Target §Resolved Quest lifecycle | **Docs Only**. |
 | Worker departure | Assignment is active. | No voluntary leave or reassignment. | Target §Resolved Quest lifecycle | **Docs Only**. |
-| Dispute Case | Quest failed. | May exist without reopening or changing the Quest State. Actors, 1-day self-file and 5-day Admin windows, shared per-Quest cap, and a 7-day money hold are defined. | `CONTEXT.md`; `docs/admin/admin-role.md` §2; ADR `0024-hold-quest-failure-settlement-for-dispute-window.md` | **Docs Only**. |
+| Dispute Case | Quest failed. | May exist without reopening or changing the Quest State. Actors, 1-day self-file and 5-day Admin windows, shared per-Quest cap, and a 7-day money hold are defined. | `CONTEXT.md`; `docs/rulebook/admin/admin-rulebook.md` §2; ADR `0024-hold-quest-failure-settlement-for-dispute-window.md` | **Docs Only**. |
 | Reward transfer failure | Assignment is completed but transfer fails. | Transfer stays pending and retries with no duplicate or reclaim. | Target §Reward and money contract | **Docs Only**. |
 | Reviews after terminal result | Quest is completed, cancelled, or failed. | Each Hirer/Worker direction is available once; author can edit for seven days; no delete. | `CONTEXT.md`; target §Rating Review | **Docs Only / Conflict**. |
 | Quest Image v2 | A Hirer manages zero to three optional images on an owned `QUEST_DRAFT`. | `POST /api/v2/quests/:questId/images` appends a validated JPEG, PNG, or WebP up to 5 MB; `DELETE /api/v2/quests/:questId/images/:imageId` soft-deletes one image and repacks positions. Both writes are idempotent, and images are immutable after publish in this contract. | `CONTEXT.md`; target §Quest Image contract; ADR `0025-quest-image-v2-contract.md` | **Docs Only**. |
@@ -326,7 +320,7 @@ flowchart LR
 | **Proof-free work** | Every required confirmation moves current Quest through submitted/approval/settlement handling. | Required submitter confirms directly; no Hirer review. Candidate Team confirmation completes every Active Worker Assignment. **Conflict**. |
 | **Proof rejection** | Candidate rework or dispute. | Immediate terminal failure and Admin Review Item; no Rework. **Conflict**. |
 | **Overdue start, proof, or confirmation** | Missing proof/confirmation moves to `QUEST_DISPUTED`; no Start Work action exists. | Missing required action at `dueAt` moves to `QUEST_FAILED`. **Conflict**. |
-| **Admin intervention** | Admin resolves `QUEST_DISPUTED`. | A Dispute Case opens after `QUEST_FAILED` and redirects part of the held settlement to a Worker (`docs/admin/admin-role.md` §2). Admin Review Item remains audit only. **Conflict**. |
+| **Admin intervention** | Admin resolves `QUEST_DISPUTED`. | A Dispute Case opens after `QUEST_FAILED` and redirects part of the held settlement to a Worker (`docs/rulebook/admin/admin-rulebook.md` §2). Admin Review Item remains audit only. **Conflict**. |
 | **Payment failure** | Wallet settlement is internal and current Quest settlement has no target Reward Transfer status machine. | Pending transfer retries idempotently without duplicate payment. Provider execution is out of scope. |
 | **Worker departure or reassignment** | No voluntary departure or reassignment path. | Same rule. **Current code and target agree on absence.** |
 | **Terminal work access** | Current Work Chat writer is not configured. | Conversation is read-only for Members; system may append later System Messages. **Docs Only**. |
@@ -335,35 +329,62 @@ flowchart LR
 
 | Area | Documentation | Code | Classification |
 | --- | --- | --- | --- |
-| Quest state set | Target has seven Quest states and terminal `QUEST_FAILED`. | Current contract has twelve states, including `QUEST_AWAITING_CONSENT`, `QUEST_SUBMITTED`, `QUEST_APPROVED`, `QUEST_REWORK`, `QUEST_DISPUTED`, and `QUEST_HIDDEN`; it lacks `QUEST_FAILED`. | **Conflict** — target §§State naming, Known conflicts; `quest.contract.ts`. |
-| Proof statuses | Target uses `PROOF_PENDING`, `PROOF_APPROVED`, `PROOF_NOT_APPROVED`. | Current code uses `PROOF_REJECTED` and `PROOF_AUTO_APPROVED`. | **Conflict** — target §§State naming, Known conflicts; `quest.contract.ts`. |
+| Quest state set | Target has seven Quest states and terminal `QUEST_FAILED`. | Current contract has twelve states, including `QUEST_AWAITING_CONSENT`, `QUEST_SUBMITTED`, `QUEST_APPROVED`, `QUEST_REWORK`, `QUEST_DISPUTED`, and `QUEST_HIDDEN`; it lacks `QUEST_FAILED`. | **Conflict** — target §State and status naming; `quest.contract.ts`. |
+| Proof statuses | Target uses `PROOF_PENDING`, `PROOF_APPROVED`, `PROOF_NOT_APPROVED`. | Current code uses `PROOF_REJECTED` and `PROOF_AUTO_APPROVED`. | **Conflict** — target §State and status naming; `quest.contract.ts`. |
 | Failure and Rework | Target failure is terminal and has no Rework. | Current Candidate proof rejection can create `QUEST_REWORK`; other rejection or overdue work creates `QUEST_DISPUTED`. | **Conflict** — ADR `0016`; `quest-proof.service.ts`, `quest-lifecycle.worker.ts`. |
 | Quest Edit | Target: only assigned, Condition Item change, ten-minute all-worker protocol, no Quest pause. | Current: assigned or in-progress, broader allowed fields, five-minute protocol, `QUEST_AWAITING_CONSENT`. | **Conflict** — target §Edit protocol; `quest.service.ts`. |
 | Completion / Review | Target opens Review after completed, cancelled, or failed Quest. | Current review requires completed Quest and completed Assignment. | **Conflict** — `CONTEXT.md`; `quest-review.service.ts`. |
-| Candidate Inquiry and Work Chat | Target requires inquiry lifecycle, Chat, membership, Push, and System Messages. | No target Chat module; no configured membership writer, so Assignment commands fail closed. | **Docs Only** for target / **runtime gap** — target §Known conflicts; `bpmn-quest-api-comparison.md` §3. |
-| Target proof shape | Target permits file-only proof, up to five files, and 24-hour approval. | Current proof schema requires content, permits three images, and uses one-hour auto-approval. | **Conflict** — target §Known conflicts; `quest-proof.service.ts`. |
+| Candidate Inquiry and Work Chat | Target requires inquiry lifecycle, Chat, membership, Push, and System Messages. | No target Chat module; no configured membership writer, so Assignment commands fail closed. | **Docs Only** for target / **runtime gap** — target §§Candidate Inquiry Conversation, Work Conversation; `bpmn-quest-api-comparison.md` §3. |
+| Target proof shape | Target permits file-only proof, up to five files, and 24-hour approval. | Current proof schema requires content, permits three images, and uses one-hour auto-approval. | **Conflict** — target §Proof Submission protocol; `quest-proof.service.ts`. |
 | Candidate GROUP submitter | Target requires Team Leader submission and Team-level Assignment completion or failure. | Current selected Team member can submit on behalf of the Team. | **Conflict** — target §Resolved Quest lifecycle; `quest-proof.service.ts`. |
 | Team onboarding | Target specifies Server Join Codes and Team lifecycle rules. | Current code implements 24-hour targeted invitations. | **Conflict** — target §Resolved Quest lifecycle; `quest-candidate.service.ts`. |
 | Pre-start consent and deadline extension | Target has no general pre-start consent and keeps `dueAt` immutable after assignment. | Current `QUEST_AWAITING_CONSENT` is only post-Assignment Quest Edit consent. | **Conflict** — target §Resolved Quest lifecycle; `quest.service.ts`. |
-| Dispute and hide | Target has neither `QUEST_DISPUTED` nor `QUEST_HIDDEN`. A Dispute Case acts on `QUEST_FAILED`, and hiding is the independent `hiddenAt` flag (`docs/admin/admin-role.md` §§2–3). | Legacy/EDR still define both states; current dispute settlement uses `QUEST_DISPUTED`; hide fields exist but no commands. | **Conflict** — both enum values must go. |
-| Report Case and moderation | `CONTEXT.md` and `docs/admin/admin-role.md` §5 define Report Cases, Admin evidence access, and the moderation decisions. | No Report Case, Reporter Entry, Moderation Decision, Evidence Reference, or Admin Review Item model exists. | **Docs Only**. |
+| Dispute and hide | Target has neither `QUEST_DISPUTED` nor `QUEST_HIDDEN`. A Dispute Case acts on `QUEST_FAILED`, and hiding is the independent `hiddenAt` flag (`docs/rulebook/admin/admin-rulebook.md` §§2–3). | Legacy/EDR still define both states; current dispute settlement uses `QUEST_DISPUTED`; hide fields exist but no commands. | **Conflict** — both enum values must go. |
+| Report Case and moderation | `CONTEXT.md` and `docs/rulebook/admin/admin-rulebook.md` §5 define Report Cases, Admin evidence access, and the moderation decisions. | No Report Case, Reporter Entry, Moderation Decision, Evidence Reference, or Admin Review Item model exists. | **Docs Only**. |
 
 ## Remaining non-lifecycle policies
 
 | Policy | Evidence | Status |
 | --- | --- | --- |
-| Dispute Case | A Failed Quest may have a Dispute Case. | Defined in `docs/admin/admin-role.md` §2: actors, deadlines, shared per-Quest cap, and the 7-day money hold (ADR `0024`). **Docs Only**. |
-| Member account ban or suspension | `auth_user` has no ban model, route, or policy yet. Wallet status is a separate concept. | Defined in `docs/admin/admin-role.md` §6: two penalty ladders, Red Flag, and the `memberPenaltyRecord` audit table. **Docs Only**. |
-| Admin Quest moderation | Legacy/EDR describe `QUEST_HIDDEN`; code has fields but no operation. | Defined in `docs/admin/admin-role.md` §3: `hiddenAt` is an independent flag and adds no Quest State. **Docs Only**. |
+| Dispute Case | A Failed Quest may have a Dispute Case. | Defined in `docs/rulebook/admin/admin-rulebook.md` §2: actors, deadlines, shared per-Quest cap, and the 7-day money hold (ADR `0024`). **Docs Only**. |
+| Member account ban or suspension | `auth_user` has no ban model, route, or policy yet. Wallet status is a separate concept. | Defined in `docs/rulebook/admin/admin-rulebook.md` §6: two penalty ladders, Red Flag, and the `memberPenaltyRecord` audit table. **Docs Only**. |
+| Admin Quest moderation | Legacy/EDR describe `QUEST_HIDDEN`; code has fields but no operation. | Defined in `docs/rulebook/admin/admin-rulebook.md` §3: `hiddenAt` is an independent flag and adds no Quest State. **Docs Only**. |
 | Production retention period | ADR `0015` requires university-policy confirmation. | ⚠️ **NOT SPECIFIED** |
+
+## Migration and implementation checklist
+
+This checklist preserves the actionable engineering tasks required to align
+the server implementation with the Quest and Work Chat Rulebook:
+
+### Schema and migration
+
+- [ ] Migrate Quest state enum to the seven canonical states (`QUEST_DRAFT`, `QUEST_OPEN`, `QUEST_ASSIGNED`, `QUEST_IN_PROGRESS`, `QUEST_COMPLETED`, `QUEST_FAILED`, `QUEST_CANCELLED`), removing legacy states (`QUEST_AWAITING_CONSENT`, `QUEST_SUBMITTED`, `QUEST_APPROVED`, `QUEST_REWORK`, `QUEST_DISPUTED`, `QUEST_HIDDEN`).
+- [ ] Migrate Proof decision enum to `PROOF_PENDING`, `PROOF_APPROVED`, and `PROOF_NOT_APPROVED` (dropping `PROOF_REJECTED` and `PROOF_AUTO_APPROVED`).
+- [ ] Update Proof Submission schema to allow file-only submissions up to 5 files (removing mandatory content text constraint).
+- [ ] Create Candidate Inquiry Conversation, Work Conversation, Message, and Attachment tables with entity-prefixed statuses.
+- [ ] Create `adminReviewItem` table for recording `PROOF_NOT_APPROVED` audit evidence.
+- [ ] Create `auditRecord` table covering Quest, Assignment, Proof Submission, Reward, and Conversation state transitions.
+- [ ] Create Android Push device registration and notification dispatch tables.
+
+### Code and workflow
+
+- [ ] Implement 10-minute all-Active-Worker Quest Edit protocol in `QUEST_ASSIGNED` without pausing Quest state.
+- [ ] Implement Start Work protocol from `startTime` through `dueAt` with starter matrix (Single: Worker; Candidate Group: Team Leader; FCFS Group: all Active Workers).
+- [ ] Implement 10-minute Hirer decision and 10-minute Active Worker consent protocol for underfilled `GROUP + FCFS` at `startTime`.
+- [ ] Wire Work Chat membership writer to Assignment lifecycle transactions to eliminate `WORK_CHAT_UNAVAILABLE` runtime blocks.
+- [ ] Implement Candidate Team Server Join Code generation (24-hour expiry/regeneration) and team selection/rejection lifecycle.
+- [ ] Wire direct FCM Android Push notification integration with deduplication and retries.
+- [ ] Extend Rating Review creation to open after `QUEST_COMPLETED`, `QUEST_FAILED`, and `QUEST_CANCELLED`.
+- [ ] Ensure non-approval creates exactly one Admin Review Item idempotently without reopening or changing the failed Quest.
+- [ ] Enforce inclusive Quest Funding Total calculation and integer-satang escrow reservation per slot.
 
 ## Sources
 
 ### Canonical and accepted sources
 
 - `CONTEXT.md`
-- `docs/quest/work-chat-system-target.md`
-- `docs/admin/admin-role.md`
+- `docs/rulebook/quest/quest-work-chat-rulebook.md`
+- `docs/rulebook/admin/admin-rulebook.md`
 - `docs/adr/0005-quest-owns-work-chat-membership.md`
 - `docs/adr/0015-work-chat-retention-and-account-deletion.md`
 - `docs/adr/0016-not-approved-proof-fails-quest.md`
@@ -402,6 +423,7 @@ flowchart LR
 - `docs/deprecated/bpmn-quest-api-comparison.md`
 - `docs/deprecated/quest-stage-milestones.md`
 - `docs/deprecated/work-chat-contract.md`
+- `docs/deprecated/chat-schema-draft.sql`
 
 ## Evidence limits
 

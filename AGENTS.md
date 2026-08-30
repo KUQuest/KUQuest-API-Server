@@ -13,18 +13,14 @@ Use the five canonical labels without remapping: `needs-triage`, `needs-info`, `
 ### Domain docs
 
 Single-context repository: read root `CONTEXT.md` and relevant ADRs under `docs/adr/`. See `docs/agents/domain.md`.
-Before doing anything related to finance—including diagnosis, design, coding, testing, database work, provider calls, or migrations—read `finace_function.md` completely. It is mandatory guidance for `Top-up`, `Wallet`, `Funding Reservation`, `Ledger Transaction`, `Earnings Conversion`, `Payout`, and `Payout Destination` work.
 
-**Quest rulebook** — for Quest State, Start Work, Proof Submission,
-cancellation, failure, or Work Chat membership, read
-`docs/quest/work-chat-system-target.md` §Resolved Quest lifecycle before
-planning or coding. `docs/deprecated/` is historical evidence, not workflow
-authority.
+**Finance Rulebook** — for `Top-up`, `Wallet`, `Funding Reservation`, `Ledger Transaction`, `Earnings Conversion`, `Payout`, or `Payout Destination`, read `docs/rulebook/finance/finance-rulebook.md` before planning or coding.
 
-**Admin rulebook** — for Payout Approval, Dispute Case, Quest Hide, Wallet
-Freeze or Suspend, Report Case moderation, Conduct Report, Red Flag, or
-Member Ban, read
-`docs/admin/admin-role.md` before planning or coding.
+**Quest Rulebook** — for Quest State, Start Work, Proof Submission, cancellation, failure, or Work Chat membership, read `docs/rulebook/quest/quest-work-chat-rulebook.md` §Resolved Quest lifecycle before planning or coding.
+
+**Admin Rulebook** — for Payout Approval, Dispute Case, Quest Hide, Wallet Freeze or Suspend, Report Case moderation, Conduct Report, Red Flag, or Member Ban, read `docs/rulebook/admin/admin-rulebook.md` before planning or coding.
+
+**Rulebook routing** — for an authoritative decision table mapping tasks, actors, and states to Rulebooks, sub-contracts, and reconciliation guides, read `docs/agents/routing.md` before planning or coding.
 
 ### Clarifying domain context
 
@@ -36,7 +32,7 @@ facts in this order:
 1. The actor: `Hirer`, `Worker`, `Candidate`, `Prospective Worker`, or another
    `Accepted Participant`.
 2. The Quest State or Status, using the prefixed values in
-   `docs/quest/work-chat-system-target.md`, such as
+   `docs/rulebook/quest/quest-work-chat-rulebook.md`, such as
    `QUEST_ASSIGNED` or `QUEST_IN_PROGRESS`.
 3. The Quest mode. Ask for the exact mode from the current contract, for example
    `FIRST_COME_FIRST_SERVED` or `CANDIDATE`. Older documents may call the first

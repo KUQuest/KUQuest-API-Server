@@ -1,6 +1,6 @@
 # Spec: Prepare PR for QA
 
-Status: Decision-complete; implemented by [`.agents/skills/prepare-pr-for-qa`](../.agents/skills/prepare-pr-for-qa/SKILL.md)
+Status: Historical; archived specification for Linear Dev-to-QA workflow.
 
 ## Problem statement
 

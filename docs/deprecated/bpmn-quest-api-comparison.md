@@ -1,7 +1,7 @@
 # BPMN and Current Quest API: Difference Register
 
 > **Historical difference register.** The product source of truth is
-> [`docs/quest/work-chat-system-target.md` §Resolved Quest lifecycle](../quest/work-chat-system-target.md#resolved-quest-lifecycle).
+> [`docs/rulebook/quest/quest-work-chat-rulebook.md` §Resolved Quest lifecycle](../rulebook/quest/quest-work-chat-rulebook.md#resolved-quest-lifecycle).
 > This document preserves the prior BPMN/API comparison. It does not define new
 > Quest behavior.
 
