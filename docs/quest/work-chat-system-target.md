@@ -19,20 +19,22 @@ branches.
 
 ## Scope
 
-The feature has seven user-facing surfaces:
+The feature has eight user-facing surfaces:
 
 - one Candidate Inquiry Conversation page for one Quest and one Prospective Worker;
 - one Work Conversation page for one Quest;
 - one read-only View Quest Condition page;
 - one Edit Quest Condition page for the Hirer;
 - one Sent Work page for a Worker;
+- one optional Quest Image gallery for the Quest detail page;
 - one Rating Review page for eligible Hirer/Worker pairs after any Terminal Quest;
 - one review Popup opened from KU bot or a Push Notification.
 
 The target uses `Hirer`, `Worker`, `Candidate`, `Prospective Worker`,
 `Accepted Participant`, `Assignment`, `Quest Condition`, `Proof Submission`,
 `Candidate Inquiry Conversation`, `Work Conversation`, `Review`,
-`System Message`, `Admin Review Item`, `Quest Reward`, and `Quest Escrow`
+`System Message`, `Admin Review Item`, `Quest Reward`, `Quest Funding Total`,
+`Quest Escrow`, and `Quest Image`
 exactly as defined in `CONTEXT.md`.
 
 ## State and status naming
@@ -214,6 +216,8 @@ Apply constraints at three layers:
   One Member may still have multiple Push Devices.
 - A Message belongs to one Conversation. An Attachment belongs to one Message
   at most.
+- A Quest has zero to three Quest Images. Each image has one ordered position,
+  and one file belongs to one Quest Image at most.
 
 ### Value constraints
 
@@ -231,6 +235,9 @@ Apply constraints at three layers:
   up to five files, and requires a description or at least one file.
 - Chat and Proof files are limited to image, PDF, and video. Each file is at
   most 10 MB. The system does not scan these files for malware.
+- A Quest Image is a valid JPEG, PNG, or WebP file of at most 5 MB. The Server
+  checks the decoded file content and actual byte size; it does not trust a
+  filename or a client-declared `Content-Type` by itself.
 - A `PROOF_NOT_APPROVED` decision requires a reason of at most 1,000
   characters. A
   Quest Edit decline reason is optional and at most 255 characters.
@@ -259,6 +266,40 @@ Apply constraints at three layers:
   create a duplicate payment or reclaim a transferred Reward.
 - A Push retry keeps one logical Event/recipient identity. Invalid destinations
   end at `PUSH_DELIVERY_DISABLED`.
+
+## Quest Image contract
+
+- Quest Images are optional. A Quest with zero images may publish.
+- The v2 Hirer endpoints are `POST /api/v2/quests/:questId/images` with a
+  multipart `images` field and `DELETE
+  /api/v2/quests/:questId/images/:imageId`.
+- Only the Quest's Hirer may upload or remove its images, and both operations
+  are allowed only while the Quest is `QUEST_DRAFT`. A file from another
+  Member or another Quest cannot be attached.
+- An upload appends images in request order. The complete batch is rejected if
+  it would exceed three images. Replacement is explicit: remove the old image,
+  then upload the new image. Removing an image repacks the remaining positions
+  from `0` without changing their relative order.
+- Each successful upload or remove returns the complete current ordered
+  `images` array. Each item contains `imageId`, `fileId`, `position`, `url`,
+  and `urlExpiresAt`. Quest detail reads use the same image shape.
+- The API never returns a permanent storage URL. Each temporary link is
+  generated on read and is valid for 15 minutes. Hirer-owned reads may show
+  Draft images; Worker and public reads follow Quest detail visibility and do
+  not expose Draft images to a non-owner. Quest Images are not shown on the
+  Quest Board card.
+- Every v2 image write requires `Idempotency-Key`. A retry with the same key
+  and request replays the original response; reuse with a different request
+  returns `409 IDEMPOTENCY_KEY_REUSED`.
+- The Server validates the full upload batch before attaching any file. If a
+  validation or storage operation fails, no Quest Image attachment commits and
+  uploaded objects are cleaned up. Object storage failure returns `503
+  QUEST_IMAGE_STORAGE_UNAVAILABLE`.
+- Removing an image soft-deletes its file metadata immediately and hides it
+  from reads. Object cleanup may run after the transaction; cleanup failure
+  does not restore the image and is retried later.
+- After publish, Quest Images are immutable within this contract. A future
+  Quest Edit contract must define any post-publish image change.
 
 ## Membership and lifecycle invariants
 
@@ -595,13 +636,47 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 ## Reward and money contract
 
 - Hirer funds the Quest through `Quest Escrow`.
+- The `Quest Funding Total` is the Hirer's inclusive amount for one published
+  Worker slot. It contains that slot's `Quest Reward` and `Platform Fee`.
+- At the v2 API boundary, the Hirer supplies this amount as
+  `questFundingTotal` in Baht for one Worker slot. `Quest Reward` and
+  `Platform Fee` are derived values; `reward` is not the v2 input name.
+- The Server calculates the `Platform Fee` from the net `Quest Reward` using the
+  snapshotted `Money Policy` and its required rounding mode. The `Quest Reward`
+  is the Worker payment; the `Platform Fee` is not added after the funding
+  total is set.
+- After conversion to integer satang, the Server chooses the net `Quest Reward`
+  as the greatest amount whose required fee does not exceed the
+  `Quest Funding Total`. The required fee is
+  `ceil(Quest Reward × fee rate)`, and the actual `Platform Fee` is the
+  remaining amount: `Quest Funding Total - Quest Reward`. A rounding remainder
+  of up to one satang stays in the Platform Fee so the total is exact.
+- At publish, `Quest Escrow` reserves the `Quest Funding Total` for every
+  published `headcount` slot. The exact amount is calculated in integer satang.
+- A successful v2 publish returns the canonical `Quest` in `QUEST_OPEN` and a
+  `Quest Escrow` snapshot in the shared response envelope. The snapshot
+  includes the opaque `reservationId`, inclusive total, net Reward, Platform
+  Fee, and the captured `Money Policy` revision.
+- Publish requires `Idempotency-Key`. A retry with the same key and request
+  replays the original result. Concurrent requests use first-commit-wins and
+  can create only one Funding Reservation; a later request sees that the Quest
+  is no longer a Draft.
+- Quest state, the finance snapshot, the Funding Reservation, Wallet balance
+  projections, ledger postings, and the command result commit atomically. If
+  any publish step fails, the transaction rolls back and the Quest remains a
+  `QUEST_DRAFT` with no partial reservation.
 - The system transfers a Worker Reward immediately when that Assignment becomes
   `ASSIGNMENT_COMPLETED`.
-- The Hirer can see each Worker Reward and the Quest total.
-- A Worker sees only that Worker's Reward.
-- If a Quest is `QUEST_FAILED`, unpaid Worker-slot Rewards return to the
+- Hirer-owned Quest reads can show `questFundingTotal`, `questReward`,
+  `platformFee`, `platformFeeBps`, `feeRoundingMode`, `policyRevision`, and the
+  opaque `reservationId` for support and audit.
+- Public and Worker Quest reads show only the applicable `questReward`. They do
+  not show Platform Fee, Money Policy details, Wallet details, or Funding
+  Reservation details.
+- If a Quest is `QUEST_FAILED`, unpaid Worker-slot funding returns to the
   Hirer. Already transferred Rewards are not reclaimed.
-- A failed Quest has no Platform Fee; the fee returns to the Hirer.
+- A failed Quest has no Platform Fee; any unpaid fee portion returns to the
+  Hirer.
 - Cancellation settlement is defined only in
   [Resolved Quest lifecycle](#resolved-quest-lifecycle). Provider execution is
   outside this target. An `ASSIGNMENT_CANCELLED` Assignment receives no Reward.
