@@ -12,6 +12,22 @@ const createBody = {
   startTime: '2030-08-26T10:00:00.000Z',
 };
 
+type OpenApiSchema = {
+  multipleOf?: number;
+  nullable?: boolean;
+  required?: string[];
+  properties?: Record<string, OpenApiSchema>;
+  items?: OpenApiSchema;
+};
+
+type OpenApiOperation = {
+  operationId?: string;
+  security?: unknown;
+  requestBody?: {
+    content?: Record<string, { schema?: OpenApiSchema }>;
+  };
+};
+
 describe('Quest API v2 integration', () => {
   it('validates the required Idempotency-Key before authentication', async () => {
     const response = await app.handle(
@@ -72,7 +88,7 @@ describe('Quest API v2 integration', () => {
   it('documents the v2 Draft foundation with the v2 paths and security', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
     const document = (await response.json()) as {
-      paths: Record<string, Record<string, { operationId?: string; security?: unknown }>>;
+      paths: Record<string, Record<string, OpenApiOperation>>;
     };
 
     expect(document.paths['/api/v2/quests']?.post?.operationId).toBe('createQuestV2');
@@ -86,5 +102,11 @@ describe('Quest API v2 integration', () => {
     expect(document.paths['/api/v2/quests/mine']?.get?.security).toEqual([
       { betterAuthSession: [] },
     ]);
+
+    const bodySchema =
+      document.paths['/api/v2/quests']?.post?.requestBody?.content?.['application/json']?.schema;
+    expect(bodySchema?.properties?.questFundingTotal?.multipleOf).toBe(0.01);
+    expect(bodySchema?.properties?.locations?.items?.required).toEqual(['label']);
+    expect(bodySchema?.properties?.locations?.items?.properties?.label?.nullable).not.toBe(true);
   });
 });

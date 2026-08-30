@@ -1,5 +1,10 @@
 import { db } from '@/database/client';
-import { questConditionItem, quest, questApiVersion, questLocation } from '@/database/schema/quest.schema';
+import {
+  quest,
+  questApiVersion,
+  questConditionItem,
+  questLocation,
+} from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { positiveSatang, satang, type Satang } from '@/modules/wallet';
@@ -38,7 +43,7 @@ type NormalizedCreateInput = {
   dueAt: Date | null;
   tagId: string | null;
   proofRequired: boolean;
-  locations: Array<{ label: string | null }>;
+  locations: Array<{ label: string }>;
 };
 
 type QuestV2CreateValidationOutcome =
@@ -128,7 +133,9 @@ const parseQuestFundingTotalSatang = (value: number): Satang | undefined => {
     return undefined;
   }
 
-  const valueInSatang = Number(bahtPart) * 100 + Number((satangPart ?? '').padEnd(2, '0'));
+  // Parse the decimal representation as an integer string. Do not multiply a
+  // floating-point Baht value during the conversion.
+  const valueInSatang = Number(`${bahtPart}${(satangPart ?? '').padEnd(2, '0')}`);
   if (!Number.isSafeInteger(valueInSatang) || valueInSatang < 100 || valueInSatang > 70000000) {
     return undefined;
   }
@@ -185,15 +192,15 @@ const normalizeCreateInput = (
   if (description !== null && (description.length === 0 || description.length > 1000)) {
     return { outcome: 'invalid-description' };
   }
-  const locations = (data.locations ?? []).map((location) => ({
-    label: location.label === undefined || location.label === null ? null : location.label.trim(),
+  const normalizedLocations = (data.locations ?? []).map((location) => ({
+    label:
+      location && typeof location.label === 'string' ? location.label.trim() : null,
   }));
-  if (
-    locations.length > 10 ||
-    locations.some(
-      (location) => location.label !== null && (location.label.length === 0 || location.label.length > 100),
-    )
-  ) {
+  const locations = normalizedLocations.filter(
+    (location): location is { label: string } =>
+      location.label !== null && location.label.length > 0 && location.label.length <= 100,
+  );
+  if (locations.length > 10 || locations.length !== normalizedLocations.length) {
     return { outcome: 'invalid-location' };
   }
 
@@ -257,12 +264,21 @@ const selectConditionItems = async (database: QuestDatabase, questId: string) =>
     .where(eq(questConditionItem.questId, questId))
     .orderBy(asc(questConditionItem.position));
 
-const selectLocations = async (database: QuestDatabase, questId: string) =>
-  database
+const selectLocations = async (database: QuestDatabase, questId: string) => {
+  const locations = await database
     .select({ label: questLocation.label })
     .from(questLocation)
     .where(eq(questLocation.questId, questId))
     .orderBy(asc(questLocation.id));
+
+  return locations.map((location) => {
+    const label = location.label?.trim();
+    if (!label || label.length > 100) {
+      throw new Error(`Quest ${questId} has an invalid location label`);
+    }
+    return { label };
+  });
+};
 
 const toV2State = (status: QuestStatus): QuestV2State => {
   if (!questV2States.includes(status as QuestV2State)) {
@@ -421,7 +437,6 @@ const createQuestInTransaction = async (
       v2Mode: input.mode,
       v2Participation: input.participation,
       questStatus: questStatus.draft,
-      rewardSatang: input.questFundingTotalSatang,
       questFundingTotalSatang: input.questFundingTotalSatang,
       tagId: input.tagId,
       headcount: input.headcount,

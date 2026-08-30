@@ -45,7 +45,7 @@ export type QuestV2CanonicalQuest = {
   startTime: string;
   dueAt: string | null;
   proofRequired: boolean;
-  locations: Array<{ label: string | null }>;
+  locations: Array<{ label: string }>;
   createdAt: string;
   updatedAt: string;
 };

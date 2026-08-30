@@ -1,6 +1,8 @@
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
+import { TypeCompiler } from '@sinclair/typebox/compiler';
 import { t, type Static } from 'elysia';
+import type { StandardSchemaV1Like } from 'elysia/types';
 
 import { questV2Modes, questV2Participations, questV2States } from './quest-v2.contract';
 
@@ -36,7 +38,7 @@ const conditionItemsSchema = t.Array(
 );
 const locationSchema = t.Object(
   {
-    label: t.Optional(t.Nullable(t.String({ maxLength: 100, pattern: '\\S' }))),
+    label: t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }),
   },
   { additionalProperties: false },
 );
@@ -46,27 +48,101 @@ const questFundingTotalSchema = t.Number({
   description:
     'Inclusive Quest Funding Total in Baht with exact satang precision (at most two decimal places).',
 });
+const questFundingTotalOpenApiSchema = t.Number({
+  minimum: 1,
+  maximum: 700000,
+  multipleOf: 0.01,
+  description:
+    'Inclusive Quest Funding Total in Baht with exact satang precision (at most two decimal places).',
+});
+
+const questV2CreateProperties = {
+  title: titleSchema,
+  description: t.Optional(descriptionSchema),
+  condition: t.Object(
+    { items: conditionItemsSchema },
+    { additionalProperties: false },
+  ),
+  mode: questV2ModeSchema,
+  participation: questV2ParticipationSchema,
+  questFundingTotal: questFundingTotalSchema,
+  headcount: t.Integer({ minimum: 1, maximum: 20 }),
+  startTime: isoDateTimeWithTimezoneSchema,
+  dueAt: t.Optional(t.Nullable(isoDateTimeWithTimezoneSchema)),
+  tagId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
+  proofRequired: t.Optional(t.Boolean()),
+  locations: t.Optional(t.Array(locationSchema, { maxItems: 10 })),
+};
 
 export const questV2CreateSchema = t.Object(
-  {
-    title: titleSchema,
-    description: t.Optional(descriptionSchema),
-    condition: t.Object(
-      { items: conditionItemsSchema },
-      { additionalProperties: false },
-    ),
-    mode: questV2ModeSchema,
-    participation: questV2ParticipationSchema,
-    questFundingTotal: questFundingTotalSchema,
-    headcount: t.Integer({ minimum: 1, maximum: 20 }),
-    startTime: isoDateTimeWithTimezoneSchema,
-    dueAt: t.Optional(t.Nullable(isoDateTimeWithTimezoneSchema)),
-    tagId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
-    proofRequired: t.Optional(t.Boolean()),
-    locations: t.Optional(t.Array(locationSchema, { maxItems: 10 })),
-  },
+  questV2CreateProperties,
   { additionalProperties: false },
 );
+
+export type QuestV2CreateInput = Static<typeof questV2CreateSchema>;
+
+const questV2CreateOpenApiSchema = t.Object(
+  { ...questV2CreateProperties, questFundingTotal: questFundingTotalOpenApiSchema },
+  { additionalProperties: false },
+);
+
+// TypeBox applies multipleOf with JavaScript remainder, which can reject valid
+// decimal Baht values. Keep the OpenAPI constraint and validate the exact
+// decimal representation at runtime.
+const questV2CreateValidator = TypeCompiler.Compile(questV2CreateSchema);
+const hasExactSatangPrecision = (value: unknown): value is number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+  const fractionalPart = value.toString().split('.')[1];
+  return fractionalPart === undefined || /^\d{1,2}$/.test(fractionalPart);
+};
+
+type QuestV2CreateHttpSchema = StandardSchemaV1Like<
+  QuestV2CreateInput,
+  QuestV2CreateInput
+> & {
+  readonly '~standard': {
+    readonly version: 1;
+    readonly vendor: 'elysia';
+    readonly validate: (value: unknown) =>
+      | { value: QuestV2CreateInput; issues?: never }
+      | { value?: never; issues: unknown[] };
+    readonly jsonSchema: {
+      readonly input: () => typeof questV2CreateOpenApiSchema;
+    };
+  };
+};
+
+export const questV2CreateHttpSchema = {
+  '~standard': {
+    version: 1 as const,
+    vendor: 'elysia' as const,
+    types: undefined as unknown as {
+      input: QuestV2CreateInput;
+      output: QuestV2CreateInput;
+    },
+    validate: (value: unknown) => {
+      if (!questV2CreateValidator.Check(value)) {
+        return { issues: [...questV2CreateValidator.Errors(value)] };
+      }
+
+      if (!hasExactSatangPrecision(value.questFundingTotal)) {
+        return {
+          issues: [
+            {
+              path: ['questFundingTotal'],
+              message: 'Expected number to use at most two decimal places',
+            },
+          ],
+        };
+      }
+
+      return { value };
+    },
+    jsonSchema: {
+      input: () => questV2CreateOpenApiSchema,
+    },
+  },
+} as QuestV2CreateHttpSchema;
 
 export const normalizeQuestV2CreateBody = ({ body }: { body: unknown }) => {
   rejectUnknownFields(questV2CreateSchema)({ body });
@@ -134,7 +210,7 @@ export const questV2CanonicalQuestSchema = t.Object({
   startTime: t.String({ format: 'date-time' }),
   dueAt: t.Nullable(t.String({ format: 'date-time' })),
   proofRequired: t.Boolean(),
-  locations: t.Array(t.Object({ label: t.Nullable(t.String()) })),
+  locations: t.Array(t.Object({ label: t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }) })),
   createdAt: t.String({ format: 'date-time' }),
   updatedAt: t.String({ format: 'date-time' }),
 });
@@ -158,7 +234,6 @@ export const questV2WriteHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
 });
 
-export type QuestV2CreateInput = Static<typeof questV2CreateSchema>;
 export type QuestV2MineQuery = Static<typeof questV2MineQuerySchema>;
 export type QuestV2Params = Static<typeof questV2ParamsSchema>;
 export type QuestV2WriteHeaders = Static<typeof questV2WriteHeadersSchema>;

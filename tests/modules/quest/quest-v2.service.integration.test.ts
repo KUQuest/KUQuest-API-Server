@@ -13,8 +13,8 @@ import {
   createQuestV2,
   getQuestV2Detail,
   listOwnQuestV2,
-} from '@/modules/quest/quest-v2.service';
-import type { QuestV2CreateInput } from '@/modules/quest/quest-v2.schema';
+  type QuestV2CreateInput,
+} from '@/modules/quest';
 
 import { randomUUID } from 'node:crypto';
 
@@ -61,6 +61,26 @@ const baseInput: QuestV2CreateInput = {
   locations: [{ label: '  Online  ' }],
 };
 
+const postQuest = (body: unknown, key = `quest-v2-http-${randomUUID()}`) =>
+  app.handle(
+    new Request('http://localhost/api/v2/quests', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'idempotency-key': key,
+        cookie: sessionCookie,
+      },
+      body: JSON.stringify(body),
+    }),
+  );
+
+const getQuest = (questId: string) =>
+  app.handle(
+    new Request(`http://localhost/api/v2/quests/${questId}`, {
+      headers: { cookie: sessionCookie },
+    }),
+  );
+
 beforeAll(async () => {
   await sql`select 1`;
   const loginResponse = await authTestApp.handle(
@@ -91,6 +111,9 @@ beforeEach(async () => {
   await db.delete(walletIdempotencyKey).where(
     eq(walletIdempotencyKey.principalUserId, hirerId),
   );
+  await db.delete(walletIdempotencyKey).where(
+    eq(walletIdempotencyKey.principalUserId, otherMemberId),
+  );
   if (questIds.length > 0) {
     await db.delete(quest).where(inArray(quest.id, questIds));
     questIds = [];
@@ -100,6 +123,9 @@ beforeEach(async () => {
 afterAll(async () => {
   await db.delete(walletIdempotencyKey).where(
     eq(walletIdempotencyKey.principalUserId, hirerId),
+  );
+  await db.delete(walletIdempotencyKey).where(
+    eq(walletIdempotencyKey.principalUserId, otherMemberId),
   );
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(tag).where(eq(tag.id, tagId));
@@ -163,6 +189,7 @@ describe('Quest API v2 persistence', () => {
         apiVersion: quest.apiVersion,
         v2Mode: quest.v2Mode,
         v2Participation: quest.v2Participation,
+        rewardSatang: quest.rewardSatang,
         questFundingTotalSatang: quest.questFundingTotalSatang,
       })
       .from(quest)
@@ -171,6 +198,7 @@ describe('Quest API v2 persistence', () => {
       apiVersion: 'v2',
       v2Mode: 'FIRST_COME_FIRST_SERVED',
       v2Participation: 'SINGLE',
+      rewardSatang: null,
       questFundingTotalSatang: 103,
     });
 
@@ -182,6 +210,56 @@ describe('Quest API v2 persistence', () => {
       { position: 0, text: 'Use the KUQuest brand' },
       { position: 1, text: 'Return an editable file' },
     ]);
+  });
+
+  it.each([
+    ['one satang precision', 1.01, 101],
+    ['maximum funding total', 700000, 70000000],
+  ])('stores %s as integer Satang without setting Quest Reward', async (_, funding, expected) => {
+    const result = await createQuestV2(
+      hirerId,
+      { ...baseInput, questFundingTotal: funding },
+      `v2-funding-${randomUUID()}`,
+    );
+    if (!('quest' in result)) throw new Error(`Create failed: ${result.outcome}`);
+    questIds.push(result.quest.id);
+
+    const [storedQuest] = await db
+      .select({
+        rewardSatang: quest.rewardSatang,
+        questFundingTotalSatang: quest.questFundingTotalSatang,
+      })
+      .from(quest)
+      .where(eq(quest.id, result.quest.id));
+
+    expect(storedQuest).toEqual({
+      rewardSatang: null,
+      questFundingTotalSatang: expected,
+    });
+  });
+
+  it('rejects funding totals with more than two decimal places', async () => {
+    const result = await createQuestV2(
+      hirerId,
+      { ...baseInput, questFundingTotal: 1.001 },
+      `v2-funding-precision-${randomUUID()}`,
+    );
+
+    expect(result).toEqual({ outcome: 'invalid-funding' });
+  });
+
+  it.each([
+    ['missing label', {}],
+    ['null label', { label: null }],
+    ['blank label', { label: '   ' }],
+  ])('rejects a location with %s', async (_, location) => {
+    const result = await createQuestV2(
+      hirerId,
+      { ...baseInput, locations: [location] } as unknown as QuestV2CreateInput,
+      `v2-location-${randomUUID()}`,
+    );
+
+    expect(result).toEqual({ outcome: 'invalid-location' });
   });
 
   it('exposes the same canonical resource through the HTTP boundary', async () => {
@@ -245,5 +323,78 @@ describe('Quest API v2 persistence', () => {
     );
     expect(detail.status).toBe(200);
     expect((await detail.json()).data).toEqual(created.data);
+  });
+});
+
+const invalidHttpInputs: Array<[string, Record<string, unknown>, string]> = [
+  ['empty Condition Items', { condition: { items: [] } }, 'VALIDATION'],
+  ['blank Condition Item', { condition: { items: ['   '] } }, 'VALIDATION'],
+  ['title over the text limit', { title: 'x'.repeat(121) }, 'VALIDATION'],
+  ['description over the text limit', { description: 'x'.repeat(1001) }, 'VALIDATION'],
+  [
+    'dueAt before startTime',
+    { dueAt: '2030-08-26T09:00:00.000+07:00' },
+    'INVALID_QUEST_DATES',
+  ],
+  ['funding with more than two decimals', { questFundingTotal: 1.001 }, 'VALIDATION'],
+  ['headcount over maximum', { headcount: 21 }, 'VALIDATION'],
+  ['SINGLE participation with multiple Workers', { headcount: 2 }, 'INVALID_HEADCOUNT'],
+  ['location without label', { locations: [{}] }, 'VALIDATION'],
+  ['location with null label', { locations: [{ label: null }] }, 'VALIDATION'],
+  ['location with blank label', { locations: [{ label: '   ' }] }, 'VALIDATION'],
+];
+
+describe('Quest API v2 HTTP validation and ownership', () => {
+  it.each(invalidHttpInputs)('rejects %s with the shared error envelope', async (_, changes, code) => {
+    const response = await postQuest({ ...baseInput, ...changes });
+    expect(response.status).toBe(400);
+
+    const body = (await response.json()) as {
+      success: boolean;
+      error: { code: string; message: string };
+    };
+    expect(body).toEqual({
+      success: false,
+      error: { code, message: expect.any(String) },
+    });
+  });
+
+  it('accepts exact two-decimal funding at the HTTP boundary', async () => {
+    const response = await postQuest({
+      ...baseInput,
+      questFundingTotal: 1.01,
+      locations: [],
+    });
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as {
+      success: true;
+      data: { id: string; questFundingTotal: number };
+    };
+    questIds.push(body.data.id);
+    expect(body.data.questFundingTotal).toBe(1.01);
+  });
+
+  it('returns 404 QUEST_NOT_FOUND with the complete envelope for missing and non-owned Quests', async () => {
+    const expected = {
+      success: false,
+      error: { code: 'QUEST_NOT_FOUND', message: 'Quest not found' },
+    };
+
+    const missing = await getQuest(randomUUID());
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual(expected);
+
+    const created = await createQuestV2(
+      otherMemberId,
+      { ...baseInput, title: 'Other Hirer Quest' },
+      `v2-other-owned-${randomUUID()}`,
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+
+    const nonOwned = await getQuest(created.quest.id);
+    expect(nonOwned.status).toBe(404);
+    expect(await nonOwned.json()).toEqual(expected);
   });
 });

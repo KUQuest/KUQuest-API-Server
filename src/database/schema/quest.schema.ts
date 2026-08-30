@@ -69,7 +69,7 @@ export const quest = pgTable(
       'SINGLE' | 'GROUP'
     >(),
     questStatus: questStatus('quest_status').default('QUEST_DRAFT').notNull(),
-    rewardSatang: integer('reward_satang').notNull(),
+    rewardSatang: integer('reward_satang'),
     questFundingTotalSatang: integer('quest_funding_total_satang'),
     fundingReservationId: uuid('funding_reservation_id')
       .unique()
@@ -105,7 +105,15 @@ export const quest = pgTable(
       'quest_funding_total_check',
       sql`${table.questFundingTotalSatang} IS NULL OR ${table.questFundingTotalSatang} BETWEEN 100 AND 70000000`,
     ),
-    check('quest_reward_check', sql`${table.rewardSatang} > 0`),
+    check('quest_reward_check', sql`${table.rewardSatang} IS NULL OR ${table.rewardSatang} > 0`),
+    check(
+      'quest_v2_draft_reward_check',
+      sql`${table.apiVersion} <> 'v2' OR ${table.questStatus} <> 'QUEST_DRAFT' OR ${table.rewardSatang} IS NULL`,
+    ),
+    check(
+      'quest_reward_required_check',
+      sql`(${table.apiVersion} = 'v2' AND ${table.questStatus} = 'QUEST_DRAFT') OR ${table.rewardSatang} IS NOT NULL`,
+    ),
     check('quest_finance_snapshot_bps_check', sql`${table.platformFeeBps} IS NULL OR ${table.platformFeeBps} BETWEEN 0 AND 10000`),
     check('quest_finance_snapshot_amounts_check', sql`${table.platformFeePerWorkerSatang} IS NULL OR ${table.platformFeePerWorkerSatang} >= 0`),
     check('quest_finance_snapshot_escrow_check', sql`${table.questEscrowSatang} IS NULL OR ${table.questEscrowSatang} > 0`),

@@ -11,7 +11,7 @@ import {
 } from './quest-v2.controller';
 import {
   questV2CreateResponseSchema,
-  questV2CreateSchema,
+  questV2CreateHttpSchema,
   questV2DetailResponseSchema,
   questV2MineQuerySchema,
   questV2MineResponseSchema,
@@ -26,7 +26,7 @@ export const questV2Route = new Elysia({
 })
   .use(authGuard)
   .post('', createQuestV2Controller, {
-    body: questV2CreateSchema,
+    body: questV2CreateHttpSchema,
     headers: questV2WriteHeadersSchema,
     transform: normalizeQuestV2CreateBody,
     response: responses(questV2CreateResponseSchema, 400, 401, 409, 500, 503),
@@ -43,7 +43,7 @@ export const questV2Route = new Elysia({
     response: responses(questV2MineResponseSchema, 400, 401, 500),
     detail: {
       tags: ['Quests v2'],
-      summary: "List the Hirer's v2 Quests",
+      summary: 'List the Hirer\'s v2 Quests',
       description: 'Returns the authenticated Hirer’s Quests owned through the v2 contract.',
       operationId: 'listOwnQuestsV2',
       security: betterAuthSecurity,

@@ -1,5 +1,4 @@
 import { questRoute } from '@/modules/quest/quest.route';
-import { questV2Route } from '@/modules/quest/quest-v2.route';
 import { tagRoute } from '@/modules/tag';
 import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
 import { topUpWebhookRoute } from '@/modules/top-up';
@@ -8,7 +7,7 @@ import { questCandidateRoute } from '@/modules/quest/quest-candidate.route';
 import { questProofRoute } from '@/modules/quest/quest-proof.route';
 import { questReviewRoute } from '@/modules/quest/quest-review.route';
 import { questDisputeRoute, questSettlementRoute } from '@/modules/quest/quest-settlement.route';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest';
+import { configureQuestWorkChatMembershipWriter, questV2Route } from '@/modules/quest';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 
 import { Elysia } from 'elysia';

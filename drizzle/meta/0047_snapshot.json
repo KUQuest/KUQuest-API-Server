@@ -3993,7 +3993,7 @@
           "name": "reward_satang",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "quest_funding_total_satang": {
           "name": "quest_funding_total_satang",
@@ -4308,7 +4308,15 @@
         },
         "quest_reward_check": {
           "name": "quest_reward_check",
-          "value": "\"quest\".\"reward_satang\" > 0"
+          "value": "\"quest\".\"reward_satang\" IS NULL OR \"quest\".\"reward_satang\" > 0"
+        },
+        "quest_v2_draft_reward_check": {
+          "name": "quest_v2_draft_reward_check",
+          "value": "\"quest\".\"api_version\" <> 'v2' OR \"quest\".\"quest_status\" <> 'QUEST_DRAFT' OR \"quest\".\"reward_satang\" IS NULL"
+        },
+        "quest_reward_required_check": {
+          "name": "quest_reward_required_check",
+          "value": "(\"quest\".\"api_version\" = 'v2' AND \"quest\".\"quest_status\" = 'QUEST_DRAFT') OR \"quest\".\"reward_satang\" IS NOT NULL"
         },
         "quest_finance_snapshot_bps_check": {
           "name": "quest_finance_snapshot_bps_check",
