@@ -105,7 +105,7 @@ describe('Xendit Payout provider', () => {
     })).resolves.toMatchObject({ normalizedStatus: 'FAILED' });
   });
 
-  it('sends the validated v2 request with THB conversion and stable idempotency', async () => {
+  it('sends the exact staging-compatible V2 SCB request with stable idempotency', async () => {
     let called: { url: string; init?: RequestInit } | undefined;
     const fetcher: Fetcher = async (url, init) => {
       called = { url, init };
@@ -130,6 +130,7 @@ describe('Xendit Payout provider', () => {
     expect(called?.url).toBe('https://xendit.test/v2/payouts');
     expect(called?.init?.method).toBe('POST');
     expect(new Headers(called?.init?.headers).get('authorization')).toBe('Basic eG5kX3Rlc3Rfc2VjcmV0Og==');
+    expect(XENDIT_PAYOUT_API_VERSION).toBe('2020-02-01');
     expect(new Headers(called?.init?.headers).get('api-version')).toBe(XENDIT_PAYOUT_API_VERSION);
     expect(new Headers(called?.init?.headers).get('idempotency-key')).toBe(request.internalReference);
     expect(body).toEqual({

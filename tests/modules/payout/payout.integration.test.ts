@@ -508,10 +508,18 @@ describe('Payout application services', () => {
       expect.objectContaining({
         toStatus: 'FAILED',
         providerStatus: '400:TEST_REJECTED',
+        reason: 'Provider rejected the Payout.',
+      }),
+    ]));
+    expect(JSON.stringify(rejectedHistory)).not.toContain('Invalid destination account');
+    const adminRejectedHistory = await listAdminPayoutStatusHistory(rejectedPayout.id);
+    expect(adminRejectedHistory).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        toStatus: 'FAILED',
+        providerStatus: '400:TEST_REJECTED',
         reason: 'Provider rejected the Payout. HTTP 400. Code TEST_REJECTED. Message: Invalid destination account <REDACTED>.',
       }),
     ]));
-    expect(rejectedHistory[rejectedHistory.length - 1]?.reason).not.toContain('1234567890');
     expect(await getWallet(rejectedStudent)).toMatchObject({ earningsBalanceSatang: 1_000, reservedForPayoutsSatang: 0 });
 
     const uncertainStudent = await createStudent('be115-uncertain');

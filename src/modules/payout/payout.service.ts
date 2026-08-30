@@ -872,13 +872,35 @@ export const listPayouts = async (principalUserId: string, limit = 50) => {
   return records.map(payoutFromRecord);
 };
 
+const studentProviderStatus = (providerStatus: string | null) => {
+  if (!providerStatus) return null;
+  const normalized = providerStatus.trim().toUpperCase();
+  return /^(?:\d{3}:)?[A-Z][A-Z0-9_]{0,63}$/.test(normalized) ? normalized : null;
+};
+
+const studentProviderHistoryReason = (toStatus: PayoutStatus) => {
+  if (toStatus === 'FAILED') return 'Provider rejected the Payout.';
+  if (toStatus === 'CANCELLED') return 'Provider cancelled the Payout.';
+  if (toStatus === 'AWAITING_RECONCILIATION') return 'Provider response is uncertain.';
+  if (toStatus === 'PENDING') return 'Provider reports the Payout is still in progress.';
+  if (toStatus === 'COMPLETED') return 'Provider confirmed the Payout.';
+  return 'Provider updated the Payout.';
+};
+
 export const listPayoutStatusHistory = async (principalUserId: string, payoutId: string) => {
   await readPayoutRecord(principalUserId, payoutId);
-  return db
+  const history = await db
     .select()
     .from(paymentPayoutStatusHistory)
     .where(eq(paymentPayoutStatusHistory.payoutId, payoutId))
     .orderBy(asc(paymentPayoutStatusHistory.occurredAt), asc(paymentPayoutStatusHistory.id));
+  return history.map((entry) => entry.source === 'PROVIDER'
+    ? {
+        ...entry,
+        providerStatus: studentProviderStatus(entry.providerStatus),
+        reason: studentProviderHistoryReason(entry.toStatus),
+      }
+    : entry);
 };
 
 export const createPayoutQuote = quotePayout;

@@ -13,6 +13,8 @@ import {
   type PayoutOutcomeStatus,
 } from './payout.provider-event';
 
+// Keep the validated Thai bank payout contract on V2. Current V3 requires
+// routing types and recipient details that Payout Destination does not model.
 export const XENDIT_PAYOUT_API_VERSION = '2020-02-01';
 
 export type PayoutProviderErrorCode =
