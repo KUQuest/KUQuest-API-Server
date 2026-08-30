@@ -24,4 +24,9 @@ their ADRs must be revised together before implementation.
 Production activation requires confirmation of the one-year period against
 university policy.
 
+Closed Candidate Inquiry Conversation history and files follow the same
+retention and moderation-hold policy. Closing removes Member access and normal
+UI visibility; it does not require physical deletion at the assignment
+transition.
+
 Status: accepted.

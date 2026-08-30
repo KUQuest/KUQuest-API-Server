@@ -9,6 +9,15 @@ Read these sources when they exist:
 - `CONTEXT.md` at the repository root
 - Relevant architectural decisions under `docs/adr/`
 
+For a Candidate Inquiry Conversation or a pre-assignment question, read the
+`Candidate Inquiry Conversation contract` in
+`docs/quest/work-chat-system-target.md` before changing the domain, schema,
+API, UI, or notification flow. For a Work Conversation, Quest Condition or
+Quest Edit, Sent Work, Proof Submission, review Popup, System Message, Android
+Push, or Quest Reward settlement, read the corresponding target sections in
+that same file. It is the accepted target contract and identifies older
+documents that must be reconciled.
+
 If they do not exist, proceed silently. Domain-modeling skills create them
 lazily when terminology or architectural decisions are established.
 

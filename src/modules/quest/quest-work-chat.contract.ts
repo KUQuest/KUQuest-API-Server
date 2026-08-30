@@ -7,8 +7,10 @@
  * The caller invokes WorkChatMembershipWriter inside the Quest database transaction.
  * Identities are native UUIDs (BE-170): a Member is auth_user.id, an Admin is
  * auth_admin.id.
- * This contract deliberately does not cover private Inquiry Conversations.
- * It also has no ownership-transfer transition because MVP ownership is immutable.
+ * This port covers Work Conversation membership only. Candidate Inquiry
+ * Conversations have a separate lifecycle and do not enter this membership
+ * transition. It also has no ownership-transfer transition because MVP
+ * ownership is immutable.
  */
 
 import type {
