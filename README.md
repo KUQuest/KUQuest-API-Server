@@ -1,107 +1,107 @@
 # KUQuest API Server
 
-ยินดีต้อนรับสู่ **KUQuest API Server** — บริการแบ็กเอนด์หลักสำหรับระบบว่าจ้างและช่วยเหลือนิสิต มหาวิทยาลัยเกษตรศาสตร์ (KUQuest Mobile และ KUQuest Admin Web App) พัฒนาด้วย **Elysia**, **Bun**, **PostgreSQL** และ **RustFS**
+Welcome to the **KUQuest API Server** — the core backend API for the student mutual-aid and task marketplace platform at Kasetsart University (supporting both the KUQuest Mobile App and KUQuest Admin Web App). Built with **Elysia**, **Bun**, **PostgreSQL**, and **RustFS**.
 
-- 🚀 **เริ่มต้นติดตั้งและรันระบบ:** ดูขั้นตอนอย่างละเอียดที่ [SETUP.md](SETUP.md)
-- 📜 **อ่านกฎเกณฑ์ทางธุรกิจและสเปกระบบ:** ดูสารบัญ [Domain Rulebooks & Architecture](#-domain-rulebooks--specifications)
-- 🎮 **เปิดดูการจำลองพฤติกรรมระบบ (120 สถานการณ์):** ดูที่ [human-read/quest-scenarios.html](human-read/quest-scenarios.html)
+- 🚀 **Setup & Local Execution Guide:** See [SETUP.md](SETUP.md) for step-by-step instructions.
+- 📜 **Business Rules & Specifications:** See [Domain Rulebooks & Architecture](#-domain-rulebooks--specifications).
+- 🎮 **Interactive Simulation Suite (120 Scenarios):** Explore [human-read/quest-scenarios.html](human-read/quest-scenarios.html).
 
 ---
 
 ## 📚 Domain Rulebooks & Specifications
 
-ระบบ KUQuest ขับเคลื่อนด้วยนโยบายทางธุรกิจที่ถูกกำหนดไว้อย่างเป็นเอกภาพใน **Domain Rulebooks** และ **Architectural Decision Records (ADRs)**:
+The business logic and system constraints of KUQuest are formally defined in authoritative **Domain Rulebooks** and **Architectural Decision Records (ADRs)**:
 
 ```text
 docs/
-├── rulebook/                  # 🌟 กฎเกณฑ์ทางธุรกิจฉบับทางการ (Authoritative Target Policy)
-│   ├── quest/                 # นโยบายวงจรชีวิตเควสต์, แชต, การส่งงาน และการยกเลิก
-│   ├── admin/                 # นโยบายการตรวจสอบ, ระงับข้อพิพาท, อนุมัติถอนเงิน และบทลงโทษ
-│   └── finance/               # นโยบายบัญชีคู่ (Double-Entry Ledger) และการจัดสรรเงินมัดจำ
-├── adr/                       # บันทึกการตัดสินใจเชิงสถาปัตยกรรม (Architectural Decision Records)
-├── quest/                     # คู่มือเทียบโค้ดกับนโยบาย (Quest Reconciliation Guide)
-├── admin/                     # คู่มือเทียบโค้ดกับนโยบาย (Admin Reconciliation Guide)
-└── human-read/                # เอกสารจำลองสถานการณ์และ Flow การทำงานสำหรับผู้อ่าน
+├── rulebook/                  # 🌟 Authoritative Target Policy Rulebooks
+│   ├── quest/                 # Quest lifecycle, Work Chat, Proof submissions, and Cancellations
+│   ├── admin/                 # Moderation, Dispute resolution, Payout approvals, and Penalty ladders
+│   └── finance/               # Double-Entry Ledger, Wallet compartments, and Integer Satang math
+├── adr/                       # Architectural Decision Records
+├── quest/                     # Quest implementation & reconciliation guide
+├── admin/                     # Admin operations reconciliation guide
+└── human-read/                # Interactive behavioral simulation suite (HTML)
 ```
 
-### 1. 📘 กฎเกณฑ์เควสต์และการประสานงาน (Quest & Work Chat Rulebook)
-- **ไฟล์หลัก**: [`docs/rulebook/quest/quest-work-chat-rulebook.md`](docs/rulebook/quest/quest-work-chat-rulebook.md)
-- **ครอบคลุม**:
-  - วงจรชีวิตเควสต์ทั้ง 4 จตุภาค (Single/Group × FCFS/Candidate)
-  - สัญญาห้องสนทนา Work Chat และ Candidate Inquiry แยกต่างหาก ([ADR 0019](docs/adr/0019-separate-candidate-inquiry-conversation.md))
-  - การตรวจรับงานและเงื่อนไขไม่ผ่านส่งผลให้เควสต์ล้มเหลว ([ADR 0016](docs/adr/0016-not-approved-proof-fails-quest.md))
-  - เมทริกซ์การยกเลิกเควสต์ 3 ระดับ (3-Tier Cancellation Matrix: คืน 100% / ชดเชย 20% / จ่ายเต็ม 100%)
-  - หน้าต่างขอแก้ไขเควสต์ 10 นาที (10-Minute Quest Edit Window)
+### 1. 📘 Quest & Work Chat Rulebook
+- **Primary Source:** [`docs/rulebook/quest/quest-work-chat-rulebook.md`](docs/rulebook/quest/quest-work-chat-rulebook.md)
+- **Scope & Highlights:**
+  - Complete Quest Lifecycle across all 4 Quadrants (`SINGLE`/`GROUP` × `FIRST_COME_FIRST_SERVED`/`CANDIDATE`).
+  - Strict separation of Work Chat and Candidate Inquiry Conversation ([ADR 0019](docs/adr/0019-separate-candidate-inquiry-conversation.md)).
+  - Non-approval of proof immediately transitions Quest to failure with zero rework ([ADR 0016](docs/adr/0016-not-approved-proof-fails-quest.md)).
+  - Three-Tier Cancellation Matrix (Pre-start: 100% refund, Assigned: 20% worker compensation, In-progress: 100% full payout).
+  - 10-Minute Quest Edit Window in `QUEST_ASSIGNED` requiring unanimous worker consent.
 
-### 2. 🛡️ กฎเกณฑ์ผู้ดูแลระบบและความปลอดภัย (Admin Operations Rulebook)
-- **ไฟล์หลัก**: [`docs/rulebook/admin/admin-rulebook.md`](docs/rulebook/admin/admin-rulebook.md)
-- **ครอบคลุม**:
-  - การอนุมัติคำขอถอนเงินรางวัลแบบ Manual ([ADR 0022](docs/adr/0022-manual-admin-approval-for-payouts.md))
-  - การระงับข้อพิพาทและการจัดสรรเงินมัดจำที่พักไว้ 7 วัน ([ADR 0024](docs/adr/0024-hold-quest-failure-settlement-for-dispute-window.md))
-  - การสั่งซ่อนเควสต์ไม่ปลอดภัยโดยคงเงินมัดจำ Escrow ไว้ ([ADR 0021](docs/adr/0021-keep-escrow-during-moderation-hide.md))
-  - การควบคุมกระเป๋าเงิน (Wallet Freeze/Suspend) และการคุ้มครองงานที่กำลังดำเนินอยู่
-  - บันไดบทลงโทษสมาชิก (Misconduct Ladder & Low-Average-Review Ladder, Red Flag, Auto-Freeze)
+### 2. 🛡️ Admin Operations Rulebook
+- **Primary Source:** [`docs/rulebook/admin/admin-rulebook.md`](docs/rulebook/admin/admin-rulebook.md)
+- **Scope & Highlights:**
+  - Manual Admin verification and approval for Payouts ([ADR 0022](docs/adr/0022-manual-admin-approval-for-payouts.md)).
+  - Dispute resolution and 7-day money hold for failed quests ([ADR 0024](docs/adr/0024-hold-quest-failure-settlement-for-dispute-window.md)).
+  - Moderation Hide: quests are hidden from discovery while escrow and in-progress work remain intact ([ADR 0021](docs/adr/0021-keep-escrow-during-moderation-hide.md)).
+  - Wallet Freeze & Suspend mechanics with in-progress commitment protection.
+  - Member Penalty Ladders (Misconduct Ladder, Low-Average-Review Ladder, Red Flag, Auto-Freeze).
 
-### 3. 💰 กฎเกณฑ์การเงินและบัญชีคู่ (Finance & Wallets Rulebook)
-- **ไฟล์หลัก**: [`docs/rulebook/finance/finance-rulebook.md`](docs/rulebook/finance/finance-rulebook.md)
-- **ครอบคลุม**:
-  - ระบบบัญชีแยกประเภทคู่ (Double-Entry Ledger) คำนวณในหน่วยสตางค์จำนวนเต็ม ([ADR 0005](docs/adr/0005-integer-satang-for-money.md))
-  - บัญชีย่อยของกระเป๋าเงิน (SPENDING, EARNINGS, Quest Escrow, Funding Reservation)
-  - ความคงทนและการแก้ไขข้อผิดพลาดทางการเงินแบบไม่ลบประวัติ ([ADR 0010](docs/adr/0010-retain-and-correct-financial-records.md))
-  - การเข้ารหัสข้อมูลเลขที่บัญชีธนาคารปลายทางด้วย AES-256-GCM ([ADR 0008](docs/adr/0008-encrypt-payout-destination-secrets.md))
+### 3. 💰 Finance & Wallets Rulebook
+- **Primary Source:** [`docs/rulebook/finance/finance-rulebook.md`](docs/rulebook/finance/finance-rulebook.md)
+- **Scope & Highlights:**
+  - Strict Double-Entry General Ledger with integer Satang accounting ([ADR 0005](docs/adr/0005-integer-satang-for-money.md)).
+  - Wallet Compartments (`SPENDING`, `EARNINGS`, `Quest Escrow`, `Funding Reservation`).
+  - Immutable financial records and reversing ledger transaction correction pattern ([ADR 0010](docs/adr/0010-retain-and-correct-financial-records.md)).
+  - AES-256-GCM encryption for bank account and payout destination secrets ([ADR 0008](docs/adr/0008-encrypt-payout-destination-secrets.md)).
 
-### 4. 📖 พจนานุกรมศัพท์ทางการ (Ubiquitous Language)
-- **ไฟล์หลัก**: [`CONTEXT.md`](CONTEXT.md)
-- นิยามศัพท์เฉพาะ เช่น `Hirer`, `Worker`, `Candidate`, `Red Flag`, `Quest Escrow`, `Double-Entry Ledger`, `Remainder Satang` เพื่อให้ทีมพัฒนาและเอกสารใช้ภาษาเดียวกันทั้งหมด
+### 4. 📖 Ubiquitous Language & Domain Model
+- **Primary Source:** [`CONTEXT.md`](CONTEXT.md)
+- Standardized terminology across actors (`Hirer`, `Worker`, `Candidate`), states (`QUEST_OPEN`, `QUEST_ASSIGNED`, `ASSIGNMENT_ACTIVE`, `PROOF_SUBMITTED`), and financial constructs (`Quest Escrow`, `Double-Entry Ledger`, `Remainder Satang`).
 
 ---
 
-## 🎮 Interactive Simulation Suite (สำหรับมนุษย์อ่าน)
+## 🎮 Interactive Simulation Suite (Human-Readable)
 
-สำหรับผู้ที่ต้องการทำความเข้าใจพฤติกรรมของระบบอย่างเห็นภาพ ทางโครงการได้จัดทำชุดสถานการณ์จำลองแบบ Interactive ไว้อย่างครบถ้วน:
+For visualizing end-to-end user journeys, system state machines, double-entry ledger postings, and edge cases:
 
-* **ไฟล์เอกสาร**: [`human-read/quest-scenarios.html`](human-read/quest-scenarios.html) *(หรือ `docs/human-read/quest-scenarios.html`)*
-* **ฟีเจอร์เด่น**:
-  * 🎯 รวม **120 สถานการณ์จำลองจริง** พร้อม **📖 เรื่องเล่าจำลองสถานการณ์จริง (Campus Story)**
-  * 💬 **Interactive Tooltips & Tracing**: นำเมาส์ไปชี้ที่สถานะ (`QUEST_OPEN`, `QUEST_ASSIGNED`, `ASSIGNMENT_ACTIVE`, `PROOF_SUBMITTED`) หรือรหัสบทลงโทษ (`CONDUCT_OUT_OF_SCOPE`, `PC-11`, `Red Flag`) เพื่อดูคำนิยามและผลลัพธ์ทันที
-  * 📊 **Sequence Diagrams (Mermaid)**: แผนภาพแสดงลำดับข้อความ การเรียก API และการลงบัญชีคู่ทุกขั้นตอน
-  * 🎛️ **Multi-Facet Filter Hub**: กรองตามโหมดเควสต์, ผลลัพธ์, ผู้เกี่ยวข้อง หรือประเภทสถานการณ์ได้ทันที
+* **Document File:** [`human-read/quest-scenarios.html`](human-read/quest-scenarios.html) *(or `docs/human-read/quest-scenarios.html`)*
+* **Key Features:**
+  * 🎯 **120 Comprehensive Scenarios:** Real-world campus stories covering standard workflows, disputes, cancellations, penalties, and concurrent race conditions.
+  * 💬 **Interactive Tooltips & Tracing:** Hover over any underlined system code (`QUEST_IN_PROGRESS`, `CONDUCT_OUT_OF_SCOPE`, `PC-11`, `Red Flag`) to view its definition, runtime consequences, and rulebook reference.
+  * 📊 **Sequence Diagrams (Mermaid.js):** Step-by-step visual message sequences, API triggers, and double-entry ledger postings.
+  * 🎛️ **Multi-Facet Filter Hub:** Filter instantly by Quadrant, Nature, Actors, or Outcome.
 
-เปิดดูด้วยเบราว์เซอร์:
+Open in your browser:
 ```bash
 xdg-open human-read/quest-scenarios.html
 ```
 
 ---
 
-## 📂 โครงสร้างโปรเจกต์ (Project Structure)
+## 📂 Repository Structure
 
 ```text
 .
-├── docs/                      # เอกสารสเปก นโยบาย และคำอธิบายเชิงสถาปัตยกรรม
-│   ├── rulebook/              # นโยบายทางการ (Quest, Admin, Finance)
+├── docs/                      # Specification, rulebooks, and architectural documentation
+│   ├── rulebook/              # Authoritative domain rulebooks (Quest, Admin, Finance)
 │   ├── adr/                   # Architectural Decision Records
-│   ├── human-read/            # เอกสารจำลองสถานการณ์ HTML
-│   └── db/                    # เอกสาร Database และ EDR SQL
-├── human-read -> docs/human-read # Symlink สำหรับเข้าถึงเอกสารจำลองสถานการณ์ได้สะดวก
+│   ├── human-read/            # Single canonical simulation HTML document
+│   └── db/                    # Database and EDR SQL documentation
+├── human-read -> docs/human-read # Symlink for direct document access
 ├── src/
-│   ├── config/                # ค่า Configuration และ Environment Validation
-│   ├── database/              # Drizzle ORM Schema และ Database Client
-│   ├── modules/               # Feature Modules (Auth, Quest, Wallet, Admin, Profile, Onboarding)
-│   ├── plugins/               # Cross-cutting Elysia Plugins (Error handler, Logging, Security)
-│   ├── app.ts                 # การประกอบ Route และ Middleware
-│   └── index.ts               # HTTP Server Entrypoint
-├── scripts/                   # Migration, Seeding, Workers และ Verification Scripts
-├── tests/                     # Automated Test Suites (Unit, Integration, Contract)
-├── drizzle/                   # SQL Migrations และ Migration Journal
-├── public/                    # API Test Bench และ Static Assets
-├── SETUP.md                   # 🚀 คู่มือการติดตั้ง รัน และทดสอบระบบ
-└── CONTEXT.md                 # 📖 พจนานุกรมศัพท์ทางการของระบบ
+│   ├── config/                # Typed configuration and environment validation
+│   ├── database/              # Drizzle ORM schema and database client
+│   ├── modules/               # Feature modules (Auth, Quest, Wallet, Admin, Profile, Onboarding)
+│   ├── plugins/               # Cross-cutting Elysia plugins (Error handling, Logging, CORS)
+│   ├── app.ts                 # Application route composition
+│   └── index.ts               # HTTP startup and runtime initialization
+├── scripts/                   # Migration, seeding, background workers, and verification tools
+├── tests/                     # Automated test suites (Unit, Integration, Contract)
+├── drizzle/                   # Versioned SQL migrations and metadata ledger
+├── public/                    # API test bench and static web assets
+├── SETUP.md                   # 🚀 Setup, installation, testing, and operations guide
+└── CONTEXT.md                 # 📖 Canonical domain vocabulary and Ubiquitous Language
 ```
 
 ---
 
-## 🤝 การมีส่วนร่วมและข้อกำหนด Pull Request (PR Rules)
+## 🤝 Contribution & Pull Request Workflow
 
-- **Application, Database & Documentation PRs**: ให้เปิด PR โดยมี Base Branch ชี้ไปที่ **`develop`**
-- **GitHub Actions Workflows (`.github/workflows/`)**: หากมีการแก้ไขไฟล์ Workflow ให้เปิด PR แยกต่างหากโดยมี Base Branch ชี้ไปที่ **`main`** (ตามข้อกำหนดใน [AGENTS.md](AGENTS.md))
+- **Application, Test, and Documentation PRs:** Create pull requests targeting the **`develop`** branch.
+- **GitHub Actions Workflows (`.github/workflows/`):** Any workflow changes must be isolated in a separate pull request targeting the **`main`** branch (see [AGENTS.md](AGENTS.md)).
