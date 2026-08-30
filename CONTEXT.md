@@ -40,6 +40,12 @@ _Avoid_: profile skill, occupation, treating Tags as editable Member fields.
 A rating and optional comment that a Hirer or Worker gives to the other after a Quest reaches any Terminal State: `QUEST_COMPLETED`, `QUEST_FAILED`, or `QUEST_CANCELLED`. A Review is tied to one Quest, each direction is allowed once per Quest, and the author may edit it until seven days after the Quest becomes Terminal. Reviews cannot be deleted and contribute to the reviewed Member's Reputation.
 _Avoid_: reviewing before a Quest becomes Terminal; treating a Review as a Profile field that can be edited by someone else.
 
+**Proof Review Window**:
+The 24-hour period after a required submitter sends Proof Submission during
+which the Hirer may decide the outcome. If the Hirer does not decide, the
+Server records `PROOF_APPROVED`.
+_Avoid_: mode-specific review deadlines.
+
 **Giver**:
 Legacy term for Hirer. In new Quest and Work Chat text, use Hirer.
 _Avoid_: Giver in new domain text, Employer, client, job owner.
@@ -93,8 +99,12 @@ An inbound payment that adds its quoted amount to a Student's Spending Balance a
 _Avoid_: Deposit, earnings, Wallet credit (too broad).
 
 **Payout**:
-An outbound transfer of a Student's Earnings Balance to their chosen payout destination. The transfer amount, provider fee, and tax are all debited from Earnings Balance.
+An outbound transfer of a Student's Earnings Balance to their chosen Payout Destination. The transfer amount, provider fee, and tax are all reserved from Earnings Balance first. The provider call starts only after an Admin approves the Payout. An Admin rejection releases the full Payout Reserve back to the Student's Earnings Balance.
 _Avoid_: Withdrawal request (the Payout includes the full transfer lifecycle), Quest Reward.
+
+**Payout Approval**:
+The manual Admin decision that permits or rejects one Student Payout before the provider call. The Payout remains waiting for Admin action until an Admin approves or rejects it; there is no automatic rejection after a time limit.
+_Avoid_: provider approval, automatic timeout, releasing funds without an Admin decision.
 
 **Payout Destination**:
 The Student's own Thai bank or PromptPay destination to which a Payout is sent. A Student has at most one active destination; replacing or removing it retires the old destination without erasing its historical association with prior Payouts.

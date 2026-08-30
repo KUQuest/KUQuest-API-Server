@@ -9,8 +9,8 @@ export const authTestRoute = new Elysia({
 }).get('/', () => authTestPage, {
   detail: {
     tags: ['General'],
-    summary: 'Authentication test page',
-    description: 'Serves a browser page for testing Google authentication.',
+    summary: 'Quest and finance test bench',
+    description: 'Serves a browser page for testing the default Member, Quest, and finance flows.',
     operationId: 'getApiRoot',
   },
 });

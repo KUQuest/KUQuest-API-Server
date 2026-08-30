@@ -170,6 +170,9 @@ jobs:
             sleep 1
           done
 
+      - name: Verify browser test page
+        run: curl --fail --silent http://localhost:5000/ | grep --fixed-strings '<title>KUQuest API Test Bench</title>'
+
       - name: Clean production image smoke-test container
         if: always()
         run: docker stop kuquest-api-ci 2>/dev/null || true

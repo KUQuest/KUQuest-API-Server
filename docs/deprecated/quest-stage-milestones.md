@@ -33,7 +33,8 @@ stateDiagram-v2
     APPROVED --> COMPLETED: payment credited
 
     OPEN --> HIDDEN: Admin moderation
-    HIDDEN --> OPEN: Admin restores
+    HIDDEN --> OPEN: Admin restores before startTime
+    HIDDEN --> CANCELLED: startTime passes or restore is too late
     OPEN --> CANCELLED: Hirer cancels
     ASSIGNED --> CANCELLED: Hirer cancellation
     IN_PROGRESS --> CANCELLED: Hirer cancellation
@@ -58,7 +59,7 @@ stateDiagram-v2
 | `COMPLETED` | Work and payout are complete. Terminal. | No further Quest stage. |
 | `CANCELLED` | The Quest stopped before completion. Terminal. | No further Quest stage. |
 | `DISPUTED` | Admin resolves the payment outcome. | Complete or cancel according to the decision. |
-| `HIDDEN` | Admin moderation temporarily hides an open Quest. | Admin restores it to `OPEN`. |
+| `HIDDEN` | Admin moderation temporarily hides an open Quest; its Quest Escrow remains reserved. | Admin restores it to `OPEN` before `startTime`, or it becomes `CANCELLED` after `startTime`. |
 
 ## Acceptance and Work Conversation milestones
 
@@ -100,9 +101,10 @@ stateDiagram-v2
 
 ## Completion, cancellation, and dispute milestones
 
-- The Hirer locks `reward_satang × headcount + Platform Fee` before `QUEST_DRAFT → QUEST_OPEN`. The Platform Fee follows the active Wallet Money Policy and is calculated for each Worker Reward.
+- The Hirer locks exact integer-Satang Quest Escrow before `QUEST_DRAFT → QUEST_OPEN`: `reward_satang × headcount + Platform Fee` for each required Worker. The Quest records the effective Money Policy revision, Platform Fee basis, Quest Escrow amount, and Funding Reservation. These core funding terms are fixed after publish.
 - Proof submissions and proof-free completion confirmations use the same one-hour Proof Review Window in every Quest mode. `NO_CANDIDATE` has no rework; `CANDIDATE` uses the Worker/team’s declared rework limit.
 - A proof-free Quest still enters `SUBMITTED`; the Worker submits a completion confirmation instead of a proof file. The confirmation is persisted as a completion obligation (not as a fake Proof Submission), with one obligation per Active Worker or one shared Candidate Team.
+- The Quest Lifecycle Worker cancels every `QUEST_OPEN` Quest whose `startTime` has passed before it reaches `ASSIGNED`; it cancels any partial active Assignments and releases the full Quest Escrow.
 - Proof HTTP commands are `POST /api/v1/quests/:questId/proof` (multipart images or existing `fileIds`/`imageIds`), `POST .../proof/confirm`, `GET .../proof`, and Hirer `POST .../proof/:proofId/review` with `APPROVE` or `REJECT`. A proof owner is the individual Worker for SOLO and direct GROUP Quests, and the selected Candidate Team for Candidate GROUP Quests.
 - Hirer cancellation at `OPEN` returns the full amount. At `ASSIGNED`, return 80% and compensate Workers with 20%. From `IN_PROGRESS` onward, there is no Hirer refund.
 - A Worker cannot voluntarily cancel after an Assignment exists. BE-184 implements Hirer cancellation at `OPEN`, `ASSIGNED`, and `IN_PROGRESS`, plus Admin dispute resolution. Worker absence or other failure attribution is outside this scope and does not create a Worker cancellation command.

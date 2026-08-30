@@ -39,6 +39,10 @@ export const env = {
   stagingTestAuthPassword: process.env.STAGING_TEST_AUTH_PASSWORD,
   stagingTestAuthFirstName: process.env.STAGING_TEST_AUTH_FIRST_NAME,
   stagingTestAuthLastName: process.env.STAGING_TEST_AUTH_LAST_NAME,
+  localFinanceTestEnabled: parseBoolean(
+    'LOCAL_FINANCE_TEST_ENABLED',
+    process.env.LOCAL_FINANCE_TEST_ENABLED,
+  ),
   localFinanceTestRecipientEmail: process.env.LOCAL_FINANCE_TEST_RECIPIENT_EMAIL,
   localFinanceTestRecipientFirstName: process.env.LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME,
   localFinanceTestRecipientLastName: process.env.LOCAL_FINANCE_TEST_RECIPIENT_LAST_NAME,
@@ -99,24 +103,48 @@ export const validateRuntimeEnv = (): void => {
     assertAuthSecretLength('ADMIN_BETTER_AUTH_SECRET', env.adminBetterAuthSecret);
   }
 
-  if (!env.stagingTestAuthEnabled) return;
+  if (env.stagingTestAuthEnabled) {
+    if (env.deploymentEnv !== 'staging') {
+      throw new Error('STAGING_TEST_AUTH_ENABLED requires DEPLOYMENT_ENV=staging');
+    }
 
-  if (env.deploymentEnv !== 'staging') {
-    throw new Error('STAGING_TEST_AUTH_ENABLED requires DEPLOYMENT_ENV=staging');
+    const missingTestAuthVariables = Object.entries({
+      STAGING_TEST_AUTH_EMAIL: env.stagingTestAuthEmail,
+      STAGING_TEST_AUTH_PASSWORD: env.stagingTestAuthPassword,
+      STAGING_TEST_AUTH_FIRST_NAME: env.stagingTestAuthFirstName,
+      STAGING_TEST_AUTH_LAST_NAME: env.stagingTestAuthLastName,
+    })
+      .filter(([, value]) => !value)
+      .map(([name]) => name);
+
+    if (missingTestAuthVariables.length > 0) {
+      throw new Error(
+        `Missing required staging test auth variables: ${missingTestAuthVariables.join(', ')}`,
+      );
+    }
   }
 
-  const missingTestAuthVariables = Object.entries({
-    STAGING_TEST_AUTH_EMAIL: env.stagingTestAuthEmail,
-    STAGING_TEST_AUTH_PASSWORD: env.stagingTestAuthPassword,
-    STAGING_TEST_AUTH_FIRST_NAME: env.stagingTestAuthFirstName,
-    STAGING_TEST_AUTH_LAST_NAME: env.stagingTestAuthLastName,
-  })
-    .filter(([, value]) => !value)
-    .map(([name]) => name);
-
-  if (missingTestAuthVariables.length > 0) {
-    throw new Error(
-      `Missing required staging test auth variables: ${missingTestAuthVariables.join(', ')}`,
-    );
+  if (env.localFinanceTestEnabled) {
+    if (env.nodeEnv !== 'development') {
+      throw new Error('LOCAL_FINANCE_TEST_ENABLED requires NODE_ENV=development');
+    }
+    if (!env.stagingTestAuthEnabled) {
+      throw new Error('LOCAL_FINANCE_TEST_ENABLED requires STAGING_TEST_AUTH_ENABLED=true');
+    }
+    if (!env.xenditSecretKey?.startsWith('xnd_development_')) {
+      throw new Error('LOCAL_FINANCE_TEST_ENABLED requires an Xendit Development API key');
+    }
+    const missingFinanceTestVariables = Object.entries({
+      LOCAL_FINANCE_TEST_RECIPIENT_EMAIL: env.localFinanceTestRecipientEmail,
+      LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME: env.localFinanceTestRecipientFirstName,
+      LOCAL_FINANCE_TEST_RECIPIENT_LAST_NAME: env.localFinanceTestRecipientLastName,
+    })
+      .filter(([, value]) => !value)
+      .map(([name]) => name);
+    if (missingFinanceTestVariables.length > 0) {
+      throw new Error(
+        `Missing required local finance test variables: ${missingFinanceTestVariables.join(', ')}`,
+      );
+    }
   }
 };

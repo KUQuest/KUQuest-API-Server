@@ -134,8 +134,11 @@ describe('Xendit Payout provider', () => {
     expect(new Headers(called?.init?.headers).get('idempotency-key')).toBe(request.internalReference);
     expect(body).toEqual({
       reference_id: request.internalReference,
-      channel_code: 'SCB',
-      channel_properties: { account_number: destination.accountNumber },
+      channel_code: 'TH_SCB',
+      channel_properties: {
+        account_number: destination.accountNumber,
+        account_holder_name: destination.accountHolderName,
+      },
       amount: 123.45,
       currency: 'THB',
       description: 'KUQuest Payout',
@@ -163,7 +166,7 @@ describe('Xendit Payout provider', () => {
         fee: 0,
         tax: 0,
         currency: 'THB',
-        channel_code: 'SCB',
+      channel_code: 'TH_SCB',
       }),
     });
 

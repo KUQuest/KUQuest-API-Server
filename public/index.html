@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="th">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>KUQuest Auth Test</title>
+    <title>KUQuest API Test Bench</title>
     <style>
       :root {
         color-scheme: light;
@@ -22,82 +22,295 @@
         min-width: 320px;
         min-height: 100dvh;
         margin: 0;
-        display: grid;
-        place-items: center;
-        padding: 24px;
+        padding: 28px 18px 48px;
+        background:
+          radial-gradient(circle at 0% 0%, #dcefe3 0, transparent 32rem),
+          #f3f6f4;
       }
 
       main {
-        width: min(100%, 680px);
+        width: min(100%, 1180px);
+        margin: 0 auto;
       }
 
       header {
-        margin-bottom: 24px;
+        margin-bottom: 22px;
       }
 
       .eyebrow {
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        margin-bottom: 12px;
+        margin-bottom: 10px;
         color: #17653a;
         font-size: 0.875rem;
-        font-weight: 700;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
       }
 
       .dot {
-        width: 8px;
-        height: 8px;
+        width: 9px;
+        height: 9px;
         border-radius: 999px;
         background: #1b7f49;
       }
 
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
       h1 {
-        margin: 0;
-        font-size: clamp(2rem, 8vw, 3.5rem);
-        line-height: 1.05;
+        margin-bottom: 10px;
+        font-size: clamp(2rem, 6vw, 3.6rem);
+        line-height: 1.02;
         text-wrap: balance;
       }
 
       header p {
-        max-width: 58ch;
-        margin: 14px 0 0;
+        max-width: 74ch;
+        margin-bottom: 0;
         color: #58635c;
         line-height: 1.6;
         text-wrap: pretty;
       }
 
       .card {
-        padding: clamp(20px, 5vw, 32px);
+        min-width: 0;
+        padding: clamp(18px, 3vw, 28px);
         border: 1px solid #dce4df;
         border-radius: 18px;
         background: #ffffff;
-        box-shadow: 0 8px 24px rgb(20 44 30 / 8%);
+        box-shadow: 0 12px 30px rgb(20 44 30 / 8%);
       }
 
-      .actions {
+      .card + .card,
+      .grid + .card {
+        margin-top: 18px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      .grid > .card {
+        margin-top: 0;
+      }
+
+      .wallet-card {
+        margin-top: 18px;
+        background: #17211b;
+        color: #ffffff;
+      }
+
+      .wallet-card .card-heading {
+        margin-bottom: 8px;
+      }
+
+      .wallet-card .muted,
+      .wallet-card label {
+        color: #b8c9be;
+      }
+
+      .wallet-card .badge {
+        background: #2c4c3a;
+        color: #d9f5e2;
+      }
+
+      .wallet-card button {
+        border-color: #557463;
+        background: transparent;
+        color: #ffffff;
+      }
+
+      .wallet-card button:hover:not(:disabled) {
+        background: #2c4c3a;
+      }
+
+      .wallet-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .wallet-item {
+        min-width: 0;
+        border: 1px solid #355643;
+        border-radius: 12px;
+        padding: 14px;
+        background: #213529;
+      }
+
+      .wallet-label {
+        display: block;
+        color: #b8c9be;
+        font-size: 0.75rem;
+        font-weight: 750;
+        text-transform: uppercase;
+      }
+
+      .wallet-value {
+        display: block;
+        margin-top: 6px;
+        color: #ffffff;
+        font-size: clamp(1rem, 2.2vw, 1.35rem);
+        font-weight: 850;
+        overflow-wrap: anywhere;
+      }
+
+      .wallet-foot {
         display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 12px;
+        color: #b8c9be;
+        font-size: 0.82rem;
+      }
+
+      .wallet-foot .status {
+        margin: 0;
+        color: inherit;
+      }
+
+      .card-heading,
+      .toolbar,
+      .actions,
+      .result-heading {
+        display: flex;
+        align-items: center;
         flex-wrap: wrap;
         gap: 10px;
       }
 
+      .card-heading,
+      .toolbar,
+      .result-heading {
+        justify-content: space-between;
+      }
+
+      .card-heading {
+        margin-bottom: 14px;
+      }
+
+      .card-heading h2,
+      .result-heading h3 {
+        margin-bottom: 0;
+      }
+
+      h2 {
+        font-size: 1.1rem;
+      }
+
+      h3 {
+        font-size: 0.98rem;
+      }
+
+      .muted,
+      .hint,
+      .note {
+        color: #69746d;
+        font-size: 0.875rem;
+        line-height: 1.5;
+      }
+
+      .hint,
+      .note {
+        margin: 10px 0 0;
+      }
+
+      .status {
+        min-height: 24px;
+        margin: 14px 0 0;
+        color: #455149;
+        line-height: 1.5;
+      }
+
+      .status[data-type="error"] {
+        color: #a12622;
+      }
+
+      .status[data-type="success"] {
+        color: #17653a;
+      }
+
+      .badge,
+      .method {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        border-radius: 999px;
+        padding: 4px 9px;
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+
+      .badge {
+        background: #e8f2ec;
+        color: #17653a;
+      }
+
+      .badge[data-state="error"] {
+        background: #fceceb;
+        color: #a12622;
+      }
+
+      .method {
+        background: #17211b;
+        color: #ffffff;
+      }
+
+      .method[data-method="GET"] {
+        background: #285d89;
+      }
+
+      .method[data-method="POST"] {
+        background: #17653a;
+      }
+
+      .method[data-method="PATCH"] {
+        background: #8a5a00;
+      }
+
+      .method[data-method="DELETE"] {
+        background: #a12622;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+
       button {
-        min-height: 44px;
+        min-height: 42px;
         border: 1px solid #cbd6cf;
         border-radius: 10px;
-        padding: 10px 16px;
-        font: inherit;
-        font-weight: 700;
+        padding: 9px 14px;
         cursor: pointer;
         background: #ffffff;
         color: #26332b;
+        font-weight: 750;
       }
 
       button:hover:not(:disabled) {
         background: #f3f6f4;
       }
 
-      button:focus-visible {
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      textarea:focus-visible {
         outline: 3px solid #89c7a3;
         outline-offset: 2px;
       }
@@ -117,77 +330,273 @@
         background: #11542f;
       }
 
-      .status {
-        min-height: 24px;
-        margin: 18px 0 0;
-        color: #455149;
-        line-height: 1.5;
-      }
-
-      .status[data-type="error"] {
+      .danger {
+        border-color: #a12622;
         color: #a12622;
       }
 
-      .status[data-type="success"] {
-        color: #17653a;
+      label {
+        display: grid;
+        gap: 6px;
+        color: #455149;
+        font-size: 0.82rem;
+        font-weight: 750;
       }
 
-      .session {
-        margin-top: 22px;
-        padding-top: 22px;
-        border-top: 1px solid #e5ebe7;
+      input,
+      select,
+      textarea {
+        width: 100%;
+        border: 1px solid #cbd6cf;
+        border-radius: 9px;
+        padding: 9px 10px;
+        background: #ffffff;
+        color: #17211b;
       }
 
-      .session h2 {
-        margin: 0 0 10px;
-        font-size: 1rem;
-      }
-
-      .avatar-upload {
-        margin-top: 22px;
-        padding-top: 22px;
-        border-top: 1px solid #e5ebe7;
-      }
-
-      .avatar-upload h2 {
-        margin: 0 0 10px;
-        font-size: 1rem;
+      input[type="checkbox"] {
+        width: auto;
+        min-height: 18px;
       }
 
       input[type="file"] {
-        max-width: 100%;
-        font: inherit;
+        padding: 7px;
+      }
+
+      textarea {
+        min-height: 100px;
+        resize: vertical;
+        font: 0.82rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .field-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .field-grid .wide {
+        grid-column: 1 / -1;
+      }
+
+      .check-field {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 42px;
+      }
+
+      .simple-flow {
+        border: 1px solid #dce4df;
+        border-radius: 14px;
+        padding: 16px;
+        background: #f7faf8;
+      }
+
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin: 14px 0;
+      }
+
+      .step {
+        min-width: 0;
+        border-left: 3px solid #9bc9aa;
+        padding: 4px 0 4px 10px;
+      }
+
+      .step-number {
+        display: block;
+        color: #17653a;
+        font-size: 0.72rem;
+        font-weight: 850;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .step-text {
+        display: block;
+        margin-top: 4px;
+        color: #455149;
+        font-size: 0.84rem;
+        line-height: 1.35;
+      }
+
+      details.advanced {
+        margin-top: 14px;
+        border-top: 1px solid #e5ebe7;
+        padding-top: 14px;
+      }
+
+      details.advanced summary {
+        cursor: pointer;
+        color: #17653a;
+        font-weight: 800;
+      }
+
+      .qr-result {
+        display: grid;
+        grid-template-columns: minmax(180px, 260px) 1fr;
+        align-items: center;
+        gap: 18px;
+        margin-top: 15px;
+        border: 1px solid #cfe0d4;
+        border-radius: 14px;
+        padding: 16px;
+        background: #f7faf8;
+      }
+
+      .qr-image {
+        display: block;
+        width: min(100%, 260px);
+        aspect-ratio: 1;
+        justify-self: center;
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 10px;
+      }
+
+      .qr-meta h3 {
+        margin-bottom: 8px;
+      }
+
+      .qr-meta p {
+        margin-bottom: 0;
+      }
+
+      .result {
+        margin-top: 15px;
       }
 
       pre {
-        min-height: 92px;
-        margin: 0;
-        overflow-x: auto;
+        max-height: 360px;
+        margin: 8px 0 0;
+        overflow: auto;
         border-radius: 10px;
-        padding: 14px;
+        padding: 13px;
         background: #17211b;
         color: #e8f2ec;
-        font: 0.8125rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+        font: 0.79rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
         white-space: pre-wrap;
         word-break: break-word;
       }
 
-      .note {
-        margin: 18px 0 0;
-        color: #69746d;
-        font-size: 0.875rem;
-        line-height: 1.5;
+      .small-pre {
+        max-height: 210px;
       }
 
-      @media (max-width: 520px) {
+      .operations-toolbar {
+        margin-bottom: 16px;
+      }
+
+      .operations-toolbar label {
+        min-width: min(100%, 280px);
+      }
+
+      .operation-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      details.operation {
+        border: 1px solid #dce4df;
+        border-radius: 12px;
+        background: #fbfcfb;
+      }
+
+      details.operation[open] {
+        background: #ffffff;
+      }
+
+      details.operation summary {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      details.operation summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .operation-path {
+        overflow-wrap: anywhere;
+        color: #455149;
+        font: 0.82rem ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .operation-body {
+        border-top: 1px solid #e5ebe7;
+        padding: 14px;
+      }
+
+      .operation-body form {
+        display: grid;
+        gap: 12px;
+      }
+
+      .operation-fields {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .operation-fields .wide {
+        grid-column: 1 / -1;
+      }
+
+      .debug-heading {
+        margin-bottom: 0;
+      }
+
+      #debug-log {
+        min-height: 180px;
+        max-height: 420px;
+      }
+
+      @media (max-width: 820px) {
+        .grid,
+        .wallet-grid,
+        .field-grid,
+        .operation-fields {
+          grid-template-columns: 1fr;
+        }
+
+        .steps {
+          grid-template-columns: 1fr;
+        }
+
+        .field-grid .wide,
+        .operation-fields .wide {
+          grid-column: auto;
+        }
+      }
+
+      @media (max-width: 560px) {
         body {
-          align-items: start;
-          padding: 20px 16px;
+          padding: 20px 12px 36px;
         }
 
         .actions,
-        button {
+        .actions button {
           width: 100%;
+        }
+
+        .wallet-foot {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .qr-result {
+          grid-template-columns: 1fr;
+        }
+
+        details.operation summary {
+          align-items: flex-start;
+          flex-direction: column;
         }
       }
     </style>
@@ -196,256 +605,1041 @@
     <main>
       <header>
         <div class="eyebrow"><span class="dot" aria-hidden="true"></span>KUQuest API</div>
-        <h1>ทดสอบระบบเข้าสู่ระบบ</h1>
+        <h1>Quest and finance test bench</h1>
         <p>
-          หน้าเครื่องมือสำหรับตรวจ Google OAuth, session และข้อมูลผู้ใช้ที่บันทึกโดย Better Auth
+          This local or staging page uses the configured test Member. It can run the
+          implemented Quest endpoints, the Quest Escrow flow, Funding Reservation,
+          Wallet, and the Xendit Test Mode payment simulation. Every request and
+          response is recorded in the debug panel.
         </p>
       </header>
 
       <section class="card" aria-labelledby="auth-heading">
-        <h2 id="auth-heading" hidden>Authentication controls</h2>
+        <div class="card-heading">
+          <h2 id="auth-heading">Default test Member</h2>
+          <span class="badge" id="auth-badge" data-state="pending">checking</span>
+        </div>
         <div class="actions">
-          <button class="primary" id="sign-in" type="button">เข้าสู่ระบบด้วย Google</button>
-          <button id="refresh-session" type="button">ตรวจสอบ Session</button>
-          <button id="sign-out" type="button" hidden>ออกจากระบบ</button>
+          <button class="primary" id="default-sign-in" type="button">Sign in as default test Member</button>
+          <button id="google-sign-in" type="button">Sign in with Google</button>
+          <button id="refresh-session" type="button">Refresh Session</button>
+          <button class="danger" id="sign-out" type="button">Sign out</button>
         </div>
-
-        <p class="status" id="status" role="status" aria-live="polite">
-          กำลังตรวจสอบ session…
+        <p class="status" id="auth-status" role="status" aria-live="polite">Checking Session…</p>
+        <div class="result">
+          <div class="result-heading"><h3>Session</h3></div>
+          <pre class="small-pre" id="session-output" aria-live="polite">null</pre>
+        </div>
+        <p class="note">
+          Default sign-in is available only when staging test authentication is enabled.
+          It does not expose the configured password to this page.
         </p>
+      </section>
 
-        <div class="session">
-          <h2>Session result</h2>
-          <pre id="session-output" aria-live="polite">กำลังโหลด…</pre>
-        </div>
-
-        <div class="avatar-upload" id="avatar-upload" hidden>
-          <h2>Avatar upload</h2>
-          <div class="actions">
-            <input
-              id="avatar-file"
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-            />
-            <button class="primary" id="upload-avatar" type="button">อัปโหลด</button>
+      <section class="card wallet-card" aria-labelledby="wallet-heading">
+        <div class="card-heading">
+          <div>
+            <h2 id="wallet-heading">Current Wallet</h2>
+            <p class="muted">The live Wallet projection for the signed-in test Member.</p>
           </div>
-          <p
-            class="status"
-            id="upload-status"
-            role="status"
-            aria-live="polite"
-            hidden
-          ></p>
+          <button id="refresh-wallet" type="button">Refresh Wallet</button>
         </div>
+        <div class="wallet-grid" aria-live="polite">
+          <div class="wallet-item">
+            <span class="wallet-label">Spending Balance</span>
+            <strong class="wallet-value" id="wallet-spending">—</strong>
+          </div>
+          <div class="wallet-item">
+            <span class="wallet-label">Earnings Balance</span>
+            <strong class="wallet-value" id="wallet-earnings">—</strong>
+          </div>
+          <div class="wallet-item">
+            <span class="wallet-label">Funding Reserved</span>
+            <strong class="wallet-value" id="wallet-funding">—</strong>
+          </div>
+          <div class="wallet-item">
+            <span class="wallet-label">Payout Reserve</span>
+            <strong class="wallet-value" id="wallet-payout">—</strong>
+          </div>
+        </div>
+        <div class="wallet-foot">
+          <span id="wallet-member">No Wallet loaded.</span>
+          <span class="status" id="wallet-status" role="status" aria-live="polite">Sign in to read the Wallet.</span>
+        </div>
+      </section>
 
-        <p class="note">อนุญาตเฉพาะบัญชี Google ที่มีอีเมลลงท้ายด้วย @ku.th เท่านั้น</p>
+      <div class="grid">
+        <section class="card" aria-labelledby="finance-heading">
+          <div class="card-heading">
+            <h2 id="finance-heading">Finance integration</h2>
+            <span class="badge">Xendit Test Mode</span>
+          </div>
+          <p class="muted">
+            Enter a credit amount and press the button. The server creates the Xendit
+            Payment Request, triggers Test Mode, shows the QR, and waits for the result.
+          </p>
+          <div class="field-grid">
+            <label>
+              Top-up credit (Baht)
+              <input id="payment-amount" type="number" min="1" step="0.01" value="1.00" />
+            </label>
+            <label>
+              Payment action
+              <span class="badge">Manual Test Mode trigger</span>
+            </label>
+          </div>
+          <div class="actions" style="margin-top: 12px">
+            <button class="primary" id="run-payment" type="button">Trigger Payment and show QR</button>
+            <button id="run-transfer" type="button">Run Funding Reservation transfer</button>
+          </div>
+          <p class="hint">Transfer amount (Baht): <input id="transfer-amount" type="number" min="1" step="0.01" value="1.00" style="width: 130px" /></p>
+          <div class="result">
+            <div class="result-heading"><h3>Latest finance result</h3></div>
+            <pre id="finance-output">No finance request yet.</pre>
+          </div>
+          <div class="qr-result" id="payment-qr-panel" hidden>
+            <img class="qr-image" id="payment-qr" alt="Xendit Test Mode payment QR" />
+            <div class="qr-meta">
+              <h3>Payment QR from Xendit</h3>
+              <p class="muted" id="payment-qr-status">Scan this QR with the Xendit Test Mode payment flow.</p>
+              <p class="note">The QR payload is not printed in the debug log.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="quest-heading">
+          <div class="card-heading">
+            <h2 id="quest-heading">Simple Quest test</h2>
+            <span class="badge">Quest + Wallet</span>
+          </div>
+          <div class="simple-flow">
+            <p class="muted">One button runs the complete low-value flow. It creates a Draft, checks and reserves Quest Escrow, reads the Quest, then cancels it and releases the funds.</p>
+            <div class="steps">
+              <div class="step"><span class="step-number">Step 1</span><span class="step-text">Create Draft</span></div>
+              <div class="step"><span class="step-number">Step 2</span><span class="step-text">Publish and reserve</span></div>
+              <div class="step"><span class="step-number">Step 3</span><span class="step-text">Cancel and release</span></div>
+            </div>
+            <button class="primary" id="simple-quest-smoke" type="button">Run simple Quest flow</button>
+            <p class="status" id="quest-flow-status" role="status" aria-live="polite">Ready. This uses a `NO_CANDIDATE` solo Quest.</p>
+          </div>
+          <details class="advanced">
+            <summary>Advanced Quest controls</summary>
+            <div class="field-grid" style="margin-top: 14px">
+              <label class="wide">
+                Quest ID
+                <input id="quest-id" type="text" placeholder="Created Quest ID appears here" />
+              </label>
+              <label class="wide">
+                Title
+                <input id="quest-title" type="text" value="Browser finance integration check" />
+              </label>
+              <label>
+              Reward (Baht)
+                <input id="quest-reward" type="number" min="1" step="1" value="100" />
+              </label>
+              <label>
+                Headcount
+                <input id="quest-headcount" type="number" min="1" max="20" step="1" value="1" />
+              </label>
+              <label>
+                Mode
+                <select id="quest-mode">
+                  <option value="NO_CANDIDATE">NO_CANDIDATE</option>
+                  <option value="CANDIDATE">CANDIDATE</option>
+                </select>
+              </label>
+              <label>
+                Participation
+                <select id="quest-participation">
+                  <option value="SOLO">SOLO</option>
+                  <option value="GROUP">GROUP</option>
+                </select>
+              </label>
+              <label>
+                Start time
+                <input id="quest-start" type="datetime-local" />
+              </label>
+              <label>
+                Due time
+                <input id="quest-due" type="datetime-local" />
+              </label>
+              <label>
+                Tag
+                <select id="quest-tag"><option value="">Load Tags after sign-in</option></select>
+              </label>
+              <label class="check-field">
+                <input id="quest-proof-required" type="checkbox" checked />
+                Proof required
+              </label>
+              <label class="wide">
+                Condition
+                <textarea id="quest-condition" rows="2">Submit a result and a short explanation.</textarea>
+              </label>
+            </div>
+            <div class="actions" style="margin-top: 12px">
+              <button id="create-quest" type="button">Create Draft Quest</button>
+              <button id="escrow-smoke" type="button">Run custom escrow smoke</button>
+              <button id="publish-check" type="button">Check publication</button>
+              <button id="publish-quest" type="button">Publish Quest</button>
+              <button class="danger" id="cancel-quest" type="button">Cancel Quest</button>
+            </div>
+            <div class="actions" style="margin-top: 10px">
+              <button id="list-mine" type="button">List my Quests</button>
+              <button id="list-board" type="button">List Quest Board</button>
+              <button id="get-detail" type="button">Get selected detail</button>
+              <button id="join-quest" type="button">Try direct join</button>
+            </div>
+          </details>
+          <div class="result">
+            <div class="result-heading"><h3>Latest Quest result</h3></div>
+            <pre id="quest-output">No Quest request yet.</pre>
+          </div>
+        </section>
+      </div>
+
+      <section class="card" aria-labelledby="payout-heading">
+        <div class="card-heading">
+          <div>
+            <h2 id="payout-heading">Payout</h2>
+            <p class="muted">Quote a receipt amount and submit a Payout using the active encrypted Payout Destination.</p>
+          </div>
+          <span class="badge">Admin approval required</span>
+        </div>
+        <div class="simple-flow">
+          <div class="field-grid">
+            <label>
+              Receipt amount (Baht)
+              <input id="payout-amount" type="number" min="1" step="0.01" value="100.00" />
+            </label>
+            <label>
+              Active Payout Destination
+              <span class="badge" id="payout-destination">Shown after quote</span>
+            </label>
+          </div>
+          <div class="actions" style="margin-top: 12px">
+            <button class="primary" id="quote-payout" type="button">Quote Payout</button>
+            <button id="submit-payout" type="button">Submit Payout for approval</button>
+            <button id="list-payouts" type="button">Refresh Payouts</button>
+          </div>
+          <p class="status" id="payout-status" role="status" aria-live="polite">A Payout uses Earnings Balance and creates a Payout Reserve.</p>
+        </div>
+        <div class="result">
+          <div class="result-heading"><h3>Latest Payout result</h3></div>
+          <pre id="payout-output">No Payout request yet.</pre>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="explorer-heading">
+        <div class="card-heading">
+          <h2 id="explorer-heading">All implemented Quest API operations</h2>
+          <span class="badge" id="operation-count">loading</span>
+        </div>
+        <p class="muted">
+          This list is loaded from the server OpenAPI document. Money fields on this page use Baht.
+          It includes Quests,
+          Assignments, Candidates, Teams, Invitations, Proof, Reviews, and Quest
+          Settlement. Use the current Quest ID where a path field is pre-filled.
+        </p>
+        <div class="toolbar operations-toolbar">
+          <label>
+            Filter operations
+            <select id="operation-filter">
+              <option value="all">All Quest operations</option>
+            </select>
+          </label>
+          <button id="reload-operations" type="button">Reload from OpenAPI</button>
+        </div>
+        <div class="operation-list" id="operation-list">
+          <p class="muted">Loading operation list…</p>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="debug-heading">
+        <div class="card-heading">
+          <h2 class="debug-heading" id="debug-heading">Debug messages</h2>
+          <button id="clear-debug" type="button">Clear log</button>
+        </div>
+        <pre id="debug-log" aria-live="polite"></pre>
       </section>
     </main>
 
     <script>
       const appOrigin = window.location.origin;
-      const signInButton = document.querySelector('#sign-in');
-      const refreshButton = document.querySelector('#refresh-session');
-      const signOutButton = document.querySelector('#sign-out');
-      const statusElement = document.querySelector('#status');
+      const state = { openApi: null, operations: [], session: null, payoutQuote: null };
+      const questIdElement = document.querySelector('#quest-id');
+      const debugLog = document.querySelector('#debug-log');
+      const authBadge = document.querySelector('#auth-badge');
+      const authStatus = document.querySelector('#auth-status');
       const sessionOutput = document.querySelector('#session-output');
-      const avatarUpload = document.querySelector('#avatar-upload');
-      const avatarFile = document.querySelector('#avatar-file');
-      const uploadAvatarButton = document.querySelector('#upload-avatar');
-      const uploadStatus = document.querySelector('#upload-status');
+      const financeOutput = document.querySelector('#finance-output');
+      const questOutput = document.querySelector('#quest-output');
+      const payoutOutput = document.querySelector('#payout-output');
+      const operationList = document.querySelector('#operation-list');
+      const operationFilter = document.querySelector('#operation-filter');
+
+      const redactKeys = new Set([
+        'accountNumber',
+        'account_number',
+        'authorization',
+        'cookie',
+        'password',
+        'qrPayload',
+        'qrDataUrl',
+        'qr_string',
+        'routingValue',
+        'routing_value',
+        'secret',
+        'token',
+        'x-callback-token',
+      ]);
+
+      const redact = (value) => {
+        if (Array.isArray(value)) return value.map(redact);
+        if (!value || typeof value !== 'object') return value;
+
+        return Object.fromEntries(
+          Object.entries(value).map(([key, entry]) => [
+            key,
+            redactKeys.has(key) || key.toLowerCase().includes('password')
+              ? '[redacted]'
+              : redact(entry),
+          ]),
+        );
+      };
+
+      const isSatangKey = (key = '') => key.endsWith('Satang');
+
+      const isBahtKey = (key = '') => ['maxReward', 'minReward', 'reward'].includes(key);
+
+      const displayKey = (key) => key.endsWith('Satang') ? key.replace(/Satang$/, 'Baht') : key;
+
+      const bahtTextFromSatang = (value) => {
+        if (!Number.isInteger(value)) return '—';
+        const sign = value < 0 ? '-' : '';
+        const absolute = Math.abs(value);
+        const wholeBaht = Math.floor(absolute / 100).toLocaleString('en-US');
+        const bahtPart = String(absolute % 100).padStart(2, '0');
+        return `${sign}฿${wholeBaht}.${bahtPart}`;
+      };
+
+      const bahtTextFromBaht = (value) => Number.isInteger(value) ? `฿${value.toLocaleString('en-US')}.00` : '—';
+
+      const bahtInputFromSatang = (value) => {
+        if (!Number.isInteger(value)) return '';
+        const sign = value < 0 ? '-' : '';
+        const absolute = Math.abs(value);
+        return `${sign}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}`;
+      };
+
+      const bahtToSatang = (value) => {
+        const normalized = String(value).trim();
+        if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) {
+          throw new Error('Enter a valid Baht amount with up to 2 decimal places.');
+        }
+        const [whole, fraction = ''] = normalized.split('.');
+        const satang = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+        if (!Number.isSafeInteger(satang)) throw new Error('Baht amount is too large.');
+        return satang;
+      };
+
+      const readBahtInput = (selector) => bahtToSatang(document.querySelector(selector).value);
+
+      const toDisplayValue = (value, key = '') => {
+        if (Array.isArray(value)) return value.map((item) => toDisplayValue(item, key));
+        if (value && typeof value === 'object') {
+          return Object.fromEntries(Object.entries(value).map(([name, entry]) => [
+            displayKey(name),
+            isSatangKey(name) && Number.isInteger(entry)
+              ? bahtTextFromSatang(entry)
+              : isBahtKey(name) && Number.isInteger(entry)
+                ? bahtTextFromBaht(entry)
+                : toDisplayValue(entry, name),
+          ]));
+        }
+        if (isSatangKey(key) && Number.isInteger(value)) return bahtTextFromSatang(value);
+        if (isBahtKey(key) && Number.isInteger(value)) return bahtTextFromBaht(value);
+        return value;
+      };
+
+      const formatValue = (value) => {
+        if (typeof value === 'string') return value;
+        return JSON.stringify(toDisplayValue(redact(value)), null, 2);
+      };
+
+      const debug = (message, details) => {
+        const suffix = details === undefined ? '' : ` ${formatValue(details)}`;
+        debugLog.textContent += `[${new Date().toISOString()}] ${message}${suffix}\n`;
+        debugLog.scrollTop = debugLog.scrollHeight;
+      };
+
+      const setStatus = (element, message, type = 'info') => {
+        element.textContent = message;
+        element.dataset.type = type;
+      };
 
       const setBusy = (busy) => {
-        signInButton.disabled = busy;
-        refreshButton.disabled = busy;
-        signOutButton.disabled = busy;
-        avatarFile.disabled = busy;
-        uploadAvatarButton.disabled = busy;
+        document.querySelectorAll('button, input, select, textarea').forEach((element) => {
+          element.disabled = busy;
+        });
+        document.querySelector('#clear-debug').disabled = false;
       };
 
-      const setStatus = (message, type = 'info') => {
-        statusElement.textContent = message;
-        statusElement.dataset.type = type;
+      const renderWallet = (wallet, email = state.session?.user?.email) => {
+        const values = {
+          '#wallet-spending': wallet?.spendingBalanceSatang,
+          '#wallet-earnings': wallet?.earningsBalanceSatang,
+          '#wallet-funding': wallet?.fundingReservedSatang,
+          '#wallet-payout': wallet?.reservedForPayoutsSatang,
+        };
+        Object.entries(values).forEach(([selector, value]) => {
+          document.querySelector(selector).textContent = bahtTextFromSatang(value);
+        });
+        document.querySelector('#wallet-member').textContent = email ? `Member: ${email}` : 'No Wallet loaded.';
       };
 
-      const readJson = async (response) => {
-        const body = await response.json().catch(() => null);
+      const refreshWallet = async () => {
+        if (!state.session) {
+          renderWallet(null, null);
+          setStatus(document.querySelector('#wallet-status'), 'Sign in to read the Wallet.', 'info');
+          return null;
+        }
+        try {
+          const response = await request('/api/local/test/wallet', {}, 'Read current Wallet');
+          renderWallet(response?.data?.wallet, response?.data?.testUserEmail);
+          setStatus(document.querySelector('#wallet-status'), 'Wallet projection is current.', 'success');
+          return response;
+        } catch (error) {
+          renderWallet(null);
+          setStatus(document.querySelector('#wallet-status'), error instanceof Error ? error.message : 'Wallet read failed', 'error');
+          return null;
+        }
+      };
 
-        if (!response.ok) {
-          throw new Error(body?.message ?? `Request failed (${response.status})`);
+      const parseResponse = async (response) => {
+        const text = await response.text();
+        if (!text) return null;
+        try {
+          return JSON.parse(text);
+        } catch {
+          return text;
+        }
+      };
+
+      const request = async (path, options = {}, label = `${options.method ?? 'GET'} ${path}`) => {
+        const url = new URL(path, appOrigin).toString();
+        const requestDetails = {
+          method: options.method ?? 'GET',
+          url,
+          body: options.body && typeof options.body === 'string' ? JSON.parse(options.body) : undefined,
+        };
+        debug(`${label} →`, requestDetails);
+
+        let response;
+        try {
+          response = await fetch(url, { ...options, credentials: 'include' });
+        } catch (error) {
+          debug(`${label} network error`, error instanceof Error ? error.message : error);
+          throw error;
         }
 
+        const body = await parseResponse(response);
+        debug(`${label} ← ${response.status}`, body);
+        if (!response.ok) {
+          const message = body?.error?.message ?? body?.message ?? `Request failed (${response.status})`;
+          const error = new Error(message);
+          error.status = response.status;
+          error.body = body;
+          throw error;
+        }
         return body;
       };
 
-      const safeSessionView = (data) => {
-        if (!data) return null;
+      const jsonRequest = (path, method, body, label, headers = {}) => request(path, {
+        method,
+        headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify(body),
+      }, label);
 
-        return {
-          user: data.user,
-          session: {
-            id: data.session?.id,
-            userId: data.session?.userId,
-            createdAt: data.session?.createdAt,
-            updatedAt: data.session?.updatedAt,
-            expiresAt: data.session?.expiresAt,
-          },
-        };
-      };
+      const randomKey = (prefix) => `${prefix}:${crypto.randomUUID()}`;
 
       const refreshSession = async () => {
-        setBusy(true);
-        setStatus('กำลังตรวจสอบ session…');
-
         try {
-          const response = await fetch(`${appOrigin}/api/auth/get-session`, {
-            credentials: 'include',
-          });
-          const data = await readJson(response);
-
-          sessionOutput.textContent = JSON.stringify(safeSessionView(data), null, 2);
-          signInButton.hidden = Boolean(data);
-          signOutButton.hidden = !data;
-          avatarUpload.hidden = !data;
-          if (!data) uploadStatus.hidden = true;
-          setStatus(
-            data ? `เข้าสู่ระบบแล้ว: ${data.user.email}` : 'ยังไม่ได้เข้าสู่ระบบ',
-            data ? 'success' : 'info',
-          );
+          const data = await request('/api/auth/get-session', {}, 'Refresh Session');
+          state.session = data;
+          sessionOutput.textContent = formatValue(data ?? null);
+          const signedIn = Boolean(data);
+          authBadge.textContent = signedIn ? 'signed in' : 'signed out';
+          authBadge.dataset.state = signedIn ? 'success' : 'pending';
+          setStatus(authStatus, signedIn ? `Signed in as ${data.user.email}` : 'No Session', signedIn ? 'success' : 'info');
+          return data;
         } catch (error) {
+          state.session = null;
           sessionOutput.textContent = 'null';
-          setStatus(error instanceof Error ? error.message : 'ตรวจสอบ session ไม่สำเร็จ', 'error');
+          authBadge.textContent = 'error';
+          authBadge.dataset.state = 'error';
+          setStatus(authStatus, error instanceof Error ? error.message : 'Session check failed', 'error');
+          return null;
+        }
+      };
+
+      const loadDefaultSession = async () => {
+        setBusy(true);
+        setStatus(authStatus, 'Signing in as the default test Member…');
+        try {
+          await jsonRequest('/api/staging/test-auth/sign-in/default', 'POST', {}, 'Default test sign-in');
+          await refreshSession();
+          await loadTags();
+          await refreshWallet();
+          setStatus(authStatus, 'Default test Member is ready', 'success');
+        } catch (error) {
+          setStatus(
+            authStatus,
+            error?.status === 404
+              ? 'Default test sign-in is disabled in this environment. Use Google sign-in or enable staging test authentication.'
+              : error instanceof Error ? error.message : 'Default sign-in failed',
+            'error',
+          );
         } finally {
           setBusy(false);
         }
       };
 
-      const signIn = async () => {
+      const signInWithGoogle = async () => {
         setBusy(true);
-        setStatus('กำลังเปิด Google account selector…');
-
+        setStatus(authStatus, 'Opening Google account selector…');
         try {
-          const response = await fetch(`${appOrigin}/api/auth/sign-in/social`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              provider: 'google',
-              callbackURL: `${appOrigin}/`,
-              errorCallbackURL: `${appOrigin}/`,
-              disableRedirect: true,
-            }),
-          });
-          const data = await readJson(response);
-
-          if (!data?.url) throw new Error('ไม่ได้รับ Google authorization URL');
-
+          const data = await jsonRequest('/api/auth/sign-in/social', 'POST', {
+            provider: 'google',
+            callbackURL: `${appOrigin}/`,
+            errorCallbackURL: `${appOrigin}/`,
+            disableRedirect: true,
+          }, 'Google sign-in');
+          if (!data?.url) throw new Error('The server returned no Google authorization URL');
           window.location.assign(data.url);
         } catch (error) {
-          setStatus(error instanceof Error ? error.message : 'เริ่ม Google login ไม่สำเร็จ', 'error');
+          setStatus(authStatus, error instanceof Error ? error.message : 'Google sign-in failed', 'error');
           setBusy(false);
         }
       };
 
       const signOut = async () => {
         setBusy(true);
-        setStatus('กำลังออกจากระบบ…');
-
         try {
-          const response = await fetch(`${appOrigin}/api/auth/sign-out`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: '{}',
-          });
-          await readJson(response);
+          await jsonRequest('/api/auth/sign-out', 'POST', {}, 'Sign out');
+          state.session = null;
+          renderWallet(null, null);
           await refreshSession();
         } catch (error) {
-          setStatus(error instanceof Error ? error.message : 'ออกจากระบบไม่สำเร็จ', 'error');
+          setStatus(authStatus, error instanceof Error ? error.message : 'Sign out failed', 'error');
+        } finally {
           setBusy(false);
         }
       };
 
-      const uploadAvatar = async () => {
-        const file = avatarFile.files?.[0];
-        uploadStatus.hidden = true;
+      const loadTags = async () => {
+        if (!state.session) return;
+        try {
+          const response = await request('/api/v1/tags', {}, 'List Tags');
+          const tags = response?.data ?? [];
+          const select = document.querySelector('#quest-tag');
+          select.replaceChildren(new Option('No Tag', ''));
+          tags.forEach((tag) => select.append(new Option(`${tag.name} (${tag.id})`, tag.id)));
+        } catch (error) {
+          debug('Tag loading skipped', error instanceof Error ? error.message : error);
+        }
+      };
 
-        if (!file) {
-          console.warn('[avatar-upload] No file selected');
-          uploadStatus.textContent = 'อัปโหลดไม่สำเร็จ';
-          uploadStatus.dataset.type = 'error';
-          uploadStatus.hidden = false;
-          return;
+      const renderPaymentResult = (response) => {
+        financeOutput.textContent = formatValue(response);
+        const qrDataUrl = response?.data?.topUp?.qrDataUrl;
+        const panel = document.querySelector('#payment-qr-panel');
+        const image = document.querySelector('#payment-qr');
+        if (qrDataUrl) {
+          image.src = qrDataUrl;
+          panel.hidden = false;
+          document.querySelector('#payment-qr-status').textContent = response.data.topUp.topUpStatus === 'PAID'
+            ? 'This Payment Request is already paid in Test Mode. The QR came from the Xendit response.'
+            : 'Scan this QR with the Xendit Test Mode payment flow.';
+        } else {
+          image.removeAttribute('src');
+          panel.hidden = true;
+        }
+        if (response?.data?.wallet) renderWallet(response.data.wallet, response.data.testUserEmail);
+      };
+
+      const isoFromInput = (selector, fallbackMinutes) => {
+        const input = document.querySelector(selector);
+        if (input.value) return new Date(input.value).toISOString();
+        return new Date(Date.now() + fallbackMinutes * 60_000).toISOString();
+      };
+
+      const questBody = () => {
+        const description = document.querySelector('#quest-description')?.value?.trim();
+        const tagId = document.querySelector('#quest-tag').value;
+        return {
+          title: document.querySelector('#quest-title').value.trim(),
+          ...(description ? { description } : {}),
+          condition: document.querySelector('#quest-condition').value.trim(),
+          mode: document.querySelector('#quest-mode').value,
+          participation: document.querySelector('#quest-participation').value,
+          reward: Number(document.querySelector('#quest-reward').value),
+          headcount: Number(document.querySelector('#quest-headcount').value),
+          startTime: isoFromInput('#quest-start', 60),
+          dueAt: isoFromInput('#quest-due', 180),
+          tagId: tagId || undefined,
+          proofRequired: document.querySelector('#quest-proof-required').checked,
+        };
+      };
+
+      const selectedQuestId = () => questIdElement.value.trim();
+
+      const showQuest = (value) => {
+        questOutput.textContent = formatValue(value);
+        if (value?.data?.id) questIdElement.value = value.data.id;
+        if (value?.data?.quest?.id) questIdElement.value = value.data.quest.id;
+      };
+
+      const requireQuestId = () => {
+        const id = selectedQuestId();
+        if (!id) throw new Error('Enter or create a Quest ID first');
+        return id;
+      };
+
+      const createQuest = async () => {
+        const response = await jsonRequest('/api/v1/quests', 'POST', questBody(), 'Create Draft Quest');
+        showQuest(response);
+        return response;
+      };
+
+      const simpleQuestBody = () => ({
+        title: `Browser Quest Escrow test ${new Date().toISOString().slice(0, 19)}`,
+        description: 'Small browser test Quest for the Quest Escrow flow.',
+        condition: 'Return a short test result.',
+        mode: 'NO_CANDIDATE',
+        participation: 'SOLO',
+        reward: 1000,
+        headcount: 1,
+        startTime: new Date(Date.now() + 60 * 60_000).toISOString(),
+        dueAt: new Date(Date.now() + 3 * 60 * 60_000).toISOString(),
+        tagId: document.querySelector('#quest-tag').value || undefined,
+        proofRequired: false,
+      });
+
+      const runSimpleQuestSmoke = async () => {
+        const created = await jsonRequest('/api/v1/quests', 'POST', simpleQuestBody(), 'Create simple Draft Quest');
+        showQuest(created);
+        if (!created?.data?.id) throw new Error('Draft Quest creation returned no Quest ID');
+        setStatus(document.querySelector('#quest-flow-status'), 'Draft created. Checking publication…', 'info');
+        await publishCheck();
+        setStatus(document.querySelector('#quest-flow-status'), 'Publishing and reserving Quest Escrow…', 'info');
+        await publishQuest();
+        await getDetail();
+        setStatus(document.querySelector('#quest-flow-status'), 'Quest is open. Canceling and releasing Quest Escrow…', 'info');
+        await cancelQuest();
+        setStatus(document.querySelector('#quest-flow-status'), 'Complete: Draft → Open → Quest Escrow released.', 'success');
+      };
+
+      const publishCheck = async () => {
+        const id = requireQuestId();
+        const response = await request(`/api/v1/quests/${encodeURIComponent(id)}/publish-check`, {}, 'Check Quest publication');
+        showQuest(response);
+        return response;
+      };
+
+      const publishQuest = async () => {
+        const id = requireQuestId();
+        const response = await request(`/api/v1/quests/${encodeURIComponent(id)}/publish`, { method: 'POST' }, 'Publish Quest and reserve Quest Escrow');
+        showQuest(response);
+        return response;
+      };
+
+      const cancelQuest = async () => {
+        const id = requireQuestId();
+        const response = await request(`/api/v1/quests/${encodeURIComponent(id)}/cancel`, {
+          method: 'POST',
+          headers: { 'idempotency-key': randomKey('browser-cancel') },
+        }, 'Cancel Quest and release Quest Escrow');
+        showQuest(response);
+        return response;
+      };
+
+      const runEscrowSmoke = async () => {
+        const created = await createQuest();
+        if (!created?.data?.id) throw new Error('Draft Quest creation returned no Quest ID');
+        await publishCheck();
+        await publishQuest();
+        await request(`/api/v1/quests/${encodeURIComponent(requireQuestId())}`, {}, 'Get published Quest detail');
+        await cancelQuest();
+        setStatus(authStatus, 'Quest Escrow smoke completed: Draft → published → reserved → canceled → released', 'success');
+      };
+
+      const listMine = async () => showQuest(await request('/api/v1/quests/mine?limit=50', {}, 'List my Quests'));
+      const listBoard = async () => showQuest(await request('/api/v1/quests?limit=50', {}, 'List Quest Board'));
+      const getDetail = async () => {
+        const id = requireQuestId();
+        showQuest(await request(`/api/v1/quests/${encodeURIComponent(id)}`, {}, 'Get Quest detail'));
+      };
+      const joinQuest = async () => {
+        const id = requireQuestId();
+        showQuest(await request(`/api/v1/quests/${encodeURIComponent(id)}/join`, {
+          method: 'POST',
+          headers: { 'idempotency-key': randomKey('browser-join') },
+        }, 'Join Quest directly'));
+      };
+
+      const schemaFromRef = (schema) => {
+        if (!schema || !schema.$ref) return schema;
+        const name = schema.$ref.split('/').pop();
+        return state.openApi?.components?.schemas?.[name] ?? schema;
+      };
+
+      const exampleForSchema = (schema, propertyName = '') => {
+        const resolved = schemaFromRef(schema) ?? {};
+        if (resolved.example !== undefined) return resolved.example;
+        if (resolved.enum?.length) return resolved.enum[0];
+        if (resolved.oneOf?.length) return exampleForSchema(resolved.oneOf[0], propertyName);
+        if (resolved.anyOf?.length) return exampleForSchema(resolved.anyOf[0], propertyName);
+        if (resolved.allOf?.length) {
+          return resolved.allOf.reduce((value, item) => ({ ...value, ...exampleForSchema(item, propertyName) }), {});
+        }
+        if (resolved.type === 'object' || resolved.properties) {
+          return Object.fromEntries(Object.entries(resolved.properties ?? {}).map(([name, child]) => [name, exampleForSchema(child, name)]));
+        }
+        if (resolved.type === 'array') return [];
+        if (resolved.type === 'integer' || resolved.type === 'number') {
+          if (propertyName.toLowerCase().includes('rating')) return 5;
+          if (propertyName.toLowerCase().includes('headcount')) return 1;
+          if (propertyName.toLowerCase().includes('rework')) return 0;
+          return 100;
+        }
+        if (resolved.type === 'boolean') return true;
+        if (resolved.format === 'date-time') return new Date(Date.now() + 60 * 60_000).toISOString();
+        if (resolved.format === 'uuid') return propertyName.toLowerCase().includes('quest') ? selectedQuestId() : '';
+        if (propertyName.toLowerCase().includes('content')) return 'Browser test proof content';
+        if (propertyName.toLowerCase().includes('title')) return 'Browser test Quest';
+        if (propertyName.toLowerCase().includes('condition')) return 'Complete the browser test condition';
+        if (propertyName.toLowerCase().includes('name')) return 'Browser test';
+        return '';
+      };
+
+      const operationBodySchema = (operation) => {
+        const content = operation.requestBody?.content ?? {};
+        const mediaType = content['multipart/form-data'] ? 'multipart/form-data' : Object.keys(content)[0];
+        return mediaType ? { mediaType, schema: content[mediaType].schema } : null;
+      };
+
+      const isMoneyParameter = (name) => isSatangKey(name);
+
+      const toBahtInputValue = (value, key = '') => {
+        if (Array.isArray(value)) return value.map((item) => toBahtInputValue(item, key));
+        if (value && typeof value === 'object') {
+          return Object.fromEntries(Object.entries(value).map(([name, entry]) => [
+            displayKey(name),
+            isSatangKey(name) && Number.isInteger(entry) ? bahtInputFromSatang(entry) : toBahtInputValue(entry, name),
+          ]));
+        }
+        return isSatangKey(key) && Number.isInteger(value) ? bahtInputFromSatang(value) : value;
+      };
+
+      const toApiMoneyValue = (value, key = '') => {
+        if (Array.isArray(value)) return value.map((item) => toApiMoneyValue(item, key));
+        if (value && typeof value === 'object') {
+          return Object.fromEntries(Object.entries(value).map(([name, entry]) => {
+            const apiKey = name.endsWith('Baht') ? name.replace(/Baht$/, 'Satang') : name;
+            return [apiKey, isSatangKey(apiKey) ? bahtToSatang(entry) : toApiMoneyValue(entry, apiKey)];
+          }));
+        }
+        return isSatangKey(key) ? bahtToSatang(value) : value;
+      };
+
+      const operationExample = (operation) => {
+        const known = {
+          createQuest: questBody(),
+          createQuestApplication: { reworkLimit: 0 },
+          updateQuestApplication: { reworkLimit: 0 },
+          createQuestTeam: { name: 'Browser test team', reworkLimit: 0 },
+          updateQuestTeam: { name: 'Browser test team', reworkLimit: 0 },
+          submitQuestProof: { content: 'Browser test proof content' },
+          reviewQuestProof: { status: 'PROOF_APPROVED', reviewNote: 'Browser test review' },
+          confirmQuestWork: {},
+          createQuestReview: { rating: 5, comment: 'Browser test review' },
+          updateQuestReview: { rating: 5, comment: 'Browser test review' },
+          resolveQuestDispute: { outcome: 'REFUND_HIRER' },
+        };
+        const body = operationBodySchema(operation);
+        if (!body) return '';
+        return JSON.stringify(toBahtInputValue(known[operation.operationId] ?? exampleForSchema(body.schema)), null, 2);
+      };
+
+      const parameterInput = (parameter) => {
+        const input = document.createElement('input');
+        input.name = parameter.name;
+        input.dataset.parameter = parameter.in;
+        input.dataset.money = String(isMoneyParameter(parameter.name));
+        input.placeholder = parameter.required ? 'required' : 'optional';
+        input.value = parameter.in === 'path' && parameter.name === 'questId' ? selectedQuestId() : '';
+        if (parameter.in === 'header' && parameter.name.toLowerCase() === 'idempotency-key') input.value = randomKey('browser');
+        if (parameter.schema?.format === 'date-time') input.type = 'datetime-local';
+        if (isMoneyParameter(parameter.name)) {
+          input.type = 'number';
+          input.min = '0.01';
+          input.step = '0.01';
+        }
+        return input;
+      };
+
+      const buildOperationCard = ({ path, method, operation }) => {
+        const details = document.createElement('details');
+        details.className = 'operation';
+        details.dataset.tags = (operation.tags ?? []).join('|');
+        const summary = document.createElement('summary');
+        const methodBadge = document.createElement('span');
+        methodBadge.className = 'method';
+        methodBadge.dataset.method = method;
+        methodBadge.textContent = method;
+        const pathText = document.createElement('span');
+        pathText.className = 'operation-path';
+        pathText.textContent = operation.summary ? `${operation.summary} — ${path}` : path;
+        summary.append(methodBadge, pathText);
+
+        const body = document.createElement('div');
+        body.className = 'operation-body';
+        const form = document.createElement('form');
+        const parameters = operation.parameters ?? [];
+        const parameterFields = document.createElement('div');
+        parameterFields.className = 'operation-fields';
+        parameters.forEach((parameter) => {
+          const label = document.createElement('label');
+          const parameterName = isMoneyParameter(parameter.name) ? displayKey(parameter.name) : isBahtKey(parameter.name) ? `${parameter.name} (Baht)` : parameter.name;
+          label.textContent = `${parameter.in}: ${parameterName}${parameter.required ? ' *' : ''}`;
+          label.append(parameterInput(parameter));
+          parameterFields.append(label);
+        });
+        if (parameterFields.children.length) form.append(parameterFields);
+
+        const requestBody = operationBodySchema(operation);
+        let bodyInput;
+        let fileInput;
+        if (requestBody) {
+          const label = document.createElement('label');
+          label.className = 'wide';
+          label.textContent = `Request fields (${requestBody.mediaType})`;
+          bodyInput = document.createElement('textarea');
+          bodyInput.dataset.requestBody = requestBody.mediaType;
+          bodyInput.value = operationExample(operation);
+          label.append(bodyInput);
+          form.append(label);
+          if (requestBody.mediaType.includes('multipart')) {
+            const fileLabel = document.createElement('label');
+            fileLabel.className = 'wide';
+            fileLabel.textContent = 'Files (sent as images)';
+            fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.multiple = true;
+            fileLabel.append(fileInput);
+            form.append(fileLabel);
+          }
         }
 
-        console.info('[avatar-upload] File selected', {
-          name: file.name,
-          size: file.size,
-          type: file.type,
+        const send = document.createElement('button');
+        send.className = 'primary';
+        send.type = 'submit';
+        send.textContent = `Send ${method}`;
+        form.append(send);
+        const result = document.createElement('pre');
+        result.className = 'small-pre';
+        result.textContent = 'No request yet.';
+        form.append(result);
+
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          send.disabled = true;
+          try {
+            let requestPath = path;
+            const query = new URLSearchParams();
+            const headers = {};
+            form.querySelectorAll('[data-parameter]').forEach((input) => {
+              const value = input.value.trim();
+              if (!value) return;
+              if (input.dataset.parameter === 'path') requestPath = requestPath.replace(`{${input.name}}`, encodeURIComponent(value));
+              if (input.dataset.parameter === 'query') {
+                query.set(input.name, input.dataset.money === 'true' ? String(bahtToSatang(value)) : value);
+              }
+              if (input.dataset.parameter === 'header') headers[input.name] = value;
+            });
+            if (["POST", "PATCH", "PUT"].includes(method) && operation.parameters?.some((parameter) => parameter.in === 'header' && parameter.name.toLowerCase() === 'idempotency-key') && !headers['idempotency-key']) {
+              headers['idempotency-key'] = randomKey('browser');
+            }
+            if (query.size) requestPath += `?${query.toString()}`;
+
+            const options = { method, headers };
+            if (bodyInput && requestBody.mediaType.includes('multipart')) {
+              const formData = new FormData();
+              const fields = bodyInput.value.trim() ? toApiMoneyValue(JSON.parse(bodyInput.value)) : {};
+              Object.entries(fields).forEach(([name, value]) => {
+                if (name === 'images') return;
+                if (Array.isArray(value)) value.forEach((entry) => formData.append(name, String(entry)));
+                else if (value !== undefined && value !== null) formData.append(name, String(value));
+              });
+              Array.from(fileInput?.files ?? []).forEach((file) => formData.append('images', file));
+              options.body = formData;
+            } else if (bodyInput && bodyInput.value.trim() && !['GET', 'DELETE'].includes(method)) {
+              options.headers = { ...headers, 'content-type': 'application/json' };
+              options.body = JSON.stringify(toApiMoneyValue(JSON.parse(bodyInput.value)));
+            }
+            const response = await request(requestPath, options, `${operation.operationId ?? method} ${requestPath}`);
+            result.textContent = formatValue(response);
+          } catch (error) {
+            result.textContent = formatValue(error?.body ?? { error: error instanceof Error ? error.message : String(error) });
+          } finally {
+            send.disabled = false;
+          }
         });
 
-        setBusy(true);
-        const form = new FormData();
-        form.set('avatar', file);
-        const uploadUrl = `${appOrigin}/api/v1/profile/avatar`;
+        body.append(form);
+        details.append(summary, body);
+        return details;
+      };
 
+      const renderOperations = () => {
+        const filter = operationFilter.value;
+        operationList.replaceChildren();
+        const operations = state.operations.filter(({ operation }) => filter === 'all' || (operation.tags ?? []).includes(filter));
+        if (!operations.length) {
+          operationList.append(Object.assign(document.createElement('p'), { className: 'muted', textContent: 'No operations match this filter.' }));
+          return;
+        }
+        operations.forEach((operation) => operationList.append(buildOperationCard(operation)));
+      };
+
+      const loadOperations = async () => {
         try {
-          console.info('[avatar-upload] Sending request', {
-            method: 'POST',
-            url: uploadUrl,
-            credentials: 'include',
-          });
-
-          const response = await fetch(uploadUrl, {
-            method: 'POST',
-            credentials: 'include',
-            body: form,
-          });
-          const responseBody = await response.clone().json().catch(() => null);
-
-          console.info('[avatar-upload] Response received', {
-            body: responseBody,
-            status: response.status,
-            statusText: response.statusText,
-          });
-
-          if (!response.ok) {
-            throw new Error(
-              responseBody?.error?.message ?? `Upload failed (${response.status})`,
-            );
-          }
-
-          uploadStatus.textContent = 'อัปโหลดสำเร็จ';
-          uploadStatus.dataset.type = 'success';
-          avatarFile.value = '';
-          console.info('[avatar-upload] Upload succeeded');
+          state.openApi = await request('/openapi/json', {}, 'Load OpenAPI operation list');
+          state.operations = Object.entries(state.openApi.paths ?? {}).flatMap(([path, pathItem]) => Object.entries(pathItem)
+            .filter(([method]) => ['get', 'post', 'patch', 'put', 'delete'].includes(method))
+            .map(([method, operation]) => ({ path, method: method.toUpperCase(), operation }))
+            .filter(({ path, operation }) => path.includes('/quests') || (operation.tags ?? []).some((tag) => ['Quests', 'Quest Assignments', 'Quest Candidates', 'Quest Teams', 'Quest Invitations', 'Quest Proof', 'Quest Settlement', 'Reviews'].includes(tag))));
+          const tags = [...new Set(state.operations.flatMap(({ operation }) => operation.tags ?? []))].sort();
+          operationFilter.replaceChildren(new Option('All Quest operations', 'all'));
+          tags.forEach((tag) => operationFilter.append(new Option(tag, tag)));
+          document.querySelector('#operation-count').textContent = `${state.operations.length} operations`;
+          renderOperations();
         } catch (error) {
-          console.error('[avatar-upload] Upload failed', error);
-          uploadStatus.textContent = 'อัปโหลดไม่สำเร็จ';
-          uploadStatus.dataset.type = 'error';
+          document.querySelector('#operation-count').textContent = 'error';
+          operationList.replaceChildren(Object.assign(document.createElement('p'), { className: 'status', textContent: error instanceof Error ? error.message : 'OpenAPI loading failed' }));
+        }
+      };
+
+      const runWithOutput = async (output, action, onSuccess = null) => {
+        setBusy(true);
+        try {
+          const value = await action();
+          if (onSuccess) onSuccess(value);
+          else output.textContent = formatValue(value);
+        } catch (error) {
+          output.textContent = formatValue(error?.body ?? { error: error instanceof Error ? error.message : String(error) });
+          debug('Action failed', error instanceof Error ? error.message : error);
         } finally {
-          uploadStatus.hidden = false;
           setBusy(false);
         }
       };
 
-      if (window.location.protocol === 'file:') {
-        setBusy(true);
-        setStatus('ไม่สามารถเปิดหน้า Auth Test ผ่าน file:// ได้', 'error');
-        sessionOutput.textContent =
-          'เริ่ม API ด้วยคำสั่ง bun run dev แล้วเปิด http://localhost:5000 ใน browser';
-      } else {
-        const oauthError = new URLSearchParams(window.location.search).get('error');
-        if (oauthError) {
-          setStatus(`Google login ไม่สำเร็จ: ${oauthError}`, 'error');
-          history.replaceState({}, '', window.location.pathname);
-        }
+      const quotePayout = async () => {
+        const response = await jsonRequest('/api/v1/payouts/quotes', 'POST', {
+          receiptSatang: readBahtInput('#payout-amount'),
+        }, 'Quote Payout');
+        state.payoutQuote = response?.data ?? null;
+        payoutOutput.textContent = formatValue(response);
+        const quote = state.payoutQuote;
+        document.querySelector('#payout-destination').textContent = quote?.payoutDestinationId
+          ? `Destination ready · quote ${quote.id.slice(0, 8)}…`
+          : 'Shown after quote';
+        setStatus(document.querySelector('#payout-status'), quote
+          ? `Quote ready. Maximum debit: ${bahtTextFromSatang(quote.maximumDebitSatang)}.`
+          : 'No Payout Quote returned.', 'success');
+        return response;
+      };
 
-        signInButton.addEventListener('click', signIn);
-        refreshButton.addEventListener('click', refreshSession);
-        signOutButton.addEventListener('click', signOut);
-        uploadAvatarButton.addEventListener('click', uploadAvatar);
-        refreshSession();
-      }
+      const submitPayout = async () => {
+        if (!state.payoutQuote?.id) throw new Error('Quote a Payout first');
+        const response = await jsonRequest('/api/v1/payouts', 'POST', {
+          quoteId: state.payoutQuote.id,
+        }, 'Submit Payout for Admin approval', { 'idempotency-key': randomKey('browser-payout') });
+        payoutOutput.textContent = formatValue(response);
+        setStatus(document.querySelector('#payout-status'), `Payout status: ${response?.data?.payoutStatus ?? 'submitted'}. Provider hand-off waits for Admin approval.`, 'success');
+        await refreshWallet();
+        return response;
+      };
+
+      const listPayouts = async () => {
+        const response = await request('/api/v1/payouts?limit=10', {}, 'List Payouts');
+        payoutOutput.textContent = formatValue(response);
+        return response;
+      };
+
+      const initializeDateInputs = () => {
+        const localInput = (minutes) => {
+          const date = new Date(Date.now() + minutes * 60_000);
+          const offset = date.getTimezoneOffset() * 60_000;
+          return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+        };
+        document.querySelector('#quest-start').value = localInput(60);
+        document.querySelector('#quest-due').value = localInput(180);
+      };
+
+      document.querySelector('#default-sign-in').addEventListener('click', loadDefaultSession);
+      document.querySelector('#google-sign-in').addEventListener('click', signInWithGoogle);
+      document.querySelector('#refresh-wallet').addEventListener('click', async () => {
+        setBusy(true);
+        await refreshWallet();
+        setBusy(false);
+      });
+      document.querySelector('#refresh-session').addEventListener('click', async () => {
+        setBusy(true);
+        await refreshSession();
+        await loadTags();
+        await refreshWallet();
+        setBusy(false);
+      });
+      document.querySelector('#sign-out').addEventListener('click', signOut);
+      document.querySelector('#clear-debug').addEventListener('click', () => { debugLog.textContent = ''; });
+      document.querySelector('#run-payment').addEventListener('click', () => runWithOutput(financeOutput, () => jsonRequest('/api/local/test/payment', 'POST', {
+        creditSatang: readBahtInput('#payment-amount'),
+        simulate: true,
+      }, 'Trigger Xendit Test Mode Payment', { 'idempotency-key': randomKey('browser-payment') }), renderPaymentResult));
+      document.querySelector('#run-transfer').addEventListener('click', () => runWithOutput(financeOutput, () => jsonRequest('/api/local/test/transfer', 'POST', {
+        amountSatang: readBahtInput('#transfer-amount'),
+      }, 'Run Funding Reservation transfer', { 'idempotency-key': randomKey('browser-transfer') }), (value) => {
+        financeOutput.textContent = formatValue(value);
+        if (value?.data?.payerWallet) renderWallet(value.data.payerWallet, value.data.payerEmail);
+      }));
+      document.querySelector('#quote-payout').addEventListener('click', () => runWithOutput(payoutOutput, quotePayout));
+      document.querySelector('#submit-payout').addEventListener('click', () => runWithOutput(payoutOutput, submitPayout));
+      document.querySelector('#list-payouts').addEventListener('click', () => runWithOutput(payoutOutput, listPayouts));
+      document.querySelector('#simple-quest-smoke').addEventListener('click', () => runWithOutput(questOutput, runSimpleQuestSmoke));
+      document.querySelector('#create-quest').addEventListener('click', () => runWithOutput(questOutput, createQuest));
+      document.querySelector('#escrow-smoke').addEventListener('click', () => runWithOutput(questOutput, runEscrowSmoke));
+      document.querySelector('#publish-check').addEventListener('click', () => runWithOutput(questOutput, publishCheck));
+      document.querySelector('#publish-quest').addEventListener('click', () => runWithOutput(questOutput, publishQuest));
+      document.querySelector('#cancel-quest').addEventListener('click', () => runWithOutput(questOutput, cancelQuest));
+      document.querySelector('#list-mine').addEventListener('click', () => runWithOutput(questOutput, listMine));
+      document.querySelector('#list-board').addEventListener('click', () => runWithOutput(questOutput, listBoard));
+      document.querySelector('#get-detail').addEventListener('click', () => runWithOutput(questOutput, getDetail));
+      document.querySelector('#join-quest').addEventListener('click', () => runWithOutput(questOutput, joinQuest));
+      document.querySelector('#reload-operations').addEventListener('click', loadOperations);
+      operationFilter.addEventListener('change', renderOperations);
+
+      initializeDateInputs();
+      debug('Test bench loaded', { origin: appOrigin });
+      (async () => {
+        const session = await refreshSession();
+        if (session) {
+          await loadTags();
+          await refreshWallet();
+        }
+        else await loadDefaultSession();
+        await loadOperations();
+      })();
     </script>
   </body>
 </html>
