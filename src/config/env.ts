@@ -21,6 +21,9 @@ export const assertAuthSecretLength = (name: string, value: string): void => {
   }
 };
 
+export const isFinanceTestRuntime = (nodeEnv: string, deploymentEnv: string): boolean =>
+  nodeEnv === 'development' || (nodeEnv === 'production' && deploymentEnv === 'staging');
+
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   deploymentEnv: process.env.DEPLOYMENT_ENV ?? 'development',
@@ -125,8 +128,10 @@ export const validateRuntimeEnv = (): void => {
   }
 
   if (env.localFinanceTestEnabled) {
-    if (env.nodeEnv !== 'development') {
-      throw new Error('LOCAL_FINANCE_TEST_ENABLED requires NODE_ENV=development');
+    if (!isFinanceTestRuntime(env.nodeEnv, env.deploymentEnv)) {
+      throw new Error(
+        'LOCAL_FINANCE_TEST_ENABLED requires a development runtime or a staging runtime',
+      );
     }
     if (!env.stagingTestAuthEnabled) {
       throw new Error('LOCAL_FINANCE_TEST_ENABLED requires STAGING_TEST_AUTH_ENABLED=true');

@@ -285,11 +285,13 @@ The existing `db:seed-admin` workflow remains the path for creating an Admin.
 This Student route is separate because an Admin session cannot access
 Student-owned endpoints.
 
-### Local finance test routes
+### Local and staging Finance test routes
 
-For local finance verification, enable the guarded test route together with the
-staging Student test account. It requires `NODE_ENV=development` and an
-Xendit Development API key. The recipient is created as a second local Member
+For local or staging Finance verification, enable the guarded test route
+together with the staging Student test account. It requires an Xendit
+Development API key and either a development runtime or the controlled
+`NODE_ENV=production` and `DEPLOYMENT_ENV=staging` runtime. The route accepts
+only the configured test Student. The recipient is created as a second Member
 when the transfer test runs.
 
 ```env
@@ -298,6 +300,10 @@ LOCAL_FINANCE_TEST_RECIPIENT_EMAIL=finance-test-recipient@ku.th
 LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME=Finance
 LOCAL_FINANCE_TEST_RECIPIENT_LAST_NAME=Recipient
 ```
+
+The staging CD workflow supplies this configuration and runs the guarded
+Finance seed before verification. The seed creates deterministic Wallet
+balances and does not call Xendit.
 
 After signing in with the staging test route, run these local-only checks:
 
@@ -528,4 +534,4 @@ The service uses a feature-first modular monolith. Business rules such as the
 `@ku.th` email restriction stay inside their feature module, while database and
 cross-cutting HTTP concerns remain reusable infrastructure. This keeps module
 ownership clear without adding controller/repository abstractions before the
-domain needs them. nice one.
+domain needs them. nice one. hello

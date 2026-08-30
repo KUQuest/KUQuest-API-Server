@@ -147,6 +147,25 @@ describe('staging test authentication', () => {
 
     expect(profileResponse.status).toBe(200);
     expect((await profileResponse.json()).success).toBe(true);
+
+    const walletResponse = await app.handle(
+      new Request('http://localhost/api/v1/wallet', {
+        headers: { cookie: getCookieHeader(loginResponse) },
+      }),
+    );
+
+    expect(walletResponse.status).toBe(200);
+    expect(await walletResponse.json()).toMatchObject({
+      success: true,
+      data: {
+        wallet: {
+          spendingBalanceSatang: 0,
+          earningsBalanceSatang: 0,
+          fundingReservedSatang: 0,
+          reservedForPayoutsSatang: 0,
+        },
+      },
+    });
   });
 
   it('issues a normal session for the default test Student without exposing credentials', async () => {

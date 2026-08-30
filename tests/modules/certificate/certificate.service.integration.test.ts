@@ -5,6 +5,7 @@ import { profileCertificate } from '@/database/schema/profile.schema';
 import {
   createCertificate,
   deleteCertificate,
+  deleteCertificateImage,
   findCertificate,
   getPreviousCertificateImageFile,
   listCertificates,
@@ -241,5 +242,21 @@ describe.skipIf(!databaseIsMigrated)('certificate image against the database', (
     await markCertificateImageDeleted(imageOwner, first!.fileId);
 
     expect(await getPreviousCertificateImageFile(imageOwner, first!.fileId)).toBeUndefined();
+  });
+
+  it('clears a certificate image, tombstones its file, and returns object cleanup metadata', async () => {
+    const storedImage = makeStoredImage();
+    const attached = await replaceCertificateImage(imageOwner, certificateId, storedImage);
+    const before = await findCertificate(imageOwner, certificateId);
+
+    const result = await deleteCertificateImage(imageOwner, certificateId, before!.version);
+
+    expect(result).toEqual({
+      version: before!.version + 1,
+      bucket: storedImage.bucket,
+      objectKey: storedImage.objectKey,
+    });
+    expect((await findCertificate(imageOwner, certificateId))?.imageFileId).toBeNull();
+    expect(await getPreviousCertificateImageFile(imageOwner, attached!.fileId)).toBeUndefined();
   });
 });

@@ -7,8 +7,8 @@ import { questCandidateRoute } from '@/modules/quest/quest-candidate.route';
 import { questProofRoute } from '@/modules/quest/quest-proof.route';
 import { questReviewRoute } from '@/modules/quest/quest-review.route';
 import { questDisputeRoute, questSettlementRoute } from '@/modules/quest/quest-settlement.route';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest';
-import { workChatMembershipWriter } from '@/modules/work-chat';
+import { configureQuestWorkChatMembershipWriter, questV2Route } from '@/modules/quest';
+import { workChatMembershipWriter, workChatRoute } from '@/modules/work-chat';
 
 import { Elysia } from 'elysia';
 
@@ -21,6 +21,7 @@ import { portfolioRoute } from './modules/portfolio';
 import { profileRoute } from './modules/profile';
 import { workExperienceRoute } from './modules/work-experience';
 import { localFinanceTestRoute } from './modules/local-finance-test';
+import { walletRoute } from './modules/wallet';
 import { corsPlugin } from './plugins/cors';
 import { errorHandlerPlugin } from './plugins/error-handler';
 import { openapiPlugin } from './plugins/openapi';
@@ -36,6 +37,7 @@ export const createApp = () => {
     .use(authPlugin)
     .use(stagingTestAuthRoute)
     .use(localFinanceTestRoute)
+    .use(walletRoute)
     .use(openapiPlugin)
     .get('/', () => 'Hello Elysia', {
       detail: {
@@ -56,11 +58,13 @@ export const createApp = () => {
     .use(questReviewRoute)
     .use(questSettlementRoute)
     .use(questDisputeRoute)
+    .use(questV2Route)
     .use(questRoute)
     .use(certificateRoute)
     .use(portfolioRoute)
     .use(workExperienceRoute)
     .use(tagRoute)
+    .use(workChatRoute)
     .use(payoutRoute)
     .use(adminPayoutRoute)
     .use(payoutWebhookRoute)

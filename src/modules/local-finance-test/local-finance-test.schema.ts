@@ -1,11 +1,6 @@
-import { t } from 'elysia';
+import { walletBalanceSchema } from '@/modules/wallet/wallet.schema';
 
-export const walletBalanceSchema = t.Object({
-  spendingBalanceSatang: t.Integer({ minimum: 0 }),
-  earningsBalanceSatang: t.Integer({ minimum: 0 }),
-  fundingReservedSatang: t.Integer({ minimum: 0 }),
-  reservedForPayoutsSatang: t.Integer({ minimum: 0 }),
-});
+import { t } from 'elysia';
 
 const topUpSchema = t.Object({
   id: t.String({ format: 'uuid' }),

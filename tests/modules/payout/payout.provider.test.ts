@@ -105,7 +105,7 @@ describe('Xendit Payout provider', () => {
     })).resolves.toMatchObject({ normalizedStatus: 'FAILED' });
   });
 
-  it('sends the current v2 request with THB conversion and stable idempotency', async () => {
+  it('sends the exact staging-compatible V2 SCB request with stable idempotency', async () => {
     let called: { url: string; init?: RequestInit } | undefined;
     const fetcher: Fetcher = async (url, init) => {
       called = { url, init };
@@ -115,7 +115,7 @@ describe('Xendit Payout provider', () => {
         status: 'ACCEPTED',
         amount: 123.45,
         currency: 'THB',
-        channel_code: 'SCB',
+        channel_code: 'TH_SCB',
       });
     };
 
@@ -130,6 +130,7 @@ describe('Xendit Payout provider', () => {
     expect(called?.url).toBe('https://xendit.test/v2/payouts');
     expect(called?.init?.method).toBe('POST');
     expect(new Headers(called?.init?.headers).get('authorization')).toBe('Basic eG5kX3Rlc3Rfc2VjcmV0Og==');
+    expect(XENDIT_PAYOUT_API_VERSION).toBe('2020-02-01');
     expect(new Headers(called?.init?.headers).get('api-version')).toBe(XENDIT_PAYOUT_API_VERSION);
     expect(new Headers(called?.init?.headers).get('idempotency-key')).toBe(request.internalReference);
     expect(body).toEqual({
@@ -166,7 +167,7 @@ describe('Xendit Payout provider', () => {
         fee: 0,
         tax: 0,
         currency: 'THB',
-      channel_code: 'TH_SCB',
+        channel_code: 'TH_SCB',
       }),
     });
 
@@ -217,7 +218,7 @@ describe('Xendit Payout provider', () => {
         status: 'SUCCEEDED',
         amount: 123.45,
         currency: 'THB',
-        channel_code: 'SCB',
+        channel_code: 'TH_SCB',
       }),
     });
 
@@ -254,7 +255,42 @@ describe('Xendit Payout provider', () => {
 
     expect(body).toMatchObject({
       channel_code: 'PROMPTPAY',
-      channel_properties: { account_number: '0812345678' },
+      channel_properties: {
+        account_number: '0812345678',
+        account_holder_name: destination.accountHolderName,
+      },
+    });
+  });
+
+  it('maps another supported Thai bank to its explicit Xendit channel', async () => {
+    let body: Record<string, unknown> | undefined;
+    const fetcher: Fetcher = async (_url, init) => {
+      body = JSON.parse(String(init?.body));
+      return response({
+        id: 'xnd-kbank-123',
+        status: 'ACCEPTED',
+        amount: 123.45,
+        currency: 'THB',
+        channel_code: 'TH_KKB',
+      });
+    };
+
+    await new XenditPayoutProvider({ secretKey: 'secret', fetcher }).createPayout({
+      ...request,
+      destination: { ...destination, bankCode: 'KBANK' },
+    });
+
+    expect(body).toEqual({
+      reference_id: request.internalReference,
+      channel_code: 'TH_KKB',
+      channel_properties: {
+        account_number: destination.accountNumber,
+        account_holder_name: destination.accountHolderName,
+      },
+      amount: 123.45,
+      currency: 'THB',
+      description: 'KUQuest Payout',
+      metadata: { kuquest_reference: request.internalReference },
     });
   });
 
@@ -267,7 +303,34 @@ describe('Xendit Payout provider', () => {
       code: 'PROVIDER_REJECTED',
       providerCode: 'INVALID_CHANNEL',
       providerStatus: 400,
+      providerMessage: 'bad channel',
     });
+
+    const unsafeDiagnostic = new XenditPayoutProvider({
+      secretKey: 'secret',
+      fetcher: async () => response({
+        error_code: 'API_VALIDATION_ERROR',
+        message: 'Invalid destination 1234567890 using xnd_development_providersecret.',
+        errors: [{
+          field: 'channel_properties.account_number',
+          messages: ['Account 1234567890 is invalid.'],
+        }],
+      }, 400),
+    });
+    let diagnosticError: PayoutProviderError | undefined;
+    try {
+      await unsafeDiagnostic.createPayout(request);
+    } catch (error: unknown) {
+      diagnosticError = error as PayoutProviderError;
+    }
+    expect(diagnosticError).toMatchObject({
+      code: 'PROVIDER_REJECTED',
+      providerCode: 'API_VALIDATION_ERROR',
+      providerStatus: 400,
+    });
+    expect(diagnosticError?.providerMessage).toContain('channel_properties.account_number');
+    expect(diagnosticError?.providerMessage).not.toContain('1234567890');
+    expect(diagnosticError?.providerMessage).not.toContain('xnd_development_providersecret');
 
     const uncertain = new XenditPayoutProvider({
       secretKey: 'secret',

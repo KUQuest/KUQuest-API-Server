@@ -21,6 +21,23 @@ describe('errorHandlerPlugin', () => {
     });
   });
 
+  it('uses the v2 internal error code without changing the legacy code', async () => {
+    const noisyPlugin = new Elysia({ name: 'v2-noisy' }).get('/api/v2/boom', () => {
+      throw new Error('kaboom');
+    });
+
+    const app = new Elysia().use(errorHandlerPlugin).use(noisyPlugin);
+
+    const res = await app.handle(new Request('http://localhost/api/v2/boom'));
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body).toEqual({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
+    });
+  });
+
   it('maps an unparseable body to status 400 without echoing the parser', async () => {
     const parsingPlugin = new Elysia({ name: 'parsing' }).post('/parse', ({ body }) => body, {
       body: t.Object({ field: t.String() }),

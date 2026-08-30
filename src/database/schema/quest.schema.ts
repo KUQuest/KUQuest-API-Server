@@ -25,6 +25,12 @@ const time = (name: string) => timestamp(name, { withTimezone: true });
 
 export const questMode = pgEnum('quest_mode', ['NO_CANDIDATE', 'CANDIDATE']);
 export const questParticipation = pgEnum('quest_participation', ['SOLO', 'GROUP']);
+export const questApiVersion = {
+  v1: 'v1',
+  v2: 'v2',
+} as const;
+export type QuestApiVersion = (typeof questApiVersion)[keyof typeof questApiVersion];
+
 export const questStatus = pgEnum('quest_status', [
   'QUEST_DRAFT',
   'QUEST_OPEN',
@@ -47,13 +53,24 @@ export const quest = pgTable(
     hirerId: uuid('hirer_id')
       .notNull()
       .references(() => authUser.id),
+    apiVersion: varchar('api_version', { length: 2 })
+      .$type<QuestApiVersion>()
+      .default(questApiVersion.v1)
+      .notNull(),
     title: varchar('title', { length: 200 }).notNull(),
     description: varchar('description', { length: 2000 }),
     condition: varchar('condition', { length: 4000 }).notNull(),
     mode: questMode('mode').notNull(),
     participation: questParticipation('participation').default('SOLO').notNull(),
+    v2Mode: varchar('v2_mode', { length: 32 }).$type<
+      'FIRST_COME_FIRST_SERVED' | 'CANDIDATE'
+    >(),
+    v2Participation: varchar('v2_participation', { length: 16 }).$type<
+      'SINGLE' | 'GROUP'
+    >(),
     questStatus: questStatus('quest_status').default('QUEST_DRAFT').notNull(),
-    rewardSatang: integer('reward_satang').notNull(),
+    rewardSatang: integer('reward_satang'),
+    questFundingTotalSatang: integer('quest_funding_total_satang'),
     fundingReservationId: uuid('funding_reservation_id')
       .unique()
       .references(() => walletFundingReservation.id),
@@ -75,7 +92,28 @@ export const quest = pgTable(
     updatedAt: time('updated_at').defaultNow().notNull(),
   },
   (table) => [
-    check('quest_reward_check', sql`${table.rewardSatang} > 0`),
+    check('quest_api_version_check', sql`${table.apiVersion} IN ('v1', 'v2')`),
+    check(
+      'quest_v2_mode_check',
+      sql`${table.v2Mode} IS NULL OR ${table.v2Mode} IN ('FIRST_COME_FIRST_SERVED', 'CANDIDATE')`,
+    ),
+    check(
+      'quest_v2_participation_check',
+      sql`${table.v2Participation} IS NULL OR ${table.v2Participation} IN ('SINGLE', 'GROUP')`,
+    ),
+    check(
+      'quest_funding_total_check',
+      sql`${table.questFundingTotalSatang} IS NULL OR ${table.questFundingTotalSatang} BETWEEN 100 AND 70000000`,
+    ),
+    check('quest_reward_check', sql`${table.rewardSatang} IS NULL OR ${table.rewardSatang} > 0`),
+    check(
+      'quest_v2_draft_reward_check',
+      sql`${table.apiVersion} <> 'v2' OR ${table.questStatus} <> 'QUEST_DRAFT' OR ${table.rewardSatang} IS NULL`,
+    ),
+    check(
+      'quest_reward_required_check',
+      sql`(${table.apiVersion} = 'v2' AND ${table.questStatus} = 'QUEST_DRAFT') OR ${table.rewardSatang} IS NOT NULL`,
+    ),
     check('quest_finance_snapshot_bps_check', sql`${table.platformFeeBps} IS NULL OR ${table.platformFeeBps} BETWEEN 0 AND 10000`),
     check('quest_finance_snapshot_amounts_check', sql`${table.platformFeePerWorkerSatang} IS NULL OR ${table.platformFeePerWorkerSatang} >= 0`),
     check('quest_finance_snapshot_escrow_check', sql`${table.questEscrowSatang} IS NULL OR ${table.questEscrowSatang} > 0`),
@@ -85,7 +123,10 @@ export const quest = pgTable(
       sql`${table.participation} = 'GROUP' OR ${table.headcount} = 1`,
     ),
     check('quest_due_at_check', sql`${table.dueAt} IS NULL OR ${table.dueAt} > ${table.startTime}`),
-    check('quest_tag_check', sql`${table.questStatus} = 'QUEST_DRAFT' OR ${table.tagId} IS NOT NULL`),
+    check(
+      'quest_tag_check',
+      sql`${table.questStatus} IN ('QUEST_DRAFT', 'QUEST_CANCELLED') OR ${table.tagId} IS NOT NULL`,
+    ),
     check(
       'quest_cancelled_by_check',
       sql`num_nonnulls(${table.cancelledByUserId}, ${table.cancelledByAdminId}) <= 1`,
@@ -107,6 +148,24 @@ export const quest = pgTable(
     index('quest_mode_idx').on(table.mode),
     index('quest_tag_id_idx').on(table.tagId),
     index('quest_start_time_idx').on(table.startTime),
+  ],
+);
+
+export const questConditionItem = pgTable(
+  'quest_condition_item',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    text: varchar('text', { length: 255 }).notNull(),
+  },
+  (table) => [
+    check('quest_condition_item_position_check', sql`${table.position} >= 0`),
+    check('quest_condition_item_text_check', sql`btrim(${table.text}) <> ''`),
+    unique('quest_condition_item_quest_id_position_key').on(table.questId, table.position),
+    index('quest_condition_item_quest_id_idx').on(table.questId),
   ],
 );
 
@@ -572,6 +631,7 @@ export const questRelations = relations(quest, ({ one, many }) => ({
     references: [authAdmin.id],
   }),
   locations: many(questLocation),
+  conditionItems: many(questConditionItem),
   images: many(questImage),
   editRequests: many(questEditRequest),
   editHistory: many(questEditHistory),
@@ -604,6 +664,13 @@ export const reviewRelations = relations(review, ({ one }) => ({
 export const questLocationRelations = relations(questLocation, ({ one }) => ({
   quest: one(quest, {
     fields: [questLocation.questId],
+    references: [quest.id],
+  }),
+}));
+
+export const questConditionItemRelations = relations(questConditionItem, ({ one }) => ({
+  quest: one(quest, {
+    fields: [questConditionItem.questId],
     references: [quest.id],
   }),
 }));
