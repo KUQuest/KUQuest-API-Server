@@ -1,3 +1,8 @@
-# Keep Quest Escrow during moderation hiding
+# Out of scope: Keep Quest Escrow during moderation hiding
 
-Admin moderation may move an open Quest to `QUEST_HIDDEN` without releasing its Quest Escrow. Restoring the Quest before `startTime` returns it to `QUEST_OPEN` with the original funding commitment; after `startTime`, restoration is not allowed and the Quest becomes `QUEST_CANCELLED`, which releases the reservation. This keeps a reversible moderation action separate from a terminal Quest outcome without allowing a stale Quest to reopen.
+> **Outside the accepted Quest lifecycle.** The product rule is
+> [`docs/quest/work-chat-system-target.md` §Resolved Quest lifecycle](../quest/work-chat-system-target.md#resolved-quest-lifecycle).
+
+This ADR records a current-server moderation model using `QUEST_HIDDEN`.
+Administration and moderation decisions are outside the accepted lifecycle;
+they do not add a target Quest State or reopen a terminal Quest.

@@ -1,9 +1,9 @@
 # Quest stage milestones
 
-> **Legacy reference — reconciliation required.** Use
-> `docs/quest/work-chat-system-target.md` for the accepted Quest and Work Chat
-> behavior. This file records the earlier lifecycle contract and its stage,
-> review, Rework, cancellation, and money rules are historical.
+> **Legacy workflow reference.** The product source of truth is
+> [`docs/quest/work-chat-system-target.md` §Resolved Quest lifecycle](../quest/work-chat-system-target.md#resolved-quest-lifecycle).
+> This file records the earlier stage, Rework, cancellation, dispute, and money
+> model. Do not use it to define new behavior.
 
 This document is the earlier stage-by-stage product reference for a Quest. It
 describes the historical milestone rules and transitions.

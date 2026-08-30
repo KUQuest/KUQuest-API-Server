@@ -1,3 +1,10 @@
-# Automatically cancel unfilled Quests
+# Superseded: Automatically cancel unfilled Quests
 
-An open Quest that has not reached `ASSIGNED` when `startTime` passes is automatically moved to `QUEST_CANCELLED`, and its full Quest Escrow is released by the background Quest Lifecycle Worker. This applies to every Quest mode and participation type, including a partially filled direct-join GROUP Quest; any active Assignments are canceled without a Worker payment. Automatic cancellation is recorded as an explicit system settlement command with a deterministic idempotency key, not as a Hirer or Admin action. The rule gives the Quest a deterministic start boundary and prevents an active Funding Reservation from remaining held indefinitely; the Hirer can still cancel earlier through the normal cancellation endpoint.
+> **Superseded for Quest lifecycle behavior.** The accepted product rule is
+> [`docs/quest/work-chat-system-target.md` §Resolved Quest lifecycle](../quest/work-chat-system-target.md#resolved-quest-lifecycle).
+
+The current-server behavior described by this ADR automatically cancels an open
+Quest that has not reached `ASSIGNED` when `startTime` passes. It is not the
+target behavior for an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest,
+which uses the Hirer decision and Active Worker consent protocol in the
+accepted rulebook.
