@@ -244,6 +244,11 @@ jobs:
                 exit 1
               fi
             done
+
+            if [[ "$XENDIT_SECRET_KEY" != xnd_development_* ]]; then
+              echo "Staging Finance tests require an Xendit Development API key"
+              exit 1
+            fi
           fi
 
           ENV_FILE="$RUNNER_TEMP/backend.env"
@@ -271,6 +276,12 @@ jobs:
               printf 'STAGING_TEST_AUTH_PASSWORD=%s\n' "$STAGING_TEST_AUTH_PASSWORD"
               printf 'STAGING_TEST_AUTH_FIRST_NAME=%s\n' "$STAGING_TEST_AUTH_FIRST_NAME"
               printf 'STAGING_TEST_AUTH_LAST_NAME=%s\n' "$STAGING_TEST_AUTH_LAST_NAME"
+              printf 'LOCAL_FINANCE_TEST_ENABLED=true\n'
+              printf 'LOCAL_FINANCE_TEST_RECIPIENT_EMAIL=finance-test-recipient@ku.th\n'
+              printf 'LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME=Finance\n'
+              printf 'LOCAL_FINANCE_TEST_RECIPIENT_LAST_NAME=Recipient\n'
+            else
+              printf 'LOCAL_FINANCE_TEST_ENABLED=false\n'
             fi
             printf 'GOOGLE_CLIENT_ID=%s\n' "$GOOGLE_CLIENT_ID"
             printf 'GOOGLE_CLIENT_SECRET=%s\n' "$GOOGLE_CLIENT_SECRET"
@@ -362,6 +373,26 @@ jobs:
              POSTGRES_CLIENT_IMAGE='${IMAGE_NAME}:postgres-client-${{ github.event.workflow_run.head_sha }}' \
              bash -s -- deploy" \
             < scripts/staging-operations.sh
+
+      - name: Seed staging Finance test data
+        if: ${{ env.STAGING_TEST_AUTH_ENABLED == 'true' }}
+        shell: bash
+        env:
+          APP_IMAGE: ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            "cd /opt/backend && \
+             APP_IMAGE='$APP_IMAGE' \
+             docker compose run --rm --no-deps \
+             -e STAGING_FINANCE_SEED_ENABLED=true \
+             api bun run db:seed-finance-test"
 
       - name: Seed staging Admin account
         shell: bash
