@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KUQuest - สรุป 114 สถานการณ์จำลองเควสต์และการเงินทั้งหมด (พร้อมระบบ Tracing & Multi-Filter)</title>
+    <title>KUQuest - สรุป 114 สถานการณ์จำลองเควสต์และการเงิน (พร้อม Interactive Domain Glossary & Tracing Tooltips)</title>
     <!-- Load Mermaid.js for interactive Sequence Diagrams -->
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script>
@@ -44,12 +44,48 @@
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Sarabun", Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text-main); line-height: 1.6; padding-bottom: 100px; }
         
         /* Sticky Header */
-        .header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: white; padding: 36px 20px; border-bottom: 4px solid var(--primary); }
-        .header-content { max-width: 1300px; margin: 0 auto; }
-        .header h1 { font-size: 2.1rem; font-weight: 800; margin-bottom: 8px; }
-        .header p { font-size: 1.05rem; color: #94a3b8; max-width: 950px; }
+        .header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: white; padding: 36px 20px; border-bottom: 4px solid var(--primary); position: relative; }
+        .header-content { max-width: 1300px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+        .header-titles h1 { font-size: 2.1rem; font-weight: 800; margin-bottom: 8px; }
+        .header-titles p { font-size: 1.05rem; color: #94a3b8; max-width: 850px; }
+        
+        .btn-open-glossary-modal { background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: white; border: none; padding: 12px 20px; border-radius: 12px; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(2,132,199,0.35); transition: all 0.2s; display: flex; align-items: center; gap: 8px; }
+        .btn-open-glossary-modal:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(2,132,199,0.5); }
         
         .container { max-width: 1300px; margin: 24px auto; padding: 0 20px; }
+        
+        /* Interactive Glossary Term & Tooltip */
+        .glossary-term { border-bottom: 2px dashed var(--primary); color: #0369a1; font-weight: 700; cursor: help; position: relative; display: inline-block; transition: all 0.15s; padding: 0 2px; border-radius: 2px; }
+        .glossary-term:hover { background: #e0f2fe; color: #0284c7; }
+        
+        /* Floating Tooltip Card */
+        #globalTooltip { position: fixed; z-index: 10000; background: #0f172a; color: white; padding: 14px 18px; border-radius: 10px; font-size: 0.88rem; max-width: 340px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.4), 0 8px 10px -6px rgba(0,0,0,0.3); border: 1px solid #334155; pointer-events: none; opacity: 0; transform: translateY(6px); transition: opacity 0.2s, transform 0.2s; line-height: 1.5; }
+        #globalTooltip.show { opacity: 1; transform: translateY(0); }
+        #globalTooltip .tt-cat { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: #38bdf8; font-weight: 800; margin-bottom: 4px; }
+        #globalTooltip .tt-title { font-size: 1rem; font-weight: 800; color: #f8fafc; margin-bottom: 6px; }
+        #globalTooltip .tt-def { color: #cbd5e1; margin-bottom: 6px; }
+        #globalTooltip .tt-effect { color: #4ade80; font-size: 0.82rem; margin-bottom: 6px; }
+        #globalTooltip .tt-ref { font-size: 0.75rem; color: #94a3b8; font-family: monospace; border-top: 1px solid #1e293b; padding-top: 4px; }
+        
+        /* Glossary Modal / Drawer */
+        .glossary-modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(4px); z-index: 9999; display: none; justify-content: center; align-items: center; padding: 20px; }
+        .glossary-modal { background: white; width: 100%; max-width: 900px; max-height: 85vh; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); display: flex; flex-direction: column; overflow: hidden; }
+        .glossary-modal-header { padding: 20px 24px; background: #0f172a; color: white; display: flex; justify-content: space-between; align-items: center; }
+        .glossary-modal-header h2 { font-size: 1.3rem; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+        .btn-close-modal { background: transparent; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer; padding: 4px; border-radius: 6px; transition: color 0.15s; }
+        .btn-close-modal:hover { color: white; }
+        
+        .glossary-modal-body { padding: 20px 24px; overflow-y: auto; flex: 1; }
+        .glossary-search-wrap { margin-bottom: 18px; }
+        .glossary-search-wrap input { width: 100%; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); font-size: 1rem; }
+        
+        .glossary-cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+        .glossary-card-item { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; }
+        .glossary-card-item .g-cat { font-size: 0.75rem; font-weight: 700; color: #0284c7; text-transform: uppercase; margin-bottom: 4px; }
+        .glossary-card-item .g-title { font-size: 1rem; font-weight: 800; color: #0f172a; margin-bottom: 6px; }
+        .glossary-card-item .g-def { font-size: 0.88rem; color: #334155; margin-bottom: 8px; }
+        .glossary-card-item .g-effect { font-size: 0.82rem; color: #166534; background: #dcfce7; padding: 6px 10px; border-radius: 6px; margin-bottom: 6px; }
+        .glossary-card-item .g-ref { font-size: 0.75rem; color: #64748b; font-family: monospace; }
         
         /* Quick Index Matrix Drawer */
         .index-panel { background: white; border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 24px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); }
@@ -155,14 +191,55 @@
 </head>
 <body>
 
+<!-- Floating Tooltip Container -->
+<div id="globalTooltip">
+    <div class="tt-cat" id="ttCat">Category</div>
+    <div class="tt-title" id="ttTitle">Term Title</div>
+    <div class="tt-def" id="ttDef">Definition description</div>
+    <div class="tt-effect" id="ttEffect">System Consequence</div>
+    <div class="tt-ref" id="ttRef">Rulebook Reference</div>
+</div>
+
+<!-- Glossary Modal Dialog -->
+<div class="glossary-modal-backdrop" id="glossaryModal" onclick="if(event.target === this) closeGlossaryModal()">
+    <div class="glossary-modal">
+        <div class="glossary-modal-header">
+            <h2>📖 พจนานุกรมคำศัพท์ & รหัสระบบทางการ (KUQuest Domain Glossary)</h2>
+            <button class="btn-close-modal" onclick="closeGlossaryModal()">&times;</button>
+        </div>
+        <div class="glossary-modal-body">
+            <div class="glossary-search-wrap">
+                <input type="text" id="glossarySearchInput" placeholder="พิมพ์คำศัพท์หรือรหัสเพื่อค้นหา (เช่น CONDUCT, PC-11, Escrow, Red Flag)..." onkeyup="filterGlossaryCards()">
+            </div>
+            <div class="glossary-cards-grid" id="glossaryCardsGrid">
+                <!-- Injected via JS -->
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="header">
     <div class="header-content">
-        <h1>KUQuest: สรุป 114 สถานการณ์จำลองเควสต์และการเงินทั้งหมด</h1>
-        <p>เอกสาร Master Simulation Suite รวมตัวอย่างกรณีใช้งานจริง 100% ครอบคลุมทั้ง 4 Quadrants เควสต์, ระบบ Admin Moderation, และกระเป๋าเงินคู่ (Double-Entry Ledger Satang Math) พร้อมเครื่องมือช่วย Trace และ Filter อย่างละเอียด</p>
+        <div class="header-titles">
+            <h1>KUQuest: สรุป 114 สถานการณ์จำลองเควสต์และการเงินทั้งหมด</h1>
+            <p>เอกสาร Master Simulation Suite รวมตัวอย่างกรณีใช้งานจริง 100% ครอบคลุมทั้ง 4 Quadrants เควสต์, ระบบ Admin Moderation, และกระเป๋าเงินคู่ (Double-Entry Ledger Satang Math) พร้อมระบบ Tracing, Tooltips และพจนานุกรมศัพท์</p>
+        </div>
+        <button class="btn-open-glossary-modal" onclick="openGlossaryModal()">
+            <span>📖</span> เปิดพจนานุกรมศัพท์ & รหัสระบบ
+        </button>
     </div>
 </div>
 
 <div class="container">
+
+    <!-- Tip Banner for Tooltips -->
+    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 12px 18px; margin-bottom: 20px; font-size: 0.9rem; color: #166534; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 1.2rem;">💡</span>
+            <span><strong>คำแนะนำสำหรับผู้อ่าน:</strong> สามารถนำเมาส์ไปชี้ที่คำศัพท์ที่มี <span class="glossary-term" data-term="CONDUCT_OUT_OF_SCOPE">เส้นใต้ประสีฟ้า</span> เพื่อดูคำนิยามและผลลัพธ์ของรหัสระบบได้ทันที!</span>
+        </div>
+        <button onclick="openGlossaryModal()" style="background: #16a34a; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 0.82rem; cursor: pointer;">ดูพจนานุกรมทั้งหมด</button>
+    </div>
 
     <!-- Authority & Version Reference Box -->
     <div style="background: white; border-radius: 14px; border: 1px solid #bae6fd; padding: 20px 24px; margin-bottom: 24px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); background: linear-gradient(to right, #f0f9ff, #ffffff);">
@@ -441,9 +518,9 @@
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag">QUEST_OPEN</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ยังไม่มี</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> ยังไม่มี</div>
-                    <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> Double-entry Ledger: เงิน Hirer ใน SPENDING -&gt; Quest Escrow (สำรองเงิน 10,500 สตางค์ ใน wallet_funding_reservations)</div>
+                    <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> <span class="glossary-term" data-term="Double-Entry Ledger">Double-entry Ledger</span>: เงิน Hirer ใน SPENDING -&gt; <span class="glossary-term" data-term="Quest Escrow">Quest Escrow</span> (สำรองเงิน 10,500 สตางค์ ใน wallet_funding_reservations)</div>
                     <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> เควสต์แสดงบนหน้าฟีดสาธารณะ ยังไม่เปิดห้อง Work Chat</div>
-                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> การเผยแพร่เควสต์จะทำการล็อกเงินมัดจำเต็มจำนวน 100% ใน Quest Escrow ทันที</div>
+                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> การเผยแพร่เควสต์จะทำการล็อกเงินมัดจำเต็มจำนวน 100% ใน <span class="glossary-term" data-term="Quest Escrow">Quest Escrow</span> ทันที</div>
                 </div>
             </div>
             
@@ -559,7 +636,7 @@ sequenceDiagram
                         <span class="badge badge-nature">⏱️ Concurrency / Boundary (จังหวะเวลาและขอบเขต)</span>
                         <span class="badge badge-outcome-success">สำเร็จ (COMPLETED)</span>
                     </div>
-                    <div class="scenario-title">การอนุมัติงานอัตโนมัติเมื่อครบกำหนด 24 ชั่วโมง (24-Hour Review Timeout Auto-Approval)</div>
+                    <div class="scenario-title">การอนุมัติงานอัตโนมัติเมื่อครบกำหนด 24 ชั่วโมง (<span class="glossary-term" data-term="24-Hour Review Timeout">24-Hour Review Timeout</span> Auto-Approval)</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q1-01: SINGLE + FCFS: ส่งหลักฐานเป็นไฟล์มาตรฐาน</div>
                     
                     <div class="actor-chips-row">
@@ -656,7 +733,7 @@ sequenceDiagram
                         <span class="badge badge-nature">🎯 Happy Path (เส้นทางปกติ)</span>
                         <span class="badge badge-outcome-success">สำเร็จ (COMPLETED)</span>
                     </div>
-                    <div class="scenario-title">การสอบถามก่อนเข้าร่วม (Candidate Inquiry) ก่อนกดรับงาน FCFS</div>
+                    <div class="scenario-title">การสอบถามก่อนเข้าร่วม (<span class="glossary-term" data-term="Candidate Inquiry">Candidate Inquiry</span>) ก่อนกดรับงาน FCFS</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q1-01: SINGLE + FCFS: ส่งหลักฐานเป็นไฟล์มาตรฐาน</div>
                     
                     <div class="actor-chips-row">
@@ -677,7 +754,7 @@ sequenceDiagram
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">น้องตาล (M-203)</span> — เปิดห้องสนทนาสอบถาม (Candidate Inquiry Conversation) ที่ T+1h ขณะเควสต์อยู่ในสถานะ QUEST_OPEN</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">น้องตาล (M-203)</span> — เปิดห้องสนทนาสอบถาม (<span class="glossary-term" data-term="Candidate Inquiry">Candidate Inquiry</span> Conversation) ที่ T+1h ขณะเควสต์อยู่ในสถานะ QUEST_OPEN</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag">QUEST_OPEN</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ยังไม่มี</div>
@@ -696,7 +773,7 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ยังไม่มี</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> ยังไม่มี</div>
                     <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> ไม่มีการเคลื่อนไหว</div>
-                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ส่งข้อความในห้อง Candidate Inquiry</div>
+                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ส่งข้อความในห้อง <span class="glossary-term" data-term="Candidate Inquiry">Candidate Inquiry</span></div>
                     <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> การพูดคุยชี้แจงขอบเขตงานก่อนตกลงรับงาน</div>
                 </div>
             </div>
@@ -709,7 +786,7 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ASSIGNMENT_ACTIVE</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> ยังไม่มี</div>
                     <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> เงิน Escrow ถูกล็อก</div>
-                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ห้อง Candidate Inquiry ถูกเปลี่ยนสถานะเป็น INQUIRY_CLOSED และเปิดห้อง Work Chat ทางการขึ้นมาแทน</div>
+                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ห้อง <span class="glossary-term" data-term="Candidate Inquiry">Candidate Inquiry</span> ถูกเปลี่ยนสถานะเป็น INQUIRY_CLOSED และเปิดห้อง Work Chat ทางการขึ้นมาแทน</div>
                     <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> เมื่อได้รับการมอบหมายงาน ห้องสอบถามก่อนหน้าจะถูกปิดถาวรและสลับไปยังห้อง Work Chat</div>
                 </div>
             </div>
@@ -756,7 +833,7 @@ sequenceDiagram
                 
                 <div class="notes-box">
                     <span>💡</span>
-                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> แสดงการแยกขาดระหว่างห้องสอบถามก่อนรับงาน (Candidate Inquiry) กับห้องคุยงาน (Work Chat) ตาม ADR 0019</div>
+                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> แสดงการแยกขาดระหว่างห้องสอบถามก่อนรับงาน (<span class="glossary-term" data-term="Candidate Inquiry">Candidate Inquiry</span>) กับห้องคุยงาน (Work Chat) ตาม ADR 0019</div>
                 </div>
                 
                 <!-- Audit References for Domain Owner -->
@@ -1110,7 +1187,7 @@ sequenceDiagram
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Worker (M-207)</span> — สอบถามพิกัดอาคารผ่าน Candidate Inquiry -&gt; กดเข้าร่วมเควสต์ที่ T+45m</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Worker (M-207)</span> — สอบถามพิกัดอาคารผ่าน <span class="glossary-term" data-term="Candidate Inquiry">Candidate Inquiry</span> -&gt; กดเข้าร่วมเควสต์ที่ T+45m</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag warning">QUEST_ASSIGNED</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ASSIGNMENT_ACTIVE</div>
@@ -1755,7 +1832,7 @@ sequenceDiagram
             </div>
             <div class="scenario-body">
                 <div class="context-box">
-                    <div class="context-item"><strong>ผู้ว่าจ้าง (Hirer):</strong> Hirer (M-113 &#x27;น้องแพรว&#x27;)</div><div class="context-item"><strong>ผู้รับงาน (Worker):</strong> ไม่มี (ไม่มีผู้เข้าร่วม)</div><div class="context-item"><strong>ข้อมูลการเงิน (Financials):</strong> เงินมัดจำรวม: 10,500 สตางค์ ใน Quest Escrow</div><div class="context-item"><strong>กรอบเวลา (Timing):</strong> startTime: T+2h, เวลาปัจจุบัน: T+2h</div>
+                    <div class="context-item"><strong>ผู้ว่าจ้าง (Hirer):</strong> Hirer (M-113 &#x27;น้องแพรว&#x27;)</div><div class="context-item"><strong>ผู้รับงาน (Worker):</strong> ไม่มี (ไม่มีผู้เข้าร่วม)</div><div class="context-item"><strong>ข้อมูลการเงิน (Financials):</strong> เงินมัดจำรวม: 10,500 สตางค์ ใน <span class="glossary-term" data-term="Quest Escrow">Quest Escrow</span></div><div class="context-item"><strong>กรอบเวลา (Timing):</strong> startTime: T+2h, เวลาปัจจุบัน: T+2h</div>
                 </div>
                 <div class="steps-container">
                     <div class="steps-title">ลำดับขั้นตอนการทำงาน (Step-by-Step Execution Sequence):</div>
@@ -1780,7 +1857,7 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag danger">QUEST_CANCELLED</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ยังไม่มี</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> ยังไม่มี</div>
-                    <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> คืนเงินมัดจำ: Quest Escrow -&gt; บัญชี SPENDING ของ Hirer (คืนเงิน 100% เต็มจำนวน 10,500 สตางค์)</div>
+                    <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> คืนเงินมัดจำ: <span class="glossary-term" data-term="Quest Escrow">Quest Escrow</span> -&gt; บัญชี SPENDING ของ Hirer (คืนเงิน 100% เต็มจำนวน 10,500 สตางค์)</div>
                     <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ส่ง Push หา Hirer: &#x27;เควสต์ถูกยกเลิกอัตโนมัติเนื่องจากไม่มีผู้เข้าร่วมก่อนเวลาเริ่มงาน ระบบได้คืนเงินมัดจำเต็มจำนวนแล้ว&#x27;</div>
                     <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> เควสต์ที่ไม่มีผู้รับงานเมื่อถึงเวลาเริ่มงานจะถูกยกเลิกและคืนเงินทันทีโดยไม่มีการหักค่าธรรมเนียม</div>
                 </div>
@@ -2213,7 +2290,7 @@ sequenceDiagram
             
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 2: <span class="step-actor">Hirer (M-118)</span> — ยื่นรายงานความประพฤติ: CONDUCT_ABANDONED กล่าวหา Worker ละทิ้งงาน</div>
+                <div class="step-head">ขั้นตอนที่ 2: <span class="step-actor">Hirer (M-118)</span> — ยื่นรายงานความประพฤติ: <span class="glossary-term" data-term="CONDUCT_ABANDONED">CONDUCT_ABANDONED</span> กล่าวหา Worker ละทิ้งงาน</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag danger">QUEST_FAILED</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ASSIGNMENT_INCOMPLETE</div>
@@ -2568,7 +2645,7 @@ sequenceDiagram
                         <span class="badge badge-nature">🛡️ Moderation / Penalty (การควบคุมและบทลงโทษ)</span>
                         <span class="badge badge-outcome-moderated">กำลังดำเนินการ / ดำเนินการพิเศษ</span>
                     </div>
-                    <div class="scenario-title">Worker ยื่นรายงาน CONDUCT_OUT_OF_SCOPE ต่อ Hirer -&gt; Admin ยืนยันความผิด</div>
+                    <div class="scenario-title">Worker ยื่นรายงาน <span class="glossary-term" data-term="CONDUCT_OUT_OF_SCOPE">CONDUCT_OUT_OF_SCOPE</span> ต่อ Hirer -&gt; Admin ยืนยันความผิด</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q1-06: SINGLE + FCFS: การดูแลความปลอดภัย ซ่อนเควสต์ และรายงานความประพฤติ</div>
                     
                     <div class="actor-chips-row">
@@ -2589,7 +2666,7 @@ sequenceDiagram
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Worker (M-222)</span> — ยื่นรายงาน CONDUCT_OUT_OF_SCOPE (&#x27;ผู้ว่าจ้างบังคับขอเบอร์โทรส่วนตัวและนัดเจอภายนอก&#x27;)</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Worker (M-222)</span> — ยื่นรายงาน <span class="glossary-term" data-term="CONDUCT_OUT_OF_SCOPE">CONDUCT_OUT_OF_SCOPE</span> (&#x27;ผู้ว่าจ้างบังคับขอเบอร์โทรส่วนตัวและนัดเจอภายนอก&#x27;)</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag warning">QUEST_IN_PROGRESS</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ASSIGNMENT_ACTIVE</div>
@@ -2664,7 +2741,7 @@ sequenceDiagram
                         <span class="badge badge-nature">🛡️ Moderation / Penalty (การควบคุมและบทลงโทษ)</span>
                         <span class="badge badge-outcome-failed">ล้มเหลว (FAILED)</span>
                     </div>
-                    <div class="scenario-title">Hirer ยื่นรายงาน CONDUCT_ABANDONED -&gt; Admin ยืนยันความผิด -&gt; เพิ่มประวัติบทลงโทษ Worker</div>
+                    <div class="scenario-title">Hirer ยื่นรายงาน <span class="glossary-term" data-term="CONDUCT_ABANDONED">CONDUCT_ABANDONED</span> -&gt; Admin ยืนยันความผิด -&gt; เพิ่มประวัติบทลงโทษ Worker</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q1-06: SINGLE + FCFS: การดูแลความปลอดภัย ซ่อนเควสต์ และรายงานความประพฤติ</div>
                     
                     <div class="actor-chips-row">
@@ -2685,7 +2762,7 @@ sequenceDiagram
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Hirer (M-123)</span> — ยื่นรายงาน CONDUCT_ABANDONED ภายใน 1 วันหลังเควสต์ล้มเหลว</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Hirer (M-123)</span> — ยื่นรายงาน <span class="glossary-term" data-term="CONDUCT_ABANDONED">CONDUCT_ABANDONED</span> ภายใน 1 วันหลังเควสต์ล้มเหลว</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag danger">QUEST_FAILED</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ASSIGNMENT_INCOMPLETE</div>
@@ -3180,7 +3257,7 @@ sequenceDiagram
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">ผู้สมัคร (C1, C2)</span> — ทั้งสองคนเปิดห้องแชตสอบถาม (Candidate Inquiry) แยกกันคนละห้องกับ Hirer</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">ผู้สมัคร (C1, C2)</span> — ทั้งสองคนเปิดห้องแชตสอบถาม (<span class="glossary-term" data-term="Candidate Inquiry">Candidate Inquiry</span>) แยกกันคนละห้องกับ Hirer</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag">QUEST_OPEN</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ยังไม่มี</div>
@@ -4576,7 +4653,7 @@ sequenceDiagram
             
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 2: <span class="step-actor">Hirer (M-143)</span> — ยื่นรายงานความประพฤติ CONDUCT_ABANDONED ภายใน 1 วัน</div>
+                <div class="step-head">ขั้นตอนที่ 2: <span class="step-actor">Hirer (M-143)</span> — ยื่นรายงานความประพฤติ <span class="glossary-term" data-term="CONDUCT_ABANDONED">CONDUCT_ABANDONED</span> ภายใน 1 วัน</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag danger">QUEST_FAILED</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ASSIGNMENT_INCOMPLETE</div>
@@ -4945,7 +5022,7 @@ sequenceDiagram
                         <span class="badge badge-nature">🛡️ Moderation / Penalty (การควบคุมและบทลงโทษ)</span>
                         <span class="badge badge-outcome-success">สำเร็จ (COMPLETED)</span>
                     </div>
-                    <div class="scenario-title">ลำดับขั้นบทลงโทษ Hirer ติดธงแดง (Red Flag ความผิดครั้งที่ 1) -&gt; ระงับการสร้างเควสต์ใหม่</div>
+                    <div class="scenario-title">ลำดับขั้นบทลงโทษ Hirer ติดธงแดง (<span class="glossary-term" data-term="Red Flag">Red Flag</span> ความผิดครั้งที่ 1) -&gt; ระงับการสร้างเควสต์ใหม่</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q2-12: SINGLE + CANDIDATE: ความปลอดภัย มัลแวร์ และการแบนบัญชี</div>
                     
                     <div class="actor-chips-row">
@@ -4972,21 +5049,21 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ASSIGNMENT_COMPLETED</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> PROOF_APPROVED</div>
                     <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> ไม่มีการเปลี่ยนแปลง</div>
-                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ติดสัญลักษณ์ Red Flag บนโปรไฟล์ของ Hirer เป็นเวลา 7 วัน. ส่ง Push แจ้งเตือน</div>
-                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> ความผิดที่ได้รับการยืนยันครั้งแรกจะส่งผลให้ติด Red Flag ชั่วคราว</div>
+                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ติดสัญลักษณ์ <span class="glossary-term" data-term="Red Flag">Red Flag</span> บนโปรไฟล์ของ Hirer เป็นเวลา 7 วัน. ส่ง Push แจ้งเตือน</div>
+                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> ความผิดที่ได้รับการยืนยันครั้งแรกจะส่งผลให้ติด <span class="glossary-term" data-term="Red Flag">Red Flag</span> ชั่วคราว</div>
                 </div>
             </div>
             
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 2: <span class="step-actor">Hirer (M-147)</span> — พยายามสร้างและเผยแพร่เควสต์ใหม่ในขณะที่ยังมี Red Flag</div>
+                <div class="step-head">ขั้นตอนที่ 2: <span class="step-actor">Hirer (M-147)</span> — พยายามสร้างและเผยแพร่เควสต์ใหม่ในขณะที่ยังมี <span class="glossary-term" data-term="Red Flag">Red Flag</span></div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag success">QUEST_COMPLETED</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ASSIGNMENT_COMPLETED</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> PROOF_APPROVED</div>
                     <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> ไม่มีการเปลี่ยนแปลง</div>
                     <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ระบบตอบกลับข้อผิดพลาด: HTTP 403 Forbidden (&#x27;ACCOUNT_RED_FLAGGED_CANNOT_PUBLISH&#x27;)</div>
-                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> Red Flag จะระงับสิทธิ์ในการสร้างเควสต์ใหม่และการรับงานจนกว่าจะหมดอายุ</div>
+                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> <span class="glossary-term" data-term="Red Flag">Red Flag</span> จะระงับสิทธิ์ในการสร้างเควสต์ใหม่และการรับงานจนกว่าจะหมดอายุ</div>
                 </div>
             </div>
             
@@ -5014,7 +5091,7 @@ sequenceDiagram
                 
                 <div class="notes-box">
                     <span>💡</span>
-                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> ผลกระทบของบทลงโทษ Red Flag ต่อการสร้างเควสต์ใหม่</div>
+                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> ผลกระทบของบทลงโทษ <span class="glossary-term" data-term="Red Flag">Red Flag</span> ต่อการสร้างเควสต์ใหม่</div>
                 </div>
                 
                 <!-- Audit References for Domain Owner -->
@@ -5068,8 +5145,8 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> N/A</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> N/A</div>
                     <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> ไม่มีการเปลี่ยนแปลง</div>
-                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> อัปเดต member_penalty_records -&gt; ระงับบัญชี (TEMPORARILY_BANNED) เป็นเวลา 7 วัน พร้อมระงับกระเป๋าเงินอัตโนมัติตามกฎ PC-11</div>
-                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> บันทึกบทลงโทษ: ความผิดครั้งที่ 2 จะสั่งแบนชั่วคราว 7 วันและ Auto-Freeze กระเป๋าเงินอัตโนมัติตามกฎ PC-11</div>
+                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> อัปเดต member_penalty_records -&gt; ระงับบัญชี (TEMPORARILY_BANNED) เป็นเวลา 7 วัน พร้อมระงับกระเป๋าเงินอัตโนมัติตามกฎ <span class="glossary-term" data-term="PC-11">PC-11</span></div>
+                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> บันทึกบทลงโทษ: ความผิดครั้งที่ 2 จะสั่งแบนชั่วคราว 7 วันและ Auto-Freeze กระเป๋าเงินอัตโนมัติตามกฎ <span class="glossary-term" data-term="PC-11">PC-11</span></div>
                 </div>
             </div>
             
@@ -5362,7 +5439,7 @@ sequenceDiagram
                         <span class="badge badge-nature">💰 Financial / Ledger (การเงินและบัญชีคู่)</span>
                         <span class="badge badge-outcome-success">สำเร็จ (COMPLETED)</span>
                     </div>
-                    <div class="scenario-title">กลุ่ม FCFS 2 คน พร้อมการคำนวณและจัดสรรเศษสตางค์ (Remainder Satang)</div>
+                    <div class="scenario-title">กลุ่ม FCFS 2 คน พร้อมการคำนวณและจัดสรรเศษสตางค์ (<span class="glossary-term" data-term="Remainder Satang">Remainder Satang</span>)</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q3-13: GROUP + FCFS: เข้าร่วมเต็มจำนวนและสำเร็จทุกคน</div>
                     
                     <div class="actor-chips-row">
@@ -6498,7 +6575,7 @@ sequenceDiagram
                         <span class="badge badge-nature">🛡️ Moderation / Penalty (การควบคุมและบทลงโทษ)</span>
                         <span class="badge badge-outcome-failed">ล้มเหลว (FAILED)</span>
                     </div>
-                    <div class="scenario-title">W1 และ W2 ยื่นรายงาน CONDUCT_NO_SHOW ต่อ W3 ที่เบี้ยวนัดไม่ยอมกดเริ่มงาน</div>
+                    <div class="scenario-title">W1 และ W2 ยื่นรายงาน <span class="glossary-term" data-term="CONDUCT_NO_SHOW">CONDUCT_NO_SHOW</span> ต่อ W3 ที่เบี้ยวนัดไม่ยอมกดเริ่มงาน</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q3-16: GROUP + FCFS: หน้าที่การกดเริ่มงานของทุกคนในกลุ่ม FCFS</div>
                     
                     <div class="actor-chips-row">
@@ -6519,7 +6596,7 @@ sequenceDiagram
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Worker W1 (M-261)</span> — ยื่นรายงานความประพฤติระหว่างผู้รับงานด้วยกัน: CONDUCT_NO_SHOW กล่าวหา W3 (M-263)</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Worker W1 (M-261)</span> — ยื่นรายงานความประพฤติระหว่างผู้รับงานด้วยกัน: <span class="glossary-term" data-term="CONDUCT_NO_SHOW">CONDUCT_NO_SHOW</span> กล่าวหา W3 (M-263)</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag danger">QUEST_FAILED</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ทุกคน INCOMPLETE</div>
@@ -6567,7 +6644,7 @@ sequenceDiagram
                 
                 <div class="notes-box">
                     <span>💡</span>
-                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> การยื่นรายงานความประพฤติ CONDUCT_NO_SHOW ระหว่างผู้รับงานในกลุ่ม FCFS</div>
+                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> การยื่นรายงานความประพฤติ <span class="glossary-term" data-term="CONDUCT_NO_SHOW">CONDUCT_NO_SHOW</span> ระหว่างผู้รับงานในกลุ่ม FCFS</div>
                 </div>
                 
                 <!-- Audit References for Domain Owner -->
@@ -7696,7 +7773,7 @@ sequenceDiagram
                         <span class="badge badge-nature">🛡️ Moderation / Penalty (การควบคุมและบทลงโทษ)</span>
                         <span class="badge badge-outcome-failed">ล้มเหลว (FAILED)</span>
                     </div>
-                    <div class="scenario-title">ผู้รับงานยื่นรายงาน CONDUCT_NO_SHOW ต่อเพื่อนร่วมกลุ่ม -&gt; Admin ยืนยันความผิด</div>
+                    <div class="scenario-title">ผู้รับงานยื่นรายงาน <span class="glossary-term" data-term="CONDUCT_NO_SHOW">CONDUCT_NO_SHOW</span> ต่อเพื่อนร่วมกลุ่ม -&gt; Admin ยืนยันความผิด</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q3-19: GROUP + FCFS: การยกเลิกกลุ่ม รายงานความประพฤติ และการประเมินคะแนน</div>
                     
                     <div class="actor-chips-row">
@@ -7717,7 +7794,7 @@ sequenceDiagram
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Worker W1</span> — ยื่นรายงาน CONDUCT_NO_SHOW ต่อ W3 ภายใน 1 วันหลังเควสต์ล้มเหลว</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Worker W1</span> — ยื่นรายงาน <span class="glossary-term" data-term="CONDUCT_NO_SHOW">CONDUCT_NO_SHOW</span> ต่อ W3 ภายใน 1 วันหลังเควสต์ล้มเหลว</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag danger">QUEST_FAILED</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ทุกคน INCOMPLETE</div>
@@ -7792,7 +7869,7 @@ sequenceDiagram
                         <span class="badge badge-nature">🛡️ Moderation / Penalty (การควบคุมและบทลงโทษ)</span>
                         <span class="badge badge-outcome-failed">ล้มเหลว (FAILED)</span>
                     </div>
-                    <div class="scenario-title">Hirer ยื่นรายงาน CONDUCT_ABANDONED ต่อผู้รับงานที่ละทิ้งงานพร้อมกัน 2 คน</div>
+                    <div class="scenario-title">Hirer ยื่นรายงาน <span class="glossary-term" data-term="CONDUCT_ABANDONED">CONDUCT_ABANDONED</span> ต่อผู้รับงานที่ละทิ้งงานพร้อมกัน 2 คน</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q3-19: GROUP + FCFS: การยกเลิกกลุ่ม รายงานความประพฤติ และการประเมินคะแนน</div>
                     
                     <div class="actor-chips-row">
@@ -7813,7 +7890,7 @@ sequenceDiagram
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Hirer (M-176)</span> — ยื่นรายงาน CONDUCT_ABANDONED แยกกัน 2 ฉบับสำหรับ W2 และ W3</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Hirer (M-176)</span> — ยื่นรายงาน <span class="glossary-term" data-term="CONDUCT_ABANDONED">CONDUCT_ABANDONED</span> แยกกัน 2 ฉบับสำหรับ W2 และ W3</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag danger">QUEST_FAILED</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> W1: COMPLETED; W2, W3: INCOMPLETE</div>
@@ -7889,7 +7966,7 @@ sequenceDiagram
                         <span class="badge badge-nature">⏱️ Concurrency / Boundary (จังหวะเวลาและขอบเขต)</span>
                         <span class="badge badge-outcome-moderated">กำลังดำเนินการ / ดำเนินการพิเศษ</span>
                     </div>
-                    <div class="scenario-title">การสร้างทีม Candidate ด้วย Join Code 24 ชม. -&gt; สมาชิกเข้าครบ -&gt; หัวหน้าทีมกดยื่นสมัคร -&gt; Hirer คัดเลือก</div>
+                    <div class="scenario-title">การสร้างทีม Candidate ด้วย <span class="glossary-term" data-term="Join Code">Join Code</span> 24 ชม. -&gt; สมาชิกเข้าครบ -&gt; หัวหน้าทีมกดยื่นสมัคร -&gt; Hirer คัดเลือก</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q4-20: GROUP + CANDIDATE: รวมทีมด้วย Join Code 24 ชม. และสมัครงาน</div>
                     
                     <div class="actor-chips-row">
@@ -7903,7 +7980,7 @@ sequenceDiagram
             </div>
             <div class="scenario-body">
                 <div class="context-box">
-                    <div class="context-item"><strong>ผู้ว่าจ้าง (Hirer):</strong> Hirer (M-177 &#x27;น้องกร&#x27;)</div><div class="context-item"><strong>ทีมผู้สมัคร (Candidate Team):</strong> ทีม Alpha: หัวหน้าทีม (M-277 &#x27;พี่อ้อม&#x27;), สมาชิก [M-278 &#x27;น้องมายด์&#x27;, M-279 &#x27;พี่กอล์ฟ&#x27;]</div><div class="context-item"><strong>ข้อมูลการเงิน (Financials):</strong> เงินมัดจำรวม: 31,500 สตางค์ (รางวัลรวม: 30,000 สตางค์ = คนละ 10,000 สตางค์ x 3 คน, ค่าธรรมเนียม: 1,500 สตางค์)</div><div class="context-item"><strong>กรอบเวลา (Timing):</strong> สร้าง Join Code ที่ T+1h, ยื่นสมัครที่ T+2h, ได้รับเลือกที่ T+3h</div>
+                    <div class="context-item"><strong>ผู้ว่าจ้าง (Hirer):</strong> Hirer (M-177 &#x27;น้องกร&#x27;)</div><div class="context-item"><strong>ทีมผู้สมัคร (Candidate Team):</strong> ทีม Alpha: หัวหน้าทีม (M-277 &#x27;พี่อ้อม&#x27;), สมาชิก [M-278 &#x27;น้องมายด์&#x27;, M-279 &#x27;พี่กอล์ฟ&#x27;]</div><div class="context-item"><strong>ข้อมูลการเงิน (Financials):</strong> เงินมัดจำรวม: 31,500 สตางค์ (รางวัลรวม: 30,000 สตางค์ = คนละ 10,000 สตางค์ x 3 คน, ค่าธรรมเนียม: 1,500 สตางค์)</div><div class="context-item"><strong>กรอบเวลา (Timing):</strong> สร้าง <span class="glossary-term" data-term="Join Code">Join Code</span> ที่ T+1h, ยื่นสมัครที่ T+2h, ได้รับเลือกที่ T+3h</div>
                 </div>
                 <div class="steps-container">
                     <div class="steps-title">ลำดับขั้นตอนการทำงาน (Step-by-Step Execution Sequence):</div>
@@ -7916,8 +7993,8 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ยังไม่มี</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> ยังไม่มี</div>
                     <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> เงิน Escrow 31,500 สตางค์ถูกล็อก</div>
-                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> สร้าง Join Code ที่มีอายุ 24 ชั่วโมง (หมดอายุที่ T+25h)</div>
-                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> การรวมทีม Candidate เริ่มจากการที่หัวหน้าทีมกดสร้างทีมและได้รหัส Join Code</div>
+                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> สร้าง <span class="glossary-term" data-term="Join Code">Join Code</span> ที่มีอายุ 24 ชั่วโมง (หมดอายุที่ T+25h)</div>
+                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> การรวมทีม Candidate เริ่มจากการที่หัวหน้าทีมกดสร้างทีมและได้รหัส <span class="glossary-term" data-term="Join Code">Join Code</span></div>
                 </div>
             </div>
             
@@ -7990,7 +8067,7 @@ sequenceDiagram
                 
                 <div class="notes-box">
                     <span>💡</span>
-                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> โฟลว์มาตรฐานของการรวมทีม Candidate ด้วย Join Code และการคัดเลือกเข้าทำงานทั้งทีม</div>
+                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> โฟลว์มาตรฐานของการรวมทีม Candidate ด้วย <span class="glossary-term" data-term="Join Code">Join Code</span> และการคัดเลือกเข้าทำงานทั้งทีม</div>
                 </div>
                 
                 <!-- Audit References for Domain Owner -->
@@ -8051,7 +8128,7 @@ sequenceDiagram
             
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 2: <span class="step-actor">สมาชิกคนใหม่ (M-283)</span> — กรอกรหัส Join Code -&gt; เข้ามาเติมเต็มที่นั่งที่ 3</div>
+                <div class="step-head">ขั้นตอนที่ 2: <span class="step-actor">สมาชิกคนใหม่ (M-283)</span> — กรอกรหัส <span class="glossary-term" data-term="Join Code">Join Code</span> -&gt; เข้ามาเติมเต็มที่นั่งที่ 3</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag">QUEST_OPEN</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ยังไม่มี</div>
@@ -8128,7 +8205,7 @@ sequenceDiagram
                         <span class="badge badge-nature">🚫 Cancellation (การยกเลิกเควสต์)</span>
                         <span class="badge badge-outcome-moderated">กำลังดำเนินการ / ดำเนินการพิเศษ</span>
                     </div>
-                    <div class="scenario-title">รหัส Join Code หมดอายุ 24 ชั่วโมง -&gt; ทีมที่คนไม่ครบถูกยุบอัตโนมัติ</div>
+                    <div class="scenario-title">รหัส <span class="glossary-term" data-term="Join Code">Join Code</span> หมดอายุ 24 ชั่วโมง -&gt; ทีมที่คนไม่ครบถูกยุบอัตโนมัติ</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q4-20: GROUP + CANDIDATE: รวมทีมด้วย Join Code 24 ชม. และสมัครงาน</div>
                     
                     <div class="actor-chips-row">
@@ -8149,14 +8226,14 @@ sequenceDiagram
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">ระบบอัตโนมัติ (Cron)</span> — รหัส Join Code ครบอายุ 24 ชั่วโมงที่เวลา T+24h</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">ระบบอัตโนมัติ (Cron)</span> — รหัส <span class="glossary-term" data-term="Join Code">Join Code</span> ครบอายุ 24 ชั่วโมงที่เวลา T+24h</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag">QUEST_OPEN</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ยังไม่มี</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> ยังไม่มี</div>
                     <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> เงิน Escrow ถูกล็อก</div>
                     <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ทีม Gamma ถูกยุบอัตโนมัติ. ส่ง Push หาหัวหน้าและสมาชิก: &#x27;รหัสเข้าร่วมทีมหมดอายุ ทีมถูกยกเลิกแล้ว&#x27;</div>
-                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> รหัส Join Code มีอายุจำกัด 24 ชั่วโมง ทีมที่คนไม่ครบจะถูกยุบเพื่อปลดปล่อยสมาชิกให้ไปรวมทีมอื่นได้</div>
+                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> รหัส <span class="glossary-term" data-term="Join Code">Join Code</span> มีอายุจำกัด 24 ชั่วโมง ทีมที่คนไม่ครบจะถูกยุบเพื่อปลดปล่อยสมาชิกให้ไปรวมทีมอื่นได้</div>
                 </div>
             </div>
             
@@ -8182,7 +8259,7 @@ sequenceDiagram
                 
                 <div class="notes-box">
                     <span>💡</span>
-                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> ระบบความปลอดภัยการหมดอายุของรหัส Join Code 24 ชั่วโมง</div>
+                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> ระบบความปลอดภัยการหมดอายุของรหัส <span class="glossary-term" data-term="Join Code">Join Code</span> 24 ชั่วโมง</div>
                 </div>
                 
                 <!-- Audit References for Domain Owner -->
@@ -9284,7 +9361,7 @@ sequenceDiagram
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">ผู้สนใจร่วมทีม (M-314)</span> — เปิดห้องสอบถาม 1-ต่อ-1 (Candidate Inquiry) กับ Hirer ก่อนที่จะตัดสินใจกดเข้าทีมใดๆ</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">ผู้สนใจร่วมทีม (M-314)</span> — เปิดห้องสอบถาม 1-ต่อ-1 (<span class="glossary-term" data-term="Candidate Inquiry">Candidate Inquiry</span>) กับ Hirer ก่อนที่จะตัดสินใจกดเข้าทีมใดๆ</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag">QUEST_OPEN</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ยังไม่มี</div>
@@ -9787,7 +9864,7 @@ sequenceDiagram
                         <span class="badge badge-nature">🛡️ Moderation / Penalty (การควบคุมและบทลงโทษ)</span>
                         <span class="badge badge-outcome-failed">ล้มเหลว (FAILED)</span>
                     </div>
-                    <div class="scenario-title">Hirer ยื่นรายงาน CONDUCT_ABANDONED ต่อหัวหน้าทีม (เฉพาะหัวหน้าเท่านั้นที่มีหน้าที่ส่งงาน)</div>
+                    <div class="scenario-title">Hirer ยื่นรายงาน <span class="glossary-term" data-term="CONDUCT_ABANDONED">CONDUCT_ABANDONED</span> ต่อหัวหน้าทีม (เฉพาะหัวหน้าเท่านั้นที่มีหน้าที่ส่งงาน)</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q4-25: GROUP + CANDIDATE: ข้อพิพาท การรายงานหัวหน้าทีม และการประเมินคะแนน</div>
                     
                     <div class="actor-chips-row">
@@ -9808,7 +9885,7 @@ sequenceDiagram
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Hirer (M-198)</span> — ยื่นรายงานความประพฤติ CONDUCT_ABANDONED กล่าวหาหัวหน้าทีม (M-324)</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Hirer (M-198)</span> — ยื่นรายงานความประพฤติ <span class="glossary-term" data-term="CONDUCT_ABANDONED">CONDUCT_ABANDONED</span> กล่าวหาหัวหน้าทีม (M-324)</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag danger">QUEST_FAILED</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> สมาชิกทุกคน INCOMPLETE</div>
@@ -9884,7 +9961,7 @@ sequenceDiagram
                         <span class="badge badge-nature">🛡️ Moderation / Penalty (การควบคุมและบทลงโทษ)</span>
                         <span class="badge badge-outcome-moderated">กำลังดำเนินการ / ดำเนินการพิเศษ</span>
                     </div>
-                    <div class="scenario-title">สมาชิกในทีมยื่นรายงาน CONDUCT_OUT_OF_SCOPE ต่อ Hirer -&gt; Admin ตรวจสอบผ่าน Token</div>
+                    <div class="scenario-title">สมาชิกในทีมยื่นรายงาน <span class="glossary-term" data-term="CONDUCT_OUT_OF_SCOPE">CONDUCT_OUT_OF_SCOPE</span> ต่อ Hirer -&gt; Admin ตรวจสอบผ่าน Token</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype Q4-25: GROUP + CANDIDATE: ข้อพิพาท การรายงานหัวหน้าทีม และการประเมินคะแนน</div>
                     
                     <div class="actor-chips-row">
@@ -9905,7 +9982,7 @@ sequenceDiagram
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">สมาชิกคนที่ 2 (M-327)</span> — ยื่นรายงาน CONDUCT_OUT_OF_SCOPE ต่อผู้ว่าจ้าง</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">สมาชิกคนที่ 2 (M-327)</span> — ยื่นรายงาน <span class="glossary-term" data-term="CONDUCT_OUT_OF_SCOPE">CONDUCT_OUT_OF_SCOPE</span> ต่อผู้ว่าจ้าง</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag warning">QUEST_IN_PROGRESS</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> 3 คน ASSIGNMENT_ACTIVE</div>
@@ -10107,14 +10184,14 @@ sequenceDiagram
             </div>
             <div class="scenario-body">
                 <div class="context-box">
-                    <div class="context-item"><strong>ผู้รับงาน (Worker):</strong> Worker (M-201 &#x27;น้องพลอย&#x27;)</div><div class="context-item"><strong>ผู้ดูแลระบบ (Admin):</strong> Admin (A-01)</div><div class="context-item"><strong>ยอดเงินที่ขอถอน:</strong> 50,000 สตางค์ (500.00 บาท) จากบัญชี EARNINGS</div><div class="context-item"><strong>ช่องทางปลายทาง:</strong> บัญชีธนาคารกสิกรไทย (KBANK) ข้อมูลเข้ารหัส AES-256-GCM</div><div class="context-item"><strong>สถานะคำขอ (Status):</strong> PENDING_ADMIN_APPROVAL -&gt; APPROVED -&gt; TRANSFERRED</div>
+                    <div class="context-item"><strong>ผู้รับงาน (Worker):</strong> Worker (M-201 &#x27;น้องพลอย&#x27;)</div><div class="context-item"><strong>ผู้ดูแลระบบ (Admin):</strong> Admin (A-01)</div><div class="context-item"><strong>ยอดเงินที่ขอถอน:</strong> 50,000 สตางค์ (500.00 บาท) จากบัญชี EARNINGS</div><div class="context-item"><strong>ช่องทางปลายทาง:</strong> บัญชีธนาคารกสิกรไทย (KBANK) ข้อมูลเข้ารหัส <span class="glossary-term" data-term="AES-256-GCM">AES-256-GCM</span></div><div class="context-item"><strong>สถานะคำขอ (Status):</strong> PENDING_ADMIN_APPROVAL -&gt; APPROVED -&gt; TRANSFERRED</div>
                 </div>
                 <div class="steps-container">
                     <div class="steps-title">ลำดับขั้นตอนการทำงาน (Step-by-Step Execution Sequence):</div>
                     
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Worker (M-201)</span> — ส่งคำขอถอนเงินรางวัล POST /api/v1/wallets/payouts จำนวน 50,000 สตางค์ พร้อมแนบ Idempotency-Key</div>
+                <div class="step-head">ขั้นตอนที่ 1: <span class="step-actor">Worker (M-201)</span> — ส่งคำขอถอนเงินรางวัล POST /api/v1/wallets/payouts จำนวน 50,000 สตางค์ พร้อมแนบ <span class="glossary-term" data-term="Idempotency-Key">Idempotency-Key</span></div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag">N/A (กระเป๋าเงิน)</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> N/A</div>
@@ -10218,7 +10295,7 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> N/A</div>
                     <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> Double-entry: ล็อกเงิน 30,000 สตางค์ สู่ PENDING_PAYOUT_RESERVATION</div>
                     <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> บันทึกคำขอถอนเงิน</div>
-                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> ระบบล็อกยอดเงินและบันทึกปลายทางที่เข้ารหัส AES-256-GCM ตาม ADR 0008</div>
+                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> ระบบล็อกยอดเงินและบันทึกปลายทางที่เข้ารหัส <span class="glossary-term" data-term="AES-256-GCM">AES-256-GCM</span> ตาม ADR 0008</div>
                 </div>
             </div>
             
@@ -10285,7 +10362,7 @@ sequenceDiagram
                         <span class="badge badge-nature">🛡️ Moderation / Penalty (การควบคุมและบทลงโทษ)</span>
                         <span class="badge badge-outcome-failed">ล้มเหลว (REJECTED_AT_API)</span>
                     </div>
-                    <div class="scenario-title">กระเป๋าเงินถูกระงับ (WALLET_FROZEN) -&gt; พยายามส่งคำขอถอนเงิน -&gt; ถูกปฏิเสธที่ API Boundary</div>
+                    <div class="scenario-title">กระเป๋าเงินถูกระงับ (<span class="glossary-term" data-term="WALLET_FROZEN">WALLET_FROZEN</span>) -&gt; พยายามส่งคำขอถอนเงิน -&gt; ถูกปฏิเสธที่ API Boundary</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype AF-02: การควบคุมกระเป๋าเงินและการอายัด (Wallet Freeze &amp; In-Progress Protection)</div>
                     
                     <div class="actor-chips-row">
@@ -10299,7 +10376,7 @@ sequenceDiagram
             </div>
             <div class="scenario-body">
                 <div class="context-box">
-                    <div class="context-item"><strong>ผู้รับงาน (Worker):</strong> Worker (M-203)</div><div class="context-item"><strong>สถานะกระเป๋าเงิน (Wallet Status):</strong> WALLET_FROZEN (ถูกระงับจากการทำผิดกฎ PC-11)</div><div class="context-item"><strong>ยอดเงินใน EARNINGS:</strong> 100,000 สตางค์</div><div class="context-item"><strong>พฤติกรรม:</strong> พยายามกดถอนเงินผ่าน API</div>
+                    <div class="context-item"><strong>ผู้รับงาน (Worker):</strong> Worker (M-203)</div><div class="context-item"><strong>สถานะกระเป๋าเงิน (Wallet Status):</strong> <span class="glossary-term" data-term="WALLET_FROZEN">WALLET_FROZEN</span> (ถูกระงับจากการทำผิดกฎ <span class="glossary-term" data-term="PC-11">PC-11</span>)</div><div class="context-item"><strong>ยอดเงินใน EARNINGS:</strong> 100,000 สตางค์</div><div class="context-item"><strong>พฤติกรรม:</strong> พยายามกดถอนเงินผ่าน API</div>
                 </div>
                 <div class="steps-container">
                     <div class="steps-title">ลำดับขั้นตอนการทำงาน (Step-by-Step Execution Sequence):</div>
@@ -10389,7 +10466,7 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag">N/A</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> N/A</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> N/A</div>
-                    <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> Double-entry: เครดิตเพิ่มเงิน 100,000 สตางค์ สู่กระเป๋า SPENDING ของ Hirer พร้อมบันทึก Idempotency-Key</div>
+                    <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> Double-entry: เครดิตเพิ่มเงิน 100,000 สตางค์ สู่กระเป๋า SPENDING ของ Hirer พร้อมบันทึก <span class="glossary-term" data-term="Idempotency-Key">Idempotency-Key</span></div>
                     <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ส่ง Push แจ้ง Hirer: &#x27;เติมเงินสำเร็จ 1,000.00 บาท&#x27;</div>
                     <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> ระบบเติมเงินและบันทึกประวัติการชำระเงินสำเร็จ</div>
                 </div>
@@ -10402,7 +10479,7 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag">N/A</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> N/A</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> N/A</div>
-                    <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> ไม่มีการลงบัญชีซ้ำ (Double-Entry Guard ตรวจพบ Idempotency-Key เดิม)</div>
+                    <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> ไม่มีการลงบัญชีซ้ำ (Double-Entry Guard ตรวจพบ <span class="glossary-term" data-term="Idempotency-Key">Idempotency-Key</span> เดิม)</div>
                     <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ระบบตอบกลับ HTTP 200 OK ให้ Payment Gateway ทันทีโดยไม่ทำธุรกรรมซ้ำ</div>
                     <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> ตาม ADR 0006 ทุกการเคลื่อนไหวทางการเงินต้อง Idempotent ป้องกันการเติมเงินเบิ้ล 100%</div>
                 </div>
@@ -10430,7 +10507,7 @@ sequenceDiagram
                 
                 <div class="notes-box">
                     <span>💡</span>
-                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> ป้องกันปัญหา Duplicate Top-up Webhook ด้วยการล็อก Idempotency-Key ทางบัญชี</div>
+                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> ป้องกันปัญหา Duplicate Top-up Webhook ด้วยการล็อก <span class="glossary-term" data-term="Idempotency-Key">Idempotency-Key</span> ทางบัญชี</div>
                 </div>
                 
                 <!-- Audit References for Domain Owner -->
@@ -10483,7 +10560,7 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag warning">QUEST_IN_PROGRESS</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ASSIGNMENT_ACTIVE</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> PROOF_DRAFT</div>
-                    <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> กระเป๋า Hirer เปลี่ยนสถานะเป็น WALLET_FROZEN แต่เงินเควสต์อยู่ใน Quest Escrow อยู่แล้ว</div>
+                    <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> กระเป๋า Hirer เปลี่ยนสถานะเป็น <span class="glossary-term" data-term="WALLET_FROZEN">WALLET_FROZEN</span> แต่เงินเควสต์อยู่ใน <span class="glossary-term" data-term="Quest Escrow">Quest Escrow</span> อยู่แล้ว</div>
                     <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ส่ง Push แจ้ง Hirer: &#x27;กระเป๋าเงินของคุณถูกระงับการใช้งาน&#x27;</div>
                     <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> กฎ Invariant &#x27;In-progress commitments protected&#x27;: เควสต์ที่เคยวาง Escrow สำเร็จแล้วจะไม่ถูกยกเลิกหรือหยุดชะงัก</div>
                 </div>
@@ -10569,7 +10646,7 @@ sequenceDiagram
             </div>
             <div class="scenario-body">
                 <div class="context-box">
-                    <div class="context-item"><strong>ผู้ว่าจ้าง (Hirer):</strong> Hirer (M-106)</div><div class="context-item"><strong>ผู้รับงาน (Worker):</strong> Worker (M-206 - กระเป๋าสถานะ WALLET_FROZEN)</div><div class="context-item"><strong>ผลลัพธ์:</strong> เงินรางวัลเข้าบัญชีได้ แต่ถอนไม่ได้จนกว่า Admin จะปลดอายัด</div>
+                    <div class="context-item"><strong>ผู้ว่าจ้าง (Hirer):</strong> Hirer (M-106)</div><div class="context-item"><strong>ผู้รับงาน (Worker):</strong> Worker (M-206 - กระเป๋าสถานะ <span class="glossary-term" data-term="WALLET_FROZEN">WALLET_FROZEN</span>)</div><div class="context-item"><strong>ผลลัพธ์:</strong> เงินรางวัลเข้าบัญชีได้ แต่ถอนไม่ได้จนกว่า Admin จะปลดอายัด</div>
                 </div>
                 <div class="steps-container">
                     <div class="steps-title">ลำดับขั้นตอนการทำงาน (Step-by-Step Execution Sequence):</div>
@@ -10666,7 +10743,7 @@ sequenceDiagram
             </div>
             <div class="scenario-body">
                 <div class="context-box">
-                    <div class="context-item"><strong>ผู้ว่าจ้าง (Hirer):</strong> Hirer (M-107 - กระเป๋า WALLET_FROZEN)</div><div class="context-item"><strong>ผู้รับงาน (Worker):</strong> Worker (M-207)</div><div class="context-item"><strong>เงินมัดจำรวม:</strong> 10,500 สตางค์ (รางวัล 10,000 + ค่าธรรมเนียม 500)</div>
+                    <div class="context-item"><strong>ผู้ว่าจ้าง (Hirer):</strong> Hirer (M-107 - กระเป๋า <span class="glossary-term" data-term="WALLET_FROZEN">WALLET_FROZEN</span>)</div><div class="context-item"><strong>ผู้รับงาน (Worker):</strong> Worker (M-207)</div><div class="context-item"><strong>เงินมัดจำรวม:</strong> 10,500 สตางค์ (รางวัล 10,000 + ค่าธรรมเนียม 500)</div>
                 </div>
                 <div class="steps-container">
                     <div class="steps-title">ลำดับขั้นตอนการทำงาน (Step-by-Step Execution Sequence):</div>
@@ -11025,7 +11102,7 @@ sequenceDiagram
                         <span class="badge badge-nature">🛡️ Moderation / Penalty (การควบคุมและบทลงโทษ)</span>
                         <span class="badge badge-outcome-moderated">ได้รับการยกเว้น (EXEMPTION_APPLIED)</span>
                     </div>
-                    <div class="scenario-title">สมาชิกทำผิดเล็กน้อยสะสม 10 ครั้งแรก -&gt; กฎยกเว้น (PC-12) ไม่ตัดคะแนนหรือติด Red Flag จนกว่าจะถึงครั้งที่ 11</div>
+                    <div class="scenario-title">สมาชิกทำผิดเล็กน้อยสะสม 10 ครั้งแรก -&gt; กฎยกเว้น (<span class="glossary-term" data-term="PC-12">PC-12</span>) ไม่ตัดคะแนนหรือติด <span class="glossary-term" data-term="Red Flag">Red Flag</span> จนกว่าจะถึงครั้งที่ 11</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype AF-05: บันไดบทลงโทษสมาชิกและการยกเว้น (Member Penalty Ladders &amp; Exemptions)</div>
                     
                     <div class="actor-chips-row">
@@ -11039,7 +11116,7 @@ sequenceDiagram
             </div>
             <div class="scenario-body">
                 <div class="context-box">
-                    <div class="context-item"><strong>สมาชิก (Member):</strong> Worker (M-215)</div><div class="context-item"><strong>ประวัติการกระทำผิด:</strong> ได้รับการยืนยันความผิดครั้งที่ 1 ถึง 10 (Minor Conduct Violations)</div><div class="context-item"><strong>กฎที่บังคับใช้:</strong> PC-12: การกระทำผิด 10 ครั้งแรกได้รับการยกเว้น ไม่ติด Red Flag</div><div class="context-item"><strong>การเปลี่ยนแปลง:</strong> เมื่อถึงครั้งที่ 11 ระบบจึงจะเริ่มติดสัญลักษณ์ Red Flag เป็นครั้งแรก</div>
+                    <div class="context-item"><strong>สมาชิก (Member):</strong> Worker (M-215)</div><div class="context-item"><strong>ประวัติการกระทำผิด:</strong> ได้รับการยืนยันความผิดครั้งที่ 1 ถึง 10 (Minor Conduct Violations)</div><div class="context-item"><strong>กฎที่บังคับใช้:</strong> <span class="glossary-term" data-term="PC-12">PC-12</span>: การกระทำผิด 10 ครั้งแรกได้รับการยกเว้น ไม่ติด <span class="glossary-term" data-term="Red Flag">Red Flag</span></div><div class="context-item"><strong>การเปลี่ยนแปลง:</strong> เมื่อถึงครั้งที่ 11 ระบบจึงจะเริ่มติดสัญลักษณ์ <span class="glossary-term" data-term="Red Flag">Red Flag</span> เป็นครั้งแรก</div>
                 </div>
                 <div class="steps-container">
                     <div class="steps-title">ลำดับขั้นตอนการทำงาน (Step-by-Step Execution Sequence):</div>
@@ -11053,7 +11130,7 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> PROOF_APPROVED</div>
                     <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> ไม่มีการเปลี่ยนแปลง</div>
                     <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ส่ง Push แจ้งเตือนสถิติความผิดสะสม 10/10 ครั้ง (ยังไม่ถูกลงโทษ)</div>
-                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> กฎ PC-12 กำหนดช่วงผ่อนปรน 10 ครั้งแรกสำหรับนิสิตใหม่เพื่อป้องกันการลงโทษรุนแรงเกินไปจากความผิดพลาดเล็กน้อย</div>
+                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> กฎ <span class="glossary-term" data-term="PC-12">PC-12</span> กำหนดช่วงผ่อนปรน 10 ครั้งแรกสำหรับนิสิตใหม่เพื่อป้องกันการลงโทษรุนแรงเกินไปจากความผิดพลาดเล็กน้อย</div>
                 </div>
             </div>
             
@@ -11065,8 +11142,8 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> ASSIGNMENT_COMPLETED</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> PROOF_APPROVED</div>
                     <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> ไม่มีการเปลี่ยนแปลง</div>
-                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ส่ง Push แจ้ง: &#x27;คุณกระทำผิดครั้งที่ 11 บัญชีของคุณติด Red Flag เป็นเวลา 7 วัน&#x27;</div>
-                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> เมื่อพ้นข้อยกเว้น ความผิดที่ 11 จะทริกเกอร์บันไดขั้นที่ 1 (Red Flag) ทันที</div>
+                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ส่ง Push แจ้ง: &#x27;คุณกระทำผิดครั้งที่ 11 บัญชีของคุณติด <span class="glossary-term" data-term="Red Flag">Red Flag</span> เป็นเวลา 7 วัน&#x27;</div>
+                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> เมื่อพ้นข้อยกเว้น ความผิดที่ 11 จะทริกเกอร์บันไดขั้นที่ 1 (<span class="glossary-term" data-term="Red Flag">Red Flag</span>) ทันที</div>
                 </div>
             </div>
             
@@ -11093,7 +11170,7 @@ sequenceDiagram
                 
                 <div class="notes-box">
                     <span>💡</span>
-                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> แสดงกฎความยุติธรรม PC-12 Exemption ที่ป้องกันไม่ให้นิสิตถูก Red Flag จากการทำผิดเล็กๆ น้อยๆ 10 ครั้งแรก</div>
+                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> แสดงกฎความยุติธรรม <span class="glossary-term" data-term="PC-12">PC-12</span> Exemption ที่ป้องกันไม่ให้นิสิตถูก <span class="glossary-term" data-term="Red Flag">Red Flag</span> จากการทำผิดเล็กๆ น้อยๆ 10 ครั้งแรก</div>
                 </div>
                 
                 <!-- Audit References for Domain Owner -->
@@ -11134,7 +11211,7 @@ sequenceDiagram
             </div>
             <div class="scenario-body">
                 <div class="context-box">
-                    <div class="context-item"><strong>สมาชิก (Member):</strong> Candidate (M-220)</div><div class="context-item"><strong>ผู้ดูแลระบบ (Admin):</strong> Admin (A-01)</div><div class="context-item"><strong>ประวัติ:</strong> เคยถูก Red Flag (ครั้งที่ 1) และ Temporary Ban 7 วัน (ครั้งที่ 2) มาแล้ว</div><div class="context-item"><strong>เหตุการณ์:</strong> Admin ยืนยันความผิดทุจริตหลอกลวงเป็นครั้งที่ 3</div>
+                    <div class="context-item"><strong>สมาชิก (Member):</strong> Candidate (M-220)</div><div class="context-item"><strong>ผู้ดูแลระบบ (Admin):</strong> Admin (A-01)</div><div class="context-item"><strong>ประวัติ:</strong> เคยถูก <span class="glossary-term" data-term="Red Flag">Red Flag</span> (ครั้งที่ 1) และ Temporary Ban 7 วัน (ครั้งที่ 2) มาแล้ว</div><div class="context-item"><strong>เหตุการณ์:</strong> Admin ยืนยันความผิดทุจริตหลอกลวงเป็นครั้งที่ 3</div>
                 </div>
                 <div class="steps-container">
                     <div class="steps-title">ลำดับขั้นตอนการทำงาน (Step-by-Step Execution Sequence):</div>
@@ -11148,7 +11225,7 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> N/A</div>
                     <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> กระเป๋าเงินถูก Freeze ถาวร (ห้ามใช้จ่าย/ถอน)</div>
                     <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ส่งคำสั่ง Revoke Session ทันที ผู้ใช้ถูกเตะออกจากระบบทุกอุปกรณ์</div>
-                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> ความผิดขั้นที่ 3 ทริกเกอร์ MEMBER_BANNED_PERMANENTLY ตัดสิทธิ์การเข้าใช้งานระบบอย่างถาวร</div>
+                    <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> ความผิดขั้นที่ 3 ทริกเกอร์ <span class="glossary-term" data-term="MEMBER_BANNED_PERMANENTLY">MEMBER_BANNED_PERMANENTLY</span> ตัดสิทธิ์การเข้าใช้งานระบบอย่างถาวร</div>
                 </div>
             </div>
             
@@ -11214,7 +11291,7 @@ sequenceDiagram
                         <span class="badge badge-nature">⚖️ Dispute / Arbitration (ข้อพิพาทและการตัดสิน)</span>
                         <span class="badge badge-outcome-moderated">ปลดบทลงโทษ (PENALTY_REVERSED)</span>
                     </div>
-                    <div class="scenario-title">Admin ตรวจสอบพบความผิดพลาดและกู้คืนเคส (REPORT_CASE_RESTORED) -&gt; ระบบสร้าง Reversing Record ปลด Red Flag ก่อนกำหนด</div>
+                    <div class="scenario-title">Admin ตรวจสอบพบความผิดพลาดและกู้คืนเคส (<span class="glossary-term" data-term="REPORT_CASE_RESTORED">REPORT_CASE_RESTORED</span>) -&gt; ระบบสร้าง Reversing Record ปลด <span class="glossary-term" data-term="Red Flag">Red Flag</span> ก่อนกำหนด</div>
                     <div class="scenario-archetype">หมวดหมู่ Archetype AF-05: บันไดบทลงโทษสมาชิกและการยกเว้น (Member Penalty Ladders &amp; Exemptions)</div>
                     
                     <div class="actor-chips-row">
@@ -11228,7 +11305,7 @@ sequenceDiagram
             </div>
             <div class="scenario-body">
                 <div class="context-box">
-                    <div class="context-item"><strong>สมาชิก (Member):</strong> Worker (M-225)</div><div class="context-item"><strong>ผู้ดูแลระบบ (Admin):</strong> Admin (A-02)</div><div class="context-item"><strong>เหตุการณ์:</strong> Admin คนเดิมเคยกด Upheld รายงานผิดคน ทำให้ M-225 ติด Red Flag เมื่อวานนี้</div>
+                    <div class="context-item"><strong>สมาชิก (Member):</strong> Worker (M-225)</div><div class="context-item"><strong>ผู้ดูแลระบบ (Admin):</strong> Admin (A-02)</div><div class="context-item"><strong>เหตุการณ์:</strong> Admin คนเดิมเคยกด Upheld รายงานผิดคน ทำให้ M-225 ติด <span class="glossary-term" data-term="Red Flag">Red Flag</span> เมื่อวานนี้</div>
                 </div>
                 <div class="steps-container">
                     <div class="steps-title">ลำดับขั้นตอนการทำงาน (Step-by-Step Execution Sequence):</div>
@@ -11241,14 +11318,14 @@ sequenceDiagram
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> N/A</div>
                     <div class="detail-item"><strong>สถานะหลักฐาน (Proof Status):</strong> N/A</div>
                     <div class="detail-item"><strong>การเคลื่อนไหวบัญชี/เงิน (Money & Ledger):</strong> ไม่มี</div>
-                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ส่ง Push แจ้ง Worker: &#x27;รายงานความประพฤติได้รับการแก้ไขแล้ว สัญลักษณ์ Red Flag ถูกปลดออกเรียบร้อย&#x27;</div>
+                    <div class="detail-item" style="grid-column: 1 / -1;"><strong>แชตและการแจ้งเตือน (Chat & Push):</strong> ส่ง Push แจ้ง Worker: &#x27;รายงานความประพฤติได้รับการแก้ไขแล้ว สัญลักษณ์ <span class="glossary-term" data-term="Red Flag">Red Flag</span> ถูกปลดออกเรียบร้อย&#x27;</div>
                     <div class="detail-item" style="grid-column: 1 / -1; color: #0f766e;"><strong>กฎและขอบเขตทางธุรกิจ (Rule Invariant):</strong> ตาม ADR 0010 การแก้ไขความผิดพลาดต้องสร้าง Reversing Record เชื่อมโยงกับ Record เดิม ห้ามลบประวัติ</div>
                 </div>
             </div>
             
             <div class="step-row">
                 <div class="step-circle"></div>
-                <div class="step-head">ขั้นตอนที่ 2: <span class="step-actor">ระบบอัตโนมัติ (System)</span> — สร้าง Record ใหม่ type=&#x27;REVERSAL&#x27; ใน memberPenaltyRecord และเคลียร์สถานะ Red Flag ทันที</div>
+                <div class="step-head">ขั้นตอนที่ 2: <span class="step-actor">ระบบอัตโนมัติ (System)</span> — สร้าง Record ใหม่ type=&#x27;REVERSAL&#x27; ใน memberPenaltyRecord และเคลียร์สถานะ <span class="glossary-term" data-term="Red Flag">Red Flag</span> ทันที</div>
                 <div class="step-details-grid">
                     <div class="detail-item"><strong>สถานะเควสต์ (Quest State):</strong> <span class="state-tag">N/A</span></div>
                     <div class="detail-item"><strong>สถานะการมอบหมาย (Assignment):</strong> N/A</div>
@@ -11321,7 +11398,7 @@ sequenceDiagram
             </div>
             <div class="scenario-body">
                 <div class="context-box">
-                    <div class="context-item"><strong>ผู้รับงาน (Worker):</strong> Worker (M-230)</div><div class="context-item"><strong>ประวัติรีวิว:</strong> ได้รับรีวิวสะสมครบ 12 ครั้ง (ผ่านเกณฑ์ขั้นต่ำ 10 ครั้ง) โดยมีคะแนนเฉลี่ย 2.7 ดาว (ต่ำกว่าเกณฑ์ 3.0 ดาว)</div><div class="context-item"><strong>กฎที่บังคับใช้:</strong> PC-09: คะแนนเฉลี่ยต่ำกว่า 3.0 เมื่อครบ 10 รีวิวขึ้นไป จะถูกแบนจากการรับงาน 7 วัน</div>
+                    <div class="context-item"><strong>ผู้รับงาน (Worker):</strong> Worker (M-230)</div><div class="context-item"><strong>ประวัติรีวิว:</strong> ได้รับรีวิวสะสมครบ 12 ครั้ง (ผ่านเกณฑ์ขั้นต่ำ 10 ครั้ง) โดยมีคะแนนเฉลี่ย 2.7 ดาว (ต่ำกว่าเกณฑ์ 3.0 ดาว)</div><div class="context-item"><strong>กฎที่บังคับใช้:</strong> <span class="glossary-term" data-term="PC-09">PC-09</span>: คะแนนเฉลี่ยต่ำกว่า 3.0 เมื่อครบ 10 รีวิวขึ้นไป จะถูกแบนจากการรับงาน 7 วัน</div>
                 </div>
                 <div class="steps-container">
                     <div class="steps-title">ลำดับขั้นตอนการทำงาน (Step-by-Step Execution Sequence):</div>
@@ -11374,7 +11451,7 @@ sequenceDiagram
                 
                 <div class="notes-box">
                     <span>💡</span>
-                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> แสดงการทำงานของ Low-Average-Review Ladder อัตโนมัติตามกฎ PC-09</div>
+                    <div><strong>จุดสำคัญและกรณีขอบเขต (Key Invariant & Edge Case Note):</strong> แสดงการทำงานของ Low-Average-Review Ladder อัตโนมัติตามกฎ <span class="glossary-term" data-term="PC-09">PC-09</span></div>
                 </div>
                 
                 <!-- Audit References for Domain Owner -->
@@ -11393,6 +11470,8 @@ sequenceDiagram
 <button class="fab-top" onclick="window.scrollTo({ top: 0, behavior: 'smooth' })" title="กลับขึ้นบนสุด">⬆️</button>
 
 <script>
+const GLOSSARY_DATA = {"CONDUCT_OUT_OF_SCOPE": {"title": "CONDUCT_OUT_OF_SCOPE (สั่งงานนอกข้อตกลง)", "category": "🚩 รายงานความประพฤติ (Conduct Report)", "definition": "การรายงานเมื่อผู้ว่าจ้างสั่งงานหรือเรียกร้องงานนอกเหนือจากเงื่อนไขที่ระบุไว้ในเควสต์", "effect": "Admin จะเข้าตรวจสอบประวัติแชต หากพบว่าเป็นจริง จะสั่งยกฟ้องหรือคุ้มครองผู้รับงานไม่ให้เสียสิทธิ์", "rulebook": "docs/rulebook/admin/admin-conduct-report-contract.md §Report Codes"}, "CONDUCT_NO_SHOW": {"title": "CONDUCT_NO_SHOW (ไม่มาทำงานตามนัด)", "category": "🚩 รายงานความประพฤติ (Conduct Report)", "definition": "การรายงานเมื่อผู้รับงานในเควสต์กลุ่มไม่มากดเริ่มงานหรือหายตัวไปในเวลาเริ่มงาน", "effect": "บันทึกประวัติความประพฤติและเปิดทางให้เพื่อนร่วมกลุ่มที่เหลือตัดสินใจทำต่อหรือขอยกเลิก", "rulebook": "docs/rulebook/admin/admin-conduct-report-contract.md §CONDUCT_NO_SHOW"}, "CONDUCT_ABANDONED": {"title": "CONDUCT_ABANDONED (ทิ้งงานกลางคัน / ไม่ส่งงาน)", "category": "🚩 รายงานความประพฤติ (Conduct Report)", "definition": "การรายงานเมื่อผู้รับงานหรือหัวหน้าทีมรับงานแล้วหายเงียบ ทิ้งงาน หรือไม่ยอมส่งมอบงานตามกำหนด", "effect": "เข้าสู่บันไดความผิด Misconduct Ladder และอาจถูกลงโทษ Red Flag หรือระงับบัญชี", "rulebook": "docs/rulebook/admin/admin-conduct-report-contract.md §CONDUCT_ABANDONED"}, "CONDUCT_HARASSMENT": {"title": "CONDUCT_HARASSMENT (พฤติกรรมคุกคาม/ไม่เหมาะสม)", "category": "🚩 รายงานความประพฤติ (Conduct Report)", "definition": "การใช้ภาษาหยาบคาย ข่มขู่ หรือคุกคามในห้องสนทนา Work Chat", "effect": "Admin เข้าตรวจสอบและอาจสั่งแบนบัญชีหรือตัดสิทธิ์ทันที", "rulebook": "docs/rulebook/admin/admin-conduct-report-contract.md"}, "CONDUCT_PAYMENT_FRAUD": {"title": "CONDUCT_PAYMENT_FRAUD (ชวนทำธุรกรรมนอกระบบ)", "category": "🚩 รายงานความประพฤติ (Conduct Report)", "definition": "การชักชวนให้โอนเงินสดนอกระบบ KUQuest เพื่อหลีกเลี่ยงกฎเกณฑ์", "effect": "ความผิดร้ายแรงที่อาจทริกเกอร์การระงับกระเป๋าเงินทันที", "rulebook": "docs/rulebook/admin/admin-conduct-report-contract.md"}, "PC-09": {"title": "PC-09: Low-Average-Review Penalty", "category": "⚖️ รหัสบทลงโทษ (Penalty Constants)", "definition": "กฎลงโทษสำหรับผู้รับงานที่ได้คะแนนรีวิวเฉลี่ยสะสมต่ำกว่า 3.0 ดาว (เมื่อมีรีวิวตั้งแต่ 10 ครั้งขึ้นไป)", "effect": "ระบบสั่งระงับสิทธิ์การรับงานใหม่เป็นเวลา 7 วันโดยอัตโนมัติ", "rulebook": "docs/rulebook/admin/admin-member-penalty-contract.md §PC-09"}, "PC-11": {"title": "PC-11: Second Strike Auto-Freeze & 7-Day Ban", "category": "⚖️ รหัสบทลงโทษ (Penalty Constants)", "definition": "บทลงโทษเมื่อสมาชิกกระทำความผิดร้ายแรงที่ได้รับการยืนยันเป็นครั้งที่ 2 บน Misconduct Ladder", "effect": "สั่งแบนบัญชีชั่วคราว 7 วัน พร้อมทั้งระงับกระเป๋าเงิน (Auto-Freeze) ห้ามใช้จ่ายและห้ามถอนเงิน", "rulebook": "docs/rulebook/admin/admin-member-penalty-contract.md §PC-11 Auto-Freeze"}, "PC-12": {"title": "PC-12: Ten-Violation Exemption Rule", "category": "⚖️ รหัสบทลงโทษ (Penalty Constants)", "definition": "กฎยกเว้นการกระทำผิดเล็กน้อย 10 ครั้งแรกสำหรับนิสิตใหม่เพื่อเปิดโอกาสให้ปรับตัว", "effect": "ความผิด 10 ครั้งแรกจะไม่ถูกตัดคะแนนหรือติด Red Flag โดยบทลงโทษจะเริ่มมีผลในการยืนยันครั้งที่ 11", "rulebook": "docs/rulebook/admin/admin-member-penalty-contract.md §PC-12 Exemption"}, "Red Flag": {"title": "Red Flag (เครื่องหมายเตือนสีแดง)", "category": "⚖️ รหัสบทลงโทษ (Penalty Constants)", "definition": "สัญลักษณ์เตือนความประพฤติบนโปรไฟล์สมาชิกเมื่อทำผิดกฎครั้งแรกที่ได้รับการยืนยัน", "effect": "ระงับสิทธิ์การสร้างเควสต์ใหม่, การสมัครเป็น Candidate, และการรับงาน FCFS เป็นเวลา 7 วัน (หมดอายุอัตโนมัติ)", "rulebook": "docs/rulebook/admin/admin-member-penalty-contract.md §Red Flag"}, "WALLET_FROZEN": {"title": "WALLET_FROZEN (กระเป๋าเงินถูกระงับ)", "category": "💰 การเงิน & กระเป๋าเงิน (Wallets & Ledger)", "definition": "สถานะกระเป๋าเงินที่ถูกอายัดโดย Admin หรือระบบ Auto-Freeze", "effect": "ห้ามใช้จ่ายสร้างเควสต์ใหม่และห้ามถอนเงิน แต่ยังคงรับเงินรางวัลโอนเข้า (Credit) จากเควสต์เดิมที่ทำค้างไว้ได้", "rulebook": "docs/rulebook/admin/admin-wallet-freeze-contract.md §In-progress commitments protected"}, "Quest Escrow": {"title": "Quest Escrow (บัญชีเงินมัดจำเควสต์)", "category": "💰 การเงิน & กระเป๋าเงิน (Wallets & Ledger)", "definition": "บัญชีพักเงินส่วนกลางที่ตัดเงินมัดจำ (เงินรางวัล + ค่าธรรมเนียม) ออกจากผู้ว่าจ้างตั้งแต่ตอน Publish เควสต์", "effect": "เงินถูกล็อกไว้อย่างปลอดภัย ไม่ขึ้นกับสถานะกระเป๋าของผู้ว่าจ้าง และรับประกันว่าผู้รับงานที่ทำงานสำเร็จจะได้เงินแน่นอน", "rulebook": "docs/rulebook/finance/funding-reservation-contract.md §Escrow Reservation"}, "7-Day Money Hold": {"title": "7-Day Money Hold (การพักเงิน 7 วันหลังเควสต์ล้มเหลว)", "category": "💰 การเงิน & กระเป๋าเงิน (Wallets & Ledger)", "definition": "การพักเงินมัดจำไว้ 7 วันหลังเควสต์ล้มเหลว (ตาม ADR 0024) ก่อนจะปล่อยให้ผู้ว่าจ้างนำไปใช้จ่ายได้", "effect": "เปิดโอกาสให้ผู้รับงานยื่นข้อพิพาท (Dispute) ใน 1 วัน และให้ Admin ไกล่เกลี่ยใน 5 วัน โดยเงินยังไม่ถูกถอนหนี", "rulebook": "docs/adr/0024-hold-quest-failure-settlement-for-dispute-window.md"}, "Double-Entry Ledger": {"title": "Double-Entry Ledger (ระบบบัญชีแยกประเภทคู่)", "category": "💰 การเงิน & กระเป๋าเงิน (Wallets & Ledger)", "definition": "ระบบบันทึกธุรกรรมทางการเงินที่ทุกการเคลื่อนไหวต้องมี Debit และ Credit เท่ากันเสมอในหน่วยสตางค์ (Satang)", "effect": "รับประกันความถูกต้องทางคณิตศาสตร์ 100% เงินไม่สูญหายและไม่เกิดการเสกเงินในระบบ", "rulebook": "docs/rulebook/finance/double-entry-ledger-contract.md"}, "AES-256-GCM": {"title": "AES-256-GCM Encryption", "category": "🔒 ความปลอดภัย (Security)", "definition": "มาตรฐานการเข้ารหัสข้อมูลลับระดับสูงที่ใช้กับข้อมูลเลขที่บัญชีธนาคารปลายทางของผู้รับงาน (ตาม ADR 0008)", "effect": "ปกป้องข้อมูลส่วนบุคคล (PDPA) ผู้ดูแลระบบจะมองเห็นเฉพาะข้อมูล Masked เท่านั้น", "rulebook": "docs/adr/0008-encrypt-payout-destination-secrets.md"}, "Remainder Satang": {"title": "Remainder Satang (เศษสตางค์การปัดเศษ)", "category": "💰 การเงิน & กระเป๋าเงิน (Wallets & Ledger)", "definition": "เศษสตางค์ที่เหลือจากการหารเงินรางวัลรวมด้วยจำนวนคนในเควสต์กลุ่ม", "effect": "ระบบจัดสรรเศษ 1 สตางค์ ให้กับผู้รับงานที่เข้าร่วมงานคนแรกสุด (Earliest Joined Worker) ตาม ADR 0005", "rulebook": "docs/rulebook/quest/reward-money-contract.md §Remainder Satang"}, "Idempotency-Key": {"title": "Idempotency-Key (กุญแจป้องกันทำรายการซ้ำ)", "category": "🔒 ความปลอดภัย (Security)", "definition": "รหัสเฉพาะที่แนบไปกับทุกคำขอ API ที่มีการเปลี่ยนแปลงสถานะหรือเงิน", "effect": "ป้องกันข้อผิดพลาดจากการกดปุ่มเบิ้ล (Double Click) หรือ Webhook ส่งซ้ำ โดยจะไม่เกิดการลงบัญชีซ้ำซ้อน", "rulebook": "docs/rulebook/finance/double-entry-ledger-contract.md §Idempotency Keys"}, "24-Hour Review Timeout": {"title": "24-Hour Review Timeout (อนุมัติอัตโนมัติ 24 ชม.)", "category": "🔄 สถานะเควสต์ & หลักฐาน (States & Assignments)", "definition": "ระบบนับถอยหลัง 24 ชั่วโมงหลังจากผู้รับงานส่งหลักฐาน หากผู้ว่าจ้างนิ่งเฉย ระบบจะอนุมัติงานและโอนเงินให้อัตโนมัติ", "effect": "คุ้มครองผู้รับงานไม่ให้ถูกผู้ว่าจ้างดองงานหรือเบี้ยวค่าจ้าง", "rulebook": "docs/rulebook/quest/proof-submission-contract.md §24-Hour Review Timeout"}, "10-Minute Quest Edit Window": {"title": "10-Minute Quest Edit Window (หน้าต่างขอแก้ไขเควสต์ 10 นาที)", "category": "🔄 สถานะเควสต์ & หลักฐาน (States & Assignments)", "definition": "หน้าต่างเวลาที่ผู้ว่าจ้างสามารถขอแก้ไขรายละเอียดเควสต์ได้ 1 ครั้งในสถานะ QUEST_ASSIGNED", "effect": "ผู้รับงานทุกคนต้องกดยอมรับภายใน 10 นาที หากใครคนหนึ่งปฏิเสธหรือหมดเวลา เงื่อนไขจะถูก Rollback กลับสู่เดิม", "rulebook": "docs/rulebook/quest/quest-condition-contract.md §Quest Edit Protocol"}, "MEMBER_BANNED_PERMANENTLY": {"title": "MEMBER_BANNED_PERMANENTLY (แบนถาวร)", "category": "⚖️ รหัสบทลงโทษ (Penalty Constants)", "definition": "การตัดสิทธิ์การเข้าใช้งานระบบอย่างถาวรเมื่อสมาชิกทำผิดร้ายแรงสะสมครบ 3 ครั้งบน Misconduct Ladder", "effect": "เพิกถอน Session ทันที, อายัดกระเป๋าเงินถาวร, และลบใบสมัคร Candidate ทั้งหมด", "rulebook": "docs/rulebook/admin/admin-member-penalty-contract.md §Strike 3: Permanent Ban"}, "REPORT_CASE_RESTORED": {"title": "REPORT_CASE_RESTORED (กู้คืนรายงานความประพฤติ)", "category": "⚖️ รหัสบทลงโทษ (Penalty Constants)", "definition": "การแก้ไขข้อผิดพลาดโดย Admin เมื่อพบว่าเคยวินิจฉัยลงโทษผิดคน", "effect": "ระบบสร้าง Reversing Penalty Record เชื่อมโยงกับประวัติเดิม และปลดสัญลักษณ์ Red Flag ออกทันที", "rulebook": "docs/rulebook/admin/admin-member-penalty-contract.md §Strike Reversals"}, "Candidate Inquiry": {"title": "Candidate Inquiry (การสอบถามก่อนรับงาน)", "category": "🔄 สถานะเควสต์ & หลักฐาน (States & Assignments)", "definition": "ห้องสนทนาแยกสำหรับผู้ที่ยังไม่ได้เป็นผู้รับงาน (Prospective Worker) เพื่อสอบถามผู้ว่าจ้างล่วงหน้า (ตาม ADR 0019)", "effect": "แยกขาดจาก Work Chat ของผู้รับงานจริงเพื่อความปลอดภัยและความเป็นส่วนตัว", "rulebook": "docs/adr/0019-separate-candidate-inquiry-conversation.md"}, "Join Code": {"title": "Join Code (รหัสรวมทีม 24 ชั่วโมง)", "category": "🔄 สถานะเควสต์ & หลักฐาน (States & Assignments)", "definition": "รหัสลับที่หัวหน้าทีมสร้างขึ้นเพื่อให้สมาชิกในทีมนำมากรอกเพื่อฟอร์มทีมก่อนยื่นสมัครเควสต์กลุ่มแบบ Candidate", "effect": "มีอายุ 24 ชั่วโมง เมื่อสมาชิกครบ หัวหน้าทีมจะเป็นตัวแทนกดยื่นสมัครเพียงคนเดียว", "rulebook": "docs/rulebook/quest/quest-mode-matrix-contract.md §Quadrant 4"}};
+
 // Filter State
 let activeFilters = {
     quadrant: 'all',
@@ -11505,6 +11584,96 @@ window.addEventListener('hashchange', () => {
     const hash = window.location.hash.replace('#', '');
     if (hash) highlightCard(hash);
 });
+
+// -------------------------------------------------------------
+// Interactive Tooltips Engine
+// -------------------------------------------------------------
+const tooltipEl = document.getElementById('globalTooltip');
+const ttCat = document.getElementById('ttCat');
+const ttTitle = document.getElementById('ttTitle');
+const ttDef = document.getElementById('ttDef');
+const ttEffect = document.getElementById('ttEffect');
+const ttRef = document.getElementById('ttRef');
+
+document.addEventListener('mouseover', (e) => {
+    const termEl = e.target.closest('.glossary-term');
+    if (!termEl) {
+        tooltipEl.classList.remove('show');
+        return;
+    }
+    
+    const termKey = termEl.getAttribute('data-term');
+    const data = GLOSSARY_DATA[termKey];
+    if (!data) return;
+    
+    ttCat.innerText = data.category;
+    ttTitle.innerText = data.title;
+    ttDef.innerText = data.definition;
+    ttEffect.innerText = "⚡ ผลลัพธ์: " + data.effect;
+    ttRef.innerText = "📜 อ้างอิง: " + data.rulebook;
+    
+    const rect = termEl.getBoundingClientRect();
+    let top = rect.bottom + 8;
+    let left = rect.left;
+    
+    if (left + 340 > window.innerWidth) {
+        left = window.innerWidth - 350;
+    }
+    if (top + 200 > window.innerHeight) {
+        top = rect.top - 180;
+    }
+    
+    tooltipEl.style.top = top + 'px';
+    tooltipEl.style.left = left + 'px';
+    tooltipEl.classList.add('show');
+});
+
+document.addEventListener('mouseout', (e) => {
+    if (e.target.closest('.glossary-term')) {
+        tooltipEl.classList.remove('show');
+    }
+});
+
+// -------------------------------------------------------------
+// Glossary Modal Engine
+// -------------------------------------------------------------
+function openGlossaryModal() {
+    const grid = document.getElementById('glossaryCardsGrid');
+    grid.innerHTML = '';
+    
+    for (const [key, item] of Object.entries(GLOSSARY_DATA)) {
+        const card = document.createElement('div');
+        card.className = 'glossary-card-item';
+        card.innerHTML = `
+            <div class="g-cat">${item.category}</div>
+            <div class="g-title">${item.title}</div>
+            <div class="g-def">${item.definition}</div>
+            <div class="g-effect">⚡ ผลลัพธ์: ${item.effect}</div>
+            <div class="g-ref">📜 ${item.rulebook}</div>
+        `;
+        grid.appendChild(card);
+    }
+    
+    document.getElementById('glossaryModal').style.display = 'flex';
+}
+
+function closeGlossaryModal() {
+    document.getElementById('glossaryModal').style.display = 'none';
+}
+
+function filterGlossaryCards() {
+    const query = document.getElementById('glossarySearchInput').value.toLowerCase().trim();
+    const cards = document.querySelectorAll('.glossary-card-item');
+    
+    cards.forEach(card => {
+        const text = card.innerText.toLowerCase();
+        if (text.includes(query)) {
+            card.style.display = 'block';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+}
 
 // Initialize on page load
 window.addEventListener('DOMContentLoaded', () => {
