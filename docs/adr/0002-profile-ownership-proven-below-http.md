@@ -12,4 +12,6 @@ The cost is that `bun test` now requires a running, migrated database, which it 
 
 Delete this seam when [BE-50](https://linear.app/kuquest/issue/BE-50/authenticate-as-a-student-inside-automated-tests) lands a fixture that can establish a Session without Google. At that point the ownership assertions belong over HTTP with the rest, and `profile.service.test.ts` should be folded into the integration test rather than kept alongside it. Until then, do not "fix" these tests by moving them up — they will silently stop testing anything.
 
+**Update ([QA-33](https://linear.app/kuquest/issue/QA-33/authenticate-as-a-student-inside-automated-tests), the same fixture request re-filed under Tester): the fixture has landed** as `authenticateAsStudent()` in `tests/support/authenticate-as-student.ts` (see CODESTYLES.md's Testing section). `profile.integration.test.ts` now re-proves the ownership guarantee over HTTP using it. `profile.service.test.ts` has deliberately **not** been folded away yet — that migration is its own piece of work, not done as a side effect of landing the fixture — but any *new* test needing a Session should use the fixture over HTTP rather than add another database-seam workaround.
+
 Status: accepted.
