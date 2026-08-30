@@ -469,6 +469,40 @@
         margin-top: 14px;
       }
 
+      .admin-queue-controls,
+      .admin-pagination {
+        display: flex;
+        align-items: end;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .admin-queue-controls label {
+        min-width: 170px;
+      }
+
+      .admin-pagination {
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .admin-pagination .status {
+        margin: 0;
+      }
+
+      .admin-history {
+        margin: 18px 0 0;
+        padding-left: 22px;
+      }
+
+      .admin-history li {
+        margin-top: 8px;
+        color: #455149;
+        font-size: 0.84rem;
+        line-height: 1.5;
+      }
+
       .steps {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -941,8 +975,43 @@
 
         <div id="admin-payout-workspace" hidden>
           <div class="toolbar" style="margin-top: 16px">
-            <p class="muted">Waiting Payouts are listed first. Approving changes the Payout to <code>CREATING</code>.</p>
+            <p class="muted">Filter Payouts by status. Approving a waiting Payout changes it to <code>CREATING</code>.</p>
+          </div>
+          <div class="admin-queue-controls">
+            <label>
+              Payout status
+              <select id="admin-payout-status">
+                <option value="PENDING_ADMIN_APPROVAL">Waiting for Admin approval</option>
+                <option value="">All Payout statuses</option>
+                <option value="CREATING">CREATING</option>
+                <option value="PENDING">PENDING</option>
+                <option value="AWAITING_RECONCILIATION">AWAITING_RECONCILIATION</option>
+                <option value="COMPLETED">COMPLETED</option>
+                <option value="FAILED">FAILED</option>
+                <option value="CANCELLED">CANCELLED</option>
+              </select>
+            </label>
+            <label>
+              Sort
+              <select id="admin-payout-sort">
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+              </select>
+            </label>
+            <label>
+              Page size
+              <select id="admin-payout-limit">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+              </select>
+            </label>
             <button id="admin-refresh-payouts" type="button">Refresh Approval Queue</button>
+          </div>
+          <div class="admin-pagination">
+            <button id="admin-payout-previous" type="button" disabled>Previous page</button>
+            <p class="status" id="admin-payout-page-status" role="status" aria-live="polite">Waiting for Admin Payouts.</p>
+            <button id="admin-payout-next" type="button" disabled>Next page</button>
           </div>
           <div class="admin-grid">
             <div>
@@ -1009,6 +1078,15 @@
         payoutQuote: null,
         adminPayouts: [],
         selectedAdminPayout: null,
+        adminPayoutQuery: {
+          status: 'PENDING_ADMIN_APPROVAL',
+          sort: 'newest',
+          limit: 50,
+          cursor: null,
+        },
+        adminPayoutNextCursor: null,
+        adminPayoutCursorHistory: [],
+        adminDecisionKeys: new Map(),
       };
       const questIdElement = document.querySelector('#quest-id');
       const debugLog = document.querySelector('#debug-log');
@@ -1026,6 +1104,12 @@
       const adminPayoutList = document.querySelector('#admin-payout-list');
       const adminPayoutDetail = document.querySelector('#admin-payout-detail');
       const adminPayoutOutput = document.querySelector('#admin-payout-output');
+      const adminPayoutStatusInput = document.querySelector('#admin-payout-status');
+      const adminPayoutSortInput = document.querySelector('#admin-payout-sort');
+      const adminPayoutLimitInput = document.querySelector('#admin-payout-limit');
+      const adminPayoutPageStatus = document.querySelector('#admin-payout-page-status');
+      const adminPayoutPrevious = document.querySelector('#admin-payout-previous');
+      const adminPayoutNext = document.querySelector('#admin-payout-next');
       const operationList = document.querySelector('#operation-list');
       const operationFilter = document.querySelector('#operation-filter');
 
@@ -1731,6 +1815,46 @@
 
       const adminPayoutIsWaiting = (payout) => payout?.payoutStatus === 'PENDING_ADMIN_APPROVAL';
 
+      const adminPayoutStudentName = (payout) => [payout?.student?.firstName, payout?.student?.lastName]
+        .filter(Boolean)
+        .join(' ');
+
+      const adminPayoutStatusType = (payoutStatus) => {
+        if (['FAILED', 'CANCELLED'].includes(payoutStatus)) return 'error';
+        if (payoutStatus === 'COMPLETED') return 'success';
+        return 'info';
+      };
+
+      const requireSelectedAdminWaitingPayout = () => {
+        const payout = state.selectedAdminPayout;
+        if (!payout || !adminPayoutIsWaiting(payout)) throw new Error('Select a Payout waiting for Admin approval.');
+        return payout;
+      };
+
+      const adminDecisionIdempotencyKey = (action, payoutId, body) => {
+        const storageKey = `${action}:${payoutId}`;
+        const requestSignature = JSON.stringify(body);
+        const existing = state.adminDecisionKeys.get(storageKey);
+        if (!existing || existing.requestSignature !== requestSignature) {
+          const decision = { requestSignature, key: randomKey(`browser-admin-${action.toLowerCase()}`) };
+          state.adminDecisionKeys.set(storageKey, decision);
+          return decision.key;
+        }
+        return existing.key;
+      };
+
+      const resetAdminPayoutQuery = () => {
+        state.adminPayoutQuery = {
+          status: adminPayoutStatusInput.value,
+          sort: adminPayoutSortInput.value,
+          limit: Number(adminPayoutLimitInput.value),
+          cursor: null,
+        };
+        state.adminPayoutCursorHistory = [];
+        state.adminPayoutNextCursor = null;
+        state.selectedAdminPayout = null;
+      };
+
       const setPayoutTab = (tab) => {
         const adminSelected = tab === 'admin';
         const studentTab = document.querySelector('#student-payout-tab');
@@ -1756,6 +1880,10 @@
         adminAuthBadge.dataset.state = signedIn ? 'success' : 'pending';
         adminPayoutWorkspace.hidden = !signedIn;
         if (!signedIn) {
+          state.adminPayouts = [];
+          state.selectedAdminPayout = null;
+          state.adminPayoutNextCursor = null;
+          state.adminPayoutCursorHistory = [];
           setStatus(adminAuthStatus, 'Use an Admin account to open the approval queue.', 'info');
           adminPayoutList.replaceChildren(Object.assign(document.createElement('p'), {
             className: 'muted',
@@ -1765,6 +1893,9 @@
             className: 'muted',
             textContent: 'Select a Payout to review it.',
           }));
+          adminPayoutPrevious.disabled = true;
+          adminPayoutNext.disabled = true;
+          setStatus(adminPayoutPageStatus, 'Sign in as Admin to load Payouts.', 'info');
         } else {
           setStatus(adminAuthStatus, `Signed in as Admin ${state.adminSession.user.email}.`, 'success');
         }
@@ -1791,20 +1922,15 @@
         }
         state.adminPayouts.forEach((payout) => {
           const button = document.createElement('button');
-          const studentName = [payout.student?.firstName, payout.student?.lastName].filter(Boolean).join(' ');
           button.className = 'admin-payout-row';
           button.type = 'button';
           button.setAttribute('aria-selected', String(state.selectedAdminPayout?.id === payout.id));
           const title = document.createElement('strong');
           const summary = document.createElement('small');
-          title.textContent = studentName || payout.student?.email || 'Student Payout';
+          title.textContent = adminPayoutStudentName(payout) || payout.student?.email || 'Student Payout';
           summary.textContent = `${bahtTextFromSatang(payout.principalSatang)} · ${payout.payoutStatus}`;
           button.append(title, summary);
-          button.addEventListener('click', () => {
-            state.selectedAdminPayout = payout;
-            renderAdminPayoutList();
-            renderAdminPayoutDetail();
-          });
+          button.addEventListener('click', () => void selectAdminPayout(payout));
           adminPayoutList.append(button);
         });
       };
@@ -1820,13 +1946,12 @@
           return;
         }
 
-        const studentName = [payout.student?.firstName, payout.student?.lastName].filter(Boolean).join(' ');
         const heading = document.createElement('div');
         const title = document.createElement('h3');
         const status = document.createElement('span');
-        title.textContent = studentName || payout.student?.email || 'Student Payout';
+        title.textContent = adminPayoutStudentName(payout) || payout.student?.email || 'Student Payout';
         status.className = 'status';
-        status.dataset.type = adminPayoutIsWaiting(payout) ? 'info' : 'success';
+        status.dataset.type = adminPayoutStatusType(payout.payoutStatus);
         status.textContent = payout.payoutStatus;
         heading.className = 'result-heading';
         heading.append(title, status);
@@ -1840,10 +1965,28 @@
           createAdminFact('Provider fee', bahtTextFromSatang(payout.maximumFeeSatang)),
           createAdminFact('Provider tax', bahtTextFromSatang(payout.maximumTaxSatang)),
           createAdminFact('Destination', `${payout.bankName} · ${payout.maskedDestinationValue}`),
+          createAdminFact('Destination type', payout.destinationType),
           createAdminFact('Routing', payout.maskedRoutingValue),
+          createAdminFact('Provider status', payout.providerStatus),
+          createAdminFact('Provider reference', payout.providerReference),
           createAdminFact('Created', payout.createdAt ? new Date(payout.createdAt).toLocaleString() : null),
         );
         adminPayoutDetail.append(heading, facts);
+
+        if (payout.history?.length) {
+          const historyHeading = document.createElement('h4');
+          historyHeading.textContent = 'Status history';
+          const history = document.createElement('ol');
+          history.className = 'admin-history';
+          payout.history.forEach((entry) => {
+            const item = document.createElement('li');
+            const transition = `${entry.fromStatus ?? 'NEW'} → ${entry.toStatus}`;
+            const reason = entry.reason ? ` · ${entry.reason}` : '';
+            item.textContent = `${new Date(entry.occurredAt).toLocaleString()} · ${transition} · ${entry.source}${reason}`;
+            history.append(item);
+          });
+          adminPayoutDetail.append(historyHeading, history);
+        }
 
         if (!adminPayoutIsWaiting(payout)) {
           if (payout.rejectionReason) adminPayoutDetail.append(createAdminFact('Rejection reason', payout.rejectionReason));
@@ -1882,21 +2025,78 @@
         adminPayoutDetail.append(note, reason, actions);
       };
 
-      const loadAdminPayouts = async () => {
-        if (!state.adminSession) return null;
+      const loadAdminPayoutDetail = async (payoutId) => {
         const response = await request(
-          '/api/v1/admin/payouts?status=PENDING_ADMIN_APPROVAL&limit=50&sort=newest',
+          `/api/v1/admin/payouts/${encodeURIComponent(payoutId)}`,
+          {},
+          'Get Admin Payout detail',
+        );
+        if (state.selectedAdminPayout?.id === payoutId) {
+          state.selectedAdminPayout = response?.data ?? state.selectedAdminPayout;
+          renderAdminPayoutDetail();
+        }
+        return response;
+      };
+
+      const selectAdminPayout = async (payout) => {
+        state.selectedAdminPayout = payout;
+        renderAdminPayoutList();
+        renderAdminPayoutDetail();
+        try {
+          return await loadAdminPayoutDetail(payout.id);
+        } catch (error) {
+          adminPayoutOutput.textContent = formatValue(error?.body ?? { error: error instanceof Error ? error.message : String(error) });
+          debug('Admin Payout detail loading failed', error instanceof Error ? error.message : error);
+          return null;
+        }
+      };
+
+      const loadAdminPayouts = async ({ reset = false } = {}) => {
+        if (!state.adminSession) return null;
+        if (reset) resetAdminPayoutQuery();
+        const query = new URLSearchParams({
+          limit: String(state.adminPayoutQuery.limit),
+          sort: state.adminPayoutQuery.sort,
+        });
+        if (state.adminPayoutQuery.status) query.set('status', state.adminPayoutQuery.status);
+        if (state.adminPayoutQuery.cursor) query.set('cursor', state.adminPayoutQuery.cursor);
+        const response = await request(
+          `/api/v1/admin/payouts?${query.toString()}`,
           {},
           'List Admin Payout approval queue',
         );
         const selectedId = state.selectedAdminPayout?.id;
         state.adminPayouts = response?.data?.items ?? [];
+        state.adminPayoutNextCursor = response?.data?.nextCursor ?? null;
         const queuedSelection = state.adminPayouts.find((payout) => payout.id === selectedId);
         if (queuedSelection) state.selectedAdminPayout = queuedSelection;
-        else if (!state.selectedAdminPayout) state.selectedAdminPayout = state.adminPayouts[0] ?? null;
+        else state.selectedAdminPayout = state.adminPayouts[0] ?? null;
         renderAdminPayoutList();
         renderAdminPayoutDetail();
+        adminPayoutPrevious.disabled = state.adminPayoutCursorHistory.length === 0;
+        adminPayoutNext.disabled = !state.adminPayoutNextCursor;
+        setStatus(
+          adminPayoutPageStatus,
+          state.adminPayouts.length
+            ? `Showing ${state.adminPayouts.length} Payout${state.adminPayouts.length === 1 ? '' : 's'}.`
+            : 'No Payouts match this filter.',
+          'info',
+        );
+        if (state.selectedAdminPayout) await loadAdminPayoutDetail(state.selectedAdminPayout.id);
         return response;
+      };
+
+      const loadNextAdminPayoutPage = async () => {
+        if (!state.adminPayoutNextCursor) return null;
+        state.adminPayoutCursorHistory.push(state.adminPayoutQuery.cursor);
+        state.adminPayoutQuery.cursor = state.adminPayoutNextCursor;
+        return loadAdminPayouts();
+      };
+
+      const loadPreviousAdminPayoutPage = async () => {
+        if (!state.adminPayoutCursorHistory.length) return null;
+        state.adminPayoutQuery.cursor = state.adminPayoutCursorHistory.pop() ?? null;
+        return loadAdminPayouts();
       };
 
       const refreshAdminSession = async () => {
@@ -1937,16 +2137,16 @@
       };
 
       const approveSelectedAdminPayout = async () => {
-        const payout = state.selectedAdminPayout;
-        if (!payout || !adminPayoutIsWaiting(payout)) throw new Error('Select a Payout waiting for Admin approval.');
+        const payout = requireSelectedAdminWaitingPayout();
         if (!window.confirm('Approve this Payout? The Payout Worker can then call the Provider.')) return null;
         const note = document.querySelector('#admin-approval-note')?.value.trim();
+        const body = note ? { note } : {};
         const response = await jsonRequest(
           `/api/v1/admin/payouts/${encodeURIComponent(payout.id)}/approve`,
           'POST',
-          note ? { note } : {},
+          body,
           'Approve Payout',
-          { 'idempotency-key': randomKey('browser-admin-approve') },
+          { 'idempotency-key': adminDecisionIdempotencyKey('APPROVE', payout.id, body) },
         );
         state.selectedAdminPayout = response?.data ?? payout;
         await loadAdminPayouts();
@@ -1955,17 +2155,17 @@
       };
 
       const rejectSelectedAdminPayout = async () => {
-        const payout = state.selectedAdminPayout;
-        if (!payout || !adminPayoutIsWaiting(payout)) throw new Error('Select a Payout waiting for Admin approval.');
+        const payout = requireSelectedAdminWaitingPayout();
         const reason = document.querySelector('#admin-rejection-reason')?.value.trim() ?? '';
         if (!reason) throw new Error('Enter a rejection reason.');
         if (!window.confirm('Reject this Payout and release its Payout Reserve?')) return null;
+        const body = { reason };
         const response = await jsonRequest(
           `/api/v1/admin/payouts/${encodeURIComponent(payout.id)}/reject`,
           'POST',
-          { reason },
+          body,
           'Reject Payout',
-          { 'idempotency-key': randomKey('browser-admin-reject') },
+          { 'idempotency-key': adminDecisionIdempotencyKey('REJECT', payout.id, body) },
         );
         state.selectedAdminPayout = response?.data ?? payout;
         await loadAdminPayouts();
@@ -2017,7 +2217,12 @@
       document.querySelector('#admin-sign-in').addEventListener('click', () => runWithOutput(adminPayoutOutput, signInAdmin));
       document.querySelector('#admin-refresh-session').addEventListener('click', () => runWithOutput(adminPayoutOutput, refreshAdminSession));
       document.querySelector('#admin-sign-out').addEventListener('click', () => runWithOutput(adminPayoutOutput, signOutAdmin));
-      document.querySelector('#admin-refresh-payouts').addEventListener('click', () => runWithOutput(adminPayoutOutput, loadAdminPayouts));
+      document.querySelector('#admin-refresh-payouts').addEventListener('click', () => runWithOutput(adminPayoutOutput, () => loadAdminPayouts({ reset: true })));
+      adminPayoutStatusInput.addEventListener('change', () => runWithOutput(adminPayoutOutput, () => loadAdminPayouts({ reset: true })));
+      adminPayoutSortInput.addEventListener('change', () => runWithOutput(adminPayoutOutput, () => loadAdminPayouts({ reset: true })));
+      adminPayoutLimitInput.addEventListener('change', () => runWithOutput(adminPayoutOutput, () => loadAdminPayouts({ reset: true })));
+      adminPayoutPrevious.addEventListener('click', () => runWithOutput(adminPayoutOutput, loadPreviousAdminPayoutPage));
+      adminPayoutNext.addEventListener('click', () => runWithOutput(adminPayoutOutput, loadNextAdminPayoutPage));
       document.querySelector('#simple-quest-smoke').addEventListener('click', () => runWithOutput(questOutput, runSimpleQuestSmoke));
       document.querySelector('#create-quest').addEventListener('click', () => runWithOutput(questOutput, createQuest));
       document.querySelector('#escrow-smoke').addEventListener('click', () => runWithOutput(questOutput, runEscrowSmoke));
