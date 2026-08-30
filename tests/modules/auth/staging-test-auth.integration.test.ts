@@ -1,7 +1,9 @@
 import { app } from '@/app';
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
+import { walletWallet } from '@/database/schema/wallet.schema';
 import { authPlugin, createStagingTestAuthRoute } from '@/modules/auth';
+import { getWallet } from '@/modules/wallet';
 
 import { randomUUID } from 'node:crypto';
 
@@ -53,6 +55,13 @@ const getCookieHeader = (response: Response): string =>
     .join('; ');
 
 afterAll(async () => {
+  const [wallet] = await db
+    .select({ id: walletWallet.id })
+    .from(walletWallet)
+    .innerJoin(authUser, eq(walletWallet.userId, authUser.id))
+    .where(eq(authUser.email, testEmail));
+  // Wallet provisioning retains immutable status history, so keep this fixture after the Wallet exists.
+  if (wallet) return;
   await db.delete(authUser).where(eq(authUser.email, testEmail));
 });
 
@@ -119,6 +128,16 @@ describe('staging test authentication', () => {
 
     expect(loginResponse.status).toBe(200);
     expect(getCookieHeader(loginResponse)).toContain('better-auth.session_token=');
+
+    const loginBody = (await loginResponse.json()) as { user: { id: string } };
+    const wallet = await getWallet(loginBody.user.id);
+    expect(wallet).toMatchObject({
+      walletStatus: 'ACTIVE',
+      spendingBalanceSatang: 0,
+      earningsBalanceSatang: 0,
+      fundingReservedSatang: 0,
+      reservedForPayoutsSatang: 0,
+    });
 
     const profileResponse = await app.handle(
       new Request('http://localhost/api/v1/profile', {

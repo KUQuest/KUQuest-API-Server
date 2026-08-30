@@ -1,6 +1,7 @@
 import { env } from '@/config/env';
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
+import { ensureWallet } from '@/modules/wallet';
 
 import { Elysia } from 'elysia';
 import { eq } from 'drizzle-orm';
@@ -113,19 +114,23 @@ export const createStagingTestAuthRoute = (
         .where(eq(authUser.email, settings.email!))
         .limit(1);
 
-      if (existingStudent.length > 0) return;
+      let studentId = existingStudent[0]?.id;
+      if (!studentId) {
+        const result = await testAuth.api.signUpEmail({
+          body: {
+            email: settings.email!,
+            password: settings.password!,
+            name: `${settings.firstName} ${settings.lastName}`,
+            firstName: settings.firstName!,
+            lastName: settings.lastName!,
+          },
+        });
 
-      const result = await testAuth.api.signUpEmail({
-        body: {
-          email: settings.email!,
-          password: settings.password!,
-          name: `${settings.firstName} ${settings.lastName}`,
-          firstName: settings.firstName!,
-          lastName: settings.lastName!,
-        },
-      });
+        if (!result.user) throw new Error('Staging test Student could not be created');
+        studentId = result.user.id;
+      }
 
-      if (!result.user) throw new Error('Staging test Student could not be created');
+      await ensureWallet(studentId);
     })();
 
     try {
