@@ -1004,8 +1004,8 @@
           return null;
         }
         try {
-          const response = await request('/api/local/test/wallet', {}, 'Read current Wallet');
-          renderWallet(response?.data?.wallet, response?.data?.testUserEmail);
+          const response = await request('/api/v1/wallet', {}, 'Read current Wallet');
+          renderWallet(response?.data?.wallet);
           setStatus(document.querySelector('#wallet-status'), 'Wallet projection is current.', 'success');
           return response;
         } catch (error) {
