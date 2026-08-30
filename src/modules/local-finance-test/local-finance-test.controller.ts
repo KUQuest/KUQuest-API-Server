@@ -1,4 +1,4 @@
-import { env } from '@/config/env';
+import { env, isFinanceTestRuntime } from '@/config/env';
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { paymentProviderEventInbox } from '@/database/schema/payment.schema';
@@ -59,7 +59,7 @@ const recipientEmail = env.localFinanceTestRecipientEmail?.trim().toLowerCase();
 
 export const localFinanceTestIsEnabled = Boolean(
   env.localFinanceTestEnabled &&
-  env.nodeEnv === 'development' &&
+  isFinanceTestRuntime(env.nodeEnv, env.deploymentEnv) &&
   env.stagingTestAuthEnabled &&
   env.xenditSecretKey?.startsWith('xnd_development_') &&
   testUserEmail &&
