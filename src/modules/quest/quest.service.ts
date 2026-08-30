@@ -24,7 +24,7 @@ import {
   type CursorPayload,
 } from '@/shared/cursor';
 
-import { and, asc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, exists, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 
 import {
   buildQuestPublishCheck,
@@ -245,7 +245,9 @@ const getQuestEditEligibility = async (
     teams.some(({ teamStatus: status }) => status === teamStatus.selected) ||
     assignments.length > 0;
   if (hasSelectedParticipation) return { outcome: 'requires-consent' };
-  if (ownedQuest.questStatus !== questStatus.open) return { outcome: 'not-editable' };
+  if (ownedQuest.questStatus !== questStatus.draft && ownedQuest.questStatus !== questStatus.open) {
+    return { outcome: 'not-editable' };
+  }
 
   const hasCandidate =
     applications.some(({ applicationStatus: status }) => status === applicationStatus.applied) ||
@@ -798,11 +800,18 @@ export const editQuest = async (
     const eligibility = await getQuestEditEligibility(transaction, userId, questId);
     if ('outcome' in eligibility) return eligibility;
     if (Object.keys(data).length === 0) return { outcome: 'empty-edit' };
-    if (Object.keys(data).some((field) => coreEditFields.has(field))) {
+
+    const current = eligibility.quest;
+    if (
+      Object.keys(data).some(
+        (field) =>
+          coreEditFields.has(field) &&
+          !(current.questStatus === questStatus.draft && field === 'tagId'),
+      )
+    ) {
       return { outcome: 'forbidden-fields' };
     }
 
-    const current = eligibility.quest;
     const history: QuestEditHistoryValue[] = [];
     const updates: Partial<typeof quest.$inferInsert> = {};
 
@@ -1222,7 +1231,17 @@ export const getQuestDetail = async (userId: string, questId: string) => {
     .where(
       and(
         eq(quest.id, questId),
-        or(eq(quest.hirerId, userId), eq(quest.questStatus, questStatus.open)),
+        or(
+          eq(quest.hirerId, userId),
+          eq(quest.questStatus, questStatus.open),
+          exists(sql`(
+            select 1
+            from quest_assignment a
+            where a.quest_id = ${quest.id}
+              and a.worker_id = ${userId}
+              and a.assignment_status = ${assignmentStatus.active}
+          )`),
+        ),
       ),
     )
     .limit(1);

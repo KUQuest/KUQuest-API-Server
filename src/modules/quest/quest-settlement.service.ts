@@ -292,6 +292,15 @@ const cancelInTransaction = async (tx: QuestTransaction, questId: string, hirerI
   const current = await lockQuest(tx, questId);
   if (!current) return { outcome: 'not-found' };
   if (current.hirerId !== hirerId) return { outcome: 'not-authorized' };
+  if (current.questStatus === questStatus.draft) {
+    await tx.update(quest).set({
+      questStatus: questStatus.cancelled,
+      cancelledAt: now,
+      cancelledByUserId: hirerId,
+      updatedAt: now,
+    }).where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.draft)));
+    return { questStatus: questStatus.cancelled, outcome: 'CANCELLED', paidSatang: 0, refundedSatang: 0 };
+  }
   if (![questStatus.open, questStatus.assigned, questStatus.inProgress].includes(current.questStatus as never)) return { outcome: 'invalid-state' };
   const reservation = await reservationFor(tx, hirerId, questId);
   if (!reservation || reservation.status !== 'ACTIVE') return { outcome: 'invalid-state' };
