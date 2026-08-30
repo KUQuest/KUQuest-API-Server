@@ -2,9 +2,13 @@
 
 Work Chat history and files remain available until their retention eligibility
 time. `latestTerminalAt` is the Quest's latest terminal transition, and
-`caseClosedAt` is set when a Report Case changes to `DISMISSED` or `RESTORED`.
-`PENDING` and `HIDDEN` cases remain open and continue to hold the Message and
-Attachment records named by their Evidence References. After a case closes:
+`caseClosedAt` is set when a Report Case changes to `REPORT_CASE_DISMISSED` or
+`REPORT_CASE_RESTORED`. `REPORT_CASE_PENDING` and `REPORT_CASE_HIDDEN` cases
+remain open and continue to hold the Message and Attachment records named by
+their Evidence References. One Message can carry more than one Report Case
+(`docs/admin/admin-role.md` §5), so `caseClosedAt` is the close time of the
+most recently closed one, and a Message with any open case has no `eligibleAt`
+yet. After a case closes:
 
 ~~~text
 eligibleAt = max(latestTerminalAt + 1 year, caseClosedAt + 90 days)

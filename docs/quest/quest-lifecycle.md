@@ -39,8 +39,9 @@ with `WORK_CHAT_UNAVAILABLE`; no Assignment or state change commits.
 ### Authority
 
 1. `CONTEXT.md` defines domain language.
-2. `docs/quest/work-chat-system-target.md` is the accepted target. It is not
-   proof of shipped behavior.
+2. `docs/quest/work-chat-system-target.md` is the accepted target for Quest
+   and Chat behavior, and `docs/admin/admin-role.md` is the accepted target
+   for Admin behavior. Neither is proof of shipped behavior.
 3. Accepted ADRs define architecture decisions.
 4. `src/modules/quest/*` and `src/database/schema/quest.schema.ts` define the
    current server behavior.
@@ -304,7 +305,7 @@ flowchart LR
 | GROUP completion | Required GROUP work completes. | A completed FCFS Worker keeps Reward if another Assignment fails. Approved or proof-free Candidate Team work completes every Active Worker Assignment. | Target §Resolved Quest lifecycle | **Docs Only**. |
 | Target cancellation settlement | Hirer cancels open, assigned, or in-progress Quest. | Open refunds Hirer; assigned pays 20% reward pool to Active Workers; in-progress settles full Rewards and Platform Fee. | Target §Resolved Quest lifecycle | **Docs Only**. |
 | Worker departure | Assignment is active. | No voluntary leave or reassignment. | Target §Resolved Quest lifecycle | **Docs Only**. |
-| Dispute Case | Quest failed. | May exist without reopening or changing the Quest State; its actors, rules, and payment integration are outside this target. | `CONTEXT.md`; target §Resolved Quest lifecycle | **Excluded from target scope**. |
+| Dispute Case | Quest failed. | May exist without reopening or changing the Quest State. Actors, 1-day self-file and 5-day Admin windows, shared per-Quest cap, and a 7-day money hold are defined. | `CONTEXT.md`; `docs/admin/admin-role.md` §2; ADR `0024-hold-quest-failure-settlement-for-dispute-window.md` | **Docs Only**. |
 | Reward transfer failure | Assignment is completed but transfer fails. | Transfer stays pending and retries with no duplicate or reclaim. | Target §Reward and money contract | **Docs Only**. |
 | Reviews after terminal result | Quest is completed, cancelled, or failed. | Each Hirer/Worker direction is available once; author can edit for seven days; no delete. | `CONTEXT.md`; target §Rating Review | **Docs Only / Conflict**. |
 | Candidate Inquiry Conversation | Viewable `QUEST_OPEN` Quest and one Hirer/Prospective Worker pair. | One private inquiry; closes irreversibly at Assignment, assignment-complete state change, or pre-assignment cancellation. | Target §Candidate Inquiry Conversation; ADR `0019-separate-candidate-inquiry-conversation.md` | **Docs Only**. |
@@ -323,7 +324,7 @@ flowchart LR
 | **Proof-free work** | Every required confirmation moves current Quest through submitted/approval/settlement handling. | Required submitter confirms directly; no Hirer review. Candidate Team confirmation completes every Active Worker Assignment. **Conflict**. |
 | **Proof rejection** | Candidate rework or dispute. | Immediate terminal failure and Admin Review Item; no Rework. **Conflict**. |
 | **Overdue start, proof, or confirmation** | Missing proof/confirmation moves to `QUEST_DISPUTED`; no Start Work action exists. | Missing required action at `dueAt` moves to `QUEST_FAILED`. **Conflict**. |
-| **Admin intervention** | Admin resolves `QUEST_DISPUTED`. | Dispute Case is a deferred abstraction; Admin Review Item remains audit only. **Conflict**. |
+| **Admin intervention** | Admin resolves `QUEST_DISPUTED`. | A Dispute Case opens after `QUEST_FAILED` and redirects part of the held settlement to a Worker (`docs/admin/admin-role.md` §2). Admin Review Item remains audit only. **Conflict**. |
 | **Payment failure** | Wallet settlement is internal and current Quest settlement has no target Reward Transfer status machine. | Pending transfer retries idempotently without duplicate payment. Provider execution is out of scope. |
 | **Worker departure or reassignment** | No voluntary departure or reassignment path. | Same rule. **Current code and target agree on absence.** |
 | **Terminal work access** | Current Work Chat writer is not configured. | Conversation is read-only for Members; system may append later System Messages. **Docs Only**. |
@@ -342,16 +343,16 @@ flowchart LR
 | Candidate GROUP submitter | Target requires Team Leader submission and Team-level Assignment completion or failure. | Current selected Team member can submit on behalf of the Team. | **Conflict** — target §Resolved Quest lifecycle; `quest-proof.service.ts`. |
 | Team onboarding | Target specifies Server Join Codes and Team lifecycle rules. | Current code implements 24-hour targeted invitations. | **Conflict** — target §Resolved Quest lifecycle; `quest-candidate.service.ts`. |
 | Pre-start consent and deadline extension | Target has no general pre-start consent and keeps `dueAt` immutable after assignment. | Current `QUEST_AWAITING_CONSENT` is only post-Assignment Quest Edit consent. | **Conflict** — target §Resolved Quest lifecycle; `quest.service.ts`. |
-| Dispute and hide | Legacy/EDR define `QUEST_DISPUTED` and `QUEST_HIDDEN`. Target does not. | Current dispute settlement exists; hide fields exist but no commands. | **Conflict / Unclear**. |
-| Report Case and moderation | Legacy Chat contract and `CONTEXT.md` define Report Cases. | No Report Case, Reporter Entry, Moderation Decision, Evidence Reference, or Admin Review Item model exists. | **Docs Only**. |
+| Dispute and hide | Target has neither `QUEST_DISPUTED` nor `QUEST_HIDDEN`. A Dispute Case acts on `QUEST_FAILED`, and hiding is the independent `hiddenAt` flag (`docs/admin/admin-role.md` §§2–3). | Legacy/EDR still define both states; current dispute settlement uses `QUEST_DISPUTED`; hide fields exist but no commands. | **Conflict** — both enum values must go. |
+| Report Case and moderation | `CONTEXT.md` and `docs/admin/admin-role.md` §5 define Report Cases, Admin evidence access, and the moderation decisions. | No Report Case, Reporter Entry, Moderation Decision, Evidence Reference, or Admin Review Item model exists. | **Docs Only**. |
 
 ## Remaining non-lifecycle policies
 
 | Policy | Evidence | Status |
 | --- | --- | --- |
-| Dispute Case | A Failed Quest may have a Dispute Case. | Its actors, deadline, decision rules, Group behavior, and payment integration are outside this scope. |
-| Member account ban or suspension | No `auth_user` ban/suspension model, route, or policy exists. Wallet status is a separate concept. | ⚠️ **NOT FOUND IN DOCS OR CODE** |
-| Admin Quest moderation | Legacy/EDR describe `QUEST_HIDDEN`; code has fields but no operation; target omits it. | ⚠️ **NOT SPECIFIED** |
+| Dispute Case | A Failed Quest may have a Dispute Case. | Defined in `docs/admin/admin-role.md` §2: actors, deadlines, shared per-Quest cap, and the 7-day money hold (ADR `0024`). **Docs Only**. |
+| Member account ban or suspension | `auth_user` has no ban model, route, or policy yet. Wallet status is a separate concept. | Defined in `docs/admin/admin-role.md` §6: two penalty ladders, Red Flag, and the `memberPenaltyRecord` audit table. **Docs Only**. |
+| Admin Quest moderation | Legacy/EDR describe `QUEST_HIDDEN`; code has fields but no operation. | Defined in `docs/admin/admin-role.md` §3: `hiddenAt` is an independent flag and adds no Quest State. **Docs Only**. |
 | Production retention period | ADR `0015` requires university-policy confirmation. | ⚠️ **NOT SPECIFIED** |
 
 ## Sources
@@ -360,6 +361,7 @@ flowchart LR
 
 - `CONTEXT.md`
 - `docs/quest/work-chat-system-target.md`
+- `docs/admin/admin-role.md`
 - `docs/adr/0005-quest-owns-work-chat-membership.md`
 - `docs/adr/0015-work-chat-retention-and-account-deletion.md`
 - `docs/adr/0016-not-approved-proof-fails-quest.md`
@@ -374,6 +376,9 @@ flowchart LR
 - `docs/adr/0012-wallet-ledger-is-a-subledger.md`
 - `docs/adr/0013-work-chat-rest-authoritative-delivery.md`
 - `docs/adr/0014-work-chat-is-server-readable-for-moderation.md`
+- `docs/adr/0021-keep-escrow-during-moderation-hide.md`
+- `docs/adr/0022-manual-admin-approval-for-payouts.md`
+- `docs/adr/0024-hold-quest-failure-settlement-for-dispute-window.md`
 
 ### Current, draft, comparison, and legacy sources
 

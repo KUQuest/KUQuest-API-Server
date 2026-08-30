@@ -173,12 +173,17 @@ fewer Active Workers than its original published `headcount`.
 An Active Worker cannot voluntarily leave or be replaced. The cancellation
 rules create the allowed departure transition.
 
-### Deferred Dispute Case
+### Dispute Case
 
-A Dispute Case may exist after `QUEST_FAILED`. Its actors, deadline, decision
-rules, Group behavior, and payment integration are outside this target. It does
-not reopen or change the Quest State. An Admin Review Item remains the automatic
-review and audit record for `PROOF_NOT_APPROVED`; it is not a Dispute Case.
+A Dispute Case may exist after `QUEST_FAILED`. It does not reopen or change the
+Quest State. An Admin Review Item remains the automatic review and audit record
+for `PROOF_NOT_APPROVED`; it is not a Dispute Case.
+
+Its actors, deadline, shared per-Quest cap, decision rules, and money movement
+are defined in `docs/admin/admin-role.md` §2. That document also holds the
+returned failure settlement for 7 days before the Hirer can spend it — see
+[Reward and money contract](#reward-and-money-contract) and
+`docs/adr/0024-hold-quest-failure-settlement-for-dispute-window.md`.
 
 ## Constraint contract
 
@@ -601,6 +606,11 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 - A Worker sees only that Worker's Reward.
 - If a Quest is `QUEST_FAILED`, unpaid Worker-slot Rewards return to the
   Hirer. Already transferred Rewards are not reclaimed.
+- That return is held for 7 days before the Hirer can spend it, so a Dispute
+  Case still has funds to redirect. The amount and the recipient do not
+  change; only the moment the Hirer can spend it moves. See
+  `docs/admin/admin-role.md` §2 and
+  `docs/adr/0024-hold-quest-failure-settlement-for-dispute-window.md`.
 - A failed Quest has no Platform Fee; the fee returns to the Hirer.
 - Cancellation settlement is defined only in
   [Resolved Quest lifecycle](#resolved-quest-lifecycle). Provider execution is
