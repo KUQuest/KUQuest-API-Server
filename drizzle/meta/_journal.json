@@ -295,6 +295,27 @@
       "when": 1787992224114,
       "tag": "0046_work_chat_persistence",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1788075923125,
+      "tag": "0047_allow_cancelled_drafts_without_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1788078789647,
+      "tag": "0048_work_chat_attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788085170121,
+      "tag": "20260830101930_work_chat_pr_337_fixes",
+      "breakpoints": true
     }
   ]
 }

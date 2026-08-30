@@ -258,7 +258,7 @@ export const deleteCertificateImage = async (
       .leftJoin(file, and(eq(profileCertificate.imageFileId, file.id), isNull(file.deletedAt)))
       .where(ownedBy(userId, certificateId))
       .limit(1)
-      .for('update');
+      .for('update', { of: profileCertificate });
     if (!certificate) return { outcome: 'not-found' };
     if (expectedVersion !== undefined && certificate.version !== expectedVersion) {
       return { outcome: 'conflict' };

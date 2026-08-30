@@ -7,6 +7,8 @@ import { tag } from '@/database/schema/tag.schema';
 import {
   getPublicProfile,
   getProfile,
+  getPreviousAvatarFile,
+  removeStudentAvatar,
   replaceStudentAvatar,
   updateProfile,
 } from '@/modules/profile/profile.service';
@@ -378,6 +380,37 @@ describe('reading the avatar', () => {
       .where(eq(authUser.id, studentA));
 
     expect((await getProfile(studentB))?.avatar).toBeNull();
+  });
+});
+
+describe('removing the avatar', () => {
+  afterEach(async () => {
+    await db
+      .update(authUser)
+      .set({ imageFileId: null })
+      .where(eq(authUser.id, studentA));
+    await db
+      .update(file)
+      .set({ deletedAt: null })
+      .where(eq(file.id, avatarFileId));
+  });
+
+  it('clears the avatar, tombstones its file, and returns object cleanup metadata', async () => {
+    await db
+      .update(authUser)
+      .set({ imageFileId: avatarFileId })
+      .where(eq(authUser.id, studentA));
+
+    const before = await getProfile(studentA);
+    const result = await removeStudentAvatar(studentA);
+
+    expect(result).toEqual({
+      bucket: avatarObject.bucket,
+      objectKey: avatarObject.objectKey,
+      version: before!.version + 1,
+    });
+    expect((await getProfile(studentA))?.avatar).toBeNull();
+    expect(await getPreviousAvatarFile(studentA, avatarFileId)).toBeUndefined();
   });
 });
 

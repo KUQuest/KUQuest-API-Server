@@ -1,3 +1,4 @@
+import { authUser } from '@/database/schema/auth.schema';
 import {
   chatConversation,
   chatMembership,
@@ -207,6 +208,7 @@ const ensureConversation = async (transaction: QuestTransaction, questId: string
     .insert(chatConversation)
     .values({
       questId: questRow.id,
+      type: 'CONVERSATION_WORK',
       questTitle: questRow.title,
       questStatus: questRow.questStatus,
     })
@@ -260,6 +262,22 @@ const appendSystemMessage = async (
   }
 
   const sequence = await reserveSequence(transaction, conversationId);
+  const memberId = typeof systemPayload.memberId === 'string' ? systemPayload.memberId : undefined;
+  const [affectedMember] = memberId
+    ? await transaction
+      .select({ firstName: authUser.firstName, lastName: authUser.lastName })
+      .from(authUser)
+      .where(eq(authUser.id, memberId))
+      .limit(1)
+    : [];
+  const memberDisplayName = affectedMember
+    ? `${affectedMember.firstName ?? ''} ${affectedMember.lastName ?? ''}`.trim() || 'Former member'
+    : undefined;
+  const safeSystemPayload = {
+    ...systemPayload,
+    ...(memberDisplayName ? { memberDisplayName } : {}),
+    action: { type: 'OPEN_WORK_CONVERSATION', conversationId },
+  };
   const [message] = await transaction
     .insert(chatMessage)
     .values({
@@ -268,7 +286,7 @@ const appendSystemMessage = async (
       kind: 'SYSTEM',
       contentText,
       systemType,
-      systemPayload,
+      systemPayload: safeSystemPayload,
       eventId,
       createdAt,
     })

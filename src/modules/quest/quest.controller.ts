@@ -182,7 +182,7 @@ const mapQuestEditOutcome = (
 
   if (outcome === 'not-editable') {
     set.status = 409;
-    return apiError('QUEST_NOT_EDITABLE', 'Only an eligible OPEN Quest can be edited');
+    return apiError('QUEST_NOT_EDITABLE', 'Only an eligible Draft or OPEN Quest can be edited');
   }
 
   if (outcome === 'invalid-dates') {
@@ -197,7 +197,7 @@ const mapQuestEditOutcome = (
 
   if (outcome === 'tag-required') {
     set.status = 400;
-    return apiError('TAG_REQUIRED', 'An OPEN Quest must have a Tag');
+    return apiError('TAG_REQUIRED', 'A published Quest must have a Tag');
   }
 
   if (outcome === 'forbidden-fields') {

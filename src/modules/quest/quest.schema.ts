@@ -77,6 +77,7 @@ export const questDirectEditSchema = t.Object(
     startTime: t.Optional(startTimeSchema),
     dueAt: t.Optional(dueAtSchema),
     proofRequired: t.Optional(t.Boolean()),
+    tagId: t.Optional(tagIdSchema),
     locations: t.Optional(locationsSchema),
   },
   { additionalProperties: false },

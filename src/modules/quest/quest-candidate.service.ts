@@ -157,6 +157,15 @@ const ensureNoMembership = async (tx: Tx, questId: string, userId: string) => {
   return !row;
 };
 
+const teamMemberAccess = (userId: string) => exists(sql`(
+  select 1
+  from quest_team_member m
+  where m.team_id = ${questTeam.id}
+    and m.user_id = ${userId}
+)`);
+
+const teamAccess = (userId: string) => or(eq(quest.hirerId, userId), teamMemberAccess(userId));
+
 export const createTeam = async (leaderId: string, questId: string, data: TeamCreateInput, now = new Date()): Promise<TeamOutcome> => db.transaction(async (tx) => {
   const current = await lockQuest(tx, questId);
   if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.group || current.questStatus !== questStatus.open || current.hirerId === leaderId) return { outcome: 'not-eligible' };
@@ -167,7 +176,7 @@ export const createTeam = async (leaderId: string, questId: string, data: TeamCr
 });
 
 const selectTeamForUser = async (database: Database, userId: string, questId: string, teamId: string, lock = false) => {
-  const query = database.select(teamFields).from(questTeam).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeam.id, teamId), eq(questTeam.questId, questId), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`, or(eq(quest.hirerId, userId), exists(sql`select 1 from quest_team_member m where m.team_id = ${questTeam.id} and m.user_id = ${userId}`)))).limit(1);
+  const query = database.select(teamFields).from(questTeam).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeam.id, teamId), eq(questTeam.questId, questId), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`, teamAccess(userId))).limit(1);
   return (lock ? await query.for('update') : await query)[0];
 };
 
@@ -181,7 +190,7 @@ export type TeamCollection = { outcome: 'not-found' } | TeamWithMembers[];
 export const listTeams = async (userId: string, questId: string): Promise<TeamCollection> => db.transaction(async (tx) => {
   const current = await lockQuest(tx, questId);
   if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.group || current.questStatus !== questStatus.open) return { outcome: 'not-found' };
-  const rows = await tx.select(teamFields).from(questTeam).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeam.questId, questId), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`, or(eq(quest.hirerId, userId), exists(sql`select 1 from quest_team_member m where m.team_id = ${questTeam.id} and m.user_id = ${userId}`)))).orderBy(asc(questTeam.createdAt), asc(questTeam.id));
+  const rows = await tx.select(teamFields).from(questTeam).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeam.questId, questId), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`, teamAccess(userId))).orderBy(asc(questTeam.createdAt), asc(questTeam.id));
   return Promise.all(rows.map((row) => withMembers(tx, row)));
 });
 

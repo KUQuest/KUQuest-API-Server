@@ -131,6 +131,20 @@ describe('Quest persistence', () => {
     expect((await getQuestDetail(otherMemberId, questId))?.questStatus).toBe('QUEST_OPEN');
   });
 
+  it('allows an Active Worker to view an assigned Quest and hides it from unrelated Members', async () => {
+    const questId = await createFixture();
+    await openQuest(questId);
+    await db.update(quest).set({ questStatus: 'QUEST_ASSIGNED' }).where(eq(quest.id, questId));
+    await db.insert(questAssignment).values({
+      questId,
+      workerId: otherMemberId,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    });
+
+    expect((await getQuestDetail(otherMemberId, questId))?.questStatus).toBe('QUEST_ASSIGNED');
+    expect(await getQuestDetail(randomUUID(), questId)).toBeUndefined();
+  });
+
   it('lists the Hirer’s Quests across Quest Status values', async () => {
     const draftId = await createFixture({ title: 'Draft Quest' });
     const openId = await createFixture({ title: 'Open Quest' });
@@ -265,18 +279,20 @@ describe('Quest persistence', () => {
     });
   });
 
-  it('rejects direct edits to a Draft Quest', async () => {
+  it('lets the Hirer add a Tag to a null-tag Draft', async () => {
     const questId = await createFixture();
 
-    expect(await editQuest(hirerId, questId, { title: 'Still a Draft' })).toEqual({
-      outcome: 'not-editable',
+    expect(await editQuest(hirerId, questId, { tagId })).toEqual({ id: questId });
+    expect((await getQuestDetail(hirerId, questId))?.tag).toEqual({
+      id: tagId,
+      name: `Quest test ${tagId}`,
     });
   });
 
-  it('checks Quest editability before rejecting an empty edit', async () => {
+  it('rejects an empty edit after confirming that a Draft is editable', async () => {
     const questId = await createFixture();
 
-    expect(await editQuest(hirerId, questId, {})).toEqual({ outcome: 'not-editable' });
+    expect(await editQuest(hirerId, questId, {})).toEqual({ outcome: 'empty-edit' });
   });
 
   it('treats another Member’s Quest as not found when editing', async () => {
