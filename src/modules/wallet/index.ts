@@ -59,3 +59,4 @@ export {
   validateOperationAmount,
   verifyWalletProjection,
 } from './wallet.service';
+export { walletRoute } from './wallet.route';

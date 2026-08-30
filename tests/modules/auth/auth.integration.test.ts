@@ -13,7 +13,8 @@ describe('authentication integration', () => {
     expect(body).toContain('KUQuest API Test Bench');
     expect(body).toContain('/api/auth/sign-in/social');
     expect(body).toContain('/api/staging/test-auth/sign-in/default');
-    expect(body).toContain('/api/local/test/wallet');
+    expect(body).toContain('/api/v1/wallet');
+    expect(body).not.toContain('/api/local/test/wallet');
     expect(body).toContain('/api/local/test/payment');
     expect(body).toContain('Payment QR from Xendit');
     expect(body).toContain('Top-up credit (Baht)');

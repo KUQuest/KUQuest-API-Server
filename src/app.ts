@@ -21,6 +21,7 @@ import { portfolioRoute } from './modules/portfolio';
 import { profileRoute } from './modules/profile';
 import { workExperienceRoute } from './modules/work-experience';
 import { localFinanceTestRoute } from './modules/local-finance-test';
+import { walletRoute } from './modules/wallet';
 import { corsPlugin } from './plugins/cors';
 import { errorHandlerPlugin } from './plugins/error-handler';
 import { openapiPlugin } from './plugins/openapi';
@@ -36,6 +37,7 @@ export const createApp = () => {
     .use(authPlugin)
     .use(stagingTestAuthRoute)
     .use(localFinanceTestRoute)
+    .use(walletRoute)
     .use(openapiPlugin)
     .get('/', () => 'Hello Elysia', {
       detail: {
