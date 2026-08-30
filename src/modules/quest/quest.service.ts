@@ -5,6 +5,7 @@ import {
   quest,
   questApplication,
   questAssignment,
+  questApiVersion,
   questEditHistory,
   questEditRequest,
   questEditRequestResponse,
@@ -77,7 +78,7 @@ type QuestRow = {
   title: string;
   description: string | null;
   condition: string;
-  rewardSatang: number;
+  rewardSatang: number | null;
   tagId: string | null;
   tagName: string | null;
   mode: QuestMode;
@@ -204,7 +205,13 @@ const selectOwnedQuestForEdit = async (
       proofRequired: quest.proofRequired,
     })
     .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId)))
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.hirerId, userId),
+        eq(quest.apiVersion, questApiVersion.v1),
+      ),
+    )
     .limit(1)
     .for('update');
 
@@ -268,7 +275,13 @@ const lockOwnedQuest = async (
   const [ownedQuest] = await transaction
     .select({ id: quest.id, questStatus: quest.questStatus })
     .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId)))
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.hirerId, userId),
+        eq(quest.apiVersion, questApiVersion.v1),
+      ),
+    )
     .limit(1)
     .for('update');
 
@@ -316,6 +329,11 @@ export type QuestCreateOutcome =
   | { outcome: 'tag-not-found' | 'invalid-dates' | 'invalid-headcount' };
 
 const toRewardBaht = (rewardSatang: number) => Math.trunc(rewardSatang / 100);
+
+const requireQuestReward = (rewardSatang: number | null): number => {
+  if (rewardSatang === null) throw new Error('Quest Reward is missing');
+  return rewardSatang;
+};
 
 const durationMinutes = (startTime: Date, dueAt: Date | null) => {
   if (!dueAt) return null;
@@ -370,6 +388,7 @@ const listRows = async (filters: QuestListFilters, hirerId?: string) => {
   const limit = parsePageLimit(filters.limit);
   const cursor = decodeCursor(filters.cursor);
   const conditions = [
+    eq(quest.apiVersion, questApiVersion.v1),
     hirerId ? eq(quest.hirerId, hirerId) : eq(quest.questStatus, questStatus.open),
   ];
 
@@ -447,7 +466,7 @@ const serializeCard = (
   return {
     id: row.id,
     title: row.title,
-    reward: toRewardBaht(row.rewardSatang),
+    reward: toRewardBaht(requireQuestReward(row.rewardSatang)),
     tag: row.tagId && row.tagName ? { id: row.tagId, name: row.tagName } : null,
     mode: row.mode,
     participation: row.participation,
@@ -618,10 +637,17 @@ const selectConsentQuest = async (
       headcount: quest.headcount,
     })
     .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId)))
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.hirerId, userId),
+        eq(quest.apiVersion, questApiVersion.v1),
+      ),
+    )
     .limit(1)
     .for('update');
-  return row;
+  if (!row || row.rewardSatang === null) return undefined;
+  return { ...row, rewardSatang: row.rewardSatang };
 };
 
 const normalizeConsentChanges = async (
@@ -1231,6 +1257,7 @@ export const getQuestDetail = async (userId: string, questId: string) => {
     .where(
       and(
         eq(quest.id, questId),
+        eq(quest.apiVersion, questApiVersion.v1),
         or(
           eq(quest.hirerId, userId),
           eq(quest.questStatus, questStatus.open),
@@ -1257,7 +1284,7 @@ export const getQuestDetail = async (userId: string, questId: string) => {
     title: row.title,
     description: row.description,
     condition: row.condition,
-    reward: toRewardBaht(row.rewardSatang),
+    reward: toRewardBaht(requireQuestReward(row.rewardSatang)),
     tag: row.tagId && row.tagName ? { id: row.tagId, name: row.tagName } : null,
     mode: row.mode,
     participation: row.participation,
@@ -1278,7 +1305,7 @@ const selectPublishRow = async (
   userId: string,
   questId: string,
   lock: boolean,
-) => {
+): Promise<QuestPublishRow | undefined> => {
   const query = transaction
     .select({
       id: quest.id,
@@ -1290,11 +1317,19 @@ const selectPublishRow = async (
       dueAt: quest.dueAt,
     })
     .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId)))
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.hirerId, userId),
+        eq(quest.apiVersion, questApiVersion.v1),
+      ),
+    )
     .limit(1);
 
   const rows = lock ? await query.for('update') : await query;
-  return rows[0] as QuestPublishRow | undefined;
+  const row = rows[0];
+  if (!row || row.rewardSatang === null) return undefined;
+  return { ...row, rewardSatang: row.rewardSatang };
 };
 
 const buildPublishSnapshot = async (
