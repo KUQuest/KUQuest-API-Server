@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
+import { file } from '@/database/schema/file.schema';
 import {
   chatAttachment,
   chatConversation,
@@ -12,6 +13,12 @@ import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 
 import { and, asc, desc, eq, exists, gt, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 
+import {
+  UnsupportedWorkChatAttachmentError,
+  WorkChatAttachmentTooLargeError,
+  workChatStorage,
+} from './work-chat.storage';
+
 type WorkChatTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type WorkChatDatabase = typeof db | WorkChatTransaction;
 
@@ -21,6 +28,10 @@ export class WorkChatServiceError extends Error {
   constructor(
     readonly code:
       | 'ATTACHMENT_NOT_FOUND'
+      | 'ATTACHMENT_LINK_UNAVAILABLE'
+      | 'ATTACHMENT_TOO_LARGE'
+      | 'ATTACHMENT_UNSUPPORTED'
+      | 'ATTACHMENT_UPLOAD_FAILED'
       | 'CLIENT_MESSAGE_ID_REUSED'
       | 'CONVERSATION_NOT_FOUND'
       | 'CONVERSATION_READ_ONLY'
@@ -279,6 +290,14 @@ export type WorkConversationParticipant = {
   displayName: string;
 };
 
+export type WorkConversationAttachment = {
+  id: string;
+  fileName: string;
+  mediaType: string;
+  sizeBytes: number;
+  createdAt: Date;
+};
+
 export const listWorkConversationParticipants = async (
   userId: string,
   conversationId: string,
@@ -485,6 +504,155 @@ const enforceSendRateLimit = async (
     Number(attachmentCount?.count ?? 0) + requestedAttachmentCount > MAX_ATTACHMENTS_PER_MINUTE
   ) {
     throw new WorkChatServiceError('RATE_LIMITED', 'Work Chat rate limit exceeded');
+  }
+};
+
+const mapAttachmentStorageError = (error: unknown): WorkChatServiceError => {
+  if (error instanceof WorkChatAttachmentTooLargeError) {
+    return new WorkChatServiceError('ATTACHMENT_TOO_LARGE', error.message);
+  }
+  if (error instanceof UnsupportedWorkChatAttachmentError) {
+    return new WorkChatServiceError('ATTACHMENT_UNSUPPORTED', error.message);
+  }
+  return new WorkChatServiceError('ATTACHMENT_UPLOAD_FAILED', 'Attachment upload failed');
+};
+
+export const uploadWorkConversationAttachment = async (
+  userId: string,
+  conversationId: string,
+  upload: File,
+): Promise<WorkConversationAttachment> => {
+  const visibleConversation = await getConversationMembership(db, userId, conversationId, true);
+  if (!visibleConversation) throw new WorkChatServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+  if (visibleConversation.readOnlyAt) {
+    throw new WorkChatServiceError('CONVERSATION_READ_ONLY', 'Conversation is read-only');
+  }
+
+  let stored: Awaited<ReturnType<typeof workChatStorage.upload>>;
+  try {
+    stored = await workChatStorage.upload(userId, upload);
+  } catch (error) {
+    throw mapAttachmentStorageError(error);
+  }
+
+  try {
+    return await db.transaction(async (transaction) => {
+      const [lockedConversation] = await transaction
+        .select({ id: chatConversation.id, readOnlyAt: chatConversation.readOnlyAt })
+        .from(chatConversation)
+        .where(and(
+          eq(chatConversation.id, conversationId),
+          isNull(chatConversation.deletedAt),
+        ))
+        .limit(1)
+        .for('update');
+      if (!lockedConversation) throw new WorkChatServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+
+      const conversation = await getConversationMembership(transaction, userId, conversationId, true);
+      if (!conversation) throw new WorkChatServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+      if (lockedConversation.readOnlyAt) {
+        throw new WorkChatServiceError('CONVERSATION_READ_ONLY', 'Conversation is read-only');
+      }
+
+      const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS);
+      const [recent] = await transaction
+        .select({ count: sql<number>`count(*)` })
+        .from(chatAttachment)
+        .innerJoin(chatMembership, eq(chatMembership.id, chatAttachment.uploadedByMemberId!))
+        .where(and(
+          eq(chatAttachment.conversationId, conversationId),
+          eq(chatMembership.memberId, userId),
+          gte(chatAttachment.createdAt, windowStart),
+          isNull(chatAttachment.deletedAt),
+        ));
+      if (Number(recent?.count ?? 0) >= MAX_ATTACHMENTS_PER_MINUTE) {
+        throw new WorkChatServiceError('RATE_LIMITED', 'Work Chat rate limit exceeded');
+      }
+
+      const [storedFile] = await transaction
+        .insert(file)
+        .values({
+          bucket: stored.bucket,
+          objectKey: stored.objectKey,
+          contentType: stored.contentType,
+          sizeBytes: stored.sizeBytes,
+          uploadedByUserId: userId,
+        })
+        .returning({ id: file.id });
+      if (!storedFile) throw new Error('Work Chat attachment file could not be stored');
+
+      const [attachment] = await transaction
+        .insert(chatAttachment)
+        .values({
+          conversationId,
+          uploadedByMemberId: conversation.membershipId,
+          fileId: storedFile.id,
+          status: 'VALIDATED',
+          originalFilename: stored.fileName,
+          mimeType: stored.contentType,
+          sizeBytes: stored.sizeBytes,
+          validatedAt: new Date(),
+        })
+        .returning({
+          id: chatAttachment.id,
+          fileName: chatAttachment.originalFilename,
+          mediaType: chatAttachment.mimeType,
+          sizeBytes: chatAttachment.sizeBytes,
+          createdAt: chatAttachment.createdAt,
+        });
+      if (!attachment) throw new Error('Work Chat attachment could not be stored');
+      return attachment;
+    });
+  } catch (error) {
+    try {
+      await workChatStorage.remove(stored);
+    } catch (cleanupError) {
+      console.error('[work-chat-attachment-upload] Compensating object deletion failed', {
+        bucket: stored.bucket,
+        cleanupError,
+        objectKey: stored.objectKey,
+      });
+    }
+    throw error;
+  }
+};
+
+export const getWorkConversationAttachmentLink = async (
+  userId: string,
+  conversationId: string,
+  attachmentId: string,
+) => {
+  const conversation = await getConversationMembership(db, userId, conversationId);
+  if (!conversation) throw new WorkChatServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+
+  const [attachment] = await db
+    .select({
+      id: chatAttachment.id,
+      bucket: file.bucket,
+      objectKey: file.objectKey,
+    })
+    .from(chatAttachment)
+    .innerJoin(file, eq(file.id, chatAttachment.fileId))
+    .innerJoin(chatMessageAttachment, eq(chatMessageAttachment.attachmentId, chatAttachment.id))
+    .innerJoin(chatMessage, eq(chatMessage.id, chatMessageAttachment.messageId))
+    .where(and(
+      eq(chatAttachment.id, attachmentId),
+      eq(chatAttachment.conversationId, conversationId),
+      eq(chatAttachment.status, 'CONSUMED'),
+      isNull(chatAttachment.deletedAt),
+      isNull(chatMessage.deletedAt),
+      memberCanSeeMessage(db, userId),
+    ))
+    .limit(1);
+  if (!attachment) throw new WorkChatServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
+
+  try {
+    return {
+      attachmentId: attachment.id,
+      ...workChatStorage.linkFor(attachment),
+    };
+  } catch {
+    throw new WorkChatServiceError('ATTACHMENT_LINK_UNAVAILABLE', 'Attachment link is unavailable');
   }
 };
 

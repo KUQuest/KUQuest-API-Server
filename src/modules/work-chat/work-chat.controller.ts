@@ -7,13 +7,17 @@ import type { Static } from 'elysia';
 
 import {
   advanceWorkConversationReadCursor,
+  getWorkConversationAttachmentLink,
   listWorkConversationMessages,
   listWorkConversationParticipants,
   listWorkConversations,
   sendWorkConversationMessage,
+  uploadWorkConversationAttachment,
   WorkChatServiceError,
 } from './work-chat.service';
 import type {
+  workChatAttachmentParamsSchema,
+  workChatAttachmentUploadSchema,
   workChatConversationListQuerySchema,
   workChatConversationParamsSchema,
   workChatMessageListQuerySchema,
@@ -24,6 +28,8 @@ import type {
 type ConversationListQuery = Static<typeof workChatConversationListQuerySchema>;
 type MessageListQuery = Static<typeof workChatMessageListQuerySchema>;
 type ConversationParams = Static<typeof workChatConversationParamsSchema>;
+type AttachmentParams = Static<typeof workChatAttachmentParamsSchema>;
+type AttachmentUploadInput = Static<typeof workChatAttachmentUploadSchema>;
 type SendMessageInput = Static<typeof workChatSendMessageSchema>;
 type ReadCursorInput = Static<typeof workChatReadCursorSchema>;
 
@@ -34,6 +40,11 @@ const serializeMessage = (message: Awaited<ReturnType<typeof sendWorkConversatio
     ...attachment,
     createdAt: attachment.createdAt.toISOString(),
   })),
+});
+
+const serializeAttachment = (attachment: Awaited<ReturnType<typeof uploadWorkConversationAttachment>>) => ({
+  ...attachment,
+  createdAt: attachment.createdAt.toISOString(),
 });
 
 const serializeConversation = (conversation: Awaited<ReturnType<typeof listWorkConversations>>['items'][number]) => ({
@@ -52,6 +63,12 @@ const mapWorkChatError = (set: AuthedContext['set'], error: unknown) => {
   if (!(error instanceof WorkChatServiceError)) throw error;
   if (error.code === 'CONVERSATION_NOT_FOUND' || error.code === 'MESSAGE_NOT_FOUND' || error.code === 'ATTACHMENT_NOT_FOUND') {
     set.status = 404;
+  } else if (error.code === 'ATTACHMENT_TOO_LARGE') {
+    set.status = 413;
+  } else if (error.code === 'ATTACHMENT_UNSUPPORTED') {
+    set.status = 415;
+  } else if (error.code === 'ATTACHMENT_UPLOAD_FAILED' || error.code === 'ATTACHMENT_LINK_UNAVAILABLE') {
+    set.status = 502;
   } else if (error.code === 'MESSAGE_CONTENT_REQUIRED') {
     set.status = 400;
   } else if (error.code === 'RATE_LIMITED') {
@@ -60,6 +77,37 @@ const mapWorkChatError = (set: AuthedContext['set'], error: unknown) => {
     set.status = 409;
   }
   return apiError(error.code, error.message);
+};
+
+export const uploadWorkConversationAttachmentController = async ({
+  body,
+  params,
+  session,
+  set,
+}: AuthedContext & { body: AttachmentUploadInput; params: ConversationParams }): Promise<ApiResponse> => {
+  try {
+    const attachment = await uploadWorkConversationAttachment(session.user.id, params.conversationId, body.file);
+    return apiSuccess({ attachment: serializeAttachment(attachment) });
+  } catch (error) {
+    return mapWorkChatError(set, error);
+  }
+};
+
+export const getWorkConversationAttachmentLinkController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: AttachmentParams }): Promise<ApiResponse> => {
+  try {
+    const link = await getWorkConversationAttachmentLink(
+      session.user.id,
+      params.conversationId,
+      params.attachmentId,
+    );
+    return apiSuccess({ ...link, expiresAt: link.expiresAt.toISOString() });
+  } catch (error) {
+    return mapWorkChatError(set, error);
+  }
 };
 
 export const listWorkConversationsController = async ({

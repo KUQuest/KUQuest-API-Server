@@ -14,7 +14,7 @@ import {
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
-import { createWorkChatMembershipWriter } from '@/modules/work-chat';
+import { createWorkChatMembershipWriter, workChatStorage } from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';
 
@@ -208,10 +208,17 @@ afterAll(async () => {
 
 describe('Work Chat Member API', () => {
   it('requires Member authentication for every documented route', async () => {
+    const unauthorizedAttachment = new FormData();
+    unauthorizedAttachment.set('file', new File([new Uint8Array([1])], 'file.png', { type: 'image/png' }));
     const responses = await Promise.all([
       workChatApp.handle(new Request('http://localhost/api/v1/chat/conversations')),
       workChatApp.handle(new Request(`http://localhost/api/v1/chat/conversations/${randomUUID()}/messages`)),
       workChatApp.handle(new Request(`http://localhost/api/v1/chat/conversations/${randomUUID()}/participants`)),
+      workChatApp.handle(new Request(`http://localhost/api/v1/chat/conversations/${randomUUID()}/attachments`, {
+        method: 'POST',
+        body: unauthorizedAttachment,
+      })),
+      workChatApp.handle(new Request(`http://localhost/api/v1/chat/conversations/${randomUUID()}/attachments/${randomUUID()}/link`)),
       requestJson('POST', `/api/v1/chat/conversations/${randomUUID()}/read`, { messageId: randomUUID() }),
       requestJson('POST', `/api/v1/chat/conversations/${randomUUID()}/messages`, {
         clientMessageId: 'unauthorized-message',
@@ -239,6 +246,8 @@ describe('Work Chat Member API', () => {
     const operations = [
       ['/api/v1/chat/conversations', 'get', 'listWorkConversations'],
       ['/api/v1/chat/conversations/{conversationId}/participants', 'get', 'listWorkConversationParticipants'],
+      ['/api/v1/chat/conversations/{conversationId}/attachments', 'post', 'uploadWorkConversationAttachment'],
+      ['/api/v1/chat/conversations/{conversationId}/attachments/{attachmentId}/link', 'get', 'getWorkConversationAttachmentLink'],
       ['/api/v1/chat/conversations/{conversationId}/messages', 'get', 'listWorkConversationMessages'],
       ['/api/v1/chat/conversations/{conversationId}/messages', 'post', 'sendWorkConversationMessage'],
       ['/api/v1/chat/conversations/{conversationId}/read', 'post', 'advanceWorkConversationReadCursor'],
@@ -286,6 +295,43 @@ describe('Work Chat Member API', () => {
       { id: hirerId, role: 'HIRER', displayName: 'Route Hirer' },
       { id: workerId, role: 'WORKER', displayName: 'Route Worker' },
     ]);
+
+    const storedObject = {
+      bucket: 'test-work-chat',
+      objectKey: `work-chat/${conversationId}/uploaded.png`,
+      contentType: 'image/png' as const,
+      sizeBytes: 3,
+      fileName: 'uploaded.png',
+    };
+    spyOn(workChatStorage, 'upload').mockResolvedValue(storedObject);
+    spyOn(workChatStorage, 'remove').mockResolvedValue(undefined);
+    const uploadBody = new FormData();
+    uploadBody.set('file', new File([new Uint8Array([1, 2, 3])], 'uploaded.png', { type: 'image/png' }));
+    const uploaded = await workChatApp.handle(new Request(
+      `http://localhost/api/v1/chat/conversations/${conversationId}/attachments`,
+      { method: 'POST', headers: { 'x-member-id': workerId }, body: uploadBody },
+    ));
+    expect(uploaded.status).toBe(200);
+    const uploadedBody = await uploaded.json() as { data: { attachment: { id: string; fileName: string } } };
+    expect(uploadedBody.data.attachment.fileName).toBe('uploaded.png');
+    const [uploadedFile] = await db.select({ id: file.id }).from(file).where(eq(file.objectKey, storedObject.objectKey));
+    if (uploadedFile) fixtureFileIds.push(uploadedFile.id);
+
+    const attachmentMessage = await requestJson('POST', `/api/v1/chat/conversations/${conversationId}/messages`, {
+      clientMessageId: 'worker-uploaded-attachment',
+      attachmentIds: [uploadedBody.data.attachment.id],
+    }, workerId);
+    expect(attachmentMessage.status).toBe(200);
+    spyOn(workChatStorage, 'linkFor').mockReturnValue({
+      url: 'https://storage.test/work-chat-link',
+      expiresAt: new Date('2030-01-01T11:15:00.000Z'),
+    });
+    const link = await workChatApp.handle(new Request(
+      `http://localhost/api/v1/chat/conversations/${conversationId}/attachments/${uploadedBody.data.attachment.id}/link`,
+      { headers: { 'x-member-id': workerId } },
+    ));
+    expect(link.status).toBe(200);
+    expect((await link.json()).data.url).toBe('https://storage.test/work-chat-link');
 
     const sent = await requestJson('POST', `/api/v1/chat/conversations/${conversationId}/messages`, {
       clientMessageId: 'worker-message-1',

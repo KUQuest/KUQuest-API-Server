@@ -27,6 +27,12 @@ const attachmentSchema = t.Object({
   createdAt: t.String({ format: 'date-time' }),
 });
 
+const workChatAttachmentLinkSchema = t.Object({
+  attachmentId: t.String({ format: 'uuid' }),
+  url: t.String({ format: 'uri' }),
+  expiresAt: t.String({ format: 'date-time' }),
+});
+
 const messageSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   conversationId: t.String({ format: 'uuid' }),
@@ -52,6 +58,16 @@ export const workChatConversationParamsSchema = t.Object({
   conversationId: t.String({ format: 'uuid' }),
 });
 
+export const workChatAttachmentParamsSchema = t.Object({
+  conversationId: t.String({ format: 'uuid' }),
+  attachmentId: t.String({ format: 'uuid' }),
+});
+
+export const workChatAttachmentUploadSchema = t.Object(
+  { file: t.File() },
+  { additionalProperties: false },
+);
+
 export const workChatConversationListQuerySchema = t.Object(
   {
     limit: t.Optional(t.Integer({ minimum: 1, maximum: 20 })),
@@ -73,9 +89,7 @@ export const workChatSendMessageSchema = t.Object(
   {
     clientMessageId: t.String({ minLength: 1, maxLength: 128, pattern: '\\S' }),
     text: t.Optional(t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' })),
-    // The current database relation permits positions 1 through 5. Keep this API at five
-    // until a storage-boundary migration can raise that source-of-truth constraint safely.
-    attachmentIds: t.Optional(t.Array(t.String({ format: 'uuid' }), { maxItems: 5, uniqueItems: true })),
+    attachmentIds: t.Optional(t.Array(t.String({ format: 'uuid' }), { uniqueItems: true })),
   },
   { additionalProperties: false },
 );
@@ -116,6 +130,16 @@ export const workChatParticipantListResponseSchema = t.Object({
   }),
 });
 
+export const workChatAttachmentResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({ attachment: attachmentSchema }),
+});
+
+export const workChatAttachmentLinkResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: workChatAttachmentLinkSchema,
+});
+
 export const workChatReadCursorResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
@@ -127,5 +151,7 @@ export const workChatReadCursorResponseSchema = t.Object({
 export type WorkChatConversationListQuery = typeof workChatConversationListQuerySchema.static;
 export type WorkChatMessageListQuery = typeof workChatMessageListQuerySchema.static;
 export type WorkChatConversationParams = typeof workChatConversationParamsSchema.static;
+export type WorkChatAttachmentParams = typeof workChatAttachmentParamsSchema.static;
+export type WorkChatAttachmentUploadInput = typeof workChatAttachmentUploadSchema.static;
 export type WorkChatSendMessageInput = typeof workChatSendMessageSchema.static;
 export type WorkChatReadCursorInput = typeof workChatReadCursorSchema.static;

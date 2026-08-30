@@ -5,10 +5,10 @@ import {
   foreignKey,
   index,
   jsonb,
+  integer,
   pgEnum,
   pgTable,
   primaryKey,
-  smallint,
   timestamp,
   unique,
   uniqueIndex,
@@ -227,7 +227,7 @@ export const chatMessageAttachment = pgTable(
   {
     messageId: uuid('message_id').notNull(),
     attachmentId: uuid('attachment_id').notNull(),
-    position: smallint('position').notNull(),
+    position: integer('position').notNull(),
     attachedAt: time('attached_at').defaultNow().notNull(),
   },
   (table) => [
@@ -244,7 +244,7 @@ export const chatMessageAttachment = pgTable(
       columns: [table.attachmentId],
       foreignColumns: [chatAttachment.id],
     }).onDelete('restrict'),
-    check('chat_message_attachment_position_check', sql`${table.position} BETWEEN 1 AND 5`),
+    check('chat_message_attachment_position_check', sql`${table.position} > 0`),
   ],
 );
 

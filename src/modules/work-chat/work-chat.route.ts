@@ -7,12 +7,18 @@ import { Elysia } from 'elysia';
 
 import {
   advanceWorkConversationReadCursorController,
+  getWorkConversationAttachmentLinkController,
   listWorkConversationMessagesController,
   listWorkConversationParticipantsController,
   listWorkConversationsController,
   sendWorkConversationMessageController,
+  uploadWorkConversationAttachmentController,
 } from './work-chat.controller';
 import {
+  workChatAttachmentLinkResponseSchema,
+  workChatAttachmentParamsSchema,
+  workChatAttachmentResponseSchema,
+  workChatAttachmentUploadSchema,
   workChatConversationListQuerySchema,
   workChatConversationListResponseSchema,
   workChatConversationParamsSchema,
@@ -49,6 +55,30 @@ export const workChatRoute = new Elysia({
       summary: 'List Work Conversation Participants',
       description: 'Lists the current Hirer and Worker participants with their roles.',
       operationId: 'listWorkConversationParticipants',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/conversations/:conversationId/attachments', uploadWorkConversationAttachmentController, {
+    params: workChatConversationParamsSchema,
+    body: workChatAttachmentUploadSchema,
+    type: 'multipart/form-data',
+    response: responses(workChatAttachmentResponseSchema, 401, 404, 409, 413, 415, 429, 502),
+    detail: {
+      tags: ['Work Chat'],
+      summary: 'Upload a Work Conversation Attachment',
+      description: 'Uploads an image, PDF, or video up to 10 MB for the authenticated current Member to attach to a Message.',
+      operationId: 'uploadWorkConversationAttachment',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/conversations/:conversationId/attachments/:attachmentId/link', getWorkConversationAttachmentLinkController, {
+    params: workChatAttachmentParamsSchema,
+    response: responses(workChatAttachmentLinkResponseSchema, 401, 404, 502),
+    detail: {
+      tags: ['Work Chat'],
+      summary: 'Get a Work Conversation Attachment Link',
+      description: 'Returns a short-lived link for an attachment in a visible Work Conversation Message.',
+      operationId: 'getWorkConversationAttachmentLink',
       security: betterAuthSecurity,
     },
   })
