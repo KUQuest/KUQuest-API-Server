@@ -13,6 +13,13 @@ Use the five canonical labels without remapping: `needs-triage`, `needs-info`, `
 ### Domain docs
 
 Single-context repository: read root `CONTEXT.md` and relevant ADRs under `docs/adr/`. See `docs/agents/domain.md`.
+Before doing anything related to finance—including diagnosis, design, coding, testing, database work, provider calls, or migrations—read `finace_function.md` completely. It is mandatory guidance for `Top-up`, `Wallet`, `Funding Reservation`, `Ledger Transaction`, `Earnings Conversion`, `Payout`, and `Payout Destination` work.
+
+**Quest rulebook** — for Quest State, Start Work, Proof Submission,
+cancellation, failure, or Work Chat membership, read
+`docs/quest/work-chat-system-target.md` §Resolved Quest lifecycle before
+planning or coding. `docs/deprecated/` is historical evidence, not workflow
+authority.
 
 ### Clarifying domain context
 
@@ -73,6 +80,14 @@ Follow `CODESTYLES.md` at the repo root — formatting, import order, module lay
 - Domain/architecture: `domain-modeling` (terminology, ADRs), `improve-codebase-architecture` (refactor scan).
 
 Typical chain: `grilling`/`grill-with-docs` → `to-spec`/`to-tickets` → `triage` as issues come in → `wayfinder` if scope exceeds one session.
+
+### Pull request and CI/CD workflow rules
+
+- GitHub Actions uses the workflow files from `main`.
+- Put application, test, finance, documentation, and other non-workflow changes in a PR with base `develop`.
+- If a task changes a file under `.github/workflows/`, commit that workflow change and open a separate PR with base `main`.
+- A PR with base `main` must contain only the required GitHub Actions workflow file changes. Do not include application, test, finance, or documentation changes in that PR.
+- If one task needs both workflow and non-workflow changes, use separate commits and separate PRs: workflow PR to `main`, other changes PR to `develop`.
 
 ### Coding guidelines
 

@@ -15,6 +15,21 @@ const stagingOperationsScript = join(
   import.meta.dir,
   '../../scripts/staging-operations.sh',
 );
+const stagingBootstrapVerificationScript = join(
+  import.meta.dir,
+  '../../scripts/verify-staging-bootstrap.sh',
+);
+
+test('staging bootstrap verification reads credentials from its environment', async () => {
+  const script = await readFile(stagingBootstrapVerificationScript, 'utf8');
+
+  expect(script).toContain('ADMIN_PASSWORD must be supplied by the caller');
+  expect(script).toContain('STAGING_TEST_AUTH_PASSWORD must be supplied by the caller');
+  expect(script).toContain('"ADMIN_PASSWORD=$ADMIN_PASSWORD"');
+  expect(script).toContain('"STAGING_TEST_AUTH_PASSWORD=$STAGING_TEST_AUTH_PASSWORD"');
+  expect(script).not.toMatch(/ADMIN_PASSWORD=BootstrapAdmin/);
+  expect(script).not.toMatch(/STAGING_TEST_AUTH_PASSWORD=BootstrapStudent/);
+});
 
 const createFixture = async () => {
   const directory = await mkdtemp(join(tmpdir(), 'kuquest-staging-ops-'));

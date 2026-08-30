@@ -1,7 +1,9 @@
 import { app } from '@/app';
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
+import { walletWallet } from '@/database/schema/wallet.schema';
 import { authPlugin, createStagingTestAuthRoute } from '@/modules/auth';
+import { getWallet } from '@/modules/wallet';
 
 import { randomUUID } from 'node:crypto';
 
@@ -36,18 +38,36 @@ const composedStagingTestApp = new Elysia({
     }),
   );
 
+const disabledStagingTestApp = new Elysia({ name: 'disabled-staging-test-auth' }).use(
+  createStagingTestAuthRoute({
+    enabled: false,
+    deploymentEnv: 'staging',
+    email: testEmail,
+    password: testPassword,
+    firstName: 'Staging',
+    lastName: 'Test Student',
+  }),
+);
+
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? [])
     .map((cookie) => cookie.split(';', 1)[0])
     .join('; ');
 
 afterAll(async () => {
+  const [wallet] = await db
+    .select({ id: walletWallet.id })
+    .from(walletWallet)
+    .innerJoin(authUser, eq(walletWallet.userId, authUser.id))
+    .where(eq(authUser.email, testEmail));
+  // Wallet provisioning retains immutable status history, so keep this fixture after the Wallet exists.
+  if (wallet) return;
   await db.delete(authUser).where(eq(authUser.email, testEmail));
 });
 
 describe('staging test authentication', () => {
   it('is unavailable when the staging flag is off', async () => {
-    const response = await app.handle(
+    const response = await disabledStagingTestApp.handle(
       new Request('http://localhost/api/staging/test-auth/get-session'),
     );
 
@@ -109,6 +129,16 @@ describe('staging test authentication', () => {
     expect(loginResponse.status).toBe(200);
     expect(getCookieHeader(loginResponse)).toContain('better-auth.session_token=');
 
+    const loginBody = (await loginResponse.json()) as { user: { id: string } };
+    const wallet = await getWallet(loginBody.user.id);
+    expect(wallet).toMatchObject({
+      walletStatus: 'ACTIVE',
+      spendingBalanceSatang: 0,
+      earningsBalanceSatang: 0,
+      fundingReservedSatang: 0,
+      reservedForPayoutsSatang: 0,
+    });
+
     const profileResponse = await app.handle(
       new Request('http://localhost/api/v1/profile', {
         headers: { cookie: getCookieHeader(loginResponse) },
@@ -117,5 +147,35 @@ describe('staging test authentication', () => {
 
     expect(profileResponse.status).toBe(200);
     expect((await profileResponse.json()).success).toBe(true);
+
+    const walletResponse = await app.handle(
+      new Request('http://localhost/api/v1/wallet', {
+        headers: { cookie: getCookieHeader(loginResponse) },
+      }),
+    );
+
+    expect(walletResponse.status).toBe(200);
+    expect(await walletResponse.json()).toMatchObject({
+      success: true,
+      data: {
+        wallet: {
+          spendingBalanceSatang: 0,
+          earningsBalanceSatang: 0,
+          fundingReservedSatang: 0,
+          reservedForPayoutsSatang: 0,
+        },
+      },
+    });
+  });
+
+  it('issues a normal session for the default test Student without exposing credentials', async () => {
+    const response = await stagingTestApp.handle(
+      new Request('http://localhost/api/staging/test-auth/sign-in/default', {
+        method: 'POST',
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(getCookieHeader(response)).toContain('better-auth.session_token=');
   });
 });

@@ -205,7 +205,11 @@ export const parseTopUpProviderEvent = (
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event currency is not supported.');
   }
   const providerChannelCode = firstText(data.channel_code, payload.channel_code);
-  if (providerChannelCode && providerChannelCode !== 'QRPROMPTPAY') {
+  if (
+    providerChannelCode
+    && providerChannelCode !== 'PROMPTPAY'
+    && providerChannelCode !== 'QRPROMPTPAY'
+  ) {
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event channel is not supported.');
   }
 

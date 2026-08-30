@@ -1,9 +1,9 @@
 # Work Chat REST and WebSocket contract
 
-> **Legacy reference — reconciliation required.** Use
-> `docs/quest/work-chat-system-target.md` for the accepted Work Chat, proof,
-> notification, and Quest workflow behavior. This file retains earlier
-> REST/WebSocket details; compare every constraint with the target before use.
+> **Legacy workflow reference.** The product source of truth is
+> `docs/quest/work-chat-system-target.md`, including §Resolved Quest lifecycle.
+> This file retains the earlier REST/WebSocket model. Do not use its Quest,
+> proof, notification, or moderation rules to define new behavior.
 
 This is the earlier contract for the Work Chat MVP. It defines the private
 Conversation associated with a Quest, the REST read and write surfaces, and the

@@ -75,7 +75,30 @@ KUQuest API running at http://localhost:5000
 
 Keep this terminal open while you use the API.
 
-### 6. Verify local services
+### 6. Expose the test API with Cloudflare Tunnel
+
+The Compose file includes a dedicated `cloudflared` service in the `tunnel`
+profile. Set `CLOUDFLARE_TUNNEL_TOKEN` in the ignored `.env` file, then start
+the tunnel:
+
+```bash
+docker compose --profile tunnel up -d cloudflared
+docker compose logs -f cloudflared
+```
+
+The tunnel uses host networking because the test API runs on the host at
+`http://localhost:5000`. The named tunnel's published application route in
+Cloudflare must therefore use `http://localhost:5000` as its service URL. Use
+the tunnel hostname from Cloudflare as the Xendit callback URL, with the API
+callback path appended.
+
+Stop the tunnel with:
+
+```bash
+docker compose --profile tunnel stop cloudflared
+```
+
+### 7. Verify local services
 
 In a second terminal, run:
 
@@ -86,14 +109,14 @@ curl --fail http://localhost:5000/openapi/json
 
 Open these URLs in a browser:
 
-- API auth test page: `http://localhost:5000`
+- Quest and finance test bench: `http://localhost:5000`
 - OpenAPI: `http://localhost:5000/openapi`
 - RustFS console: `http://localhost:9001`
 
 The RustFS console uses `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` from
 `.env`.
 
-### 7. Configure Google sign-in
+### 8. Configure Google sign-in
 
 Create a Google OAuth 2.0 **Web application** client. Add this redirect URI:
 
@@ -108,7 +131,7 @@ ends exactly in `@ku.th`.
 Do not open `public/index.html` with a `file://` URL. OAuth state and Session
 cookies require the API origin.
 
-### 8. Stop local services
+### 9. Stop local services
 
 ```bash
 docker compose stop
@@ -174,6 +197,9 @@ ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=replace-with-a-compliant-password
 ADMIN_FIRST_NAME=System
 ADMIN_LAST_NAME=Administrator
+
+# Required only for disposable staging bootstrap verification
+STAGING_TEST_AUTH_PASSWORD=replace-with-a-compliant-test-password
 ```
 
 Run the seed once with:
@@ -186,6 +212,11 @@ The password must be 8–25 characters and include uppercase, lowercase, a
 number, and an ASCII special character without whitespace. The seed lowercases
 the email, refuses to modify an existing Admin, and never prints or stores the
 plaintext password. Do not commit `.env.admin` or any real credentials.
+
+The disposable staging bootstrap verification also reads
+`ADMIN_PASSWORD` and `STAGING_TEST_AUTH_PASSWORD` from the caller environment.
+Use the ignored `.env.admin` file when running that verification locally. The
+staging workflow supplies both values from GitHub Actions secrets.
 
 The Admin endpoints are:
 
@@ -222,6 +253,16 @@ STAGING_TEST_AUTH_FIRST_NAME=Staging
 STAGING_TEST_AUTH_LAST_NAME=Test Student
 ```
 
+When staging test authentication is enabled, opening `http://localhost:5000`
+automatically signs the browser in as the configured test Member through
+`POST /api/staging/test-auth/sign-in/default`. The password is kept on the
+server and is not sent to the browser. The page provides guided controls for
+the Xendit Test Mode Top-up, Funding Reservation, Quest Escrow publication and
+release, and an OpenAPI-driven console for all implemented Quest operations.
+
+The default sign-in route is staging-only and returns `404` when the staging
+test-auth flag is disabled. Do not enable it for a production deployment.
+
 The email must end in `@ku.th`, and the password must be 8–25 ASCII characters
 containing uppercase, lowercase, a number, and a special character. The first
 valid login creates the configured Student if it does not exist, then returns
@@ -243,6 +284,60 @@ curl -b staging.cookies \
 The existing `db:seed-admin` workflow remains the path for creating an Admin.
 This Student route is separate because an Admin session cannot access
 Student-owned endpoints.
+
+### Local and staging Finance test routes
+
+For local or staging Finance verification, enable the guarded test route
+together with the staging Student test account. It requires an Xendit
+Development API key and either a development runtime or the controlled
+`NODE_ENV=production` and `DEPLOYMENT_ENV=staging` runtime. The route accepts
+only the configured test Student. The recipient is created as a second Member
+when the transfer test runs.
+
+```env
+LOCAL_FINANCE_TEST_ENABLED=true
+LOCAL_FINANCE_TEST_RECIPIENT_EMAIL=finance-test-recipient@ku.th
+LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME=Finance
+LOCAL_FINANCE_TEST_RECIPIENT_LAST_NAME=Recipient
+```
+
+The staging CD workflow supplies this configuration and runs the guarded
+Finance seed before verification. The seed creates deterministic Wallet
+balances and does not call Xendit.
+
+After signing in with the staging test route, run these local-only checks:
+
+```bash
+curl -b staging.cookies \
+  http://localhost:5000/api/local/test/wallet
+
+curl -b staging.cookies -H 'content-type: application/json' \
+  -X POST http://localhost:5000/api/local/test/payment \
+  -d '{"creditSatang":100,"simulate":true}'
+
+curl -b staging.cookies -H 'content-type: application/json' \
+  -X POST http://localhost:5000/api/local/test/transfer \
+  -d '{"amountSatang":100}'
+```
+
+The Payment route creates and simulates a real Xendit Test Mode Payment
+Request. It first waits for the Xendit callback. If the callback is not
+delivered, it uses the existing Provider reconciliation path and reports
+`reconciliationUsed: true`. The Transfer route performs a real `Funding
+Reservation` followed by a sealed `Ledger Transaction` from the test
+Student's `Spending Balance` to the recipient Member's `Earnings Balance`.
+The browser page displays the current Wallet compartments and renders the QR
+from the Xendit response. All browser money inputs and displayed amounts use
+Baht. The raw finance API keeps integer Satang at its boundary. It redacts the
+QR payload from debug messages.
+
+The Payout panel calls the normal Payout Quote and Payout submission APIs. It
+shows the maximum debit and masked active Payout Destination. The submitted
+Payout remains `PENDING_ADMIN_APPROVAL` until an Admin approves it; the browser
+page does not bypass that control or call the Payout Provider directly.
+
+These local finance routes return 404 for any other user and are disabled
+unless the local flags are valid.
 
 Staging CD starts only after a successful Backend CI run for a push to
 `develop`. Opening a pull request runs CI but does not deploy; merge the pull

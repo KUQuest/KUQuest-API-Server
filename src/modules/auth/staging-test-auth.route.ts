@@ -1,6 +1,7 @@
 import { env } from '@/config/env';
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
+import { ensureWallet } from '@/modules/wallet';
 
 import { Elysia } from 'elysia';
 import { eq } from 'drizzle-orm';
@@ -10,8 +11,10 @@ import { createStudentAuth } from './auth.config';
 
 const stagingTestAuthBasePath = '/api/staging/test-auth';
 const stagingTestAuthSignInPath = `${stagingTestAuthBasePath}/sign-in/email`;
+const stagingTestAuthDefaultSignInPath = `${stagingTestAuthBasePath}/sign-in/default`;
 const stagingTestAuthPaths = new Set([
   stagingTestAuthSignInPath,
+  stagingTestAuthDefaultSignInPath,
   `${stagingTestAuthBasePath}/get-session`,
   `${stagingTestAuthBasePath}/sign-out`,
 ]);
@@ -50,6 +53,18 @@ const readSignInBody = async (request: Request): Promise<SignInBody | null> => {
   } catch {
     return null;
   }
+};
+
+const defaultSignInRequest = (request: Request, email: string, password: string): Request => {
+  const headers = new Headers(request.headers);
+  headers.set('content-type', 'application/json');
+  headers.delete('content-length');
+
+  return new Request(new URL(stagingTestAuthSignInPath, request.url), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ email, password }),
+  });
 };
 
 export const createStagingTestAuthRoute = (
@@ -99,19 +114,23 @@ export const createStagingTestAuthRoute = (
         .where(eq(authUser.email, settings.email!))
         .limit(1);
 
-      if (existingStudent.length > 0) return;
+      let studentId = existingStudent[0]?.id;
+      if (!studentId) {
+        const result = await testAuth.api.signUpEmail({
+          body: {
+            email: settings.email!,
+            password: settings.password!,
+            name: `${settings.firstName} ${settings.lastName}`,
+            firstName: settings.firstName!,
+            lastName: settings.lastName!,
+          },
+        });
 
-      const result = await testAuth.api.signUpEmail({
-        body: {
-          email: settings.email!,
-          password: settings.password!,
-          name: `${settings.firstName} ${settings.lastName}`,
-          firstName: settings.firstName!,
-          lastName: settings.lastName!,
-        },
-      });
+        if (!result.user) throw new Error('Staging test Student could not be created');
+        studentId = result.user.id;
+      }
 
-      if (!result.user) throw new Error('Staging test Student could not be created');
+      await ensureWallet(studentId);
     })();
 
     try {
@@ -126,6 +145,13 @@ export const createStagingTestAuthRoute = (
 
     if (!enabled || !stagingTestAuthPaths.has(pathname)) {
       return new Response(null, { status: 404 });
+    }
+
+    if (pathname === stagingTestAuthDefaultSignInPath) {
+      if (request.method !== 'POST') return new Response(null, { status: 404 });
+
+      await ensureTestStudent();
+      return testAuth.handler(defaultSignInRequest(request, settings.email!, settings.password!));
     }
 
     if (pathname === stagingTestAuthSignInPath) {
