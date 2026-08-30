@@ -12,9 +12,11 @@ const clientErrors: Record<string, { status: number; message?: string }> = {
 
 export const errorHandlerPlugin = new Elysia({ name: 'error-handler' }).onError(
   { as: 'global' },
-  ({ code, error, set }) => {
+  ({ code, error, request, set }) => {
     const codeName = String(code);
     const clientError = clientErrors[codeName];
+    const isV2Request = new URL(request.url).pathname.startsWith('/api/v2/');
+    const responseCode = !clientError && isV2Request ? 'INTERNAL_ERROR' : codeName;
 
     const message = clientError
       ? (clientError.message ?? (error instanceof Error ? error.message : 'Internal server error'))
@@ -26,6 +28,6 @@ export const errorHandlerPlugin = new Elysia({ name: 'error-handler' }).onError(
 
     set.status = clientError?.status ?? 500;
 
-    return apiError(codeName, message);
+    return apiError(responseCode, message);
   },
 );

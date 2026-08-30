@@ -5,6 +5,7 @@ import {
   quest,
   questApplication,
   questAssignment,
+  questApiVersion,
   questEditHistory,
   questEditRequest,
   questEditRequestResponse,
@@ -204,7 +205,13 @@ const selectOwnedQuestForEdit = async (
       proofRequired: quest.proofRequired,
     })
     .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId)))
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.hirerId, userId),
+        eq(quest.apiVersion, questApiVersion.v1),
+      ),
+    )
     .limit(1)
     .for('update');
 
@@ -266,7 +273,13 @@ const lockOwnedQuest = async (
   const [ownedQuest] = await transaction
     .select({ id: quest.id, questStatus: quest.questStatus })
     .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId)))
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.hirerId, userId),
+        eq(quest.apiVersion, questApiVersion.v1),
+      ),
+    )
     .limit(1)
     .for('update');
 
@@ -368,6 +381,7 @@ const listRows = async (filters: QuestListFilters, hirerId?: string) => {
   const limit = parsePageLimit(filters.limit);
   const cursor = decodeCursor(filters.cursor);
   const conditions = [
+    eq(quest.apiVersion, questApiVersion.v1),
     hirerId ? eq(quest.hirerId, hirerId) : eq(quest.questStatus, questStatus.open),
   ];
 
@@ -616,7 +630,13 @@ const selectConsentQuest = async (
       headcount: quest.headcount,
     })
     .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId)))
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.hirerId, userId),
+        eq(quest.apiVersion, questApiVersion.v1),
+      ),
+    )
     .limit(1)
     .for('update');
   return row;
@@ -1222,6 +1242,7 @@ export const getQuestDetail = async (userId: string, questId: string) => {
     .where(
       and(
         eq(quest.id, questId),
+        eq(quest.apiVersion, questApiVersion.v1),
         or(eq(quest.hirerId, userId), eq(quest.questStatus, questStatus.open)),
       ),
     )
@@ -1271,7 +1292,13 @@ const selectPublishRow = async (
       dueAt: quest.dueAt,
     })
     .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId)))
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.hirerId, userId),
+        eq(quest.apiVersion, questApiVersion.v1),
+      ),
+    )
     .limit(1);
 
   const rows = lock ? await query.for('update') : await query;
