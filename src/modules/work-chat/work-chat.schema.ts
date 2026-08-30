@@ -2,6 +2,7 @@ import { t } from 'elysia';
 
 const conversationSchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  type: t.Literal('CONVERSATION_WORK'),
   quest: t.Object({
     id: t.String({ format: 'uuid' }),
     title: t.String(),
@@ -45,6 +46,8 @@ const messageSchema = t.Object({
   text: t.Nullable(t.String()),
   attachments: t.Array(attachmentSchema),
   systemType: t.Nullable(t.String()),
+  systemPayload: t.Nullable(t.Record(t.String(), t.Unknown())),
+  eventId: t.Nullable(t.String()),
   createdAt: t.String({ format: 'date-time' }),
 });
 
@@ -138,6 +141,11 @@ export const workChatAttachmentResponseSchema = t.Object({
 export const workChatAttachmentLinkResponseSchema = t.Object({
   success: t.Literal(true),
   data: workChatAttachmentLinkSchema,
+});
+
+export const workChatAttachmentDiscardResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({ attachmentId: t.String({ format: 'uuid' }) }),
 });
 
 export const workChatReadCursorResponseSchema = t.Object({

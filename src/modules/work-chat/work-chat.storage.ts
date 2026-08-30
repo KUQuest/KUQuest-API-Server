@@ -2,8 +2,8 @@ import { env } from '@/config/env';
 
 import sharp from 'sharp';
 
-const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
-const LINK_LIFETIME_SECONDS = 15 * 60;
+const maxAttachmentSizeBytes = 10 * 1024 * 1024;
+const linkLifetimeSeconds = 15 * 60;
 
 const extensionByContentType = {
   'image/jpeg': 'jpg',
@@ -97,8 +97,8 @@ export const createWorkChatStorage = ({
   keyPrefix,
   bucket: configuredBucket,
   client,
-  maxSizeBytes = MAX_ATTACHMENT_SIZE_BYTES,
-  urlLifetimeSeconds = LINK_LIFETIME_SECONDS,
+  maxSizeBytes = maxAttachmentSizeBytes,
+  urlLifetimeSeconds = linkLifetimeSeconds,
 }: WorkChatStorageConfig) => {
   const storageBucket = configuredBucket ?? env.s3Bucket;
   const s3 = client ?? new Bun.S3Client({

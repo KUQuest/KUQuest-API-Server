@@ -7,6 +7,7 @@ import type { Static } from 'elysia';
 
 import {
   advanceWorkConversationReadCursor,
+  discardWorkConversationAttachment,
   getWorkConversationAttachmentLink,
   listWorkConversationMessages,
   listWorkConversationParticipants,
@@ -73,6 +74,9 @@ const mapWorkChatError = (set: AuthedContext['set'], error: unknown) => {
     set.status = 400;
   } else if (error.code === 'RATE_LIMITED') {
     set.status = 429;
+    if (error.retryAfterSeconds !== undefined) {
+      (set as unknown as { headers: Record<string, string> }).headers['Retry-After'] = String(error.retryAfterSeconds);
+    }
   } else {
     set.status = 409;
   }
@@ -105,6 +109,22 @@ export const getWorkConversationAttachmentLinkController = async ({
       params.attachmentId,
     );
     return apiSuccess({ ...link, expiresAt: link.expiresAt.toISOString() });
+  } catch (error) {
+    return mapWorkChatError(set, error);
+  }
+};
+
+export const discardWorkConversationAttachmentController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: AttachmentParams }): Promise<ApiResponse> => {
+  try {
+    return apiSuccess(await discardWorkConversationAttachment(
+      session.user.id,
+      params.conversationId,
+      params.attachmentId,
+    ));
   } catch (error) {
     return mapWorkChatError(set, error);
   }

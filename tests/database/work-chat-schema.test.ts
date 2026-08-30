@@ -14,6 +14,7 @@ describe('Work Chat database schema', () => {
     const columns = getTableColumns(chatConversation);
 
     expect(columns.questId.name).toBe('quest_id');
+    expect(columns.type.name).toBe('type');
     expect(columns.questTitle.name).toBe('quest_title');
     expect(columns.questStatus.name).toBe('quest_status');
     expect(getTableConfig(chatConversation).uniqueConstraints).toHaveLength(1);

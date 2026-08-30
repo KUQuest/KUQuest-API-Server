@@ -115,7 +115,7 @@ describe('Xendit Payout provider', () => {
         status: 'ACCEPTED',
         amount: 123.45,
         currency: 'THB',
-        channel_code: 'SCB',
+        channel_code: 'TH_SCB',
       });
     };
 
@@ -135,8 +135,11 @@ describe('Xendit Payout provider', () => {
     expect(new Headers(called?.init?.headers).get('idempotency-key')).toBe(request.internalReference);
     expect(body).toEqual({
       reference_id: request.internalReference,
-      channel_code: 'SCB',
-      channel_properties: { account_number: destination.accountNumber },
+      channel_code: 'TH_SCB',
+      channel_properties: {
+        account_number: destination.accountNumber,
+        account_holder_name: destination.accountHolderName,
+      },
       amount: 123.45,
       currency: 'THB',
       description: 'KUQuest Payout',
@@ -164,7 +167,7 @@ describe('Xendit Payout provider', () => {
         fee: 0,
         tax: 0,
         currency: 'THB',
-      channel_code: 'SCB',
+        channel_code: 'TH_SCB',
       }),
     });
 
@@ -215,7 +218,7 @@ describe('Xendit Payout provider', () => {
         status: 'SUCCEEDED',
         amount: 123.45,
         currency: 'THB',
-        channel_code: 'SCB',
+        channel_code: 'TH_SCB',
       }),
     });
 
@@ -252,7 +255,42 @@ describe('Xendit Payout provider', () => {
 
     expect(body).toMatchObject({
       channel_code: 'PROMPTPAY',
-      channel_properties: { account_number: '0812345678' },
+      channel_properties: {
+        account_number: '0812345678',
+        account_holder_name: destination.accountHolderName,
+      },
+    });
+  });
+
+  it('maps another supported Thai bank to its explicit Xendit channel', async () => {
+    let body: Record<string, unknown> | undefined;
+    const fetcher: Fetcher = async (_url, init) => {
+      body = JSON.parse(String(init?.body));
+      return response({
+        id: 'xnd-kbank-123',
+        status: 'ACCEPTED',
+        amount: 123.45,
+        currency: 'THB',
+        channel_code: 'TH_KKB',
+      });
+    };
+
+    await new XenditPayoutProvider({ secretKey: 'secret', fetcher }).createPayout({
+      ...request,
+      destination: { ...destination, bankCode: 'KBANK' },
+    });
+
+    expect(body).toEqual({
+      reference_id: request.internalReference,
+      channel_code: 'TH_KKB',
+      channel_properties: {
+        account_number: destination.accountNumber,
+        account_holder_name: destination.accountHolderName,
+      },
+      amount: 123.45,
+      currency: 'THB',
+      description: 'KUQuest Payout',
+      metadata: { kuquest_reference: request.internalReference },
     });
   });
 

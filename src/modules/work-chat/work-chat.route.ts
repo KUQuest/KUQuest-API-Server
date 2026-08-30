@@ -7,6 +7,7 @@ import { Elysia } from 'elysia';
 
 import {
   advanceWorkConversationReadCursorController,
+  discardWorkConversationAttachmentController,
   getWorkConversationAttachmentLinkController,
   listWorkConversationMessagesController,
   listWorkConversationParticipantsController,
@@ -16,6 +17,7 @@ import {
 } from './work-chat.controller';
 import {
   workChatAttachmentLinkResponseSchema,
+  workChatAttachmentDiscardResponseSchema,
   workChatAttachmentParamsSchema,
   workChatAttachmentResponseSchema,
   workChatAttachmentUploadSchema,
@@ -30,12 +32,49 @@ import {
   workChatReadCursorSchema,
   workChatSendMessageSchema,
 } from './work-chat.schema';
+import { workChatDelivery } from './work-chat.delivery';
+import { isCurrentWorkConversationMember } from './work-chat.service';
+
+const webSocketUnsubscribers = new WeakMap<object, () => void>();
 
 export const workChatRoute = new Elysia({
   name: 'work-chat-route',
   prefix: `${API_V1_PREFIX}/chat`,
 })
   .use(authGuard)
+  .ws('/conversations/:conversationId/events', {
+    params: workChatConversationParamsSchema,
+    async open(ws) {
+      const memberId = ws.data.session.user.id;
+      const allowed = await isCurrentWorkConversationMember(memberId, ws.data.params.conversationId);
+      if (!allowed) {
+        ws.close(4403, 'Conversation not found');
+        return;
+      }
+      const unsubscribe = workChatDelivery.subscribe(
+        memberId,
+        async (event) => {
+          ws.send(JSON.stringify({ type: 'WORK_CONVERSATION_MESSAGE', message: event.message }));
+        },
+        ws.data.params.conversationId,
+      );
+      webSocketUnsubscribers.set(ws, unsubscribe);
+    },
+    message(ws) {
+      ws.close(1008, 'Work Conversation Events are read-only');
+    },
+    close(ws) {
+      webSocketUnsubscribers.get(ws)?.();
+      webSocketUnsubscribers.delete(ws);
+    },
+    detail: {
+      tags: ['Work Chat'],
+      summary: 'Subscribe to committed Work Conversation Events',
+      description: 'Subscribes a current Work Conversation Member to committed Message Events. REST remains authoritative and this channel is read-only.',
+      operationId: 'subscribeWorkConversationEvents',
+      security: betterAuthSecurity,
+    },
+  })
   .get('/conversations', listWorkConversationsController, {
     query: workChatConversationListQuerySchema,
     response: responses(workChatConversationListResponseSchema, 400, 401),
@@ -79,6 +118,17 @@ export const workChatRoute = new Elysia({
       summary: 'Get a Work Conversation Attachment Link',
       description: 'Returns a short-lived link for an attachment in a visible Work Conversation Message.',
       operationId: 'getWorkConversationAttachmentLink',
+      security: betterAuthSecurity,
+    },
+  })
+  .delete('/conversations/:conversationId/attachments/:attachmentId', discardWorkConversationAttachmentController, {
+    params: workChatAttachmentParamsSchema,
+    response: responses(workChatAttachmentDiscardResponseSchema, 401, 404, 409),
+    detail: {
+      tags: ['Work Chat'],
+      summary: 'Discard a Work Conversation Attachment',
+      description: 'Discards the authenticated current Member attachment while it remains in the composer.',
+      operationId: 'discardWorkConversationAttachment',
       security: betterAuthSecurity,
     },
   })

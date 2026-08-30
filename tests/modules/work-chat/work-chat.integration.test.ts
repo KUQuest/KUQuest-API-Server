@@ -14,7 +14,12 @@ import {
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
-import { createWorkChatMembershipWriter, workChatStorage } from '@/modules/work-chat';
+import {
+  cleanupExpiredWorkChatAttachments,
+  createWorkChatMembershipWriter,
+  workChatDelivery,
+  workChatStorage,
+} from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';
 
@@ -219,6 +224,9 @@ describe('Work Chat Member API', () => {
         body: unauthorizedAttachment,
       })),
       workChatApp.handle(new Request(`http://localhost/api/v1/chat/conversations/${randomUUID()}/attachments/${randomUUID()}/link`)),
+      workChatApp.handle(new Request(`http://localhost/api/v1/chat/conversations/${randomUUID()}/attachments/${randomUUID()}`, {
+        method: 'DELETE',
+      })),
       requestJson('POST', `/api/v1/chat/conversations/${randomUUID()}/read`, { messageId: randomUUID() }),
       requestJson('POST', `/api/v1/chat/conversations/${randomUUID()}/messages`, {
         clientMessageId: 'unauthorized-message',
@@ -248,6 +256,7 @@ describe('Work Chat Member API', () => {
       ['/api/v1/chat/conversations/{conversationId}/participants', 'get', 'listWorkConversationParticipants'],
       ['/api/v1/chat/conversations/{conversationId}/attachments', 'post', 'uploadWorkConversationAttachment'],
       ['/api/v1/chat/conversations/{conversationId}/attachments/{attachmentId}/link', 'get', 'getWorkConversationAttachmentLink'],
+      ['/api/v1/chat/conversations/{conversationId}/attachments/{attachmentId}', 'delete', 'discardWorkConversationAttachment'],
       ['/api/v1/chat/conversations/{conversationId}/messages', 'get', 'listWorkConversationMessages'],
       ['/api/v1/chat/conversations/{conversationId}/messages', 'post', 'sendWorkConversationMessage'],
       ['/api/v1/chat/conversations/{conversationId}/read', 'post', 'advanceWorkConversationReadCursor'],
@@ -280,8 +289,23 @@ describe('Work Chat Member API', () => {
       { headers: { 'x-member-id': workerId } },
     ));
     expect(history.status).toBe(200);
-    const historyBody = await history.json() as { data: { items: Array<{ kind: string }> } };
+    const historyBody = await history.json() as {
+      data: { items: Array<{
+        kind: string;
+        sender: { id: string | null; displayName: string } | null;
+        eventId: string | null;
+        systemType: string | null;
+        systemPayload: Record<string, unknown> | null;
+      }> };
+    };
     expect(historyBody.data.items[0]?.kind).toBe('SYSTEM');
+    expect(historyBody.data.items[0]?.sender).toEqual({ id: null, displayName: 'KU bot' });
+    expect(historyBody.data.items[0]?.eventId).toBeString();
+    expect(historyBody.data.items[0]?.systemType).toBe('ACCEPTED_PARTICIPANT_JOINED');
+    expect(historyBody.data.items[0]?.systemPayload).toMatchObject({
+      memberDisplayName: 'Route Hirer',
+      action: { type: 'OPEN_WORK_CONVERSATION' },
+    });
 
     const participants = await workChatApp.handle(new Request(
       `http://localhost/api/v1/chat/conversations/${conversationId}/participants`,
@@ -449,6 +473,51 @@ describe('Work Chat Member API', () => {
     expect(terminalHistory.status).toBe(200);
   });
 
+  it('does not expose a Candidate Inquiry Conversation through Work Conversation APIs', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const questId = randomUUID();
+    const conversationId = randomUUID();
+    const now = new Date();
+    fixtureQuestIds.push(questId);
+    await db.insert(quest).values({
+      id: questId,
+      hirerId,
+      title: 'Candidate Inquiry boundary test',
+      condition: 'Keep inquiry separate',
+      mode: 'CANDIDATE',
+      participation: 'SOLO',
+      questStatus: 'QUEST_OPEN',
+      rewardSatang: 500,
+      tagId,
+      headcount: 1,
+      startTime: new Date('2030-01-01T10:00:00.000Z'),
+    });
+    await db.insert(chatConversation).values({
+      id: conversationId,
+      questId,
+      type: 'CONVERSATION_CANDIDATE_INQUIRY',
+      questTitle: 'Candidate Inquiry boundary test',
+      questStatus: 'QUEST_OPEN',
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(chatMembership).values({
+      conversationId,
+      memberId: hirerId,
+      role: 'HIRER',
+      joinedAt: now,
+      createdAt: now,
+    });
+
+    const response = await workChatApp.handle(new Request(
+      `http://localhost/api/v1/chat/conversations/${conversationId}/messages`,
+      { headers: { 'x-member-id': hirerId } },
+    ));
+    expect(response.status).toBe(404);
+    expect((await response.json()).error.code).toBe('CONVERSATION_NOT_FOUND');
+  });
+
   it('validates message content and mutually exclusive history cursors', async () => {
     if (!postgresAvailable) return;
     authenticate();
@@ -526,6 +595,7 @@ describe('Work Chat Member API', () => {
     }, workerId);
     expect(messageLimited.status).toBe(429);
     expect((await messageLimited.json()).error.code).toBe('RATE_LIMITED');
+    expect(messageLimited.headers.get('Retry-After')).toMatch(/^[1-9]\d*$/);
 
     const attachmentFixture = await createWorkConversation();
     const attachmentIds = await createValidatedAttachments(attachmentFixture.conversationId, workerId, 11);
@@ -545,5 +615,91 @@ describe('Work Chat Member API', () => {
     }, workerId);
     expect(attachmentLimited.status).toBe(429);
     expect((await attachmentLimited.json()).error.code).toBe('RATE_LIMITED');
+    expect(attachmentLimited.headers.get('Retry-After')).toMatch(/^[1-9]\d*$/);
+    const [preparedAttachment] = await db.select({ status: chatAttachment.status })
+      .from(chatAttachment)
+      .where(eq(chatAttachment.id, attachmentIds[10]!));
+    expect(preparedAttachment?.status).toBe('VALIDATED');
+  });
+
+  it('publishes a committed Message only to the other current Work Conversation Member', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const { conversationId } = await createWorkConversation();
+    const receivedByHirer: string[] = [];
+    const receivedByWorker: string[] = [];
+    const unsubscribeHirer = workChatDelivery.subscribe(hirerId, ({ message }) => {
+      receivedByHirer.push(message.id);
+    });
+    const unsubscribeWorker = workChatDelivery.subscribe(workerId, ({ message }) => {
+      receivedByWorker.push(message.id);
+    });
+
+    try {
+      const response = await requestJson('POST', `/api/v1/chat/conversations/${conversationId}/messages`, {
+        clientMessageId: 'delivery-message-1',
+        text: 'Committed delivery',
+      }, workerId);
+      const body = await response.json() as { data: { message: { id: string } } };
+      expect(response.status).toBe(200);
+      expect(receivedByHirer).toEqual([body.data.message.id]);
+      expect(receivedByWorker).toEqual([]);
+    } finally {
+      unsubscribeHirer();
+      unsubscribeWorker();
+    }
+  });
+
+  it('discards an uncommitted attachment and removes its private object', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const { conversationId } = await createWorkConversation();
+    const storedObject = {
+      bucket: 'test-work-chat',
+      objectKey: `work-chat/${conversationId}/discard.png`,
+      contentType: 'image/png' as const,
+      sizeBytes: 3,
+      fileName: 'discard.png',
+    };
+    const removed: Array<{ bucket: string; objectKey: string }> = [];
+    let removeAttempts = 0;
+    spyOn(workChatStorage, 'upload').mockResolvedValue(storedObject);
+    spyOn(workChatStorage, 'remove').mockImplementation(async (object) => {
+      removeAttempts += 1;
+      if (removeAttempts === 1) throw new Error('temporary object cleanup failure');
+      removed.push(object);
+    });
+    const form = new FormData();
+    form.set('file', new File([new Uint8Array([1, 2, 3])], 'discard.png', { type: 'image/png' }));
+    const uploaded = await workChatApp.handle(new Request(
+      `http://localhost/api/v1/chat/conversations/${conversationId}/attachments`,
+      { method: 'POST', headers: { 'x-member-id': workerId }, body: form },
+    ));
+    const uploadedBody = await uploaded.json() as { data: { attachment: { id: string } } };
+    const [uploadedFile] = await db.select({ id: file.id }).from(file).where(eq(file.objectKey, storedObject.objectKey));
+    if (uploadedFile) fixtureFileIds.push(uploadedFile.id);
+
+    const discarded = await workChatApp.handle(new Request(
+      `http://localhost/api/v1/chat/conversations/${conversationId}/attachments/${uploadedBody.data.attachment.id}`,
+      { method: 'DELETE', headers: { 'x-member-id': workerId } },
+    ));
+
+    expect(discarded.status).toBe(200);
+    expect(removed).toEqual([]);
+    const [pendingCleanup] = await db.select({ objectDeletedAt: chatAttachment.objectDeletedAt })
+      .from(chatAttachment)
+      .where(eq(chatAttachment.id, uploadedBody.data.attachment.id));
+    expect(pendingCleanup?.objectDeletedAt).toBeNull();
+    expect(await cleanupExpiredWorkChatAttachments()).toBe(1);
+    expect(removed).toHaveLength(1);
+    expect(removed[0]).toMatchObject({
+      bucket: storedObject.bucket,
+      objectKey: storedObject.objectKey,
+    });
+    const [storedAttachment] = await db.select({ status: chatAttachment.status, deletedAt: chatAttachment.deletedAt })
+      .from(chatAttachment)
+      .where(eq(chatAttachment.id, uploadedBody.data.attachment.id));
+    expect(storedAttachment?.status).toBe('EXPIRED');
+    expect(storedAttachment?.deletedAt).toBeDate();
   });
 });

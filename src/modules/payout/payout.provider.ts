@@ -207,9 +207,33 @@ const amountValue = (value: unknown): unknown => {
   return object?.amount ?? value;
 };
 
-const xenditChannelCode = (destination: PayoutDestinationForProvider): string => (
-  destination.bankCode
-);
+const xenditChannelCodeByBankCode: Record<string, string> = {
+  BAAC: 'TH_BAA',
+  BAY: 'TH_BAY',
+  BBL: 'TH_BBL',
+  CIMBT: 'TH_CIMB',
+  EXIM: 'TH_EXIM',
+  GHB: 'TH_GHB',
+  GSB: 'TH_GSB',
+  ICBC: 'TH_ICBC',
+  KBANK: 'TH_KKB',
+  KKP: 'TH_KNB',
+  KTB: 'TH_KTB',
+  LHBANK: 'TH_LHB',
+  SCB: 'TH_SCB',
+  TISCO: 'TH_TISCO',
+  TTB: 'TH_TTB',
+  UOBT: 'TH_UOB',
+  PROMPTPAY: 'PROMPTPAY',
+};
+
+const xenditChannelCode = (destination: PayoutDestinationForProvider): string => {
+  const channelCode = xenditChannelCodeByBankCode[destination.bankCode];
+  if (!channelCode) {
+    throw new PayoutProviderError('PROVIDER_CONFIGURATION', 'Payout Destination bank is not configured.');
+  }
+  return channelCode;
+};
 
 export class XenditPayoutProvider implements OutboundPayoutProvider {
   private readonly secretKey: string | undefined;
@@ -265,6 +289,7 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
           channel_code: channelCode,
           channel_properties: {
             account_number: destinationValue,
+            account_holder_name: input.destination.accountHolderName,
           },
           amount: toThb(input.receiptSatang),
           currency: 'THB',
@@ -372,7 +397,6 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
     if (
       payload.channel_code !== undefined
       && payload.channel_code !== channelCode
-      && payload.channel_code !== input.destination.bankCode
     ) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different Payout channel.');
     }

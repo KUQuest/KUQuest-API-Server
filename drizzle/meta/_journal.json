@@ -309,6 +309,13 @@
       "when": 1788078789647,
       "tag": "0048_work_chat_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788085170121,
+      "tag": "20260830101930_work_chat_pr_337_fixes",
+      "breakpoints": true
     }
   ]
 }

@@ -24,6 +24,10 @@ const time = (name: string) => timestamp(name, { withTimezone: true });
 
 export const chatMembershipRole = pgEnum('chat_membership_role', ['HIRER', 'WORKER']);
 export const chatMessageKind = pgEnum('chat_message_kind', ['USER', 'SYSTEM']);
+export const chatConversationType = pgEnum('chat_conversation_type', [
+  'CONVERSATION_CANDIDATE_INQUIRY',
+  'CONVERSATION_WORK',
+]);
 export const chatAttachmentStatus = pgEnum('chat_attachment_status', [
   'QUARANTINED',
   'VALIDATED',
@@ -40,6 +44,7 @@ export const chatConversation = pgTable(
     questId: uuid('quest_id')
       .notNull()
       .references(() => quest.id, { onDelete: 'restrict' }),
+    type: chatConversationType('type').default('CONVERSATION_WORK').notNull(),
     questTitle: varchar('quest_title', { length: 200 }).notNull(),
     questStatus: varchar('quest_status', { length: 50 }).notNull(),
     nextSequence: bigint('next_sequence', { mode: 'number' }).default(1).notNull(),
@@ -180,6 +185,7 @@ export const chatAttachment = pgTable(
     consumedAt: time('consumed_at'),
     hiddenAt: time('hidden_at'),
     deletedAt: time('deleted_at'),
+    objectDeletedAt: time('object_deleted_at'),
     createdAt: time('created_at').defaultNow().notNull(),
     updatedAt: time('updated_at').defaultNow().notNull(),
   },
