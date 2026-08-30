@@ -534,4 +534,4 @@ The service uses a feature-first modular monolith. Business rules such as the
 `@ku.th` email restriction stay inside their feature module, while database and
 cross-cutting HTTP concerns remain reusable infrastructure. This keeps module
 ownership clear without adding controller/repository abstractions before the
-domain needs them. nice one.
+domain needs them. nice one. hello
