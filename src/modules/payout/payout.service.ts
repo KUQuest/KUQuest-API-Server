@@ -40,6 +40,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or } from 'drizzle-
 
 import {
   PayoutProviderError,
+  sanitizePayoutProviderDiagnostic,
   type OutboundPayoutProvider,
   type OutboundPayoutResponse,
   XenditPayoutProvider,
@@ -573,7 +574,7 @@ const finalizeUncertain = async (
     .for('update');
   if (!record) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
   if (!['CREATING', 'AWAITING_RECONCILIATION'].includes(record.payoutStatus)) return payoutFromRecord(record);
-  const providerStatus = error.providerStatus?.toString() ?? error.code;
+  const providerStatus = providerStatusForError(error);
   const nextStatus = record.payoutStatus === 'CREATING' ? 'AWAITING_RECONCILIATION' : record.payoutStatus;
   const [updated] = await transaction
     .update(paymentPayouts)
@@ -594,7 +595,7 @@ const finalizeUncertain = async (
       toStatus: nextStatus,
       providerStatus,
       source: 'PROVIDER',
-      reason: 'Provider response is uncertain.',
+      reason: providerFailureReason('Provider response is uncertain', error),
     });
   }
   return payoutFromRecord(updated);
@@ -671,8 +672,8 @@ const finalizeRejected = async (
   error: PayoutProviderError,
 ) => finalizeFailed(input, prepared, {
   providerApiVersion: error.providerApiVersion,
-  providerStatus: error.providerStatus?.toString() ?? error.code,
-  historyReason: 'Provider rejected the Payout.',
+  providerStatus: providerStatusForError(error),
+  historyReason: providerFailureReason('Provider rejected the Payout', error),
   historySource: 'PROVIDER',
 });
 
@@ -697,6 +698,18 @@ const safeProviderCode = (value: string | undefined) => (
   value && /^[A-Z][A-Z_]{0,63}$/.test(value) ? value : undefined
 );
 
+const providerStatusForError = (error: PayoutProviderError) => [
+  error.providerStatus?.toString(),
+  safeProviderCode(error.providerCode),
+].filter((value): value is string => value !== undefined).join(':') || error.code;
+
+const providerFailureReason = (prefix: string, error: PayoutProviderError) => sanitizePayoutProviderDiagnostic([
+  prefix,
+  error.providerStatus === undefined ? undefined : `HTTP ${error.providerStatus}`,
+  safeProviderCode(error.providerCode) ? `Code ${safeProviderCode(error.providerCode)}` : undefined,
+  error.providerMessage ? `Message: ${error.providerMessage}` : undefined,
+].filter((value): value is string => value !== undefined).join('. '));
+
 const asProviderError = (error: unknown) => {
   if (!(error instanceof PayoutProviderError)) {
     return new PayoutProviderError('PROVIDER_UNCERTAIN', 'Provider response is uncertain.');
@@ -705,6 +718,7 @@ const asProviderError = (error: unknown) => {
     providerCode: safeProviderCode(error.providerCode),
     providerStatus: error.providerStatus,
     providerApiVersion: error.providerApiVersion,
+    providerMessage: error.providerMessage,
   });
 };
 

@@ -70,6 +70,8 @@ class FakePayoutProvider implements OutboundPayoutProvider {
     if (this.mode === 'rejected') {
       throw new PayoutProviderError('PROVIDER_REJECTED', 'Provider rejected the payout.', {
         providerCode: 'TEST_REJECTED',
+        providerStatus: 400,
+        providerMessage: 'Invalid destination account 1234567890.',
         providerApiVersion: 'test-v1',
       });
     }
@@ -500,6 +502,16 @@ describe('Payout application services', () => {
       .rejects.toMatchObject({ code: 'PROVIDER_REJECTED' });
     const [failed] = await db.select().from(paymentPayouts).where(eq(paymentPayouts.quoteId, rejectedQuote.id));
     expect(failed).toMatchObject({ payoutStatus: 'FAILED', actualDebitSatang: null });
+    expect(failed?.providerStatus).toBe('400:TEST_REJECTED');
+    const rejectedHistory = await listPayoutStatusHistory(rejectedStudent, rejectedPayout.id);
+    expect(rejectedHistory).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        toStatus: 'FAILED',
+        providerStatus: '400:TEST_REJECTED',
+        reason: 'Provider rejected the Payout. HTTP 400. Code TEST_REJECTED. Message: Invalid destination account <REDACTED>.',
+      }),
+    ]));
+    expect(rejectedHistory[rejectedHistory.length - 1]?.reason).not.toContain('1234567890');
     expect(await getWallet(rejectedStudent)).toMatchObject({ earningsBalanceSatang: 1_000, reservedForPayoutsSatang: 0 });
 
     const uncertainStudent = await createStudent('be115-uncertain');

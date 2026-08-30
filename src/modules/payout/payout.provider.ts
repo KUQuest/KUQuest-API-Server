@@ -24,13 +24,29 @@ type PayoutProviderErrorDetails = {
   providerCode?: string;
   providerStatus?: number;
   providerApiVersion?: string;
+  providerMessage?: string;
 };
+
+const providerDiagnosticMaxLength = 500;
+
+export const sanitizePayoutProviderDiagnostic = (value: string) => value
+  .replace(/[\r\n\t]+/g, ' ')
+  .replace(/\b(?:xnd|sk|pk)_[A-Za-z0-9_-]+\b/gi, '<REDACTED>')
+  .replace(/\b(?:bearer|basic)\s+[A-Za-z0-9+/=_-]+/gi, '<REDACTED>')
+  .replace(/\b(?:api[-_ ]?key|secret|token|password)\s*[:=]\s*\S+/gi, '<REDACTED>')
+  .replace(/\b\d[\d\s().-]{3,}\d\b/g, '<REDACTED>')
+  .replace(/\b\d{4,}\b/g, '<REDACTED>')
+  .replace(/\b[A-Za-z0-9_-]{24,}\b/g, '<REDACTED>')
+  .replace(/[^\x20-\x7E]/g, '?')
+  .trim()
+  .slice(0, providerDiagnosticMaxLength);
 
 export class PayoutProviderError extends Error {
   readonly code: PayoutProviderErrorCode;
   readonly providerCode?: string;
   readonly providerStatus?: number;
   readonly providerApiVersion?: string;
+  readonly providerMessage?: string;
 
   constructor(
     code: PayoutProviderErrorCode,
@@ -43,6 +59,9 @@ export class PayoutProviderError extends Error {
     this.providerCode = details.providerCode;
     this.providerStatus = details.providerStatus;
     this.providerApiVersion = details.providerApiVersion;
+    this.providerMessage = details.providerMessage
+      ? sanitizePayoutProviderDiagnostic(details.providerMessage) || undefined
+      : undefined;
   }
 }
 
@@ -134,10 +153,33 @@ const fromThb = (value: unknown, allowZero = false): Satang => {
   return allowZero ? satang(amount) : positiveSatang(amount);
 };
 
-const providerErrorDetails = (payload: JsonObject | null) => ({
-  providerCode: [asText(payload?.error_code), asText(payload?.code)]
-    .find((value): value is string => value !== null && /^[A-Z][A-Z_]{0,63}$/.test(value)) ?? undefined,
-});
+const providerValidationSummary = (value: unknown) => {
+  if (!Array.isArray(value)) return null;
+  const entries = value.slice(0, 5).map(asObject).filter((entry): entry is JsonObject => entry !== null);
+  const summary = entries.map((entry) => {
+    const field = asText(entry.field);
+    const messages = [
+      ...(Array.isArray(entry.messages) ? entry.messages.map(asText).filter((message): message is string => message !== null) : []),
+      asText(entry.message),
+    ].filter((message): message is string => message !== null);
+    return [field, messages.join(', ')].filter((part): part is string => part !== null && part.length > 0).join(': ');
+  }).filter((entry) => entry.length > 0);
+  return summary.length > 0 ? summary.join('; ') : null;
+};
+
+const providerErrorDetails = (payload: JsonObject | null) => {
+  const providerCode = [asText(payload?.error_code), asText(payload?.code)]
+    .find((value): value is string => value !== null && /^[A-Z][A-Z_]{0,63}$/.test(value));
+  const providerMessage = sanitizePayoutProviderDiagnostic([
+    asText(payload?.message),
+    asText(payload?.error_message),
+    providerValidationSummary(payload?.errors),
+  ].filter((value): value is string => value !== null).join(' '));
+  return {
+    providerCode,
+    providerMessage: providerMessage || undefined,
+  };
+};
 
 const acceptedProviderStatuses = new Set([
   'ACCEPTED',
@@ -164,9 +206,7 @@ const amountValue = (value: unknown): unknown => {
 };
 
 const xenditChannelCode = (destination: PayoutDestinationForProvider): string => (
-  destination.routingType === 'BANK_ACCOUNT' && destination.bankCode === 'SCB'
-    ? 'TH_SCB'
-    : destination.bankCode
+  destination.bankCode
 );
 
 export class XenditPayoutProvider implements OutboundPayoutProvider {
@@ -223,7 +263,6 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
           channel_code: channelCode,
           channel_properties: {
             account_number: destinationValue,
-            account_holder_name: input.destination.accountHolderName,
           },
           amount: toThb(input.receiptSatang),
           currency: 'THB',
