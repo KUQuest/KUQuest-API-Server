@@ -10,8 +10,10 @@ import { createStudentAuth } from './auth.config';
 
 const stagingTestAuthBasePath = '/api/staging/test-auth';
 const stagingTestAuthSignInPath = `${stagingTestAuthBasePath}/sign-in/email`;
+const stagingTestAuthDefaultSignInPath = `${stagingTestAuthBasePath}/sign-in/default`;
 const stagingTestAuthPaths = new Set([
   stagingTestAuthSignInPath,
+  stagingTestAuthDefaultSignInPath,
   `${stagingTestAuthBasePath}/get-session`,
   `${stagingTestAuthBasePath}/sign-out`,
 ]);
@@ -50,6 +52,18 @@ const readSignInBody = async (request: Request): Promise<SignInBody | null> => {
   } catch {
     return null;
   }
+};
+
+const defaultSignInRequest = (request: Request, email: string, password: string): Request => {
+  const headers = new Headers(request.headers);
+  headers.set('content-type', 'application/json');
+  headers.delete('content-length');
+
+  return new Request(new URL(stagingTestAuthSignInPath, request.url), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ email, password }),
+  });
 };
 
 export const createStagingTestAuthRoute = (
@@ -126,6 +140,13 @@ export const createStagingTestAuthRoute = (
 
     if (!enabled || !stagingTestAuthPaths.has(pathname)) {
       return new Response(null, { status: 404 });
+    }
+
+    if (pathname === stagingTestAuthDefaultSignInPath) {
+      if (request.method !== 'POST') return new Response(null, { status: 404 });
+
+      await ensureTestStudent();
+      return testAuth.handler(defaultSignInRequest(request, settings.email!, settings.password!));
     }
 
     if (pathname === stagingTestAuthSignInPath) {

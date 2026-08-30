@@ -80,6 +80,17 @@ services:
       AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-kuquest-local-only}
     restart: "no"
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: kuquest-cloudflared
+    profiles:
+      - tunnel
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    command: ["tunnel", "--no-autoupdate", "run"]
+
 volumes:
   postgres_data:
   postgres_edr_data:

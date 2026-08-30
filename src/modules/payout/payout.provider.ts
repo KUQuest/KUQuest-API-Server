@@ -163,6 +163,12 @@ const amountValue = (value: unknown): unknown => {
   return object?.amount ?? value;
 };
 
+const xenditChannelCode = (destination: PayoutDestinationForProvider): string => (
+  destination.routingType === 'BANK_ACCOUNT' && destination.bankCode === 'SCB'
+    ? 'TH_SCB'
+    : destination.bankCode
+);
+
 export class XenditPayoutProvider implements OutboundPayoutProvider {
   private readonly secretKey: string | undefined;
   private readonly baseUrl: string;
@@ -199,6 +205,7 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     let response: Response;
     try {
+      const channelCode = xenditChannelCode(input.destination);
       const destinationValue = input.destination.routingType === 'PROMPTPAY'
         ? input.destination.routingValue
         : input.destination.accountNumber;
@@ -213,8 +220,11 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
         signal: controller.signal,
         body: JSON.stringify({
           reference_id: input.internalReference,
-          channel_code: input.destination.bankCode,
-          channel_properties: { account_number: destinationValue },
+          channel_code: channelCode,
+          channel_properties: {
+            account_number: destinationValue,
+            account_holder_name: input.destination.accountHolderName,
+          },
           amount: toThb(input.receiptSatang),
           currency: 'THB',
           description: 'KUQuest Payout',
@@ -317,7 +327,12 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
     if (payload.currency !== undefined && payload.currency !== 'THB') {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different Payout currency.');
     }
-    if (payload.channel_code !== undefined && payload.channel_code !== input.destination.bankCode) {
+    const channelCode = xenditChannelCode(input.destination);
+    if (
+      payload.channel_code !== undefined
+      && payload.channel_code !== channelCode
+      && payload.channel_code !== input.destination.bankCode
+    ) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different Payout channel.');
     }
 

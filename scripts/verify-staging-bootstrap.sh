@@ -8,6 +8,9 @@ test_id="kuquest-bootstrap-test-$$"
 database_container="$test_id-database"
 test_image=${KUQUEST_BOOTSTRAP_TEST_IMAGE:-kuquest-api:bootstrap-test}
 
+: "${ADMIN_PASSWORD:?ADMIN_PASSWORD must be supplied by the caller}"
+: "${STAGING_TEST_AUTH_PASSWORD:?STAGING_TEST_AUTH_PASSWORD must be supplied by the caller}"
+
 cleanup() {
   docker stop "$database_container" >/dev/null 2>&1 || true
   docker network rm "$test_id" >/dev/null 2>&1 || true
@@ -29,12 +32,12 @@ printf '%s\n' \
   'BETTER_AUTH_SECRET=bootstrap-auth-secret-at-least-32-characters' \
   'ADMIN_BETTER_AUTH_SECRET=bootstrap-admin-secret-at-least-32-characters' \
   'ADMIN_EMAIL=bootstrap-admin@ku.th' \
-  'ADMIN_PASSWORD=BootstrapAdmin1!' \
+  "ADMIN_PASSWORD=$ADMIN_PASSWORD" \
   'ADMIN_FIRST_NAME=Bootstrap' \
   'ADMIN_LAST_NAME=Administrator' \
   'STAGING_TEST_AUTH_ENABLED=true' \
   'STAGING_TEST_AUTH_EMAIL=bootstrap-test@ku.th' \
-  'STAGING_TEST_AUTH_PASSWORD=BootstrapStudent1!' \
+  "STAGING_TEST_AUTH_PASSWORD=$STAGING_TEST_AUTH_PASSWORD" \
   'STAGING_TEST_AUTH_FIRST_NAME=Bootstrap' \
   'STAGING_TEST_AUTH_LAST_NAME=Student' \
   'LOCAL_FINANCE_TEST_RECIPIENT_EMAIL=bootstrap-recipient@ku.th' \
