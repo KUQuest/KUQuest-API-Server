@@ -57,6 +57,129 @@ There is no bare `PENDING`, `APPROVED`, `COMPLETED`, `FAILED`, or `CANCELLED`
 value in this target. Automatic approval uses `PROOF_APPROVED`; there is no
 `PROOF_REJECTED` or `PROOF_AUTO_APPROVED`.
 
+## Resolved Quest lifecycle
+
+This section is the product source of truth for Quest selection, start,
+completion, failure, and cancellation. The Server enforces every time and State
+rule. Payment-provider execution is outside this document.
+
+### Lifecycle
+
+1. A Hirer creates `QUEST_DRAFT`.
+2. Publish funds Quest Escrow and changes the Quest to `QUEST_OPEN`.
+3. An accepted roster changes the Quest to `QUEST_ASSIGNED`.
+4. Required Start Work actions change the Quest to `QUEST_IN_PROGRESS`.
+5. Required work completes the Assignment or fails the Quest.
+6. A Quest ends only as `QUEST_COMPLETED`, `QUEST_CANCELLED`, or
+   `QUEST_FAILED`. It does not reopen.
+
+### Selection modes
+
+| Mode | Meaning |
+| --- | --- |
+| `FIRST_COME_FIRST_SERVED` (FCFS) | An eligible Worker joins an open Quest directly. |
+| `CANDIDATE` | A Candidate applies, or a Candidate Team forms; the Hirer selects the accepted Worker or Team. |
+
+`NO_CANDIDATE` is a legacy implementation name. It is not a target mode.
+
+### Candidate lifecycle
+
+- A `SINGLE + CANDIDATE` Candidate may withdraw that Candidate's application
+  while the Quest is `QUEST_OPEN`.
+- A Candidate Team forms only for `GROUP + CANDIDATE`.
+- The Server generates one Join Code for a forming Team. Code format and
+  generation mechanics are a backend security decision.
+- An eligible Prospective Worker may join with the current Join Code until the
+  Team reaches `headcount`. A Candidate may belong to one Team for one Quest.
+- A Join Code is valid for 24 hours. The Team Leader may regenerate it; the
+  prior code becomes invalid.
+- A forming Member may leave. The Team Leader may remove another Member. If the
+  Team Leader leaves, leadership transfers to the earliest joined remaining
+  Member. If the last Member leaves, the Team disbands.
+- At exact `headcount`, the Team Leader explicitly submits the Team. A
+  submitted Team is immutable and its Join Code is invalid.
+- A submitted Team cannot withdraw.
+- Hirer selection creates the accepted Assignment roster and rejects every
+  other Candidate application and submitted Team in the same transaction.
+- A Candidate Quest still `QUEST_OPEN` at `startTime` cancels.
+
+### Start Work
+
+The required starter can press Start Work only from `startTime` through
+`dueAt`. A required starter who has not pressed Start Work by `dueAt` fails the
+Quest. The affected Assignment becomes `ASSIGNMENT_INCOMPLETE`.
+
+| Participation and mode | Required starter | Required work submitter |
+| --- | --- | --- |
+| `SINGLE + FIRST_COME_FIRST_SERVED` | Worker | Worker |
+| `SINGLE + CANDIDATE` | Worker | Worker |
+| `GROUP + FIRST_COME_FIRST_SERVED` | Every Active Worker | Every Active Worker submits that Worker's work. |
+| `GROUP + CANDIDATE` | Team Leader | Team Leader submits or confirms the Team's work. |
+
+For a full `GROUP + FIRST_COME_FIRST_SERVED` roster, the Quest changes to
+`QUEST_IN_PROGRESS` only after every Active Worker has pressed Start Work.
+Assignment acceptance is the only general pre-start consent.
+
+### Underfilled GROUP + FCFS Quest
+
+At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has
+fewer Active Workers than its original published `headcount`.
+
+1. The Hirer has 10 minutes to choose proceed or cancel.
+2. No Hirer choice cancels the Quest.
+3. To proceed, every current Active Worker has 10 minutes to consent.
+4. The consent view shows the exact new Quest Reward and `dueAt`.
+5. A decline or timeout cancels the Quest.
+6. All consent changes the Quest from `QUEST_OPEN` to `QUEST_ASSIGNED`.
+7. Every current Active Worker must still press Start Work by `dueAt`.
+8. The Quest changes to `QUEST_IN_PROGRESS` after every required Start Work
+   action.
+9. The original published `headcount` remains unchanged. Current Active Workers
+   are the accepted roster, the original Worker Reward pool is split equally
+   between them, and the earliest accepted Worker receives any remaining satang.
+10. The roster freezes when the Quest starts. No later Worker can join.
+
+### Completion and failure
+
+- A required submitter sends Proof Submission before `dueAt` when
+  `proofRequired=true`. A proof-free required submitter confirms completion
+  before `dueAt`.
+- The Hirer approves or does not approve each submitted Proof Submission.
+- If the Hirer has not decided 24 hours after a Proof Submission is sent, the
+  Server records `PROOF_APPROVED`.
+- Approved or proof-free Team work makes every Active Worker Assignment in a
+  `GROUP + CANDIDATE` Quest `ASSIGNMENT_COMPLETED`.
+- Non-approved Team work makes every Active Worker Assignment in a
+  `GROUP + CANDIDATE` Quest `ASSIGNMENT_INCOMPLETE`.
+- A missing required Team Proof Submission or Team confirmation makes every
+  Active Worker Assignment in a `GROUP + CANDIDATE` Quest
+  `ASSIGNMENT_INCOMPLETE`.
+- Hirer non-approval, a missing required submission, a missing proof-free
+  confirmation, or a missing Start Work action at `dueAt` makes the Quest
+  `QUEST_FAILED`.
+- Failure gives the affected Assignment `ASSIGNMENT_INCOMPLETE`. No Rework or
+  second Proof Submission exists.
+- In a GROUP Quest, an Assignment that completed before another Assignment
+  fails keeps its Quest Reward. The Quest remains `QUEST_FAILED`.
+
+### Cancellation
+
+| Quest State | Settlement result |
+| --- | --- |
+| `QUEST_OPEN` | Refund the Hirer. |
+| `QUEST_ASSIGNED` | Pay 20% of the Worker Reward pool to Active Workers. Return 80% and the Platform Fee to the Hirer. |
+| `QUEST_IN_PROGRESS` | Settle full Worker Rewards and the Platform Fee. The Hirer receives no refund. |
+
+An Active Worker cannot voluntarily leave or be replaced. The cancellation
+rules create the allowed departure transition.
+
+### Deferred Dispute Case
+
+A Dispute Case may exist after `QUEST_FAILED`. Its actors, deadline, decision
+rules, Group behavior, and payment integration are outside this target. It does
+not reopen or change the Quest State. An Admin Review Item remains the automatic
+review and audit record for `PROOF_NOT_APPROVED`; it is not a Dispute Case.
+
 ## Constraint contract
 
 Apply constraints at three layers:
@@ -200,30 +323,33 @@ Workers see only that the Quest Edit has `EDIT_REQUEST_FAILED`.
 
 ### Quest without proof
 
-When `proofRequired=false`, the Worker presses “ส่งงานเสร็จแล้ว”. No Proof
-Submission is created, no Hirer review is required, and that Assignment becomes
-`ASSIGNMENT_COMPLETED` immediately.
+When `proofRequired=false`, the required work submitter in
+[Resolved Quest lifecycle](#resolved-quest-lifecycle) confirms completion. No
+Proof Submission is created and no Hirer review is required.
 
-- A one-Worker Quest becomes `QUEST_COMPLETED` immediately.
-- A `GROUP` Quest becomes `QUEST_COMPLETED` when every Active Worker
-  Assignment is `ASSIGNMENT_COMPLETED`.
-- If a Worker does not press the button by `dueAt`, that Assignment becomes
-  `ASSIGNMENT_INCOMPLETE` and the Quest becomes `QUEST_FAILED`.
+- A proof-free `SINGLE` Quest completes when its Worker confirms.
+- A proof-free `GROUP + FIRST_COME_FIRST_SERVED` Quest completes when every
+  Active Worker confirms.
+- A proof-free `GROUP + CANDIDATE` Quest completes every Active Worker
+  Assignment when the Team Leader confirms the Team's work.
+- Missing confirmation uses the failure rule in
+  [Resolved Quest lifecycle](#resolved-quest-lifecycle).
 
 ### Quest with proof
 
-When proof is required, an Assignment may have one Proof Submission. For a
-`GROUP` Quest, the Quest remains `QUEST_IN_PROGRESS` until every required
-Worker has submitted. Hirer review may start before every Worker submits.
+When proof is required, the required work submitter and completion result are
+defined in [Resolved Quest lifecycle](#resolved-quest-lifecycle). For
+`GROUP + CANDIDATE`, approved Team work completes every Active Worker
+Assignment; non-approved or missing Team work makes every such Assignment
+incomplete.
 
 ## Proof Submission protocol
 
 ### Draft and send
 
-- A Worker can save an unsent draft, edit it, delete it, and create a replacement draft before `dueAt`.
-- A draft is visible only to its Worker and creates no System Message or notification.
+- The required work submitter can save an unsent draft, edit it, delete it, and create a replacement draft before `dueAt`. A draft is visible only to that submitter and creates no System Message or notification.
 - Description is optional and is at most 1,000 characters.
-- A Worker can attach up to five files.
+- The required work submitter can attach up to five files.
 - Allowed file types are image, PDF, and video. Other types are rejected.
 - Each file is at most 10 MB. The system does not scan these files for malware.
 - At least one description or file is required.
@@ -476,8 +602,9 @@ When limited, the UI shows the remaining wait time and preserves the Message or 
 - If a Quest is `QUEST_FAILED`, unpaid Worker-slot Rewards return to the
   Hirer. Already transferred Rewards are not reclaimed.
 - A failed Quest has no Platform Fee; the fee returns to the Hirer.
-- A `QUEST_CANCELLED` Quest returns unpaid Rewards and the Platform Fee.
-  `ASSIGNMENT_CANCELLED` Assignments do not receive Reward.
+- Cancellation settlement is defined only in
+  [Resolved Quest lifecycle](#resolved-quest-lifecycle). Provider execution is
+  outside this target. An `ASSIGNMENT_CANCELLED` Assignment receives no Reward.
 - If a Reward transfer fails, the Assignment remains
   `ASSIGNMENT_COMPLETED`, the transfer remains
   `REWARD_TRANSFER_PENDING`, the system retries, and Hirer/Worker are
@@ -525,17 +652,28 @@ When implementation is requested, the Agent must complete all of these checks:
     Prospective Worker while `QUEST_OPEN`, closes at the individual
     `ASSIGNMENT_ACTIVE` transition or Quest `QUEST_ASSIGNED` transition, and
     cannot be reopened or copied into the Work Conversation.
+12. Start Work is accepted only from `startTime` through `dueAt`, using the
+    required-starter matrix. A missing required action at `dueAt` fails the
+    Quest.
+13. An underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest uses the Hirer's
+    10-minute decision, Active Worker consent, Reward visibility, equal-split,
+    and roster-freeze rules in [Resolved Quest lifecycle](#resolved-quest-lifecycle).
 
 The work is complete only when the target behavior is represented in the domain model, persistence, API/UI behavior, notifications, money flow, and tests, and the known conflicts below are resolved.
 
 ## Known conflicts
 
-These existing files still describe older behavior and must be updated before implementation is considered aligned:
+These sources preserve historical or current-baseline behavior. They are not
+product workflow authority. Code and persistence must migrate before
+implementation aligns with this target:
 
-- `docs/quest/quest-stage-milestones.md` still contains `REWORK`, a 5-minute Quest Edit window, and the older proof-free stage flow.
-- `docs/chat/work-chat-contract.md` still treats Push and video as out of scope, uses older attachment-scan rules, and has older rate-limit and scaling assumptions.
+- `docs/deprecated/quest-stage-milestones.md` retains `REWORK`, a 5-minute Quest Edit window, and the older proof-free stage flow.
+- `docs/deprecated/work-chat-contract.md` treats Push and video as out of scope and has earlier attachment, rate-limit, and scaling assumptions.
 - `docs/db/edr/05-quest.sql` still defines the earlier Quest lifecycle, including `QUEST_REWORK`, older proof/review values, and older cancellation and payment rules.
 - `docs/chat/chat-schema-draft.sql` still defines older attachment, message, malware-scan, and unprefixed status assumptions.
+- `docs/deprecated/quest-process.md`, `docs/deprecated/bpmn-quest-api-comparison.md`, and
+  `docs/deprecated/bpmn-current-state-audit.md` are historical analysis, not
+  target workflow documents.
 - Existing Quest code still allows edits in the legacy `OPEN` state and uses
   older proof statuses such as `REJECTED` and `AUTO_APPROVED`.
 - Existing Quest and Chat schema/types still use values outside this target, including unprefixed Chat values and older Quest proof/review values; implementation must migrate them to the prefixed values in this document.

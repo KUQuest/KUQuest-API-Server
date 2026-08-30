@@ -136,9 +136,10 @@ The auth library (`better-auth`) providing session management, Google OAuth, and
 
 ## Quest and Work Chat
 
-The entries below define the vocabulary. For Work Chat, Quest Condition, Quest
-Edit, Sent Work, review, notification, and reward behavior, read
-`docs/quest/work-chat-system-target.md`.
+The entries below define the vocabulary. For Quest lifecycle, selection, Start
+Work, Proof Submission, cancellation, failure, Work Chat, and reward behavior,
+read `docs/quest/work-chat-system-target.md` §Resolved Quest lifecycle first.
+`docs/deprecated/` is historical evidence, not workflow authority.
 
 **Hirer**:
 The Member who creates a Quest, commissions its work, and remains its current owner for MVP.
@@ -152,9 +153,30 @@ _Avoid_: Hunter, candidate, assignee
 A Member or team that has applied to a Candidate Quest but has not been accepted as a Worker.
 _Avoid_: Chat member, assigned Worker
 
+**Candidate Team**:
+A forming group of Candidates for one `GROUP + CANDIDATE` Quest. A submitted
+Candidate Team is the unit the Hirer selects.
+_Avoid_: Work Conversation, Active Workers before selection.
+
+**Team Leader**:
+The Worker who represents a Candidate `GROUP` Team. The Team Leader starts and
+submits or confirms the Team's required work.
+_Avoid_: treating a Team Leader as the Hirer or as a leader of a FCFS Group.
+
+**First Come, First Served (FCFS)**:
+A Quest selection mode where an eligible Worker joins directly. It replaces the
+legacy `NO_CANDIDATE` name, which describes an absence instead of the selection
+rule.
+_Avoid_: `NO_CANDIDATE` in new contracts, treating FCFS as a third Quest mode.
+
 **Prospective Worker**:
 A Member who is considering work on a Quest but does not have an active Assignment for that Quest. A Prospective Worker may be a Candidate or a Member considering a direct join.
 _Avoid_: Worker, Accepted Participant
+
+**Join Code**:
+A Server-generated temporary code that lets an eligible Prospective Worker join
+a forming Candidate Team.
+_Avoid_: an invitation, a permanent shared secret.
 
 **Accepted Participant**:
 The current Hirer or an Active Worker. Only Accepted Participants have current Work Conversation membership.
@@ -164,8 +186,16 @@ _Avoid_: Candidate, departed Worker
 One bounded agreement for work, owned by one Hirer and progressing through its lifecycle. Target lifecycle and `dueAt` rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Job, task
 
+**Underfilled GROUP + FCFS Quest**:
+A `GROUP + FIRST_COME_FIRST_SERVED` Quest at `startTime` with fewer Active
+Workers than `headcount`.
+_Avoid_: an open Quest with no accepted Worker, an incomplete Candidate Team.
+
 **dueAt**:
-The deadline for the required Worker action on a Quest. The Server decides whether the action arrived on time; the target deadline, reminder, and failure rules are defined in `docs/quest/work-chat-system-target.md`.
+The deadline for the required Worker action on a Quest. The Server decides
+whether the action arrived on time. It cannot change after the Quest is
+assigned. Target deadline, reminder, and failure rules are defined in
+`docs/quest/work-chat-system-target.md`.
 _Avoid_: client-side deadline, approximate deadline.
 
 **Quest Condition**:
@@ -180,8 +210,15 @@ _Avoid_: condition field
 The accepted participation of one Worker in a Quest. It is the canonical record that a Worker is working on that Quest.
 _Avoid_: Application, team membership
 
+**Start Work**:
+The required starter's action that changes an assigned Quest to in progress.
+_Avoid_: a readiness signal, a Proof Submission.
+
 **Proof Submission**:
-A record of work submitted by a Worker for one Assignment when the Quest requires proof. It is separate from Chat Messages and has one decision. Its fields, lifecycle, visibility, and UI rules are defined in `docs/quest/work-chat-system-target.md`.
+A record of required work submitted by a Worker or Team Leader when the Quest
+requires proof. It is separate from Chat Messages and has one decision. Its
+fields, lifecycle, visibility, and UI rules are defined in
+`docs/quest/work-chat-system-target.md`.
 _Avoid_: Work Message, treating proof as an ordinary Chat Message
 
 **Active Worker**:
@@ -267,6 +304,12 @@ _Avoid_: Reporter Entry, Moderation Decision
 **Admin Review Item**:
 A system-created record for sending a confirmed `PROOF_NOT_APPROVED` decision to an Admin for review. It links the Quest, Assignment, Proof Submission, decision reason, and evidence references; it does not reopen the Quest or create Rework.
 _Avoid_: Report Case, Admin override
+
+**Dispute Case**:
+An abstract future review after a Failed Quest. Its actors, decision rules, and
+payment integration are not yet defined. It does not reopen or change the Quest
+State.
+_Avoid_: Admin Review Item, `QUEST_DISPUTED`
 
 **Terminal Quest**:
 A Quest in `QUEST_COMPLETED`, `QUEST_CANCELLED`, or

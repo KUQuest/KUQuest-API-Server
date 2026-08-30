@@ -14,6 +14,12 @@ Use the five canonical labels without remapping: `needs-triage`, `needs-info`, `
 
 Single-context repository: read root `CONTEXT.md` and relevant ADRs under `docs/adr/`. See `docs/agents/domain.md`.
 
+**Quest rulebook** — for Quest State, Start Work, Proof Submission,
+cancellation, failure, or Work Chat membership, read
+`docs/quest/work-chat-system-target.md` §Resolved Quest lifecycle before
+planning or coding. `docs/deprecated/` is historical evidence, not workflow
+authority.
+
 ### Clarifying domain context
 
 When a request involves a Quest, Work Chat, Candidate Inquiry Conversation, or
