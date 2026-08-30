@@ -55,11 +55,15 @@ Legacy term for Worker. In new Quest and Work Chat text, use Worker.
 _Avoid_: Hunter in new domain text, employee, contractor.
 
 **Quest Reward**:
-The amount paid from the Hirer's Quest Escrow to a Worker who successfully completes an Assignment. Settlement, visibility, failure, retry, and notification rules are defined in `docs/quest/work-chat-system-target.md`.
+The portion of a Quest Funding Total paid from the Hirer's Quest Escrow to a Worker who successfully completes an Assignment. Settlement, visibility, failure, retry, and notification rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Wage, salary, shared prize pool.
 
+**Quest Funding Total**:
+The amount a Hirer commits for one Worker slot, including that slot's Quest Reward and Platform Fee. The Quest Escrow covers this total for each published headcount slot.
+_Avoid_: treating the total as the Worker's Quest Reward, adding Platform Fee after the total.
+
 **Platform Fee**:
-An amount paid by the Hirer in addition to Quest Rewards when a Quest successfully completes. The target failure and cancellation rules are defined in `docs/quest/work-chat-system-target.md`.
+The portion of a Quest Funding Total retained as Platform Fee when a Quest successfully completes. It is calculated from the net Quest Reward by the active Money Policy and is included in the total rather than added after it. The target failure and cancellation rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: deducting the Platform Fee from a Worker's displayed Quest Reward.
 
 **Wallet**:
@@ -83,7 +87,7 @@ An immediate, fee-free, and irreversible transfer from a Student's Earnings Bala
 _Avoid_: Payout, reversible exchange.
 
 **Quest Escrow**:
-Spending Balance committed by a Hirer to cover Quest Rewards and Platform Fees until the Quest workflow settles or releases it. The Quest domain owns the timing and lifecycle; the target settlement rules are defined in `docs/quest/work-chat-system-target.md`.
+Spending Balance committed by a Hirer to cover Quest Funding Totals until the Quest workflow settles or releases it. The Quest domain owns the timing and lifecycle; the target settlement rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Job hold, locked balance, inferring escrow from Wallet activity.
 
 **Funding Reservation**:
@@ -195,6 +199,16 @@ _Avoid_: Candidate, departed Worker
 **Quest**:
 One bounded agreement for work, owned by one Hirer and progressing through its lifecycle. Target lifecycle and `dueAt` rules are defined in `docs/quest/work-chat-system-target.md`.
 _Avoid_: Job, task
+
+**Quest Image**:
+An optional ordered image in a Quest's detail gallery. The `Hirer` owns it
+through the Quest, and it is not a Chat Attachment. The `/api/v2` contract
+accepts valid JPEG, PNG, or WebP files up to 5 MB each, with at most three
+images per Quest. Upload and remove are allowed only while the Quest is
+`QUEST_DRAFT`; the API uses `imageId`, returns a 15-minute temporary link, and
+soft-deletes removed file metadata. Quest Images are not shown on the Quest
+Board card.
+_Avoid_: image URL, Chat Attachment, treating an image as required for publish.
 
 **Underfilled GROUP + FCFS Quest**:
 A `GROUP + FIRST_COME_FIRST_SERVED` Quest at `startTime` with fewer Active
