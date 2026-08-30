@@ -21,6 +21,11 @@ cancellation, failure, or Work Chat membership, read
 planning or coding. `docs/deprecated/` is historical evidence, not workflow
 authority.
 
+**Admin rulebook** — for Payout Approval, Dispute Case, Quest Hide, Wallet
+Freeze or Suspend, Report Case moderation, Conduct Report, Red Flag, or
+Member Ban, read
+`docs/admin/admin-role.md` before planning or coding.
+
 ### Clarifying domain context
 
 When a request involves a Quest, Work Chat, Candidate Inquiry Conversation, or

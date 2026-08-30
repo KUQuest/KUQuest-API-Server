@@ -9,7 +9,7 @@ The end user of KUQuest — anyone authenticated with a Google account under the
 _Avoid_: User, account holder, Student (use Member when the KUQuest identity matters, User only when referring generically to the auth record).
 
 **Admin**:
-A KUQuest Admin web app operator, signed in with credentials (not Google). Represented by the `auth_admin` table — a separate identity space from Member, sharing `auth_account`/`auth_session` via a nullable `userId`/`adminId` pair (exactly one set per row). Schema landed in [[BE-32]]; the second better-auth instance wiring credential login for Admins is a follow-up, not yet built.
+A KUQuest Admin web app operator, signed in with credentials (not Google). Represented by the `auth_admin` table — a separate identity space from Member, sharing `auth_account`/`auth_session` via a nullable `userId`/`adminId` pair (exactly one set per row). Schema landed in [[BE-32]]; the second better-auth instance wiring credential login for Admins is a follow-up, not yet built. One undifferentiated permission tier — `auth_admin` has no role/permission column. For Payout Approval, Dispute Case, Quest Hide, Wallet Freeze/Suspend, Trust & Safety moderation, and the Member penalty ladders, read `docs/admin/admin-role.md`.
 _Avoid_: User (Admins are never Members and vice versa).
 
 **Onboarding**:
@@ -39,6 +39,14 @@ _Avoid_: profile skill, occupation, treating Tags as editable Member fields.
 **Review**:
 A rating and optional comment that a Hirer or Worker gives to the other after a Quest reaches any Terminal State: `QUEST_COMPLETED`, `QUEST_FAILED`, or `QUEST_CANCELLED`. A Review is tied to one Quest, each direction is allowed once per Quest, and the author may edit it until seven days after the Quest becomes Terminal. Reviews cannot be deleted and contribute to the reviewed Member's Reputation.
 _Avoid_: reviewing before a Quest becomes Terminal; treating a Review as a Profile field that can be edited by someone else.
+
+**Red Flag**:
+A temporary mark on a Member's Profile after an Admin confirms that Member's first violation, blocking that Member from applying as a Candidate, joining a `FIRST_COME_FIRST_SERVED` Quest, or publishing a new Quest while it lasts. It restricts both the Worker side and the Hirer side. Expires automatically; does not require Admin action to clear. Rules are defined in `docs/admin/admin-role.md`.
+_Avoid_: Ban, Suspension, treating Red Flag as a Wallet Status.
+
+**Member Ban**:
+A Member's account being made temporarily or permanently unable to sign in, reached by escalating a Misconduct ladder, which counts both hidden Messages and upheld Conduct Reports, or a low-average-review ladder. A ban also freezes the Member's Wallet. Rules, exemptions, and both ladders are defined in `docs/admin/admin-role.md`.
+_Avoid_: Wallet Freeze/Suspend alone (a Wallet hold does not by itself block sign-in), Admin disabling another Admin (a separate, out-of-scope capability).
 
 **Proof Review Window**:
 The 24-hour period after a required submitter sends Proof Submission during
@@ -306,8 +314,12 @@ An Android device registered by a Member to receive Push Notifications, managed 
 _Avoid_: phone number, treating one Member as one device
 
 **Report Case**:
-A Trust & Safety record that groups Reporter Entries for one Message and tracks its moderation status: `PENDING`, `DISMISSED`, `HIDDEN`, or `RESTORED`. `PENDING` and `HIDDEN` are open statuses; `DISMISSED` and `RESTORED` are closed statuses. It retains the bounded evidence needed for moderation under the retention policy.
-_Avoid_: single Reporter Entry, Message flag
+A Trust & Safety record that groups Reporter Entries for one Message and tracks its moderation status: `REPORT_CASE_PENDING`, `REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN`, or `REPORT_CASE_RESTORED`. `REPORT_CASE_PENDING` and `REPORT_CASE_HIDDEN` are open statuses; `REPORT_CASE_DISMISSED` and `REPORT_CASE_RESTORED` are closed statuses. A new Reporter Entry against a Message whose most recent Report Case is closed opens a new Report Case rather than reopening the old one. It retains the bounded evidence needed for moderation under the retention policy. Scope, Admin access, and decision rules are defined in `docs/admin/admin-role.md`.
+_Avoid_: single Reporter Entry, Message flag, the superseded bare `PENDING`/`DISMISSED`/`HIDDEN`/`RESTORED` values
+
+**Conduct Report**:
+A Member's report about how another Member behaved on one Quest, chosen from a fixed reason list scoped to the pair's roles. Its evidence is the Quest record — the Assignment, the Proof Submission, and their times — not a Message, so it is a separate record from a Report Case: the clearest case is an unreachable Worker, where the complaint is that no Message exists. A Conduct Report an Admin upholds counts as a confirmed violation on the same penalty ladder as a hidden Message. Reasons, filers, timing, decision, and Admin access are defined in `docs/admin/admin-role.md` §7.
+_Avoid_: Report Case (that is about one Message's content), Reporter Entry, treating abusive language as a Conduct Report reason — that opens a Report Case.
 
 **Evidence Reference**:
 A bounded reference from a Report Case to a Message or Attachment required for moderation. It identifies the retained domain record and its hold without copying Message text, file bytes, or signed URLs.
@@ -326,13 +338,11 @@ An immutable audit record of an Admin's Work Chat evidence access or moderation 
 _Avoid_: Reporter Entry, Moderation Decision
 
 **Admin Review Item**:
-A system-created record for sending a confirmed `PROOF_NOT_APPROVED` decision to an Admin for review. It links the Quest, Assignment, Proof Submission, decision reason, and evidence references; it does not reopen the Quest or create Rework.
+A system-created record for sending a confirmed `PROOF_NOT_APPROVED` decision to an Admin for review. It links the Quest, Assignment, Proof Submission, decision reason, and evidence references; it does not reopen the Quest or create Rework. It is one way an Admin learns a Dispute Case is warranted, but an Admin may open one without it; see `docs/admin/admin-role.md`.
 _Avoid_: Report Case, Admin override
 
 **Dispute Case**:
-An abstract future review after a Failed Quest. Its actors, decision rules, and
-payment integration are not yet defined. It does not reopen or change the Quest
-State.
+A review opened by the Hirer, a Worker, or an Admin acting for a Worker, within a fixed window after a Failed Quest, that may redirect part of the Hirer's returned settlement to a Worker. It does not reopen or change the Quest State, and never reclaims a Reward already transferred to a Worker. Actors, timing, and decision rules are defined in `docs/admin/admin-role.md`.
 _Avoid_: Admin Review Item, `QUEST_DISPUTED`
 
 **Terminal Quest**:
