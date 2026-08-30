@@ -10,7 +10,7 @@ import {
 } from '@/database/schema/work-chat.schema';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 
-import { and, asc, desc, eq, exists, gt, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, gt, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 
 type WorkChatTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type WorkChatDatabase = typeof db | WorkChatTransaction;
@@ -25,7 +25,8 @@ export class WorkChatServiceError extends Error {
       | 'CONVERSATION_NOT_FOUND'
       | 'CONVERSATION_READ_ONLY'
       | 'MESSAGE_CONTENT_REQUIRED'
-      | 'MESSAGE_NOT_FOUND',
+      | 'MESSAGE_NOT_FOUND'
+      | 'RATE_LIMITED',
     message: string,
   ) {
     super(message);
@@ -272,6 +273,41 @@ export type WorkConversation = {
   unreadCount: number;
 };
 
+export type WorkConversationParticipant = {
+  id: string | null;
+  role: 'HIRER' | 'WORKER';
+  displayName: string;
+};
+
+export const listWorkConversationParticipants = async (
+  userId: string,
+  conversationId: string,
+): Promise<WorkConversationParticipant[]> => {
+  const conversation = await getConversationMembership(db, userId, conversationId);
+  if (!conversation) throw new WorkChatServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+
+  const participants = await db
+    .select({
+      id: chatMembership.memberId,
+      role: chatMembership.role,
+      firstName: authUser.firstName,
+      lastName: authUser.lastName,
+    })
+    .from(chatMembership)
+    .leftJoin(authUser, eq(authUser.id, chatMembership.memberId))
+    .where(and(
+      eq(chatMembership.conversationId, conversationId),
+      isNull(chatMembership.leftAt),
+    ))
+    .orderBy(asc(chatMembership.role), asc(chatMembership.joinedAt), asc(chatMembership.id));
+
+  return participants.map((participant) => ({
+    id: participant.id,
+    role: participant.role,
+    displayName: `${participant.firstName ?? ''} ${participant.lastName ?? ''}`.trim() || 'Former member',
+  }));
+};
+
 const loadConversationSummary = async (
   database: WorkChatDatabase,
   userId: string,
@@ -324,24 +360,35 @@ export const listWorkConversations = async (
   userId: string,
   options: { limit: number; cursor?: CursorPayload },
 ) => {
-  const memberships = await db
-    .select({ conversationId: chatMembership.conversationId, joinedAt: chatMembership.joinedAt })
+  // Page by the caller-visible activity in SQL. This keeps the summary work bounded
+  // by the requested page instead of loading every Conversation before slicing it.
+  const lastActivityAt = sql`coalesce(max(${chatMessage.createdAt}), timestamp 'epoch')`;
+  const cursor = options.cursor;
+  const candidates = await db
+    .select({ conversationId: chatMembership.conversationId })
     .from(chatMembership)
     .innerJoin(chatConversation, eq(chatConversation.id, chatMembership.conversationId))
+    .leftJoin(chatMessage, and(
+      eq(chatMessage.conversationId, chatConversation.id),
+      isNull(chatMessage.deletedAt),
+      memberCanSeeMessage(db, userId),
+    ))
     .where(and(
       eq(chatMembership.memberId, userId),
       isNull(chatConversation.deletedAt),
     ))
-    .orderBy(desc(chatMembership.joinedAt));
-  const latestMembershipByConversation = new Map<string, typeof memberships[number]>();
-  for (const membership of memberships) {
-    if (!latestMembershipByConversation.has(membership.conversationId)) {
-      latestMembershipByConversation.set(membership.conversationId, membership);
-    }
-  }
+    .groupBy(chatMembership.conversationId)
+    .having(cursor
+      ? or(
+          lt(lastActivityAt, new Date(cursor.startTime)),
+          and(eq(lastActivityAt, new Date(cursor.startTime)), lt(chatMembership.conversationId, cursor.id)),
+        )
+      : undefined)
+    .orderBy(desc(lastActivityAt), desc(chatMembership.conversationId))
+    .limit(options.limit + 1);
 
   const conversations = await Promise.all(
-    [...latestMembershipByConversation.values()].map(async ({ conversationId }) => {
+    candidates.slice(0, options.limit).map(async ({ conversationId }) => {
       const membership = await getConversationMembership(db, userId, conversationId);
       return membership ? loadConversationSummary(db, userId, membership) : null;
     }),
@@ -354,15 +401,8 @@ export const listWorkConversations = async (
       if (rightTime !== leftTime) return rightTime - leftTime;
       return right.id > left.id ? 1 : right.id < left.id ? -1 : 0;
     });
-  const filtered = options.cursor
-    ? sorted.filter((conversation) => {
-        const activity = conversation.lastActivityAt?.toISOString() ?? new Date(0).toISOString();
-        return activity < options.cursor!.startTime ||
-          (activity === options.cursor!.startTime && conversation.id < options.cursor!.id);
-      })
-    : sorted;
-  const page = filtered.slice(0, options.limit);
-  const hasMore = filtered.length > page.length;
+  const page = sorted;
+  const hasMore = candidates.length > page.length;
   const last = page[page.length - 1];
   return {
     items: page,
@@ -407,11 +447,67 @@ const attachmentIdsForMessage = async (database: WorkChatDatabase, messageId: st
   return rows.map(({ id }) => id);
 };
 
+const MAX_MESSAGES_PER_MINUTE = 30;
+const MAX_ATTACHMENTS_PER_MINUTE = 10;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+const enforceSendRateLimit = async (
+  database: WorkChatDatabase,
+  userId: string,
+  conversationId: string,
+  requestedAttachmentCount: number,
+): Promise<void> => {
+  const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS);
+  const [messageCount] = await database
+    .select({ count: sql<number>`count(*)` })
+    .from(chatMessage)
+    .innerJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId!))
+    .where(and(
+      eq(chatMessage.conversationId, conversationId),
+      eq(chatMessage.kind, 'USER'),
+      eq(chatMembership.memberId, userId),
+      gte(chatMessage.createdAt, windowStart),
+    ));
+  const [attachmentCount] = await database
+    .select({ count: sql<number>`count(*)` })
+    .from(chatMessageAttachment)
+    .innerJoin(chatMessage, eq(chatMessage.id, chatMessageAttachment.messageId))
+    .innerJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId!))
+    .where(and(
+      eq(chatMessage.conversationId, conversationId),
+      eq(chatMessage.kind, 'USER'),
+      eq(chatMembership.memberId, userId),
+      gte(chatMessage.createdAt, windowStart),
+    ));
+
+  if (
+    Number(messageCount?.count ?? 0) >= MAX_MESSAGES_PER_MINUTE ||
+    Number(attachmentCount?.count ?? 0) + requestedAttachmentCount > MAX_ATTACHMENTS_PER_MINUTE
+  ) {
+    throw new WorkChatServiceError('RATE_LIMITED', 'Work Chat rate limit exceeded');
+  }
+};
+
 export const sendWorkConversationMessage = async (
   userId: string,
   conversationId: string,
   input: { clientMessageId: string; text?: string; attachmentIds?: string[] },
 ) => db.transaction(async (transaction) => {
+  const [lockedConversation] = await transaction
+    .select({
+      id: chatConversation.id,
+      nextSequence: chatConversation.nextSequence,
+      readOnlyAt: chatConversation.readOnlyAt,
+    })
+    .from(chatConversation)
+    .where(and(
+      eq(chatConversation.id, conversationId),
+      isNull(chatConversation.deletedAt),
+    ))
+    .limit(1)
+    .for('update');
+  if (!lockedConversation) throw new WorkChatServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+
   const conversation = await getConversationMembership(transaction, userId, conversationId, true);
   if (!conversation) throw new WorkChatServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
 
@@ -420,17 +516,6 @@ export const sendWorkConversationMessage = async (
   if (!text && attachmentIds.length === 0) {
     throw new WorkChatServiceError('MESSAGE_CONTENT_REQUIRED', 'Message text or an Attachment is required');
   }
-
-  const [lockedConversation] = await transaction
-    .select({
-      nextSequence: chatConversation.nextSequence,
-      readOnlyAt: chatConversation.readOnlyAt,
-    })
-    .from(chatConversation)
-    .where(eq(chatConversation.id, conversationId))
-    .limit(1)
-    .for('update');
-  if (!lockedConversation) throw new WorkChatServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
 
   const [existing] = await transaction
     .select({
@@ -465,9 +550,11 @@ export const sendWorkConversationMessage = async (
     throw new WorkChatServiceError('CONVERSATION_READ_ONLY', 'Conversation is read-only');
   }
 
+  await enforceSendRateLimit(transaction, userId, conversationId, attachmentIds.length);
+
   let attachments: Array<{ id: string }> = [];
   if (attachmentIds.length > 0) {
-    attachments = await transaction
+    const selectedAttachments = await transaction
       .select({ id: chatAttachment.id })
       .from(chatAttachment)
       .where(and(
@@ -477,8 +564,14 @@ export const sendWorkConversationMessage = async (
         eq(chatAttachment.status, 'VALIDATED'),
         isNull(chatAttachment.deletedAt),
       ));
-    if (attachments.length !== attachmentIds.length) {
+    if (selectedAttachments.length !== attachmentIds.length) {
       throw new WorkChatServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
+    }
+    const selectedById = new Map(selectedAttachments.map((attachment) => [attachment.id, attachment]));
+    for (const attachmentId of attachmentIds) {
+      const attachment = selectedById.get(attachmentId);
+      if (!attachment) throw new WorkChatServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
+      attachments.push(attachment);
     }
   }
 

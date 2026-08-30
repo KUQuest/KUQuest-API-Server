@@ -1,12 +1,15 @@
 import { createApp } from '@/app';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
+import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
   chatConversation,
+  chatAttachment,
   chatMembership,
   chatMessage,
+  chatMessageAttachment,
   chatReadCursor,
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
@@ -15,7 +18,7 @@ import { createWorkChatMembershipWriter } from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';
 
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
 const hirerId = randomUUID();
@@ -23,6 +26,7 @@ const workerId = randomUUID();
 const otherMemberId = randomUUID();
 const tagId = randomUUID();
 const fixtureQuestIds: string[] = [];
+const fixtureFileIds: string[] = [];
 let postgresAvailable = false;
 let workChatApp: ReturnType<typeof createApp>;
 
@@ -47,7 +51,11 @@ const requestJson = (
   body: JSON.stringify(body),
 }));
 
-const createWorkConversation = async (): Promise<{ questId: string; conversationId: string }> => {
+const createWorkConversation = async (): Promise<{
+  questId: string;
+  assignmentId: string;
+  conversationId: string;
+}> => {
   const questId = randomUUID();
   const assignmentId = randomUUID();
   fixtureQuestIds.push(questId);
@@ -89,7 +97,51 @@ const createWorkConversation = async (): Promise<{ questId: string; conversation
     }],
   }));
 
-  return { questId, conversationId: result.conversationId! };
+  return { questId, assignmentId, conversationId: result.conversationId! };
+};
+
+const createValidatedAttachments = async (conversationId: string, memberId: string, count: number) => {
+  const [membership] = await db
+    .select({ id: chatMembership.id })
+    .from(chatMembership)
+    .where(and(
+      eq(chatMembership.conversationId, conversationId),
+      eq(chatMembership.memberId, memberId),
+      isNull(chatMembership.leftAt),
+    ))
+    .limit(1);
+  if (!membership) throw new Error('Fixture Chat Membership not found');
+
+  const attachments = Array.from({ length: count }, (_, index) => {
+    const attachmentId = randomUUID();
+    const fileId = randomUUID();
+    fixtureFileIds.push(fileId);
+    return {
+      attachmentId,
+      fileId,
+      index,
+    };
+  });
+  await db.insert(file).values(attachments.map(({ fileId }) => ({
+    id: fileId,
+    bucket: 'test-work-chat',
+    objectKey: `work-chat/${fileId}`,
+    contentType: 'image/png',
+    sizeBytes: 3,
+    uploadedByUserId: memberId,
+  })));
+  await db.insert(chatAttachment).values(attachments.map(({ attachmentId, fileId, index }) => ({
+    id: attachmentId,
+    conversationId,
+    uploadedByMemberId: membership.id,
+    fileId,
+    status: 'VALIDATED' as const,
+    originalFilename: `attachment-${index}.png`,
+    mimeType: 'image/png',
+    sizeBytes: 3,
+    validatedAt: new Date(),
+  })));
+  return attachments.map(({ attachmentId }) => attachmentId);
 };
 
 const cleanFixtures = async (): Promise<void> => {
@@ -102,13 +154,25 @@ const cleanFixtures = async (): Promise<void> => {
   const conversationIds = conversations.map(({ id }) => id);
   if (conversationIds.length > 0) {
     await db.delete(chatReadCursor).where(inArray(chatReadCursor.conversationId, conversationIds));
+    const messages = await db.select({ id: chatMessage.id })
+      .from(chatMessage)
+      .where(inArray(chatMessage.conversationId, conversationIds));
+    const messageIds = messages.map(({ id }) => id);
+    if (messageIds.length > 0) {
+      await db.delete(chatMessageAttachment).where(inArray(chatMessageAttachment.messageId, messageIds));
+    }
     await db.delete(chatMessage).where(inArray(chatMessage.conversationId, conversationIds));
+    await db.delete(chatAttachment).where(inArray(chatAttachment.conversationId, conversationIds));
     await db.delete(chatMembership).where(inArray(chatMembership.conversationId, conversationIds));
     await db.delete(chatConversation).where(inArray(chatConversation.id, conversationIds));
+  }
+  if (fixtureFileIds.length > 0) {
+    await db.delete(file).where(inArray(file.id, fixtureFileIds));
   }
   await db.delete(questAssignment).where(inArray(questAssignment.questId, fixtureQuestIds));
   await db.delete(quest).where(inArray(quest.id, fixtureQuestIds));
   fixtureQuestIds.length = 0;
+  fixtureFileIds.length = 0;
 };
 
 beforeAll(async () => {
@@ -147,6 +211,7 @@ describe('Work Chat Member API', () => {
     const responses = await Promise.all([
       workChatApp.handle(new Request('http://localhost/api/v1/chat/conversations')),
       workChatApp.handle(new Request(`http://localhost/api/v1/chat/conversations/${randomUUID()}/messages`)),
+      workChatApp.handle(new Request(`http://localhost/api/v1/chat/conversations/${randomUUID()}/participants`)),
       requestJson('POST', `/api/v1/chat/conversations/${randomUUID()}/read`, { messageId: randomUUID() }),
       requestJson('POST', `/api/v1/chat/conversations/${randomUUID()}/messages`, {
         clientMessageId: 'unauthorized-message',
@@ -164,11 +229,16 @@ describe('Work Chat Member API', () => {
   it('exposes the documented Work Conversation operations with Member security', async () => {
     const response = await workChatApp.handle(new Request('http://localhost/openapi/json'));
     const document = (await response.json()) as {
-      paths: Record<string, Record<string, { operationId?: string; security?: unknown }>>;
+      paths: Record<string, Record<string, {
+        operationId?: string;
+        security?: unknown;
+        responses?: Record<string, unknown>;
+      }>>;
     };
 
     const operations = [
       ['/api/v1/chat/conversations', 'get', 'listWorkConversations'],
+      ['/api/v1/chat/conversations/{conversationId}/participants', 'get', 'listWorkConversationParticipants'],
       ['/api/v1/chat/conversations/{conversationId}/messages', 'get', 'listWorkConversationMessages'],
       ['/api/v1/chat/conversations/{conversationId}/messages', 'post', 'sendWorkConversationMessage'],
       ['/api/v1/chat/conversations/{conversationId}/read', 'post', 'advanceWorkConversationReadCursor'],
@@ -178,6 +248,7 @@ describe('Work Chat Member API', () => {
       expect(document.paths[path]?.[method]?.operationId).toBe(operationId);
       expect(document.paths[path]?.[method]?.security).toEqual([{ betterAuthSession: [] }]);
     }
+    expect(document.paths['/api/v1/chat/conversations/{conversationId}/messages']?.post?.responses?.['429']).toBeDefined();
   });
 
   it('allows the accepted Hirer and Worker to use the Conversation and denies a non-member', async () => {
@@ -202,6 +273,19 @@ describe('Work Chat Member API', () => {
     expect(history.status).toBe(200);
     const historyBody = await history.json() as { data: { items: Array<{ kind: string }> } };
     expect(historyBody.data.items[0]?.kind).toBe('SYSTEM');
+
+    const participants = await workChatApp.handle(new Request(
+      `http://localhost/api/v1/chat/conversations/${conversationId}/participants`,
+      { headers: { 'x-member-id': workerId } },
+    ));
+    expect(participants.status).toBe(200);
+    const participantsBody = await participants.json() as {
+      data: { participants: Array<{ id: string; role: string; displayName: string }> };
+    };
+    expect(participantsBody.data.participants).toEqual([
+      { id: hirerId, role: 'HIRER', displayName: 'Route Hirer' },
+      { id: workerId, role: 'WORKER', displayName: 'Route Worker' },
+    ]);
 
     const sent = await requestJson('POST', `/api/v1/chat/conversations/${conversationId}/messages`, {
       clientMessageId: 'worker-message-1',
@@ -237,6 +321,31 @@ describe('Work Chat Member API', () => {
     }, hirerId);
     expect(hirerSent.status).toBe(200);
 
+    const attachmentIds = await createValidatedAttachments(conversationId, workerId, 2);
+    const requestedAttachmentIds = [attachmentIds[1]!, attachmentIds[0]!];
+    const attachmentSent = await requestJson('POST', `/api/v1/chat/conversations/${conversationId}/messages`, {
+      clientMessageId: 'worker-message-with-attachments',
+      text: 'Worker files',
+      attachmentIds: requestedAttachmentIds,
+    }, workerId);
+    expect(attachmentSent.status).toBe(200);
+    const attachmentSentBody = await attachmentSent.json() as {
+      data: { message: { id: string; attachments: Array<{ id: string }> } };
+    };
+    expect(attachmentSentBody.data.message.attachments.map(({ id }) => id)).toEqual(requestedAttachmentIds);
+
+    const attachmentReplay = await requestJson('POST', `/api/v1/chat/conversations/${conversationId}/messages`, {
+      clientMessageId: 'worker-message-with-attachments',
+      text: 'Worker files',
+      attachmentIds: requestedAttachmentIds,
+    }, workerId);
+    expect(attachmentReplay.status).toBe(200);
+    const attachmentReplayBody = await attachmentReplay.json() as {
+      data: { message: { id: string; attachments: Array<{ id: string }> } };
+    };
+    expect(attachmentReplayBody.data.message.id).toBe(attachmentSentBody.data.message.id);
+    expect(attachmentReplayBody.data.message.attachments.map(({ id }) => id)).toEqual(requestedAttachmentIds);
+
     const newestPage = await workChatApp.handle(new Request(
       `http://localhost/api/v1/chat/conversations/${conversationId}/messages?limit=1`,
       { headers: { 'x-member-id': workerId } },
@@ -266,6 +375,13 @@ describe('Work Chat Member API', () => {
     }, otherMemberId);
     expect(nonMemberSend.status).toBe(404);
     expect((await nonMemberSend.json()).error.code).toBe('CONVERSATION_NOT_FOUND');
+
+    const nonMemberParticipants = await workChatApp.handle(new Request(
+      `http://localhost/api/v1/chat/conversations/${conversationId}/participants`,
+      { headers: { 'x-member-id': otherMemberId } },
+    ));
+    expect(nonMemberParticipants.status).toBe(404);
+    expect((await nonMemberParticipants.json()).error.code).toBe('CONVERSATION_NOT_FOUND');
 
     await db.update(chatConversation).set({
       questStatus: 'QUEST_COMPLETED',
@@ -304,5 +420,84 @@ describe('Work Chat Member API', () => {
     ));
     expect(invalidHistory.status).toBe(400);
     expect((await invalidHistory.json()).error.code).toBe('VALIDATION');
+  });
+
+  it('rejects a send when the Member departs before the locked Conversation is used', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const { conversationId } = await createWorkConversation();
+    let releaseDeparture!: () => void;
+    let departure!: Promise<void>;
+    const departureReady = new Promise<void>((resolve) => {
+      departure = db.transaction(async (transaction) => {
+        await transaction
+          .select({ id: chatConversation.id })
+          .from(chatConversation)
+          .where(eq(chatConversation.id, conversationId))
+          .for('update');
+        resolve();
+        await new Promise<void>((release) => {
+          releaseDeparture = release;
+        });
+        await transaction
+          .update(chatMembership)
+          .set({ leftAt: new Date('2030-01-01T11:00:00.000Z') })
+          .where(and(
+            eq(chatMembership.conversationId, conversationId),
+            eq(chatMembership.memberId, workerId),
+            isNull(chatMembership.leftAt),
+          ));
+      });
+    });
+    await departureReady;
+
+    const sendPromise = requestJson('POST', `/api/v1/chat/conversations/${conversationId}/messages`, {
+      clientMessageId: 'worker-message-after-departure',
+      text: 'Should not be sent',
+    }, workerId);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseDeparture();
+    const response = await sendPromise;
+    await departure;
+    expect(response.status).toBe(404);
+    expect((await response.json()).error.code).toBe('CONVERSATION_NOT_FOUND');
+  });
+
+  it('enforces the per-Minute Message and Attachment limits', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const messageFixture = await createWorkConversation();
+    for (let index = 0; index < 30; index += 1) {
+      const response = await requestJson('POST', `/api/v1/chat/conversations/${messageFixture.conversationId}/messages`, {
+        clientMessageId: `rate-message-${index}`,
+        text: 'Rate test',
+      }, workerId);
+      expect(response.status).toBe(200);
+    }
+    const messageLimited = await requestJson('POST', `/api/v1/chat/conversations/${messageFixture.conversationId}/messages`, {
+      clientMessageId: 'rate-message-30',
+      text: 'Rate test',
+    }, workerId);
+    expect(messageLimited.status).toBe(429);
+    expect((await messageLimited.json()).error.code).toBe('RATE_LIMITED');
+
+    const attachmentFixture = await createWorkConversation();
+    const attachmentIds = await createValidatedAttachments(attachmentFixture.conversationId, workerId, 11);
+    const firstAttachments = await requestJson('POST', `/api/v1/chat/conversations/${attachmentFixture.conversationId}/messages`, {
+      clientMessageId: 'rate-attachments-1',
+      attachmentIds: attachmentIds.slice(0, 5),
+    }, workerId);
+    expect(firstAttachments.status).toBe(200);
+    const secondAttachments = await requestJson('POST', `/api/v1/chat/conversations/${attachmentFixture.conversationId}/messages`, {
+      clientMessageId: 'rate-attachments-2',
+      attachmentIds: attachmentIds.slice(5, 10),
+    }, workerId);
+    expect(secondAttachments.status).toBe(200);
+    const attachmentLimited = await requestJson('POST', `/api/v1/chat/conversations/${attachmentFixture.conversationId}/messages`, {
+      clientMessageId: 'rate-attachments-3',
+      attachmentIds: attachmentIds.slice(10),
+    }, workerId);
+    expect(attachmentLimited.status).toBe(429);
+    expect((await attachmentLimited.json()).error.code).toBe('RATE_LIMITED');
   });
 });

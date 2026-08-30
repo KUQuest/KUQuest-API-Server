@@ -8,6 +8,7 @@ import type { Static } from 'elysia';
 import {
   advanceWorkConversationReadCursor,
   listWorkConversationMessages,
+  listWorkConversationParticipants,
   listWorkConversations,
   sendWorkConversationMessage,
   WorkChatServiceError,
@@ -53,6 +54,8 @@ const mapWorkChatError = (set: AuthedContext['set'], error: unknown) => {
     set.status = 404;
   } else if (error.code === 'MESSAGE_CONTENT_REQUIRED') {
     set.status = 400;
+  } else if (error.code === 'RATE_LIMITED') {
+    set.status = 429;
   } else {
     set.status = 409;
   }
@@ -99,6 +102,18 @@ export const listWorkConversationMessagesController = async ({
       nextCursor: result.nextCursor,
       hasMore: result.hasMore,
     });
+  } catch (error) {
+    return mapWorkChatError(set, error);
+  }
+};
+
+export const listWorkConversationParticipantsController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: ConversationParams }): Promise<ApiResponse> => {
+  try {
+    return apiSuccess({ participants: await listWorkConversationParticipants(session.user.id, params.conversationId) });
   } catch (error) {
     return mapWorkChatError(set, error);
   }

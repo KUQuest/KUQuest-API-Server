@@ -42,6 +42,12 @@ const messageSchema = t.Object({
   createdAt: t.String({ format: 'date-time' }),
 });
 
+const participantSchema = t.Object({
+  id: t.Nullable(t.String({ format: 'uuid' })),
+  role: t.Union([t.Literal('HIRER'), t.Literal('WORKER')]),
+  displayName: t.String(),
+});
+
 export const workChatConversationParamsSchema = t.Object({
   conversationId: t.String({ format: 'uuid' }),
 });
@@ -67,6 +73,8 @@ export const workChatSendMessageSchema = t.Object(
   {
     clientMessageId: t.String({ minLength: 1, maxLength: 128, pattern: '\\S' }),
     text: t.Optional(t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' })),
+    // The current database relation permits positions 1 through 5. Keep this API at five
+    // until a storage-boundary migration can raise that source-of-truth constraint safely.
     attachmentIds: t.Optional(t.Array(t.String({ format: 'uuid' }), { maxItems: 5, uniqueItems: true })),
   },
   { additionalProperties: false },
@@ -99,6 +107,13 @@ export const workChatMessageListResponseSchema = t.Object({
 export const workChatMessageResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({ message: messageSchema }),
+});
+
+export const workChatParticipantListResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    participants: t.Array(participantSchema),
+  }),
 });
 
 export const workChatReadCursorResponseSchema = t.Object({

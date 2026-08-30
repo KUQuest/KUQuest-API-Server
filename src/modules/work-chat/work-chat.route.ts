@@ -8,6 +8,7 @@ import { Elysia } from 'elysia';
 import {
   advanceWorkConversationReadCursorController,
   listWorkConversationMessagesController,
+  listWorkConversationParticipantsController,
   listWorkConversationsController,
   sendWorkConversationMessageController,
 } from './work-chat.controller';
@@ -18,6 +19,7 @@ import {
   workChatMessageListQuerySchema,
   workChatMessageListResponseSchema,
   workChatMessageResponseSchema,
+  workChatParticipantListResponseSchema,
   workChatReadCursorResponseSchema,
   workChatReadCursorSchema,
   workChatSendMessageSchema,
@@ -39,6 +41,17 @@ export const workChatRoute = new Elysia({
       security: betterAuthSecurity,
     },
   })
+  .get('/conversations/:conversationId/participants', listWorkConversationParticipantsController, {
+    params: workChatConversationParamsSchema,
+    response: responses(workChatParticipantListResponseSchema, 401, 404),
+    detail: {
+      tags: ['Work Chat'],
+      summary: 'List Work Conversation Participants',
+      description: 'Lists the current Hirer and Worker participants with their roles.',
+      operationId: 'listWorkConversationParticipants',
+      security: betterAuthSecurity,
+    },
+  })
   .get('/conversations/:conversationId/messages', listWorkConversationMessagesController, {
     params: workChatConversationParamsSchema,
     query: workChatMessageListQuerySchema,
@@ -55,7 +68,7 @@ export const workChatRoute = new Elysia({
     params: workChatConversationParamsSchema,
     body: workChatSendMessageSchema,
     transform: rejectUnknownFields(workChatSendMessageSchema),
-    response: responses(workChatMessageResponseSchema, 400, 401, 404, 409),
+    response: responses(workChatMessageResponseSchema, 400, 401, 404, 409, 429),
     detail: {
       tags: ['Work Chat'],
       summary: 'Send a Work Conversation Message',
