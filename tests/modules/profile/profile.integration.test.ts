@@ -2,16 +2,30 @@ import { app } from '@/app';
 
 import { randomUUID } from 'node:crypto';
 
-import { describe, expect, it } from 'bun:test';
+import { afterAll, describe, expect, it } from 'bun:test';
 
-const patchProfile = (body: unknown) =>
+import {
+  authenticateAsStudent,
+  cleanupStudentSessions,
+} from '../../support/authenticate-as-student';
+
+const patchProfile = (body: unknown, cookie?: string) =>
   app.handle(
     new Request('http://localhost/api/v1/profile', {
       method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...(cookie ? { cookie } : {}),
+      },
       body: JSON.stringify(body),
     }),
   );
+
+const getProfile = (cookie: string) =>
+  app.handle(new Request('http://localhost/api/v1/profile', { headers: { cookie } }));
+
+const authenticatedStudentIds: string[] = [];
+afterAll(() => cleanupStudentSessions(authenticatedStudentIds));
 
 describe('profile integration', () => {
   it('rejects an unauthenticated read', async () => {
@@ -167,6 +181,41 @@ describe('profile integration', () => {
     const response = await patchProfile({ bio: 'a'.repeat(1000) });
 
     expect(response.status).toBe(401);
+  });
+
+  // QA-33: these hold Sessions from the `authenticateAsStudent` fixture, so — unlike
+  // every case above — they reach the auth guard's accepted path, not just its
+  // rejection. Ownership used to be provable only at the database seam
+  // (docs/adr/0002-profile-ownership-proven-below-http.md); this re-proves it here.
+  describe('authenticated with the Student Session fixture', () => {
+    it("lets an authenticated Student read their own profile", async () => {
+      const student = await authenticateAsStudent({ firstName: 'Fixture', lastName: 'Reader' });
+      authenticatedStudentIds.push(student.userId);
+
+      const response = await getProfile(student.cookie);
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.success).toBe(true);
+      expect(body.data).toMatchObject({ firstName: 'Fixture', lastName: 'Reader' });
+    });
+
+    it("updates only the authenticated Student's own profile, leaving another Student's untouched", async () => {
+      const studentA = await authenticateAsStudent({ firstName: 'Student', lastName: 'A' });
+      const studentB = await authenticateAsStudent({ firstName: 'Student', lastName: 'B' });
+      authenticatedStudentIds.push(studentA.userId, studentB.userId);
+
+      const updateResponse = await patchProfile({ bio: 'Updated by A' }, studentA.cookie);
+      expect(updateResponse.status).toBe(200);
+
+      const [profileA, profileB] = await Promise.all([
+        getProfile(studentA.cookie).then((r) => r.json()),
+        getProfile(studentB.cookie).then((r) => r.json()),
+      ]);
+
+      expect(profileA.data.bio).toBe('Updated by A');
+      expect(profileB.data.bio).toBeNull();
+    });
   });
 
   describe('published documentation', () => {
