@@ -6,7 +6,7 @@ time. `latestTerminalAt` is the Quest's latest terminal transition, and
 `REPORT_CASE_RESTORED`. `REPORT_CASE_PENDING` and `REPORT_CASE_HIDDEN` cases
 remain open and continue to hold the Message and Attachment records named by
 their Evidence References. One Message can carry more than one Report Case
-(`docs/admin/admin-role.md` §5), so `caseClosedAt` is the close time of the
+(`docs/rulebook/admin/admin-rulebook.md` §5), so `caseClosedAt` is the close time of the
 most recently closed one, and a Message with any open case has no `eligibleAt`
 yet. After a case closes:
 

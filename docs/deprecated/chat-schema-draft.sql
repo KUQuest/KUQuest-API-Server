@@ -1,6 +1,6 @@
 -- Work Chat schema design draft
 --
--- LEGACY REFERENCE: use docs/quest/work-chat-system-target.md for the accepted
+-- LEGACY REFERENCE: use docs/rulebook/quest/quest-work-chat-rulebook.md for the accepted
 -- Work Chat workflow and constraints. This draft contains older attachment,
 -- message, and status assumptions. Reconcile it before using it for implementation.
 --

@@ -1,7 +1,7 @@
 # Quest stage milestones
 
 > **Legacy workflow reference.** The product source of truth is
-> [`docs/quest/work-chat-system-target.md` §Resolved Quest lifecycle](../quest/work-chat-system-target.md#resolved-quest-lifecycle).
+> [`docs/rulebook/quest/quest-work-chat-rulebook.md` §Resolved Quest lifecycle](../rulebook/quest/quest-work-chat-rulebook.md#resolved-quest-lifecycle).
 > This file records the earlier stage, Rework, cancellation, dispute, and money
 > model. Do not use it to define new behavior.
 

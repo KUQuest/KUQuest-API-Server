@@ -1,7 +1,7 @@
 # Work Chat REST and WebSocket contract
 
 > **Legacy workflow reference.** The product source of truth is
-> `docs/quest/work-chat-system-target.md`, including §Resolved Quest lifecycle.
+> `docs/rulebook/quest/quest-work-chat-rulebook.md`, including §Resolved Quest lifecycle.
 > This file retains the earlier REST/WebSocket model. Do not use its Quest,
 > proof, notification, or moderation rules to define new behavior.
 

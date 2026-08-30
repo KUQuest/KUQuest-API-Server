@@ -2,7 +2,7 @@
 
 Status: Decision-complete; ready for implementation planning
 
-Related document: `prepare-pr-for-qa-spec.md`
+Related document: `docs/spec/prepare-pr-for-qa-spec.md`
 
 ## Problem statement
 

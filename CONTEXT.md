@@ -4,12 +4,28 @@ Backend serving the KUQuest Mobile app and Admin web app: authentication, onboar
 
 ## Language
 
+**Rulebook**:
+An accepted domain-policy document that defines what the Server must do for one domain, including state transitions, actor decisions, Admin control, and money movement. Only a domain-policy document is a Rulebook; ADRs record decisions, and reconciliation documents describe Legacy Implementation.
+_Avoid_: implementation guide, draft, historical document
+
+**Legacy Implementation**:
+Existing code, schema, or API behavior that does not implement an accepted Rulebook. It is evidence of the current server only; it does not define KUQuest policy.
+_Avoid_: Rulebook, accepted target, product policy
+
+**Domain Owner**:
+The named person who approves a Candidate Rulebook for one domain. A Rulebook becomes accepted only after that explicit approval.
+_Avoid_: code owner, automatic approver
+
+**Candidate Rulebook**:
+A proposed domain-policy document that awaits Domain Owner approval. It does not define current KUQuest policy.
+_Avoid_: Rulebook, draft Rulebook, accepted contract
+
 **Member**:
 The end user of KUQuest — anyone authenticated with a Google account under the `@ku.th` email domain. Represented by the `auth_user` table.
 _Avoid_: User, account holder, Student (use Member when the KUQuest identity matters, User only when referring generically to the auth record).
 
 **Admin**:
-A KUQuest Admin web app operator, signed in with credentials (not Google). Represented by the `auth_admin` table — a separate identity space from Member, sharing `auth_account`/`auth_session` via a nullable `userId`/`adminId` pair (exactly one set per row). Schema landed in [[BE-32]]; the second better-auth instance wiring credential login for Admins is a follow-up, not yet built. One undifferentiated permission tier — `auth_admin` has no role/permission column. For Payout Approval, Dispute Case, Quest Hide, Wallet Freeze/Suspend, Trust & Safety moderation, and the Member penalty ladders, read `docs/admin/admin-role.md`.
+A KUQuest Admin web app operator, signed in with credentials (not Google). Represented by the `auth_admin` table — a separate identity space from Member, sharing `auth_account`/`auth_session` via a nullable `userId`/`adminId` pair (exactly one set per row). Schema landed in [[BE-32]]; the second better-auth instance wiring credential login for Admins is a follow-up, not yet built. One undifferentiated permission tier — `auth_admin` has no role/permission column. For Payout Approval, Dispute Case, Quest Hide, Wallet Freeze/Suspend, Trust & Safety moderation, and the Member penalty ladders, read `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: User (Admins are never Members and vice versa).
 
 **Onboarding**:
@@ -41,11 +57,11 @@ A rating and optional comment that a Hirer or Worker gives to the other after a 
 _Avoid_: reviewing before a Quest becomes Terminal; treating a Review as a Profile field that can be edited by someone else.
 
 **Red Flag**:
-A temporary mark on a Member's Profile after an Admin confirms that Member's first violation, blocking that Member from applying as a Candidate, joining a `FIRST_COME_FIRST_SERVED` Quest, or publishing a new Quest while it lasts. It restricts both the Worker side and the Hirer side. Expires automatically; does not require Admin action to clear. Rules are defined in `docs/admin/admin-role.md`.
+A temporary mark on a Member's Profile after an Admin confirms that Member's first violation, blocking that Member from applying as a Candidate, joining a `FIRST_COME_FIRST_SERVED` Quest, or publishing a new Quest while it lasts. It restricts both the Worker side and the Hirer side. Expires automatically; does not require Admin action to clear. Rules are defined in `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: Ban, Suspension, treating Red Flag as a Wallet Status.
 
 **Member Ban**:
-A Member's account being made temporarily or permanently unable to sign in, reached by escalating a Misconduct ladder, which counts both hidden Messages and upheld Conduct Reports, or a low-average-review ladder. A ban also freezes the Member's Wallet. Rules, exemptions, and both ladders are defined in `docs/admin/admin-role.md`.
+A Member's account being made temporarily or permanently unable to sign in, reached by escalating a Misconduct ladder, which counts both hidden Messages and upheld Conduct Reports, or a low-average-review ladder. A ban also freezes the Member's Wallet. Rules, exemptions, and both ladders are defined in `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: Wallet Freeze/Suspend alone (a Wallet hold does not by itself block sign-in), Admin disabling another Admin (a separate, out-of-scope capability).
 
 **Proof Review Window**:
@@ -63,7 +79,7 @@ Legacy term for Worker. In new Quest and Work Chat text, use Worker.
 _Avoid_: Hunter in new domain text, employee, contractor.
 
 **Quest Reward**:
-The portion of a Quest Funding Total paid from the Hirer's Quest Escrow to a Worker who successfully completes an Assignment. Settlement, visibility, failure, retry, and notification rules are defined in `docs/quest/work-chat-system-target.md`.
+The portion of a Quest Funding Total paid from the Hirer's Quest Escrow to a Worker who successfully completes an Assignment. Settlement, visibility, failure, retry, and notification rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Wage, salary, shared prize pool.
 
 **Quest Funding Total**:
@@ -71,7 +87,7 @@ The amount a Hirer commits for one Worker slot, including that slot's Quest Rewa
 _Avoid_: treating the total as the Worker's Quest Reward, adding Platform Fee after the total.
 
 **Platform Fee**:
-The portion of a Quest Funding Total retained as Platform Fee when a Quest successfully completes. It is calculated from the net Quest Reward by the active Money Policy and is included in the total rather than added after it. The target failure and cancellation rules are defined in `docs/quest/work-chat-system-target.md`.
+The portion of a Quest Funding Total retained as Platform Fee when a Quest successfully completes. It is calculated from the net Quest Reward by the active Money Policy and is included in the total rather than added after it. The target failure and cancellation rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: deducting the Platform Fee from a Worker's displayed Quest Reward.
 
 **Wallet**:
@@ -95,7 +111,7 @@ An immediate, fee-free, and irreversible transfer from a Student's Earnings Bala
 _Avoid_: Payout, reversible exchange.
 
 **Quest Escrow**:
-Spending Balance committed by a Hirer to cover Quest Funding Totals until the Quest workflow settles or releases it. The Quest domain owns the timing and lifecycle; the target settlement rules are defined in `docs/quest/work-chat-system-target.md`.
+Spending Balance committed by a Hirer to cover Quest Funding Totals until the Quest workflow settles or releases it. The Quest domain owns the timing and lifecycle; the target settlement rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Job hold, locked balance, inferring escrow from Wallet activity.
 
 **Funding Reservation**:
@@ -160,7 +176,7 @@ The auth library (`better-auth`) providing session management, Google OAuth, and
 
 The entries below define the vocabulary. For Quest lifecycle, selection, Start
 Work, Proof Submission, cancellation, failure, Work Chat, and reward behavior,
-read `docs/quest/work-chat-system-target.md` §Resolved Quest lifecycle first.
+read `docs/rulebook/quest/quest-work-chat-rulebook.md` §Resolved Quest lifecycle first.
 `docs/deprecated/` is historical evidence, not workflow authority.
 
 **Hirer**:
@@ -205,7 +221,7 @@ The current Hirer or an Active Worker. Only Accepted Participants have current W
 _Avoid_: Candidate, departed Worker
 
 **Quest**:
-One bounded agreement for work, owned by one Hirer and progressing through its lifecycle. Target lifecycle and `dueAt` rules are defined in `docs/quest/work-chat-system-target.md`.
+One bounded agreement for work, owned by one Hirer and progressing through its lifecycle. Target lifecycle and `dueAt` rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Job, task
 
 **Quest Image**:
@@ -227,15 +243,15 @@ _Avoid_: an open Quest with no accepted Worker, an incomplete Candidate Team.
 The deadline for the required Worker action on a Quest. The Server decides
 whether the action arrived on time. It cannot change after the Quest is
 assigned. Target deadline, reminder, and failure rules are defined in
-`docs/quest/work-chat-system-target.md`.
+`docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: client-side deadline, approximate deadline.
 
 **Quest Condition**:
-A set of separate requirements that define what a Worker must complete for a Quest. Condition size, ordering, visibility, and editing rules are defined in `docs/quest/work-chat-system-target.md`.
+A set of separate requirements that define what a Worker must complete for a Quest. Condition size, ordering, visibility, and editing rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: condition text, Quest rule
 
 **Condition Item**:
-One ordered requirement within a Quest Condition. Its validation and Quest Edit rules are defined in `docs/quest/work-chat-system-target.md`.
+One ordered requirement within a Quest Condition. Its validation and Quest Edit rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: condition field
 
 **Assignment**:
@@ -250,7 +266,7 @@ _Avoid_: a readiness signal, a Proof Submission.
 A record of required work submitted by a Worker or Team Leader when the Quest
 requires proof. It is separate from Chat Messages and has one decision. Its
 fields, lifecycle, visibility, and UI rules are defined in
-`docs/quest/work-chat-system-target.md`.
+`docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Work Message, treating proof as an ordinary Chat Message
 
 **Active Worker**:
@@ -266,7 +282,7 @@ The inclusive period in which an Accepted Participant has current access to the 
 _Avoid_: Chat permission, participant status
 
 **Quest Edit**:
-A proposed change to a Quest Condition by its Hirer. The target timing, response, diff, and Quest State rules are defined in `docs/quest/work-chat-system-target.md`.
+A proposed change to a Quest Condition by its Hirer. The target timing, response, diff, and Quest State rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Assignment change, membership transition
 
 **Conversation**:
@@ -274,11 +290,11 @@ A persisted private room for one Quest. The target has two Conversation types: C
 _Avoid_: Direct message, group chat, team chat
 
 **Candidate Inquiry Conversation**:
-A private one-to-one Conversation between the Hirer and one Prospective Worker for questions while a Quest is `QUEST_OPEN`. It becomes inaccessible when that Member gets an active Assignment, the Quest enters `QUEST_ASSIGNED`, or the Quest is cancelled before assignment; it never becomes a Work Conversation.
+A private one-to-one Conversation between the Hirer and one Prospective Worker to clarify unclear Quest details while any Quest is `QUEST_OPEN` (across all selection modes and participation shapes). It becomes inaccessible when that Member gets an active Assignment, the Quest enters `QUEST_ASSIGNED`, or the Quest is cancelled before assignment; it never becomes a Work Conversation.
 _Avoid_: DM as a domain type, Work Conversation, public Quest comment
 
 **Work Conversation**:
-The one Chat Conversation for coordinating work on a Quest, created when the first Worker gets an active Assignment. Current members are the Hirer and Active Workers; Candidates and Prospective Workers never join it. The target membership, Message, Attachment, read, UI, offline, and Rate Limit rules are defined in `docs/quest/work-chat-system-target.md`.
+The one Chat Conversation for coordinating work on a Quest, created when the first Worker gets an active Assignment. Current members are the Hirer and Active Workers; Candidates and Prospective Workers never join it. The target membership, Message, Attachment, read, UI, offline, and Rate Limit rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Group chat, team chat
 
 **Chat Membership**:
@@ -286,27 +302,27 @@ The relationship between an Accepted Participant and a Work Conversation. It rec
 _Avoid_: Chat permission, participant status
 
 **Message**:
-A piece of immutable content in a Conversation, sent by a permitted participant or created by the system. The target text, Attachment, ordering, visibility, and retry rules are defined in `docs/quest/work-chat-system-target.md`.
+A piece of immutable content in a Conversation, sent by a permitted participant or created by the system. The target text, Attachment, ordering, visibility, and retry rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Notification, post
 
 **Attachment**:
-A private image, PDF, or video file shared in a Message. The target access, size, link, device-open, and upload-failure rules are defined in `docs/quest/work-chat-system-target.md`.
+A private image, PDF, or video file shared in a Message. The target access, size, link, device-open, and upload-failure rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Public file, image URL
 
 **Read Cursor**:
-A private position that a Member has acknowledged in a Conversation. It is not a Read Receipt. The target movement and unread-count rules are defined in `docs/quest/work-chat-system-target.md`.
+A private position that a Member has acknowledged in a Conversation. It is not a Read Receipt. The target movement and unread-count rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Read receipt, last seen
 
 **System Message**:
-A system-created immutable Message that records a membership or Quest workflow Event and appears from KU bot. The target template, visibility, action-link, Popup, and notification rules are defined in `docs/quest/work-chat-system-target.md`.
+A system-created immutable Message that records a membership or Quest workflow Event and appears from KU bot. The target template, visibility, action-link, Popup, and notification rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Notification, audit log
 
 **Audit Record**:
-An immutable internal record of a domain or money change. The target covered records, fields, visibility, and retention rules are defined in `docs/quest/work-chat-system-target.md`.
+An immutable internal record of a domain or money change. The target covered records, fields, visibility, and retention rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: System Message, editable history
 
 **Push Notification**:
-A short out-of-app alert for a Quest Event. Production targets Android through FCM; the target recipient, device, retry, deduplication, mute, foreground, and privacy rules are defined in `docs/quest/work-chat-system-target.md`.
+A short out-of-app alert for a Quest Event. Production targets Android through FCM; the target recipient, device, retry, deduplication, mute, foreground, and privacy rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: System Message, treating a push alert as Chat history
 
 **Push Device**:
@@ -314,11 +330,11 @@ An Android device registered by a Member to receive Push Notifications, managed 
 _Avoid_: phone number, treating one Member as one device
 
 **Report Case**:
-A Trust & Safety record that groups Reporter Entries for one Message and tracks its moderation status: `REPORT_CASE_PENDING`, `REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN`, or `REPORT_CASE_RESTORED`. `REPORT_CASE_PENDING` and `REPORT_CASE_HIDDEN` are open statuses; `REPORT_CASE_DISMISSED` and `REPORT_CASE_RESTORED` are closed statuses. A new Reporter Entry against a Message whose most recent Report Case is closed opens a new Report Case rather than reopening the old one. It retains the bounded evidence needed for moderation under the retention policy. Scope, Admin access, and decision rules are defined in `docs/admin/admin-role.md`.
+A Trust & Safety record that groups Reporter Entries for one Message and tracks its moderation status: `REPORT_CASE_PENDING`, `REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN`, or `REPORT_CASE_RESTORED`. `REPORT_CASE_PENDING` and `REPORT_CASE_HIDDEN` are open statuses; `REPORT_CASE_DISMISSED` and `REPORT_CASE_RESTORED` are closed statuses. A new Reporter Entry against a Message whose most recent Report Case is closed opens a new Report Case rather than reopening the old one. It retains the bounded evidence needed by moderation while open; rules are defined in `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: single Reporter Entry, Message flag, the superseded bare `PENDING`/`DISMISSED`/`HIDDEN`/`RESTORED` values
 
 **Conduct Report**:
-A Member's report about how another Member behaved on one Quest, chosen from a fixed reason list scoped to the pair's roles. Its evidence is the Quest record — the Assignment, the Proof Submission, and their times — not a Message, so it is a separate record from a Report Case: the clearest case is an unreachable Worker, where the complaint is that no Message exists. A Conduct Report an Admin upholds counts as a confirmed violation on the same penalty ladder as a hidden Message. Reasons, filers, timing, decision, and Admin access are defined in `docs/admin/admin-role.md` §7.
+A Member's report about how another Member behaved on one Quest, chosen from a fixed reason list scoped to the pair's roles. Its evidence is the Quest record — the Assignment, the Proof Submission, and their times — not a Message, so it is a separate record from a Report Case: the clearest case is an unreachable Worker, where the complaint is that no Message exists. A Conduct Report an Admin upholds counts as a confirmed violation on the same penalty ladder as a hidden Message. Reasons, filers, timing, notifications, and decision rules are defined in `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: Report Case (that is about one Message's content), Reporter Entry, treating abusive language as a Conduct Report reason — that opens a Report Case.
 
 **Evidence Reference**:
@@ -338,11 +354,11 @@ An immutable audit record of an Admin's Work Chat evidence access or moderation 
 _Avoid_: Reporter Entry, Moderation Decision
 
 **Admin Review Item**:
-A system-created record for sending a confirmed `PROOF_NOT_APPROVED` decision to an Admin for review. It links the Quest, Assignment, Proof Submission, decision reason, and evidence references; it does not reopen the Quest or create Rework. It is one way an Admin learns a Dispute Case is warranted, but an Admin may open one without it; see `docs/admin/admin-role.md`.
+A system-created record for sending a confirmed `PROOF_NOT_APPROVED` decision to an Admin for review. It links the Quest, Assignment, Proof Submission, decision reason, and evidence references; it does not reopen the Quest or create Rework. It is one way an Admin learns a Dispute Case is warranted, but an Admin may open one without it; see `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: Report Case, Admin override
 
 **Dispute Case**:
-A review opened by the Hirer, a Worker, or an Admin acting for a Worker, within a fixed window after a Failed Quest, that may redirect part of the Hirer's returned settlement to a Worker. It does not reopen or change the Quest State, and never reclaims a Reward already transferred to a Worker. Actors, timing, and decision rules are defined in `docs/admin/admin-role.md`.
+A review opened by the Hirer, a Worker, or an Admin acting for a Worker, within a fixed window after a Failed Quest, that may redirect part of the Hirer's returned settlement to a Worker. It does not reopen or change the Quest State, and never reclaims a Reward already transferred to a Worker. Actors, timing, and decision rules are defined in `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: Admin Review Item, `QUEST_DISPUTED`
 
 **Terminal Quest**:

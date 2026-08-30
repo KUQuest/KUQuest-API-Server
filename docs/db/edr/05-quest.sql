@@ -17,13 +17,13 @@
 -- NO_CANDIDATE joins and Assignment creation are implemented by BE-181.
 -- Candidate selection and Assignment fan-out are implemented by BE-180.
 --
--- Target workflow note: use docs/quest/work-chat-system-target.md for the
+-- Target workflow note: use docs/rulebook/quest/quest-work-chat-rulebook.md for the
 -- accepted Work Chat and Quest workflow. Reconcile workflow-specific values in
 -- this EDR before implementation when they differ from that target.
 --
 -- Workflow authority: this is the current implementation baseline, not the
 -- product workflow authority. For new Quest behavior, use
--- docs/quest/work-chat-system-target.md §Resolved Quest lifecycle.
+-- docs/rulebook/quest/quest-work-chat-rulebook.md §Resolved Quest lifecycle.
 --
 -- Core quest table settled via /batch-grill-me. Old Quest model (prisma.ts) split/trimmed:
 --  - riskLevel/riskCheckedAt: cut, no consumer anywhere in the schema, no product
@@ -586,5 +586,5 @@ CREATE INDEX proof_submission_image_submission_idx ON proof_submission_image (pr
 --    closes a membership window on its own.
 -- Private Candidate Inquiry Conversations (Hirer <-> Prospective Worker) are
 -- separate from Work Conversation membership. Their target lifecycle is in
--- docs/quest/work-chat-system-target.md; they are not part of this Quest-owned
+-- docs/rulebook/quest/quest-work-chat-rulebook.md; they are not part of this Quest-owned
 -- membership writer block.

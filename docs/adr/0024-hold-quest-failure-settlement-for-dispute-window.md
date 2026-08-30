@@ -4,7 +4,7 @@ When a Quest becomes `QUEST_FAILED`, the amount the Reward and money
 contract returns to the Hirer is held for 7 days — not released as ordinary
 Spending Balance immediately — so that money is still available if a
 Dispute Case later redirects some of it back to a Worker (see
-`docs/admin/admin-role.md` §2). Without a hold, a Hirer could spend or
+`docs/rulebook/admin/admin-rulebook.md` §2). Without a hold, a Hirer could spend or
 withdraw the returned amount before a same-Quest Dispute Case is decided,
 leaving no funds for the reversing Ledger Transaction to draw from.
 
@@ -22,7 +22,7 @@ early adds machinery for no product gain.
 
 Two payments draw on this reservation, not only a Dispute Case. A Hirer may
 approve a still-`PROOF_PENDING` Proof Submission after the Quest failed
-(`docs/quest/work-chat-system-target.md` §Failure and partial success), and
+(`docs/rulebook/quest/quest-work-chat-rulebook.md` §Failure and partial success), and
 that Worker's Reward settles from this same reservation. Because a pending
 Proof Submission becomes `PROOF_APPROVED` automatically 24 hours after it is
 sent, that payment always falls inside the 7-day hold.
@@ -42,7 +42,7 @@ days of held money in which to be decided, so an unresolved case at day 7 is
 expected to be rare.
 
 The code this decision needs — keeping the reservation `ACTIVE` and
-releasing it at day 7 — is listed in `docs/admin/admin-role.md`
-§Follow-up work.
+releasing it at day 7 — is listed in `docs/reconciliation/admin-reconciliation.md`
+§Migration and implementation checklist.
 
 Status: accepted.
