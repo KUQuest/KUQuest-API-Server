@@ -42,6 +42,19 @@ describe('Quest API v2 integration', () => {
     expect((await response.json()).error.code).toBe('VALIDATION');
   });
 
+  it('validates required PATCH headers before authentication', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Updated title' }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('VALIDATION');
+  });
+
   it('rejects legacy Quest vocabulary before authentication', async () => {
     const response = await app.handle(
       new Request('http://localhost/api/v2/quests', {
@@ -66,6 +79,7 @@ describe('Quest API v2 integration', () => {
     ['GET', '/api/v2/quests/mine'],
     ['GET', '/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c'],
     ['POST', '/api/v2/quests'],
+    ['PATCH', '/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c'],
   ])('%s %s requires Member authentication', async (method, path) => {
     const response = await app.handle(
       new Request(`http://localhost${path}`, {
@@ -76,8 +90,19 @@ describe('Quest API v2 integration', () => {
                 'content-type': 'application/json',
                 'idempotency-key': 'v2-auth-test',
               }
+            : method === 'PATCH'
+              ? {
+                  'content-type': 'application/json',
+                  'idempotency-key': 'v2-auth-test',
+                  'if-match': '1',
+                }
             : undefined,
-        body: method === 'POST' ? JSON.stringify(createBody) : undefined,
+        body:
+          method === 'POST'
+            ? JSON.stringify(createBody)
+            : method === 'PATCH'
+              ? JSON.stringify({ title: 'Updated title' })
+              : undefined,
       }),
     );
 
@@ -96,10 +121,16 @@ describe('Quest API v2 integration', () => {
     expect(document.paths['/api/v2/quests/{questId}']?.get?.operationId).toBe(
       'getQuestV2Detail',
     );
+    expect(document.paths['/api/v2/quests/{questId}']?.patch?.operationId).toBe(
+      'editQuestV2Draft',
+    );
     expect(document.paths['/api/v2/quests']?.post?.security).toEqual([
       { betterAuthSession: [] },
     ]);
     expect(document.paths['/api/v2/quests/mine']?.get?.security).toEqual([
+      { betterAuthSession: [] },
+    ]);
+    expect(document.paths['/api/v2/quests/{questId}']?.patch?.security).toEqual([
       { betterAuthSession: [] },
     ]);
 
@@ -108,5 +139,10 @@ describe('Quest API v2 integration', () => {
     expect(bodySchema?.properties?.questFundingTotal?.multipleOf).toBe(0.01);
     expect(bodySchema?.properties?.locations?.items?.required).toEqual(['label']);
     expect(bodySchema?.properties?.locations?.items?.properties?.label?.nullable).not.toBe(true);
+
+    const editBodySchema =
+      document.paths['/api/v2/quests/{questId}']?.patch?.requestBody?.content?.['application/json']
+        ?.schema;
+    expect(editBodySchema?.properties?.questFundingTotal?.multipleOf).toBe(0.01);
   });
 });

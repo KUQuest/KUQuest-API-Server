@@ -10,7 +10,7 @@ import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { positiveSatang, satang, type Satang } from '@/modules/wallet';
 import { decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 
-import { and, asc, eq, gt, or } from 'drizzle-orm';
+import { and, asc, eq, gt, or, sql } from 'drizzle-orm';
 
 import { questStatus, type QuestStatus } from './quest.contract';
 import { questV2StorageCompatibility } from './quest-storage.adapter';
@@ -22,12 +22,15 @@ import {
   type QuestV2Participation,
   type QuestV2State,
 } from './quest-v2.contract';
-import type { QuestV2CreateInput } from './quest-v2.schema';
+import type { QuestV2CreateInput, QuestV2EditInput } from './quest-v2.schema';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type QuestDatabase = typeof db | QuestTransaction;
 
 export const questV2CreateOperationScope = 'quest.v2.create';
+export const questV2EditOperationScope = 'quest.v2.edit';
+const questV2CreatePath = '/api/v2/quests';
+const questV2EditPath = '/api/v2/quests/:questId';
 
 const explicitTimezonePattern = /(?:Z|[+-]\d{2}:\d{2})$/;
 
@@ -46,6 +49,21 @@ type NormalizedCreateInput = {
   locations: Array<{ label: string }>;
 };
 
+type NormalizedEditInput = {
+  title?: string;
+  description?: string | null;
+  conditionItems?: string[];
+  mode?: QuestV2Mode;
+  participation?: QuestV2Participation;
+  questFundingTotalSatang?: Satang;
+  headcount?: number;
+  startTime?: Date;
+  dueAt?: Date | null;
+  tagId?: string | null;
+  proofRequired?: boolean;
+  locations?: Array<{ label: string }>;
+};
+
 type QuestV2CreateValidationOutcome =
   | 'invalid-condition'
   | 'invalid-dates'
@@ -58,6 +76,28 @@ type QuestV2CreateValidationOutcome =
   | 'tag-not-found'
   | 'idempotency-unavailable';
 
+type QuestV2EditValidationOutcome =
+  | 'empty-edit'
+  | 'invalid-condition'
+  | 'invalid-dates'
+  | 'invalid-description'
+  | 'invalid-funding'
+  | 'invalid-headcount'
+  | 'invalid-idempotency-key'
+  | 'invalid-location'
+  | 'invalid-title'
+  | 'invalid-version';
+
+type QuestV2EditOutcomeCode =
+  | QuestV2EditValidationOutcome
+  | 'not-found'
+  | 'not-draft'
+  | 'conflict'
+  | 'tag-not-found'
+  | 'idempotency-key-reused'
+  | 'idempotency-in-progress'
+  | 'idempotency-unavailable';
+
 export type QuestV2CreateOutcome =
   | { quest: QuestV2CanonicalQuest }
   | {
@@ -67,8 +107,13 @@ export type QuestV2CreateOutcome =
         | 'idempotency-in-progress';
     };
 
+export type QuestV2EditOutcome =
+  | { quest: QuestV2CanonicalQuest }
+  | { outcome: QuestV2EditOutcomeCode };
+
 type QuestV2Row = {
   id: string;
+  version: number;
   title: string;
   description: string | null;
   v2Mode: QuestV2Mode | null;
@@ -87,6 +132,7 @@ type QuestV2Row = {
 
 const questV2RowSelection = {
   id: quest.id,
+  version: quest.version,
   title: quest.title,
   description: quest.description,
   v2Mode: quest.v2Mode,
@@ -107,6 +153,13 @@ class QuestV2InputError extends Error {
   constructor(readonly outcome: QuestV2CreateValidationOutcome) {
     super(outcome);
     this.name = 'QuestV2InputError';
+  }
+}
+
+class QuestV2EditError extends Error {
+  constructor(readonly outcome: QuestV2EditOutcomeCode) {
+    super(outcome);
+    this.name = 'QuestV2EditError';
   }
 }
 
@@ -220,20 +273,145 @@ const normalizeCreateInput = (
   };
 };
 
-const requestHashFor = (input: NormalizedCreateInput): Promise<string> =>
+const hasEditField = <K extends keyof QuestV2EditInput>(
+  data: QuestV2EditInput,
+  field: K,
+): data is QuestV2EditInput & Required<Pick<QuestV2EditInput, K>> =>
+  Object.prototype.hasOwnProperty.call(data, field);
+
+const normalizeEditInput = (
+  data: QuestV2EditInput,
+): NormalizedEditInput | { outcome: QuestV2EditValidationOutcome } => {
+  if (Object.keys(data).length === 0) return { outcome: 'empty-edit' };
+
+  const normalized: NormalizedEditInput = {};
+
+  if (hasEditField(data, 'title')) {
+    if (typeof data.title !== 'string') return { outcome: 'invalid-title' };
+    const title = data.title.trim();
+    if (title.length === 0 || title.length > 120) return { outcome: 'invalid-title' };
+    normalized.title = title;
+  }
+
+  if (hasEditField(data, 'description')) {
+    if (data.description === null) {
+      normalized.description = null;
+    } else {
+      if (typeof data.description !== 'string') return { outcome: 'invalid-description' };
+      const description = data.description.trim();
+      if (description.length === 0 || description.length > 1000) {
+        return { outcome: 'invalid-description' };
+      }
+      normalized.description = description;
+    }
+  }
+
+  if (hasEditField(data, 'condition')) {
+    if (!data.condition || !Array.isArray(data.condition.items)) {
+      return { outcome: 'invalid-condition' };
+    }
+    const conditionItems = data.condition.items.map((item) =>
+      typeof item === 'string' ? item.trim() : '',
+    );
+    if (
+      conditionItems.length === 0 ||
+      conditionItems.some((item) => item.length === 0 || item.length > 255)
+    ) {
+      return { outcome: 'invalid-condition' };
+    }
+    normalized.conditionItems = conditionItems;
+  }
+
+  if (hasEditField(data, 'questFundingTotal')) {
+    if (typeof data.questFundingTotal !== 'number') return { outcome: 'invalid-funding' };
+    const questFundingTotalSatang = parseQuestFundingTotalSatang(data.questFundingTotal);
+    if (!questFundingTotalSatang) return { outcome: 'invalid-funding' };
+    normalized.questFundingTotalSatang = questFundingTotalSatang;
+  }
+
+  if (hasEditField(data, 'headcount')) {
+    if (!Number.isInteger(data.headcount) || data.headcount < 1 || data.headcount > 20) {
+      return { outcome: 'invalid-headcount' };
+    }
+    normalized.headcount = data.headcount;
+  }
+
+  if (hasEditField(data, 'startTime')) {
+    if (typeof data.startTime !== 'string' || !explicitTimezonePattern.test(data.startTime)) {
+      return { outcome: 'invalid-dates' };
+    }
+    const startTime = new Date(data.startTime);
+    if (Number.isNaN(startTime.getTime())) return { outcome: 'invalid-dates' };
+    normalized.startTime = startTime;
+  }
+
+  if (hasEditField(data, 'dueAt')) {
+    if (data.dueAt === null) {
+      normalized.dueAt = null;
+    } else {
+      if (typeof data.dueAt !== 'string' || !explicitTimezonePattern.test(data.dueAt)) {
+        return { outcome: 'invalid-dates' };
+      }
+      const dueAt = new Date(data.dueAt);
+      if (Number.isNaN(dueAt.getTime())) return { outcome: 'invalid-dates' };
+      normalized.dueAt = dueAt;
+    }
+  }
+
+  if (hasEditField(data, 'tagId')) normalized.tagId = data.tagId;
+  if (hasEditField(data, 'mode')) normalized.mode = data.mode;
+  if (hasEditField(data, 'participation')) normalized.participation = data.participation;
+  if (hasEditField(data, 'proofRequired')) normalized.proofRequired = data.proofRequired;
+
+  if (hasEditField(data, 'locations')) {
+    if (!Array.isArray(data.locations)) return { outcome: 'invalid-location' };
+    const locations = data.locations.map((location) => {
+      if (!location || typeof location.label !== 'string') return null;
+      const label = location.label.trim();
+      return label.length > 0 && label.length <= 100 ? { label } : null;
+    });
+    if (locations.some((location) => location === null)) return { outcome: 'invalid-location' };
+    normalized.locations = locations as Array<{ label: string }>;
+  }
+
+  return normalized;
+};
+
+const requestHashFor = (userId: string, input: NormalizedCreateInput): Promise<string> =>
   sha256Json({
-    title: input.title,
-    description: input.description,
-    condition: { items: input.conditionItems },
-    mode: input.mode,
-    participation: input.participation,
-    questFundingTotalSatang: input.questFundingTotalSatang,
-    headcount: input.headcount,
-    startTime: input.startTime.toISOString(),
-    dueAt: input.dueAt?.toISOString() ?? null,
-    tagId: input.tagId,
-    proofRequired: input.proofRequired,
-    locations: input.locations,
+    authenticatedMemberId: userId,
+    operation: questV2CreateOperationScope,
+    path: questV2CreatePath,
+    questId: null,
+    body: {
+      title: input.title,
+      description: input.description,
+      condition: { items: input.conditionItems },
+      mode: input.mode,
+      participation: input.participation,
+      questFundingTotalSatang: input.questFundingTotalSatang,
+      headcount: input.headcount,
+      startTime: input.startTime.toISOString(),
+      dueAt: input.dueAt?.toISOString() ?? null,
+      tagId: input.tagId,
+      proofRequired: input.proofRequired,
+      locations: input.locations,
+    },
+  });
+
+const editRequestHashFor = (
+  userId: string,
+  questId: string,
+  expectedVersion: number,
+  input: NormalizedEditInput,
+): Promise<string> =>
+  sha256Json({
+    authenticatedMemberId: userId,
+    operation: questV2EditOperationScope,
+    path: questV2EditPath,
+    questId,
+    expectedVersion,
+    body: input,
   });
 
 const selectQuestV2Row = async (
@@ -309,6 +487,7 @@ const buildCanonicalQuest = async (
 
   return {
     id: row.id,
+    version: row.version,
     title: row.title,
     description: row.description,
     condition: { items: conditionItems },
@@ -327,16 +506,59 @@ const buildCanonicalQuest = async (
   };
 };
 
+type QuestV2IdempotencySnapshot = Omit<QuestV2CanonicalQuest, 'questFundingTotal'> & {
+  questFundingTotalSatang: Satang;
+};
+
+const toQuestV2IdempotencySnapshot = (
+  canonicalQuest: QuestV2CanonicalQuest,
+): QuestV2IdempotencySnapshot => {
+  const questFundingTotalSatang = parseQuestFundingTotalSatang(canonicalQuest.questFundingTotal);
+  if (!questFundingTotalSatang) {
+    throw new Error(`Quest ${canonicalQuest.id} has an invalid Quest Funding Total`);
+  }
+
+  const { questFundingTotal: _questFundingTotal, ...canonicalFields } = canonicalQuest;
+  return { ...canonicalFields, questFundingTotalSatang };
+};
+
+const fromQuestV2IdempotencySnapshot = (
+  resultData: unknown,
+): QuestV2CanonicalQuest | undefined => {
+  if (!resultData || typeof resultData !== 'object' || Array.isArray(resultData)) {
+    return undefined;
+  }
+
+  const snapshot = resultData as Partial<QuestV2IdempotencySnapshot>;
+  const questFundingTotalSatang = snapshot.questFundingTotalSatang;
+  if (
+    typeof questFundingTotalSatang !== 'number' ||
+    !Number.isInteger(questFundingTotalSatang) ||
+    questFundingTotalSatang < 100 ||
+    questFundingTotalSatang > 70_000_000
+  ) {
+    return undefined;
+  }
+
+  const { questFundingTotalSatang: _questFundingTotalSatang, ...canonicalFields } = snapshot;
+  return {
+    ...canonicalFields,
+    questFundingTotal: toBaht(satang(questFundingTotalSatang)),
+  } as QuestV2CanonicalQuest;
+};
+
 type IdempotencyRecord = {
   id: string;
   requestHash: string;
   resourceId: string | null;
+  resultData: unknown;
   processingStatus: string;
 };
 
-const acquireCreateIdempotency = async (
+const acquireQuestV2Idempotency = async (
   transaction: QuestTransaction,
   userId: string,
+  operationScope: string,
   key: string,
   requestHash: string,
 ): Promise<
@@ -348,7 +570,7 @@ const acquireCreateIdempotency = async (
     .insert(walletIdempotencyKey)
     .values({
       principalUserId: userId,
-      operationScope: questV2CreateOperationScope,
+      operationScope,
       key,
       requestHash,
       expiresAt: idempotencyExpiry(),
@@ -358,6 +580,7 @@ const acquireCreateIdempotency = async (
       id: walletIdempotencyKey.id,
       requestHash: walletIdempotencyKey.requestHash,
       resourceId: walletIdempotencyKey.resourceId,
+      resultData: walletIdempotencyKey.resultData,
       processingStatus: walletIdempotencyKey.processingStatus,
     });
 
@@ -369,13 +592,14 @@ const acquireCreateIdempotency = async (
             id: walletIdempotencyKey.id,
             requestHash: walletIdempotencyKey.requestHash,
             resourceId: walletIdempotencyKey.resourceId,
+            resultData: walletIdempotencyKey.resultData,
             processingStatus: walletIdempotencyKey.processingStatus,
           })
           .from(walletIdempotencyKey)
           .where(
             and(
               eq(walletIdempotencyKey.principalUserId, userId),
-              eq(walletIdempotencyKey.operationScope, questV2CreateOperationScope),
+              eq(walletIdempotencyKey.operationScope, operationScope),
               eq(walletIdempotencyKey.key, key),
             ),
           )
@@ -403,10 +627,19 @@ const createQuestInTransaction = async (
   input: NormalizedCreateInput,
   requestHash: string,
 ): Promise<QuestV2CreateOutcome> => {
-  const idempotency = await acquireCreateIdempotency(transaction, userId, key, requestHash);
+  const idempotency = await acquireQuestV2Idempotency(
+    transaction,
+    userId,
+    questV2CreateOperationScope,
+    key,
+    requestHash,
+  );
   if ('outcome' in idempotency) return idempotency;
 
   if (!idempotency.created && idempotency.record.resourceId) {
+    const snapshot = fromQuestV2IdempotencySnapshot(idempotency.record.resultData);
+    if (snapshot) return { quest: snapshot };
+
     const replayed = await selectQuestV2Row(transaction, userId, idempotency.record.resourceId);
     if (!replayed) return { outcome: 'idempotency-unavailable' };
 
@@ -464,20 +697,22 @@ const createQuestInTransaction = async (
     );
   }
 
+  const createdRow = await selectQuestV2Row(transaction, userId, createdQuest.id);
+  if (!createdRow) return { outcome: 'idempotency-unavailable' };
+  const canonicalQuest = await buildCanonicalQuest(transaction, createdRow);
+
   await transaction
     .update(walletIdempotencyKey)
     .set({
       resourceType: 'quest',
       resourceId: createdQuest.id,
+      resultData: toQuestV2IdempotencySnapshot(canonicalQuest),
       processingStatus: 'COMPLETED',
       completedAt: new Date(),
     })
     .where(eq(walletIdempotencyKey.id, idempotency.record.id));
 
-  const createdRow = await selectQuestV2Row(transaction, userId, createdQuest.id);
-  if (!createdRow) return { outcome: 'idempotency-unavailable' };
-
-  return { quest: await buildCanonicalQuest(transaction, createdRow) };
+  return { quest: canonicalQuest };
 };
 
 export const createQuestV2 = async (
@@ -491,7 +726,7 @@ export const createQuestV2 = async (
   const input = normalizeCreateInput(data);
   if ('outcome' in input) return input;
 
-  const requestHash = await requestHashFor(input);
+  const requestHash = await requestHashFor(userId, input);
 
   try {
     return await db.transaction((transaction) =>
@@ -499,6 +734,201 @@ export const createQuestV2 = async (
     );
   } catch (error) {
     if (error instanceof QuestV2InputError) return { outcome: error.outcome };
+    throw error;
+  }
+};
+
+const throwEditError = (outcome: QuestV2EditOutcomeCode): never => {
+  throw new QuestV2EditError(outcome);
+};
+
+const editQuestV2InTransaction = async (
+  transaction: QuestTransaction,
+  userId: string,
+  questId: string,
+  key: string,
+  expectedVersion: number,
+  input: NormalizedEditInput,
+  requestHash: string,
+): Promise<QuestV2EditOutcome> => {
+  const idempotency = await acquireQuestV2Idempotency(
+    transaction,
+    userId,
+    questV2EditOperationScope,
+    key,
+    requestHash,
+  );
+  if ('outcome' in idempotency) return idempotency;
+
+  if (!idempotency.created && idempotency.record.resourceId) {
+    const snapshot = fromQuestV2IdempotencySnapshot(idempotency.record.resultData);
+    if (snapshot) return { quest: snapshot };
+
+    const replayed = await selectQuestV2Row(transaction, userId, idempotency.record.resourceId);
+    if (!replayed) return { outcome: 'idempotency-unavailable' };
+
+    return { quest: await buildCanonicalQuest(transaction, replayed) };
+  }
+
+  const [current] = await transaction
+    .select({
+      id: quest.id,
+      version: quest.version,
+      title: quest.title,
+      description: quest.description,
+      v2Mode: quest.v2Mode,
+      v2Participation: quest.v2Participation,
+      questStatus: quest.questStatus,
+      headcount: quest.headcount,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
+      proofRequired: quest.proofRequired,
+      tagId: quest.tagId,
+    })
+    .from(quest)
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.hirerId, userId),
+        eq(quest.apiVersion, questApiVersion.v2),
+      ),
+    )
+    .limit(1)
+    .for('update');
+
+  if (!current) throwEditError('not-found');
+  if (current.questStatus !== questStatus.draft) throwEditError('not-draft');
+  if (current.version !== expectedVersion) throwEditError('conflict');
+  if (!current.v2Mode || !current.v2Participation) {
+    throw new Error(`Quest ${questId} has incomplete v2 persistence data`);
+  }
+
+  const nextParticipation = input.participation ?? current.v2Participation;
+  const nextHeadcount = input.headcount ?? current.headcount;
+  if (nextParticipation === questV2Participation.single && nextHeadcount !== 1) {
+    throwEditError('invalid-headcount');
+  }
+
+  const nextStartTime = input.startTime ?? current.startTime;
+  const nextDueAt = input.dueAt === undefined ? current.dueAt : input.dueAt;
+  if (nextDueAt !== null && nextDueAt <= nextStartTime) throwEditError('invalid-dates');
+
+  if (input.tagId) {
+    const [existingTag] = await transaction
+      .select({ id: tag.id })
+      .from(tag)
+      .where(eq(tag.id, input.tagId))
+      .limit(1);
+    if (!existingTag) throwEditError('tag-not-found');
+  }
+
+  const now = new Date();
+  const updates: Partial<Omit<typeof quest.$inferInsert, 'version'>> = { updatedAt: now };
+
+  if (input.title !== undefined) updates.title = input.title;
+  if (input.description !== undefined) updates.description = input.description;
+  if (input.questFundingTotalSatang !== undefined) {
+    updates.questFundingTotalSatang = input.questFundingTotalSatang;
+  }
+  if (input.headcount !== undefined) updates.headcount = input.headcount;
+  if (input.startTime !== undefined) updates.startTime = input.startTime;
+  if (input.dueAt !== undefined) updates.dueAt = input.dueAt;
+  if (input.tagId !== undefined) updates.tagId = input.tagId;
+  if (input.proofRequired !== undefined) updates.proofRequired = input.proofRequired;
+
+  if (input.mode !== undefined || input.participation !== undefined) {
+    const storageCompatibility = questV2StorageCompatibility({
+      mode: input.mode ?? current.v2Mode,
+      participation: nextParticipation,
+    });
+    updates.mode = storageCompatibility.mode;
+    updates.participation = storageCompatibility.participation;
+    updates.v2Mode = input.mode ?? current.v2Mode;
+    updates.v2Participation = nextParticipation;
+  }
+
+  if (input.conditionItems !== undefined) {
+    updates.condition = input.conditionItems.join('\n').slice(0, 4000);
+    await transaction.delete(questConditionItem).where(eq(questConditionItem.questId, questId));
+    await transaction.insert(questConditionItem).values(
+      input.conditionItems.map((text, position) => ({ questId, position, text })),
+    );
+  }
+
+  if (input.locations !== undefined) {
+    await transaction.delete(questLocation).where(eq(questLocation.questId, questId));
+    if (input.locations.length > 0) {
+      await transaction.insert(questLocation).values(
+        input.locations.map((location) => ({ questId, label: location.label })),
+      );
+    }
+  }
+
+  const [updated] = await transaction
+    .update(quest)
+    .set({ ...updates, version: sql`${quest.version} + 1` })
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.hirerId, userId),
+        eq(quest.apiVersion, questApiVersion.v2),
+        eq(quest.questStatus, questStatus.draft),
+        eq(quest.version, expectedVersion),
+      ),
+    )
+    .returning({ id: quest.id });
+  if (!updated) throwEditError('conflict');
+
+  const updatedRow = await selectQuestV2Row(transaction, userId, questId);
+  if (!updatedRow) return { outcome: 'idempotency-unavailable' };
+  const canonicalQuest = await buildCanonicalQuest(transaction, updatedRow);
+
+  await transaction
+    .update(walletIdempotencyKey)
+    .set({
+      resourceType: 'quest',
+      resourceId: questId,
+      resultData: toQuestV2IdempotencySnapshot(canonicalQuest),
+      processingStatus: 'COMPLETED',
+      completedAt: now,
+    })
+    .where(eq(walletIdempotencyKey.id, idempotency.record.id));
+
+  return { quest: canonicalQuest };
+};
+
+export const editQuestV2 = async (
+  userId: string,
+  questId: string,
+  data: QuestV2EditInput,
+  expectedVersion: number,
+  rawIdempotencyKey: string,
+): Promise<QuestV2EditOutcome> => {
+  const key = rawIdempotencyKey.trim();
+  if (key.length === 0 || key.length > 200) return { outcome: 'invalid-idempotency-key' };
+  if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+    return { outcome: 'invalid-version' };
+  }
+
+  const input = normalizeEditInput(data);
+  if ('outcome' in input) return input;
+
+  const requestHash = await editRequestHashFor(userId, questId, expectedVersion, input);
+
+  try {
+    return await db.transaction((transaction) =>
+      editQuestV2InTransaction(
+        transaction,
+        userId,
+        questId,
+        key,
+        expectedVersion,
+        input,
+        requestHash,
+      ),
+    );
+  } catch (error) {
+    if (error instanceof QuestV2EditError) return { outcome: error.outcome };
     throw error;
   }
 };

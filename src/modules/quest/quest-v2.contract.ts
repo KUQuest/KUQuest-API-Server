@@ -28,6 +28,7 @@ export type QuestV2State = (typeof questV2States)[number];
 
 export type QuestV2CanonicalQuest = {
   id: string;
+  version: number;
   title: string;
   description: string | null;
   condition: {

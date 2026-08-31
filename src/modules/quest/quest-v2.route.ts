@@ -6,6 +6,7 @@ import { Elysia } from 'elysia';
 
 import {
   createQuestV2Controller,
+  editQuestV2Controller,
   getQuestV2DetailController,
   listOwnQuestV2Controller,
 } from './quest-v2.controller';
@@ -13,11 +14,15 @@ import {
   questV2CreateResponseSchema,
   questV2CreateHttpSchema,
   questV2DetailResponseSchema,
+  questV2EditHeadersSchema,
+  questV2EditHttpSchema,
+  questV2EditResponseSchema,
   questV2MineQuerySchema,
   questV2MineResponseSchema,
   questV2ParamsSchema,
   questV2WriteHeadersSchema,
   normalizeQuestV2CreateBody,
+  normalizeQuestV2EditBody,
 } from './quest-v2.schema';
 
 export const questV2Route = new Elysia({
@@ -46,6 +51,21 @@ export const questV2Route = new Elysia({
       summary: 'List the Hirer\'s v2 Quests',
       description: 'Returns the authenticated Hirer’s Quests owned through the v2 contract.',
       operationId: 'listOwnQuestsV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .patch('/:questId', editQuestV2Controller, {
+    params: questV2ParamsSchema,
+    body: questV2EditHttpSchema,
+    headers: questV2EditHeadersSchema,
+    transform: normalizeQuestV2EditBody,
+    response: responses(questV2EditResponseSchema, 400, 401, 404, 409, 500, 503),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Edit a v2 Quest Draft',
+      description:
+        'Updates the supplied fields of an owned QUEST_DRAFT with optimistic concurrency.',
+      operationId: 'editQuestV2Draft',
       security: betterAuthSecurity,
     },
   })

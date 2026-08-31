@@ -22,13 +22,17 @@ export type {
 export { questV2Route } from './quest-v2.route';
 export {
   createQuestV2,
+  editQuestV2,
   getQuestV2Detail,
   listOwnQuestV2,
   questV2CreateOperationScope,
+  questV2EditOperationScope,
 } from './quest-v2.service';
-export type { QuestV2CreateOutcome } from './quest-v2.service';
+export type { QuestV2CreateOutcome, QuestV2EditOutcome } from './quest-v2.service';
 export type {
   QuestV2CreateInput,
+  QuestV2EditHeaders,
+  QuestV2EditInput,
   QuestV2MineQuery,
   QuestV2Params,
   QuestV2WriteHeaders,
