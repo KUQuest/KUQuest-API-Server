@@ -55,6 +55,76 @@ describe('seeded occupation options', () => {
   });
 });
 
+describe('seeded academic options', () => {
+  it('seeds the KU faculty catalog the onboarding form reads from', async () => {
+    const rows = await db.select({ name: faculty.name }).from(faculty);
+    const names = rows.map(({ name }) => name);
+
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'Agriculture',
+        'Business Administration',
+        'Economics',
+        'Engineering',
+        'Humanities',
+        'Science',
+        'Social Sciences',
+        'Veterinary Medicine',
+      ]),
+    );
+  });
+
+  it('seeds each faculty with the departments it offers', async () => {
+    const rows = await db
+      .select({ name: department.name })
+      .from(department)
+      .innerJoin(faculty, eq(department.facultyId, faculty.id))
+      .where(eq(faculty.name, 'Engineering'));
+    const names = rows.map(({ name }) => name);
+
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'Electrical Engineering',
+        'Industrial Engineering',
+        'Mechanical Engineering',
+      ]),
+    );
+  });
+});
+
+describe('catalog seed idempotency', () => {
+  const countCatalog = async () => {
+    const [counts] = await sql`
+      select
+        (select count(*) from faculty) as faculties,
+        (select count(*) from department) as departments
+    `;
+
+    return counts;
+  };
+
+  it('adds no rows when the catalog seed is applied a second time', async () => {
+    const before = await countCatalog();
+
+    // The same two statements 0005_seed_academic_options.sql applies, against the
+    // post-rename table. Their ON CONFLICT clauses only hold while the unique
+    // constraints they name exist.
+    await sql`
+      insert into faculty (name) values ('Engineering')
+      on conflict (name) do nothing
+    `;
+    await sql`
+      insert into department (faculty_id, name)
+      select faculty.id, 'Mechanical Engineering'
+      from faculty
+      where faculty.name = 'Engineering'
+      on conflict (faculty_id, name) do nothing
+    `;
+
+    expect(await countCatalog()).toEqual(before);
+  });
+});
+
 describe('faculty to department relationship', () => {
   it('still relates a department to its faculty after the rename', async () => {
     const [row] = await db
