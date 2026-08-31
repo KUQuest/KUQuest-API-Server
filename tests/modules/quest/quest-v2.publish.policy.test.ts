@@ -18,20 +18,22 @@ const policy = {
 
 describe('Quest v2 publish policy', () => {
   it('splits an inclusive ฿20.00 total into ฿19.60 Reward and ฿0.40 Platform Fee', () => {
-    expect(calculateQuestV2FundingQuote({
+    const quote = calculateQuestV2FundingQuote({
       questFundingTotalSatang: positiveSatang(2_000),
       headcount: 1,
       ...policy,
-    })).toMatchObject({
+    });
+
+    expect(quote).toMatchObject({
       questFundingTotalSatang: 2_000,
       questRewardSatang: 1_960,
       platformFeeSatang: 40,
       escrowRequirementSatang: 2_000,
-      questFundingTotal: 20,
-      questReward: 19.6,
-      platformFee: 0.4,
-      escrowRequirement: 20,
     });
+    expect(quote).not.toHaveProperty('questFundingTotal');
+    expect(quote).not.toHaveProperty('questReward');
+    expect(quote).not.toHaveProperty('platformFee');
+    expect(quote).not.toHaveProperty('escrowRequirement');
   });
 
   it('keeps the one-satang rounding remainder in the Platform Fee', () => {
@@ -42,8 +44,6 @@ describe('Quest v2 publish policy', () => {
     })).toMatchObject({
       questRewardSatang: 100,
       platformFeeSatang: 3,
-      questReward: 1,
-      platformFee: 0.03,
     });
   });
 
@@ -56,7 +56,6 @@ describe('Quest v2 publish policy', () => {
       questRewardSatang: 100,
       platformFeeSatang: 3,
       escrowRequirementSatang: 309,
-      escrowRequirement: 3.09,
     });
   });
 

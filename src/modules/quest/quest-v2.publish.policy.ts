@@ -2,7 +2,6 @@ import type { WalletStatus } from '@/database/schema/wallet.schema';
 import {
   calculatePlatformFeeSatang,
   satang,
-  toBaht,
   type Satang,
 } from '@/modules/wallet';
 
@@ -21,13 +20,9 @@ export type QuestV2FundingQuoteInput = {
 };
 
 export type QuestV2FundingQuote = {
-  questFundingTotal: number;
   questFundingTotalSatang: Satang;
-  questReward: number;
   questRewardSatang: Satang;
-  platformFee: number;
   platformFeeSatang: Satang;
-  escrowRequirement: number;
   escrowRequirementSatang: Satang;
   headcount: number;
   platformFeeBps: number;
@@ -86,13 +81,9 @@ export const calculateQuestV2FundingQuote = (
   const escrowRequirementSatang = satang(input.questFundingTotalSatang * input.headcount);
 
   return {
-    questFundingTotal: toBaht(input.questFundingTotalSatang),
     questFundingTotalSatang: input.questFundingTotalSatang,
-    questReward: toBaht(questRewardSatang),
     questRewardSatang,
-    platformFee: toBaht(platformFeeSatang),
     platformFeeSatang,
-    escrowRequirement: toBaht(escrowRequirementSatang),
     escrowRequirementSatang,
     headcount: input.headcount,
     platformFeeBps: input.platformFeeBps,

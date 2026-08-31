@@ -1,5 +1,5 @@
 import type { AuthedContext } from '@/modules/auth';
-import { MoneyDomainError } from '@/modules/wallet';
+import { MoneyDomainError, toBaht } from '@/modules/wallet';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import { CursorInputError, decodeCursor, parsePageLimit } from '@/shared/cursor';
@@ -14,6 +14,7 @@ import {
   getQuestV2PublishCheck,
   listOwnQuestV2,
 } from './quest-v2.service';
+import type { QuestV2PublishCheck } from './quest-v2.publish.policy';
 import type {
   questV2CreateResponseSchema,
   questV2CreateSchema,
@@ -44,6 +45,16 @@ const invalidInput = (set: AuthedContext['set'], code: string, message: string) 
   set.status = 400;
   return apiError(code, message);
 };
+
+const toQuestV2PublishCheckResponse = (
+  result: QuestV2PublishCheck,
+): QuestV2PublishCheckResponse => ({
+  ...result,
+  questFundingTotal: toBaht(result.questFundingTotalSatang),
+  questReward: toBaht(result.questRewardSatang),
+  platformFee: toBaht(result.platformFeeSatang),
+  escrowRequirement: toBaht(result.escrowRequirementSatang),
+});
 
 const mapCreateOutcome = (
   set: AuthedContext['set'],
@@ -263,5 +274,5 @@ export const getQuestV2PublishCheckController = async ({
     return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be checked');
   }
 
-  return apiSuccess(result);
+  return apiSuccess(toQuestV2PublishCheckResponse(result));
 };
