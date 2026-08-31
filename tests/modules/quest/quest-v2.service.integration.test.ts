@@ -4,6 +4,7 @@ import { authUser } from '@/database/schema/auth.schema';
 import {
   quest,
   questConditionItem,
+  questImage,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
@@ -511,7 +512,7 @@ describe('Quest API v2 persistence', () => {
 });
 
 describe('Quest API v2 publish check', () => {
-  it('returns an exact inclusive quote for an owned Draft without changing state or finance', async () => {
+  it('allows an owned Draft with zero Quest Images and returns an exact inclusive quote', async () => {
     await fundHirer(10_000);
     const created = await createQuestV2(
       hirerId,
@@ -520,6 +521,13 @@ describe('Quest API v2 publish check', () => {
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
+
+    expect(
+      await db
+        .select({ id: questImage.id })
+        .from(questImage)
+        .where(eq(questImage.questId, created.quest.id)),
+    ).toEqual([]);
 
     const beforeSnapshot = await readPublishCheckSnapshot(created.quest.id, hirerId);
 

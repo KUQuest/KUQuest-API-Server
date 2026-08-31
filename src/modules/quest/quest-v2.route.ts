@@ -86,7 +86,7 @@ export const questV2Route = new Elysia({
       tags: ['Quests v2'],
       summary: 'Add Quest Images to a v2 Draft',
       description:
-        'Appends validated JPEG, PNG, or WebP files to the authenticated Hirer’s QUEST_DRAFT in request order.',
+        'Accepts a multipart images field with one to three validated JPEG, PNG, or WebP files of at most 5 MB each. Appends files to the authenticated Hirer’s QUEST_DRAFT in request order and returns imageId, fileId, position, url, and urlExpiresAt for the complete ordered gallery. A retry with the same Idempotency-Key replays the original response; temporary links expire 15 minutes after materialization, so use Quest detail for a fresh link.',
       operationId: 'addQuestImagesV2',
       security: betterAuthSecurity,
     },
@@ -99,7 +99,7 @@ export const questV2Route = new Elysia({
       tags: ['Quests v2'],
       summary: 'Remove a Quest Image from a v2 Draft',
       description:
-        'Removes one Quest Image by imageId, repacks the remaining positions, and returns the complete ordered gallery.',
+        'Removes one Quest Image by imageId, soft-deletes its file metadata, repacks the remaining positions from zero, and returns imageId, fileId, position, url, and urlExpiresAt for the complete ordered gallery. A retry with the same Idempotency-Key replays the original response; temporary links expire 15 minutes after materialization, so use Quest detail for a fresh link.',
       operationId: 'deleteQuestImageV2',
       security: betterAuthSecurity,
     },

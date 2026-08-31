@@ -29,6 +29,6 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 ## Visibility and URLs
 
-- The API never returns a permanent storage URL. Each temporary link is valid for 15 minutes.
+- The API never returns a permanent storage URL. Each temporary link is valid for 15 minutes. An idempotent retry replays the original response, including its links and expiry; use Quest detail when a fresh link is needed after expiry.
 - Hirer reads show Draft images; Worker and public reads follow Quest detail visibility and do not expose Draft images.
 - Quest Images are not shown on the Quest Board card.

@@ -33,6 +33,7 @@ import {
   type QuestPublishCheck,
   type QuestPublishSnapshot,
 } from './quest.publish.policy';
+import { softDeleteQuestImageAndRepack } from './quest-image.persistence';
 import {
   applicationStatus,
   assignmentStatus,
@@ -1194,26 +1195,13 @@ export const deleteQuestImage = async (
 
     if (!image) return { outcome: 'not-found' };
 
-    await transaction.delete(questImage).where(eq(questImage.id, image.id));
-    await transaction.update(file).set({ deletedAt: new Date() }).where(eq(file.id, image.fileId));
-
-    await transaction
-      .update(questImage)
-      .set({ position: sql`${questImage.position} + ${maxQuestImages}` })
-      .where(eq(questImage.questId, questId));
-
-    const remainingImages = await transaction
-      .select({ id: questImage.id })
-      .from(questImage)
-      .where(eq(questImage.questId, questId))
-      .orderBy(asc(questImage.position));
-
-    for (const [position, remainingImage] of remainingImages.entries()) {
-      await transaction
-        .update(questImage)
-        .set({ position })
-        .where(eq(questImage.id, remainingImage.id));
-    }
+    await softDeleteQuestImageAndRepack(transaction, {
+      questId,
+      questImageId: image.id,
+      fileId: image.fileId,
+      deletedAt: new Date(),
+      positionOffset: maxQuestImages,
+    });
 
     return { outcome: 'deleted', bucket: image.bucket, objectKey: image.objectKey };
   });

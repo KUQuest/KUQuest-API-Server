@@ -25,9 +25,14 @@ import {
   questV2ImageRemoveRequestHash,
   questV2ImageUploadRequestHash,
   recordQuestV2ImageCleanupTombstones,
+  recordQuestV2ImageCleanupRetry,
   releaseQuestV2ImageUploadReservation,
+  QuestV2ImageCleanupUnavailableError,
 } from './quest-v2.service';
-import type { QuestV2ImageReference } from './quest-v2.service';
+import type {
+  QuestV2ImageCommandContext,
+  QuestV2ImageReference,
+} from './quest-v2.service';
 import type { QuestV2PublishCheck } from './quest-v2.publish.policy';
 import { questV2Storage } from './quest.storage';
 import type { StoredQuestImage } from './quest.storage';
@@ -68,8 +73,8 @@ const invalidInput = (set: AuthedContext['set'], code: string, message: string) 
   return apiError(code, message);
 };
 
-const discardUploadedQuestImages = async (
-  userId: string,
+const compensateQuestV2ImageUpload = async (
+  context: QuestV2ImageCommandContext,
   images: StoredQuestImage[],
 ): Promise<void> => {
   const pendingCleanup: StoredQuestImage[] = [];
@@ -88,31 +93,28 @@ const discardUploadedQuestImages = async (
     }),
   );
 
-  if (pendingCleanup.length === 0) return;
-
-  try {
-    await recordQuestV2ImageCleanupTombstones(userId, pendingCleanup);
-  } catch (error) {
-    console.error('[quest-v2-image-upload] Cleanup tombstone could not be stored', {
-      error,
-      objectKeys: pendingCleanup.map((image) => image.objectKey),
-    });
+  const cleanupRecordedAt = new Date();
+  if (pendingCleanup.length > 0) {
+    try {
+      await recordQuestV2ImageCleanupTombstones(
+        context.userId,
+        pendingCleanup,
+        cleanupRecordedAt,
+      );
+    } catch (error) {
+      await recordQuestV2ImageCleanupRetry(context, pendingCleanup, cleanupRecordedAt);
+      throw new QuestV2ImageCleanupUnavailableError(error);
+    }
   }
-};
 
-const releaseQuestV2ImageReservation = async (
-  userId: string,
-  key: string,
-  requestHash: string,
-): Promise<void> => {
   try {
-    await releaseQuestV2ImageUploadReservation(userId, key, requestHash);
+    await releaseQuestV2ImageUploadReservation(context);
   } catch (error) {
     console.error('[quest-v2-image-upload] Idempotency reservation release failed', {
       error,
-      key,
-      requestHash,
-      userId,
+      key: context.key,
+      requestHash: context.requestHash,
+      userId: context.userId,
     });
   }
 };
@@ -143,6 +145,33 @@ const serializeQuestV2Images = (
   }
 };
 
+type IdempotencyOutcome =
+  | 'invalid-idempotency-key'
+  | 'idempotency-key-reused'
+  | 'idempotency-in-progress'
+  | 'idempotency-unavailable';
+
+const mapIdempotencyOutcome = (
+  set: AuthedContext['set'],
+  outcome: IdempotencyOutcome,
+  inProgressMessage: string,
+): ReturnType<typeof apiError> => {
+  if (outcome === 'idempotency-key-reused') {
+    set.status = 409;
+    return apiError('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request');
+  }
+  if (outcome === 'idempotency-in-progress') {
+    set.status = 409;
+    return apiError('IDEMPOTENCY_IN_PROGRESS', inProgressMessage);
+  }
+  if (outcome === 'idempotency-unavailable') {
+    set.status = 503;
+    return apiError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency record is unavailable');
+  }
+
+  return invalidInput(set, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency key must not be empty');
+};
+
 const mapQuestV2ImageMutationOutcome = (
   set: AuthedContext['set'],
   outcome:
@@ -166,20 +195,12 @@ const mapQuestV2ImageMutationOutcome = (
     set.status = 409;
     return apiError('QUEST_IMAGE_LIMIT_REACHED', 'A Quest can have at most 3 images');
   }
-  if (outcome === 'idempotency-key-reused') {
-    set.status = 409;
-    return apiError('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request');
-  }
-  if (outcome === 'idempotency-in-progress') {
-    set.status = 409;
-    return apiError('IDEMPOTENCY_IN_PROGRESS', 'A Quest Image operation is still processing');
-  }
-  if (outcome === 'idempotency-unavailable') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency record is unavailable');
-  }
 
-  return invalidInput(set, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency key must not be empty');
+  return mapIdempotencyOutcome(
+    set,
+    outcome,
+    'A Quest Image operation is still processing',
+  );
 };
 
 const mapQuestV2ImageStorageError = (set: AuthedContext['set'], error: unknown) => {
@@ -194,6 +215,26 @@ const mapQuestV2ImageStorageError = (set: AuthedContext['set'], error: unknown) 
   if (error instanceof ImageUploadError) {
     set.status = 503;
     return apiError('QUEST_IMAGE_STORAGE_UNAVAILABLE', 'Quest Image storage is unavailable');
+  }
+  if (error instanceof ImageLinkUnavailableError || error instanceof QuestV2ImageCleanupUnavailableError) {
+    set.status = 503;
+    return apiError('QUEST_IMAGE_STORAGE_UNAVAILABLE', 'Quest Image storage is unavailable');
+  }
+
+  return undefined;
+};
+
+const compensateQuestV2ImageUploadOrError = async (
+  set: AuthedContext['set'],
+  context: QuestV2ImageCommandContext,
+  images: StoredQuestImage[],
+): Promise<ReturnType<typeof apiError> | undefined> => {
+  try {
+    await compensateQuestV2ImageUpload(context, images);
+  } catch (error) {
+    const mapped = mapQuestV2ImageStorageError(set, error);
+    if (mapped) return mapped;
+    throw error;
   }
 
   return undefined;
@@ -213,17 +254,17 @@ const mapCreateOutcome = (
   set: AuthedContext['set'],
   outcome: Exclude<Awaited<ReturnType<typeof createQuestV2>>, { quest: unknown }>['outcome'],
 ) => {
-  if (outcome === 'idempotency-key-reused') {
-    set.status = 409;
-    return apiError('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request');
-  }
-  if (outcome === 'idempotency-in-progress') {
-    set.status = 409;
-    return apiError('IDEMPOTENCY_IN_PROGRESS', 'A Quest with this idempotency key is still processing');
-  }
-  if (outcome === 'idempotency-unavailable') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency record is unavailable');
+  if (
+    outcome === 'idempotency-key-reused' ||
+    outcome === 'idempotency-in-progress' ||
+    outcome === 'idempotency-unavailable' ||
+    outcome === 'invalid-idempotency-key'
+  ) {
+    return mapIdempotencyOutcome(
+      set,
+      outcome,
+      'A Quest with this idempotency key is still processing',
+    );
   }
   if (outcome === 'tag-not-found') return invalidInput(set, 'TAG_NOT_FOUND', 'Tag not found');
   if (outcome === 'invalid-dates') {
@@ -238,9 +279,6 @@ const mapCreateOutcome = (
       'INVALID_QUEST_FUNDING_TOTAL',
       'questFundingTotal must use exact satang precision between 1 and 700000 Baht',
     );
-  }
-  if (outcome === 'invalid-idempotency-key') {
-    return invalidInput(set, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency key must not be empty');
   }
   if (outcome === 'invalid-title') {
     return invalidInput(set, 'INVALID_TITLE', 'title must contain 1 to 120 characters');
@@ -259,17 +297,17 @@ const mapEditOutcome = (
   set: AuthedContext['set'],
   outcome: Exclude<Awaited<ReturnType<typeof editQuestV2>>, { quest: unknown }>['outcome'],
 ) => {
-  if (outcome === 'idempotency-key-reused') {
-    set.status = 409;
-    return apiError('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request');
-  }
-  if (outcome === 'idempotency-in-progress') {
-    set.status = 409;
-    return apiError('IDEMPOTENCY_IN_PROGRESS', 'A Quest edit with this idempotency key is still processing');
-  }
-  if (outcome === 'idempotency-unavailable') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency record is unavailable');
+  if (
+    outcome === 'idempotency-key-reused' ||
+    outcome === 'idempotency-in-progress' ||
+    outcome === 'idempotency-unavailable' ||
+    outcome === 'invalid-idempotency-key'
+  ) {
+    return mapIdempotencyOutcome(
+      set,
+      outcome,
+      'A Quest edit with this idempotency key is still processing',
+    );
   }
   if (outcome === 'not-found') {
     set.status = 404;
@@ -299,9 +337,6 @@ const mapEditOutcome = (
   }
   if (outcome === 'invalid-version') {
     return invalidInput(set, 'INVALID_VERSION', 'If-Match must be a positive integer');
-  }
-  if (outcome === 'invalid-idempotency-key') {
-    return invalidInput(set, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency key must not be empty');
   }
   if (outcome === 'invalid-title') {
     return invalidInput(set, 'INVALID_TITLE', 'title must contain 1 to 120 characters');
@@ -370,26 +405,23 @@ export const addQuestImagesV2Controller = async ({
   headers: QuestV2WriteHeaders;
   params: QuestV2Params;
 }): Promise<ApiResponse<QuestV2ImagesResponse>> => {
-  const requestHash = await questV2ImageUploadRequestHash(
-    session.user.id,
-    params.questId,
-    body.images,
-  );
-  const preflight = await checkQuestV2ImageUpload(
-    session.user.id,
-    params.questId,
-    body.images.length,
-    headers['idempotency-key'],
-    requestHash,
-  );
+  const imageCommand: QuestV2ImageCommandContext = {
+    userId: session.user.id,
+    questId: params.questId,
+    key: headers['idempotency-key'],
+    requestHash: await questV2ImageUploadRequestHash(
+      session.user.id,
+      params.questId,
+      body.images,
+    ),
+  };
+  const preflight = await checkQuestV2ImageUpload(imageCommand, body.images.length);
   if ('outcome' in preflight) {
     return mapQuestV2ImageMutationOutcome(set, preflight.outcome);
   }
 
   if ('replay' in preflight) {
-    const images = serializeQuestV2Images(set, preflight.replay.images);
-    if ('success' in images) return images;
-    return apiSuccess({ images });
+    return apiSuccess({ images: preflight.replay.images });
   }
 
   const uploaded: StoredQuestImage[] = [];
@@ -402,12 +434,12 @@ export const addQuestImagesV2Controller = async ({
       error instanceof ImageUploadError && error.cleanupObject
         ? [error.cleanupObject]
         : [];
-    await discardUploadedQuestImages(session.user.id, [...uploaded, ...failedUploadObject]);
-    await releaseQuestV2ImageReservation(
-      session.user.id,
-      headers['idempotency-key'],
-      requestHash,
+    const compensationError = await compensateQuestV2ImageUploadOrError(
+      set,
+      imageCommand,
+      [...uploaded, ...failedUploadObject],
     );
+    if (compensationError) return compensationError;
     const mapped = mapQuestV2ImageStorageError(set, error);
     if (mapped) return mapped;
     throw error;
@@ -416,35 +448,39 @@ export const addQuestImagesV2Controller = async ({
   let result: Awaited<ReturnType<typeof addQuestV2Images>>;
   try {
     result = await addQuestV2Images(
-      session.user.id,
-      params.questId,
+      imageCommand,
       uploaded,
-      headers['idempotency-key'],
-      requestHash,
     );
   } catch (error) {
-    await discardUploadedQuestImages(session.user.id, uploaded);
-    await releaseQuestV2ImageReservation(
-      session.user.id,
-      headers['idempotency-key'],
-      requestHash,
+    const compensationError = await compensateQuestV2ImageUploadOrError(
+      set,
+      imageCommand,
+      uploaded,
     );
+    if (compensationError) return compensationError;
+    const mapped = mapQuestV2ImageStorageError(set, error);
+    if (mapped) return mapped;
     throw error;
   }
   if ('outcome' in result) {
-    await discardUploadedQuestImages(session.user.id, uploaded);
-    await releaseQuestV2ImageReservation(
-      session.user.id,
-      headers['idempotency-key'],
-      requestHash,
+    const compensationError = await compensateQuestV2ImageUploadOrError(
+      set,
+      imageCommand,
+      uploaded,
     );
+    if (compensationError) return compensationError;
     return mapQuestV2ImageMutationOutcome(set, result.outcome);
   }
-  if (result.replayed) await discardUploadedQuestImages(session.user.id, uploaded);
+  if (result.replayed) {
+    const compensationError = await compensateQuestV2ImageUploadOrError(
+      set,
+      imageCommand,
+      uploaded,
+    );
+    if (compensationError) return compensationError;
+  }
 
-  const images = serializeQuestV2Images(set, result.images);
-  if ('success' in images) return images;
-  return apiSuccess({ images });
+  return apiSuccess({ images: result.response });
 };
 
 export const deleteQuestImageV2Controller = async ({
@@ -456,25 +492,22 @@ export const deleteQuestImageV2Controller = async ({
   headers: QuestV2WriteHeaders;
   params: QuestV2ImageParams;
 }): Promise<ApiResponse<QuestV2ImagesResponse>> => {
-  const requestHash = await questV2ImageRemoveRequestHash(
-    session.user.id,
-    params.questId,
-    params.imageId,
-  );
-  const result = await deleteQuestV2Image(
-    session.user.id,
-    params.questId,
-    params.imageId,
-    headers['idempotency-key'],
-    requestHash,
-  );
+  const imageCommand: QuestV2ImageCommandContext = {
+    userId: session.user.id,
+    questId: params.questId,
+    key: headers['idempotency-key'],
+    requestHash: await questV2ImageRemoveRequestHash(
+      session.user.id,
+      params.questId,
+      params.imageId,
+    ),
+  };
+  const result = await deleteQuestV2Image(imageCommand, params.imageId);
   if ('outcome' in result) {
     return mapQuestV2ImageMutationOutcome(set, result.outcome);
   }
 
-  const images = serializeQuestV2Images(set, result.images);
-  if ('success' in images) return images;
-  return apiSuccess({ images });
+  return apiSuccess({ images: result.response });
 };
 
 const validateMineQuery = (query: QuestV2MineQuery, set: AuthedContext['set']) => {

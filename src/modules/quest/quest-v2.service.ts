@@ -35,6 +35,7 @@ import {
   buildQuestV2PublishCheck,
   type QuestV2PublishCheck,
 } from './quest-v2.publish.policy';
+import { softDeleteQuestImageAndRepack } from './quest-image.persistence';
 import { maxQuestV2Images } from './quest-v2.schema';
 import type { QuestV2CreateInput, QuestV2EditInput } from './quest-v2.schema';
 import { questV2Storage, type StoredQuestImage } from './quest.storage';
@@ -142,6 +143,21 @@ export type QuestV2ImageReference = {
   objectKey: string;
 };
 
+export type QuestV2ImageResponse = {
+  imageId: string;
+  fileId: string;
+  position: number;
+  url: string;
+  urlExpiresAt: string;
+};
+
+export type QuestV2ImageCommandContext = {
+  userId: string;
+  questId: string;
+  key: string;
+  requestHash: string;
+};
+
 export type QuestV2Detail = QuestV2CanonicalQuest & {
   images: QuestV2ImageReference[];
 };
@@ -157,15 +173,19 @@ type QuestV2ImageMutationOutcome =
 
 export type QuestV2ImageUploadPreflight =
   | { canUpload: true }
-  | { replay: { images: QuestV2ImageReference[] } }
+  | { replay: { images: QuestV2ImageResponse[] } }
   | { outcome: QuestV2ImageMutationOutcome };
 
 export type QuestV2ImageUploadOutcome =
-  | { images: QuestV2ImageReference[]; replayed?: boolean }
+  | {
+      images: QuestV2ImageReference[];
+      response: QuestV2ImageResponse[];
+      replayed?: boolean;
+    }
   | { outcome: QuestV2ImageMutationOutcome };
 
 export type QuestV2ImageRemoveOutcome =
-  | { images: QuestV2ImageReference[] }
+  | { images: QuestV2ImageReference[]; response: QuestV2ImageResponse[] }
   | { outcome: QuestV2ImageMutationOutcome };
 
 type QuestV2Row = {
@@ -580,11 +600,13 @@ const selectQuestV2Images = async (
 
 type QuestV2ImageIdempotencySnapshot = {
   images: QuestV2ImageReference[];
+  response: QuestV2ImageResponse[];
 };
 
 const toQuestV2ImageIdempotencySnapshot = (
   images: QuestV2ImageReference[],
-): QuestV2ImageIdempotencySnapshot => ({ images });
+  response: QuestV2ImageResponse[],
+): QuestV2ImageIdempotencySnapshot => ({ images, response });
 
 const isQuestV2ImageReference = (value: unknown): value is QuestV2ImageReference => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -601,6 +623,21 @@ const isQuestV2ImageReference = (value: unknown): value is QuestV2ImageReference
   );
 };
 
+const isQuestV2ImageResponse = (value: unknown): value is QuestV2ImageResponse => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+
+  const image = value as Partial<QuestV2ImageResponse>;
+  return (
+    typeof image.imageId === 'string' &&
+    typeof image.fileId === 'string' &&
+    typeof image.position === 'number' &&
+    Number.isInteger(image.position) &&
+    image.position >= 0 &&
+    typeof image.url === 'string' &&
+    typeof image.urlExpiresAt === 'string'
+  );
+};
+
 const fromQuestV2ImageIdempotencySnapshot = (
   resultData: unknown,
 ): QuestV2ImageIdempotencySnapshot | undefined => {
@@ -609,12 +646,30 @@ const fromQuestV2ImageIdempotencySnapshot = (
   }
 
   const snapshot = resultData as Partial<QuestV2ImageIdempotencySnapshot>;
-  if (!Array.isArray(snapshot.images) || snapshot.images.some((image) => !isQuestV2ImageReference(image))) {
+  if (
+    !Array.isArray(snapshot.images) ||
+    snapshot.images.some((image) => !isQuestV2ImageReference(image)) ||
+    !Array.isArray(snapshot.response) ||
+    snapshot.response.some((image) => !isQuestV2ImageResponse(image))
+  ) {
     return undefined;
   }
 
-  return { images: snapshot.images };
+  return { images: snapshot.images, response: snapshot.response };
 };
+
+const materializeQuestV2ImageResponse = (
+  images: QuestV2ImageReference[],
+): QuestV2ImageResponse[] => images.map((image) => {
+  const link = questV2Storage.linkForWithExpiry(image);
+  return {
+    imageId: image.imageId,
+    fileId: image.fileId,
+    position: image.position,
+    url: link.url,
+    urlExpiresAt: link.expiresAt.toISOString(),
+  };
+});
 
 const questV2ImageIdempotencySelection = {
   id: walletIdempotencyKey.id,
@@ -659,7 +714,9 @@ const readQuestV2ImageReplay = (
   if (record.requestHash !== requestHash) return { outcome: 'idempotency-key-reused' };
   if (record.resourceId) {
     const snapshot = fromQuestV2ImageIdempotencySnapshot(record.resultData);
-    return snapshot ? { replay: snapshot } : { outcome: 'idempotency-unavailable' };
+    return snapshot
+      ? { replay: { images: snapshot.response } }
+      : { outcome: 'idempotency-unavailable' };
   }
   return record.processingStatus === 'PROCESSING'
     ? { outcome: 'idempotency-in-progress' }
@@ -673,6 +730,15 @@ const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
 
 const imageRequestHash = (value: object): Promise<string> =>
   sha256Hex(new TextEncoder().encode(JSON.stringify(value)));
+
+const normalizeQuestV2ImageCommandContext = (
+  context: QuestV2ImageCommandContext,
+): QuestV2ImageCommandContext | undefined => {
+  const key = context.key.trim();
+  if (key.length === 0 || key.length > 200) return undefined;
+
+  return { ...context, key };
+};
 
 export const questV2ImageUploadRequestHash = async (
   userId: string,
@@ -714,16 +780,15 @@ export const questV2ImageRemoveRequestHash = (
 
 const lockQuestV2ImageOwner = async (
   transaction: QuestTransaction,
-  userId: string,
-  questId: string,
+  context: QuestV2ImageCommandContext,
 ) => {
   const [ownedQuest] = await transaction
     .select({ id: quest.id, questStatus: quest.questStatus })
     .from(quest)
     .where(
       and(
-        eq(quest.id, questId),
-        eq(quest.hirerId, userId),
+        eq(quest.id, context.questId),
+        eq(quest.hirerId, context.userId),
         eq(quest.apiVersion, questApiVersion.v2),
       ),
     )
@@ -734,54 +799,54 @@ const lockQuestV2ImageOwner = async (
 };
 
 export const checkQuestV2ImageUpload = async (
-  userId: string,
-  questId: string,
+  context: QuestV2ImageCommandContext,
   imageCount: number,
-  key: string,
-  requestHash: string,
 ): Promise<QuestV2ImageUploadPreflight> => {
-  const normalizedKey = key.trim();
-  if (normalizedKey.length === 0 || normalizedKey.length > 200) {
+  const normalizedContext = normalizeQuestV2ImageCommandContext(context);
+  if (!normalizedContext) {
     return { outcome: 'invalid-idempotency-key' };
   }
 
   return db.transaction(async (transaction) => {
     const existing = await findQuestV2ImageIdempotency(
       transaction,
-      userId,
+      normalizedContext.userId,
       questV2ImageUploadOperationScope,
-      normalizedKey,
+      normalizedContext.key,
     );
     if (
       existing &&
       !(
         existing.processingStatus === 'PROCESSING' &&
-        existing.expiresAt <= new Date()
+        existing.expiresAt <= new Date() &&
+        !hasQuestV2ImageCleanupManifest(existing.resultData)
       )
     ) {
-      return readQuestV2ImageReplay(existing, requestHash);
+      return readQuestV2ImageReplay(existing, normalizedContext.requestHash);
     }
 
-    const ownedQuest = await lockQuestV2ImageOwner(transaction, userId, questId);
+    const ownedQuest = await lockQuestV2ImageOwner(transaction, normalizedContext);
     if (!ownedQuest) return { outcome: 'not-found' };
     if (ownedQuest.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
 
     const reservation = await acquireQuestV2Idempotency(
       transaction,
-      userId,
+      normalizedContext.userId,
       questV2ImageUploadOperationScope,
-      normalizedKey,
-      requestHash,
+      normalizedContext.key,
+      normalizedContext.requestHash,
       false,
       true,
     );
     if ('outcome' in reservation) return reservation;
-    if (!reservation.created) return readQuestV2ImageReplay(reservation.record, requestHash);
+    if (!reservation.created) {
+      return readQuestV2ImageReplay(reservation.record, normalizedContext.requestHash);
+    }
 
     const [imageCountRow] = await transaction
       .select({ count: sql<number>`count(*)` })
       .from(questImage)
-      .where(eq(questImage.questId, questId));
+      .where(eq(questImage.questId, normalizedContext.questId));
     if (Number(imageCountRow?.count ?? 0) + imageCount > maxQuestV2Images) {
       await transaction
         .delete(walletIdempotencyKey)
@@ -808,19 +873,16 @@ const throwQuestV2ImageCommandError = (
 
 const addQuestV2ImagesInTransaction = async (
   transaction: QuestTransaction,
-  userId: string,
-  questId: string,
-  key: string,
+  context: QuestV2ImageCommandContext,
   images: StoredQuestImage[],
-  requestHash: string,
   allowExistingProcessing: boolean,
 ): Promise<QuestV2ImageUploadOutcome> => {
   const idempotency = await acquireQuestV2Idempotency(
     transaction,
-    userId,
+    context.userId,
     questV2ImageUploadOperationScope,
-    key,
-    requestHash,
+    context.key,
+    context.requestHash,
     allowExistingProcessing,
     true,
   );
@@ -833,14 +895,14 @@ const addQuestV2ImagesInTransaction = async (
       : { outcome: 'idempotency-unavailable' };
   }
 
-  const ownedQuest = await lockQuestV2ImageOwner(transaction, userId, questId);
+  const ownedQuest = await lockQuestV2ImageOwner(transaction, context);
   if (!ownedQuest) throwQuestV2ImageCommandError('not-found');
   if (ownedQuest.questStatus !== questStatus.draft) throwQuestV2ImageCommandError('not-draft');
 
   const [imageCountRow] = await transaction
     .select({ count: sql<number>`count(*)` })
     .from(questImage)
-    .where(eq(questImage.questId, questId));
+    .where(eq(questImage.questId, context.questId));
   const currentCount = Number(imageCountRow?.count ?? 0);
   if (currentCount + images.length > maxQuestV2Images) {
     throwQuestV2ImageCommandError('limit-reached');
@@ -849,45 +911,43 @@ const addQuestV2ImagesInTransaction = async (
   for (const [index, image] of images.entries()) {
     const [createdFile] = await transaction
       .insert(file)
-      .values({ ...image, uploadedByUserId: userId })
+      .values({ ...image, uploadedByUserId: context.userId })
       .returning({ id: file.id });
     if (!createdFile) throw new Error('Quest Image file could not be stored');
 
     await transaction.insert(questImage).values({
-      questId,
+      questId: context.questId,
       fileId: createdFile.id,
       position: currentCount + index,
     });
   }
 
-  const currentImages = await selectQuestV2Images(transaction, questId);
+  const currentImages = await selectQuestV2Images(transaction, context.questId);
+  const responseImages = materializeQuestV2ImageResponse(currentImages);
   await transaction
     .update(walletIdempotencyKey)
     .set({
       resourceType: 'quest-image',
-      resourceId: questId,
-      resultData: toQuestV2ImageIdempotencySnapshot(currentImages),
+      resourceId: context.questId,
+      resultData: toQuestV2ImageIdempotencySnapshot(currentImages, responseImages),
       processingStatus: 'COMPLETED',
       completedAt: new Date(),
     })
     .where(eq(walletIdempotencyKey.id, idempotency.record.id));
 
-  return { images: currentImages };
+  return { images: currentImages, response: responseImages };
 };
 
 export const addQuestV2Images = async (
-  userId: string,
-  questId: string,
+  context: QuestV2ImageCommandContext,
   images: StoredQuestImage[],
-  rawKey: string,
-  requestHash: string,
 ): Promise<QuestV2ImageUploadOutcome> => {
-  const key = rawKey.trim();
-  if (key.length === 0 || key.length > 200) return { outcome: 'invalid-idempotency-key' };
+  const normalizedContext = normalizeQuestV2ImageCommandContext(context);
+  if (!normalizedContext) return { outcome: 'invalid-idempotency-key' };
 
   try {
     return await db.transaction((transaction) =>
-      addQuestV2ImagesInTransaction(transaction, userId, questId, key, images, requestHash, true),
+      addQuestV2ImagesInTransaction(transaction, normalizedContext, images, true),
     );
   } catch (error) {
     if (error instanceof QuestV2ImageCommandError) return { outcome: error.outcome };
@@ -896,21 +956,19 @@ export const addQuestV2Images = async (
 };
 
 export const releaseQuestV2ImageUploadReservation = async (
-  userId: string,
-  rawKey: string,
-  requestHash: string,
+  context: QuestV2ImageCommandContext,
 ): Promise<void> => {
-  const key = rawKey.trim();
-  if (key.length === 0 || key.length > 200) return;
+  const normalizedContext = normalizeQuestV2ImageCommandContext(context);
+  if (!normalizedContext) return;
 
   await db
     .delete(walletIdempotencyKey)
     .where(
       and(
-        eq(walletIdempotencyKey.principalUserId, userId),
+        eq(walletIdempotencyKey.principalUserId, normalizedContext.userId),
         eq(walletIdempotencyKey.operationScope, questV2ImageUploadOperationScope),
-        eq(walletIdempotencyKey.key, key),
-        eq(walletIdempotencyKey.requestHash, requestHash),
+        eq(walletIdempotencyKey.key, normalizedContext.key),
+        eq(walletIdempotencyKey.requestHash, normalizedContext.requestHash),
         eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
         isNull(walletIdempotencyKey.resourceId),
       ),
@@ -924,13 +982,82 @@ type QuestV2ImageCleanupObject = {
   deletedAt: Date | null;
 };
 
+type QuestV2ImageCleanupManifest = {
+  images: StoredQuestImage[];
+  deletedAt: string;
+};
+
+export class QuestV2ImageCleanupUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super('Quest Image cleanup retry could not be recorded', { cause });
+    this.name = 'QuestV2ImageCleanupUnavailableError';
+  }
+}
+
+const isStoredQuestImage = (value: unknown): value is StoredQuestImage => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+
+  const image = value as Partial<StoredQuestImage>;
+  return (
+    typeof image.bucket === 'string' &&
+    typeof image.objectKey === 'string' &&
+    (image.contentType === 'image/jpeg' ||
+      image.contentType === 'image/png' ||
+      image.contentType === 'image/webp') &&
+    typeof image.sizeBytes === 'number' &&
+    Number.isInteger(image.sizeBytes) &&
+    image.sizeBytes >= 0
+  );
+};
+
+const toQuestV2ImageCleanupManifest = (
+  images: StoredQuestImage[],
+  deletedAt: Date,
+): QuestV2ImageCleanupManifest => ({
+  images,
+  deletedAt: deletedAt.toISOString(),
+});
+
+const fromQuestV2ImageCleanupManifest = (
+  resultData: unknown,
+): QuestV2ImageCleanupManifest | undefined => {
+  if (!resultData || typeof resultData !== 'object' || Array.isArray(resultData)) {
+    return undefined;
+  }
+
+  const result = resultData as { cleanup?: unknown };
+  if (!result.cleanup || typeof result.cleanup !== 'object' || Array.isArray(result.cleanup)) {
+    return undefined;
+  }
+
+  const manifest = result.cleanup as Partial<QuestV2ImageCleanupManifest>;
+  const deletedAt = typeof manifest.deletedAt === 'string' ? new Date(manifest.deletedAt) : undefined;
+  if (
+    !Array.isArray(manifest.images) ||
+    manifest.images.length === 0 ||
+    manifest.images.some((image) => !isStoredQuestImage(image)) ||
+    !deletedAt ||
+    Number.isNaN(deletedAt.getTime())
+  ) {
+    return undefined;
+  }
+
+  return {
+    images: manifest.images,
+    deletedAt: deletedAt.toISOString(),
+  };
+};
+
+const hasQuestV2ImageCleanupManifest = (resultData: unknown): boolean =>
+  Boolean(fromQuestV2ImageCleanupManifest(resultData));
+
 export const recordQuestV2ImageCleanupTombstones = async (
   userId: string,
   images: StoredQuestImage[],
+  deletedAt = new Date(),
 ): Promise<void> => {
   if (images.length === 0) return;
 
-  const deletedAt = new Date();
   await db
     .insert(file)
     .values(
@@ -941,6 +1068,87 @@ export const recordQuestV2ImageCleanupTombstones = async (
       })),
     )
     .onConflictDoNothing();
+};
+
+export const recordQuestV2ImageCleanupRetry = async (
+  context: QuestV2ImageCommandContext,
+  images: StoredQuestImage[],
+  deletedAt: Date,
+): Promise<void> => {
+  const normalizedContext = normalizeQuestV2ImageCommandContext(context);
+  if (!normalizedContext || images.length === 0) return;
+
+  let updated: { id: string } | undefined;
+  try {
+    [updated] = await db
+      .update(walletIdempotencyKey)
+      .set({
+        resultData: { cleanup: toQuestV2ImageCleanupManifest(images, deletedAt) },
+        expiresAt: idempotencyExpiry(),
+      })
+      .where(
+        and(
+          eq(walletIdempotencyKey.principalUserId, normalizedContext.userId),
+          eq(walletIdempotencyKey.operationScope, questV2ImageUploadOperationScope),
+          eq(walletIdempotencyKey.key, normalizedContext.key),
+          eq(walletIdempotencyKey.requestHash, normalizedContext.requestHash),
+          eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
+          isNull(walletIdempotencyKey.resourceId),
+        ),
+      )
+      .returning({ id: walletIdempotencyKey.id });
+  } catch (cause) {
+    throw new QuestV2ImageCleanupUnavailableError(cause);
+  }
+
+  if (!updated) {
+    throw new QuestV2ImageCleanupUnavailableError(
+      new Error('Quest Image upload reservation was not available for cleanup retry'),
+    );
+  }
+};
+
+export const retryQuestV2ImageCleanupManifests = async (limit = 100): Promise<number> => {
+  const pending = await db
+    .select({
+      id: walletIdempotencyKey.id,
+      userId: walletIdempotencyKey.principalUserId,
+      resultData: walletIdempotencyKey.resultData,
+    })
+    .from(walletIdempotencyKey)
+    .where(
+      and(
+        eq(walletIdempotencyKey.operationScope, questV2ImageUploadOperationScope),
+        eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
+        isNull(walletIdempotencyKey.resourceId),
+        sql`${walletIdempotencyKey.resultData} IS NOT NULL`,
+      ),
+    )
+    .orderBy(asc(walletIdempotencyKey.id))
+    .limit(limit);
+
+  let retried = 0;
+  for (const record of pending) {
+    const manifest = fromQuestV2ImageCleanupManifest(record.resultData);
+    if (!manifest) continue;
+
+    try {
+      await recordQuestV2ImageCleanupTombstones(
+        record.userId,
+        manifest.images,
+        new Date(manifest.deletedAt),
+      );
+      await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.id, record.id));
+      retried += 1;
+    } catch (error) {
+      console.error('[quest-image-cleanup] Cleanup tombstone retry failed', {
+        error,
+        idempotencyKeyId: record.id,
+      });
+    }
+  }
+
+  return retried;
 };
 
 const cleanupQuestV2ImageObject = async (object: QuestV2ImageCleanupObject): Promise<boolean> => {
@@ -997,18 +1205,15 @@ export const cleanupQuestV2ImageObjects = async (
 
 const deleteQuestV2ImageInTransaction = async (
   transaction: QuestTransaction,
-  userId: string,
-  questId: string,
+  context: QuestV2ImageCommandContext,
   imageId: string,
-  key: string,
-  requestHash: string,
 ): Promise<QuestV2ImageRemoveOutcome & { cleanup?: QuestV2ImageCleanupObject }> => {
   const idempotency = await acquireQuestV2Idempotency(
     transaction,
-    userId,
+    context.userId,
     questV2ImageRemoveOperationScope,
-    key,
-    requestHash,
+    context.key,
+    context.requestHash,
   );
   if ('outcome' in idempotency) return idempotency;
 
@@ -1017,7 +1222,7 @@ const deleteQuestV2ImageInTransaction = async (
     return snapshot ? snapshot : { outcome: 'idempotency-unavailable' };
   }
 
-  const ownedQuest = await lockQuestV2ImageOwner(transaction, userId, questId);
+  const ownedQuest = await lockQuestV2ImageOwner(transaction, context);
   if (!ownedQuest) throwQuestV2ImageCommandError('not-found');
   if (ownedQuest.questStatus !== questStatus.draft) throwQuestV2ImageCommandError('not-draft');
 
@@ -1030,41 +1235,28 @@ const deleteQuestV2ImageInTransaction = async (
     })
     .from(questImage)
     .innerJoin(file, and(eq(questImage.fileId, file.id), isNull(file.deletedAt)))
-    .where(and(eq(questImage.questId, questId), eq(questImage.id, imageId)))
+    .where(and(eq(questImage.questId, context.questId), eq(questImage.id, imageId)))
     .limit(1)
     .for('update');
   if (!image) throwQuestV2ImageCommandError('not-found');
 
   const deletedAt = new Date();
-  await transaction.delete(questImage).where(eq(questImage.id, image.imageId));
-  await transaction
-    .update(file)
-    .set({ deletedAt, objectDeletedAt: null })
-    .where(eq(file.id, image.fileId));
+  await softDeleteQuestImageAndRepack(transaction, {
+    questId: context.questId,
+    questImageId: image.imageId,
+    fileId: image.fileId,
+    deletedAt,
+    positionOffset: maxQuestV2Images,
+  });
 
-  await transaction
-    .update(questImage)
-    .set({ position: sql`${questImage.position} + ${maxQuestV2Images}` })
-    .where(eq(questImage.questId, questId));
-  const remainingImages = await transaction
-    .select({ imageId: questImage.id })
-    .from(questImage)
-    .where(eq(questImage.questId, questId))
-    .orderBy(asc(questImage.position), asc(questImage.id));
-  for (const [position, remainingImage] of remainingImages.entries()) {
-    await transaction
-      .update(questImage)
-      .set({ position })
-      .where(eq(questImage.id, remainingImage.imageId));
-  }
-
-  const currentImages = await selectQuestV2Images(transaction, questId);
+  const currentImages = await selectQuestV2Images(transaction, context.questId);
+  const responseImages = materializeQuestV2ImageResponse(currentImages);
   await transaction
     .update(walletIdempotencyKey)
     .set({
       resourceType: 'quest-image',
-      resourceId: questId,
-      resultData: toQuestV2ImageIdempotencySnapshot(currentImages),
+      resourceId: context.questId,
+      resultData: toQuestV2ImageIdempotencySnapshot(currentImages, responseImages),
       processingStatus: 'COMPLETED',
       completedAt: deletedAt,
     })
@@ -1072,6 +1264,7 @@ const deleteQuestV2ImageInTransaction = async (
 
   return {
     images: currentImages,
+    response: responseImages,
     cleanup: {
       fileId: image.fileId,
       bucket: image.bucket,
@@ -1082,26 +1275,16 @@ const deleteQuestV2ImageInTransaction = async (
 };
 
 export const deleteQuestV2Image = async (
-  userId: string,
-  questId: string,
+  context: QuestV2ImageCommandContext,
   imageId: string,
-  rawKey: string,
-  requestHash: string,
 ): Promise<QuestV2ImageRemoveOutcome> => {
-  const key = rawKey.trim();
-  if (key.length === 0 || key.length > 200) return { outcome: 'invalid-idempotency-key' };
+  const normalizedContext = normalizeQuestV2ImageCommandContext(context);
+  if (!normalizedContext) return { outcome: 'invalid-idempotency-key' };
 
   let result: QuestV2ImageRemoveOutcome & { cleanup?: QuestV2ImageCleanupObject };
   try {
     result = await db.transaction((transaction) =>
-      deleteQuestV2ImageInTransaction(
-        transaction,
-        userId,
-        questId,
-        imageId,
-        key,
-        requestHash,
-      ),
+      deleteQuestV2ImageInTransaction(transaction, normalizedContext, imageId),
     );
   } catch (error) {
     if (error instanceof QuestV2ImageCommandError) return { outcome: error.outcome };
@@ -1113,7 +1296,7 @@ export const deleteQuestV2Image = async (
     await cleanupQuestV2ImageObject(result.cleanup);
   }
 
-  return { images: result.images };
+  return { images: result.images, response: result.response };
 };
 
 type QuestV2IdempotencySnapshot = Omit<QuestV2CanonicalQuest, 'questFundingTotal'> & {
@@ -1229,6 +1412,7 @@ const acquireQuestV2Idempotency = async (
     !created &&
     recoverExpiredProcessing &&
     record.processingStatus === 'PROCESSING' &&
+    !hasQuestV2ImageCleanupManifest(record.resultData) &&
     record.expiresAt <= new Date()
   ) {
     await transaction
@@ -1254,7 +1438,12 @@ const acquireQuestV2Idempotency = async (
     if (!created) return { outcome: 'idempotency-unavailable' };
     record = created;
   }
-  if (!created && allowExistingProcessing && record.processingStatus === 'PROCESSING') {
+  if (
+    !created &&
+    allowExistingProcessing &&
+    record.processingStatus === 'PROCESSING' &&
+    !hasQuestV2ImageCleanupManifest(record.resultData)
+  ) {
     return { created: true, record };
   }
   if (!created) return { outcome: 'idempotency-in-progress' };

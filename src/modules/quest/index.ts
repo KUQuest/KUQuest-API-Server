@@ -37,6 +37,8 @@ export {
   questV2ImageUploadOperationScope,
   questV2ImageUploadRequestHash,
   recordQuestV2ImageCleanupTombstones,
+  recordQuestV2ImageCleanupRetry,
+  retryQuestV2ImageCleanupManifests,
   releaseQuestV2ImageUploadReservation,
 } from './quest-v2.service';
 export type {
@@ -44,6 +46,8 @@ export type {
   QuestV2EditOutcome,
   QuestV2Detail,
   QuestV2ImageReference,
+  QuestV2ImageResponse,
+  QuestV2ImageCommandContext,
   QuestV2ImageRemoveOutcome,
   QuestV2ImageUploadOutcome,
   QuestV2ImageUploadPreflight,

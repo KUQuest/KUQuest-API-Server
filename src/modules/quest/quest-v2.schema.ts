@@ -306,7 +306,12 @@ export const questV2ImageParamsSchema = t.Object({
 
 export const questV2ImagesUploadSchema = t.Object(
   {
-    images: t.Files({ minItems: 1, maxItems: maxQuestV2Images }),
+    images: t.Files({
+      minItems: 1,
+      maxItems: maxQuestV2Images,
+      description:
+        'One to three Quest Image files in request order. Each file must be a decoded JPEG, PNG, or WebP of at most 5 MB.',
+    }),
   },
   { additionalProperties: false },
 );
@@ -322,11 +327,17 @@ const questV2ConditionItemSchema = t.Object({
 });
 
 export const questV2ImageSchema = t.Object({
-  imageId: t.String({ format: 'uuid' }),
-  fileId: t.String({ format: 'uuid' }),
-  position: t.Integer({ minimum: 0 }),
-  url: t.String({ format: 'uri' }),
-  urlExpiresAt: t.String({ format: 'date-time' }),
+  imageId: t.String({ format: 'uuid', description: 'Quest Image identifier.' }),
+  fileId: t.String({ format: 'uuid', description: 'Private file reference.' }),
+  position: t.Integer({ minimum: 0, description: 'Zero-based gallery position.' }),
+  url: t.String({
+    format: 'uri',
+    description: 'Temporary image link. The API never returns a permanent storage URL.',
+  }),
+  urlExpiresAt: t.String({
+    format: 'date-time',
+    description: 'Expiry time for the temporary image link, 15 minutes after materialization.',
+  }),
 });
 
 export const questV2CanonicalQuestSchema = t.Object({

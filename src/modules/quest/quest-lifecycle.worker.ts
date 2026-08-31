@@ -15,7 +15,10 @@ import { assignmentStatus, questMode, questParticipation, questStatus } from './
 import { autoApproveDueProofs } from './quest-proof.service';
 import { cancelUnfilledQuest } from './quest-settlement.service';
 import { expireQuestEditRequest } from './quest.service';
-import { cleanupQuestV2ImageObjects } from './quest-v2.service';
+import {
+  cleanupQuestV2ImageObjects,
+  retryQuestV2ImageCleanupManifests,
+} from './quest-v2.service';
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -322,6 +325,7 @@ export const runQuestLifecycleWorker = async (
   const errors: QuestLifecycleWorkerError[] = [];
 
   try {
+    await retryQuestV2ImageCleanupManifests(limit);
     await cleanupQuestV2ImageObjects(now, limit);
   } catch (cause) {
     const error = { operation: 'quest-image-cleanup' as const, cause };
