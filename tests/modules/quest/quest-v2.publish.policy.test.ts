@@ -2,7 +2,7 @@ import {
   buildQuestV2PublishCheck,
   calculateQuestV2FundingQuote,
 } from '@/modules/quest/quest-v2.publish.policy';
-import { positiveSatang } from '@/modules/wallet';
+import { positiveSatang, satang } from '@/modules/wallet';
 
 import { describe, expect, it } from 'bun:test';
 
@@ -11,8 +11,8 @@ const policy = {
   platformFeeBps: 200,
   policyRevision: 1,
   policyRevisionId: '018f47a7-1c7d-7c98-9a11-690d7e834303',
-  minimumFundingReservationSatang: 100,
-  maximumFundingReservationSatang: 70_000_000,
+  minimumFundingReservationSatang: satang(100),
+  maximumFundingReservationSatang: satang(70_000_000),
   walletStatus: 'ACTIVE' as const,
 };
 
@@ -96,8 +96,8 @@ describe('Quest v2 publish policy', () => {
       questFundingTotalSatang: positiveSatang(2_000),
       headcount: 1,
       spendingBalanceSatang: positiveSatang(2_000),
-      minimumFundingReservationSatang: 100,
-      maximumFundingReservationSatang: 70_000_000,
+      minimumFundingReservationSatang: satang(100),
+      maximumFundingReservationSatang: satang(70_000_000),
     });
 
     expect(check.blockingReasons).toEqual([
@@ -114,8 +114,8 @@ describe('Quest v2 publish policy', () => {
   ])('reports a Quest Escrow amount %s in the active Money Policy', (_, minimum, maximum) => {
     const check = buildQuestV2PublishCheck({
       ...policy,
-      minimumFundingReservationSatang: minimum,
-      maximumFundingReservationSatang: maximum,
+      minimumFundingReservationSatang: satang(minimum),
+      maximumFundingReservationSatang: satang(maximum),
       tagId: 'tag-1',
       conditionValid: true,
       startTime: new Date('2026-09-01T10:00:00.000Z'),

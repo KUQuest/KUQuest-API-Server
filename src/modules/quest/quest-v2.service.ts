@@ -12,6 +12,7 @@ import {
   MoneyDomainError,
   positiveSatang,
   satang,
+  toBaht,
   type Satang,
 } from '@/modules/wallet';
 import { decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
@@ -479,8 +480,6 @@ const toV2State = (status: QuestStatus): QuestV2State => {
 
   return status as QuestV2State;
 };
-
-const toBaht = (amount: Satang): number => Number((amount / 100).toFixed(2));
 
 const buildCanonicalQuest = async (
   database: QuestDatabase,

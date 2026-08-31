@@ -1,5 +1,10 @@
 import type { WalletStatus } from '@/database/schema/wallet.schema';
-import { calculatePlatformFeeSatang, satang, type Satang } from '@/modules/wallet';
+import {
+  calculatePlatformFeeSatang,
+  satang,
+  toBaht,
+  type Satang,
+} from '@/modules/wallet';
 
 export type QuestV2PublishReason = {
   code: string;
@@ -39,8 +44,8 @@ export type QuestV2PublishSnapshot = QuestV2FundingQuoteInput & {
   now: Date;
   spendingBalanceSatang: Satang;
   walletStatus: WalletStatus;
-  minimumFundingReservationSatang: number;
-  maximumFundingReservationSatang: number;
+  minimumFundingReservationSatang: Satang;
+  maximumFundingReservationSatang: Satang;
 };
 
 export type QuestV2PublishCheck = QuestV2FundingQuote & {
@@ -48,8 +53,6 @@ export type QuestV2PublishCheck = QuestV2FundingQuote & {
   warnings: QuestV2PublishReason[];
   canPublish: boolean;
 };
-
-const toBaht = (amountSatang: Satang): number => Number((amountSatang / 100).toFixed(2));
 
 const requiredFundingForReward = (rewardSatang: number, platformFeeBps: number) =>
   rewardSatang + calculatePlatformFeeSatang(satang(rewardSatang), platformFeeBps);

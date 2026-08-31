@@ -193,7 +193,7 @@ beforeAll(async () => {
     }),
   );
   if (noWalletSignUpResponse.status !== 200) {
-    throw new Error(`Quest v2 no-Wallet test Student creation failed: ${noWalletSignUpResponse.status}`);
+    throw new Error(`Quest v2 no-Wallet test Member creation failed: ${noWalletSignUpResponse.status}`);
   }
 
   const noWalletLoginResponse = await noWalletAuth.handler(
