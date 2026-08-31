@@ -21,7 +21,7 @@ import {
   questV2MineQuerySchema,
   questV2MineResponseSchema,
   questV2ParamsSchema,
-  questV2PublishCheckResponseSchema,
+  questV2PublishCheckHttpResponseSchema,
   questV2WriteHeadersSchema,
   normalizeQuestV2CreateBody,
   normalizeQuestV2EditBody,
@@ -73,7 +73,7 @@ export const questV2Route = new Elysia({
   })
   .get('/:questId/publish-check', getQuestV2PublishCheckController, {
     params: questV2ParamsSchema,
-    response: responses(questV2PublishCheckResponseSchema, 400, 401, 404, 409, 500, 503),
+    response: responses(questV2PublishCheckHttpResponseSchema, 400, 401, 404, 409, 500, 503),
     detail: {
       tags: ['Quests v2'],
       summary: 'Check whether a v2 Quest Draft can be published',

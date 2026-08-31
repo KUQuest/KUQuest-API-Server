@@ -13,6 +13,7 @@ const policy = {
   policyRevisionId: '018f47a7-1c7d-7c98-9a11-690d7e834303',
   minimumFundingReservationSatang: 100,
   maximumFundingReservationSatang: 70_000_000,
+  walletStatus: 'ACTIVE' as const,
 };
 
 describe('Quest v2 publish policy', () => {
@@ -103,6 +104,81 @@ describe('Quest v2 publish policy', () => {
       {
         code: 'QUEST_DUE_AT_NOT_AFTER_START_TIME',
         message: 'Quest dueAt must be after startTime',
+      },
+    ]);
+  });
+
+  it.each([
+    ['below the minimum', 104, 70_000_000],
+    ['above the maximum', 100, 102],
+  ])('reports a Quest Escrow amount %s in the active Money Policy', (_, minimum, maximum) => {
+    const check = buildQuestV2PublishCheck({
+      ...policy,
+      minimumFundingReservationSatang: minimum,
+      maximumFundingReservationSatang: maximum,
+      tagId: 'tag-1',
+      conditionValid: true,
+      startTime: new Date('2026-09-01T10:00:00.000Z'),
+      dueAt: new Date('2026-09-01T12:00:00.000Z'),
+      now: new Date('2026-08-31T08:00:00.000Z'),
+      questFundingTotalSatang: positiveSatang(103),
+      headcount: 1,
+      spendingBalanceSatang: positiveSatang(2_000),
+    });
+
+    expect(check.blockingReasons).toContainEqual({
+      code: 'QUEST_ESCROW_AMOUNT_OUT_OF_RANGE',
+      message: 'Quest Escrow amount is outside the active Money Policy limits',
+    });
+    expect(check.canPublish).toBe(false);
+  });
+
+  it.each([
+    ['FROZEN', 'FROZEN'],
+    ['SUSPENDED', 'SUSPENDED'],
+    ['CLOSED', 'CLOSED'],
+  ] as const)('blocks a %s Wallet from publish readiness', (_, walletStatus) => {
+    const check = buildQuestV2PublishCheck({
+      ...policy,
+      walletStatus,
+      tagId: 'tag-1',
+      conditionValid: true,
+      startTime: new Date('2026-09-01T10:00:00.000Z'),
+      dueAt: new Date('2026-09-01T12:00:00.000Z'),
+      now: new Date('2026-08-31T08:00:00.000Z'),
+      questFundingTotalSatang: positiveSatang(2_000),
+      headcount: 1,
+      spendingBalanceSatang: positiveSatang(2_000),
+    });
+
+    expect(check.blockingReasons).toContainEqual({
+      code: 'WALLET_NOT_ACTIVE',
+      message: `Wallet status ${walletStatus} does not permit FUNDING_RESERVATION.`,
+    });
+    expect(check.canPublish).toBe(false);
+  });
+
+  it('reports an invalid dueAt and a startTime at the Server time boundary', () => {
+    const check = buildQuestV2PublishCheck({
+      ...policy,
+      tagId: 'tag-1',
+      conditionValid: true,
+      startTime: new Date('2026-08-31T08:00:00.000Z'),
+      dueAt: new Date('invalid'),
+      now: new Date('2026-08-31T08:00:00.000Z'),
+      questFundingTotalSatang: positiveSatang(2_000),
+      headcount: 1,
+      spendingBalanceSatang: positiveSatang(2_000),
+    });
+
+    expect(check.blockingReasons).toEqual([
+      {
+        code: 'QUEST_DUE_AT_INVALID',
+        message: 'Quest dueAt must be a valid date-time',
+      },
+      {
+        code: 'QUEST_START_TIME_NOT_IN_FUTURE',
+        message: 'Quest startTime must be in the future',
       },
     ]);
   });

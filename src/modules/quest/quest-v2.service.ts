@@ -9,6 +9,7 @@ import { tag } from '@/database/schema/tag.schema';
 import { walletIdempotencyKey, walletWallet } from '@/database/schema/wallet.schema';
 import {
   getEffectiveFundingReservationPolicy,
+  MoneyDomainError,
   positiveSatang,
   satang,
   type Satang,
@@ -1012,12 +1013,18 @@ export const getQuestV2PublishCheck = async (
       selectConditionItems(transaction, questId),
       getEffectiveFundingReservationPolicy(transaction),
       transaction
-        .select({ spendingBalanceSatang: walletWallet.spendingBalanceSatang })
+        .select({
+          spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+          walletStatus: walletWallet.walletStatus,
+        })
         .from(walletWallet)
         .where(eq(walletWallet.userId, userId))
         .limit(1)
         .then((rows) => rows[0]),
     ]);
+    if (!wallet) {
+      throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
+    }
 
     return buildQuestV2PublishCheck({
       tagId: row.tagId,
@@ -1030,7 +1037,8 @@ export const getQuestV2PublishCheck = async (
       now: new Date(),
       questFundingTotalSatang: satang(row.questFundingTotalSatang),
       headcount: row.headcount,
-      spendingBalanceSatang: satang(wallet?.spendingBalanceSatang ?? 0),
+      spendingBalanceSatang: satang(wallet.spendingBalanceSatang),
+      walletStatus: wallet.walletStatus,
       platformFeeBps: policy.platformFeeBps,
       feeRoundingMode: policy.feeRoundingMode as 'UP',
       policyRevisionId: policy.id,

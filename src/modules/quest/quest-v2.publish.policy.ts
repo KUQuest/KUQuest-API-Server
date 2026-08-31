@@ -1,3 +1,4 @@
+import type { WalletStatus } from '@/database/schema/wallet.schema';
 import { calculatePlatformFeeSatang, satang, type Satang } from '@/modules/wallet';
 
 export type QuestV2PublishReason = {
@@ -37,6 +38,7 @@ export type QuestV2PublishSnapshot = QuestV2FundingQuoteInput & {
   dueAt: Date | null;
   now: Date;
   spendingBalanceSatang: Satang;
+  walletStatus: WalletStatus;
   minimumFundingReservationSatang: number;
   maximumFundingReservationSatang: number;
 };
@@ -138,6 +140,13 @@ export const buildQuestV2PublishCheck = (
     blockingReasons.push({
       code: 'QUEST_START_TIME_NOT_IN_FUTURE',
       message: 'Quest startTime must be in the future',
+    });
+  }
+
+  if (snapshot.walletStatus !== 'ACTIVE') {
+    blockingReasons.push({
+      code: 'WALLET_NOT_ACTIVE',
+      message: `Wallet status ${snapshot.walletStatus} does not permit FUNDING_RESERVATION.`,
     });
   }
 

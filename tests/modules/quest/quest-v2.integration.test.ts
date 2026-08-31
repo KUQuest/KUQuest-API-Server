@@ -26,6 +26,9 @@ type OpenApiOperation = {
   requestBody?: {
     content?: Record<string, { schema?: OpenApiSchema }>;
   };
+  responses?: Record<string, {
+    content?: Record<string, { schema?: OpenApiSchema }>;
+  }>;
 };
 
 describe('Quest API v2 integration', () => {
@@ -151,5 +154,37 @@ describe('Quest API v2 integration', () => {
       document.paths['/api/v2/quests/{questId}']?.patch?.requestBody?.content?.['application/json']
         ?.schema;
     expect(editBodySchema?.properties?.questFundingTotal?.multipleOf).toBe(0.01);
+
+    const publishResponseSchema =
+      document.paths['/api/v2/quests/{questId}/publish-check']?.get?.responses?.['200']?.content
+        ?.['application/json']?.schema;
+    expect(publishResponseSchema?.required).toEqual(['success', 'data']);
+    const publishDataSchema = publishResponseSchema?.properties?.data;
+    expect(publishDataSchema?.required).toEqual([
+      'blockingReasons',
+      'warnings',
+      'canPublish',
+      'questFundingTotal',
+      'questFundingTotalSatang',
+      'questReward',
+      'questRewardSatang',
+      'platformFee',
+      'platformFeeSatang',
+      'escrowRequirement',
+      'escrowRequirementSatang',
+      'headcount',
+      'platformFeeBps',
+      'feeRoundingMode',
+      'policyRevisionId',
+      'policyRevision',
+    ]);
+    for (const property of [
+      'questFundingTotal',
+      'questReward',
+      'platformFee',
+      'escrowRequirement',
+    ]) {
+      expect(publishDataSchema?.properties?.[property]?.multipleOf).toBe(0.01);
+    }
   });
 });

@@ -14,7 +14,7 @@ import {
   walletLedgerTransaction,
   walletWallet,
 } from '@/database/schema/wallet.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
+import { createStagingTestAuthRoute, createStudentAuth } from '@/modules/auth';
 import { listOwnQuests } from '@/modules/quest/quest.service';
 import {
   createQuestV2,
@@ -41,6 +41,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 
 const testEmail = `quest-v2-${randomUUID()}@ku.th`;
 const testPassword = 'TestStudent1!';
+const noWalletTestEmail = `quest-v2-no-wallet-${randomUUID()}@ku.th`;
 const authTestApp = new Elysia({ name: 'quest-v2-test-auth' }).use(
   createStagingTestAuthRoute({
     enabled: true,
@@ -51,6 +52,12 @@ const authTestApp = new Elysia({ name: 'quest-v2-test-auth' }).use(
     lastName: 'Hirer',
   }),
 );
+const noWalletAuth = createStudentAuth({
+  basePath: '/api/staging/quest-v2-no-wallet-auth',
+  emailAndPasswordEnabled: true,
+  allowEmailSignUp: true,
+  autoSignIn: false,
+});
 
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? [])
@@ -59,6 +66,8 @@ const getCookieHeader = (response: Response): string =>
 
 let hirerId = '';
 let sessionCookie = '';
+let noWalletMemberId = '';
+let noWalletSessionCookie = '';
 const otherMemberId = randomUUID();
 const tagId = randomUUID();
 const retryTagId = randomUUID();
@@ -124,10 +133,10 @@ const getQuest = (questId: string) =>
     }),
   );
 
-const getPublishCheck = (questId: string) =>
+const getPublishCheck = (questId: string, cookie = sessionCookie) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/${questId}/publish-check`, {
-      headers: { cookie: sessionCookie },
+      headers: { cookie },
     }),
   );
 
@@ -170,6 +179,38 @@ beforeAll(async () => {
   hirerId = loginBody.user.id;
   sessionCookie = getCookieHeader(loginResponse);
 
+  const noWalletSignUpResponse = await noWalletAuth.handler(
+    new Request('http://localhost/api/staging/quest-v2-no-wallet-auth/sign-up/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: noWalletTestEmail,
+        password: testPassword,
+        name: 'No Wallet Hirer',
+        firstName: 'No Wallet',
+        lastName: 'Hirer',
+      }),
+    }),
+  );
+  if (noWalletSignUpResponse.status !== 200) {
+    throw new Error(`Quest v2 no-Wallet test Student creation failed: ${noWalletSignUpResponse.status}`);
+  }
+
+  const noWalletLoginResponse = await noWalletAuth.handler(
+    new Request('http://localhost/api/staging/quest-v2-no-wallet-auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: noWalletTestEmail, password: testPassword }),
+    }),
+  );
+  if (noWalletLoginResponse.status !== 200) {
+    throw new Error(`Quest v2 no-Wallet test authentication failed: ${noWalletLoginResponse.status}`);
+  }
+
+  const noWalletLoginBody = (await noWalletLoginResponse.json()) as { user: { id: string } };
+  noWalletMemberId = noWalletLoginBody.user.id;
+  noWalletSessionCookie = getCookieHeader(noWalletLoginResponse);
+
   await db.insert(authUser).values({
     id: otherMemberId,
     email: `${otherMemberId}@ku.th`,
@@ -187,6 +228,13 @@ beforeEach(async () => {
   await db.delete(walletIdempotencyKey).where(
     eq(walletIdempotencyKey.principalUserId, otherMemberId),
   );
+  await db.delete(walletIdempotencyKey).where(
+    eq(walletIdempotencyKey.principalUserId, noWalletMemberId),
+  );
+  await db
+    .update(walletWallet)
+    .set({ walletStatus: 'ACTIVE' })
+    .where(eq(walletWallet.userId, hirerId));
   if (questIds.length > 0) {
     await db.delete(quest).where(inArray(quest.id, questIds));
     questIds = [];
@@ -200,10 +248,14 @@ afterAll(async () => {
   await db.delete(walletIdempotencyKey).where(
     eq(walletIdempotencyKey.principalUserId, otherMemberId),
   );
+  await db.delete(walletIdempotencyKey).where(
+    eq(walletIdempotencyKey.principalUserId, noWalletMemberId),
+  );
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(tag).where(eq(tag.id, retryTagId));
   await db.delete(authUser).where(eq(authUser.id, otherMemberId));
+  await db.delete(authUser).where(eq(authUser.id, noWalletMemberId));
 });
 
 describe('Quest API v2 persistence', () => {
@@ -456,8 +508,12 @@ describe('Quest API v2 publish check', () => {
       .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
       .where(eq(walletLedgerAccount.walletId, wallet.id));
 
-    const result = await getQuestV2PublishCheck(hirerId, created.quest.id);
-    if (!result || 'outcome' in result) throw new Error('Publish check did not return a quote');
+    const response = await getPublishCheck(created.quest.id);
+    expect(response.status).toBe(200);
+    const { data: result } = (await response.json()) as {
+      success: true;
+      data: Record<string, unknown>;
+    };
     expect(result).toMatchObject({
       blockingReasons: [],
       warnings: [],
@@ -514,22 +570,20 @@ describe('Quest API v2 publish check', () => {
 
   it('returns every applicable blocker and the quote for an incomplete Draft', async () => {
     const created = await createQuestV2(
-      otherMemberId,
-      { ...baseInput, tagId: null, dueAt: null, locations: [] },
+      hirerId,
+      { ...baseInput, tagId: null, dueAt: null, locations: [], questFundingTotal: 700000 },
       `v2-publish-check-incomplete-${randomUUID()}`,
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
     await db.delete(questConditionItem).where(eq(questConditionItem.questId, created.quest.id));
 
-    const result = await getQuestV2PublishCheck(otherMemberId, created.quest.id);
+    const result = await getQuestV2PublishCheck(hirerId, created.quest.id);
     if (!result || 'outcome' in result) throw new Error('Publish check did not return a Draft check');
     expect(result).toMatchObject({
       canPublish: false,
       warnings: [],
-      questFundingTotalSatang: 103,
-      questRewardSatang: 100,
-      platformFeeSatang: 3,
+      questFundingTotalSatang: 70_000_000,
     });
     expect(result.blockingReasons).toEqual(expect.arrayContaining([
       { code: 'QUEST_TAG_REQUIRED', message: 'Quest requires a Tag' },
@@ -593,6 +647,186 @@ describe('Quest API v2 publish check', () => {
       escrowRequirement: 1.03,
     });
   });
+
+  it('returns 503 when the Hirer has no Wallet', async () => {
+    const created = await createQuestV2(
+      noWalletMemberId,
+      baseInput,
+      `v2-publish-check-missing-wallet-${randomUUID()}`,
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+
+    const response = await getPublishCheck(created.quest.id, noWalletSessionCookie);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: {
+        code: 'QUEST_ESCROW_UNAVAILABLE',
+        message: 'Quest Escrow could not be evaluated',
+      },
+    });
+  });
+
+  it('returns every applicable blocker and the quote for an incomplete Draft through HTTP', async () => {
+    const response = await postQuest({
+      ...baseInput,
+      title: 'Incomplete HTTP Draft',
+      tagId: null,
+      dueAt: null,
+      participation: 'GROUP',
+      headcount: 20,
+      questFundingTotal: 700000,
+      locations: [],
+    });
+    expect(response.status).toBe(200);
+
+    const created = (await response.json()) as { success: true; data: { id: string } };
+    questIds.push(created.data.id);
+    await db.delete(questConditionItem).where(eq(questConditionItem.questId, created.data.id));
+    await db
+      .update(quest)
+      .set({ startTime: new Date('2020-08-26T10:00:00.000Z') })
+      .where(eq(quest.id, created.data.id));
+
+    const checkResponse = await getPublishCheck(created.data.id);
+    expect(checkResponse.status).toBe(200);
+    const checkBody = (await checkResponse.json()) as {
+      success: true;
+      data: {
+        canPublish: boolean;
+        blockingReasons: Array<{ code: string; message: string }>;
+        warnings: Array<{ code: string; message: string }>;
+        questFundingTotal: number;
+        questFundingTotalSatang: number;
+        questReward: number;
+        questRewardSatang: number;
+        platformFee: number;
+        platformFeeSatang: number;
+        escrowRequirement: number;
+        escrowRequirementSatang: number;
+        headcount: number;
+        platformFeeBps: number;
+        feeRoundingMode: string;
+        policyRevisionId: string;
+        policyRevision: number;
+      };
+    };
+    expect(checkBody.data).toMatchObject({
+      canPublish: false,
+      warnings: [],
+      questFundingTotal: 700000,
+      questFundingTotalSatang: 70_000_000,
+      headcount: 20,
+      platformFeeBps: 200,
+      feeRoundingMode: 'UP',
+      policyRevision: 1,
+    });
+    expect(checkBody.data.questReward).toBeGreaterThanOrEqual(0);
+    expect(checkBody.data.questRewardSatang).toBeGreaterThanOrEqual(0);
+    expect(checkBody.data.platformFee).toBeGreaterThanOrEqual(0);
+    expect(checkBody.data.platformFeeSatang).toBeGreaterThanOrEqual(0);
+    expect(checkBody.data.escrowRequirement).toBe(14_000_000);
+    expect(checkBody.data.escrowRequirementSatang).toBe(1_400_000_000);
+    expect(checkBody.data.blockingReasons).toEqual(expect.arrayContaining([
+      { code: 'QUEST_TAG_REQUIRED', message: 'Quest requires a Tag' },
+      { code: 'QUEST_CONDITION_REQUIRED', message: 'Quest requires at least one Condition Item' },
+      { code: 'QUEST_DUE_AT_REQUIRED', message: 'Quest requires a dueAt' },
+      { code: 'QUEST_START_TIME_NOT_IN_FUTURE', message: 'Quest startTime must be in the future' },
+      {
+        code: 'QUEST_ESCROW_AMOUNT_OUT_OF_RANGE',
+        message: 'Quest Escrow amount is outside the active Money Policy limits',
+      },
+      {
+        code: 'INSUFFICIENT_SPENDING_BALANCE',
+        message: 'Spending Balance is insufficient for Quest Escrow',
+      },
+    ]));
+  });
+
+  it('returns the Server-time boundary blocker through HTTP', async () => {
+    const created = await createQuestV2(
+      hirerId,
+      { ...baseInput, locations: [] },
+      `v2-publish-check-time-${randomUUID()}`,
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+
+    const startTime = new Date();
+    await db
+      .update(quest)
+      .set({ startTime })
+      .where(eq(quest.id, created.quest.id));
+
+    const response = await getPublishCheck(created.quest.id);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      success: true;
+      data: { blockingReasons: Array<{ code: string; message: string }> };
+    };
+    expect(body.data.blockingReasons).toContainEqual({
+      code: 'QUEST_START_TIME_NOT_IN_FUTURE',
+      message: 'Quest startTime must be in the future',
+    });
+  });
+
+  it.each(['FROZEN', 'SUSPENDED', 'CLOSED'] as const)(
+    'blocks a %s Wallet from HTTP publish readiness',
+    async (walletStatus) => {
+      await fundHirer(10_000);
+      const created = await createQuestV2(
+        hirerId,
+        { ...baseInput, locations: [] },
+        `v2-publish-check-wallet-status-${randomUUID()}`,
+      );
+      if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+      questIds.push(created.quest.id);
+
+      await db
+        .update(walletWallet)
+        .set({ walletStatus })
+        .where(eq(walletWallet.userId, hirerId));
+      const [beforeWallet] = await db
+        .select({
+          spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+          walletStatus: walletWallet.walletStatus,
+        })
+        .from(walletWallet)
+        .where(eq(walletWallet.userId, hirerId));
+
+      try {
+        const response = await getPublishCheck(created.quest.id);
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as {
+          success: true;
+          data: {
+            canPublish: boolean;
+            blockingReasons: Array<{ code: string; message: string }>;
+          };
+        };
+        expect(body.data.canPublish).toBe(false);
+        expect(body.data.blockingReasons).toContainEqual({
+          code: 'WALLET_NOT_ACTIVE',
+          message: `Wallet status ${walletStatus} does not permit FUNDING_RESERVATION.`,
+        });
+
+        const [afterWallet] = await db
+          .select({
+            spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+            walletStatus: walletWallet.walletStatus,
+          })
+          .from(walletWallet)
+          .where(eq(walletWallet.userId, hirerId));
+        expect(afterWallet).toEqual(beforeWallet);
+      } finally {
+        await db
+          .update(walletWallet)
+          .set({ walletStatus: 'ACTIVE' })
+          .where(eq(walletWallet.userId, hirerId));
+      }
+    },
+  );
 
   it('maps missing, non-owned, and non-Draft Quests at the HTTP boundary', async () => {
     const notFound = {
