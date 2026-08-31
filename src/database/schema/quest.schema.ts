@@ -69,6 +69,7 @@ export const quest = pgTable(
       'SINGLE' | 'GROUP'
     >(),
     questStatus: questStatus('quest_status').default('QUEST_DRAFT').notNull(),
+    version: integer('version').default(1).notNull(),
     rewardSatang: integer('reward_satang'),
     questFundingTotalSatang: integer('quest_funding_total_satang'),
     fundingReservationId: uuid('funding_reservation_id')
@@ -101,6 +102,7 @@ export const quest = pgTable(
       'quest_v2_participation_check',
       sql`${table.v2Participation} IS NULL OR ${table.v2Participation} IN ('SINGLE', 'GROUP')`,
     ),
+    check('quest_version_check', sql`${table.version} >= 1`),
     check(
       'quest_funding_total_check',
       sql`${table.questFundingTotalSatang} IS NULL OR ${table.questFundingTotalSatang} BETWEEN 100 AND 70000000`,
