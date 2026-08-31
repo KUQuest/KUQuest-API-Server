@@ -42,6 +42,11 @@ const locationSchema = t.Object(
   },
   { additionalProperties: false },
 );
+const conditionSchema = t.Object(
+  { items: conditionItemsSchema },
+  { additionalProperties: false },
+);
+const locationsSchema = t.Array(locationSchema, { maxItems: 10 });
 const questFundingTotalSchema = t.Number({
   minimum: 1,
   maximum: 700000,
@@ -59,10 +64,7 @@ const questFundingTotalOpenApiSchema = t.Number({
 const questV2CreateProperties = {
   title: titleSchema,
   description: t.Optional(descriptionSchema),
-  condition: t.Object(
-    { items: conditionItemsSchema },
-    { additionalProperties: false },
-  ),
+  condition: conditionSchema,
   mode: questV2ModeSchema,
   participation: questV2ParticipationSchema,
   questFundingTotal: questFundingTotalSchema,
@@ -71,7 +73,7 @@ const questV2CreateProperties = {
   dueAt: t.Optional(t.Nullable(isoDateTimeWithTimezoneSchema)),
   tagId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
   proofRequired: t.Optional(t.Boolean()),
-  locations: t.Optional(t.Array(locationSchema, { maxItems: 10 })),
+  locations: t.Optional(locationsSchema),
 };
 
 export const questV2CreateSchema = t.Object(
@@ -81,9 +83,38 @@ export const questV2CreateSchema = t.Object(
 
 export type QuestV2CreateInput = Static<typeof questV2CreateSchema>;
 
+const questV2EditProperties = {
+  title: t.Optional(titleSchema),
+  description: t.Optional(descriptionSchema),
+  condition: t.Optional(conditionSchema),
+  mode: t.Optional(questV2ModeSchema),
+  participation: t.Optional(questV2ParticipationSchema),
+  questFundingTotal: t.Optional(questFundingTotalSchema),
+  headcount: t.Optional(t.Integer({ minimum: 1, maximum: 20 })),
+  startTime: t.Optional(isoDateTimeWithTimezoneSchema),
+  dueAt: t.Optional(t.Nullable(isoDateTimeWithTimezoneSchema)),
+  tagId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
+  proofRequired: t.Optional(t.Boolean()),
+  locations: t.Optional(locationsSchema),
+};
+
+export const questV2EditSchema = t.Object(questV2EditProperties, {
+  additionalProperties: false,
+  minProperties: 1,
+});
+
+export type QuestV2EditInput = Static<typeof questV2EditSchema>;
+
 const questV2CreateOpenApiSchema = t.Object(
   { ...questV2CreateProperties, questFundingTotal: questFundingTotalOpenApiSchema },
   { additionalProperties: false },
+);
+const questV2EditOpenApiSchema = t.Object(
+  {
+    ...questV2EditProperties,
+    questFundingTotal: t.Optional(questFundingTotalOpenApiSchema),
+  },
+  { additionalProperties: false, minProperties: 1 },
 );
 
 // TypeBox applies multipleOf with JavaScript remainder, which can reject valid
@@ -144,8 +175,88 @@ export const questV2CreateHttpSchema = {
   },
 } as QuestV2CreateHttpSchema;
 
+type QuestV2EditHttpSchema = StandardSchemaV1Like<QuestV2EditInput, QuestV2EditInput> & {
+  readonly '~standard': {
+    readonly version: 1;
+    readonly vendor: 'elysia';
+    readonly validate: (value: unknown) =>
+      | { value: QuestV2EditInput; issues?: never }
+      | { value?: never; issues: unknown[] };
+    readonly jsonSchema: {
+      readonly input: () => typeof questV2EditOpenApiSchema;
+    };
+  };
+};
+
+const questV2EditValidator = TypeCompiler.Compile(questV2EditSchema);
+
+export const questV2EditHttpSchema = {
+  '~standard': {
+    version: 1 as const,
+    vendor: 'elysia' as const,
+    types: undefined as unknown as {
+      input: QuestV2EditInput;
+      output: QuestV2EditInput;
+    },
+    validate: (value: unknown) => {
+      if (!questV2EditValidator.Check(value)) {
+        return { issues: [...questV2EditValidator.Errors(value)] };
+      }
+
+      if (
+        'questFundingTotal' in value &&
+        !hasExactSatangPrecision(value.questFundingTotal)
+      ) {
+        return {
+          issues: [
+            {
+              path: ['questFundingTotal'],
+              message: 'Expected number to use at most two decimal places',
+            },
+          ],
+        };
+      }
+
+      return { value };
+    },
+    jsonSchema: {
+      input: () => questV2EditOpenApiSchema,
+    },
+  },
+} as QuestV2EditHttpSchema;
+
 export const normalizeQuestV2CreateBody = ({ body }: { body: unknown }) => {
   rejectUnknownFields(questV2CreateSchema)({ body });
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return;
+
+  const payload = body as Record<string, unknown>;
+  if (typeof payload.title === 'string') payload.title = payload.title.trim();
+  if (typeof payload.description === 'string') payload.description = payload.description.trim();
+
+  if (typeof payload.condition === 'object' && payload.condition !== null) {
+    const condition = payload.condition as Record<string, unknown>;
+    if (Array.isArray(condition.items)) {
+      condition.items = condition.items.map((item) =>
+        typeof item === 'string' ? item.trim() : item,
+      );
+    }
+  }
+
+  if (Array.isArray(payload.locations)) {
+    payload.locations = payload.locations.map((location) => {
+      if (typeof location !== 'object' || location === null || Array.isArray(location)) {
+        return location;
+      }
+
+      const normalized = { ...(location as Record<string, unknown>) };
+      if (typeof normalized.label === 'string') normalized.label = normalized.label.trim();
+      return normalized;
+    });
+  }
+};
+
+export const normalizeQuestV2EditBody = ({ body }: { body: unknown }) => {
+  rejectUnknownFields(questV2EditSchema)({ body });
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return;
 
   const payload = body as Record<string, unknown>;
@@ -198,6 +309,7 @@ const questV2ConditionItemSchema = t.Object({
 
 export const questV2CanonicalQuestSchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  version: t.Integer({ minimum: 1 }),
   title: t.String(),
   description: t.Nullable(t.String()),
   condition: t.Object({ items: t.Array(questV2ConditionItemSchema, { minItems: 1 }) }),
@@ -230,10 +342,21 @@ export const questV2MineResponseSchema = t.Object({
 
 export const questV2DetailResponseSchema = questV2CreateResponseSchema;
 
+export const questV2EditResponseSchema = questV2CreateResponseSchema;
+
 export const questV2WriteHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
 });
 
+export const questV2EditHeadersSchema = t.Object(
+  {
+    'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
+    'if-match': t.String({ minLength: 1, pattern: '\\S' }),
+  },
+  { additionalProperties: false },
+);
+
 export type QuestV2MineQuery = Static<typeof questV2MineQuerySchema>;
 export type QuestV2Params = Static<typeof questV2ParamsSchema>;
 export type QuestV2WriteHeaders = Static<typeof questV2WriteHeadersSchema>;
+export type QuestV2EditHeaders = Static<typeof questV2EditHeadersSchema>;
