@@ -6,18 +6,32 @@ import {
   questConditionItem,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
+import {
+  walletFundingReservation,
+  walletIdempotencyKey,
+  walletLedgerAccount,
+  walletLedgerPosting,
+  walletLedgerTransaction,
+  walletWallet,
+} from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import { listOwnQuests } from '@/modules/quest/quest.service';
 import {
   createQuestV2,
   getQuestV2Detail,
+  getQuestV2PublishCheck,
   listOwnQuestV2,
   questV2CreateOperationScope,
   questV2EditOperationScope,
   type QuestV2CreateInput,
 } from '@/modules/quest';
 import { questStatus } from '@/modules/quest/quest.contract';
+import {
+  createSealedLedgerTransaction,
+  ensureInitialMoneyPolicy,
+  ensureWallet,
+  signedSatang,
+} from '@/modules/wallet';
 
 import { randomUUID } from 'node:crypto';
 
@@ -65,6 +79,31 @@ const baseInput: QuestV2CreateInput = {
   locations: [{ label: '  Online  ' }],
 };
 
+const fundHirer = async (amountSatang: number) => {
+  const wallet = await ensureWallet(hirerId);
+  const [spendingAccount] = await db
+    .select({ id: walletLedgerAccount.id })
+    .from(walletLedgerAccount)
+    .where(and(
+      eq(walletLedgerAccount.walletId, wallet.id),
+      eq(walletLedgerAccount.type, 'SPENDING'),
+    ));
+  const [suspenseAccount] = await db
+    .select({ id: walletLedgerAccount.id })
+    .from(walletLedgerAccount)
+    .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
+  if (!spendingAccount || !suspenseAccount) throw new Error('Missing funding accounts');
+
+  await createSealedLedgerTransaction({
+    businessReference: `quest-v2-publish-funding-${randomUUID()}`,
+    eventType: 'TOP_UP',
+    postings: [
+      { accountId: spendingAccount.id, amountSatang: signedSatang(amountSatang) },
+      { accountId: suspenseAccount.id, amountSatang: signedSatang(-amountSatang) },
+    ],
+  });
+};
+
 const postQuest = (body: unknown, key = `quest-v2-http-${randomUUID()}`) =>
   app.handle(
     new Request('http://localhost/api/v2/quests', {
@@ -81,6 +120,13 @@ const postQuest = (body: unknown, key = `quest-v2-http-${randomUUID()}`) =>
 const getQuest = (questId: string) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/${questId}`, {
+      headers: { cookie: sessionCookie },
+    }),
+  );
+
+const getPublishCheck = (questId: string) =>
+  app.handle(
+    new Request(`http://localhost/api/v2/quests/${questId}/publish-check`, {
       headers: { cookie: sessionCookie },
     }),
   );
@@ -131,6 +177,7 @@ beforeAll(async () => {
     lastName: 'Member',
   });
   await db.insert(tag).values({ id: tagId, name: `v2 Design ${tagId}` });
+  await ensureInitialMoneyPolicy();
 });
 
 beforeEach(async () => {
@@ -364,6 +411,227 @@ describe('Quest API v2 persistence', () => {
     );
     expect(detail.status).toBe(200);
     expect((await detail.json()).data).toEqual(created.data);
+  });
+});
+
+describe('Quest API v2 publish check', () => {
+  it('returns an exact inclusive quote for an owned Draft without changing state or finance', async () => {
+    await fundHirer(10_000);
+    const created = await createQuestV2(
+      hirerId,
+      { ...baseInput, locations: [] },
+      `v2-publish-check-read-${randomUUID()}`,
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+
+    const [beforeQuest] = await db
+      .select({
+        questStatus: quest.questStatus,
+        version: quest.version,
+        updatedAt: quest.updatedAt,
+        rewardSatang: quest.rewardSatang,
+        questFundingTotalSatang: quest.questFundingTotalSatang,
+        fundingReservationId: quest.fundingReservationId,
+        policyRevisionId: quest.policyRevisionId,
+        platformFeeBps: quest.platformFeeBps,
+        platformFeePerWorkerSatang: quest.platformFeePerWorkerSatang,
+        questEscrowSatang: quest.questEscrowSatang,
+      })
+      .from(quest)
+      .where(eq(quest.id, created.quest.id));
+    const [wallet] = await db
+      .select()
+      .from(walletWallet)
+      .where(eq(walletWallet.userId, hirerId));
+    if (!wallet) throw new Error('Funding Wallet was not created');
+    const beforeReservations = await db
+      .select({ id: walletFundingReservation.id })
+      .from(walletFundingReservation)
+      .where(eq(walletFundingReservation.ownerUserId, hirerId));
+    const beforeLedger = await db
+      .select({ id: walletLedgerTransaction.id })
+      .from(walletLedgerTransaction)
+      .innerJoin(walletLedgerPosting, eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id))
+      .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
+      .where(eq(walletLedgerAccount.walletId, wallet.id));
+
+    const result = await getQuestV2PublishCheck(hirerId, created.quest.id);
+    if (!result || 'outcome' in result) throw new Error('Publish check did not return a quote');
+    expect(result).toMatchObject({
+      blockingReasons: [],
+      warnings: [],
+      canPublish: true,
+      questFundingTotal: 1.03,
+      questFundingTotalSatang: 103,
+      questReward: 1,
+      questRewardSatang: 100,
+      platformFee: 0.03,
+      platformFeeSatang: 3,
+      escrowRequirement: 1.03,
+      escrowRequirementSatang: 103,
+      headcount: 1,
+      platformFeeBps: 200,
+      feeRoundingMode: 'UP',
+      policyRevision: 1,
+    });
+
+    const [afterQuest] = await db
+      .select({
+        questStatus: quest.questStatus,
+        version: quest.version,
+        updatedAt: quest.updatedAt,
+        rewardSatang: quest.rewardSatang,
+        questFundingTotalSatang: quest.questFundingTotalSatang,
+        fundingReservationId: quest.fundingReservationId,
+        policyRevisionId: quest.policyRevisionId,
+        platformFeeBps: quest.platformFeeBps,
+        platformFeePerWorkerSatang: quest.platformFeePerWorkerSatang,
+        questEscrowSatang: quest.questEscrowSatang,
+      })
+      .from(quest)
+      .where(eq(quest.id, created.quest.id));
+    const [afterWallet] = await db
+      .select()
+      .from(walletWallet)
+      .where(eq(walletWallet.userId, hirerId));
+    const afterReservations = await db
+      .select({ id: walletFundingReservation.id })
+      .from(walletFundingReservation)
+      .where(eq(walletFundingReservation.ownerUserId, hirerId));
+    const afterLedger = await db
+      .select({ id: walletLedgerTransaction.id })
+      .from(walletLedgerTransaction)
+      .innerJoin(walletLedgerPosting, eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id))
+      .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
+      .where(eq(walletLedgerAccount.walletId, wallet.id));
+
+    expect(afterQuest).toEqual(beforeQuest);
+    expect(afterWallet).toEqual(wallet);
+    expect(afterReservations).toEqual(beforeReservations);
+    expect(afterLedger).toEqual(beforeLedger);
+  });
+
+  it('returns every applicable blocker and the quote for an incomplete Draft', async () => {
+    const created = await createQuestV2(
+      otherMemberId,
+      { ...baseInput, tagId: null, dueAt: null, locations: [] },
+      `v2-publish-check-incomplete-${randomUUID()}`,
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+    await db.delete(questConditionItem).where(eq(questConditionItem.questId, created.quest.id));
+
+    const result = await getQuestV2PublishCheck(otherMemberId, created.quest.id);
+    if (!result || 'outcome' in result) throw new Error('Publish check did not return a Draft check');
+    expect(result).toMatchObject({
+      canPublish: false,
+      warnings: [],
+      questFundingTotalSatang: 103,
+      questRewardSatang: 100,
+      platformFeeSatang: 3,
+    });
+    expect(result.blockingReasons).toEqual(expect.arrayContaining([
+      { code: 'QUEST_TAG_REQUIRED', message: 'Quest requires a Tag' },
+      { code: 'QUEST_CONDITION_REQUIRED', message: 'Quest requires at least one Condition Item' },
+      { code: 'QUEST_DUE_AT_REQUIRED', message: 'Quest requires a dueAt' },
+      { code: 'INSUFFICIENT_SPENDING_BALANCE', message: 'Spending Balance is insufficient for Quest Escrow' },
+    ]));
+  });
+
+  it('returns 404 for a non-owned Draft and 409 for a non-Draft Quest', async () => {
+    const created = await createQuestV2(
+      hirerId,
+      baseInput,
+      `v2-publish-check-ownership-${randomUUID()}`,
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+
+    expect(await getQuestV2PublishCheck(otherMemberId, created.quest.id)).toBeUndefined();
+
+    await db
+      .update(quest)
+      .set({ questStatus: questStatus.open, rewardSatang: 100 })
+      .where(eq(quest.id, created.quest.id));
+    expect(await getQuestV2PublishCheck(hirerId, created.quest.id)).toEqual({
+      outcome: 'not-draft',
+    });
+  });
+
+  it('returns the same readiness and quote through the HTTP boundary', async () => {
+    await fundHirer(10_000);
+    const created = await createQuestV2(
+      hirerId,
+      { ...baseInput, locations: [] },
+      `v2-publish-check-http-${randomUUID()}`,
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+
+    const response = await getPublishCheck(created.quest.id);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      success: true;
+      data: {
+        canPublish: boolean;
+        blockingReasons: unknown[];
+        warnings: unknown[];
+        questFundingTotal: number;
+        questReward: number;
+        platformFee: number;
+        escrowRequirement: number;
+      };
+    };
+    expect(body.data).toMatchObject({
+      canPublish: true,
+      blockingReasons: [],
+      warnings: [],
+      questFundingTotal: 1.03,
+      questReward: 1,
+      platformFee: 0.03,
+      escrowRequirement: 1.03,
+    });
+  });
+
+  it('maps missing, non-owned, and non-Draft Quests at the HTTP boundary', async () => {
+    const notFound = {
+      success: false,
+      error: { code: 'QUEST_NOT_FOUND', message: 'Quest not found' },
+    };
+    const missing = await getPublishCheck(randomUUID());
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual(notFound);
+
+    const other = await createQuestV2(
+      otherMemberId,
+      baseInput,
+      `v2-publish-check-http-owner-${randomUUID()}`,
+    );
+    if (!('quest' in other)) throw new Error(`Create failed: ${other.outcome}`);
+    questIds.push(other.quest.id);
+    const nonOwned = await getPublishCheck(other.quest.id);
+    expect(nonOwned.status).toBe(404);
+    expect(await nonOwned.json()).toEqual(notFound);
+
+    const owned = await createQuestV2(
+      hirerId,
+      baseInput,
+      `v2-publish-check-http-state-${randomUUID()}`,
+    );
+    if (!('quest' in owned)) throw new Error(`Create failed: ${owned.outcome}`);
+    questIds.push(owned.quest.id);
+    await db
+      .update(quest)
+      .set({ questStatus: questStatus.open, rewardSatang: 100 })
+      .where(eq(quest.id, owned.quest.id));
+
+    const notDraft = await getPublishCheck(owned.quest.id);
+    expect(notDraft.status).toBe(409);
+    expect(await notDraft.json()).toEqual({
+      success: false,
+      error: { code: 'QUEST_NOT_DRAFT', message: 'Only Draft Quests can be checked' },
+    });
   });
 });
 

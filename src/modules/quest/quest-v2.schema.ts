@@ -344,6 +344,33 @@ export const questV2DetailResponseSchema = questV2CreateResponseSchema;
 
 export const questV2EditResponseSchema = questV2CreateResponseSchema;
 
+const questV2PublishReasonSchema = t.Object({
+  code: t.String(),
+  message: t.String(),
+});
+
+export const questV2PublishCheckResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    blockingReasons: t.Array(questV2PublishReasonSchema),
+    warnings: t.Array(questV2PublishReasonSchema),
+    canPublish: t.Boolean(),
+    questFundingTotal: questFundingTotalSchema,
+    questFundingTotalSatang: t.Integer({ minimum: 100, maximum: 70_000_000 }),
+    questReward: t.Number({ minimum: 0 }),
+    questRewardSatang: t.Integer({ minimum: 0 }),
+    platformFee: t.Number({ minimum: 0 }),
+    platformFeeSatang: t.Integer({ minimum: 0 }),
+    escrowRequirement: t.Number({ minimum: 0 }),
+    escrowRequirementSatang: t.Integer({ minimum: 0, maximum: 2_000_000_000 }),
+    headcount: t.Integer({ minimum: 1, maximum: 20 }),
+    platformFeeBps: t.Integer({ minimum: 0, maximum: 10000 }),
+    feeRoundingMode: t.Literal('UP'),
+    policyRevisionId: t.String({ format: 'uuid' }),
+    policyRevision: t.Integer({ minimum: 1 }),
+  }),
+});
+
 export const questV2WriteHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
 });

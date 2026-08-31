@@ -8,6 +8,7 @@ import {
   createQuestV2Controller,
   editQuestV2Controller,
   getQuestV2DetailController,
+  getQuestV2PublishCheckController,
   listOwnQuestV2Controller,
 } from './quest-v2.controller';
 import {
@@ -20,6 +21,7 @@ import {
   questV2MineQuerySchema,
   questV2MineResponseSchema,
   questV2ParamsSchema,
+  questV2PublishCheckResponseSchema,
   questV2WriteHeadersSchema,
   normalizeQuestV2CreateBody,
   normalizeQuestV2EditBody,
@@ -66,6 +68,18 @@ export const questV2Route = new Elysia({
       description:
         'Updates the supplied fields of an owned QUEST_DRAFT with optimistic concurrency.',
       operationId: 'editQuestV2Draft',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:questId/publish-check', getQuestV2PublishCheckController, {
+    params: questV2ParamsSchema,
+    response: responses(questV2PublishCheckResponseSchema, 400, 401, 404, 409, 500, 503),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Check whether a v2 Quest Draft can be published',
+      description:
+        'Returns publish blockers, warnings, and the inclusive Quest Funding Total quote for the Hirer without changing Quest or Wallet state.',
+      operationId: 'getQuestV2PublishCheck',
       security: betterAuthSecurity,
     },
   })

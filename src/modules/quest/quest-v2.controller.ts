@@ -1,4 +1,5 @@
 import type { AuthedContext } from '@/modules/auth';
+import { MoneyDomainError } from '@/modules/wallet';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import { CursorInputError, decodeCursor, parsePageLimit } from '@/shared/cursor';
@@ -10,6 +11,7 @@ import {
   createQuestV2,
   editQuestV2,
   getQuestV2Detail,
+  getQuestV2PublishCheck,
   listOwnQuestV2,
 } from './quest-v2.service';
 import type {
@@ -22,6 +24,7 @@ import type {
   questV2MineQuerySchema,
   questV2MineResponseSchema,
   questV2ParamsSchema,
+  questV2PublishCheckResponseSchema,
   questV2WriteHeadersSchema,
 } from './quest-v2.schema';
 
@@ -35,6 +38,7 @@ type QuestV2Params = Static<typeof questV2ParamsSchema>;
 type QuestV2WriteHeaders = Static<typeof questV2WriteHeadersSchema>;
 type QuestV2EditHeaders = Static<typeof questV2EditHeadersSchema>;
 type QuestV2DetailResponse = Static<typeof questV2DetailResponseSchema>['data'];
+type QuestV2PublishCheckResponse = Static<typeof questV2PublishCheckResponseSchema>['data'];
 
 const invalidInput = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 400;
@@ -230,4 +234,34 @@ export const getQuestV2DetailController = async ({
   }
 
   return apiSuccess(questDetail);
+};
+
+export const getQuestV2PublishCheckController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  params: QuestV2Params;
+}): Promise<ApiResponse<QuestV2PublishCheckResponse>> => {
+  let result: Awaited<ReturnType<typeof getQuestV2PublishCheck>>;
+  try {
+    result = await getQuestV2PublishCheck(session.user.id, params.questId);
+  } catch (error) {
+    if (error instanceof MoneyDomainError) {
+      set.status = 503;
+      return apiError('QUEST_ESCROW_UNAVAILABLE', 'Quest Escrow could not be evaluated');
+    }
+    throw error;
+  }
+
+  if (!result) {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+  if ('outcome' in result) {
+    set.status = 409;
+    return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be checked');
+  }
+
+  return apiSuccess(result);
 };

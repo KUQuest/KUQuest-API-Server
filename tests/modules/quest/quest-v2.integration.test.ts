@@ -77,6 +77,7 @@ describe('Quest API v2 integration', () => {
 
   it.each([
     ['GET', '/api/v2/quests/mine'],
+    ['GET', '/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/publish-check'],
     ['GET', '/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c'],
     ['POST', '/api/v2/quests'],
     ['PATCH', '/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c'],
@@ -124,6 +125,9 @@ describe('Quest API v2 integration', () => {
     expect(document.paths['/api/v2/quests/{questId}']?.patch?.operationId).toBe(
       'editQuestV2Draft',
     );
+    expect(
+      document.paths['/api/v2/quests/{questId}/publish-check']?.get?.operationId,
+    ).toBe('getQuestV2PublishCheck');
     expect(document.paths['/api/v2/quests']?.post?.security).toEqual([
       { betterAuthSession: [] },
     ]);
@@ -131,6 +135,9 @@ describe('Quest API v2 integration', () => {
       { betterAuthSession: [] },
     ]);
     expect(document.paths['/api/v2/quests/{questId}']?.patch?.security).toEqual([
+      { betterAuthSession: [] },
+    ]);
+    expect(document.paths['/api/v2/quests/{questId}/publish-check']?.get?.security).toEqual([
       { betterAuthSession: [] },
     ]);
 
