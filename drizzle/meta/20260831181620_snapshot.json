@@ -1,6 +1,6 @@
 {
-  "id": "3053bfbf-eb17-47ea-b3f4-3f8260193d39",
-  "prevId": "14d22f10-051c-4bcb-bf39-2d1c743548bd",
+  "id": "e534030f-4bc4-4c93-81b5-96a0fd4be9ec",
+  "prevId": "7d002e9f-4700-4fa0-a958-99365d2059b9",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -913,6 +913,12 @@
         },
         "deleted_at": {
           "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "object_deleted_at": {
+          "name": "object_deleted_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -3929,6 +3935,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "api_version": {
+          "name": "api_version",
+          "type": "varchar(2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'v1'"
+        },
         "title": {
           "name": "title",
           "type": "varchar(200)",
@@ -3962,6 +3975,18 @@
           "notNull": true,
           "default": "'SOLO'"
         },
+        "v2_mode": {
+          "name": "v2_mode",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "v2_participation": {
+          "name": "v2_participation",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "quest_status": {
           "name": "quest_status",
           "type": "quest_status",
@@ -3970,11 +3995,24 @@
           "notNull": true,
           "default": "'QUEST_DRAFT'"
         },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
         "reward_satang": {
           "name": "reward_satang",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "quest_funding_total_satang": {
+          "name": "quest_funding_total_satang",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "funding_reservation_id": {
           "name": "funding_reservation_id",
@@ -4265,9 +4303,37 @@
       },
       "policies": {},
       "checkConstraints": {
+        "quest_api_version_check": {
+          "name": "quest_api_version_check",
+          "value": "\"quest\".\"api_version\" IN ('v1', 'v2')"
+        },
+        "quest_v2_mode_check": {
+          "name": "quest_v2_mode_check",
+          "value": "\"quest\".\"v2_mode\" IS NULL OR \"quest\".\"v2_mode\" IN ('FIRST_COME_FIRST_SERVED', 'CANDIDATE')"
+        },
+        "quest_v2_participation_check": {
+          "name": "quest_v2_participation_check",
+          "value": "\"quest\".\"v2_participation\" IS NULL OR \"quest\".\"v2_participation\" IN ('SINGLE', 'GROUP')"
+        },
+        "quest_version_check": {
+          "name": "quest_version_check",
+          "value": "\"quest\".\"version\" >= 1"
+        },
+        "quest_funding_total_check": {
+          "name": "quest_funding_total_check",
+          "value": "\"quest\".\"quest_funding_total_satang\" IS NULL OR \"quest\".\"quest_funding_total_satang\" BETWEEN 100 AND 70000000"
+        },
         "quest_reward_check": {
           "name": "quest_reward_check",
-          "value": "\"quest\".\"reward_satang\" > 0"
+          "value": "\"quest\".\"reward_satang\" IS NULL OR \"quest\".\"reward_satang\" > 0"
+        },
+        "quest_v2_draft_reward_check": {
+          "name": "quest_v2_draft_reward_check",
+          "value": "\"quest\".\"api_version\" <> 'v2' OR \"quest\".\"quest_status\" <> 'QUEST_DRAFT' OR \"quest\".\"reward_satang\" IS NULL"
+        },
+        "quest_reward_required_check": {
+          "name": "quest_reward_required_check",
+          "value": "(\"quest\".\"api_version\" = 'v2' AND \"quest\".\"quest_status\" = 'QUEST_DRAFT') OR \"quest\".\"reward_satang\" IS NOT NULL"
         },
         "quest_finance_snapshot_bps_check": {
           "name": "quest_finance_snapshot_bps_check",
@@ -4910,6 +4976,92 @@
         "quest_completion_confirmation_owner_check": {
           "name": "quest_completion_confirmation_owner_check",
           "value": "num_nonnulls(\"quest_completion_confirmation\".\"worker_id\", \"quest_completion_confirmation\".\"team_id\") = 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.quest_condition_item": {
+      "name": "quest_condition_item",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "quest_id": {
+          "name": "quest_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "quest_condition_item_quest_id_idx": {
+          "name": "quest_condition_item_quest_id_idx",
+          "columns": [
+            {
+              "expression": "quest_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "quest_condition_item_quest_id_quest_id_fk": {
+          "name": "quest_condition_item_quest_id_quest_id_fk",
+          "tableFrom": "quest_condition_item",
+          "tableTo": "quest",
+          "columnsFrom": [
+            "quest_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "quest_condition_item_quest_id_position_key": {
+          "name": "quest_condition_item_quest_id_position_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "quest_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "quest_condition_item_position_check": {
+          "name": "quest_condition_item_position_check",
+          "value": "\"quest_condition_item\".\"position\" >= 0"
+        },
+        "quest_condition_item_text_check": {
+          "name": "quest_condition_item_text_check",
+          "value": "btrim(\"quest_condition_item\".\"text\") <> ''"
         }
       },
       "isRLSEnabled": false
@@ -7226,6 +7378,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "result_data": {
+          "name": "result_data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "processing_status": {
           "name": "processing_status",
           "type": "text",
@@ -8021,6 +8179,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "object_deleted_at": {
+          "name": "object_deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -8227,6 +8391,14 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "chat_conversation_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'CONVERSATION_WORK'"
         },
         "quest_title": {
           "name": "quest_title",
@@ -9145,6 +9317,14 @@
         "CONSUMED",
         "HIDDEN",
         "EXPIRED"
+      ]
+    },
+    "public.chat_conversation_type": {
+      "name": "chat_conversation_type",
+      "schema": "public",
+      "values": [
+        "CONVERSATION_CANDIDATE_INQUIRY",
+        "CONVERSATION_WORK"
       ]
     },
     "public.chat_membership_role": {

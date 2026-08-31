@@ -337,6 +337,13 @@
       "when": 1788185369427,
       "tag": "20260831140929_omniscient_doomsday",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1788200180189,
+      "tag": "20260831181620_tan_black_tarantula",
+      "breakpoints": true
     }
   ]
 }

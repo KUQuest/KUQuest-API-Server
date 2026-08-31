@@ -15,6 +15,7 @@ import { assignmentStatus, questMode, questParticipation, questStatus } from './
 import { autoApproveDueProofs } from './quest-proof.service';
 import { cancelUnfilledQuest } from './quest-settlement.service';
 import { expireQuestEditRequest } from './quest.service';
+import { cleanupQuestV2ImageObjects } from './quest-v2.service';
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -39,7 +40,7 @@ export type QuestLifecycleWorkerOptions = {
 };
 
 export type QuestLifecycleWorkerError = {
-  operation: 'start' | 'auto-cancel' | 'dispute' | 'invitation-expiry' | 'edit-timeout' | 'auto-approval';
+  operation: 'start' | 'auto-cancel' | 'dispute' | 'invitation-expiry' | 'edit-timeout' | 'auto-approval' | 'quest-image-cleanup';
   id?: string;
   cause: unknown;
 };
@@ -319,6 +320,14 @@ export const runQuestLifecycleWorker = async (
   const now = clock.now();
   const limit = boundedSize(options.batchSize);
   const errors: QuestLifecycleWorkerError[] = [];
+
+  try {
+    await cleanupQuestV2ImageObjects(now, limit);
+  } catch (cause) {
+    const error = { operation: 'quest-image-cleanup' as const, cause };
+    errors.push(error);
+    reportError(options.onError, error);
+  }
 
   let autoApprovedProofIds: string[] = [];
   try {

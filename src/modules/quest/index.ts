@@ -21,17 +21,32 @@ export type {
 } from './quest-v2.contract';
 export { questV2Route } from './quest-v2.route';
 export {
+  addQuestV2Images,
+  checkQuestV2ImageUpload,
+  cleanupQuestV2ImageObjects,
   createQuestV2,
+  deleteQuestV2Image,
   editQuestV2,
   getQuestV2Detail,
   getQuestV2PublishCheck,
   listOwnQuestV2,
   questV2CreateOperationScope,
   questV2EditOperationScope,
+  questV2ImageRemoveOperationScope,
+  questV2ImageRemoveRequestHash,
+  questV2ImageUploadOperationScope,
+  questV2ImageUploadRequestHash,
+  recordQuestV2ImageCleanupTombstones,
+  releaseQuestV2ImageUploadReservation,
 } from './quest-v2.service';
 export type {
   QuestV2CreateOutcome,
   QuestV2EditOutcome,
+  QuestV2Detail,
+  QuestV2ImageReference,
+  QuestV2ImageRemoveOutcome,
+  QuestV2ImageUploadOutcome,
+  QuestV2ImageUploadPreflight,
   QuestV2PublishCheckOutcome,
 } from './quest-v2.service';
 export {
@@ -49,6 +64,8 @@ export type {
   QuestV2CreateInput,
   QuestV2EditHeaders,
   QuestV2EditInput,
+  QuestV2ImageParams,
+  QuestV2ImagesUploadInput,
   QuestV2MineQuery,
   QuestV2Params,
   QuestV2WriteHeaders,

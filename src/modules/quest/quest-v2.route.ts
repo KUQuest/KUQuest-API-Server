@@ -5,7 +5,9 @@ import { API_V2_PREFIX } from '@/shared/api-version';
 import { Elysia } from 'elysia';
 
 import {
+  addQuestImagesV2Controller,
   createQuestV2Controller,
+  deleteQuestImageV2Controller,
   editQuestV2Controller,
   getQuestV2DetailController,
   getQuestV2PublishCheckController,
@@ -20,6 +22,9 @@ import {
   questV2EditResponseSchema,
   questV2MineQuerySchema,
   questV2MineResponseSchema,
+  questV2ImageParamsSchema,
+  questV2ImagesResponseSchema,
+  questV2ImagesUploadSchema,
   questV2ParamsSchema,
   questV2PublishCheckHttpResponseSchema,
   questV2WriteHeadersSchema,
@@ -71,6 +76,34 @@ export const questV2Route = new Elysia({
       security: betterAuthSecurity,
     },
   })
+  .post('/:questId/images', addQuestImagesV2Controller, {
+    params: questV2ParamsSchema,
+    body: questV2ImagesUploadSchema,
+    headers: questV2WriteHeadersSchema,
+    type: 'multipart/form-data',
+    response: responses(questV2ImagesResponseSchema, 400, 401, 404, 409, 413, 415, 500, 503),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Add Quest Images to a v2 Draft',
+      description:
+        'Appends validated JPEG, PNG, or WebP files to the authenticated Hirer’s QUEST_DRAFT in request order.',
+      operationId: 'addQuestImagesV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .delete('/:questId/images/:imageId', deleteQuestImageV2Controller, {
+    params: questV2ImageParamsSchema,
+    headers: questV2WriteHeadersSchema,
+    response: responses(questV2ImagesResponseSchema, 400, 401, 404, 409, 500, 503),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Remove a Quest Image from a v2 Draft',
+      description:
+        'Removes one Quest Image by imageId, repacks the remaining positions, and returns the complete ordered gallery.',
+      operationId: 'deleteQuestImageV2',
+      security: betterAuthSecurity,
+    },
+  })
   .get('/:questId/publish-check', getQuestV2PublishCheckController, {
     params: questV2ParamsSchema,
     response: responses(questV2PublishCheckHttpResponseSchema, 400, 401, 404, 409, 500, 503),
@@ -85,7 +118,7 @@ export const questV2Route = new Elysia({
   })
   .get('/:questId', getQuestV2DetailController, {
     params: questV2ParamsSchema,
-    response: responses(questV2DetailResponseSchema, 400, 401, 404, 500),
+    response: responses(questV2DetailResponseSchema, 400, 401, 404, 500, 503),
     detail: {
       tags: ['Quests v2'],
       summary: 'Get a v2 Quest detail',

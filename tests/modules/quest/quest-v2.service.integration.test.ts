@@ -339,7 +339,8 @@ describe('Quest API v2 persistence', () => {
     expect(changed).toEqual({ outcome: 'idempotency-key-reused' });
 
     const detail = await getQuestV2Detail(hirerId, first.quest.id);
-    expect(detail).toEqual(first.quest);
+    expect(detail).toMatchObject(first.quest);
+    expect(detail?.images).toEqual([]);
     expect(await getQuestV2Detail(otherMemberId, first.quest.id)).toBeUndefined();
 
     const own = await listOwnQuestV2(hirerId, { limit: 20 });
@@ -503,7 +504,9 @@ describe('Quest API v2 persistence', () => {
       }),
     );
     expect(detail.status).toBe(200);
-    expect((await detail.json()).data).toEqual(created.data);
+    const detailBody = (await detail.json()).data;
+    expect(detailBody).toMatchObject(created.data);
+    expect(detailBody.images).toEqual([]);
   });
 });
 
@@ -896,7 +899,9 @@ describe('Quest API v2 Draft editing', () => {
     });
 
     const detail = await getQuest(created.quest.id);
-    expect((await detail.json()).data).toEqual(body.data);
+    const detailBody = (await detail.json()).data;
+    expect(detailBody).toMatchObject(body.data);
+    expect(detailBody.images).toEqual([]);
   });
 
   it('rejects a stale version without changing the Draft', async () => {
@@ -937,7 +942,9 @@ describe('Quest API v2 Draft editing', () => {
     });
 
     const detail = await getQuest(created.quest.id);
-    expect((await detail.json()).data).toEqual(currentBody.data);
+    const detailBody = (await detail.json()).data;
+    expect(detailBody).toMatchObject(currentBody.data);
+    expect(detailBody.images).toEqual([]);
   });
 
   it('lets only the first concurrent edit commit for one Draft version', async () => {

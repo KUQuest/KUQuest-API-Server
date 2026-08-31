@@ -74,6 +74,7 @@ CREATE TABLE file (
   uploaded_by_user_id UUID REFERENCES auth_user(id),
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at          TIMESTAMPTZ,
+  object_deleted_at   TIMESTAMPTZ,
   UNIQUE (bucket, object_key)
 );
 CREATE INDEX file_uploaded_by_user_id_idx ON file (uploaded_by_user_id);

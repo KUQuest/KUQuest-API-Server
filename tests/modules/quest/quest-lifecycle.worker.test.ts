@@ -1,5 +1,6 @@
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
+import { file } from '@/database/schema/file.schema';
 import {
   proofSubmission,
   quest,
@@ -9,9 +10,10 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
+import { questV2Storage } from '@/modules/quest/quest.storage';
 
 import { and, eq, inArray } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
 
 const hirerId = crypto.randomUUID();
 const workerId = crypto.randomUUID();
@@ -20,6 +22,7 @@ const testNow = new Date('2026-08-27T12:00:00.000Z');
 const questIds: string[] = [];
 const teamIds: string[] = [];
 const invitationIds: string[] = [];
+const cleanupFileIds: string[] = [];
 
 const createQuest = async (input: Partial<typeof quest.$inferInsert> = {}) => {
   const id = crypto.randomUUID();
@@ -60,12 +63,15 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db.delete(file).where(inArray(file.id, cleanupFileIds));
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(questTeam).where(inArray(questTeam.id, teamIds));
   await db.delete(questTeamInvitation).where(inArray(questTeamInvitation.id, invitationIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(authUser).where(inArray(authUser.id, [hirerId, workerId]));
 });
+
+afterEach(() => mock.restore());
 
 describe('Quest lifecycle worker', () => {
   it('starts only due assigned Quests with one fake-time instant for all active Assignments', async () => {
@@ -156,5 +162,50 @@ describe('Quest lifecycle worker', () => {
     const [invitation] = await db.select({ status: questTeamInvitation.invitationStatus, respondedAt: questTeamInvitation.respondedAt })
       .from(questTeamInvitation).where(and(eq(questTeamInvitation.id, invitationId), eq(questTeamInvitation.invitationStatus, 'INVITATION_EXPIRED')));
     expect(invitation?.respondedAt?.getTime()).toBe(testNow.getTime());
+  });
+
+  it('reports image cleanup errors and continues lifecycle processing', async () => {
+    const questId = await createQuest({
+      questStatus: 'QUEST_ASSIGNED',
+      startTime: new Date(testNow.getTime() - 1),
+    });
+    await addAssignment(questId);
+    const cleanupFileId = crypto.randomUUID();
+    cleanupFileIds.push(cleanupFileId);
+    await db.insert(file).values({
+      id: cleanupFileId,
+      bucket: 'test-bucket',
+      objectKey: `quests/v2/${hirerId}/pending.png`,
+      contentType: 'image/png',
+      sizeBytes: 3,
+      uploadedByUserId: hirerId,
+      deletedAt: new Date(testNow.getTime() - 1),
+    });
+    const deleteObject = spyOn(questV2Storage, 'delete')
+      .mockRejectedValueOnce(new Error('storage unavailable'))
+      .mockResolvedValue();
+
+    const result = await runQuestLifecycleWorker({
+      clock: { now: () => testNow },
+      autoApprove: async () => [],
+    });
+
+    expect(result.startedQuestIds).toContain(questId);
+    const [pending] = await db
+      .select({ objectDeletedAt: file.objectDeletedAt })
+      .from(file)
+      .where(eq(file.id, cleanupFileId));
+    expect(pending?.objectDeletedAt).toBeNull();
+
+    await runQuestLifecycleWorker({
+      clock: { now: () => testNow },
+      autoApprove: async () => [],
+    });
+    expect(deleteObject).toHaveBeenCalledTimes(2);
+    const [cleaned] = await db
+      .select({ objectDeletedAt: file.objectDeletedAt })
+      .from(file)
+      .where(eq(file.id, cleanupFileId));
+    expect(cleaned?.objectDeletedAt).not.toBeNull();
   });
 });

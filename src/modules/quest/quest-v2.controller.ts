@@ -3,18 +3,34 @@ import { MoneyDomainError, toBaht } from '@/modules/wallet';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import { CursorInputError, decodeCursor, parsePageLimit } from '@/shared/cursor';
+import {
+  ImageLinkUnavailableError,
+  ImageTooLargeError,
+  ImageUploadError,
+  UnsupportedImageTypeError,
+} from '@/shared/image-storage';
 import { readResourceVersion } from '@/shared/resource-version';
 
 import type { Static } from 'elysia';
 
 import {
   createQuestV2,
+  addQuestV2Images,
+  checkQuestV2ImageUpload,
+  deleteQuestV2Image,
   editQuestV2,
   getQuestV2Detail,
   getQuestV2PublishCheck,
   listOwnQuestV2,
+  questV2ImageRemoveRequestHash,
+  questV2ImageUploadRequestHash,
+  recordQuestV2ImageCleanupTombstones,
+  releaseQuestV2ImageUploadReservation,
 } from './quest-v2.service';
+import type { QuestV2ImageReference } from './quest-v2.service';
 import type { QuestV2PublishCheck } from './quest-v2.publish.policy';
+import { questV2Storage } from './quest.storage';
+import type { StoredQuestImage } from './quest.storage';
 import type {
   questV2CreateResponseSchema,
   questV2CreateSchema,
@@ -22,6 +38,9 @@ import type {
   questV2EditHeadersSchema,
   questV2EditResponseSchema,
   questV2EditSchema,
+  questV2ImageParamsSchema,
+  questV2ImagesResponseSchema,
+  questV2ImagesUploadSchema,
   questV2MineQuerySchema,
   questV2MineResponseSchema,
   questV2ParamsSchema,
@@ -40,10 +59,144 @@ type QuestV2WriteHeaders = Static<typeof questV2WriteHeadersSchema>;
 type QuestV2EditHeaders = Static<typeof questV2EditHeadersSchema>;
 type QuestV2DetailResponse = Static<typeof questV2DetailResponseSchema>['data'];
 type QuestV2PublishCheckResponse = Static<typeof questV2PublishCheckResponseSchema>['data'];
+type QuestV2ImagesResponse = Static<typeof questV2ImagesResponseSchema>['data'];
+type QuestV2ImagesUploadInput = Static<typeof questV2ImagesUploadSchema>;
+type QuestV2ImageParams = Static<typeof questV2ImageParamsSchema>;
 
 const invalidInput = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 400;
   return apiError(code, message);
+};
+
+const discardUploadedQuestImages = async (
+  userId: string,
+  images: StoredQuestImage[],
+): Promise<void> => {
+  const pendingCleanup: StoredQuestImage[] = [];
+  await Promise.all(
+    images.map(async (image) => {
+      try {
+        await questV2Storage.delete(image.bucket, image.objectKey);
+      } catch (error) {
+        pendingCleanup.push(image);
+        console.error('[quest-v2-image-upload] Compensating object deletion failed', {
+          bucket: image.bucket,
+          error,
+          objectKey: image.objectKey,
+        });
+      }
+    }),
+  );
+
+  if (pendingCleanup.length === 0) return;
+
+  try {
+    await recordQuestV2ImageCleanupTombstones(userId, pendingCleanup);
+  } catch (error) {
+    console.error('[quest-v2-image-upload] Cleanup tombstone could not be stored', {
+      error,
+      objectKeys: pendingCleanup.map((image) => image.objectKey),
+    });
+  }
+};
+
+const releaseQuestV2ImageReservation = async (
+  userId: string,
+  key: string,
+  requestHash: string,
+): Promise<void> => {
+  try {
+    await releaseQuestV2ImageUploadReservation(userId, key, requestHash);
+  } catch (error) {
+    console.error('[quest-v2-image-upload] Idempotency reservation release failed', {
+      error,
+      key,
+      requestHash,
+      userId,
+    });
+  }
+};
+
+const serializeQuestV2Images = (
+  set: AuthedContext['set'],
+  images: QuestV2ImageReference[],
+): QuestV2ImagesResponse['images'] | ReturnType<typeof apiError> => {
+  try {
+    return images.map((image) => {
+      const link = questV2Storage.linkForWithExpiry(image);
+      return {
+        imageId: image.imageId,
+        fileId: image.fileId,
+        position: image.position,
+        url: link.url,
+        urlExpiresAt: link.expiresAt.toISOString(),
+      };
+    });
+  } catch (error) {
+    if (!(error instanceof ImageLinkUnavailableError)) throw error;
+
+    set.status = 503;
+    return apiError(
+      'QUEST_IMAGE_STORAGE_UNAVAILABLE',
+      'Quest Image storage is unavailable',
+    );
+  }
+};
+
+const mapQuestV2ImageMutationOutcome = (
+  set: AuthedContext['set'],
+  outcome:
+    | 'invalid-idempotency-key'
+    | 'not-found'
+    | 'not-draft'
+    | 'limit-reached'
+    | 'idempotency-key-reused'
+    | 'idempotency-in-progress'
+    | 'idempotency-unavailable',
+) => {
+  if (outcome === 'not-found') {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+  if (outcome === 'not-draft') {
+    set.status = 409;
+    return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be changed');
+  }
+  if (outcome === 'limit-reached') {
+    set.status = 409;
+    return apiError('QUEST_IMAGE_LIMIT_REACHED', 'A Quest can have at most 3 images');
+  }
+  if (outcome === 'idempotency-key-reused') {
+    set.status = 409;
+    return apiError('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request');
+  }
+  if (outcome === 'idempotency-in-progress') {
+    set.status = 409;
+    return apiError('IDEMPOTENCY_IN_PROGRESS', 'A Quest Image operation is still processing');
+  }
+  if (outcome === 'idempotency-unavailable') {
+    set.status = 503;
+    return apiError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency record is unavailable');
+  }
+
+  return invalidInput(set, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency key must not be empty');
+};
+
+const mapQuestV2ImageStorageError = (set: AuthedContext['set'], error: unknown) => {
+  if (error instanceof ImageTooLargeError) {
+    set.status = 413;
+    return apiError('IMAGE_TOO_LARGE', error.message);
+  }
+  if (error instanceof UnsupportedImageTypeError) {
+    set.status = 415;
+    return apiError('UNSUPPORTED_IMAGE_TYPE', error.message);
+  }
+  if (error instanceof ImageUploadError) {
+    set.status = 503;
+    return apiError('QUEST_IMAGE_STORAGE_UNAVAILABLE', 'Quest Image storage is unavailable');
+  }
+
+  return undefined;
 };
 
 const toQuestV2PublishCheckResponse = (
@@ -206,6 +359,124 @@ export const editQuestV2Controller = async ({
   return apiSuccess(result.quest);
 };
 
+export const addQuestImagesV2Controller = async ({
+  body,
+  headers,
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  body: QuestV2ImagesUploadInput;
+  headers: QuestV2WriteHeaders;
+  params: QuestV2Params;
+}): Promise<ApiResponse<QuestV2ImagesResponse>> => {
+  const requestHash = await questV2ImageUploadRequestHash(
+    session.user.id,
+    params.questId,
+    body.images,
+  );
+  const preflight = await checkQuestV2ImageUpload(
+    session.user.id,
+    params.questId,
+    body.images.length,
+    headers['idempotency-key'],
+    requestHash,
+  );
+  if ('outcome' in preflight) {
+    return mapQuestV2ImageMutationOutcome(set, preflight.outcome);
+  }
+
+  if ('replay' in preflight) {
+    const images = serializeQuestV2Images(set, preflight.replay.images);
+    if ('success' in images) return images;
+    return apiSuccess({ images });
+  }
+
+  const uploaded: StoredQuestImage[] = [];
+  try {
+    for (const image of body.images) {
+      uploaded.push(await questV2Storage.upload(session.user.id, image));
+    }
+  } catch (error) {
+    const failedUploadObject =
+      error instanceof ImageUploadError && error.cleanupObject
+        ? [error.cleanupObject]
+        : [];
+    await discardUploadedQuestImages(session.user.id, [...uploaded, ...failedUploadObject]);
+    await releaseQuestV2ImageReservation(
+      session.user.id,
+      headers['idempotency-key'],
+      requestHash,
+    );
+    const mapped = mapQuestV2ImageStorageError(set, error);
+    if (mapped) return mapped;
+    throw error;
+  }
+
+  let result: Awaited<ReturnType<typeof addQuestV2Images>>;
+  try {
+    result = await addQuestV2Images(
+      session.user.id,
+      params.questId,
+      uploaded,
+      headers['idempotency-key'],
+      requestHash,
+    );
+  } catch (error) {
+    await discardUploadedQuestImages(session.user.id, uploaded);
+    await releaseQuestV2ImageReservation(
+      session.user.id,
+      headers['idempotency-key'],
+      requestHash,
+    );
+    throw error;
+  }
+  if ('outcome' in result) {
+    await discardUploadedQuestImages(session.user.id, uploaded);
+    await releaseQuestV2ImageReservation(
+      session.user.id,
+      headers['idempotency-key'],
+      requestHash,
+    );
+    return mapQuestV2ImageMutationOutcome(set, result.outcome);
+  }
+  if (result.replayed) await discardUploadedQuestImages(session.user.id, uploaded);
+
+  const images = serializeQuestV2Images(set, result.images);
+  if ('success' in images) return images;
+  return apiSuccess({ images });
+};
+
+export const deleteQuestImageV2Controller = async ({
+  headers,
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  headers: QuestV2WriteHeaders;
+  params: QuestV2ImageParams;
+}): Promise<ApiResponse<QuestV2ImagesResponse>> => {
+  const requestHash = await questV2ImageRemoveRequestHash(
+    session.user.id,
+    params.questId,
+    params.imageId,
+  );
+  const result = await deleteQuestV2Image(
+    session.user.id,
+    params.questId,
+    params.imageId,
+    headers['idempotency-key'],
+    requestHash,
+  );
+  if ('outcome' in result) {
+    return mapQuestV2ImageMutationOutcome(set, result.outcome);
+  }
+
+  const images = serializeQuestV2Images(set, result.images);
+  if ('success' in images) return images;
+  return apiSuccess({ images });
+};
+
 const validateMineQuery = (query: QuestV2MineQuery, set: AuthedContext['set']) => {
   try {
     parsePageLimit(query.limit);
@@ -244,7 +515,9 @@ export const getQuestV2DetailController = async ({
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
 
-  return apiSuccess(questDetail);
+  const images = serializeQuestV2Images(set, questDetail.images);
+  if ('success' in images) return images;
+  return apiSuccess({ ...questDetail, images });
 };
 
 export const getQuestV2PublishCheckController = async ({
