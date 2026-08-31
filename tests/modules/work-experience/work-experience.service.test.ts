@@ -113,6 +113,25 @@ describe('work experience persistence', () => {
     expect(await updateWorkExperience(studentB, created!.id, { title: 'Hijacked' })).toBeUndefined();
   });
 
+  it('returns the current record unchanged for an empty patch', async () => {
+    const created = await createValidExperience(studentA);
+
+    const updated = await updateWorkExperience(studentA, created!.id, {});
+
+    expect(updated).toMatchObject({ id: created!.id, version: created!.version, title: created!.title });
+  });
+
+  it('explicitly clears organization and description when set to null', async () => {
+    const created = await createValidExperience(studentA);
+
+    const updated = await updateWorkExperience(studentA, created!.id, {
+      organization: null,
+      description: null,
+    });
+
+    expect(updated).toMatchObject({ organization: null, description: null });
+  });
+
   it('deletes only an owned entry', async () => {
     const created = await createValidExperience(studentA);
 
