@@ -113,6 +113,47 @@ const fundHirer = async (amountSatang: number) => {
   });
 };
 
+const readPublishCheckSnapshot = async (questId: string, userId: string) => {
+  const [questSnapshot] = await db
+    .select({
+      questStatus: quest.questStatus,
+      version: quest.version,
+      updatedAt: quest.updatedAt,
+      rewardSatang: quest.rewardSatang,
+      questFundingTotalSatang: quest.questFundingTotalSatang,
+      fundingReservationId: quest.fundingReservationId,
+      policyRevisionId: quest.policyRevisionId,
+      platformFeeBps: quest.platformFeeBps,
+      platformFeePerWorkerSatang: quest.platformFeePerWorkerSatang,
+      questEscrowSatang: quest.questEscrowSatang,
+    })
+    .from(quest)
+    .where(eq(quest.id, questId));
+  const [walletSnapshot] = await db
+    .select()
+    .from(walletWallet)
+    .where(eq(walletWallet.userId, userId));
+  if (!walletSnapshot) throw new Error('Funding Wallet was not created');
+
+  const reservations = await db
+    .select({ id: walletFundingReservation.id })
+    .from(walletFundingReservation)
+    .where(eq(walletFundingReservation.ownerUserId, userId));
+  const ledger = await db
+    .select({ id: walletLedgerTransaction.id })
+    .from(walletLedgerTransaction)
+    .innerJoin(walletLedgerPosting, eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id))
+    .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
+    .where(eq(walletLedgerAccount.walletId, walletSnapshot.id));
+
+  return {
+    quest: questSnapshot,
+    wallet: walletSnapshot,
+    reservations,
+    ledger,
+  };
+};
+
 const postQuest = (body: unknown, key = `quest-v2-http-${randomUUID()}`) =>
   app.handle(
     new Request('http://localhost/api/v2/quests', {
@@ -477,36 +518,7 @@ describe('Quest API v2 publish check', () => {
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
 
-    const [beforeQuest] = await db
-      .select({
-        questStatus: quest.questStatus,
-        version: quest.version,
-        updatedAt: quest.updatedAt,
-        rewardSatang: quest.rewardSatang,
-        questFundingTotalSatang: quest.questFundingTotalSatang,
-        fundingReservationId: quest.fundingReservationId,
-        policyRevisionId: quest.policyRevisionId,
-        platformFeeBps: quest.platformFeeBps,
-        platformFeePerWorkerSatang: quest.platformFeePerWorkerSatang,
-        questEscrowSatang: quest.questEscrowSatang,
-      })
-      .from(quest)
-      .where(eq(quest.id, created.quest.id));
-    const [wallet] = await db
-      .select()
-      .from(walletWallet)
-      .where(eq(walletWallet.userId, hirerId));
-    if (!wallet) throw new Error('Funding Wallet was not created');
-    const beforeReservations = await db
-      .select({ id: walletFundingReservation.id })
-      .from(walletFundingReservation)
-      .where(eq(walletFundingReservation.ownerUserId, hirerId));
-    const beforeLedger = await db
-      .select({ id: walletLedgerTransaction.id })
-      .from(walletLedgerTransaction)
-      .innerJoin(walletLedgerPosting, eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id))
-      .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
-      .where(eq(walletLedgerAccount.walletId, wallet.id));
+    const beforeSnapshot = await readPublishCheckSnapshot(created.quest.id, hirerId);
 
     const response = await getPublishCheck(created.quest.id);
     expect(response.status).toBe(200);
@@ -532,40 +544,9 @@ describe('Quest API v2 publish check', () => {
       policyRevision: 1,
     });
 
-    const [afterQuest] = await db
-      .select({
-        questStatus: quest.questStatus,
-        version: quest.version,
-        updatedAt: quest.updatedAt,
-        rewardSatang: quest.rewardSatang,
-        questFundingTotalSatang: quest.questFundingTotalSatang,
-        fundingReservationId: quest.fundingReservationId,
-        policyRevisionId: quest.policyRevisionId,
-        platformFeeBps: quest.platformFeeBps,
-        platformFeePerWorkerSatang: quest.platformFeePerWorkerSatang,
-        questEscrowSatang: quest.questEscrowSatang,
-      })
-      .from(quest)
-      .where(eq(quest.id, created.quest.id));
-    const [afterWallet] = await db
-      .select()
-      .from(walletWallet)
-      .where(eq(walletWallet.userId, hirerId));
-    const afterReservations = await db
-      .select({ id: walletFundingReservation.id })
-      .from(walletFundingReservation)
-      .where(eq(walletFundingReservation.ownerUserId, hirerId));
-    const afterLedger = await db
-      .select({ id: walletLedgerTransaction.id })
-      .from(walletLedgerTransaction)
-      .innerJoin(walletLedgerPosting, eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id))
-      .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
-      .where(eq(walletLedgerAccount.walletId, wallet.id));
+    const afterSnapshot = await readPublishCheckSnapshot(created.quest.id, hirerId);
 
-    expect(afterQuest).toEqual(beforeQuest);
-    expect(afterWallet).toEqual(wallet);
-    expect(afterReservations).toEqual(beforeReservations);
-    expect(afterLedger).toEqual(beforeLedger);
+    expect(afterSnapshot).toEqual(beforeSnapshot);
   });
 
   it('returns every applicable blocker and the quote for an incomplete Draft', async () => {
