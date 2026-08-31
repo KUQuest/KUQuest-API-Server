@@ -83,6 +83,9 @@ export const satang = (value: number): Satang => {
   return value as Satang;
 };
 
+export const toBaht = (amountSatang: Satang): number =>
+  Number((amountSatang / 100).toFixed(2));
+
 export const positiveSatang = (value: number): Satang => {
   const amount = satang(value);
 

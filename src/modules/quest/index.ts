@@ -24,11 +24,27 @@ export {
   createQuestV2,
   editQuestV2,
   getQuestV2Detail,
+  getQuestV2PublishCheck,
   listOwnQuestV2,
   questV2CreateOperationScope,
   questV2EditOperationScope,
 } from './quest-v2.service';
-export type { QuestV2CreateOutcome, QuestV2EditOutcome } from './quest-v2.service';
+export type {
+  QuestV2CreateOutcome,
+  QuestV2EditOutcome,
+  QuestV2PublishCheckOutcome,
+} from './quest-v2.service';
+export {
+  buildQuestV2PublishCheck,
+  calculateQuestV2FundingQuote,
+} from './quest-v2.publish.policy';
+export type {
+  QuestV2FundingQuote,
+  QuestV2FundingQuoteInput,
+  QuestV2PublishCheck,
+  QuestV2PublishReason,
+  QuestV2PublishSnapshot,
+} from './quest-v2.publish.policy';
 export type {
   QuestV2CreateInput,
   QuestV2EditHeaders,
