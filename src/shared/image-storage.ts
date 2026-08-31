@@ -168,7 +168,10 @@ export const createImageStorage = ({
   };
 
   const temporaryLinkFor = ({ bucket, objectKey }: Pick<StoredImage, 'bucket' | 'objectKey'>): ImageLink => {
-    if (!env.s3AccessKeyId || !env.s3SecretAccessKey || !env.s3Endpoint || !env.s3Region) {
+    if (
+      !client &&
+      (!env.s3AccessKeyId || !env.s3SecretAccessKey || !env.s3Endpoint || !env.s3Region)
+    ) {
       throw new ImageLinkUnavailableError('Object storage is not configured');
     }
 
