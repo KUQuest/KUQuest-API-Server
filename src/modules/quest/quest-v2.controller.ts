@@ -77,7 +77,11 @@ const mapCreateOutcome = (
     return invalidInput(set, 'INVALID_QUEST_DATES', 'dueAt must be after startTime');
   }
   if (outcome === 'invalid-headcount') {
-    return invalidInput(set, 'INVALID_HEADCOUNT', 'SINGLE participation requires headcount 1');
+    return invalidInput(
+      set,
+      'INVALID_HEADCOUNT',
+      'SINGLE participation requires headcount 1 and GROUP participation requires headcount 2 to 20',
+    );
   }
   if (outcome === 'invalid-funding') {
     return invalidInput(
@@ -135,7 +139,11 @@ const mapEditOutcome = (
     return invalidInput(set, 'INVALID_QUEST_DATES', 'dueAt must be after startTime');
   }
   if (outcome === 'invalid-headcount') {
-    return invalidInput(set, 'INVALID_HEADCOUNT', 'SINGLE participation requires headcount 1');
+    return invalidInput(
+      set,
+      'INVALID_HEADCOUNT',
+      'SINGLE participation requires headcount 1 and GROUP participation requires headcount 2 to 20',
+    );
   }
   if (outcome === 'invalid-funding') {
     return invalidInput(

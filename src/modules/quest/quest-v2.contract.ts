@@ -15,6 +15,14 @@ export const questV2Participations = [
 ] as const;
 export type QuestV2Participation = (typeof questV2Participations)[number];
 
+export const isValidQuestV2Headcount = (
+  participation: QuestV2Participation,
+  headcount: number,
+): boolean => {
+  if (!Number.isInteger(headcount) || headcount < 1 || headcount > 20) return false;
+  return participation === questV2Participation.single ? headcount === 1 : headcount >= 2;
+};
+
 export const questV2States = [
   'QUEST_DRAFT',
   'QUEST_OPEN',

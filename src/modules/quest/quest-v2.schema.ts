@@ -60,6 +60,23 @@ const questFundingTotalOpenApiSchema = t.Number({
   description:
     'Inclusive Quest Funding Total in Baht with exact satang precision (at most two decimal places).',
 });
+// The lower bound depends on participation. The service validates the complete
+// combination because PATCH may omit either participation or headcount.
+const questV2HeadcountSchema = t.Integer({
+  minimum: 1,
+  maximum: 20,
+  description: 'SINGLE requires exactly 1 Worker; GROUP requires 2 to 20 Workers.',
+});
+const questV2SingleHeadcountOpenApiSchema = t.Integer({
+  minimum: 1,
+  maximum: 1,
+  description: 'SINGLE requires exactly 1 Worker.',
+});
+const questV2GroupHeadcountOpenApiSchema = t.Integer({
+  minimum: 2,
+  maximum: 20,
+  description: 'GROUP requires 2 to 20 Workers.',
+});
 
 const questV2CreateProperties = {
   title: titleSchema,
@@ -68,7 +85,7 @@ const questV2CreateProperties = {
   mode: questV2ModeSchema,
   participation: questV2ParticipationSchema,
   questFundingTotal: questFundingTotalSchema,
-  headcount: t.Integer({ minimum: 1, maximum: 20 }),
+  headcount: questV2HeadcountSchema,
   startTime: isoDateTimeWithTimezoneSchema,
   dueAt: t.Optional(t.Nullable(isoDateTimeWithTimezoneSchema)),
   tagId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
@@ -83,19 +100,23 @@ export const questV2CreateSchema = t.Object(
 
 export type QuestV2CreateInput = Static<typeof questV2CreateSchema>;
 
-const questV2EditProperties = {
+const questV2EditCommonProperties = {
   title: t.Optional(titleSchema),
   description: t.Optional(descriptionSchema),
   condition: t.Optional(conditionSchema),
   mode: t.Optional(questV2ModeSchema),
-  participation: t.Optional(questV2ParticipationSchema),
   questFundingTotal: t.Optional(questFundingTotalSchema),
-  headcount: t.Optional(t.Integer({ minimum: 1, maximum: 20 })),
   startTime: t.Optional(isoDateTimeWithTimezoneSchema),
   dueAt: t.Optional(t.Nullable(isoDateTimeWithTimezoneSchema)),
   tagId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
   proofRequired: t.Optional(t.Boolean()),
   locations: t.Optional(locationsSchema),
+};
+
+const questV2EditProperties = {
+  ...questV2EditCommonProperties,
+  participation: t.Optional(questV2ParticipationSchema),
+  headcount: t.Optional(questV2HeadcountSchema),
 };
 
 export const questV2EditSchema = t.Object(questV2EditProperties, {
@@ -105,17 +126,57 @@ export const questV2EditSchema = t.Object(questV2EditProperties, {
 
 export type QuestV2EditInput = Static<typeof questV2EditSchema>;
 
-const questV2CreateOpenApiSchema = t.Object(
-  { ...questV2CreateProperties, questFundingTotal: questFundingTotalOpenApiSchema },
-  { additionalProperties: false },
-);
-const questV2EditOpenApiSchema = t.Object(
-  {
-    ...questV2EditProperties,
-    questFundingTotal: t.Optional(questFundingTotalOpenApiSchema),
-  },
-  { additionalProperties: false, minProperties: 1 },
-);
+const questV2CreateOpenApiProperties = {
+  ...questV2CreateProperties,
+  questFundingTotal: questFundingTotalOpenApiSchema,
+};
+const questV2CreateOpenApiSchema = t.Union([
+  t.Object(
+    {
+      ...questV2CreateOpenApiProperties,
+      participation: t.Literal('SINGLE'),
+      headcount: questV2SingleHeadcountOpenApiSchema,
+    },
+    { additionalProperties: false },
+  ),
+  t.Object(
+    {
+      ...questV2CreateOpenApiProperties,
+      participation: t.Literal('GROUP'),
+      headcount: questV2GroupHeadcountOpenApiSchema,
+    },
+    { additionalProperties: false },
+  ),
+]);
+const questV2EditOpenApiCommonProperties = {
+  ...questV2EditCommonProperties,
+  questFundingTotal: t.Optional(questFundingTotalOpenApiSchema),
+};
+const questV2EditOpenApiSchema = t.Union([
+  t.Object(
+    {
+      ...questV2EditOpenApiCommonProperties,
+      participation: t.Literal('SINGLE'),
+      headcount: t.Optional(questV2SingleHeadcountOpenApiSchema),
+    },
+    { additionalProperties: false, minProperties: 1 },
+  ),
+  t.Object(
+    {
+      ...questV2EditOpenApiCommonProperties,
+      participation: t.Literal('GROUP'),
+      headcount: t.Optional(questV2GroupHeadcountOpenApiSchema),
+    },
+    { additionalProperties: false, minProperties: 1 },
+  ),
+  t.Object(
+    {
+      ...questV2EditOpenApiCommonProperties,
+      headcount: t.Optional(questV2HeadcountSchema),
+    },
+    { additionalProperties: false, minProperties: 1 },
+  ),
+]);
 
 // TypeBox applies multipleOf with JavaScript remainder, which can reject valid
 // decimal Baht values. Keep the OpenAPI constraint and validate the exact
@@ -318,7 +379,7 @@ export const questV2CanonicalQuestSchema = t.Object({
   participation: questV2ParticipationSchema,
   state: questV2StateSchema,
   questFundingTotal: questFundingTotalSchema,
-  headcount: t.Integer({ minimum: 1 }),
+  headcount: questV2HeadcountSchema,
   startTime: t.String({ format: 'date-time' }),
   dueAt: t.Nullable(t.String({ format: 'date-time' })),
   proofRequired: t.Boolean(),
@@ -369,7 +430,7 @@ const questV2PublishCheckResponseProperties = {
   platformFeeSatang: t.Integer({ minimum: 0 }),
   escrowRequirement: questV2FundingQuoteAmountSchema,
   escrowRequirementSatang: t.Integer({ minimum: 0, maximum: 2_000_000_000 }),
-  headcount: t.Integer({ minimum: 1, maximum: 20 }),
+  headcount: questV2HeadcountSchema,
   platformFeeBps: t.Integer({ minimum: 0, maximum: 10000 }),
   feeRoundingMode: t.Literal('UP'),
   policyRevisionId: t.String({ format: 'uuid' }),

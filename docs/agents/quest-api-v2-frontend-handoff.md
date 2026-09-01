@@ -117,7 +117,7 @@ The create request requires:
 - `participation`: `SINGLE` or `GROUP`.
 - `questFundingTotal`: inclusive amount in Baht for one Worker slot, with exact
   satang precision.
-- `headcount`: 1–20; `SINGLE` requires `1`.
+- `headcount`: `SINGLE` requires `1`; `GROUP` requires `2`–`20`.
 - `startTime`: ISO-8601 date-time with an explicit timezone.
 
 Draft-only optional fields are:
