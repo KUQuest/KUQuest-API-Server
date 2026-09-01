@@ -29,6 +29,7 @@ type OpenApiSchema = {
 type OpenApiOperation = {
   operationId?: string;
   security?: unknown;
+  parameters?: Array<{ name?: string; in?: string; required?: boolean; schema?: OpenApiSchema }>;
   requestBody?: {
     content?: Record<string, { schema?: OpenApiSchema }>;
   };
@@ -87,6 +88,7 @@ describe('Quest API v2 integration', () => {
   it.each([
     ['GET', '/api/v2/quests/mine'],
     ['GET', '/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/publish-check'],
+    ['POST', '/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/publish'],
     ['GET', '/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c'],
     ['POST', '/api/v2/quests'],
     ['PATCH', '/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c'],
@@ -137,6 +139,26 @@ describe('Quest API v2 integration', () => {
     expect(
       document.paths['/api/v2/quests/{questId}/publish-check']?.get?.operationId,
     ).toBe('getQuestV2PublishCheck');
+    const publishOperation = document.paths['/api/v2/quests/{questId}/publish']?.post;
+    expect(publishOperation?.operationId).toBe('publishQuestV2');
+    expect(publishOperation?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(publishOperation?.requestBody).toBeUndefined();
+    expect(publishOperation?.parameters).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'idempotency-key',
+        in: 'header',
+        required: true,
+      }),
+    ]));
+    expect(Object.keys(publishOperation?.responses ?? {})).toEqual(expect.arrayContaining([
+      '200',
+      '400',
+      '401',
+      '404',
+      '409',
+      '500',
+      '503',
+    ]));
     expect(document.paths['/api/v2/quests']?.post?.security).toEqual([
       { betterAuthSession: [] },
     ]);
@@ -238,6 +260,39 @@ describe('Quest API v2 integration', () => {
       'escrowRequirement',
     ]) {
       expect(publishDataSchema?.properties?.[property]?.multipleOf).toBe(0.01);
+    }
+
+    const publishCommandResponseSchema =
+      publishOperation?.responses?.['200']?.content?.['application/json']?.schema;
+    expect(publishCommandResponseSchema?.required).toEqual(['success', 'data']);
+    const publishCommandDataSchema = publishCommandResponseSchema?.properties?.data;
+    expect(publishCommandDataSchema?.required).toEqual(['quest', 'questEscrow']);
+    expect(publishCommandDataSchema?.properties?.quest?.properties?.state).toBeDefined();
+    expect(publishCommandDataSchema?.properties?.questEscrow?.required).toEqual([
+      'reservationId',
+      'questFundingTotal',
+      'questFundingTotalSatang',
+      'questReward',
+      'questRewardSatang',
+      'platformFee',
+      'platformFeeSatang',
+      'escrowRequirement',
+      'escrowRequirementSatang',
+      'headcount',
+      'platformFeeBps',
+      'feeRoundingMode',
+      'policyRevisionId',
+      'policyRevision',
+    ]);
+    for (const property of [
+      'questFundingTotal',
+      'questReward',
+      'platformFee',
+      'escrowRequirement',
+    ]) {
+      expect(
+        publishCommandDataSchema?.properties?.questEscrow?.properties?.[property]?.multipleOf,
+      ).toBe(0.01);
     }
   });
 });

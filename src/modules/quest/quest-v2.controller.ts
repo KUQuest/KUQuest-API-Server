@@ -23,6 +23,7 @@ import {
   getQuestV2PublishCheck,
   listOwnQuestV2,
   materializeQuestV2ImageResponse,
+  publishQuestV2,
   questV2ImageRemoveRequestHash,
   questV2ImageUploadRequestHash,
   recordQuestV2ImageCleanupTombstones,
@@ -51,6 +52,7 @@ import type {
   questV2MineResponseSchema,
   questV2ParamsSchema,
   questV2PublishCheckResponseSchema,
+  questV2PublishResponseSchema,
   questV2WriteHeadersSchema,
 } from './quest-v2.schema';
 
@@ -65,6 +67,7 @@ type QuestV2WriteHeaders = Static<typeof questV2WriteHeadersSchema>;
 type QuestV2EditHeaders = Static<typeof questV2EditHeadersSchema>;
 type QuestV2DetailResponse = Static<typeof questV2DetailResponseSchema>['data'];
 type QuestV2PublishCheckResponse = Static<typeof questV2PublishCheckResponseSchema>['data'];
+type QuestV2PublishResponse = Static<typeof questV2PublishResponseSchema>['data'];
 type QuestV2ImagesResponse = Static<typeof questV2ImagesResponseSchema>['data'];
 type QuestV2ImagesUploadInput = Static<typeof questV2ImagesUploadSchema>;
 type QuestV2ImageParams = Static<typeof questV2ImageParamsSchema>;
@@ -582,4 +585,64 @@ export const getQuestV2PublishCheckController = async ({
   }
 
   return apiSuccess(toQuestV2PublishCheckResponse(result));
+};
+
+const mapQuestV2PublishError = (set: AuthedContext['set'], error: MoneyDomainError) => {
+  const clientCorrectableCodes = new Set([
+    'AMOUNT_OUT_OF_RANGE',
+    'INSUFFICIENT_SPENDING_BALANCE',
+    'INVALID_WALLET_STATUS',
+    'WALLET_NOT_ACTIVE',
+  ]);
+  if (clientCorrectableCodes.has(error.code)) {
+    set.status = 409;
+    return apiError(error.code, error.message);
+  }
+
+  set.status = 503;
+  return apiError('QUEST_ESCROW_UNAVAILABLE', 'Quest Escrow could not be reserved');
+};
+
+export const publishQuestV2Controller = async ({
+  headers,
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  headers: QuestV2WriteHeaders;
+  params: QuestV2Params;
+}): Promise<ApiResponse<QuestV2PublishResponse>> => {
+  let result: Awaited<ReturnType<typeof publishQuestV2>>;
+  try {
+    result = await publishQuestV2(session.user.id, params.questId, headers['idempotency-key']);
+  } catch (error) {
+    if (error instanceof MoneyDomainError) return mapQuestV2PublishError(set, error);
+    throw error;
+  }
+
+  if (!result) {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+  if ('outcome' in result) {
+    if (result.outcome === 'blocked') {
+      const [firstReason] = result.check.blockingReasons;
+      if (!firstReason) {
+        throw new Error('Blocked Quest publish has no blocking reason');
+      }
+      set.status = 409;
+      return apiError(firstReason.code, firstReason.message);
+    }
+    if (result.outcome === 'not-draft') {
+      set.status = 409;
+      return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be published');
+    }
+    return mapIdempotencyOutcome(
+      set,
+      result.outcome,
+      'A Quest publish with this idempotency key is still processing',
+    );
+  }
+
+  return apiSuccess(result);
 };

@@ -12,6 +12,7 @@ import {
   getQuestV2DetailController,
   getQuestV2PublishCheckController,
   listOwnQuestV2Controller,
+  publishQuestV2Controller,
 } from './quest-v2.controller';
 import {
   questV2CreateResponseSchema,
@@ -27,6 +28,7 @@ import {
   questV2ImagesUploadSchema,
   questV2ParamsSchema,
   questV2PublishCheckHttpResponseSchema,
+  questV2PublishHttpResponseSchema,
   questV2WriteHeadersSchema,
   normalizeQuestV2CreateBody,
   normalizeQuestV2EditBody,
@@ -101,6 +103,19 @@ export const questV2Route = new Elysia({
       description:
         'Removes one Quest Image by imageId, soft-deletes its file metadata, repacks the remaining positions from zero, and returns imageId, fileId, position, url, and urlExpiresAt for the complete ordered gallery. A retry with the same Idempotency-Key replays the original response; temporary links expire 15 minutes after materialization, so use Quest detail for a fresh link.',
       operationId: 'deleteQuestImageV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/:questId/publish', publishQuestV2Controller, {
+    params: questV2ParamsSchema,
+    headers: questV2WriteHeadersSchema,
+    response: responses(questV2PublishHttpResponseSchema, 400, 401, 404, 409, 500, 503),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Publish a v2 Quest Draft',
+      description:
+        'Rechecks the owned Draft and reserves the exact inclusive Quest Funding Total for every headcount slot before changing the Quest to QUEST_OPEN. The request has no business body and requires Idempotency-Key.',
+      operationId: 'publishQuestV2',
       security: betterAuthSecurity,
     },
   })

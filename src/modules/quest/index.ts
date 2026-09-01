@@ -30,8 +30,10 @@ export {
   getQuestV2Detail,
   getQuestV2PublishCheck,
   listOwnQuestV2,
+  publishQuestV2,
   questV2CreateOperationScope,
   questV2EditOperationScope,
+  questV2PublishOperationScope,
   questV2ImageRemoveOperationScope,
   questV2ImageRemoveRequestHash,
   questV2ImageUploadOperationScope,
@@ -53,6 +55,9 @@ export type {
   QuestV2ImageUploadOutcome,
   QuestV2ImageUploadPreflight,
   QuestV2PublishCheckOutcome,
+  QuestV2PublishOutcome,
+  QuestV2PublishResponse,
+  QuestV2QuestEscrowSnapshot,
 } from './quest-v2.service';
 export {
   buildQuestV2PublishCheck,
