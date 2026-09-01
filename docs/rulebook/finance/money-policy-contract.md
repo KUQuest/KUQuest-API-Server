@@ -4,7 +4,7 @@ Part of the [Finance Rulebook](finance-rulebook.md). Defines accepted policy for
 
 ## Versioned Money Policy revisions
 
-- All financial calculations use an active, versioned **Money Policy Revision** (`payment_money_policy_revisions`).
+- All financial calculations governed by Money Policy use an active, versioned **Money Policy Revision** (`payment_money_policy_revisions`). Provider fees and taxes are supplied by the Provider Quote instead.
 - When a Quest is published or a Funding Reservation is created, the active `revision` is snapshotted into the reservation record. Subsequent policy changes do not alter existing in-flight Quest escrow terms.
 
 ## Policy fields and default parameters
@@ -19,7 +19,13 @@ Part of the [Finance Rulebook](finance-rulebook.md). Defines accepted policy for
 | `maximumPayoutSatang` | Integer Satang | `2,000,000,000` (฿20M) | Maximum withdrawal request. |
 | `minimumEarningsConversionSatang`| Integer Satang | `100` (฿1.00) | Minimum conversion amount. |
 | `maximumEarningsConversionSatang`| Integer Satang | `2,000,000,000` (฿20M) | Maximum conversion amount. |
-| `quoteLifetimeSeconds` | Seconds | `300` (5 minutes) | Expiry window for PromptPay QR quotes. |
+| `quoteLifetimeSeconds` | Seconds | `300` (5 minutes) | Expiry window for Top-up and Payout Provider Quotes before Member confirmation. |
+
+## Provider fee boundary
+
+- The Provider Quote supplies the Provider fee and tax for each confirmed Top-up or Payout operation.
+- `Money Policy` does not guess or replace a missing Provider fee or tax. If a valid Provider Quote is unavailable, the operation stops without a Payment Request, reserve, Wallet change, or Ledger posting.
+- After Member confirmation, the operation stores an immutable Quote Snapshot. Later Money Policy revisions or Quote expiry do not change that Snapshot.
 
 ## Platform Fee calculation math
 
