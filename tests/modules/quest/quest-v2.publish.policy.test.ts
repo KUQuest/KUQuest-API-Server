@@ -59,9 +59,31 @@ describe('Quest v2 publish policy', () => {
     });
   });
 
+  it('blocks a GROUP Quest whose headcount is below two Workers', () => {
+    const check = buildQuestV2PublishCheck({
+      ...policy,
+      participation: 'GROUP',
+      tagId: 'tag-1',
+      conditionValid: true,
+      startTime: new Date('2026-09-01T10:00:00.000Z'),
+      dueAt: new Date('2026-09-01T12:00:00.000Z'),
+      now: new Date('2026-08-31T08:00:00.000Z'),
+      questFundingTotalSatang: positiveSatang(103),
+      headcount: 1,
+      spendingBalanceSatang: positiveSatang(2_000),
+    });
+
+    expect(check.blockingReasons).toContainEqual({
+      code: 'QUEST_HEADCOUNT_INVALID',
+      message: 'GROUP participation requires a headcount between 2 and 20',
+    });
+    expect(check.canPublish).toBe(false);
+  });
+
   it('reports every Draft correction and still returns the funding quote', () => {
     const check = buildQuestV2PublishCheck({
       ...policy,
+      participation: 'SINGLE',
       tagId: null,
       conditionValid: false,
       startTime: new Date('2026-08-30T00:00:00.000Z'),
@@ -87,6 +109,7 @@ describe('Quest v2 publish policy', () => {
   it('reports a dueAt that is not after startTime', () => {
     const check = buildQuestV2PublishCheck({
       ...policy,
+      participation: 'SINGLE',
       tagId: 'tag-1',
       conditionValid: true,
       startTime: new Date('2026-08-31T10:00:00.000Z'),
@@ -113,6 +136,7 @@ describe('Quest v2 publish policy', () => {
   ])('reports a Quest Escrow amount %s in the active Money Policy', (_, minimum, maximum) => {
     const check = buildQuestV2PublishCheck({
       ...policy,
+      participation: 'SINGLE',
       minimumFundingReservationSatang: satang(minimum),
       maximumFundingReservationSatang: satang(maximum),
       tagId: 'tag-1',
@@ -139,6 +163,7 @@ describe('Quest v2 publish policy', () => {
   ] as const)('blocks a %s Wallet from publish readiness', (_, walletStatus) => {
     const check = buildQuestV2PublishCheck({
       ...policy,
+      participation: 'SINGLE',
       walletStatus,
       tagId: 'tag-1',
       conditionValid: true,
@@ -160,6 +185,7 @@ describe('Quest v2 publish policy', () => {
   it('reports an invalid dueAt and a startTime at the Server time boundary', () => {
     const check = buildQuestV2PublishCheck({
       ...policy,
+      participation: 'SINGLE',
       tagId: 'tag-1',
       conditionValid: true,
       startTime: new Date('2026-08-31T08:00:00.000Z'),

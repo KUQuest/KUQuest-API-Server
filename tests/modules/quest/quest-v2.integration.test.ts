@@ -13,6 +13,11 @@ const createBody = {
 };
 
 type OpenApiSchema = {
+  anyOf?: OpenApiSchema[];
+  const?: unknown;
+  description?: string;
+  maximum?: number;
+  minimum?: number;
   multipleOf?: number;
   nullable?: boolean;
   required?: string[];
@@ -146,14 +151,43 @@ describe('Quest API v2 integration', () => {
 
     const bodySchema =
       document.paths['/api/v2/quests']?.post?.requestBody?.content?.['application/json']?.schema;
-    expect(bodySchema?.properties?.questFundingTotal?.multipleOf).toBe(0.01);
-    expect(bodySchema?.properties?.locations?.items?.required).toEqual(['label']);
-    expect(bodySchema?.properties?.locations?.items?.properties?.label?.nullable).not.toBe(true);
+    expect(bodySchema?.anyOf).toHaveLength(2);
+    expect(bodySchema?.anyOf?.map((variant) => ({
+      participation: variant.properties?.participation?.const,
+      minimum: variant.properties?.headcount?.minimum,
+      maximum: variant.properties?.headcount?.maximum,
+    }))).toEqual(expect.arrayContaining([
+      { participation: 'SINGLE', minimum: 1, maximum: 1 },
+      { participation: 'GROUP', minimum: 2, maximum: 20 },
+    ]));
+    for (const variant of bodySchema?.anyOf ?? []) {
+      expect(variant.properties?.questFundingTotal?.multipleOf).toBe(0.01);
+      expect(variant.properties?.locations?.items?.required).toEqual(['label']);
+      expect(variant.properties?.locations?.items?.properties?.label?.nullable).not.toBe(true);
+    }
 
     const editBodySchema =
       document.paths['/api/v2/quests/{questId}']?.patch?.requestBody?.content?.['application/json']
         ?.schema;
-    expect(editBodySchema?.properties?.questFundingTotal?.multipleOf).toBe(0.01);
+    expect(editBodySchema?.anyOf).toHaveLength(3);
+    const editSingleVariant = editBodySchema?.anyOf?.find(
+      (variant) => variant.properties?.participation?.const === 'SINGLE',
+    );
+    expect(editSingleVariant?.properties?.headcount?.minimum).toBe(1);
+    expect(editSingleVariant?.properties?.headcount?.maximum).toBe(1);
+    const editGroupVariant = editBodySchema?.anyOf?.find(
+      (variant) => variant.properties?.participation?.const === 'GROUP',
+    );
+    expect(editGroupVariant?.properties?.headcount?.minimum).toBe(2);
+    expect(editGroupVariant?.properties?.headcount?.maximum).toBe(20);
+    const editExistingParticipationVariant = editBodySchema?.anyOf?.find(
+      (variant) => variant.properties?.participation === undefined,
+    );
+    expect(editExistingParticipationVariant?.properties?.headcount?.minimum).toBe(1);
+    expect(editExistingParticipationVariant?.properties?.headcount?.maximum).toBe(20);
+    for (const variant of editBodySchema?.anyOf ?? []) {
+      expect(variant.properties?.questFundingTotal?.multipleOf).toBe(0.01);
+    }
 
     const publishResponseSchema =
       document.paths['/api/v2/quests/{questId}/publish-check']?.get?.responses?.['200']?.content

@@ -22,7 +22,7 @@ import { and, asc, eq, gt, or, sql } from 'drizzle-orm';
 import { questStatus, type QuestStatus } from './quest.contract';
 import { questV2StorageCompatibility } from './quest-storage.adapter';
 import {
-  questV2Participation,
+  isValidQuestV2Headcount,
   questV2States,
   type QuestV2CanonicalQuest,
   type QuestV2Mode,
@@ -243,12 +243,7 @@ const normalizeCreateInput = (
     return { outcome: 'invalid-funding' };
   }
 
-  if (
-    !Number.isInteger(data.headcount) ||
-    data.headcount < 1 ||
-    data.headcount > 20 ||
-    (data.participation === questV2Participation.single && data.headcount !== 1)
-  ) {
+  if (!isValidQuestV2Headcount(data.participation, data.headcount)) {
     return { outcome: 'invalid-headcount' };
   }
 
@@ -818,7 +813,7 @@ const editQuestV2InTransaction = async (
 
   const nextParticipation = input.participation ?? current.v2Participation;
   const nextHeadcount = input.headcount ?? current.headcount;
-  if (nextParticipation === questV2Participation.single && nextHeadcount !== 1) {
+  if (!isValidQuestV2Headcount(nextParticipation, nextHeadcount)) {
     throwEditError('invalid-headcount');
   }
 
@@ -1004,7 +999,7 @@ export const getQuestV2PublishCheck = async (
     const row = await selectQuestV2Row(transaction, userId, questId);
     if (!row) return undefined;
     if (row.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
-    if (row.questFundingTotalSatang === null) {
+    if (row.questFundingTotalSatang === null || !row.v2Participation) {
       throw new Error(`Quest ${questId} has incomplete v2 persistence data`);
     }
 
@@ -1026,6 +1021,7 @@ export const getQuestV2PublishCheck = async (
     }
 
     return buildQuestV2PublishCheck({
+      participation: row.v2Participation,
       tagId: row.tagId,
       conditionValid: conditionItems.length > 0 && conditionItems.every((item, position) => {
         const text = item.text.trim();

@@ -122,7 +122,17 @@ export const quest = pgTable(
     check('quest_headcount_check', sql`${table.headcount} > 0`),
     check(
       'quest_participation_headcount_check',
-      sql`${table.participation} = 'GROUP' OR ${table.headcount} = 1`,
+      sql`(
+        ${table.apiVersion} <> 'v2' AND
+        (${table.participation} = 'GROUP' OR ${table.headcount} = 1)
+      ) OR (
+        ${table.apiVersion} = 'v2' AND
+        ${table.v2Participation} IS NOT NULL AND
+        (
+          (${table.v2Participation} = 'SINGLE' AND ${table.headcount} = 1) OR
+          (${table.v2Participation} = 'GROUP' AND ${table.headcount} BETWEEN 2 AND 20)
+        )
+      )`,
     ),
     check('quest_due_at_check', sql`${table.dueAt} IS NULL OR ${table.dueAt} > ${table.startTime}`),
     check(

@@ -393,6 +393,40 @@ describe('Quest API v2 persistence', () => {
     ]);
   });
 
+  it('rejects a v2 GROUP Quest with fewer than two Workers at persistence', async () => {
+    const questId = randomUUID();
+    let databaseError: {
+      cause?: { code?: string; constraint_name?: string };
+    } | undefined;
+
+    try {
+      await db.insert(quest).values({
+        id: questId,
+        hirerId,
+        apiVersion: 'v2',
+        title: 'Invalid GROUP headcount',
+        condition: 'Complete the work',
+        mode: 'NO_CANDIDATE',
+        participation: 'GROUP',
+        v2Mode: 'FIRST_COME_FIRST_SERVED',
+        v2Participation: 'GROUP',
+        questStatus: 'QUEST_DRAFT',
+        questFundingTotalSatang: 103,
+        headcount: 1,
+        startTime: new Date('2030-08-26T10:00:00.000Z'),
+      }).execute();
+    } catch (error) {
+      databaseError = error as typeof databaseError;
+    } finally {
+      await db.delete(quest).where(eq(quest.id, questId));
+    }
+
+    expect(databaseError?.cause).toMatchObject({
+      code: '23514',
+      constraint_name: 'quest_participation_headcount_check',
+    });
+  });
+
   it.each([
     ['one satang precision', 1.01, 101],
     ['maximum funding total', 700000, 70000000],
@@ -899,6 +933,39 @@ describe('Quest API v2 Draft editing', () => {
     expect((await detail.json()).data).toEqual(body.data);
   });
 
+  it.each(['FIRST_COME_FIRST_SERVED', 'CANDIDATE'] as const)(
+    'rejects a GROUP Draft edit below two Workers for %s mode',
+    async (mode) => {
+      const created = await createQuestV2(
+        hirerId,
+        { ...baseInput, mode, participation: 'GROUP', headcount: 2 },
+        `v2-edit-group-headcount-create-${mode}-${randomUUID()}`,
+      );
+      if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+      questIds.push(created.quest.id);
+
+      const response = await patchQuest(
+        created.quest.id,
+        { headcount: 1 },
+        1,
+        `v2-edit-group-headcount-${mode}-${randomUUID()}`,
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        success: false,
+        error: {
+          code: 'INVALID_HEADCOUNT',
+          message:
+            'SINGLE participation requires headcount 1 and GROUP participation requires headcount 2 to 20',
+        },
+      });
+
+      const detail = await getQuestV2Detail(hirerId, created.quest.id);
+      expect(detail?.headcount).toBe(2);
+    },
+  );
+
   it('rejects a stale version without changing the Draft', async () => {
     const created = await createQuestV2(
       hirerId,
@@ -1196,6 +1263,27 @@ const invalidHttpInputs: Array<[string, Record<string, unknown>, string]> = [
 ];
 
 describe('Quest API v2 HTTP validation and ownership', () => {
+  it.each(['FIRST_COME_FIRST_SERVED', 'CANDIDATE'] as const)(
+    'rejects GROUP participation with one Worker for %s mode',
+    async (mode) => {
+      const response = await postQuest({
+        ...baseInput,
+        mode,
+        participation: 'GROUP',
+        headcount: 1,
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        success: false,
+        error: {
+          code: 'INVALID_HEADCOUNT',
+          message:
+            'SINGLE participation requires headcount 1 and GROUP participation requires headcount 2 to 20',
+        },
+      });
+    },
+  );
+
   it.each(invalidHttpInputs)('rejects %s with the shared error envelope', async (_, changes, code) => {
     const response = await postQuest({ ...baseInput, ...changes });
     expect(response.status).toBe(400);

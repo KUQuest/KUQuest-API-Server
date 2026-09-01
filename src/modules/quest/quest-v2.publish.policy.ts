@@ -5,6 +5,12 @@ import {
   type Satang,
 } from '@/modules/wallet';
 
+import {
+  isValidQuestV2Headcount,
+  questV2Participation,
+  type QuestV2Participation,
+} from './quest-v2.contract';
+
 export type QuestV2PublishReason = {
   code: string;
   message: string;
@@ -32,6 +38,7 @@ export type QuestV2FundingQuote = {
 };
 
 export type QuestV2PublishSnapshot = QuestV2FundingQuoteInput & {
+  participation: QuestV2Participation;
   tagId: string | null;
   conditionValid: boolean;
   startTime: Date;
@@ -98,6 +105,16 @@ export const buildQuestV2PublishCheck = (
 ): QuestV2PublishCheck => {
   const quote = calculateQuestV2FundingQuote(snapshot);
   const blockingReasons: QuestV2PublishReason[] = [];
+
+  if (!isValidQuestV2Headcount(snapshot.participation, snapshot.headcount)) {
+    blockingReasons.push({
+      code: 'QUEST_HEADCOUNT_INVALID',
+      message:
+        snapshot.participation === questV2Participation.group
+          ? 'GROUP participation requires a headcount between 2 and 20'
+          : 'SINGLE participation requires a headcount of 1',
+    });
+  }
 
   if (!snapshot.tagId) {
     blockingReasons.push({
