@@ -22,6 +22,8 @@ import { and, asc, eq, gt, or, sql } from 'drizzle-orm';
 import { questStatus, type QuestStatus } from './quest.contract';
 import { questV2StorageCompatibility } from './quest-storage.adapter';
 import {
+  formatQuestV2ScheduleTime,
+  isQuestV2ScheduleTime,
   isValidQuestV2Headcount,
   questV2States,
   type QuestV2CanonicalQuest,
@@ -42,8 +44,6 @@ export const questV2CreateOperationScope = 'quest.v2.create';
 export const questV2EditOperationScope = 'quest.v2.edit';
 const questV2CreatePath = '/api/v2/quests';
 const questV2EditPath = '/api/v2/quests/:questId';
-
-const explicitTimezonePattern = /(?:Z|[+-]\d{2}:\d{2})$/;
 
 type NormalizedCreateInput = {
   title: string;
@@ -229,8 +229,8 @@ const normalizeCreateInput = (
   const startTime = new Date(data.startTime);
   const dueAt = data.dueAt === undefined || data.dueAt === null ? null : new Date(data.dueAt);
   if (
-    !explicitTimezonePattern.test(data.startTime) ||
-    (typeof data.dueAt === 'string' && !explicitTimezonePattern.test(data.dueAt)) ||
+    !isQuestV2ScheduleTime(data.startTime) ||
+    (typeof data.dueAt === 'string' && !isQuestV2ScheduleTime(data.dueAt)) ||
     Number.isNaN(startTime.getTime()) ||
     (dueAt !== null && Number.isNaN(dueAt.getTime())) ||
     (dueAt !== null && dueAt <= startTime)
@@ -347,7 +347,7 @@ const normalizeEditInput = (
   }
 
   if (hasEditField(data, 'startTime')) {
-    if (typeof data.startTime !== 'string' || !explicitTimezonePattern.test(data.startTime)) {
+    if (typeof data.startTime !== 'string' || !isQuestV2ScheduleTime(data.startTime)) {
       return { outcome: 'invalid-dates' };
     }
     const startTime = new Date(data.startTime);
@@ -359,7 +359,7 @@ const normalizeEditInput = (
     if (data.dueAt === null) {
       normalized.dueAt = null;
     } else {
-      if (typeof data.dueAt !== 'string' || !explicitTimezonePattern.test(data.dueAt)) {
+      if (typeof data.dueAt !== 'string' || !isQuestV2ScheduleTime(data.dueAt)) {
         return { outcome: 'invalid-dates' };
       }
       const dueAt = new Date(data.dueAt);
@@ -505,8 +505,8 @@ const buildCanonicalQuest = async (
     state: toV2State(row.questStatus),
     questFundingTotal: toBaht(questFundingTotalSatang),
     headcount: row.headcount,
-    startTime: row.startTime.toISOString(),
-    dueAt: row.dueAt?.toISOString() ?? null,
+    startTime: formatQuestV2ScheduleTime(row.startTime),
+    dueAt: row.dueAt ? formatQuestV2ScheduleTime(row.dueAt) : null,
     proofRequired: row.proofRequired,
     locations,
     createdAt: row.createdAt.toISOString(),

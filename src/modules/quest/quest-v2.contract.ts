@@ -23,6 +23,19 @@ export const isValidQuestV2Headcount = (
   return participation === questV2Participation.single ? headcount === 1 : headcount >= 2;
 };
 
+export const questV2ScheduleTimePattern =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?\+07:00$/;
+export const questV2CanonicalScheduleTimePattern =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+07:00$/;
+
+export const isQuestV2ScheduleTime = (value: string): boolean =>
+  questV2ScheduleTimePattern.test(value) && !Number.isNaN(new Date(value).getTime());
+
+export const formatQuestV2ScheduleTime = (value: Date): string => {
+  const bangkokTime = new Date(value.getTime() + 7 * 60 * 60 * 1000);
+  return `${bangkokTime.toISOString().slice(0, -1)}+07:00`;
+};
+
 export const questV2States = [
   'QUEST_DRAFT',
   'QUEST_OPEN',
