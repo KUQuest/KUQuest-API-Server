@@ -123,19 +123,19 @@ Earnings Balance committed to an in-progress Payout and unavailable for another 
 _Avoid_: Quest Escrow, withdrawn balance.
 
 **Top-up**:
-An inbound payment that adds its quoted amount to a Student's Spending Balance after the payment provider confirms it. The Student pays the provider fee and tax in addition to the amount credited.
+An inbound payment that adds its Provider-quoted credit amount to a Member's Spending Balance after the payment provider confirms the exact quoted payment total. The Provider sets the fee and tax for each operation; the Member pays them in addition to the amount credited.
 _Avoid_: Deposit, earnings, Wallet credit (too broad).
 
 **Payout**:
-An outbound transfer of a Student's Earnings Balance to their chosen Payout Destination. The transfer amount, provider fee, and tax are all reserved from Earnings Balance first. The provider call starts only after an Admin approves the Payout. An Admin rejection releases the full Payout Reserve back to the Student's Earnings Balance.
+An outbound transfer of a Member's Earnings Balance to their chosen Thai bank account Payout Destination. The receipt amount, Provider fee, and tax are quoted and reserved from Earnings Balance first. The Provider call starts only after an Admin approves the Payout. The Member cannot cancel it; only an Admin can cancel it before submission. An Admin cancellation releases the full Payout Reserve back to the Member's Earnings Balance.
 _Avoid_: Withdrawal request (the Payout includes the full transfer lifecycle), Quest Reward.
 
 **Payout Approval**:
-The manual Admin decision that permits or rejects one Student Payout before the provider call. The Payout remains waiting for Admin action until an Admin approves or rejects it; there is no automatic rejection after a time limit.
+The manual Admin decision that permits or cancels one Member Payout before the provider call. The Payout remains waiting for Admin action until an Admin approves or cancels it; there is no automatic cancellation after a time limit.
 _Avoid_: provider approval, automatic timeout, releasing funds without an Admin decision.
 
 **Payout Destination**:
-The Student's own Thai bank or PromptPay destination to which a Payout is sent. A Student has at most one active destination; replacing or removing it retires the old destination without erasing its historical association with prior Payouts.
+The Member's own Thai bank account to which a Payout is sent. PromptPay is a Top-up payment method, not a Payout Destination. A Member has at most one active destination; replacing or removing it retires the old destination without erasing its historical association with prior Payouts.
 _Avoid_: Wallet, bank account stored as disposable profile data.
 
 **Money Policy**:
