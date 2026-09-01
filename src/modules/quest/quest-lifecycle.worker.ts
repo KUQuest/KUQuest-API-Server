@@ -16,6 +16,11 @@ import { autoApproveDueProofs } from './quest-proof.service';
 import { cancelUnfilledQuest } from './quest-settlement.service';
 import { expireQuestEditRequest } from './quest.service';
 import {
+  expireQuestV2EditRequest,
+  hasPendingQuestV2EditRequest,
+  pendingQuestV2EditRequestIds,
+} from './quest-v2-edit.service';
+import {
   cleanupQuestV2ImageObjects,
   recoverQuestV2ImageUploadManifests,
   retryQuestV2ImageCleanupManifests,
@@ -73,6 +78,7 @@ const startQuest = async (questId: string, now: Date): Promise<boolean> => db.tr
     .limit(1)
     .for('update');
   if (!current) return false;
+  if (await hasPendingQuestV2EditRequest(transaction, questId)) return false;
 
   await transaction
     .select({ id: questAssignment.id })
@@ -264,6 +270,9 @@ const pendingEditRequestIds = async (limit: number) => db
 const timeoutEditRequest = async (requestId: string, now: Date) => expireQuestEditRequest(requestId, now)
   .then((result) => 'status' in result && result.status === 'EDIT_REQUEST_REJECTED');
 
+const timeoutQuestV2EditRequest = (requestId: string, now: Date) =>
+  expireQuestV2EditRequest(requestId, now);
+
 const dueInvitationIds = async (now: Date, limit: number) => db
   .select({ id: questTeamInvitation.id })
   .from(questTeamInvitation)
@@ -344,10 +353,17 @@ export const runQuestLifecycleWorker = async (
     reportError(options.onError, error);
   }
 
-  const timedOutEditRequestIds = await processIds(
+  const timedOutLegacyEditRequestIds = await processIds(
     (await pendingEditRequestIds(limit)).map(({ id }) => id),
     'edit-timeout',
     (id) => timeoutEditRequest(id, now),
+    errors,
+    options.onError,
+  );
+  const timedOutV2EditRequestIds = await processIds(
+    (await pendingQuestV2EditRequestIds(limit)).map(({ id }) => id),
+    'edit-timeout',
+    (id) => timeoutQuestV2EditRequest(id, now),
     errors,
     options.onError,
   );
@@ -383,7 +399,15 @@ export const runQuestLifecycleWorker = async (
     options.onError,
   );
 
-  return { startedQuestIds, autoCancelledQuestIds, disputedQuestIds, timedOutEditRequestIds, expiredInvitationIds, autoApprovedProofIds, errors };
+  return {
+    startedQuestIds,
+    autoCancelledQuestIds,
+    disputedQuestIds,
+    timedOutEditRequestIds: [...timedOutLegacyEditRequestIds, ...timedOutV2EditRequestIds],
+    expiredInvitationIds,
+    autoApprovedProofIds,
+    errors,
+  };
 };
 
 export const runQuestLifecycle = runQuestLifecycleWorker;
