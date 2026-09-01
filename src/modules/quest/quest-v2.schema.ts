@@ -7,6 +7,7 @@ import type { StandardSchemaV1Like } from 'elysia/types';
 
 import {
   questV2CanonicalScheduleTimePattern,
+  isQuestV2ScheduleTime,
   questV2Modes,
   questV2Participations,
   questV2ScheduleTimePattern,
@@ -372,6 +373,167 @@ export const questV2MineQuerySchema = t.Object(
   { additionalProperties: false },
 );
 
+const questV2BoardQueryProperties = {
+  q: t.Optional(t.String()),
+  tagId: t.Optional(t.String({ format: 'uuid' })),
+  mode: t.Optional(questV2ModeSchema),
+  participation: t.Optional(questV2ParticipationSchema),
+  minQuestReward: t.Optional(t.Number({ minimum: 0, maximum: 700000 })),
+  maxQuestReward: t.Optional(t.Number({ minimum: 0, maximum: 700000 })),
+  maxDurationMinutes: t.Optional(t.Integer({ minimum: 1 })),
+  startFrom: t.Optional(t.String({
+    format: 'date-time',
+    pattern: questV2ScheduleTimePattern.source,
+  })),
+  startTo: t.Optional(t.String({
+    format: 'date-time',
+    pattern: questV2ScheduleTimePattern.source,
+  })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+  cursor: t.Optional(t.String()),
+};
+
+export const questV2BoardQuerySchema = t.Object(
+  questV2BoardQueryProperties,
+  { additionalProperties: false },
+);
+
+const questV2BoardQueryOpenApiSchema = t.Object(
+  {
+    ...questV2BoardQueryProperties,
+    minQuestReward: t.Optional(t.Number({
+      minimum: 0,
+      maximum: 700000,
+      multipleOf: 0.01,
+      description: 'Minimum inclusive Quest Reward in Baht with at most two decimal places.',
+    })),
+    maxQuestReward: t.Optional(t.Number({
+      minimum: 0,
+      maximum: 700000,
+      multipleOf: 0.01,
+      description: 'Maximum inclusive Quest Reward in Baht with at most two decimal places.',
+    })),
+  },
+  { additionalProperties: false },
+);
+
+const questV2BoardQueryValidator = TypeCompiler.Compile(questV2BoardQuerySchema);
+
+type QuestV2BoardQueryHttpSchema = StandardSchemaV1Like<
+  Static<typeof questV2BoardQuerySchema>,
+  Static<typeof questV2BoardQuerySchema>
+> & {
+  readonly '~standard': {
+    readonly version: 1;
+    readonly vendor: 'elysia';
+    readonly validate: (value: unknown) =>
+      | { value: Static<typeof questV2BoardQuerySchema>; issues?: never }
+      | { value?: never; issues: unknown[] };
+    readonly jsonSchema: {
+      readonly input: () => typeof questV2BoardQueryOpenApiSchema;
+    };
+  };
+};
+
+const hasExactBahtPrecision = (value: unknown): value is number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+  const fractionalPart = value.toString().split('.')[1];
+  return fractionalPart === undefined || /^\d{1,2}$/.test(fractionalPart);
+};
+
+const hasAtMostTwoBahtDecimals = (value: unknown): boolean => {
+  if (typeof value !== 'string') return hasExactBahtPrecision(value);
+
+  const mantissa = value.split(/[eE]/, 1)[0];
+  const fractionalPart = mantissa?.split('.')[1];
+  return fractionalPart === undefined || fractionalPart.length <= 2;
+};
+
+const numericQuestV2BoardQueryFields = [
+  'minQuestReward',
+  'maxQuestReward',
+  'maxDurationMinutes',
+  'limit',
+] as const;
+
+const normalizeQuestV2BoardQueryInput = (value: unknown): unknown => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+
+  const query = { ...(value as Record<string, unknown>) };
+  for (const field of numericQuestV2BoardQueryFields) {
+    if (typeof query[field] === 'string' && query[field] !== '') {
+      query[field] = Number(query[field]);
+    }
+  }
+  return query;
+};
+
+export const questV2BoardQueryHttpSchema = {
+  '~standard': {
+    version: 1 as const,
+    vendor: 'elysia' as const,
+    types: undefined as unknown as {
+      input: Static<typeof questV2BoardQuerySchema>;
+      output: Static<typeof questV2BoardQuerySchema>;
+    },
+    validate: (value: unknown) => {
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        const rawQuery = value as Record<string, unknown>;
+        for (const [field, amount] of [
+          ['minQuestReward', rawQuery.minQuestReward],
+          ['maxQuestReward', rawQuery.maxQuestReward],
+        ] as const) {
+          if (amount !== undefined && !hasAtMostTwoBahtDecimals(amount)) {
+            return {
+              issues: [{ path: [field], message: 'Expected Baht amount to use at most two decimal places' }],
+            };
+          }
+        }
+      }
+
+      const normalizedValue = normalizeQuestV2BoardQueryInput(value);
+      if (!questV2BoardQueryValidator.Check(normalizedValue)) {
+        return { issues: [...questV2BoardQueryValidator.Errors(normalizedValue)] };
+      }
+
+      const query = normalizedValue as Static<typeof questV2BoardQuerySchema>;
+      for (const [field, amount] of [
+        ['minQuestReward', query.minQuestReward],
+        ['maxQuestReward', query.maxQuestReward],
+      ] as const) {
+        if (amount !== undefined && !hasExactBahtPrecision(amount)) {
+          return {
+            issues: [{ path: [field], message: 'Expected Baht amount to use at most two decimal places' }],
+          };
+        }
+      }
+
+      for (const [field, schedule] of [
+        ['startFrom', query.startFrom],
+        ['startTo', query.startTo],
+      ] as const) {
+        if (schedule !== undefined && !isQuestV2ScheduleTime(schedule)) {
+          return {
+            issues: [{ path: [field], message: 'Expected a valid +07:00 schedule time' }],
+          };
+        }
+      }
+
+      return { value: query };
+    },
+    jsonSchema: {
+      input: () => questV2BoardQueryOpenApiSchema,
+    },
+  },
+} as QuestV2BoardQueryHttpSchema;
+
+export const normalizeQuestV2BoardQuery = ({ query }: { query: unknown }) => {
+  if (typeof query !== 'object' || query === null || Array.isArray(query)) return;
+
+  const payload = query as Record<string, unknown>;
+  if (typeof payload.q === 'string') payload.q = payload.q.trim();
+};
+
 export const questV2ParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
 });
@@ -539,6 +701,67 @@ export const questV2MineHttpResponseSchema = createQuestV2HttpResponseSchema(
   questV2MineResponseSchema,
   questV2MineResponseOpenApiSchema,
 );
+
+const questV2RewardSchema = t.Number({ minimum: 0, maximum: 700000 });
+const questV2CanonicalScheduleSchema = t.String({
+  format: 'date-time',
+  pattern: questV2CanonicalScheduleTimePattern.source,
+});
+
+export const questV2BoardCardSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  title: t.String(),
+  questReward: questV2RewardSchema,
+  tag: questV2TagSchema,
+  mode: questV2ModeSchema,
+  participation: questV2ParticipationSchema,
+  headcount: t.Integer({ minimum: 1, maximum: 20 }),
+  activeWorkerCount: t.Integer({ minimum: 0, maximum: 20 }),
+  startTime: questV2CanonicalScheduleSchema,
+  dueAt: questV2CanonicalScheduleSchema,
+  hirerName: t.String(),
+  location: t.Nullable(t.String()),
+});
+
+export const questV2BoardResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    items: t.Array(questV2BoardCardSchema),
+    nextCursor: t.Nullable(t.String()),
+  }),
+});
+
+export const questV2PublicImageSchema = t.Object({
+  imageId: t.String({ format: 'uuid' }),
+  position: t.Integer({ minimum: 0 }),
+  url: t.String({ format: 'uri' }),
+  urlExpiresAt: t.String({ format: 'date-time' }),
+});
+
+export const questV2PublicDetailSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  title: t.String(),
+  description: t.Nullable(t.String()),
+  condition: t.Object({ items: t.Array(questV2ConditionItemSchema, { minItems: 1 }) }),
+  tag: questV2TagSchema,
+  mode: questV2ModeSchema,
+  participation: questV2ParticipationSchema,
+  state: questV2StateSchema,
+  questReward: questV2RewardSchema,
+  headcount: t.Integer({ minimum: 1, maximum: 20 }),
+  activeWorkerCount: t.Integer({ minimum: 0, maximum: 20 }),
+  startTime: questV2CanonicalScheduleSchema,
+  dueAt: questV2CanonicalScheduleSchema,
+  proofRequired: t.Boolean(),
+  hirerName: t.String(),
+  locations: t.Array(t.Object({ label: t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }) })),
+  images: t.Array(questV2PublicImageSchema),
+});
+
+export const questV2PublicDetailResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: questV2PublicDetailSchema,
+});
 
 export const questV2DetailSchema = t.Composite([
   questV2CanonicalQuestSchema,
@@ -761,6 +984,7 @@ export const questV2EditHeadersSchema = t.Object(
 );
 
 export type QuestV2MineQuery = Static<typeof questV2MineQuerySchema>;
+export type QuestV2BoardQuery = Static<typeof questV2BoardQuerySchema>;
 export type QuestV2Params = Static<typeof questV2ParamsSchema>;
 export type QuestV2ImageParams = Static<typeof questV2ImageParamsSchema>;
 export type QuestV2ImagesUploadInput = Static<typeof questV2ImagesUploadSchema>;
