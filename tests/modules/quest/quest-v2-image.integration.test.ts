@@ -220,6 +220,11 @@ beforeEach(async () => {
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(file).where(eq(file.uploadedByUserId, hirerId));
   questIds.splice(0, questIds.length);
+
+  spyOn(questV2Storage, 'prepareUpload').mockImplementation((userId) => ({
+    bucket: 'test-bucket',
+    objectKey: `quests/v2/${userId}/${crypto.randomUUID()}`,
+  }));
 });
 
 afterAll(async () => {
