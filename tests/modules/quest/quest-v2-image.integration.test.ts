@@ -83,7 +83,7 @@ const baseInput: QuestV2CreateInput = {
   participation: 'SINGLE',
   questFundingTotal: 20,
   headcount: 1,
-  startTime: '2030-08-26T10:00:00.000Z',
+  startTime: '2030-08-26T10:00:00.000+07:00',
 };
 
 const legacyBaseInput: QuestCreateInput = {

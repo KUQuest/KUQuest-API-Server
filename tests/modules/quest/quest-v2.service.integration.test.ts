@@ -1498,7 +1498,9 @@ describe('Quest API v2 HTTP validation and ownership', () => {
     expect(body.data.updatedAt).toMatch(/Z$/);
 
     const detail = await getQuest(body.data.id);
-    expect((await detail.json()).data).toEqual(body.data);
+    const detailBody = (await detail.json()).data;
+    expect(detailBody).toMatchObject(body.data);
+    expect(detailBody.images).toEqual([]);
 
     const mine = await app.handle(
       new Request('http://localhost/api/v2/quests/mine', {
