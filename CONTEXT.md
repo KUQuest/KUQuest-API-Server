@@ -351,7 +351,7 @@ An immutable record of an Admin's decision to dismiss, hide, or restore a Report
 _Avoid_: Reporter Entry, Admin Action
 
 **Admin Action**:
-An immutable audit record of an Admin's Work Chat evidence access or moderation operation. It records the action and result for the affected domain records without storing Message text, file bytes, or signed URLs.
+An immutable audit record of an Admin's command or Work Chat evidence access or moderation operation. It records the action and result for the affected domain records without storing Message text, file bytes, or signed URLs.
 _Avoid_: Reporter Entry, Moderation Decision
 
 **Admin Review Item**:

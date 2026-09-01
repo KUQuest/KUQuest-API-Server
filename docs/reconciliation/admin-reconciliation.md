@@ -21,6 +21,7 @@ active routes, and unbuilt moderation and penalty models.
 | --- | --- |
 | **Confirmed** | The Rulebook and Legacy Implementation agree. |
 | **Docs Only** | Rulebook behavior has no verified implementation. |
+| **Partial** | Some target behavior has verified implementation, but the full area is incomplete. |
 | **Code Only** | Legacy Implementation behavior has no Rulebook policy. |
 | **Conflict** | The Rulebook and Legacy Implementation define different behavior. |
 | **Unclear** | Evidence does not define one behavior. |
@@ -44,7 +45,7 @@ active routes, and unbuilt moderation and penalty models.
 | **Dispute Case** | Admin resolves Dispute Case on `QUEST_FAILED` Quests within 5-day window. Resolves to `DISPUTE_CASE_DISMISSED` or `DISPUTE_CASE_RESOLVED` with positive satang redirection. 7-day money hold delays funding release. | `POST /api/v1/admin/quests/:questId/dispute/resolve` (`quest-settlement.route.ts`) operates on legacy `QUEST_DISPUTED` state. No Dispute Case table exists. | **Conflict / Docs Only**. |
 | **Quest Hide** | Admin hides/restores non-terminal Quests via independent `hiddenAt`/`hiddenByAdminId` flags without mutating Quest State. Requires reason and `Idempotency-Key`. Sends Push Notification to Hirer. | `quest.schema.ts` has `hiddenAt`/`hiddenByAdminId` columns but ties `hiddenAt` to `QUEST_HIDDEN` state via CHECK constraint. No Admin hide/restore routes exist. | **Conflict / Docs Only**. |
 | **Wallet Freeze/Suspend** | Admin sets Student Wallet to `FROZEN` or `SUSPENDED` with reason and `Idempotency-Key`. Blocks new financial and Quest commitments while honoring existing obligations. Auto-freeze on ban. | `changeWalletStatus` exists in `wallet.status.service.ts`, but no Admin route calls it. No auto-freeze on ban hook exists. | **Docs Only**. |
-| **Trust & Safety (Messages)** | Moderation of reported Work Chat and Candidate Inquiry Messages. Decisions: `REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN` (creates Misconduct strike), `REPORT_CASE_RESTORED` (reverses strike). Evidence access via Evidence Reference. | No Report Case, Reporter Entry, Evidence Reference, Moderation Decision, or Admin Action tables or routes exist. | **Docs Only**. |
+| **Trust & Safety (Messages)** | Moderation of reported Work Chat and Candidate Inquiry Messages. Decisions: `REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN` (creates Misconduct strike), `REPORT_CASE_RESTORED` (reverses strike). Evidence access via Evidence Reference. | Shared Admin Action infrastructure now exists in `admin.schema.ts` and `admin-action.service.ts`; Report Case, Reporter Entry, Evidence Reference, and Moderation Decision tables and routes remain absent. | **Docs Only / Partial**. |
 | **Conduct Report (Quests)** | Review of Member behavior on Quests (reasons: `CONDUCT_NO_SHOW`, `CONDUCT_ABANDONED`, `CONDUCT_POOR_QUALITY`, `CONDUCT_INAPPROPRIATE_BEHAVIOR`). Decisions: `CONDUCT_REPORT_PENDING`, `CONDUCT_REPORT_UPHELD` (creates Misconduct strike), `CONDUCT_REPORT_DISMISSED`. | No Conduct Report table or routes exist. | **Docs Only**. |
 | **Member Ban & Penalty Ladders** | Two penalty ladders (Misconduct ladder and Low Average Review ladder). Results: Red Flag (7 days), Temporary Ban (7 days), Permanent Ban. Backed by immutable `memberPenaltyRecord` audit table. Auth guard checks active ban. | `auth_user` lacks `bannedUntil` and `redFlagExpiresAt` columns. Only `auth_admin` carries `disabled_at`. No `memberPenaltyRecord` table or Member ban auth guard exists. | **Docs Only**. |
 
@@ -57,7 +58,7 @@ active routes, and unbuilt moderation and penalty models.
 | Quest Hide Admin routes | Target specifies Admin routes to hide (with reason) and restore Quests, sending Push Notifications to the Hirer. | `hiddenAt` and `hiddenByAdminId` columns exist in `quest.schema.ts`, but no Admin routes exist to invoke them. | **Docs Only / Gap** — `admin-rulebook.md` §3. |
 | Member Ban columns and guard | Target requires `auth_user.banned_until` and `auth_user.red_flag_expires_at` for O(1) guard checks, backed by `memberPenaltyRecord`. Auth guard rejects active bans. | `auth_user` has neither column. Only `auth_admin` carries `disabled_at` (`auth.schema.ts`, `drizzle/0002_groovy_vertigo.sql`). No Member ban guard exists. | **Docs Only / Gap** — `admin-rulebook.md` §6. |
 | Member Penalty Record table | Target requires immutable `memberPenaltyRecord` table storing strikes, sequence numbers, results, and linked reversing rows. | Table does not exist in schema. | **Docs Only / Gap** — `admin-rulebook.md` §6. |
-| Moderation tables | Target requires Report Case, Reporter Entry, Evidence Reference, Moderation Decision, and Admin Action tables. | None of these tables exist in schema. | **Docs Only / Gap** — `admin-rulebook.md` §5. |
+| Moderation tables | Target requires Report Case, Reporter Entry, Evidence Reference, and Moderation Decision tables. The shared Admin Action table is tracked separately below. | Those four tables do not exist in schema. | **Docs Only / Gap** — `admin-rulebook.md` §5. |
 | Conduct Report table | Target requires Conduct Report table keyed to Quest and reported Member with fixed reason enums and Admin decisions. | Table does not exist in schema. | **Docs Only / Gap** — `admin-rulebook.md` §7. |
 | Dispute Case table | Target requires Dispute Case table keyed to `QUEST_FAILED` Quest and Member with filing window tracking. | Table does not exist in schema. | **Docs Only / Gap** — `admin-rulebook.md` §2. |
 | Wallet Freeze Admin route | Target specifies Admin route to freeze or suspend a Student Wallet with reason and `Idempotency-Key`. | `changeWalletStatus` exists in `wallet.status.service.ts`, but no Admin HTTP route is wired to invoke it. | **Docs Only / Gap** — `admin-rulebook.md` §4. |
@@ -77,7 +78,8 @@ the server implementation with the Admin Rulebook:
 - [ ] Add `QUEST_FAILED` to the `quest_status` enum.
 - [ ] Add `auth_user.banned_until` and `auth_user.red_flag_expires_at` columns to `auth_user`.
 - [ ] Create the `memberPenaltyRecord` table with strike sequence, penalty result, and linked reversing rows.
-- [ ] Create the Trust & Safety moderation tables: `reportCase`, `reporterEntry`, `evidenceReference`, `moderationDecision`, and `adminAction`.
+- [x] Create the shared immutable `adminAction` table and transaction-aware writer.
+- [ ] Create the remaining Trust & Safety moderation tables: `reportCase`, `reporterEntry`, `evidenceReference`, and `moderationDecision`.
 - [ ] Create the `conductReport` table keyed to Quest and reported Member.
 - [ ] Create the `disputeCase` table keyed to `QUEST_FAILED` Quest and Member.
 
