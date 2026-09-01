@@ -1,6 +1,8 @@
 import { db } from '@/database/client';
+import { authUser } from '@/database/schema/auth.schema';
 import {
   quest,
+  questAssignment,
   questApiVersion,
   questConditionItem,
   questImage,
@@ -20,9 +22,23 @@ import {
 } from '@/modules/wallet';
 import { decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 
-import { and, asc, eq, gt, isNull, like, lte, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  lte,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm';
 
-import { questStatus, type QuestStatus } from './quest.contract';
+import { assignmentStatus, questStatus, type QuestStatus } from './quest.contract';
 import { questV2StorageCompatibility } from './quest-storage.adapter';
 import {
   formatQuestV2ScheduleTime,
@@ -40,7 +56,11 @@ import {
 } from './quest-v2.publish.policy';
 import { softDeleteQuestImageAndRepack } from './quest-image.service';
 import { maxQuestV2Images } from './quest-v2.schema';
-import type { QuestV2CreateInput, QuestV2EditInput } from './quest-v2.schema';
+import type {
+  QuestV2BoardQuery,
+  QuestV2CreateInput,
+  QuestV2EditInput,
+} from './quest-v2.schema';
 import { questV2Storage, type StoredQuestImage } from './quest.storage';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -199,6 +219,48 @@ export type QuestV2Detail = QuestV2CanonicalQuest & {
   images: QuestV2ImageReference[];
 };
 
+export type QuestV2BoardCard = {
+  id: string;
+  title: string;
+  questReward: number;
+  tag: { id: string; name: string };
+  mode: QuestV2Mode;
+  participation: QuestV2Participation;
+  headcount: number;
+  activeWorkerCount: number;
+  startTime: string;
+  dueAt: string;
+  hirerName: string;
+  location: string | null;
+};
+
+export type QuestV2PublicImageResponse = {
+  imageId: string;
+  position: number;
+  url: string;
+  urlExpiresAt: string;
+};
+
+export type QuestV2PublicDetail = {
+  id: string;
+  title: string;
+  description: string | null;
+  condition: QuestV2CanonicalQuest['condition'];
+  tag: { id: string; name: string };
+  mode: QuestV2Mode;
+  participation: QuestV2Participation;
+  state: QuestV2State;
+  questReward: number;
+  headcount: number;
+  activeWorkerCount: number;
+  startTime: string;
+  dueAt: string;
+  proofRequired: boolean;
+  hirerName: string;
+  locations: Array<{ label: string }>;
+  images: QuestV2ImageReference[];
+};
+
 type QuestV2ImageMutationOutcome =
   | 'invalid-idempotency-key'
   | 'not-found'
@@ -243,6 +305,48 @@ type QuestV2Row = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+type QuestV2BoardRow = {
+  id: string;
+  title: string;
+  rewardSatang: number | null;
+  tagId: string | null;
+  tagName: string | null;
+  v2Mode: QuestV2Mode | null;
+  v2Participation: QuestV2Participation | null;
+  headcount: number;
+  activeWorkerCount: number;
+  startTime: Date;
+  dueAt: Date | null;
+  hirerFirstName: string;
+  hirerLastName: string;
+};
+
+type QuestV2PublicDetailRow = QuestV2BoardRow & {
+  description: string | null;
+  questStatus: QuestStatus;
+  proofRequired: boolean;
+};
+
+type CompleteQuestV2DiscoveryRow = QuestV2BoardRow & {
+  rewardSatang: number;
+  tagId: string;
+  tagName: string;
+  v2Mode: QuestV2Mode;
+  v2Participation: QuestV2Participation;
+  dueAt: Date;
+};
+
+const isCompleteQuestV2DiscoveryRow = (
+  row: QuestV2BoardRow,
+): row is CompleteQuestV2DiscoveryRow => (
+  row.rewardSatang !== null &&
+  row.tagId !== null &&
+  row.tagName !== null &&
+  row.v2Mode !== null &&
+  row.v2Participation !== null &&
+  row.dueAt !== null
+);
 
 const questV2RowSelection = {
   id: quest.id,
@@ -2313,6 +2417,252 @@ export const publishQuestV2 = async (
     }
     return { outcome: error.outcome };
   }
+};
+
+const activeWorkerCountExpression = sql<number>`(
+  SELECT COUNT(*)::int
+  FROM ${questAssignment}
+  WHERE ${questAssignment.questId} = ${quest.id}
+    AND ${questAssignment.assignmentStatus} = ${assignmentStatus.active}
+)`;
+
+const questV2PublicReadConditions = (userId: string) => [
+  eq(quest.apiVersion, questApiVersion.v2),
+  eq(quest.questStatus, questStatus.open),
+  isNull(quest.hiddenAt),
+  ne(quest.hirerId, userId),
+  isNotNull(quest.rewardSatang),
+  isNotNull(quest.v2Mode),
+  isNotNull(quest.v2Participation),
+  isNotNull(quest.dueAt),
+  isNotNull(tag.id),
+];
+
+const parseBahtFilterSatang = (value: number): Satang => {
+  const [bahtPart, satangPart] = value.toString().split('.');
+  return satang(Number(`${bahtPart}${(satangPart ?? '').padEnd(2, '0')}`));
+};
+
+const boardCursorCondition = (cursor: ReturnType<typeof decodeCursor>) => {
+  if (!cursor) return undefined;
+
+  const startTime = new Date(cursor.startTime);
+  return or(
+    gt(quest.startTime, startTime),
+    and(eq(quest.startTime, startTime), gt(quest.id, cursor.id)),
+  );
+};
+
+const firstLocationLabels = async (questIds: string[]) => {
+  if (questIds.length === 0) return new Map<string, string | null>();
+
+  const rows = await db
+    .select({ questId: questLocation.questId, label: questLocation.label })
+    .from(questLocation)
+    .where(inArray(questLocation.questId, questIds))
+    .orderBy(asc(questLocation.id));
+  const labels = new Map<string, string | null>();
+
+  for (const row of rows) {
+    if (!labels.has(row.questId)) labels.set(row.questId, row.label?.trim() || null);
+  }
+
+  return labels;
+};
+
+const toQuestV2BoardCard = (
+  row: QuestV2BoardRow,
+  locations: Map<string, string | null>,
+): QuestV2BoardCard => {
+  if (!isCompleteQuestV2DiscoveryRow(row)) {
+    throw new Error(`Quest ${row.id} has incomplete v2 Board data`);
+  }
+
+  return {
+    id: row.id,
+    title: row.title,
+    questReward: toBaht(satang(row.rewardSatang)),
+    tag: { id: row.tagId, name: row.tagName },
+    mode: row.v2Mode,
+    participation: row.v2Participation,
+    headcount: row.headcount,
+    activeWorkerCount: Number(row.activeWorkerCount),
+    startTime: formatQuestV2ScheduleTime(row.startTime),
+    dueAt: formatQuestV2ScheduleTime(row.dueAt),
+    hirerName: `${row.hirerFirstName} ${row.hirerLastName}`.trim(),
+    location: locations.get(row.id) ?? null,
+  };
+};
+
+export const listQuestBoardV2 = async (
+  userId: string,
+  filters: QuestV2BoardQuery,
+): Promise<{ items: QuestV2BoardCard[]; nextCursor: string | null }> => {
+  const limit = parsePageLimit(filters.limit);
+  const cursor = decodeCursor(filters.cursor);
+  const conditions = [
+    ...questV2PublicReadConditions(userId),
+    gt(quest.startTime, new Date()),
+    or(
+      eq(quest.v2Mode, 'CANDIDATE'),
+      and(
+        eq(quest.v2Mode, 'FIRST_COME_FIRST_SERVED'),
+        or(
+          and(
+            eq(quest.v2Participation, 'SINGLE'),
+            sql`${activeWorkerCountExpression} = 0`,
+          ),
+          and(
+            eq(quest.v2Participation, 'GROUP'),
+            sql`${activeWorkerCountExpression} < ${quest.headcount}`,
+          ),
+        ),
+      ),
+    ),
+  ];
+
+  const queryText = filters.q?.trim();
+  if (queryText) {
+    const pattern = `%${queryText.replace(/[\\%_]/g, '\\$&')}%`;
+    conditions.push(
+      sql`(${quest.title} ILIKE ${pattern} ESCAPE ${'\\'} OR ${quest.description} ILIKE ${pattern} ESCAPE ${'\\'})`,
+    );
+  }
+  if (filters.tagId) conditions.push(eq(quest.tagId, filters.tagId));
+  if (filters.mode) conditions.push(eq(quest.v2Mode, filters.mode));
+  if (filters.participation) conditions.push(eq(quest.v2Participation, filters.participation));
+  if (filters.minQuestReward !== undefined) {
+    conditions.push(
+      sql`${quest.rewardSatang} >= ${parseBahtFilterSatang(filters.minQuestReward)}`,
+    );
+  }
+  if (filters.maxQuestReward !== undefined) {
+    conditions.push(
+      sql`${quest.rewardSatang} <= ${parseBahtFilterSatang(filters.maxQuestReward)}`,
+    );
+  }
+  if (filters.maxDurationMinutes !== undefined) {
+    conditions.push(
+      sql`${quest.dueAt} IS NOT NULL AND EXTRACT(EPOCH FROM (${quest.dueAt} - ${quest.startTime})) / 60 <= ${filters.maxDurationMinutes}`,
+    );
+  }
+  if (filters.startFrom) conditions.push(gte(quest.startTime, new Date(filters.startFrom)));
+  if (filters.startTo) conditions.push(lte(quest.startTime, new Date(filters.startTo)));
+
+  const cursorCondition = boardCursorCondition(cursor);
+  if (cursorCondition) conditions.push(cursorCondition);
+
+  const rows = (await db
+    .select({
+      id: quest.id,
+      title: quest.title,
+      rewardSatang: quest.rewardSatang,
+      tagId: tag.id,
+      tagName: tag.name,
+      v2Mode: quest.v2Mode,
+      v2Participation: quest.v2Participation,
+      headcount: quest.headcount,
+      activeWorkerCount: activeWorkerCountExpression,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
+      hirerFirstName: authUser.firstName,
+      hirerLastName: authUser.lastName,
+    })
+    .from(quest)
+    .innerJoin(authUser, eq(quest.hirerId, authUser.id))
+    .leftJoin(tag, eq(quest.tagId, tag.id))
+    .where(and(...conditions))
+    .orderBy(asc(quest.startTime), asc(quest.id))
+    .limit(limit + 1)) as QuestV2BoardRow[];
+
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit);
+  const locations = await firstLocationLabels(page.map((row) => row.id));
+  const items = page.map((row) => toQuestV2BoardCard(row, locations));
+  const last = page[page.length - 1];
+
+  return {
+    items,
+    nextCursor:
+      hasMore && last
+        ? encodeCursor({ id: last.id, startTime: last.startTime.toISOString() })
+        : null,
+  };
+};
+
+export const materializeQuestV2PublicImageResponse = (
+  images: QuestV2ImageReference[],
+): QuestV2PublicImageResponse[] => images.map((image) => {
+  const link = questV2Storage.linkForWithExpiry(image);
+  return {
+    imageId: image.imageId,
+    position: image.position,
+    url: link.url,
+    urlExpiresAt: link.expiresAt.toISOString(),
+  };
+});
+
+export const getPublicQuestV2Detail = async (
+  userId: string,
+  questId: string,
+): Promise<QuestV2PublicDetail | undefined> => {
+  const [row] = await db
+    .select({
+      id: quest.id,
+      title: quest.title,
+      description: quest.description,
+      rewardSatang: quest.rewardSatang,
+      tagId: tag.id,
+      tagName: tag.name,
+      v2Mode: quest.v2Mode,
+      v2Participation: quest.v2Participation,
+      questStatus: quest.questStatus,
+      headcount: quest.headcount,
+      activeWorkerCount: activeWorkerCountExpression,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
+      proofRequired: quest.proofRequired,
+      hirerFirstName: authUser.firstName,
+      hirerLastName: authUser.lastName,
+    })
+    .from(quest)
+    .innerJoin(authUser, eq(quest.hirerId, authUser.id))
+    .leftJoin(tag, eq(quest.tagId, tag.id))
+    .where(and(eq(quest.id, questId), ...questV2PublicReadConditions(userId)))
+    .limit(1);
+
+  if (!row) return undefined;
+  const publicRow = row as QuestV2PublicDetailRow;
+  if (!isCompleteQuestV2DiscoveryRow(publicRow)) {
+    throw new Error(`Quest ${questId} has incomplete v2 Public Detail data`);
+  }
+
+  const [conditionItems, locations, images] = await Promise.all([
+    selectConditionItems(db, questId),
+    selectLocations(db, questId),
+    selectQuestV2Images(db, questId),
+  ]);
+  if (conditionItems.length === 0) throw new Error(`Quest ${questId} has no Condition Items`);
+
+  return {
+    id: publicRow.id,
+    title: publicRow.title,
+    description: publicRow.description,
+    condition: { items: conditionItems },
+    tag: { id: publicRow.tagId, name: publicRow.tagName },
+    mode: publicRow.v2Mode,
+    participation: publicRow.v2Participation,
+    state: toV2State(publicRow.questStatus),
+    questReward: toBaht(satang(publicRow.rewardSatang)),
+    headcount: publicRow.headcount,
+    activeWorkerCount: Number(publicRow.activeWorkerCount),
+    startTime: formatQuestV2ScheduleTime(publicRow.startTime),
+    dueAt: formatQuestV2ScheduleTime(publicRow.dueAt),
+    proofRequired: publicRow.proofRequired,
+    hirerName: `${publicRow.hirerFirstName} ${publicRow.hirerLastName}`.trim(),
+    locations,
+    images,
+  };
 };
 
 export const listOwnQuestV2 = async (

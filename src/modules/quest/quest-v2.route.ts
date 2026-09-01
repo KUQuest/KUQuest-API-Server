@@ -9,14 +9,18 @@ import {
   createQuestV2Controller,
   deleteQuestImageV2Controller,
   editQuestV2Controller,
+  getPublicQuestV2DetailController,
   getQuestV2DetailController,
   getQuestV2PublishCheckController,
   listOwnQuestV2Controller,
+  listQuestBoardV2Controller,
   publishQuestV2Controller,
 } from './quest-v2.controller';
 import {
   questV2CreateResponseSchema,
   questV2CreateHttpSchema,
+  questV2BoardQueryHttpSchema,
+  questV2BoardResponseSchema,
   questV2DetailResponseSchema,
   questV2EditHeadersSchema,
   questV2EditHttpSchema,
@@ -27,10 +31,12 @@ import {
   questV2ImagesResponseSchema,
   questV2ImagesUploadSchema,
   questV2ParamsSchema,
+  questV2PublicDetailResponseSchema,
   questV2PublishCheckHttpResponseSchema,
   questV2PublishHttpResponseSchema,
   questV2WriteHeadersSchema,
   normalizeQuestV2CreateBody,
+  normalizeQuestV2BoardQuery,
   normalizeQuestV2EditBody,
 } from './quest-v2.schema';
 
@@ -39,6 +45,19 @@ export const questV2Route = new Elysia({
   prefix: `${API_V2_PREFIX}/quests`,
 })
   .use(authGuard)
+  .get('', listQuestBoardV2Controller, {
+    query: questV2BoardQueryHttpSchema,
+    transform: normalizeQuestV2BoardQuery,
+    response: responses(questV2BoardResponseSchema, 400, 401, 500),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'List the v2 Quest Board',
+      description:
+        'Returns compact Quest Board Cards for non-hidden, open, joinable Quests owned by another Member. Eligibility is evaluated before cursor pagination.',
+      operationId: 'listQuestBoardV2',
+      security: betterAuthSecurity,
+    },
+  })
   .post('', createQuestV2Controller, {
     body: questV2CreateHttpSchema,
     headers: questV2WriteHeadersSchema,
@@ -128,6 +147,18 @@ export const questV2Route = new Elysia({
       description:
         'Returns publish blockers, warnings, and the inclusive Quest Funding Total quote for the Hirer without changing Quest or Wallet state.',
       operationId: 'getQuestV2PublishCheck',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:questId/public', getPublicQuestV2DetailController, {
+    params: questV2ParamsSchema,
+    response: responses(questV2PublicDetailResponseSchema, 400, 401, 404, 500, 503),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Get Public Quest Detail through the v2 contract',
+      description:
+        'Returns the public projection of a non-hidden QUEST_OPEN Quest to an authenticated Member who is not the Hirer. Candidate and Finance internals are excluded.',
+      operationId: 'getPublicQuestV2Detail',
       security: betterAuthSecurity,
     },
   })
