@@ -12,6 +12,8 @@ import {
   questV2States,
 } from './quest-v2.contract';
 
+export const maxQuestV2Images = 3;
+
 const questV2ModeSchema = t.Union([
   t.Literal(questV2Modes[0]),
   t.Literal(questV2Modes[1]),
@@ -373,6 +375,23 @@ export const questV2ParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
 });
 
+export const questV2ImageParamsSchema = t.Object({
+  questId: t.String({ format: 'uuid' }),
+  imageId: t.String({ format: 'uuid' }),
+});
+
+export const questV2ImagesUploadSchema = t.Object(
+  {
+    images: t.Files({
+      minItems: 1,
+      maxItems: maxQuestV2Images,
+      description:
+        'One to three Quest Image files in request order. Each file must be a decoded JPEG, PNG, or WebP of at most 5 MB.',
+    }),
+  },
+  { additionalProperties: false },
+);
+
 const questV2TagSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   name: t.String(),
@@ -381,6 +400,20 @@ const questV2TagSchema = t.Object({
 const questV2ConditionItemSchema = t.Object({
   position: t.Integer({ minimum: 0 }),
   text: t.String(),
+});
+
+export const questV2ImageSchema = t.Object({
+  imageId: t.String({ format: 'uuid', description: 'Quest Image identifier.' }),
+  fileId: t.String({ format: 'uuid', description: 'Private file reference.' }),
+  position: t.Integer({ minimum: 0, description: 'Zero-based gallery position.' }),
+  url: t.String({
+    format: 'uri',
+    description: 'Temporary image link. The API never returns a permanent storage URL.',
+  }),
+  urlExpiresAt: t.String({
+    format: 'date-time',
+    description: 'Expiry time for the temporary image link, 15 minutes after materialization.',
+  }),
 });
 
 export const questV2CanonicalQuestSchema = t.Object({
@@ -422,9 +455,24 @@ export const questV2MineResponseSchema = t.Object({
   }),
 });
 
-export const questV2DetailResponseSchema = questV2CreateResponseSchema;
+export const questV2DetailSchema = t.Composite([
+  questV2CanonicalQuestSchema,
+  t.Object({ images: t.Array(questV2ImageSchema) }),
+]);
+
+export const questV2DetailResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: questV2DetailSchema,
+});
 
 export const questV2EditResponseSchema = questV2CreateResponseSchema;
+
+export const questV2ImagesResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    images: t.Array(questV2ImageSchema),
+  }),
+});
 
 const questV2PublishReasonSchema = t.Object({
   code: t.String(),
@@ -537,5 +585,7 @@ export const questV2EditHeadersSchema = t.Object(
 
 export type QuestV2MineQuery = Static<typeof questV2MineQuerySchema>;
 export type QuestV2Params = Static<typeof questV2ParamsSchema>;
+export type QuestV2ImageParams = Static<typeof questV2ImageParamsSchema>;
+export type QuestV2ImagesUploadInput = Static<typeof questV2ImagesUploadSchema>;
 export type QuestV2WriteHeaders = Static<typeof questV2WriteHeadersSchema>;
 export type QuestV2EditHeaders = Static<typeof questV2EditHeadersSchema>;

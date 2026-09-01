@@ -23,9 +23,24 @@ export type StoredImage = {
   sizeBytes: number;
 };
 
+export type ImageUploadPlan = Pick<StoredImage, 'bucket' | 'objectKey'>;
+
+export type ImageLink = {
+  url: string;
+  expiresAt: Date;
+};
+
 export class ImageTooLargeError extends Error {}
 export class UnsupportedImageTypeError extends Error {}
-export class ImageUploadError extends Error {}
+export class ImageUploadError extends Error {
+  constructor(
+    message: string,
+    options?: ErrorOptions,
+    readonly cleanupObject?: StoredImage,
+  ) {
+    super(message, options);
+  }
+}
 export class ImageLinkUnavailableError extends Error {}
 
 export const createDebugLogger =
@@ -76,7 +91,22 @@ export const createImageStorage = ({
       region: env.s3Region,
     });
 
-  const upload = async (userId: string, image: File): Promise<StoredImage> => {
+  const prepareUpload = (userId: string): ImageUploadPlan => {
+    if (!storageBucket) {
+      throw new ImageUploadError('S3 bucket is not configured');
+    }
+
+    return {
+      bucket: storageBucket,
+      objectKey: `${keyPrefix}/${userId}/${crypto.randomUUID()}`,
+    };
+  };
+
+  const upload = async (
+    userId: string,
+    image: File,
+    plan?: ImageUploadPlan,
+  ): Promise<StoredImage> => {
     log('Validating file', {
       declaredContentType: image.type,
       sizeBytes: image.size,
@@ -91,6 +121,12 @@ export const createImageStorage = ({
     }
 
     const bytes = new Uint8Array(await image.arrayBuffer());
+    if (bytes.length === 0) {
+      throw new UnsupportedImageTypeError(emptyFileMessage);
+    }
+    if (bytes.length > maxSizeBytes) {
+      throw new ImageTooLargeError(tooLargeMessage);
+    }
     let contentType: ImageContentType | undefined;
 
     try {
@@ -115,30 +151,38 @@ export const createImageStorage = ({
       throw new ImageUploadError('S3 bucket is not configured');
     }
 
-    const objectKey = `${keyPrefix}/${userId}/${crypto.randomUUID()}.${extensionByContentType[contentType]}`;
+    if (plan && plan.bucket !== storageBucket) {
+      throw new ImageUploadError('Image upload plan does not belong to this storage');
+    }
+
+    const objectKey =
+      plan?.objectKey ??
+      `${keyPrefix}/${userId}/${crypto.randomUUID()}.${extensionByContentType[contentType]}`;
 
     try {
-      const writtenBytes = await s3.write(objectKey, image, { type: contentType });
-      if (writtenBytes !== image.size) {
-        throw new Error(`Expected ${image.size} bytes but wrote ${writtenBytes}`);
+      const writtenBytes = await s3.write(objectKey, new Blob([bytes], { type: contentType }), { type: contentType });
+      if (writtenBytes !== bytes.length) {
+        throw new Error(`Expected ${bytes.length} bytes but wrote ${writtenBytes}`);
       }
     } catch (error) {
       console.error(`[${logLabel}] Upload failed`, { bucket: storageBucket, error, objectKey });
+      let cleanupObject: StoredImage | undefined;
       try {
         await s3.delete(objectKey, { bucket: storageBucket });
       } catch (cleanupError) {
+        cleanupObject = { bucket: storageBucket, objectKey, contentType, sizeBytes: bytes.length };
         console.error(`[${logLabel}] Compensating object deletion failed`, {
           bucket: storageBucket,
           cleanupError,
           objectKey,
         });
       }
-      throw new ImageUploadError('Image upload failed', { cause: error });
+      throw new ImageUploadError('Image upload failed', { cause: error }, cleanupObject);
     }
 
     log('Upload succeeded', { bucket: storageBucket, objectKey, userId });
 
-    return { bucket: storageBucket, objectKey, contentType, sizeBytes: image.size };
+    return { bucket: storageBucket, objectKey, contentType, sizeBytes: bytes.length };
   };
 
   const deleteImage = async (bucket: string, objectKey: string): Promise<void> => {
@@ -146,17 +190,35 @@ export const createImageStorage = ({
     await s3.delete(objectKey, { bucket });
   };
 
-  const linkFor = ({ bucket, objectKey }: Pick<StoredImage, 'bucket' | 'objectKey'>): string => {
-    if (!env.s3AccessKeyId || !env.s3SecretAccessKey || !env.s3Endpoint || !env.s3Region) {
+  const temporaryLinkFor = ({ bucket, objectKey }: Pick<StoredImage, 'bucket' | 'objectKey'>): ImageLink => {
+    if (
+      !client &&
+      (!env.s3AccessKeyId || !env.s3SecretAccessKey || !env.s3Endpoint || !env.s3Region)
+    ) {
       throw new ImageLinkUnavailableError('Object storage is not configured');
     }
 
-    return s3.presign(objectKey, { bucket, expiresIn: urlLifetimeSeconds });
+    try {
+      return {
+        url: s3.presign(objectKey, { bucket, expiresIn: urlLifetimeSeconds }),
+        expiresAt: new Date(Date.now() + urlLifetimeSeconds * 1000),
+      };
+    } catch (error) {
+      throw new ImageLinkUnavailableError('Image link could not be created', { cause: error });
+    }
   };
+
+  const linkFor = (image: Pick<StoredImage, 'bucket' | 'objectKey'>): string =>
+    temporaryLinkFor(image).url;
+
+  const linkForWithExpiry = (image: Pick<StoredImage, 'bucket' | 'objectKey'>): ImageLink =>
+    temporaryLinkFor(image);
 
   return {
     delete: deleteImage,
     linkFor,
+    linkForWithExpiry,
+    prepareUpload,
     upload,
   };
 };

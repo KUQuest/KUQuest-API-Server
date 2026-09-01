@@ -4,6 +4,7 @@ import { authUser } from '@/database/schema/auth.schema';
 import {
   quest,
   questConditionItem,
+  questImage,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
@@ -339,7 +340,8 @@ describe('Quest API v2 persistence', () => {
     expect(changed).toEqual({ outcome: 'idempotency-key-reused' });
 
     const detail = await getQuestV2Detail(hirerId, first.quest.id);
-    expect(detail).toEqual(first.quest);
+    expect(detail).toMatchObject(first.quest);
+    expect(detail?.images).toEqual([]);
     expect(await getQuestV2Detail(otherMemberId, first.quest.id)).toBeUndefined();
 
     const own = await listOwnQuestV2(hirerId, { limit: 20 });
@@ -566,12 +568,14 @@ describe('Quest API v2 persistence', () => {
       }),
     );
     expect(detail.status).toBe(200);
-    expect((await detail.json()).data).toEqual(created.data);
+    const detailBody = (await detail.json()).data;
+    expect(detailBody).toMatchObject(created.data);
+    expect(detailBody.images).toEqual([]);
   });
 });
 
 describe('Quest API v2 publish check', () => {
-  it('returns an exact inclusive quote for an owned Draft without changing state or finance', async () => {
+  it('allows an owned Draft with zero Quest Images and returns an exact inclusive quote', async () => {
     await fundHirer(10_000);
     const created = await createQuestV2(
       hirerId,
@@ -580,6 +584,13 @@ describe('Quest API v2 publish check', () => {
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
+
+    expect(
+      await db
+        .select({ id: questImage.id })
+        .from(questImage)
+        .where(eq(questImage.questId, created.quest.id)),
+    ).toEqual([]);
 
     const beforeSnapshot = await readPublishCheckSnapshot(created.quest.id, hirerId);
 
@@ -959,7 +970,9 @@ describe('Quest API v2 Draft editing', () => {
     });
 
     const detail = await getQuest(created.quest.id);
-    expect((await detail.json()).data).toEqual(body.data);
+    const detailBody = (await detail.json()).data;
+    expect(detailBody).toMatchObject(body.data);
+    expect(detailBody.images).toEqual([]);
   });
 
   it.each(['FIRST_COME_FIRST_SERVED', 'CANDIDATE'] as const)(
@@ -1104,7 +1117,9 @@ describe('Quest API v2 Draft editing', () => {
     });
 
     const detail = await getQuest(created.quest.id);
-    expect((await detail.json()).data).toEqual(currentBody.data);
+    const detailBody = (await detail.json()).data;
+    expect(detailBody).toMatchObject(currentBody.data);
+    expect(detailBody.images).toEqual([]);
   });
 
   it('lets only the first concurrent edit commit for one Draft version', async () => {
@@ -1483,7 +1498,9 @@ describe('Quest API v2 HTTP validation and ownership', () => {
     expect(body.data.updatedAt).toMatch(/Z$/);
 
     const detail = await getQuest(body.data.id);
-    expect((await detail.json()).data).toEqual(body.data);
+    const detailBody = (await detail.json()).data;
+    expect(detailBody).toMatchObject(body.data);
+    expect(detailBody.images).toEqual([]);
 
     const mine = await app.handle(
       new Request('http://localhost/api/v2/quests/mine', {
