@@ -341,6 +341,13 @@
     {
       "idx": 48,
       "version": "7",
+      "when": 1788260296166,
+      "tag": "20260901105816_tricky_luckman",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
       "when": 1788200180189,
       "tag": "20260831181620_tan_black_tarantula",
       "breakpoints": true

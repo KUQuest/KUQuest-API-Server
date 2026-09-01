@@ -15,11 +15,12 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 - A `SINGLE + CANDIDATE` Candidate may withdraw that Candidate's application while the Quest is `QUEST_OPEN`.
 - A Candidate Team forms only for `GROUP + CANDIDATE`.
-- The Server generates one Join Code for a forming Team. Code format and generation mechanics are a backend security decision.
-- An eligible Prospective Worker may join with the current Join Code until the Team reaches `headcount`. A Candidate may belong to one Team for one Quest.
+- Before the Server creates a Candidate Team, its Team Leader enters the Team `headcount`. It must be from 2 through the published Quest `headcount`, and the Team Leader counts as one Member.
+- The Server generates one Join Code for the forming Team. The Team Leader sends the code to prospective Team Members. Code format and generation mechanics are a backend security decision.
+- An eligible Prospective Worker joins only by accepting the current Join Code, until the Team reaches its entered Team `headcount`. A Candidate may belong to one Team for one Quest.
 - A Join Code is valid for 24 hours. The Team Leader may regenerate it; the prior code becomes invalid.
 - A forming Member may leave. The Team Leader may remove another Member. If the Team Leader leaves, leadership transfers to the earliest joined remaining Member. If the last Member leaves, the Team disbands.
-- At exact `headcount`, the Team Leader explicitly submits the Team. A submitted Team is immutable and its Join Code is invalid.
+- At the entered Team `headcount`, the Team Leader explicitly submits the Team to the Hirer. The submission must contain text and at least one file. Each file follows the type and size rules for a Work Conversation Attachment. A submitted Team is immutable and its Join Code is invalid.
 - A submitted Team cannot withdraw.
 - Hirer selection creates the accepted Assignment roster and rejects every other Candidate application and submitted Team in the same transaction.
 - A Candidate Quest still `QUEST_OPEN` at `startTime` cancels.
@@ -58,6 +59,7 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 - The Hirer approves or does not approve each submitted Proof Submission.
 - If the Hirer has not decided 24 hours after a Proof Submission is sent, the Server records `PROOF_APPROVED`.
 - Approved or proof-free Team work makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_COMPLETED`.
+- For approved or proof-free Team work in a `GROUP + CANDIDATE` Quest, the Team Leader receives the complete Worker Reward pool for every published Quest `headcount` slot. Other Team Member Assignments receive no Quest Reward.
 - Non-approved Team work makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_INCOMPLETE`.
 - A missing required Team Proof Submission or Team confirmation makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_INCOMPLETE`.
 - Hirer non-approval, a missing required submission, a missing proof-free confirmation, or a missing Start Work action at `dueAt` makes the Quest `QUEST_FAILED`.
@@ -69,8 +71,8 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 | Quest State at cancellation | Settlement result |
 | --- | --- |
 | `QUEST_OPEN` | Refund the Hirer 100% of Quest Escrow. |
-| `QUEST_ASSIGNED` | Pay 20% of the Worker Reward pool to Active Workers. Return 80% and the Platform Fee to the Hirer. |
-| `QUEST_IN_PROGRESS` | Settle full Worker Rewards and the Platform Fee. The Hirer receives no refund. |
+| `QUEST_ASSIGNED` | Pay 20% of the Worker Reward pool to Active Workers. For `GROUP + CANDIDATE`, pay the full 20% only to the Team Leader. Return 80% and the Platform Fee to the Hirer. |
+| `QUEST_IN_PROGRESS` | Settle full Worker Rewards and the Platform Fee. For `GROUP + CANDIDATE`, pay the full Worker Reward pool only to the Team Leader. The Hirer receives no refund. |
 
 An Active Worker cannot voluntarily leave or be replaced. The cancellation rules create the allowed departure transition.
 

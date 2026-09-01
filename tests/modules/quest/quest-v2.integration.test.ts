@@ -9,11 +9,17 @@ const createBody = {
   participation: 'SINGLE',
   questFundingTotal: 20.0,
   headcount: 1,
-  startTime: '2030-08-26T10:00:00.000Z',
+  startTime: '2030-08-26T10:00:00.000+07:00',
 };
 
 type OpenApiSchema = {
+  anyOf?: OpenApiSchema[];
+  const?: unknown;
+  description?: string;
+  maximum?: number;
+  minimum?: number;
   multipleOf?: number;
+  pattern?: string;
   nullable?: boolean;
   required?: string[];
   properties?: Record<string, OpenApiSchema>;
@@ -146,14 +152,61 @@ describe('Quest API v2 integration', () => {
 
     const bodySchema =
       document.paths['/api/v2/quests']?.post?.requestBody?.content?.['application/json']?.schema;
-    expect(bodySchema?.properties?.questFundingTotal?.multipleOf).toBe(0.01);
-    expect(bodySchema?.properties?.locations?.items?.required).toEqual(['label']);
-    expect(bodySchema?.properties?.locations?.items?.properties?.label?.nullable).not.toBe(true);
+    expect(bodySchema?.anyOf).toHaveLength(2);
+    expect(bodySchema?.anyOf?.map((variant) => ({
+      participation: variant.properties?.participation?.const,
+      minimum: variant.properties?.headcount?.minimum,
+      maximum: variant.properties?.headcount?.maximum,
+    }))).toEqual(expect.arrayContaining([
+      { participation: 'SINGLE', minimum: 1, maximum: 1 },
+      { participation: 'GROUP', minimum: 2, maximum: 20 },
+    ]));
+    const requestScheduleTimePattern =
+      '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?\\+07:00$';
+    for (const variant of bodySchema?.anyOf ?? []) {
+      expect(variant.properties?.startTime?.pattern).toBe(requestScheduleTimePattern);
+      expect(variant.properties?.dueAt?.anyOf?.[0]?.pattern).toBe(requestScheduleTimePattern);
+      expect(variant.properties?.questFundingTotal?.multipleOf).toBe(0.01);
+      expect(variant.properties?.locations?.items?.required).toEqual(['label']);
+      expect(variant.properties?.locations?.items?.properties?.label?.nullable).not.toBe(true);
+    }
 
     const editBodySchema =
       document.paths['/api/v2/quests/{questId}']?.patch?.requestBody?.content?.['application/json']
         ?.schema;
-    expect(editBodySchema?.properties?.questFundingTotal?.multipleOf).toBe(0.01);
+    expect(editBodySchema?.anyOf).toHaveLength(3);
+    const editSingleVariant = editBodySchema?.anyOf?.find(
+      (variant) => variant.properties?.participation?.const === 'SINGLE',
+    );
+    expect(editSingleVariant?.properties?.headcount?.minimum).toBe(1);
+    expect(editSingleVariant?.properties?.headcount?.maximum).toBe(1);
+    const editGroupVariant = editBodySchema?.anyOf?.find(
+      (variant) => variant.properties?.participation?.const === 'GROUP',
+    );
+    expect(editGroupVariant?.properties?.headcount?.minimum).toBe(2);
+    expect(editGroupVariant?.properties?.headcount?.maximum).toBe(20);
+    const editExistingParticipationVariant = editBodySchema?.anyOf?.find(
+      (variant) => variant.properties?.participation === undefined,
+    );
+    expect(editExistingParticipationVariant?.properties?.headcount?.minimum).toBe(1);
+    expect(editExistingParticipationVariant?.properties?.headcount?.maximum).toBe(20);
+    for (const variant of editBodySchema?.anyOf ?? []) {
+      expect(variant.properties?.startTime?.pattern).toBe(requestScheduleTimePattern);
+      expect(variant.properties?.dueAt?.anyOf?.[0]?.pattern).toBe(requestScheduleTimePattern);
+      expect(variant.properties?.questFundingTotal?.multipleOf).toBe(0.01);
+    }
+
+    const canonicalScheduleTimePattern =
+      '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\+07:00$';
+    const createResponseSchema =
+      document.paths['/api/v2/quests']?.post?.responses?.['200']?.content
+        ?.['application/json']?.schema;
+    const createDataSchema = createResponseSchema?.properties?.data;
+    expect(createDataSchema?.properties?.startTime?.pattern).toBe(canonicalScheduleTimePattern);
+    expect(createDataSchema?.properties?.dueAt?.anyOf?.[0]?.pattern).toBe(
+      canonicalScheduleTimePattern,
+    );
+    expect(createDataSchema?.properties?.createdAt?.pattern).toBeUndefined();
 
     const publishResponseSchema =
       document.paths['/api/v2/quests/{questId}/publish-check']?.get?.responses?.['200']?.content

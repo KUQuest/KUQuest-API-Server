@@ -24,7 +24,9 @@ import { and, asc, eq, gt, isNull, like, lte, or, sql } from 'drizzle-orm';
 import { questStatus, type QuestStatus } from './quest.contract';
 import { questV2StorageCompatibility } from './quest-storage.adapter';
 import {
-  questV2Participation,
+  formatQuestV2ScheduleTime,
+  isQuestV2ScheduleTime,
+  isValidQuestV2Headcount,
   questV2States,
   type QuestV2CanonicalQuest,
   type QuestV2Mode,
@@ -51,8 +53,6 @@ const questV2CreatePath = '/api/v2/quests';
 const questV2EditPath = '/api/v2/quests/:questId';
 const questV2ImageUploadPath = '/api/v2/quests/:questId/images';
 const questV2ImageRemovePath = '/api/v2/quests/:questId/images/:imageId';
-
-const explicitTimezonePattern = /(?:Z|[+-]\d{2}:\d{2})$/;
 
 type NormalizedCreateInput = {
   title: string;
@@ -291,8 +291,8 @@ const normalizeCreateInput = (
   const startTime = new Date(data.startTime);
   const dueAt = data.dueAt === undefined || data.dueAt === null ? null : new Date(data.dueAt);
   if (
-    !explicitTimezonePattern.test(data.startTime) ||
-    (typeof data.dueAt === 'string' && !explicitTimezonePattern.test(data.dueAt)) ||
+    !isQuestV2ScheduleTime(data.startTime) ||
+    (typeof data.dueAt === 'string' && !isQuestV2ScheduleTime(data.dueAt)) ||
     Number.isNaN(startTime.getTime()) ||
     (dueAt !== null && Number.isNaN(dueAt.getTime())) ||
     (dueAt !== null && dueAt <= startTime)
@@ -305,12 +305,7 @@ const normalizeCreateInput = (
     return { outcome: 'invalid-funding' };
   }
 
-  if (
-    !Number.isInteger(data.headcount) ||
-    data.headcount < 1 ||
-    data.headcount > 20 ||
-    (data.participation === questV2Participation.single && data.headcount !== 1)
-  ) {
+  if (!isValidQuestV2Headcount(data.participation, data.headcount)) {
     return { outcome: 'invalid-headcount' };
   }
 
@@ -414,7 +409,7 @@ const normalizeEditInput = (
   }
 
   if (hasEditField(data, 'startTime')) {
-    if (typeof data.startTime !== 'string' || !explicitTimezonePattern.test(data.startTime)) {
+    if (typeof data.startTime !== 'string' || !isQuestV2ScheduleTime(data.startTime)) {
       return { outcome: 'invalid-dates' };
     }
     const startTime = new Date(data.startTime);
@@ -426,7 +421,7 @@ const normalizeEditInput = (
     if (data.dueAt === null) {
       normalized.dueAt = null;
     } else {
-      if (typeof data.dueAt !== 'string' || !explicitTimezonePattern.test(data.dueAt)) {
+      if (typeof data.dueAt !== 'string' || !isQuestV2ScheduleTime(data.dueAt)) {
         return { outcome: 'invalid-dates' };
       }
       const dueAt = new Date(data.dueAt);
@@ -572,8 +567,8 @@ const buildCanonicalQuest = async (
     state: toV2State(row.questStatus),
     questFundingTotal: toBaht(questFundingTotalSatang),
     headcount: row.headcount,
-    startTime: row.startTime.toISOString(),
-    dueAt: row.dueAt?.toISOString() ?? null,
+    startTime: formatQuestV2ScheduleTime(row.startTime),
+    dueAt: row.dueAt ? formatQuestV2ScheduleTime(row.dueAt) : null,
     proofRequired: row.proofRequired,
     locations,
     createdAt: row.createdAt.toISOString(),
@@ -1445,6 +1440,15 @@ type QuestV2IdempotencySnapshot = Omit<QuestV2CanonicalQuest, 'questFundingTotal
   questFundingTotalSatang: Satang;
 };
 
+const normalizeQuestV2SnapshotScheduleTime = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+
+  return formatQuestV2ScheduleTime(parsed);
+};
+
 const toQuestV2IdempotencySnapshot = (
   canonicalQuest: QuestV2CanonicalQuest,
 ): QuestV2IdempotencySnapshot => {
@@ -1475,9 +1479,16 @@ const fromQuestV2IdempotencySnapshot = (
     return undefined;
   }
 
+  const startTime = normalizeQuestV2SnapshotScheduleTime(snapshot.startTime);
+  const dueAt =
+    snapshot.dueAt === null ? null : normalizeQuestV2SnapshotScheduleTime(snapshot.dueAt);
+  if (!startTime || (snapshot.dueAt !== null && !dueAt)) return undefined;
+
   const { questFundingTotalSatang: _questFundingTotalSatang, ...canonicalFields } = snapshot;
   return {
     ...canonicalFields,
+    startTime,
+    dueAt,
     questFundingTotal: toBaht(satang(questFundingTotalSatang)),
   } as QuestV2CanonicalQuest;
 };
@@ -1783,7 +1794,7 @@ const editQuestV2InTransaction = async (
 
   const nextParticipation = input.participation ?? current.v2Participation;
   const nextHeadcount = input.headcount ?? current.headcount;
-  if (nextParticipation === questV2Participation.single && nextHeadcount !== 1) {
+  if (!isValidQuestV2Headcount(nextParticipation, nextHeadcount)) {
     throwEditError('invalid-headcount');
   }
 
@@ -1975,7 +1986,7 @@ export const getQuestV2PublishCheck = async (
     const row = await selectQuestV2Row(transaction, userId, questId);
     if (!row) return undefined;
     if (row.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
-    if (row.questFundingTotalSatang === null) {
+    if (row.questFundingTotalSatang === null || !row.v2Participation) {
       throw new Error(`Quest ${questId} has incomplete v2 persistence data`);
     }
 
@@ -1997,6 +2008,7 @@ export const getQuestV2PublishCheck = async (
     }
 
     return buildQuestV2PublishCheck({
+      participation: row.v2Participation,
       tagId: row.tagId,
       conditionValid: conditionItems.length > 0 && conditionItems.every((item, position) => {
         const text = item.text.trim();
