@@ -9,8 +9,10 @@ import {
   questTeamInvitation,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
+import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import { questV2Storage } from '@/modules/quest/quest.storage';
+import { questV2ImageUploadOperationScope } from '@/modules/quest/quest-v2.service';
 
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
@@ -63,6 +65,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.principalUserId, hirerId));
   await db.delete(file).where(inArray(file.id, cleanupFileIds));
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(questTeam).where(inArray(questTeam.id, teamIds));
@@ -162,6 +165,37 @@ describe('Quest lifecycle worker', () => {
     const [invitation] = await db.select({ status: questTeamInvitation.invitationStatus, respondedAt: questTeamInvitation.respondedAt })
       .from(questTeamInvitation).where(and(eq(questTeamInvitation.id, invitationId), eq(questTeamInvitation.invitationStatus, 'INVITATION_EXPIRED')));
     expect(invitation?.respondedAt?.getTime()).toBe(testNow.getTime());
+  });
+
+  it('recovers an expired Quest Image upload manifest before the lifecycle sweep continues', async () => {
+    const key = 'lifecycle-expired-image-upload';
+    const object = {
+      bucket: 'test-bucket',
+      objectKey: `quests/v2/${hirerId}/lifecycle-crashed-upload`,
+    };
+    await db.insert(walletIdempotencyKey).values({
+      principalUserId: hirerId,
+      operationScope: questV2ImageUploadOperationScope,
+      key,
+      requestHash: 'lifecycle-crashed-upload-request',
+      resultData: { upload: { objects: [object] } },
+      expiresAt: new Date(testNow.getTime() - 1),
+    });
+    const deleteObject = spyOn(questV2Storage, 'delete').mockResolvedValue();
+
+    const result = await runQuestLifecycleWorker({
+      clock: { now: () => testNow },
+      autoApprove: async () => [],
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(deleteObject).toHaveBeenCalledWith(object.bucket, object.objectKey);
+    expect(
+      await db
+        .select({ id: walletIdempotencyKey.id })
+        .from(walletIdempotencyKey)
+        .where(eq(walletIdempotencyKey.key, key)),
+    ).toEqual([]);
   });
 
   it('reports image cleanup errors and continues lifecycle processing', async () => {

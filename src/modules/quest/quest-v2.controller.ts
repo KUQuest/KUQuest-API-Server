@@ -407,7 +407,20 @@ export const addQuestImagesV2Controller = async ({
       body.images,
     ),
   };
-  const preflight = await checkQuestV2ImageUpload(imageCommand, body.images.length);
+  let uploadPlans: Array<ReturnType<typeof questV2Storage.prepareUpload>>;
+  try {
+    uploadPlans = body.images.map(() => questV2Storage.prepareUpload(session.user.id));
+  } catch (error) {
+    const mapped = mapQuestV2ImageStorageError(set, error);
+    if (mapped) return mapped;
+    throw error;
+  }
+
+  const preflight = await checkQuestV2ImageUpload(
+    imageCommand,
+    body.images.length,
+    uploadPlans,
+  );
   if ('outcome' in preflight) {
     return mapQuestV2ImageMutationOutcome(set, preflight.outcome);
   }
@@ -422,8 +435,8 @@ export const addQuestImagesV2Controller = async ({
   let result: Awaited<ReturnType<typeof addQuestV2Images>> | undefined;
 
   try {
-    for (const image of body.images) {
-      uploaded.push(await questV2Storage.upload(session.user.id, image));
+    for (const [index, image] of body.images.entries()) {
+      uploaded.push(await questV2Storage.upload(session.user.id, image, uploadPlans[index]!));
     }
     result = await addQuestV2Images(imageCommand, uploaded);
   } catch (error) {

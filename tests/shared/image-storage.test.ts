@@ -78,6 +78,39 @@ describe('createImageStorage upload size limit', () => {
   });
 });
 
+describe('createImageStorage upload plans', () => {
+  it('writes an upload to its prepared object target', async () => {
+    let writtenObjectKey: string | undefined;
+    const bytes = await validPngBuffer();
+    const plannedStorage = createImageStorage({
+      keyPrefix: 'planned-images',
+      bucket: 'kuquest-test',
+      client: {
+        write: async (objectKey) => {
+          writtenObjectKey = objectKey;
+          return bytes.length;
+        },
+        delete: async () => undefined,
+        presign: () => 'https://storage.test/signed-link',
+      },
+    });
+    const plan = plannedStorage.prepareUpload('user-1');
+
+    const stored = await plannedStorage.upload(
+      'user-1',
+      new File([bytes], 'image.png', { type: 'image/png' }),
+      plan,
+    );
+
+    expect(writtenObjectKey).toBe(plan.objectKey);
+    expect(stored).toEqual({
+      ...plan,
+      contentType: 'image/png',
+      sizeBytes: bytes.length,
+    });
+  });
+});
+
 describe('createImageStorage temporary links', () => {
   it('returns a link expiry that matches the presign lifetime', () => {
     let expiresIn: number | undefined;

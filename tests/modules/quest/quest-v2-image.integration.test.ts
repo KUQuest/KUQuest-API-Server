@@ -11,6 +11,7 @@ import {
   getQuestV2Detail,
   questV2ImageUploadOperationScope,
   questV2ImageUploadRequestHash,
+  recoverQuestV2ImageUploadManifests,
   retryQuestV2ImageCleanupManifests,
   type QuestV2CreateInput,
 } from '@/modules/quest';
@@ -339,6 +340,18 @@ describe('Quest API v2 Quest Image integration', () => {
 
     const firstRequest = postImages(draft.id, 'image-concurrent-1', [makeImageFile('first.png')]);
     await firstUploadStarted;
+    const [reservation] = await db
+      .select({ resultData: walletIdempotencyKey.resultData })
+      .from(walletIdempotencyKey)
+      .where(eq(walletIdempotencyKey.key, 'image-concurrent-1'));
+    expect(reservation?.resultData).toMatchObject({
+      upload: {
+        objects: [{
+          bucket: expect.any(String),
+          objectKey: expect.stringContaining(`quests/v2/${hirerId}/`),
+        }],
+      },
+    });
     const secondResponse = await postImages(
       draft.id,
       'image-concurrent-1',
@@ -415,6 +428,32 @@ describe('Quest API v2 Quest Image integration', () => {
 
     expect(response.status).toBe(200);
     expect((await response.json()).data.images).toHaveLength(1);
+  });
+
+  it('recovers an expired upload manifest before releasing its idempotency reservation', async () => {
+    const key = 'image-expired-upload-manifest';
+    const object = {
+      bucket: 'test-bucket',
+      objectKey: `quests/v2/${hirerId}/crashed-upload`,
+    };
+    await db.insert(walletIdempotencyKey).values({
+      principalUserId: hirerId,
+      operationScope: questV2ImageUploadOperationScope,
+      key,
+      requestHash: 'crashed-upload-request',
+      resultData: { upload: { objects: [object] } },
+      expiresAt: new Date(Date.now() - 1),
+    });
+    const deleteObject = spyOn(questV2Storage, 'delete').mockResolvedValue();
+
+    expect(await recoverQuestV2ImageUploadManifests()).toBe(1);
+    expect(deleteObject).toHaveBeenCalledWith(object.bucket, object.objectKey);
+    expect(
+      await db
+        .select({ id: walletIdempotencyKey.id })
+        .from(walletIdempotencyKey)
+        .where(eq(walletIdempotencyKey.key, key)),
+    ).toEqual([]);
   });
 
   it('removes one image, repacks positions, soft-deletes its file, and retries cleanup', async () => {
@@ -826,6 +865,7 @@ describe('Quest API v2 Quest Image integration', () => {
           requestHash: otherHash,
         },
         1,
+        [{ bucket: 'test-bucket', objectKey: `quests/v2/${otherMemberId}/ownership.png` }],
       ),
     ).toEqual({ outcome: 'not-found' });
 
@@ -848,6 +888,7 @@ describe('Quest API v2 Quest Image integration', () => {
           requestHash: ownerHash,
         },
         1,
+        [{ bucket: 'test-bucket', objectKey: `quests/v2/${hirerId}/open.png` }],
       ),
     ).toEqual({ outcome: 'not-draft' });
   });

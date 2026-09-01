@@ -23,6 +23,8 @@ export type StoredImage = {
   sizeBytes: number;
 };
 
+export type ImageUploadPlan = Pick<StoredImage, 'bucket' | 'objectKey'>;
+
 export type ImageLink = {
   url: string;
   expiresAt: Date;
@@ -89,7 +91,22 @@ export const createImageStorage = ({
       region: env.s3Region,
     });
 
-  const upload = async (userId: string, image: File): Promise<StoredImage> => {
+  const prepareUpload = (userId: string): ImageUploadPlan => {
+    if (!storageBucket) {
+      throw new ImageUploadError('S3 bucket is not configured');
+    }
+
+    return {
+      bucket: storageBucket,
+      objectKey: `${keyPrefix}/${userId}/${crypto.randomUUID()}`,
+    };
+  };
+
+  const upload = async (
+    userId: string,
+    image: File,
+    plan?: ImageUploadPlan,
+  ): Promise<StoredImage> => {
     log('Validating file', {
       declaredContentType: image.type,
       sizeBytes: image.size,
@@ -134,7 +151,13 @@ export const createImageStorage = ({
       throw new ImageUploadError('S3 bucket is not configured');
     }
 
-    const objectKey = `${keyPrefix}/${userId}/${crypto.randomUUID()}.${extensionByContentType[contentType]}`;
+    if (plan && plan.bucket !== storageBucket) {
+      throw new ImageUploadError('Image upload plan does not belong to this storage');
+    }
+
+    const objectKey =
+      plan?.objectKey ??
+      `${keyPrefix}/${userId}/${crypto.randomUUID()}.${extensionByContentType[contentType]}`;
 
     try {
       const writtenBytes = await s3.write(objectKey, new Blob([bytes], { type: contentType }), { type: contentType });
@@ -195,6 +218,7 @@ export const createImageStorage = ({
     delete: deleteImage,
     linkFor,
     linkForWithExpiry,
+    prepareUpload,
     upload,
   };
 };

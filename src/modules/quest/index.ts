@@ -38,6 +38,7 @@ export {
   questV2ImageUploadRequestHash,
   recordQuestV2ImageCleanupTombstones,
   recordQuestV2ImageCleanupRetry,
+  recoverQuestV2ImageUploadManifests,
   retryQuestV2ImageCleanupManifests,
   releaseQuestV2ImageUploadReservation,
 } from './quest-v2.service';

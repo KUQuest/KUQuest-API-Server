@@ -598,6 +598,54 @@ const selectQuestV2Images = async (
     .where(eq(questImage.questId, questId))
     .orderBy(asc(questImage.position), asc(questImage.id));
 
+type QuestV2ImageUploadObject = Pick<StoredQuestImage, 'bucket' | 'objectKey'>;
+
+type QuestV2ImageUploadManifest = {
+  upload: {
+    objects: QuestV2ImageUploadObject[];
+  };
+};
+
+const toQuestV2ImageUploadManifest = (
+  objects: QuestV2ImageUploadObject[],
+): QuestV2ImageUploadManifest => ({
+  upload: {
+    objects: objects.map(({ bucket, objectKey }) => ({ bucket, objectKey })),
+  },
+});
+
+const fromQuestV2ImageUploadManifest = (
+  resultData: unknown,
+): QuestV2ImageUploadManifest | undefined => {
+  if (!resultData || typeof resultData !== 'object' || Array.isArray(resultData)) {
+    return undefined;
+  }
+
+  const result = resultData as { upload?: unknown };
+  if (!result.upload || typeof result.upload !== 'object' || Array.isArray(result.upload)) {
+    return undefined;
+  }
+
+  const manifest = result.upload as Partial<QuestV2ImageUploadManifest['upload']>;
+  if (
+    !Array.isArray(manifest.objects) ||
+    manifest.objects.length === 0 ||
+    manifest.objects.some((object) => {
+      if (!object || typeof object !== 'object' || Array.isArray(object)) return true;
+      const value = object as Partial<QuestV2ImageUploadObject>;
+      return typeof value.bucket !== 'string' || typeof value.objectKey !== 'string';
+    })
+  ) {
+    return undefined;
+  }
+
+  return {
+    upload: {
+      objects: manifest.objects,
+    },
+  };
+};
+
 type QuestV2ImageIdempotencySnapshot = {
   images: QuestV2ImageReference[];
   response: QuestV2ImageResponse[];
@@ -670,6 +718,28 @@ export const materializeQuestV2ImageResponse = (
     urlExpiresAt: link.expiresAt.toISOString(),
   };
 });
+
+const completeQuestV2ImageCommand = async (
+  transaction: QuestTransaction,
+  questId: string,
+  idempotencyKeyId: string,
+  completedAt: Date,
+): Promise<{ images: QuestV2ImageReference[]; response: QuestV2ImageResponse[] }> => {
+  const images = await selectQuestV2Images(transaction, questId);
+  const response = materializeQuestV2ImageResponse(images);
+  await transaction
+    .update(walletIdempotencyKey)
+    .set({
+      resourceType: 'quest-image',
+      resourceId: questId,
+      resultData: toQuestV2ImageIdempotencySnapshot(images, response),
+      processingStatus: 'COMPLETED',
+      completedAt,
+    })
+    .where(eq(walletIdempotencyKey.id, idempotencyKeyId));
+
+  return { images, response };
+};
 
 const questV2ImageIdempotencySelection = {
   id: walletIdempotencyKey.id,
@@ -801,6 +871,7 @@ const lockQuestV2ImageOwner = async (
 export const checkQuestV2ImageUpload = async (
   context: QuestV2ImageCommandContext,
   imageCount: number,
+  plannedObjects: QuestV2ImageUploadObject[],
 ): Promise<QuestV2ImageUploadPreflight> => {
   const normalizedContext = normalizeQuestV2ImageCommandContext(context);
   if (!normalizedContext) {
@@ -819,7 +890,7 @@ export const checkQuestV2ImageUpload = async (
       !(
         existing.processingStatus === 'PROCESSING' &&
         existing.expiresAt <= new Date() &&
-        !hasQuestV2ImageCleanupManifest(existing.resultData)
+        !hasQuestV2ImageRecoveryManifest(existing.resultData)
       )
     ) {
       return readQuestV2ImageReplay(existing, normalizedContext.requestHash);
@@ -853,6 +924,12 @@ export const checkQuestV2ImageUpload = async (
         .where(eq(walletIdempotencyKey.id, reservation.record.id));
       return { outcome: 'limit-reached' };
     }
+
+    // Commit the object targets before any storage write so a crashed request remains recoverable.
+    await transaction
+      .update(walletIdempotencyKey)
+      .set({ resultData: toQuestV2ImageUploadManifest(plannedObjects) })
+      .where(eq(walletIdempotencyKey.id, reservation.record.id));
 
     return { canUpload: true };
   });
@@ -922,20 +999,12 @@ const addQuestV2ImagesInTransaction = async (
     });
   }
 
-  const currentImages = await selectQuestV2Images(transaction, context.questId);
-  const responseImages = materializeQuestV2ImageResponse(currentImages);
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({
-      resourceType: 'quest-image',
-      resourceId: context.questId,
-      resultData: toQuestV2ImageIdempotencySnapshot(currentImages, responseImages),
-      processingStatus: 'COMPLETED',
-      completedAt: new Date(),
-    })
-    .where(eq(walletIdempotencyKey.id, idempotency.record.id));
-
-  return { images: currentImages, response: responseImages };
+  return completeQuestV2ImageCommand(
+    transaction,
+    context.questId,
+    idempotency.record.id,
+    new Date(),
+  );
 };
 
 export const addQuestV2Images = async (
@@ -975,11 +1044,11 @@ export const releaseQuestV2ImageUploadReservation = async (
     );
 };
 
-type QuestV2ImageCleanupObject = {
+type QuestV2ImageTombstone = {
   fileId: string;
   bucket: string;
   objectKey: string;
-  deletedAt: Date | null;
+  tombstonedAt: Date;
 };
 
 type QuestV2ImageCleanupManifest = {
@@ -1050,6 +1119,11 @@ const fromQuestV2ImageCleanupManifest = (
 
 const hasQuestV2ImageCleanupManifest = (resultData: unknown): boolean =>
   Boolean(fromQuestV2ImageCleanupManifest(resultData));
+
+const hasQuestV2ImageRecoveryManifest = (resultData: unknown): boolean =>
+  Boolean(
+    fromQuestV2ImageUploadManifest(resultData) || fromQuestV2ImageCleanupManifest(resultData),
+  );
 
 export const recordQuestV2ImageCleanupTombstones = async (
   userId: string,
@@ -1151,26 +1225,98 @@ export const retryQuestV2ImageCleanupManifests = async (limit = 100): Promise<nu
   return retried;
 };
 
-const cleanupQuestV2ImageObject = async (object: QuestV2ImageCleanupObject): Promise<boolean> => {
+const deleteQuestV2ImageUploadObject = async (
+  object: QuestV2ImageUploadObject,
+): Promise<boolean> => {
   try {
     await questV2Storage.delete(object.bucket, object.objectKey);
+    return true;
+  } catch (error) {
+    console.error('[quest-image-upload-recovery] Object deletion failed', {
+      bucket: object.bucket,
+      error,
+      objectKey: object.objectKey,
+    });
+    return false;
+  }
+};
+
+export const recoverQuestV2ImageUploadManifests = async (
+  now = new Date(),
+  limit = 100,
+): Promise<number> => {
+  const pending = await db
+    .select({
+      id: walletIdempotencyKey.id,
+      resultData: walletIdempotencyKey.resultData,
+    })
+    .from(walletIdempotencyKey)
+    .where(
+      and(
+        eq(walletIdempotencyKey.operationScope, questV2ImageUploadOperationScope),
+        eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
+        isNull(walletIdempotencyKey.resourceId),
+        lte(walletIdempotencyKey.expiresAt, now),
+        sql`${walletIdempotencyKey.resultData} IS NOT NULL`,
+      ),
+    )
+    .orderBy(asc(walletIdempotencyKey.expiresAt), asc(walletIdempotencyKey.id))
+    .limit(limit);
+
+  let recovered = 0;
+  for (const record of pending) {
+    const manifest = fromQuestV2ImageUploadManifest(record.resultData);
+    if (!manifest) continue;
+
+    const deleted = await Promise.all(
+      manifest.upload.objects.map((object) => deleteQuestV2ImageUploadObject(object)),
+    );
+    if (deleted.some((result) => !result)) continue;
+
+    try {
+      const [removed] = await db
+        .delete(walletIdempotencyKey)
+        .where(
+          and(
+            eq(walletIdempotencyKey.id, record.id),
+            eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
+            isNull(walletIdempotencyKey.resourceId),
+          ),
+        )
+        .returning({ id: walletIdempotencyKey.id });
+      if (removed) recovered += 1;
+    } catch (error) {
+      console.error('[quest-image-upload-recovery] Idempotency reservation cleanup failed', {
+        error,
+        idempotencyKeyId: record.id,
+      });
+    }
+  }
+
+  return recovered;
+};
+
+const cleanupQuestV2ImageObject = async (tombstone: QuestV2ImageTombstone): Promise<boolean> => {
+  try {
+    await questV2Storage.delete(tombstone.bucket, tombstone.objectKey);
     await db
       .update(file)
       .set({ objectDeletedAt: new Date() })
       .where(
         and(
-          eq(file.id, object.fileId),
+          eq(file.id, tombstone.fileId),
           isNull(file.objectDeletedAt),
-          object.deletedAt ? eq(file.deletedAt, object.deletedAt) : sql`${file.deletedAt} IS NOT NULL`,
+          eq(file.deletedAt, tombstone.tombstonedAt),
         ),
       );
     return true;
   } catch (error) {
     console.error('[quest-image-cleanup] Object deletion failed', {
-      bucket: object.bucket,
+      bucket: tombstone.bucket,
       error,
-      fileId: object.fileId,
-      objectKey: object.objectKey,
+      fileId: tombstone.fileId,
+      objectKey: tombstone.objectKey,
+      tombstonedAt: tombstone.tombstonedAt,
     });
     return false;
   }
@@ -1185,7 +1331,7 @@ export const cleanupQuestV2ImageObjects = async (
       fileId: file.id,
       bucket: file.bucket,
       objectKey: file.objectKey,
-      deletedAt: file.deletedAt,
+      tombstonedAt: file.deletedAt,
     })
     .from(file)
     .where(
@@ -1197,7 +1343,10 @@ export const cleanupQuestV2ImageObjects = async (
       ),
     )
     .orderBy(asc(file.deletedAt), asc(file.id))
-    .limit(limit);
+    .limit(limit)
+    .then((objects): QuestV2ImageTombstone[] => objects.filter(
+      (object): object is QuestV2ImageTombstone => object.tombstonedAt !== null,
+    ));
 
   const results = await Promise.all(pending.map((object) => cleanupQuestV2ImageObject(object)));
   return results.filter(Boolean).length;
@@ -1207,7 +1356,7 @@ const deleteQuestV2ImageInTransaction = async (
   transaction: QuestTransaction,
   context: QuestV2ImageCommandContext,
   imageId: string,
-): Promise<QuestV2ImageRemoveOutcome & { cleanup?: QuestV2ImageCleanupObject }> => {
+): Promise<QuestV2ImageRemoveOutcome & { cleanup?: QuestV2ImageTombstone }> => {
   const idempotency = await acquireQuestV2Idempotency(
     transaction,
     context.userId,
@@ -1249,27 +1398,20 @@ const deleteQuestV2ImageInTransaction = async (
     positionOffset: maxQuestV2Images,
   });
 
-  const currentImages = await selectQuestV2Images(transaction, context.questId);
-  const responseImages = materializeQuestV2ImageResponse(currentImages);
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({
-      resourceType: 'quest-image',
-      resourceId: context.questId,
-      resultData: toQuestV2ImageIdempotencySnapshot(currentImages, responseImages),
-      processingStatus: 'COMPLETED',
-      completedAt: deletedAt,
-    })
-    .where(eq(walletIdempotencyKey.id, idempotency.record.id));
+  const completed = await completeQuestV2ImageCommand(
+    transaction,
+    context.questId,
+    idempotency.record.id,
+    deletedAt,
+  );
 
   return {
-    images: currentImages,
-    response: responseImages,
+    ...completed,
     cleanup: {
       fileId: image.fileId,
       bucket: image.bucket,
       objectKey: image.objectKey,
-      deletedAt,
+      tombstonedAt: deletedAt,
     },
   };
 };
@@ -1281,7 +1423,7 @@ export const deleteQuestV2Image = async (
   const normalizedContext = normalizeQuestV2ImageCommandContext(context);
   if (!normalizedContext) return { outcome: 'invalid-idempotency-key' };
 
-  let result: QuestV2ImageRemoveOutcome & { cleanup?: QuestV2ImageCleanupObject };
+  let result: QuestV2ImageRemoveOutcome & { cleanup?: QuestV2ImageTombstone };
   try {
     result = await db.transaction((transaction) =>
       deleteQuestV2ImageInTransaction(transaction, normalizedContext, imageId),
@@ -1412,7 +1554,7 @@ const acquireQuestV2Idempotency = async (
     !created &&
     recoverExpiredProcessing &&
     record.processingStatus === 'PROCESSING' &&
-    !hasQuestV2ImageCleanupManifest(record.resultData) &&
+    !hasQuestV2ImageRecoveryManifest(record.resultData) &&
     record.expiresAt <= new Date()
   ) {
     await transaction

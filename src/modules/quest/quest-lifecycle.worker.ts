@@ -17,6 +17,7 @@ import { cancelUnfilledQuest } from './quest-settlement.service';
 import { expireQuestEditRequest } from './quest.service';
 import {
   cleanupQuestV2ImageObjects,
+  recoverQuestV2ImageUploadManifests,
   retryQuestV2ImageCleanupManifests,
 } from './quest-v2.service';
 
@@ -325,6 +326,7 @@ export const runQuestLifecycleWorker = async (
   const errors: QuestLifecycleWorkerError[] = [];
 
   try {
+    await recoverQuestV2ImageUploadManifests(now, limit);
     await retryQuestV2ImageCleanupManifests(limit);
     await cleanupQuestV2ImageObjects(now, limit);
   } catch (cause) {
