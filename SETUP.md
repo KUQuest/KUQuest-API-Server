@@ -170,7 +170,8 @@ bun --env-file=.env.admin run db:seed-admin
 ```
 
 If the command reports that an Admin already exists, stop the bootstrap. This
-seed never updates or resets an existing Admin.
+seed never updates or resets an existing Admin. Verify the bootstrap by signing
+in to the Admin web app with these credentials before you close the deployment.
 
 ---
 
