@@ -197,8 +197,9 @@ Candidate Team is the unit the Hirer selects.
 _Avoid_: Work Conversation, Active Workers before selection.
 
 **Team Leader**:
-The Worker who represents a Candidate `GROUP` Team. The Team Leader starts and
-submits or confirms the Team's required work.
+The Candidate who creates and represents a Candidate `GROUP` Team. If the
+Hirer selects the Team, the Team Leader becomes a Worker. The Team Leader
+starts and submits or confirms the Team's required work.
 _Avoid_: treating a Team Leader as the Hirer or as a leader of a FCFS Group.
 
 **First Come, First Served (FCFS)**:
