@@ -1059,7 +1059,11 @@ describe('Quest API v2 Draft editing', () => {
     expect(response.status).toBe(400);
     expect((await response.json()).error.code).toBe('INVALID_QUEST_DATES');
     const detail = await getQuestV2Detail(hirerId, created.quest.id);
-    expect(detail?.startTime).toBe('2030-08-26T10:00:00.000+07:00');
+    expect(detail?.[field]).toBe(
+      field === 'startTime'
+        ? '2030-08-26T10:00:00.000+07:00'
+        : '2030-08-26T12:00:00.000+07:00',
+    );
   });
 
   it('rejects a stale version without changing the Draft', async () => {
