@@ -23,6 +23,74 @@ export const isValidQuestV2Headcount = (
   return participation === questV2Participation.single ? headcount === 1 : headcount >= 2;
 };
 
+export const questV2ScheduleTimePattern =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?\+07:00$/;
+export const questV2CanonicalScheduleTimePattern =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+07:00$/;
+
+const questV2BangkokOffsetMilliseconds = 7 * 60 * 60 * 1000;
+
+export const isQuestV2ScheduleTime = (value: string): boolean => {
+  if (!questV2ScheduleTimePattern.test(value)) return false;
+
+  const [datePart, timePart] = value.slice(0, -6).split('T');
+  if (!datePart || !timePart) return false;
+
+  const [yearText, monthText, dayText] = datePart.split('-');
+  const [hourText, minuteText, secondAndFraction] = timePart.split(':');
+  if (!yearText || !monthText || !dayText || !hourText || !minuteText || !secondAndFraction) {
+    return false;
+  }
+
+  const [secondText, fractionText] = secondAndFraction.split('.');
+  if (!secondText) return false;
+
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const milliseconds = Number((fractionText ?? '').padEnd(3, '0'));
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return false;
+  }
+
+  const localTime = new Date(0);
+  localTime.setUTCFullYear(year, month - 1, day);
+  localTime.setUTCHours(hour, minute, second, milliseconds);
+  if (
+    localTime.getUTCFullYear() !== year ||
+    localTime.getUTCMonth() !== month - 1 ||
+    localTime.getUTCDate() !== day ||
+    localTime.getUTCHours() !== hour ||
+    localTime.getUTCMinutes() !== minute ||
+    localTime.getUTCSeconds() !== second ||
+    localTime.getUTCMilliseconds() !== milliseconds
+  ) {
+    return false;
+  }
+
+  const parsed = new Date(value);
+  return (
+    !Number.isNaN(parsed.getTime()) &&
+    parsed.getTime() === localTime.getTime() - questV2BangkokOffsetMilliseconds
+  );
+};
+
+export const formatQuestV2ScheduleTime = (value: Date): string => {
+  const bangkokTime = new Date(value.getTime() + questV2BangkokOffsetMilliseconds);
+  return `${bangkokTime.toISOString().slice(0, -1)}+07:00`;
+};
+
 export const questV2States = [
   'QUEST_DRAFT',
   'QUEST_OPEN',

@@ -118,16 +118,32 @@ The create request requires:
 - `questFundingTotal`: inclusive amount in Baht for one Worker slot, with exact
   satang precision.
 - `headcount`: `SINGLE` requires `1`; `GROUP` requires `2`–`20`.
-- `startTime`: ISO-8601 date-time with an explicit timezone.
+- `startTime`: RFC 3339 date-time with the fixed `+07:00` offset. Requests
+  may use zero to three fractional-second digits.
 
 Draft-only optional fields are:
 
 - `description`: nullable, at most 1,000 characters.
-- `dueAt`: nullable while the Quest is a Draft.
+- `dueAt`: nullable while the Quest is a Draft. A non-null value uses the same
+  `+07:00` wire format as `startTime`.
 - `tagId`: nullable while the Quest is a Draft.
 - `proofRequired`: defaults to `true`.
 - `locations`: zero to ten label-only objects; each label is at most 100
   characters.
+
+Quest schedule time contract:
+
+- The v2 wire contract accepts only `+07:00` for `startTime` and non-null
+  `dueAt`. `Z` and other numeric offsets are invalid.
+- The Server normalizes accepted values to UTC instants and stores them in
+  PostgreSQL `timestamptz`. It compares `startTime` and `dueAt` as instants.
+- Canonical Quest responses serialize `startTime` and non-null `dueAt` as
+  `YYYY-MM-DDTHH:mm:ss.sss+07:00`. A null `dueAt` remains null.
+- `createdAt`, `updatedAt`, and cursor timestamps remain UTC `Z`; this rule is
+  only for Quest scheduling fields.
+- Existing stored timestamps are read as instants and do not need a data
+  migration. `dueAt` remains required by publish readiness and immutable after
+  the Quest reaches `QUEST_ASSIGNED`.
 
 Keep two values in Client state:
 

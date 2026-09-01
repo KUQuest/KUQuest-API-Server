@@ -4,7 +4,13 @@ import { TypeCompiler } from '@sinclair/typebox/compiler';
 import { t, type Static } from 'elysia';
 import type { StandardSchemaV1Like } from 'elysia/types';
 
-import { questV2Modes, questV2Participations, questV2States } from './quest-v2.contract';
+import {
+  questV2CanonicalScheduleTimePattern,
+  questV2Modes,
+  questV2Participations,
+  questV2ScheduleTimePattern,
+  questV2States,
+} from './quest-v2.contract';
 
 const questV2ModeSchema = t.Union([
   t.Literal(questV2Modes[0]),
@@ -29,6 +35,11 @@ const questV2StateSchema = t.Union([
 const isoDateTimeWithTimezoneSchema = t.String({
   format: 'date-time',
   pattern: '(?:Z|[+-]\\d{2}:\\d{2})$',
+});
+const isoDateTimeWithBangkokTimezoneOpenApiSchema = t.String({
+  format: 'date-time',
+  pattern: questV2ScheduleTimePattern.source,
+  description: 'RFC 3339 date-time with the fixed Asia/Bangkok +07:00 offset.',
 });
 const titleSchema = t.String({ minLength: 1, maxLength: 120, pattern: '\\S' });
 const descriptionSchema = t.Nullable(t.String({ maxLength: 1000, pattern: '\\S' }));
@@ -129,6 +140,8 @@ export type QuestV2EditInput = Static<typeof questV2EditSchema>;
 const questV2CreateOpenApiProperties = {
   ...questV2CreateProperties,
   questFundingTotal: questFundingTotalOpenApiSchema,
+  startTime: isoDateTimeWithBangkokTimezoneOpenApiSchema,
+  dueAt: t.Optional(t.Nullable(isoDateTimeWithBangkokTimezoneOpenApiSchema)),
 };
 const questV2CreateOpenApiSchema = t.Union([
   t.Object(
@@ -151,6 +164,8 @@ const questV2CreateOpenApiSchema = t.Union([
 const questV2EditOpenApiCommonProperties = {
   ...questV2EditCommonProperties,
   questFundingTotal: t.Optional(questFundingTotalOpenApiSchema),
+  startTime: t.Optional(isoDateTimeWithBangkokTimezoneOpenApiSchema),
+  dueAt: t.Optional(t.Nullable(isoDateTimeWithBangkokTimezoneOpenApiSchema)),
 };
 const questV2EditOpenApiSchema = t.Union([
   t.Object(
@@ -380,8 +395,14 @@ export const questV2CanonicalQuestSchema = t.Object({
   state: questV2StateSchema,
   questFundingTotal: questFundingTotalSchema,
   headcount: questV2HeadcountSchema,
-  startTime: t.String({ format: 'date-time' }),
-  dueAt: t.Nullable(t.String({ format: 'date-time' })),
+  startTime: t.String({
+    format: 'date-time',
+    pattern: questV2CanonicalScheduleTimePattern.source,
+  }),
+  dueAt: t.Nullable(t.String({
+    format: 'date-time',
+    pattern: questV2CanonicalScheduleTimePattern.source,
+  })),
   proofRequired: t.Boolean(),
   locations: t.Array(t.Object({ label: t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }) })),
   createdAt: t.String({ format: 'date-time' }),

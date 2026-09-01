@@ -321,7 +321,7 @@ describe('Quest API v2 persistence', () => {
       state: 'QUEST_DRAFT',
       questFundingTotal: 1.03,
       headcount: 1,
-      dueAt: '2030-08-26T05:00:00.000Z',
+      dueAt: '2030-08-26T12:00:00.000+07:00',
       proofRequired: false,
       locations: [{ label: 'Online' }],
     });
@@ -503,6 +503,35 @@ describe('Quest API v2 persistence', () => {
       state: 'QUEST_DRAFT',
       questFundingTotal: 1.03,
     });
+
+    const [storedIdempotency] = await db
+      .select({ id: walletIdempotencyKey.id, resultData: walletIdempotencyKey.resultData })
+      .from(walletIdempotencyKey)
+      .where(
+        and(
+          eq(walletIdempotencyKey.principalUserId, hirerId),
+          eq(walletIdempotencyKey.operationScope, questV2CreateOperationScope),
+          eq(walletIdempotencyKey.key, 'v2-http-create-1'),
+        ),
+      );
+    if (!storedIdempotency) throw new Error('Missing create idempotency record');
+    if (
+      !storedIdempotency.resultData ||
+      typeof storedIdempotency.resultData !== 'object' ||
+      Array.isArray(storedIdempotency.resultData)
+    ) {
+      throw new Error('Missing create idempotency snapshot');
+    }
+    await db
+      .update(walletIdempotencyKey)
+      .set({
+        resultData: {
+          ...(storedIdempotency.resultData as Record<string, unknown>),
+          startTime: '2030-08-26T03:00:00.000Z',
+          dueAt: '2030-08-26T05:00:00.000Z',
+        },
+      })
+      .where(eq(walletIdempotencyKey.id, storedIdempotency.id));
 
     const replay = await app.handle(
       new Request('http://localhost/api/v2/quests', {
@@ -966,6 +995,77 @@ describe('Quest API v2 Draft editing', () => {
     },
   );
 
+  it('accepts Bangkok schedule times in a Draft edit and returns canonical precision', async () => {
+    const created = await createQuestV2(
+      hirerId,
+      baseInput,
+      `v2-edit-time-create-${randomUUID()}`,
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+
+    const response = await patchQuest(
+      created.quest.id,
+      {
+        startTime: '2030-08-26T11:00:00+07:00',
+        dueAt: '2030-08-26T13:00:00.1+07:00',
+      },
+      1,
+      `v2-edit-time-${randomUUID()}`,
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      success: true;
+      data: { startTime: string; dueAt: string | null };
+    };
+    expect(body.data).toMatchObject({
+      startTime: '2030-08-26T11:00:00.000+07:00',
+      dueAt: '2030-08-26T13:00:00.100+07:00',
+    });
+  });
+
+  it.each([
+    ['startTime', 'UTC', { startTime: '2030-08-26T11:00:00.000Z' }],
+    ['startTime', 'a non-Bangkok offset', { startTime: '2030-08-26T11:00:00.000+08:00' }],
+    [
+      'startTime',
+      'more than three fractional-second digits',
+      { startTime: '2030-08-26T11:00:00.1234+07:00' },
+    ],
+    ['dueAt', 'UTC', { dueAt: '2030-08-26T13:00:00.000Z' }],
+    ['dueAt', 'a non-Bangkok offset', { dueAt: '2030-08-26T13:00:00.000+08:00' }],
+    [
+      'dueAt',
+      'more than three fractional-second digits',
+      { dueAt: '2030-08-26T13:00:00.1234+07:00' },
+    ],
+  ] as const)('rejects %s with %s in a Draft edit', async (field, _, body) => {
+    const created = await createQuestV2(
+      hirerId,
+      baseInput,
+      `v2-edit-invalid-time-create-${randomUUID()}`,
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+
+    const response = await patchQuest(
+      created.quest.id,
+      body,
+      1,
+      `v2-edit-invalid-time-${randomUUID()}`,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('INVALID_QUEST_DATES');
+    const detail = await getQuestV2Detail(hirerId, created.quest.id);
+    expect(detail?.[field]).toBe(
+      field === 'startTime'
+        ? '2030-08-26T10:00:00.000+07:00'
+        : '2030-08-26T12:00:00.000+07:00',
+    );
+  });
+
   it('rejects a stale version without changing the Draft', async () => {
     const created = await createQuestV2(
       hirerId,
@@ -1133,6 +1233,35 @@ describe('Quest API v2 Draft editing', () => {
     expect(first.status).toBe(200);
     const firstBody = await first.json();
 
+    const [storedIdempotency] = await db
+      .select({ id: walletIdempotencyKey.id, resultData: walletIdempotencyKey.resultData })
+      .from(walletIdempotencyKey)
+      .where(
+        and(
+          eq(walletIdempotencyKey.principalUserId, hirerId),
+          eq(walletIdempotencyKey.operationScope, questV2EditOperationScope),
+          eq(walletIdempotencyKey.key, key),
+        ),
+      );
+    if (!storedIdempotency) throw new Error('Missing edit idempotency record');
+    if (
+      !storedIdempotency.resultData ||
+      typeof storedIdempotency.resultData !== 'object' ||
+      Array.isArray(storedIdempotency.resultData)
+    ) {
+      throw new Error('Missing edit idempotency snapshot');
+    }
+    await db
+      .update(walletIdempotencyKey)
+      .set({
+        resultData: {
+          ...(storedIdempotency.resultData as Record<string, unknown>),
+          startTime: '2030-08-26T03:00:00.000Z',
+          dueAt: '2030-08-26T05:00:00.000Z',
+        },
+      })
+      .where(eq(walletIdempotencyKey.id, storedIdempotency.id));
+
     const later = await patchQuest(
       created.quest.id,
       { title: 'Later title' },
@@ -1250,6 +1379,16 @@ const invalidHttpInputs: Array<[string, Record<string, unknown>, string]> = [
   ['title over the text limit', { title: 'x'.repeat(121) }, 'VALIDATION'],
   ['description over the text limit', { description: 'x'.repeat(1001) }, 'VALIDATION'],
   [
+    'invalid calendar startTime',
+    { startTime: '2030-02-31T10:00:00.000+07:00' },
+    'INVALID_QUEST_DATES',
+  ],
+  [
+    'invalid calendar dueAt',
+    { dueAt: '2030-09-31T12:00:00.000+07:00' },
+    'INVALID_QUEST_DATES',
+  ],
+  [
     'dueAt before startTime',
     { dueAt: '2030-08-26T09:00:00.000+07:00' },
     'INVALID_QUEST_DATES',
@@ -1286,12 +1425,14 @@ describe('Quest API v2 HTTP validation and ownership', () => {
 
   it.each(invalidHttpInputs)('rejects %s with the shared error envelope', async (_, changes, code) => {
     const response = await postQuest({ ...baseInput, ...changes });
-    expect(response.status).toBe(400);
-
     const body = (await response.json()) as {
       success: boolean;
-      error: { code: string; message: string };
+      data?: { id: string };
+      error?: { code: string; message: string };
     };
+    if (response.status === 200 && body.data) questIds.push(body.data.id);
+
+    expect(response.status).toBe(400);
     expect(body).toEqual({
       success: false,
       error: { code, message: expect.any(String) },
@@ -1312,6 +1453,75 @@ describe('Quest API v2 HTTP validation and ownership', () => {
     };
     questIds.push(body.data.id);
     expect(body.data.questFundingTotal).toBe(1.01);
+  });
+
+  it('returns canonical Bangkok schedule times with millisecond precision', async () => {
+    const response = await postQuest({
+      ...baseInput,
+      startTime: '2030-08-26T10:00:00+07:00',
+      dueAt: '2030-08-26T12:00:00.12+07:00',
+      locations: [],
+    });
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as {
+      success: true;
+      data: {
+        id: string;
+        startTime: string;
+        dueAt: string | null;
+        createdAt: string;
+        updatedAt: string;
+      };
+    };
+    questIds.push(body.data.id);
+    expect(body.data).toMatchObject({
+      startTime: '2030-08-26T10:00:00.000+07:00',
+      dueAt: '2030-08-26T12:00:00.120+07:00',
+    });
+    expect(body.data.createdAt).toMatch(/Z$/);
+    expect(body.data.updatedAt).toMatch(/Z$/);
+
+    const detail = await getQuest(body.data.id);
+    expect((await detail.json()).data).toEqual(body.data);
+
+    const mine = await app.handle(
+      new Request('http://localhost/api/v2/quests/mine', {
+        headers: { cookie: sessionCookie },
+      }),
+    );
+    expect(mine.status).toBe(200);
+    expect((await mine.json()).data.items).toContainEqual(body.data);
+  });
+
+  it.each([
+    ['startTime', 'UTC', { startTime: '2030-08-26T10:00:00.000Z' }],
+    ['startTime', 'a non-Bangkok offset', { startTime: '2030-08-26T10:00:00.000+08:00' }],
+    [
+      'startTime',
+      'more than three fractional-second digits',
+      { startTime: '2030-08-26T10:00:00.1234+07:00' },
+    ],
+    ['dueAt', 'UTC', { dueAt: '2030-08-26T12:00:00.000Z' }],
+    ['dueAt', 'a non-Bangkok offset', { dueAt: '2030-08-26T12:00:00.000+08:00' }],
+    [
+      'dueAt',
+      'more than three fractional-second digits',
+      { dueAt: '2030-08-26T12:00:00.1234+07:00' },
+    ],
+  ] as const)('rejects %s with %s at the HTTP boundary', async (_, __, body) => {
+    const response = await postQuest({
+      ...baseInput,
+      ...body,
+    });
+
+    if (response.status === 200) {
+      const createdBody = (await response.json()) as { data: { id: string } };
+      questIds.push(createdBody.data.id);
+    }
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('INVALID_QUEST_DATES');
   });
 
   it('returns 404 QUEST_NOT_FOUND with the complete envelope for missing and non-owned Quests', async () => {

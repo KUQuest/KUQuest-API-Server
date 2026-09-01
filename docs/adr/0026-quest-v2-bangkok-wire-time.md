@@ -1,0 +1,3 @@
+# Use Bangkok Wire Time with UTC Quest Storage
+
+The Quest v2 API represents `startTime` and non-null `dueAt` as RFC 3339 date-time values with a fixed `+07:00` offset. Requests may use zero to three fractional-second digits, and responses always use three; the Server parses these values into UTC instants, stores and compares them in PostgreSQL `timestamptz`, and formats only these scheduling fields back to `+07:00`. This satisfies the Quest Rulebook's Asia/Bangkok deadline rule while keeping persistence and comparisons independent of session timezone; `Z` and other input offsets are rejected as `INVALID_QUEST_DATES`, and existing stored instants are not migrated.
