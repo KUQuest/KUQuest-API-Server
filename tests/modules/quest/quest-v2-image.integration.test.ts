@@ -14,8 +14,10 @@ import {
   retryQuestV2ImageCleanupManifests,
   type QuestV2CreateInput,
 } from '@/modules/quest';
+import { createQuest } from '@/modules/quest/quest.service';
+import type { QuestCreateInput } from '@/modules/quest/quest.schema';
 import * as questV2Service from '@/modules/quest/quest-v2.service';
-import { questV2Storage } from '@/modules/quest/quest.storage';
+import { questStorage, questV2Storage } from '@/modules/quest/quest.storage';
 import {
   ImageTooLargeError,
   ImageLinkUnavailableError,
@@ -83,11 +85,29 @@ const baseInput: QuestV2CreateInput = {
   startTime: '2030-08-26T10:00:00.000Z',
 };
 
+const legacyBaseInput: QuestCreateInput = {
+  title: 'Legacy Quest Image Draft',
+  description: 'A v1 Quest Image fixture',
+  condition: 'Create the legacy gallery',
+  mode: 'NO_CANDIDATE',
+  participation: 'SOLO',
+  reward: 20,
+  headcount: 1,
+  startTime: '2030-08-26T10:00:00.000Z',
+};
+
 const createDraft = async () => {
   const result = await createQuestV2(hirerId, baseInput, `image-create-${crypto.randomUUID()}`);
   if (!('quest' in result)) throw new Error(`Draft creation failed: ${result.outcome}`);
   questIds.push(result.quest.id);
   return result.quest;
+};
+
+const createLegacyDraft = async () => {
+  const result = await createQuest(hirerId, legacyBaseInput);
+  if ('outcome' in result) throw new Error(`Legacy Draft creation failed: ${result.outcome}`);
+  questIds.push(result.id);
+  return result.id;
 };
 
 const postImages = (questId: string, key: string, files: File[], cookie = sessionCookie) => {
@@ -98,6 +118,19 @@ const postImages = (questId: string, key: string, files: File[], cookie = sessio
     new Request(`http://localhost/api/v2/quests/${questId}/images`, {
       method: 'POST',
       headers: { cookie, 'idempotency-key': key },
+      body: form,
+    }),
+  );
+};
+
+const postLegacyImages = (questId: string, files: File[], cookie = sessionCookie) => {
+  const form = new FormData();
+  for (const imageFile of files) form.append('images', imageFile);
+
+  return app.handle(
+    new Request(`http://localhost/api/v1/quests/${questId}/images`, {
+      method: 'POST',
+      headers: { cookie },
       body: form,
     }),
   );
@@ -126,6 +159,14 @@ const deleteImage = (
     new Request(`http://localhost/api/v2/quests/${questId}/images/${imageId}`, {
       method: 'DELETE',
       headers: { cookie, 'idempotency-key': key },
+    }),
+  );
+
+const deleteLegacyImage = (questId: string, fileId: string, cookie = sessionCookie) =>
+  app.handle(
+    new Request(`http://localhost/api/v1/quests/${questId}/images/${fileId}`, {
+      method: 'DELETE',
+      headers: { cookie },
     }),
   );
 
@@ -443,6 +484,78 @@ describe('Quest API v2 Quest Image integration', () => {
       .from(file)
       .where(eq(file.id, target.fileId));
     expect(cleanedFile?.objectDeletedAt).not.toBeNull();
+  });
+
+  it('maps a delete link failure and rolls back the image change', async () => {
+    const draft = await createDraft();
+    const firstUploaded = {
+      bucket: 'test-bucket',
+      objectKey: `quests/v2/${hirerId}/delete-presign-failure.png`,
+      contentType: 'image/png' as const,
+      sizeBytes: 3,
+    };
+    const secondUploaded = {
+      ...firstUploaded,
+      objectKey: `quests/v2/${hirerId}/delete-presign-survivor.png`,
+    };
+    spyOn(questV2Storage, 'upload')
+      .mockResolvedValueOnce(firstUploaded)
+      .mockResolvedValueOnce(secondUploaded);
+    const linkForWithExpiry = spyOn(questV2Storage, 'linkForWithExpiry').mockReturnValue({
+      url: 'https://storage.test/temporary-link',
+      expiresAt: new Date('2030-08-26T10:15:00.000Z'),
+    });
+
+    const uploadResponse = await postImages(
+      draft.id,
+      'image-delete-presign-upload',
+      [
+        makeImageFile('delete-presign-failure.png'),
+        makeImageFile('delete-presign-survivor.png'),
+      ],
+    );
+    const uploadedBody = (await uploadResponse.json()) as {
+      data: { images: Array<{ imageId: string; fileId: string; position: number }> };
+    };
+    const targetImage = uploadedBody.data.images[0]!;
+    const deleteObject = spyOn(questV2Storage, 'delete').mockResolvedValue();
+    linkForWithExpiry.mockImplementation(() => {
+      throw new ImageLinkUnavailableError('presign unavailable');
+    });
+
+    const response = await deleteImage(
+      draft.id,
+      targetImage.imageId,
+      'image-delete-presign-failure',
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: {
+        code: 'QUEST_IMAGE_STORAGE_UNAVAILABLE',
+        message: 'Quest Image storage is unavailable',
+      },
+    });
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(
+      await db
+        .select({ imageId: questImage.id, fileId: questImage.fileId, position: questImage.position })
+        .from(questImage)
+        .where(eq(questImage.questId, draft.id)),
+    ).toEqual(
+      uploadedBody.data.images.map(({ imageId, fileId, position }) => ({
+        imageId,
+        fileId,
+        position,
+      })),
+    );
+    expect(
+      await db
+        .select({ deletedAt: file.deletedAt, objectDeletedAt: file.objectDeletedAt })
+        .from(file)
+        .where(eq(file.id, targetImage.fileId)),
+    ).toEqual([{ deletedAt: null, objectDeletedAt: null }]);
   });
 
   it('rejects a gallery that exceeds three images before storage upload', async () => {
@@ -836,6 +949,109 @@ describe('Quest API v2 Quest Image integration', () => {
     );
     expect(remove.status).toBe(400);
     expect((await remove.json()).error.code).toBe('VALIDATION');
+  });
+
+  describe('v1 Quest Image compatibility', () => {
+    it('keeps the v1 HTTP upload and delete response contract', async () => {
+      const draftId = await createLegacyDraft();
+      const stored = {
+        bucket: 'test-bucket',
+        objectKey: `quests/${hirerId}/v1-contract.png`,
+        contentType: 'image/png' as const,
+        sizeBytes: 3,
+      };
+      const upload = spyOn(questStorage, 'upload').mockResolvedValue(stored);
+      spyOn(questStorage, 'linkFor').mockReturnValue('https://storage.test/v1-link');
+      const deleteObject = spyOn(questStorage, 'delete').mockResolvedValue();
+
+      const uploadResponse = await postLegacyImages(draftId, [makeImageFile('v1-contract.png')]);
+      expect(uploadResponse.status).toBe(200);
+      const uploadBody = (await uploadResponse.json()) as {
+        data: { images: Array<{ fileId: string; position: number; url: string }> };
+      };
+      expect(uploadBody.data.images).toEqual([
+        { fileId: expect.any(String), position: 0, url: 'https://storage.test/v1-link' },
+      ]);
+      expect(upload).toHaveBeenCalledTimes(1);
+
+      const fileId = uploadBody.data.images[0]!.fileId;
+      const deleteResponse = await deleteLegacyImage(draftId, fileId);
+      expect(deleteResponse.status).toBe(200);
+      expect(await deleteResponse.json()).toEqual({ success: true });
+      expect(deleteObject).toHaveBeenCalledWith(stored.bucket, stored.objectKey);
+    });
+
+    it('keeps v1 and v2 Quest Image routes isolated', async () => {
+      const v1DraftId = await createLegacyDraft();
+      const v2Draft = await createDraft();
+      const v1Stored = {
+        bucket: 'test-bucket',
+        objectKey: `quests/${hirerId}/v1-isolation.png`,
+        contentType: 'image/png' as const,
+        sizeBytes: 3,
+      };
+      const v2Stored = {
+        bucket: 'test-bucket',
+        objectKey: `quests/v2/${hirerId}/v2-isolation.png`,
+        contentType: 'image/png' as const,
+        sizeBytes: 3,
+      };
+      const v1Upload = spyOn(questStorage, 'upload').mockResolvedValue(v1Stored);
+      spyOn(questStorage, 'linkFor').mockReturnValue('https://storage.test/v1-isolation');
+      const v1Delete = spyOn(questStorage, 'delete').mockResolvedValue();
+      const v2Upload = spyOn(questV2Storage, 'upload').mockResolvedValue(v2Stored);
+      spyOn(questV2Storage, 'linkForWithExpiry').mockReturnValue({
+        url: 'https://storage.test/v2-isolation',
+        expiresAt: new Date('2030-08-26T10:15:00.000Z'),
+      });
+      const v2Delete = spyOn(questV2Storage, 'delete').mockResolvedValue();
+
+      const v1Response = await postLegacyImages(v1DraftId, [makeImageFile('v1-isolation.png')]);
+      const v1Body = (await v1Response.json()) as {
+        data: { images: Array<{ fileId: string }> };
+      };
+      const v1FileId = v1Body.data.images[0]!.fileId;
+      const v2Response = await postImages(
+        v2Draft.id,
+        'image-v2-isolation-upload',
+        [makeImageFile('v2-isolation.png')],
+      );
+      const v2Body = (await v2Response.json()) as {
+        data: { images: Array<{ fileId: string; imageId: string }> };
+      };
+      const v2Image = v2Body.data.images[0]!;
+
+      const v2OnV1 = await postImages(
+        v1DraftId,
+        'image-v2-on-v1',
+        [makeImageFile('v2-on-v1.png')],
+      );
+      expect(v2OnV1.status).toBe(404);
+      expect((await v2OnV1.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+      const v1OnV2 = await postLegacyImages(v2Draft.id, [makeImageFile('v1-on-v2.png')]);
+      expect(v1OnV2.status).toBe(404);
+      expect((await v1OnV2.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+      const v2DeleteOnV1 = await deleteImage(v1DraftId, v1FileId, 'image-v2-on-v1-delete');
+      expect(v2DeleteOnV1.status).toBe(404);
+      expect((await v2DeleteOnV1.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+      const v1DeleteOnV2 = await deleteLegacyImage(v2Draft.id, v2Image.fileId);
+      expect(v1DeleteOnV2.status).toBe(404);
+      expect((await v1DeleteOnV2.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+      expect(v1Upload).toHaveBeenCalledTimes(1);
+      expect(v2Upload).toHaveBeenCalledTimes(1);
+      expect(v1Delete).not.toHaveBeenCalled();
+      expect(v2Delete).not.toHaveBeenCalled();
+      expect(
+        await db.select({ id: questImage.id }).from(questImage).where(eq(questImage.questId, v1DraftId)),
+      ).toHaveLength(1);
+      expect(
+        await db.select({ id: questImage.id }).from(questImage).where(eq(questImage.questId, v2Draft.id)),
+      ).toHaveLength(1);
+    });
   });
 
   it('documents the v2 Quest Image operations', async () => {

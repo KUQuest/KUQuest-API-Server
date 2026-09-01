@@ -35,7 +35,7 @@ import {
   buildQuestV2PublishCheck,
   type QuestV2PublishCheck,
 } from './quest-v2.publish.policy';
-import { softDeleteQuestImageAndRepack } from './quest-image.persistence';
+import { softDeleteQuestImageAndRepack } from './quest-image.service';
 import { maxQuestV2Images } from './quest-v2.schema';
 import type { QuestV2CreateInput, QuestV2EditInput } from './quest-v2.schema';
 import { questV2Storage, type StoredQuestImage } from './quest.storage';
@@ -658,7 +658,7 @@ const fromQuestV2ImageIdempotencySnapshot = (
   return { images: snapshot.images, response: snapshot.response };
 };
 
-const materializeQuestV2ImageResponse = (
+export const materializeQuestV2ImageResponse = (
   images: QuestV2ImageReference[],
 ): QuestV2ImageResponse[] => images.map((image) => {
   const link = questV2Storage.linkForWithExpiry(image);

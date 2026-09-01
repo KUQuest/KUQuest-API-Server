@@ -33,7 +33,7 @@ import {
   type QuestPublishCheck,
   type QuestPublishSnapshot,
 } from './quest.publish.policy';
-import { softDeleteQuestImageAndRepack } from './quest-image.persistence';
+import { softDeleteQuestImageAndRepack } from './quest-image.service';
 import {
   applicationStatus,
   assignmentStatus,
