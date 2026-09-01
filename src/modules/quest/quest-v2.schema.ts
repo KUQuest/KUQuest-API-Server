@@ -571,6 +571,92 @@ export const questV2PublishCheckHttpResponseSchema = {
   },
 } as QuestV2PublishCheckHttpResponseSchema;
 
+const questV2QuestEscrowResponseProperties = {
+  reservationId: t.String({ format: 'uuid' }),
+  questFundingTotal: questV2FundingQuoteAmountSchema,
+  questFundingTotalSatang: t.Integer({ minimum: 100, maximum: 70_000_000 }),
+  questReward: questV2FundingQuoteAmountSchema,
+  questRewardSatang: t.Integer({ minimum: 0 }),
+  platformFee: questV2FundingQuoteAmountSchema,
+  platformFeeSatang: t.Integer({ minimum: 0 }),
+  escrowRequirement: questV2FundingQuoteAmountSchema,
+  escrowRequirementSatang: t.Integer({ minimum: 1, maximum: 2_000_000_000 }),
+  headcount: questV2HeadcountSchema,
+  platformFeeBps: t.Integer({ minimum: 0, maximum: 10000 }),
+  feeRoundingMode: t.Literal('UP'),
+  policyRevisionId: t.String({ format: 'uuid' }),
+  policyRevision: t.Integer({ minimum: 1 }),
+};
+
+const questV2QuestEscrowResponseOpenApiSchema = t.Object({
+  ...questV2QuestEscrowResponseProperties,
+  questFundingTotal: questV2FundingQuoteAmountOpenApiSchema,
+  questReward: questV2FundingQuoteAmountOpenApiSchema,
+  platformFee: questV2FundingQuoteAmountOpenApiSchema,
+  escrowRequirement: questV2FundingQuoteAmountOpenApiSchema,
+});
+
+const questV2PublishResponseOpenApiSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    quest: questV2CanonicalQuestSchema,
+    questEscrow: questV2QuestEscrowResponseOpenApiSchema,
+  }),
+});
+
+export const questV2PublishResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    quest: questV2CanonicalQuestSchema,
+    questEscrow: t.Object(questV2QuestEscrowResponseProperties),
+  }),
+});
+
+const questV2PublishResponseValidator = TypeCompiler.Compile(questV2PublishResponseSchema);
+
+type QuestV2PublishHttpResponseSchema = StandardSchemaV1Like<
+  Static<typeof questV2PublishResponseSchema>,
+  Static<typeof questV2PublishResponseSchema>
+> & {
+  readonly '~standard': {
+    readonly version: 1;
+    readonly vendor: 'elysia';
+    readonly validate: (value: unknown) =>
+      | { value: Static<typeof questV2PublishResponseSchema>; issues?: never }
+      | { value?: never; issues: unknown[] };
+    readonly jsonSchema: {
+      readonly input: () => typeof questV2PublishResponseOpenApiSchema;
+      readonly output: () => typeof questV2PublishResponseOpenApiSchema;
+    };
+  };
+};
+
+export const questV2PublishHttpResponseSchema = {
+  '~standard': {
+    version: 1 as const,
+    vendor: 'elysia' as const,
+    types: undefined as unknown as {
+      input: Static<typeof questV2PublishResponseSchema>;
+      output: Static<typeof questV2PublishResponseSchema>;
+    },
+    validate: (value: unknown) => {
+      if (!questV2PublishResponseValidator.Check(value)) {
+        return {
+          issues: [...questV2PublishResponseValidator.Errors(value)],
+        };
+      }
+
+      return {
+        value: value as Static<typeof questV2PublishResponseSchema>,
+      };
+    },
+    jsonSchema: {
+      input: () => questV2PublishResponseOpenApiSchema,
+      output: () => questV2PublishResponseOpenApiSchema,
+    },
+  },
+} as QuestV2PublishHttpResponseSchema;
+
 export const questV2WriteHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
 });

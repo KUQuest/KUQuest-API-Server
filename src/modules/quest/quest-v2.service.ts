@@ -13,6 +13,7 @@ import {
   getEffectiveFundingReservationPolicy,
   MoneyDomainError,
   positiveSatang,
+  reserveSpending,
   satang,
   toBaht,
   type Satang,
@@ -47,10 +48,12 @@ type QuestDatabase = typeof db | QuestTransaction;
 
 export const questV2CreateOperationScope = 'quest.v2.create';
 export const questV2EditOperationScope = 'quest.v2.edit';
+export const questV2PublishOperationScope = 'quest.v2.publish';
 export const questV2ImageUploadOperationScope = 'quest.v2.image.upload';
 export const questV2ImageRemoveOperationScope = 'quest.v2.image.remove';
 const questV2CreatePath = '/api/v2/quests';
 const questV2EditPath = '/api/v2/quests/:questId';
+const questV2PublishPath = '/api/v2/quests/:questId/publish';
 const questV2ImageUploadPath = '/api/v2/quests/:questId/images';
 const questV2ImageRemovePath = '/api/v2/quests/:questId/images/:imageId';
 
@@ -134,6 +137,40 @@ export type QuestV2EditOutcome =
 export type QuestV2PublishCheckOutcome =
   | QuestV2PublishCheck
   | { outcome: 'not-draft' };
+
+export type QuestV2QuestEscrowSnapshot = {
+  reservationId: string;
+  questFundingTotal: number;
+  questFundingTotalSatang: Satang;
+  questReward: number;
+  questRewardSatang: Satang;
+  platformFee: number;
+  platformFeeSatang: Satang;
+  escrowRequirement: number;
+  escrowRequirementSatang: Satang;
+  headcount: number;
+  platformFeeBps: number;
+  feeRoundingMode: 'UP';
+  policyRevisionId: string;
+  policyRevision: number;
+};
+
+export type QuestV2PublishResponse = {
+  quest: QuestV2CanonicalQuest;
+  questEscrow: QuestV2QuestEscrowSnapshot;
+};
+
+export type QuestV2PublishOutcome =
+  | QuestV2PublishResponse
+  | { outcome: 'blocked'; check: QuestV2PublishCheck }
+  | {
+      outcome:
+        | 'invalid-idempotency-key'
+        | 'idempotency-key-reused'
+        | 'idempotency-in-progress'
+        | 'idempotency-unavailable'
+        | 'not-draft';
+    };
 
 export type QuestV2ImageReference = {
   imageId: string;
@@ -237,6 +274,18 @@ class QuestV2EditError extends Error {
   constructor(readonly outcome: QuestV2EditOutcomeCode) {
     super(outcome);
     this.name = 'QuestV2EditError';
+  }
+}
+
+type QuestV2PublishCommandErrorCode = 'blocked' | 'not-draft' | 'not-found';
+
+class QuestV2PublishError extends Error {
+  constructor(
+    readonly outcome: QuestV2PublishCommandErrorCode,
+    readonly check?: QuestV2PublishCheck,
+  ) {
+    super(outcome);
+    this.name = 'QuestV2PublishError';
   }
 }
 
@@ -490,18 +539,31 @@ const selectQuestV2Row = async (
   database: QuestDatabase,
   userId: string,
   questId: string,
+  lock = false,
 ): Promise<QuestV2Row | undefined> => {
+  const ownerCondition = and(
+    eq(quest.id, questId),
+    eq(quest.hirerId, userId),
+    eq(quest.apiVersion, questApiVersion.v2),
+  );
+
+  // Lock the Quest table row separately. PostgreSQL does not allow FOR UPDATE
+  // on the nullable side of the left join used to read the optional Tag.
+  if (lock) {
+    const [lockedQuest] = await database
+      .select({ id: quest.id })
+      .from(quest)
+      .where(ownerCondition)
+      .limit(1)
+      .for('update');
+    if (!lockedQuest) return undefined;
+  }
+
   const [row] = await database
     .select(questV2RowSelection)
     .from(quest)
     .leftJoin(tag, eq(quest.tagId, tag.id))
-    .where(
-      and(
-        eq(quest.id, questId),
-        eq(quest.hirerId, userId),
-        eq(quest.apiVersion, questApiVersion.v2),
-      ),
-    )
+    .where(ownerCondition)
     .limit(1);
 
   return row as QuestV2Row | undefined;
@@ -574,6 +636,55 @@ const buildCanonicalQuest = async (
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+};
+
+const buildQuestV2PublishCheckForRow = async (
+  database: QuestTransaction,
+  userId: string,
+  row: QuestV2Row,
+  lockWallet: boolean,
+): Promise<QuestV2PublishCheck> => {
+  if (row.questFundingTotalSatang === null || !row.v2Participation) {
+    throw new Error(`Quest ${row.id} has incomplete v2 persistence data`);
+  }
+
+  const conditionItems = await selectConditionItems(database, row.id);
+  const policy = await getEffectiveFundingReservationPolicy(database);
+  const walletQuery = database
+    .select({
+      spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+      walletStatus: walletWallet.walletStatus,
+    })
+    .from(walletWallet)
+    .where(eq(walletWallet.userId, userId))
+    .limit(1);
+  const [wallet] = lockWallet ? await walletQuery.for('update') : await walletQuery;
+
+  if (!wallet) {
+    throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
+  }
+
+  return buildQuestV2PublishCheck({
+    participation: row.v2Participation,
+    tagId: row.tagId,
+    conditionValid: conditionItems.length > 0 && conditionItems.every((item, position) => {
+      const text = item.text.trim();
+      return item.position === position && text.length > 0 && text.length <= 255;
+    }),
+    startTime: row.startTime,
+    dueAt: row.dueAt,
+    now: new Date(),
+    questFundingTotalSatang: satang(row.questFundingTotalSatang),
+    headcount: row.headcount,
+    spendingBalanceSatang: satang(wallet.spendingBalanceSatang),
+    walletStatus: wallet.walletStatus,
+    platformFeeBps: policy.platformFeeBps,
+    feeRoundingMode: policy.feeRoundingMode as 'UP',
+    policyRevisionId: policy.id,
+    policyRevision: policy.revision,
+    minimumFundingReservationSatang: satang(policy.minimumFundingReservationSatang),
+    maximumFundingReservationSatang: satang(policy.maximumFundingReservationSatang),
+  });
 };
 
 const selectQuestV2Images = async (
@@ -1493,6 +1604,148 @@ const fromQuestV2IdempotencySnapshot = (
   } as QuestV2CanonicalQuest;
 };
 
+const toQuestV2QuestEscrowSnapshot = (
+  reservationId: string,
+  check: QuestV2PublishCheck,
+): QuestV2QuestEscrowSnapshot => ({
+  reservationId,
+  questFundingTotal: toBaht(check.questFundingTotalSatang),
+  questFundingTotalSatang: check.questFundingTotalSatang,
+  questReward: toBaht(check.questRewardSatang),
+  questRewardSatang: check.questRewardSatang,
+  platformFee: toBaht(check.platformFeeSatang),
+  platformFeeSatang: check.platformFeeSatang,
+  escrowRequirement: toBaht(check.escrowRequirementSatang),
+  escrowRequirementSatang: check.escrowRequirementSatang,
+  headcount: check.headcount,
+  platformFeeBps: check.platformFeeBps,
+  feeRoundingMode: check.feeRoundingMode,
+  policyRevisionId: check.policyRevisionId,
+  policyRevision: check.policyRevision,
+});
+
+type QuestV2QuestEscrowIdempotencySnapshot = Omit<
+  QuestV2QuestEscrowSnapshot,
+  | 'questFundingTotal'
+  | 'questReward'
+  | 'platformFee'
+  | 'escrowRequirement'
+>;
+
+type QuestV2PublishIdempotencySnapshot = {
+  quest: QuestV2IdempotencySnapshot;
+  questEscrow: QuestV2QuestEscrowIdempotencySnapshot;
+};
+
+const toQuestV2PublishIdempotencySnapshot = (
+  result: QuestV2PublishResponse,
+): QuestV2PublishIdempotencySnapshot => ({
+  quest: toQuestV2IdempotencySnapshot(result.quest),
+  questEscrow: {
+    reservationId: result.questEscrow.reservationId,
+    questFundingTotalSatang: result.questEscrow.questFundingTotalSatang,
+    questRewardSatang: result.questEscrow.questRewardSatang,
+    platformFeeSatang: result.questEscrow.platformFeeSatang,
+    escrowRequirementSatang: result.questEscrow.escrowRequirementSatang,
+    headcount: result.questEscrow.headcount,
+    platformFeeBps: result.questEscrow.platformFeeBps,
+    feeRoundingMode: result.questEscrow.feeRoundingMode,
+    policyRevisionId: result.questEscrow.policyRevisionId,
+    policyRevision: result.questEscrow.policyRevision,
+  },
+});
+
+const fromQuestV2QuestEscrowIdempotencySnapshot = (
+  value: unknown,
+): QuestV2QuestEscrowSnapshot | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+
+  const snapshot = value as Partial<QuestV2QuestEscrowIdempotencySnapshot>;
+  const satangFields: unknown[] = [
+    snapshot.questFundingTotalSatang,
+    snapshot.questRewardSatang,
+    snapshot.platformFeeSatang,
+    snapshot.escrowRequirementSatang,
+  ];
+  if (
+    typeof snapshot.reservationId !== 'string' ||
+    typeof snapshot.policyRevisionId !== 'string' ||
+    snapshot.feeRoundingMode !== 'UP' ||
+    !satangFields.every((amount) => typeof amount === 'number' && Number.isInteger(amount)) ||
+    typeof snapshot.headcount !== 'number' ||
+    !Number.isInteger(snapshot.headcount) ||
+    typeof snapshot.platformFeeBps !== 'number' ||
+    !Number.isInteger(snapshot.platformFeeBps) ||
+    typeof snapshot.policyRevision !== 'number' ||
+    !Number.isInteger(snapshot.policyRevision)
+  ) {
+    return undefined;
+  }
+
+  const [
+    questFundingTotalSatang,
+    questRewardSatang,
+    platformFeeSatang,
+    escrowRequirementSatang,
+  ] = satangFields as [number, number, number, number];
+  if (
+    questFundingTotalSatang < 100 ||
+    questFundingTotalSatang > 70_000_000 ||
+    questRewardSatang < 0 ||
+    platformFeeSatang < 0 ||
+    escrowRequirementSatang < 1 ||
+    escrowRequirementSatang > 2_000_000_000 ||
+    snapshot.headcount < 1 ||
+    snapshot.headcount > 20 ||
+    snapshot.platformFeeBps < 0 ||
+    snapshot.platformFeeBps > 10_000 ||
+    snapshot.policyRevision < 1
+  ) {
+    return undefined;
+  }
+
+  try {
+    const total = satang(questFundingTotalSatang);
+    const reward = satang(questRewardSatang);
+    const fee = satang(platformFeeSatang);
+    const escrow = satang(escrowRequirementSatang);
+
+    return {
+      reservationId: snapshot.reservationId,
+      questFundingTotal: toBaht(total),
+      questFundingTotalSatang: total,
+      questReward: toBaht(reward),
+      questRewardSatang: reward,
+      platformFee: toBaht(fee),
+      platformFeeSatang: fee,
+      escrowRequirement: toBaht(escrow),
+      escrowRequirementSatang: escrow,
+      headcount: snapshot.headcount,
+      platformFeeBps: snapshot.platformFeeBps,
+      feeRoundingMode: snapshot.feeRoundingMode,
+      policyRevisionId: snapshot.policyRevisionId,
+      policyRevision: snapshot.policyRevision,
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+const fromQuestV2PublishIdempotencySnapshot = (
+  resultData: unknown,
+): QuestV2PublishResponse | undefined => {
+  if (!resultData || typeof resultData !== 'object' || Array.isArray(resultData)) {
+    return undefined;
+  }
+
+  const snapshot = resultData as Partial<QuestV2PublishIdempotencySnapshot>;
+  const canonicalQuest = fromQuestV2IdempotencySnapshot(snapshot.quest);
+  const questEscrow = fromQuestV2QuestEscrowIdempotencySnapshot(snapshot.questEscrow);
+  if (!canonicalQuest || !questEscrow) return undefined;
+
+  return { quest: canonicalQuest, questEscrow };
+};
+
 type IdempotencyRecord = {
   id: string;
   requestHash: string;
@@ -1603,6 +1856,105 @@ const acquireQuestV2Idempotency = async (
   if (record.processingStatus !== 'PROCESSING') return { outcome: 'idempotency-unavailable' };
 
   return { created: true, record };
+};
+
+const throwQuestV2PublishError = (
+  outcome: QuestV2PublishCommandErrorCode,
+  check?: QuestV2PublishCheck,
+): never => {
+  throw new QuestV2PublishError(outcome, check);
+};
+
+const publishQuestV2InTransaction = async (
+  transaction: QuestTransaction,
+  userId: string,
+  questId: string,
+  key: string,
+  requestHash: string,
+): Promise<QuestV2PublishOutcome> => {
+  const idempotency = await acquireQuestV2Idempotency(
+    transaction,
+    userId,
+    questV2PublishOperationScope,
+    key,
+    requestHash,
+  );
+  if ('outcome' in idempotency) return idempotency;
+
+  if (!idempotency.created && idempotency.record.resourceId) {
+    const snapshot = fromQuestV2PublishIdempotencySnapshot(idempotency.record.resultData);
+    return snapshot ? snapshot : { outcome: 'idempotency-unavailable' };
+  }
+
+  const row = await selectQuestV2Row(transaction, userId, questId, true);
+  if (!row) {
+    throw new QuestV2PublishError('not-found');
+  }
+  if (row.questStatus !== questStatus.draft) throwQuestV2PublishError('not-draft');
+
+  const check = await buildQuestV2PublishCheckForRow(transaction, userId, row, true);
+  if (!check.canPublish) throwQuestV2PublishError('blocked', check);
+
+  const reservation = await reserveSpending(transaction, {
+    ownerUserId: userId,
+    callerScope: 'quest',
+    callerReference: questId,
+    amountSatang: check.escrowRequirementSatang,
+  });
+  if (reservation.policyRevisionId !== check.policyRevisionId) {
+    throw new MoneyDomainError(
+      'POLICY_NOT_AVAILABLE',
+      'Money Policy changed while publishing the Quest.',
+    );
+  }
+
+  const publishedAt = new Date();
+  const [updated] = await transaction
+    .update(quest)
+    .set({
+      questStatus: questStatus.open,
+      rewardSatang: check.questRewardSatang,
+      questFundingTotalSatang: check.questFundingTotalSatang,
+      headcount: check.headcount,
+      fundingReservationId: reservation.id,
+      policyRevisionId: check.policyRevisionId,
+      platformFeeBps: check.platformFeeBps,
+      platformFeePerWorkerSatang: check.platformFeeSatang,
+      questEscrowSatang: check.escrowRequirementSatang,
+      updatedAt: publishedAt,
+    })
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.hirerId, userId),
+        eq(quest.apiVersion, questApiVersion.v2),
+        eq(quest.questStatus, questStatus.draft),
+      ),
+    )
+    .returning({ id: quest.id });
+  if (!updated) throwQuestV2PublishError('not-draft');
+
+  const updatedRow = await selectQuestV2Row(transaction, userId, questId);
+  if (!updatedRow) {
+    throw new Error(`Published Quest ${questId} could not be read back`);
+  }
+
+  const result: QuestV2PublishResponse = {
+    quest: await buildCanonicalQuest(transaction, updatedRow),
+    questEscrow: toQuestV2QuestEscrowSnapshot(reservation.id, check),
+  };
+  await transaction
+    .update(walletIdempotencyKey)
+    .set({
+      resourceType: 'quest',
+      resourceId: questId,
+      resultData: toQuestV2PublishIdempotencySnapshot(result),
+      processingStatus: 'COMPLETED',
+      completedAt: publishedAt,
+    })
+    .where(eq(walletIdempotencyKey.id, idempotency.record.id));
+
+  return result;
 };
 
 const throwInputError = (outcome: QuestV2CreateValidationOutcome): never => {
@@ -1922,6 +2274,47 @@ export const editQuestV2 = async (
   }
 };
 
+const publishRequestHashFor = (
+  userId: string,
+  questId: string,
+): Promise<string> =>
+  sha256Json({
+    authenticatedMemberId: userId,
+    operation: questV2PublishOperationScope,
+    path: questV2PublishPath,
+    questId,
+    body: null,
+  });
+
+export const publishQuestV2 = async (
+  userId: string,
+  questId: string,
+  rawIdempotencyKey: string,
+): Promise<QuestV2PublishOutcome | undefined> => {
+  const key = rawIdempotencyKey.trim();
+  if (key.length === 0 || key.length > 200) {
+    return { outcome: 'invalid-idempotency-key' };
+  }
+
+  const requestHash = await publishRequestHashFor(userId, questId);
+
+  try {
+    return await db.transaction((transaction) =>
+      publishQuestV2InTransaction(transaction, userId, questId, key, requestHash),
+    );
+  } catch (error) {
+    if (!(error instanceof QuestV2PublishError)) throw error;
+    if (error.outcome === 'not-found') return undefined;
+    if (error.outcome === 'blocked') {
+      if (!error.check) {
+        throw new Error('Blocked Quest publish is missing its readiness check', { cause: error });
+      }
+      return { outcome: 'blocked', check: error.check };
+    }
+    return { outcome: error.outcome };
+  }
+};
+
 export const listOwnQuestV2 = async (
   userId: string,
   filters: { limit?: number; cursor?: string },
@@ -1986,46 +2379,5 @@ export const getQuestV2PublishCheck = async (
     const row = await selectQuestV2Row(transaction, userId, questId);
     if (!row) return undefined;
     if (row.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
-    if (row.questFundingTotalSatang === null || !row.v2Participation) {
-      throw new Error(`Quest ${questId} has incomplete v2 persistence data`);
-    }
-
-    const [conditionItems, policy, wallet] = await Promise.all([
-      selectConditionItems(transaction, questId),
-      getEffectiveFundingReservationPolicy(transaction),
-      transaction
-        .select({
-          spendingBalanceSatang: walletWallet.spendingBalanceSatang,
-          walletStatus: walletWallet.walletStatus,
-        })
-        .from(walletWallet)
-        .where(eq(walletWallet.userId, userId))
-        .limit(1)
-        .then((rows) => rows[0]),
-    ]);
-    if (!wallet) {
-      throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
-    }
-
-    return buildQuestV2PublishCheck({
-      participation: row.v2Participation,
-      tagId: row.tagId,
-      conditionValid: conditionItems.length > 0 && conditionItems.every((item, position) => {
-        const text = item.text.trim();
-        return item.position === position && text.length > 0 && text.length <= 255;
-      }),
-      startTime: row.startTime,
-      dueAt: row.dueAt,
-      now: new Date(),
-      questFundingTotalSatang: satang(row.questFundingTotalSatang),
-      headcount: row.headcount,
-      spendingBalanceSatang: satang(wallet.spendingBalanceSatang),
-      walletStatus: wallet.walletStatus,
-      platformFeeBps: policy.platformFeeBps,
-      feeRoundingMode: policy.feeRoundingMode as 'UP',
-      policyRevisionId: policy.id,
-      policyRevision: policy.revision,
-      minimumFundingReservationSatang: satang(policy.minimumFundingReservationSatang),
-      maximumFundingReservationSatang: satang(policy.maximumFundingReservationSatang),
-    });
+    return buildQuestV2PublishCheckForRow(transaction, userId, row, false);
   });
