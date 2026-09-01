@@ -6,6 +6,7 @@ export {
   satang,
   satangDelta,
   signedSatang,
+  toBaht,
 } from './wallet.money';
 export type {
   MoneyDomainErrorCode,

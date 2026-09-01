@@ -229,8 +229,17 @@ funding quote. Known blockers include:
 - missing or invalid `dueAt`;
 - `dueAt <= startTime`;
 - `startTime` is not in the future by Server time;
-- invalid Quest Condition; and
-- insufficient `Spending Balance` for Quest Escrow.
+- invalid Quest Condition;
+- insufficient `Spending Balance` for Quest Escrow;
+- `Wallet Status` is not `ACTIVE`; and
+- the total Quest Escrow amount is outside the active Money Policy's
+  Funding Reservation limits.
+
+`QUEST_ESCROW_AMOUNT_OUT_OF_RANGE` is returned when the headcount-multiplied
+Quest Escrow amount is below or above those active limits. This is a
+publish-check blocker because the later Funding Reservation would reject the
+same amount. A missing Wallet or unavailable Money Policy is a dependency
+failure and returns `503 QUEST_ESCROW_UNAVAILABLE`.
 
 Empty locations and zero Quest Images are valid. They are neither blockers nor
 warnings.

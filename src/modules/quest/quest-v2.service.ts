@@ -6,8 +6,15 @@ import {
   questLocation,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
-import { positiveSatang, satang, type Satang } from '@/modules/wallet';
+import { walletIdempotencyKey, walletWallet } from '@/database/schema/wallet.schema';
+import {
+  getEffectiveFundingReservationPolicy,
+  MoneyDomainError,
+  positiveSatang,
+  satang,
+  toBaht,
+  type Satang,
+} from '@/modules/wallet';
 import { decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 
 import { and, asc, eq, gt, or, sql } from 'drizzle-orm';
@@ -22,6 +29,10 @@ import {
   type QuestV2Participation,
   type QuestV2State,
 } from './quest-v2.contract';
+import {
+  buildQuestV2PublishCheck,
+  type QuestV2PublishCheck,
+} from './quest-v2.publish.policy';
 import type { QuestV2CreateInput, QuestV2EditInput } from './quest-v2.schema';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -110,6 +121,10 @@ export type QuestV2CreateOutcome =
 export type QuestV2EditOutcome =
   | { quest: QuestV2CanonicalQuest }
   | { outcome: QuestV2EditOutcomeCode };
+
+export type QuestV2PublishCheckOutcome =
+  | QuestV2PublishCheck
+  | { outcome: 'not-draft' };
 
 type QuestV2Row = {
   id: string;
@@ -465,8 +480,6 @@ const toV2State = (status: QuestStatus): QuestV2State => {
 
   return status as QuestV2State;
 };
-
-const toBaht = (amount: Satang): number => Number((amount / 100).toFixed(2));
 
 const buildCanonicalQuest = async (
   database: QuestDatabase,
@@ -982,3 +995,54 @@ export const getQuestV2Detail = async (
   const row = await selectQuestV2Row(db, userId, questId);
   return row ? buildCanonicalQuest(db, row) : undefined;
 };
+
+export const getQuestV2PublishCheck = async (
+  userId: string,
+  questId: string,
+): Promise<QuestV2PublishCheckOutcome | undefined> =>
+  db.transaction(async (transaction) => {
+    const row = await selectQuestV2Row(transaction, userId, questId);
+    if (!row) return undefined;
+    if (row.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
+    if (row.questFundingTotalSatang === null) {
+      throw new Error(`Quest ${questId} has incomplete v2 persistence data`);
+    }
+
+    const [conditionItems, policy, wallet] = await Promise.all([
+      selectConditionItems(transaction, questId),
+      getEffectiveFundingReservationPolicy(transaction),
+      transaction
+        .select({
+          spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+          walletStatus: walletWallet.walletStatus,
+        })
+        .from(walletWallet)
+        .where(eq(walletWallet.userId, userId))
+        .limit(1)
+        .then((rows) => rows[0]),
+    ]);
+    if (!wallet) {
+      throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
+    }
+
+    return buildQuestV2PublishCheck({
+      tagId: row.tagId,
+      conditionValid: conditionItems.length > 0 && conditionItems.every((item, position) => {
+        const text = item.text.trim();
+        return item.position === position && text.length > 0 && text.length <= 255;
+      }),
+      startTime: row.startTime,
+      dueAt: row.dueAt,
+      now: new Date(),
+      questFundingTotalSatang: satang(row.questFundingTotalSatang),
+      headcount: row.headcount,
+      spendingBalanceSatang: satang(wallet.spendingBalanceSatang),
+      walletStatus: wallet.walletStatus,
+      platformFeeBps: policy.platformFeeBps,
+      feeRoundingMode: policy.feeRoundingMode as 'UP',
+      policyRevisionId: policy.id,
+      policyRevision: policy.revision,
+      minimumFundingReservationSatang: satang(policy.minimumFundingReservationSatang),
+      maximumFundingReservationSatang: satang(policy.maximumFundingReservationSatang),
+    });
+  });
