@@ -19,9 +19,12 @@ import {
   checkQuestV2ImageUpload,
   deleteQuestV2Image,
   editQuestV2,
+  getPublicQuestV2Detail,
   getQuestV2Detail,
   getQuestV2PublishCheck,
   listOwnQuestV2,
+  listQuestBoardV2,
+  materializeQuestV2PublicImageResponse,
   materializeQuestV2ImageResponse,
   publishQuestV2,
   questV2ImageRemoveRequestHash,
@@ -50,6 +53,9 @@ import type {
   questV2ImagesUploadSchema,
   questV2MineQuerySchema,
   questV2MineResponseSchema,
+  questV2BoardQuerySchema,
+  questV2BoardResponseSchema,
+  questV2PublicDetailResponseSchema,
   questV2ParamsSchema,
   questV2PublishCheckResponseSchema,
   questV2PublishResponseSchema,
@@ -62,10 +68,13 @@ type QuestV2EditResponse = Static<typeof questV2EditResponseSchema>['data'];
 type QuestV2EditInput = Static<typeof questV2EditSchema>;
 type QuestV2MineQuery = Static<typeof questV2MineQuerySchema>;
 type QuestV2MineResponse = Static<typeof questV2MineResponseSchema>['data'];
+type QuestV2BoardQuery = Static<typeof questV2BoardQuerySchema>;
+type QuestV2BoardResponse = Static<typeof questV2BoardResponseSchema>['data'];
 type QuestV2Params = Static<typeof questV2ParamsSchema>;
 type QuestV2WriteHeaders = Static<typeof questV2WriteHeadersSchema>;
 type QuestV2EditHeaders = Static<typeof questV2EditHeadersSchema>;
 type QuestV2DetailResponse = Static<typeof questV2DetailResponseSchema>['data'];
+type QuestV2PublicDetailResponse = Static<typeof questV2PublicDetailResponseSchema>['data'];
 type QuestV2PublishCheckResponse = Static<typeof questV2PublishCheckResponseSchema>['data'];
 type QuestV2PublishResponse = Static<typeof questV2PublishResponseSchema>['data'];
 type QuestV2ImagesResponse = Static<typeof questV2ImagesResponseSchema>['data'];
@@ -526,6 +535,38 @@ const validateMineQuery = (query: QuestV2MineQuery, set: AuthedContext['set']) =
   return undefined;
 };
 
+const validateBoardQuery = (query: QuestV2BoardQuery, set: AuthedContext['set']) => {
+  try {
+    parsePageLimit(query.limit);
+    decodeCursor(query.cursor);
+  } catch (error) {
+    if (error instanceof CursorInputError) return invalidInput(set, 'VALIDATION', error.message);
+    throw error;
+  }
+
+  if (
+    query.minQuestReward !== undefined &&
+    query.maxQuestReward !== undefined &&
+    query.minQuestReward > query.maxQuestReward
+  ) {
+    return invalidInput(
+      set,
+      'VALIDATION',
+      'minQuestReward must be less than or equal to maxQuestReward',
+    );
+  }
+
+  if (
+    query.startFrom !== undefined &&
+    query.startTo !== undefined &&
+    new Date(query.startFrom) > new Date(query.startTo)
+  ) {
+    return invalidInput(set, 'VALIDATION', 'startFrom must be before or equal to startTo');
+  }
+
+  return undefined;
+};
+
 export const listOwnQuestV2Controller = async ({
   query,
   session,
@@ -537,6 +578,19 @@ export const listOwnQuestV2Controller = async ({
   if (validationError) return validationError;
 
   return apiSuccess(await listOwnQuestV2(session.user.id, query));
+};
+
+export const listQuestBoardV2Controller = async ({
+  query,
+  session,
+  set,
+}: AuthedContext & {
+  query: QuestV2BoardQuery;
+}): Promise<ApiResponse<QuestV2BoardResponse>> => {
+  const validationError = validateBoardQuery(query, set);
+  if (validationError) return validationError;
+
+  return apiSuccess(await listQuestBoardV2(session.user.id, query));
 };
 
 export const getQuestV2DetailController = async ({
@@ -554,6 +608,35 @@ export const getQuestV2DetailController = async ({
 
   const images = serializeQuestV2Images(set, questDetail.images);
   if ('success' in images) return images;
+  return apiSuccess({ ...questDetail, images });
+};
+
+export const getPublicQuestV2DetailController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  params: QuestV2Params;
+}): Promise<ApiResponse<QuestV2PublicDetailResponse>> => {
+  const questDetail = await getPublicQuestV2Detail(session.user.id, params.questId);
+  if (!questDetail) {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+
+  let images: QuestV2PublicDetailResponse['images'];
+  try {
+    images = materializeQuestV2PublicImageResponse(questDetail.images);
+  } catch (error) {
+    if (!(error instanceof ImageLinkUnavailableError)) throw error;
+
+    set.status = 503;
+    return apiError(
+      'QUEST_IMAGE_STORAGE_UNAVAILABLE',
+      'Quest Image storage is unavailable',
+    );
+  }
+
   return apiSuccess({ ...questDetail, images });
 };
 
