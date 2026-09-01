@@ -504,6 +504,35 @@ describe('Quest API v2 persistence', () => {
       questFundingTotal: 1.03,
     });
 
+    const [storedIdempotency] = await db
+      .select({ id: walletIdempotencyKey.id, resultData: walletIdempotencyKey.resultData })
+      .from(walletIdempotencyKey)
+      .where(
+        and(
+          eq(walletIdempotencyKey.principalUserId, hirerId),
+          eq(walletIdempotencyKey.operationScope, questV2CreateOperationScope),
+          eq(walletIdempotencyKey.key, 'v2-http-create-1'),
+        ),
+      );
+    if (!storedIdempotency) throw new Error('Missing create idempotency record');
+    if (
+      !storedIdempotency.resultData ||
+      typeof storedIdempotency.resultData !== 'object' ||
+      Array.isArray(storedIdempotency.resultData)
+    ) {
+      throw new Error('Missing create idempotency snapshot');
+    }
+    await db
+      .update(walletIdempotencyKey)
+      .set({
+        resultData: {
+          ...(storedIdempotency.resultData as Record<string, unknown>),
+          startTime: '2030-08-26T03:00:00.000Z',
+          dueAt: '2030-08-26T05:00:00.000Z',
+        },
+      })
+      .where(eq(walletIdempotencyKey.id, storedIdempotency.id));
+
     const replay = await app.handle(
       new Request('http://localhost/api/v2/quests', {
         method: 'POST',
@@ -1200,6 +1229,35 @@ describe('Quest API v2 Draft editing', () => {
     expect(first.status).toBe(200);
     const firstBody = await first.json();
 
+    const [storedIdempotency] = await db
+      .select({ id: walletIdempotencyKey.id, resultData: walletIdempotencyKey.resultData })
+      .from(walletIdempotencyKey)
+      .where(
+        and(
+          eq(walletIdempotencyKey.principalUserId, hirerId),
+          eq(walletIdempotencyKey.operationScope, questV2EditOperationScope),
+          eq(walletIdempotencyKey.key, key),
+        ),
+      );
+    if (!storedIdempotency) throw new Error('Missing edit idempotency record');
+    if (
+      !storedIdempotency.resultData ||
+      typeof storedIdempotency.resultData !== 'object' ||
+      Array.isArray(storedIdempotency.resultData)
+    ) {
+      throw new Error('Missing edit idempotency snapshot');
+    }
+    await db
+      .update(walletIdempotencyKey)
+      .set({
+        resultData: {
+          ...(storedIdempotency.resultData as Record<string, unknown>),
+          startTime: '2030-08-26T03:00:00.000Z',
+          dueAt: '2030-08-26T05:00:00.000Z',
+        },
+      })
+      .where(eq(walletIdempotencyKey.id, storedIdempotency.id));
+
     const later = await patchQuest(
       created.quest.id,
       { title: 'Later title' },
@@ -1317,6 +1375,16 @@ const invalidHttpInputs: Array<[string, Record<string, unknown>, string]> = [
   ['title over the text limit', { title: 'x'.repeat(121) }, 'VALIDATION'],
   ['description over the text limit', { description: 'x'.repeat(1001) }, 'VALIDATION'],
   [
+    'invalid calendar startTime',
+    { startTime: '2030-02-31T10:00:00.000+07:00' },
+    'INVALID_QUEST_DATES',
+  ],
+  [
+    'invalid calendar dueAt',
+    { dueAt: '2030-09-31T12:00:00.000+07:00' },
+    'INVALID_QUEST_DATES',
+  ],
+  [
     'dueAt before startTime',
     { dueAt: '2030-08-26T09:00:00.000+07:00' },
     'INVALID_QUEST_DATES',
@@ -1353,12 +1421,14 @@ describe('Quest API v2 HTTP validation and ownership', () => {
 
   it.each(invalidHttpInputs)('rejects %s with the shared error envelope', async (_, changes, code) => {
     const response = await postQuest({ ...baseInput, ...changes });
-    expect(response.status).toBe(400);
-
     const body = (await response.json()) as {
       success: boolean;
-      error: { code: string; message: string };
+      data?: { id: string };
+      error?: { code: string; message: string };
     };
+    if (response.status === 200 && body.data) questIds.push(body.data.id);
+
+    expect(response.status).toBe(400);
     expect(body).toEqual({
       success: false,
       error: { code, message: expect.any(String) },

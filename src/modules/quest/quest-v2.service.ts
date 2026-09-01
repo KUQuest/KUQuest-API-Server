@@ -518,6 +518,15 @@ type QuestV2IdempotencySnapshot = Omit<QuestV2CanonicalQuest, 'questFundingTotal
   questFundingTotalSatang: Satang;
 };
 
+const normalizeQuestV2SnapshotScheduleTime = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+
+  return formatQuestV2ScheduleTime(parsed);
+};
+
 const toQuestV2IdempotencySnapshot = (
   canonicalQuest: QuestV2CanonicalQuest,
 ): QuestV2IdempotencySnapshot => {
@@ -548,9 +557,16 @@ const fromQuestV2IdempotencySnapshot = (
     return undefined;
   }
 
+  const startTime = normalizeQuestV2SnapshotScheduleTime(snapshot.startTime);
+  const dueAt =
+    snapshot.dueAt === null ? null : normalizeQuestV2SnapshotScheduleTime(snapshot.dueAt);
+  if (!startTime || (snapshot.dueAt !== null && !dueAt)) return undefined;
+
   const { questFundingTotalSatang: _questFundingTotalSatang, ...canonicalFields } = snapshot;
   return {
     ...canonicalFields,
+    startTime,
+    dueAt,
     questFundingTotal: toBaht(satang(questFundingTotalSatang)),
   } as QuestV2CanonicalQuest;
 };
