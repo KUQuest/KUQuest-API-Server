@@ -7,7 +7,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 | Dimension | `SINGLE` (Headcount = 1) | `GROUP` (Headcount = 2–20) |
 | --- | --- | --- |
 | **`FIRST_COME_FIRST_SERVED`** (FCFS) | **Quadrant 1**: Single direct join, single starter, single submitter, individual reward. | **Quadrant 3**: Multiple direct joins, underfilled consensus, all-worker start, all-worker submission, partial success allowed. |
-| **`CANDIDATE`** | **Quadrant 2**: Single applicant selection, atomic rejection of others, single starter, single submitter. | **Quadrant 4**: Candidate Team with 24h Join Code, leader submission, team selection, leader-only start & submit, team-wide all-or-nothing outcome. |
+| **`CANDIDATE`** | **Quadrant 2**: Single applicant selection, atomic rejection of others, single starter, single submitter. | **Quadrant 4**: Candidate Team with Team Leader-entered headcount and 24h Join Code, leader submission, team selection, leader-only start & submit, team-wide all-or-nothing outcome. |
 
 ---
 
@@ -15,8 +15,8 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 | Feature / Behavior | `SINGLE + FCFS` | `SINGLE + CANDIDATE` | `GROUP + FCFS` | `GROUP + CANDIDATE` |
 | --- | --- | --- | --- | --- |
-| **Headcount** | Exactly 1 | Exactly 1 | 2 to 20 | 2 to 20 |
-| **Joining / Formation** | Direct join (1st eligible wins) | Candidate applies; Hirer selects | Direct join slot-by-slot | Candidate Team forms via 24h Join Code; Leader submits Team; Hirer selects |
+| **Headcount** | Exactly 1 | Exactly 1 | 2 to 20 | Published Quest: 2 to 20. Candidate Team: Team Leader enters 2 through the published `headcount`. |
+| **Joining / Formation** | Direct join (1st eligible wins) | Candidate applies; Hirer selects | Direct join slot-by-slot | Team Leader enters Team `headcount`, sends the 24h Join Code, and Members accept it; Leader submits the Team with text and at least one file; Hirer selects. |
 | **Application Withdrawal** | N/A (instant join) | Candidate can withdraw while `QUEST_OPEN` | N/A (instant join) | Members can leave before submission; submitted Team cannot withdraw |
 | **Underfilled at `startTime`** | Unjoined Quest auto-cancels | Unselected Quest auto-cancels | 10m Hirer choice + 10m all-Worker consent; splits pool equally | Unselected Quest auto-cancels |
 | **Required Starter** | Worker | Worker | **Every Active Worker** | **Team Leader only** |
@@ -25,7 +25,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 | **Review & Decision** | 1 Proof reviewed by Hirer | 1 Proof reviewed by Hirer | Hirer reviews each Worker individually | Hirer reviews 1 Team submission |
 | **Approval Outcome** | Completes Worker Assignment | Completes Worker Assignment | Completes individual Worker Assignment | Completes **every** teammate Assignment |
 | **Non-Approval Outcome** | Fails Quest (`QUEST_FAILED`) | Fails Quest (`QUEST_FAILED`) | Fails Quest; completed Workers keep Reward | Fails Quest; **every** teammate Assignment incomplete |
-| **Reward Allocation** | 100% net Reward to Worker | 100% net Reward to Worker | Equal split per slot; remainder satang to earliest accepted | Equal split per slot across Team |
+| **Reward Allocation** | 100% net Reward to Worker | 100% net Reward to Worker | Equal split per slot; remainder satang to earliest accepted | The complete Worker Reward pool for all published slots goes only to the Team Leader. |
 | **Conduct Reports** | `CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE` | `CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE` | `CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE`, **`CONDUCT_NO_SHOW`** | `CONDUCT_ABANDONED` (Leader only), `CONDUCT_OUT_OF_SCOPE` |
 | **Rating Review Pairs** | Hirer &harr; Worker (1 pair) | Hirer &harr; Worker (1 pair) | Hirer &harr; each Worker (N pairs); no Worker-Worker review | Hirer &harr; each teammate (N pairs); no Worker-Worker review |
 
@@ -113,9 +113,10 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 ### Quadrant 4: `GROUP + CANDIDATE`
 
 1. **Team Formation and Selection**:
-   - Candidates form a **Candidate Team** using a Server-generated 24-hour **Join Code**.
-   - Team Leader manages the forming roster.
-   - At exact `headcount`, the Team Leader explicitly submits the Team (immutable, cannot withdraw).
+   - Before creating a **Candidate Team**, the Team Leader enters a Team `headcount` from 2 through the published Quest `headcount`. The Team Leader counts as one Member.
+   - The Server generates a 24-hour **Join Code**. The Team Leader sends it to prospective Team Members, who join only after accepting it.
+   - The Team Leader manages the forming roster.
+   - At the entered Team `headcount`, the Team Leader explicitly submits the immutable Team to the Hirer. The submission requires text and at least one file, and cannot withdraw.
    - Hirer selects one submitted Team &rarr; creates `ASSIGNMENT_ACTIVE` for all teammates, moves Quest to `QUEST_ASSIGNED`, and atomically rejects all other Teams and Candidates.
    - If no Team is selected by `startTime`, the Quest cancels automatically.
 2. **Start Work Duty**:
@@ -125,7 +126,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 4. **Proof Submission & Team Outcome**:
    - **Team Leader ONLY** submits the Team's Proof (1–5 files) or confirms completion on behalf of the Team before `dueAt`.
    - Hirer reviews the single Team submission:
-     - `PROOF_APPROVED`: Makes **every** teammate Assignment `ASSIGNMENT_COMPLETED` and settles individual Rewards.
+     - `PROOF_APPROVED`: Makes **every** teammate Assignment `ASSIGNMENT_COMPLETED` and pays the complete Worker Reward pool for all published slots to the Team Leader only.
      - `PROOF_NOT_APPROVED` / Missing submission: Makes **every** teammate Assignment `ASSIGNMENT_INCOMPLETE`, fails the Quest (`QUEST_FAILED`), and creates 1 Admin Review Item.
 5. **Conduct Reports**:
    - Hirer &rarr; Team Leader: `CONDUCT_ABANDONED` (against Team Leader only; teammates have no individual submission duty).

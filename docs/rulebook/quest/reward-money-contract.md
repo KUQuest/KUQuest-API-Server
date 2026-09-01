@@ -24,7 +24,8 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 ## Settlement and failure rules
 
-- The system transfers a Worker Reward immediately when that Assignment becomes `ASSIGNMENT_COMPLETED`.
+- Except for `GROUP + CANDIDATE`, the system transfers a Worker Reward immediately when that Assignment becomes `ASSIGNMENT_COMPLETED`.
+- For approved or proof-free `GROUP + CANDIDATE` Team work, the Server transfers the complete Worker Reward pool for every published Quest `headcount` slot to the Team Leader. The Candidate Team's entered `headcount` does not reduce that pool, and no other Team Member receives a Quest Reward.
 - If a Reward transfer fails, the Assignment remains `ASSIGNMENT_COMPLETED`, the transfer remains `REWARD_TRANSFER_PENDING`, the system retries, and Hirer/Worker are notified. Retries reuse the same payment record and cannot create duplicate payments.
 - **On `QUEST_FAILED`**:
   - Unpaid Worker-slot funding returns to the Hirer. Already transferred Rewards are not reclaimed.
