@@ -7,14 +7,17 @@ import { Elysia } from 'elysia';
 import {
   addQuestImagesV2Controller,
   createQuestV2Controller,
+  createQuestV2EditRequestController,
   deleteQuestImageV2Controller,
   editQuestV2Controller,
   getPublicQuestV2DetailController,
   getQuestV2DetailController,
   getQuestV2PublishCheckController,
+  getQuestV2EditRequestController,
   listOwnQuestV2Controller,
   listQuestBoardV2Controller,
   publishQuestV2Controller,
+  respondToQuestV2EditRequestController,
 } from './quest-v2.controller';
 import {
   questV2CreateResponseSchema,
@@ -38,6 +41,12 @@ import {
   normalizeQuestV2CreateBody,
   normalizeQuestV2BoardQuery,
   normalizeQuestV2EditBody,
+  normalizeQuestV2EditRequestCreateBody,
+  normalizeQuestV2EditRequestResponseBody,
+  questV2EditRequestCreateSchema,
+  questV2EditRequestParamsSchema,
+  questV2EditRequestResponseInputSchema,
+  questV2EditRequestResponseSchema,
 } from './quest-v2.schema';
 
 export const questV2Route = new Elysia({
@@ -79,6 +88,48 @@ export const questV2Route = new Elysia({
       summary: 'List the Hirer\'s v2 Quests',
       description: 'Returns the authenticated Hirer’s Quests owned through the v2 contract.',
       operationId: 'listOwnQuestsV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/:questId/edit-requests', createQuestV2EditRequestController, {
+    params: questV2ParamsSchema,
+    body: questV2EditRequestCreateSchema,
+    headers: questV2WriteHeadersSchema,
+    transform: normalizeQuestV2EditRequestCreateBody,
+    response: responses(questV2EditRequestResponseSchema, { successStatus: 201 }, 400, 401, 404, 409, 500, 503),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Create a v2 Quest Edit Request',
+      description:
+        'Creates a ten-minute Condition replacement request for every Active Worker on an assigned v2 Quest. The request does not pause the Quest or change other Quest fields.',
+      operationId: 'createQuestEditRequestV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/edit-requests/:requestId', getQuestV2EditRequestController, {
+    params: questV2EditRequestParamsSchema,
+    response: responses(questV2EditRequestResponseSchema, 400, 401, 404, 500),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Get a v2 Quest Edit Request',
+      description:
+        'Returns the Quest Edit Request to the Hirer or an Active Worker. Worker responses include only that Worker’s response and the aggregate summary.',
+      operationId: 'getQuestEditRequestV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/edit-requests/:requestId/respond', respondToQuestV2EditRequestController, {
+    params: questV2EditRequestParamsSchema,
+    body: questV2EditRequestResponseInputSchema,
+    headers: questV2WriteHeadersSchema,
+    transform: normalizeQuestV2EditRequestResponseBody,
+    response: responses(questV2EditRequestResponseSchema, 400, 401, 404, 409, 500, 503),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Respond to a v2 Quest Edit Request',
+      description:
+        'Records one Active Worker response. The final acceptance applies the proposed Condition atomically; a decline fails the request and preserves the previous Condition.',
+      operationId: 'respondToQuestEditRequestV2',
       security: betterAuthSecurity,
     },
   })

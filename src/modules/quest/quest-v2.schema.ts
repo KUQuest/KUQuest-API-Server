@@ -10,6 +10,9 @@ import {
   questV2Modes,
   questV2Participations,
   questV2ScheduleTimePattern,
+  questV2EditFailureCodes,
+  questV2EditRequestStatuses,
+  questV2EditResponseDecisions,
   questV2States,
 } from './quest-v2.contract';
 
@@ -364,6 +367,28 @@ export const normalizeQuestV2EditBody = ({ body }: { body: unknown }) => {
   }
 };
 
+export const normalizeQuestV2EditRequestCreateBody = ({ body }: { body: unknown }) => {
+  rejectUnknownFields(questV2EditRequestCreateSchema)({ body });
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return;
+
+  const payload = body as Record<string, unknown>;
+  if (typeof payload.condition !== 'object' || payload.condition === null) return;
+  const condition = payload.condition as Record<string, unknown>;
+  if (Array.isArray(condition.items)) {
+    condition.items = condition.items.map((item) =>
+      typeof item === 'string' ? item.trim() : item,
+    );
+  }
+};
+
+export const normalizeQuestV2EditRequestResponseBody = ({ body }: { body: unknown }) => {
+  rejectUnknownFields(questV2EditRequestResponseInputSchema)({ body });
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return;
+
+  const payload = body as Record<string, unknown>;
+  if (typeof payload.reason === 'string') payload.reason = payload.reason.trim();
+};
+
 export const questV2MineQuerySchema = t.Object(
   {
     limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
@@ -677,6 +702,93 @@ export const questV2PublicDetailResponseSchema = t.Object({
   success: t.Literal(true),
   data: questV2PublicDetailSchema,
 });
+
+const questV2EditRequestStatusSchema = t.Union([
+  t.Literal(questV2EditRequestStatuses[0]),
+  t.Literal(questV2EditRequestStatuses[1]),
+  t.Literal(questV2EditRequestStatuses[2]),
+]);
+const questV2EditResponseDecisionSchema = t.Union([
+  t.Literal(questV2EditResponseDecisions[0]),
+  t.Literal(questV2EditResponseDecisions[1]),
+]);
+const questV2EditFailureCodeSchema = t.Union([
+  t.Literal(questV2EditFailureCodes[0]),
+  t.Literal(questV2EditFailureCodes[1]),
+  t.Literal(questV2EditFailureCodes[2]),
+]);
+const questV2EditConditionItemSchema = t.Object({
+  position: t.Integer({ minimum: 0 }),
+  text: t.String({ minLength: 1, maxLength: 255, pattern: '\\S' }),
+});
+const questV2EditConditionSchema = t.Object({
+  items: t.Array(questV2EditConditionItemSchema, { minItems: 1 }),
+});
+const questV2EditResponseSummarySchema = t.Object({
+  totalCount: t.Integer({ minimum: 0 }),
+  acceptedCount: t.Integer({ minimum: 0 }),
+  declinedCount: t.Integer({ minimum: 0 }),
+  pendingCount: t.Integer({ minimum: 0 }),
+});
+const questV2EditHirerResponseSchema = t.Object({
+  workerId: t.String({ format: 'uuid' }),
+  decision: t.Nullable(questV2EditResponseDecisionSchema),
+  reason: t.Nullable(t.String({ maxLength: 255 })),
+  respondedAt: t.Nullable(t.String({ format: 'date-time' })),
+});
+const questV2EditWorkerResponseSchema = t.Object({
+  decision: t.Nullable(questV2EditResponseDecisionSchema),
+  reason: t.Nullable(t.String({ maxLength: 255 })),
+  respondedAt: t.Nullable(t.String({ format: 'date-time' })),
+});
+
+export const questV2EditRequestCreateSchema = t.Object(
+  {
+    condition: t.Object(
+      { items: conditionItemsSchema },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
+export const questV2EditRequestResponseInputSchema = t.Object(
+  {
+    decision: questV2EditResponseDecisionSchema,
+    reason: t.Optional(t.String({ maxLength: 255, pattern: '\\S' })),
+  },
+  { additionalProperties: false },
+);
+
+export const questV2EditRequestParamsSchema = t.Object({
+  requestId: t.String({ format: 'uuid' }),
+});
+
+export const questV2EditRequestDataSchema = t.Object({
+  requestId: t.String({ format: 'uuid' }),
+  questId: t.String({ format: 'uuid' }),
+  status: questV2EditRequestStatusSchema,
+  failureCode: t.Nullable(questV2EditFailureCodeSchema),
+  createdAt: t.String({ format: 'date-time' }),
+  expiresAt: t.String({ format: 'date-time' }),
+  appliedAt: t.Nullable(t.String({ format: 'date-time' })),
+  failedAt: t.Nullable(t.String({ format: 'date-time' })),
+  previousCondition: questV2EditConditionSchema,
+  proposedCondition: questV2EditConditionSchema,
+  responseSummary: questV2EditResponseSummarySchema,
+  responses: t.Optional(t.Array(questV2EditHirerResponseSchema)),
+  ownResponse: t.Optional(t.Nullable(questV2EditWorkerResponseSchema)),
+});
+
+export const questV2EditRequestResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: questV2EditRequestDataSchema,
+});
+
+export type QuestV2EditRequestCreateInput = Static<typeof questV2EditRequestCreateSchema>;
+export type QuestV2EditRequestResponseInput = Static<typeof questV2EditRequestResponseInputSchema>;
+export type QuestV2EditRequestParams = Static<typeof questV2EditRequestParamsSchema>;
+export type QuestV2EditRequestData = Static<typeof questV2EditRequestDataSchema>;
 
 export const questV2DetailSchema = t.Composite([
   questV2CanonicalQuestSchema,
