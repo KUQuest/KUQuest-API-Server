@@ -15,14 +15,14 @@ import {
   publishQuestV2Controller,
 } from './quest-v2.controller';
 import {
-  questV2CreateResponseSchema,
+  questV2CreateHttpResponseSchema,
   questV2CreateHttpSchema,
-  questV2DetailResponseSchema,
+  questV2DetailHttpResponseSchema,
   questV2EditHeadersSchema,
   questV2EditHttpSchema,
-  questV2EditResponseSchema,
+  questV2EditHttpResponseSchema,
   questV2MineQuerySchema,
-  questV2MineResponseSchema,
+  questV2MineHttpResponseSchema,
   questV2ImageParamsSchema,
   questV2ImagesResponseSchema,
   questV2ImagesUploadSchema,
@@ -43,7 +43,7 @@ export const questV2Route = new Elysia({
     body: questV2CreateHttpSchema,
     headers: questV2WriteHeadersSchema,
     transform: normalizeQuestV2CreateBody,
-    response: responses(questV2CreateResponseSchema, 400, 401, 409, 500, 503),
+    response: responses(questV2CreateHttpResponseSchema, 400, 401, 409, 500, 503),
     detail: {
       tags: ['Quests v2'],
       summary: 'Create a Quest Draft with the v2 contract',
@@ -54,7 +54,7 @@ export const questV2Route = new Elysia({
   })
   .get('/mine', listOwnQuestV2Controller, {
     query: questV2MineQuerySchema,
-    response: responses(questV2MineResponseSchema, 400, 401, 500),
+    response: responses(questV2MineHttpResponseSchema, 400, 401, 500),
     detail: {
       tags: ['Quests v2'],
       summary: 'List the Hirer\'s v2 Quests',
@@ -68,7 +68,7 @@ export const questV2Route = new Elysia({
     body: questV2EditHttpSchema,
     headers: questV2EditHeadersSchema,
     transform: normalizeQuestV2EditBody,
-    response: responses(questV2EditResponseSchema, 400, 401, 404, 409, 500, 503),
+    response: responses(questV2EditHttpResponseSchema, 400, 401, 404, 409, 500, 503),
     detail: {
       tags: ['Quests v2'],
       summary: 'Edit a v2 Quest Draft',
@@ -133,7 +133,7 @@ export const questV2Route = new Elysia({
   })
   .get('/:questId', getQuestV2DetailController, {
     params: questV2ParamsSchema,
-    response: responses(questV2DetailResponseSchema, 400, 401, 404, 500, 503),
+    response: responses(questV2DetailHttpResponseSchema, 400, 401, 404, 500, 503),
     detail: {
       tags: ['Quests v2'],
       summary: 'Get a v2 Quest detail',

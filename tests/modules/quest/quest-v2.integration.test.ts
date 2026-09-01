@@ -228,7 +228,25 @@ describe('Quest API v2 integration', () => {
     expect(createDataSchema?.properties?.dueAt?.anyOf?.[0]?.pattern).toBe(
       canonicalScheduleTimePattern,
     );
+    expect(createDataSchema?.properties?.questFundingTotal?.multipleOf).toBe(0.01);
     expect(createDataSchema?.properties?.createdAt?.pattern).toBeUndefined();
+
+    const mineDataSchema =
+      document.paths['/api/v2/quests/mine']?.get?.responses?.['200']?.content
+        ?.['application/json']?.schema?.properties?.data;
+    expect(mineDataSchema?.properties?.items?.items?.properties?.questFundingTotal?.multipleOf).toBe(
+      0.01,
+    );
+
+    const editDataSchema =
+      document.paths['/api/v2/quests/{questId}']?.patch?.responses?.['200']?.content
+        ?.['application/json']?.schema?.properties?.data;
+    expect(editDataSchema?.properties?.questFundingTotal?.multipleOf).toBe(0.01);
+
+    const detailDataSchema =
+      document.paths['/api/v2/quests/{questId}']?.get?.responses?.['200']?.content
+        ?.['application/json']?.schema?.properties?.data;
+    expect(detailDataSchema?.properties?.questFundingTotal?.multipleOf).toBe(0.01);
 
     const publishResponseSchema =
       document.paths['/api/v2/quests/{questId}/publish-check']?.get?.responses?.['200']?.content
@@ -268,6 +286,9 @@ describe('Quest API v2 integration', () => {
     const publishCommandDataSchema = publishCommandResponseSchema?.properties?.data;
     expect(publishCommandDataSchema?.required).toEqual(['quest', 'questEscrow']);
     expect(publishCommandDataSchema?.properties?.quest?.properties?.state).toBeDefined();
+    expect(publishCommandDataSchema?.properties?.quest?.properties?.questFundingTotal?.multipleOf).toBe(
+      0.01,
+    );
     expect(publishCommandDataSchema?.properties?.questEscrow?.required).toEqual([
       'reservationId',
       'questFundingTotal',

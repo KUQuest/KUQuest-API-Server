@@ -1,5 +1,6 @@
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
+import type { TSchema } from '@sinclair/typebox';
 import { TypeCompiler } from '@sinclair/typebox/compiler';
 import { t, type Static } from 'elysia';
 import type { StandardSchemaV1Like } from 'elysia/types';
@@ -442,10 +443,89 @@ export const questV2CanonicalQuestSchema = t.Object({
   updatedAt: t.String({ format: 'date-time' }),
 });
 
+const questV2CanonicalQuestOpenApiSchema = t.Object({
+  ...questV2CanonicalQuestSchema.properties,
+  questFundingTotal: questFundingTotalOpenApiSchema,
+});
+
+const questV2CreateResponseOpenApiSchema = t.Object({
+  success: t.Literal(true),
+  data: questV2CanonicalQuestOpenApiSchema,
+});
+
+const questV2MineResponseOpenApiSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    items: t.Array(questV2CanonicalQuestOpenApiSchema),
+    nextCursor: t.Nullable(t.String()),
+  }),
+});
+
+const questV2DetailOpenApiSchema = t.Object({
+  ...questV2CanonicalQuestOpenApiSchema.properties,
+  images: t.Array(questV2ImageSchema),
+});
+
+const questV2DetailResponseOpenApiSchema = t.Object({
+  success: t.Literal(true),
+  data: questV2DetailOpenApiSchema,
+});
+
+type QuestV2HttpResponseSchema<
+  RuntimeSchema extends TSchema,
+  OpenApiSchema extends TSchema,
+> = StandardSchemaV1Like<Static<RuntimeSchema>, Static<RuntimeSchema>> & {
+  readonly '~standard': {
+    readonly version: 1;
+    readonly vendor: 'elysia';
+    readonly validate: (value: unknown) =>
+      | { value: Static<RuntimeSchema>; issues?: never }
+      | { value?: never; issues: unknown[] };
+    readonly jsonSchema: {
+      readonly input: () => OpenApiSchema;
+      readonly output: () => OpenApiSchema;
+    };
+  };
+};
+
+const createQuestV2HttpResponseSchema = <
+  RuntimeSchema extends TSchema,
+  OpenApiSchema extends TSchema,
+>(runtimeSchema: RuntimeSchema, openApiSchema: OpenApiSchema) => {
+  const validator = TypeCompiler.Compile(runtimeSchema);
+
+  return {
+    '~standard': {
+      version: 1 as const,
+      vendor: 'elysia' as const,
+      types: undefined as unknown as {
+        input: Static<RuntimeSchema>;
+        output: Static<RuntimeSchema>;
+      },
+      validate: (value: unknown) => {
+        if (!validator.Check(value)) {
+          return { issues: [...validator.Errors(value)] };
+        }
+
+        return { value: value as Static<RuntimeSchema> };
+      },
+      jsonSchema: {
+        input: () => openApiSchema,
+        output: () => openApiSchema,
+      },
+    },
+  } as QuestV2HttpResponseSchema<RuntimeSchema, OpenApiSchema>;
+};
+
 export const questV2CreateResponseSchema = t.Object({
   success: t.Literal(true),
   data: questV2CanonicalQuestSchema,
 });
+
+export const questV2CreateHttpResponseSchema = createQuestV2HttpResponseSchema(
+  questV2CreateResponseSchema,
+  questV2CreateResponseOpenApiSchema,
+);
 
 export const questV2MineResponseSchema = t.Object({
   success: t.Literal(true),
@@ -454,6 +534,11 @@ export const questV2MineResponseSchema = t.Object({
     nextCursor: t.Nullable(t.String()),
   }),
 });
+
+export const questV2MineHttpResponseSchema = createQuestV2HttpResponseSchema(
+  questV2MineResponseSchema,
+  questV2MineResponseOpenApiSchema,
+);
 
 export const questV2DetailSchema = t.Composite([
   questV2CanonicalQuestSchema,
@@ -465,7 +550,13 @@ export const questV2DetailResponseSchema = t.Object({
   data: questV2DetailSchema,
 });
 
+export const questV2DetailHttpResponseSchema = createQuestV2HttpResponseSchema(
+  questV2DetailResponseSchema,
+  questV2DetailResponseOpenApiSchema,
+);
+
 export const questV2EditResponseSchema = questV2CreateResponseSchema;
+export const questV2EditHttpResponseSchema = questV2CreateHttpResponseSchema;
 
 export const questV2ImagesResponseSchema = t.Object({
   success: t.Literal(true),
@@ -599,7 +690,7 @@ const questV2QuestEscrowResponseOpenApiSchema = t.Object({
 const questV2PublishResponseOpenApiSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
-    quest: questV2CanonicalQuestSchema,
+    quest: questV2CanonicalQuestOpenApiSchema,
     questEscrow: questV2QuestEscrowResponseOpenApiSchema,
   }),
 });
