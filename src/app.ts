@@ -8,7 +8,12 @@ import { questCandidateRoute } from '@/modules/quest/quest-candidate.route';
 import { questProofRoute } from '@/modules/quest/quest-proof.route';
 import { questReviewRoute } from '@/modules/quest/quest-review.route';
 import { questDisputeRoute, questSettlementRoute } from '@/modules/quest/quest-settlement.route';
-import { configureQuestWorkChatMembershipWriter, questV2Route } from '@/modules/quest';
+import {
+  configureQuestWorkChatMembershipWriter,
+  questAssignmentV2Route,
+  questCandidateV2Route,
+  questV2Route,
+} from '@/modules/quest';
 import { workChatMembershipWriter, workChatRoute } from '@/modules/work-chat';
 
 import { Elysia } from 'elysia';
@@ -59,6 +64,8 @@ export const createApp = () => {
     .use(questReviewRoute)
     .use(questSettlementRoute)
     .use(questDisputeRoute)
+    .use(questAssignmentV2Route)
+    .use(questCandidateV2Route)
     .use(questV2Route)
     .use(questRoute)
     .use(adminQuestRoute)

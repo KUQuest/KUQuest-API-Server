@@ -27,6 +27,7 @@ export type EventId = string;
 export type IsoTimestamp = string;
 export type QuestWorkChatTransitionProducer =
   | 'QUEST_DIRECT_JOIN'
+  | 'QUEST_ASSIGNMENT_V2'
   | 'QUEST_CANDIDATE_SELECTION'
   | 'QUEST_SETTLEMENT';
 
@@ -40,9 +41,9 @@ export type AcceptedWorker = {
 };
 
 type TransitionBase = {
-  /** The Quest command boundary that produced this transition. */
+  /** Stable identity for this transition command within its producer and type. */
   producer: QuestWorkChatTransitionProducer;
-  /** The caller's idempotency key. Retries must return the prior result. */
+  /** Retries with this command identity must return the prior result. */
   commandId: CommandId;
   /** Stable event identity used to deduplicate Chat-side system messages. */
   eventId: EventId;

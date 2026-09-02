@@ -2,6 +2,7 @@ import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import {
   quest,
+  questApiVersion,
   questApplication,
   questAssignment,
   questCandidateSelectionCommand,
@@ -99,7 +100,7 @@ const lockQuest = async (tx: Tx, questId: string) => {
     participation: quest.participation,
     questStatus: quest.questStatus,
     headcount: quest.headcount,
-  }).from(quest).where(eq(quest.id, questId)).limit(1).for('update');
+  }).from(quest).where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v1))).limit(1).for('update');
   return row;
 };
 
@@ -113,7 +114,7 @@ export const createApplication = async (workerId: string, questId: string, data:
 });
 
 export const getApplication = async (userId: string, questId: string, applicationId: string) => {
-  const [row] = await db.select(applicationFields).from(questApplication).innerJoin(quest, eq(questApplication.questId, quest.id)).where(and(eq(questApplication.id, applicationId), eq(questApplication.questId, questId), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.solo), eq(quest.questStatus, questStatus.open), or(eq(questApplication.workerId, userId), eq(quest.hirerId, userId)))).limit(1);
+  const [row] = await db.select(applicationFields).from(questApplication).innerJoin(quest, eq(questApplication.questId, quest.id)).where(and(eq(questApplication.id, applicationId), eq(questApplication.questId, questId), eq(quest.apiVersion, questApiVersion.v1), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.solo), eq(quest.questStatus, questStatus.open), or(eq(questApplication.workerId, userId), eq(quest.hirerId, userId)))).limit(1);
   return row;
 };
 
@@ -122,7 +123,7 @@ export type ApplicationCollection = { outcome: 'not-found' } | ApplicationRecord
 export const listApplications = async (userId: string, questId: string): Promise<ApplicationCollection> => db.transaction(async (tx) => {
   const current = await lockQuest(tx, questId);
   if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.solo || current.questStatus !== questStatus.open) return { outcome: 'not-found' };
-  return tx.select(applicationFields).from(questApplication).innerJoin(quest, eq(questApplication.questId, quest.id)).where(and(eq(questApplication.questId, questId), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.solo), eq(quest.questStatus, questStatus.open), or(eq(questApplication.workerId, userId), eq(quest.hirerId, userId)))).orderBy(asc(questApplication.appliedAt), asc(questApplication.id));
+  return tx.select(applicationFields).from(questApplication).innerJoin(quest, eq(questApplication.questId, quest.id)).where(and(eq(questApplication.questId, questId), eq(quest.apiVersion, questApiVersion.v1), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.solo), eq(quest.questStatus, questStatus.open), or(eq(questApplication.workerId, userId), eq(quest.hirerId, userId)))).orderBy(asc(questApplication.appliedAt), asc(questApplication.id));
 });
 
 export const updateApplication = async (userId: string, questId: string, applicationId: string, data: ApplicationUpdateInput): Promise<CandidateOutcome> => db.transaction(async (tx) => {
@@ -176,7 +177,7 @@ export const createTeam = async (leaderId: string, questId: string, data: TeamCr
 });
 
 const selectTeamForUser = async (database: Database, userId: string, questId: string, teamId: string, lock = false) => {
-  const query = database.select(teamFields).from(questTeam).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeam.id, teamId), eq(questTeam.questId, questId), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`, teamAccess(userId))).limit(1);
+  const query = database.select(teamFields).from(questTeam).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeam.id, teamId), eq(questTeam.questId, questId), eq(quest.apiVersion, questApiVersion.v1), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`, teamAccess(userId))).limit(1);
   return (lock ? await query.for('update') : await query)[0];
 };
 
@@ -190,7 +191,7 @@ export type TeamCollection = { outcome: 'not-found' } | TeamWithMembers[];
 export const listTeams = async (userId: string, questId: string): Promise<TeamCollection> => db.transaction(async (tx) => {
   const current = await lockQuest(tx, questId);
   if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.group || current.questStatus !== questStatus.open) return { outcome: 'not-found' };
-  const rows = await tx.select(teamFields).from(questTeam).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeam.questId, questId), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`, teamAccess(userId))).orderBy(asc(questTeam.createdAt), asc(questTeam.id));
+  const rows = await tx.select(teamFields).from(questTeam).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeam.questId, questId), eq(quest.apiVersion, questApiVersion.v1), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`, teamAccess(userId))).orderBy(asc(questTeam.createdAt), asc(questTeam.id));
   return Promise.all(rows.map((row) => withMembers(tx, row)));
 });
 
@@ -304,7 +305,7 @@ export const listTeamInvitations = async (leaderId: string, questId: string, tea
   return db.select(invitationFields).from(questTeamInvitation).where(and(eq(questTeamInvitation.teamId, teamId), eq(questTeamInvitation.invitationStatus, 'INVITATION_PENDING'))).orderBy(asc(questTeamInvitation.createdAt), asc(questTeamInvitation.id));
 };
 
-export const listOwnInvitations = async (userId: string) => db.select(invitationFields).from(questTeamInvitation).innerJoin(questTeam, eq(questTeamInvitation.teamId, questTeam.id)).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeamInvitation.invitedUserId, userId), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`)).orderBy(asc(questTeamInvitation.createdAt), asc(questTeamInvitation.id));
+export const listOwnInvitations = async (userId: string) => db.select(invitationFields).from(questTeamInvitation).innerJoin(questTeam, eq(questTeamInvitation.teamId, questTeam.id)).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeamInvitation.invitedUserId, userId), eq(quest.apiVersion, questApiVersion.v1), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`)).orderBy(asc(questTeamInvitation.createdAt), asc(questTeamInvitation.id));
 
 export const revokeInvitation = async (leaderId: string, questId: string, teamId: string, invitationId: string, now = new Date()): Promise<InvitationOutcome> => db.transaction(async (tx) => {
   const current = await lockQuest(tx, questId);
@@ -343,7 +344,7 @@ const respondToInvitation = async (userId: string, invitationId: string, respons
 
 export const acceptInvitation = (userId: string, invitationId: string, now = new Date()) => respondToInvitation(userId, invitationId, 'INVITATION_ACCEPTED', now);
 export const declineInvitation = (userId: string, invitationId: string, now = new Date()) => respondToInvitation(userId, invitationId, 'INVITATION_DECLINED', now);
-export const getOwnInvitation = async (userId: string, invitationId: string) => db.select(invitationFields).from(questTeamInvitation).innerJoin(questTeam, eq(questTeamInvitation.teamId, questTeam.id)).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeamInvitation.id, invitationId), eq(questTeamInvitation.invitedUserId, userId), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`)).limit(1).then(([row]) => row);
+export const getOwnInvitation = async (userId: string, invitationId: string) => db.select(invitationFields).from(questTeamInvitation).innerJoin(questTeam, eq(questTeamInvitation.teamId, questTeam.id)).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeamInvitation.id, invitationId), eq(questTeamInvitation.invitedUserId, userId), eq(quest.apiVersion, questApiVersion.v1), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`)).limit(1).then(([row]) => row);
 
 export type CandidateSelectionTarget =
   | { type: 'APPLICATION'; id: string }

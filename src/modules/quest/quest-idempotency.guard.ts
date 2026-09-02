@@ -1,4 +1,5 @@
 import { apiError } from '@/shared/api-response';
+import { API_V2_PREFIX } from '@/shared/api-version';
 
 import { Elysia } from 'elysia';
 
@@ -9,10 +10,11 @@ const isUuid = (value: string | undefined) => value !== undefined && uuidPattern
 type IdempotencyKeyScope =
   | 'quest-join'
   | 'candidate-selection'
+  | 'candidate-application-v2'
   | 'quest-cancellation'
   | 'quest-dispute-resolution';
 
-const pathNeedsIdempotencyKey = (scope: IdempotencyKeyScope, pathname: string) => {
+const pathNeedsIdempotencyKey = (scope: IdempotencyKeyScope, pathname: string, method: string) => {
   const parts = pathname.split('/');
 
   if (scope === 'quest-join') {
@@ -24,6 +26,18 @@ const pathNeedsIdempotencyKey = (scope: IdempotencyKeyScope, pathname: string) =
     const questId = parts[parts.length - 4];
     const targetId = parts[parts.length - 2];
     return pathname.endsWith('/select') && isUuid(questId) && isUuid(targetId);
+  }
+
+  if (scope === 'candidate-application-v2') {
+    if (!pathname.startsWith(`${API_V2_PREFIX}/quests/`)) return false;
+    if (method !== 'POST') return false;
+    const questId = parts[parts.length - 4];
+    const applicationId = parts[parts.length - 2];
+    return (
+      (pathname.endsWith('/applications') && isUuid(parts[4])) ||
+      (pathname.endsWith('/withdraw') && isUuid(questId) && isUuid(applicationId)) ||
+      (pathname.endsWith('/select') && isUuid(questId) && isUuid(applicationId))
+    );
   }
 
   if (scope === 'quest-cancellation') {
@@ -39,7 +53,7 @@ export const createQuestIdempotencyKeyGuard = (scope: IdempotencyKeyScope) => ne
   name: `${scope}-idempotency-key-guard`,
 }).onRequest(({ request, set }) => {
   const pathname = new URL(request.url).pathname;
-  if (!pathNeedsIdempotencyKey(scope, pathname)) return;
+  if (!pathNeedsIdempotencyKey(scope, pathname, request.method)) return;
 
   if (request.headers.get('idempotency-key')?.trim()) return;
 

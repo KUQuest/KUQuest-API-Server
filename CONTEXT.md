@@ -235,6 +235,21 @@ soft-deletes removed file metadata. Quest Images are not shown on the Quest
 Board card.
 _Avoid_: image URL, Chat Attachment, treating an image as required for publish.
 
+**Quest Board Card**:
+A compact read-only summary of a non-hidden `QUEST_OPEN` Quest shown to an
+authenticated Member for discovery. It includes the applicable Quest Reward
+and current Active Worker count; full Quest Condition, Quest Images, and
+financial internals belong to other views.
+_Avoid_: treating the Board Card as the full Quest resource, exposing Quest
+Funding Total, Platform Fee, Wallet, or Funding Reservation.
+
+**Public Quest Detail**:
+The read-only view of a non-hidden `QUEST_OPEN` Quest available to an
+authenticated Member who is not its Hirer. It includes the full ordered Quest
+Condition and other public Quest details, but never exposes Platform Fee,
+Money Policy, Wallet, or Funding Reservation details.
+_Avoid_: anonymous Quest Detail, Hirer finance view, Candidate data.
+
 **Underfilled GROUP + FCFS Quest**:
 A `GROUP + FIRST_COME_FIRST_SERVED` Quest at `startTime` with fewer Active
 Workers than `headcount`.
@@ -258,6 +273,11 @@ _Avoid_: condition field
 **Assignment**:
 The accepted participation of one Worker in a Quest. It is the canonical record that a Worker is working on that Quest.
 _Avoid_: Application, team membership
+
+**Active Worker Count**:
+The number of `ASSIGNMENT_ACTIVE` Workers for a Quest at the time the Server
+reads it. It excludes Candidates and forming Candidate Team Members.
+_Avoid_: Candidate count, applicant count, published headcount.
 
 **Start Work**:
 The required starter's action that changes an assigned Quest to in progress.
@@ -283,8 +303,17 @@ The inclusive period in which an Accepted Participant has current access to the 
 _Avoid_: Chat permission, participant status
 
 **Quest Edit**:
-A proposed change to a Quest Condition by its Hirer. The target timing, response, diff, and Quest State rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
+A proposed replacement of a Quest Condition by its Hirer while the Quest is
+`QUEST_ASSIGNED`. Every Active Worker gives one Quest Edit Response within ten
+minutes; the target timing, response, diff, and Quest State rules are defined
+in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Assignment change, membership transition
+
+**Quest Edit Response**:
+One `EDIT_RESPONSE_ACCEPTED` or `EDIT_RESPONSE_DECLINED` decision made by an
+Active Worker for one pending Quest Edit. A Worker can give only one response
+to that Quest Edit.
+_Avoid_: Hirer approval, Assignment consent, Proof Submission.
 
 **Conversation**:
 A persisted private room for one Quest. The target has two Conversation types: Candidate Inquiry Conversation and Work Conversation.
