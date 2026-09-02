@@ -41,9 +41,9 @@ export type AcceptedWorker = {
 };
 
 type TransitionBase = {
-  /** The Quest command boundary that produced this transition. */
+  /** Stable identity for this transition command within its producer and type. */
   producer: QuestWorkChatTransitionProducer;
-  /** The caller's idempotency key. Retries must return the prior result. */
+  /** Retries with this command identity must return the prior result. */
   commandId: CommandId;
   /** Stable event identity used to deduplicate Chat-side system messages. */
   eventId: EventId;

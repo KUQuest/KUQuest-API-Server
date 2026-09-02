@@ -48,8 +48,8 @@ export const questAssignmentV2Route = new Elysia({
     response: responses(questV2AssignmentResponseSchema, 400, 401, 404, 409, 503),
     detail: {
       tags: ['Quest Assignments v2'],
-      summary: 'Join a v2 SINGLE FCFS Quest',
-      description: 'Creates an active Assignment for an eligible Worker and changes the open Quest to QUEST_ASSIGNED.',
+      summary: 'Join an open v2 FCFS Quest',
+      description: 'Creates an active Assignment for an eligible Worker. A GROUP Quest remains open until its published headcount is full.',
       operationId: 'joinQuestV2',
       security: betterAuthSecurity,
     },
