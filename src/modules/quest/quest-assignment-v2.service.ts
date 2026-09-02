@@ -41,6 +41,7 @@ type QuestV2AssignmentBusinessOutcomeCode =
   | 'not-open'
   | 'not-supported-participation'
   | 'not-found'
+  | 'roster-frozen'
   | 'not-first-come-first-served';
 
 type QuestV2AssignmentIdempotencyOutcomeCode =
@@ -228,6 +229,7 @@ const lockQuest = async (transaction: QuestTransaction, questId: string) => {
       v2Participation: quest.v2Participation,
       questState: quest.questStatus,
       headcount: quest.headcount,
+      startTime: quest.startTime,
     })
     .from(quest)
     .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
@@ -325,6 +327,9 @@ const joinQuestV2InTransaction = async (
     .limit(1);
   if (existing) return discardIdempotency('already-assigned');
   if (current.questState !== 'QUEST_OPEN') return discardIdempotency('not-open');
+  if (isGroupQuest && current.startTime.getTime() <= now.getTime()) {
+    return discardIdempotency('roster-frozen');
+  }
 
   const [activeCount] = await transaction
     .select({ count: sql<number>`count(*)` })
