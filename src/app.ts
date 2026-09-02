@@ -1,4 +1,5 @@
 import { questRoute } from '@/modules/quest/quest.route';
+import { adminQuestRoute } from '@/modules/quest/quest-admin.route';
 import { tagRoute } from '@/modules/tag';
 import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
 import { topUpWebhookRoute } from '@/modules/top-up';
@@ -60,6 +61,7 @@ export const createApp = () => {
     .use(questDisputeRoute)
     .use(questV2Route)
     .use(questRoute)
+    .use(adminQuestRoute)
     .use(certificateRoute)
     .use(portfolioRoute)
     .use(workExperienceRoute)
