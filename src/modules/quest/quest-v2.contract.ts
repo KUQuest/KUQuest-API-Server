@@ -102,6 +102,14 @@ export const questV2States = [
 ] as const;
 export type QuestV2State = (typeof questV2States)[number];
 
+export const questV2AssignmentStates = [
+  'ASSIGNMENT_ACTIVE',
+  'ASSIGNMENT_COMPLETED',
+  'ASSIGNMENT_INCOMPLETE',
+  'ASSIGNMENT_CANCELLED',
+] as const;
+export type QuestV2AssignmentState = (typeof questV2AssignmentStates)[number];
+
 export const questV2EditRequestStatuses = [
   'EDIT_REQUEST_PENDING',
   'EDIT_REQUEST_APPLIED',

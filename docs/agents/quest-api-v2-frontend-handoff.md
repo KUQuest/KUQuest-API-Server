@@ -1,8 +1,9 @@
 # Portable Frontend Handoff: Quest API v2
 
-Read this file when a Frontend or Mobile task covers a `Hirer` who creates,
-edits, checks, or publishes a `Quest` through `/api/v2`. This file is portable:
-it contains the required Quest context for an agent in another repository.
+Read this file when a Frontend or Mobile task covers a `Member` who discovers a
+`Quest`, or a `Hirer` who creates, edits, checks, or publishes a `Quest` through
+`/api/v2`. This file is portable: it contains the required Quest context for
+an agent in another repository.
 
 The target contract is [Spec #336](https://github.com/KUQuest/KUQuest-API-Server/issues/336),
 part of [Wayfinder Map #319](https://github.com/KUQuest/KUQuest-API-Server/issues/319).
@@ -51,9 +52,11 @@ Use the following order when sources disagree:
    platform, navigation, translation, and testing conventions.
 
 When the Backend repository is available, its supporting references are
-`CONTEXT.md`, `docs/quest/work-chat-system-target.md`, and ADR 0024/0025. They
-explain the domain decisions. The Frontend task still uses the v2 contract
-above; legacy v1 behavior remains a separate adapter.
+`CONTEXT.md`, `docs/quest/work-chat-system-target.md`, and the Quest ADRs. They
+explain the domain decisions. Quest API v1 is deprecated and is not part of the
+v2 contract: v2 does not map v1 fields, rows, or semantics, and does not
+maintain backward compatibility. Existing v1 code is unchanged by #367; its
+removal is separate work.
 
 The Backend delivery order is:
 
@@ -68,7 +71,8 @@ The Backend delivery order is:
 - [#342](https://github.com/KUQuest/KUQuest-API-Server/issues/342): publish
   and Quest Escrow; blocked by #340.
 - [#343](https://github.com/KUQuest/KUQuest-API-Server/issues/343): complete
-  v2 flow and v1 compatibility; blocked by #339, #340, #341, and #342.
+  the remaining v2 flow; v1 compatibility is excluded by the accepted #367
+  contract. It is blocked by #339, #340, #341, and #342.
 
 ## Target outcome
 
@@ -76,9 +80,209 @@ Provide one reliable Frontend journey:
 
 `create Draft → edit Draft → manage Quest Images → check publish → publish`
 
+Provide two additional v2 journeys:
+
+- `Quest Board Card → Public Quest Detail` for discovery.
+- `QUEST_ASSIGNED → Quest Edit Request → all Active Worker responses` for a
+  complete Quest Condition replacement.
+
 The Client owns form state, screen state, retry presentation, and recoverable
 local data. The Server owns validation, time, money, ownership, Quest State,
 temporary URLs, and command results.
+
+## Quest discovery and Quest Edit contract (#367)
+
+This section is the accepted v2 contract for issue #367. All routes require an
+authenticated `Member` Session and use the shared `{ success, data }` or
+`{ success, error }` envelope. The `/public` path means a Public projection;
+it does not allow anonymous access.
+
+| Operation ID | Method and endpoint | Actor and success |
+| --- | --- | --- |
+| `listQuestBoardV2` | `GET /api/v2/quests` | Any authenticated Member; `200` |
+| `getPublicQuestV2Detail` | `GET /api/v2/quests/:questId/public` | Authenticated Member who is not the Hirer; `200` |
+| `createQuestEditRequestV2` | `POST /api/v2/quests/:questId/edit-requests` | Hirer of a `QUEST_ASSIGNED` Quest; `201` |
+| `getQuestEditRequestV2` | `GET /api/v2/quests/edit-requests/:requestId` | Hirer or current Active Worker; `200` |
+| `respondToQuestEditRequestV2` | `POST /api/v2/quests/edit-requests/:requestId/respond` | Current Active Worker; `200` |
+
+The existing `GET /api/v2/quests/:questId` remains the owner projection. A
+Hirer calling the `/public` route receives `404 QUEST_NOT_FOUND`. v1 routes,
+v1 rows, and v1 compatibility mapping are out of scope.
+
+### Quest Board
+
+`GET /api/v2/quests` returns:
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [],
+    "nextCursor": null
+  }
+}
+```
+
+Supported query fields are `q`, `tagId`, `mode`, `participation`,
+`minQuestReward`, `maxQuestReward`, `maxDurationMinutes`, `startFrom`,
+`startTo`, `limit`, and `cursor`.
+
+- `q` is a trimmed, case-insensitive partial match against `title` and
+  `description`. It does not search Quest Condition.
+- `tagId` is one exact Tag UUID. Repeated or comma-separated values are
+  invalid.
+- `mode` and `participation` use the canonical enum values
+  `FIRST_COME_FIRST_SERVED`, `CANDIDATE`, `SINGLE`, and `GROUP`.
+- Reward bounds are Baht JSON numbers with at most two decimal places. The
+  range is inclusive.
+- `maxDurationMinutes` compares the duration from `startTime` to `dueAt`.
+- `startFrom` and `startTo` are inclusive v2 schedule timestamps with the
+  fixed `+07:00` offset.
+- `limit` is an integer from `1` to `50`, with default `20`. `cursor` is
+  opaque. Results sort by `startTime` ascending, then Quest ID ascending.
+- A reversed range returns `400 VALIDATION`.
+
+The Server applies non-hidden, ownership, State, timing, and joinability rules
+before it applies the cursor and page limit. A Quest is listed only when it is
+non-hidden, `QUEST_OPEN`, owned by another Member, before `startTime`, and
+joinable at read time:
+
+- `SINGLE + FIRST_COME_FIRST_SERVED`: `activeWorkerCount` is `0`.
+- `GROUP + FIRST_COME_FIRST_SERVED`: `activeWorkerCount` is below `headcount`.
+- `CANDIDATE + SINGLE` and `CANDIDATE + GROUP`: the Quest is shown while open
+  and before `startTime`, regardless of Candidate or forming team count.
+- An open Quest after `startTime` is not listed. An underfilled `GROUP +
+  FIRST_COME_FIRST_SERVED` Quest at `startTime` is also not listed while the
+  Hirer decision and Worker consent process applies.
+
+Each `Quest Board Card` contains only:
+
+```json
+{
+  "id": "quest-id",
+  "title": "Quest title",
+  "questReward": 100.00,
+  "tag": { "id": "tag-id", "name": "Programming" },
+  "mode": "FIRST_COME_FIRST_SERVED",
+  "participation": "SINGLE",
+  "headcount": 1,
+  "activeWorkerCount": 0,
+  "startTime": "2026-09-02T09:00:00.000+07:00",
+  "dueAt": "2026-09-02T12:00:00.000+07:00",
+  "hirerName": "Hirer display name",
+  "location": "Engineering building"
+}
+```
+
+`questReward` is the applicable Worker Reward in Baht. `activeWorkerCount`
+counts only `ASSIGNMENT_ACTIVE` Workers; it excludes Candidates and forming
+Candidate Team Members. `location` is the first ordered display location.
+The Board Card does not contain the full Quest Condition, description, Quest
+Images, Quest State, Hirer ID, Quest Funding Total, Platform Fee, Money Policy,
+Wallet, or Funding Reservation.
+
+### Public Quest Detail
+
+`GET /api/v2/quests/:questId/public` returns a non-hidden `QUEST_OPEN` Quest to
+an authenticated Member who is not its Hirer. Its public fields are:
+
+```text
+id, title, description, condition.items, tag, mode, participation, state,
+questReward, headcount, activeWorkerCount, startTime, dueAt, proofRequired,
+hirerName, locations, images
+```
+
+`condition.items` is ordered. `locations` contains all ordered label-only
+locations. Public Quest Image entries contain `imageId`, `position`, `url`,
+and `urlExpiresAt`; `fileId` is a private file reference and is omitted. Image
+links expire after 15 minutes.
+
+The response never contains Quest Funding Total, Platform Fee, Money Policy,
+Wallet, Funding Reservation, Hirer ID, Candidate data, or other Finance
+internals. A missing, hidden, closed, or unreadable Quest returns
+`404 QUEST_NOT_FOUND`. Public Detail is not a Worker lifecycle view.
+
+### Quest Edit
+
+The Hirer can create a Quest Edit only while the Quest is `QUEST_ASSIGNED`.
+The request is a complete replacement of the Quest Condition:
+
+```json
+{
+  "condition": {
+    "items": ["First requirement", "Second requirement"]
+  }
+}
+```
+
+The request must contain at least one non-blank item. Each item is at most 255
+characters. The Server trims and validates items, assigns zero-based
+positions, and rejects a replacement identical to the current Condition with
+`409 QUEST_EDIT_NO_CHANGE`.
+
+The read representation uses the canonical position shape:
+
+```json
+{
+  "position": 0,
+  "text": "First requirement"
+}
+```
+
+A Quest Edit resource contains `requestId`, `questId`, `status`, `createdAt`,
+`expiresAt`, nullable `appliedAt`, nullable `failedAt`,
+`previousCondition`, `proposedCondition`, and `responseSummary`.
+`responseSummary` contains `totalCount`, `acceptedCount`, `declinedCount`,
+and `pendingCount`. Audit timestamps use UTC `Z`; `expiresAt` is ten minutes
+after `createdAt`.
+
+Every Active Worker gives one whole-request decision within ten minutes:
+
+- `EDIT_RESPONSE_ACCEPTED` or `EDIT_RESPONSE_DECLINED`.
+- `reason` is optional, allowed only for a declined response, and is at most
+  255 characters.
+- The last acceptance applies the proposed Quest Condition atomically and
+  changes the request to `EDIT_REQUEST_APPLIED`.
+- Any decline, timeout, or Active Worker departure changes the request to
+  `EDIT_REQUEST_FAILED` and leaves the old Quest Condition unchanged.
+- A pending Quest Edit cannot be cancelled and does not use
+  `QUEST_AWAITING_CONSENT`.
+- A pending Quest Edit blocks the Quest from leaving `QUEST_ASSIGNED`.
+- When no Active Worker exists at create time, no resource is created and the
+  Server returns `409 QUEST_EDIT_NO_ACTIVE_WORKERS`.
+
+The Hirer sees every Active Worker response with `workerId`, decision, reason,
+and `respondedAt`. A Worker sees only its own response and the summary; it
+does not see another Worker's identity or reason. Candidate, Prospective
+Worker, and Departed Worker cannot read or respond to the Quest Edit. The
+failure codes are `EDIT_REQUEST_DECLINED`, `EDIT_REQUEST_TIMEOUT`, and
+`ACTIVE_WORKER_LEFT`.
+
+The Server materializes timeout under the Quest row lock. After `expiresAt`, a
+read or response cannot observe `PENDING`; a response attempt returns
+`409 QUEST_EDIT_EXPIRED` after the request is marked failed. Concurrent
+responses use first-commit-wins behavior. Create and respond require a
+non-blank `Idempotency-Key`; the key is scoped by authenticated Member and
+operation, retained for at least 24 hours, and checked with a normalized
+request fingerprint. A matching retry replays the original status and body;
+reuse with a different request returns `409 IDEMPOTENCY_KEY_REUSED`; a request
+still processing returns `409 IDEMPOTENCY_IN_PROGRESS`.
+
+The remaining Quest Edit conflicts are:
+
+| Condition | Error |
+| --- | --- |
+| Missing or unreadable Quest Edit Request | `404 QUEST_EDIT_NOT_FOUND` |
+| A Pending request already exists | `409 QUEST_EDIT_PENDING` |
+| Request has already ended | `409 QUEST_EDIT_NOT_PENDING` |
+| Worker already responded | `409 QUEST_EDIT_ALREADY_RESPONDED` |
+| Invalid body, decision, reason, or request parameters | `400 VALIDATION` |
+| No authenticated Session | `401 UNAUTHORIZED` |
+| Unexpected Server failure | `500 INTERNAL_ERROR` |
+
+An empty Board result is successful: `200` with an empty `items` array and a
+null `nextCursor`. Invalid query ranges, limits, or cursors return
+`400 VALIDATION`.
 
 ## Agent sequence
 
