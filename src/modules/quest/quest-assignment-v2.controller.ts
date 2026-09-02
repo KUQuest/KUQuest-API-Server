@@ -39,8 +39,8 @@ const mapJoinOutcome = (
   if (outcome.outcome === 'not-first-come-first-served') {
     return conflict(set, 'QUEST_MODE_NOT_ALLOWED', 'Only FIRST_COME_FIRST_SERVED Quests accept direct joins');
   }
-  if (outcome.outcome === 'not-single') {
-    return conflict(set, 'QUEST_PARTICIPATION_NOT_ALLOWED', 'This Assignment route currently accepts only SINGLE Quests');
+  if (outcome.outcome === 'not-supported-participation') {
+    return conflict(set, 'QUEST_PARTICIPATION_NOT_ALLOWED', 'Only SINGLE or GROUP Quests accept direct joins');
   }
   if (outcome.outcome === 'hirer-not-allowed') {
     return conflict(set, 'HIRER_CANNOT_JOIN', 'The Hirer cannot join their own Quest');
@@ -50,6 +50,9 @@ const mapJoinOutcome = (
   }
   if (outcome.outcome === 'already-assigned') {
     return conflict(set, 'ASSIGNMENT_ALREADY_EXISTS', 'The Worker is already assigned to this Quest');
+  }
+  if (outcome.outcome === 'full') {
+    return conflict(set, 'QUEST_FULL', 'The Quest has no open Worker slots');
   }
   if (outcome.outcome === 'idempotency-key-reused') {
     return conflict(set, 'IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');

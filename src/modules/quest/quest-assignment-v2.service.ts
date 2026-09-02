@@ -2,11 +2,7 @@ import { db } from '@/database/client';
 import { quest, questApiVersion, questAssignment } from '@/database/schema/quest.schema';
 import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 
-import {
-  and,
-  asc,
-  eq,
-} from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 
 import {
   type QuestTransaction,
@@ -40,9 +36,10 @@ type QuestV2AssignmentRow = {
 
 type QuestV2AssignmentBusinessOutcomeCode =
   | 'already-assigned'
+  | 'full'
   | 'hirer-not-allowed'
   | 'not-open'
-  | 'not-single'
+  | 'not-supported-participation'
   | 'not-found'
   | 'not-first-come-first-served';
 
@@ -230,6 +227,7 @@ const lockQuest = async (transaction: QuestTransaction, questId: string) => {
       v2Mode: quest.v2Mode,
       v2Participation: quest.v2Participation,
       questState: quest.questStatus,
+      headcount: quest.headcount,
     })
     .from(quest)
     .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
@@ -313,8 +311,10 @@ const joinQuestV2InTransaction = async (
   if (current.v2Mode !== questV2Mode.firstComeFirstServed) {
     return discardIdempotency('not-first-come-first-served');
   }
-  if (current.v2Participation !== questV2Participation.single) {
-    return discardIdempotency('not-single');
+  const isSingleQuest = current.v2Participation === questV2Participation.single;
+  const isGroupQuest = current.v2Participation === questV2Participation.group;
+  if (!isSingleQuest && !isGroupQuest) {
+    return discardIdempotency('not-supported-participation');
   }
   if (current.hirerId === userId) return discardIdempotency('hirer-not-allowed');
 
@@ -325,6 +325,18 @@ const joinQuestV2InTransaction = async (
     .limit(1);
   if (existing) return discardIdempotency('already-assigned');
   if (current.questState !== 'QUEST_OPEN') return discardIdempotency('not-open');
+
+  const [activeCount] = await transaction
+    .select({ count: sql<number>`count(*)` })
+    .from(questAssignment)
+    .where(
+      and(
+        eq(questAssignment.questId, questId),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
+      ),
+    );
+  const joinedCount = Number(activeCount?.count ?? 0);
+  if (joinedCount >= current.headcount) return discardIdempotency('full');
 
   const [createdAssignment] = await transaction
     .insert(questAssignment)
@@ -337,16 +349,20 @@ const joinQuestV2InTransaction = async (
     .returning(assignmentFields);
   if (!createdAssignment) return { outcome: 'idempotency-unavailable' };
 
+  const nextQuestState = isSingleQuest || joinedCount + 1 === current.headcount
+    ? 'QUEST_ASSIGNED'
+    : 'QUEST_OPEN';
   await transaction
     .update(quest)
-    .set({ questStatus: 'QUEST_ASSIGNED', updatedAt: now })
+    .set({ questStatus: nextQuestState, updatedAt: now })
     .where(and(eq(quest.id, questId), eq(quest.questStatus, 'QUEST_OPEN')));
 
-  const assignment = toQuestV2AssignmentRow(createdAssignment, 'QUEST_ASSIGNED');
+  const assignment = toQuestV2AssignmentRow(createdAssignment, nextQuestState);
+  const workChatCommandId = `quest-assignment-v2:${assignment.id}`;
   try {
     await writer.applyQuestTransition(
       transaction,
-      transitionFor(questId, userId, assignment.id, current.hirerId, now, commandId),
+      transitionFor(questId, userId, assignment.id, current.hirerId, now, workChatCommandId),
     );
   } catch (cause) {
     throw new WorkChatTransitionError(cause);
