@@ -47,6 +47,17 @@ export {
   retryQuestV2ImageCleanupManifests,
   releaseQuestV2ImageUploadReservation,
 } from './quest-v2.service';
+export {
+  createQuestV2EditRequest,
+  expireQuestV2EditRequest,
+  getQuestV2EditRequest,
+  hasPendingQuestV2EditRequest,
+  pendingQuestV2EditRequestIds,
+  respondToQuestV2EditRequest,
+  questV2EditRequestCreateOperationScope,
+  questV2EditRequestRespondOperationScope,
+} from './quest-v2-edit.service';
+export type { QuestV2EditRequestOutcome } from './quest-v2-edit.service';
 export type {
   QuestV2CreateOutcome,
   QuestV2EditOutcome,

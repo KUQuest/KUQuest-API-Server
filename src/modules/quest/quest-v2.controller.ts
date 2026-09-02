@@ -34,6 +34,11 @@ import {
   releaseQuestV2ImageUploadReservation,
   QuestV2ImageCleanupUnavailableError,
 } from './quest-v2.service';
+import {
+  createQuestV2EditRequest,
+  getQuestV2EditRequest,
+  respondToQuestV2EditRequest,
+} from './quest-v2-edit.service';
 import type {
   QuestV2ImageCommandContext,
   QuestV2ImageReference,
@@ -60,6 +65,10 @@ import type {
   questV2PublishCheckResponseSchema,
   questV2PublishResponseSchema,
   questV2WriteHeadersSchema,
+  questV2EditRequestCreateSchema,
+  questV2EditRequestResponseInputSchema,
+  questV2EditRequestResponseSchema,
+  questV2EditRequestParamsSchema,
 } from './quest-v2.schema';
 
 type QuestV2CreateResponse = Static<typeof questV2CreateResponseSchema>['data'];
@@ -80,6 +89,10 @@ type QuestV2PublishResponse = Static<typeof questV2PublishResponseSchema>['data'
 type QuestV2ImagesResponse = Static<typeof questV2ImagesResponseSchema>['data'];
 type QuestV2ImagesUploadInput = Static<typeof questV2ImagesUploadSchema>;
 type QuestV2ImageParams = Static<typeof questV2ImageParamsSchema>;
+type QuestV2EditRequestCreateInput = Static<typeof questV2EditRequestCreateSchema>;
+type QuestV2EditRequestResponseInput = Static<typeof questV2EditRequestResponseInputSchema>;
+type QuestV2EditRequestResponse = Static<typeof questV2EditRequestResponseSchema>['data'];
+type QuestV2EditRequestParams = Static<typeof questV2EditRequestParamsSchema>;
 
 const invalidInput = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 400;
@@ -360,6 +373,58 @@ const mapEditOutcome = (
     return invalidInput(set, 'INVALID_LOCATIONS', 'locations must contain at most 10 labels');
   }
   return invalidInput(set, 'INVALID_CONDITION', 'At least one valid Condition Item is required');
+};
+
+const mapQuestV2EditRequestOutcome = (
+  set: AuthedContext['set'],
+  outcome: Exclude<Awaited<ReturnType<typeof createQuestV2EditRequest>>, { request: unknown }>['outcome'],
+) => {
+  if (outcome === 'invalid-input') return invalidInput(set, 'VALIDATION', 'Invalid Quest Edit Request body');
+  if (outcome === 'invalid-idempotency-key') {
+    return invalidInput(set, 'VALIDATION', 'Idempotency-Key must not be empty');
+  }
+  if (outcome === 'not-found') {
+    set.status = 404;
+    return apiError('QUEST_EDIT_NOT_FOUND', 'Quest Edit Request not found');
+  }
+  if (outcome === 'not-assigned') {
+    set.status = 409;
+    return apiError('QUEST_EDIT_NOT_ALLOWED', 'Quest Edit is allowed only for an assigned Quest');
+  }
+  if (outcome === 'pending-request') {
+    set.status = 409;
+    return apiError('QUEST_EDIT_PENDING', 'The Quest already has a pending Quest Edit');
+  }
+  if (outcome === 'no-active-workers') {
+    set.status = 409;
+    return apiError('QUEST_EDIT_NO_ACTIVE_WORKERS', 'The Quest has no Active Workers');
+  }
+  if (outcome === 'no-change') {
+    set.status = 409;
+    return apiError('QUEST_EDIT_NO_CHANGE', 'The proposed Condition is unchanged');
+  }
+  if (outcome === 'not-pending') {
+    set.status = 409;
+    return apiError('QUEST_EDIT_NOT_PENDING', 'The Quest Edit is no longer pending');
+  }
+  if (outcome === 'already-responded') {
+    set.status = 409;
+    return apiError('QUEST_EDIT_ALREADY_RESPONDED', 'The Worker already responded to this Quest Edit');
+  }
+  if (outcome === 'expired') {
+    set.status = 409;
+    return apiError('QUEST_EDIT_EXPIRED', 'The Quest Edit expired');
+  }
+  if (outcome === 'idempotency-key-reused') {
+    set.status = 409;
+    return apiError('IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
+  }
+  if (outcome === 'idempotency-in-progress') {
+    set.status = 409;
+    return apiError('IDEMPOTENCY_IN_PROGRESS', 'The request is still processing');
+  }
+  set.status = 503;
+  return apiError('IDEMPOTENCY_UNAVAILABLE', 'The Idempotency-Key result is unavailable');
 };
 
 export const createQuestV2Controller = async ({
@@ -668,6 +733,67 @@ export const getQuestV2PublishCheckController = async ({
   }
 
   return apiSuccess(toQuestV2PublishCheckResponse(result));
+};
+
+export const createQuestV2EditRequestController = async ({
+  body,
+  headers,
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  body: QuestV2EditRequestCreateInput;
+  headers: QuestV2WriteHeaders;
+  params: QuestV2Params;
+}): Promise<ApiResponse<QuestV2EditRequestResponse>> => {
+  const result = await createQuestV2EditRequest(
+    session.user.id,
+    params.questId,
+    body,
+    headers['idempotency-key'],
+  );
+  if ('outcome' in result) return mapQuestV2EditRequestOutcome(set, result.outcome);
+
+  set.status = 201;
+  return apiSuccess(result.request);
+};
+
+export const getQuestV2EditRequestController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  params: QuestV2EditRequestParams;
+}): Promise<ApiResponse<QuestV2EditRequestResponse>> => {
+  const result = await getQuestV2EditRequest(session.user.id, params.requestId);
+  if (!result) {
+    set.status = 404;
+    return apiError('QUEST_EDIT_NOT_FOUND', 'Quest Edit Request not found');
+  }
+
+  return apiSuccess(result);
+};
+
+export const respondToQuestV2EditRequestController = async ({
+  body,
+  headers,
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  body: QuestV2EditRequestResponseInput;
+  headers: QuestV2WriteHeaders;
+  params: QuestV2EditRequestParams;
+}): Promise<ApiResponse<QuestV2EditRequestResponse>> => {
+  const result = await respondToQuestV2EditRequest(
+    session.user.id,
+    params.requestId,
+    body,
+    headers['idempotency-key'],
+  );
+  if ('outcome' in result) return mapQuestV2EditRequestOutcome(set, result.outcome);
+
+  return apiSuccess(result.request);
 };
 
 const mapQuestV2PublishError = (set: AuthedContext['set'], error: MoneyDomainError) => {

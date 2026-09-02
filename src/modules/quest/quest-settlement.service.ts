@@ -22,6 +22,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 
 import { requireQuestWorkChatMembershipWriter, WorkChatTransitionError } from './quest-assignment.service';
 import { assignmentStatus, questStatus, type QuestStatus } from './quest.contract';
+import { hasPendingQuestV2EditRequest } from './quest-v2-edit.service';
 import type { QuestTransaction } from './quest-assignment.service';
 import type { InactiveAssignmentStatus } from './quest-work-chat.contract';
 
@@ -114,6 +115,7 @@ const reservationFor = async (tx: QuestTransaction, ownerUserId: string, questId
 const lockQuest = async (tx: QuestTransaction, questId: string) => (await tx.select({
   id: quest.id,
   hirerId: quest.hirerId,
+  apiVersion: quest.apiVersion,
   questStatus: quest.questStatus,
   rewardSatang: quest.rewardSatang,
   platformFeePerWorkerSatang: quest.platformFeePerWorkerSatang,
@@ -300,6 +302,13 @@ const cancelInTransaction = async (tx: QuestTransaction, questId: string, hirerI
   const current = await lockQuest(tx, questId);
   if (!current) return { outcome: 'not-found' };
   if (current.hirerId !== hirerId) return { outcome: 'not-authorized' };
+  if (
+    current.apiVersion === 'v2' &&
+    current.questStatus === questStatus.assigned &&
+    await hasPendingQuestV2EditRequest(tx, questId)
+  ) {
+    return { outcome: 'invalid-state' };
+  }
   if (current.questStatus === questStatus.draft) {
     await tx.update(quest).set({
       questStatus: questStatus.cancelled,

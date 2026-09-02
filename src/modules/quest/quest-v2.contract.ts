@@ -102,6 +102,26 @@ export const questV2States = [
 ] as const;
 export type QuestV2State = (typeof questV2States)[number];
 
+export const questV2EditRequestStatuses = [
+  'EDIT_REQUEST_PENDING',
+  'EDIT_REQUEST_APPLIED',
+  'EDIT_REQUEST_FAILED',
+] as const;
+export type QuestV2EditRequestStatus = (typeof questV2EditRequestStatuses)[number];
+
+export const questV2EditResponseDecisions = [
+  'EDIT_RESPONSE_ACCEPTED',
+  'EDIT_RESPONSE_DECLINED',
+] as const;
+export type QuestV2EditResponseDecision = (typeof questV2EditResponseDecisions)[number];
+
+export const questV2EditFailureCodes = [
+  'EDIT_REQUEST_DECLINED',
+  'EDIT_REQUEST_TIMEOUT',
+  'ACTIVE_WORKER_LEFT',
+] as const;
+export type QuestV2EditFailureCode = (typeof questV2EditFailureCodes)[number];
+
 export type QuestV2CanonicalQuest = {
   id: string;
   version: number;
