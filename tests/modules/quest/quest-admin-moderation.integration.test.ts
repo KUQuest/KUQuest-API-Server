@@ -562,7 +562,7 @@ describe('Admin Quest moderation commands', () => {
       .from(chatConversation).where(eq(chatConversation.questId, questId))).toEqual([{ readOnlyAt: expect.any(Date), archivedAt: expect.any(Date) }]);
   });
 
-  it('refuses a v2 direct join once an Admin has hidden the Quest', async () => {
+  it('refuses a v1 direct join once an Admin has hidden the Quest', async () => {
     if (!postgresAvailable) return;
     const questId = await createQuest('QUEST_OPEN');
     expect((await hideQuest(questId, 1)).status).toBe(200);
@@ -701,6 +701,36 @@ describe('Admin Quest moderation commands', () => {
     expect({ status: response.status, body: await response.json() }).toMatchObject({
       status: 409,
       body: { success: false, error: { code: 'QUEST_NOT_OPEN' } },
+    });
+  });
+
+  it('still lets an invited Member decline once an Admin has hidden the Quest', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV1CandidateQuest('GROUP');
+    const teamId = randomUUID();
+    const invitationId = randomUUID();
+    await db.insert(questTeam).values({ id: teamId, questId, leaderId: teamLeaderId, name: 'Hidden Quest Team' });
+    await db.insert(questTeamMember).values({ teamId, userId: teamLeaderId });
+    await db.insert(questTeamInvitation).values({
+      id: invitationId,
+      teamId,
+      invitedUserId: workerId,
+      invitedByUserId: teamLeaderId,
+      expiresAt: new Date('2035-01-01T00:00:00.000Z'),
+    });
+    expect((await hideQuest(questId, 1)).status).toBe(200);
+
+    const session = asWorker();
+    let response: Response;
+    try {
+      response = await workerRequest(`/api/v1/quests/invitations/${invitationId}/decline`);
+    } finally {
+      session.mockRestore();
+    }
+
+    expect({ status: response.status, body: await response.json() }).toMatchObject({
+      status: 200,
+      body: { success: true, data: { invitationStatus: 'INVITATION_DECLINED' } },
     });
   });
 

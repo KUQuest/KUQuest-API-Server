@@ -329,9 +329,7 @@ const respondToInvitation = async (userId: string, invitationId: string, respons
   const [identity] = await tx.select({ questId: questTeam.questId, teamId: questTeam.id }).from(questTeamInvitation).innerJoin(questTeam, eq(questTeamInvitation.teamId, questTeam.id)).where(and(eq(questTeamInvitation.id, invitationId), eq(questTeamInvitation.invitedUserId, userId))).limit(1);
   if (!identity) return { outcome: 'not-found' };
   const current = await lockQuest(tx, identity.questId);
-  // A hidden Quest is out of reach for Members, so it refuses an invitation response
-  // the same way a Quest that is not open does.
-  if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.group || current.questStatus !== questStatus.open || current.hiddenAt !== null) return { outcome: 'not-eligible' };
+  if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.group || current.questStatus !== questStatus.open) return { outcome: 'not-eligible' };
   const team = await tx.select(teamFields).from(questTeam).where(eq(questTeam.id, identity.teamId)).limit(1).for('update');
   if (!team[0]) return { outcome: 'not-found' };
   const row = await tx.select(invitationFields).from(questTeamInvitation).where(eq(questTeamInvitation.id, invitationId)).limit(1).for('update');
@@ -343,6 +341,10 @@ const respondToInvitation = async (userId: string, invitationId: string, respons
     const [updated] = await tx.update(questTeamInvitation).set({ invitationStatus: response, respondedAt: now }).where(eq(questTeamInvitation.id, invitationId)).returning(invitationFields);
     return invitationResult(updated);
   }
+  // Accepting joins the Quest, so a hidden Quest refuses it. Declining stays open above,
+  // because hiding a Quest must not trap an invited Member with an invitation they
+  // cannot clear.
+  if (current.hiddenAt !== null) return { outcome: 'not-eligible' };
   if (!(await ensureNoMembership(tx, identity.questId, userId))) return { outcome: 'already-member' };
   await tx.insert(questTeamMember).values({ teamId: identity.teamId, userId, joinedAt: now });
   const [updated] = await tx.update(questTeamInvitation).set({ invitationStatus: response, respondedAt: now }).where(eq(questTeamInvitation.id, invitationId)).returning(invitationFields);
