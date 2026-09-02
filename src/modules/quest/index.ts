@@ -17,17 +17,36 @@ export {
   questV2Participation,
   questV2Participations,
   questV2AssignmentStates,
+  questV2ApplicationStates,
   questV2States,
 } from './quest-v2.contract';
 export type {
   QuestV2CanonicalQuest,
   QuestV2AssignmentState,
+  QuestV2ApplicationState,
   QuestV2Mode,
   QuestV2Participation,
   QuestV2State,
 } from './quest-v2.contract';
 export { questV2Route } from './quest-v2.route';
 export { questAssignmentV2Route } from './quest-assignment-v2.route';
+export { questCandidateV2Route } from './quest-candidate-v2.route';
+export {
+  createQuestV2CandidateApplication,
+  getQuestV2CandidateApplication,
+  listQuestV2CandidateApplications,
+  withdrawQuestV2CandidateApplication,
+  questV2CandidateApplicationCreateOperationScope,
+  questV2CandidateApplicationWithdrawOperationScope,
+  questV2CandidateApplicationSelectOperationScope,
+  selectQuestV2CandidateApplication,
+} from './quest-candidate-v2.service';
+export type {
+  QuestV2CandidateApplicationOutcome,
+  QuestV2CandidateApplicationWithdrawOutcome,
+  QuestV2CandidateSelectionOutcome,
+  QuestV2CandidateApplicationReadOutcome,
+} from './quest-candidate-v2.service';
 export {
   joinQuestV2,
   listMyQuestV2Assignments,
