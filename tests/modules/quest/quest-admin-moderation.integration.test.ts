@@ -93,6 +93,15 @@ const hideQuest = (questId: string, version: number) => adminRequest(
   { 'idempotency-key': `admin-hide-${questId}`, 'if-match': String(version) },
 );
 
+// Hides the Quest and proves the overlay is the only thing that changed: the Quest
+// stays QUEST_OPEN, so a refusal below can only come from `hiddenAt`.
+const hideOpenQuest = async (questId: string) => {
+  expect((await hideQuest(questId, 1)).status).toBe(200);
+  const [row] = await db.select({ hiddenAt: quest.hiddenAt, questStatus: quest.questStatus })
+    .from(quest).where(eq(quest.id, questId));
+  expect(row).toMatchObject({ hiddenAt: expect.any(Date), questStatus: 'QUEST_OPEN' });
+};
+
 const walletAccount = async (userId: string, type: 'SPENDING' | 'FUNDING_RESERVED') => {
   const [wallet] = await db.select({ id: walletWallet.id })
     .from(walletWallet)
@@ -569,10 +578,7 @@ describe('Admin Quest moderation commands', () => {
   it('refuses a v1 direct join once an Admin has hidden the Quest', async () => {
     if (!postgresAvailable) return;
     const questId = await createQuest('QUEST_OPEN');
-    expect((await hideQuest(questId, 1)).status).toBe(200);
-    const [hidden] = await db.select({ hiddenAt: quest.hiddenAt, apiVersion: quest.apiVersion })
-      .from(quest).where(eq(quest.id, questId));
-    expect(hidden).toMatchObject({ hiddenAt: expect.any(Date), apiVersion: 'v2' });
+    await hideOpenQuest(questId);
 
     const session = asMember();
     let response: Response;
@@ -595,7 +601,7 @@ describe('Admin Quest moderation commands', () => {
   it('refuses a v2 direct join once an Admin has hidden the Quest', async () => {
     if (!postgresAvailable) return;
     const questId = await createQuest('QUEST_OPEN');
-    expect((await hideQuest(questId, 1)).status).toBe(200);
+    await hideOpenQuest(questId);
 
     const session = asMember();
     let response: Response;
@@ -618,7 +624,7 @@ describe('Admin Quest moderation commands', () => {
   it('refuses a Candidate application once an Admin has hidden the Quest', async () => {
     if (!postgresAvailable) return;
     const questId = await createV1CandidateQuest();
-    expect((await hideQuest(questId, 1)).status).toBe(200);
+    await hideOpenQuest(questId);
 
     const session = asMember();
     let response: Response;
@@ -637,7 +643,7 @@ describe('Admin Quest moderation commands', () => {
   it('refuses a Candidate Team once an Admin has hidden the Quest', async () => {
     if (!postgresAvailable) return;
     const questId = await createV1CandidateQuest('GROUP');
-    expect((await hideQuest(questId, 1)).status).toBe(200);
+    await hideOpenQuest(questId);
 
     const session = asMember();
     let response: Response;
@@ -667,7 +673,7 @@ describe('Admin Quest moderation commands', () => {
       invitedByUserId: teamLeaderId,
       expiresAt: new Date('2035-01-01T00:00:00.000Z'),
     });
-    expect((await hideQuest(questId, 1)).status).toBe(200);
+    await hideOpenQuest(questId);
 
     const session = asMember();
     let response: Response;
@@ -688,7 +694,7 @@ describe('Admin Quest moderation commands', () => {
   it('refuses a v2 Candidate application once an Admin has hidden the Quest', async () => {
     if (!postgresAvailable) return;
     const questId = await createV2CandidateSingleQuest();
-    expect((await hideQuest(questId, 1)).status).toBe(200);
+    await hideOpenQuest(questId);
 
     const session = asMember();
     let response: Response;
@@ -722,7 +728,7 @@ describe('Admin Quest moderation commands', () => {
       invitedByUserId: teamLeaderId,
       expiresAt: new Date('2035-01-01T00:00:00.000Z'),
     });
-    expect((await hideQuest(questId, 1)).status).toBe(200);
+    await hideOpenQuest(questId);
 
     const session = asMember();
     let response: Response;
@@ -744,7 +750,7 @@ describe('Admin Quest moderation commands', () => {
     const teamId = randomUUID();
     await db.insert(questTeam).values({ id: teamId, questId, leaderId: teamLeaderId, name: 'Hidden Quest Team' });
     await db.insert(questTeamMember).values({ teamId, userId: teamLeaderId });
-    expect((await hideQuest(questId, 1)).status).toBe(200);
+    await hideOpenQuest(questId);
 
     const session = asMember(teamLeaderId);
     let response: Response;
@@ -790,7 +796,7 @@ describe('Admin Quest moderation commands', () => {
     }
     expect(listedBefore.data.items).toHaveLength(1);
 
-    expect((await hideQuest(questId, 1)).status).toBe(200);
+    await hideOpenQuest(questId);
 
     const after = asMember();
     let listResponse: Response;
