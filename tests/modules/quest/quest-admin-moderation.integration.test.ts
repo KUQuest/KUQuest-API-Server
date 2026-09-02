@@ -15,6 +15,7 @@ import {
   walletLedgerAccount,
   walletWallet,
 } from '@/database/schema/wallet.schema';
+import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { editQuestV2 } from '@/modules/quest';
 import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
@@ -31,7 +32,7 @@ import {
 import { randomUUID } from 'node:crypto';
 
 import { and, eq } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 
 let postgresAvailable = false;
 let adminCookie = '';
@@ -60,6 +61,21 @@ const adminRequest = (
   },
   body: JSON.stringify(body),
 }));
+
+const asWorker = () => spyOn(auth.api, 'getSession').mockImplementation((async () => ({
+  user: { id: workerId },
+  session: { userId: workerId },
+})) as never);
+
+const workerRequest = (path: string, headers: HeadersInit = {}) => app.handle(
+  new Request(`http://localhost${path}`, { method: 'POST', headers }),
+);
+
+const hideQuest = (questId: string, version: number) => adminRequest(
+  `/api/v1/admin/quests/${questId}/hide`,
+  { reasonCode: 'POLICY_REVIEW' },
+  { 'idempotency-key': `admin-hide-${questId}`, 'if-match': String(version) },
+);
 
 const walletAccount = async (userId: string, type: 'SPENDING' | 'FUNDING_RESERVED') => {
   const [wallet] = await db.select({ id: walletWallet.id })
@@ -483,6 +499,32 @@ describe('Admin Quest moderation commands', () => {
       .from(walletFundingReservation).where(eq(walletFundingReservation.callerReference, questId))).toEqual([{ status: 'SETTLED', remaining: 0 }]);
     expect(await db.select({ readOnlyAt: chatConversation.readOnlyAt, archivedAt: chatConversation.archivedAt })
       .from(chatConversation).where(eq(chatConversation.questId, questId))).toEqual([{ readOnlyAt: expect.any(Date), archivedAt: expect.any(Date) }]);
+  });
+
+  it('refuses a v2 direct join once an Admin has hidden the Quest', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest('QUEST_OPEN');
+    expect((await hideQuest(questId, 1)).status).toBe(200);
+    const [hidden] = await db.select({ hiddenAt: quest.hiddenAt, apiVersion: quest.apiVersion })
+      .from(quest).where(eq(quest.id, questId));
+    expect(hidden).toMatchObject({ hiddenAt: expect.any(Date), apiVersion: 'v2' });
+
+    const session = asWorker();
+    let response: Response;
+    try {
+      response = await workerRequest(`/api/v1/quests/${questId}/join`, {
+        'idempotency-key': `join-hidden-${questId}`,
+      });
+    } finally {
+      session.mockRestore();
+    }
+
+    expect({ status: response.status, body: await response.json() }).toMatchObject({
+      status: 409,
+      body: { success: false, error: { code: 'QUEST_NOT_OPEN' } },
+    });
+    expect(await db.select({ id: questAssignment.id })
+      .from(questAssignment).where(eq(questAssignment.questId, questId))).toEqual([]);
   });
 
   it('rejects unsupported Admin approval operations and invalid reason codes', async () => {
