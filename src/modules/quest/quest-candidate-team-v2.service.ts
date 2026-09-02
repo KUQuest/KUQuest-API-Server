@@ -1319,10 +1319,17 @@ export const selectQuestV2CandidateTeam = async (
 
     const team = await lockTeam(transaction, questId, teamId);
     if (!team) return discardIdempotency(transaction, idempotency.record.id, 'team-not-found');
-    if (team.state !== 'TEAM_SUBMITTED') return discardIdempotency(transaction, idempotency.record.id, 'not-selectable');
+    if (
+      team.state !== 'TEAM_SUBMITTED' ||
+      team.submissionText === null ||
+      team.submittedAt === null
+    ) return discardIdempotency(transaction, idempotency.record.id, 'not-selectable');
     if (team.headcount === null) return discardIdempotency(transaction, idempotency.record.id, 'headcount-mismatch');
     const members = await teamMembers(transaction, teamId, true);
     if (members.length !== team.headcount) return discardIdempotency(transaction, idempotency.record.id, 'headcount-mismatch');
+    if ((await teamSubmissionFileIds(transaction, teamId)).length === 0) {
+      return discardIdempotency(transaction, idempotency.record.id, 'not-selectable');
+    }
 
     const existingAssignments = await transaction
       .select(assignmentFields)

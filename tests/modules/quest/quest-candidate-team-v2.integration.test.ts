@@ -23,6 +23,7 @@ import {
   type QuestTransaction,
 } from '@/modules/quest';
 import type { QuestWorkChatMembershipTransition } from '@/modules/quest/quest-work-chat.contract';
+import { createWorkChatMembershipWriter } from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';
 
@@ -286,6 +287,33 @@ describe('Quest Candidate Team API v2', () => {
     expect(Object.keys(document.paths).some((path) =>
       path.startsWith('/api/v2/quests/') && path.includes('/invitations'),
     )).toBe(false);
+  });
+
+  it('lets the owning Hirer inspect all Candidate Teams and limits other Members to permitted Teams', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId, candidate.id, 2, 'candidate-team-v2-read-create');
+
+    const hirerList = await request(`/api/v2/quests/${questId}/teams`, 'GET', hirer.id);
+    expect(hirerList.status).toBe(200);
+    expect((await hirerList.json()).data.items).toEqual([
+      expect.objectContaining({ id: team.id, joinCode: null }),
+    ]);
+
+    const memberList = await request(`/api/v2/quests/${questId}/teams`, 'GET', candidate.id);
+    expect(memberList.status).toBe(200);
+    expect((await memberList.json()).data.items).toEqual([
+      expect.objectContaining({ id: team.id, joinCode: null }),
+    ]);
+
+    const detail = await request(`/api/v2/quests/${questId}/teams/${team.id}`, 'GET', hirer.id);
+    expect(detail.status).toBe(200);
+    expect((await detail.json()).data).toMatchObject({ id: team.id, joinCode: null });
+
+    const unrelatedRead = await request(`/api/v2/quests/${questId}/teams`, 'GET', unrelated.id);
+    expect(unrelatedRead.status).toBe(404);
+    expect((await unrelatedRead.json()).error.code).toBe('QUEST_NOT_FOUND');
   });
 
   it('creates one forming Candidate Team with a 24-hour Join Code and replays creation', async () => {
@@ -634,6 +662,279 @@ describe('Quest Candidate Team API v2', () => {
     );
     expect(losingSelection.status).toBe(409);
     expect((await losingSelection.json()).error.code).toBe('QUEST_NOT_OPEN');
+  });
+
+  it('serializes concurrent Team selections so only one complete roster is accepted', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const firstTeam = await createTeam(questId, candidate.id, 2, 'candidate-team-v2-concurrent-create-one');
+    await joinTeam(
+      questId,
+      firstTeam.id,
+      secondCandidate.id,
+      firstTeam.joinCode,
+      'candidate-team-v2-concurrent-join-one',
+    );
+    const secondTeam = await createTeam(questId, thirdCandidate.id, 2, 'candidate-team-v2-concurrent-create-two');
+    await joinTeam(
+      questId,
+      secondTeam.id,
+      fourthCandidate.id,
+      secondTeam.joinCode,
+      'candidate-team-v2-concurrent-join-two',
+    );
+
+    const firstFileId = await createFile(candidate.id);
+    const secondFileId = await createFile(thirdCandidate.id);
+    const firstSubmit = await request(
+      `/api/v2/quests/${questId}/teams/${firstTeam.id}/submit`,
+      'POST',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-concurrent-submit-one' },
+      JSON.stringify({ text: 'First submitted team', fileIds: [firstFileId] }),
+    );
+    const secondSubmit = await request(
+      `/api/v2/quests/${questId}/teams/${secondTeam.id}/submit`,
+      'POST',
+      thirdCandidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-concurrent-submit-two' },
+      JSON.stringify({ text: 'Second submitted team', fileIds: [secondFileId] }),
+    );
+    expect(firstSubmit.status).toBe(200);
+    expect(secondSubmit.status).toBe(200);
+
+    const responses = await Promise.all([
+      request(
+        `/api/v2/quests/${questId}/teams/${firstTeam.id}/select`,
+        'POST',
+        hirer.id,
+        { 'idempotency-key': 'candidate-team-v2-concurrent-select-one' },
+      ),
+      request(
+        `/api/v2/quests/${questId}/teams/${secondTeam.id}/select`,
+        'POST',
+        hirer.id,
+        { 'idempotency-key': 'candidate-team-v2-concurrent-select-two' },
+      ),
+    ]);
+    expect(responses.map((response) => response.status).sort((left, right) => left - right)).toEqual([200, 409]);
+    const losingResponse = responses.find((response) => response.status === 409);
+    expect(losingResponse).toBeDefined();
+    expect((await losingResponse!.json()).error.code).toBe('QUEST_NOT_OPEN');
+
+    const teams = await db
+      .select({ id: questCandidateTeamV2.id, state: questCandidateTeamV2.state })
+      .from(questCandidateTeamV2)
+      .where(eq(questCandidateTeamV2.questId, questId));
+    expect(teams.filter(({ state }) => state === 'TEAM_SELECTED')).toHaveLength(1);
+    expect(teams.filter(({ state }) => state === 'TEAM_REJECTED')).toHaveLength(1);
+    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(2);
+    expect(transitions).toHaveLength(1);
+  });
+
+  it('creates one Work Conversation for the selected Team roster', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId, candidate.id, 2, 'candidate-team-v2-work-chat-create');
+    await joinTeam(
+      questId,
+      team.id,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-work-chat-join',
+    );
+    const submissionFileId = await createFile(candidate.id);
+    const submitted = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/submit`,
+      'POST',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-work-chat-submit' },
+      JSON.stringify({ text: 'Team work', fileIds: [submissionFileId] }),
+    );
+    expect(submitted.status).toBe(200);
+
+    configureQuestWorkChatMembershipWriter(createWorkChatMembershipWriter());
+    const selected = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-team-v2-work-chat-select' },
+    );
+    expect(selected.status).toBe(200);
+
+    const [conversation] = await db
+      .select({
+        id: chatConversation.id,
+        questStatus: chatConversation.questStatus,
+        readOnlyAt: chatConversation.readOnlyAt,
+      })
+      .from(chatConversation)
+      .where(eq(chatConversation.questId, questId));
+    expect(conversation).toMatchObject({ questStatus: 'QUEST_ASSIGNED', readOnlyAt: null });
+
+    const memberships = await db
+      .select({ memberId: chatMembership.memberId, role: chatMembership.role })
+      .from(chatMembership)
+      .where(eq(chatMembership.conversationId, conversation!.id));
+    expect(memberships).toEqual(expect.arrayContaining([
+      { memberId: hirer.id, role: 'HIRER' },
+      { memberId: candidate.id, role: 'WORKER' },
+      { memberId: secondCandidate.id, role: 'WORKER' },
+    ]));
+    expect(memberships).toHaveLength(3);
+
+    const messages = await db
+      .select({ kind: chatMessage.kind, systemType: chatMessage.systemType })
+      .from(chatMessage)
+      .where(eq(chatMessage.conversationId, conversation!.id));
+    expect(messages).toHaveLength(3);
+    expect(messages.every(({ kind, systemType }) => kind === 'SYSTEM' && systemType === 'ACCEPTED_PARTICIPANT_JOINED')).toBe(true);
+
+    const commands = await db
+      .select({ processingStatus: chatTransitionCommand.processingStatus })
+      .from(chatTransitionCommand)
+      .where(eq(chatTransitionCommand.questId, questId));
+    expect(commands).toEqual([{ processingStatus: 'COMPLETED' }]);
+  });
+
+  it('selects only a full Candidate Team with a stored submission', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId, candidate.id, 2, 'candidate-team-v2-selection-evidence-create');
+    await joinTeam(
+      questId,
+      team.id,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-selection-evidence-join',
+    );
+
+    await db.update(questCandidateTeamV2)
+      .set({
+        state: 'TEAM_SUBMITTED',
+        joinCodeHash: null,
+        joinCodeExpiresAt: null,
+        submissionText: null,
+        submittedAt: null,
+      })
+      .where(eq(questCandidateTeamV2.id, team.id));
+
+    const response = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-team-v2-selection-evidence-select' },
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe('CANDIDATE_TEAM_NOT_SELECTABLE');
+
+    const [currentQuest] = await db.select({ state: quest.questStatus }).from(quest).where(eq(quest.id, questId));
+    expect(currentQuest?.state).toBe('QUEST_OPEN');
+    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(0);
+  });
+
+  it('rejects Team selection by the wrong Hirer, for a forming Team, or after the Quest closes', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const formingTeam = await createTeam(questId, candidate.id, 2, 'candidate-team-v2-selection-state-forming');
+    await joinTeam(
+      questId,
+      formingTeam.id,
+      secondCandidate.id,
+      formingTeam.joinCode,
+      'candidate-team-v2-selection-state-forming-join',
+    );
+
+    const formingSelection = await request(
+      `/api/v2/quests/${questId}/teams/${formingTeam.id}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-team-v2-selection-state-forming-select' },
+    );
+    expect(formingSelection.status).toBe(409);
+    expect((await formingSelection.json()).error.code).toBe('CANDIDATE_TEAM_NOT_SELECTABLE');
+
+    const submittedTeam = await createTeam(questId, thirdCandidate.id, 2, 'candidate-team-v2-selection-state-submitted');
+    await joinTeam(
+      questId,
+      submittedTeam.id,
+      fourthCandidate.id,
+      submittedTeam.joinCode,
+      'candidate-team-v2-selection-state-submitted-join',
+    );
+    const submissionFileId = await createFile(thirdCandidate.id);
+    const submitted = await request(
+      `/api/v2/quests/${questId}/teams/${submittedTeam.id}/submit`,
+      'POST',
+      thirdCandidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-selection-state-submit' },
+      JSON.stringify({ text: 'Submitted team', fileIds: [submissionFileId] }),
+    );
+    expect(submitted.status).toBe(200);
+
+    const wrongHirer = await request(
+      `/api/v2/quests/${questId}/teams/${submittedTeam.id}/select`,
+      'POST',
+      unrelated.id,
+      { 'idempotency-key': 'candidate-team-v2-selection-state-wrong-hirer' },
+    );
+    expect(wrongHirer.status).toBe(409);
+    expect((await wrongHirer.json()).error.code).toBe('CANDIDATE_SELECTION_NOT_ALLOWED');
+
+    await db.update(quest)
+      .set({ questStatus: 'QUEST_ASSIGNED' })
+      .where(eq(quest.id, questId));
+    const closed = await request(
+      `/api/v2/quests/${questId}/teams/${submittedTeam.id}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-team-v2-selection-state-closed' },
+    );
+    expect(closed.status).toBe(409);
+    expect((await closed.json()).error.code).toBe('QUEST_NOT_OPEN');
+  });
+
+  it('rejects a submitted Candidate Team when its roster no longer matches its headcount', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId, candidate.id, 2, 'candidate-team-v2-selection-mismatch-create');
+    await joinTeam(
+      questId,
+      team.id,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-selection-mismatch-join',
+    );
+    const submissionFileId = await createFile(candidate.id);
+    const submitted = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/submit`,
+      'POST',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-selection-mismatch-submit' },
+      JSON.stringify({ text: 'Submitted team', fileIds: [submissionFileId] }),
+    );
+    expect(submitted.status).toBe(200);
+
+    await db.delete(questCandidateTeamV2Member)
+      .where(and(
+        eq(questCandidateTeamV2Member.teamId, team.id),
+        eq(questCandidateTeamV2Member.memberId, secondCandidate.id),
+      ));
+
+    const response = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-team-v2-selection-mismatch-select' },
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe('TEAM_HEADCOUNT_MISMATCH');
+    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(0);
   });
 
   it('rolls back the Team selection when Work Chat membership cannot be updated', async () => {
