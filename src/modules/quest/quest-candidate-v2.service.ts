@@ -200,6 +200,7 @@ const lockQuest = async (transaction: QuestTransaction, questId: string) => {
       v2Mode: quest.v2Mode,
       v2Participation: quest.v2Participation,
       questState: quest.questStatus,
+      hiddenAt: quest.hiddenAt,
     })
     .from(quest)
     .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
@@ -294,7 +295,12 @@ export const createQuestV2CandidateApplication = async (
     if (current.v2Mode !== questV2Mode.candidate) return discardIdempotency('not-candidate');
     if (current.v2Participation !== questV2Participation.single) return discardIdempotency('not-single');
     if (current.hirerId === memberId) return discardIdempotency('hirer-not-allowed');
-    if (current.questState !== 'QUEST_OPEN') return discardIdempotency('not-open');
+    // A hidden Quest is out of reach for Members, so it refuses an application the same
+    // way a Quest that is not open does. Withdrawal below stays open, so hiding a Quest
+    // does not trap the Members already on it.
+    if (current.questState !== 'QUEST_OPEN' || current.hiddenAt !== null) {
+      return discardIdempotency('not-open');
+    }
 
     const [existing] = await transaction
       .select({ id: questApplication.id })

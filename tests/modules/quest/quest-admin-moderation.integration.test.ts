@@ -148,6 +148,32 @@ const createQuest = async (
   return questId;
 };
 
+const createV2CandidateSingleQuest = async () => {
+  const questId = randomUUID();
+  questIds.push(questId);
+  await db.insert(quest).values({
+    id: questId,
+    hirerId,
+    apiVersion: 'v2',
+    title: `Admin moderation v2 candidate ${questId}`,
+    condition: 'Complete the work',
+    mode: 'CANDIDATE',
+    participation: 'SOLO',
+    v2Mode: 'CANDIDATE',
+    v2Participation: 'SINGLE',
+    rewardSatang: 1_000,
+    questStatus: 'QUEST_OPEN',
+    questFundingTotalSatang: 1_020,
+    platformFeePerWorkerSatang: 20,
+    questEscrowSatang: 1_020,
+    tagId,
+    headcount: 1,
+    startTime: new Date('2035-01-01T00:00:00.000Z'),
+    dueAt: new Date('2035-01-01T02:00:00.000Z'),
+  });
+  return questId;
+};
+
 const createV1CandidateQuest = async (participation: 'SOLO' | 'GROUP' = 'SOLO') => {
   const questId = randomUUID();
   questIds.push(questId);
@@ -653,6 +679,29 @@ describe('Admin Quest moderation commands', () => {
     });
     expect(await db.select({ userId: questTeamMember.userId })
       .from(questTeamMember).where(and(eq(questTeamMember.teamId, teamId), eq(questTeamMember.userId, workerId)))).toEqual([]);
+  });
+
+  it('refuses a v2 Candidate application once an Admin has hidden the Quest', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV2CandidateSingleQuest();
+    expect((await hideQuest(questId, 1)).status).toBe(200);
+
+    const session = asWorker();
+    let response: Response;
+    try {
+      response = await workerRequest(
+        `/api/v2/quests/${questId}/applications`,
+        { 'idempotency-key': `apply-v2-hidden-${questId}` },
+        {},
+      );
+    } finally {
+      session.mockRestore();
+    }
+
+    expect({ status: response.status, body: await response.json() }).toMatchObject({
+      status: 409,
+      body: { success: false, error: { code: 'QUEST_NOT_OPEN' } },
+    });
   });
 
   it('rejects unsupported Admin approval operations and invalid reason codes', async () => {
