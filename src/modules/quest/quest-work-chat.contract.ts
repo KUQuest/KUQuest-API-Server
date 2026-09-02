@@ -27,6 +27,7 @@ export type EventId = string;
 export type IsoTimestamp = string;
 export type QuestWorkChatTransitionProducer =
   | 'QUEST_DIRECT_JOIN'
+  | 'QUEST_ASSIGNMENT_V2'
   | 'QUEST_CANDIDATE_SELECTION'
   | 'QUEST_SETTLEMENT';
 

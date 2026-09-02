@@ -1,5 +1,10 @@
-export { configureQuestWorkChatMembershipWriter } from './quest-assignment.service';
-export type { QuestTransaction } from './quest-assignment.service';
+export {
+  configureQuestWorkChatMembershipWriter,
+  getQuestWorkChatMembershipWriter,
+  requireQuestWorkChatMembershipWriter,
+  WorkChatTransitionError,
+} from './quest-work-chat.port';
+export type { QuestTransaction } from './quest-work-chat.port';
 export type {
   AcceptedWorker,
   ApplyQuestWorkChatMembershipResult,
@@ -11,15 +16,28 @@ export {
   questV2Modes,
   questV2Participation,
   questV2Participations,
+  questV2AssignmentStates,
   questV2States,
 } from './quest-v2.contract';
 export type {
   QuestV2CanonicalQuest,
+  QuestV2AssignmentState,
   QuestV2Mode,
   QuestV2Participation,
   QuestV2State,
 } from './quest-v2.contract';
 export { questV2Route } from './quest-v2.route';
+export { questAssignmentV2Route } from './quest-assignment-v2.route';
+export {
+  joinQuestV2,
+  listMyQuestV2Assignments,
+  listQuestV2Assignments,
+  questV2AssignmentJoinOperationScope,
+} from './quest-assignment-v2.service';
+export type {
+  QuestV2AssignmentOutcome,
+  QuestV2AssignmentReadOutcome,
+} from './quest-assignment-v2.service';
 export {
   addQuestV2Images,
   checkQuestV2ImageUpload,
@@ -98,3 +116,4 @@ export type {
   QuestV2Params,
   QuestV2WriteHeaders,
 } from './quest-v2.schema';
+export type { QuestV2AssignmentParams } from './quest-assignment-v2.schema';
