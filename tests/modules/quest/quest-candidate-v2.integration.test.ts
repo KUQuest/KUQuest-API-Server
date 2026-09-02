@@ -81,9 +81,11 @@ const request = (
   method = 'GET',
   memberId = candidate.id,
   headers: HeadersInit = {},
+  body?: BodyInit,
 ) => app.handle(new Request(`http://localhost${path}`, {
   method,
   headers: { ...headers, 'x-member-id': memberId },
+  body,
 }));
 
 const createOpenCandidateQuest = async (overrides: Partial<typeof quest.$inferInsert> = {}) => {
@@ -664,6 +666,48 @@ describe('Quest Candidate API v2', () => {
     );
     expect(v1Response.status).toBe(404);
     expect((await v1Response.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+    const v2QuestId = await createOpenCandidateQuest();
+    const v1ApplyResponse = await request(
+      `/api/v1/quests/${v2QuestId}/applications`,
+      'POST',
+      candidate.id,
+      { 'content-type': 'application/json' },
+      JSON.stringify({}),
+    );
+    expect(v1ApplyResponse.status).toBe(404);
+    expect((await v1ApplyResponse.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+    const v2ApplyResponse = await request(
+      `/api/v2/quests/${v2QuestId}/applications`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': 'candidate-v2-v1-boundary-apply' },
+    );
+    const applicationId = (await v2ApplyResponse.json()).data.id as string;
+
+    const v1ListResponse = await request(
+      `/api/v1/quests/${v2QuestId}/applications`,
+      'GET',
+      hirer.id,
+    );
+    expect(v1ListResponse.status).toBe(404);
+    expect((await v1ListResponse.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+    const v1SelectionResponse = await request(
+      `/api/v1/quests/${v2QuestId}/applications/${applicationId}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-v1-boundary-select' },
+    );
+    expect(v1SelectionResponse.status).toBe(404);
+    expect((await v1SelectionResponse.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+    const [v2Quest] = await db
+      .select({ state: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, v2QuestId));
+    expect(v2Quest?.state).toBe('QUEST_OPEN');
   });
 
   it('requires the owning Hirer and an applied Candidate for selection', async () => {
