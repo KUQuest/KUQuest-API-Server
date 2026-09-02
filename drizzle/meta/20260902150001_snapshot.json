@@ -1,6 +1,6 @@
 {
-  "id": "cb35ef09-0461-4f56-8193-acd3016dece7",
-  "prevId": "7d002e9f-4700-4fa0-a958-99365d2059b9",
+  "id": "0f9b0e2c-7e65-4059-9ddb-bcd8b0f2dab4",
+  "prevId": "b4b4e457-2186-4b5f-b64e-37b518143047",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1142,6 +1142,12 @@
         },
         "deleted_at": {
           "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "object_deleted_at": {
+          "name": "object_deleted_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -4576,7 +4582,7 @@
         },
         "quest_participation_headcount_check": {
           "name": "quest_participation_headcount_check",
-          "value": "\"quest\".\"participation\" = 'GROUP' OR \"quest\".\"headcount\" = 1"
+          "value": "(\n        \"quest\".\"api_version\" <> 'v2' AND\n        (\"quest\".\"participation\" = 'GROUP' OR \"quest\".\"headcount\" = 1)\n      ) OR (\n        \"quest\".\"api_version\" = 'v2' AND\n        \"quest\".\"v2_participation\" IS NOT NULL AND\n        (\n          (\"quest\".\"v2_participation\" = 'SINGLE' AND \"quest\".\"headcount\" = 1) OR\n          (\"quest\".\"v2_participation\" = 'GROUP' AND \"quest\".\"headcount\" BETWEEN 2 AND 20)\n        )\n      )"
         },
         "quest_due_at_check": {
           "name": "quest_due_at_check",
@@ -4593,10 +4599,6 @@
         "quest_cancelled_at_check": {
           "name": "quest_cancelled_at_check",
           "value": "(\"quest\".\"cancelled_at\" IS NULL) = (\"quest\".\"quest_status\" <> 'QUEST_CANCELLED')"
-        },
-        "quest_hidden_at_check": {
-          "name": "quest_hidden_at_check",
-          "value": "(\"quest\".\"hidden_at\" IS NULL) = (\"quest\".\"quest_status\" <> 'QUEST_HIDDEN')"
         },
         "quest_hidden_by_check": {
           "name": "quest_hidden_by_check",
@@ -6569,6 +6571,283 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.quest_v2_edit_request": {
+      "name": "quest_v2_edit_request",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "quest_id": {
+          "name": "quest_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "previous_condition": {
+          "name": "previous_condition",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "proposed_condition": {
+          "name": "proposed_condition",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_status": {
+          "name": "request_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'EDIT_REQUEST_PENDING'"
+        },
+        "failure_code": {
+          "name": "failure_code",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "applied_at": {
+          "name": "applied_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failed_at": {
+          "name": "failed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "quest_v2_edit_request_quest_idx": {
+          "name": "quest_v2_edit_request_quest_idx",
+          "columns": [
+            {
+              "expression": "quest_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "quest_v2_edit_request_one_pending_uidx": {
+          "name": "quest_v2_edit_request_one_pending_uidx",
+          "columns": [
+            {
+              "expression": "quest_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"quest_v2_edit_request\".\"request_status\" = 'EDIT_REQUEST_PENDING'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "quest_v2_edit_request_quest_id_quest_id_fk": {
+          "name": "quest_v2_edit_request_quest_id_quest_id_fk",
+          "tableFrom": "quest_v2_edit_request",
+          "tableTo": "quest",
+          "columnsFrom": [
+            "quest_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "quest_v2_edit_request_status_check": {
+          "name": "quest_v2_edit_request_status_check",
+          "value": "\"quest_v2_edit_request\".\"request_status\" IN ('EDIT_REQUEST_PENDING', 'EDIT_REQUEST_APPLIED', 'EDIT_REQUEST_FAILED')"
+        },
+        "quest_v2_edit_request_failure_code_check": {
+          "name": "quest_v2_edit_request_failure_code_check",
+          "value": "\"quest_v2_edit_request\".\"failure_code\" IS NULL OR \"quest_v2_edit_request\".\"failure_code\" IN ('EDIT_REQUEST_DECLINED', 'EDIT_REQUEST_TIMEOUT', 'ACTIVE_WORKER_LEFT')"
+        },
+        "quest_v2_edit_request_expiry_check": {
+          "name": "quest_v2_edit_request_expiry_check",
+          "value": "\"quest_v2_edit_request\".\"expires_at\" > \"quest_v2_edit_request\".\"created_at\""
+        },
+        "quest_v2_edit_request_applied_at_check": {
+          "name": "quest_v2_edit_request_applied_at_check",
+          "value": "(\"quest_v2_edit_request\".\"applied_at\" IS NOT NULL) = (\"quest_v2_edit_request\".\"request_status\" = 'EDIT_REQUEST_APPLIED')"
+        },
+        "quest_v2_edit_request_failed_at_check": {
+          "name": "quest_v2_edit_request_failed_at_check",
+          "value": "(\"quest_v2_edit_request\".\"failed_at\" IS NOT NULL) = (\"quest_v2_edit_request\".\"request_status\" = 'EDIT_REQUEST_FAILED')"
+        },
+        "quest_v2_edit_request_failure_status_check": {
+          "name": "quest_v2_edit_request_failure_status_check",
+          "value": "(\"quest_v2_edit_request\".\"failure_code\" IS NOT NULL) = (\"quest_v2_edit_request\".\"request_status\" = 'EDIT_REQUEST_FAILED')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.quest_v2_edit_request_response": {
+      "name": "quest_v2_edit_request_response",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "worker_id": {
+          "name": "worker_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decision": {
+          "name": "decision",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "responded_at": {
+          "name": "responded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "quest_v2_edit_request_response_request_idx": {
+          "name": "quest_v2_edit_request_response_request_idx",
+          "columns": [
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "quest_v2_edit_request_response_worker_idx": {
+          "name": "quest_v2_edit_request_response_worker_idx",
+          "columns": [
+            {
+              "expression": "worker_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "quest_v2_edit_request_response_request_id_quest_v2_edit_request_id_fk": {
+          "name": "quest_v2_edit_request_response_request_id_quest_v2_edit_request_id_fk",
+          "tableFrom": "quest_v2_edit_request_response",
+          "tableTo": "quest_v2_edit_request",
+          "columnsFrom": [
+            "request_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "quest_v2_edit_request_response_worker_id_auth_user_id_fk": {
+          "name": "quest_v2_edit_request_response_worker_id_auth_user_id_fk",
+          "tableFrom": "quest_v2_edit_request_response",
+          "tableTo": "auth_user",
+          "columnsFrom": [
+            "worker_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "quest_v2_edit_request_response_request_worker_key": {
+          "name": "quest_v2_edit_request_response_request_worker_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "request_id",
+            "worker_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "quest_v2_edit_request_response_decision_check": {
+          "name": "quest_v2_edit_request_response_decision_check",
+          "value": "\"quest_v2_edit_request_response\".\"decision\" IS NULL OR \"quest_v2_edit_request_response\".\"decision\" IN ('EDIT_RESPONSE_ACCEPTED', 'EDIT_RESPONSE_DECLINED')"
+        },
+        "quest_v2_edit_request_response_reason_check": {
+          "name": "quest_v2_edit_request_response_reason_check",
+          "value": "\"quest_v2_edit_request_response\".\"reason\" IS NULL OR (\"quest_v2_edit_request_response\".\"decision\" = 'EDIT_RESPONSE_DECLINED' AND btrim(\"quest_v2_edit_request_response\".\"reason\") <> '')"
+        },
+        "quest_v2_edit_request_response_responded_at_check": {
+          "name": "quest_v2_edit_request_response_responded_at_check",
+          "value": "(\"quest_v2_edit_request_response\".\"responded_at\" IS NOT NULL) = (\"quest_v2_edit_request_response\".\"decision\" IS NOT NULL)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.review": {
@@ -8681,7 +8960,24 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "chat_conversation_work_quest_uidx": {
+          "name": "chat_conversation_work_quest_uidx",
+          "columns": [
+            {
+              "expression": "quest_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"chat_conversation\".\"type\" = 'CONVERSATION_WORK'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "chat_conversation_quest_id_quest_id_fk": {
           "name": "chat_conversation_quest_id_quest_id_fk",
@@ -8698,15 +8994,7 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "chat_conversation_quest_id_key": {
-          "name": "chat_conversation_quest_id_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "quest_id"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
         "chat_conversation_title_check": {
@@ -9527,7 +9815,7 @@
         "QUEST_COMPLETED",
         "QUEST_CANCELLED",
         "QUEST_DISPUTED",
-        "QUEST_HIDDEN"
+        "QUEST_FAILED"
       ]
     },
     "public.chat_attachment_status": {
