@@ -70,9 +70,9 @@ const adminRequest = (
   body: JSON.stringify(body),
 }));
 
-const asWorker = () => spyOn(auth.api, 'getSession').mockImplementation((async () => ({
-  user: { id: workerId },
-  session: { userId: workerId },
+const asMember = (memberId: string = workerId) => spyOn(auth.api, 'getSession').mockImplementation((async () => ({
+  user: { id: memberId },
+  session: { userId: memberId },
 })) as never);
 
 const workerRequest = (path: string, headers: HeadersInit = {}, body?: unknown) => app.handle(
@@ -81,6 +81,10 @@ const workerRequest = (path: string, headers: HeadersInit = {}, body?: unknown) 
     headers: body === undefined ? headers : { ...headers, 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   }),
+);
+
+const memberGet = (path: string) => app.handle(
+  new Request(`http://localhost${path}`, { method: 'GET' }),
 );
 
 const hideQuest = (questId: string, version: number) => adminRequest(
@@ -570,7 +574,7 @@ describe('Admin Quest moderation commands', () => {
       .from(quest).where(eq(quest.id, questId));
     expect(hidden).toMatchObject({ hiddenAt: expect.any(Date), apiVersion: 'v2' });
 
-    const session = asWorker();
+    const session = asMember();
     let response: Response;
     try {
       response = await workerRequest(`/api/v1/quests/${questId}/join`, {
@@ -593,7 +597,7 @@ describe('Admin Quest moderation commands', () => {
     const questId = await createQuest('QUEST_OPEN');
     expect((await hideQuest(questId, 1)).status).toBe(200);
 
-    const session = asWorker();
+    const session = asMember();
     let response: Response;
     try {
       response = await workerRequest(`/api/v2/quests/${questId}/join`, {
@@ -616,7 +620,7 @@ describe('Admin Quest moderation commands', () => {
     const questId = await createV1CandidateQuest();
     expect((await hideQuest(questId, 1)).status).toBe(200);
 
-    const session = asWorker();
+    const session = asMember();
     let response: Response;
     try {
       response = await workerRequest(`/api/v1/quests/${questId}/applications`, {}, {});
@@ -635,7 +639,7 @@ describe('Admin Quest moderation commands', () => {
     const questId = await createV1CandidateQuest('GROUP');
     expect((await hideQuest(questId, 1)).status).toBe(200);
 
-    const session = asWorker();
+    const session = asMember();
     let response: Response;
     try {
       response = await workerRequest(`/api/v1/quests/${questId}/teams`, {}, { name: 'Hidden Quest Team' });
@@ -665,7 +669,7 @@ describe('Admin Quest moderation commands', () => {
     });
     expect((await hideQuest(questId, 1)).status).toBe(200);
 
-    const session = asWorker();
+    const session = asMember();
     let response: Response;
     try {
       response = await workerRequest(`/api/v1/quests/invitations/${invitationId}/accept`);
@@ -686,7 +690,7 @@ describe('Admin Quest moderation commands', () => {
     const questId = await createV2CandidateSingleQuest();
     expect((await hideQuest(questId, 1)).status).toBe(200);
 
-    const session = asWorker();
+    const session = asMember();
     let response: Response;
     try {
       response = await workerRequest(
@@ -720,7 +724,7 @@ describe('Admin Quest moderation commands', () => {
     });
     expect((await hideQuest(questId, 1)).status).toBe(200);
 
-    const session = asWorker();
+    const session = asMember();
     let response: Response;
     try {
       response = await workerRequest(`/api/v1/quests/invitations/${invitationId}/decline`);
@@ -732,6 +736,74 @@ describe('Admin Quest moderation commands', () => {
       status: 200,
       body: { success: true, data: { invitationStatus: 'INVITATION_DECLINED' } },
     });
+  });
+
+  it('refuses a new Team invitation once an Admin has hidden the Quest', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV1CandidateQuest('GROUP');
+    const teamId = randomUUID();
+    await db.insert(questTeam).values({ id: teamId, questId, leaderId: teamLeaderId, name: 'Hidden Quest Team' });
+    await db.insert(questTeamMember).values({ teamId, userId: teamLeaderId });
+    expect((await hideQuest(questId, 1)).status).toBe(200);
+
+    const session = asMember(teamLeaderId);
+    let response: Response;
+    try {
+      response = await workerRequest(
+        `/api/v1/quests/${questId}/teams/${teamId}/invitations`,
+        {},
+        { invitedUserId: workerId },
+      );
+    } finally {
+      session.mockRestore();
+    }
+
+    expect({ status: response.status, body: await response.json() }).toMatchObject({
+      status: 404,
+      body: { success: false, error: { code: 'INVITATION_NOT_FOUND' } },
+    });
+    expect(await db.select({ id: questTeamInvitation.id })
+      .from(questTeamInvitation).where(eq(questTeamInvitation.teamId, teamId))).toEqual([]);
+  });
+
+  it('hides a pending invitation from Member reads once an Admin has hidden the Quest', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV1CandidateQuest('GROUP');
+    const teamId = randomUUID();
+    const invitationId = randomUUID();
+    await db.insert(questTeam).values({ id: teamId, questId, leaderId: teamLeaderId, name: 'Hidden Quest Team' });
+    await db.insert(questTeamMember).values({ teamId, userId: teamLeaderId });
+    await db.insert(questTeamInvitation).values({
+      id: invitationId,
+      teamId,
+      invitedUserId: workerId,
+      invitedByUserId: teamLeaderId,
+      expiresAt: new Date('2035-01-01T00:00:00.000Z'),
+    });
+
+    const before = asMember();
+    let listedBefore: { data: { items: unknown[] } };
+    try {
+      listedBefore = await (await memberGet('/api/v1/quests/invitations')).json() as typeof listedBefore;
+    } finally {
+      before.mockRestore();
+    }
+    expect(listedBefore.data.items).toHaveLength(1);
+
+    expect((await hideQuest(questId, 1)).status).toBe(200);
+
+    const after = asMember();
+    let listResponse: Response;
+    let detailResponse: Response;
+    try {
+      listResponse = await memberGet('/api/v1/quests/invitations');
+      detailResponse = await memberGet(`/api/v1/quests/invitations/${invitationId}`);
+    } finally {
+      after.mockRestore();
+    }
+
+    expect(await listResponse.json()).toMatchObject({ success: true, data: { items: [] } });
+    expect(detailResponse.status).toBe(404);
   });
 
   it('rejects unsupported Admin approval operations and invalid reason codes', async () => {

@@ -11,7 +11,7 @@ import {
   questTeamMember,
 } from '@/database/schema/quest.schema';
 
-import { and, asc, eq, exists, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, eq, exists, inArray, isNull, or, sql } from 'drizzle-orm';
 
 import {
   getQuestWorkChatMembershipWriter,
@@ -292,7 +292,9 @@ const selectInvitation = async (database: Database, questId: string, teamId: str
 
 export const createInvitation = async (leaderId: string, questId: string, teamId: string, data: InvitationCreateInput, now = new Date()): Promise<InvitationOutcome> => db.transaction(async (tx) => {
   const current = await lockQuest(tx, questId);
-  if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.group || current.questStatus !== questStatus.open) return { outcome: 'not-found' };
+  // Inviting reaches a Member who has no relationship to the Quest yet, so a hidden
+  // Quest refuses it the same way a Quest that is not open does.
+  if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.group || current.questStatus !== questStatus.open || current.hiddenAt !== null) return { outcome: 'not-found' };
   const team = await selectTeamForUser(tx, leaderId, questId, teamId, true);
   if (!team || team.leaderId !== leaderId || team.teamStatus !== teamStatus.forming || data.invitedUserId === leaderId || data.invitedUserId === current.hirerId) return { outcome: 'not-eligible' };
   const [pending] = await tx.select({ id: questTeamInvitation.id }).from(questTeamInvitation).where(and(eq(questTeamInvitation.teamId, teamId), eq(questTeamInvitation.invitedUserId, data.invitedUserId), eq(questTeamInvitation.invitationStatus, 'INVITATION_PENDING'))).limit(1);
@@ -310,7 +312,7 @@ export const listTeamInvitations = async (leaderId: string, questId: string, tea
   return db.select(invitationFields).from(questTeamInvitation).where(and(eq(questTeamInvitation.teamId, teamId), eq(questTeamInvitation.invitationStatus, 'INVITATION_PENDING'))).orderBy(asc(questTeamInvitation.createdAt), asc(questTeamInvitation.id));
 };
 
-export const listOwnInvitations = async (userId: string) => db.select(invitationFields).from(questTeamInvitation).innerJoin(questTeam, eq(questTeamInvitation.teamId, questTeam.id)).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeamInvitation.invitedUserId, userId), eq(quest.apiVersion, questApiVersion.v1), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`)).orderBy(asc(questTeamInvitation.createdAt), asc(questTeamInvitation.id));
+export const listOwnInvitations = async (userId: string) => db.select(invitationFields).from(questTeamInvitation).innerJoin(questTeam, eq(questTeamInvitation.teamId, questTeam.id)).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeamInvitation.invitedUserId, userId), eq(quest.apiVersion, questApiVersion.v1), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`)).orderBy(asc(questTeamInvitation.createdAt), asc(questTeamInvitation.id));
 
 export const revokeInvitation = async (leaderId: string, questId: string, teamId: string, invitationId: string, now = new Date()): Promise<InvitationOutcome> => db.transaction(async (tx) => {
   const current = await lockQuest(tx, questId);
@@ -353,7 +355,7 @@ const respondToInvitation = async (userId: string, invitationId: string, respons
 
 export const acceptInvitation = (userId: string, invitationId: string, now = new Date()) => respondToInvitation(userId, invitationId, 'INVITATION_ACCEPTED', now);
 export const declineInvitation = (userId: string, invitationId: string, now = new Date()) => respondToInvitation(userId, invitationId, 'INVITATION_DECLINED', now);
-export const getOwnInvitation = async (userId: string, invitationId: string) => db.select(invitationFields).from(questTeamInvitation).innerJoin(questTeam, eq(questTeamInvitation.teamId, questTeam.id)).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeamInvitation.id, invitationId), eq(questTeamInvitation.invitedUserId, userId), eq(quest.apiVersion, questApiVersion.v1), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`)).limit(1).then(([row]) => row);
+export const getOwnInvitation = async (userId: string, invitationId: string) => db.select(invitationFields).from(questTeamInvitation).innerJoin(questTeam, eq(questTeamInvitation.teamId, questTeam.id)).innerJoin(quest, eq(questTeam.questId, quest.id)).where(and(eq(questTeamInvitation.id, invitationId), eq(questTeamInvitation.invitedUserId, userId), eq(quest.apiVersion, questApiVersion.v1), eq(quest.mode, questMode.candidate), eq(quest.participation, questParticipation.group), eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt), sql`${questTeam.teamStatus} <> ${teamStatus.disbanded}`)).limit(1).then(([row]) => row);
 
 export type CandidateSelectionTarget =
   | { type: 'APPLICATION'; id: string }
