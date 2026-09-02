@@ -56,7 +56,9 @@ export const chatConversation = pgTable(
     updatedAt: time('updated_at').defaultNow().notNull(),
   },
   (table) => [
-    unique('chat_conversation_quest_id_key').on(table.questId),
+    uniqueIndex('chat_conversation_work_quest_uidx')
+      .on(table.questId)
+      .where(sql`${table.type} = 'CONVERSATION_WORK'`),
     check('chat_conversation_title_check', sql`btrim(${table.questTitle}) <> ''`),
     check('chat_conversation_status_snapshot_check', sql`btrim(${table.questStatus}) <> ''`),
     check('chat_conversation_next_sequence_check', sql`${table.nextSequence} > 0`),

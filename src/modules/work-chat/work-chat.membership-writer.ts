@@ -180,7 +180,10 @@ const findConversation = async (transaction: QuestTransaction, questId: string) 
       readOnlyAt: chatConversation.readOnlyAt,
     })
     .from(chatConversation)
-    .where(eq(chatConversation.questId, questId))
+    .where(and(
+      eq(chatConversation.questId, questId),
+      eq(chatConversation.type, 'CONVERSATION_WORK'),
+    ))
     .limit(1)
     .for('update');
 
@@ -212,7 +215,7 @@ const ensureConversation = async (transaction: QuestTransaction, questId: string
       questTitle: questRow.title,
       questStatus: questRow.questStatus,
     })
-    .onConflictDoNothing({ target: chatConversation.questId });
+    .onConflictDoNothing();
 
   const created = await findConversation(transaction, questId);
   if (!created) throw new Error('Work Conversation could not be created');
