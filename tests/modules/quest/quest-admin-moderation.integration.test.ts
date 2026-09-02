@@ -2,7 +2,14 @@ import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { adminAction } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
-import { quest, questAssignment, questConditionItem } from '@/database/schema/quest.schema';
+import {
+  quest,
+  questAssignment,
+  questConditionItem,
+  questTeam,
+  questTeamInvitation,
+  questTeamMember,
+} from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
   chatConversation,
@@ -40,6 +47,7 @@ let adminId = '';
 const tagId = randomUUID();
 const hirerId = randomUUID();
 const workerId = randomUUID();
+const teamLeaderId = randomUUID();
 const questIds: string[] = [];
 const adminEmail = `${randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';
@@ -67,8 +75,12 @@ const asWorker = () => spyOn(auth.api, 'getSession').mockImplementation((async (
   session: { userId: workerId },
 })) as never);
 
-const workerRequest = (path: string, headers: HeadersInit = {}) => app.handle(
-  new Request(`http://localhost${path}`, { method: 'POST', headers }),
+const workerRequest = (path: string, headers: HeadersInit = {}, body?: unknown) => app.handle(
+  new Request(`http://localhost${path}`, {
+    method: 'POST',
+    headers: body === undefined ? headers : { ...headers, 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }),
 );
 
 const hideQuest = (questId: string, version: number) => adminRequest(
@@ -135,6 +147,28 @@ const createQuest = async (
   });
   return questId;
 };
+
+const createV1CandidateQuest = async (participation: 'SOLO' | 'GROUP' = 'SOLO') => {
+  const questId = randomUUID();
+  questIds.push(questId);
+  await db.insert(quest).values({
+    id: questId,
+    hirerId,
+    apiVersion: 'v1',
+    title: `Admin moderation v1 ${questId}`,
+    condition: 'Complete the work',
+    mode: 'CANDIDATE',
+    participation,
+    rewardSatang: 1_000,
+    questStatus: 'QUEST_OPEN',
+    tagId,
+    headcount: participation === 'GROUP' ? 2 : 1,
+    startTime: new Date('2035-01-01T00:00:00.000Z'),
+    dueAt: new Date('2035-01-01T02:00:00.000Z'),
+  });
+  return questId;
+};
+
 const createInProgressQuestWithChat = async () => {
   const questId = await createQuest('QUEST_IN_PROGRESS');
   const assignmentId = randomUUID();
@@ -178,6 +212,7 @@ beforeAll(async () => {
   await db.insert(authUser).values([
     { id: hirerId, email: `${hirerId}@ku.th`, firstName: 'Admin', lastName: 'Hirer' },
     { id: workerId, email: `${workerId}@ku.th`, firstName: 'Admin', lastName: 'Worker' },
+    { id: teamLeaderId, email: `${teamLeaderId}@ku.th`, firstName: 'Admin', lastName: 'Leader' },
   ]);
   await db.insert(tag).values({ id: tagId, name: `Admin moderation ${tagId}` });
   const seedAuth = createAdminAuth({ allowSignUp: true, autoSignIn: false, markEmailVerified: true });
@@ -548,6 +583,76 @@ describe('Admin Quest moderation commands', () => {
     });
     expect(await db.select({ id: questAssignment.id })
       .from(questAssignment).where(eq(questAssignment.questId, questId))).toEqual([]);
+  });
+
+  it('refuses a Candidate application once an Admin has hidden the Quest', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV1CandidateQuest();
+    expect((await hideQuest(questId, 1)).status).toBe(200);
+
+    const session = asWorker();
+    let response: Response;
+    try {
+      response = await workerRequest(`/api/v1/quests/${questId}/applications`, {}, {});
+    } finally {
+      session.mockRestore();
+    }
+
+    expect({ status: response.status, body: await response.json() }).toMatchObject({
+      status: 404,
+      body: { success: false, error: { code: 'QUEST_NOT_FOUND' } },
+    });
+  });
+
+  it('refuses a Candidate Team once an Admin has hidden the Quest', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV1CandidateQuest('GROUP');
+    expect((await hideQuest(questId, 1)).status).toBe(200);
+
+    const session = asWorker();
+    let response: Response;
+    try {
+      response = await workerRequest(`/api/v1/quests/${questId}/teams`, {}, { name: 'Hidden Quest Team' });
+    } finally {
+      session.mockRestore();
+    }
+
+    expect({ status: response.status, body: await response.json() }).toMatchObject({
+      status: 404,
+      body: { success: false, error: { code: 'QUEST_NOT_FOUND' } },
+    });
+  });
+
+  it('refuses a Team invitation response once an Admin has hidden the Quest', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV1CandidateQuest('GROUP');
+    const teamId = randomUUID();
+    const invitationId = randomUUID();
+    await db.insert(questTeam).values({ id: teamId, questId, leaderId: teamLeaderId, name: 'Hidden Quest Team' });
+    await db.insert(questTeamMember).values({ teamId, userId: teamLeaderId });
+    await db.insert(questTeamInvitation).values({
+      id: invitationId,
+      teamId,
+      invitedUserId: workerId,
+      invitedByUserId: teamLeaderId,
+      expiresAt: new Date('2035-01-01T00:00:00.000Z'),
+    });
+    expect((await hideQuest(questId, 1)).status).toBe(200);
+
+    const session = asWorker();
+    let response: Response;
+    try {
+      response = await workerRequest(`/api/v1/quests/invitations/${invitationId}/accept`);
+    } finally {
+      session.mockRestore();
+    }
+
+    expect({ status: response.status, body: await response.json() }).toMatchObject({
+      status: 409,
+      body: { success: false, error: { code: 'INVITATION_NOT_ALLOWED' } },
+    });
+    expect(await db.select({ userId: questTeamMember.userId })
+      .from(questTeamMember).where(and(eq(questTeamMember.teamId, teamId), eq(questTeamMember.userId, workerId)))).toEqual([]);
   });
 
   it('rejects unsupported Admin approval operations and invalid reason codes', async () => {

@@ -100,13 +100,16 @@ const lockQuest = async (tx: Tx, questId: string) => {
     participation: quest.participation,
     questStatus: quest.questStatus,
     headcount: quest.headcount,
+    hiddenAt: quest.hiddenAt,
   }).from(quest).where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v1))).limit(1).for('update');
   return row;
 };
 
 export const createApplication = async (workerId: string, questId: string, data: ApplicationCreateInput, now = new Date()): Promise<CandidateOutcome> => db.transaction(async (tx) => {
   const current = await lockQuest(tx, questId);
-  if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.solo || current.questStatus !== questStatus.open || current.hirerId === workerId) return { outcome: 'not-eligible' };
+  // A hidden Quest is out of reach for Members, so it refuses an application the same
+  // way a Quest that is not open does.
+  if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.solo || current.questStatus !== questStatus.open || current.hiddenAt !== null || current.hirerId === workerId) return { outcome: 'not-eligible' };
   const [existing] = await tx.select({ id: questApplication.id }).from(questApplication).where(and(eq(questApplication.questId, questId), eq(questApplication.workerId, workerId))).limit(1);
   if (existing) return { outcome: 'already-exists' };
   const [row] = await tx.insert(questApplication).values({ questId, workerId, reworkLimit: data.reworkLimit ?? 0, appliedAt: now }).returning(applicationFields);
@@ -169,7 +172,9 @@ const teamAccess = (userId: string) => or(eq(quest.hirerId, userId), teamMemberA
 
 export const createTeam = async (leaderId: string, questId: string, data: TeamCreateInput, now = new Date()): Promise<TeamOutcome> => db.transaction(async (tx) => {
   const current = await lockQuest(tx, questId);
-  if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.group || current.questStatus !== questStatus.open || current.hirerId === leaderId) return { outcome: 'not-eligible' };
+  // A hidden Quest is out of reach for Members, so it refuses a Team the same way a
+  // Quest that is not open does.
+  if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.group || current.questStatus !== questStatus.open || current.hiddenAt !== null || current.hirerId === leaderId) return { outcome: 'not-eligible' };
   if (!(await ensureNoMembership(tx, questId, leaderId))) return { outcome: 'already-exists' };
   const [team] = await tx.insert(questTeam).values({ questId, leaderId, name: data.name, reworkLimit: data.reworkLimit ?? 0, createdAt: now }).returning(teamFields);
   await tx.insert(questTeamMember).values({ teamId: team.id, userId: leaderId, joinedAt: now });
@@ -324,7 +329,9 @@ const respondToInvitation = async (userId: string, invitationId: string, respons
   const [identity] = await tx.select({ questId: questTeam.questId, teamId: questTeam.id }).from(questTeamInvitation).innerJoin(questTeam, eq(questTeamInvitation.teamId, questTeam.id)).where(and(eq(questTeamInvitation.id, invitationId), eq(questTeamInvitation.invitedUserId, userId))).limit(1);
   if (!identity) return { outcome: 'not-found' };
   const current = await lockQuest(tx, identity.questId);
-  if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.group || current.questStatus !== questStatus.open) return { outcome: 'not-eligible' };
+  // A hidden Quest is out of reach for Members, so it refuses an invitation response
+  // the same way a Quest that is not open does.
+  if (!current || current.mode !== questMode.candidate || current.participation !== questParticipation.group || current.questStatus !== questStatus.open || current.hiddenAt !== null) return { outcome: 'not-eligible' };
   const team = await tx.select(teamFields).from(questTeam).where(eq(questTeam.id, identity.teamId)).limit(1).for('update');
   if (!team[0]) return { outcome: 'not-found' };
   const row = await tx.select(invitationFields).from(questTeamInvitation).where(eq(questTeamInvitation.id, invitationId)).limit(1).for('update');
