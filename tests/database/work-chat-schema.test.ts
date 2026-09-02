@@ -17,8 +17,11 @@ describe('Work Chat database schema', () => {
     expect(columns.type.name).toBe('type');
     expect(columns.questTitle.name).toBe('quest_title');
     expect(columns.questStatus.name).toBe('quest_status');
-    expect(getTableConfig(chatConversation).uniqueConstraints).toHaveLength(1);
-    expect(getTableConfig(chatConversation).foreignKeys).toHaveLength(1);
+    const config = getTableConfig(chatConversation);
+    expect(config.uniqueConstraints).toHaveLength(0);
+    expect(config.indexes).toHaveLength(1);
+    expect(config.indexes[0]?.config.name).toBe('chat_conversation_work_quest_uidx');
+    expect(config.foreignKeys).toHaveLength(1);
   });
 
   it('stores Assignment-scoped inclusive Chat Membership windows', () => {
