@@ -527,6 +527,29 @@ describe('Admin Quest moderation commands', () => {
       .from(questAssignment).where(eq(questAssignment.questId, questId))).toEqual([]);
   });
 
+  it('refuses a v2 direct join once an Admin has hidden the Quest', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest('QUEST_OPEN');
+    expect((await hideQuest(questId, 1)).status).toBe(200);
+
+    const session = asWorker();
+    let response: Response;
+    try {
+      response = await workerRequest(`/api/v2/quests/${questId}/join`, {
+        'idempotency-key': `join-v2-hidden-${questId}`,
+      });
+    } finally {
+      session.mockRestore();
+    }
+
+    expect({ status: response.status, body: await response.json() }).toMatchObject({
+      status: 409,
+      body: { success: false, error: { code: 'QUEST_NOT_OPEN' } },
+    });
+    expect(await db.select({ id: questAssignment.id })
+      .from(questAssignment).where(eq(questAssignment.questId, questId))).toEqual([]);
+  });
+
   it('rejects unsupported Admin approval operations and invalid reason codes', async () => {
     if (!postgresAvailable) return;
     const questId = await createQuest('QUEST_OPEN');
