@@ -1,7 +1,7 @@
 import { app } from '@/app';
 import { db, sql as postgresSql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { quest, questCandidateApplicationV2 } from '@/database/schema/quest.schema';
+import { quest, questAssignment, questCandidateApplicationV2 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import {
@@ -112,6 +112,14 @@ const createOpenCandidateQuest = async (overrides: Partial<typeof quest.$inferIn
   return id;
 };
 
+const hashRequest = async (value: object) => {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(value)),
+  );
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
 beforeAll(async () => {
   try {
     await postgresSql`select 1`;
@@ -163,6 +171,72 @@ afterAll(async () => {
 });
 
 describe('Quest Candidate API v2', () => {
+  it('does not accept Candidate application commands after the start boundary', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenCandidateQuest({
+      startTime: new Date('2020-01-01T10:00:00.000Z'),
+    });
+    authenticate();
+
+    const response = await request(
+      `/api/v2/quests/${questId}/applications`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': 'candidate-v2-after-start-create' },
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe('QUEST_NOT_OPEN');
+    expect(await db.select().from(questCandidateApplicationV2).where(eq(questCandidateApplicationV2.questId, questId))).toHaveLength(0);
+  });
+
+  it('does not withdraw or select a Candidate application after the start boundary', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+
+    const withdrawQuestId = await createOpenCandidateQuest();
+    const withdrawApplication = await request(
+      `/api/v2/quests/${withdrawQuestId}/applications`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': 'candidate-v2-after-start-withdraw-apply' },
+    );
+    const withdrawApplicationId = (await withdrawApplication.json()).data.id as string;
+    await db.update(quest)
+      .set({ startTime: new Date('2020-01-01T10:00:00.000Z') })
+      .where(eq(quest.id, withdrawQuestId));
+
+    const withdraw = await request(
+      `/api/v2/quests/${withdrawQuestId}/applications/${withdrawApplicationId}/withdraw`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': 'candidate-v2-after-start-withdraw' },
+    );
+    expect(withdraw.status).toBe(409);
+    expect((await withdraw.json()).error.code).toBe('QUEST_NOT_OPEN');
+
+    const selectQuestId = await createOpenCandidateQuest();
+    const selectApplication = await request(
+      `/api/v2/quests/${selectQuestId}/applications`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': 'candidate-v2-after-start-select-apply' },
+    );
+    const selectApplicationId = (await selectApplication.json()).data.id as string;
+    await db.update(quest)
+      .set({ startTime: new Date('2020-01-01T10:00:00.000Z') })
+      .where(eq(quest.id, selectQuestId));
+
+    const select = await request(
+      `/api/v2/quests/${selectQuestId}/applications/${selectApplicationId}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-v2-after-start-select' },
+    );
+    expect(select.status).toBe(409);
+    expect((await select.json()).error.code).toBe('QUEST_NOT_OPEN');
+    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, selectQuestId))).toHaveLength(0);
+  });
+
   it('allows a Prospective Worker to apply and replays the application command', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenCandidateQuest();
@@ -200,6 +274,13 @@ describe('Quest Candidate API v2', () => {
     expect(applications).toHaveLength(1);
     expect(applications[0]?.memberId).toBe(candidate.id);
     expect(transitions).toHaveLength(0);
+
+    const assignmentRead = await request(`/api/v2/quests/${questId}/assignments`, 'GET', candidate.id);
+    expect(assignmentRead.status).toBe(404);
+    expect((await assignmentRead.json()).error.code).toBe('QUEST_NOT_FOUND');
+    const mine = await request('/api/v2/assignments/mine', 'GET', candidate.id);
+    expect(mine.status).toBe(200);
+    expect((await mine.json()).data.items).toHaveLength(0);
   });
 
   it('lets the owning Hirer list applications and a Candidate read only that Candidate application', async () => {
@@ -804,5 +885,35 @@ describe('Quest Candidate API v2', () => {
     );
     expect(blank.status).toBe(400);
     expect((await blank.json()).error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+  });
+
+  it('returns IDEMPOTENCY_IN_PROGRESS for an unfinished Candidate application command', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenCandidateQuest();
+    const key = 'candidate-v2-in-progress';
+    await db.insert(walletIdempotencyKey).values({
+      principalUserId: candidate.id,
+      operationScope: 'quest.v2.candidate-application.create',
+      key,
+      requestHash: await hashRequest({
+        authenticatedMemberId: candidate.id,
+        operation: 'quest.v2.candidate-application.create',
+        path: '/api/v2/quests/:questId/applications',
+        questId,
+        body: {},
+      }),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+    });
+    authenticate();
+
+    const response = await request(
+      `/api/v2/quests/${questId}/applications`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': key },
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe('IDEMPOTENCY_IN_PROGRESS');
+    expect(await db.select().from(questCandidateApplicationV2).where(eq(questCandidateApplicationV2.questId, questId))).toHaveLength(0);
   });
 });

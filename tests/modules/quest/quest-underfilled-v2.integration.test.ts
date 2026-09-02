@@ -6,9 +6,15 @@ import {
   questAssignment,
   questSettlementCommand,
   questV2UnderfilledConsent,
+  questV2UnderfilledDecision,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletFundingReservation, walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
+import {
+  walletFundingReservation,
+  walletIdempotencyKey,
+  walletLedgerAccount,
+  walletWallet,
+} from '@/database/schema/wallet.schema';
 import { auth } from '@/modules/auth';
 import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
@@ -110,7 +116,19 @@ const fundHirer = async (amountSatang: number) => {
   });
 };
 
-const createQuest = async (workerIds: string[], reserve = false) => {
+const hashRequest = async (value: object) => {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(value)),
+  );
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
+const createQuest = async (
+  workerIds: string[],
+  reserve = false,
+  startTime = new Date(Date.now() - 1_000),
+) => {
   const now = new Date();
   const questId = randomUUID();
   questIds.push(questId);
@@ -130,7 +148,7 @@ const createQuest = async (workerIds: string[], reserve = false) => {
     questEscrowSatang: 16_000,
     tagId,
     headcount: 4,
-    startTime: new Date(now.getTime() - 1_000),
+    startTime,
     dueAt: new Date(now.getTime() + 60 * 60 * 1_000),
   });
   await db.insert(questAssignment).values(workerIds.map((workerId, index) => ({
@@ -192,6 +210,27 @@ afterAll(async () => {
 });
 
 describe('Quest underfilled GROUP + FCFS API v2', () => {
+  it('does not let an unrelated Member create or access the underfilled process', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest([workers[0].id]);
+
+    const unrelatedGet = await request(`/api/v2/quests/${questId}/underfilled`, 'GET', workers[1].id);
+    expect(unrelatedGet.status).toBe(404);
+    expect((await unrelatedGet.json()).error.code).toBe('QUEST_UNDERFILLED_NOT_FOUND');
+    expect(await db.select().from(questV2UnderfilledDecision).where(eq(questV2UnderfilledDecision.questId, questId))).toHaveLength(0);
+
+    const unrelatedConsent = await request(
+      `/api/v2/quests/${questId}/underfilled/consent`,
+      'POST',
+      workers[1].id,
+      { decision: 'ACCEPT' },
+      { 'idempotency-key': 'underfilled-unrelated-consent' },
+    );
+    expect(unrelatedConsent.status).toBe(404);
+    expect((await unrelatedConsent.json()).error.code).toBe('QUEST_UNDERFILLED_NOT_FOUND');
+    expect(await db.select().from(questV2UnderfilledDecision).where(eq(questV2UnderfilledDecision.questId, questId))).toHaveLength(0);
+  });
+
   it('opens the decision window at startTime and keeps the Quest OPEN', async () => {
     if (!postgresAvailable) return;
     const questId = await createQuest([workers[0].id]);
@@ -223,6 +262,21 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
     expect(lateJoin.status).toBe(409);
     expect((await lateJoin.json()).error.code).toBe('QUEST_ROSTER_FROZEN');
     expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status).toBe('QUEST_OPEN');
+  });
+
+  it('does not reopen an expired decision window when lifecycle detection is late', async () => {
+    if (!postgresAvailable) return;
+    const now = new Date();
+    const questId = await createQuest(
+      [workers[0].id],
+      true,
+      new Date(now.getTime() - 11 * 60 * 1_000),
+    );
+
+    const result = await detect(now);
+    expect(result.autoCancelledQuestIds).toContain(questId);
+    expect(result.underfilledQuestIds).not.toContain(questId);
+    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status).toBe('QUEST_CANCELLED');
   });
 
   it('lets the Hirer proceed, exposes the exact revised Reward, and replays the decision command', async () => {
@@ -262,6 +316,16 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
     );
     expect(replay.status).toBe(200);
     expect((await replay.json()).data).toEqual(firstBody.data);
+
+    const changed = await request(
+      `/api/v2/quests/${questId}/underfilled/decision`,
+      'POST',
+      hirer.id,
+      { decision: 'CANCEL' },
+      { 'idempotency-key': 'underfilled-proceed' },
+    );
+    expect(changed.status).toBe(409);
+    expect((await changed.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
   });
 
   it('requires unanimous Worker consent, allocates the original pool, and freezes the roster', async () => {
@@ -303,6 +367,16 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       headcount: 4,
       state: 'QUEST_ASSIGNED',
     });
+
+    const changedConsent = await request(
+      `/api/v2/quests/${questId}/underfilled/consent`,
+      'POST',
+      workers[0].id,
+      { decision: 'DECLINE' },
+      { 'idempotency-key': 'underfilled-consent-0' },
+    );
+    expect(changedConsent.status).toBe(409);
+    expect((await changedConsent.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
 
     const afterConsentWindow = await getQuestV2Underfilled(
       hirer.id,
@@ -408,6 +482,36 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
     });
     expect(result.timedOutUnderfilledQuestIds).toContain(timeoutQuestId);
     expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, timeoutQuestId)))[0]?.status).toBe('QUEST_CANCELLED');
+  });
+
+  it('returns IDEMPOTENCY_IN_PROGRESS for an unfinished underfilled command', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest([workers[0].id]);
+    const key = 'underfilled-v2-in-progress';
+    await db.insert(walletIdempotencyKey).values({
+      principalUserId: hirer.id,
+      operationScope: 'quest.v2.underfilled.decision',
+      key,
+      requestHash: await hashRequest({
+        authenticatedMemberId: hirer.id,
+        operation: 'quest.v2.underfilled.decision',
+        path: '/api/v2/quests/:questId/underfilled/decision',
+        questId,
+        body: { decision: 'PROCEED' },
+      }),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+    });
+
+    const response = await request(
+      `/api/v2/quests/${questId}/underfilled/decision`,
+      'POST',
+      hirer.id,
+      { decision: 'PROCEED' },
+      { 'idempotency-key': key },
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe('IDEMPOTENCY_IN_PROGRESS');
+    expect(await db.select().from(questV2UnderfilledDecision).where(eq(questV2UnderfilledDecision.questId, questId))).toHaveLength(0);
   });
 
   it('publishes authenticated, actor-scoped underfilled operations', async () => {

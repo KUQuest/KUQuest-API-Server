@@ -143,6 +143,14 @@ const createOpenGroupCandidateQuest = async (
   return id;
 };
 
+const hashRequest = async (value: object) => {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(value)),
+  );
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
 const createTeam = async (
   questId: string,
   leaderId = candidate.id,
@@ -250,6 +258,25 @@ afterAll(async () => {
 });
 
 describe('Quest Candidate Team API v2', () => {
+  it('does not accept Candidate Team commands after the start boundary', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest({
+      startTime: new Date('2020-01-01T10:00:00.000Z'),
+    });
+    authenticate();
+
+    const response = await request(
+      `/api/v2/quests/${questId}/teams`,
+      'POST',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-after-start-create' },
+      JSON.stringify({ headcount: 2 }),
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe('QUEST_NOT_OPEN');
+    expect(await db.select().from(questCandidateTeamV2).where(eq(questCandidateTeamV2.questId, questId))).toHaveLength(0);
+  });
+
   it('publishes the V2 Candidate Team contract and keeps Join Code plaintext out of reads', async () => {
     const response = await request('/openapi/json');
     const document = await response.json() as {
@@ -1060,5 +1087,35 @@ describe('Quest Candidate Team API v2', () => {
     expect((await v2Response.json()).error.code).toBe('QUEST_NOT_FOUND');
 
     expect(await db.select().from(questCandidateTeamV2Member).where(eq(questCandidateTeamV2Member.memberId, candidate.id))).toHaveLength(0);
+  });
+
+  it('returns IDEMPOTENCY_IN_PROGRESS for an unfinished Candidate Team command', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    const key = 'candidate-team-v2-in-progress';
+    await db.insert(walletIdempotencyKey).values({
+      principalUserId: candidate.id,
+      operationScope: 'quest.v2.candidate-team.create',
+      key,
+      requestHash: await hashRequest({
+        authenticatedMemberId: candidate.id,
+        operation: 'quest.v2.candidate-team.create',
+        path: '/api/v2/quests/:questId/teams',
+        body: { questId, headcount: 2 },
+      }),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+    });
+    authenticate();
+
+    const response = await request(
+      `/api/v2/quests/${questId}/teams`,
+      'POST',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': key },
+      JSON.stringify({ headcount: 2 }),
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe('IDEMPOTENCY_IN_PROGRESS');
+    expect(await db.select().from(questCandidateTeamV2).where(eq(questCandidateTeamV2.questId, questId))).toHaveLength(0);
   });
 });

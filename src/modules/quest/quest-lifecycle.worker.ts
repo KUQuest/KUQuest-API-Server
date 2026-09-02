@@ -308,7 +308,7 @@ export const cancelDueUnfilledQuests = async (now = new Date(), limit = DEFAULT_
     'auto-cancel',
     async (id) => {
       const detected = await detectQuestV2Underfilled(id, now);
-      if (detected.underfilled) return false;
+      if (detected.underfilled) return expireQuestV2Underfilled(id, now);
       const result = await cancelUnfilledQuest(id, now);
       return 'questStatus' in result && result.outcome === 'CANCELLED' && !result.replayed;
     },
@@ -323,8 +323,9 @@ const processDueUnderfilledQuest = async (
 ): Promise<boolean> => {
   const detected = await detectQuestV2Underfilled(questId, now);
   if (detected.underfilled) {
-    underfilledQuestIds.push(questId);
-    return false;
+    const expired = await expireQuestV2Underfilled(questId, now);
+    if (!expired) underfilledQuestIds.push(questId);
+    return expired;
   }
   const result = await cancelUnfilledQuest(questId, now);
   return 'questStatus' in result && result.outcome === 'CANCELLED' && !result.replayed;

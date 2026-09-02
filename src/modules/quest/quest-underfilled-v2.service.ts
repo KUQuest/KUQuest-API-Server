@@ -254,6 +254,24 @@ const activeAssignments = async (transaction: QuestTransaction, questId: string)
   .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id))
   .for('update');
 
+const hasActiveAssignment = async (
+  transaction: QuestTransaction,
+  questId: string,
+  workerId: string,
+) => {
+  const [assignment] = await transaction
+    .select({ id: questAssignment.id })
+    .from(questAssignment)
+    .where(and(
+      eq(questAssignment.questId, questId),
+      eq(questAssignment.workerId, workerId),
+      eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
+    ))
+    .limit(1)
+    .for('update');
+  return Boolean(assignment);
+};
+
 const isDueUnderfilledQuest = (current: QuestRow, now: Date) =>
   current.apiVersion === questApiVersion.v2 &&
   current.v2Mode === questV2Mode.firstComeFirstServed &&
@@ -290,8 +308,8 @@ const createDecisionInTransaction = async (
       activeWorkerCount: assignments.length,
       workerRewardPoolSatang,
       state: 'UNDERFILLED_DECISION_PENDING',
-      decisionExpiresAt: new Date(now.getTime() + WINDOW_MILLISECONDS),
-      detectedAt: now,
+      decisionExpiresAt: new Date(current.startTime.getTime() + WINDOW_MILLISECONDS),
+      detectedAt: current.startTime,
     })
     .returning();
   if (!created) return { underfilled: false, created: false };
@@ -495,6 +513,10 @@ const materialize = async (
 ): Promise<QuestV2UnderfilledData | { outcome: OutcomeCode }> => {
   let current = await lockQuest(transaction, questId);
   if (!current) return { outcome: 'not-found' };
+  const isHirer = current.hirerId === memberId;
+  if (!isHirer && !(await hasActiveAssignment(transaction, questId, memberId))) {
+    return { outcome: 'not-authorized' };
+  }
   let decision = await selectDecision(transaction, questId, true);
   if (!decision) {
     const created = await createDecisionInTransaction(transaction, current, now);
@@ -503,7 +525,6 @@ const materialize = async (
   }
   if (!decision) return { outcome: 'not-underfilled' };
 
-  const isHirer = current.hirerId === memberId;
   const ownResponse = (await selectConsents(transaction, decision.id)).find(({ workerId }) => workerId === memberId);
   if (!isHirer && !ownResponse) return { outcome: 'not-authorized' };
 
@@ -671,6 +692,9 @@ export const respondToQuestV2Underfilled = async (
       return { outcome };
     };
 
+    if (current.hirerId === workerId || !(await hasActiveAssignment(transaction, questId, workerId))) {
+      return discard('not-authorized');
+    }
     let decision = await selectDecision(transaction, questId, true);
     if (!decision) {
       const created = await createDecisionInTransaction(transaction, current, now);
@@ -681,7 +705,6 @@ export const respondToQuestV2Underfilled = async (
     const consents = await selectConsents(transaction, decision.id, true);
     const ownResponse = consents.find(({ workerId: candidate }) => candidate === workerId);
     if (!ownResponse) return discard('not-authorized');
-    if (current.hirerId === workerId) return discard('not-authorized');
     if (current.questState !== 'QUEST_OPEN') return discard('not-pending');
     const expired = await expireInTransaction(transaction, current, decision, now);
     if (expired.expired) {

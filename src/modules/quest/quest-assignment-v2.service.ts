@@ -327,8 +327,8 @@ const joinQuestV2InTransaction = async (
     .limit(1);
   if (existing) return discardIdempotency('already-assigned');
   if (current.questState !== 'QUEST_OPEN') return discardIdempotency('not-open');
-  if (isGroupQuest && current.startTime.getTime() <= now.getTime()) {
-    return discardIdempotency('roster-frozen');
+  if (current.startTime.getTime() <= now.getTime()) {
+    return discardIdempotency(isGroupQuest ? 'roster-frozen' : 'not-open');
   }
 
   const [activeCount] = await transaction

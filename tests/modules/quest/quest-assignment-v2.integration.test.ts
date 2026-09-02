@@ -105,7 +105,7 @@ const createOpenQuest = async (overrides: Partial<typeof quest.$inferInsert> = {
   return id;
 };
 
-const createOpenSingleFcfsQuest = () => createOpenQuest();
+const createOpenSingleFcfsQuest = (overrides: Partial<typeof quest.$inferInsert> = {}) => createOpenQuest(overrides);
 
 const createOpenGroupFcfsQuest = (overrides: Partial<typeof quest.$inferInsert> = {}) => createOpenQuest({
   participation: 'GROUP',
@@ -114,6 +114,14 @@ const createOpenGroupFcfsQuest = (overrides: Partial<typeof quest.$inferInsert> 
   questFundingTotalSatang: 4000,
   ...overrides,
 });
+
+const hashRequest = async (value: object) => {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(value)),
+  );
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
 
 beforeAll(async () => {
   try {
@@ -233,6 +241,25 @@ describe('Quest Assignment API v2', () => {
     expect(transitions[0]?.producer).toBe('QUEST_ASSIGNMENT_V2');
   });
 
+  it('does not accept a SINGLE FCFS Join after the start boundary', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenSingleFcfsQuest({
+      startTime: new Date('2020-01-01T10:00:00.000Z'),
+    });
+    authenticate();
+
+    const response = await request(
+      `/api/v2/quests/${questId}/join`,
+      'POST',
+      worker.id,
+      { 'idempotency-key': 'assignment-v2-single-after-start' },
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe('QUEST_NOT_OPEN');
+    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(0);
+    expect((await db.select({ state: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.state).toBe('QUEST_OPEN');
+  });
+
   it('allows the Hirer to read all active Assignments and a Worker to read only their own Assignment', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenSingleFcfsQuest();
@@ -261,6 +288,11 @@ describe('Quest Assignment API v2', () => {
     const unrelated = await request(`/api/v2/quests/${questId}/assignments`, 'GET', secondWorker.id);
     expect(unrelated.status).toBe(404);
     expect((await unrelated.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+    await createOpenSingleFcfsQuest({ hirerId: secondWorker.id });
+    const otherHirer = await request(`/api/v2/quests/${questId}/assignments`, 'GET', secondWorker.id);
+    expect(otherHirer.status).toBe(404);
+    expect((await otherHirer.json()).error.code).toBe('QUEST_NOT_FOUND');
   });
 
   it('accepts GROUP Workers slot-by-slot and assigns the Quest on the final slot', async () => {
@@ -612,5 +644,35 @@ describe('Quest Assignment API v2', () => {
     );
     expect(changedRequest.status).toBe(409);
     expect((await changedRequest.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  });
+
+  it('returns IDEMPOTENCY_IN_PROGRESS for an unfinished Join command', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenSingleFcfsQuest();
+    const key = 'assignment-v2-in-progress';
+    await db.insert(walletIdempotencyKey).values({
+      principalUserId: worker.id,
+      operationScope: 'quest.v2.assignment.join',
+      key,
+      requestHash: await hashRequest({
+        authenticatedMemberId: worker.id,
+        operation: 'quest.v2.assignment.join',
+        path: '/api/v2/quests/:questId/join',
+        questId,
+        body: {},
+      }),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+    });
+    authenticate();
+
+    const response = await request(
+      `/api/v2/quests/${questId}/join`,
+      'POST',
+      worker.id,
+      { 'idempotency-key': key },
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe('IDEMPOTENCY_IN_PROGRESS');
+    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(0);
   });
 });
