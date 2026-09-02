@@ -18,12 +18,14 @@ export {
   questV2Participations,
   questV2AssignmentStates,
   questV2ApplicationStates,
+  questV2TeamStates,
   questV2States,
 } from './quest-v2.contract';
 export type {
   QuestV2CanonicalQuest,
   QuestV2AssignmentState,
   QuestV2ApplicationState,
+  QuestV2TeamState,
   QuestV2Mode,
   QuestV2Participation,
   QuestV2State,
@@ -31,6 +33,7 @@ export type {
 export { questV2Route } from './quest-v2.route';
 export { questAssignmentV2Route } from './quest-assignment-v2.route';
 export { questCandidateV2Route } from './quest-candidate-v2.route';
+export { questCandidateTeamV2Route } from './quest-candidate-team-v2.route';
 export {
   createQuestV2CandidateApplication,
   getQuestV2CandidateApplication,

@@ -118,6 +118,15 @@ export const questV2ApplicationStates = [
 ] as const;
 export type QuestV2ApplicationState = (typeof questV2ApplicationStates)[number];
 
+export const questV2TeamStates = [
+  'TEAM_FORMING',
+  'TEAM_SUBMITTED',
+  'TEAM_SELECTED',
+  'TEAM_REJECTED',
+  'TEAM_DISBANDED',
+] as const;
+export type QuestV2TeamState = (typeof questV2TeamStates)[number];
+
 export const questV2EditRequestStatuses = [
   'EDIT_REQUEST_PENDING',
   'EDIT_REQUEST_APPLIED',
