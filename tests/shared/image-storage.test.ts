@@ -64,6 +64,80 @@ describe('createImageStorage upload size limit', () => {
 
     await expect(small.upload('user-1', file)).rejects.toThrow(ImageTooLargeError);
   });
+
+  it('checks the actual byte length after reading the file', async () => {
+    const small = createImageStorage({ keyPrefix: 'test-images', maxSizeBytes: 10 });
+    const file = {
+      name: 'small.png',
+      type: 'image/png',
+      size: 1,
+      arrayBuffer: async () => new Uint8Array(11).buffer,
+    } as File;
+
+    await expect(small.upload('user-1', file)).rejects.toThrow(ImageTooLargeError);
+  });
+});
+
+describe('createImageStorage upload plans', () => {
+  it('writes an upload to its prepared object target', async () => {
+    let writtenObjectKey: string | undefined;
+    const bytes = await validPngBuffer();
+    const plannedStorage = createImageStorage({
+      keyPrefix: 'planned-images',
+      bucket: 'kuquest-test',
+      client: {
+        write: async (objectKey) => {
+          writtenObjectKey = objectKey;
+          return bytes.length;
+        },
+        delete: async () => undefined,
+        presign: () => 'https://storage.test/signed-link',
+      },
+    });
+    const plan = plannedStorage.prepareUpload('user-1');
+
+    const stored = await plannedStorage.upload(
+      'user-1',
+      new File([bytes], 'image.png', { type: 'image/png' }),
+      plan,
+    );
+
+    expect(writtenObjectKey).toBe(plan.objectKey);
+    expect(stored).toEqual({
+      ...plan,
+      contentType: 'image/png',
+      sizeBytes: bytes.length,
+    });
+  });
+});
+
+describe('createImageStorage temporary links', () => {
+  it('returns a link expiry that matches the presign lifetime', () => {
+    let expiresIn: number | undefined;
+    const linkedStorage = createImageStorage({
+      keyPrefix: 'linked-images',
+      bucket: 'kuquest-test',
+      client: {
+        write: async () => 0,
+        delete: async () => undefined,
+        presign: (_objectKey, options) => {
+          expiresIn = options?.expiresIn;
+          return 'https://storage.test/temporary-link';
+        },
+      },
+    });
+    const before = Date.now();
+
+    const link = linkedStorage.linkForWithExpiry({
+      bucket: 'kuquest-test',
+      objectKey: 'linked-images/user-1/image.png',
+    });
+
+    expect(link.url).toBe('https://storage.test/temporary-link');
+    expect(expiresIn).toBe(15 * 60);
+    expect(link.expiresAt.getTime()).toBeGreaterThanOrEqual(before + 15 * 60 * 1000);
+    expect(link.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + 15 * 60 * 1000);
+  });
 });
 
 describe('createImageStorage upload compensation', () => {

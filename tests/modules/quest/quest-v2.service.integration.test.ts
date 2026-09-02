@@ -4,6 +4,7 @@ import { authUser } from '@/database/schema/auth.schema';
 import {
   quest,
   questConditionItem,
+  questImage,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
@@ -321,7 +322,7 @@ describe('Quest API v2 persistence', () => {
       state: 'QUEST_DRAFT',
       questFundingTotal: 1.03,
       headcount: 1,
-      dueAt: '2030-08-26T05:00:00.000Z',
+      dueAt: '2030-08-26T12:00:00.000+07:00',
       proofRequired: false,
       locations: [{ label: 'Online' }],
     });
@@ -339,7 +340,8 @@ describe('Quest API v2 persistence', () => {
     expect(changed).toEqual({ outcome: 'idempotency-key-reused' });
 
     const detail = await getQuestV2Detail(hirerId, first.quest.id);
-    expect(detail).toEqual(first.quest);
+    expect(detail).toMatchObject(first.quest);
+    expect(detail?.images).toEqual([]);
     expect(await getQuestV2Detail(otherMemberId, first.quest.id)).toBeUndefined();
 
     const own = await listOwnQuestV2(hirerId, { limit: 20 });
@@ -391,6 +393,40 @@ describe('Quest API v2 persistence', () => {
       { position: 0, text: 'Use the KUQuest brand' },
       { position: 1, text: 'Return an editable file' },
     ]);
+  });
+
+  it('rejects a v2 GROUP Quest with fewer than two Workers at persistence', async () => {
+    const questId = randomUUID();
+    let databaseError: {
+      cause?: { code?: string; constraint_name?: string };
+    } | undefined;
+
+    try {
+      await db.insert(quest).values({
+        id: questId,
+        hirerId,
+        apiVersion: 'v2',
+        title: 'Invalid GROUP headcount',
+        condition: 'Complete the work',
+        mode: 'NO_CANDIDATE',
+        participation: 'GROUP',
+        v2Mode: 'FIRST_COME_FIRST_SERVED',
+        v2Participation: 'GROUP',
+        questStatus: 'QUEST_DRAFT',
+        questFundingTotalSatang: 103,
+        headcount: 1,
+        startTime: new Date('2030-08-26T10:00:00.000Z'),
+      }).execute();
+    } catch (error) {
+      databaseError = error as typeof databaseError;
+    } finally {
+      await db.delete(quest).where(eq(quest.id, questId));
+    }
+
+    expect(databaseError?.cause).toMatchObject({
+      code: '23514',
+      constraint_name: 'quest_participation_headcount_check',
+    });
   });
 
   it.each([
@@ -470,6 +506,35 @@ describe('Quest API v2 persistence', () => {
       questFundingTotal: 1.03,
     });
 
+    const [storedIdempotency] = await db
+      .select({ id: walletIdempotencyKey.id, resultData: walletIdempotencyKey.resultData })
+      .from(walletIdempotencyKey)
+      .where(
+        and(
+          eq(walletIdempotencyKey.principalUserId, hirerId),
+          eq(walletIdempotencyKey.operationScope, questV2CreateOperationScope),
+          eq(walletIdempotencyKey.key, 'v2-http-create-1'),
+        ),
+      );
+    if (!storedIdempotency) throw new Error('Missing create idempotency record');
+    if (
+      !storedIdempotency.resultData ||
+      typeof storedIdempotency.resultData !== 'object' ||
+      Array.isArray(storedIdempotency.resultData)
+    ) {
+      throw new Error('Missing create idempotency snapshot');
+    }
+    await db
+      .update(walletIdempotencyKey)
+      .set({
+        resultData: {
+          ...(storedIdempotency.resultData as Record<string, unknown>),
+          startTime: '2030-08-26T03:00:00.000Z',
+          dueAt: '2030-08-26T05:00:00.000Z',
+        },
+      })
+      .where(eq(walletIdempotencyKey.id, storedIdempotency.id));
+
     const replay = await app.handle(
       new Request('http://localhost/api/v2/quests', {
         method: 'POST',
@@ -503,12 +568,14 @@ describe('Quest API v2 persistence', () => {
       }),
     );
     expect(detail.status).toBe(200);
-    expect((await detail.json()).data).toEqual(created.data);
+    const detailBody = (await detail.json()).data;
+    expect(detailBody).toMatchObject(created.data);
+    expect(detailBody.images).toEqual([]);
   });
 });
 
 describe('Quest API v2 publish check', () => {
-  it('returns an exact inclusive quote for an owned Draft without changing state or finance', async () => {
+  it('allows an owned Draft with zero Quest Images and returns an exact inclusive quote', async () => {
     await fundHirer(10_000);
     const created = await createQuestV2(
       hirerId,
@@ -517,6 +584,13 @@ describe('Quest API v2 publish check', () => {
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
+
+    expect(
+      await db
+        .select({ id: questImage.id })
+        .from(questImage)
+        .where(eq(questImage.questId, created.quest.id)),
+    ).toEqual([]);
 
     const beforeSnapshot = await readPublishCheckSnapshot(created.quest.id, hirerId);
 
@@ -896,7 +970,113 @@ describe('Quest API v2 Draft editing', () => {
     });
 
     const detail = await getQuest(created.quest.id);
-    expect((await detail.json()).data).toEqual(body.data);
+    const detailBody = (await detail.json()).data;
+    expect(detailBody).toMatchObject(body.data);
+    expect(detailBody.images).toEqual([]);
+  });
+
+  it.each(['FIRST_COME_FIRST_SERVED', 'CANDIDATE'] as const)(
+    'rejects a GROUP Draft edit below two Workers for %s mode',
+    async (mode) => {
+      const created = await createQuestV2(
+        hirerId,
+        { ...baseInput, mode, participation: 'GROUP', headcount: 2 },
+        `v2-edit-group-headcount-create-${mode}-${randomUUID()}`,
+      );
+      if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+      questIds.push(created.quest.id);
+
+      const response = await patchQuest(
+        created.quest.id,
+        { headcount: 1 },
+        1,
+        `v2-edit-group-headcount-${mode}-${randomUUID()}`,
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        success: false,
+        error: {
+          code: 'INVALID_HEADCOUNT',
+          message:
+            'SINGLE participation requires headcount 1 and GROUP participation requires headcount 2 to 20',
+        },
+      });
+
+      const detail = await getQuestV2Detail(hirerId, created.quest.id);
+      expect(detail?.headcount).toBe(2);
+    },
+  );
+
+  it('accepts Bangkok schedule times in a Draft edit and returns canonical precision', async () => {
+    const created = await createQuestV2(
+      hirerId,
+      baseInput,
+      `v2-edit-time-create-${randomUUID()}`,
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+
+    const response = await patchQuest(
+      created.quest.id,
+      {
+        startTime: '2030-08-26T11:00:00+07:00',
+        dueAt: '2030-08-26T13:00:00.1+07:00',
+      },
+      1,
+      `v2-edit-time-${randomUUID()}`,
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      success: true;
+      data: { startTime: string; dueAt: string | null };
+    };
+    expect(body.data).toMatchObject({
+      startTime: '2030-08-26T11:00:00.000+07:00',
+      dueAt: '2030-08-26T13:00:00.100+07:00',
+    });
+  });
+
+  it.each([
+    ['startTime', 'UTC', { startTime: '2030-08-26T11:00:00.000Z' }],
+    ['startTime', 'a non-Bangkok offset', { startTime: '2030-08-26T11:00:00.000+08:00' }],
+    [
+      'startTime',
+      'more than three fractional-second digits',
+      { startTime: '2030-08-26T11:00:00.1234+07:00' },
+    ],
+    ['dueAt', 'UTC', { dueAt: '2030-08-26T13:00:00.000Z' }],
+    ['dueAt', 'a non-Bangkok offset', { dueAt: '2030-08-26T13:00:00.000+08:00' }],
+    [
+      'dueAt',
+      'more than three fractional-second digits',
+      { dueAt: '2030-08-26T13:00:00.1234+07:00' },
+    ],
+  ] as const)('rejects %s with %s in a Draft edit', async (field, _, body) => {
+    const created = await createQuestV2(
+      hirerId,
+      baseInput,
+      `v2-edit-invalid-time-create-${randomUUID()}`,
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+
+    const response = await patchQuest(
+      created.quest.id,
+      body,
+      1,
+      `v2-edit-invalid-time-${randomUUID()}`,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('INVALID_QUEST_DATES');
+    const detail = await getQuestV2Detail(hirerId, created.quest.id);
+    expect(detail?.[field]).toBe(
+      field === 'startTime'
+        ? '2030-08-26T10:00:00.000+07:00'
+        : '2030-08-26T12:00:00.000+07:00',
+    );
   });
 
   it('rejects a stale version without changing the Draft', async () => {
@@ -937,7 +1117,9 @@ describe('Quest API v2 Draft editing', () => {
     });
 
     const detail = await getQuest(created.quest.id);
-    expect((await detail.json()).data).toEqual(currentBody.data);
+    const detailBody = (await detail.json()).data;
+    expect(detailBody).toMatchObject(currentBody.data);
+    expect(detailBody.images).toEqual([]);
   });
 
   it('lets only the first concurrent edit commit for one Draft version', async () => {
@@ -1066,6 +1248,35 @@ describe('Quest API v2 Draft editing', () => {
     expect(first.status).toBe(200);
     const firstBody = await first.json();
 
+    const [storedIdempotency] = await db
+      .select({ id: walletIdempotencyKey.id, resultData: walletIdempotencyKey.resultData })
+      .from(walletIdempotencyKey)
+      .where(
+        and(
+          eq(walletIdempotencyKey.principalUserId, hirerId),
+          eq(walletIdempotencyKey.operationScope, questV2EditOperationScope),
+          eq(walletIdempotencyKey.key, key),
+        ),
+      );
+    if (!storedIdempotency) throw new Error('Missing edit idempotency record');
+    if (
+      !storedIdempotency.resultData ||
+      typeof storedIdempotency.resultData !== 'object' ||
+      Array.isArray(storedIdempotency.resultData)
+    ) {
+      throw new Error('Missing edit idempotency snapshot');
+    }
+    await db
+      .update(walletIdempotencyKey)
+      .set({
+        resultData: {
+          ...(storedIdempotency.resultData as Record<string, unknown>),
+          startTime: '2030-08-26T03:00:00.000Z',
+          dueAt: '2030-08-26T05:00:00.000Z',
+        },
+      })
+      .where(eq(walletIdempotencyKey.id, storedIdempotency.id));
+
     const later = await patchQuest(
       created.quest.id,
       { title: 'Later title' },
@@ -1183,6 +1394,16 @@ const invalidHttpInputs: Array<[string, Record<string, unknown>, string]> = [
   ['title over the text limit', { title: 'x'.repeat(121) }, 'VALIDATION'],
   ['description over the text limit', { description: 'x'.repeat(1001) }, 'VALIDATION'],
   [
+    'invalid calendar startTime',
+    { startTime: '2030-02-31T10:00:00.000+07:00' },
+    'INVALID_QUEST_DATES',
+  ],
+  [
+    'invalid calendar dueAt',
+    { dueAt: '2030-09-31T12:00:00.000+07:00' },
+    'INVALID_QUEST_DATES',
+  ],
+  [
     'dueAt before startTime',
     { dueAt: '2030-08-26T09:00:00.000+07:00' },
     'INVALID_QUEST_DATES',
@@ -1196,14 +1417,37 @@ const invalidHttpInputs: Array<[string, Record<string, unknown>, string]> = [
 ];
 
 describe('Quest API v2 HTTP validation and ownership', () => {
+  it.each(['FIRST_COME_FIRST_SERVED', 'CANDIDATE'] as const)(
+    'rejects GROUP participation with one Worker for %s mode',
+    async (mode) => {
+      const response = await postQuest({
+        ...baseInput,
+        mode,
+        participation: 'GROUP',
+        headcount: 1,
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        success: false,
+        error: {
+          code: 'INVALID_HEADCOUNT',
+          message:
+            'SINGLE participation requires headcount 1 and GROUP participation requires headcount 2 to 20',
+        },
+      });
+    },
+  );
+
   it.each(invalidHttpInputs)('rejects %s with the shared error envelope', async (_, changes, code) => {
     const response = await postQuest({ ...baseInput, ...changes });
-    expect(response.status).toBe(400);
-
     const body = (await response.json()) as {
       success: boolean;
-      error: { code: string; message: string };
+      data?: { id: string };
+      error?: { code: string; message: string };
     };
+    if (response.status === 200 && body.data) questIds.push(body.data.id);
+
+    expect(response.status).toBe(400);
     expect(body).toEqual({
       success: false,
       error: { code, message: expect.any(String) },
@@ -1224,6 +1468,77 @@ describe('Quest API v2 HTTP validation and ownership', () => {
     };
     questIds.push(body.data.id);
     expect(body.data.questFundingTotal).toBe(1.01);
+  });
+
+  it('returns canonical Bangkok schedule times with millisecond precision', async () => {
+    const response = await postQuest({
+      ...baseInput,
+      startTime: '2030-08-26T10:00:00+07:00',
+      dueAt: '2030-08-26T12:00:00.12+07:00',
+      locations: [],
+    });
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as {
+      success: true;
+      data: {
+        id: string;
+        startTime: string;
+        dueAt: string | null;
+        createdAt: string;
+        updatedAt: string;
+      };
+    };
+    questIds.push(body.data.id);
+    expect(body.data).toMatchObject({
+      startTime: '2030-08-26T10:00:00.000+07:00',
+      dueAt: '2030-08-26T12:00:00.120+07:00',
+    });
+    expect(body.data.createdAt).toMatch(/Z$/);
+    expect(body.data.updatedAt).toMatch(/Z$/);
+
+    const detail = await getQuest(body.data.id);
+    const detailBody = (await detail.json()).data;
+    expect(detailBody).toMatchObject(body.data);
+    expect(detailBody.images).toEqual([]);
+
+    const mine = await app.handle(
+      new Request('http://localhost/api/v2/quests/mine', {
+        headers: { cookie: sessionCookie },
+      }),
+    );
+    expect(mine.status).toBe(200);
+    expect((await mine.json()).data.items).toContainEqual(body.data);
+  });
+
+  it.each([
+    ['startTime', 'UTC', { startTime: '2030-08-26T10:00:00.000Z' }],
+    ['startTime', 'a non-Bangkok offset', { startTime: '2030-08-26T10:00:00.000+08:00' }],
+    [
+      'startTime',
+      'more than three fractional-second digits',
+      { startTime: '2030-08-26T10:00:00.1234+07:00' },
+    ],
+    ['dueAt', 'UTC', { dueAt: '2030-08-26T12:00:00.000Z' }],
+    ['dueAt', 'a non-Bangkok offset', { dueAt: '2030-08-26T12:00:00.000+08:00' }],
+    [
+      'dueAt',
+      'more than three fractional-second digits',
+      { dueAt: '2030-08-26T12:00:00.1234+07:00' },
+    ],
+  ] as const)('rejects %s with %s at the HTTP boundary', async (_, __, body) => {
+    const response = await postQuest({
+      ...baseInput,
+      ...body,
+    });
+
+    if (response.status === 200) {
+      const createdBody = (await response.json()) as { data: { id: string } };
+      questIds.push(createdBody.data.id);
+    }
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('INVALID_QUEST_DATES');
   });
 
   it('returns 404 QUEST_NOT_FOUND with the complete envelope for missing and non-owned Quests', async () => {

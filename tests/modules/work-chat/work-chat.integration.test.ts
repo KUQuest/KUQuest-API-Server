@@ -509,6 +509,15 @@ describe('Work Chat Member API', () => {
       joinedAt: now,
       createdAt: now,
     });
+    await db.insert(chatConversation).values({
+      id: randomUUID(),
+      questId,
+      type: 'CONVERSATION_WORK',
+      questTitle: 'Candidate Inquiry boundary test',
+      questStatus: 'QUEST_OPEN',
+      createdAt: now,
+      updatedAt: now,
+    });
 
     const response = await workChatApp.handle(new Request(
       `http://localhost/api/v1/chat/conversations/${conversationId}/messages`,

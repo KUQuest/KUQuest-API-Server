@@ -122,7 +122,17 @@ export const quest = pgTable(
     check('quest_headcount_check', sql`${table.headcount} > 0`),
     check(
       'quest_participation_headcount_check',
-      sql`${table.participation} = 'GROUP' OR ${table.headcount} = 1`,
+      sql`(
+        ${table.apiVersion} <> 'v2' AND
+        (${table.participation} = 'GROUP' OR ${table.headcount} = 1)
+      ) OR (
+        ${table.apiVersion} = 'v2' AND
+        ${table.v2Participation} IS NOT NULL AND
+        (
+          (${table.v2Participation} = 'SINGLE' AND ${table.headcount} = 1) OR
+          (${table.v2Participation} = 'GROUP' AND ${table.headcount} BETWEEN 2 AND 20)
+        )
+      )`,
     ),
     check('quest_due_at_check', sql`${table.dueAt} IS NULL OR ${table.dueAt} > ${table.startTime}`),
     check(
@@ -286,6 +296,94 @@ export const questEditRequestResponse = pgTable(
       table.userId,
     ),
     index('quest_edit_request_response_request_idx').on(table.requestId),
+  ],
+);
+
+export const questV2EditRequest = pgTable(
+  'quest_v2_edit_request',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    previousCondition: jsonb('previous_condition').notNull(),
+    proposedCondition: jsonb('proposed_condition').notNull(),
+    requestStatus: varchar('request_status', { length: 32 })
+      .$type<'EDIT_REQUEST_PENDING' | 'EDIT_REQUEST_APPLIED' | 'EDIT_REQUEST_FAILED'>()
+      .default('EDIT_REQUEST_PENDING')
+      .notNull(),
+    failureCode: varchar('failure_code', { length: 32 }).$type<
+      'EDIT_REQUEST_DECLINED' | 'EDIT_REQUEST_TIMEOUT' | 'ACTIVE_WORKER_LEFT'
+    >(),
+    createdAt: time('created_at').defaultNow().notNull(),
+    expiresAt: time('expires_at').notNull(),
+    appliedAt: time('applied_at'),
+    failedAt: time('failed_at'),
+  },
+  (table) => [
+    check(
+      'quest_v2_edit_request_status_check',
+      sql`${table.requestStatus} IN ('EDIT_REQUEST_PENDING', 'EDIT_REQUEST_APPLIED', 'EDIT_REQUEST_FAILED')`,
+    ),
+    check(
+      'quest_v2_edit_request_failure_code_check',
+      sql`${table.failureCode} IS NULL OR ${table.failureCode} IN ('EDIT_REQUEST_DECLINED', 'EDIT_REQUEST_TIMEOUT', 'ACTIVE_WORKER_LEFT')`,
+    ),
+    check('quest_v2_edit_request_expiry_check', sql`${table.expiresAt} > ${table.createdAt}`),
+    check(
+      'quest_v2_edit_request_applied_at_check',
+      sql`(${table.appliedAt} IS NOT NULL) = (${table.requestStatus} = 'EDIT_REQUEST_APPLIED')`,
+    ),
+    check(
+      'quest_v2_edit_request_failed_at_check',
+      sql`(${table.failedAt} IS NOT NULL) = (${table.requestStatus} = 'EDIT_REQUEST_FAILED')`,
+    ),
+    check(
+      'quest_v2_edit_request_failure_status_check',
+      sql`(${table.failureCode} IS NOT NULL) = (${table.requestStatus} = 'EDIT_REQUEST_FAILED')`,
+    ),
+    index('quest_v2_edit_request_quest_idx').on(table.questId),
+    uniqueIndex('quest_v2_edit_request_one_pending_uidx')
+      .on(table.questId)
+      .where(sql`${table.requestStatus} = 'EDIT_REQUEST_PENDING'`),
+  ],
+);
+
+export const questV2EditRequestResponse = pgTable(
+  'quest_v2_edit_request_response',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    requestId: uuid('request_id')
+      .notNull()
+      .references(() => questV2EditRequest.id, { onDelete: 'cascade' }),
+    workerId: uuid('worker_id')
+      .notNull()
+      .references(() => authUser.id),
+    decision: varchar('decision', { length: 32 }).$type<
+      'EDIT_RESPONSE_ACCEPTED' | 'EDIT_RESPONSE_DECLINED'
+    >(),
+    reason: varchar('reason', { length: 255 }),
+    respondedAt: time('responded_at'),
+  },
+  (table) => [
+    check(
+      'quest_v2_edit_request_response_decision_check',
+      sql`${table.decision} IS NULL OR ${table.decision} IN ('EDIT_RESPONSE_ACCEPTED', 'EDIT_RESPONSE_DECLINED')`,
+    ),
+    check(
+      'quest_v2_edit_request_response_reason_check',
+      sql`${table.reason} IS NULL OR (${table.decision} = 'EDIT_RESPONSE_DECLINED' AND btrim(${table.reason}) <> '')`,
+    ),
+    check(
+      'quest_v2_edit_request_response_responded_at_check',
+      sql`(${table.respondedAt} IS NOT NULL) = (${table.decision} IS NOT NULL)`,
+    ),
+    unique('quest_v2_edit_request_response_request_worker_key').on(
+      table.requestId,
+      table.workerId,
+    ),
+    index('quest_v2_edit_request_response_request_idx').on(table.requestId),
+    index('quest_v2_edit_request_response_worker_idx').on(table.workerId),
   ],
 );
 
