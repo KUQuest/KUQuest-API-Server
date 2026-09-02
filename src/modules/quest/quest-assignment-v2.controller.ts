@@ -48,6 +48,9 @@ const mapJoinOutcome = (
   if (outcome.outcome === 'not-open') {
     return conflict(set, 'QUEST_NOT_OPEN', 'Only an open Quest can accept a direct join');
   }
+  if (outcome.outcome === 'roster-frozen') {
+    return conflict(set, 'QUEST_ROSTER_FROZEN', 'The accepted Worker roster is frozen after the Quest start boundary');
+  }
   if (outcome.outcome === 'already-assigned') {
     return conflict(set, 'ASSIGNMENT_ALREADY_EXISTS', 'The Worker is already assigned to this Quest');
   }

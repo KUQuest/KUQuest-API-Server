@@ -298,7 +298,15 @@ export const settleApprovedQuestInTransaction = completeInTransaction;
 
 export const completeQuest = async (questId: string, actorUserId: string, commandId = `quest-completion:${questId}`, now = new Date()) => db.transaction((tx) => completeInTransaction(tx, questId, actorUserId, commandId, now));
 
-const cancelInTransaction = async (tx: QuestTransaction, questId: string, hirerId: string, commandId: string, now: Date): Promise<QuestSettlementOutcome> => {
+/** Cancel Quest state and settlement effects from a caller-owned transaction. */
+export const cancelQuestInTransaction = async (
+  tx: QuestTransaction,
+  questId: string,
+  hirerId: string,
+  commandId: string,
+  now: Date,
+  actorUserId: string | null = hirerId,
+): Promise<QuestSettlementOutcome> => {
   const current = await lockQuest(tx, questId);
   if (!current) return { outcome: 'not-found' };
   if (current.hirerId !== hirerId) return { outcome: 'not-authorized' };
@@ -337,28 +345,59 @@ const cancelInTransaction = async (tx: QuestTransaction, questId: string, hirerI
   const beforeRelease = (await reservationFor(tx, hirerId, questId, false))?.remainingSatang ?? 0;
   const releasedAmount = await releaseRemaining(tx, hirerId, reservation.id, `quest-cancel-release:${commandId}`);
   await tx.update(questAssignment).set({ assignmentStatus: assignmentStatus.cancelled }).where(and(eq(questAssignment.questId, questId), eq(questAssignment.assignmentStatus, assignmentStatus.active)));
-  await inactiveWorkersChat(tx, current, workers, assignmentStatus.cancelled, now, hirerId);
-  await tx.update(quest).set({ questStatus: questStatus.cancelled, cancelledAt: now, cancelledByUserId: hirerId, updatedAt: now }).where(eq(quest.id, questId));
-  await terminalChat(tx, current, questStatus.cancelled, commandId, now);
+  await inactiveWorkersChat(tx, current, workers, assignmentStatus.cancelled, now, actorUserId);
+  await tx.update(quest).set({ questStatus: questStatus.cancelled, cancelledAt: now, cancelledByUserId: actorUserId, updatedAt: now }).where(eq(quest.id, questId));
+  await terminalChat(tx, current, questStatus.cancelled, commandId, now, actorUserId);
   return { questStatus: questStatus.cancelled, outcome: 'CANCELLED', paidSatang: paid, refundedSatang: beforeRelease || releasedAmount };
+};
+
+const settleCancellationInTransaction = async (
+  tx: QuestTransaction,
+  questId: string,
+  hirerId: string,
+  commandId: string,
+  now: Date,
+  system = false,
+): Promise<QuestSettlementOutcome> => {
+  const command = await acquireCommand(tx, {
+    commandId,
+    questId,
+    commandType: system ? 'AUTO_CANCEL' : 'CANCEL',
+    requestHash: await hash(system ? { command: 'auto-cancel', questId } : { command: 'cancel', questId, hirerId }),
+    actor: system ? {} : { userId: hirerId },
+    now,
+  });
+  if ('outcome' in command) {
+    if (command.outcome === 'idempotency-in-progress' || command.outcome === 'idempotency-unavailable') {
+      return { outcome: 'idempotency-unavailable' };
+    }
+    return { outcome: command.outcome };
+  }
+  if ('replay' in command) return command.replay;
+
+  const result = await cancelQuestInTransaction(tx, questId, hirerId, commandId, now, system ? null : hirerId);
+  if (!('questStatus' in result)) {
+    await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId));
+    return result;
+  }
+  await finishCommand(tx, commandId, result, now);
+  return result;
 };
 
 export const cancelQuest = async (hirerId: string, questId: string, commandId: string, now = new Date()) => {
   if (!commandId.trim()) return { outcome: 'idempotency-key-required' as const };
-  const requestHash = await hash({ command: 'cancel', questId, hirerId });
-  return db.transaction(async (tx) => {
-    const command = await acquireCommand(tx, { commandId, questId, commandType: 'CANCEL', requestHash, actor: { userId: hirerId }, now });
-    if ('outcome' in command) return command.outcome === 'idempotency-in-progress' ? { outcome: 'idempotency-unavailable' as const } : command;
-    if ('replay' in command) return command.replay;
-    const result = await cancelInTransaction(tx, questId, hirerId, commandId, now);
-    if (!('questStatus' in result)) {
-      await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId));
-      return result;
-    }
-    await finishCommand(tx, commandId, result, now);
-    return result;
-  });
+  return db.transaction((tx) => settleCancellationInTransaction(tx, questId, hirerId, commandId, now));
 };
+
+/** Settle an underfilled cancellation in the caller's Quest transaction. */
+export const settleUnderfilledCancellationInTransaction = (
+  tx: QuestTransaction,
+  questId: string,
+  hirerId: string,
+  commandId: string,
+  now: Date,
+  system = false,
+) => settleCancellationInTransaction(tx, questId, hirerId, commandId, now, system);
 
 export type AutomaticQuestCancellationOutcome =
   | (CommandResult & { replayed?: boolean })

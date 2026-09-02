@@ -667,6 +667,93 @@ export const questAssignment = pgTable(
   ],
 );
 
+export const questV2UnderfilledDecision = pgTable(
+  'quest_v2_underfilled_decisions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    activeWorkerCount: integer('active_worker_count').notNull(),
+    workerRewardPoolSatang: integer('worker_reward_pool_satang').notNull(),
+    state: varchar('state', { length: 40 })
+      .$type<
+        'UNDERFILLED_DECISION_PENDING' |
+          'UNDERFILLED_CONSENT_PENDING' |
+          'UNDERFILLED_COMPLETED' |
+          'UNDERFILLED_CANCELLED'
+      >()
+      .default('UNDERFILLED_DECISION_PENDING')
+      .notNull(),
+    decision: varchar('decision', { length: 16 }).$type<'PROCEED' | 'CANCEL'>(),
+    decisionExpiresAt: time('decision_expires_at').notNull(),
+    consentExpiresAt: time('consent_expires_at'),
+    detectedAt: time('detected_at').notNull(),
+    resolvedAt: time('resolved_at'),
+    resolutionCode: varchar('resolution_code', { length: 32 }).$type<
+      'HIRER_CANCELLED' | 'HIRER_DECISION_TIMEOUT' | 'WORKER_DECLINED' | 'WORKER_CONSENT_TIMEOUT'
+    >(),
+  },
+  (table) => [
+    unique('quest_v2_underfilled_decisions_quest_id_key').on(table.questId),
+    check(
+      'quest_v2_underfilled_decisions_state_check',
+      sql`${table.state} IN ('UNDERFILLED_DECISION_PENDING', 'UNDERFILLED_CONSENT_PENDING', 'UNDERFILLED_COMPLETED', 'UNDERFILLED_CANCELLED')`,
+    ),
+    check('quest_v2_underfilled_decisions_worker_count_check', sql`${table.activeWorkerCount} > 0`),
+    check('quest_v2_underfilled_decisions_pool_check', sql`${table.workerRewardPoolSatang} > 0`),
+    check(
+      'quest_v2_underfilled_decisions_decision_check',
+      sql`${table.decision} IS NULL OR ${table.decision} IN ('PROCEED', 'CANCEL')`,
+    ),
+    check(
+      'quest_v2_underfilled_decisions_resolution_check',
+      sql`${table.resolutionCode} IS NULL OR ${table.resolutionCode} IN ('HIRER_CANCELLED', 'HIRER_DECISION_TIMEOUT', 'WORKER_DECLINED', 'WORKER_CONSENT_TIMEOUT')`,
+    ),
+    index('quest_v2_underfilled_decisions_state_idx').on(table.state),
+    index('quest_v2_underfilled_decisions_decision_expires_at_idx').on(table.decisionExpiresAt),
+    index('quest_v2_underfilled_decisions_consent_expires_at_idx').on(table.consentExpiresAt),
+  ],
+);
+
+export const questV2UnderfilledConsent = pgTable(
+  'quest_v2_underfilled_consents',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    decisionId: uuid('decision_id')
+      .notNull()
+      .references(() => questV2UnderfilledDecision.id, { onDelete: 'cascade' }),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    assignmentId: uuid('assignment_id')
+      .notNull()
+      .references(() => questAssignment.id, { onDelete: 'cascade' }),
+    workerId: uuid('worker_id')
+      .notNull()
+      .references(() => authUser.id),
+    rewardSatang: integer('reward_satang').notNull(),
+    decision: varchar('decision', { length: 16 }).$type<'ACCEPT' | 'DECLINE'>(),
+    respondedAt: time('responded_at'),
+    createdAt: time('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    unique('quest_v2_underfilled_consents_decision_worker_key').on(table.decisionId, table.workerId),
+    unique('quest_v2_underfilled_consents_decision_assignment_key').on(table.decisionId, table.assignmentId),
+    check('quest_v2_underfilled_consents_reward_check', sql`${table.rewardSatang} > 0`),
+    check(
+      'quest_v2_underfilled_consents_decision_check',
+      sql`${table.decision} IS NULL OR ${table.decision} IN ('ACCEPT', 'DECLINE')`,
+    ),
+    check(
+      'quest_v2_underfilled_consents_response_check',
+      sql`(${table.decision} IS NULL) = (${table.respondedAt} IS NULL)`,
+    ),
+    index('quest_v2_underfilled_consents_quest_id_idx').on(table.questId),
+    index('quest_v2_underfilled_consents_worker_id_idx').on(table.workerId),
+  ],
+);
+
 /** Durable command identity and replay result for Quest terminal settlement commands. */
 export const questSettlementCommand = pgTable(
   'quest_settlement_commands',
