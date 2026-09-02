@@ -37,7 +37,7 @@ export const questV2CandidateApplicationSelectOperationScope =
 type QuestV2CandidateApplicationRow = {
   id: string;
   questId: string;
-  workerId: string;
+  memberId: string;
   state: QuestV2ApplicationState;
   appliedAt: Date;
 };
@@ -84,7 +84,7 @@ type IdempotencyAcquireResult =
 const applicationFields = {
   id: questApplication.id,
   questId: questApplication.questId,
-  workerId: questApplication.workerId,
+  memberId: questApplication.workerId,
   state: questApplication.applicationStatus,
   appliedAt: questApplication.appliedAt,
 };
@@ -108,9 +108,9 @@ const sha256Json = async (value: object): Promise<string> => {
   ).join('');
 };
 
-const requestHashFor = (workerId: string, questId: string): Promise<string> =>
+const requestHashFor = (memberId: string, questId: string): Promise<string> =>
   sha256Json({
-    authenticatedMemberId: workerId,
+    authenticatedMemberId: memberId,
     operation: questV2CandidateApplicationCreateOperationScope,
     path: '/api/v2/quests/:questId/applications',
     questId,
@@ -118,11 +118,11 @@ const requestHashFor = (workerId: string, questId: string): Promise<string> =>
   });
 
 const withdrawRequestHashFor = (
-  workerId: string,
+  memberId: string,
   questId: string,
   applicationId: string,
 ): Promise<string> => sha256Json({
-  authenticatedMemberId: workerId,
+  authenticatedMemberId: memberId,
   operation: questV2CandidateApplicationWithdrawOperationScope,
   path: '/api/v2/quests/:questId/applications/:applicationId/withdraw',
   questId,
@@ -148,7 +148,7 @@ const idempotencyExpiry = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
 const toApplicationRow = (row: {
   id: string;
   questId: string;
-  workerId: string;
+  memberId: string;
   state: string;
   appliedAt: Date;
 }): QuestV2CandidateApplicationRow => {
@@ -164,7 +164,7 @@ const toApplicationRow = (row: {
 const snapshotFor = (application: QuestV2CandidateApplicationRow) => ({
   id: application.id,
   questId: application.questId,
-  workerId: application.workerId,
+  memberId: application.memberId,
   state: application.state,
   appliedAt: application.appliedAt.toISOString(),
 });
@@ -177,7 +177,7 @@ const applicationFromSnapshot = (
   if (
     typeof snapshot.id !== 'string' ||
     typeof snapshot.questId !== 'string' ||
-    typeof snapshot.workerId !== 'string' ||
+    typeof snapshot.memberId !== 'string' ||
     typeof snapshot.state !== 'string' ||
     typeof snapshot.appliedAt !== 'string' ||
     !(questV2ApplicationStates as readonly string[]).includes(snapshot.state)
@@ -187,7 +187,7 @@ const applicationFromSnapshot = (
   return {
     id: snapshot.id,
     questId: snapshot.questId,
-    workerId: snapshot.workerId,
+    memberId: snapshot.memberId,
     state: snapshot.state as QuestV2ApplicationState,
     appliedAt,
   };
@@ -256,7 +256,7 @@ const acquireIdempotency = async (
 };
 
 export const createQuestV2CandidateApplication = async (
-  workerId: string,
+  memberId: string,
   questId: string,
   rawCommandId: string,
   now = new Date(),
@@ -265,7 +265,7 @@ export const createQuestV2CandidateApplication = async (
   if (commandId.length === 0 || commandId.length > 200) {
     return { outcome: 'invalid-idempotency-key' };
   }
-  const requestHash = await requestHashFor(workerId, questId);
+  const requestHash = await requestHashFor(memberId, questId);
 
   return db.transaction(async (transaction) => {
     const current = await lockQuest(transaction, questId);
@@ -273,7 +273,7 @@ export const createQuestV2CandidateApplication = async (
 
     const idempotency = await acquireIdempotency(
       transaction,
-      workerId,
+      memberId,
       commandId,
       requestHash,
       questV2CandidateApplicationCreateOperationScope,
@@ -293,7 +293,7 @@ export const createQuestV2CandidateApplication = async (
 
     if (current.v2Mode !== questV2Mode.candidate) return discardIdempotency('not-candidate');
     if (current.v2Participation !== questV2Participation.single) return discardIdempotency('not-single');
-    if (current.hirerId === workerId) return discardIdempotency('hirer-not-allowed');
+    if (current.hirerId === memberId) return discardIdempotency('hirer-not-allowed');
     if (current.questState !== 'QUEST_OPEN') return discardIdempotency('not-open');
 
     const [existing] = await transaction
@@ -301,7 +301,7 @@ export const createQuestV2CandidateApplication = async (
       .from(questApplication)
       .where(and(
         eq(questApplication.questId, questId),
-        eq(questApplication.workerId, workerId),
+        eq(questApplication.workerId, memberId),
       ))
       .limit(1);
     if (existing) return discardIdempotency('already-exists');
@@ -310,7 +310,7 @@ export const createQuestV2CandidateApplication = async (
       .insert(questApplication)
       .values({
         questId,
-        workerId,
+        workerId: memberId,
         applicationStatus: 'APPLICATION_APPLIED',
         appliedAt: now,
       })
@@ -351,7 +351,7 @@ export type QuestV2CandidateApplicationWithdrawOutcome =
     };
 
 export const withdrawQuestV2CandidateApplication = async (
-  workerId: string,
+  memberId: string,
   questId: string,
   applicationId: string,
   rawCommandId: string,
@@ -361,7 +361,7 @@ export const withdrawQuestV2CandidateApplication = async (
   if (commandId.length === 0 || commandId.length > 200) {
     return { outcome: 'invalid-idempotency-key' };
   }
-  const requestHash = await withdrawRequestHashFor(workerId, questId, applicationId);
+  const requestHash = await withdrawRequestHashFor(memberId, questId, applicationId);
 
   return db.transaction(async (transaction) => {
     const current = await lockQuest(transaction, questId);
@@ -369,7 +369,7 @@ export const withdrawQuestV2CandidateApplication = async (
 
     const idempotency = await acquireIdempotency(
       transaction,
-      workerId,
+      memberId,
       commandId,
       requestHash,
       questV2CandidateApplicationWithdrawOperationScope,
@@ -389,7 +389,7 @@ export const withdrawQuestV2CandidateApplication = async (
 
     if (current.v2Mode !== questV2Mode.candidate) return discardIdempotency('not-candidate');
     if (current.v2Participation !== questV2Participation.single) return discardIdempotency('not-single');
-    if (current.hirerId === workerId) return discardIdempotency('hirer-not-allowed');
+    if (current.hirerId === memberId) return discardIdempotency('hirer-not-allowed');
     if (current.questState !== 'QUEST_OPEN') return discardIdempotency('not-open');
 
     const [application] = await transaction
@@ -398,7 +398,7 @@ export const withdrawQuestV2CandidateApplication = async (
       .where(and(
         eq(questApplication.id, applicationId),
         eq(questApplication.questId, questId),
-        eq(questApplication.workerId, workerId),
+        eq(questApplication.workerId, memberId),
       ))
       .limit(1)
       .for('update');
@@ -628,7 +628,7 @@ export const selectQuestV2CandidateApplication = async (
       .from(questAssignment)
       .where(eq(questAssignment.questId, questId))
       .for('update');
-    if (assignmentRows.some((assignment) => assignment.workerId === application.workerId)) {
+    if (assignmentRows.some((assignment) => assignment.workerId === application.memberId)) {
       return discardIdempotency('already-assigned');
     }
 
@@ -649,7 +649,7 @@ export const selectQuestV2CandidateApplication = async (
       .insert(questAssignment)
       .values({
         questId,
-        workerId: application.workerId,
+        workerId: application.memberId,
         assignmentStatus: 'ASSIGNMENT_ACTIVE',
         createdAt: now,
       })

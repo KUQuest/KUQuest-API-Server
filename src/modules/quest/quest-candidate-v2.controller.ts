@@ -26,7 +26,7 @@ type SelectionError = Exclude<QuestV2CandidateSelectionOutcome, { assignments: u
 const serializeApplication = (application: Application) => ({
   id: application.id,
   questId: application.questId,
-  workerId: application.workerId,
+  memberId: application.memberId,
   state: application.state,
   appliedAt: application.appliedAt.toISOString(),
 });

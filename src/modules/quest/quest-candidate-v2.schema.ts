@@ -33,7 +33,7 @@ export const questV2CandidateApplicationHeadersSchema = t.Object({
 const applicationSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
-  workerId: t.String({ format: 'uuid' }),
+  memberId: t.String({ format: 'uuid' }),
   state: applicationState,
   appliedAt: t.String({ format: 'date-time' }),
 });

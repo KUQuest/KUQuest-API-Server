@@ -174,11 +174,11 @@ describe('Quest Candidate API v2', () => {
     );
     expect(first.status).toBe(200);
     const firstBody = await first.json() as {
-      data: { id: string; questId: string; workerId: string; state: string; appliedAt: string };
+      data: { id: string; questId: string; memberId: string; state: string; appliedAt: string };
     };
     expect(firstBody.data).toMatchObject({
       questId,
-      workerId: candidate.id,
+      memberId: candidate.id,
       state: 'APPLICATION_APPLIED',
     });
 
@@ -226,7 +226,7 @@ describe('Quest Candidate API v2', () => {
     expect(candidateRead.status).toBe(200);
     expect((await candidateRead.json()).data).toMatchObject({
       id: application.id,
-      workerId: candidate.id,
+      memberId: candidate.id,
       state: 'APPLICATION_APPLIED',
     });
 
