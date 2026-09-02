@@ -128,11 +128,33 @@ const memberCommand = (
   };
 };
 
+// `expect(...).rejects` hangs on a rejected database promise, so both helpers below
+// read the rejection themselves. Drizzle wraps a driver failure, so a trigger's own
+// message sits on the cause rather than the thrown error.
+const rejectionMessage = async (operation: Promise<unknown>): Promise<string> => {
+  try {
+    await operation;
+  } catch (error) {
+    const messages: string[] = [];
+    for (let current: unknown = error; current instanceof Error; current = current.cause) {
+      messages.push(current.message);
+    }
+    return messages.join(' | ');
+  }
+  return '';
+};
+
 const expectAdminActionError = async (
   operation: Promise<unknown>,
   code: AdminActionErrorCode,
 ) => {
-  await expect(operation).rejects.toMatchObject({ code });
+  let actual: string | undefined;
+  try {
+    await operation;
+  } catch (error) {
+    actual = (error as { code?: string }).code;
+  }
+  expect(actual).toBe(code);
 };
 
 beforeAll(async () => {
@@ -447,15 +469,15 @@ describe('Admin Action service', () => {
     const memberId = await createMember();
     const result = await adminActionService.executeCommand(memberCommand({ adminId, memberId }));
 
-    await expect(
+    expect(await rejectionMessage(
       db
         .update(adminAction)
         .set({ reasonCode: 'SAFETY_REVIEW' })
         .where(eq(adminAction.id, result.adminActionId))
         .execute(),
-    ).rejects.toThrow();
-    await expect(
+    )).toContain('Admin Action is immutable');
+    expect(await rejectionMessage(
       db.delete(adminAction).where(eq(adminAction.id, result.adminActionId)).execute(),
-    ).rejects.toThrow();
+    )).toContain('Admin Action is immutable');
   });
 });
