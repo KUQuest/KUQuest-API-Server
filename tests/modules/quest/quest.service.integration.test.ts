@@ -1,5 +1,5 @@
 import { db, sql } from '@/database/client';
-import { authUser } from '@/database/schema/auth.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   quest,
   questApplication,
@@ -24,6 +24,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 
 const hirerId = randomUUID();
 const otherMemberId = randomUUID();
+const adminId = randomUUID();
 const tagId = randomUUID();
 let questIds: string[] = [];
 
@@ -79,6 +80,12 @@ beforeAll(async () => {
       lastName: 'Member',
     },
   ]);
+  await db.insert(authAdmin).values({
+    id: adminId,
+    email: `${adminId}@kuquest.test`,
+    firstName: 'Quest',
+    lastName: 'Admin',
+  });
   await db.insert(tag).values({ id: tagId, name: `Quest test ${tagId}` });
 });
 
@@ -92,6 +99,7 @@ beforeEach(async () => {
 afterAll(async () => {
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(tag).where(eq(tag.id, tagId));
+  await db.delete(authAdmin).where(eq(authAdmin.id, adminId));
   await db.delete(authUser).where(inArray(authUser.id, [hirerId, otherMemberId]));
 });
 
@@ -129,6 +137,20 @@ describe('Quest persistence', () => {
     await openQuest(questId);
 
     expect((await getQuestDetail(otherMemberId, questId))?.questStatus).toBe('QUEST_OPEN');
+  });
+  it('marks a hidden Quest in Hirer views without exposing it to other Members', async () => {
+    const questId = await createFixture();
+    await openQuest(questId);
+    await db.update(quest).set({
+      hiddenAt: new Date(),
+      hiddenByAdminId: adminId,
+    }).where(eq(quest.id, questId));
+
+    const detail = await getQuestDetail(hirerId, questId);
+    expect(detail?.hiddenAt).toEqual(expect.any(String));
+    const mine = await listOwnQuests(hirerId, { limit: 20 });
+    expect(mine.items.find((item) => item.id === questId)?.hiddenAt).toEqual(expect.any(String));
+    expect(await getQuestDetail(otherMemberId, questId)).toBeUndefined();
   });
 
   it('allows an Active Worker to view an assigned Quest and hides it from unrelated Members', async () => {

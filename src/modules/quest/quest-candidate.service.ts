@@ -499,7 +499,7 @@ export const selectCandidate = async (
     }
 
     const assignments = await tx.insert(questAssignment).values(roster.map((workerId) => ({ questId, workerId, assignmentStatus: assignmentStatus.active, createdAt: now }))).returning(selectionAssignmentFields);
-    await tx.update(quest).set({ questStatus: questStatus.assigned, updatedAt: now }).where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.open)));
+    await tx.update(quest).set({ questStatus: questStatus.assigned, version: sql`${quest.version} + 1`, updatedAt: now }).where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.open)));
     try {
       await writer.applyQuestTransition(tx, selectionTransition(commandId, questId, hirerId, now, assignments));
     } catch (cause) {

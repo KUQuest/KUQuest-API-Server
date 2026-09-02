@@ -11,7 +11,7 @@ import {
 import { tag } from '@/database/schema/tag.schema';
 import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
-import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
+import { createQuestV2, getQuestV2Detail, type QuestV2CreateInput } from '@/modules/quest';
 import { questStatus } from '@/modules/quest/quest.contract';
 
 import { Elysia } from 'elysia';
@@ -354,7 +354,7 @@ describe('Quest API v2 discovery contract', () => {
   it('excludes hidden, closed, expired, and non-joinable Quests and returns an empty page', async () => {
     const hiddenQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Hidden` });
     await db.update(quest).set({
-      questStatus: questStatus.hidden,
+      questStatus: questStatus.open,
       hiddenAt: new Date(),
       hiddenByAdminId: adminId,
     }).where(eq(quest.id, hiddenQuest));
@@ -457,10 +457,42 @@ describe('Quest API v2 discovery contract', () => {
     expect(body.data).not.toHaveProperty('candidate');
   });
 
+  it('returns public detail to active Workers even when a Quest is hidden or assigned', async () => {
+    const hiddenQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Hidden Public` });
+    await db.update(quest).set({
+      questStatus: questStatus.open,
+      hiddenAt: new Date(),
+      hiddenByAdminId: adminId,
+    }).where(eq(quest.id, hiddenQuest));
+    await addActiveWorkers(hiddenQuest, [memberId]);
+
+    const assignedQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Assigned Public` });
+    await db.update(quest).set({ questStatus: questStatus.assigned }).where(eq(quest.id, assignedQuest));
+    await addActiveWorkers(assignedQuest, [memberId]);
+
+    const hiddenResponse = await getPublicDetail(hiddenQuest);
+    expect(hiddenResponse.status).toBe(200);
+    const hiddenBody = (await hiddenResponse.json()) as { data: Record<string, unknown> };
+    expect(hiddenBody.data).toMatchObject({
+      id: hiddenQuest,
+      state: 'QUEST_OPEN',
+    });
+    expect(hiddenBody.data).not.toHaveProperty('hiddenAt');
+    const ownDetail = await getQuestV2Detail(ownerId, hiddenQuest);
+    expect(ownDetail?.hiddenAt).toEqual(expect.any(String));
+
+    const assignedResponse = await getPublicDetail(assignedQuest);
+    expect(assignedResponse.status).toBe(200);
+    expect((await assignedResponse.json()).data).toMatchObject({
+      id: assignedQuest,
+      state: 'QUEST_ASSIGNED',
+    });
+  });
+
   it('returns QUEST_NOT_FOUND for unreadable Public Quest Detail', async () => {
     const hiddenQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Hidden Public` });
     await db.update(quest).set({
-      questStatus: questStatus.hidden,
+      questStatus: questStatus.open,
       hiddenAt: new Date(),
       hiddenByAdminId: adminId,
     }).where(eq(quest.id, hiddenQuest));

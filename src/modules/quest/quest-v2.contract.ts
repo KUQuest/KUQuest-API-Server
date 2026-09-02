@@ -125,6 +125,7 @@ export type QuestV2EditFailureCode = (typeof questV2EditFailureCodes)[number];
 export type QuestV2CanonicalQuest = {
   id: string;
   version: number;
+  hiddenAt: string | null;
   title: string;
   description: string | null;
   condition: {

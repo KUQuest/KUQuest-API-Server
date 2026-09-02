@@ -30,6 +30,7 @@ import {
   type QuestV2Mode,
   type QuestV2Participation,
 } from './quest-v2.contract';
+import type { QuestTransaction } from './quest-assignment.service';
 
 export type AdminQuestSort = 'newest' | 'oldest';
 
@@ -77,6 +78,17 @@ export type AdminQuestSummary = {
   hirer: AdminQuestMember;
 };
 
+export type AdminQuestSummaryResponse = Omit<
+  AdminQuestSummary,
+  'startTime' | 'dueAt' | 'hiddenAt' | 'createdAt' | 'updatedAt'
+> & {
+  startTime: string;
+  dueAt: string | null;
+  hiddenAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 const adminQuestSummaryFromRow = (row: { quest: QuestRow; hirer: AdminQuestMember }): AdminQuestSummary => ({
   id: row.quest.id,
   apiVersion: row.quest.apiVersion,
@@ -96,7 +108,18 @@ const adminQuestSummaryFromRow = (row: { quest: QuestRow; hirer: AdminQuestMembe
   hirer: row.hirer,
 });
 
-const adminQuestRows = (executor: typeof db) => executor
+export const serializeAdminQuestSummary = (value: AdminQuestSummary): AdminQuestSummaryResponse => ({
+  ...value,
+  startTime: value.startTime.toISOString(),
+  dueAt: value.dueAt ? value.dueAt.toISOString() : null,
+  hiddenAt: value.hiddenAt ? value.hiddenAt.toISOString() : null,
+  createdAt: value.createdAt.toISOString(),
+  updatedAt: value.updatedAt.toISOString(),
+});
+
+type AdminQuestExecutor = typeof db | QuestTransaction;
+
+const adminQuestRows = (executor: AdminQuestExecutor) => executor
   .select({
     quest,
     hirer: {
@@ -108,6 +131,16 @@ const adminQuestRows = (executor: typeof db) => executor
   })
   .from(quest)
   .innerJoin(authUser, eq(authUser.id, quest.hirerId));
+
+export const getAdminQuestSummaryInTransaction = async (
+  executor: QuestTransaction,
+  questId: string,
+): Promise<AdminQuestSummary | undefined> => {
+  const [row] = await adminQuestRows(executor)
+    .where(eq(quest.id, questId))
+    .limit(1);
+  return row ? adminQuestSummaryFromRow(row) : undefined;
+};
 
 export type ListAdminQuestsInput = {
   status?: QuestStatus;

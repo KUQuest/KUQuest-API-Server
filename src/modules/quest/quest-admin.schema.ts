@@ -29,6 +29,37 @@ const adminQuestParticipationSchema = t.Union([
 ]);
 
 export const adminQuestParamsSchema = t.Object({ questId: t.String({ format: 'uuid' }) });
+const adminQuestVersionHeaderSchema = t.String({ minLength: 1, maxLength: 100, pattern: '\\S' });
+export const adminQuestCommandHeadersSchema = t.Union([
+  t.Object({
+    'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
+    'if-match': adminQuestVersionHeaderSchema,
+    'x-resource-version': t.Optional(adminQuestVersionHeaderSchema),
+  }),
+  t.Object({
+    'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
+    'if-match': t.Optional(adminQuestVersionHeaderSchema),
+    'x-resource-version': adminQuestVersionHeaderSchema,
+  }),
+]);
+
+const adminQuestReasonCodeSchema = t.String({
+  minLength: 1,
+  maxLength: 100,
+  pattern: '^[A-Z][A-Z0-9_.-]*$',
+});
+
+export const adminQuestHideBodySchema = t.Object({
+  reasonCode: adminQuestReasonCodeSchema,
+}, { additionalProperties: false });
+
+export const adminQuestRestoreBodySchema = t.Object({
+  reasonCode: t.Optional(adminQuestReasonCodeSchema),
+}, { additionalProperties: false });
+
+export const adminQuestTerminateBodySchema = t.Object({
+  reasonCode: adminQuestReasonCodeSchema,
+}, { additionalProperties: false });
 
 export const adminQuestListQuerySchema = t.Object({
   status: t.Optional(adminQuestStatusSchema),
@@ -47,7 +78,7 @@ const adminQuestMemberSchema = t.Object({
   email: t.String(),
 });
 
-const adminQuestSummarySchema = t.Object({
+export const adminQuestSummarySchema = t.Object({
   id: t.String({ format: 'uuid' }),
   apiVersion: t.Union([t.Literal('v1'), t.Literal('v2')]),
   version: t.Integer(),
@@ -65,8 +96,16 @@ const adminQuestSummarySchema = t.Object({
   updatedAt: t.String({ format: 'date-time' }),
   hirer: adminQuestMemberSchema,
 });
-
+export const adminQuestCommandResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    resourceSummary: adminQuestSummarySchema,
+    resourceVersion: t.Integer({ minimum: 1 }),
+    adminActionId: t.String({ format: 'uuid' }),
+  }),
+});
 export const adminQuestListResponseSchema = t.Object({
+
   success: t.Literal(true),
   data: t.Object({
     items: t.Array(adminQuestSummarySchema),

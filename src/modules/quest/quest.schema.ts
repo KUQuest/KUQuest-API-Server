@@ -183,7 +183,10 @@ export const questCardSchema = t.Composite([
 
 export const questListItemSchema = t.Composite([
   questSummarySchema,
-  t.Object({ questStatus: questStatusSchema }),
+  t.Object({
+    questStatus: questStatusSchema,
+    hiddenAt: t.Nullable(t.String({ format: 'date-time' })),
+  }),
 ]);
 
 export const questDetailSchema = t.Object({
@@ -196,6 +199,7 @@ export const questDetailSchema = t.Object({
   mode: questModeSchema,
   participation: questParticipationSchema,
   questStatus: questStatusSchema,
+  hiddenAt: t.Optional(t.Nullable(t.String({ format: 'date-time' }))),
   headcount: t.Integer({ minimum: 1 }),
   startTime: t.String({ format: 'date-time' }),
   dueAt: t.Nullable(t.String({ format: 'date-time' })),

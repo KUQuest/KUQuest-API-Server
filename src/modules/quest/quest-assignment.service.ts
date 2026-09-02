@@ -318,7 +318,7 @@ export const joinNoCandidateQuest = async (
       : questStatus.open;
     await transaction
       .update(quest)
-      .set({ questStatus: nextStatus, updatedAt: now })
+      .set({ questStatus: nextStatus, version: sql`${quest.version} + 1`, updatedAt: now })
       .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.open)));
 
     const transition = transitionFor(

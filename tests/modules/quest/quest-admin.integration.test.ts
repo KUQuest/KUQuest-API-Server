@@ -110,7 +110,7 @@ beforeAll(async () => {
     condition: 'Do the work',
     mode: 'CANDIDATE',
     participation: 'SOLO',
-    questStatus: 'QUEST_HIDDEN',
+    questStatus: 'QUEST_OPEN',
     rewardSatang: 1_000,
     tagId,
     startTime: new Date('2030-06-02T00:00:00.000Z'),
@@ -274,9 +274,19 @@ describe('Admin Quest API routes', () => {
   it('requires Admin authentication for Admin Quest endpoints', async () => {
     const list = await app.handle(new Request('http://localhost/api/v1/admin/quests'));
     const detail = await app.handle(new Request(`http://localhost/api/v1/admin/quests/${randomUUID()}`));
+    const command = await app.handle(new Request(`http://localhost/api/v1/admin/quests/${randomUUID()}/hide`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'idempotency-key': 'admin-auth-check',
+        'if-match': '1',
+      },
+      body: JSON.stringify({ reasonCode: 'POLICY_REVIEW' }),
+    }));
 
     expect(list.status).toBe(401);
     expect(detail.status).toBe(401);
+    expect(command.status).toBe(401);
   });
 
   it('publishes the Admin Quest contract in OpenAPI', async () => {
@@ -301,7 +311,7 @@ describe('Admin Quest API routes', () => {
   it('lists Quests across states with filters, hidden visibility, and cursor pagination', async () => {
     type ListResponse = { data: { items: Array<Record<string, unknown>>; nextCursor: string | null } };
 
-    const openOnly = await adminRequest('/api/v1/admin/quests?status=QUEST_OPEN&limit=50');
+    const openOnly = await adminRequest('/api/v1/admin/quests?status=QUEST_OPEN&hidden=false&limit=50');
     const openBody = await openOnly.json() as ListResponse;
     expect(openOnly.status).toBe(200);
     expect(openBody.data.items.map((item) => item.id)).toEqual(
@@ -315,14 +325,14 @@ describe('Admin Quest API routes', () => {
     expect(hiddenBody.data.items.map((item) => item.id)).toContain(hiddenQuestId);
     expect(hiddenBody.data.items.every((item) => item.hiddenAt !== null)).toBe(true);
 
-    const firstPage = await adminRequest('/api/v1/admin/quests?status=QUEST_OPEN&limit=1&sort=newest');
+    const firstPage = await adminRequest('/api/v1/admin/quests?status=QUEST_OPEN&hidden=false&limit=1&sort=newest');
     const firstPageBody = await firstPage.json() as ListResponse;
     expect(firstPage.status).toBe(200);
     expect(firstPageBody.data.items).toHaveLength(1);
     expect(firstPageBody.data.nextCursor).toBeString();
 
     const secondPage = await adminRequest(
-      `/api/v1/admin/quests?status=QUEST_OPEN&limit=1&sort=newest&cursor=${encodeURIComponent(firstPageBody.data.nextCursor!)}`,
+      `/api/v1/admin/quests?status=QUEST_OPEN&hidden=false&limit=1&sort=newest&cursor=${encodeURIComponent(firstPageBody.data.nextCursor!)}`,
     );
     const secondPageBody = await secondPage.json() as ListResponse;
     expect(secondPage.status).toBe(200);
