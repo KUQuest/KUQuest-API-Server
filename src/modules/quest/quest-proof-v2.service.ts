@@ -63,6 +63,8 @@ export type QuestV2ProofSubmission = {
     uploadStatus: 'PROOF_FILE_READY' | 'PROOF_FILE_FAILED';
     failureCode: string | null;
   }>;
+  /** Internal marker used by the controller to clean up replay-only uploads. */
+  replayed?: boolean;
 };
 
 export type StoredQuestV2ProofFileInput = StoredQuestV2ProofFile & {
@@ -788,14 +790,18 @@ const mergeEditAttachments = async (
     const retry = remainingFailures.shift();
     readyFiles.push({ fileId: stored.fileId, position: retry?.position ?? nextPosition() });
   }
+  const retriedFailures = (input.failedFiles ?? []).map((failed) => {
+    const retry = remainingFailures.shift();
+    return {
+      ...failed,
+      position: retry?.position ?? nextPosition(),
+    };
+  });
   return {
     readyFiles,
     failedFiles: [
       ...remainingFailures,
-      ...(input.failedFiles ?? []).map((failed) => ({
-        ...failed,
-        position: nextPosition(),
-      })),
+      ...retriedFailures,
     ],
   };
 };
@@ -835,10 +841,12 @@ const commandFailure = async (
   return { outcome } as const;
 };
 
-const replaySubmission = (record: IdempotencyRecord): QuestV2ProofSubmissionOutcome =>
-  submissionFromSnapshot(record.resultData) ?? outcomeFromSnapshot(record.resultData) ?? {
-    outcome: 'idempotency-unavailable',
-  };
+const replaySubmission = (record: IdempotencyRecord): QuestV2ProofSubmissionOutcome => {
+  const submission = submissionFromSnapshot(record.resultData);
+  return submission
+    ? { ...submission, replayed: true }
+    : outcomeFromSnapshot(record.resultData) ?? { outcome: 'idempotency-unavailable' };
+};
 
 const writeCommandChecks = async (
   transaction: QuestTransaction,
@@ -1210,7 +1218,18 @@ export const confirmQuestV2Completion = async (
       .returning({ confirmedAt: questV2CompletionConfirmation.confirmedAt });
     if (!confirmation) return fail('idempotency-unavailable');
     let questStatus: QuestV2State = currentQuestState;
-    if (await allCompletionObligationsConfirmed(transaction, setup.current, questId)) {
+    const groupFcfs = setup.current.v2Mode === questV2Mode.firstComeFirstServed &&
+      setup.current.v2Participation === questV2Participation.group;
+    if (groupFcfs) {
+      const settlement = await settleProofFreeQuestV2InTransaction(
+        transaction,
+        questId,
+        `quest-v2-completion:${questId}`,
+        now,
+        checks.owner.workerId!,
+      );
+      if (settlement) questStatus = 'QUEST_COMPLETED';
+    } else if (await allCompletionObligationsConfirmed(transaction, setup.current, questId)) {
       await settleProofFreeQuestV2InTransaction(
         transaction,
         questId,

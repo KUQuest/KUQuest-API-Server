@@ -133,10 +133,24 @@ const mapCommandError = (
   return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
 };
 
-const fingerprintFor = async (input: File): Promise<string> => {
+const fingerprintFor = async (input: File, position: number): Promise<string> => {
   const digest = await crypto.subtle.digest('SHA-256', await input.arrayBuffer());
-  return Array.from(
+  const contentHash = Array.from(
     new Uint8Array(digest),
+    (byte) => byte.toString(16).padStart(2, '0'),
+  ).join('');
+  const requestDigest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify({
+      contentHash,
+      position,
+      contentType: input.type,
+      fileName: input.name,
+      size: input.size,
+    })),
+  );
+  return Array.from(
+    new Uint8Array(requestDigest),
     (byte) => byte.toString(16).padStart(2, '0'),
   ).join('');
 };
@@ -162,7 +176,7 @@ const uploadFiles = async (
   const fingerprints: string[] = [];
   let firstError: unknown;
   for (const [position, input] of files.entries()) {
-    fingerprints.push(await fingerprintFor(input));
+    fingerprints.push(await fingerprintFor(input, position));
     try {
       uploaded.push({
         ...(await questV2ProofStorage.upload(memberId, input)),
@@ -246,7 +260,7 @@ export const createQuestV2ProofSubmissionController = async ({
         serviceInputFor(body, upload),
         commandId,
       );
-      persisted = !('outcome' in partial);
+      persisted = !('outcome' in partial) && partial.replayed !== true;
     }
     if (!persisted) await cleanupUploadedFiles(upload.uploaded);
     return mapUploadError(set, upload.error);
@@ -259,7 +273,7 @@ export const createQuestV2ProofSubmissionController = async ({
       serviceInputFor(body, upload),
       commandId,
     );
-    if ('outcome' in result) await cleanupUploadedFiles(upload.uploaded);
+    if ('outcome' in result || result.replayed === true) await cleanupUploadedFiles(upload.uploaded);
     if ('outcome' in result) return mapCommandError(set, result.outcome);
     set.status = 201;
     return apiSuccess(serializeSubmission(result));
@@ -294,7 +308,7 @@ export const editQuestV2ProofSubmissionController = async ({
         input,
         commandId,
       );
-      persisted = !('outcome' in partial);
+      persisted = !('outcome' in partial) && partial.replayed !== true;
     }
     if (!persisted) await cleanupUploadedFiles(upload.uploaded);
     return mapUploadError(set, upload.error);
@@ -308,7 +322,7 @@ export const editQuestV2ProofSubmissionController = async ({
       input,
       commandId,
     );
-    if ('outcome' in result) await cleanupUploadedFiles(upload.uploaded);
+    if ('outcome' in result || result.replayed === true) await cleanupUploadedFiles(upload.uploaded);
     return commandResult(set, result);
   } catch (error) {
     await cleanupUploadedFiles(upload.uploaded);

@@ -7,6 +7,7 @@ import {
   quest,
   questAssignment,
   questCandidateTeamV2,
+  questV2UnderfilledConsent,
   questSettlementCommand,
   questTeam,
 } from '@/database/schema/quest.schema';
@@ -321,7 +322,8 @@ export const settleProofFreeQuestV2InTransaction = async (
   questId: string,
   commandId: string,
   now: Date,
-): Promise<CommandResult> => {
+  completedWorkerId?: string,
+): Promise<CommandResult | undefined> => {
   const current = await lockQuest(tx, questId);
   if (!current || current.apiVersion !== 'v2' || current.questStatus !== questStatus.inProgress) {
     throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The v2 Quest is not ready for completion.');
@@ -337,12 +339,52 @@ export const settleProofFreeQuestV2InTransaction = async (
   const rewardSatang = requireQuestReward(current.rewardSatang);
   const fee = await feeForQuest(tx, current, reservation, rewardSatang);
   const expectedEscrow = current.questEscrowSatang ?? (rewardSatang + Number(fee)) * current.headcount;
-  if (reservation.remainingSatang !== expectedEscrow) {
+  if (completedWorkerId === undefined && reservation.remainingSatang !== expectedEscrow) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Quest Escrow does not match the published funding terms.');
+  }
+  if (completedWorkerId !== undefined && reservation.remainingSatang > expectedEscrow) {
     throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Quest Escrow does not match the published funding terms.');
   }
 
   const groupCandidate = current.v2Mode === 'CANDIDATE' && current.v2Participation === 'GROUP';
-  let payoutWorkers = workers.map(({ workerId }) => ({ workerId, amountSatang: rewardSatang }));
+  const partialWorker = completedWorkerId === undefined
+    ? undefined
+    : workers.find(({ workerId }) => workerId === completedWorkerId);
+  if (completedWorkerId !== undefined && (!partialWorker || groupCandidate)) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The completed Worker Assignment is missing.');
+  }
+  const underfilledConsents = completedWorkerId === undefined
+    ? []
+    : await tx.select({
+        assignmentId: questV2UnderfilledConsent.assignmentId,
+        workerId: questV2UnderfilledConsent.workerId,
+        rewardSatang: questV2UnderfilledConsent.rewardSatang,
+      })
+      .from(questV2UnderfilledConsent)
+      .where(and(
+        eq(questV2UnderfilledConsent.questId, questId),
+        eq(questV2UnderfilledConsent.decision, 'ACCEPT'),
+      ))
+      .orderBy(asc(questV2UnderfilledConsent.createdAt), asc(questV2UnderfilledConsent.id))
+      .for('update');
+  const underfilledConsent = completedWorkerId === undefined
+    ? undefined
+    : underfilledConsents.find(({ assignmentId, workerId }) =>
+      assignmentId === partialWorker!.id && workerId === completedWorkerId);
+  if (completedWorkerId !== undefined && underfilledConsents.length > 0 && !underfilledConsent) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The underfilled Worker Reward allocation is missing.');
+  }
+  const payoutRewardSatang = underfilledConsent?.rewardSatang ?? rewardSatang;
+  const underfilledFeePoolSatang = expectedEscrow - rewardSatang * current.headcount;
+  const payoutFee = underfilledConsents.length === 0
+    ? fee
+    : satang(
+        Math.floor(underfilledFeePoolSatang / underfilledConsents.length) +
+        (underfilledConsents.findIndex(({ assignmentId }) => assignmentId === partialWorker!.id) < underfilledFeePoolSatang % underfilledConsents.length ? 1 : 0),
+      );
+  let payoutWorkers = completedWorkerId === undefined
+    ? workers.map(({ workerId }) => ({ workerId, amountSatang: rewardSatang }))
+    : [{ workerId: completedWorkerId, amountSatang: payoutRewardSatang }];
   if (groupCandidate) {
     const [team] = await tx.select({ leaderId: questCandidateTeamV2.leaderId })
       .from(questCandidateTeamV2)
@@ -365,9 +407,25 @@ export const settleProofFreeQuestV2InTransaction = async (
     current.hirerId,
     reservation.id,
     payoutWorkers,
-    () => Promise.resolve(fee),
-    `quest-v2-complete:${questId}`,
+    () => Promise.resolve(payoutFee),
+    completedWorkerId === undefined
+      ? `quest-v2-complete:${questId}`
+      : `quest-v2-complete:${questId}:${completedWorkerId}`,
   );
+  if (completedWorkerId !== undefined) {
+    const assignment = partialWorker;
+    if (!assignment) {
+      throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The completed Worker Assignment is missing.');
+    }
+    await tx.update(questAssignment)
+      .set({ assignmentStatus: assignmentStatus.completed })
+      .where(and(
+        eq(questAssignment.id, assignment.id),
+        eq(questAssignment.assignmentStatus, assignmentStatus.active),
+      ));
+    const remainingWorkers = await activeAssignments(tx, questId);
+    if (remainingWorkers.length > 0) return undefined;
+  }
   const remaining = (await reservationFor(tx, current.hirerId, questId, false))?.remainingSatang ?? 0;
   if (remaining !== 0) {
     throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Quest Escrow does not match the completion payout.');

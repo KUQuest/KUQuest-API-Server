@@ -2,6 +2,7 @@ import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
+import { chatConversation, chatMembership } from '@/database/schema/work-chat.schema';
 import {
   quest,
   questAssignment,
@@ -21,7 +22,9 @@ import {
 import { questV2ProofStorage } from '@/modules/quest/quest-proof-v2.storage';
 import {
   UnsupportedWorkChatAttachmentError,
+  WorkChatAttachmentTooLargeError,
 } from '@/modules/work-chat/work-chat.storage';
+import { createWorkChatMembershipWriter } from '@/modules/work-chat';
 import {
   createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
@@ -187,6 +190,28 @@ const reserveQuest = async (questId: string, amountSatang: number) => {
   }));
 };
 
+const deleteWorkChatForQuests = async (ids: string[]) => {
+  if (ids.length === 0) return;
+  const conversations = await db.select({ id: chatConversation.id })
+    .from(chatConversation)
+    .where(inArray(chatConversation.questId, ids));
+  const conversationIds = conversations.map(({ id }) => id);
+  if (conversationIds.length === 0) return;
+  const messages = await sql<{ id: string }[]>`
+    select id from chat_message where conversation_id = any(${sql.array(conversationIds, 2951)})
+  `;
+  const messageIds = messages.map(({ id }) => id);
+  if (messageIds.length > 0) {
+    await sql`delete from chat_message_attachment where message_id = any(${sql.array(messageIds, 2951)})`;
+    await sql`delete from chat_message where id = any(${sql.array(messageIds, 2951)})`;
+  }
+  await sql`delete from chat_read_cursor where conversation_id = any(${sql.array(conversationIds, 2951)})`;
+  await sql`delete from chat_attachment where conversation_id = any(${sql.array(conversationIds, 2951)})`;
+  await sql`delete from chat_transition_commands where quest_id = any(${sql.array(ids, 2951)})`;
+  await db.delete(chatMembership).where(inArray(chatMembership.conversationId, conversationIds));
+  await db.delete(chatConversation).where(inArray(chatConversation.id, conversationIds));
+};
+
 beforeAll(async () => {
   try {
     await sql`select 1`;
@@ -207,7 +232,7 @@ beforeAll(async () => {
   }
   await ensureInitialMoneyPolicy();
   await db.insert(authUser).values(members);
-  await db.insert(tag).values({ id: tagId, name: 'Proof v2 behavior test tag' });
+  await db.insert(tag).values({ id: tagId, name: `Proof v2 behavior test tag ${tagId}` });
   for (const member of members) await ensureWallet(member.id);
   await fundHirer(100_000);
 });
@@ -222,6 +247,7 @@ afterEach(async () => {
   mock.restore();
   if (!postgresAvailable || !proofSchemaAvailable) return;
   if (questIds.length > 0) {
+    await deleteWorkChatForQuests([...questIds]);
     await db.delete(quest).where(inArray(quest.id, questIds));
     questIds.splice(0, questIds.length);
   }
@@ -423,6 +449,23 @@ describe('Quest Proof Submission v2 behavior', () => {
       expect.objectContaining({ status: 'PROOF_FILE_FAILED', fileId: null, failureCode: 'PROOF_FILE_TYPE_NOT_SUPPORTED' }),
     ]));
 
+    const failedRetryForm = new FormData();
+    failedRetryForm.append('files', new File([new Uint8Array([10, 11, 12])], 'bad.pdf', { type: 'application/pdf' }));
+    const failedRetry = await request(
+      'PATCH',
+      `/api/v2/quests/${questId}/proof-submissions/${submission.id}`,
+      worker.id,
+      failedRetryForm,
+      { 'idempotency-key': 'proof-v2-behavior-partial-failed-retry' },
+    );
+    expect(failedRetry.status).toBe(415);
+    const failedRetryAttachments = await db.select({
+      status: questV2ProofSubmissionFile.uploadStatus,
+    }).from(questV2ProofSubmissionFile)
+      .where(eq(questV2ProofSubmissionFile.proofSubmissionId, submission.id));
+    expect(failedRetryAttachments).toHaveLength(2);
+    expect(failedRetryAttachments.filter(({ status }) => status === 'PROOF_FILE_FAILED')).toHaveLength(1);
+
     const blocked = await request(
       'POST',
       `/api/v2/quests/${questId}/proof-submissions/${submission.id}/submit`,
@@ -481,6 +524,12 @@ describe('Quest Proof Submission v2 behavior', () => {
     );
     expect(first.status).toBe(200);
     expect((await first.json()).data.questStatus).toBe('QUEST_IN_PROGRESS');
+    expect(await db.select({ workerId: questAssignment.workerId, status: questAssignment.assignmentStatus })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, questId))).toEqual(expect.arrayContaining([
+      { workerId: worker.id, status: 'ASSIGNMENT_COMPLETED' },
+      { workerId: secondWorker.id, status: 'ASSIGNMENT_ACTIVE' },
+    ]));
 
     const second = await request(
       'POST',
@@ -498,6 +547,259 @@ describe('Quest Proof Submission v2 behavior', () => {
       { status: 'ASSIGNMENT_COMPLETED' },
     ]);
     expect(await db.select().from(questV2CompletionConfirmation).where(eq(questV2CompletionConfirmation.questId, questId))).toHaveLength(2);
+  });
+
+  it('covers SINGLE Candidate draft deletion, dueAt, and Assignment authorization', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const candidateQuest = await createQuest({
+      mode: 'CANDIDATE',
+      v2Mode: 'CANDIDATE',
+      v2Participation: 'SINGLE',
+      participation: 'SOLO',
+      headcount: 1,
+    });
+    const draft = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${candidateQuest.questId}/proof-submissions`,
+      worker.id,
+      { description: 'candidate draft' },
+      { 'idempotency-key': 'proof-v2-behavior-single-candidate-create' },
+    );
+    expect(draft.status).toBe(201);
+    const draftData = (await draft.json()).data as { id: string };
+
+    const unauthorized = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${candidateQuest.questId}/proof-submissions`,
+      secondWorker.id,
+      { description: 'not assigned' },
+      { 'idempotency-key': 'proof-v2-behavior-single-candidate-unauthorized' },
+    );
+    expect(unauthorized.status).toBe(403);
+    expect((await unauthorized.json()).error.code).toBe('PROOF_SUBMISSION_NOT_ALLOWED');
+
+    const deleted = await request(
+      'DELETE',
+      `/api/v2/quests/${candidateQuest.questId}/proof-submissions/${draftData.id}`,
+      worker.id,
+      undefined,
+      { 'idempotency-key': 'proof-v2-behavior-single-candidate-delete' },
+    );
+    expect(deleted.status).toBe(200);
+    expect((await deleted.json()).data).toMatchObject({ deleted: true, proofSubmissionId: draftData.id });
+    const ownList = await request(
+      'GET',
+      `/api/v2/quests/${candidateQuest.questId}/proof-submissions`,
+      worker.id,
+    );
+    expect((await ownList.json()).data.items).toEqual([]);
+
+    const dueQuest = await createQuest({
+      startTime: new Date('2019-01-01T00:00:00.000Z'),
+      dueAt: new Date('2020-01-01T00:00:00.000Z'),
+    });
+    const due = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${dueQuest.questId}/proof-submissions`,
+      worker.id,
+      { description: 'too late' },
+      { 'idempotency-key': 'proof-v2-behavior-due-at' },
+    );
+    expect(due.status).toBe(409);
+    expect((await due.json()).error.code).toBe('PROOF_DUE_AT_PASSED');
+  });
+
+  it('settles proof-free SINGLE completion without creating a Proof Submission', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest({ proofRequired: false });
+    await reserveQuest(questId, 1_020);
+
+    const confirmed = await request(
+      'POST',
+      `/api/v2/quests/${questId}/completion-confirmation`,
+      worker.id,
+      undefined,
+      { 'idempotency-key': 'proof-v2-behavior-single-confirm' },
+    );
+    expect(confirmed.status).toBe(200);
+    expect((await confirmed.json()).data.questStatus).toBe('QUEST_COMPLETED');
+    expect(await db.select().from(questV2ProofSubmission).where(eq(questV2ProofSubmission.questId, questId))).toEqual([]);
+    expect(await db.select().from(questV2ProofSubmissionFile).where(eq(questV2ProofSubmissionFile.proofSubmissionId, questId))).toEqual([]);
+    expect((await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment).where(eq(questAssignment.questId, questId)))[0]?.status).toBe('ASSIGNMENT_COMPLETED');
+  });
+
+  it('uses first-commit-wins for concurrent Draft commands', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest();
+    const responses = await Promise.all([
+      jsonRequest(
+        'POST',
+        `/api/v2/quests/${questId}/proof-submissions`,
+        worker.id,
+        { description: 'first command' },
+        { 'idempotency-key': 'proof-v2-behavior-concurrent-first' },
+      ),
+      jsonRequest(
+        'POST',
+        `/api/v2/quests/${questId}/proof-submissions`,
+        worker.id,
+        { description: 'second command' },
+        { 'idempotency-key': 'proof-v2-behavior-concurrent-second' },
+      ),
+    ]);
+    expect(responses.map(({ status }) => status).sort()).toEqual([201, 409]);
+    expect((await db.select().from(questV2ProofSubmission).where(eq(questV2ProofSubmission.questId, questId)))).toHaveLength(1);
+  });
+
+  it('rolls back proof-free completion when the Work Conversation transition fails', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest({ proofRequired: false });
+    await reserveQuest(questId, 1_020);
+    configureQuestWorkChatMembershipWriter({
+      applyQuestTransition: async (_transaction, transition) => {
+        if (transition.type === 'questBecameReadOnly') throw new Error('chat unavailable');
+        return { conversationId: 'proof-v2-behavior-rollback', outcome: 'APPLIED' as const };
+      },
+    });
+
+    const response = await request(
+      'POST',
+      `/api/v2/quests/${questId}/completion-confirmation`,
+      worker.id,
+      undefined,
+      { 'idempotency-key': 'proof-v2-behavior-rollback-confirm' },
+    );
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe('QUEST_COMPLETION_UNAVAILABLE');
+    expect(await db.select().from(questV2CompletionConfirmation).where(eq(questV2CompletionConfirmation.questId, questId))).toEqual([]);
+    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status).toBe('QUEST_IN_PROGRESS');
+    expect((await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment).where(eq(questAssignment.questId, questId)))[0]?.status).toBe('ASSIGNMENT_ACTIVE');
+  });
+
+  it('closes the real Work Conversation at proof-free completion', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest({ proofRequired: false });
+    const [assignment] = await db.select({ id: questAssignment.id, workerId: questAssignment.workerId })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, questId));
+    if (!assignment) throw new Error('Behavior fixture Assignment was not created');
+    const productionWriter = createWorkChatMembershipWriter();
+    const acceptedAt = new Date();
+    await db.transaction((transaction) => productionWriter.applyQuestTransition(transaction, {
+      producer: 'QUEST_ASSIGNMENT_V2',
+      type: 'workersAccepted',
+      commandId: `proof-v2-behavior-chat-accepted-${questId}`,
+      eventId: `proof-v2-behavior-chat-accepted-event-${questId}`,
+      questId,
+      actorId: hirer.id,
+      occurredAt: acceptedAt.toISOString(),
+      hirerId: hirer.id,
+      workers: [{
+        workerId: assignment.workerId,
+        assignmentId: assignment.id,
+        joinedAt: acceptedAt.toISOString(),
+      }],
+    }));
+    configureQuestWorkChatMembershipWriter(productionWriter);
+    await reserveQuest(questId, 1_020);
+
+    const response = await request(
+      'POST',
+      `/api/v2/quests/${questId}/completion-confirmation`,
+      worker.id,
+      undefined,
+      { 'idempotency-key': `proof-v2-behavior-real-chat-confirm-${questId}` },
+    );
+    expect(response.status).toBe(200);
+    const [conversation] = await db.select({ id: chatConversation.id, readOnlyAt: chatConversation.readOnlyAt, questStatus: chatConversation.questStatus })
+      .from(chatConversation)
+      .where(eq(chatConversation.questId, questId));
+    expect(conversation?.readOnlyAt).toBeInstanceOf(Date);
+    expect(conversation?.questStatus).toBe('QUEST_COMPLETED');
+    expect(await db.select().from(chatMembership).where(eq(chatMembership.conversationId, conversation!.id))).toHaveLength(2);
+  });
+
+  it('cleans replay-only uploads and rejects changed multipart metadata', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest();
+    const upload = spyOn(questV2ProofStorage, 'upload').mockImplementation(async (memberId, input) => ({
+      bucket: 'proof-v2-behavior-test',
+      objectKey: `proof-submissions/${memberId}/${randomUUID()}`,
+      contentType: 'application/pdf',
+      sizeBytes: input.size,
+      fileName: input.name,
+    }));
+    const remove = spyOn(questV2ProofStorage, 'remove').mockResolvedValue(undefined);
+
+    const firstForm = new FormData();
+    firstForm.append('files', new File([new Uint8Array([1, 2, 3])], 'proof.pdf', { type: 'application/pdf' }));
+    const first = await request(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      worker.id,
+      firstForm,
+      { 'idempotency-key': `proof-v2-behavior-multipart-replay-${questId}` },
+    );
+    expect(first.status).toBe(201);
+
+    const replayForm = new FormData();
+    replayForm.append('files', new File([new Uint8Array([1, 2, 3])], 'proof.pdf', { type: 'application/pdf' }));
+    const replay = await request(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      worker.id,
+      replayForm,
+      { 'idempotency-key': `proof-v2-behavior-multipart-replay-${questId}` },
+    );
+    expect(replay.status).toBe(201);
+    expect(remove).toHaveBeenCalledTimes(1);
+
+    const changedTypeForm = new FormData();
+    changedTypeForm.append('files', new File([new Uint8Array([1, 2, 3])], 'proof.png', { type: 'image/png' }));
+    const changedType = await request(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      worker.id,
+      changedTypeForm,
+      { 'idempotency-key': `proof-v2-behavior-multipart-replay-${questId}` },
+    );
+    expect(changedType.status).toBe(409);
+    expect((await changedType.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+    expect(upload).toHaveBeenCalledTimes(3);
+    expect(remove).toHaveBeenCalledTimes(2);
+  });
+
+  it('enforces the five-file limit and the storage size boundary', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const countQuest = await createQuest();
+    const tooManyForm = new FormData();
+    for (let index = 0; index < 6; index += 1) {
+      tooManyForm.append('files', new File([new Uint8Array([index + 1])], `proof-${index}.pdf`, { type: 'application/pdf' }));
+    }
+    const tooMany = await request(
+      'POST',
+      `/api/v2/quests/${countQuest.questId}/proof-submissions`,
+      worker.id,
+      tooManyForm,
+      { 'idempotency-key': `proof-v2-behavior-file-count-${countQuest.questId}` },
+    );
+    expect(tooMany.status).toBe(400);
+
+    const sizeQuest = await createQuest();
+    spyOn(questV2ProofStorage, 'upload').mockRejectedValue(
+      new WorkChatAttachmentTooLargeError('Attachment must be 10 MB or smaller'),
+    );
+    const tooLargeForm = new FormData();
+    tooLargeForm.append('files', new File([new Uint8Array([1])], 'large.pdf', { type: 'application/pdf' }));
+    const tooLarge = await request(
+      'POST',
+      `/api/v2/quests/${sizeQuest.questId}/proof-submissions`,
+      worker.id,
+      tooLargeForm,
+      { 'idempotency-key': `proof-v2-behavior-file-size-${sizeQuest.questId}` },
+    );
+    expect(tooLarge.status).toBe(413);
+    expect((await tooLarge.json()).error.code).toBe('PROOF_FILE_TOO_LARGE');
   });
 
   it('allows only the Team Leader to confirm proof-free GROUP Candidate work', async () => {
@@ -531,7 +833,7 @@ describe('Quest Proof Submission v2 behavior', () => {
       `/api/v2/quests/${questId}/completion-confirmation`,
       secondWorker.id,
       undefined,
-      { 'idempotency-key': 'proof-v2-behavior-candidate-member' },
+      { 'idempotency-key': `proof-v2-behavior-candidate-member-${questId}` },
     );
     expect(memberAttempt.status).toBe(403);
     expect((await memberAttempt.json()).error.code).toBe('PROOF_SUBMISSION_NOT_ALLOWED');
@@ -541,7 +843,7 @@ describe('Quest Proof Submission v2 behavior', () => {
       `/api/v2/quests/${questId}/completion-confirmation`,
       worker.id,
       undefined,
-      { 'idempotency-key': 'proof-v2-behavior-candidate-leader' },
+      { 'idempotency-key': `proof-v2-behavior-candidate-leader-${questId}` },
     );
     expect(leaderConfirmation.status).toBe(200);
     expect((await leaderConfirmation.json()).data.questStatus).toBe('QUEST_COMPLETED');
