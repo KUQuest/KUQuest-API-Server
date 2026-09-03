@@ -682,7 +682,8 @@ describe('Quest Proof Submission v2 behavior', () => {
       { 'idempotency-key': `proof-v2-behavior-underfilled-confirm-${index}-${questId}` },
     )));
     expect(confirmations.map(({ status }) => status)).toEqual([200, 200, 200]);
-    expect((await confirmations[2]!.json()).data.questStatus).toBe('QUEST_COMPLETED');
+    const confirmationStatuses = await Promise.all(confirmations.map(async (response) => (await response.json()).data.questStatus));
+    expect(confirmationStatuses.filter((status) => status === 'QUEST_COMPLETED')).toHaveLength(1);
     expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status).toBe('QUEST_COMPLETED');
     const [reservation] = await db.select({ id: walletFundingReservation.id })
       .from(walletFundingReservation)
