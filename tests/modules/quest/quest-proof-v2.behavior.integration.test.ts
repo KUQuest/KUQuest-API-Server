@@ -171,7 +171,7 @@ const createFile = async (uploadedByUserId: string, contentType = 'application/p
   return id;
 };
 
-const account = async (userId: string, type: 'SPENDING' | 'FUNDING_RESERVED') => {
+const account = async (userId: string, type: 'SPENDING' | 'EARNINGS' | 'FUNDING_RESERVED') => {
   const [wallet] = await db.select({ id: walletWallet.id })
     .from(walletWallet)
     .where(eq(walletWallet.userId, userId));
