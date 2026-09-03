@@ -1,11 +1,3 @@
-export type AdminActionJsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | AdminActionJsonValue[]
-  | { [key: string]: AdminActionJsonValue };
-
 export type AdminActionSafeValue =
   | string
   | number
@@ -309,7 +301,7 @@ export const assertPositiveVersion = (value: number, field: string): number => {
 export const normalizeRequestValue = (
   value: unknown,
   path = 'request',
-): AdminActionJsonValue | null => {
+): AdminActionSafeValue | null => {
   if (value === undefined) return null;
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return value;
   if (typeof value === 'number') {
@@ -325,7 +317,7 @@ export const normalizeRequestValue = (
     throw new AdminActionError('ADMIN_ACTION_INVALID_REQUEST', `${path} must contain JSON values.`);
   }
 
-  const normalized = Object.create(null) as { [key: string]: AdminActionJsonValue };
+  const normalized = Object.create(null) as { [key: string]: AdminActionSafeValue };
   for (const [key, child] of Object.entries(value)) {
     if (!key || key.length > 100) {
       throw new AdminActionError('ADMIN_ACTION_INVALID_REQUEST', `${path} contains an invalid field name.`);

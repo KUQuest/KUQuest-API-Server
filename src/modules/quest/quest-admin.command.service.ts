@@ -1,7 +1,7 @@
 import { quest } from '@/database/schema/quest.schema';
 import {
   createAdminActionService,
-  type AdminActionCommandResult,
+  type AdminActionResult,
   type AdminActionReasonCatalog,
 } from '@/modules/admin';
 
@@ -65,7 +65,7 @@ export type QuestAdminCommandInput = {
   now?: Date;
 };
 
-export type QuestAdminCommandResult = AdminActionCommandResult<AdminQuestSummaryResponse>;
+export type QuestAdminCommandResult = AdminActionResult<AdminQuestSummaryResponse>;
 
 type QuestAdminCommandAction = 'QUEST_HIDE' | 'QUEST_RESTORE' | 'QUEST_TERMINATE';
 

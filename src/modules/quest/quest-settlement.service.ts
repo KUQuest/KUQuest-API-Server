@@ -314,13 +314,11 @@ export const settleApprovedQuestInTransaction = completeInTransaction;
 
 export const completeQuest = async (questId: string, actorUserId: string, commandId = `quest-completion:${questId}`, now = new Date()) => db.transaction((tx) => completeInTransaction(tx, questId, actorUserId, commandId, now));
 
-type CancellationActor = Actor;
-
 /** A system cancellation authorises against the Hirer but attributes the cancellation to nobody. */
 const cancelInTransaction = async (
   tx: QuestTransaction,
   questId: string,
-  actor: CancellationActor,
+  actor: Actor,
   commandId: string,
   now: Date,
   system = false,

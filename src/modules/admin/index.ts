@@ -1,7 +1,7 @@
 export { createAdminActionService } from './admin-action.service';
 export type {
   AdminActionCommandInput,
-  AdminActionCommandResult,
+  AdminActionResult,
   AdminActionCommandRevision,
 } from './admin-action.service';
 export {

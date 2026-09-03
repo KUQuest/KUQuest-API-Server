@@ -15,7 +15,7 @@ import {
   normalizeRequestValue,
   normalizeResourceId,
   normalizeSafeObject,
-  type AdminActionJsonValue,
+  type AdminActionSafeValue,
   type AdminActionKind,
   type AdminActionReasonCatalog,
   type AdminActionSafeObject,
@@ -23,21 +23,14 @@ import {
 
 export type AdminActionTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-export type AdminActionCommandResult<T extends AdminActionSafeObject = AdminActionSafeObject> = {
+export type AdminActionResult<T extends AdminActionSafeObject = AdminActionSafeObject> = {
   resourceSummary: T;
   resourceVersion: number | null;
   resourceTimestamp: Date | null;
   adminActionId: string;
 };
 
-export type AdminActionEvidenceResult<T extends AdminActionSafeObject = AdminActionSafeObject> = {
-  resourceSummary: T;
-  resourceVersion: number | null;
-  resourceTimestamp: Date | null;
-  adminActionId: string;
-};
-
-export type AdminActionCommandMutation<T extends AdminActionSafeObject> = {
+export type AdminActionMutation<T extends AdminActionSafeObject> = {
   outcome?: never;
   resourceSummary: T;
   resourceVersion: number | null;
@@ -53,7 +46,7 @@ export type AdminActionCommandPlan<T extends AdminActionSafeObject> = {
   outcome?: never;
   currentVersion?: number;
   currentTimestamp?: Date;
-  apply: () => Promise<AdminActionCommandMutation<T>>;
+  apply: () => Promise<AdminActionMutation<T>>;
 };
 
 export type AdminActionCommandPreparationContext = {
@@ -66,17 +59,6 @@ export type AdminActionCommandPreparationContext = {
 export type AdminActionCommandPreparation<T extends AdminActionSafeObject> =
   | AdminActionCommandPlan<T>
   | { outcome: 'conflict' };
-
-/**
- * The evidence adapter must authorize the case-scoped read and return only
- * safe summary data. It must not mutate or return message/evidence content.
- */
-export type AdminActionEvidenceMutation<T extends AdminActionSafeObject> = {
-  outcome?: never;
-  resourceSummary: T;
-  resourceVersion: number | null;
-  resourceTimestamp?: Date | null;
-};
 
 export type AdminActionEvidenceContext = {
   requestHash: string;
@@ -107,28 +89,32 @@ export type AdminActionCommandInput<T extends AdminActionSafeObject> =
     ) => Promise<AdminActionCommandPreparation<T>>;
   };
 
+/**
+ * `read` must authorize the case-scoped read and return only safe summary data.
+ * It must not mutate or return message/evidence content.
+ */
 export type AdminActionEvidenceAccessInput<T extends AdminActionSafeObject> = AdminActionBaseInput & {
   read: (
     transaction: AdminActionTransaction,
     context: AdminActionEvidenceContext,
-  ) => Promise<AdminActionEvidenceMutation<T>>;
+  ) => Promise<AdminActionMutation<T>>;
 };
 
 export type AdminActionService = {
   executeCommand: <T extends AdminActionSafeObject>(
     input: AdminActionCommandInput<T>,
-  ) => Promise<AdminActionCommandResult<T>>;
+  ) => Promise<AdminActionResult<T>>;
   executeCommandInTransaction: <T extends AdminActionSafeObject>(
     transaction: AdminActionTransaction,
     input: AdminActionCommandInput<T>,
-  ) => Promise<AdminActionCommandResult<T>>;
+  ) => Promise<AdminActionResult<T>>;
   recordEvidenceAccess: <T extends AdminActionSafeObject>(
     input: AdminActionEvidenceAccessInput<T>,
-  ) => Promise<AdminActionEvidenceResult<T>>;
+  ) => Promise<AdminActionResult<T>>;
   recordEvidenceAccessInTransaction: <T extends AdminActionSafeObject>(
     transaction: AdminActionTransaction,
     input: AdminActionEvidenceAccessInput<T>,
-  ) => Promise<AdminActionEvidenceResult<T>>;
+  ) => Promise<AdminActionResult<T>>;
 };
 
 type NormalizedActionInput = {
@@ -141,7 +127,7 @@ type NormalizedActionInput = {
   expectedVersion: number | null;
   expectedTimestamp: Date | null;
   metadata: AdminActionSafeObject;
-  request: AdminActionJsonValue | null;
+  request: AdminActionSafeValue | null;
   requestHash: string;
 };
 
@@ -173,7 +159,7 @@ type InternalActionInput<T extends AdminActionSafeObject> = NormalizedActionInpu
   >;
 };
 
-const canonicalJson = (value: AdminActionJsonValue): string => {
+const canonicalJson = (value: AdminActionSafeValue): string => {
   if (value === null) return 'null';
   if (typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
   if (typeof value === 'number') return String(value);
@@ -185,7 +171,7 @@ const canonicalJson = (value: AdminActionJsonValue): string => {
     .join(',')}}`;
 };
 
-const requestHashFor = async (value: AdminActionJsonValue): Promise<string> => {
+const requestHashFor = async (value: AdminActionSafeValue): Promise<string> => {
   const digest = await crypto.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(canonicalJson(value)),
@@ -449,7 +435,7 @@ const runAdminActionInTransaction = async <T extends AdminActionSafeObject>(
 
 const toCommandResult = <T extends AdminActionSafeObject>(
   result: StoredActionResult,
-): AdminActionCommandResult<T> => {
+): AdminActionResult<T> => {
   if (result.resourceVersion === null && result.resourceTimestamp === null) {
     throw new AdminActionError(
       'ADMIN_ACTION_INVALID_RESULT',
@@ -466,7 +452,7 @@ const toCommandResult = <T extends AdminActionSafeObject>(
 
 const toEvidenceResult = <T extends AdminActionSafeObject>(
   result: StoredActionResult,
-): AdminActionEvidenceResult<T> => ({
+): AdminActionResult<T> => ({
   resourceSummary: result.resourceSummary as T,
   resourceVersion: result.resourceVersion,
   resourceTimestamp: result.resourceTimestamp,
@@ -485,7 +471,7 @@ export const createAdminActionService = (
   const executeCommandInTransaction = async <T extends AdminActionSafeObject>(
     transaction: AdminActionTransaction,
     input: AdminActionCommandInput<T>,
-  ): Promise<AdminActionCommandResult<T>> => {
+  ): Promise<AdminActionResult<T>> => {
     const normalized = await normalizeInput(catalog, 'COMMAND', input);
     const result = await runAdminActionInTransaction(transaction, catalog, {
       ...normalized,
@@ -519,13 +505,13 @@ export const createAdminActionService = (
 
   const executeCommand = async <T extends AdminActionSafeObject>(
     input: AdminActionCommandInput<T>,
-  ): Promise<AdminActionCommandResult<T>> =>
+  ): Promise<AdminActionResult<T>> =>
     db.transaction((transaction) => executeCommandInTransaction(transaction, input));
 
   const recordEvidenceAccessInTransaction = async <T extends AdminActionSafeObject>(
     transaction: AdminActionTransaction,
     input: AdminActionEvidenceAccessInput<T>,
-  ): Promise<AdminActionEvidenceResult<T>> => {
+  ): Promise<AdminActionResult<T>> => {
     const normalized = await normalizeInput(catalog, 'EVIDENCE_ACCESS', input);
     const result = await runAdminActionInTransaction(transaction, catalog, {
       ...normalized,
@@ -540,7 +526,7 @@ export const createAdminActionService = (
 
   const recordEvidenceAccess = async <T extends AdminActionSafeObject>(
     input: AdminActionEvidenceAccessInput<T>,
-  ): Promise<AdminActionEvidenceResult<T>> =>
+  ): Promise<AdminActionResult<T>> =>
     db.transaction((transaction) => recordEvidenceAccessInTransaction(transaction, input));
 
   return {
