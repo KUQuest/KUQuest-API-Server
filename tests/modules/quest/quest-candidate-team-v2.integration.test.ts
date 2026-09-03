@@ -863,6 +863,54 @@ describe('Quest Candidate Team API v2', () => {
     expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(0);
   });
 
+  it('does not select a submitted Candidate Team after its submission file is tombstoned', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId, candidate.id, 3, 'candidate-team-v2-selection-tombstone-create');
+    await joinTeam(
+      questId,
+      team.id,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-selection-tombstone-join-one',
+    );
+    await joinTeam(
+      questId,
+      team.id,
+      thirdCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-selection-tombstone-join-two',
+    );
+
+    const submissionFileId = await createFile(candidate.id);
+    const submitted = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/submit`,
+      'POST',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-selection-tombstone-submit' },
+      JSON.stringify({ text: 'Submitted team', fileIds: [submissionFileId] }),
+    );
+    expect(submitted.status).toBe(200);
+
+    await db.update(file)
+      .set({ deletedAt: new Date() })
+      .where(eq(file.id, submissionFileId));
+
+    const response = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-team-v2-selection-tombstone-select' },
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe('CANDIDATE_TEAM_NOT_SELECTABLE');
+
+    const [currentQuest] = await db.select({ state: quest.questStatus }).from(quest).where(eq(quest.id, questId));
+    expect(currentQuest?.state).toBe('QUEST_OPEN');
+    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(0);
+  });
+
   it('rejects Team selection by the wrong Hirer, for a forming Team, or after the Quest closes', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenGroupCandidateQuest();

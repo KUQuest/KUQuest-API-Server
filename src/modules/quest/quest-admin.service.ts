@@ -13,6 +13,7 @@ import {
   questEditHistory,
   questEditRequest,
   questEditRequestResponse,
+  questLocation,
   questTeam,
   questTeamMember,
   questV2EditRequest,
@@ -118,6 +119,10 @@ export const serializeAdminQuestSummary = (value: AdminQuestSummary): AdminQuest
 });
 
 type AdminQuestExecutor = typeof db | QuestTransaction;
+
+type AdminQuestLocation = {
+  label: string | null;
+};
 
 const adminQuestRows = (executor: AdminQuestExecutor) => executor
   .select({
@@ -294,6 +299,7 @@ export type AdminQuestAdminAction = {
 export type AdminQuestDetail = AdminQuestSummary & {
   description: string | null;
   condition: { text: string; items: Array<{ position: number; text: string }> };
+  locations: AdminQuestLocation[];
   proofRequired: boolean;
   tagId: string | null;
   fundingReservationId: string | null;
@@ -337,6 +343,12 @@ const applicationsFor = async (questId: string): Promise<AdminQuestApplication[]
     appliedAt: row.application.appliedAt,
   }));
 };
+
+const locationsFor = async (questId: string): Promise<AdminQuestLocation[]> => db
+  .select({ label: questLocation.label })
+  .from(questLocation)
+  .where(eq(questLocation.questId, questId))
+  .orderBy(asc(questLocation.id));
 
 const teamsFor = async (questId: string): Promise<AdminQuestTeam[]> => {
   const teams = await db.select().from(questTeam).where(eq(questTeam.questId, questId)).orderBy(asc(questTeam.createdAt));
@@ -525,6 +537,7 @@ export const getAdminQuestDetail = async (questId: string): Promise<AdminQuestDe
 
   const [
     conditionItems,
+    locations,
     candidateApplications,
     candidateTeams,
     assignments,
@@ -537,6 +550,7 @@ export const getAdminQuestDetail = async (questId: string): Promise<AdminQuestDe
       .from(questConditionItem)
       .where(eq(questConditionItem.questId, questId))
       .orderBy(asc(questConditionItem.position)),
+    locationsFor(questId),
     applicationsFor(questId),
     teamsFor(questId),
     assignmentsFor(questId),
@@ -549,6 +563,7 @@ export const getAdminQuestDetail = async (questId: string): Promise<AdminQuestDe
     ...adminQuestSummaryFromRow(row),
     description: row.quest.description,
     condition: { text: row.quest.condition, items: conditionItems },
+    locations,
     proofRequired: row.quest.proofRequired,
     tagId: row.quest.tagId,
     fundingReservationId: row.quest.fundingReservationId,

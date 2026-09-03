@@ -105,6 +105,10 @@ const adminQuestConditionItemSchema = t.Object({
   text: t.String(),
 });
 
+const adminQuestLocationSchema = t.Object({
+  label: t.Nullable(t.String()),
+});
+
 const adminQuestApplicationSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   worker: adminQuestMemberSchema,
@@ -208,6 +212,7 @@ export const adminQuestDetailSchema = t.Object({
     text: t.String(),
     items: t.Array(adminQuestConditionItemSchema),
   }),
+  locations: t.Array(adminQuestLocationSchema),
   questStatus: adminQuestStatusSchema,
   mode: adminQuestModeSchema,
   participation: adminQuestParticipationSchema,
