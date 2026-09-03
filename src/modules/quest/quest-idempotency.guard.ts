@@ -13,6 +13,7 @@ type IdempotencyKeyScope =
   | 'candidate-application-v2'
   | 'candidate-team-v2'
   | 'proof-submission-v2'
+  | 'rating-review-v2'
   | 'quest-cancellation'
   | 'quest-dispute-resolution';
 
@@ -70,6 +71,13 @@ const pathNeedsIdempotencyKey = (scope: IdempotencyKeyScope, pathname: string, m
       return isUuid(parts[6]) && ['submit', 'review'].includes(parts[7]!);
     }
     return method === 'POST' && parts.length === 6 && parts[5] === 'completion-confirmation';
+  }
+
+  if (scope === 'rating-review-v2') {
+    if (!pathname.startsWith(`${API_V2_PREFIX}/quests/`)) return false;
+    if (!isUuid(parts[4]) || parts[5] !== 'reviews') return false;
+    if (method === 'POST' && parts.length === 6) return true;
+    return method === 'PATCH' && parts.length === 7 && isUuid(parts[6]);
   }
 
   if (scope === 'quest-cancellation') {
