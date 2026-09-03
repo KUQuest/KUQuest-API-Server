@@ -26,7 +26,6 @@ import {
   expireQuestV2Underfilled,
   pendingQuestV2UnderfilledQuestIds,
 } from './quest-underfilled-v2.service';
-import { retryQuestV2ProofUploadCleanup } from './quest-proof-v2.service';
 import {
   autoApproveDueQuestV2Proofs,
   failDueAtQuestV2Proofs,
