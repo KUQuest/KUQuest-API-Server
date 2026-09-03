@@ -71,13 +71,17 @@ export type {
 } from './quest-assignment-v2.service';
 export {
   confirmQuestV2Completion,
+  autoApproveDueQuestV2Proofs,
   createQuestV2ProofSubmission,
   deleteQuestV2ProofSubmission,
   editQuestV2ProofSubmission,
+  failDueAtQuestV2Proofs,
+  failQuestV2AtDueAt,
   listQuestV2ProofSubmissions,
   questV2ProofSubmissionOperationScope,
   recordQuestV2ProofUploadCleanup,
   retryQuestV2ProofUploadCleanup,
+  reviewQuestV2ProofSubmission,
   QuestV2ProofUploadCleanupUnavailableError,
   submitQuestV2ProofSubmission,
 } from './quest-proof-v2.service';
@@ -91,6 +95,9 @@ export type {
   QuestV2ProofSubmissionDeleteOutcome,
   QuestV2ProofSubmissionListOutcome,
   QuestV2ProofSubmissionOutcome,
+  QuestV2ProofReview,
+  QuestV2ProofReviewDecision,
+  QuestV2ProofReviewOutcome,
   StoredQuestV2ProofFileInput,
 } from './quest-proof-v2.service';
 export {

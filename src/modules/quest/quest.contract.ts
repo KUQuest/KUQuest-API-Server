@@ -147,8 +147,8 @@ export const terminalQuestStatuses = [
 export const isTerminalQuestStatus = (status: QuestStatus): status is TerminalQuestStatus =>
   terminalQuestStatuses.includes(status as TerminalQuestStatus);
 
-/** An Assignment status of a departed Worker — no current Work Conversation membership. */
+/** An Assignment status of a Worker who has no current Work Conversation membership. */
 export type InactiveAssignmentStatus = Extract<
   AssignmentStatus,
-  (typeof assignmentStatus)['incomplete' | 'cancelled']
+  (typeof assignmentStatus)['completed' | 'incomplete' | 'cancelled']
 >;

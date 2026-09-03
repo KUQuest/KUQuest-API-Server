@@ -1,5 +1,7 @@
 import { db } from '@/database/client';
+import { adminReviewItem } from '@/database/schema/admin.schema';
 import { file } from '@/database/schema/file.schema';
+import { recordAudit, type AuditActor } from '@/modules/audit/audit.service';
 import {
   quest,
   questApiVersion,
@@ -12,10 +14,14 @@ import {
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
 
-import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, isNotNull, lte, ne, sql } from 'drizzle-orm';
 
 import type { QuestTransaction } from './quest-work-chat.port';
-import { settleProofFreeQuestV2InTransaction } from './quest-settlement.service';
+import {
+  failQuestV2InTransaction,
+  settleApprovedQuestV2ProofInTransaction,
+  settleProofFreeQuestV2InTransaction,
+} from './quest-settlement.service';
 import {
   questV2Mode,
   questV2Participation,
@@ -113,11 +119,17 @@ type ProofCommandOutcomeCode =
   | 'invalid-draft'
   | 'invalid-files'
   | 'invalid-idempotency-key'
+  | 'invalid-review-decision'
   | 'not-authorized'
   | 'not-found'
   | 'not-in-progress'
   | 'not-required'
+  | 'not-reviewable'
   | 'proof-not-found'
+  | 'proof-not-sent'
+  | 'review-not-pending'
+  | 'review-reason-invalid'
+  | 'review-reason-required'
   | 'submission-locked'
   | 'not-v2-contract';
 
@@ -136,11 +148,17 @@ const proofCommandOutcomeCodes: readonly ProofCommandOutcomeCode[] = [
   'invalid-draft',
   'invalid-files',
   'invalid-idempotency-key',
+  'invalid-review-decision',
   'not-authorized',
   'not-found',
   'not-in-progress',
   'not-required',
+  'not-reviewable',
   'proof-not-found',
+  'proof-not-sent',
+  'review-not-pending',
+  'review-reason-invalid',
+  'review-reason-required',
   'submission-locked',
   'not-v2-contract',
 ];
@@ -166,6 +184,18 @@ export type QuestV2CompletionConfirmationOutcome =
 export type QuestV2ProofSubmissionListOutcome =
   | QuestV2ProofSubmission[]
   | { outcome: 'not-authorized' | 'not-found' };
+
+export type QuestV2ProofReviewDecision = 'PROOF_APPROVED' | 'PROOF_NOT_APPROVED';
+
+export type QuestV2ProofReview = {
+  proof: QuestV2ProofSubmission;
+  questStatus: QuestV2State;
+  replayed?: boolean;
+};
+
+export type QuestV2ProofReviewOutcome =
+  | QuestV2ProofReview
+  | { outcome: ProofCommandOutcomeCode };
 
 type QuestRow = {
   hirerId: string;
@@ -705,6 +735,20 @@ const submissionFromSnapshot = (value: unknown): QuestV2ProofSubmission | undefi
   };
 };
 
+const reviewFromSnapshot = (value: unknown): QuestV2ProofReview | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const snapshot = value as { proof?: unknown; questStatus?: unknown };
+  const proof = submissionFromSnapshot(snapshot.proof);
+  if (!proof || typeof snapshot.questStatus !== 'string' || !isQuestV2State(snapshot.questStatus)) {
+    return undefined;
+  }
+  return {
+    proof: { ...proof, replayed: true },
+    questStatus: snapshot.questStatus,
+    replayed: true,
+  };
+};
+
 const requestHashFor = (
   memberId: string,
   operation: string,
@@ -742,7 +786,23 @@ const requestHashFor = (
           : input.failedFiles ?? null,
         retryPosition: input.retryPosition ?? null,
       }
-    : {},
+  : {},
+});
+
+const reviewRequestHashFor = (
+  principalId: string,
+  operation: string,
+  questId: string,
+  proofSubmissionId: string,
+  decision: QuestV2ProofReviewDecision,
+  reason: string | null,
+): Promise<string> => sha256Json({
+  authenticatedMemberId: principalId,
+  operation,
+  path: '/api/v2/quests/:questId/proof-submissions/:proofSubmissionId/review',
+  questId,
+  proofSubmissionId,
+  body: { decision, reason },
 });
 
 const validPosition = (position: number): boolean =>
@@ -1009,7 +1069,7 @@ const writeCommandChecks = async (
   if (!current.v2Mode || !current.v2Participation) return { outcome: 'not-v2-contract' as const };
   if (current.questState !== 'QUEST_IN_PROGRESS') return { outcome: 'not-in-progress' as const };
   if (!current.dueAt) return { outcome: 'due-at-missing' as const };
-  if (current.dueAt.getTime() <= now.getTime()) return { outcome: 'due-at-passed' as const };
+  if (current.dueAt.getTime() < now.getTime()) return { outcome: 'due-at-passed' as const };
   const owner = await ownerFor(transaction, current, questId, memberId);
   return owner ? { owner } : { outcome: 'not-authorized' as const };
 };
@@ -1381,6 +1441,7 @@ export const confirmQuestV2Completion = async (
         `quest-v2-completion:${questId}`,
         now,
         checks.owner.workerId!,
+        memberId,
       );
       if (settlement) questStatus = 'QUEST_COMPLETED';
     } else if (await allCompletionObligationsConfirmed(transaction, setup.current, questId)) {
@@ -1406,4 +1467,564 @@ export const confirmQuestV2Completion = async (
     );
     return result;
   });
+};
+
+type ReviewCommandActor =
+  | { actorType: 'MEMBER'; actorUserId: string }
+  | { actorType: 'SYSTEM' };
+
+type ReviewCommandInput = {
+  principalId: string;
+  actor: ReviewCommandActor;
+  operation: 'review' | 'auto-approval';
+  questId: string;
+  proofSubmissionId: string;
+  decision: QuestV2ProofReviewDecision;
+  reason: string | null;
+  commandId: string;
+  requestHash: string;
+  now: Date;
+};
+
+type ReviewSubject = {
+  assignmentIds: string[];
+  assignmentId: string;
+  workerId: string;
+  teamId: string | null;
+};
+
+const auditActorFor = (actor: ReviewCommandActor): AuditActor => actor.actorType === 'MEMBER'
+  ? { actorType: 'MEMBER', actorUserId: actor.actorUserId }
+  : { actorType: 'SYSTEM' };
+
+const reviewSubjectFor = async (
+  transaction: QuestTransaction,
+  questId: string,
+  submission: SubmissionRow,
+  current: QuestRow,
+): Promise<ReviewSubject | undefined> => {
+  const assignments = await transaction
+    .select({ id: questAssignment.id, workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .where(and(
+      eq(questAssignment.questId, questId),
+      ne(questAssignment.assignmentStatus, 'ASSIGNMENT_CANCELLED'),
+    ))
+    .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id))
+    .for('update');
+
+  const groupCandidate = current.v2Mode === questV2Mode.candidate &&
+    current.v2Participation === questV2Participation.group;
+  if (groupCandidate) {
+    if (!submission.teamId) return undefined;
+    const [team] = await transaction
+      .select({ id: questCandidateTeamV2.id, leaderId: questCandidateTeamV2.leaderId })
+      .from(questCandidateTeamV2)
+      .where(and(
+        eq(questCandidateTeamV2.id, submission.teamId),
+        eq(questCandidateTeamV2.questId, questId),
+        eq(questCandidateTeamV2.state, 'TEAM_SELECTED'),
+      ))
+      .limit(1)
+      .for('update');
+    if (!team) return undefined;
+    const [leaderAssignment] = assignments.filter(({ workerId }) => workerId === team.leaderId);
+    if (!leaderAssignment) return undefined;
+    return {
+      assignmentIds: assignments.map(({ id }) => id),
+      assignmentId: leaderAssignment.id,
+      workerId: team.leaderId,
+      teamId: team.id,
+    };
+  }
+
+  if (!submission.workerId) return undefined;
+  const assignment = assignments.find(({ workerId }) => workerId === submission.workerId);
+  if (!assignment) return undefined;
+  return {
+    assignmentIds: [assignment.id],
+    assignmentId: assignment.id,
+    workerId: submission.workerId,
+    teamId: null,
+  };
+};
+
+const normalizedReviewReason = (
+  decision: QuestV2ProofReviewDecision,
+  reason: string | null,
+): { reason: string | null } | { outcome: Extract<ProofCommandOutcomeCode, 'invalid-review-decision' | 'review-reason-invalid' | 'review-reason-required'> } => {
+  if (decision !== 'PROOF_APPROVED' && decision !== 'PROOF_NOT_APPROVED') {
+    return { outcome: 'invalid-review-decision' };
+  }
+  const value = reason?.trim() ?? null;
+  if (value !== null && value.length > maxDescriptionLength) {
+    return { outcome: 'review-reason-invalid' };
+  }
+  if (decision === 'PROOF_APPROVED' && value !== null) {
+    return { outcome: 'review-reason-invalid' };
+  }
+  if (decision === 'PROOF_NOT_APPROVED' && value === null) {
+    return { outcome: 'review-reason-required' };
+  }
+  return { reason: value };
+};
+
+const recordProofDecisionAudit = async (
+  transaction: QuestTransaction,
+  actor: ReviewCommandActor,
+  proofSubmissionId: string,
+  decision: QuestV2ProofReviewDecision,
+  reason: string | null,
+  now: Date,
+) => recordAudit(transaction, {
+  ...auditActorFor(actor),
+  action: 'PROOF_REVIEWED',
+  resourceType: 'PROOF_SUBMISSION',
+  resourceId: proofSubmissionId,
+  oldValue: { status: 'PROOF_PENDING' },
+  newValue: { status: decision },
+  reason,
+  createdAt: now,
+});
+
+const recordAssignmentAudits = async (
+  transaction: QuestTransaction,
+  actor: ReviewCommandActor,
+  assignmentIds: string[],
+  status: 'ASSIGNMENT_COMPLETED' | 'ASSIGNMENT_INCOMPLETE',
+  now: Date,
+) => {
+  for (const assignmentId of assignmentIds) {
+    await recordAudit(transaction, {
+      ...auditActorFor(actor),
+      action: 'ASSIGNMENT_STATE_CHANGED',
+      resourceType: 'ASSIGNMENT',
+      resourceId: assignmentId,
+      oldValue: { state: 'ASSIGNMENT_ACTIVE' },
+      newValue: { state: status },
+      createdAt: now,
+    });
+  }
+};
+
+const recordQuestFailureAudit = async (
+  transaction: QuestTransaction,
+  actor: ReviewCommandActor,
+  questId: string,
+  now: Date,
+) => recordAudit(transaction, {
+  ...auditActorFor(actor),
+  action: 'QUEST_STATE_CHANGED',
+  resourceType: 'QUEST',
+  resourceId: questId,
+  oldValue: { state: 'QUEST_IN_PROGRESS' },
+  newValue: { state: 'QUEST_FAILED' },
+  createdAt: now,
+});
+
+const reviewQuestV2ProofSubmissionInTransaction = async (
+  transaction: QuestTransaction,
+  input: ReviewCommandInput,
+): Promise<QuestV2ProofReviewOutcome> => {
+  const setup = await commandSetup(
+    transaction,
+    input.principalId,
+    input.questId,
+    input.operation,
+    input.commandId,
+    input.requestHash,
+  );
+  if ('outcome' in setup) return setup;
+  if (!setup.idempotency.created) {
+    return reviewFromSnapshot(setup.idempotency.record.resultData) ??
+      outcomeFromSnapshot(setup.idempotency.record.resultData) ??
+      { outcome: 'idempotency-unavailable' };
+  }
+
+  const fail = (outcome: ProofCommandOutcomeCode) =>
+    commandFailure(transaction, setup.idempotency.record.id, outcome, input.now);
+  if (
+    input.actor.actorType === 'MEMBER' &&
+    setup.current.hirerId !== input.actor.actorUserId
+  ) return fail('hirer-not-allowed');
+  if (!setup.current.v2Mode || !setup.current.v2Participation) return fail('not-v2-contract');
+  if (!setup.current.proofRequired) return fail('not-required');
+
+  const [submission] = await transaction
+    .select(submissionFields)
+    .from(questV2ProofSubmission)
+    .where(and(
+      eq(questV2ProofSubmission.id, input.proofSubmissionId),
+      eq(questV2ProofSubmission.questId, input.questId),
+    ))
+    .limit(1)
+    .for('update');
+  if (!submission) return fail('proof-not-found');
+  if (submission.sentAt === null || submission.submissionStatus === null) return fail('proof-not-sent');
+  if (submission.submissionStatus !== 'PROOF_PENDING') return fail('review-not-pending');
+  if (!['QUEST_IN_PROGRESS', 'QUEST_FAILED'].includes(setup.current.questState)) {
+    return fail('not-reviewable');
+  }
+  if (!setup.current.dueAt) return fail('due-at-missing');
+  if (submission.sentAt.getTime() > setup.current.dueAt.getTime()) return fail('due-at-passed');
+
+  const subject = await reviewSubjectFor(transaction, input.questId, submission, setup.current);
+  if (!subject) return fail('proof-not-found');
+  const normalizedReason = normalizedReviewReason(input.decision, input.reason);
+  if ('outcome' in normalizedReason) return fail(normalizedReason.outcome);
+
+  const [updated] = await transaction
+    .update(questV2ProofSubmission)
+    .set({
+      submissionStatus: input.decision,
+      updatedAt: input.now,
+    })
+    .where(and(
+      eq(questV2ProofSubmission.id, input.proofSubmissionId),
+      eq(questV2ProofSubmission.submissionStatus, 'PROOF_PENDING'),
+    ))
+    .returning(submissionFields);
+  if (!updated) return fail('review-not-pending');
+
+  const proof = await toSubmission(transaction, updated);
+  await recordProofDecisionAudit(
+    transaction,
+    input.actor,
+    proof.id,
+    input.decision,
+    normalizedReason.reason,
+    input.now,
+  );
+
+  let questStatus: QuestV2State = setup.current.questState as QuestV2State;
+  if (input.decision === 'PROOF_APPROVED') {
+    const settlement = await settleApprovedQuestV2ProofInTransaction(
+      transaction,
+      input.questId,
+      proof.id,
+      input.commandId,
+      input.now,
+      input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null,
+    );
+    questStatus = settlement.questStatus as QuestV2State;
+    await recordAssignmentAudits(
+      transaction,
+      input.actor,
+      settlement.completedAssignmentIds,
+      'ASSIGNMENT_COMPLETED',
+      input.now,
+    );
+    await recordAudit(transaction, {
+      ...auditActorFor(input.actor),
+      action: 'QUEST_REWARD_SETTLED',
+      resourceType: 'QUEST_REWARD',
+      resourceId: input.questId,
+      oldValue: { state: 'QUEST_REWARD_HELD' },
+      newValue: {
+        state: 'QUEST_REWARD_SETTLED',
+        paidSatang: settlement.paidSatang,
+        assignmentIds: settlement.completedAssignmentIds,
+      },
+      createdAt: input.now,
+    });
+    if (setup.current.questState !== questStatus) {
+      await recordAudit(transaction, {
+        ...auditActorFor(input.actor),
+        action: 'QUEST_STATE_CHANGED',
+        resourceType: 'QUEST',
+        resourceId: input.questId,
+        oldValue: { state: setup.current.questState },
+        newValue: { state: questStatus },
+        createdAt: input.now,
+      });
+    }
+  } else {
+    const failure = await failQuestV2InTransaction(
+      transaction,
+      input.questId,
+      subject.assignmentIds,
+      input.commandId,
+      input.now,
+      input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null,
+    );
+    questStatus = failure.questStatus;
+    const attachments = await attachmentRowsFor(transaction, proof.id);
+    const evidenceReferences = attachments
+      .filter(({ uploadStatus, fileId }) => uploadStatus === 'PROOF_FILE_READY' && fileId !== null)
+      .map(({ fileId }) => fileId!);
+    const [reviewItem] = await transaction.insert(adminReviewItem).values({
+      questId: input.questId,
+      assignmentId: subject.assignmentId,
+      proofSubmissionId: proof.id,
+      hirerId: setup.current.hirerId,
+      workerId: subject.workerId,
+      teamId: subject.teamId,
+      reason: normalizedReason.reason!,
+      evidenceReferences,
+      createdAt: input.now,
+    }).returning({ id: adminReviewItem.id });
+    if (!reviewItem) throw new Error('Admin Review Item could not be created');
+    await recordAudit(transaction, {
+      ...auditActorFor(input.actor),
+      action: 'ADMIN_REVIEW_ITEM_CREATED',
+      resourceType: 'ADMIN_REVIEW_ITEM',
+      resourceId: reviewItem.id,
+      newValue: {
+        questId: input.questId,
+        assignmentId: subject.assignmentId,
+        proofSubmissionId: proof.id,
+        workerId: subject.workerId,
+        teamId: subject.teamId,
+        evidenceReferences,
+      },
+      reason: normalizedReason.reason,
+      createdAt: input.now,
+    });
+    await recordAssignmentAudits(
+      transaction,
+      input.actor,
+      failure.incompleteAssignmentIds,
+      'ASSIGNMENT_INCOMPLETE',
+      input.now,
+    );
+    if (setup.current.questState === 'QUEST_IN_PROGRESS') {
+      await recordQuestFailureAudit(transaction, input.actor, input.questId, input.now);
+    }
+  }
+
+  const result: QuestV2ProofReview = { proof, questStatus };
+  await completeIdempotency(
+    transaction,
+    setup.idempotency.record.id,
+    proof.id,
+    {
+      proof: snapshotFor(proof),
+      questStatus,
+    },
+    input.now,
+  );
+  return result;
+};
+
+const reviewQuestV2ProofSubmissionCommand = async (
+  input: ReviewCommandInput,
+): Promise<QuestV2ProofReviewOutcome> => db.transaction((transaction) =>
+  reviewQuestV2ProofSubmissionInTransaction(transaction, input));
+
+export const reviewQuestV2ProofSubmission = async (
+  memberId: string,
+  questId: string,
+  proofSubmissionId: string,
+  decision: QuestV2ProofReviewDecision,
+  reason: string | null,
+  rawCommandId: string,
+  now = new Date(),
+): Promise<QuestV2ProofReviewOutcome> => {
+  const commandId = rawCommandId.trim();
+  if (commandId.length === 0 || commandId.length > 200) return { outcome: 'invalid-idempotency-key' };
+  const normalizedReason = reason?.trim() ?? null;
+  const requestHash = await reviewRequestHashFor(
+    memberId,
+    'review',
+    questId,
+    proofSubmissionId,
+    decision,
+    normalizedReason,
+  );
+  return reviewQuestV2ProofSubmissionCommand({
+    principalId: memberId,
+    actor: { actorType: 'MEMBER', actorUserId: memberId },
+    operation: 'review',
+    questId,
+    proofSubmissionId,
+    decision,
+    reason,
+    commandId,
+    requestHash,
+    now,
+  });
+};
+
+const dueQuestV2ProofFailureAssignmentIds = async (
+  transaction: QuestTransaction,
+  current: QuestRow,
+  questId: string,
+): Promise<string[]> => {
+  const assignments = await transaction
+    .select({ id: questAssignment.id, workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .where(and(
+      eq(questAssignment.questId, questId),
+      eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
+    ))
+    .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id))
+    .for('update');
+  if (assignments.length === 0 || !current.dueAt) return [];
+
+  const groupCandidate = current.v2Mode === questV2Mode.candidate &&
+    current.v2Participation === questV2Participation.group;
+  const selectedTeam = groupCandidate
+    ? (await transaction
+      .select({ id: questCandidateTeamV2.id })
+      .from(questCandidateTeamV2)
+      .where(and(
+        eq(questCandidateTeamV2.questId, questId),
+        eq(questCandidateTeamV2.state, 'TEAM_SELECTED'),
+      ))
+      .limit(1)
+      .for('update'))[0]
+    : undefined;
+
+  if (groupCandidate) {
+    if (!selectedTeam) return assignments.map(({ id }) => id);
+    if (current.proofRequired) {
+      const [proof] = await transaction
+        .select({ id: questV2ProofSubmission.id })
+        .from(questV2ProofSubmission)
+        .where(and(
+          eq(questV2ProofSubmission.questId, questId),
+          eq(questV2ProofSubmission.teamId, selectedTeam.id),
+          isNotNull(questV2ProofSubmission.sentAt),
+          lte(questV2ProofSubmission.sentAt, current.dueAt),
+        ))
+        .limit(1);
+      return proof ? [] : assignments.map(({ id }) => id);
+    }
+    const [confirmation] = await transaction
+      .select({ id: questV2CompletionConfirmation.id })
+      .from(questV2CompletionConfirmation)
+      .where(and(
+        eq(questV2CompletionConfirmation.questId, questId),
+        eq(questV2CompletionConfirmation.teamId, selectedTeam.id),
+      ))
+      .limit(1);
+    return confirmation ? [] : assignments.map(({ id }) => id);
+  }
+
+  const missing: string[] = [];
+  for (const assignment of assignments) {
+    if (current.proofRequired) {
+      const [proof] = await transaction
+        .select({ id: questV2ProofSubmission.id })
+        .from(questV2ProofSubmission)
+        .where(and(
+          eq(questV2ProofSubmission.questId, questId),
+          eq(questV2ProofSubmission.workerId, assignment.workerId),
+          isNotNull(questV2ProofSubmission.sentAt),
+          lte(questV2ProofSubmission.sentAt, current.dueAt),
+        ))
+        .limit(1);
+      if (!proof) missing.push(assignment.id);
+    } else {
+      const [confirmation] = await transaction
+        .select({ id: questV2CompletionConfirmation.id })
+        .from(questV2CompletionConfirmation)
+        .where(and(
+          eq(questV2CompletionConfirmation.questId, questId),
+          eq(questV2CompletionConfirmation.workerId, assignment.workerId),
+        ))
+        .limit(1);
+      if (!confirmation) missing.push(assignment.id);
+    }
+  }
+  return missing;
+};
+
+export const failQuestV2AtDueAt = async (
+  questId: string,
+  now = new Date(),
+): Promise<boolean> => db.transaction(async (transaction) => {
+  const current = await lockQuest(transaction, questId);
+  if (!current || current.questState !== 'QUEST_IN_PROGRESS' || !current.dueAt || current.dueAt > now) {
+    return false;
+  }
+  const assignmentIds = await dueQuestV2ProofFailureAssignmentIds(transaction, current, questId);
+  if (assignmentIds.length === 0) return false;
+  const failure = await failQuestV2InTransaction(
+    transaction,
+    questId,
+    assignmentIds,
+    `quest-v2-due-at-failure:${questId}`,
+    now,
+    null,
+  );
+  await recordAssignmentAudits(
+    transaction,
+    { actorType: 'SYSTEM' },
+    failure.incompleteAssignmentIds,
+    'ASSIGNMENT_INCOMPLETE',
+    now,
+  );
+  await recordQuestFailureAudit(transaction, { actorType: 'SYSTEM' }, questId, now);
+  return true;
+});
+
+export const failDueAtQuestV2Proofs = async (
+  now = new Date(),
+  limit = 100,
+): Promise<string[]> => {
+  if (!Number.isInteger(limit) || limit < 1) throw new Error('limit must be a positive integer');
+  const due = await db
+    .select({ id: quest.id })
+    .from(quest)
+    .where(and(
+      eq(quest.apiVersion, questApiVersion.v2),
+      eq(quest.questStatus, 'QUEST_IN_PROGRESS'),
+      lte(quest.dueAt, now),
+    ))
+    .orderBy(asc(quest.dueAt), asc(quest.id))
+    .limit(limit);
+  const failed: string[] = [];
+  for (const { id } of due) {
+    if (await failQuestV2AtDueAt(id, now)) failed.push(id);
+  }
+  return failed;
+};
+
+export const autoApproveDueQuestV2Proofs = async (
+  now = new Date(),
+  limit = 100,
+): Promise<string[]> => {
+  if (!Number.isInteger(limit) || limit < 1) throw new Error('limit must be a positive integer');
+  const sentBefore = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const due = await db
+    .select({
+      proofSubmissionId: questV2ProofSubmission.id,
+      questId: questV2ProofSubmission.questId,
+      hirerId: quest.hirerId,
+    })
+    .from(questV2ProofSubmission)
+    .innerJoin(quest, eq(quest.id, questV2ProofSubmission.questId))
+    .where(and(
+      eq(quest.apiVersion, questApiVersion.v2),
+      inArray(quest.questStatus, ['QUEST_IN_PROGRESS', 'QUEST_FAILED']),
+      eq(questV2ProofSubmission.submissionStatus, 'PROOF_PENDING'),
+      lte(questV2ProofSubmission.sentAt, sentBefore),
+    ))
+    .orderBy(asc(questV2ProofSubmission.sentAt), asc(questV2ProofSubmission.id))
+    .limit(limit);
+  const approved: string[] = [];
+  for (const candidate of due) {
+    const result = await reviewQuestV2ProofSubmissionCommand({
+      principalId: candidate.hirerId,
+      actor: { actorType: 'SYSTEM' },
+      operation: 'auto-approval',
+      questId: candidate.questId,
+      proofSubmissionId: candidate.proofSubmissionId,
+      decision: 'PROOF_APPROVED',
+      reason: null,
+      commandId: `quest-v2-proof-auto-approval:${candidate.proofSubmissionId}`,
+      requestHash: await reviewRequestHashFor(
+        candidate.hirerId,
+        'auto-approval',
+        candidate.questId,
+        candidate.proofSubmissionId,
+        'PROOF_APPROVED',
+        null,
+      ),
+      now,
+    });
+    if (!('outcome' in result) && !result.replayed) approved.push(candidate.proofSubmissionId);
+  }
+  return approved;
 };

@@ -72,7 +72,7 @@ export type QuestWorkChatMembershipTransition =
       ];
     })
   | (TransitionBase & {
-      /** Chat closes this Worker's membership window at leftAt. */
+      /** Chat closes this Worker's membership window at leftAt after the Assignment becomes inactive. */
       type: 'workerBecameInactive';
       assignmentId: AssignmentId;
       workerId: MemberId;
