@@ -45,6 +45,9 @@ const pathNeedsIdempotencyKey = (scope: IdempotencyKeyScope, pathname: string, m
     if (!pathname.startsWith(`${API_V2_PREFIX}/quests/`)) return false;
     if (!isUuid(parts[4]) || parts[5] !== 'teams') return false;
     if (method === 'POST' && parts.length === 6) return true;
+    if (method === 'PATCH' && parts.length === 7) {
+      return isUuid(parts[6]);
+    }
     if (method === 'POST' && parts.length === 8) {
       return isUuid(parts[6]) && ['join', 'join-code', 'leave', 'select', 'submit'].includes(parts[7]!);
     }

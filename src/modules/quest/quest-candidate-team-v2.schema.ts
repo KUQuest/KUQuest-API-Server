@@ -14,6 +14,8 @@ const memberSchema = t.Object({
   joinedAt: t.String({ format: 'date-time' }),
 });
 
+const teamNameSchema = t.String({ minLength: 1, maxLength: 100, pattern: '\\S' });
+
 const submissionSchema = t.Object({
   text: t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' }),
   fileIds: t.Array(t.String({ format: 'uuid' }), { minItems: 1, uniqueItems: true }),
@@ -24,6 +26,7 @@ const teamSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
   leaderId: t.String({ format: 'uuid' }),
+  name: teamNameSchema,
   headcount: t.Integer({ minimum: 2, maximum: 20 }),
   state: teamState,
   joinCode: t.Nullable(t.String({ pattern: '^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$' })),
@@ -58,7 +61,12 @@ export const questV2CandidateTeamHeadersSchema = t.Object({
 });
 
 export const questV2CandidateTeamCreateSchema = t.Object({
+  name: teamNameSchema,
   headcount: t.Integer({ minimum: 2, maximum: 20 }),
+}, { additionalProperties: false });
+
+export const questV2CandidateTeamUpdateSchema = t.Object({
+  name: teamNameSchema,
 }, { additionalProperties: false });
 
 export const questV2CandidateTeamJoinSchema = t.Object({
@@ -84,5 +92,6 @@ export type QuestV2CandidateTeamParams = Static<typeof questV2CandidateTeamParam
 export type QuestV2CandidateTeamDetailParams = Static<typeof questV2CandidateTeamDetailParamsSchema>;
 export type QuestV2CandidateTeamMemberParams = Static<typeof questV2CandidateTeamMemberParamsSchema>;
 export type QuestV2CandidateTeamCreateInput = Static<typeof questV2CandidateTeamCreateSchema>;
+export type QuestV2CandidateTeamUpdateInput = Static<typeof questV2CandidateTeamUpdateSchema>;
 export type QuestV2CandidateTeamJoinInput = Static<typeof questV2CandidateTeamJoinSchema>;
 export type QuestV2CandidateTeamSubmissionInput = Static<typeof questV2CandidateTeamSubmissionSchema>;
