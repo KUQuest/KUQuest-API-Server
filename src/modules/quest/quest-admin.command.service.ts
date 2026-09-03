@@ -14,7 +14,7 @@ import {
 import type { AdminQuestSummaryResponse } from './quest-admin.service';
 import { terminateQuestInTransaction } from './quest-settlement.service';
 import type { QuestTransaction } from './quest-assignment.service';
-import { questStatus } from './quest.contract';
+import { isTerminalQuestStatus, questStatus } from './quest.contract';
 
 export const questAdminReasonCodes = ['POLICY_REVIEW', 'SAFETY_REVIEW'] as const;
 
@@ -69,12 +69,6 @@ export type QuestAdminCommandResult = AdminActionCommandResult<AdminQuestSummary
 
 type QuestAdminCommandAction = 'QUEST_HIDE' | 'QUEST_RESTORE' | 'QUEST_TERMINATE';
 
-const activeModerationStatuses = [
-  questStatus.open,
-  questStatus.assigned,
-  questStatus.inProgress,
-] as const;
-
 const summaryResult = async (
   transaction: QuestTransaction,
   questId: string,
@@ -123,10 +117,7 @@ const executeQuestAdminCommand = async (
         currentVersion: current.version,
         apply: async () => {
           if (action === 'QUEST_HIDE') {
-            if (
-              !activeModerationStatuses.includes(current.questStatus as (typeof activeModerationStatuses)[number]) ||
-              current.hiddenAt !== null
-            ) {
+            if (isTerminalQuestStatus(current.questStatus) || current.hiddenAt !== null) {
               throw new QuestAdminCommandError('QUEST_ACTION_NOT_ALLOWED', 'Quest cannot be hidden in its current state.');
             }
             await transaction.update(quest).set({

@@ -26,6 +26,7 @@ import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { editQuestV2 } from '@/modules/quest';
 import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
+import type { QuestStatus } from '@/modules/quest/quest.contract';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 import {
   createSealedLedgerTransaction,
@@ -131,7 +132,7 @@ const fundWallet = async (userId: string, amountSatang: number) => {
 };
 
 const createQuest = async (
-  status: 'QUEST_DRAFT' | 'QUEST_OPEN' | 'QUEST_ASSIGNED' | 'QUEST_IN_PROGRESS',
+  status: QuestStatus,
   startTime = new Date('2035-01-01T00:00:00.000Z'),
   options: { group?: boolean } = {},
 ) => {
@@ -157,6 +158,9 @@ const createQuest = async (
     headcount: group ? 2 : 1,
     startTime,
     dueAt: new Date('2035-01-01T02:00:00.000Z'),
+    // `quest_cancelled_at_check` ties the timestamp to the status.
+    cancelledAt: status === 'QUEST_CANCELLED' ? new Date('2035-01-01T01:00:00.000Z') : null,
+    cancelledByUserId: status === 'QUEST_CANCELLED' ? hirerId : null,
   });
   return questId;
 };
@@ -373,6 +377,51 @@ describe('Admin Quest moderation commands', () => {
       .from(quest).where(eq(quest.id, assignedQuestId))).toEqual([{ status: 'QUEST_ASSIGNED', version: 2 }]);
     expect(await db.select({ status: quest.questStatus, version: quest.version })
       .from(quest).where(eq(quest.id, inProgressQuestId))).toEqual([{ status: 'QUEST_IN_PROGRESS', version: 2 }]);
+  });
+
+  it('hides every remaining non-terminal Quest state without changing lifecycle state', async () => {
+    if (!postgresAvailable) return;
+    const states = [
+      'QUEST_DRAFT',
+      'QUEST_AWAITING_CONSENT',
+      'QUEST_SUBMITTED',
+      'QUEST_APPROVED',
+      'QUEST_REWORK',
+      'QUEST_DISPUTED',
+    ] as const;
+    const questIdsByState = await Promise.all(states.map((state) => createQuest(state)));
+
+    const responses = await Promise.all(questIdsByState.map((questId) => hideQuest(questId, 1)));
+
+    expect(responses.map((response) => response.status)).toEqual(states.map(() => 200));
+    const rows = await Promise.all(questIdsByState.map(async (questId) => {
+      const [row] = await db.select({ status: quest.questStatus, hiddenAt: quest.hiddenAt, version: quest.version })
+        .from(quest).where(eq(quest.id, questId));
+      return row;
+    }));
+    expect(rows).toEqual(states.map((state) => ({
+      status: state,
+      hiddenAt: expect.any(Date),
+      version: 2,
+    })));
+  });
+
+  it('refuses to hide a terminal Quest', async () => {
+    if (!postgresAvailable) return;
+    const states = ['QUEST_COMPLETED', 'QUEST_CANCELLED', 'QUEST_FAILED'] as const;
+    const questIdsByState = await Promise.all(states.map((state) => createQuest(state)));
+
+    const responses = await Promise.all(questIdsByState.map((questId) => hideQuest(questId, 1)));
+
+    expect(responses.map((response) => response.status)).toEqual(states.map(() => 409));
+    expect(await Promise.all(responses.map(async (response) => (await response.json()).error.code)))
+      .toEqual(states.map(() => 'QUEST_ACTION_NOT_ALLOWED'));
+    const rows = await Promise.all(questIdsByState.map(async (questId) => {
+      const [row] = await db.select({ hiddenAt: quest.hiddenAt, version: quest.version })
+        .from(quest).where(eq(quest.id, questId));
+      return row;
+    }));
+    expect(rows).toEqual(states.map(() => ({ hiddenAt: null, version: 1 })));
   });
 
   it('terminates an OPEN GROUP Candidate Quest and releases its full reservation', async () => {

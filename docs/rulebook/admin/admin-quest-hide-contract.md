@@ -4,7 +4,7 @@ Part of the [Admin Rulebook](admin-rulebook.md). Defines accepted policy for Adm
 
 ## Scope and state independence
 
-- Admin may hide a Quest in any non-terminal state (`QUEST_OPEN`, `QUEST_ASSIGNED`, `QUEST_IN_PROGRESS`), using the `hiddenAt` and `hiddenByAdminId` fields.
+- Admin may hide a Quest in any non-terminal state — every state except `QUEST_COMPLETED`, `QUEST_CANCELLED`, and `QUEST_FAILED` — using the `hiddenAt` and `hiddenByAdminId` fields.
 - **State independence**: `hiddenAt` is an independent timestamp flag. Hiding never writes a Quest State value. The 7 canonical Quest States in `docs/rulebook/quest/quest-work-chat-rulebook.md` remain complete; `QUEST_HIDDEN` is not a state.
 - **Discovery isolation only**: Hiding removes the Quest from search and discovery only. Every other Quest rule — `dueAt`, Start Work, Proof Submission, Quest Edit, settlement, and Work Conversation access — applies unchanged while a Quest is hidden.
 - The Hirer still sees and manages their own hidden Quest normally, marked hidden in their view. Current Accepted Participants are unaffected.

@@ -139,6 +139,13 @@ export type TerminalQuestStatus = Extract<
   QuestStatus,
   (typeof questStatus)['completed' | 'cancelled' | 'failed']
 >;
+export const terminalQuestStatuses = [
+  questStatus.completed,
+  questStatus.cancelled,
+  questStatus.failed,
+] as const satisfies readonly TerminalQuestStatus[];
+export const isTerminalQuestStatus = (status: QuestStatus): status is TerminalQuestStatus =>
+  terminalQuestStatuses.includes(status as TerminalQuestStatus);
 
 /** An Assignment status of a departed Worker — no current Work Conversation membership. */
 export type InactiveAssignmentStatus = Extract<
