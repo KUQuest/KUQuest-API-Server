@@ -1662,7 +1662,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
   if (!submission) return fail('proof-not-found');
   if (submission.sentAt === null || submission.submissionStatus === null) return fail('proof-not-sent');
   if (submission.submissionStatus !== 'PROOF_PENDING') return fail('review-not-pending');
-  if (!["QUEST_IN_PROGRESS", "QUEST_FAILED"].includes(setup.current.questState)) {
+  if (!['QUEST_IN_PROGRESS', 'QUEST_FAILED'].includes(setup.current.questState)) {
     return fail('not-reviewable');
   }
   if (!setup.current.dueAt) return fail('due-at-missing');
