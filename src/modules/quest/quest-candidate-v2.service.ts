@@ -2,7 +2,7 @@ import { db } from '@/database/client';
 import {
   quest,
   questApiVersion,
-  questApplication,
+  questCandidateApplicationV2,
   questAssignment,
 } from '@/database/schema/quest.schema';
 import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
@@ -81,12 +81,25 @@ type IdempotencyAcquireResult =
   | { created: false; record: IdempotencyRecord }
   | { outcome: IdempotencyOutcomeCode };
 
+const candidateApplicationOutcomeCodes: readonly CandidateApplicationOutcomeCode[] = [
+  'already-exists',
+  'hirer-not-allowed',
+  'not-candidate',
+  'not-found',
+  'not-open',
+  'not-single',
+  'idempotency-in-progress',
+  'idempotency-key-reused',
+  'idempotency-unavailable',
+  'invalid-idempotency-key',
+];
+
 const applicationFields = {
-  id: questApplication.id,
-  questId: questApplication.questId,
-  memberId: questApplication.workerId,
-  state: questApplication.applicationStatus,
-  appliedAt: questApplication.appliedAt,
+  id: questCandidateApplicationV2.id,
+  questId: questCandidateApplicationV2.questId,
+  memberId: questCandidateApplicationV2.memberId,
+  state: questCandidateApplicationV2.state,
+  appliedAt: questCandidateApplicationV2.appliedAt,
 };
 
 const idempotencyFields = {
@@ -249,11 +262,22 @@ const acquireIdempotency = async (
     .for('update');
   if (!existing) return { outcome: 'idempotency-unavailable' };
   if (existing.requestHash !== requestHash) return { outcome: 'idempotency-key-reused' };
-  if (existing.resourceId) return { created: false, record: existing };
+  if (existing.processingStatus === 'COMPLETED') return { created: false, record: existing };
   if (existing.processingStatus !== 'PROCESSING') {
     return { outcome: 'idempotency-unavailable' };
   }
   return { outcome: 'idempotency-in-progress' };
+};
+
+const outcomeFromSnapshot = <T extends string>(
+  value: unknown,
+  allowedOutcomes: readonly T[],
+): { outcome: T } | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const outcome = (value as Record<string, unknown>).outcome;
+  return typeof outcome === 'string' && allowedOutcomes.includes(outcome as T)
+    ? { outcome: outcome as T }
+    : undefined;
 };
 
 export const createQuestV2CandidateApplication = async (
@@ -281,13 +305,20 @@ export const createQuestV2CandidateApplication = async (
     );
     if ('outcome' in idempotency) return idempotency;
     if (!idempotency.created) {
-      const replay = applicationFromSnapshot(idempotency.record.resultData);
+      const replay = applicationFromSnapshot(idempotency.record.resultData) ??
+        outcomeFromSnapshot(idempotency.record.resultData, candidateApplicationOutcomeCodes);
       return replay ? replay : { outcome: 'idempotency-unavailable' };
     }
 
     const discardIdempotency = async (outcome: CandidateApplicationOutcomeCode) => {
       await transaction
-        .delete(walletIdempotencyKey)
+        .update(walletIdempotencyKey)
+        .set({
+          resourceType: 'quest-v2-candidate-application',
+          resultData: { outcome },
+          processingStatus: 'COMPLETED',
+          completedAt: now,
+        })
         .where(eq(walletIdempotencyKey.id, idempotency.record.id));
       return { outcome };
     };
@@ -303,21 +334,21 @@ export const createQuestV2CandidateApplication = async (
     }
 
     const [existing] = await transaction
-      .select({ id: questApplication.id })
-      .from(questApplication)
+      .select({ id: questCandidateApplicationV2.id })
+      .from(questCandidateApplicationV2)
       .where(and(
-        eq(questApplication.questId, questId),
-        eq(questApplication.workerId, memberId),
+        eq(questCandidateApplicationV2.questId, questId),
+        eq(questCandidateApplicationV2.memberId, memberId),
       ))
       .limit(1);
     if (existing) return discardIdempotency('already-exists');
 
     const [createdApplication] = await transaction
-      .insert(questApplication)
+      .insert(questCandidateApplicationV2)
       .values({
         questId,
-        workerId: memberId,
-        applicationStatus: 'APPLICATION_APPLIED',
+        memberId,
+        state: 'APPLICATION_APPLIED',
         appliedAt: now,
       })
       .returning(applicationFields);
@@ -349,6 +380,20 @@ type QuestV2CandidateApplicationWithdrawOutcomeCode =
   | 'not-withdrawable'
   | IdempotencyOutcomeCode
   | 'invalid-idempotency-key';
+
+const candidateApplicationWithdrawOutcomeCodes: readonly QuestV2CandidateApplicationWithdrawOutcomeCode[] = [
+  'application-not-found',
+  'hirer-not-allowed',
+  'not-candidate',
+  'not-found',
+  'not-open',
+  'not-single',
+  'not-withdrawable',
+  'idempotency-in-progress',
+  'idempotency-key-reused',
+  'idempotency-unavailable',
+  'invalid-idempotency-key',
+];
 
 export type QuestV2CandidateApplicationWithdrawOutcome =
   | QuestV2CandidateApplicationRow
@@ -382,13 +427,20 @@ export const withdrawQuestV2CandidateApplication = async (
     );
     if ('outcome' in idempotency) return idempotency;
     if (!idempotency.created) {
-      const replay = applicationFromSnapshot(idempotency.record.resultData);
+      const replay = applicationFromSnapshot(idempotency.record.resultData) ??
+        outcomeFromSnapshot(idempotency.record.resultData, candidateApplicationWithdrawOutcomeCodes);
       return replay ? replay : { outcome: 'idempotency-unavailable' };
     }
 
     const discardIdempotency = async (outcome: QuestV2CandidateApplicationWithdrawOutcomeCode) => {
       await transaction
-        .delete(walletIdempotencyKey)
+        .update(walletIdempotencyKey)
+        .set({
+          resourceType: 'quest-v2-candidate-application',
+          resultData: { outcome },
+          processingStatus: 'COMPLETED',
+          completedAt: now,
+        })
         .where(eq(walletIdempotencyKey.id, idempotency.record.id));
       return { outcome };
     };
@@ -400,11 +452,11 @@ export const withdrawQuestV2CandidateApplication = async (
 
     const [application] = await transaction
       .select(applicationFields)
-      .from(questApplication)
+      .from(questCandidateApplicationV2)
       .where(and(
-        eq(questApplication.id, applicationId),
-        eq(questApplication.questId, questId),
-        eq(questApplication.workerId, memberId),
+        eq(questCandidateApplicationV2.id, applicationId),
+        eq(questCandidateApplicationV2.questId, questId),
+        eq(questCandidateApplicationV2.memberId, memberId),
       ))
       .limit(1)
       .for('update');
@@ -412,9 +464,9 @@ export const withdrawQuestV2CandidateApplication = async (
     if (application.state !== 'APPLICATION_APPLIED') return discardIdempotency('not-withdrawable');
 
     const [updatedApplication] = await transaction
-      .update(questApplication)
-      .set({ applicationStatus: 'APPLICATION_WITHDRAWN' })
-      .where(eq(questApplication.id, applicationId))
+      .update(questCandidateApplicationV2)
+      .set({ state: 'APPLICATION_WITHDRAWN' })
+      .where(eq(questCandidateApplicationV2.id, applicationId))
       .returning(applicationFields);
     if (!updatedApplication) return { outcome: 'idempotency-unavailable' };
 
@@ -455,6 +507,19 @@ type QuestV2CandidateSelectionOutcomeCode =
   | 'not-found'
   | 'not-open'
   | 'not-selectable';
+
+const candidateSelectionOutcomeCodes: readonly QuestV2CandidateSelectionOutcomeCode[] = [
+  'already-assigned',
+  'application-not-found',
+  'idempotency-in-progress',
+  'idempotency-key-reused',
+  'idempotency-unavailable',
+  'invalid-idempotency-key',
+  'not-allowed',
+  'not-found',
+  'not-open',
+  'not-selectable',
+];
 
 export type QuestV2CandidateSelectionOutcome =
   | {
@@ -600,13 +665,20 @@ export const selectQuestV2CandidateApplication = async (
     );
     if ('outcome' in idempotency) return idempotency;
     if (!idempotency.created) {
-      const replay = selectionFromSnapshot(idempotency.record.resultData);
+      const replay = selectionFromSnapshot(idempotency.record.resultData) ??
+        outcomeFromSnapshot(idempotency.record.resultData, candidateSelectionOutcomeCodes);
       return replay ?? { outcome: 'idempotency-unavailable' };
     }
 
     const discardIdempotency = async (outcome: QuestV2CandidateSelectionOutcomeCode) => {
       await transaction
-        .delete(walletIdempotencyKey)
+        .update(walletIdempotencyKey)
+        .set({
+          resourceType: 'quest-v2-candidate-selection',
+          resultData: { outcome },
+          processingStatus: 'COMPLETED',
+          completedAt: now,
+        })
         .where(eq(walletIdempotencyKey.id, idempotency.record.id));
       return { outcome };
     };
@@ -619,10 +691,10 @@ export const selectQuestV2CandidateApplication = async (
 
     const [application] = await transaction
       .select(applicationFields)
-      .from(questApplication)
+      .from(questCandidateApplicationV2)
       .where(and(
-        eq(questApplication.id, applicationId),
-        eq(questApplication.questId, questId),
+        eq(questCandidateApplicationV2.id, applicationId),
+        eq(questCandidateApplicationV2.questId, questId),
       ))
       .limit(1)
       .for('update');
@@ -639,16 +711,16 @@ export const selectQuestV2CandidateApplication = async (
     }
 
     await transaction
-      .update(questApplication)
-      .set({ applicationStatus: 'APPLICATION_SELECTED' })
-      .where(eq(questApplication.id, application.id));
+      .update(questCandidateApplicationV2)
+      .set({ state: 'APPLICATION_SELECTED' })
+      .where(eq(questCandidateApplicationV2.id, application.id));
     await transaction
-      .update(questApplication)
-      .set({ applicationStatus: 'APPLICATION_REJECTED' })
+      .update(questCandidateApplicationV2)
+      .set({ state: 'APPLICATION_REJECTED' })
       .where(and(
-        eq(questApplication.questId, questId),
-        eq(questApplication.applicationStatus, 'APPLICATION_APPLIED'),
-        ne(questApplication.id, application.id),
+        eq(questCandidateApplicationV2.questId, questId),
+        eq(questCandidateApplicationV2.state, 'APPLICATION_APPLIED'),
+        ne(questCandidateApplicationV2.id, application.id),
       ));
 
     const [createdAssignment] = await transaction
@@ -714,12 +786,12 @@ export const listQuestV2CandidateApplications = async (
 
   const rows = await db
     .select(applicationFields)
-    .from(questApplication)
+    .from(questCandidateApplicationV2)
     .where(and(
-      eq(questApplication.questId, questId),
-      ...(current.hirerId === memberId ? [] : [eq(questApplication.workerId, memberId)]),
+      eq(questCandidateApplicationV2.questId, questId),
+      ...(current.hirerId === memberId ? [] : [eq(questCandidateApplicationV2.memberId, memberId)]),
     ))
-    .orderBy(asc(questApplication.appliedAt), asc(questApplication.id));
+    .orderBy(asc(questCandidateApplicationV2.appliedAt), asc(questCandidateApplicationV2.id));
   if (current.hirerId !== memberId && rows.length === 0) return { outcome: 'not-authorized' };
   return rows.map(toApplicationRow);
 };
@@ -743,11 +815,11 @@ export const getQuestV2CandidateApplication = async (
 
   const [row] = await db
     .select(applicationFields)
-    .from(questApplication)
+    .from(questCandidateApplicationV2)
     .where(and(
-      eq(questApplication.id, applicationId),
-      eq(questApplication.questId, questId),
-      ...(current.hirerId === memberId ? [] : [eq(questApplication.workerId, memberId)]),
+      eq(questCandidateApplicationV2.id, applicationId),
+      eq(questCandidateApplicationV2.questId, questId),
+      ...(current.hirerId === memberId ? [] : [eq(questCandidateApplicationV2.memberId, memberId)]),
     ))
     .limit(1);
   if (!row) {

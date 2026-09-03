@@ -12,6 +12,7 @@ import {
   configureQuestWorkChatMembershipWriter,
   questAssignmentV2Route,
   questCandidateV2Route,
+  questCandidateTeamV2Route,
   questV2Route,
 } from '@/modules/quest';
 import { workChatMembershipWriter, workChatRoute } from '@/modules/work-chat';
@@ -66,6 +67,7 @@ export const createApp = () => {
     .use(questDisputeRoute)
     .use(questAssignmentV2Route)
     .use(questCandidateV2Route)
+    .use(questCandidateTeamV2Route)
     .use(questV2Route)
     .use(questRoute)
     .use(adminQuestRoute)

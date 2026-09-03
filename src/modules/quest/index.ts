@@ -31,19 +31,30 @@ export {
   questV2Participations,
   questV2AssignmentStates,
   questV2ApplicationStates,
+  questV2TeamStates,
   questV2States,
+  questV2UnderfilledStates,
+  questV2UnderfilledDecisionValues,
+  questV2UnderfilledConsentDecisions,
+  questV2UnderfilledResolutionCodes,
 } from './quest-v2.contract';
 export type {
   QuestV2CanonicalQuest,
   QuestV2AssignmentState,
   QuestV2ApplicationState,
+  QuestV2TeamState,
   QuestV2Mode,
   QuestV2Participation,
   QuestV2State,
+  QuestV2UnderfilledState,
+  QuestV2UnderfilledDecision,
+  QuestV2UnderfilledConsentDecision,
+  QuestV2UnderfilledResolutionCode,
 } from './quest-v2.contract';
 export { questV2Route } from './quest-v2.route';
 export { questAssignmentV2Route } from './quest-assignment-v2.route';
 export { questCandidateV2Route } from './quest-candidate-v2.route';
+export { questCandidateTeamV2Route } from './quest-candidate-team-v2.route';
 export {
   createQuestV2CandidateApplication,
   getQuestV2CandidateApplication,
@@ -70,6 +81,20 @@ export type {
   QuestV2AssignmentOutcome,
   QuestV2AssignmentReadOutcome,
 } from './quest-assignment-v2.service';
+export {
+  decideQuestV2Underfilled,
+  detectQuestV2Underfilled,
+  expireQuestV2Underfilled,
+  getQuestV2Underfilled,
+  pendingQuestV2UnderfilledQuestIds,
+  questV2UnderfilledConsentOperationScope,
+  questV2UnderfilledDecisionOperationScope,
+  respondToQuestV2Underfilled,
+} from './quest-underfilled-v2.service';
+export type {
+  QuestV2UnderfilledDetectionResult,
+  QuestV2UnderfilledOutcome,
+} from './quest-underfilled-v2.service';
 export {
   addQuestV2Images,
   checkQuestV2ImageUpload,

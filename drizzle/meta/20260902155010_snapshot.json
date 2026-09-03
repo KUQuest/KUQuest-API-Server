@@ -1,5 +1,5 @@
 {
-  "id": "0f9b0e2c-7e65-4059-9ddb-bcd8b0f2dab4",
+  "id": "6e9b3496-a45e-41af-93f9-23ed2b88ca30",
   "prevId": "b4b4e457-2186-4b5f-b64e-37b518143047",
   "version": "7",
   "dialect": "postgresql",
@@ -134,235 +134,6 @@
         "occupation_name_nonempty": {
           "name": "occupation_name_nonempty",
           "value": "length(trim(name)) > 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.admin_action": {
-      "name": "admin_action",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "admin_id": {
-          "name": "admin_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "action": {
-          "name": "action",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "resource_type": {
-          "name": "resource_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "resource_id": {
-          "name": "resource_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_key": {
-          "name": "request_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_hash": {
-          "name": "request_hash",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason_catalog_version": {
-          "name": "reason_catalog_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason_code": {
-          "name": "reason_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expected_version": {
-          "name": "expected_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expected_timestamp": {
-          "name": "expected_timestamp",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "result_version": {
-          "name": "result_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "result_timestamp": {
-          "name": "result_timestamp",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "result_data": {
-          "name": "result_data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "admin_action_resource_idx": {
-          "name": "admin_action_resource_idx",
-          "columns": [
-            {
-              "expression": "resource_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "resource_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "admin_action_admin_created_idx": {
-          "name": "admin_action_admin_created_idx",
-          "columns": [
-            {
-              "expression": "admin_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "admin_action_admin_id_auth_admin_id_fk": {
-          "name": "admin_action_admin_id_auth_admin_id_fk",
-          "tableFrom": "admin_action",
-          "tableTo": "auth_admin",
-          "columnsFrom": [
-            "admin_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "admin_action_admin_action_request_key": {
-          "name": "admin_action_admin_action_request_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "admin_id",
-            "action",
-            "request_key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "admin_action_action_check": {
-          "name": "admin_action_action_check",
-          "value": "btrim(\"admin_action\".\"action\") <> ''"
-        },
-        "admin_action_resource_type_check": {
-          "name": "admin_action_resource_type_check",
-          "value": "btrim(\"admin_action\".\"resource_type\") <> ''"
-        },
-        "admin_action_resource_id_check": {
-          "name": "admin_action_resource_id_check",
-          "value": "btrim(\"admin_action\".\"resource_id\") <> ''"
-        },
-        "admin_action_request_key_check": {
-          "name": "admin_action_request_key_check",
-          "value": "btrim(\"admin_action\".\"request_key\") <> ''"
-        },
-        "admin_action_request_hash_check": {
-          "name": "admin_action_request_hash_check",
-          "value": "\"admin_action\".\"request_hash\" ~ '^[0-9a-f]{64}$'"
-        },
-        "admin_action_reason_catalog_version_check": {
-          "name": "admin_action_reason_catalog_version_check",
-          "value": "\"admin_action\".\"reason_catalog_version\" >= 1"
-        },
-        "admin_action_reason_code_check": {
-          "name": "admin_action_reason_code_check",
-          "value": "\"admin_action\".\"reason_code\" IS NULL OR \"admin_action\".\"reason_code\" ~ '^[A-Z][A-Z0-9_.-]{0,99}$'"
-        },
-        "admin_action_resource_version_check": {
-          "name": "admin_action_resource_version_check",
-          "value": "(\"admin_action\".\"expected_version\" IS NULL OR \"admin_action\".\"expected_version\" >= 1) AND (\"admin_action\".\"result_version\" IS NULL OR \"admin_action\".\"result_version\" >= 1)"
-        },
-        "admin_action_resource_revision_check": {
-          "name": "admin_action_resource_revision_check",
-          "value": "num_nonnulls(\"admin_action\".\"expected_version\", \"admin_action\".\"expected_timestamp\") <= 1 AND num_nonnulls(\"admin_action\".\"result_version\", \"admin_action\".\"result_timestamp\") <= 1"
-        },
-        "admin_action_metadata_object_check": {
-          "name": "admin_action_metadata_object_check",
-          "value": "jsonb_typeof(\"admin_action\".\"metadata\") = 'object'"
-        },
-        "admin_action_result_data_object_check": {
-          "name": "admin_action_result_data_object_check",
-          "value": "jsonb_typeof(\"admin_action\".\"result_data\") = 'object'"
         }
       },
       "isRLSEnabled": false
@@ -4600,6 +4371,10 @@
           "name": "quest_cancelled_at_check",
           "value": "(\"quest\".\"cancelled_at\" IS NULL) = (\"quest\".\"quest_status\" <> 'QUEST_CANCELLED')"
         },
+        "quest_hidden_at_check": {
+          "name": "quest_hidden_at_check",
+          "value": "(\"quest\".\"hidden_at\" IS NULL) = (\"quest\".\"quest_status\" <> 'QUEST_HIDDEN')"
+        },
         "quest_hidden_by_check": {
           "name": "quest_hidden_by_check",
           "value": "(\"quest\".\"hidden_by_admin_id\" IS NULL) = (\"quest\".\"hidden_at\" IS NULL)"
@@ -4891,6 +4666,140 @@
       },
       "isRLSEnabled": false
     },
+    "public.quest_candidate_application_v2": {
+      "name": "quest_candidate_application_v2",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "quest_id": {
+          "name": "quest_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "member_id": {
+          "name": "member_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'APPLICATION_APPLIED'"
+        },
+        "applied_at": {
+          "name": "applied_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "quest_candidate_application_v2_quest_id_idx": {
+          "name": "quest_candidate_application_v2_quest_id_idx",
+          "columns": [
+            {
+              "expression": "quest_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "quest_candidate_application_v2_state_idx": {
+          "name": "quest_candidate_application_v2_state_idx",
+          "columns": [
+            {
+              "expression": "state",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "quest_candidate_application_v2_one_selected_uidx": {
+          "name": "quest_candidate_application_v2_one_selected_uidx",
+          "columns": [
+            {
+              "expression": "quest_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"quest_candidate_application_v2\".\"state\" = 'APPLICATION_SELECTED'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "quest_candidate_application_v2_quest_id_quest_id_fk": {
+          "name": "quest_candidate_application_v2_quest_id_quest_id_fk",
+          "tableFrom": "quest_candidate_application_v2",
+          "tableTo": "quest",
+          "columnsFrom": [
+            "quest_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "quest_candidate_application_v2_member_id_auth_user_id_fk": {
+          "name": "quest_candidate_application_v2_member_id_auth_user_id_fk",
+          "tableFrom": "quest_candidate_application_v2",
+          "tableTo": "auth_user",
+          "columnsFrom": [
+            "member_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "quest_candidate_application_v2_quest_id_member_id_key": {
+          "name": "quest_candidate_application_v2_quest_id_member_id_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "quest_id",
+            "member_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "quest_candidate_application_v2_state_check": {
+          "name": "quest_candidate_application_v2_state_check",
+          "value": "\"quest_candidate_application_v2\".\"state\" IN ('APPLICATION_APPLIED', 'APPLICATION_SELECTED', 'APPLICATION_REJECTED', 'APPLICATION_WITHDRAWN')"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.quest_candidate_selection_commands": {
       "name": "quest_candidate_selection_commands",
       "schema": "",
@@ -5059,6 +4968,349 @@
         "quest_candidate_selection_commands_result_check": {
           "name": "quest_candidate_selection_commands_result_check",
           "value": "\"quest_candidate_selection_commands\".\"processing_status\" = 'PROCESSING' OR (\"quest_candidate_selection_commands\".\"result_assignment_ids\" IS NOT NULL AND \"quest_candidate_selection_commands\".\"result_quest_status\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.quest_candidate_team_v2": {
+      "name": "quest_candidate_team_v2",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "quest_id": {
+          "name": "quest_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "leader_id": {
+          "name": "leader_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "headcount": {
+          "name": "headcount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'TEAM_FORMING'"
+        },
+        "join_code_hash": {
+          "name": "join_code_hash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "join_code_expires_at": {
+          "name": "join_code_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "submission_text": {
+          "name": "submission_text",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "submitted_at": {
+          "name": "submitted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "quest_candidate_team_v2_quest_id_idx": {
+          "name": "quest_candidate_team_v2_quest_id_idx",
+          "columns": [
+            {
+              "expression": "quest_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "quest_candidate_team_v2_one_selected_uidx": {
+          "name": "quest_candidate_team_v2_one_selected_uidx",
+          "columns": [
+            {
+              "expression": "quest_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"quest_candidate_team_v2\".\"state\" = 'TEAM_SELECTED'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "quest_candidate_team_v2_quest_id_quest_id_fk": {
+          "name": "quest_candidate_team_v2_quest_id_quest_id_fk",
+          "tableFrom": "quest_candidate_team_v2",
+          "tableTo": "quest",
+          "columnsFrom": [
+            "quest_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "quest_candidate_team_v2_leader_id_auth_user_id_fk": {
+          "name": "quest_candidate_team_v2_leader_id_auth_user_id_fk",
+          "tableFrom": "quest_candidate_team_v2",
+          "tableTo": "auth_user",
+          "columnsFrom": [
+            "leader_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "quest_candidate_team_v2_state_check": {
+          "name": "quest_candidate_team_v2_state_check",
+          "value": "\"quest_candidate_team_v2\".\"state\" IN ('TEAM_FORMING', 'TEAM_SUBMITTED', 'TEAM_SELECTED', 'TEAM_REJECTED', 'TEAM_DISBANDED')"
+        },
+        "quest_candidate_team_v2_headcount_check": {
+          "name": "quest_candidate_team_v2_headcount_check",
+          "value": "\"quest_candidate_team_v2\".\"headcount\" BETWEEN 2 AND 20"
+        },
+        "quest_candidate_team_v2_join_code_fields_check": {
+          "name": "quest_candidate_team_v2_join_code_fields_check",
+          "value": "(\"quest_candidate_team_v2\".\"join_code_hash\" IS NULL) = (\"quest_candidate_team_v2\".\"join_code_expires_at\" IS NULL)"
+        },
+        "quest_candidate_team_v2_submission_fields_check": {
+          "name": "quest_candidate_team_v2_submission_fields_check",
+          "value": "(\"quest_candidate_team_v2\".\"submission_text\" IS NULL) = (\"quest_candidate_team_v2\".\"submitted_at\" IS NULL)"
+        },
+        "quest_candidate_team_v2_submission_text_check": {
+          "name": "quest_candidate_team_v2_submission_text_check",
+          "value": "\"quest_candidate_team_v2\".\"submission_text\" IS NULL OR btrim(\"quest_candidate_team_v2\".\"submission_text\") <> ''"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.quest_candidate_team_v2_member": {
+      "name": "quest_candidate_team_v2_member",
+      "schema": "",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "member_id": {
+          "name": "member_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "joined_at": {
+          "name": "joined_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "quest_candidate_team_v2_member_member_id_idx": {
+          "name": "quest_candidate_team_v2_member_member_id_idx",
+          "columns": [
+            {
+              "expression": "member_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "quest_candidate_team_v2_member_team_id_quest_candidate_team_v2_id_fk": {
+          "name": "quest_candidate_team_v2_member_team_id_quest_candidate_team_v2_id_fk",
+          "tableFrom": "quest_candidate_team_v2_member",
+          "tableTo": "quest_candidate_team_v2",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "quest_candidate_team_v2_member_member_id_auth_user_id_fk": {
+          "name": "quest_candidate_team_v2_member_member_id_auth_user_id_fk",
+          "tableFrom": "quest_candidate_team_v2_member",
+          "tableTo": "auth_user",
+          "columnsFrom": [
+            "member_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "quest_candidate_team_v2_member_team_id_member_id_pk": {
+          "name": "quest_candidate_team_v2_member_team_id_member_id_pk",
+          "columns": [
+            "team_id",
+            "member_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.quest_candidate_team_v2_submission_file": {
+      "name": "quest_candidate_team_v2_submission_file",
+      "schema": "",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_id": {
+          "name": "file_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "attached_at": {
+          "name": "attached_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "quest_candidate_team_v2_submission_file_team_idx": {
+          "name": "quest_candidate_team_v2_submission_file_team_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "quest_candidate_team_v2_submission_file_team_id_quest_candidate_team_v2_id_fk": {
+          "name": "quest_candidate_team_v2_submission_file_team_id_quest_candidate_team_v2_id_fk",
+          "tableFrom": "quest_candidate_team_v2_submission_file",
+          "tableTo": "quest_candidate_team_v2",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "quest_candidate_team_v2_submission_file_file_id_file_id_fk": {
+          "name": "quest_candidate_team_v2_submission_file_file_id_file_id_fk",
+          "tableFrom": "quest_candidate_team_v2_submission_file",
+          "tableTo": "file",
+          "columnsFrom": [
+            "file_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "quest_candidate_team_v2_submission_file_team_id_file_id_pk": {
+          "name": "quest_candidate_team_v2_submission_file_team_id_file_id_pk",
+          "columns": [
+            "team_id",
+            "file_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "quest_candidate_team_v2_submission_file_team_position_key": {
+          "name": "quest_candidate_team_v2_submission_file_team_position_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "team_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "quest_candidate_team_v2_submission_file_position_check": {
+          "name": "quest_candidate_team_v2_submission_file_position_check",
+          "value": "\"quest_candidate_team_v2_submission_file\".\"position\" >= 0"
         }
       },
       "isRLSEnabled": false
@@ -9815,7 +10067,7 @@
         "QUEST_COMPLETED",
         "QUEST_CANCELLED",
         "QUEST_DISPUTED",
-        "QUEST_FAILED"
+        "QUEST_HIDDEN"
       ]
     },
     "public.chat_attachment_status": {

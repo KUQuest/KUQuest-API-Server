@@ -1,7 +1,7 @@
 import { app } from '@/app';
 import { db, sql as postgresSql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { quest, questApplication } from '@/database/schema/quest.schema';
+import { quest, questCandidateApplicationV2 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import {
@@ -195,10 +195,10 @@ describe('Quest Candidate API v2', () => {
 
     const applications = await db
       .select()
-      .from(questApplication)
-      .where(eq(questApplication.questId, questId));
+      .from(questCandidateApplicationV2)
+      .where(eq(questCandidateApplicationV2.questId, questId));
     expect(applications).toHaveLength(1);
-    expect(applications[0]?.workerId).toBe(candidate.id);
+    expect(applications[0]?.memberId).toBe(candidate.id);
     expect(transitions).toHaveLength(0);
   });
 
@@ -346,9 +346,9 @@ describe('Quest Candidate API v2', () => {
     expect((await duplicate.json()).error.code).toBe('APPLICATION_NOT_WITHDRAWABLE');
 
     const [stored] = await db
-      .select({ state: questApplication.applicationStatus })
-      .from(questApplication)
-      .where(eq(questApplication.id, applicationId));
+      .select({ state: questCandidateApplicationV2.state })
+      .from(questCandidateApplicationV2)
+      .where(eq(questCandidateApplicationV2.id, applicationId));
     expect(stored?.state).toBe('APPLICATION_WITHDRAWN');
     expect(transitions).toHaveLength(0);
   });
@@ -419,9 +419,9 @@ describe('Quest Candidate API v2', () => {
       .where(eq(quest.id, questId));
     expect(currentQuest?.state).toBe('QUEST_ASSIGNED');
     const applications = await db
-      .select({ id: questApplication.id, workerId: questApplication.workerId, state: questApplication.applicationStatus })
-      .from(questApplication)
-      .where(eq(questApplication.questId, questId));
+      .select({ id: questCandidateApplicationV2.id, workerId: questCandidateApplicationV2.memberId, state: questCandidateApplicationV2.state })
+      .from(questCandidateApplicationV2)
+      .where(eq(questCandidateApplicationV2.questId, questId));
     expect(applications).toEqual([
       { id: firstApplicationId, workerId: candidate.id, state: 'APPLICATION_SELECTED' },
       { id: secondApplicationId, workerId: secondCandidate.id, state: 'APPLICATION_REJECTED' },
@@ -479,9 +479,9 @@ describe('Quest Candidate API v2', () => {
 
     const assignments = await db
       .select()
-      .from(questApplication)
-      .where(eq(questApplication.questId, questId));
-    expect(assignments.filter(({ applicationStatus }) => applicationStatus === 'APPLICATION_SELECTED')).toHaveLength(1);
+      .from(questCandidateApplicationV2)
+      .where(eq(questCandidateApplicationV2.questId, questId));
+    expect(assignments.filter(({ state }) => state === 'APPLICATION_SELECTED')).toHaveLength(1);
     expect(transitions).toHaveLength(1);
   });
 
@@ -552,9 +552,9 @@ describe('Quest Candidate API v2', () => {
       .where(eq(quest.id, questId));
     expect(currentQuest?.state).toBe('QUEST_OPEN');
     const [storedApplication] = await db
-      .select({ state: questApplication.applicationStatus })
-      .from(questApplication)
-      .where(eq(questApplication.id, applicationId));
+      .select({ state: questCandidateApplicationV2.state })
+      .from(questCandidateApplicationV2)
+      .where(eq(questCandidateApplicationV2.id, applicationId));
     expect(storedApplication?.state).toBe('APPLICATION_APPLIED');
     expect(transitions).toHaveLength(1);
   });
@@ -784,7 +784,7 @@ describe('Quest Candidate API v2', () => {
     expect(responses.map((response) => response.status)).toEqual([200, 200]);
     const bodies = await Promise.all(responses.map((response) => response.json()));
     expect(bodies[0].data.id).toBe(bodies[1].data.id);
-    expect(await db.select().from(questApplication).where(eq(questApplication.questId, questId))).toHaveLength(1);
+    expect(await db.select().from(questCandidateApplicationV2).where(eq(questCandidateApplicationV2.questId, questId))).toHaveLength(1);
   });
 
   it('returns IDEMPOTENCY_KEY_REQUIRED for missing or blank state-changing Candidate commands', async () => {

@@ -118,6 +118,15 @@ export const questV2ApplicationStates = [
 ] as const;
 export type QuestV2ApplicationState = (typeof questV2ApplicationStates)[number];
 
+export const questV2TeamStates = [
+  'TEAM_FORMING',
+  'TEAM_SUBMITTED',
+  'TEAM_SELECTED',
+  'TEAM_REJECTED',
+  'TEAM_DISBANDED',
+] as const;
+export type QuestV2TeamState = (typeof questV2TeamStates)[number];
+
 export const questV2EditRequestStatuses = [
   'EDIT_REQUEST_PENDING',
   'EDIT_REQUEST_APPLIED',
@@ -137,6 +146,28 @@ export const questV2EditFailureCodes = [
   'ACTIVE_WORKER_LEFT',
 ] as const;
 export type QuestV2EditFailureCode = (typeof questV2EditFailureCodes)[number];
+
+export const questV2UnderfilledStates = [
+  'UNDERFILLED_DECISION_PENDING',
+  'UNDERFILLED_CONSENT_PENDING',
+  'UNDERFILLED_COMPLETED',
+  'UNDERFILLED_CANCELLED',
+] as const;
+export type QuestV2UnderfilledState = (typeof questV2UnderfilledStates)[number];
+
+export const questV2UnderfilledDecisionValues = ['PROCEED', 'CANCEL'] as const;
+export type QuestV2UnderfilledDecision = (typeof questV2UnderfilledDecisionValues)[number];
+
+export const questV2UnderfilledConsentDecisions = ['ACCEPT', 'DECLINE'] as const;
+export type QuestV2UnderfilledConsentDecision = (typeof questV2UnderfilledConsentDecisions)[number];
+
+export const questV2UnderfilledResolutionCodes = [
+  'HIRER_CANCELLED',
+  'HIRER_DECISION_TIMEOUT',
+  'WORKER_DECLINED',
+  'WORKER_CONSENT_TIMEOUT',
+] as const;
+export type QuestV2UnderfilledResolutionCode = (typeof questV2UnderfilledResolutionCodes)[number];
 
 export type QuestV2CanonicalQuest = {
   id: string;

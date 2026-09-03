@@ -11,6 +11,7 @@ type IdempotencyKeyScope =
   | 'quest-join'
   | 'candidate-selection'
   | 'candidate-application-v2'
+  | 'candidate-team-v2'
   | 'quest-cancellation'
   | 'quest-dispute-resolution';
 
@@ -38,6 +39,20 @@ const pathNeedsIdempotencyKey = (scope: IdempotencyKeyScope, pathname: string, m
       (pathname.endsWith('/withdraw') && isUuid(questId) && isUuid(applicationId)) ||
       (pathname.endsWith('/select') && isUuid(questId) && isUuid(applicationId))
     );
+  }
+
+  if (scope === 'candidate-team-v2') {
+    if (!pathname.startsWith(`${API_V2_PREFIX}/quests/`)) return false;
+    if (!isUuid(parts[4]) || parts[5] !== 'teams') return false;
+    if (method === 'POST' && parts.length === 6) return true;
+    if (method === 'POST' && parts.length === 8) {
+      return isUuid(parts[6]) && ['join', 'join-code', 'leave', 'select', 'submit'].includes(parts[7]!);
+    }
+    return method === 'DELETE' &&
+      parts.length === 9 &&
+      isUuid(parts[6]) &&
+      parts[7] === 'members' &&
+      isUuid(parts[8]);
   }
 
   if (scope === 'quest-cancellation') {

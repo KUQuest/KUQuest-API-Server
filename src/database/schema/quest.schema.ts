@@ -455,6 +455,117 @@ export const questTeamMember = pgTable(
   ],
 );
 
+export const questCandidateApplicationV2 = pgTable(
+  'quest_candidate_application_v2',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => authUser.id),
+    state: varchar('state', { length: 32 })
+      .default('APPLICATION_APPLIED')
+      .notNull(),
+    appliedAt: time('applied_at').defaultNow().notNull(),
+  },
+  (table) => [
+    check(
+      'quest_candidate_application_v2_state_check',
+      sql`${table.state} IN ('APPLICATION_APPLIED', 'APPLICATION_SELECTED', 'APPLICATION_REJECTED', 'APPLICATION_WITHDRAWN')`,
+    ),
+    unique('quest_candidate_application_v2_quest_id_member_id_key').on(table.questId, table.memberId),
+    index('quest_candidate_application_v2_quest_id_idx').on(table.questId),
+    index('quest_candidate_application_v2_state_idx').on(table.state),
+    uniqueIndex('quest_candidate_application_v2_one_selected_uidx')
+      .on(table.questId)
+      .where(sql`${table.state} = 'APPLICATION_SELECTED'`),
+  ],
+);
+
+export const questCandidateTeamV2 = pgTable(
+  'quest_candidate_team_v2',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    leaderId: uuid('leader_id')
+      .notNull()
+      .references(() => authUser.id),
+    headcount: integer('headcount').notNull(),
+    state: varchar('state', { length: 32 })
+      .default('TEAM_FORMING')
+      .notNull(),
+    joinCodeHash: varchar('join_code_hash', { length: 64 }),
+    joinCodeExpiresAt: time('join_code_expires_at'),
+    submissionText: varchar('submission_text', { length: 1000 }),
+    submittedAt: time('submitted_at'),
+    createdAt: time('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    check(
+      'quest_candidate_team_v2_state_check',
+      sql`${table.state} IN ('TEAM_FORMING', 'TEAM_SUBMITTED', 'TEAM_SELECTED', 'TEAM_REJECTED', 'TEAM_DISBANDED')`,
+    ),
+    check('quest_candidate_team_v2_headcount_check', sql`${table.headcount} BETWEEN 2 AND 20`),
+    check(
+      'quest_candidate_team_v2_join_code_fields_check',
+      sql`(${table.joinCodeHash} IS NULL) = (${table.joinCodeExpiresAt} IS NULL)`,
+    ),
+    check(
+      'quest_candidate_team_v2_submission_fields_check',
+      sql`(${table.submissionText} IS NULL) = (${table.submittedAt} IS NULL)`,
+    ),
+    check(
+      'quest_candidate_team_v2_submission_text_check',
+      sql`${table.submissionText} IS NULL OR btrim(${table.submissionText}) <> ''`,
+    ),
+    index('quest_candidate_team_v2_quest_id_idx').on(table.questId),
+    uniqueIndex('quest_candidate_team_v2_one_selected_uidx')
+      .on(table.questId)
+      .where(sql`${table.state} = 'TEAM_SELECTED'`),
+  ],
+);
+
+export const questCandidateTeamV2Member = pgTable(
+  'quest_candidate_team_v2_member',
+  {
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => questCandidateTeamV2.id, { onDelete: 'cascade' }),
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => authUser.id),
+    joinedAt: time('joined_at').defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.memberId] }),
+    index('quest_candidate_team_v2_member_member_id_idx').on(table.memberId),
+  ],
+);
+
+export const questCandidateTeamV2SubmissionFile = pgTable(
+  'quest_candidate_team_v2_submission_file',
+  {
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => questCandidateTeamV2.id, { onDelete: 'cascade' }),
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => file.id),
+    position: integer('position').default(0).notNull(),
+    attachedAt: time('attached_at').defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.fileId] }),
+    unique('quest_candidate_team_v2_submission_file_team_position_key').on(table.teamId, table.position),
+    check('quest_candidate_team_v2_submission_file_position_check', sql`${table.position} >= 0`),
+    index('quest_candidate_team_v2_submission_file_team_idx').on(table.teamId),
+  ],
+);
+
 export const questTeamInvitation = pgTable(
   'quest_team_invitation',
   {
@@ -549,6 +660,93 @@ export const questAssignment = pgTable(
     index('quest_assignment_quest_id_idx').on(table.questId),
     index('quest_assignment_worker_id_idx').on(table.workerId),
     index('quest_assignment_status_idx').on(table.assignmentStatus),
+  ],
+);
+
+export const questV2UnderfilledDecision = pgTable(
+  'quest_v2_underfilled_decisions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    activeWorkerCount: integer('active_worker_count').notNull(),
+    workerRewardPoolSatang: integer('worker_reward_pool_satang').notNull(),
+    state: varchar('state', { length: 40 })
+      .$type<
+        'UNDERFILLED_DECISION_PENDING' |
+          'UNDERFILLED_CONSENT_PENDING' |
+          'UNDERFILLED_COMPLETED' |
+          'UNDERFILLED_CANCELLED'
+      >()
+      .default('UNDERFILLED_DECISION_PENDING')
+      .notNull(),
+    decision: varchar('decision', { length: 16 }).$type<'PROCEED' | 'CANCEL'>(),
+    decisionExpiresAt: time('decision_expires_at').notNull(),
+    consentExpiresAt: time('consent_expires_at'),
+    detectedAt: time('detected_at').notNull(),
+    resolvedAt: time('resolved_at'),
+    resolutionCode: varchar('resolution_code', { length: 32 }).$type<
+      'HIRER_CANCELLED' | 'HIRER_DECISION_TIMEOUT' | 'WORKER_DECLINED' | 'WORKER_CONSENT_TIMEOUT'
+    >(),
+  },
+  (table) => [
+    unique('quest_v2_underfilled_decisions_quest_id_key').on(table.questId),
+    check(
+      'quest_v2_underfilled_decisions_state_check',
+      sql`${table.state} IN ('UNDERFILLED_DECISION_PENDING', 'UNDERFILLED_CONSENT_PENDING', 'UNDERFILLED_COMPLETED', 'UNDERFILLED_CANCELLED')`,
+    ),
+    check('quest_v2_underfilled_decisions_worker_count_check', sql`${table.activeWorkerCount} > 0`),
+    check('quest_v2_underfilled_decisions_pool_check', sql`${table.workerRewardPoolSatang} > 0`),
+    check(
+      'quest_v2_underfilled_decisions_decision_check',
+      sql`${table.decision} IS NULL OR ${table.decision} IN ('PROCEED', 'CANCEL')`,
+    ),
+    check(
+      'quest_v2_underfilled_decisions_resolution_check',
+      sql`${table.resolutionCode} IS NULL OR ${table.resolutionCode} IN ('HIRER_CANCELLED', 'HIRER_DECISION_TIMEOUT', 'WORKER_DECLINED', 'WORKER_CONSENT_TIMEOUT')`,
+    ),
+    index('quest_v2_underfilled_decisions_state_idx').on(table.state),
+    index('quest_v2_underfilled_decisions_decision_expires_at_idx').on(table.decisionExpiresAt),
+    index('quest_v2_underfilled_decisions_consent_expires_at_idx').on(table.consentExpiresAt),
+  ],
+);
+
+export const questV2UnderfilledConsent = pgTable(
+  'quest_v2_underfilled_consents',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    decisionId: uuid('decision_id')
+      .notNull()
+      .references(() => questV2UnderfilledDecision.id, { onDelete: 'cascade' }),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    assignmentId: uuid('assignment_id')
+      .notNull()
+      .references(() => questAssignment.id, { onDelete: 'cascade' }),
+    workerId: uuid('worker_id')
+      .notNull()
+      .references(() => authUser.id),
+    rewardSatang: integer('reward_satang').notNull(),
+    decision: varchar('decision', { length: 16 }).$type<'ACCEPT' | 'DECLINE'>(),
+    respondedAt: time('responded_at'),
+    createdAt: time('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    unique('quest_v2_underfilled_consents_decision_worker_key').on(table.decisionId, table.workerId),
+    unique('quest_v2_underfilled_consents_decision_assignment_key').on(table.decisionId, table.assignmentId),
+    check('quest_v2_underfilled_consents_reward_check', sql`${table.rewardSatang} > 0`),
+    check(
+      'quest_v2_underfilled_consents_decision_check',
+      sql`${table.decision} IS NULL OR ${table.decision} IN ('ACCEPT', 'DECLINE')`,
+    ),
+    check(
+      'quest_v2_underfilled_consents_response_check',
+      sql`(${table.decision} IS NULL) = (${table.respondedAt} IS NULL)`,
+    ),
+    index('quest_v2_underfilled_consents_quest_id_idx').on(table.questId),
+    index('quest_v2_underfilled_consents_worker_id_idx').on(table.workerId),
   ],
 );
 
@@ -732,6 +930,8 @@ export const questRelations = relations(quest, ({ one, many }) => ({
   editRequests: many(questEditRequest),
   editHistory: many(questEditHistory),
   teams: many(questTeam),
+  candidateApplicationsV2: many(questCandidateApplicationV2),
+  candidateTeamsV2: many(questCandidateTeamV2),
   applications: many(questApplication),
   assignments: many(questAssignment),
   directJoinCommands: many(questDirectJoinCommand),
@@ -850,6 +1050,52 @@ export const questTeamMemberRelations = relations(questTeamMember, ({ one }) => 
   user: one(authUser, {
     fields: [questTeamMember.userId],
     references: [authUser.id],
+  }),
+}));
+
+export const questCandidateApplicationV2Relations = relations(questCandidateApplicationV2, ({ one }) => ({
+  quest: one(quest, {
+    fields: [questCandidateApplicationV2.questId],
+    references: [quest.id],
+  }),
+  member: one(authUser, {
+    fields: [questCandidateApplicationV2.memberId],
+    references: [authUser.id],
+  }),
+}));
+
+export const questCandidateTeamV2Relations = relations(questCandidateTeamV2, ({ one, many }) => ({
+  quest: one(quest, {
+    fields: [questCandidateTeamV2.questId],
+    references: [quest.id],
+  }),
+  leader: one(authUser, {
+    fields: [questCandidateTeamV2.leaderId],
+    references: [authUser.id],
+  }),
+  members: many(questCandidateTeamV2Member),
+  submissionFiles: many(questCandidateTeamV2SubmissionFile),
+}));
+
+export const questCandidateTeamV2MemberRelations = relations(questCandidateTeamV2Member, ({ one }) => ({
+  team: one(questCandidateTeamV2, {
+    fields: [questCandidateTeamV2Member.teamId],
+    references: [questCandidateTeamV2.id],
+  }),
+  member: one(authUser, {
+    fields: [questCandidateTeamV2Member.memberId],
+    references: [authUser.id],
+  }),
+}));
+
+export const questCandidateTeamV2SubmissionFileRelations = relations(questCandidateTeamV2SubmissionFile, ({ one }) => ({
+  team: one(questCandidateTeamV2, {
+    fields: [questCandidateTeamV2SubmissionFile.teamId],
+    references: [questCandidateTeamV2.id],
+  }),
+  file: one(file, {
+    fields: [questCandidateTeamV2SubmissionFile.fileId],
+    references: [file.id],
   }),
 }));
 
