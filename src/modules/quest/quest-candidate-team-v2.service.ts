@@ -562,6 +562,7 @@ const lockQuest = async (transaction: QuestTransaction, questId: string) => {
       v2Participation: quest.v2Participation,
       questState: quest.questStatus,
       headcount: quest.headcount,
+      startTime: quest.startTime,
     })
     .from(quest)
     .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
@@ -577,6 +578,9 @@ const readableQuest = (current: {
 }) => current.v2Mode === questV2Mode.candidate &&
   current.v2Participation === questV2Participation.group &&
   current.questState === 'QUEST_OPEN';
+
+const questStartHasPassed = (current: { startTime: Date }, now: Date) =>
+  current.startTime.getTime() <= now.getTime();
 
 const acquireIdempotency = async (
   transaction: QuestTransaction,
@@ -786,6 +790,7 @@ export const createQuestV2CandidateTeam = async (
     if (current.v2Participation !== questV2Participation.group) return discardIdempotency(transaction, idempotency.record.id, 'not-group');
     if (current.hirerId === leaderId) return discardIdempotency(transaction, idempotency.record.id, 'hirer-not-allowed');
     if (current.questState !== 'QUEST_OPEN') return discardIdempotency(transaction, idempotency.record.id, 'not-open');
+    if (questStartHasPassed(current, now)) return discardIdempotency(transaction, idempotency.record.id, 'not-open');
     if (!validTeamHeadcount(input.headcount, current.headcount)) return discardIdempotency(transaction, idempotency.record.id, 'headcount-not-allowed');
     if (await hasActiveAssignment(transaction, questId, leaderId)) return discardIdempotency(transaction, idempotency.record.id, 'already-assigned');
     if (await hasTeamMembership(transaction, questId, leaderId)) return discardIdempotency(transaction, idempotency.record.id, 'already-member');
@@ -937,6 +942,7 @@ export const joinQuestV2CandidateTeam = async (
     if (current.v2Participation !== questV2Participation.group) return discardIdempotency(transaction, idempotency.record.id, 'not-group');
     if (current.hirerId === memberId) return discardIdempotency(transaction, idempotency.record.id, 'hirer-not-allowed');
     if (current.questState !== 'QUEST_OPEN') return discardIdempotency(transaction, idempotency.record.id, 'not-open');
+    if (questStartHasPassed(current, now)) return discardIdempotency(transaction, idempotency.record.id, 'not-open');
 
     const team = await lockTeam(transaction, questId, teamId);
     if (!team) return discardIdempotency(transaction, idempotency.record.id, 'team-not-found');
@@ -1005,6 +1011,7 @@ const leaveOrRemoveTeamMember = async (
     if (current.v2Mode !== questV2Mode.candidate) return discardIdempotency(transaction, idempotency.record.id, 'not-candidate');
     if (current.v2Participation !== questV2Participation.group) return discardIdempotency(transaction, idempotency.record.id, 'not-group');
     if (current.questState !== 'QUEST_OPEN') return discardIdempotency(transaction, idempotency.record.id, 'not-open');
+    if (questStartHasPassed(current, now)) return discardIdempotency(transaction, idempotency.record.id, 'not-open');
 
     const team = await lockTeam(transaction, questId, teamId);
     if (!team) return discardIdempotency(transaction, idempotency.record.id, 'team-not-found');
@@ -1131,6 +1138,7 @@ export const regenerateQuestV2CandidateTeamJoinCode = async (
     if (current.v2Mode !== questV2Mode.candidate) return discardIdempotency(transaction, idempotency.record.id, 'not-candidate');
     if (current.v2Participation !== questV2Participation.group) return discardIdempotency(transaction, idempotency.record.id, 'not-group');
     if (current.questState !== 'QUEST_OPEN') return discardIdempotency(transaction, idempotency.record.id, 'not-open');
+    if (questStartHasPassed(current, now)) return discardIdempotency(transaction, idempotency.record.id, 'not-open');
     const team = await lockTeam(transaction, questId, teamId);
     if (!team) return discardIdempotency(transaction, idempotency.record.id, 'team-not-found');
     if (team.leaderId !== leaderId) return discardIdempotency(transaction, idempotency.record.id, 'not-leader');
@@ -1195,6 +1203,7 @@ export const submitQuestV2CandidateTeam = async (
     if (current.v2Mode !== questV2Mode.candidate) return discardIdempotency(transaction, idempotency.record.id, 'not-candidate');
     if (current.v2Participation !== questV2Participation.group) return discardIdempotency(transaction, idempotency.record.id, 'not-group');
     if (current.questState !== 'QUEST_OPEN') return discardIdempotency(transaction, idempotency.record.id, 'not-open');
+    if (questStartHasPassed(current, now)) return discardIdempotency(transaction, idempotency.record.id, 'not-open');
     const team = await lockTeam(transaction, questId, teamId);
     if (!team) return discardIdempotency(transaction, idempotency.record.id, 'team-not-found');
     if (team.leaderId !== leaderId) return discardIdempotency(transaction, idempotency.record.id, 'not-leader');
@@ -1316,6 +1325,7 @@ export const selectQuestV2CandidateTeam = async (
     if (current.v2Mode !== questV2Mode.candidate) return discardIdempotency(transaction, idempotency.record.id, 'not-candidate');
     if (current.v2Participation !== questV2Participation.group) return discardIdempotency(transaction, idempotency.record.id, 'not-group');
     if (current.questState !== 'QUEST_OPEN') return discardIdempotency(transaction, idempotency.record.id, 'not-open');
+    if (questStartHasPassed(current, now)) return discardIdempotency(transaction, idempotency.record.id, 'not-open');
 
     const team = await lockTeam(transaction, questId, teamId);
     if (!team) return discardIdempotency(transaction, idempotency.record.id, 'team-not-found');

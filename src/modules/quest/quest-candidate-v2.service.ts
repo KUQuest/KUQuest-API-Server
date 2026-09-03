@@ -214,6 +214,7 @@ const lockQuest = async (transaction: QuestTransaction, questId: string) => {
       v2Participation: quest.v2Participation,
       questState: quest.questStatus,
       hiddenAt: quest.hiddenAt,
+      startTime: quest.startTime,
     })
     .from(quest)
     .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
@@ -332,6 +333,7 @@ export const createQuestV2CandidateApplication = async (
     if (current.questState !== 'QUEST_OPEN' || current.hiddenAt !== null) {
       return discardIdempotency('not-open');
     }
+    if (current.startTime.getTime() <= now.getTime()) return discardIdempotency('not-open');
 
     const [existing] = await transaction
       .select({ id: questCandidateApplicationV2.id })
@@ -449,6 +451,7 @@ export const withdrawQuestV2CandidateApplication = async (
     if (current.v2Participation !== questV2Participation.single) return discardIdempotency('not-single');
     if (current.hirerId === memberId) return discardIdempotency('hirer-not-allowed');
     if (current.questState !== 'QUEST_OPEN') return discardIdempotency('not-open');
+    if (current.startTime.getTime() <= now.getTime()) return discardIdempotency('not-open');
 
     const [application] = await transaction
       .select(applicationFields)
@@ -688,6 +691,7 @@ export const selectQuestV2CandidateApplication = async (
       return discardIdempotency('not-allowed');
     }
     if (current.questState !== 'QUEST_OPEN') return discardIdempotency('not-open');
+    if (current.startTime.getTime() <= now.getTime()) return discardIdempotency('not-open');
 
     const [application] = await transaction
       .select(applicationFields)

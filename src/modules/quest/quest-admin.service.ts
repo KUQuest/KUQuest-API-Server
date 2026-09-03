@@ -205,7 +205,6 @@ export const listAdminQuests = async ({
       : null,
   };
 };
-
 export type AdminQuestApplication = {
   id: string;
   worker: AdminQuestMember;
@@ -568,4 +567,3 @@ export const getAdminQuestDetail = async (questId: string): Promise<AdminQuestDe
     adminActions,
   };
 };
-
