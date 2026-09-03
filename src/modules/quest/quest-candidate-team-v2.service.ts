@@ -1337,7 +1337,8 @@ export const selectQuestV2CandidateTeam = async (
     if (team.headcount === null) return discardIdempotency(transaction, idempotency.record.id, 'headcount-mismatch');
     const members = await teamMembers(transaction, teamId, true);
     if (members.length !== team.headcount) return discardIdempotency(transaction, idempotency.record.id, 'headcount-mismatch');
-    if ((await teamSubmissionFileIds(transaction, teamId)).length === 0) {
+    const submissionFileIds = await teamSubmissionFileIds(transaction, teamId);
+    if (!(await validateSubmissionFiles(transaction, team.leaderId, submissionFileIds))) {
       return discardIdempotency(transaction, idempotency.record.id, 'not-selectable');
     }
 
