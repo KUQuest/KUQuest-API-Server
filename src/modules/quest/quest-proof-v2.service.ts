@@ -14,7 +14,7 @@ import {
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
 
-import { and, asc, eq, inArray, isNull, isNotNull, lt, lte, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, isNotNull, lte, ne, sql } from 'drizzle-orm';
 
 import type { QuestTransaction } from './quest-work-chat.port';
 import {
@@ -1069,7 +1069,7 @@ const writeCommandChecks = async (
   if (!current.v2Mode || !current.v2Participation) return { outcome: 'not-v2-contract' as const };
   if (current.questState !== 'QUEST_IN_PROGRESS') return { outcome: 'not-in-progress' as const };
   if (!current.dueAt) return { outcome: 'due-at-missing' as const };
-  if (current.dueAt.getTime() <= now.getTime()) return { outcome: 'due-at-passed' as const };
+  if (current.dueAt.getTime() < now.getTime()) return { outcome: 'due-at-passed' as const };
   const owner = await ownerFor(transaction, current, questId, memberId);
   return owner ? { owner } : { outcome: 'not-authorized' as const };
 };
@@ -1441,6 +1441,7 @@ export const confirmQuestV2Completion = async (
         `quest-v2-completion:${questId}`,
         now,
         checks.owner.workerId!,
+        memberId,
       );
       if (settlement) questStatus = 'QUEST_COMPLETED';
     } else if (await allCompletionObligationsConfirmed(transaction, setup.current, questId)) {
@@ -1665,7 +1666,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
     return fail('not-reviewable');
   }
   if (!setup.current.dueAt) return fail('due-at-missing');
-  if (submission.sentAt.getTime() >= setup.current.dueAt.getTime()) return fail('due-at-passed');
+  if (submission.sentAt.getTime() > setup.current.dueAt.getTime()) return fail('due-at-passed');
 
   const subject = await reviewSubjectFor(transaction, input.questId, submission, setup.current);
   if (!subject) return fail('proof-not-found');
@@ -1703,6 +1704,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
       proof.id,
       input.commandId,
       input.now,
+      input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null,
     );
     questStatus = settlement.questStatus as QuestV2State;
     await recordAssignmentAudits(
@@ -1883,7 +1885,7 @@ const dueQuestV2ProofFailureAssignmentIds = async (
           eq(questV2ProofSubmission.questId, questId),
           eq(questV2ProofSubmission.teamId, selectedTeam.id),
           isNotNull(questV2ProofSubmission.sentAt),
-          lt(questV2ProofSubmission.sentAt, current.dueAt),
+          lte(questV2ProofSubmission.sentAt, current.dueAt),
         ))
         .limit(1);
       return proof ? [] : assignments.map(({ id }) => id);
@@ -1909,7 +1911,7 @@ const dueQuestV2ProofFailureAssignmentIds = async (
           eq(questV2ProofSubmission.questId, questId),
           eq(questV2ProofSubmission.workerId, assignment.workerId),
           isNotNull(questV2ProofSubmission.sentAt),
-          lt(questV2ProofSubmission.sentAt, current.dueAt),
+          lte(questV2ProofSubmission.sentAt, current.dueAt),
         ))
         .limit(1);
       if (!proof) missing.push(assignment.id);

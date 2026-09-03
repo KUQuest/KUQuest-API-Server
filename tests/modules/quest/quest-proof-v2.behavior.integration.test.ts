@@ -1112,7 +1112,7 @@ describe('Quest Proof Submission v2 behavior', () => {
     expect((await due.json()).error.code).toBe('PROOF_DUE_AT_PASSED');
   });
 
-  it('rejects a Proof Submission at the exact dueAt boundary', async () => {
+  it('accepts a Proof Submission at the exact dueAt boundary', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
     const dueAt = new Date('2030-01-01T11:00:00.000Z');
     const { questId } = await createQuest({ dueAt });
@@ -1124,7 +1124,8 @@ describe('Quest Proof Submission v2 behavior', () => {
       `proof-v2-behavior-exact-due-${questId}`,
       dueAt,
     );
-    expect(result).toEqual({ outcome: 'due-at-passed' });
+    expect('outcome' in result).toBe(false);
+    if (!('outcome' in result)) expect(result.submittedAt).toBeNull();
   });
 
   it('settles proof-free SINGLE completion without creating a Proof Submission', async () => {
@@ -1235,6 +1236,119 @@ describe('Quest Proof Submission v2 behavior', () => {
     expect(conversation?.readOnlyAt).toBeInstanceOf(Date);
     expect(conversation?.questStatus).toBe('QUEST_COMPLETED');
     expect(await db.select().from(chatMembership).where(eq(chatMembership.conversationId, conversation!.id))).toHaveLength(2);
+  });
+
+  it('closes a completed Worker membership during partial Proof settlement', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest({
+      v2Mode: 'FIRST_COME_FIRST_SERVED',
+      v2Participation: 'GROUP',
+      questFundingTotalSatang: 2_000,
+      questEscrowSatang: 2_040,
+    }, [worker.id, secondWorker.id]);
+    const assignments = await db.select({ id: questAssignment.id, workerId: questAssignment.workerId })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, questId));
+    const workerAssignment = assignments.find(({ workerId }) => workerId === worker.id);
+    const secondWorkerAssignment = assignments.find(({ workerId }) => workerId === secondWorker.id);
+    if (!workerAssignment || !secondWorkerAssignment) throw new Error('Behavior fixture Assignments were not created');
+
+    const productionWriter = createWorkChatMembershipWriter();
+    const acceptedAt = new Date();
+    await db.transaction((transaction) => productionWriter.applyQuestTransition(transaction, {
+      producer: 'QUEST_ASSIGNMENT_V2',
+      type: 'workersAccepted',
+      commandId: `proof-v2-behavior-partial-chat-accepted-${questId}`,
+      eventId: `proof-v2-behavior-partial-chat-accepted-event-${questId}`,
+      questId,
+      actorId: hirer.id,
+      occurredAt: acceptedAt.toISOString(),
+      hirerId: hirer.id,
+      workers: [
+        {
+          workerId: workerAssignment.workerId,
+          assignmentId: workerAssignment.id,
+          joinedAt: acceptedAt.toISOString(),
+        },
+        {
+          workerId: secondWorkerAssignment.workerId,
+          assignmentId: secondWorkerAssignment.id,
+          joinedAt: acceptedAt.toISOString(),
+        },
+      ],
+    }));
+    const { proofSubmissionId } = await createSentProofForQuest(questId, worker.id);
+    await reserveQuest(questId, 2_040);
+    configureQuestWorkChatMembershipWriter(productionWriter);
+
+    const response = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
+      hirer.id,
+      { decision: 'PROOF_APPROVED' },
+      { 'idempotency-key': `proof-v2-behavior-partial-chat-review-${questId}` },
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.questStatus).toBe('QUEST_IN_PROGRESS');
+
+    const [conversation] = await db.select({ id: chatConversation.id })
+      .from(chatConversation)
+      .where(eq(chatConversation.questId, questId));
+    if (!conversation) throw new Error('Behavior fixture Work Conversation was not created');
+    const [completedMembership] = await db.select({ leftAt: chatMembership.leftAt })
+      .from(chatMembership)
+      .where(and(
+        eq(chatMembership.conversationId, conversation.id),
+        eq(chatMembership.assignmentId, workerAssignment.id),
+      ));
+    const [activeMembership] = await db.select({ leftAt: chatMembership.leftAt })
+      .from(chatMembership)
+      .where(and(
+        eq(chatMembership.conversationId, conversation.id),
+        eq(chatMembership.assignmentId, secondWorkerAssignment.id),
+      ));
+    expect(completedMembership?.leftAt).toBeInstanceOf(Date);
+    expect(activeMembership?.leftAt).toBeNull();
+  });
+
+  it('closes the completed Worker membership during partial proof-free settlement', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest({
+      proofRequired: false,
+      v2Mode: 'FIRST_COME_FIRST_SERVED',
+      v2Participation: 'GROUP',
+      questFundingTotalSatang: 2_000,
+      questEscrowSatang: 2_040,
+    }, [worker.id, secondWorker.id]);
+    const [assignment] = await db.select({ id: questAssignment.id })
+      .from(questAssignment)
+      .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, worker.id)));
+    if (!assignment) throw new Error('Behavior fixture Assignment was not created');
+    await reserveQuest(questId, 2_040);
+    const transitions: unknown[] = [];
+    configureQuestWorkChatMembershipWriter({
+      applyQuestTransition: async (_transaction, transition) => {
+        transitions.push(transition);
+        return { conversationId: 'proof-v2-behavior-partial-proof-free', outcome: 'APPLIED' as const };
+      },
+    });
+
+    const response = await request(
+      'POST',
+      `/api/v2/quests/${questId}/completion-confirmation`,
+      worker.id,
+      undefined,
+      { 'idempotency-key': `proof-v2-behavior-partial-proof-free-${questId}` },
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.questStatus).toBe('QUEST_IN_PROGRESS');
+    expect(transitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'workerBecameInactive',
+        assignmentId: assignment.id,
+        assignmentStatus: 'ASSIGNMENT_COMPLETED',
+      }),
+    ]));
   });
 
   it('cleans replay-only uploads and rejects changed multipart metadata', async () => {

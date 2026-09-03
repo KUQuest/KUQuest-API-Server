@@ -333,6 +333,7 @@ export const settleProofFreeQuestV2InTransaction = async (
   commandId: string,
   now: Date,
   completedWorkerId?: string,
+  actorId: string | null = null,
 ): Promise<CommandResult | undefined> => {
   const current = await lockQuest(tx, questId);
   if (!current || current.apiVersion !== 'v2' || current.questStatus !== questStatus.inProgress) {
@@ -445,7 +446,10 @@ export const settleProofFreeQuestV2InTransaction = async (
         eq(questAssignment.assignmentStatus, assignmentStatus.active),
       ));
     const remainingWorkers = await activeAssignments(tx, questId);
-    if (remainingWorkers.length > 0) return undefined;
+    if (remainingWorkers.length > 0) {
+      await inactiveWorkersChat(tx, current, [assignment], assignmentStatus.completed, now, actorId);
+      return undefined;
+    }
   }
   const remaining = (await reservationFor(tx, current.hirerId, questId, false))?.remainingSatang ?? 0;
   if (remaining !== 0) {
@@ -486,6 +490,7 @@ export const settleApprovedQuestV2ProofInTransaction = async (
   proofSubmissionId: string,
   commandId: string,
   now: Date,
+  actorId: string | null = null,
 ): Promise<QuestV2ProofApprovalSettlement> => {
   const current = await lockQuest(tx, questId);
   if (
@@ -632,8 +637,11 @@ export const settleApprovedQuestV2ProofInTransaction = async (
           updatedAt: now,
         })
         .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.inProgress)));
-      await terminalChat(tx, current, questStatus.completed, commandId, now);
+      await terminalChat(tx, current, questStatus.completed, commandId, now, actorId);
       resultingQuestStatus = questStatus.completed;
+    } else {
+      const completedWorkers = workers.filter(({ id }) => completedAssignmentIds.includes(id));
+      await inactiveWorkersChat(tx, current, completedWorkers, assignmentStatus.completed, now, actorId);
     }
   }
 
