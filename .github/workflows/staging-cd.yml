@@ -157,6 +157,10 @@ jobs:
           STAGING_TEST_AUTH_PASSWORD: ${{ secrets.STAGING_TEST_AUTH_PASSWORD }}
           STAGING_TEST_AUTH_FIRST_NAME: ${{ secrets.STAGING_TEST_AUTH_FIRST_NAME }}
           STAGING_TEST_AUTH_LAST_NAME: ${{ secrets.STAGING_TEST_AUTH_LAST_NAME }}
+          STAGING_TEST_AUTH_ACCOUNT_2_EMAIL: ${{ secrets.STAGING_TEST_AUTH_ACCOUNT_2_EMAIL }}
+          STAGING_TEST_AUTH_ACCOUNT_2_PASSWORD: ${{ secrets.STAGING_TEST_AUTH_ACCOUNT_2_PASSWORD }}
+          STAGING_TEST_AUTH_ACCOUNT_2_FIRST_NAME: ${{ secrets.STAGING_TEST_AUTH_ACCOUNT_2_FIRST_NAME }}
+          STAGING_TEST_AUTH_ACCOUNT_2_LAST_NAME: ${{ secrets.STAGING_TEST_AUTH_ACCOUNT_2_LAST_NAME }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
 
@@ -245,6 +249,20 @@ jobs:
               fi
             done
 
+            TEST_AUTH_ACCOUNT_2_SECRETS=(
+              STAGING_TEST_AUTH_ACCOUNT_2_EMAIL
+              STAGING_TEST_AUTH_ACCOUNT_2_PASSWORD
+              STAGING_TEST_AUTH_ACCOUNT_2_FIRST_NAME
+              STAGING_TEST_AUTH_ACCOUNT_2_LAST_NAME
+            )
+
+            for SECRET_NAME in "${TEST_AUTH_ACCOUNT_2_SECRETS[@]}"; do
+              if [ -z "${!SECRET_NAME}" ]; then
+                echo "Missing GitHub secret: $SECRET_NAME"
+                exit 1
+              fi
+            done
+
             if [[ "$XENDIT_SECRET_KEY" != xnd_development_* ]]; then
               echo "Staging Finance tests require an Xendit Development API key"
               exit 1
@@ -276,6 +294,10 @@ jobs:
               printf 'STAGING_TEST_AUTH_PASSWORD=%s\n' "$STAGING_TEST_AUTH_PASSWORD"
               printf 'STAGING_TEST_AUTH_FIRST_NAME=%s\n' "$STAGING_TEST_AUTH_FIRST_NAME"
               printf 'STAGING_TEST_AUTH_LAST_NAME=%s\n' "$STAGING_TEST_AUTH_LAST_NAME"
+              printf 'STAGING_TEST_AUTH_ACCOUNT_2_EMAIL=%s\n' "$STAGING_TEST_AUTH_ACCOUNT_2_EMAIL"
+              printf 'STAGING_TEST_AUTH_ACCOUNT_2_PASSWORD=%s\n' "$STAGING_TEST_AUTH_ACCOUNT_2_PASSWORD"
+              printf 'STAGING_TEST_AUTH_ACCOUNT_2_FIRST_NAME=%s\n' "$STAGING_TEST_AUTH_ACCOUNT_2_FIRST_NAME"
+              printf 'STAGING_TEST_AUTH_ACCOUNT_2_LAST_NAME=%s\n' "$STAGING_TEST_AUTH_ACCOUNT_2_LAST_NAME"
               printf 'LOCAL_FINANCE_TEST_ENABLED=true\n'
               printf 'LOCAL_FINANCE_TEST_RECIPIENT_EMAIL=finance-test-recipient@ku.th\n'
               printf 'LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME=Finance\n'
