@@ -44,6 +44,11 @@ export { questCandidateV2Route } from './quest-candidate-v2.route';
 export { questCandidateTeamV2Route } from './quest-candidate-team-v2.route';
 export { questProofV2Route } from './quest-proof-v2.route';
 export {
+  cancelQuestV2,
+  questV2CancellationOperationScope,
+} from './quest-settlement.service';
+export type { QuestSettlementOutcome } from './quest-settlement.service';
+export {
   createQuestV2CandidateApplication,
   getQuestV2CandidateApplication,
   listQuestV2CandidateApplications,

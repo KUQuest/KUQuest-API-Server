@@ -19,6 +19,13 @@ import {
   publishQuestV2Controller,
   respondToQuestV2EditRequestController,
 } from './quest-v2.controller';
+import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
+import {
+  cancelQuestV2Controller,
+} from './quest-settlement.controller';
+import {
+  questCancellationResponseSchema,
+} from './quest-settlement.schema';
 import {
   questV2CreateHttpResponseSchema,
   questV2CreateHttpSchema,
@@ -53,6 +60,7 @@ export const questV2Route = new Elysia({
   name: 'quest-v2-route',
   prefix: `${API_V2_PREFIX}/quests`,
 })
+  .use(createQuestIdempotencyKeyGuard('quest-cancellation'))
   .use(authGuard)
   .get('', listQuestBoardV2Controller, {
     query: questV2BoardQueryHttpSchema,
@@ -186,6 +194,19 @@ export const questV2Route = new Elysia({
       description:
         'Rechecks the owned Draft and reserves the exact inclusive Quest Funding Total for every headcount slot before changing the Quest to QUEST_OPEN. The request has no business body and requires Idempotency-Key.',
       operationId: 'publishQuestV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/:questId/cancel', cancelQuestV2Controller, {
+    params: questV2ParamsSchema,
+    headers: questV2WriteHeadersSchema,
+    response: responses(questCancellationResponseSchema, 400, 401, 403, 404, 409, 503),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Cancel a v2 Quest as its Hirer',
+      description:
+        'Cancels a v2 Quest from Draft, Open, Assigned, or In Progress. The command has no business request body and applies the stage-specific Quest Escrow settlement atomically.',
+      operationId: 'cancelQuestV2',
       security: betterAuthSecurity,
     },
   })

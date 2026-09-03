@@ -114,7 +114,10 @@ export const quest = pgTable(
     ),
     check(
       'quest_reward_required_check',
-      sql`(${table.apiVersion} = 'v2' AND ${table.questStatus} = 'QUEST_DRAFT') OR ${table.rewardSatang} IS NOT NULL`,
+      sql`(
+        (${table.apiVersion} = 'v2' AND ${table.questStatus} IN ('QUEST_DRAFT', 'QUEST_CANCELLED') AND ${table.fundingReservationId} IS NULL)
+        OR ${table.rewardSatang} IS NOT NULL
+      )`,
     ),
     check('quest_finance_snapshot_bps_check', sql`${table.platformFeeBps} IS NULL OR ${table.platformFeeBps} BETWEEN 0 AND 10000`),
     check('quest_finance_snapshot_amounts_check', sql`${table.platformFeePerWorkerSatang} IS NULL OR ${table.platformFeePerWorkerSatang} >= 0`),
