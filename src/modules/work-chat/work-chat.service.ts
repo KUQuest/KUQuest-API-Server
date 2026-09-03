@@ -37,6 +37,7 @@ export class WorkChatServiceError extends Error {
       | 'CONVERSATION_NOT_FOUND'
       | 'CONVERSATION_READ_ONLY'
       | 'MESSAGE_CONTENT_REQUIRED'
+      | 'MESSAGE_TOO_LONG'
       | 'MESSAGE_NOT_FOUND'
       | 'RATE_LIMITED',
     message: string,
@@ -120,6 +121,7 @@ const getConversationMembership = async (
       eq(chatConversation.type, 'CONVERSATION_WORK'),
       isNull(chatConversation.deletedAt),
       eq(chatMembership.memberId, userId),
+      inArray(chatMembership.role, ['HIRER', 'WORKER']),
       ...(currentOnly ? [isNull(chatMembership.leftAt)] : []),
     ))
     .orderBy(desc(chatMembership.joinedAt), desc(chatMembership.id))
@@ -133,7 +135,7 @@ export const isCurrentWorkConversationMember = async (
   conversationId: string,
 ): Promise<boolean> => Boolean(await getConversationMembership(db, userId, conversationId, true));
 
-type MessageRow = {
+export type MessageRow = {
   id: string;
   conversationId: string;
   sequence: number;
@@ -146,7 +148,7 @@ type MessageRow = {
   createdAt: Date;
 };
 
-const loadMessageDetails = async (database: WorkChatDatabase, rows: MessageRow[]) => {
+export const loadMessageDetails = async (database: WorkChatDatabase, rows: MessageRow[]) => {
   if (rows.length === 0) return [];
 
   const senderMembershipIds = rows
@@ -332,13 +334,14 @@ export const listWorkConversationParticipants = async (
     .leftJoin(authUser, eq(authUser.id, chatMembership.memberId))
     .where(and(
       eq(chatMembership.conversationId, conversationId),
+      inArray(chatMembership.role, ['HIRER', 'WORKER']),
       isNull(chatMembership.leftAt),
     ))
     .orderBy(asc(chatMembership.role), asc(chatMembership.joinedAt), asc(chatMembership.id));
 
   return participants.map((participant) => ({
     id: participant.id,
-    role: participant.role,
+    role: participant.role as WorkConversationParticipant['role'],
     displayName: `${participant.firstName ?? ''} ${participant.lastName ?? ''}`.trim() || 'Former member',
   }));
 };
@@ -411,6 +414,7 @@ export const listWorkConversations = async (
     ))
     .where(and(
       eq(chatMembership.memberId, userId),
+      inArray(chatMembership.role, ['HIRER', 'WORKER']),
       eq(chatConversation.type, 'CONVERSATION_WORK'),
       isNull(chatConversation.deletedAt),
     ))
@@ -496,16 +500,17 @@ const retryAfterSeconds = (createdAt: Date, now = Date.now()): number => Math.ma
 const enforceSendRateLimit = async (
   database: WorkChatDatabase,
   userId: string,
-  conversationId: string,
+  questId: string,
   requestedAttachmentCount: number,
 ): Promise<void> => {
   const windowStart = new Date(Date.now() - rateLimitWindowMs);
   const recentMessages = await database
     .select({ createdAt: chatMessage.createdAt })
     .from(chatMessage)
+    .innerJoin(chatConversation, eq(chatConversation.id, chatMessage.conversationId))
     .innerJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId!))
     .where(and(
-      eq(chatMessage.conversationId, conversationId),
+      eq(chatConversation.questId, questId),
       eq(chatMessage.kind, 'USER'),
       eq(chatMembership.memberId, userId),
       gte(chatMessage.createdAt, windowStart),
@@ -515,9 +520,10 @@ const enforceSendRateLimit = async (
     .select({ createdAt: chatMessage.createdAt })
     .from(chatMessageAttachment)
     .innerJoin(chatMessage, eq(chatMessage.id, chatMessageAttachment.messageId))
+    .innerJoin(chatConversation, eq(chatConversation.id, chatMessage.conversationId))
     .innerJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId!))
     .where(and(
-      eq(chatMessage.conversationId, conversationId),
+      eq(chatConversation.questId, questId),
       eq(chatMessage.kind, 'USER'),
       eq(chatMembership.memberId, userId),
       gte(chatMessage.createdAt, windowStart),
@@ -596,11 +602,11 @@ export const uploadWorkConversationAttachment = async (
         .select({ createdAt: chatAttachment.createdAt })
         .from(chatAttachment)
         .innerJoin(chatMembership, eq(chatMembership.id, chatAttachment.uploadedByMemberId!))
+        .innerJoin(chatConversation, eq(chatConversation.id, chatAttachment.conversationId))
         .where(and(
-          eq(chatAttachment.conversationId, conversationId),
+          eq(chatConversation.questId, conversation.questId),
           eq(chatMembership.memberId, userId),
           gte(chatAttachment.createdAt, windowStart),
-          isNull(chatAttachment.deletedAt),
         ))
         .orderBy(asc(chatAttachment.createdAt));
       if (recent.length >= maxAttachmentsPerMinute && recent[0]) {
@@ -633,6 +639,7 @@ export const uploadWorkConversationAttachment = async (
           originalFilename: stored.fileName,
           mimeType: stored.contentType,
           sizeBytes: stored.sizeBytes,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
           validatedAt: new Date(),
         })
         .returning({
@@ -730,7 +737,7 @@ export const discardWorkConversationAttachment = async (
     const deletedAt = new Date();
     await transaction
       .update(chatAttachment)
-      .set({ status: 'EXPIRED', deletedAt, updatedAt: deletedAt })
+      .set({ status: 'EXPIRED', deletedAt, expiresAt: deletedAt, updatedAt: deletedAt })
       .where(eq(chatAttachment.id, attachmentId));
     await transaction
       .update(file)
@@ -831,6 +838,9 @@ export const sendWorkConversationMessage = async (
   if (!text && attachmentIds.length === 0) {
     throw new WorkChatServiceError('MESSAGE_CONTENT_REQUIRED', 'Message text or an Attachment is required');
   }
+  if (text && text.length > 1000) {
+    throw new WorkChatServiceError('MESSAGE_TOO_LONG', 'Message text must be 1,000 characters or fewer');
+  }
 
   const [existing] = await transaction
     .select({
@@ -870,7 +880,7 @@ export const sendWorkConversationMessage = async (
     throw new WorkChatServiceError('CONVERSATION_READ_ONLY', 'Conversation is read-only');
   }
 
-  await enforceSendRateLimit(transaction, userId, conversationId, attachmentIds.length);
+  await enforceSendRateLimit(transaction, userId, conversation.questId, attachmentIds.length);
 
   let attachments: Array<{ id: string }> = [];
   if (attachmentIds.length > 0) {
@@ -882,8 +892,7 @@ export const sendWorkConversationMessage = async (
         eq(chatAttachment.conversationId, conversationId),
         eq(chatAttachment.uploadedByMemberId, conversation.membershipId),
         eq(chatAttachment.status, 'VALIDATED'),
-        isNull(chatAttachment.deletedAt),
-      ))
+        ))
       .for('update');
     if (selectedAttachments.length !== attachmentIds.length) {
       throw new WorkChatServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
@@ -930,7 +939,7 @@ export const sendWorkConversationMessage = async (
     })));
     await transaction
       .update(chatAttachment)
-      .set({ status: 'CONSUMED', consumedAt: createdAt, updatedAt: createdAt })
+      .set({ status: 'CONSUMED', consumedAt: createdAt, expiresAt: null, updatedAt: createdAt })
       .where(inArray(chatAttachment.id, attachmentIds));
   }
   await transaction

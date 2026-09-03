@@ -70,7 +70,10 @@ const mapWorkChatError = (set: AuthedContext['set'], error: unknown) => {
     set.status = 415;
   } else if (error.code === 'ATTACHMENT_UPLOAD_FAILED' || error.code === 'ATTACHMENT_LINK_UNAVAILABLE') {
     set.status = 502;
-  } else if (error.code === 'MESSAGE_CONTENT_REQUIRED') {
+  } else if (
+    error.code === 'MESSAGE_CONTENT_REQUIRED' ||
+    error.code === 'MESSAGE_TOO_LONG'
+  ) {
     set.status = 400;
   } else if (error.code === 'RATE_LIMITED') {
     set.status = 429;

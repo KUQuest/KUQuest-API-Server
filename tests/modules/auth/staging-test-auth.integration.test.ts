@@ -13,6 +13,8 @@ import { eq } from 'drizzle-orm';
 
 const testEmail = `staging-test-${randomUUID()}@ku.th`;
 const testPassword = 'TestStudent1!';
+const testAccount2Email = `staging-test-account-2-${randomUUID()}@ku.th`;
+const testAccount2Password = 'TestStudent2!';
 const stagingTestApp = new Elysia({ name: 'staging-test-auth-integration' }).use(
   createStagingTestAuthRoute({
     enabled: true,
@@ -21,6 +23,12 @@ const stagingTestApp = new Elysia({ name: 'staging-test-auth-integration' }).use
     password: testPassword,
     firstName: 'Staging',
     lastName: 'Test Student',
+    account2: {
+      email: testAccount2Email,
+      password: testAccount2Password,
+      firstName: 'Chat',
+      lastName: 'Worker',
+    },
   }),
 );
 const composedStagingTestApp = new Elysia({
@@ -55,14 +63,15 @@ const getCookieHeader = (response: Response): string =>
     .join('; ');
 
 afterAll(async () => {
-  const [wallet] = await db
-    .select({ id: walletWallet.id })
-    .from(walletWallet)
-    .innerJoin(authUser, eq(walletWallet.userId, authUser.id))
-    .where(eq(authUser.email, testEmail));
-  // Wallet provisioning retains immutable status history, so keep this fixture after the Wallet exists.
-  if (wallet) return;
-  await db.delete(authUser).where(eq(authUser.email, testEmail));
+  await Promise.all([testEmail, testAccount2Email].map(async (email) => {
+    const [wallet] = await db
+      .select({ id: walletWallet.id })
+      .from(walletWallet)
+      .innerJoin(authUser, eq(walletWallet.userId, authUser.id))
+      .where(eq(authUser.email, email));
+    // Wallet provisioning retains immutable status history, so keep this fixture after the Wallet exists.
+    if (!wallet) await db.delete(authUser).where(eq(authUser.email, email));
+  }));
 });
 
 describe('staging test authentication', () => {
@@ -177,5 +186,35 @@ describe('staging test authentication', () => {
 
     expect(response.status).toBe(200);
     expect(getCookieHeader(response)).toContain('better-auth.session_token=');
+  });
+
+  it('issues separate normal sessions for Account 1 and Account 2', async () => {
+    const account1Response = await stagingTestApp.handle(
+      new Request('http://localhost/api/staging/test-auth/sign-in/account-1', {
+        method: 'POST',
+      }),
+    );
+    const account2Response = await stagingTestApp.handle(
+      new Request('http://localhost/api/staging/test-auth/sign-in/account-2', {
+        method: 'POST',
+      }),
+    );
+
+    expect(account1Response.status).toBe(200);
+    expect(account2Response.status).toBe(200);
+    const account1Body = (await account1Response.json()) as { user: { id: string } };
+    const account2Body = (await account2Response.json()) as { user: { id: string } };
+    expect(account1Body.user.id).not.toBe(account2Body.user.id);
+
+    const account2SessionResponse = await stagingTestApp.handle(
+      new Request('http://localhost/api/staging/test-auth/get-session', {
+        headers: { cookie: getCookieHeader(account2Response) },
+      }),
+    );
+    expect(account2SessionResponse.status).toBe(200);
+    expect((await account2SessionResponse.json()).user.id).toBe(account2Body.user.id);
+
+    const account2Wallet = await getWallet(account2Body.user.id);
+    expect(account2Wallet.walletStatus).toBe('ACTIVE');
   });
 });
