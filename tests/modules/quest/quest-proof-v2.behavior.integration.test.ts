@@ -1,6 +1,8 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
+import { adminReviewItem } from '@/database/schema/admin.schema';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { file } from '@/database/schema/file.schema';
 import { chatConversation, chatMembership } from '@/database/schema/work-chat.schema';
 import {
@@ -26,9 +28,13 @@ import {
 } from '@/database/schema/wallet.schema';
 import { auth } from '@/modules/auth';
 import {
+  autoApproveDueQuestV2Proofs,
   configureQuestWorkChatMembershipWriter,
   createQuestV2ProofSubmission,
+  failQuestV2AtDueAt,
   retryQuestV2ProofUploadCleanup,
+  reviewQuestV2ProofSubmission,
+  submitQuestV2ProofSubmission,
   type QuestTransaction,
 } from '@/modules/quest';
 import { questV2ProofStorage } from '@/modules/quest/quest-proof-v2.storage';
@@ -227,6 +233,57 @@ const deleteWorkChatForQuests = async (ids: string[]) => {
   await db.delete(chatConversation).where(inArray(chatConversation.id, conversationIds));
 };
 
+const createSentProofForQuest = async (
+  questId: string,
+  memberId: string,
+  sentAt = new Date(),
+) => {
+  const proofFileId = await createFile(memberId);
+  const created = await createQuestV2ProofSubmission(
+    memberId,
+    questId,
+    { description: 'Submitted proof', fileIds: [proofFileId] },
+    `proof-v2-behavior-create-${questId}-${randomUUID()}`,
+    sentAt,
+  );
+  if ('outcome' in created) throw new Error(`Proof Draft creation failed: ${created.outcome}`);
+  const sent = await submitQuestV2ProofSubmission(
+    memberId,
+    questId,
+    created.id,
+    `proof-v2-behavior-submit-${questId}-${randomUUID()}`,
+    sentAt,
+  );
+  if ('outcome' in sent) throw new Error(`Proof Submission send failed: ${sent.outcome}`);
+  return { proofSubmissionId: sent.id, proofFileId, sentAt: sent.submittedAt! };
+};
+
+const createHttpSentProof = async (
+  overrides: Partial<typeof quest.$inferInsert> = {},
+  memberId = worker.id,
+) => {
+  const { questId } = await createQuest(overrides);
+  const proofFileId = await createFile(memberId);
+  const created = await jsonRequest(
+    'POST',
+    `/api/v2/quests/${questId}/proof-submissions`,
+    memberId,
+    { description: 'Submitted proof', fileIds: [proofFileId] },
+    { 'idempotency-key': `proof-v2-behavior-http-create-${questId}` },
+  );
+  if (created.status !== 201) throw new Error(`Proof Draft HTTP creation failed: ${created.status}`);
+  const createdData = (await created.json()).data as { id: string };
+  const sent = await request(
+    'POST',
+    `/api/v2/quests/${questId}/proof-submissions/${createdData.id}/submit`,
+    memberId,
+    undefined,
+    { 'idempotency-key': `proof-v2-behavior-http-submit-${questId}` },
+  );
+  if (sent.status !== 200) throw new Error(`Proof Submission HTTP send failed: ${sent.status}`);
+  return { questId, proofSubmissionId: createdData.id, proofFileId };
+};
+
 beforeAll(async () => {
   try {
     await sql`select 1`;
@@ -421,6 +478,259 @@ describe('Quest Proof Submission v2 behavior', () => {
     expect((await crossActorReuse.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
   });
 
+  it('approves a sent Proof, settles the Quest Reward, and completes the Quest atomically', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, proofSubmissionId } = await createHttpSentProof({
+      questFundingTotalSatang: 1_020,
+      questEscrowSatang: 1_020,
+    });
+    await reserveQuest(questId, 1_020);
+
+    const response = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
+      hirer.id,
+      { decision: 'PROOF_APPROVED' },
+      { 'idempotency-key': `proof-v2-behavior-review-approve-${questId}` },
+    );
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.data).toMatchObject({
+      proof: { id: proofSubmissionId, status: 'PROOF_APPROVED' },
+      questStatus: 'QUEST_COMPLETED',
+    });
+
+    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status)
+      .toBe('QUEST_COMPLETED');
+    expect((await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment).where(eq(questAssignment.questId, questId)))[0]?.status)
+      .toBe('ASSIGNMENT_COMPLETED');
+    const [reservation] = await db.select({
+      id: walletFundingReservation.id,
+      status: walletFundingReservation.status,
+      remainingSatang: walletFundingReservation.remainingSatang,
+    }).from(walletFundingReservation).where(and(
+      eq(walletFundingReservation.ownerUserId, hirer.id),
+      eq(walletFundingReservation.callerReference, questId),
+    ));
+    expect(reservation).toMatchObject({ status: 'SETTLED', remainingSatang: 0 });
+    expect(await db.select({
+      recipientUserId: walletFundingReservationSettlement.recipientUserId,
+      recipientAmountSatang: walletFundingReservationSettlement.recipientAmountSatang,
+      platformFeeSatang: walletFundingReservationSettlement.platformFeeSatang,
+    }).from(walletFundingReservationSettlement).where(eq(walletFundingReservationSettlement.reservationId, reservation!.id)))
+      .toEqual([{ recipientUserId: worker.id, recipientAmountSatang: 1_000, platformFeeSatang: 20 }]);
+    expect(await db.select({ action: auditRecord.action, resourceType: auditRecord.resourceType })
+      .from(auditRecord).where(eq(auditRecord.resourceId, proofSubmissionId)))
+      .toEqual([{ action: 'PROOF_REVIEWED', resourceType: 'PROOF_SUBMISSION' }]);
+  });
+
+  it('records PROOF_NOT_APPROVED, fails the Quest, and creates one Admin Review Item', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, proofSubmissionId, proofFileId } = await createHttpSentProof({
+      questFundingTotalSatang: 1_020,
+      questEscrowSatang: 1_020,
+    });
+    await reserveQuest(questId, 1_020);
+    const key = `proof-v2-behavior-review-not-approved-${questId}`;
+    const first = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
+      hirer.id,
+      { decision: 'PROOF_NOT_APPROVED', reason: 'The submitted work is incomplete' },
+      { 'idempotency-key': key },
+    );
+    const firstBody = await first.json();
+    expect(first.status).toBe(200);
+    expect(firstBody.data).toMatchObject({
+      proof: { id: proofSubmissionId, status: 'PROOF_NOT_APPROVED' },
+      questStatus: 'QUEST_FAILED',
+    });
+
+    const replay = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
+      hirer.id,
+      { decision: 'PROOF_NOT_APPROVED', reason: 'The submitted work is incomplete' },
+      { 'idempotency-key': key },
+    );
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(firstBody);
+
+    const reused = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
+      hirer.id,
+      { decision: 'PROOF_NOT_APPROVED', reason: 'A different reason' },
+      { 'idempotency-key': key },
+    );
+    expect(reused.status).toBe(409);
+    expect((await reused.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+
+    const secondDecision = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
+      hirer.id,
+      { decision: 'PROOF_APPROVED' },
+      { 'idempotency-key': `${key}-second` },
+    );
+    expect(secondDecision.status).toBe(409);
+    expect((await secondDecision.json()).error.code).toBe('PROOF_REVIEW_NOT_PENDING');
+    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status)
+      .toBe('QUEST_FAILED');
+    expect((await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment).where(eq(questAssignment.questId, questId)))[0]?.status)
+      .toBe('ASSIGNMENT_INCOMPLETE');
+    expect(await db.select({
+      reason: adminReviewItem.reason,
+      proofSubmissionId: adminReviewItem.proofSubmissionId,
+      evidenceReferences: adminReviewItem.evidenceReferences,
+    }).from(adminReviewItem).where(eq(adminReviewItem.proofSubmissionId, proofSubmissionId)))
+      .toEqual([{
+        reason: 'The submitted work is incomplete',
+        proofSubmissionId,
+        evidenceReferences: [proofFileId],
+      }]);
+    expect((await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
+      .from(walletFundingReservation).where(eq(walletFundingReservation.callerReference, questId)))[0])
+      .toEqual({ status: 'ACTIVE', remainingSatang: 1_020 });
+  });
+
+  it('requires a reason for a not-approved decision without changing the pending Proof', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, proofSubmissionId } = await createHttpSentProof();
+    const response = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
+      hirer.id,
+      { decision: 'PROOF_NOT_APPROVED' },
+      { 'idempotency-key': `proof-v2-behavior-review-reason-${questId}` },
+    );
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('PROOF_NOT_APPROVED_REASON_REQUIRED');
+    expect((await db.select({ status: questV2ProofSubmission.submissionStatus })
+      .from(questV2ProofSubmission).where(eq(questV2ProofSubmission.id, proofSubmissionId)))[0]?.status)
+      .toBe('PROOF_PENDING');
+  });
+
+  it('auto-approves a pending Proof at exactly 24 hours after send', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const sentAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const { questId } = await createQuest({
+      questFundingTotalSatang: 1_020,
+      questEscrowSatang: 1_020,
+      startTime: new Date(sentAt.getTime() - 60 * 60 * 1000),
+      dueAt: new Date(sentAt.getTime() + 48 * 60 * 60 * 1000),
+    });
+    await reserveQuest(questId, 1_020);
+    const { proofSubmissionId } = await createSentProofForQuest(questId, worker.id, sentAt);
+
+    expect(await autoApproveDueQuestV2Proofs(new Date(sentAt.getTime() + 24 * 60 * 60 * 1000 - 1), 10))
+      .toEqual([]);
+    expect(await autoApproveDueQuestV2Proofs(new Date(sentAt.getTime() + 24 * 60 * 60 * 1000), 10))
+      .toEqual([proofSubmissionId]);
+    expect((await db.select({ status: questV2ProofSubmission.submissionStatus })
+      .from(questV2ProofSubmission).where(eq(questV2ProofSubmission.id, proofSubmissionId)))[0]?.status)
+      .toBe('PROOF_APPROVED');
+    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status)
+      .toBe('QUEST_COMPLETED');
+  });
+
+  it('fails a Quest at dueAt when required Proof or proof-free confirmation is missing', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const dueAt = new Date(Date.now() - 1_000);
+    const missingProof = await createQuest({
+      startTime: new Date(dueAt.getTime() - 60 * 60 * 1000),
+      dueAt,
+    });
+    const missingConfirmation = await createQuest({
+      proofRequired: false,
+      startTime: new Date(dueAt.getTime() - 60 * 60 * 1000),
+      dueAt,
+    });
+    await reserveQuest(missingProof.questId, 1_020);
+    await reserveQuest(missingConfirmation.questId, 1_020);
+
+    expect(await failQuestV2AtDueAt(missingProof.questId, new Date())).toBe(true);
+    expect(await failQuestV2AtDueAt(missingConfirmation.questId, new Date())).toBe(true);
+    expect(await db.select({ status: quest.questStatus }).from(quest).where(inArray(quest.id, [missingProof.questId, missingConfirmation.questId])))
+      .toEqual([{ status: 'QUEST_FAILED' }, { status: 'QUEST_FAILED' }]);
+    expect(await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment)
+      .where(inArray(questAssignment.questId, [missingProof.questId, missingConfirmation.questId])))
+      .toEqual([{ status: 'ASSIGNMENT_INCOMPLETE' }, { status: 'ASSIGNMENT_INCOMPLETE' }]);
+  });
+
+  it('reviews a valid pending Proof after another GROUP FCFS Assignment fails', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const failureNow = new Date();
+    const dueAt = new Date(failureNow.getTime() - 1_000);
+    const { questId } = await createQuest({
+      v2Participation: 'GROUP',
+      v2Mode: 'FIRST_COME_FIRST_SERVED',
+      questFundingTotalSatang: 2_000,
+      questEscrowSatang: 2_040,
+      startTime: new Date(dueAt.getTime() - 60 * 60 * 1000),
+      dueAt,
+    }, [worker.id, secondWorker.id]);
+    await reserveQuest(questId, 2_040);
+    const { proofSubmissionId } = await createSentProofForQuest(
+      questId,
+      worker.id,
+      new Date(dueAt.getTime() - 1),
+    );
+    expect(await failQuestV2AtDueAt(questId, failureNow)).toBe(true);
+
+    const review = await reviewQuestV2ProofSubmission(
+      hirer.id,
+      questId,
+      proofSubmissionId,
+      'PROOF_APPROVED',
+      null,
+      `proof-v2-behavior-post-failure-${questId}`,
+      failureNow,
+    );
+    expect(review).toMatchObject({ questStatus: 'QUEST_FAILED', proof: { status: 'PROOF_APPROVED' } });
+    expect(await db.select({ workerId: questAssignment.workerId, status: questAssignment.assignmentStatus })
+      .from(questAssignment).where(eq(questAssignment.questId, questId))).toEqual(expect.arrayContaining([
+      { workerId: worker.id, status: 'ASSIGNMENT_COMPLETED' },
+      { workerId: secondWorker.id, status: 'ASSIGNMENT_INCOMPLETE' },
+    ]));
+    expect((await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
+      .from(walletFundingReservation).where(eq(walletFundingReservation.callerReference, questId)))[0])
+      .toEqual({ status: 'ACTIVE', remainingSatang: 1_020 });
+  });
+
+  it('rolls back Proof review effects when the Work Conversation transition fails', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, proofSubmissionId } = await createHttpSentProof();
+    await reserveQuest(questId, 1_020);
+    configureQuestWorkChatMembershipWriter({
+      applyQuestTransition: async (_transaction, transition) => {
+        if (transition.type === 'workerBecameInactive') throw new Error('chat unavailable');
+        return { conversationId: 'proof-v2-behavior-review-rollback', outcome: 'APPLIED' as const };
+      },
+    });
+
+    const response = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
+      hirer.id,
+      { decision: 'PROOF_NOT_APPROVED', reason: 'The work is not complete' },
+      { 'idempotency-key': `proof-v2-behavior-review-rollback-${questId}` },
+    );
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe('WORK_CHAT_UNAVAILABLE');
+    expect((await db.select({ status: questV2ProofSubmission.submissionStatus })
+      .from(questV2ProofSubmission).where(eq(questV2ProofSubmission.id, proofSubmissionId)))[0]?.status)
+      .toBe('PROOF_PENDING');
+    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status)
+      .toBe('QUEST_IN_PROGRESS');
+    expect((await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment)
+      .where(eq(questAssignment.questId, questId)))[0]?.status).toBe('ASSIGNMENT_ACTIVE');
+    expect(await db.select({ id: adminReviewItem.id }).from(adminReviewItem)
+      .where(eq(adminReviewItem.proofSubmissionId, proofSubmissionId))).toEqual([]);
+    expect(await db.select({ id: auditRecord.id }).from(auditRecord)
+      .where(eq(auditRecord.resourceId, proofSubmissionId))).toEqual([]);
+  });
+
   it('preserves valid files, identifies failed files, and blocks send until retry', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
     const { questId } = await createQuest();
@@ -558,6 +868,9 @@ describe('Quest Proof Submission v2 behavior', () => {
       questEscrowSatang: 2_040,
     });
     await reserveQuest(questId, 2_040);
+    const [reservation] = await db.select({ id: walletFundingReservation.id })
+      .from(walletFundingReservation).where(eq(walletFundingReservation.callerReference, questId));
+    if (!reservation) throw new Error('Proof-free GROUP fixture reservation was not created');
 
     const first = await request(
       'POST',
@@ -579,7 +892,10 @@ describe('Quest Proof Submission v2 behavior', () => {
       recipientAmountSatang: walletFundingReservationSettlement.recipientAmountSatang,
       platformFeeSatang: walletFundingReservationSettlement.platformFeeSatang,
     }).from(walletFundingReservationSettlement)
-      .where(eq(walletFundingReservationSettlement.recipientUserId, worker.id))).toEqual([
+      .where(and(
+        eq(walletFundingReservationSettlement.reservationId, reservation.id),
+        eq(walletFundingReservationSettlement.recipientUserId, worker.id),
+      ))).toEqual([
       { recipientUserId: worker.id, recipientAmountSatang: 1_000, platformFeeSatang: 20 },
     ]);
 

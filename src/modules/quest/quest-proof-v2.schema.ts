@@ -53,6 +53,18 @@ export const questV2ProofSubmissionEmptyBodySchema = t.Object({}, {
   additionalProperties: false,
 });
 
+const proofReviewDecision = t.Union([
+  t.Literal('PROOF_APPROVED'),
+  t.Literal('PROOF_NOT_APPROVED'),
+]);
+
+export const questV2ProofSubmissionReviewSchema = t.Object({
+  decision: proofReviewDecision,
+  reason: t.Optional(t.Nullable(t.String({ maxLength: 1000, pattern: '\\S' }))),
+}, {
+  additionalProperties: false,
+});
+
 const proofStatusSchema = t.Nullable(proofStatus);
 const visibilitySchema = t.Union([t.Literal('FULL'), t.Literal('SUMMARY')]);
 
@@ -115,7 +127,16 @@ export const questV2CompletionConfirmationResponseSchema = t.Object({
   }),
 });
 
+export const questV2ProofSubmissionReviewResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    proof: proofSubmissionSchema,
+    questStatus: questV2State,
+  }),
+});
+
 export type QuestV2ProofSubmissionParams = Static<typeof questV2ProofSubmissionParamsSchema>;
 export type QuestV2ProofSubmissionDetailParams = Static<typeof questV2ProofSubmissionDetailParamsSchema>;
 export type QuestV2ProofSubmissionCreateInput = Static<typeof questV2ProofSubmissionCreateSchema>;
 export type QuestV2ProofSubmissionEditInput = Static<typeof questV2ProofSubmissionEditSchema>;
+export type QuestV2ProofSubmissionReviewInput = Static<typeof questV2ProofSubmissionReviewSchema>;

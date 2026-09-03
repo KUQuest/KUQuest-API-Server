@@ -12,6 +12,7 @@ import type {
   QuestV2ProofSubmissionDetailParams,
   QuestV2ProofSubmissionEditInput,
   QuestV2ProofSubmissionParams,
+  QuestV2ProofSubmissionReviewInput,
 } from './quest-proof-v2.schema';
 import {
   confirmQuestV2Completion,
@@ -19,6 +20,7 @@ import {
   deleteQuestV2ProofSubmission,
   editQuestV2ProofSubmission,
   listQuestV2ProofSubmissions,
+  reviewQuestV2ProofSubmission,
   submitQuestV2ProofSubmission,
   type QuestV2CompletionConfirmationOutcome,
   type QuestV2ProofDraftInput,
@@ -257,6 +259,43 @@ const commandResult = (
   return apiSuccess(serializeSubmission(result));
 };
 
+const reviewResult = (
+  set: AuthedContext['set'],
+  result: Awaited<ReturnType<typeof reviewQuestV2ProofSubmission>>,
+) => {
+  if ('outcome' in result) {
+    if (result.outcome === 'hirer-not-allowed') {
+      set.status = 403;
+      return apiError('PROOF_REVIEW_NOT_ALLOWED', 'Only the Quest Hirer can review this Proof Submission');
+    }
+    if (result.outcome === 'proof-not-found') {
+      set.status = 404;
+      return apiError('PROOF_SUBMISSION_NOT_FOUND', 'Proof Submission not found');
+    }
+    if (result.outcome === 'proof-not-sent') return conflict(set, 'PROOF_SUBMISSION_NOT_SENT', 'Only a sent Proof Submission can be reviewed');
+    if (result.outcome === 'review-not-pending') return conflict(set, 'PROOF_REVIEW_NOT_PENDING', 'The Proof Submission already has a final decision');
+    if (result.outcome === 'not-reviewable') return conflict(set, 'QUEST_NOT_REVIEWABLE', 'The Quest does not accept a Proof review in its current state');
+    if (result.outcome === 'review-reason-required') {
+      set.status = 400;
+      return apiError('PROOF_NOT_APPROVED_REASON_REQUIRED', 'PROOF_NOT_APPROVED requires a non-blank reason');
+    }
+    if (result.outcome === 'review-reason-invalid') {
+      set.status = 400;
+      return apiError('PROOF_REVIEW_REASON_INVALID', 'The Proof review reason is invalid');
+    }
+    if (result.outcome === 'invalid-review-decision') {
+      set.status = 400;
+      return apiError('PROOF_REVIEW_DECISION_INVALID', 'The Proof review decision is invalid');
+    }
+    if (result.outcome === 'not-required') return conflict(set, 'PROOF_NOT_REQUIRED', 'This Quest uses completion confirmation instead of Proof Submission');
+    return mapCommandError(set, result.outcome);
+  }
+  return apiSuccess({
+    proof: serializeSubmission(result.proof),
+    questStatus: result.questStatus,
+  });
+};
+
 export const createQuestV2ProofSubmissionController = async ({
   body,
   params,
@@ -412,6 +451,42 @@ export const submitQuestV2ProofSubmissionController = async ({
     commandId,
   );
   return commandResult(set, result);
+};
+
+export const reviewQuestV2ProofSubmissionController = async ({
+  body,
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & {
+  body: QuestV2ProofSubmissionReviewInput;
+  params: QuestV2ProofSubmissionDetailParams;
+}) => {
+  const commandId = requiredCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+  let result: Awaited<ReturnType<typeof reviewQuestV2ProofSubmission>>;
+  try {
+    result = await reviewQuestV2ProofSubmission(
+      session.user.id,
+      params.questId,
+      params.proofSubmissionId,
+      body.decision,
+      body.reason ?? null,
+      commandId,
+    );
+  } catch (error) {
+    if (error instanceof WorkChatTransitionError) {
+      set.status = 503;
+      return apiError('WORK_CHAT_UNAVAILABLE', 'Work Chat membership could not be updated');
+    }
+    if (error instanceof MoneyDomainError) {
+      set.status = 503;
+      return apiError('QUEST_SETTLEMENT_UNAVAILABLE', 'Quest Reward settlement could not be completed');
+    }
+    throw error;
+  }
+  return reviewResult(set, result);
 };
 
 export const listQuestV2ProofSubmissionsController = async ({

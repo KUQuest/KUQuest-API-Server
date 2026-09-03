@@ -11,6 +11,7 @@ import {
   deleteQuestV2ProofSubmissionController,
   editQuestV2ProofSubmissionController,
   listQuestV2ProofSubmissionsController,
+  reviewQuestV2ProofSubmissionController,
   submitQuestV2ProofSubmissionController,
 } from './quest-proof-v2.controller';
 import {
@@ -23,6 +24,8 @@ import {
   questV2ProofSubmissionListResponseSchema,
   questV2ProofSubmissionParamsSchema,
   questV2ProofSubmissionResponseSchema,
+  questV2ProofSubmissionReviewResponseSchema,
+  questV2ProofSubmissionReviewSchema,
 } from './quest-proof-v2.schema';
 import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
 
@@ -81,6 +84,20 @@ export const questProofV2Route = new Elysia({
       summary: 'Send a v2 Proof Submission Draft',
       description: 'Sends and locks a complete Proof Submission Draft before dueAt.',
       operationId: 'submitQuestV2ProofSubmission',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/:questId/proof-submissions/:proofSubmissionId/review', reviewQuestV2ProofSubmissionController, {
+    params: questV2ProofSubmissionDetailParamsSchema,
+    body: questV2ProofSubmissionReviewSchema,
+    headers: questV2ProofSubmissionHeadersSchema,
+    transform: rejectUnknownFields(questV2ProofSubmissionReviewSchema),
+    response: responses(questV2ProofSubmissionReviewResponseSchema, 400, 401, 403, 404, 409, 500, 503),
+    detail: {
+      tags: ['Quest Proof v2'],
+      summary: 'Review a v2 Proof Submission',
+      description: 'Records the Hirer’s first final approval or non-approval decision for a sent Proof Submission.',
+      operationId: 'reviewQuestV2ProofSubmission',
       security: betterAuthSecurity,
     },
   })

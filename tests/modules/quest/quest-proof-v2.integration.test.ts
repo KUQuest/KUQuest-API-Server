@@ -19,12 +19,14 @@ describe('Quest Proof API v2 contract', () => {
       request('PATCH', `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}`, { 'content-type': 'application/json' }, JSON.stringify({ description: 'updated' })),
       request('DELETE', `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}`),
       request('POST', `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/submit`),
+      request('POST', `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`, { 'content-type': 'application/json' }, JSON.stringify({ decision: 'PROOF_APPROVED' })),
       request('POST', `/api/v2/quests/${questId}/completion-confirmation`),
     ];
     const responses = await Promise.all(requests);
 
-    expect(responses.map((response) => response.status)).toEqual([400, 400, 400, 400, 400]);
+    expect(responses.map((response) => response.status)).toEqual([400, 400, 400, 400, 400, 400]);
     expect(await Promise.all(responses.map(async (response) => (await response.json()).error.code))).toEqual([
+      'IDEMPOTENCY_KEY_REQUIRED',
       'IDEMPOTENCY_KEY_REQUIRED',
       'IDEMPOTENCY_KEY_REQUIRED',
       'IDEMPOTENCY_KEY_REQUIRED',
@@ -40,15 +42,16 @@ describe('Quest Proof API v2 contract', () => {
       request('PATCH', `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}`, headers, JSON.stringify({ description: 'updated' })),
       request('DELETE', `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}`, headers),
       request('POST', `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/submit`, headers),
+      request('POST', `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`, headers, JSON.stringify({ decision: 'PROOF_APPROVED' })),
       request('GET', `/api/v2/quests/${questId}/proof-submissions`),
       request('POST', `/api/v2/quests/${questId}/completion-confirmation`, headers),
     ];
     const responses = await Promise.all(requests);
 
-    expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401, 401]);
+    expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401]);
   });
 
-  it('documents all six v2 operations with canonical Proof statuses and no retired vocabulary', async () => {
+  it('documents all seven v2 operations with canonical Proof statuses and no retired vocabulary', async () => {
     const response = await request('GET', '/openapi/json');
     const document = await response.json() as {
       paths: Record<string, Record<string, {
@@ -83,6 +86,11 @@ describe('Quest Proof API v2 contract', () => {
         '/api/v2/quests/{questId}/proof-submissions/{proofSubmissionId}/submit',
         'post',
         'submitQuestV2ProofSubmission',
+      ],
+      [
+        '/api/v2/quests/{questId}/proof-submissions/{proofSubmissionId}/review',
+        'post',
+        'reviewQuestV2ProofSubmission',
       ],
       [
         '/api/v2/quests/{questId}/completion-confirmation',

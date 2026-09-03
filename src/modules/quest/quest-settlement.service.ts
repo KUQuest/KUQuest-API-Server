@@ -8,6 +8,7 @@ import {
   questAssignment,
   questCandidateTeamV2,
   questV2UnderfilledConsent,
+  questV2ProofSubmission,
   questSettlementCommand,
   questTeam,
 } from '@/database/schema/quest.schema';
@@ -156,7 +157,7 @@ const selectedTeamLeader = async (tx: QuestTransaction, questId: string): Promis
 const terminalChat = async (
   tx: QuestTransaction,
   current: { id: string; hirerId: string },
-  status: 'QUEST_COMPLETED' | 'QUEST_CANCELLED',
+  status: 'QUEST_COMPLETED' | 'QUEST_CANCELLED' | 'QUEST_FAILED',
   commandId: string,
   now: Date,
   actorId: string | null = current.hirerId,
@@ -469,6 +470,237 @@ export const settleProofFreeQuestV2InTransaction = async (
     outcome: 'COMPLETED',
     paidSatang: paid,
     refundedSatang: 0,
+  };
+};
+
+export type QuestV2ProofApprovalSettlement = {
+  questStatus: QuestStatus;
+  paidSatang: number;
+  completedAssignmentIds: string[];
+};
+
+/** Settle one approved v2 Proof, including a valid post-failure approval. */
+export const settleApprovedQuestV2ProofInTransaction = async (
+  tx: QuestTransaction,
+  questId: string,
+  proofSubmissionId: string,
+  commandId: string,
+  now: Date,
+): Promise<QuestV2ProofApprovalSettlement> => {
+  const current = await lockQuest(tx, questId);
+  if (
+    !current ||
+    current.apiVersion !== 'v2' ||
+    ![questStatus.inProgress, questStatus.failed].includes(current.questStatus as never)
+  ) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The v2 Quest is not reviewable.');
+  }
+
+  const reservation = await reservationFor(tx, current.hirerId, questId);
+  if (!reservation || reservation.status !== 'ACTIVE') {
+    throw new MoneyDomainError('FUNDING_RESERVATION_NOT_FOUND', 'Quest Escrow is not active.');
+  }
+
+  const [submission] = await tx
+    .select({
+      workerId: questV2ProofSubmission.workerId,
+      teamId: questV2ProofSubmission.teamId,
+      submissionStatus: questV2ProofSubmission.submissionStatus,
+    })
+    .from(questV2ProofSubmission)
+    .where(and(
+      eq(questV2ProofSubmission.id, proofSubmissionId),
+      eq(questV2ProofSubmission.questId, questId),
+    ))
+    .limit(1)
+    .for('update');
+  if (!submission || submission.submissionStatus !== 'PROOF_APPROVED') {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The approved Proof Submission is missing.');
+  }
+
+  const workers = await activeAssignments(tx, questId);
+  if (workers.length === 0) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The v2 Quest has no active Assignment.');
+  }
+
+  const rewardSatang = requireQuestReward(current.rewardSatang);
+  const fee = await feeForQuest(tx, current, reservation, rewardSatang);
+  const expectedEscrow = current.questEscrowSatang ?? (rewardSatang + Number(fee)) * current.headcount;
+  if (reservation.remainingSatang > expectedEscrow) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Quest Escrow does not match the published funding terms.');
+  }
+
+  const groupCandidate = current.v2Mode === 'CANDIDATE' && current.v2Participation === 'GROUP';
+  const groupFcfs = current.v2Mode === 'FIRST_COME_FIRST_SERVED' && current.v2Participation === 'GROUP';
+  let payoutWorkers: { workerId: string; amountSatang: number }[];
+  let payoutFee: Satang | 0 = fee;
+  let platformFeeValidation: 'POLICY' | 'QUEST_ESCROW_SNAPSHOT' = 'POLICY';
+  let completedAssignmentIds: string[];
+
+  if (groupCandidate) {
+    const [team] = await tx
+      .select({ id: questCandidateTeamV2.id, leaderId: questCandidateTeamV2.leaderId })
+      .from(questCandidateTeamV2)
+      .where(and(
+        eq(questCandidateTeamV2.questId, questId),
+        eq(questCandidateTeamV2.state, 'TEAM_SELECTED'),
+      ))
+      .limit(1)
+      .for('update');
+    if (!team || team.id !== submission.teamId || !workers.some(({ workerId }) => workerId === team.leaderId)) {
+      throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Selected Team Leader Assignment is missing.');
+    }
+    payoutWorkers = Array.from({ length: current.headcount }, () => ({
+      workerId: team.leaderId,
+      amountSatang: rewardSatang,
+    }));
+    completedAssignmentIds = workers.map(({ id }) => id);
+  } else {
+    if (!submission.workerId) {
+      throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The approved Worker Assignment is missing.');
+    }
+    const assignment = workers.find(({ workerId }) => workerId === submission.workerId);
+    if (!assignment) {
+      throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The approved Worker Assignment is missing.');
+    }
+
+    let payoutRewardSatang = rewardSatang;
+    if (groupFcfs) {
+      const underfilledConsents = await tx
+        .select({ assignmentId: questV2UnderfilledConsent.assignmentId, workerId: questV2UnderfilledConsent.workerId, rewardSatang: questV2UnderfilledConsent.rewardSatang })
+        .from(questV2UnderfilledConsent)
+        .where(and(
+          eq(questV2UnderfilledConsent.questId, questId),
+          eq(questV2UnderfilledConsent.decision, 'ACCEPT'),
+        ))
+        .orderBy(asc(questV2UnderfilledConsent.createdAt), asc(questV2UnderfilledConsent.id))
+        .for('update');
+      if (underfilledConsents.length > 0) {
+        const allocation = underfilledConsents.find(({ assignmentId, workerId }) =>
+          assignmentId === assignment.id && workerId === submission.workerId);
+        const feePoolSatang = expectedEscrow - rewardSatang * current.headcount;
+        if (
+          !allocation ||
+          underfilledConsents.length > current.headcount ||
+          underfilledConsents.reduce((total, consent) => total + consent.rewardSatang, 0) !== rewardSatang * current.headcount ||
+          feePoolSatang < 0
+        ) {
+          throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The underfilled Quest Escrow allocation is inconsistent.');
+        }
+        payoutRewardSatang = allocation.rewardSatang;
+        payoutFee = satang(
+          Math.floor(feePoolSatang / underfilledConsents.length) +
+          (underfilledConsents.findIndex(({ assignmentId }) => assignmentId === assignment.id) < feePoolSatang % underfilledConsents.length ? 1 : 0),
+        );
+        platformFeeValidation = 'QUEST_ESCROW_SNAPSHOT';
+      }
+    }
+    payoutWorkers = [{ workerId: submission.workerId, amountSatang: payoutRewardSatang }];
+    completedAssignmentIds = [assignment.id];
+  }
+
+  const paidSatang = await settleWorkers(
+    tx,
+    current.hirerId,
+    reservation.id,
+    payoutWorkers,
+    () => Promise.resolve(payoutFee),
+    `quest-v2-proof-approval:${proofSubmissionId}`,
+    platformFeeValidation,
+  );
+  await tx
+    .update(questAssignment)
+    .set({ assignmentStatus: assignmentStatus.completed })
+    .where(and(
+      inArray(questAssignment.id, completedAssignmentIds),
+      eq(questAssignment.assignmentStatus, assignmentStatus.active),
+    ));
+
+  let resultingQuestStatus = current.questStatus;
+  if (current.questStatus === questStatus.inProgress) {
+    const remainingWorkers = await activeAssignments(tx, questId);
+    if (remainingWorkers.length === 0) {
+      const remaining = (await reservationFor(tx, current.hirerId, questId, false))?.remainingSatang ?? 0;
+      if (remaining !== 0) {
+        throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Quest Escrow does not match the completion payout.');
+      }
+      await tx
+        .update(quest)
+        .set({
+          questStatus: questStatus.completed,
+          version: sql`${quest.version} + 1`,
+          updatedAt: now,
+        })
+        .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.inProgress)));
+      await terminalChat(tx, current, questStatus.completed, commandId, now);
+      resultingQuestStatus = questStatus.completed;
+    }
+  }
+
+  return { questStatus: resultingQuestStatus, paidSatang, completedAssignmentIds };
+};
+
+export type QuestV2FailureEffect = {
+  questStatus: 'QUEST_FAILED';
+  incompleteAssignmentIds: string[];
+};
+
+/** Apply the terminal v2 failure transition without releasing held Quest Escrow. */
+export const failQuestV2InTransaction = async (
+  tx: QuestTransaction,
+  questId: string,
+  assignmentIds: string[],
+  commandId: string,
+  now: Date,
+  actorId: string | null,
+): Promise<QuestV2FailureEffect> => {
+  const current = await lockQuest(tx, questId);
+  if (!current || current.apiVersion !== 'v2') {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The Quest is not a v2 Quest.');
+  }
+  if (![questStatus.inProgress, questStatus.failed].includes(current.questStatus as never)) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The v2 Quest cannot fail from its current state.');
+  }
+
+  const active = await activeAssignments(tx, questId);
+  const activeById = new Map(active.map((assignment) => [assignment.id, assignment]));
+  const affected = assignmentIds
+    .map((assignmentId) => activeById.get(assignmentId))
+    .filter((assignment): assignment is (typeof active)[number] => assignment !== undefined);
+  if (current.questStatus === questStatus.inProgress && affected.length === 0) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The failed Assignment is missing.');
+  }
+
+  if (affected.length > 0) {
+    await tx
+      .update(questAssignment)
+      .set({ assignmentStatus: assignmentStatus.incomplete })
+      .where(and(
+        inArray(questAssignment.id, affected.map(({ id }) => id)),
+        eq(questAssignment.assignmentStatus, assignmentStatus.active),
+      ));
+  }
+
+  if (current.questStatus === questStatus.failed) {
+    return {
+      questStatus: questStatus.failed,
+      incompleteAssignmentIds: affected.map(({ id }) => id),
+    };
+  }
+
+  await inactiveWorkersChat(tx, current, affected, assignmentStatus.incomplete, now, actorId);
+  await tx
+    .update(quest)
+    .set({
+      questStatus: questStatus.failed,
+      version: sql`${quest.version} + 1`,
+      updatedAt: now,
+    })
+    .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.inProgress)));
+  await terminalChat(tx, current, questStatus.failed, commandId, now, actorId);
+  return {
+    questStatus: questStatus.failed,
+    incompleteAssignmentIds: affected.map(({ id }) => id),
   };
 };
 

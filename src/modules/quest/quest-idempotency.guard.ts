@@ -67,7 +67,7 @@ const pathNeedsIdempotencyKey = (scope: IdempotencyKeyScope, pathname: string, m
       return isUuid(parts[6]);
     }
     if (method === 'POST' && parts.length === 8 && parts[5] === 'proof-submissions') {
-      return isUuid(parts[6]) && parts[7] === 'submit';
+      return isUuid(parts[6]) && ['submit', 'review'].includes(parts[7]!);
     }
     return method === 'POST' && parts.length === 6 && parts[5] === 'completion-confirmation';
   }

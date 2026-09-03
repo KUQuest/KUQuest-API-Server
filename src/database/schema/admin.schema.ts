@@ -12,7 +12,13 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 
-import { authAdmin } from './auth.schema';
+import { authAdmin, authUser } from './auth.schema';
+import {
+  quest,
+  questAssignment,
+  questCandidateTeamV2,
+  questV2ProofSubmission,
+} from './quest.schema';
 
 export const adminAction = pgTable(
   'admin_action',
@@ -67,5 +73,43 @@ export const adminAction = pgTable(
     ),
     check('admin_action_metadata_object_check', sql`jsonb_typeof(${table.metadata}) = 'object'`),
     check('admin_action_result_data_object_check', sql`jsonb_typeof(${table.resultData}) = 'object'`),
+  ],
+);
+
+/** Immutable system-created review evidence for a v2 Proof non-approval. */
+export const adminReviewItem = pgTable(
+  'admin_review_item',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    assignmentId: uuid('assignment_id')
+      .notNull()
+      .references(() => questAssignment.id, { onDelete: 'cascade' }),
+    proofSubmissionId: uuid('proof_submission_id')
+      .notNull()
+      .references(() => questV2ProofSubmission.id, { onDelete: 'cascade' }),
+    hirerId: uuid('hirer_id')
+      .notNull()
+      .references(() => authUser.id),
+    workerId: uuid('worker_id')
+      .notNull()
+      .references(() => authUser.id),
+    teamId: uuid('team_id').references(() => questCandidateTeamV2.id),
+    reason: varchar('reason', { length: 1000 }).notNull(),
+    evidenceReferences: jsonb('evidence_references').$type<string[]>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('admin_review_item_proof_submission_key').on(table.proofSubmissionId),
+    check('admin_review_item_reason_check', sql`btrim(${table.reason}) <> ''`),
+    check(
+      'admin_review_item_evidence_check',
+      sql`jsonb_typeof(${table.evidenceReferences}) = 'array' AND jsonb_array_length(${table.evidenceReferences}) > 0`,
+    ),
+    index('admin_review_item_quest_idx').on(table.questId, table.createdAt),
+    index('admin_review_item_assignment_idx').on(table.assignmentId),
+    index('admin_review_item_worker_idx').on(table.workerId),
   ],
 );
