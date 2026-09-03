@@ -617,6 +617,49 @@ describe('Admin Quest moderation commands', () => {
     expect(rows).toEqual(states.map(() => ({ hiddenAt: expect.any(Date), version: 1 })));
   });
 
+  // The cancellation settlement matrix covers QUEST_OPEN, QUEST_ASSIGNED and
+  // QUEST_IN_PROGRESS only, so Terminate refuses every other non-terminal state rather
+  // than inventing a settlement for it.
+  it('refuses to terminate a non-terminal Quest with no defined settlement', async () => {
+    if (!postgresAvailable) return;
+    const states = ['QUEST_AWAITING_CONSENT', 'QUEST_SUBMITTED', 'QUEST_APPROVED', 'QUEST_REWORK', 'QUEST_DISPUTED'] as const;
+    const questIdsByState = await Promise.all(states.map((state) => createQuest(state)));
+    await Promise.all(questIdsByState.map((questId) => db.transaction((transaction) => reserveSpending(transaction, {
+      ownerUserId: hirerId,
+      callerScope: 'quest',
+      callerReference: questId,
+      amountSatang: positiveSatang(1_020),
+    }))));
+
+    const responses = await Promise.all(questIdsByState.map((questId) => adminRequest(
+      `/api/v1/admin/quests/${questId}/terminate`,
+      { reasonCode: 'POLICY_REVIEW' },
+      { 'idempotency-key': `admin-terminate-undefined-${questId}`, 'if-match': '1' },
+    )));
+
+    expect(responses.map((response) => response.status)).toEqual(states.map(() => 409));
+    expect(await Promise.all(responses.map(async (response) => (await response.json()).error.code)))
+      .toEqual(states.map(() => 'QUEST_ACTION_NOT_ALLOWED'));
+    const rows = await Promise.all(questIdsByState.map(async (questId) => {
+      const [row] = await db.select({ status: quest.questStatus, version: quest.version })
+        .from(quest).where(eq(quest.id, questId));
+      return row;
+    }));
+    expect(rows).toEqual(states.map((state) => ({ status: state, version: 1 })));
+    // The escrow is untouched, so a refused command moves no money.
+    const reservations = await Promise.all(questIdsByState.map(async (questId) => {
+      const [row] = await db.select({
+        status: walletFundingReservation.status,
+        remainingSatang: walletFundingReservation.remainingSatang,
+      }).from(walletFundingReservation).where(and(
+        eq(walletFundingReservation.ownerUserId, hirerId),
+        eq(walletFundingReservation.callerReference, questId),
+      ));
+      return row;
+    }));
+    expect(reservations).toEqual(states.map(() => ({ status: 'ACTIVE', remainingSatang: 1_020 })));
+  });
+
   it('keeps a hidden overlay when termination reaches a terminal state', async () => {
     if (!postgresAvailable) return;
     const questId = await createQuest('QUEST_OPEN');
