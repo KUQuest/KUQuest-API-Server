@@ -92,7 +92,7 @@ the server implementation with the Admin Rulebook:
 - [x] Add Admin routes for Quest Hide (`POST /api/v1/admin/quests/:questId/hide`) and restore (`POST /api/v1/admin/quests/:questId/restore`).
 - [ ] Add Admin route for Wallet Freeze/Suspend (`POST /api/v1/admin/wallets/:walletId/status`).
 - [ ] Implement auto-freeze for Wallet on ban creation, and auto-unfreeze when temporary ban expires.
-- [ ] Add Trust & Safety Admin routes: Message reporting, Evidence Reference retrieval, and case resolution (`REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN`, `REPORT_CASE_RESTORED`).
+- [ ] Add Trust & Safety Admin routes: Message reporting, Evidence Reference retrieval, and case resolution (`REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN`, `REPORT_CASE_RESTORED`). The shared `recordEvidenceAccess` writer already exists and gets its first caller here; Admin Quest detail is not evidence, because `admin-trust-safety-contract.md` scopes evidence to Message content and Attachments reached through an Evidence Reference.
 - [ ] Add Conduct Report routes and product report intake routing.
 - [ ] Implement strike reversal logic for `REPORT_CASE_RESTORED` in `memberPenaltyRecord`.
 
