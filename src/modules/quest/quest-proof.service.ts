@@ -190,7 +190,7 @@ const allObligationsApproved = async (tx: Tx, current: { id: string; mode: strin
 
 const moveIfSubmitted = async (tx: Tx, current: { id: string; questStatus: string; mode: string; participation: string; proofRequired: boolean }, now: Date) => {
   if (await allObligationsSubmitted(tx, current)) {
-    const [updated] = await tx.update(quest).set({ questStatus: questStatus.submitted, updatedAt: now })
+    const [updated] = await tx.update(quest).set({ questStatus: questStatus.submitted, version: sql`${quest.version} + 1`, updatedAt: now })
       .where(and(eq(quest.id, current.id), eq(quest.questStatus, current.questStatus as never))).returning({ id: quest.id });
     return Boolean(updated);
   }
@@ -295,12 +295,12 @@ export const reviewProof = async (hirerId: string, questId: string, proofId: str
       limit = application?.reworkLimit ?? 0;
     }
     if (current.mode === questMode.noCandidate || rejected > limit) {
-      await tx.update(quest).set({ questStatus: questStatus.disputed, updatedAt: now }).where(eq(quest.id, questId));
+      await tx.update(quest).set({ questStatus: questStatus.disputed, version: sql`${quest.version} + 1`, updatedAt: now }).where(eq(quest.id, questId));
       return { outcome: 'disputed' };
     }
-    await tx.update(quest).set({ questStatus: questStatus.rework, updatedAt: now }).where(eq(quest.id, questId));
+    await tx.update(quest).set({ questStatus: questStatus.rework, version: sql`${quest.version} + 1`, updatedAt: now }).where(eq(quest.id, questId));
   } else if (await allObligationsApproved(tx, current)) {
-    await tx.update(quest).set({ questStatus: questStatus.approved, updatedAt: now }).where(eq(quest.id, questId));
+    await tx.update(quest).set({ questStatus: questStatus.approved, version: sql`${quest.version} + 1`, updatedAt: now }).where(eq(quest.id, questId));
     await settleApprovedQuestInTransaction(tx, questId, hirerId, `quest-completion:${questId}`, now);
   }
   const updated = await loadProof(tx, proofId);
@@ -337,7 +337,7 @@ const autoApproveDueProofFreeQuests = async (tx: Tx, now: Date) => {
     const current = await lockQuest(tx, candidate.id);
     if (!current || current.proofRequired || current.questStatus !== questStatus.submitted) continue;
     if (!(await allObligationsSubmitted(tx, current))) continue;
-    const [approvedQuest] = await tx.update(quest).set({ questStatus: questStatus.approved, updatedAt: now })
+    const [approvedQuest] = await tx.update(quest).set({ questStatus: questStatus.approved, version: sql`${quest.version} + 1`, updatedAt: now })
       .where(and(eq(quest.id, candidate.id), eq(quest.questStatus, questStatus.submitted)))
       .returning({ id: quest.id });
     if (approvedQuest) await settleApprovedQuestInTransaction(tx, candidate.id, candidate.hirerId, `quest-completion:${candidate.id}`, now);
@@ -367,7 +367,7 @@ export const autoApproveDueProofs = async (now = new Date()): Promise<string[]> 
     await tx.update(proofSubmission).set({ submissionStatus: 'PROOF_AUTO_APPROVED', reviewedAt: now }).where(and(eq(proofSubmission.id, candidate.id), eq(proofSubmission.submissionStatus, 'PROOF_PENDING')));
     approved.push(candidate.id);
     if (await allObligationsApproved(tx, current)) {
-      const [approvedQuest] = await tx.update(quest).set({ questStatus: questStatus.approved, updatedAt: now }).where(and(eq(quest.id, current.id), inArray(quest.questStatus, [questStatus.submitted, questStatus.rework]))).returning({ id: quest.id });
+      const [approvedQuest] = await tx.update(quest).set({ questStatus: questStatus.approved, version: sql`${quest.version} + 1`, updatedAt: now }).where(and(eq(quest.id, current.id), inArray(quest.questStatus, [questStatus.submitted, questStatus.rework]))).returning({ id: quest.id });
       if (approvedQuest) await settleApprovedQuestInTransaction(tx, candidate.questId, current.hirerId, `quest-completion:${candidate.questId}`, now);
     }
   }

@@ -43,7 +43,7 @@ export const questStatus = pgEnum('quest_status', [
   'QUEST_COMPLETED',
   'QUEST_CANCELLED',
   'QUEST_DISPUTED',
-  'QUEST_HIDDEN',
+  'QUEST_FAILED',
 ]);
 
 export const quest = pgTable(
@@ -146,10 +146,6 @@ export const quest = pgTable(
     check(
       'quest_cancelled_at_check',
       sql`(${table.cancelledAt} IS NULL) = (${table.questStatus} <> 'QUEST_CANCELLED')`,
-    ),
-    check(
-      'quest_hidden_at_check',
-      sql`(${table.hiddenAt} IS NULL) = (${table.questStatus} <> 'QUEST_HIDDEN')`,
     ),
     check(
       'quest_hidden_by_check',

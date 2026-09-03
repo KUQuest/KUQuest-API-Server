@@ -33,7 +33,9 @@ const tagId = randomUUID();
 const fixtureQuestIds: string[] = [];
 const fixtureFileIds: string[] = [];
 let postgresAvailable = false;
-let workChatApp: ReturnType<typeof createApp>;
+// The composed route tree is past what TypeScript will instantiate through
+// `ReturnType<typeof createApp>`, and these tests only drive the app through `handle`.
+let workChatApp: { handle: (request: Request) => Promise<Response> };
 
 const authenticate = () => spyOn(auth.api, 'getSession').mockImplementation((async (
   { headers }: { headers: Headers },

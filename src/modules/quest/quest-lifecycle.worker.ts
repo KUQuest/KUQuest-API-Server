@@ -9,7 +9,7 @@ import {
   questTeamInvitation,
 } from '@/database/schema/quest.schema';
 
-import { and, asc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 
 import { assignmentStatus, questMode, questParticipation, questStatus } from './quest.contract';
 import { autoApproveDueProofs } from './quest-proof.service';
@@ -99,7 +99,7 @@ const startQuest = async (questId: string, now: Date): Promise<boolean> => db.tr
     .where(and(eq(questAssignment.questId, questId), eq(questAssignment.assignmentStatus, assignmentStatus.active)));
   const [updated] = await transaction
     .update(quest)
-    .set({ questStatus: questStatus.inProgress, updatedAt: now })
+    .set({ questStatus: questStatus.inProgress, version: sql`${quest.version} + 1`, updatedAt: now })
     .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.assigned)))
     .returning({ id: quest.id });
 

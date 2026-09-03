@@ -21,6 +21,7 @@ active routes, and unbuilt moderation and penalty models.
 | --- | --- |
 | **Confirmed** | The Rulebook and Legacy Implementation agree. |
 | **Docs Only** | Rulebook behavior has no verified implementation. |
+| **Partial** | Some target behavior has verified implementation, but the full area is incomplete. |
 | **Code Only** | Legacy Implementation behavior has no Rulebook policy. |
 | **Conflict** | The Rulebook and Legacy Implementation define different behavior. |
 | **Unclear** | Evidence does not define one behavior. |
@@ -42,9 +43,9 @@ active routes, and unbuilt moderation and penalty models.
 | --- | --- | --- | --- |
 | **Payout Approval** | Manual Admin approval queue (`PENDING_ADMIN_APPROVAL`), approve/reject actions with `Idempotency-Key`, masked destination display, Payout worker hand-off. | `payout.admin.route.ts`, `payout.admin.controller.ts`, `payout.admin.service.ts`; ADR `0022-manual-admin-approval-for-payouts.md` | **Confirmed**. |
 | **Dispute Case** | Admin resolves Dispute Case on `QUEST_FAILED` Quests within 5-day window. Resolves to `DISPUTE_CASE_DISMISSED` or `DISPUTE_CASE_RESOLVED` with positive satang redirection. 7-day money hold delays funding release. | `POST /api/v1/admin/quests/:questId/dispute/resolve` (`quest-settlement.route.ts`) operates on legacy `QUEST_DISPUTED` state. No Dispute Case table exists. | **Conflict / Docs Only**. |
-| **Quest Hide** | Admin hides/restores non-terminal Quests via independent `hiddenAt`/`hiddenByAdminId` flags without mutating Quest State. Requires reason and `Idempotency-Key`. Sends Push Notification to Hirer. | `quest.schema.ts` has `hiddenAt`/`hiddenByAdminId` columns but ties `hiddenAt` to `QUEST_HIDDEN` state via CHECK constraint. No Admin hide/restore routes exist. | **Conflict / Docs Only**. |
+| **Quest Hide** | Admin hides/restores non-terminal Quests via independent `hiddenAt`/`hiddenByAdminId` flags without mutating Quest State. Requires reason and `Idempotency-Key`. Sends Push Notification to Hirer. | `quest-admin.command.service.ts`, `quest-admin.route.ts`, and the Quest status migration implement Hide, Restore, and versioned Admin Actions. No notification adapter exists in the server. | **Partial — push integration remains unavailable**. |
 | **Wallet Freeze/Suspend** | Admin sets Student Wallet to `FROZEN` or `SUSPENDED` with reason and `Idempotency-Key`. Blocks new financial and Quest commitments while honoring existing obligations. Auto-freeze on ban. | `changeWalletStatus` exists in `wallet.status.service.ts`, but no Admin route calls it. No auto-freeze on ban hook exists. | **Docs Only**. |
-| **Trust & Safety (Messages)** | Moderation of reported Work Chat and Candidate Inquiry Messages. Decisions: `REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN` (creates Misconduct strike), `REPORT_CASE_RESTORED` (reverses strike). Evidence access via Evidence Reference. | No Report Case, Reporter Entry, Evidence Reference, Moderation Decision, or Admin Action tables or routes exist. | **Docs Only**. |
+| **Trust & Safety (Messages)** | Moderation of reported Work Chat and Candidate Inquiry Messages. Decisions: `REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN` (creates Misconduct strike), `REPORT_CASE_RESTORED` (reverses strike). Evidence access via Evidence Reference. | Shared Admin Action infrastructure now exists in `admin.schema.ts` and `admin-action.service.ts`; Report Case, Reporter Entry, Evidence Reference, and Moderation Decision tables and routes remain absent. | **Docs Only / Partial**. |
 | **Conduct Report (Quests)** | Review of Member behavior on Quests (reasons: `CONDUCT_NO_SHOW`, `CONDUCT_ABANDONED`, `CONDUCT_POOR_QUALITY`, `CONDUCT_INAPPROPRIATE_BEHAVIOR`). Decisions: `CONDUCT_REPORT_PENDING`, `CONDUCT_REPORT_UPHELD` (creates Misconduct strike), `CONDUCT_REPORT_DISMISSED`. | No Conduct Report table or routes exist. | **Docs Only**. |
 | **Member Ban & Penalty Ladders** | Two penalty ladders (Misconduct ladder and Low Average Review ladder). Results: Red Flag (7 days), Temporary Ban (7 days), Permanent Ban. Backed by immutable `memberPenaltyRecord` audit table. Auth guard checks active ban. | `auth_user` lacks `bannedUntil` and `redFlagExpiresAt` columns. Only `auth_admin` carries `disabled_at`. No `memberPenaltyRecord` table or Member ban auth guard exists. | **Docs Only**. |
 
@@ -53,11 +54,11 @@ active routes, and unbuilt moderation and penalty models.
 | Area | Documentation | Code | Classification |
 | --- | --- | --- | --- |
 | Dispute Case route and target state | Target operates against `QUEST_FAILED` and resolves via `DISPUTE_CASE_RESOLVED` / `DISPUTE_CASE_DISMISSED` with satang redirection from 7-day held Funding Reservation. | `POST /api/v1/admin/quests/:questId/dispute/resolve` (`quest-settlement.route.ts`) operates on legacy `QUEST_DISPUTED` state with `REFUND_HIRER` or `RELEASE_TO_WORKER`. | **Conflict** — `admin-rulebook.md` §2; `quest-settlement.route.ts`. |
-| Quest Hide schema constraint | `hiddenAt` is an independent timestamp flag that operates across any non-terminal Quest State (`QUEST_OPEN`, `QUEST_ASSIGNED`, `QUEST_IN_PROGRESS`) without changing Quest State. | `quest.schema.ts` contains CHECK `(hidden_at IS NULL) = (quest_status <> 'QUEST_HIDDEN')` and includes `QUEST_HIDDEN` in the `quest_status` enum. | **Conflict** — `admin-rulebook.md` §3; `quest.schema.ts`. |
-| Quest Hide Admin routes | Target specifies Admin routes to hide (with reason) and restore Quests, sending Push Notifications to the Hirer. | `hiddenAt` and `hiddenByAdminId` columns exist in `quest.schema.ts`, but no Admin routes exist to invoke them. | **Docs Only / Gap** — `admin-rulebook.md` §3. |
+| Quest Hide schema constraint | `hiddenAt` is an independent timestamp flag that operates across any non-terminal Quest State — every state except `QUEST_COMPLETED`, `QUEST_CANCELLED`, and `QUEST_FAILED` — without changing Quest State. | `quest.schema.ts` keeps the independent `hiddenAt`/`hiddenByAdminId` pair check, removes `QUEST_HIDDEN`, and adds `QUEST_FAILED`; migration `20260903012503_conscious_argent.sql` backfills legacy hidden rows to `QUEST_OPEN`. | **Resolved for this slice** — verify legacy rows during deployment. |
+| Quest Hide Admin routes | Target specifies Admin routes to hide (with reason) and restore Quests, sending Push Notifications to the Hirer. | `POST /api/v1/admin/quests/:questId/hide` and `/restore` use `enabledAdminGuard`, shared Admin Actions, expected Quest versions, and controlled reason codes. No notification adapter exists in the server. | **Partial — push integration remains unavailable**. |
 | Member Ban columns and guard | Target requires `auth_user.banned_until` and `auth_user.red_flag_expires_at` for O(1) guard checks, backed by `memberPenaltyRecord`. Auth guard rejects active bans. | `auth_user` has neither column. Only `auth_admin` carries `disabled_at` (`auth.schema.ts`, `drizzle/0002_groovy_vertigo.sql`). No Member ban guard exists. | **Docs Only / Gap** — `admin-rulebook.md` §6. |
 | Member Penalty Record table | Target requires immutable `memberPenaltyRecord` table storing strikes, sequence numbers, results, and linked reversing rows. | Table does not exist in schema. | **Docs Only / Gap** — `admin-rulebook.md` §6. |
-| Moderation tables | Target requires Report Case, Reporter Entry, Evidence Reference, Moderation Decision, and Admin Action tables. | None of these tables exist in schema. | **Docs Only / Gap** — `admin-rulebook.md` §5. |
+| Moderation tables | Target requires Report Case, Reporter Entry, Evidence Reference, and Moderation Decision tables. The shared Admin Action table is tracked separately below. | Those four tables do not exist in schema. | **Docs Only / Gap** — `admin-rulebook.md` §5. |
 | Conduct Report table | Target requires Conduct Report table keyed to Quest and reported Member with fixed reason enums and Admin decisions. | Table does not exist in schema. | **Docs Only / Gap** — `admin-rulebook.md` §7. |
 | Dispute Case table | Target requires Dispute Case table keyed to `QUEST_FAILED` Quest and Member with filing window tracking. | Table does not exist in schema. | **Docs Only / Gap** — `admin-rulebook.md` §2. |
 | Wallet Freeze Admin route | Target specifies Admin route to freeze or suspend a Student Wallet with reason and `Idempotency-Key`. | `changeWalletStatus` exists in `wallet.status.service.ts`, but no Admin HTTP route is wired to invoke it. | **Docs Only / Gap** — `admin-rulebook.md` §4. |
@@ -73,11 +74,12 @@ the server implementation with the Admin Rulebook:
 
 ### Schema and migration
 
-- [ ] Drop the `quest.schema.ts` CHECK `(hidden_at IS NULL) = (quest_status <> 'QUEST_HIDDEN')` and remove `QUEST_HIDDEN` from the `quest_status` enum, so `hiddenAt` becomes an independent flag.
-- [ ] Add `QUEST_FAILED` to the `quest_status` enum.
+- [x] Drop the `quest.schema.ts` CHECK `(hidden_at IS NULL) = (quest_status <> 'QUEST_HIDDEN')` and remove `QUEST_HIDDEN` from the `quest_status` enum, so `hiddenAt` becomes an independent flag.
+- [x] Add `QUEST_FAILED` to the `quest_status` enum. The v2 Quest contract already published the value; nothing writes it until the Dispute Case route below moves off the legacy `QUEST_DISPUTED` state.
 - [ ] Add `auth_user.banned_until` and `auth_user.red_flag_expires_at` columns to `auth_user`.
 - [ ] Create the `memberPenaltyRecord` table with strike sequence, penalty result, and linked reversing rows.
-- [ ] Create the Trust & Safety moderation tables: `reportCase`, `reporterEntry`, `evidenceReference`, `moderationDecision`, and `adminAction`.
+- [x] Create the shared immutable `adminAction` table and transaction-aware writer.
+- [ ] Create the remaining Trust & Safety moderation tables: `reportCase`, `reporterEntry`, `evidenceReference`, and `moderationDecision`.
 - [ ] Create the `conductReport` table keyed to Quest and reported Member.
 - [ ] Create the `disputeCase` table keyed to `QUEST_FAILED` Quest and Member.
 
@@ -87,10 +89,10 @@ the server implementation with the Admin Rulebook:
 - [ ] Extend Member auth guard to reject sessions while a ban is active (evaluating `auth_user.banned_until` and permanent ban rows in `memberPenaltyRecord`).
 - [ ] Implement 7-day money hold: keep Quest Funding Reservation `ACTIVE` for 7 days after `QUEST_FAILED`, with scheduled `FUNDING_RELEASE` at day 7.
 - [ ] Settle post-failure Proof approval from the held reservation rather than Hirer Spending Balance during the 7-day window.
-- [ ] Add Admin routes for Quest Hide (`POST /api/v1/admin/quests/:questId/hide`) and restore (`POST /api/v1/admin/quests/:questId/restore`).
+- [x] Add Admin routes for Quest Hide (`POST /api/v1/admin/quests/:questId/hide`) and restore (`POST /api/v1/admin/quests/:questId/restore`).
 - [ ] Add Admin route for Wallet Freeze/Suspend (`POST /api/v1/admin/wallets/:walletId/status`).
 - [ ] Implement auto-freeze for Wallet on ban creation, and auto-unfreeze when temporary ban expires.
-- [ ] Add Trust & Safety Admin routes: Message reporting, Evidence Reference retrieval, and case resolution (`REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN`, `REPORT_CASE_RESTORED`).
+- [ ] Add Trust & Safety Admin routes: Message reporting, Evidence Reference retrieval, and case resolution (`REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN`, `REPORT_CASE_RESTORED`). The shared `recordEvidenceAccess` writer already exists and gets its first caller here; Admin Quest detail is not evidence, because `admin-trust-safety-contract.md` scopes evidence to Message content and Attachments reached through an Evidence Reference.
 - [ ] Add Conduct Report routes and product report intake routing.
 - [ ] Implement strike reversal logic for `REPORT_CASE_RESTORED` in `memberPenaltyRecord`.
 

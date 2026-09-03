@@ -229,6 +229,7 @@ const lockQuest = async (transaction: QuestTransaction, questId: string) => {
       v2Participation: quest.v2Participation,
       questState: quest.questStatus,
       headcount: quest.headcount,
+      hiddenAt: quest.hiddenAt,
       startTime: quest.startTime,
     })
     .from(quest)
@@ -326,7 +327,11 @@ const joinQuestV2InTransaction = async (
     .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, userId)))
     .limit(1);
   if (existing) return discardIdempotency('already-assigned');
-  if (current.questState !== 'QUEST_OPEN') return discardIdempotency('not-open');
+  // A hidden Quest is out of reach for Members, so it refuses a join the same way a
+  // Quest that is not open does.
+  if (current.questState !== 'QUEST_OPEN' || current.hiddenAt !== null) {
+    return discardIdempotency('not-open');
+  }
   if (current.startTime.getTime() <= now.getTime()) {
     return discardIdempotency(isGroupQuest ? 'roster-frozen' : 'not-open');
   }

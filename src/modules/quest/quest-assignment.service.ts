@@ -181,6 +181,7 @@ const lockQuest = async (transaction: QuestTransaction, questId: string) => {
       participation: quest.participation,
       questStatus: quest.questStatus,
       headcount: quest.headcount,
+      hiddenAt: quest.hiddenAt,
     })
     .from(quest)
     .where(eq(quest.id, questId))
@@ -262,7 +263,11 @@ export const joinNoCandidateQuest = async (
       .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, workerId)))
       .limit(1);
     if (existing) return discardCommand('already-assigned');
-    if (current.questStatus !== questStatus.open) return discardCommand('not-open');
+    // A hidden Quest is out of reach for Members, so it refuses a join the same way a
+    // Quest that is not open does.
+    if (current.questStatus !== questStatus.open || current.hiddenAt !== null) {
+      return discardCommand('not-open');
+    }
 
     const [activeCount] = await transaction
       .select({ count: sql<number>`count(*)` })
@@ -291,7 +296,7 @@ export const joinNoCandidateQuest = async (
       : questStatus.open;
     await transaction
       .update(quest)
-      .set({ questStatus: nextStatus, updatedAt: now })
+      .set({ questStatus: nextStatus, version: sql`${quest.version} + 1`, updatedAt: now })
       .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.open)));
 
     const transition = transitionFor(

@@ -76,6 +76,8 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 
 An Active Worker cannot voluntarily leave or be replaced. The cancellation rules create the allowed departure transition.
 
+Cancellation — Hirer, automatic, or Admin termination alike — is available only from `QUEST_DRAFT`, which moves no money, and from the three states above. Every other non-terminal state refuses it, because no settlement is defined for a Quest whose work is already submitted, approved, in Rework, paused for Quest Edit consent, or disputed. `QUEST_DISPUTED` in particular holds its funding for the Dispute Case window (see [ADR 0024](../../adr/0024-hold-quest-failure-settlement-for-dispute-window.md)), and a `QUEST_CANCELLED` Quest has no Dispute Case path. Widening cancellation to any of these states requires a new row in the matrix first.
+
 ## Dispute Case window
 
 A Dispute Case may exist after `QUEST_FAILED`. It does not reopen or change the Quest State. An Admin Review Item remains the automatic review and audit record for `PROOF_NOT_APPROVED`; it is not a Dispute Case.

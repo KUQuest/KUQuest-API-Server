@@ -26,7 +26,9 @@ const workerIds = [randomUUID(), randomUUID()];
 const tagId = randomUUID();
 const questIds: string[] = [];
 let postgresAvailable = false;
-let productionApp: ReturnType<typeof createApp>;
+// The composed route tree is past what TypeScript will instantiate through
+// `ReturnType<typeof createApp>`, and these tests only drive the app through `handle`.
+let productionApp: { handle: (request: Request) => Promise<Response> };
 
 const createQuest = async (mode: 'NO_CANDIDATE' | 'CANDIDATE') => {
   const questId = randomUUID();

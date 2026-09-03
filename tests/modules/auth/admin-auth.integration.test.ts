@@ -77,6 +77,18 @@ afterAll(async () => {
 });
 
 describe('Admin authentication with PostgreSQL', () => {
+  it('stores Admin credentials as a Better Auth password hash', async () => {
+    const accounts = await db
+      .select({ providerId: authAccount.providerId, password: authAccount.password })
+      .from(authAccount)
+      .where(eq(authAccount.adminId, adminId));
+
+    expect(accounts).toHaveLength(1);
+    expect(accounts[0].providerId).toBe('credential');
+    expect(accounts[0].password).toBeTruthy();
+    expect(accounts[0].password).not.toBe(adminPassword);
+  });
+
   it('signs in with credentials and creates an admin-owned session', async () => {
     const response = await requestAdminLogin(adminPassword);
     const body = await response.json();
