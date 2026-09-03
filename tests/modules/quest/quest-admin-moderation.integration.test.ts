@@ -280,6 +280,7 @@ beforeAll(async () => {
 
   await ensureWallet(hirerId);
   await ensureWallet(workerId);
+  await ensureWallet(teamLeaderId);
   await fundWallet(hirerId, 100_000);
 });
 
@@ -422,6 +423,76 @@ describe('Admin Quest moderation commands', () => {
       return row;
     }));
     expect(rows).toEqual(states.map(() => ({ hiddenAt: null, version: 1 })));
+  });
+
+  // The cancellation matrix pays the whole 20% to the Team Leader in a GROUP + CANDIDATE
+  // Quest, not a share per Active Worker.
+  it('pays the whole ASSIGNED cancellation share to the Team Leader of a GROUP Candidate Quest', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest('QUEST_ASSIGNED', undefined, { group: true });
+    const joinedAt = new Date('2020-12-31T23:00:00.000Z');
+    const roster = [
+      { assignmentId: randomUUID(), workerId: teamLeaderId, joinedAt: joinedAt.toISOString() },
+      { assignmentId: randomUUID(), workerId, joinedAt: joinedAt.toISOString() },
+    ] as const;
+    await db.insert(questAssignment).values(roster.map(({ assignmentId, workerId: memberId }) => ({
+      id: assignmentId,
+      questId,
+      workerId: memberId,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE' as const,
+      createdAt: joinedAt,
+    })));
+    await db.transaction((transaction) => workChatMembershipWriter.applyQuestTransition(transaction, {
+      producer: 'QUEST_DIRECT_JOIN',
+      type: 'workersAccepted',
+      commandId: `admin-group-leader-seed:${questId}`,
+      eventId: `admin-group-leader-seed:${questId}`,
+      questId,
+      actorId: teamLeaderId,
+      hirerId,
+      occurredAt: joinedAt.toISOString(),
+      workers: [roster[0], roster[1]],
+    }));
+    await db.insert(questTeam).values({
+      id: randomUUID(),
+      questId,
+      leaderId: teamLeaderId,
+      name: 'Terminated Quest Team',
+      teamStatus: 'TEAM_SELECTED',
+    });
+    await db.transaction((transaction) => reserveSpending(transaction, {
+      ownerUserId: hirerId,
+      callerScope: 'quest',
+      callerReference: questId,
+      amountSatang: positiveSatang(2_040),
+    }));
+    const before = await Promise.all([teamLeaderId, workerId].map(async (userId) => {
+      const [row] = await db.select({ earnings: walletWallet.earningsBalanceSatang })
+        .from(walletWallet).where(eq(walletWallet.userId, userId));
+      return row!.earnings;
+    }));
+
+    const response = await adminRequest(
+      `/api/v1/admin/quests/${questId}/terminate`,
+      { reasonCode: 'POLICY_REVIEW' },
+      { 'idempotency-key': `admin-terminate-group-leader-${questId}`, 'if-match': '1' },
+    );
+
+    expect(response.status).toBe(200);
+    const after = await Promise.all([teamLeaderId, workerId].map(async (userId) => {
+      const [row] = await db.select({ earnings: walletWallet.earningsBalanceSatang })
+        .from(walletWallet).where(eq(walletWallet.userId, userId));
+      return row!.earnings;
+    }));
+    // 20% of the 2,000 satang Worker Reward pool, paid to the Leader alone.
+    expect(after).toEqual([before[0]! + 400, before[1]!]);
+    expect(await db.select({
+      status: walletFundingReservation.status,
+      remainingSatang: walletFundingReservation.remainingSatang,
+    }).from(walletFundingReservation).where(and(
+      eq(walletFundingReservation.ownerUserId, hirerId),
+      eq(walletFundingReservation.callerReference, questId),
+    ))).toEqual([{ status: 'RELEASED', remainingSatang: 0 }]);
   });
 
   it('terminates an OPEN GROUP Candidate Quest and releases its full reservation', async () => {

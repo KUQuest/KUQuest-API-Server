@@ -489,6 +489,38 @@ describe('Quest API v2 discovery contract', () => {
     });
   });
 
+  // Participant access rests on an ACTIVE Assignment, and settlement makes every Active
+  // Assignment terminal, so a settled Quest closes the participant door behind itself.
+  it('stops returning public detail once the Worker Assignment leaves ASSIGNMENT_ACTIVE', async () => {
+    const cancelledQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Cancelled Public` });
+    await addActiveWorkers(cancelledQuest, [memberId]);
+    const completedQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Completed Public` });
+    await addActiveWorkers(completedQuest, [memberId]);
+
+    expect((await getPublicDetail(cancelledQuest)).status).toBe(200);
+    expect((await getPublicDetail(completedQuest)).status).toBe(200);
+
+    await db.update(quest).set({
+      questStatus: questStatus.cancelled,
+      cancelledAt: new Date(),
+      cancelledByUserId: ownerId,
+    }).where(eq(quest.id, cancelledQuest));
+    await db.update(questAssignment).set({ assignmentStatus: 'ASSIGNMENT_CANCELLED' })
+      .where(eq(questAssignment.questId, cancelledQuest));
+    await db.update(quest).set({ questStatus: questStatus.completed }).where(eq(quest.id, completedQuest));
+    await db.update(questAssignment).set({ assignmentStatus: 'ASSIGNMENT_COMPLETED' })
+      .where(eq(questAssignment.questId, completedQuest));
+
+    const responses = await Promise.all([cancelledQuest, completedQuest].map(async (questId) => {
+      const response = await getPublicDetail(questId);
+      return { status: response.status, code: (await response.json()).error.code };
+    }));
+    expect(responses).toEqual([
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+    ]);
+  });
+
   it('returns QUEST_NOT_FOUND for unreadable Public Quest Detail', async () => {
     const hiddenQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Hidden Public` });
     await db.update(quest).set({
