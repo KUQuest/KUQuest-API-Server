@@ -366,38 +366,28 @@ const cancelInTransaction = async (
     throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Selected Team Leader Assignment is missing.');
   }
   let paid = 0;
+  // Past QUEST_OPEN a non-null `leaderId` means the Quest is GROUP + CANDIDATE, so it is
+  // both the payee and the discriminator for the Team Leader payout rules.
   if (current.questStatus === questStatus.assigned) {
     const pool = rewardSatang * current.headcount;
     const twentyPercent = Math.floor(pool * 20 / 100);
-    if (groupCandidate) {
-      if (twentyPercent > 0) {
-        paid = await settleWorkers(
-          tx,
-          current.hirerId,
-          reservation.id,
-          [{ workerId: leaderId!, amountSatang: twentyPercent }],
-          () => Promise.resolve(0),
-          `quest-cancel:${commandId}`,
-        );
-      }
-    } else {
-      const base = workers.length > 0 ? Math.floor(twentyPercent / workers.length) : 0;
-      const remainder = workers.length > 0 ? twentyPercent % workers.length : 0;
-      paid = await settleWorkers(
-        tx,
-        current.hirerId,
-        reservation.id,
-        workers
-          .map(({ workerId }, index) => ({ workerId, amountSatang: base + (index < remainder ? 1 : 0) }))
-          .filter(({ amountSatang }) => amountSatang > 0),
-        () => Promise.resolve(0),
-        `quest-cancel:${commandId}`,
-      );
-    }
+    const base = leaderId ? 0 : (workers.length > 0 ? Math.floor(twentyPercent / workers.length) : 0);
+    const remainder = leaderId ? 0 : (workers.length > 0 ? twentyPercent % workers.length : 0);
+    paid = await settleWorkers(
+      tx,
+      current.hirerId,
+      reservation.id,
+      (leaderId
+        ? [{ workerId: leaderId, amountSatang: twentyPercent }]
+        : workers.map(({ workerId }, index) => ({ workerId, amountSatang: base + (index < remainder ? 1 : 0) }))
+      ).filter(({ amountSatang }) => amountSatang > 0),
+      () => Promise.resolve(0),
+      `quest-cancel:${commandId}`,
+    );
   } else if (current.questStatus === questStatus.inProgress) {
     const fee = await feeForQuest(tx, current, reservation, rewardSatang);
-    const payoutWorkers = groupCandidate
-      ? Array.from({ length: current.headcount }, () => ({ workerId: leaderId!, amountSatang: rewardSatang }))
+    const payoutWorkers = leaderId
+      ? Array.from({ length: current.headcount }, () => ({ workerId: leaderId, amountSatang: rewardSatang }))
       : workers.map(({ workerId }) => ({ workerId, amountSatang: rewardSatang }));
     paid = await settleWorkers(
       tx,

@@ -311,32 +311,6 @@ const findExistingAction = async (
   return existing;
 };
 
-const assertStoredResultFor = (
-  result: StoredActionResult,
-  expectedVersion: number | null,
-  expectedTimestamp: Date | null,
-): StoredActionResult => {
-  if (result.resourceVersion !== null) {
-    assertPositiveVersion(result.resourceVersion, 'resourceVersion');
-  }
-  if (result.resourceTimestamp !== null) {
-    normalizeTimestamp(result.resourceTimestamp, 'resourceTimestamp');
-  }
-  if (expectedVersion !== null && result.resourceVersion === null) {
-    throw new AdminActionError(
-      'ADMIN_ACTION_INVALID_RESULT',
-      'A version-based command Admin Action is missing its resource version.',
-    );
-  }
-  if (expectedTimestamp !== null && result.resourceTimestamp === null) {
-    throw new AdminActionError(
-      'ADMIN_ACTION_INVALID_RESULT',
-      'A timestamp-based command Admin Action is missing its resource timestamp.',
-    );
-  }
-  return result;
-};
-
 const replayOrValidateExisting = (
   existing: typeof adminAction.$inferSelect | undefined,
   input: NormalizedActionInput,
@@ -348,11 +322,9 @@ const replayOrValidateExisting = (
       'Admin Action request key was used with a different request.',
     );
   }
-  return assertStoredResultFor(
-    storedResultFrom(existing),
-    input.expectedVersion,
-    input.expectedTimestamp,
-  );
+  // `assertResourceRevision` proved the revision when the row was written, and an
+  // Admin Action is immutable, so the stored result needs no second reading.
+  return storedResultFrom(existing);
 };
 
 const assertResourceRevision = (
