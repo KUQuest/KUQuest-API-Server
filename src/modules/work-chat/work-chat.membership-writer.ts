@@ -16,6 +16,8 @@ import type {
 
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
+import { closeCandidateInquiries, closeCandidateInquiriesForAcceptedWorkers } from './candidate-inquiry.lifecycle';
+
 const systemTypes = {
   acceptedParticipantJoined: 'ACCEPTED_PARTICIPANT_JOINED',
   workerDeparted: 'WORKER_DEPARTED',
@@ -389,6 +391,18 @@ const applyWorkersAccepted = async (
   await validateAcceptedAssignments(transaction, transition);
   const conversation = await ensureConversation(transaction, transition.questId);
   if (conversation.readOnlyAt) throw new Error('Terminal Work Conversation cannot accept Workers');
+  const [questSnapshot] = await transaction
+    .select({ questStatus: quest.questStatus })
+    .from(quest)
+    .where(eq(quest.id, transition.questId))
+    .limit(1);
+  const currentQuestStatus = questSnapshot?.questStatus ?? conversation.questStatus;
+  await closeCandidateInquiriesForAcceptedWorkers(transaction, {
+    questId: transition.questId,
+    questStatus: currentQuestStatus,
+    closedAt: occurredAt,
+    workerIds: transition.workers.map(({ workerId }) => workerId),
+  });
 
   if (await ensureHirerMembership(transaction, conversation.id, transition.hirerId, occurredAt)) {
     await appendSystemMessage(
@@ -453,7 +467,7 @@ const applyWorkersAccepted = async (
 
   await transaction
     .update(chatConversation)
-    .set({ updatedAt: occurredAt })
+    .set({ questStatus: currentQuestStatus, updatedAt: occurredAt })
     .where(eq(chatConversation.id, conversation.id));
 
   return { conversationId: conversation.id, outcome: 'APPLIED' };
@@ -541,6 +555,11 @@ const applyQuestBecameReadOnly = async (
   transition: Extract<QuestWorkChatMembershipTransition, { type: 'questBecameReadOnly' }>,
 ): Promise<ApplyQuestWorkChatMembershipResult> => {
   const readOnlyAt = parseTime(transition.readOnlyAt);
+  await closeCandidateInquiries(transaction, {
+    questId: transition.questId,
+    questStatus: transition.questStatus,
+    closedAt: readOnlyAt,
+  });
   const conversation = await findConversation(transaction, transition.questId);
   if (!conversation) {
     return { conversationId: '', outcome: 'APPLIED' };

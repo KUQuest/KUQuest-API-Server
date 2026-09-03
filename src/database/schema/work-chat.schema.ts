@@ -22,11 +22,19 @@ import { quest, questAssignment } from './quest.schema';
 
 const time = (name: string) => timestamp(name, { withTimezone: true });
 
-export const chatMembershipRole = pgEnum('chat_membership_role', ['HIRER', 'WORKER']);
+export const chatMembershipRole = pgEnum('chat_membership_role', [
+  'HIRER',
+  'WORKER',
+  'PROSPECTIVE_WORKER',
+]);
 export const chatMessageKind = pgEnum('chat_message_kind', ['USER', 'SYSTEM']);
 export const chatConversationType = pgEnum('chat_conversation_type', [
   'CONVERSATION_CANDIDATE_INQUIRY',
   'CONVERSATION_WORK',
+]);
+export const chatConversationState = pgEnum('chat_conversation_state', [
+  'INQUIRY_OPEN',
+  'INQUIRY_CLOSED',
 ]);
 export const chatAttachmentStatus = pgEnum('chat_attachment_status', [
   'QUARANTINED',
@@ -47,6 +55,10 @@ export const chatConversation = pgTable(
     type: chatConversationType('type').default('CONVERSATION_WORK').notNull(),
     questTitle: varchar('quest_title', { length: 200 }).notNull(),
     questStatus: varchar('quest_status', { length: 50 }).notNull(),
+    state: chatConversationState('state'),
+    candidateWorkerId: uuid('candidate_worker_id')
+      .references(() => authUser.id, { onDelete: 'set null' }),
+    closedAt: time('closed_at'),
     nextSequence: bigint('next_sequence', { mode: 'number' }).default(1).notNull(),
     readOnlyAt: time('read_only_at'),
     archivedAt: time('archived_at'),
@@ -59,8 +71,15 @@ export const chatConversation = pgTable(
     uniqueIndex('chat_conversation_work_quest_uidx')
       .on(table.questId)
       .where(sql`${table.type} = 'CONVERSATION_WORK'`),
+    uniqueIndex('chat_conversation_candidate_worker_uidx')
+      .on(table.questId, table.candidateWorkerId)
+      .where(sql`${table.type} = 'CONVERSATION_CANDIDATE_INQUIRY' AND ${table.candidateWorkerId} IS NOT NULL`),
     check('chat_conversation_title_check', sql`btrim(${table.questTitle}) <> ''`),
     check('chat_conversation_status_snapshot_check', sql`btrim(${table.questStatus}) <> ''`),
+    check(
+      'chat_conversation_type_state_check',
+      sql`(${table.type} = 'CONVERSATION_WORK' AND ${table.state} IS NULL AND ${table.candidateWorkerId} IS NULL AND ${table.closedAt} IS NULL) OR (${table.type} = 'CONVERSATION_CANDIDATE_INQUIRY' AND ${table.state} IS NOT NULL AND ${table.candidateWorkerId} IS NOT NULL AND ((${table.state} = 'INQUIRY_OPEN' AND ${table.closedAt} IS NULL) OR (${table.state} = 'INQUIRY_CLOSED' AND ${table.closedAt} IS NOT NULL)))`,
+    ),
     check('chat_conversation_next_sequence_check', sql`${table.nextSequence} > 0`),
     check(
       'chat_conversation_terminal_time_check',
@@ -70,6 +89,8 @@ export const chatConversation = pgTable(
       'chat_conversation_lifecycle_time_order_check',
       sql`(${table.latestTerminalAt} IS NULL OR ${table.readOnlyAt} IS NULL OR ${table.latestTerminalAt} <= ${table.readOnlyAt}) AND (${table.archivedAt} IS NULL OR ${table.readOnlyAt} IS NULL OR ${table.archivedAt} >= ${table.readOnlyAt})`,
     ),
+    index('chat_conversation_type_state_idx').on(table.type, table.state),
+    index('chat_conversation_quest_idx').on(table.questId),
   ],
 );
 
@@ -102,13 +123,16 @@ export const chatMembership = pgTable(
     }).onDelete('restrict'),
     check(
       'chat_membership_role_assignment_check',
-      sql`(${table.role} = 'HIRER' AND ${table.assignmentId} IS NULL) OR (${table.role} = 'WORKER' AND ${table.assignmentId} IS NOT NULL)`,
+      sql`(${table.role} IN ('HIRER', 'PROSPECTIVE_WORKER') AND ${table.assignmentId} IS NULL) OR (${table.role} = 'WORKER' AND ${table.assignmentId} IS NOT NULL)`,
     ),
     check('chat_membership_window_order_check', sql`${table.leftAt} IS NULL OR ${table.leftAt} >= ${table.joinedAt}`),
     check('chat_membership_created_time_check', sql`${table.createdAt} >= ${table.joinedAt}`),
     uniqueIndex('chat_membership_one_active_hirer_uidx')
       .on(table.conversationId)
       .where(sql`${table.role} = 'HIRER' AND ${table.leftAt} IS NULL`),
+    uniqueIndex('chat_membership_one_active_prospective_worker_uidx')
+      .on(table.conversationId)
+      .where(sql`${table.role} = 'PROSPECTIVE_WORKER' AND ${table.leftAt} IS NULL`),
     index('chat_membership_member_conversation_idx')
       .on(table.memberId, table.conversationId, table.joinedAt)
       .where(sql`${table.memberId} IS NOT NULL`),
@@ -125,7 +149,7 @@ export const chatMessage = pgTable(
     kind: chatMessageKind('kind').notNull(),
     senderMembershipId: uuid('sender_membership_id'),
     clientMessageId: varchar('client_message_id', { length: 128 }),
-    contentText: varchar('content_text', { length: 4000 }),
+    contentText: varchar('content_text', { length: 1000 }),
     systemType: varchar('system_type', { length: 100 }),
     systemPayload: jsonb('system_payload').$type<Record<string, unknown> | null>(),
     eventId: varchar('event_id', { length: 255 }),
@@ -147,6 +171,10 @@ export const chatMessage = pgTable(
     }).onDelete('restrict'),
     check('chat_message_sequence_check', sql`${table.sequence} > 0`),
     check('chat_message_content_text_check', sql`${table.contentText} IS NULL OR btrim(${table.contentText}) <> ''`),
+    check(
+      'chat_message_content_length_check',
+      sql`${table.contentText} IS NULL OR char_length(${table.contentText}) <= 1000`,
+    ),
     check(
       'chat_message_kind_fields_check',
       sql`(${table.kind} = 'USER' AND ${table.senderMembershipId} IS NOT NULL AND ${table.clientMessageId} IS NOT NULL AND btrim(${table.clientMessageId}) <> '' AND ${table.eventId} IS NULL AND ${table.systemType} IS NULL AND ${table.systemPayload} IS NULL) OR (${table.kind} = 'SYSTEM' AND ${table.clientMessageId} IS NULL AND ${table.eventId} IS NOT NULL AND btrim(${table.eventId}) <> '' AND ${table.systemType} IS NOT NULL AND btrim(${table.systemType}) <> '' AND ${table.systemPayload} IS NOT NULL AND jsonb_typeof(${table.systemPayload}) = 'object')`,
@@ -205,6 +233,11 @@ export const chatAttachment = pgTable(
     check('chat_attachment_filename_check', sql`btrim(${table.originalFilename}) <> ''`),
     check('chat_attachment_mime_type_check', sql`btrim(${table.mimeType}) <> ''`),
     check('chat_attachment_size_check', sql`${table.sizeBytes} > 0`),
+    check('chat_attachment_max_size_check', sql`${table.sizeBytes} <= 10485760`),
+    check(
+      'chat_attachment_mime_type_allowed_check',
+      sql`${table.mimeType} IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf', 'video/mp4', 'video/webm', 'video/quicktime')`,
+    ),
     check(
       'chat_attachment_initial_file_check',
       sql`${table.status} NOT IN ('QUARANTINED', 'REJECTED') OR ${table.fileId} IS NULL`,
@@ -252,7 +285,7 @@ export const chatMessageAttachment = pgTable(
       columns: [table.attachmentId],
       foreignColumns: [chatAttachment.id],
     }).onDelete('restrict'),
-    check('chat_message_attachment_position_check', sql`${table.position} > 0`),
+    check('chat_message_attachment_position_check', sql`${table.position} BETWEEN 1 AND 5`),
   ],
 );
 

@@ -92,7 +92,7 @@ export const workChatSendMessageSchema = t.Object(
   {
     clientMessageId: t.String({ minLength: 1, maxLength: 128, pattern: '\\S' }),
     text: t.Optional(t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' })),
-    attachmentIds: t.Optional(t.Array(t.String({ format: 'uuid' }), { uniqueItems: true })),
+    attachmentIds: t.Optional(t.Array(t.String({ format: 'uuid' }), { maxItems: 5, uniqueItems: true })),
   },
   { additionalProperties: false },
 );

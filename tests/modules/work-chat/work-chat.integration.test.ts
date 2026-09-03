@@ -154,30 +154,32 @@ const createValidatedAttachments = async (conversationId: string, memberId: stri
 const cleanFixtures = async (): Promise<void> => {
   if (!postgresAvailable || fixtureQuestIds.length === 0) return;
 
-  await db.delete(chatTransitionCommand).where(inArray(chatTransitionCommand.questId, fixtureQuestIds));
-  const conversations = await db.select({ id: chatConversation.id })
-    .from(chatConversation)
-    .where(inArray(chatConversation.questId, fixtureQuestIds));
-  const conversationIds = conversations.map(({ id }) => id);
-  if (conversationIds.length > 0) {
-    await db.delete(chatReadCursor).where(inArray(chatReadCursor.conversationId, conversationIds));
-    const messages = await db.select({ id: chatMessage.id })
-      .from(chatMessage)
-      .where(inArray(chatMessage.conversationId, conversationIds));
-    const messageIds = messages.map(({ id }) => id);
-    if (messageIds.length > 0) {
-      await db.delete(chatMessageAttachment).where(inArray(chatMessageAttachment.messageId, messageIds));
+  await db.transaction(async (transaction) => {
+    await transaction.delete(chatTransitionCommand).where(inArray(chatTransitionCommand.questId, fixtureQuestIds));
+    const conversations = await transaction.select({ id: chatConversation.id })
+      .from(chatConversation)
+      .where(inArray(chatConversation.questId, fixtureQuestIds));
+    const conversationIds = conversations.map(({ id }) => id);
+    if (conversationIds.length > 0) {
+      await transaction.delete(chatReadCursor).where(inArray(chatReadCursor.conversationId, conversationIds));
+      const messages = await transaction.select({ id: chatMessage.id })
+        .from(chatMessage)
+        .where(inArray(chatMessage.conversationId, conversationIds));
+      const messageIds = messages.map(({ id }) => id);
+      if (messageIds.length > 0) {
+        await transaction.delete(chatMessageAttachment).where(inArray(chatMessageAttachment.messageId, messageIds));
+      }
+      await transaction.delete(chatMessage).where(inArray(chatMessage.conversationId, conversationIds));
+      await transaction.delete(chatAttachment).where(inArray(chatAttachment.conversationId, conversationIds));
+      await transaction.delete(chatMembership).where(inArray(chatMembership.conversationId, conversationIds));
+      await transaction.delete(chatConversation).where(inArray(chatConversation.id, conversationIds));
     }
-    await db.delete(chatMessage).where(inArray(chatMessage.conversationId, conversationIds));
-    await db.delete(chatAttachment).where(inArray(chatAttachment.conversationId, conversationIds));
-    await db.delete(chatMembership).where(inArray(chatMembership.conversationId, conversationIds));
-    await db.delete(chatConversation).where(inArray(chatConversation.id, conversationIds));
-  }
-  if (fixtureFileIds.length > 0) {
-    await db.delete(file).where(inArray(file.id, fixtureFileIds));
-  }
-  await db.delete(questAssignment).where(inArray(questAssignment.questId, fixtureQuestIds));
-  await db.delete(quest).where(inArray(quest.id, fixtureQuestIds));
+    if (fixtureFileIds.length > 0) {
+      await transaction.delete(file).where(inArray(file.id, fixtureFileIds));
+    }
+    await transaction.delete(questAssignment).where(inArray(questAssignment.questId, fixtureQuestIds));
+    await transaction.delete(quest).where(inArray(quest.id, fixtureQuestIds));
+  });
   fixtureQuestIds.length = 0;
   fixtureFileIds.length = 0;
 };
@@ -499,6 +501,8 @@ describe('Work Chat Member API', () => {
       id: conversationId,
       questId,
       type: 'CONVERSATION_CANDIDATE_INQUIRY',
+      state: 'INQUIRY_OPEN',
+      candidateWorkerId: otherMemberId,
       questTitle: 'Candidate Inquiry boundary test',
       questStatus: 'QUEST_OPEN',
       createdAt: now,
