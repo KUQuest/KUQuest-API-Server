@@ -557,6 +557,66 @@ describe('Admin Quest moderation commands', () => {
       .from(quest).where(eq(quest.id, questId))).toEqual([{ hiddenAt: expect.any(Date), version: 1 }]);
   });
 
+  // The Hirer manages a hidden Quest normally, so Candidate selection can move it past
+  // QUEST_OPEN while the overlay is on. Restore has to stay reachable, or the Quest is
+  // hidden for the rest of its life.
+  it('restores a hidden Quest that moved past QUEST_OPEN while hidden', async () => {
+    if (!postgresAvailable) return;
+    const states = ['QUEST_DRAFT', 'QUEST_ASSIGNED', 'QUEST_IN_PROGRESS', 'QUEST_DISPUTED'] as const;
+    const questIdsByState = await Promise.all(states.map((state) => createQuest(state)));
+    await Promise.all(questIdsByState.map((questId) => db.update(quest)
+      .set({ hiddenAt: new Date(), hiddenByAdminId: adminId })
+      .where(eq(quest.id, questId))));
+
+    const responses = await Promise.all(questIdsByState.map((questId) => adminRequest(
+      `/api/v1/admin/quests/${questId}/restore`,
+      {},
+      { 'idempotency-key': `admin-restore-past-open-${questId}`, 'if-match': '1' },
+    )));
+
+    expect(responses.map((response) => response.status)).toEqual(states.map(() => 200));
+    const rows = await Promise.all(questIdsByState.map(async (questId) => {
+      const [row] = await db.select({
+        status: quest.questStatus,
+        hiddenAt: quest.hiddenAt,
+        hiddenByAdminId: quest.hiddenByAdminId,
+        version: quest.version,
+      }).from(quest).where(eq(quest.id, questId));
+      return row;
+    }));
+    expect(rows).toEqual(states.map((state) => ({
+      status: state,
+      hiddenAt: null,
+      hiddenByAdminId: null,
+      version: 2,
+    })));
+  });
+
+  it('refuses to restore a terminal hidden Quest', async () => {
+    if (!postgresAvailable) return;
+    const states = ['QUEST_COMPLETED', 'QUEST_CANCELLED', 'QUEST_FAILED'] as const;
+    const questIdsByState = await Promise.all(states.map((state) => createQuest(state)));
+    await Promise.all(questIdsByState.map((questId) => db.update(quest)
+      .set({ hiddenAt: new Date(), hiddenByAdminId: adminId })
+      .where(eq(quest.id, questId))));
+
+    const responses = await Promise.all(questIdsByState.map((questId) => adminRequest(
+      `/api/v1/admin/quests/${questId}/restore`,
+      {},
+      { 'idempotency-key': `admin-restore-terminal-${questId}`, 'if-match': '1' },
+    )));
+
+    expect(responses.map((response) => response.status)).toEqual(states.map(() => 409));
+    expect(await Promise.all(responses.map(async (response) => (await response.json()).error.code)))
+      .toEqual(states.map(() => 'QUEST_ACTION_NOT_ALLOWED'));
+    const rows = await Promise.all(questIdsByState.map(async (questId) => {
+      const [row] = await db.select({ hiddenAt: quest.hiddenAt, version: quest.version })
+        .from(quest).where(eq(quest.id, questId));
+      return row;
+    }));
+    expect(rows).toEqual(states.map(() => ({ hiddenAt: expect.any(Date), version: 1 })));
+  });
+
   it('keeps a hidden overlay when termination reaches a terminal state', async () => {
     if (!postgresAvailable) return;
     const questId = await createQuest('QUEST_OPEN');

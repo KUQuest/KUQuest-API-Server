@@ -135,13 +135,18 @@ const executeQuestAdminCommand = async (
 
           if (action === 'QUEST_RESTORE') {
             if (
-              current.questStatus !== questStatus.open ||
+              isTerminalQuestStatus(current.questStatus) ||
               current.hiddenAt === null ||
               current.hiddenByAdminId === null
             ) {
               throw new QuestAdminCommandError('QUEST_ACTION_NOT_ALLOWED', 'Quest cannot be restored in its current state.');
             }
-            if (current.startTime <= now || (current.dueAt !== null && current.dueAt <= now)) {
+            // Only an OPEN Quest returns to Member discovery, so the start and due gates
+            // bind there. Past OPEN the overlay is the only thing restore clears.
+            if (
+              current.questStatus === questStatus.open &&
+              (current.startTime <= now || (current.dueAt !== null && current.dueAt <= now))
+            ) {
               throw new QuestAdminCommandError('QUEST_RESTORE_NOT_ELIGIBLE', 'Quest cannot be restored after its start or due time.');
             }
             await transaction.update(quest).set({

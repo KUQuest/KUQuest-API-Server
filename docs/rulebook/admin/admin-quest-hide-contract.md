@@ -13,7 +13,7 @@ Part of the [Admin Rulebook](admin-rulebook.md). Defines accepted policy for Adm
 ## Operation and idempotency
 
 - **Hiding**: Requires a non-empty reason and a non-blank `Idempotency-Key`.
-- **Restoring**: Does not require a reason, but requires a non-blank `Idempotency-Key`.
+- **Restoring**: Does not require a reason, but requires a non-blank `Idempotency-Key`. Clears the overlay on any hidden non-terminal Quest, including one the Hirer moved past `QUEST_OPEN` while it was hidden. A `QUEST_OPEN` Quest returns to discovery, so it must still be before its start and due time; otherwise it stays hidden.
 - **No automatic expiry**: A hidden Quest stays hidden until an Admin explicitly restores it.
 - Each hide and restore action creates an Audit Record.
 
