@@ -33,7 +33,7 @@ export class CandidateInquiryServiceError extends Error {
       | 'ATTACHMENT_TOO_LARGE'
       | 'ATTACHMENT_UNSUPPORTED'
       | 'ATTACHMENT_UPLOAD_FAILED'
-      | 'ATTACHMENTS_TOO_MANY'
+      | 'ATTACHMENT_IDS_DUPLICATE'
       | 'CLIENT_MESSAGE_ID_REUSED'
       | 'CONVERSATION_NOT_FOUND'
       | 'INQUIRY_CLOSED'
@@ -52,7 +52,6 @@ export class CandidateInquiryServiceError extends Error {
 
 const maxMessagesPerMinute = 30;
 const maxAttachmentsPerMinute = 10;
-const maxAttachmentsPerMessage = 5;
 const rateLimitWindowMs = 60_000;
 const preparedAttachmentLifetimeMs = 24 * 60 * 60 * 1000;
 
@@ -569,11 +568,8 @@ export const sendCandidateInquiryMessage = async (
     if (text && text.length > 1000) {
       throw new CandidateInquiryServiceError('MESSAGE_TOO_LONG', 'Message text must be 1,000 characters or fewer');
     }
-    if (attachmentIds.length > maxAttachmentsPerMessage) {
-      throw new CandidateInquiryServiceError('ATTACHMENTS_TOO_MANY', 'A Message can contain at most 5 Attachments');
-    }
     if (new Set(attachmentIds).size !== attachmentIds.length) {
-      throw new CandidateInquiryServiceError('ATTACHMENTS_TOO_MANY', 'Attachment identifiers must be unique');
+      throw new CandidateInquiryServiceError('ATTACHMENT_IDS_DUPLICATE', 'Attachment identifiers must be unique');
     }
 
     const [existing] = await transaction
@@ -607,7 +603,6 @@ export const sendCandidateInquiryMessage = async (
           eq(chatAttachment.conversationId, conversationId),
           eq(chatAttachment.uploadedByMemberId, membership.membershipId),
           eq(chatAttachment.status, 'VALIDATED'),
-          isNull(chatAttachment.deletedAt),
         ))
         .for('update');
     if (attachments.length !== attachmentIds.length) {
@@ -737,7 +732,6 @@ export const uploadCandidateInquiryAttachment = async (
           eq(chatConversation.questId, membership.questId),
           eq(chatMembership.memberId, userId),
           gte(chatAttachment.createdAt, windowStart),
-          isNull(chatAttachment.deletedAt),
         ))
         .orderBy(asc(chatAttachment.createdAt));
       if (recent.length >= maxAttachmentsPerMinute && recent[0]) {

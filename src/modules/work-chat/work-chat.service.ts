@@ -38,7 +38,6 @@ export class WorkChatServiceError extends Error {
       | 'CONVERSATION_READ_ONLY'
       | 'MESSAGE_CONTENT_REQUIRED'
       | 'MESSAGE_TOO_LONG'
-      | 'ATTACHMENTS_TOO_MANY'
       | 'MESSAGE_NOT_FOUND'
       | 'RATE_LIMITED',
     message: string,
@@ -608,7 +607,6 @@ export const uploadWorkConversationAttachment = async (
           eq(chatConversation.questId, conversation.questId),
           eq(chatMembership.memberId, userId),
           gte(chatAttachment.createdAt, windowStart),
-          isNull(chatAttachment.deletedAt),
         ))
         .orderBy(asc(chatAttachment.createdAt));
       if (recent.length >= maxAttachmentsPerMinute && recent[0]) {
@@ -843,9 +841,6 @@ export const sendWorkConversationMessage = async (
   if (text && text.length > 1000) {
     throw new WorkChatServiceError('MESSAGE_TOO_LONG', 'Message text must be 1,000 characters or fewer');
   }
-  if (attachmentIds.length > 5) {
-    throw new WorkChatServiceError('ATTACHMENTS_TOO_MANY', 'A Message can contain at most 5 Attachments');
-  }
 
   const [existing] = await transaction
     .select({
@@ -897,8 +892,7 @@ export const sendWorkConversationMessage = async (
         eq(chatAttachment.conversationId, conversationId),
         eq(chatAttachment.uploadedByMemberId, conversation.membershipId),
         eq(chatAttachment.status, 'VALIDATED'),
-        isNull(chatAttachment.deletedAt),
-      ))
+        ))
       .for('update');
     if (selectedAttachments.length !== attachmentIds.length) {
       throw new WorkChatServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');

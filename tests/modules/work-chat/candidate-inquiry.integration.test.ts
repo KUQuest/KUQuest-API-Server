@@ -18,7 +18,7 @@ import { createWorkChatMembershipWriter, workChatStorage } from '@/modules/work-
 
 import { randomUUID } from 'node:crypto';
 
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
 const hirerId = randomUUID();
@@ -69,6 +69,48 @@ const createOpenQuest = async () => {
     startTime: new Date('2030-01-01T10:00:00.000Z'),
   });
   return questId;
+};
+
+const createPreparedAttachments = async (
+  conversationId: string,
+  memberId: string,
+  count: number,
+  discarded = false,
+) => {
+  const [membership] = await db
+    .select({ id: chatMembership.id })
+    .from(chatMembership)
+    .where(and(
+      eq(chatMembership.conversationId, conversationId),
+      eq(chatMembership.memberId, memberId),
+    ));
+  if (!membership) throw new Error('Candidate Inquiry Membership fixture not found');
+
+  const createdAt = new Date();
+  const files = await db.insert(file).values(Array.from({ length: count }, (_, index) => ({
+    bucket: 'test-candidate-inquiry',
+    objectKey: `candidate-inquiry/${conversationId}/prepared-${randomUUID()}-${index}.png`,
+    contentType: 'image/png',
+    sizeBytes: 3,
+    uploadedByUserId: memberId,
+    createdAt,
+    ...(discarded ? { deletedAt: createdAt } : {}),
+  }))).returning({ id: file.id });
+  fixtureFileIds.push(...files.map(({ id }) => id));
+
+  return db.insert(chatAttachment).values(files.map(({ id }, index) => ({
+    conversationId,
+    uploadedByMemberId: membership.id,
+    fileId: id,
+    status: discarded ? 'EXPIRED' as const : 'VALIDATED' as const,
+    originalFilename: `prepared-${index}.png`,
+    mimeType: 'image/png',
+    sizeBytes: 3,
+    validatedAt: createdAt,
+    createdAt,
+    updatedAt: createdAt,
+    ...(discarded ? { deletedAt: createdAt, expiresAt: createdAt } : {}),
+  }))).returning({ id: chatAttachment.id });
 };
 
 const cleanFixtures = async (): Promise<void> => {
@@ -287,6 +329,61 @@ describe('Candidate Inquiry Conversation API', () => {
     );
     expect(read.status).toBe(200);
     expect((await read.json()).data.messageId).toBe(sentBody.data.message.id);
+  });
+
+  it('allows a Candidate Inquiry Message to contain more than five Attachments', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const questId = await createOpenQuest();
+    const opened = await requestJson('POST', '/api/v1/chat/candidate-inquiries', { questId }, workerId);
+    const conversationId = (await opened.json()).data.inquiry.id as string;
+    const attachments = await createPreparedAttachments(conversationId, workerId, 6);
+
+    const sent = await requestJson(
+      'POST',
+      `/api/v1/chat/candidate-inquiries/${conversationId}/messages`,
+      {
+        clientMessageId: 'inquiry-six-attachments',
+        attachmentIds: attachments.map(({ id }) => id),
+      },
+      workerId,
+    );
+
+    expect(sent.status).toBe(200);
+    expect((await sent.json()).data.message.attachments).toHaveLength(6);
+  });
+
+  it('keeps discarded Candidate Inquiry Attachments in the one-minute rate limit', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const questId = await createOpenQuest();
+    const opened = await requestJson('POST', '/api/v1/chat/candidate-inquiries', { questId }, workerId);
+    const conversationId = (await opened.json()).data.inquiry.id as string;
+    await createPreparedAttachments(conversationId, workerId, 10, true);
+
+    const storedObject = {
+      bucket: 'test-candidate-inquiry',
+      objectKey: `candidate-inquiry/${conversationId}/rate-limit.png`,
+      contentType: 'image/png' as const,
+      sizeBytes: 3,
+      fileName: 'rate-limit.png',
+    };
+    spyOn(workChatStorage, 'upload').mockResolvedValue(storedObject);
+    spyOn(workChatStorage, 'remove').mockResolvedValue(undefined);
+    const form = new FormData();
+    form.set('file', new File([new Uint8Array([1, 2, 3])], 'rate-limit.png', { type: 'image/png' }));
+
+    const upload = await candidateInquiryApp.handle(new Request(
+      `http://localhost/api/v1/chat/candidate-inquiries/${conversationId}/attachments`,
+      { method: 'POST', headers: { 'x-member-id': workerId }, body: form },
+    ));
+    const [storedFile] = await db
+      .select({ id: file.id })
+      .from(file)
+      .where(eq(file.objectKey, storedObject.objectKey));
+    if (storedFile) fixtureFileIds.push(storedFile.id);
+
+    expect(upload.status).toBe(429);
   });
 
   it('enforces the Attachment-only Message rule at the database boundary', async () => {

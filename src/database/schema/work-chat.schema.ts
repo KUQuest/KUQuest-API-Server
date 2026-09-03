@@ -285,7 +285,7 @@ export const chatMessageAttachment = pgTable(
       columns: [table.attachmentId],
       foreignColumns: [chatAttachment.id],
     }).onDelete('restrict'),
-    check('chat_message_attachment_position_check', sql`${table.position} BETWEEN 1 AND 5`),
+    check('chat_message_attachment_position_check', sql`${table.position} > 0`),
   ],
 );
 

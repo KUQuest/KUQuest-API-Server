@@ -10,6 +10,15 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
+  chatAttachment,
+  chatConversation,
+  chatMembership,
+  chatMessage,
+  chatMessageAttachment,
+  chatReadCursor,
+  chatTransitionCommand,
+} from '@/database/schema/work-chat.schema';
+import {
   walletFundingReservation,
   walletIdempotencyKey,
   walletLedgerAccount,
@@ -20,6 +29,7 @@ import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-as
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import { getQuestV2Underfilled } from '@/modules/quest/quest-underfilled-v2.service';
 import type { QuestTransaction, QuestWorkChatMembershipTransition } from '@/modules/quest';
+import { createWorkChatMembershipWriter } from '@/modules/work-chat';
 import {
   createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
@@ -199,6 +209,27 @@ afterEach(async () => {
   mock.restore();
   if (!postgresAvailable) return;
   if (questIds.length > 0) {
+    const conversations = await db.select({ id: chatConversation.id })
+      .from(chatConversation)
+      .where(inArray(chatConversation.questId, questIds));
+    const conversationIds = conversations.map(({ id }) => id);
+    await db.transaction(async (transaction) => {
+      await transaction.delete(chatTransitionCommand).where(inArray(chatTransitionCommand.questId, questIds));
+      if (conversationIds.length > 0) {
+        await transaction.delete(chatReadCursor).where(inArray(chatReadCursor.conversationId, conversationIds));
+        const messages = await transaction.select({ id: chatMessage.id })
+          .from(chatMessage)
+          .where(inArray(chatMessage.conversationId, conversationIds));
+        const messageIds = messages.map(({ id }) => id);
+        if (messageIds.length > 0) {
+          await transaction.delete(chatMessageAttachment).where(inArray(chatMessageAttachment.messageId, messageIds));
+        }
+        await transaction.delete(chatMessage).where(inArray(chatMessage.conversationId, conversationIds));
+        await transaction.delete(chatAttachment).where(inArray(chatAttachment.conversationId, conversationIds));
+        await transaction.delete(chatMembership).where(inArray(chatMembership.conversationId, conversationIds));
+        await transaction.delete(chatConversation).where(inArray(chatConversation.id, conversationIds));
+      }
+    });
     await db.delete(quest).where(inArray(quest.id, questIds));
     questIds.splice(0, questIds.length);
   }
@@ -393,6 +424,48 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       { 'idempotency-key': 'underfilled-after-consent' },
     );
     expect(lateJoin.status).toBe(409);
+  });
+
+  it('closes remaining Candidate Inquiry Conversations when unanimous consent assigns the Quest', async () => {
+    if (!postgresAvailable) return;
+    configureQuestWorkChatMembershipWriter(createWorkChatMembershipWriter());
+    const questId = await createQuest([workers[0].id, workers[1].id]);
+    const opened = await request(
+      '/api/v1/chat/candidate-inquiries',
+      'POST',
+      workers[2].id,
+      { questId },
+    );
+    expect(opened.status).toBe(200);
+    const conversationId = (await opened.json()).data.inquiry.id as string;
+
+    await detect(new Date());
+    await request(
+      `/api/v2/quests/${questId}/underfilled/decision`,
+      'POST',
+      hirer.id,
+      { decision: 'PROCEED' },
+      { 'idempotency-key': 'underfilled-close-inquiries-proceed' },
+    );
+    await request(
+      `/api/v2/quests/${questId}/underfilled/consent`,
+      'POST',
+      workers[0].id,
+      { decision: 'ACCEPT' },
+      { 'idempotency-key': 'underfilled-close-inquiries-first' },
+    );
+    const finalConsent = await request(
+      `/api/v2/quests/${questId}/underfilled/consent`,
+      'POST',
+      workers[1].id,
+      { decision: 'ACCEPT' },
+      { 'idempotency-key': 'underfilled-close-inquiries-final' },
+    );
+
+    expect(finalConsent.status).toBe(200);
+    expect((await db.select({ state: chatConversation.state })
+      .from(chatConversation)
+      .where(eq(chatConversation.id, conversationId)))[0]?.state).toBe('INQUIRY_CLOSED');
   });
 
   it('cancels on Hirer refusal and refunds the open Quest Escrow', async () => {

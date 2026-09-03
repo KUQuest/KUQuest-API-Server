@@ -591,6 +591,26 @@ const applyQuestBecameReadOnly = async (
   return { conversationId: conversation.id, outcome: 'APPLIED' };
 };
 
+const applyQuestBecameAssigned = async (
+  transaction: QuestTransaction,
+  transition: Extract<QuestWorkChatMembershipTransition, { type: 'questBecameAssigned' }>,
+): Promise<ApplyQuestWorkChatMembershipResult> => {
+  const assignedAt = parseTime(transition.assignedAt);
+  await closeCandidateInquiries(transaction, {
+    questId: transition.questId,
+    questStatus: transition.questStatus,
+    closedAt: assignedAt,
+  });
+  const conversation = await findConversation(transaction, transition.questId);
+  if (!conversation) return { conversationId: '', outcome: 'APPLIED' };
+
+  await transaction
+    .update(chatConversation)
+    .set({ questStatus: transition.questStatus, updatedAt: assignedAt })
+    .where(eq(chatConversation.id, conversation.id));
+  return { conversationId: conversation.id, outcome: 'APPLIED' };
+};
+
 const applyTransition = async (
   transaction: QuestTransaction,
   transition: QuestWorkChatMembershipTransition,
@@ -608,6 +628,8 @@ const applyTransition = async (
     result = await applyWorkersAccepted(transaction, transition);
   } else if (transition.type === 'workerBecameInactive') {
     result = await applyWorkerBecameInactive(transaction, transition);
+  } else if (transition.type === 'questBecameAssigned') {
+    result = await applyQuestBecameAssigned(transaction, transition);
   } else {
     result = await applyQuestBecameReadOnly(transaction, transition);
   }

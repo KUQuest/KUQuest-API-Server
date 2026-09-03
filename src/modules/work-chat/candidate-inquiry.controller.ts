@@ -82,7 +82,7 @@ const mapCandidateInquiryError = (set: AuthedContext['set'], error: unknown) => 
   } else if (
     error.code === 'MESSAGE_CONTENT_REQUIRED' ||
     error.code === 'MESSAGE_TOO_LONG' ||
-    error.code === 'ATTACHMENTS_TOO_MANY'
+    error.code === 'ATTACHMENT_IDS_DUPLICATE'
   ) {
     set.status = 400;
   } else if (error.code === 'RATE_LIMITED') {

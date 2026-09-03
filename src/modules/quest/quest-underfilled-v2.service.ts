@@ -12,7 +12,11 @@ import { satang, toBaht } from '@/modules/wallet';
 import { and, asc, eq, isNull, lte, or } from 'drizzle-orm';
 
 import { settleUnderfilledCancellationInTransaction } from './quest-settlement.service';
-import type { QuestTransaction } from './quest-work-chat.port';
+import {
+  requireQuestWorkChatMembershipWriter,
+  WorkChatTransitionError,
+  type QuestTransaction,
+} from './quest-work-chat.port';
 import {
   formatQuestV2ScheduleTime,
   questV2Mode,
@@ -754,6 +758,22 @@ export const respondToQuestV2Underfilled = async (
           .update(quest)
           .set({ questStatus: 'QUEST_ASSIGNED', updatedAt: now })
           .where(and(eq(quest.id, questId), eq(quest.questStatus, 'QUEST_OPEN')));
+        const writer = requireQuestWorkChatMembershipWriter();
+        try {
+          await writer.applyQuestTransition(transaction, {
+            producer: 'QUEST_UNDERFILLED',
+            type: 'questBecameAssigned',
+            commandId: `quest-v2-underfilled-assigned:${completed.id}`,
+            eventId: completed.id,
+            questId,
+            actorId: workerId,
+            occurredAt: now.toISOString(),
+            questStatus: 'QUEST_ASSIGNED',
+            assignedAt: now.toISOString(),
+          });
+        } catch (cause) {
+          throw new WorkChatTransitionError(cause);
+        }
         nextDecision = completed;
         nextCurrent = { ...current, questState: 'QUEST_ASSIGNED' };
       }

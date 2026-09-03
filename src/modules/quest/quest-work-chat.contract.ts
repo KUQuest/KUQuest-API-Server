@@ -29,6 +29,7 @@ export type QuestWorkChatTransitionProducer =
   | 'QUEST_DIRECT_JOIN'
   | 'QUEST_ASSIGNMENT_V2'
   | 'QUEST_CANDIDATE_SELECTION'
+  | 'QUEST_UNDERFILLED'
   | 'QUEST_SETTLEMENT';
 
 export type TerminalQuestStatus = QuestTerminalQuestStatus;
@@ -77,6 +78,12 @@ export type QuestWorkChatMembershipTransition =
       workerId: MemberId;
       assignmentStatus: InactiveAssignmentStatus;
       leftAt: IsoTimestamp;
+    })
+  | (TransitionBase & {
+      /** Closes all remaining Candidate Inquiry Conversations when a Quest is assigned. */
+      type: 'questBecameAssigned';
+      questStatus: 'QUEST_ASSIGNED';
+      assignedAt: IsoTimestamp;
     })
   | (TransitionBase & {
       type: 'questBecameReadOnly';
