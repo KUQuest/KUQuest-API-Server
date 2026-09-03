@@ -76,6 +76,9 @@ export {
   editQuestV2ProofSubmission,
   listQuestV2ProofSubmissions,
   questV2ProofSubmissionOperationScope,
+  recordQuestV2ProofUploadCleanup,
+  retryQuestV2ProofUploadCleanup,
+  QuestV2ProofUploadCleanupUnavailableError,
   submitQuestV2ProofSubmission,
 } from './quest-proof-v2.service';
 export type {

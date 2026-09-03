@@ -25,6 +25,7 @@ import {
   expireQuestV2Underfilled,
   pendingQuestV2UnderfilledQuestIds,
 } from './quest-underfilled-v2.service';
+import { retryQuestV2ProofUploadCleanup } from './quest-proof-v2.service';
 import {
   cleanupQuestV2ImageObjects,
   recoverQuestV2ImageUploadManifests,
@@ -54,7 +55,7 @@ export type QuestLifecycleWorkerOptions = {
 };
 
 export type QuestLifecycleWorkerError = {
-  operation: 'start' | 'auto-cancel' | 'underfilled-detection' | 'underfilled-timeout' | 'dispute' | 'invitation-expiry' | 'edit-timeout' | 'auto-approval' | 'quest-image-cleanup';
+  operation: 'start' | 'auto-cancel' | 'underfilled-detection' | 'underfilled-timeout' | 'dispute' | 'invitation-expiry' | 'edit-timeout' | 'auto-approval' | 'quest-image-cleanup' | 'quest-proof-upload-cleanup';
   id?: string;
   cause: unknown;
 };
@@ -364,6 +365,14 @@ export const runQuestLifecycleWorker = async (
     await cleanupQuestV2ImageObjects(now, limit);
   } catch (cause) {
     const error = { operation: 'quest-image-cleanup' as const, cause };
+    errors.push(error);
+    reportError(options.onError, error);
+  }
+
+  try {
+    await retryQuestV2ProofUploadCleanup(limit);
+  } catch (cause) {
+    const error = { operation: 'quest-proof-upload-cleanup' as const, cause };
     errors.push(error);
     reportError(options.onError, error);
   }

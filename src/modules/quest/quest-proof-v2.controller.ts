@@ -26,6 +26,7 @@ import {
   type QuestV2ProofSubmission,
   type QuestV2ProofSubmissionListOutcome,
   type QuestV2ProofSubmissionOutcome,
+  recordQuestV2ProofUploadCleanup,
   type StoredQuestV2ProofFileInput,
 } from './quest-proof-v2.service';
 import {
@@ -165,6 +166,7 @@ const failureCodeFor = (error: unknown): string => {
 const uploadFiles = async (
   memberId: string,
   files: File[] = [],
+  retryPosition?: number,
 ): Promise<{
   uploaded: StoredQuestV2ProofFileInput[];
   failed: QuestV2ProofFailedFile[];
@@ -176,22 +178,40 @@ const uploadFiles = async (
   const fingerprints: string[] = [];
   let firstError: unknown;
   for (const [position, input] of files.entries()) {
-    fingerprints.push(await fingerprintFor(input, position));
+    const targetPosition = retryPosition ?? position;
+    fingerprints.push(await fingerprintFor(input, targetPosition));
     try {
       uploaded.push({
         ...(await questV2ProofStorage.upload(memberId, input)),
-        position,
+        position: targetPosition,
       });
     } catch (error) {
-      failed.push({ position, failureCode: failureCodeFor(error) });
+      failed.push({ position: targetPosition, failureCode: failureCodeFor(error) });
       firstError ??= error;
     }
   }
   return { uploaded, failed, fingerprints, error: firstError };
 };
 
-const cleanupUploadedFiles = async (files: StoredQuestV2ProofFile[]) => {
-  await Promise.all(files.map((file) => questV2ProofStorage.remove(file).catch(() => undefined)));
+const cleanupUploadedFiles = async (
+  memberId: string,
+  questId: string,
+  files: StoredQuestV2ProofFile[],
+) => {
+  const failed: StoredQuestV2ProofFile[] = [];
+  await Promise.all(files.map(async (file) => {
+    try {
+      await questV2ProofStorage.remove(file);
+    } catch (error) {
+      failed.push(file);
+      console.error('[quest-proof-upload-cleanup] Immediate object deletion failed', {
+        error,
+        bucket: file.bucket,
+        objectKey: file.objectKey,
+      });
+    }
+  }));
+  if (failed.length > 0) await recordQuestV2ProofUploadCleanup(memberId, questId, failed);
 };
 
 const mapUploadError = (set: AuthedContext['set'], error: unknown) => {
@@ -225,6 +245,7 @@ const serviceInputFor = (
   };
   if (Object.prototype.hasOwnProperty.call(body, 'description')) input.description = body.description;
   if (Object.prototype.hasOwnProperty.call(body, 'fileIds')) input.fileIds = body.fileIds;
+  if (body.retryPosition !== undefined) input.retryPosition = body.retryPosition;
   return input;
 };
 
@@ -249,38 +270,50 @@ export const createQuestV2ProofSubmissionController = async ({
     set.status = 400;
     return apiError('PROOF_FILES_CONFLICT', 'Use multipart files or existing file IDs, not both');
   }
+  if (body.retryPosition !== undefined) {
+    set.status = 400;
+    return apiError('PROOF_RETRY_POSITION_INVALID', 'retryPosition is allowed only when editing a Proof Submission Draft');
+  }
 
   const upload = await uploadFiles(session.user.id, body.files);
   if (upload.error) {
     let persisted = false;
     if (upload.uploaded.length + upload.failed.length > 0) {
-      const partial = await createQuestV2ProofSubmission(
-        session.user.id,
-        params.questId,
-        serviceInputFor(body, upload),
-        commandId,
-      );
-      persisted = !('outcome' in partial) && partial.replayed !== true;
+      try {
+        const partial = await createQuestV2ProofSubmission(
+          session.user.id,
+          params.questId,
+          serviceInputFor(body, upload),
+          commandId,
+        );
+        persisted = !('outcome' in partial) && partial.replayed !== true;
+      } catch (error) {
+        await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
+        throw error;
+      }
     }
-    if (!persisted) await cleanupUploadedFiles(upload.uploaded);
+    if (!persisted) await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
     return mapUploadError(set, upload.error);
   }
 
+  let result: QuestV2ProofSubmissionOutcome;
   try {
-    const result = await createQuestV2ProofSubmission(
+    result = await createQuestV2ProofSubmission(
       session.user.id,
       params.questId,
       serviceInputFor(body, upload),
       commandId,
     );
-    if ('outcome' in result || result.replayed === true) await cleanupUploadedFiles(upload.uploaded);
-    if ('outcome' in result) return mapCommandError(set, result.outcome);
-    set.status = 201;
-    return apiSuccess(serializeSubmission(result));
   } catch (error) {
-    await cleanupUploadedFiles(upload.uploaded);
+    await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
     throw error;
   }
+  if ('outcome' in result || result.replayed === true) {
+    await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
+  }
+  if ('outcome' in result) return mapCommandError(set, result.outcome);
+  set.status = 201;
+  return apiSuccess(serializeSubmission(result));
 };
 
 export const editQuestV2ProofSubmissionController = async ({
@@ -296,38 +329,54 @@ export const editQuestV2ProofSubmissionController = async ({
     set.status = 400;
     return apiError('PROOF_FILES_CONFLICT', 'Use multipart files or existing file IDs, not both');
   }
-  const upload = await uploadFiles(session.user.id, body.files);
+  if (body.retryPosition !== undefined && (body.files?.length ?? 0) !== 1) {
+    set.status = 400;
+    return apiError('PROOF_RETRY_POSITION_INVALID', 'retryPosition requires exactly one multipart file');
+  }
+  if (body.retryPosition !== undefined && body.fileIds !== undefined) {
+    set.status = 400;
+    return apiError('PROOF_RETRY_POSITION_CONFLICT', 'retryPosition cannot be combined with existing file IDs');
+  }
+  const upload = await uploadFiles(session.user.id, body.files, body.retryPosition);
   const input = serviceInputFor(body, upload);
   if (upload.error) {
     let persisted = false;
     if (upload.uploaded.length + upload.failed.length > 0) {
-      const partial = await editQuestV2ProofSubmission(
-        session.user.id,
-        params.questId,
-        params.proofSubmissionId,
-        input,
-        commandId,
-      );
-      persisted = !('outcome' in partial) && partial.replayed !== true;
+      try {
+        const partial = await editQuestV2ProofSubmission(
+          session.user.id,
+          params.questId,
+          params.proofSubmissionId,
+          input,
+          commandId,
+        );
+        persisted = !('outcome' in partial) && partial.replayed !== true;
+      } catch (error) {
+        await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
+        throw error;
+      }
     }
-    if (!persisted) await cleanupUploadedFiles(upload.uploaded);
+    if (!persisted) await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
     return mapUploadError(set, upload.error);
   }
 
+  let result: QuestV2ProofSubmissionOutcome;
   try {
-    const result = await editQuestV2ProofSubmission(
+    result = await editQuestV2ProofSubmission(
       session.user.id,
       params.questId,
       params.proofSubmissionId,
       input,
       commandId,
     );
-    if ('outcome' in result || result.replayed === true) await cleanupUploadedFiles(upload.uploaded);
-    return commandResult(set, result);
   } catch (error) {
-    await cleanupUploadedFiles(upload.uploaded);
+    await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
     throw error;
   }
+  if ('outcome' in result || result.replayed === true) {
+    await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
+  }
+  return commandResult(set, result);
 };
 
 export const deleteQuestV2ProofSubmissionController = async ({

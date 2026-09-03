@@ -12,7 +12,7 @@ import {
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
 
-import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 
 import type { QuestTransaction } from './quest-work-chat.port';
 import { settleProofFreeQuestV2InTransaction } from './quest-settlement.service';
@@ -22,7 +22,10 @@ import {
   questV2States,
   type QuestV2State,
 } from './quest-v2.contract';
-import type { StoredQuestV2ProofFile } from './quest-proof-v2.storage';
+import {
+  questV2ProofStorage,
+  type StoredQuestV2ProofFile,
+} from './quest-proof-v2.storage';
 
 export const questV2ProofSubmissionOperationScope = 'quest.v2.proof-submission';
 
@@ -87,6 +90,7 @@ export type QuestV2ProofDraftInput = {
   storedFiles?: StoredQuestV2ProofFileInput[];
   failedFiles?: QuestV2ProofFailedFile[];
   fileFingerprints?: string[];
+  retryPosition?: number;
 };
 
 type ProofOwner = {
@@ -231,6 +235,131 @@ const sha256Json = async (value: object): Promise<string> => {
 };
 
 const idempotencyExpiry = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+const proofUploadCleanupOperation = 'cleanup';
+
+type QuestV2ProofUploadCleanupObject = Pick<StoredQuestV2ProofFile, 'bucket' | 'objectKey'>;
+
+type QuestV2ProofUploadCleanupManifest = {
+  cleanup: {
+    objects: QuestV2ProofUploadCleanupObject[];
+  };
+};
+
+export class QuestV2ProofUploadCleanupUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super('Proof file cleanup retry could not be recorded', { cause });
+    this.name = 'QuestV2ProofUploadCleanupUnavailableError';
+  }
+}
+
+const toQuestV2ProofUploadCleanupManifest = (
+  objects: QuestV2ProofUploadCleanupObject[],
+): QuestV2ProofUploadCleanupManifest => ({
+  cleanup: {
+    objects: objects.map(({ bucket, objectKey }) => ({ bucket, objectKey })),
+  },
+});
+
+const fromQuestV2ProofUploadCleanupManifest = (
+  value: unknown,
+): QuestV2ProofUploadCleanupManifest | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const cleanup = (value as { cleanup?: unknown }).cleanup;
+  if (!cleanup || typeof cleanup !== 'object' || Array.isArray(cleanup)) return undefined;
+  const objects = (cleanup as { objects?: unknown }).objects;
+  if (
+    !Array.isArray(objects) ||
+    objects.length === 0 ||
+    objects.some((object) => {
+      if (!object || typeof object !== 'object' || Array.isArray(object)) return true;
+      const objectValue = object as Partial<QuestV2ProofUploadCleanupObject>;
+      return (
+        typeof objectValue.bucket !== 'string' ||
+        objectValue.bucket.trim().length === 0 ||
+        typeof objectValue.objectKey !== 'string' ||
+        objectValue.objectKey.trim().length === 0
+      );
+    })
+  ) return undefined;
+  return {
+    cleanup: {
+      objects: objects as QuestV2ProofUploadCleanupObject[],
+    },
+  };
+};
+
+export const recordQuestV2ProofUploadCleanup = async (
+  memberId: string,
+  questId: string,
+  objects: QuestV2ProofUploadCleanupObject[],
+  now = new Date(),
+): Promise<void> => {
+  if (objects.length === 0) return;
+  try {
+    await db.insert(questV2ProofCommand).values({
+      key: `quest-v2-proof-upload-cleanup:${crypto.randomUUID()}`,
+      questId,
+      principalUserId: memberId,
+      operation: proofUploadCleanupOperation,
+      requestHash: await sha256Json({ memberId, questId, objects }),
+      resultData: toQuestV2ProofUploadCleanupManifest(objects),
+      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+    });
+  } catch (cause) {
+    throw new QuestV2ProofUploadCleanupUnavailableError(cause);
+  }
+};
+
+export const retryQuestV2ProofUploadCleanup = async (limit = 100): Promise<number> => {
+  const pending = await db
+    .select({
+      id: questV2ProofCommand.id,
+      resultData: questV2ProofCommand.resultData,
+    })
+    .from(questV2ProofCommand)
+    .where(and(
+      eq(questV2ProofCommand.operation, proofUploadCleanupOperation),
+      eq(questV2ProofCommand.processingStatus, 'PROCESSING'),
+      sql`${questV2ProofCommand.resultData} IS NOT NULL`,
+    ))
+    .orderBy(asc(questV2ProofCommand.id))
+    .limit(limit);
+
+  let retried = 0;
+  for (const record of pending) {
+    const manifest = fromQuestV2ProofUploadCleanupManifest(record.resultData);
+    if (!manifest) continue;
+    let failed = false;
+    for (const object of manifest.cleanup.objects) {
+      try {
+        await questV2ProofStorage.remove(object);
+      } catch (error) {
+        failed = true;
+        console.error('[quest-proof-upload-cleanup] Object deletion failed', {
+          error,
+          commandId: record.id,
+          bucket: object.bucket,
+          objectKey: object.objectKey,
+        });
+      }
+    }
+    if (failed) continue;
+    await db
+      .update(questV2ProofCommand)
+      .set({
+        processingStatus: 'COMPLETED',
+        completedAt: new Date(),
+        resultData: { cleanup: { objects: [] } },
+      })
+      .where(and(
+        eq(questV2ProofCommand.id, record.id),
+        eq(questV2ProofCommand.processingStatus, 'PROCESSING'),
+      ));
+    retried += 1;
+  }
+  return retried;
+};
 
 const isProofStatus = (value: string | null): value is QuestV2ProofStatus =>
   value !== null && proofStatuses.includes(value as QuestV2ProofStatus);
@@ -611,6 +740,7 @@ const requestHashFor = (
         failedFiles: input.fileFingerprints && input.fileFingerprints.length > 0
           ? null
           : input.failedFiles ?? null,
+        retryPosition: input.retryPosition ?? null,
       }
     : {},
 });
@@ -741,7 +871,10 @@ const mergeEditAttachments = async (
   submissionId: string,
   input: QuestV2ProofDraftInput,
   storedFiles: ReadyProofFile[],
-): Promise<{ readyFiles: ReadyProofFile[]; failedFiles: QuestV2ProofFailedFile[] }> => {
+): Promise<
+  | { readyFiles: ReadyProofFile[]; failedFiles: QuestV2ProofFailedFile[] }
+  | { outcome: 'invalid-files' }
+> => {
   const current = await attachmentRowsFor(transaction, submissionId);
   if (isInputFieldPresent(input, 'fileIds')) {
     const readyFiles = (input.fileIds ?? []).map((fileId, position) => ({ fileId, position }));
@@ -777,6 +910,10 @@ const mergeEditAttachments = async (
   const readyFiles = current
     .filter((attachment) => attachment.uploadStatus === 'PROOF_FILE_READY' && attachment.fileId !== null)
     .map((attachment) => ({ fileId: attachment.fileId!, position: attachment.position }));
+  if (
+    input.retryPosition !== undefined &&
+    !remainingFailures.some(({ position }) => position === input.retryPosition)
+  ) return { outcome: 'invalid-files' };
   const nextPosition = () => {
     for (let position = 0; position < maxProofFiles; position += 1) {
       if (!occupiedPositions.has(position)) {
@@ -786,12 +923,22 @@ const mergeEditAttachments = async (
     }
     return maxProofFiles;
   };
-  for (const stored of storedFiles) {
-    const retry = remainingFailures.shift();
+  for (const [index, stored] of storedFiles.entries()) {
+    const retry = input.retryPosition !== undefined && index === 0
+      ? remainingFailures.splice(
+          remainingFailures.findIndex(({ position }) => position === input.retryPosition),
+          1,
+        )[0]
+      : remainingFailures.shift();
     readyFiles.push({ fileId: stored.fileId, position: retry?.position ?? nextPosition() });
   }
-  const retriedFailures = (input.failedFiles ?? []).map((failed) => {
-    const retry = remainingFailures.shift();
+  const retriedFailures = (input.failedFiles ?? []).map((failed, index) => {
+    const retry = input.retryPosition !== undefined && index === 0
+      ? remainingFailures.splice(
+          remainingFailures.findIndex(({ position }) => position === input.retryPosition),
+          1,
+        )[0]
+      : remainingFailures.shift();
     return {
       ...failed,
       position: retry?.position ?? nextPosition(),
@@ -890,6 +1037,7 @@ export const createQuestV2ProofSubmission = async (
     if ('outcome' in checks) return fail(checks.outcome);
     const description = normalizedDescription(input.description);
     if ('outcome' in description) return fail(description.outcome);
+    if (input.retryPosition !== undefined) return fail('invalid-files');
     const inputFileIds = input.fileIds ?? [];
     const uploadedFiles = input.storedFiles ?? [];
     const failedFiles = input.failedFiles ?? [];
@@ -974,17 +1122,23 @@ export const editQuestV2ProofSubmission = async (
       : { value: submission.description };
     if ('outcome' in description) return fail(description.outcome);
     const uploadedFiles = input.storedFiles ?? [];
+    const failedFiles = input.failedFiles ?? [];
+    if (
+      input.retryPosition !== undefined &&
+      uploadedFiles.length + failedFiles.length !== 1
+    ) return fail('invalid-files');
     const fileIdsToValidate = isInputFieldPresent(input, 'fileIds') ? input.fileIds ?? [] : [];
     const preparedFiles = await prepareFileIds(
       transaction,
       memberId,
       fileIdsToValidate,
       uploadedFiles,
-      input.failedFiles ?? [],
+      failedFiles,
     );
     if ('outcome' in preparedFiles) return fail(preparedFiles.outcome);
     const readyStoredFiles = await persistStoredFiles(transaction, memberId, preparedFiles.storedFiles);
     const mergedFiles = await mergeEditAttachments(transaction, submission.id, input, readyStoredFiles);
+    if ('outcome' in mergedFiles) return fail(mergedFiles.outcome);
     if (
       mergedFiles.readyFiles.length + mergedFiles.failedFiles.length > maxProofFiles ||
       new Set(mergedFiles.readyFiles.map(({ position }) => position)).size !== mergedFiles.readyFiles.length ||

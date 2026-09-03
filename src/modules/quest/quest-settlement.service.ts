@@ -232,7 +232,15 @@ const requireQuestReward = (rewardSatang: number | null): number => {
   return rewardSatang;
 };
 
-const settleWorkers = async (tx: QuestTransaction, ownerUserId: string, reservationId: string, workers: { workerId: string; amountSatang: number }[], feeFor: (amount: number) => Promise<Satang | 0>, reference: string) => {
+const settleWorkers = async (
+  tx: QuestTransaction,
+  ownerUserId: string,
+  reservationId: string,
+  workers: { workerId: string; amountSatang: number }[],
+  feeFor: (amount: number) => Promise<Satang | 0>,
+  reference: string,
+  platformFeeValidation: 'POLICY' | 'QUEST_ESCROW_SNAPSHOT' = 'POLICY',
+) => {
   let paid = 0;
   for (const [index, worker] of workers.entries()) {
     const amount = positiveSatang(worker.amountSatang);
@@ -244,6 +252,7 @@ const settleWorkers = async (tx: QuestTransaction, ownerUserId: string, reservat
       recipientUserId: worker.workerId,
       recipientAmountSatang: amount,
       platformFeeSatang: fee || undefined,
+      platformFeeValidation,
     });
     paid += worker.amountSatang;
   }
@@ -376,6 +385,16 @@ export const settleProofFreeQuestV2InTransaction = async (
   }
   const payoutRewardSatang = underfilledConsent?.rewardSatang ?? rewardSatang;
   const underfilledFeePoolSatang = expectedEscrow - rewardSatang * current.headcount;
+  if (
+    underfilledConsents.length > 0 &&
+    (
+      underfilledConsents.length < workers.length ||
+      underfilledConsents.reduce((total, consent) => total + consent.rewardSatang, 0) !== rewardSatang * current.headcount ||
+      underfilledFeePoolSatang < 0
+    )
+  ) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The underfilled Quest Escrow allocation is inconsistent.');
+  }
   const payoutFee = underfilledConsents.length === 0
     ? fee
     : satang(
@@ -411,6 +430,7 @@ export const settleProofFreeQuestV2InTransaction = async (
     completedWorkerId === undefined
       ? `quest-v2-complete:${questId}`
       : `quest-v2-complete:${questId}:${completedWorkerId}`,
+    underfilledConsents.length === 0 ? 'POLICY' : 'QUEST_ESCROW_SNAPSHOT',
   );
   if (completedWorkerId !== undefined) {
     const assignment = partialWorker;

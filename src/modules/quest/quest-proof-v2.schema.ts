@@ -33,6 +33,11 @@ const proofDraftProperties = {
   description: t.Optional(description),
   fileIds: t.Optional(fileIds),
   files: t.Optional(t.Files({ maxItems: 5 })),
+  retryPosition: t.Optional(t.Integer({
+    minimum: 0,
+    maximum: 4,
+    description: 'Position of the one failed Proof file being retried',
+  })),
 };
 
 export const questV2ProofSubmissionCreateSchema = t.Object(proofDraftProperties, {
