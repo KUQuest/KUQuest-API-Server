@@ -42,6 +42,7 @@ export { questV2Route } from './quest-v2.route';
 export { questAssignmentV2Route } from './quest-assignment-v2.route';
 export { questCandidateV2Route } from './quest-candidate-v2.route';
 export { questCandidateTeamV2Route } from './quest-candidate-team-v2.route';
+export { questProofV2Route } from './quest-proof-v2.route';
 export {
   createQuestV2CandidateApplication,
   getQuestV2CandidateApplication,
@@ -68,6 +69,25 @@ export type {
   QuestV2AssignmentOutcome,
   QuestV2AssignmentReadOutcome,
 } from './quest-assignment-v2.service';
+export {
+  confirmQuestV2Completion,
+  createQuestV2ProofSubmission,
+  deleteQuestV2ProofSubmission,
+  editQuestV2ProofSubmission,
+  listQuestV2ProofSubmissions,
+  questV2ProofSubmissionOperationScope,
+  submitQuestV2ProofSubmission,
+} from './quest-proof-v2.service';
+export type {
+  QuestV2CompletionConfirmation,
+  QuestV2CompletionConfirmationOutcome,
+  QuestV2ProofDraftInput,
+  QuestV2ProofStatus,
+  QuestV2ProofSubmission,
+  QuestV2ProofSubmissionDeleteOutcome,
+  QuestV2ProofSubmissionListOutcome,
+  QuestV2ProofSubmissionOutcome,
+} from './quest-proof-v2.service';
 export {
   decideQuestV2Underfilled,
   detectQuestV2Underfilled,

@@ -13,6 +13,7 @@ import {
   questAssignmentV2Route,
   questCandidateV2Route,
   questCandidateTeamV2Route,
+  questProofV2Route,
   questV2Route,
 } from '@/modules/quest';
 import { candidateInquiryRoute, workChatMembershipWriter, workChatRoute } from '@/modules/work-chat';
@@ -68,6 +69,7 @@ export const createApp = () => {
     .use(questAssignmentV2Route)
     .use(questCandidateV2Route)
     .use(questCandidateTeamV2Route)
+    .use(questProofV2Route)
     .use(questV2Route)
     .use(questRoute)
     .use(adminQuestRoute)

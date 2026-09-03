@@ -567,6 +567,100 @@ export const questCandidateTeamV2SubmissionFile = pgTable(
   ],
 );
 
+export const questV2ProofSubmission = pgTable(
+  'quest_v2_proof_submission',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    workerId: uuid('worker_id').references(() => authUser.id),
+    teamId: uuid('team_id').references(() => questCandidateTeamV2.id),
+    submittedByUserId: uuid('submitted_by_user_id')
+      .notNull()
+      .references(() => authUser.id),
+    description: varchar('description', { length: 1000 }),
+    submissionStatus: varchar('submission_status', { length: 32 }).$type<
+      'PROOF_PENDING' | 'PROOF_APPROVED' | 'PROOF_NOT_APPROVED'
+    >(),
+    sentAt: time('sent_at'),
+    createdAt: time('created_at').defaultNow().notNull(),
+    updatedAt: time('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    check(
+      'quest_v2_proof_submission_owner_check',
+      sql`num_nonnulls(${table.workerId}, ${table.teamId}) = 1`,
+    ),
+    check(
+      'quest_v2_proof_submission_status_check',
+      sql`${table.submissionStatus} IS NULL OR ${table.submissionStatus} IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED')`,
+    ),
+    check(
+      'quest_v2_proof_submission_draft_check',
+      sql`(${table.submissionStatus} IS NULL) = (${table.sentAt} IS NULL)`,
+    ),
+    check(
+      'quest_v2_proof_submission_description_check',
+      sql`${table.description} IS NULL OR btrim(${table.description}) <> ''`,
+    ),
+    uniqueIndex('quest_v2_proof_submission_one_worker_uidx').on(table.questId, table.workerId),
+    uniqueIndex('quest_v2_proof_submission_one_team_uidx').on(table.questId, table.teamId),
+    index('quest_v2_proof_submission_quest_idx').on(table.questId),
+    index('quest_v2_proof_submission_worker_idx').on(table.workerId),
+    index('quest_v2_proof_submission_team_idx').on(table.teamId),
+    index('quest_v2_proof_submission_status_idx').on(table.submissionStatus),
+  ],
+);
+
+export const questV2ProofSubmissionFile = pgTable(
+  'quest_v2_proof_submission_file',
+  {
+    proofSubmissionId: uuid('proof_submission_id')
+      .notNull()
+      .references(() => questV2ProofSubmission.id, { onDelete: 'cascade' }),
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => file.id),
+    position: integer('position').default(0).notNull(),
+    attachedAt: time('attached_at').defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.proofSubmissionId, table.fileId] }),
+    unique('quest_v2_proof_submission_file_position_key').on(
+      table.proofSubmissionId,
+      table.position,
+    ),
+    check('quest_v2_proof_submission_file_position_check', sql`${table.position} >= 0 AND ${table.position} < 5`),
+    index('quest_v2_proof_submission_file_submission_idx').on(table.proofSubmissionId),
+  ],
+);
+
+export const questV2CompletionConfirmation = pgTable(
+  'quest_v2_completion_confirmation',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    workerId: uuid('worker_id').references(() => authUser.id),
+    teamId: uuid('team_id').references(() => questCandidateTeamV2.id),
+    confirmedByUserId: uuid('confirmed_by_user_id')
+      .notNull()
+      .references(() => authUser.id),
+    confirmedAt: time('confirmed_at').defaultNow().notNull(),
+  },
+  (table) => [
+    check(
+      'quest_v2_completion_confirmation_owner_check',
+      sql`num_nonnulls(${table.workerId}, ${table.teamId}) = 1`,
+    ),
+    unique('quest_v2_completion_confirmation_worker_key').on(table.questId, table.workerId),
+    unique('quest_v2_completion_confirmation_team_key').on(table.questId, table.teamId),
+    index('quest_v2_completion_confirmation_quest_idx').on(table.questId),
+  ],
+);
+
 export const questTeamInvitation = pgTable(
   'quest_team_invitation',
   {
@@ -940,6 +1034,8 @@ export const questRelations = relations(quest, ({ one, many }) => ({
   candidateSelectionCommands: many(questCandidateSelectionCommand),
   proofSubmissions: many(proofSubmission),
   completionConfirmations: many(questCompletionConfirmation),
+  proofSubmissionsV2: many(questV2ProofSubmission),
+  completionConfirmationsV2: many(questV2CompletionConfirmation),
   reviews: many(review),
 }));
 
@@ -1076,6 +1172,8 @@ export const questCandidateTeamV2Relations = relations(questCandidateTeamV2, ({ 
   }),
   members: many(questCandidateTeamV2Member),
   submissionFiles: many(questCandidateTeamV2SubmissionFile),
+  proofSubmissions: many(questV2ProofSubmission),
+  completionConfirmations: many(questV2CompletionConfirmation),
 }));
 
 export const questCandidateTeamV2MemberRelations = relations(questCandidateTeamV2Member, ({ one }) => ({
@@ -1097,6 +1195,56 @@ export const questCandidateTeamV2SubmissionFileRelations = relations(questCandid
   file: one(file, {
     fields: [questCandidateTeamV2SubmissionFile.fileId],
     references: [file.id],
+  }),
+}));
+
+export const questV2ProofSubmissionRelations = relations(questV2ProofSubmission, ({ one, many }) => ({
+  quest: one(quest, {
+    fields: [questV2ProofSubmission.questId],
+    references: [quest.id],
+  }),
+  worker: one(authUser, {
+    fields: [questV2ProofSubmission.workerId],
+    references: [authUser.id],
+  }),
+  team: one(questCandidateTeamV2, {
+    fields: [questV2ProofSubmission.teamId],
+    references: [questCandidateTeamV2.id],
+  }),
+  submittedByUser: one(authUser, {
+    fields: [questV2ProofSubmission.submittedByUserId],
+    references: [authUser.id],
+  }),
+  files: many(questV2ProofSubmissionFile),
+}));
+
+export const questV2ProofSubmissionFileRelations = relations(questV2ProofSubmissionFile, ({ one }) => ({
+  proofSubmission: one(questV2ProofSubmission, {
+    fields: [questV2ProofSubmissionFile.proofSubmissionId],
+    references: [questV2ProofSubmission.id],
+  }),
+  file: one(file, {
+    fields: [questV2ProofSubmissionFile.fileId],
+    references: [file.id],
+  }),
+}));
+
+export const questV2CompletionConfirmationRelations = relations(questV2CompletionConfirmation, ({ one }) => ({
+  quest: one(quest, {
+    fields: [questV2CompletionConfirmation.questId],
+    references: [quest.id],
+  }),
+  worker: one(authUser, {
+    fields: [questV2CompletionConfirmation.workerId],
+    references: [authUser.id],
+  }),
+  team: one(questCandidateTeamV2, {
+    fields: [questV2CompletionConfirmation.teamId],
+    references: [questCandidateTeamV2.id],
+  }),
+  confirmedByUser: one(authUser, {
+    fields: [questV2CompletionConfirmation.confirmedByUserId],
+    references: [authUser.id],
   }),
 }));
 
