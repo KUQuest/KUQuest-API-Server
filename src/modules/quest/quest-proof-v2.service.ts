@@ -1712,6 +1712,19 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
       'ASSIGNMENT_COMPLETED',
       input.now,
     );
+    await recordAudit(transaction, {
+      ...auditActorFor(input.actor),
+      action: 'QUEST_REWARD_SETTLED',
+      resourceType: 'QUEST_REWARD',
+      resourceId: input.questId,
+      oldValue: { state: 'QUEST_REWARD_HELD' },
+      newValue: {
+        state: 'QUEST_REWARD_SETTLED',
+        paidSatang: settlement.paidSatang,
+        assignmentIds: settlement.completedAssignmentIds,
+      },
+      createdAt: input.now,
+    });
     if (setup.current.questState !== questStatus) {
       await recordAudit(transaction, {
         ...auditActorFor(input.actor),
@@ -1737,7 +1750,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
     const evidenceReferences = attachments
       .filter(({ uploadStatus, fileId }) => uploadStatus === 'PROOF_FILE_READY' && fileId !== null)
       .map(({ fileId }) => fileId!);
-    await transaction.insert(adminReviewItem).values({
+    const [reviewItem] = await transaction.insert(adminReviewItem).values({
       questId: input.questId,
       assignmentId: subject.assignmentId,
       proofSubmissionId: proof.id,
@@ -1746,6 +1759,23 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
       teamId: subject.teamId,
       reason: normalizedReason.reason!,
       evidenceReferences,
+      createdAt: input.now,
+    }).returning({ id: adminReviewItem.id });
+    if (!reviewItem) throw new Error('Admin Review Item could not be created');
+    await recordAudit(transaction, {
+      ...auditActorFor(input.actor),
+      action: 'ADMIN_REVIEW_ITEM_CREATED',
+      resourceType: 'ADMIN_REVIEW_ITEM',
+      resourceId: reviewItem.id,
+      newValue: {
+        questId: input.questId,
+        assignmentId: subject.assignmentId,
+        proofSubmissionId: proof.id,
+        workerId: subject.workerId,
+        teamId: subject.teamId,
+        evidenceReferences,
+      },
+      reason: normalizedReason.reason,
       createdAt: input.now,
     });
     await recordAssignmentAudits(
