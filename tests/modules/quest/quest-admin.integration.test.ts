@@ -12,6 +12,7 @@ import {
   questEditHistory,
   questEditRequest,
   questEditRequestResponse,
+  questLocation,
   questTeam,
   questTeamMember,
   questV2EditRequest,
@@ -132,6 +133,10 @@ beforeAll(async () => {
     rewardSatang: 1_000,
     tagId,
     startTime: new Date('2030-06-03T00:00:00.000Z'),
+  });
+  await db.insert(questLocation).values({
+    questId: detailQuestId,
+    label: 'Engineering Building',
   });
 
   applicationId = randomUUID();
@@ -355,6 +360,7 @@ describe('Admin Quest API routes', () => {
       questStatus: 'QUEST_IN_PROGRESS',
       description: 'Full facet quest for Admin detail read.',
       hirer: expect.objectContaining({ id: hirerId }),
+      locations: [{ label: 'Engineering Building' }],
     });
     expect(body.data.candidates.applications).toEqual([
       expect.objectContaining({
