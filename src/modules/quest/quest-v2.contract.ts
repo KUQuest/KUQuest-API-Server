@@ -172,6 +172,7 @@ export type QuestV2UnderfilledResolutionCode = (typeof questV2UnderfilledResolut
 export type QuestV2CanonicalQuest = {
   id: string;
   version: number;
+  hiddenAt: string | null;
   title: string;
   description: string | null;
   condition: {

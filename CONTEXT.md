@@ -222,8 +222,8 @@ The current Hirer or an Active Worker. Only Accepted Participants have current W
 _Avoid_: Candidate, departed Worker
 
 **Quest**:
-One bounded agreement for work, owned by one Hirer and progressing through its lifecycle. Target lifecycle and `dueAt` rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
-_Avoid_: Job, task
+One bounded agreement for work, owned by one Hirer and progressing through its lifecycle. Target lifecycle and `dueAt` rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`. `/api/v2/quests/*` is the canonical Quest API contract. `/api/v1/quests/*` is deprecated: existing integrations keep working, but do not build new work against it, and do not treat its shape as canonical.
+_Avoid_: Job, task; building new Quest work against `/api/v1/quests/*`.
 
 **Quest Image**:
 An optional ordered image in a Quest's detail gallery. The `Hirer` owns it
@@ -380,7 +380,7 @@ An immutable record of an Admin's decision to dismiss, hide, or restore a Report
 _Avoid_: Reporter Entry, Admin Action
 
 **Admin Action**:
-An immutable audit record of an Admin's Work Chat evidence access or moderation operation. It records the action and result for the affected domain records without storing Message text, file bytes, or signed URLs.
+An immutable audit record of an Admin's command or Work Chat evidence access or moderation operation. It records the action and result for the affected domain records without storing Message text, file bytes, or signed URLs.
 _Avoid_: Reporter Entry, Moderation Decision
 
 **Admin Review Item**:

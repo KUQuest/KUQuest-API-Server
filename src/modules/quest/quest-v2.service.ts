@@ -26,6 +26,7 @@ import {
   and,
   asc,
   eq,
+  exists,
   gt,
   gte,
   inArray,
@@ -290,6 +291,7 @@ export type QuestV2ImageRemoveOutcome =
 type QuestV2Row = {
   id: string;
   version: number;
+  hiddenAt: Date | null;
   title: string;
   description: string | null;
   v2Mode: QuestV2Mode | null;
@@ -351,6 +353,7 @@ const isCompleteQuestV2DiscoveryRow = (
 const questV2RowSelection = {
   id: quest.id,
   version: quest.version,
+  hiddenAt: quest.hiddenAt,
   title: quest.title,
   description: quest.description,
   v2Mode: quest.v2Mode,
@@ -724,6 +727,7 @@ const buildCanonicalQuest = async (
   return {
     id: row.id,
     version: row.version,
+    hiddenAt: row.hiddenAt?.toISOString() ?? null,
     title: row.title,
     description: row.description,
     condition: { items: conditionItems },
@@ -2025,6 +2029,7 @@ const publishQuestV2InTransaction = async (
       platformFeeBps: check.platformFeeBps,
       platformFeePerWorkerSatang: check.platformFeeSatang,
       questEscrowSatang: check.escrowRequirementSatang,
+      version: sql`${quest.version} + 1`,
       updatedAt: publishedAt,
     })
     .where(
@@ -2426,10 +2431,22 @@ const activeWorkerCountExpression = sql<number>`(
     AND ${questAssignment.assignmentStatus} = ${assignmentStatus.active}
 )`;
 
-const questV2PublicReadConditions = (userId: string) => [
+const activeQuestAssignmentAccess = (userId: string) => exists(sql`(
+  select 1
+  from quest_assignment a
+  where a.quest_id = ${quest.id}
+    and a.worker_id = ${userId}
+    and a.assignment_status = ${assignmentStatus.active}
+)`);
+
+const questV2PublicReadConditions = (userId: string, includeActiveAssignment = false) => [
   eq(quest.apiVersion, questApiVersion.v2),
-  eq(quest.questStatus, questStatus.open),
-  isNull(quest.hiddenAt),
+  includeActiveAssignment
+    ? or(
+        and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
+        activeQuestAssignmentAccess(userId),
+      )
+    : and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
   ne(quest.hirerId, userId),
   isNotNull(quest.rewardSatang),
   isNotNull(quest.v2Mode),
@@ -2616,8 +2633,8 @@ export const getPublicQuestV2Detail = async (
       tagName: tag.name,
       v2Mode: quest.v2Mode,
       v2Participation: quest.v2Participation,
-      questStatus: quest.questStatus,
       headcount: quest.headcount,
+      questStatus: quest.questStatus,
       activeWorkerCount: activeWorkerCountExpression,
       startTime: quest.startTime,
       dueAt: quest.dueAt,
@@ -2628,7 +2645,7 @@ export const getPublicQuestV2Detail = async (
     .from(quest)
     .innerJoin(authUser, eq(quest.hirerId, authUser.id))
     .leftJoin(tag, eq(quest.tagId, tag.id))
-    .where(and(eq(quest.id, questId), ...questV2PublicReadConditions(userId)))
+    .where(and(eq(quest.id, questId), ...questV2PublicReadConditions(userId, true)))
     .limit(1);
 
   if (!row) return undefined;

@@ -607,6 +607,7 @@ export const questV2ImageSchema = t.Object({
 export const questV2CanonicalQuestSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   version: t.Integer({ minimum: 1 }),
+  hiddenAt: t.Nullable(t.String({ format: 'date-time' })),
   title: t.String(),
   description: t.Nullable(t.String()),
   condition: t.Object({ items: t.Array(questV2ConditionItemSchema, { minItems: 1 }) }),

@@ -351,7 +351,7 @@ describe('Quest API v2 Hirer journey', () => {
       expect(published.data.quest).toMatchObject({
         id: created.data.id,
         state: 'QUEST_OPEN',
-        version: 2,
+        version: 3,
         title: 'Edited journey Quest',
         mode,
         participation,
@@ -465,7 +465,7 @@ describe('Quest API v2 Hirer journey', () => {
     expect(detail.title).toBe(
       editResponse.status === 200 ? 'Race edited Quest' : 'Race source Quest',
     );
-    expect(detail.version).toBe(editResponse.status === 200 ? 2 : 1);
+    expect(detail.version).toBe(editResponse.status === 200 ? 3 : 2);
 
     const reservations = await db
       .select({ id: walletFundingReservation.id })

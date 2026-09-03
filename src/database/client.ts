@@ -1,5 +1,6 @@
 import { env } from '@/config/env';
 import * as academicSchema from '@/database/schema/academic.schema';
+import * as adminSchema from '@/database/schema/admin.schema';
 import * as authSchema from '@/database/schema/auth.schema';
 import * as fileSchema from '@/database/schema/file.schema';
 import * as paymentSchema from '@/database/schema/payment.schema';
@@ -14,6 +15,7 @@ import postgres from 'postgres';
 
 const schema = {
   ...academicSchema,
+  ...adminSchema,
   ...authSchema,
   ...fileSchema,
   ...paymentSchema,
