@@ -494,7 +494,7 @@ export const questCandidateTeamV2 = pgTable(
     leaderId: uuid('leader_id')
       .notNull()
       .references(() => authUser.id),
-    name: varchar('name', { length: 100 }).default('Candidate Team').notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
     headcount: integer('headcount').notNull(),
     state: varchar('state', { length: 32 })
       .default('TEAM_FORMING')

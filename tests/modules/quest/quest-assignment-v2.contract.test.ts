@@ -27,6 +27,7 @@ const routeContracts = [
   ['post', '/api/v2/quests/{questId}/teams', 'createQuestCandidateTeamV2', [201, 400, 401, 404, 409, 503], true, true],
   ['get', '/api/v2/quests/{questId}/teams', 'listQuestCandidateTeamsV2', [200, 401, 404, 500], true, false],
   ['get', '/api/v2/quests/{questId}/teams/{teamId}', 'getQuestCandidateTeamV2', [200, 401, 404, 500], true, false],
+  ['patch', '/api/v2/quests/{questId}/teams/{teamId}', 'updateQuestCandidateTeamV2', [200, 400, 401, 404, 409, 503], true, true],
   ['post', '/api/v2/quests/{questId}/teams/{teamId}/join', 'joinQuestCandidateTeamV2', [200, 400, 401, 404, 409, 503], true, true],
   ['post', '/api/v2/quests/{questId}/teams/{teamId}/leave', 'leaveQuestCandidateTeamV2', [200, 400, 401, 404, 409, 503], true, true],
   ['delete', '/api/v2/quests/{questId}/teams/{teamId}/members/{memberId}', 'removeQuestCandidateTeamMemberV2', [200, 400, 401, 404, 409, 503], true, true],
@@ -41,16 +42,17 @@ const bodyPaths = new Set([
   'post /api/v2/quests/{questId}/teams',
   'post /api/v2/quests/{questId}/teams/{teamId}/join',
   'post /api/v2/quests/{questId}/teams/{teamId}/submit',
+  'patch /api/v2/quests/{questId}/teams/{teamId}',
 ]);
 
 describe('Quest Assignment API v2 contract', () => {
-  it('publishes the complete 20-route contract with validation and canonical schemas', async () => {
+  it('publishes the complete 21-route contract with validation and canonical schemas', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
     const document = await response.json() as {
       paths: Record<string, Record<string, OpenApiOperation>>;
     };
 
-    expect(routeContracts).toHaveLength(20);
+    expect(routeContracts).toHaveLength(21);
     for (const [method, path, operationId, statuses, hasQuestId, requiresIdempotency] of routeContracts) {
       const operation = document.paths[path]?.[method];
       expect(operation).toBeDefined();

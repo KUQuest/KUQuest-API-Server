@@ -471,6 +471,44 @@ describe('Quest Candidate Team API v2', () => {
     expect(storedTeam?.name).toBe('Renamed Team');
   });
 
+  it('replays a completed Candidate Team command from a pre-name snapshot', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId, candidate.id, 2);
+    const commandId = 'candidate-team-v2-legacy-snapshot-join';
+
+    const joined = await joinTeam(questId, team.id, secondCandidate.id, team.joinCode, commandId);
+    expect(joined.status).toBe(200);
+
+    const [storedCommand] = await db
+      .select({ id: walletIdempotencyKey.id, resultData: walletIdempotencyKey.resultData })
+      .from(walletIdempotencyKey)
+      .where(and(
+        eq(walletIdempotencyKey.principalUserId, secondCandidate.id),
+        eq(walletIdempotencyKey.operationScope, 'quest.v2.candidate-team.join'),
+        eq(walletIdempotencyKey.key, commandId),
+      ));
+    expect(storedCommand?.resultData).toBeDefined();
+    const legacySnapshot = { ...(storedCommand?.resultData as Record<string, unknown>) };
+    delete legacySnapshot.name;
+    await db
+      .update(walletIdempotencyKey)
+      .set({ resultData: legacySnapshot })
+      .where(eq(walletIdempotencyKey.id, storedCommand!.id));
+
+    const replay = await joinTeam(questId, team.id, secondCandidate.id, team.joinCode, commandId);
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data).toMatchObject({
+      id: team.id,
+      name: 'Candidate Team',
+      members: [
+        expect.objectContaining({ memberId: candidate.id }),
+        expect.objectContaining({ memberId: secondCandidate.id }),
+      ],
+    });
+  });
+
   it('rejects Candidate Team name updates outside the forming Team Leader lifecycle without changing data', async () => {
     if (!postgresAvailable) return;
     authenticate();

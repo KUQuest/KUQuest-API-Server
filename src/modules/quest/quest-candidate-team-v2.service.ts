@@ -56,6 +56,7 @@ export const questV2CandidateTeamSelectOperationScope =
 
 const dayInMilliseconds = 24 * 60 * 60 * 1000;
 const maxAttachmentSizeBytes = 10 * 1024 * 1024;
+const legacyCandidateTeamName = 'Candidate Team';
 const joinCodeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const joinCodeLength = 8;
 const allowedAttachmentContentTypes = new Set([
@@ -417,7 +418,7 @@ const teamFromSnapshot = (value: unknown): CandidateTeam | undefined => {
     typeof snapshot.id !== 'string' ||
     typeof snapshot.questId !== 'string' ||
     typeof snapshot.leaderId !== 'string' ||
-    typeof snapshot.name !== 'string' ||
+    (snapshot.name !== undefined && typeof snapshot.name !== 'string') ||
     typeof snapshot.headcount !== 'number' ||
     typeof snapshot.state !== 'string' ||
     (snapshot.joinCode !== null && typeof snapshot.joinCode !== 'string') ||
@@ -467,7 +468,7 @@ const teamFromSnapshot = (value: unknown): CandidateTeam | undefined => {
     id: snapshot.id,
     questId: snapshot.questId,
     leaderId: snapshot.leaderId,
-    name: snapshot.name,
+    name: typeof snapshot.name === 'string' ? snapshot.name : legacyCandidateTeamName,
     headcount: snapshot.headcount,
     state: snapshot.state,
     joinCode: snapshot.joinCode,
