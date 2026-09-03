@@ -51,6 +51,8 @@ export type SettleFundingReservationInput = {
   recipientUserId: string;
   recipientAmountSatang: Satang;
   platformFeeSatang?: Satang;
+  /** Use only when a Quest allocates the already snapshotted fee pool. */
+  platformFeeValidation?: 'POLICY' | 'QUEST_ESCROW_SNAPSHOT';
 };
 
 const requireOpaqueReference = (value: string, field: string) => {
@@ -607,7 +609,18 @@ export const settleFundingReservation = async (
     recipientAmountSatang,
     policy.platformFeeBps,
   );
-  if (platformFeeSatang > 0 && platformFeeSatang !== snapshottedPlatformFeeSatang) {
+  const platformFeeValidation = input.platformFeeValidation ?? 'POLICY';
+  if (platformFeeValidation === 'QUEST_ESCROW_SNAPSHOT' && reservationSnapshot.callerScope !== 'quest') {
+    throw new MoneyDomainError(
+      'PLATFORM_FEE_MISMATCH',
+      'Snapshotted Quest Platform Fee allocation requires a Quest Funding Reservation.',
+    );
+  }
+  if (
+    platformFeeValidation === 'POLICY' &&
+    platformFeeSatang > 0 &&
+    platformFeeSatang !== snapshottedPlatformFeeSatang
+  ) {
     throw new MoneyDomainError(
       'PLATFORM_FEE_MISMATCH',
       'Platform Fee does not match the Funding Reservation Money Policy.',
@@ -623,6 +636,7 @@ export const settleFundingReservation = async (
     recipientUserId: input.recipientUserId,
     recipientAmountSatang,
     platformFeeSatang,
+    platformFeeValidation,
   });
   const [createdIdempotency] = await transaction
     .insert(walletIdempotencyKey)
