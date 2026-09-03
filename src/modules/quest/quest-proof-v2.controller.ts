@@ -1,4 +1,5 @@
 import type { AuthedContext } from '@/modules/auth';
+import { MoneyDomainError } from '@/modules/wallet';
 import {
   UnsupportedWorkChatAttachmentError,
   WorkChatAttachmentTooLargeError,
@@ -21,14 +22,17 @@ import {
   submitQuestV2ProofSubmission,
   type QuestV2CompletionConfirmationOutcome,
   type QuestV2ProofDraftInput,
+  type QuestV2ProofFailedFile,
   type QuestV2ProofSubmission,
   type QuestV2ProofSubmissionListOutcome,
   type QuestV2ProofSubmissionOutcome,
+  type StoredQuestV2ProofFileInput,
 } from './quest-proof-v2.service';
 import {
   questV2ProofStorage,
   type StoredQuestV2ProofFile,
 } from './quest-proof-v2.storage';
+import { WorkChatTransitionError } from './quest-work-chat.port';
 
 type DraftBody = QuestV2ProofSubmissionCreateInput | QuestV2ProofSubmissionEditInput;
 
@@ -101,6 +105,9 @@ const mapCommandError = (
     set.status = 400;
     return apiError('PROOF_FILES_REQUIRED', 'A sent Proof Submission must contain at least one file');
   }
+  if (outcome === 'files-failed') {
+    return conflict(set, 'PROOF_FILES_UPLOAD_FAILED', 'Retry or remove every failed Proof file before sending');
+  }
   if (outcome === 'invalid-files') {
     set.status = 400;
     return apiError('PROOF_FILES_INVALID', 'Proof files are missing, deleted, unauthorized, or invalid');
@@ -126,17 +133,47 @@ const mapCommandError = (
   return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
 };
 
+const fingerprintFor = async (input: File): Promise<string> => {
+  const digest = await crypto.subtle.digest('SHA-256', await input.arrayBuffer());
+  return Array.from(
+    new Uint8Array(digest),
+    (byte) => byte.toString(16).padStart(2, '0'),
+  ).join('');
+};
+
+const failureCodeFor = (error: unknown): string => {
+  if (error instanceof WorkChatAttachmentTooLargeError) return 'PROOF_FILE_TOO_LARGE';
+  if (error instanceof UnsupportedWorkChatAttachmentError) return 'PROOF_FILE_TYPE_NOT_SUPPORTED';
+  if (error instanceof WorkChatAttachmentUploadError) return 'PROOF_FILE_UPLOAD_FAILED';
+  return 'PROOF_FILE_UPLOAD_FAILED';
+};
+
 const uploadFiles = async (
   memberId: string,
   files: File[] = [],
-): Promise<{ uploaded: StoredQuestV2ProofFile[]; error?: unknown }> => {
-  const uploaded: StoredQuestV2ProofFile[] = [];
-  try {
-    for (const input of files) uploaded.push(await questV2ProofStorage.upload(memberId, input));
-    return { uploaded };
-  } catch (error) {
-    return { uploaded, error };
+): Promise<{
+  uploaded: StoredQuestV2ProofFileInput[];
+  failed: QuestV2ProofFailedFile[];
+  fingerprints: string[];
+  error?: unknown;
+}> => {
+  const uploaded: StoredQuestV2ProofFileInput[] = [];
+  const failed: QuestV2ProofFailedFile[] = [];
+  const fingerprints: string[] = [];
+  let firstError: unknown;
+  for (const [position, input] of files.entries()) {
+    fingerprints.push(await fingerprintFor(input));
+    try {
+      uploaded.push({
+        ...(await questV2ProofStorage.upload(memberId, input)),
+        position,
+      });
+    } catch (error) {
+      failed.push({ position, failureCode: failureCodeFor(error) });
+      firstError ??= error;
+    }
   }
+  return { uploaded, failed, fingerprints, error: firstError };
 };
 
 const cleanupUploadedFiles = async (files: StoredQuestV2ProofFile[]) => {
@@ -161,12 +198,21 @@ const mapUploadError = (set: AuthedContext['set'], error: unknown) => {
 
 const serviceInputFor = (
   body: DraftBody,
-  storedFiles: StoredQuestV2ProofFile[],
-): QuestV2ProofDraftInput => ({
-  description: body.description,
-  fileIds: body.fileIds,
-  storedFiles,
-});
+  upload: {
+    uploaded: StoredQuestV2ProofFileInput[];
+    failed: QuestV2ProofFailedFile[];
+    fingerprints: string[];
+  },
+): QuestV2ProofDraftInput => {
+  const input: QuestV2ProofDraftInput = {
+    storedFiles: upload.uploaded,
+    failedFiles: upload.failed,
+    fileFingerprints: upload.fingerprints,
+  };
+  if (Object.prototype.hasOwnProperty.call(body, 'description')) input.description = body.description;
+  if (Object.prototype.hasOwnProperty.call(body, 'fileIds')) input.fileIds = body.fileIds;
+  return input;
+};
 
 const commandResult = (
   set: AuthedContext['set'],
@@ -193,11 +239,11 @@ export const createQuestV2ProofSubmissionController = async ({
   const upload = await uploadFiles(session.user.id, body.files);
   if (upload.error) {
     let persisted = false;
-    if (upload.uploaded.length > 0) {
+    if (upload.uploaded.length + upload.failed.length > 0) {
       const partial = await createQuestV2ProofSubmission(
         session.user.id,
         params.questId,
-        serviceInputFor(body, upload.uploaded),
+        serviceInputFor(body, upload),
         commandId,
       );
       persisted = !('outcome' in partial);
@@ -210,7 +256,7 @@ export const createQuestV2ProofSubmissionController = async ({
     const result = await createQuestV2ProofSubmission(
       session.user.id,
       params.questId,
-      serviceInputFor(body, upload.uploaded),
+      serviceInputFor(body, upload),
       commandId,
     );
     if ('outcome' in result) await cleanupUploadedFiles(upload.uploaded);
@@ -232,11 +278,15 @@ export const editQuestV2ProofSubmissionController = async ({
 }: AuthedContext & { body: QuestV2ProofSubmissionEditInput; params: QuestV2ProofSubmissionDetailParams }) => {
   const commandId = requiredCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
+  if (body.fileIds !== undefined && (body.files?.length ?? 0) > 0) {
+    set.status = 400;
+    return apiError('PROOF_FILES_CONFLICT', 'Use multipart files or existing file IDs, not both');
+  }
   const upload = await uploadFiles(session.user.id, body.files);
-  const input = serviceInputFor(body, upload.uploaded);
+  const input = serviceInputFor(body, upload);
   if (upload.error) {
     let persisted = false;
-    if (upload.uploaded.length > 0) {
+    if (upload.uploaded.length + upload.failed.length > 0) {
       const partial = await editQuestV2ProofSubmission(
         session.user.id,
         params.questId,
@@ -328,11 +378,20 @@ export const confirmQuestV2CompletionController = async ({
 }: AuthedContext & { params: QuestV2ProofSubmissionParams }) => {
   const commandId = requiredCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
-  const result: QuestV2CompletionConfirmationOutcome = await confirmQuestV2Completion(
-    session.user.id,
-    params.questId,
-    commandId,
-  );
+  let result: QuestV2CompletionConfirmationOutcome;
+  try {
+    result = await confirmQuestV2Completion(
+      session.user.id,
+      params.questId,
+      commandId,
+    );
+  } catch (error) {
+    if (error instanceof MoneyDomainError || error instanceof WorkChatTransitionError) {
+      set.status = 503;
+      return apiError('QUEST_COMPLETION_UNAVAILABLE', 'Quest completion could not settle its Wallet or Work Chat transition');
+    }
+    throw error;
+  }
   if ('outcome' in result) return mapCommandError(set, result.outcome);
   return apiSuccess({
     confirmed: result.confirmed,

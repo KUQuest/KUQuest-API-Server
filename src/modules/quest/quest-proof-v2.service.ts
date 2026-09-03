@@ -7,14 +7,15 @@ import {
   questCandidateTeamV2,
   questCandidateTeamV2Member,
   questV2CompletionConfirmation,
+  questV2ProofCommand,
   questV2ProofSubmission,
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 
 import type { QuestTransaction } from './quest-work-chat.port';
+import { settleProofFreeQuestV2InTransaction } from './quest-settlement.service';
 import {
   questV2Mode,
   questV2Participation,
@@ -55,17 +56,35 @@ export type QuestV2ProofSubmission = {
   visibility: 'FULL' | 'SUMMARY';
   fileIds: string[];
   files: Array<{
-    fileId: string;
-    contentType: string;
-    sizeBytes: number;
+    fileId: string | null;
+    contentType: string | null;
+    sizeBytes: number | null;
     position: number;
+    uploadStatus: 'PROOF_FILE_READY' | 'PROOF_FILE_FAILED';
+    failureCode: string | null;
   }>;
+};
+
+export type StoredQuestV2ProofFileInput = StoredQuestV2ProofFile & {
+  position: number;
+};
+
+export type QuestV2ProofFailedFile = {
+  position: number;
+  failureCode: string;
+};
+
+type ReadyProofFile = {
+  fileId: string;
+  position: number;
 };
 
 export type QuestV2ProofDraftInput = {
   description?: string | null;
   fileIds?: string[];
-  storedFiles?: StoredQuestV2ProofFile[];
+  storedFiles?: StoredQuestV2ProofFileInput[];
+  failedFiles?: QuestV2ProofFailedFile[];
+  fileFingerprints?: string[];
 };
 
 type ProofOwner = {
@@ -79,6 +98,7 @@ type ProofCommandOutcomeCode =
   | 'already-sent'
   | 'due-at-missing'
   | 'due-at-passed'
+  | 'files-failed'
   | 'files-required'
   | 'hirer-not-allowed'
   | 'idempotency-in-progress'
@@ -101,6 +121,7 @@ const proofCommandOutcomeCodes: readonly ProofCommandOutcomeCode[] = [
   'already-sent',
   'due-at-missing',
   'due-at-passed',
+  'files-failed',
   'files-required',
   'hirer-not-allowed',
   'idempotency-in-progress',
@@ -189,11 +210,11 @@ const submissionFields = {
 };
 
 const idempotencyFields = {
-  id: walletIdempotencyKey.id,
-  requestHash: walletIdempotencyKey.requestHash,
-  resourceId: walletIdempotencyKey.resourceId,
-  resultData: walletIdempotencyKey.resultData,
-  processingStatus: walletIdempotencyKey.processingStatus,
+  id: questV2ProofCommand.id,
+  requestHash: questV2ProofCommand.requestHash,
+  resourceId: questV2ProofCommand.resourceId,
+  resultData: questV2ProofCommand.resultData,
+  processingStatus: questV2ProofCommand.processingStatus,
 };
 
 const sha256Json = async (value: object): Promise<string> => {
@@ -252,30 +273,29 @@ const lockQuest = async (
 const acquireIdempotency = async (
   transaction: QuestTransaction,
   memberId: string,
+  questId: string,
+  operation: string,
   key: string,
   requestHash: string,
 ): Promise<IdempotencyAcquireResult> => {
   const [created] = await transaction
-    .insert(walletIdempotencyKey)
+    .insert(questV2ProofCommand)
     .values({
-      principalUserId: memberId,
-      operationScope: questV2ProofSubmissionOperationScope,
       key,
+      questId,
+      principalUserId: memberId,
+      operation,
       requestHash,
       expiresAt: idempotencyExpiry(),
     })
-    .onConflictDoNothing()
+    .onConflictDoNothing({ target: questV2ProofCommand.key })
     .returning(idempotencyFields);
   if (created) return { created: true, record: created };
 
   const [existing] = await transaction
     .select(idempotencyFields)
-    .from(walletIdempotencyKey)
-    .where(and(
-      eq(walletIdempotencyKey.principalUserId, memberId),
-      eq(walletIdempotencyKey.operationScope, questV2ProofSubmissionOperationScope),
-      eq(walletIdempotencyKey.key, key),
-    ))
+    .from(questV2ProofCommand)
+    .where(eq(questV2ProofCommand.key, key))
     .limit(1)
     .for('update');
   if (!existing) return { outcome: 'idempotency-unavailable' };
@@ -292,15 +312,15 @@ const completeIdempotency = async (
   now: Date,
 ) => {
   await transaction
-    .update(walletIdempotencyKey)
+    .update(questV2ProofCommand)
     .set({
-      resourceType: 'quest-v2-proof-submission',
+      resourceType: 'quest-v2-proof-command',
       resourceId,
       resultData,
       processingStatus: 'COMPLETED',
       completedAt: now,
     })
-    .where(eq(walletIdempotencyKey.id, idempotencyId));
+    .where(eq(questV2ProofCommand.id, idempotencyId));
 };
 
 const outcomeFromSnapshot = (
@@ -373,6 +393,67 @@ const ownerFor = async (
   return assignment ? { workerId: memberId, teamId: null } : undefined;
 };
 
+const allCompletionObligationsConfirmed = async (
+  transaction: QuestTransaction,
+  current: QuestRow,
+  questId: string,
+): Promise<boolean> => {
+  if (
+    current.v2Mode === questV2Mode.candidate &&
+    current.v2Participation === questV2Participation.group
+  ) {
+    const [team] = await transaction
+      .select({ id: questCandidateTeamV2.id, leaderId: questCandidateTeamV2.leaderId })
+      .from(questCandidateTeamV2)
+      .where(and(
+        eq(questCandidateTeamV2.questId, questId),
+        eq(questCandidateTeamV2.state, 'TEAM_SELECTED'),
+      ))
+      .limit(1)
+      .for('update');
+    if (!team) return false;
+    const [assignment] = await transaction
+      .select({ id: questAssignment.id })
+      .from(questAssignment)
+      .where(and(
+        eq(questAssignment.questId, questId),
+        eq(questAssignment.workerId, team.leaderId),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
+      ))
+      .limit(1)
+      .for('update');
+    if (!assignment) return false;
+    const [confirmation] = await transaction
+      .select({ id: questV2CompletionConfirmation.id })
+      .from(questV2CompletionConfirmation)
+      .where(and(
+        eq(questV2CompletionConfirmation.questId, questId),
+        eq(questV2CompletionConfirmation.teamId, team.id),
+      ))
+      .limit(1);
+    return Boolean(confirmation);
+  }
+
+  const assignments = await transaction
+    .select({ workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .where(and(
+      eq(questAssignment.questId, questId),
+      eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
+    ))
+    .for('update');
+  if (assignments.length === 0) return false;
+  const confirmations = await transaction
+    .select({ workerId: questV2CompletionConfirmation.workerId })
+    .from(questV2CompletionConfirmation)
+    .where(and(
+      eq(questV2CompletionConfirmation.questId, questId),
+      inArray(questV2CompletionConfirmation.workerId, assignments.map(({ workerId }) => workerId)),
+    ));
+  const confirmedWorkerIds = new Set(confirmations.map(({ workerId }) => workerId));
+  return assignments.every(({ workerId }) => confirmedWorkerIds.has(workerId));
+};
+
 const submissionForOwner = async (
   transaction: QuestTransaction,
   questId: string,
@@ -399,9 +480,11 @@ const attachmentRowsFor = async (
     contentType: file.contentType,
     sizeBytes: file.sizeBytes,
     position: questV2ProofSubmissionFile.position,
+    uploadStatus: questV2ProofSubmissionFile.uploadStatus,
+    failureCode: questV2ProofSubmissionFile.failureCode,
   })
   .from(questV2ProofSubmissionFile)
-  .innerJoin(file, eq(file.id, questV2ProofSubmissionFile.fileId))
+  .leftJoin(file, eq(file.id, questV2ProofSubmissionFile.fileId))
   .where(eq(questV2ProofSubmissionFile.proofSubmissionId, submissionId))
   .orderBy(asc(questV2ProofSubmissionFile.position));
 
@@ -426,7 +509,9 @@ const toSubmission = async (
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     visibility,
-    fileIds: attachments.map((attachment) => attachment.fileId),
+    fileIds: attachments
+      .filter((attachment) => attachment.uploadStatus === 'PROOF_FILE_READY' && attachment.fileId !== null)
+      .map((attachment) => attachment.fileId!),
     files: attachments,
   };
 };
@@ -505,25 +590,50 @@ const requestHashFor = (
   proofSubmissionId,
   body: input
     ? {
-        description: input.description ?? null,
-        fileIds: input.fileIds ?? null,
-        storedFiles: input.storedFiles?.map((stored) => ({
-          bucket: stored.bucket,
-          objectKey: stored.objectKey,
-          contentType: stored.contentType,
-          sizeBytes: stored.sizeBytes,
-          fileName: stored.fileName,
-        })) ?? null,
+        description: {
+          present: isInputFieldPresent(input, 'description'),
+          value: input.description ?? null,
+        },
+        fileIds: {
+          present: isInputFieldPresent(input, 'fileIds'),
+          value: input.fileIds ?? null,
+        },
+        storedFiles: input.fileFingerprints && input.fileFingerprints.length > 0
+          ? input.fileFingerprints.map((fingerprint, position) => ({ fingerprint, position }))
+          : input.storedFiles?.map((stored) => ({
+              position: stored.position,
+              contentType: stored.contentType,
+              sizeBytes: stored.sizeBytes,
+              fileName: stored.fileName,
+            })) ?? null,
+        failedFiles: input.fileFingerprints && input.fileFingerprints.length > 0
+          ? null
+          : input.failedFiles ?? null,
       }
     : {},
 });
 
-const validateStoredFiles = (storedFiles: StoredQuestV2ProofFile[]): boolean =>
-  storedFiles.length <= maxProofFiles && storedFiles.every((stored) =>
+const validPosition = (position: number): boolean =>
+  Number.isInteger(position) && position >= 0 && position < maxProofFiles;
+
+const validateStoredFiles = (storedFiles: StoredQuestV2ProofFileInput[]): boolean =>
+  storedFiles.length <= maxProofFiles &&
+  new Set(storedFiles.map((stored) => stored.position)).size === storedFiles.length &&
+  storedFiles.every((stored) =>
+    validPosition(stored.position) &&
     allowedAttachmentContentTypes.has(stored.contentType) &&
     Number.isInteger(stored.sizeBytes) &&
     stored.sizeBytes > 0 &&
     stored.sizeBytes <= maxAttachmentSizeBytes,
+  );
+
+const validateFailedFiles = (failedFiles: QuestV2ProofFailedFile[]): boolean =>
+  failedFiles.length <= maxProofFiles &&
+  new Set(failedFiles.map((failed) => failed.position)).size === failedFiles.length &&
+  failedFiles.every((failed) =>
+    validPosition(failed.position) &&
+    failed.failureCode.trim().length > 0 &&
+    failed.failureCode.length <= 64,
   );
 
 const validateFileIds = async (
@@ -549,24 +659,15 @@ const validateFileIds = async (
   );
 };
 
-const currentFileIds = async (
-  transaction: QuestTransaction,
-  submissionId: string,
-): Promise<string[]> => (await transaction
-  .select({ fileId: questV2ProofSubmissionFile.fileId })
-  .from(questV2ProofSubmissionFile)
-  .where(eq(questV2ProofSubmissionFile.proofSubmissionId, submissionId))
-  .orderBy(asc(questV2ProofSubmissionFile.position)))
-  .map((row) => row.fileId);
-
 const persistStoredFiles = async (
   transaction: QuestTransaction,
   memberId: string,
-  storedFiles: StoredQuestV2ProofFile[],
-): Promise<string[]> => {
+  storedFiles: StoredQuestV2ProofFileInput[],
+): Promise<ReadyProofFile[]> => {
   if (storedFiles.length === 0) return [];
   const values = storedFiles.map((stored) => ({
     id: crypto.randomUUID(),
+    position: stored.position,
     bucket: stored.bucket,
     objectKey: stored.objectKey,
     contentType: stored.contentType,
@@ -574,46 +675,136 @@ const persistStoredFiles = async (
     uploadedByUserId: memberId,
   }));
   await transaction.insert(file).values(values);
-  return values.map((value) => value.id);
+  return values.map((value) => ({ fileId: value.id, position: value.position }));
 };
 
 const replaceAttachments = async (
   transaction: QuestTransaction,
   submissionId: string,
-  fileIds: string[],
+  readyFiles: ReadyProofFile[],
+  failedFiles: QuestV2ProofFailedFile[],
   now: Date,
 ) => {
   await transaction
     .delete(questV2ProofSubmissionFile)
     .where(eq(questV2ProofSubmissionFile.proofSubmissionId, submissionId));
-  if (fileIds.length === 0) return;
-  await transaction.insert(questV2ProofSubmissionFile).values(fileIds.map((fileId, position) => ({
-    proofSubmissionId: submissionId,
-    fileId,
-    position,
-    attachedAt: now,
-  })));
+  if (readyFiles.length + failedFiles.length === 0) return;
+  await transaction.insert(questV2ProofSubmissionFile).values([
+    ...readyFiles.map(({ fileId, position }) => ({
+      proofSubmissionId: submissionId,
+      fileId,
+      position,
+      uploadStatus: 'PROOF_FILE_READY' as const,
+      failureCode: null,
+      attachedAt: now,
+    })),
+    ...failedFiles.map((failed) => ({
+      proofSubmissionId: submissionId,
+      fileId: null,
+      position: failed.position,
+      uploadStatus: 'PROOF_FILE_FAILED' as const,
+      failureCode: failed.failureCode,
+      attachedAt: now,
+    })),
+  ]);
 };
 
 const prepareFileIds = async (
   transaction: QuestTransaction,
   memberId: string,
   fileIds: string[],
-  storedFiles: StoredQuestV2ProofFile[],
-): Promise<{ fileIds: string[]; storedFiles: StoredQuestV2ProofFile[] } | { outcome: 'invalid-files' }> => {
+  storedFiles: StoredQuestV2ProofFileInput[],
+  failedFiles: QuestV2ProofFailedFile[],
+): Promise<{
+  fileIds: string[];
+  storedFiles: StoredQuestV2ProofFileInput[];
+  failedFiles: QuestV2ProofFailedFile[];
+} | { outcome: 'invalid-files' }> => {
   if (
-    fileIds.length + storedFiles.length > maxProofFiles ||
+    fileIds.length + storedFiles.length + failedFiles.length > maxProofFiles ||
     new Set(fileIds).size !== fileIds.length ||
+    new Set([
+      ...storedFiles.map((stored) => stored.position),
+      ...failedFiles.map((failed) => failed.position),
+    ]).size !== storedFiles.length + failedFiles.length ||
     !validateStoredFiles(storedFiles) ||
+    !validateFailedFiles(failedFiles) ||
     !(await validateFileIds(transaction, memberId, fileIds))
   ) return { outcome: 'invalid-files' };
-  return { fileIds, storedFiles };
+  return { fileIds, storedFiles, failedFiles };
+};
+
+const mergeEditAttachments = async (
+  transaction: QuestTransaction,
+  submissionId: string,
+  input: QuestV2ProofDraftInput,
+  storedFiles: ReadyProofFile[],
+): Promise<{ readyFiles: ReadyProofFile[]; failedFiles: QuestV2ProofFailedFile[] }> => {
+  const current = await attachmentRowsFor(transaction, submissionId);
+  if (isInputFieldPresent(input, 'fileIds')) {
+    const readyFiles = (input.fileIds ?? []).map((fileId, position) => ({ fileId, position }));
+    const usedPositions = new Set(readyFiles.map(({ position }) => position));
+    const nextPosition = () => {
+      for (let position = 0; position < maxProofFiles; position += 1) {
+        if (!usedPositions.has(position)) {
+          usedPositions.add(position);
+          return position;
+        }
+      }
+      return maxProofFiles;
+    };
+    return {
+      readyFiles: [
+        ...readyFiles,
+        ...storedFiles.map(({ fileId }) => ({ fileId, position: nextPosition() })),
+      ],
+      failedFiles: (input.failedFiles ?? []).map((failed) => ({
+        ...failed,
+        position: nextPosition(),
+      })),
+    };
+  }
+  const failures = current
+    .filter((attachment) => attachment.uploadStatus === 'PROOF_FILE_FAILED' && attachment.failureCode !== null)
+    .map((attachment) => ({
+      position: attachment.position,
+      failureCode: attachment.failureCode!,
+    }));
+  const occupiedPositions = new Set(current.map(({ position }) => position));
+  const remainingFailures = [...failures];
+  const readyFiles = current
+    .filter((attachment) => attachment.uploadStatus === 'PROOF_FILE_READY' && attachment.fileId !== null)
+    .map((attachment) => ({ fileId: attachment.fileId!, position: attachment.position }));
+  const nextPosition = () => {
+    for (let position = 0; position < maxProofFiles; position += 1) {
+      if (!occupiedPositions.has(position)) {
+        occupiedPositions.add(position);
+        return position;
+      }
+    }
+    return maxProofFiles;
+  };
+  for (const stored of storedFiles) {
+    const retry = remainingFailures.shift();
+    readyFiles.push({ fileId: stored.fileId, position: retry?.position ?? nextPosition() });
+  }
+  return {
+    readyFiles,
+    failedFiles: [
+      ...remainingFailures,
+      ...(input.failedFiles ?? []).map((failed) => ({
+        ...failed,
+        position: nextPosition(),
+      })),
+    ],
+  };
 };
 
 const commandSetup = async (
   transaction: QuestTransaction,
   memberId: string,
   questId: string,
+  operation: string,
   commandId: string,
   requestHash: string,
 ): Promise<
@@ -622,7 +813,14 @@ const commandSetup = async (
 > => {
   const current = await lockQuest(transaction, questId);
   if (!current) return { outcome: 'not-found' as const };
-  const idempotency = await acquireIdempotency(transaction, memberId, commandId, requestHash);
+  const idempotency = await acquireIdempotency(
+    transaction,
+    memberId,
+    questId,
+    operation,
+    commandId,
+    requestHash,
+  );
   if ('outcome' in idempotency) return { outcome: idempotency.outcome };
   return { current, idempotency };
 };
@@ -673,7 +871,7 @@ export const createQuestV2ProofSubmission = async (
   const requestHash = await requestHashFor(memberId, 'create', questId, null, input);
 
   return db.transaction(async (transaction) => {
-    const setup = await commandSetup(transaction, memberId, questId, commandId, requestHash);
+    const setup = await commandSetup(transaction, memberId, questId, 'create', commandId, requestHash);
     if ('outcome' in setup) return setup;
     if (!setup.idempotency.created) return replaySubmission(setup.idempotency.record);
 
@@ -685,17 +883,30 @@ export const createQuestV2ProofSubmission = async (
     const description = normalizedDescription(input.description);
     if ('outcome' in description) return fail(description.outcome);
     const inputFileIds = input.fileIds ?? [];
-    const storedFiles = input.storedFiles ?? [];
-    if (description.value === null && inputFileIds.length + storedFiles.length === 0) {
+    const uploadedFiles = input.storedFiles ?? [];
+    const failedFiles = input.failedFiles ?? [];
+    if (description.value === null && inputFileIds.length + uploadedFiles.length + failedFiles.length === 0) {
       return fail('invalid-draft');
     }
-    const preparedFiles = await prepareFileIds(transaction, memberId, inputFileIds, storedFiles);
+    const preparedFiles = await prepareFileIds(
+      transaction,
+      memberId,
+      inputFileIds,
+      uploadedFiles,
+      failedFiles,
+    );
     if ('outcome' in preparedFiles) return fail(preparedFiles.outcome);
     const existing = await submissionForOwner(transaction, questId, checks.owner);
     if (existing) return fail('already-exists');
 
-    const storedFileIds = await persistStoredFiles(transaction, memberId, preparedFiles.storedFiles);
-    const allFileIds = [...preparedFiles.fileIds, ...storedFileIds];
+    const readyStoredFiles = await persistStoredFiles(transaction, memberId, preparedFiles.storedFiles);
+    const readyFiles = [
+      ...preparedFiles.fileIds.map((fileId, position) => ({ fileId, position })),
+      ...readyStoredFiles,
+    ];
+    if (new Set(readyFiles.map(({ position }) => position)).size !== readyFiles.length) {
+      return fail('invalid-files');
+    }
     const [created] = await transaction
       .insert(questV2ProofSubmission)
       .values({
@@ -709,7 +920,7 @@ export const createQuestV2ProofSubmission = async (
       })
       .returning(submissionFields);
     if (!created) return fail('idempotency-unavailable');
-    await replaceAttachments(transaction, created.id, allFileIds, now);
+    await replaceAttachments(transaction, created.id, readyFiles, preparedFiles.failedFiles, now);
     const submission = await toSubmission(transaction, created);
     await completeIdempotency(
       transaction,
@@ -735,7 +946,7 @@ export const editQuestV2ProofSubmission = async (
   const requestHash = await requestHashFor(memberId, 'edit', questId, proofSubmissionId, input);
 
   return db.transaction(async (transaction) => {
-    const setup = await commandSetup(transaction, memberId, questId, commandId, requestHash);
+    const setup = await commandSetup(transaction, memberId, questId, 'edit', commandId, requestHash);
     if ('outcome' in setup) return setup;
     if (!setup.idempotency.created) return replaySubmission(setup.idempotency.record);
 
@@ -754,22 +965,30 @@ export const editQuestV2ProofSubmission = async (
       ? normalizedDescription(input.description)
       : { value: submission.description };
     if ('outcome' in description) return fail(description.outcome);
-    const existingFileIds = await currentFileIds(transaction, submission.id);
-    const requestedFileIds = isInputFieldPresent(input, 'fileIds')
-      ? input.fileIds ?? []
-      : existingFileIds;
-    const storedFiles = input.storedFiles ?? [];
-    const fileIdsToValidate = storedFiles.length > 0 && !isInputFieldPresent(input, 'fileIds')
-      ? existingFileIds
-      : requestedFileIds;
-    if (
-      description.value === null &&
-      fileIdsToValidate.length + storedFiles.length === 0
-    ) return fail('invalid-draft');
-    const preparedFiles = await prepareFileIds(transaction, memberId, fileIdsToValidate, storedFiles);
+    const uploadedFiles = input.storedFiles ?? [];
+    const fileIdsToValidate = isInputFieldPresent(input, 'fileIds') ? input.fileIds ?? [] : [];
+    const preparedFiles = await prepareFileIds(
+      transaction,
+      memberId,
+      fileIdsToValidate,
+      uploadedFiles,
+      input.failedFiles ?? [],
+    );
     if ('outcome' in preparedFiles) return fail(preparedFiles.outcome);
-    const storedFileIds = await persistStoredFiles(transaction, memberId, preparedFiles.storedFiles);
-    const allFileIds = [...preparedFiles.fileIds, ...storedFileIds];
+    const readyStoredFiles = await persistStoredFiles(transaction, memberId, preparedFiles.storedFiles);
+    const mergedFiles = await mergeEditAttachments(transaction, submission.id, input, readyStoredFiles);
+    if (
+      mergedFiles.readyFiles.length + mergedFiles.failedFiles.length > maxProofFiles ||
+      new Set(mergedFiles.readyFiles.map(({ position }) => position)).size !== mergedFiles.readyFiles.length ||
+      new Set([
+        ...mergedFiles.readyFiles.map(({ position }) => position),
+        ...mergedFiles.failedFiles.map(({ position }) => position),
+      ]).size !== mergedFiles.readyFiles.length + mergedFiles.failedFiles.length ||
+      !(await validateFileIds(transaction, memberId, mergedFiles.readyFiles.map(({ fileId }) => fileId))) ||
+      (description.value === null && mergedFiles.readyFiles.length + mergedFiles.failedFiles.length === 0)
+    ) return fail(description.value === null && mergedFiles.readyFiles.length + mergedFiles.failedFiles.length === 0
+      ? 'invalid-draft'
+      : 'invalid-files');
     const [updated] = await transaction
       .update(questV2ProofSubmission)
       .set({
@@ -779,7 +998,7 @@ export const editQuestV2ProofSubmission = async (
       .where(eq(questV2ProofSubmission.id, submission.id))
       .returning(submissionFields);
     if (!updated) return fail('idempotency-unavailable');
-    await replaceAttachments(transaction, updated.id, allFileIds, now);
+    await replaceAttachments(transaction, updated.id, mergedFiles.readyFiles, mergedFiles.failedFiles, now);
     const result = await toSubmission(transaction, updated);
     await completeIdempotency(
       transaction,
@@ -804,7 +1023,7 @@ export const deleteQuestV2ProofSubmission = async (
   const requestHash = await requestHashFor(memberId, 'delete', questId, proofSubmissionId, null);
 
   return db.transaction(async (transaction) => {
-    const setup = await commandSetup(transaction, memberId, questId, commandId, requestHash);
+    const setup = await commandSetup(transaction, memberId, questId, 'delete', commandId, requestHash);
     if ('outcome' in setup) return setup;
     if (!setup.idempotency.created) {
       const snapshot = setup.idempotency.record.resultData;
@@ -854,7 +1073,7 @@ export const submitQuestV2ProofSubmission = async (
   const requestHash = await requestHashFor(memberId, 'submit', questId, proofSubmissionId, null);
 
   return db.transaction(async (transaction) => {
-    const setup = await commandSetup(transaction, memberId, questId, commandId, requestHash);
+    const setup = await commandSetup(transaction, memberId, questId, 'submit', commandId, requestHash);
     if ('outcome' in setup) return setup;
     if (!setup.idempotency.created) return replaySubmission(setup.idempotency.record);
 
@@ -869,6 +1088,9 @@ export const submitQuestV2ProofSubmission = async (
     }
     if (submission.submissionStatus !== null) return fail('already-sent');
     const attachments = await attachmentRowsFor(transaction, submission.id);
+    if (attachments.some((attachment) => attachment.uploadStatus === 'PROOF_FILE_FAILED')) {
+      return fail('files-failed');
+    }
     if (attachments.length === 0) return fail('files-required');
     const [sent] = await transaction
       .update(questV2ProofSubmission)
@@ -924,8 +1146,9 @@ export const listQuestV2ProofSubmissions = async (
     .where(eq(questV2ProofSubmission.questId, questId))
     .orderBy(asc(questV2ProofSubmission.createdAt), asc(questV2ProofSubmission.id));
   const submissions = await Promise.all(rows.map(async (row) => {
-    const full = current.hirerId === memberId || row.submittedByUserId === memberId;
-    if (!full && row.sentAt === null) return undefined;
+    const isAuthor = row.submittedByUserId === memberId;
+    if (row.sentAt === null && !isAuthor) return undefined;
+    const full = isAuthor || (current.hirerId === memberId && row.sentAt !== null);
     return toSubmission(db, row, full ? 'FULL' : 'SUMMARY');
   }));
   return submissions.filter((submission): submission is QuestV2ProofSubmission => submission !== undefined);
@@ -942,7 +1165,7 @@ export const confirmQuestV2Completion = async (
   const requestHash = await requestHashFor(memberId, 'confirm-completion', questId, null, null);
 
   return db.transaction(async (transaction) => {
-    const setup = await commandSetup(transaction, memberId, questId, commandId, requestHash);
+    const setup = await commandSetup(transaction, memberId, questId, 'confirm-completion', commandId, requestHash);
     if ('outcome' in setup) return setup;
     if (!setup.idempotency.created) {
       const snapshot = setup.idempotency.record.resultData;
@@ -973,7 +1196,8 @@ export const confirmQuestV2Completion = async (
       .limit(1)
       .for('update');
     if (existing) return fail('already-confirmed');
-    if (!isQuestV2State(setup.current.questState)) return fail('not-v2-contract');
+    const currentQuestState = setup.current.questState;
+    if (!isQuestV2State(currentQuestState)) return fail('not-v2-contract');
     const [confirmation] = await transaction
       .insert(questV2CompletionConfirmation)
       .values({
@@ -985,10 +1209,20 @@ export const confirmQuestV2Completion = async (
       })
       .returning({ confirmedAt: questV2CompletionConfirmation.confirmedAt });
     if (!confirmation) return fail('idempotency-unavailable');
+    let questStatus: QuestV2State = currentQuestState;
+    if (await allCompletionObligationsConfirmed(transaction, setup.current, questId)) {
+      await settleProofFreeQuestV2InTransaction(
+        transaction,
+        questId,
+        `quest-v2-completion:${questId}`,
+        now,
+      );
+      questStatus = 'QUEST_COMPLETED';
+    }
     const result = {
       confirmed: true as const,
       confirmedAt: confirmation.confirmedAt,
-      questStatus: setup.current.questState,
+      questStatus,
     };
     await completeIdempotency(
       transaction,

@@ -6,6 +6,7 @@ import {
 import {
   quest,
   questAssignment,
+  questCandidateTeamV2,
   questSettlementCommand,
   questTeam,
 } from '@/database/schema/quest.schema';
@@ -120,6 +121,8 @@ const lockQuest = async (tx: QuestTransaction, questId: string) => (await tx.sel
   mode: quest.mode,
   participation: quest.participation,
   questStatus: quest.questStatus,
+  v2Mode: quest.v2Mode,
+  v2Participation: quest.v2Participation,
   version: quest.version,
   rewardSatang: quest.rewardSatang,
   platformFeePerWorkerSatang: quest.platformFeePerWorkerSatang,
@@ -311,6 +314,85 @@ const completeInTransaction = async (tx: QuestTransaction, questId: string, acto
 
 /** Complete an approved Quest in the caller's existing transaction. */
 export const settleApprovedQuestInTransaction = completeInTransaction;
+
+/** Complete a proof-free v2 Quest after every required work confirmation exists. */
+export const settleProofFreeQuestV2InTransaction = async (
+  tx: QuestTransaction,
+  questId: string,
+  commandId: string,
+  now: Date,
+): Promise<CommandResult> => {
+  const current = await lockQuest(tx, questId);
+  if (!current || current.apiVersion !== 'v2' || current.questStatus !== questStatus.inProgress) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The v2 Quest is not ready for completion.');
+  }
+  const reservation = await reservationFor(tx, current.hirerId, questId);
+  if (!reservation || reservation.status !== 'ACTIVE') {
+    throw new MoneyDomainError('FUNDING_RESERVATION_NOT_FOUND', 'Quest Escrow is not active.');
+  }
+  const workers = await activeAssignments(tx, questId);
+  if (workers.length === 0) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The v2 Quest has no active Assignment.');
+  }
+  const rewardSatang = requireQuestReward(current.rewardSatang);
+  const fee = await feeForQuest(tx, current, reservation, rewardSatang);
+  const expectedEscrow = current.questEscrowSatang ?? (rewardSatang + Number(fee)) * current.headcount;
+  if (reservation.remainingSatang !== expectedEscrow) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Quest Escrow does not match the published funding terms.');
+  }
+
+  const groupCandidate = current.v2Mode === 'CANDIDATE' && current.v2Participation === 'GROUP';
+  let payoutWorkers = workers.map(({ workerId }) => ({ workerId, amountSatang: rewardSatang }));
+  if (groupCandidate) {
+    const [team] = await tx.select({ leaderId: questCandidateTeamV2.leaderId })
+      .from(questCandidateTeamV2)
+      .where(and(
+        eq(questCandidateTeamV2.questId, questId),
+        eq(questCandidateTeamV2.state, 'TEAM_SELECTED'),
+      ))
+      .limit(1)
+      .for('update');
+    if (!team || !workers.some(({ workerId }) => workerId === team.leaderId)) {
+      throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Selected Team Leader Assignment is missing.');
+    }
+    payoutWorkers = Array.from({ length: current.headcount }, () => ({
+      workerId: team.leaderId,
+      amountSatang: rewardSatang,
+    }));
+  }
+  const paid = await settleWorkers(
+    tx,
+    current.hirerId,
+    reservation.id,
+    payoutWorkers,
+    () => Promise.resolve(fee),
+    `quest-v2-complete:${questId}`,
+  );
+  const remaining = (await reservationFor(tx, current.hirerId, questId, false))?.remainingSatang ?? 0;
+  if (remaining !== 0) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Quest Escrow does not match the completion payout.');
+  }
+  await tx.update(questAssignment)
+    .set({ assignmentStatus: assignmentStatus.completed })
+    .where(and(
+      eq(questAssignment.questId, questId),
+      eq(questAssignment.assignmentStatus, assignmentStatus.active),
+    ));
+  await tx.update(quest)
+    .set({
+      questStatus: questStatus.completed,
+      version: sql`${quest.version} + 1`,
+      updatedAt: now,
+    })
+    .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.inProgress)));
+  await terminalChat(tx, current, questStatus.completed, commandId, now);
+  return {
+    questStatus: questStatus.completed,
+    outcome: 'COMPLETED',
+    paidSatang: paid,
+    refundedSatang: 0,
+  };
+};
 
 export const completeQuest = async (questId: string, actorUserId: string, commandId = `quest-completion:${questId}`, now = new Date()) => db.transaction((tx) => completeInTransaction(tx, questId, actorUserId, commandId, now));
 

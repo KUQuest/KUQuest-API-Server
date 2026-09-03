@@ -82,11 +82,13 @@ export type {
   QuestV2CompletionConfirmation,
   QuestV2CompletionConfirmationOutcome,
   QuestV2ProofDraftInput,
+  QuestV2ProofFailedFile,
   QuestV2ProofStatus,
   QuestV2ProofSubmission,
   QuestV2ProofSubmissionDeleteOutcome,
   QuestV2ProofSubmissionListOutcome,
   QuestV2ProofSubmissionOutcome,
+  StoredQuestV2ProofFileInput,
 } from './quest-proof-v2.service';
 export {
   decideQuestV2Underfilled,

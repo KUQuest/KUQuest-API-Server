@@ -52,10 +52,12 @@ const proofStatusSchema = t.Nullable(proofStatus);
 const visibilitySchema = t.Union([t.Literal('FULL'), t.Literal('SUMMARY')]);
 
 const proofFileSchema = t.Object({
-  fileId: t.String({ format: 'uuid' }),
-  contentType: t.String(),
-  sizeBytes: t.Integer({ minimum: 1, maximum: 10 * 1024 * 1024 }),
+  fileId: t.Nullable(t.String({ format: 'uuid' })),
+  contentType: t.Nullable(t.String()),
+  sizeBytes: t.Nullable(t.Integer({ minimum: 1, maximum: 10 * 1024 * 1024 })),
   position: t.Integer({ minimum: 0, maximum: 4 }),
+  uploadStatus: t.Union([t.Literal('PROOF_FILE_READY'), t.Literal('PROOF_FILE_FAILED')]),
+  failureCode: t.Nullable(t.String({ minLength: 1, maxLength: 64 })),
 });
 
 const proofSubmissionSchema = t.Object({

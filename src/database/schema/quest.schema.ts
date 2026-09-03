@@ -616,22 +616,44 @@ export const questV2ProofSubmission = pgTable(
 export const questV2ProofSubmissionFile = pgTable(
   'quest_v2_proof_submission_file',
   {
+    id: uuid('id').defaultRandom().primaryKey(),
     proofSubmissionId: uuid('proof_submission_id')
       .notNull()
       .references(() => questV2ProofSubmission.id, { onDelete: 'cascade' }),
-    fileId: uuid('file_id')
-      .notNull()
-      .references(() => file.id),
+    fileId: uuid('file_id').references(() => file.id),
     position: integer('position').default(0).notNull(),
+    uploadStatus: varchar('upload_status', { length: 32 })
+      .$type<'PROOF_FILE_READY' | 'PROOF_FILE_FAILED'>()
+      .default('PROOF_FILE_READY')
+      .notNull(),
+    failureCode: varchar('failure_code', { length: 64 }),
     attachedAt: time('attached_at').defaultNow().notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.proofSubmissionId, table.fileId] }),
     unique('quest_v2_proof_submission_file_position_key').on(
       table.proofSubmissionId,
       table.position,
     ),
-    check('quest_v2_proof_submission_file_position_check', sql`${table.position} >= 0 AND ${table.position} < 5`),
+    check(
+      'quest_v2_proof_submission_file_position_check',
+      sql`${table.position} >= 0 AND ${table.position} < 5`,
+    ),
+    check(
+      'quest_v2_proof_submission_file_status_check',
+      sql`${table.uploadStatus} IN ('PROOF_FILE_READY', 'PROOF_FILE_FAILED')`,
+    ),
+    check(
+      'quest_v2_proof_submission_file_ready_check',
+      sql`(${table.uploadStatus} = 'PROOF_FILE_READY') = (${table.fileId} IS NOT NULL)`,
+    ),
+    check(
+      'quest_v2_proof_submission_file_failure_check',
+      sql`(${table.uploadStatus} = 'PROOF_FILE_FAILED') = (${table.failureCode} IS NOT NULL)`,
+    ),
+    check(
+      'quest_v2_proof_submission_file_failure_code_check',
+      sql`${table.failureCode} IS NULL OR btrim(${table.failureCode}) <> ''`,
+    ),
     index('quest_v2_proof_submission_file_submission_idx').on(table.proofSubmissionId),
   ],
 );
@@ -658,6 +680,56 @@ export const questV2CompletionConfirmation = pgTable(
     unique('quest_v2_completion_confirmation_worker_key').on(table.questId, table.workerId),
     unique('quest_v2_completion_confirmation_team_key').on(table.questId, table.teamId),
     index('quest_v2_completion_confirmation_quest_idx').on(table.questId),
+  ],
+);
+
+export const questV2ProofCommand = pgTable(
+  'quest_v2_proof_command',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    key: varchar('key', { length: 200 }).notNull().unique(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    principalUserId: uuid('principal_user_id')
+      .notNull()
+      .references(() => authUser.id),
+    operation: varchar('operation', { length: 64 }).notNull(),
+    requestHash: varchar('request_hash', { length: 64 }).notNull(),
+    resourceType: varchar('resource_type', { length: 64 }),
+    resourceId: uuid('resource_id'),
+    resultData: jsonb('result_data'),
+    processingStatus: varchar('processing_status', { length: 32 })
+      .default('PROCESSING')
+      .notNull(),
+    createdAt: time('created_at').defaultNow().notNull(),
+    completedAt: time('completed_at'),
+    expiresAt: time('expires_at').notNull(),
+  },
+  (table) => [
+    check(
+      'quest_v2_proof_command_key_check',
+      sql`btrim(${table.key}) <> ''`,
+    ),
+    check(
+      'quest_v2_proof_command_operation_check',
+      sql`btrim(${table.operation}) <> ''`,
+    ),
+    check(
+      'quest_v2_proof_command_hash_check',
+      sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'quest_v2_proof_command_status_check',
+      sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`,
+    ),
+    check(
+      'quest_v2_proof_command_completion_check',
+      sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`,
+    ),
+    index('quest_v2_proof_command_quest_idx').on(table.questId),
+    index('quest_v2_proof_command_principal_idx').on(table.principalUserId),
+    index('quest_v2_proof_command_expiry_idx').on(table.expiresAt),
   ],
 );
 
@@ -1036,6 +1108,7 @@ export const questRelations = relations(quest, ({ one, many }) => ({
   completionConfirmations: many(questCompletionConfirmation),
   proofSubmissionsV2: many(questV2ProofSubmission),
   completionConfirmationsV2: many(questV2CompletionConfirmation),
+  proofCommandsV2: many(questV2ProofCommand),
   reviews: many(review),
 }));
 
@@ -1226,6 +1299,17 @@ export const questV2ProofSubmissionFileRelations = relations(questV2ProofSubmiss
   file: one(file, {
     fields: [questV2ProofSubmissionFile.fileId],
     references: [file.id],
+  }),
+}));
+
+export const questV2ProofCommandRelations = relations(questV2ProofCommand, ({ one }) => ({
+  quest: one(quest, {
+    fields: [questV2ProofCommand.questId],
+    references: [quest.id],
+  }),
+  principalUser: one(authUser, {
+    fields: [questV2ProofCommand.principalUserId],
+    references: [authUser.id],
   }),
 }));
 
