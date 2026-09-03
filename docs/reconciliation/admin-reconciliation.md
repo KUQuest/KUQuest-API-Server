@@ -54,7 +54,7 @@ active routes, and unbuilt moderation and penalty models.
 | Area | Documentation | Code | Classification |
 | --- | --- | --- | --- |
 | Dispute Case route and target state | Target operates against `QUEST_FAILED` and resolves via `DISPUTE_CASE_RESOLVED` / `DISPUTE_CASE_DISMISSED` with satang redirection from 7-day held Funding Reservation. | `POST /api/v1/admin/quests/:questId/dispute/resolve` (`quest-settlement.route.ts`) operates on legacy `QUEST_DISPUTED` state with `REFUND_HIRER` or `RELEASE_TO_WORKER`. | **Conflict** — `admin-rulebook.md` §2; `quest-settlement.route.ts`. |
-| Quest Hide schema constraint | `hiddenAt` is an independent timestamp flag that operates across any non-terminal Quest State (`QUEST_OPEN`, `QUEST_ASSIGNED`, `QUEST_IN_PROGRESS`) without changing Quest State. | `quest.schema.ts` keeps the independent `hiddenAt`/`hiddenByAdminId` pair check, removes `QUEST_HIDDEN`, and adds `QUEST_FAILED`; migration `20260902103921_loud_quentin_quire.sql` backfills legacy hidden rows to `QUEST_OPEN`. | **Resolved for this slice** — verify legacy rows during deployment. |
+| Quest Hide schema constraint | `hiddenAt` is an independent timestamp flag that operates across any non-terminal Quest State — every state except `QUEST_COMPLETED`, `QUEST_CANCELLED`, and `QUEST_FAILED` — without changing Quest State. | `quest.schema.ts` keeps the independent `hiddenAt`/`hiddenByAdminId` pair check, removes `QUEST_HIDDEN`, and adds `QUEST_FAILED`; migration `20260903012503_conscious_argent.sql` backfills legacy hidden rows to `QUEST_OPEN`. | **Resolved for this slice** — verify legacy rows during deployment. |
 | Quest Hide Admin routes | Target specifies Admin routes to hide (with reason) and restore Quests, sending Push Notifications to the Hirer. | `POST /api/v1/admin/quests/:questId/hide` and `/restore` use `enabledAdminGuard`, shared Admin Actions, expected Quest versions, and controlled reason codes. No notification adapter exists in the server. | **Partial — push integration remains unavailable**. |
 | Member Ban columns and guard | Target requires `auth_user.banned_until` and `auth_user.red_flag_expires_at` for O(1) guard checks, backed by `memberPenaltyRecord`. Auth guard rejects active bans. | `auth_user` has neither column. Only `auth_admin` carries `disabled_at` (`auth.schema.ts`, `drizzle/0002_groovy_vertigo.sql`). No Member ban guard exists. | **Docs Only / Gap** — `admin-rulebook.md` §6. |
 | Member Penalty Record table | Target requires immutable `memberPenaltyRecord` table storing strikes, sequence numbers, results, and linked reversing rows. | Table does not exist in schema. | **Docs Only / Gap** — `admin-rulebook.md` §6. |
@@ -75,7 +75,7 @@ the server implementation with the Admin Rulebook:
 ### Schema and migration
 
 - [x] Drop the `quest.schema.ts` CHECK `(hidden_at IS NULL) = (quest_status <> 'QUEST_HIDDEN')` and remove `QUEST_HIDDEN` from the `quest_status` enum, so `hiddenAt` becomes an independent flag.
-- [x] Add `QUEST_FAILED` to the `quest_status` enum.
+- [x] Add `QUEST_FAILED` to the `quest_status` enum. The v2 Quest contract already published the value; nothing writes it until the Dispute Case route below moves off the legacy `QUEST_DISPUTED` state.
 - [ ] Add `auth_user.banned_until` and `auth_user.red_flag_expires_at` columns to `auth_user`.
 - [ ] Create the `memberPenaltyRecord` table with strike sequence, penalty result, and linked reversing rows.
 - [x] Create the shared immutable `adminAction` table and transaction-aware writer.
