@@ -85,6 +85,17 @@ type OpenApiOperation = {
   operationId?: string;
   security?: unknown;
   parameters?: Array<{ name?: string; in?: string; required?: boolean }>;
+  requestBody?: {
+    content?: {
+      'application/json'?: {
+        schema?: {
+          additionalProperties?: boolean;
+          properties?: Record<string, unknown>;
+          required?: string[];
+        };
+      };
+    };
+  };
 };
 
 const successfulWriter = {
@@ -156,18 +167,20 @@ const createTeam = async (
   leaderId = candidate.id,
   headcount = 3,
   commandId = `candidate-team-v2-create-${randomUUID()}`,
+  name = 'Candidate Team',
 ) => {
   const response = await request(
     `/api/v2/quests/${questId}/teams`,
     'POST',
     leaderId,
     { 'content-type': 'application/json', 'idempotency-key': commandId },
-    JSON.stringify({ headcount }),
+    JSON.stringify({ headcount, name }),
   );
   expect(response.status).toBe(201);
   return (await response.json()).data as {
     id: string;
     leaderId: string;
+    name: string;
     headcount: number;
     joinCode: string;
     joinCodeExpiresAt: string;
@@ -270,7 +283,7 @@ describe('Quest Candidate Team API v2', () => {
       'POST',
       candidate.id,
       { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-after-start-create' },
-      JSON.stringify({ headcount: 2 }),
+      JSON.stringify({ headcount: 2, name: 'Candidate Team' }),
     );
     expect(response.status).toBe(409);
     expect((await response.json()).error.code).toBe('QUEST_NOT_OPEN');
@@ -284,6 +297,7 @@ describe('Quest Candidate Team API v2', () => {
     };
     const collection = document.paths['/api/v2/quests/{questId}/teams'];
     const detail = document.paths['/api/v2/quests/{questId}/teams/{teamId}'];
+    const update = detail?.patch;
     const join = document.paths['/api/v2/quests/{questId}/teams/{teamId}/join']?.post;
     const leave = document.paths['/api/v2/quests/{questId}/teams/{teamId}/leave']?.post;
     const remove = document.paths['/api/v2/quests/{questId}/teams/{teamId}/members/{memberId}']?.delete;
@@ -294,6 +308,7 @@ describe('Quest Candidate Team API v2', () => {
     expect(collection?.post?.operationId).toBe('createQuestCandidateTeamV2');
     expect(collection?.get?.operationId).toBe('listQuestCandidateTeamsV2');
     expect(detail?.get?.operationId).toBe('getQuestCandidateTeamV2');
+    expect(update?.operationId).toBe('updateQuestCandidateTeamV2');
     expect(join?.operationId).toBe('joinQuestCandidateTeamV2');
     expect(leave?.operationId).toBe('leaveQuestCandidateTeamV2');
     expect(remove?.operationId).toBe('removeQuestCandidateTeamMemberV2');
@@ -301,7 +316,12 @@ describe('Quest Candidate Team API v2', () => {
     expect(submit?.operationId).toBe('submitQuestCandidateTeamV2');
     expect(select?.operationId).toBe('selectQuestCandidateTeamV2');
 
-    for (const operation of [collection?.post, join, leave, remove, regenerate, submit, select]) {
+    expect(collection?.post?.requestBody?.content?.['application/json']?.schema).toMatchObject({
+      additionalProperties: false,
+      required: ['name', 'headcount'],
+      properties: { name: expect.any(Object), headcount: expect.any(Object) },
+    });
+    for (const operation of [collection?.post, update, join, leave, remove, regenerate, submit, select]) {
       expect(operation?.security).toEqual([{ betterAuthSession: [] }]);
       expect(operation?.parameters).toEqual(expect.arrayContaining([
         expect.objectContaining({
@@ -311,9 +331,21 @@ describe('Quest Candidate Team API v2', () => {
         }),
       ]));
     }
+    expect(update?.requestBody?.content?.['application/json']?.schema).toMatchObject({
+      additionalProperties: false,
+      required: ['name'],
+      properties: { name: expect.any(Object) },
+    });
+    expect(Object.keys(update?.requestBody?.content?.['application/json']?.schema?.properties ?? {})).toEqual(['name']);
     expect(Object.keys(document.paths).some((path) =>
       path.startsWith('/api/v2/quests/') && path.includes('/invitations'),
     )).toBe(false);
+    expect(document.paths['/api/v2/quests/{questId}/teams/{teamId}/members']?.get).toBeUndefined();
+    const candidateTeamContract = JSON.stringify(Object.entries(document.paths)
+      .filter(([path]) => path.startsWith('/api/v2/quests/') && path.includes('/teams')));
+    expect(candidateTeamContract).not.toContain('reworkLimit');
+    expect(candidateTeamContract).not.toContain('Rework');
+    expect(candidateTeamContract).not.toContain('Legacy Implementation');
   });
 
   it('lets the owning Hirer inspect all Candidate Teams and limits other Members to permitted Teams', async () => {
@@ -343,6 +375,205 @@ describe('Quest Candidate Team API v2', () => {
     expect((await unrelatedRead.json()).error.code).toBe('QUEST_NOT_FOUND');
   });
 
+  it('creates and updates a named forming Candidate Team while preserving its members', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+
+    const created = await request(
+      `/api/v2/quests/${questId}/teams`,
+      'POST',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-name-create' },
+      JSON.stringify({ name: 'Initial Team', headcount: 2 }),
+    );
+    expect(created.status).toBe(201);
+    const createdBody = (await created.json()).data as {
+      id: string;
+      name: string;
+      headcount: number;
+      joinCode: string;
+      members: Array<{ memberId: string }>;
+    };
+    expect(createdBody).toMatchObject({
+      name: 'Initial Team',
+      headcount: 2,
+      members: [{ memberId: candidate.id }],
+    });
+
+    const joined = await joinTeam(
+      questId,
+      createdBody.id,
+      secondCandidate.id,
+      createdBody.joinCode,
+      'candidate-team-v2-name-join',
+    );
+    expect(joined.status).toBe(200);
+
+    const updated = await request(
+      `/api/v2/quests/${questId}/teams/${createdBody.id}`,
+      'PATCH',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-name-update' },
+      JSON.stringify({ name: 'Renamed Team' }),
+    );
+    expect(updated.status).toBe(200);
+    const updatedBody = (await updated.json()).data as Record<string, unknown>;
+    expect(updatedBody).toMatchObject({
+      id: createdBody.id,
+      name: 'Renamed Team',
+      headcount: 2,
+      state: 'TEAM_FORMING',
+      members: [
+        expect.objectContaining({ memberId: candidate.id }),
+        expect.objectContaining({ memberId: secondCandidate.id }),
+      ],
+    });
+
+    const replay = await request(
+      `/api/v2/quests/${questId}/teams/${createdBody.id}`,
+      'PATCH',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-name-update' },
+      JSON.stringify({ name: 'Renamed Team' }),
+    );
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data).toEqual(updatedBody);
+
+    const list = await request(`/api/v2/quests/${questId}/teams`, 'GET', hirer.id);
+    expect(list.status).toBe(200);
+    expect((await list.json()).data.items).toEqual([
+      expect.objectContaining({
+        id: createdBody.id,
+        name: 'Renamed Team',
+        members: [
+          expect.objectContaining({ memberId: candidate.id }),
+          expect.objectContaining({ memberId: secondCandidate.id }),
+        ],
+      }),
+    ]);
+
+    const detail = await request(`/api/v2/quests/${questId}/teams/${createdBody.id}`, 'GET', hirer.id);
+    expect(detail.status).toBe(200);
+    expect((await detail.json()).data).toMatchObject({
+      id: createdBody.id,
+      name: 'Renamed Team',
+      members: [
+        expect.objectContaining({ memberId: candidate.id }),
+        expect.objectContaining({ memberId: secondCandidate.id }),
+      ],
+    });
+
+    const [storedTeam] = await db
+      .select({ name: questCandidateTeamV2.name })
+      .from(questCandidateTeamV2)
+      .where(eq(questCandidateTeamV2.id, createdBody.id));
+    expect(storedTeam?.name).toBe('Renamed Team');
+  });
+
+  it('rejects Candidate Team name updates outside the forming Team Leader lifecycle without changing data', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+
+    const wrongActorQuestId = await createOpenGroupCandidateQuest();
+    const wrongActorTeam = await createTeam(wrongActorQuestId);
+    const wrongActor = await request(
+      `/api/v2/quests/${wrongActorQuestId}/teams/${wrongActorTeam.id}`,
+      'PATCH',
+      hirer.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-update-wrong-actor' },
+      JSON.stringify({ name: 'Wrong Actor Team' }),
+    );
+    expect(wrongActor.status).toBe(409);
+    expect((await wrongActor.json()).error.code).toBe('TEAM_LEADER_REQUIRED');
+
+    const wrongModeQuestId = await createOpenGroupCandidateQuest();
+    const wrongModeTeam = await createTeam(wrongModeQuestId);
+    await db.update(quest)
+      .set({ v2Mode: 'FIRST_COME_FIRST_SERVED' })
+      .where(eq(quest.id, wrongModeQuestId));
+    const wrongMode = await request(
+      `/api/v2/quests/${wrongModeQuestId}/teams/${wrongModeTeam.id}`,
+      'PATCH',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-update-wrong-mode' },
+      JSON.stringify({ name: 'Wrong Mode Team' }),
+    );
+    expect(wrongMode.status).toBe(409);
+    expect((await wrongMode.json()).error.code).toBe('QUEST_MODE_NOT_ALLOWED');
+
+    const wrongShapeQuestId = await createOpenGroupCandidateQuest();
+    const wrongShapeTeam = await createTeam(wrongShapeQuestId);
+    await db.update(quest)
+      .set({ participation: 'SOLO', v2Participation: 'SINGLE', headcount: 1 })
+      .where(eq(quest.id, wrongShapeQuestId));
+    const wrongShape = await request(
+      `/api/v2/quests/${wrongShapeQuestId}/teams/${wrongShapeTeam.id}`,
+      'PATCH',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-update-wrong-shape' },
+      JSON.stringify({ name: 'Wrong Shape Team' }),
+    );
+    expect(wrongShape.status).toBe(409);
+    expect((await wrongShape.json()).error.code).toBe('QUEST_PARTICIPATION_NOT_ALLOWED');
+
+    const wrongStateQuestId = await createOpenGroupCandidateQuest();
+    const wrongStateTeam = await createTeam(wrongStateQuestId);
+    await db.update(quest)
+      .set({ questStatus: 'QUEST_ASSIGNED' })
+      .where(eq(quest.id, wrongStateQuestId));
+    const wrongState = await request(
+      `/api/v2/quests/${wrongStateQuestId}/teams/${wrongStateTeam.id}`,
+      'PATCH',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-update-wrong-state' },
+      JSON.stringify({ name: 'Wrong State Team' }),
+    );
+    expect(wrongState.status).toBe(409);
+    expect((await wrongState.json()).error.code).toBe('QUEST_NOT_OPEN');
+
+    const submittedQuestId = await createOpenGroupCandidateQuest();
+    const submittedTeam = await createTeam(submittedQuestId, candidate.id, 2);
+    await joinTeam(
+      submittedQuestId,
+      submittedTeam.id,
+      secondCandidate.id,
+      submittedTeam.joinCode,
+      'candidate-team-v2-update-submitted-join',
+    );
+    const submissionFileId = await createFile(candidate.id);
+    const submitted = await request(
+      `/api/v2/quests/${submittedQuestId}/teams/${submittedTeam.id}/submit`,
+      'POST',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-update-submitted-submit' },
+      JSON.stringify({ text: 'Submitted team', fileIds: [submissionFileId] }),
+    );
+    expect(submitted.status).toBe(200);
+
+    const submittedUpdate = await request(
+      `/api/v2/quests/${submittedQuestId}/teams/${submittedTeam.id}`,
+      'PATCH',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-update-submitted' },
+      JSON.stringify({ name: 'Submitted Team Rename' }),
+    );
+    expect(submittedUpdate.status).toBe(409);
+    expect((await submittedUpdate.json()).error.code).toBe('TEAM_NOT_FORMING');
+
+    const storedTeams = await db
+      .select({ id: questCandidateTeamV2.id, name: questCandidateTeamV2.name })
+      .from(questCandidateTeamV2)
+      .where(inArray(questCandidateTeamV2.id, [
+        wrongActorTeam.id,
+        wrongModeTeam.id,
+        wrongShapeTeam.id,
+        wrongStateTeam.id,
+        submittedTeam.id,
+      ]));
+    expect(storedTeams.every((team) => team.name === 'Candidate Team')).toBe(true);
+  });
+
   it('creates one forming Candidate Team with a 24-hour Join Code and replays creation', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenGroupCandidateQuest();
@@ -353,7 +584,7 @@ describe('Quest Candidate Team API v2', () => {
       'POST',
       candidate.id,
       { 'content-type': 'application/json' },
-      JSON.stringify({ headcount: 3 }),
+      JSON.stringify({ headcount: 3, name: 'Candidate Team' }),
     );
     expect(missingKey.status).toBe(400);
     expect((await missingKey.json()).error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
@@ -363,7 +594,7 @@ describe('Quest Candidate Team API v2', () => {
       'POST',
       candidate.id,
       { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-create-1' },
-      JSON.stringify({ headcount: 3 }),
+      JSON.stringify({ headcount: 3, name: 'Candidate Team' }),
     );
     expect(first.status).toBe(201);
     const firstBody = await first.json() as { data: Record<string, unknown> };
@@ -391,7 +622,7 @@ describe('Quest Candidate Team API v2', () => {
       'POST',
       candidate.id,
       { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-create-1' },
-      JSON.stringify({ headcount: 3 }),
+      JSON.stringify({ headcount: 3, name: 'Candidate Team' }),
     );
     expect(replay.status).toBe(201);
     expect((await replay.json()).data).toEqual(firstBody.data);
@@ -407,7 +638,7 @@ describe('Quest Candidate Team API v2', () => {
       'POST',
       candidate.id,
       { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-create-2' },
-      JSON.stringify({ headcount: 2 }),
+      JSON.stringify({ headcount: 2, name: 'Candidate Team' }),
     );
     expect(secondTeam.status).toBe(409);
     expect((await secondTeam.json()).error.code).toBe('TEAM_MEMBERSHIP_ALREADY_EXISTS');
@@ -1066,7 +1297,7 @@ describe('Quest Candidate Team API v2', () => {
       'POST',
       hirer.id,
       { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-invalid-hirer' },
-      JSON.stringify({ headcount: 2 }),
+      JSON.stringify({ headcount: 2, name: 'Candidate Team' }),
     );
     expect(hirerResponse.status).toBe(409);
     expect((await hirerResponse.json()).error.code).toBe('HIRER_CANNOT_JOIN_TEAM');
@@ -1077,7 +1308,7 @@ describe('Quest Candidate Team API v2', () => {
       'POST',
       candidate.id,
       { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-invalid-mode' },
-      JSON.stringify({ headcount: 2 }),
+      JSON.stringify({ headcount: 2, name: 'Candidate Team' }),
     );
     expect(wrongMode.status).toBe(409);
     expect((await wrongMode.json()).error.code).toBe('QUEST_MODE_NOT_ALLOWED');
@@ -1093,7 +1324,7 @@ describe('Quest Candidate Team API v2', () => {
       'POST',
       candidate.id,
       { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-invalid-shape' },
-      JSON.stringify({ headcount: 2 }),
+      JSON.stringify({ headcount: 2, name: 'Candidate Team' }),
     );
     expect(wrongShape.status).toBe(409);
     expect((await wrongShape.json()).error.code).toBe('QUEST_PARTICIPATION_NOT_ALLOWED');
@@ -1104,7 +1335,7 @@ describe('Quest Candidate Team API v2', () => {
       'POST',
       candidate.id,
       { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-invalid-state' },
-      JSON.stringify({ headcount: 2 }),
+      JSON.stringify({ headcount: 2, name: 'Candidate Team' }),
     );
     expect(closed.status).toBe(409);
     expect((await closed.json()).error.code).toBe('QUEST_NOT_OPEN');
@@ -1129,7 +1360,7 @@ describe('Quest Candidate Team API v2', () => {
       'POST',
       candidate.id,
       { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-v2-v1-boundary' },
-      JSON.stringify({ headcount: 2 }),
+      JSON.stringify({ headcount: 2, name: 'Candidate Team' }),
     );
     expect(v2Response.status).toBe(404);
     expect((await v2Response.json()).error.code).toBe('QUEST_NOT_FOUND');
@@ -1149,7 +1380,7 @@ describe('Quest Candidate Team API v2', () => {
         authenticatedMemberId: candidate.id,
         operation: 'quest.v2.candidate-team.create',
         path: '/api/v2/quests/:questId/teams',
-        body: { questId, headcount: 2 },
+        body: { questId, name: 'Candidate Team', headcount: 2 },
       }),
       expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
     });
@@ -1160,7 +1391,7 @@ describe('Quest Candidate Team API v2', () => {
       'POST',
       candidate.id,
       { 'content-type': 'application/json', 'idempotency-key': key },
-      JSON.stringify({ headcount: 2 }),
+      JSON.stringify({ headcount: 2, name: 'Candidate Team' }),
     );
     expect(response.status).toBe(409);
     expect((await response.json()).error.code).toBe('IDEMPOTENCY_IN_PROGRESS');

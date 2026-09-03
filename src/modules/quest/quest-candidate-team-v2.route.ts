@@ -1,6 +1,7 @@
 import { authGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V2_PREFIX } from '@/shared/api-version';
+import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
 import { Elysia } from 'elysia';
 
@@ -14,6 +15,7 @@ import {
   removeQuestV2CandidateTeamMemberController,
   selectQuestV2CandidateTeamController,
   submitQuestV2CandidateTeamController,
+  updateQuestV2CandidateTeamController,
 } from './quest-candidate-team-v2.controller';
 import {
   questV2CandidateTeamCreateSchema,
@@ -25,6 +27,7 @@ import {
   questV2CandidateTeamParamsSchema,
   questV2CandidateTeamResponseSchema,
   questV2CandidateTeamSubmissionSchema,
+  questV2CandidateTeamUpdateSchema,
 } from './quest-candidate-team-v2.schema';
 import { questV2CandidateSelectionResponseSchema } from './quest-candidate-v2.schema';
 import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
@@ -67,6 +70,20 @@ export const questCandidateTeamV2Route = new Elysia({
       summary: 'Read a permitted Candidate Team',
       description: 'The Hirer and Candidate Team Members can read a forming or submitted Candidate Team. Join Code plaintext is not returned by reads.',
       operationId: 'getQuestCandidateTeamV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .patch('/quests/:questId/teams/:teamId', updateQuestV2CandidateTeamController, {
+    params: questV2CandidateTeamDetailParamsSchema,
+    body: questV2CandidateTeamUpdateSchema,
+    headers: questV2CandidateTeamHeadersSchema,
+    transform: rejectUnknownFields(questV2CandidateTeamUpdateSchema),
+    response: responses(questV2CandidateTeamResponseSchema, 400, 401, 404, 409, 503),
+    detail: {
+      tags: ['Quest Candidate Teams v2'],
+      summary: 'Update a forming Candidate Team name',
+      description: 'Only the Team Leader can update the name while the Candidate Team is forming for an open GROUP Candidate Quest.',
+      operationId: 'updateQuestCandidateTeamV2',
       security: betterAuthSecurity,
     },
   })

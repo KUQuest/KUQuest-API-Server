@@ -8,6 +8,7 @@ import type {
   QuestV2CandidateTeamCreateInput,
   QuestV2CandidateTeamJoinInput,
   QuestV2CandidateTeamSubmissionInput,
+  QuestV2CandidateTeamUpdateInput,
 } from './quest-candidate-team-v2.schema';
 import {
   createQuestV2CandidateTeam,
@@ -19,6 +20,7 @@ import {
   removeQuestV2CandidateTeamMember,
   selectQuestV2CandidateTeam,
   submitQuestV2CandidateTeam,
+  updateQuestV2CandidateTeam,
   type QuestV2CandidateTeamOutcome,
   type QuestV2CandidateTeamSelectionOutcome,
 } from './quest-candidate-team-v2.service';
@@ -33,6 +35,7 @@ const serializeTeam = (team: CandidateTeam) => ({
   id: team.id,
   questId: team.questId,
   leaderId: team.leaderId,
+  name: team.name,
   headcount: team.headcount,
   state: team.state,
   joinCode: team.joinCode,
@@ -249,6 +252,29 @@ export const getQuestV2CandidateTeamController = async ({
       result.outcome === 'not-found' ? 'Quest not found' : 'Candidate Team not found',
     );
   }
+  return apiSuccess(serializeTeam(result));
+};
+
+export const updateQuestV2CandidateTeamController = async ({
+  body,
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & {
+  body: QuestV2CandidateTeamUpdateInput;
+  params: QuestV2CandidateTeamDetailParams;
+}) => {
+  const commandId = requiredCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+  const result = await updateQuestV2CandidateTeam(
+    session.user.id,
+    params.questId,
+    params.teamId,
+    body,
+    commandId,
+  );
+  if ('outcome' in result) return mapTeamError(set, result);
   return apiSuccess(serializeTeam(result));
 };
 

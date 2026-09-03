@@ -34,10 +34,13 @@ import type {
   QuestV2CandidateTeamCreateInput,
   QuestV2CandidateTeamJoinInput,
   QuestV2CandidateTeamSubmissionInput,
+  QuestV2CandidateTeamUpdateInput,
 } from './quest-candidate-team-v2.schema';
 
 export const questV2CandidateTeamCreateOperationScope =
   'quest.v2.candidate-team.create';
+export const questV2CandidateTeamUpdateOperationScope =
+  'quest.v2.candidate-team.update';
 export const questV2CandidateTeamJoinOperationScope =
   'quest.v2.candidate-team.join';
 export const questV2CandidateTeamLeaveOperationScope =
@@ -80,6 +83,7 @@ type CandidateTeam = {
   id: string;
   questId: string;
   leaderId: string;
+  name: string;
   headcount: number;
   state: QuestV2TeamState;
   joinCode: string | null;
@@ -194,6 +198,7 @@ const teamFields = {
   id: questCandidateTeamV2.id,
   questId: questCandidateTeamV2.questId,
   leaderId: questCandidateTeamV2.leaderId,
+  name: questCandidateTeamV2.name,
   headcount: questCandidateTeamV2.headcount,
   state: questCandidateTeamV2.state,
   joinCodeHash: questCandidateTeamV2.joinCodeHash,
@@ -281,6 +286,7 @@ const toCandidateTeam = (
     id: string;
     questId: string;
     leaderId: string;
+    name: string;
     headcount: number | null;
     state: string;
     joinCodeHash: string | null;
@@ -313,6 +319,7 @@ const toCandidateTeam = (
     id: row.id,
     questId: row.questId,
     leaderId: row.leaderId,
+    name: row.name,
     headcount: row.headcount,
     state: row.state,
     joinCode,
@@ -363,6 +370,7 @@ const readTeam = async (
     id: string;
     questId: string;
     leaderId: string;
+    name: string;
     headcount: number | null;
     state: string;
     joinCodeHash: string | null;
@@ -383,6 +391,7 @@ const snapshotFor = (team: CandidateTeam) => ({
   id: team.id,
   questId: team.questId,
   leaderId: team.leaderId,
+  name: team.name,
   headcount: team.headcount,
   state: team.state,
   joinCode: team.joinCode,
@@ -408,6 +417,7 @@ const teamFromSnapshot = (value: unknown): CandidateTeam | undefined => {
     typeof snapshot.id !== 'string' ||
     typeof snapshot.questId !== 'string' ||
     typeof snapshot.leaderId !== 'string' ||
+    typeof snapshot.name !== 'string' ||
     typeof snapshot.headcount !== 'number' ||
     typeof snapshot.state !== 'string' ||
     (snapshot.joinCode !== null && typeof snapshot.joinCode !== 'string') ||
@@ -457,6 +467,7 @@ const teamFromSnapshot = (value: unknown): CandidateTeam | undefined => {
     id: snapshot.id,
     questId: snapshot.questId,
     leaderId: snapshot.leaderId,
+    name: snapshot.name,
     headcount: snapshot.headcount,
     state: snapshot.state,
     joinCode: snapshot.joinCode,
@@ -767,7 +778,7 @@ export const createQuestV2CandidateTeam = async (
     questV2CandidateTeamCreateOperationScope,
     leaderId,
     '/api/v2/quests/:questId/teams',
-    { questId, headcount: input.headcount },
+    { questId, name: input.name, headcount: input.headcount },
   );
 
   return db.transaction(async (transaction) => {
@@ -802,6 +813,7 @@ export const createQuestV2CandidateTeam = async (
       .values({
         questId,
         leaderId,
+        name: input.name,
         headcount: input.headcount,
         state: 'TEAM_FORMING',
         joinCodeHash: await hashJoinCode(joinCode),
@@ -902,6 +914,71 @@ export const getQuestV2CandidateTeam = async (
     ? { outcome: 'team-not-found' }
     : { outcome: 'not-authorized' };
   return readTeam(db, row);
+};
+
+export const updateQuestV2CandidateTeam = async (
+  leaderId: string,
+  questId: string,
+  teamId: string,
+  input: QuestV2CandidateTeamUpdateInput,
+  rawCommandId: string,
+  now = new Date(),
+): Promise<QuestV2CandidateTeamOutcome> => {
+  const commandId = rawCommandId.trim();
+  if (commandId.length === 0 || commandId.length > 200) return { outcome: 'invalid-idempotency-key' };
+  const requestHash = await requestHashFor(
+    questV2CandidateTeamUpdateOperationScope,
+    leaderId,
+    '/api/v2/quests/:questId/teams/:teamId',
+    { questId, teamId, name: input.name },
+  );
+
+  return db.transaction(async (transaction) => {
+    const current = await lockQuest(transaction, questId);
+    if (!current) return { outcome: 'not-found' };
+    const idempotency = await acquireIdempotency(
+      transaction,
+      leaderId,
+      commandId,
+      requestHash,
+      questV2CandidateTeamUpdateOperationScope,
+    );
+    if ('outcome' in idempotency) return idempotency;
+    if (!idempotency.created) {
+      const replay = teamOutcomeFromSnapshot(idempotency.record.resultData);
+      return replay ?? { outcome: 'idempotency-unavailable' };
+    }
+
+    if (current.v2Mode !== questV2Mode.candidate) return discardIdempotency(transaction, idempotency.record.id, 'not-candidate');
+    if (current.v2Participation !== questV2Participation.group) return discardIdempotency(transaction, idempotency.record.id, 'not-group');
+    if (current.questState !== 'QUEST_OPEN') return discardIdempotency(transaction, idempotency.record.id, 'not-open');
+    if (questStartHasPassed(current, now)) return discardIdempotency(transaction, idempotency.record.id, 'not-open');
+
+    const team = await lockTeam(transaction, questId, teamId);
+    if (!team) return discardIdempotency(transaction, idempotency.record.id, 'team-not-found');
+    if (team.leaderId !== leaderId) return discardIdempotency(transaction, idempotency.record.id, 'not-leader');
+    if (team.state !== 'TEAM_FORMING') return discardIdempotency(transaction, idempotency.record.id, 'not-forming');
+
+    const [updatedTeam] = await transaction
+      .update(questCandidateTeamV2)
+      .set({ name: input.name })
+      .where(and(
+        eq(questCandidateTeamV2.id, teamId),
+        eq(questCandidateTeamV2.state, 'TEAM_FORMING'),
+      ))
+      .returning(teamFields);
+    if (!updatedTeam) return { outcome: 'idempotency-unavailable' };
+
+    const updated = await readTeam(transaction, updatedTeam);
+    await completeTeamCommand(
+      transaction,
+      idempotency.record.id,
+      updated,
+      'quest-v2-candidate-team',
+      now,
+    );
+    return updated;
+  });
 };
 
 export const joinQuestV2CandidateTeam = async (
