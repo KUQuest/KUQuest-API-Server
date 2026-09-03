@@ -3,30 +3,17 @@ import { t } from 'elysia';
 import { questStatuses } from './quest.contract';
 import { questV2Modes, questV2Participations } from './quest-v2.contract';
 
-const adminQuestStatusSchema = t.Union([
-  t.Literal(questStatuses[0]),
-  t.Literal(questStatuses[1]),
-  t.Literal(questStatuses[2]),
-  t.Literal(questStatuses[3]),
-  t.Literal(questStatuses[4]),
-  t.Literal(questStatuses[5]),
-  t.Literal(questStatuses[6]),
-  t.Literal(questStatuses[7]),
-  t.Literal(questStatuses[8]),
-  t.Literal(questStatuses[9]),
-  t.Literal(questStatuses[10]),
-  t.Literal(questStatuses[11]),
-]);
+// Generic in the member type, so the schema keeps the literal union the controllers read.
+const literalUnion = <T extends string>(values: readonly T[]) => t.Union(
+  values.map((value) => t.Literal(value)) as [
+    ReturnType<typeof t.Literal<T>>,
+    ...ReturnType<typeof t.Literal<T>>[],
+  ],
+);
 
-const adminQuestModeSchema = t.Union([
-  t.Literal(questV2Modes[0]),
-  t.Literal(questV2Modes[1]),
-]);
-
-const adminQuestParticipationSchema = t.Union([
-  t.Literal(questV2Participations[0]),
-  t.Literal(questV2Participations[1]),
-]);
+const adminQuestStatusSchema = literalUnion(questStatuses);
+const adminQuestModeSchema = literalUnion(questV2Modes);
+const adminQuestParticipationSchema = literalUnion(questV2Participations);
 
 export const adminQuestParamsSchema = t.Object({ questId: t.String({ format: 'uuid' }) });
 const adminQuestVersionHeaderSchema = t.String({ minLength: 1, maxLength: 100, pattern: '\\S' });
