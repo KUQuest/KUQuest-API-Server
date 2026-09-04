@@ -83,7 +83,6 @@ const members = [hirer, worker, secondWorker, thirdWorker, fourthWorker];
 const tagId = randomUUID();
 const questIds: string[] = [];
 const fileIds: string[] = [];
-let postgresAvailable = false;
 let writerFailure: Error | undefined;
 
 type JsonSchema = {
@@ -672,13 +671,7 @@ const releaseActiveReservations = async (ids: string[]) => {
 };
 
 beforeAll(async () => {
-  try {
-    await postgresSql`select 1`;
-    postgresAvailable = true;
-  } catch {
-    console.warn('Skipping Quest migration domain verification: PostgreSQL is unavailable');
-    return;
-  }
+  await postgresSql`select 1`;
   await ensureInitialMoneyPolicy();
   await db.insert(authUser).values(members);
   await db.insert(tag).values({ id: tagId, name: 'Quest migration verification tag' });
@@ -694,7 +687,6 @@ beforeEach(() => {
 afterEach(async () => {
   configureQuestWorkChatMembershipWriter(undefined);
   mock.restore();
-  if (!postgresAvailable) return;
   const ids = [...questIds];
   await releaseActiveReservations(ids);
   await deleteWorkChatForQuests(ids);
@@ -710,7 +702,6 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  if (!postgresAvailable) return;
   await db.delete(tag).where(eq(tag.id, tagId));
 });
 
@@ -794,7 +785,6 @@ describe('Quest API v1 to v2 migration verification', () => {
   });
 
   it('enforces the Candidate Team field split and the 24-hour Join Code boundary at the HTTP seam', async () => {
-    if (!postgresAvailable) return;
     authenticate();
     const questId = await createOpenGroupCandidateQuest({
       headcount: 3,
@@ -862,11 +852,39 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(staleCode.status).toBe(409);
     expect((await staleCode.json()).error.code).toBe('JOIN_CODE_INVALID');
 
-    const currentCode = await joinTeam(
+    await db.update(questCandidateTeamV2)
+      .set({ joinCodeExpiresAt: new Date('2020-01-01T00:00:00.000Z') })
+      .where(eq(questCandidateTeamV2.id, team.id));
+    const expiredCode = await joinTeam(
       questId,
       team.id,
       thirdWorker.id,
       regeneratedBody.joinCode,
+      'quest-migration-expired-join-code',
+    );
+    expect(expiredCode.status).toBe(409);
+    expect((await expiredCode.json()).error.code).toBe('JOIN_CODE_EXPIRED');
+    expect(await db.select().from(questCandidateTeamV2Member).where(eq(questCandidateTeamV2Member.teamId, team.id))).toHaveLength(2);
+
+    const refreshed = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/join-code`,
+      'POST',
+      worker.id,
+      { 'idempotency-key': 'quest-migration-join-code-refresh-after-expiry' },
+    );
+    expect(refreshed.status).toBe(200);
+    const refreshedBody = (await refreshed.json()).data as {
+      joinCode: string;
+      joinCodeExpiresAt: string;
+    };
+    expect(new Date(refreshedBody.joinCodeExpiresAt).getTime() - Date.now()).toBeGreaterThan(23 * 60 * 60 * 1_000);
+    expect(new Date(refreshedBody.joinCodeExpiresAt).getTime() - Date.now()).toBeLessThan(25 * 60 * 60 * 1_000);
+
+    const currentCode = await joinTeam(
+      questId,
+      team.id,
+      thirdWorker.id,
+      refreshedBody.joinCode,
       'quest-migration-current-join-code',
     );
     expect(currentCode.status).toBe(200);
@@ -874,7 +892,6 @@ describe('Quest API v1 to v2 migration verification', () => {
   });
 
   it('verifies real PostgreSQL effects across Candidate Team, Assignment, Work Conversation, Proof, Reward, and Reputation', async () => {
-    if (!postgresAvailable) return;
     authenticate();
     const questId = await createOpenGroupCandidateQuest();
     const firstTeam = await createTeam(questId, worker.id, 2, 'quest-migration-concurrent-team-one');
@@ -1085,15 +1102,24 @@ describe('Quest API v1 to v2 migration verification', () => {
     );
     expect(reviewResponse.status).toBe(200);
     const reviewBody = await reviewResponse.json();
-    const reviewReplay = await jsonRequest(
-      `/api/v2/quests/${questId}/reviews`,
-      'POST',
-      hirer.id,
-      { revieweeId: winningTeam.leaderId, rating: 5 },
-      'quest-migration-review-create',
-    );
-    expect(reviewReplay.status).toBe(200);
-    expect(await reviewReplay.json()).toEqual(reviewBody);
+    const reviewReplays = await Promise.all([
+      jsonRequest(
+        `/api/v2/quests/${questId}/reviews`,
+        'POST',
+        hirer.id,
+        { revieweeId: winningTeam.leaderId, rating: 5 },
+        'quest-migration-review-create',
+      ),
+      jsonRequest(
+        `/api/v2/quests/${questId}/reviews`,
+        'POST',
+        hirer.id,
+        { revieweeId: winningTeam.leaderId, rating: 5 },
+        'quest-migration-review-create',
+      ),
+    ]);
+    expect(reviewReplays.map(({ status }) => status)).toEqual([200, 200]);
+    expect(await Promise.all(reviewReplays.map((response) => response.json()))).toEqual([reviewBody, reviewBody]);
     expect(await db.select({ reviewerId: questReview.reviewerId, revieweeId: questReview.revieweeId })
       .from(questReview).where(eq(questReview.questId, questId))).toEqual([
       { reviewerId: hirer.id, revieweeId: winningTeam.leaderId },
@@ -1113,7 +1139,6 @@ describe('Quest API v1 to v2 migration verification', () => {
   });
 
   it('rolls back Candidate Team selection atomically and retries the same command after Work Chat failure', async () => {
-    if (!postgresAvailable) return;
     authenticate();
     const questId = await createOpenGroupCandidateQuest();
     const team = await createTeam(questId, worker.id, 2, 'quest-migration-rollback-team-create');
@@ -1161,12 +1186,28 @@ describe('Quest API v1 to v2 migration verification', () => {
       { 'idempotency-key': key },
     );
     expect(retry.status).toBe(200);
+    const retryBody = await retry.json();
+    const concurrentReplays = await Promise.all([
+      request(
+        `/api/v2/quests/${questId}/teams/${team.id}/select`,
+        'POST',
+        hirer.id,
+        { 'idempotency-key': key },
+      ),
+      request(
+        `/api/v2/quests/${questId}/teams/${team.id}/select`,
+        'POST',
+        hirer.id,
+        { 'idempotency-key': key },
+      ),
+    ]);
+    expect(concurrentReplays.map(({ status }) => status)).toEqual([200, 200]);
+    expect(await Promise.all(concurrentReplays.map((response) => response.json()))).toEqual([retryBody, retryBody]);
     expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(2);
     expect(await db.select().from(chatConversation).where(eq(chatConversation.questId, questId))).toHaveLength(1);
   });
 
   it('records one Admin Review Item for a real non-approved Proof and keeps the Funding Reservation active', async () => {
-    if (!postgresAvailable) return;
     authenticate();
     const { questId, assignmentId } = await createInProgressSingleQuest();
     await createWorkConversation(questId, assignmentId);
@@ -1245,7 +1286,6 @@ describe('Quest API v1 to v2 migration verification', () => {
   });
 
   it('keeps the v2 cancellation settlement matrix isolated from v1', async () => {
-    if (!postgresAvailable) return;
     authenticate();
     const questId = await createOpenGroupCandidateQuest();
     const reservationId = await reserveQuest(questId, 2_040);
