@@ -212,6 +212,50 @@ export const review = pgTable(
   ],
 );
 
+/** Durable command identity and replay result for v2 Rating Review commands. */
+export const questV2ReviewCommand = pgTable(
+  'quest_v2_review_command',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    key: varchar('key', { length: 200 }).notNull().unique(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    principalUserId: uuid('principal_user_id')
+      .notNull()
+      .references(() => authUser.id),
+    operation: varchar('operation', { length: 64 }).notNull(),
+    requestHash: varchar('request_hash', { length: 64 }).notNull(),
+    resourceId: uuid('resource_id'),
+    resultData: jsonb('result_data'),
+    processingStatus: varchar('processing_status', { length: 32 })
+      .default('PROCESSING')
+      .notNull(),
+    createdAt: time('created_at').defaultNow().notNull(),
+    completedAt: time('completed_at'),
+    expiresAt: time('expires_at').notNull(),
+  },
+  (table) => [
+    check('quest_v2_review_command_key_check', sql`btrim(${table.key}) <> ''`),
+    check('quest_v2_review_command_operation_check', sql`btrim(${table.operation}) <> ''`),
+    check(
+      'quest_v2_review_command_hash_check',
+      sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'quest_v2_review_command_status_check',
+      sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`,
+    ),
+    check(
+      'quest_v2_review_command_completion_check',
+      sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`,
+    ),
+    index('quest_v2_review_command_quest_idx').on(table.questId),
+    index('quest_v2_review_command_principal_idx').on(table.principalUserId),
+    index('quest_v2_review_command_expiry_idx').on(table.expiresAt),
+  ],
+);
+
 export const questLocation = pgTable(
   'quest_location',
   {
@@ -1113,6 +1157,7 @@ export const questRelations = relations(quest, ({ one, many }) => ({
   completionConfirmationsV2: many(questV2CompletionConfirmation),
   proofCommandsV2: many(questV2ProofCommand),
   reviews: many(review),
+  reviewCommandsV2: many(questV2ReviewCommand),
 }));
 
 export const reviewRelations = relations(review, ({ one }) => ({
@@ -1126,6 +1171,17 @@ export const reviewRelations = relations(review, ({ one }) => ({
   }),
   reviewee: one(authUser, {
     fields: [review.revieweeId],
+    references: [authUser.id],
+  }),
+}));
+
+export const questV2ReviewCommandRelations = relations(questV2ReviewCommand, ({ one }) => ({
+  quest: one(quest, {
+    fields: [questV2ReviewCommand.questId],
+    references: [quest.id],
+  }),
+  principalUser: one(authUser, {
+    fields: [questV2ReviewCommand.principalUserId],
     references: [authUser.id],
   }),
 }));

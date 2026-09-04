@@ -43,6 +43,23 @@ export { questAssignmentV2Route } from './quest-assignment-v2.route';
 export { questCandidateV2Route } from './quest-candidate-v2.route';
 export { questCandidateTeamV2Route } from './quest-candidate-team-v2.route';
 export { questProofV2Route } from './quest-proof-v2.route';
+export { questReviewV2Route } from './quest-review-v2.route';
+export {
+  createQuestV2Review,
+  questV2ReviewOperationScope,
+  updateQuestV2Review,
+} from './quest-review-v2.service';
+export type {
+  QuestV2ReviewOutcome,
+  QuestV2ReviewRow,
+} from './quest-review-v2.service';
+export type {
+  QuestV2ReviewCreateInput,
+  QuestV2ReviewDetailParams,
+  QuestV2ReviewHeaders,
+  QuestV2ReviewParams,
+  QuestV2ReviewUpdateInput,
+} from './quest-review-v2.schema';
 export {
   cancelQuestV2,
   questV2CancellationOperationScope,
