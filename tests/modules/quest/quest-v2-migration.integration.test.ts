@@ -1,13 +1,16 @@
 import { app } from '@/app';
 import { db, sql as postgresSql } from '@/database/client';
 import { adminReviewItem } from '@/database/schema/admin.schema';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
   quest,
   questAssignment,
+  questCandidateApplicationV2,
   questCandidateTeamV2,
   questCandidateTeamV2Member,
+  questImage,
   questV2ProofSubmission,
   review as questReview,
 } from '@/database/schema/quest.schema';
@@ -16,6 +19,7 @@ import {
   walletFundingReservation,
   walletFundingReservationOperation,
   walletFundingReservationSettlement,
+  walletIdempotencyKey,
   walletLedgerAccount,
   walletLedgerPosting,
   walletLedgerTransaction,
@@ -33,6 +37,7 @@ import {
   type QuestTransaction,
 } from '@/modules/quest';
 import { createWorkChatMembershipWriter } from '@/modules/work-chat';
+import { questV2Storage } from '@/modules/quest/quest.storage';
 import {
   createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
@@ -42,12 +47,15 @@ import {
   reserveSpending,
   signedSatang,
 } from '@/modules/wallet';
+import * as auditService from '@/modules/audit/audit.service';
+import * as walletModule from '@/modules/wallet';
 
 import { randomUUID } from 'node:crypto';
 
 import { and, eq, inArray } from 'drizzle-orm';
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { ImageUploadError } from '@/shared/image-storage';
 
 const hirer = {
   id: randomUUID(),
@@ -485,6 +493,29 @@ const createOpenGroupCandidateQuest = async (
   return id;
 };
 
+const createDraftQuest = async () => {
+  const id = randomUUID();
+  questIds.push(id);
+  await db.insert(quest).values({
+    id,
+    hirerId: hirer.id,
+    apiVersion: 'v2',
+    title: 'Quest migration image verification',
+    condition: 'Prepare the image',
+    mode: 'NO_CANDIDATE',
+    participation: 'SOLO',
+    v2Mode: 'FIRST_COME_FIRST_SERVED',
+    v2Participation: 'SINGLE',
+    questStatus: 'QUEST_DRAFT',
+    tagId: null,
+    headcount: 1,
+    startTime: new Date('2030-01-01T10:00:00.000Z'),
+    dueAt: new Date('2030-01-01T11:00:00.000Z'),
+    proofRequired: true,
+  });
+  return id;
+};
+
 const createTeam = async (
   questId: string,
   leaderId: string,
@@ -763,6 +794,27 @@ describe('Quest API v1 to v2 migration verification', () => {
     );
   });
 
+  it('rolls back the v2 Quest Image effect when storage fails', async () => {
+    authenticate();
+    const questId = await createDraftQuest();
+    const beforeFiles = await db.select({ id: file.id }).from(file).where(eq(file.uploadedByUserId, hirer.id));
+    spyOn(questV2Storage, 'upload').mockRejectedValue(new ImageUploadError('storage unavailable'));
+    const form = new FormData();
+    form.append('images', new File([new Uint8Array([1, 2, 3])], 'migration.png', { type: 'image/png' }));
+
+    const response = await request(
+      `/api/v2/quests/${questId}/images`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'quest-migration-image-storage-failure' },
+      form,
+    );
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe('QUEST_IMAGE_STORAGE_UNAVAILABLE');
+    expect(await db.select({ id: questImage.id }).from(questImage).where(eq(questImage.questId, questId))).toEqual([]);
+    expect(await db.select({ id: file.id }).from(file).where(eq(file.uploadedByUserId, hirer.id))).toEqual(beforeFiles);
+  });
+
   it('documents only canonical v2 vocabulary and requires Idempotency-Key on every v2 write', async () => {
     const document = await getDocument();
     const v2Text = JSON.stringify(
@@ -806,6 +858,57 @@ describe('Quest API v1 to v2 migration verification', () => {
     const team = await createTeam(questId, worker.id, 3, 'quest-migration-join-code-create');
     expect(new Date(team.joinCodeExpiresAt).getTime() - Date.now()).toBeGreaterThan(23 * 60 * 60 * 1_000);
     expect(new Date(team.joinCodeExpiresAt).getTime() - Date.now()).toBeLessThan(25 * 60 * 60 * 1_000);
+
+    const createCommand = and(
+      eq(walletIdempotencyKey.principalUserId, worker.id),
+      eq(walletIdempotencyKey.operationScope, 'quest.v2.candidate-team.create'),
+      eq(walletIdempotencyKey.key, 'quest-migration-join-code-create'),
+    );
+    await db.update(walletIdempotencyKey).set({
+      processingStatus: 'PROCESSING',
+      completedAt: null,
+      resourceId: null,
+      resultData: null,
+    }).where(createCommand);
+    const inProgress = await jsonRequest(
+      `/api/v2/quests/${questId}/teams`,
+      'POST',
+      worker.id,
+      { name: 'Migration Team', headcount: 3 },
+      'quest-migration-join-code-create',
+    );
+    expect(inProgress.status).toBe(409);
+    expect((await inProgress.json()).error.code).toBe('IDEMPOTENCY_IN_PROGRESS');
+
+    await db.update(walletIdempotencyKey).set({
+      processingStatus: 'COMPLETED',
+      completedAt: new Date(),
+      resultData: null,
+    }).where(createCommand);
+    const unavailable = await jsonRequest(
+      `/api/v2/quests/${questId}/teams`,
+      'POST',
+      worker.id,
+      { name: 'Migration Team', headcount: 3 },
+      'quest-migration-join-code-create',
+    );
+    expect(unavailable.status).toBe(503);
+    expect((await unavailable.json()).error.code).toBe('IDEMPOTENCY_UNAVAILABLE');
+    await db.delete(walletIdempotencyKey).where(createCommand);
+
+    const oldFieldUpdate = await jsonRequest(
+      `/api/v2/quests/${questId}/teams/${team.id}`,
+      'PATCH',
+      worker.id,
+      { name: 'Updated Team', reworkLimit: 1 },
+      'quest-migration-field-split-update',
+    );
+    expect(oldFieldUpdate.status).toBe(400);
+    expect((await oldFieldUpdate.json()).error.code).toBe('VALIDATION');
+    expect(await db.select({ name: questCandidateTeamV2.name })
+      .from(questCandidateTeamV2).where(eq(questCandidateTeamV2.id, team.id))).toEqual([
+      { name: 'Migration Team' },
+    ]);
 
     const oldInvitationField = await joinTeam(
       questId,
@@ -889,6 +992,226 @@ describe('Quest API v1 to v2 migration verification', () => {
     );
     expect(currentCode.status).toBe(200);
     expect(await db.select().from(questCandidateTeamV2Member).where(eq(questCandidateTeamV2Member.teamId, team.id))).toHaveLength(3);
+  });
+
+  it('covers all v2 mode and participation quadrants at the HTTP seam', async () => {
+    authenticate();
+    configureQuestWorkChatMembershipWriter(createWorkChatMembershipWriter());
+
+    const singleFcfsQuestId = await createOpenGroupCandidateQuest({
+      mode: 'NO_CANDIDATE',
+      participation: 'SOLO',
+      v2Mode: 'FIRST_COME_FIRST_SERVED',
+      v2Participation: 'SINGLE',
+      headcount: 1,
+      questFundingTotalSatang: 1_020,
+      questEscrowSatang: 1_020,
+    });
+    const singleFcfsJoin = await request(
+      `/api/v2/quests/${singleFcfsQuestId}/join`,
+      'POST',
+      worker.id,
+      { 'idempotency-key': 'quest-migration-matrix-single-fcfs-join' },
+    );
+    expect(singleFcfsJoin.status).toBe(200);
+    expect((await singleFcfsJoin.json()).data).toMatchObject({
+      workerId: worker.id,
+      state: 'ASSIGNMENT_ACTIVE',
+      questState: 'QUEST_ASSIGNED',
+    });
+
+    const singleCandidateQuestId = await createOpenGroupCandidateQuest({
+      mode: 'CANDIDATE',
+      participation: 'SOLO',
+      v2Mode: 'CANDIDATE',
+      v2Participation: 'SINGLE',
+      headcount: 1,
+      questFundingTotalSatang: 1_020,
+      questEscrowSatang: 1_020,
+    });
+    const firstApplication = await request(
+      `/api/v2/quests/${singleCandidateQuestId}/applications`,
+      'POST',
+      worker.id,
+      { 'idempotency-key': 'quest-migration-matrix-single-candidate-apply-one' },
+    );
+    const firstApplicationId = (await firstApplication.json()).data.id as string;
+    const secondApplication = await request(
+      `/api/v2/quests/${singleCandidateQuestId}/applications`,
+      'POST',
+      secondWorker.id,
+      { 'idempotency-key': 'quest-migration-matrix-single-candidate-apply-two' },
+    );
+    const secondApplicationId = (await secondApplication.json()).data.id as string;
+    const singleCandidateSelection = await request(
+      `/api/v2/quests/${singleCandidateQuestId}/applications/${firstApplicationId}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'quest-migration-matrix-single-candidate-select' },
+    );
+    expect(singleCandidateSelection.status).toBe(200);
+    expect(await db.select({ memberId: questCandidateApplicationV2.memberId, state: questCandidateApplicationV2.state })
+      .from(questCandidateApplicationV2).where(eq(questCandidateApplicationV2.questId, singleCandidateQuestId))).toEqual([
+      { memberId: worker.id, state: 'APPLICATION_SELECTED' },
+      { memberId: secondWorker.id, state: 'APPLICATION_REJECTED' },
+    ]);
+    expect(await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, singleCandidateQuestId))).toEqual([
+      { status: 'QUEST_ASSIGNED' },
+    ]);
+    expect(secondApplicationId).not.toBe(firstApplicationId);
+
+    const groupFcfsQuestId = await createOpenGroupCandidateQuest({
+      mode: 'NO_CANDIDATE',
+      participation: 'GROUP',
+      v2Mode: 'FIRST_COME_FIRST_SERVED',
+      v2Participation: 'GROUP',
+    });
+    const groupFcfsFirstJoin = await request(
+      `/api/v2/quests/${groupFcfsQuestId}/join`,
+      'POST',
+      thirdWorker.id,
+      { 'idempotency-key': 'quest-migration-matrix-group-fcfs-join-one' },
+    );
+    const groupFcfsSecondJoin = await request(
+      `/api/v2/quests/${groupFcfsQuestId}/join`,
+      'POST',
+      fourthWorker.id,
+      { 'idempotency-key': 'quest-migration-matrix-group-fcfs-join-two' },
+    );
+    expect([groupFcfsFirstJoin.status, groupFcfsSecondJoin.status]).toEqual([200, 200]);
+    expect(await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, groupFcfsQuestId))).toEqual([
+      { status: 'QUEST_ASSIGNED' },
+    ]);
+    expect(await db.select({ workerId: questAssignment.workerId }).from(questAssignment)
+      .where(eq(questAssignment.questId, groupFcfsQuestId))).toHaveLength(2);
+
+    const groupCandidateQuestId = await createOpenGroupCandidateQuest();
+    const groupCandidateTeam = await createTeam(
+      groupCandidateQuestId,
+      worker.id,
+      2,
+      'quest-migration-matrix-group-candidate-create',
+    );
+    const groupCandidateJoin = await joinTeam(
+      groupCandidateQuestId,
+      groupCandidateTeam.id,
+      secondWorker.id,
+      groupCandidateTeam.joinCode,
+      'quest-migration-matrix-group-candidate-join',
+    );
+    expect(groupCandidateJoin.status).toBe(200);
+    expect(await db.select({ state: questCandidateTeamV2.state }).from(questCandidateTeamV2)
+      .where(eq(questCandidateTeamV2.id, groupCandidateTeam.id))).toEqual([
+      { state: 'TEAM_FORMING' },
+    ]);
+  });
+
+  it('enforces actor, visibility, mode, participation, state, timing, and missing-resource boundaries', async () => {
+    authenticate();
+    const questId = await createOpenGroupCandidateQuest();
+    const team = await createTeam(questId, worker.id, 2, 'quest-migration-boundary-team-create');
+
+    const outsiderRead = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}`,
+      'GET',
+      thirdWorker.id,
+    );
+    expect(outsiderRead.status).toBe(404);
+    expect((await outsiderRead.json()).error.code).toBe('TEAM_NOT_FOUND');
+    const missingTeamRead = await request(
+      `/api/v2/quests/${questId}/teams/${randomUUID()}`,
+      'GET',
+      worker.id,
+    );
+    expect(missingTeamRead.status).toBe(404);
+    expect((await missingTeamRead.json()).error.code).toBe('TEAM_NOT_FOUND');
+    const missingQuestRead = await request(`/api/v2/quests/${randomUUID()}`, 'GET', hirer.id);
+    expect(missingQuestRead.status).toBe(404);
+    expect((await missingQuestRead.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+    await joinTeam(
+      questId,
+      team.id,
+      secondWorker.id,
+      team.joinCode,
+      'quest-migration-boundary-team-join',
+    );
+    const nonLeaderUpdate = await jsonRequest(
+      `/api/v2/quests/${questId}/teams/${team.id}`,
+      'PATCH',
+      secondWorker.id,
+      { name: 'Unauthorized Team Name' },
+      'quest-migration-boundary-non-leader-update',
+    );
+    expect(nonLeaderUpdate.status).toBe(409);
+    expect((await nonLeaderUpdate.json()).error.code).toBe('TEAM_LEADER_REQUIRED');
+    const workerSelection = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/select`,
+      'POST',
+      worker.id,
+      { 'idempotency-key': 'quest-migration-boundary-worker-selection' },
+    );
+    expect(workerSelection.status).toBe(409);
+    expect((await workerSelection.json()).error.code).toBe('CANDIDATE_SELECTION_NOT_ALLOWED');
+
+    const wrongModeQuestId = await createOpenGroupCandidateQuest({
+      mode: 'NO_CANDIDATE',
+      participation: 'GROUP',
+      v2Mode: 'FIRST_COME_FIRST_SERVED',
+      v2Participation: 'GROUP',
+    });
+    const wrongModeTeam = await jsonRequest(
+      `/api/v2/quests/${wrongModeQuestId}/teams`,
+      'POST',
+      thirdWorker.id,
+      { name: 'Wrong Mode Team', headcount: 2 },
+      'quest-migration-boundary-wrong-mode',
+    );
+    expect(wrongModeTeam.status).toBe(409);
+    expect((await wrongModeTeam.json()).error.code).toBe('QUEST_MODE_NOT_ALLOWED');
+
+    const wrongParticipationQuestId = await createOpenGroupCandidateQuest({
+      mode: 'CANDIDATE',
+      participation: 'SOLO',
+      v2Mode: 'CANDIDATE',
+      v2Participation: 'SINGLE',
+      headcount: 1,
+      questFundingTotalSatang: 1_020,
+      questEscrowSatang: 1_020,
+    });
+    const wrongParticipationTeam = await jsonRequest(
+      `/api/v2/quests/${wrongParticipationQuestId}/teams`,
+      'POST',
+      thirdWorker.id,
+      { name: 'Wrong Shape Team', headcount: 2 },
+      'quest-migration-boundary-wrong-participation',
+    );
+    expect(wrongParticipationTeam.status).toBe(409);
+    expect((await wrongParticipationTeam.json()).error.code).toBe('QUEST_PARTICIPATION_NOT_ALLOWED');
+
+    const closedQuestId = await createOpenGroupCandidateQuest({ questStatus: 'QUEST_ASSIGNED' });
+    const closedTeam = await jsonRequest(
+      `/api/v2/quests/${closedQuestId}/teams`,
+      'POST',
+      fourthWorker.id,
+      { name: 'Closed Quest Team', headcount: 2 },
+      'quest-migration-boundary-closed-state',
+    );
+    expect(closedTeam.status).toBe(409);
+    expect((await closedTeam.json()).error.code).toBe('QUEST_NOT_OPEN');
+
+    const startedQuestId = await createOpenGroupCandidateQuest({
+      startTime: new Date('2020-01-01T10:00:00.000Z'),
+    });
+    const startedTeam = await jsonRequest(
+      `/api/v2/quests/${startedQuestId}/teams`,
+      'POST',
+      fourthWorker.id,
+      { name: 'Started Quest Team', headcount: 2 },
+      'quest-migration-boundary-start-time',
+    );
+    expect(startedTeam.status).toBe(409);
+    expect((await startedTeam.json()).error.code).toBe('QUEST_NOT_OPEN');
   });
 
   it('verifies real PostgreSQL effects across Candidate Team, Assignment, Work Conversation, Proof, Reward, and Reputation', async () => {
@@ -1207,6 +1530,77 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(await db.select().from(chatConversation).where(eq(chatConversation.questId, questId))).toHaveLength(1);
   });
 
+  it('rolls back Funding Reservation, Ledger Transaction, Reward, and Quest effects when settlement fails', async () => {
+    authenticate();
+    const questId = await createOpenGroupCandidateQuest({
+      mode: 'NO_CANDIDATE',
+      participation: 'SOLO',
+      v2Mode: 'FIRST_COME_FIRST_SERVED',
+      v2Participation: 'SINGLE',
+      questStatus: 'QUEST_ASSIGNED',
+      headcount: 1,
+      questFundingTotalSatang: 1_020,
+      questEscrowSatang: 1_020,
+    });
+    await db.insert(questAssignment).values({
+      id: randomUUID(),
+      questId,
+      workerId: worker.id,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    });
+    const reservationId = await reserveQuest(questId, 1_020);
+    spyOn(walletModule, 'settleFundingReservation').mockRejectedValue(new Error('Ledger unavailable'));
+
+    const response = await request(
+      `/api/v2/quests/${questId}/cancel`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'quest-migration-settlement-failure' },
+    );
+    expect(response.status).toBe(500);
+    expect((await response.json()).error.code).toBe('INTERNAL_ERROR');
+    expect(await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId))).toEqual([
+      { status: 'QUEST_ASSIGNED' },
+    ]);
+    expect(await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
+      .from(walletFundingReservation).where(eq(walletFundingReservation.id, reservationId))).toEqual([
+      { status: 'ACTIVE', remainingSatang: 1_020 },
+    ]);
+    expect(await db.select().from(walletFundingReservationSettlement)
+      .where(eq(walletFundingReservationSettlement.reservationId, reservationId))).toHaveLength(0);
+    expect(await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment)
+      .where(eq(questAssignment.questId, questId))).toEqual([{ status: 'ASSIGNMENT_ACTIVE' }]);
+    expect(await db.select({ action: auditRecord.action }).from(auditRecord)
+      .where(eq(auditRecord.resourceId, questId))).toEqual([]);
+  });
+
+  it('rolls back the cancellation when the audit effect fails after money work', async () => {
+    authenticate();
+    const questId = await createOpenGroupCandidateQuest();
+    const reservationId = await reserveQuest(questId, 2_040);
+    spyOn(auditService, 'recordAudit').mockRejectedValue(new Error('Audit unavailable'));
+
+    const response = await request(
+      `/api/v2/quests/${questId}/cancel`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'quest-migration-audit-failure' },
+    );
+    expect(response.status).toBe(500);
+    expect((await response.json()).error.code).toBe('INTERNAL_ERROR');
+    expect(await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId))).toEqual([
+      { status: 'QUEST_OPEN' },
+    ]);
+    expect(await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
+      .from(walletFundingReservation).where(eq(walletFundingReservation.id, reservationId))).toEqual([
+      { status: 'ACTIVE', remainingSatang: 2_040 },
+    ]);
+    expect(await db.select().from(walletFundingReservationSettlement)
+      .where(eq(walletFundingReservationSettlement.reservationId, reservationId))).toHaveLength(0);
+    expect(await db.select({ action: auditRecord.action }).from(auditRecord)
+      .where(eq(auditRecord.resourceId, questId))).toEqual([]);
+  });
+
   it('records one Admin Review Item for a real non-approved Proof and keeps the Funding Reservation active', async () => {
     authenticate();
     const { questId, assignmentId } = await createInProgressSingleQuest();
@@ -1330,5 +1724,128 @@ describe('Quest API v1 to v2 migration verification', () => {
     ]);
     const v1Read = await request(`/api/v1/quests/${questId}`, 'GET', hirer.id);
     expect(v1Read.status).toBe(404);
+  });
+
+  it('verifies assigned and in-progress cancellation settlement rows for every v2 quadrant', async () => {
+    authenticate();
+    const cases = [
+      {
+        name: 'single-fcfs-assigned',
+        mode: 'FIRST_COME_FIRST_SERVED' as const,
+        participation: 'SINGLE' as const,
+        status: 'QUEST_ASSIGNED' as const,
+        workerIds: [worker.id],
+        headcount: 1,
+      },
+      {
+        name: 'single-candidate-in-progress',
+        mode: 'CANDIDATE' as const,
+        participation: 'SINGLE' as const,
+        status: 'QUEST_IN_PROGRESS' as const,
+        workerIds: [secondWorker.id],
+        headcount: 1,
+      },
+      {
+        name: 'group-fcfs-assigned',
+        mode: 'FIRST_COME_FIRST_SERVED' as const,
+        participation: 'GROUP' as const,
+        status: 'QUEST_ASSIGNED' as const,
+        workerIds: [thirdWorker.id, fourthWorker.id],
+        headcount: 2,
+      },
+      {
+        name: 'group-candidate-in-progress',
+        mode: 'CANDIDATE' as const,
+        participation: 'GROUP' as const,
+        status: 'QUEST_IN_PROGRESS' as const,
+        workerIds: [worker.id, secondWorker.id],
+        headcount: 2,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const rewardSatang = 1_000;
+      const platformFeeSatang = 20;
+      const escrowSatang = (rewardSatang + platformFeeSatang) * testCase.headcount;
+      const questId = await createOpenGroupCandidateQuest({
+        mode: testCase.mode === 'CANDIDATE' ? 'CANDIDATE' : 'NO_CANDIDATE',
+        participation: testCase.participation === 'GROUP' ? 'GROUP' : 'SOLO',
+        v2Mode: testCase.mode,
+        v2Participation: testCase.participation,
+        questStatus: testCase.status,
+        headcount: testCase.headcount,
+        rewardSatang,
+        questFundingTotalSatang: escrowSatang,
+        questEscrowSatang: escrowSatang,
+      });
+      await db.insert(questAssignment).values(testCase.workerIds.map((workerId) => ({
+        id: randomUUID(),
+        questId,
+        workerId,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE' as const,
+      })));
+
+      const leaderId = testCase.mode === 'CANDIDATE' && testCase.participation === 'GROUP'
+        ? testCase.workerIds[0]!
+        : undefined;
+      if (leaderId) {
+        const teamId = randomUUID();
+        await db.insert(questCandidateTeamV2).values({
+          id: teamId,
+          questId,
+          leaderId,
+          name: 'Cancellation Matrix Team',
+          headcount: testCase.headcount,
+          state: 'TEAM_SELECTED',
+        });
+        await db.insert(questCandidateTeamV2Member).values(testCase.workerIds.map((memberId) => ({
+          teamId,
+          memberId,
+        })));
+      }
+      const reservationId = await reserveQuest(questId, escrowSatang);
+      const response = await request(
+        `/api/v2/quests/${questId}/cancel`,
+        'POST',
+        hirer.id,
+        { 'idempotency-key': `quest-migration-cancel-matrix-${testCase.name}` },
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      const expectedPaid = testCase.status === 'QUEST_ASSIGNED'
+        ? rewardSatang * testCase.headcount * 20 / 100
+        : rewardSatang * testCase.headcount;
+      expect(body.data).toMatchObject({
+        questStatus: 'QUEST_CANCELLED',
+        paidSatang: expectedPaid,
+        refundedSatang: testCase.status === 'QUEST_ASSIGNED' ? escrowSatang - expectedPaid : 0,
+      });
+
+      const [storedReservation] = await db.select({
+        status: walletFundingReservation.status,
+        remainingSatang: walletFundingReservation.remainingSatang,
+      }).from(walletFundingReservation).where(eq(walletFundingReservation.id, reservationId));
+      expect(storedReservation).toEqual({
+        status: testCase.status === 'QUEST_IN_PROGRESS' ? 'SETTLED' : 'RELEASED',
+        remainingSatang: 0,
+      });
+      const settlements = await db.select({
+        recipientUserId: walletFundingReservationSettlement.recipientUserId,
+        recipientAmountSatang: walletFundingReservationSettlement.recipientAmountSatang,
+        platformFeeSatang: walletFundingReservationSettlement.platformFeeSatang,
+      }).from(walletFundingReservationSettlement)
+        .where(eq(walletFundingReservationSettlement.reservationId, reservationId));
+      expect(settlements.reduce((total, settlement) => total + settlement.recipientAmountSatang, 0)).toBe(expectedPaid);
+      expect(settlements.reduce((total, settlement) => total + settlement.platformFeeSatang, 0)).toBe(
+        testCase.status === 'QUEST_IN_PROGRESS' ? platformFeeSatang * testCase.headcount : 0,
+      );
+      if (leaderId) {
+        expect(settlements.every(({ recipientUserId }) => recipientUserId === leaderId)).toBe(true);
+      }
+      expect(await db.select({ action: auditRecord.action }).from(auditRecord)
+        .where(eq(auditRecord.resourceId, questId))).toEqual(expect.arrayContaining([
+        { action: 'QUEST_STATE_CHANGED' },
+      ]));
+    }
   });
 });
