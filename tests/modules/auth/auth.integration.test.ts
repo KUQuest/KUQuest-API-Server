@@ -10,7 +10,8 @@ describe('authentication integration', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/html');
-    expect(body).toContain('KUQuest · Test Bench');
+    // The production-image CI smoke check matches this exact title line.
+    expect(body).toContain('<title>KUQuest API Test Bench</title>');
     expect(body).toContain('data-page="member"');
     expect(body).toContain('data-page="quests"');
     expect(body).toContain('data-page="chat"');
