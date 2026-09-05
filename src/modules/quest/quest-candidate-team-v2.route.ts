@@ -42,6 +42,7 @@ export const questCandidateTeamV2Route = new Elysia({
     params: questV2CandidateTeamParamsSchema,
     body: questV2CandidateTeamCreateSchema,
     headers: questV2CandidateTeamHeadersSchema,
+    transform: rejectUnknownFields(questV2CandidateTeamCreateSchema),
     response: responses(questV2CandidateTeamResponseSchema, 400, 401, 404, 409, 503, { successStatus: 201 }),
     detail: {
       tags: ['Quest Candidate Teams v2'],
@@ -91,6 +92,7 @@ export const questCandidateTeamV2Route = new Elysia({
     params: questV2CandidateTeamDetailParamsSchema,
     body: questV2CandidateTeamJoinSchema,
     headers: questV2CandidateTeamHeadersSchema,
+    transform: rejectUnknownFields(questV2CandidateTeamJoinSchema),
     response: responses(questV2CandidateTeamResponseSchema, 400, 401, 404, 409, 503),
     detail: {
       tags: ['Quest Candidate Teams v2'],
@@ -140,6 +142,7 @@ export const questCandidateTeamV2Route = new Elysia({
     params: questV2CandidateTeamDetailParamsSchema,
     body: questV2CandidateTeamSubmissionSchema,
     headers: questV2CandidateTeamHeadersSchema,
+    transform: rejectUnknownFields(questV2CandidateTeamSubmissionSchema),
     response: responses(questV2CandidateTeamResponseSchema, 400, 401, 404, 409, 503),
     detail: {
       tags: ['Quest Candidate Teams v2'],
