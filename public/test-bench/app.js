@@ -497,8 +497,21 @@ const showQuest = (response) => {
   return response;
 };
 const getDetail = async () => showQuest(await request(`/api/v2/quests/${encodeURIComponent(requireQuestId())}`));
+let questCreateAttempt;
 const createQuest = async () => {
-  const response = await jsonRequest('/api/v2/quests', 'POST', questBody(), 'Create Draft Quest');
+  const body = questBody();
+  const signature = `${state.session?.user?.id}:${JSON.stringify(body)}`;
+  if (!questCreateAttempt || questCreateAttempt.signature !== signature) {
+    questCreateAttempt = { signature, key: randomKey('create-quest') };
+  }
+  const response = await jsonRequest(
+    '/api/v2/quests',
+    'POST',
+    body,
+    'Create Draft Quest',
+    { 'idempotency-key': questCreateAttempt.key },
+  );
+  questCreateAttempt = null;
   showQuest(response);
   setStatus(document.querySelector('#quest-flow-status'), 'Draft saved. Check publication before you reserve Quest Escrow.', 'success');
   document.querySelector('.selected-quest').scrollIntoView({ block: 'start' });

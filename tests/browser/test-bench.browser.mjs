@@ -27,7 +27,7 @@ await page.route('**/api/**', async (route) => {
   const path = new URL(request.url()).pathname;
   const method = request.method();
   const body = request.postDataJSON();
-  if (method !== 'GET') writes.push({ path, method, body });
+  if (method !== 'GET') writes.push({ path, method, body, headers: request.headers() });
   if (path === '/api/v1/wallet' && walletGate) await walletGate;
   let data;
   let status = 200;
@@ -89,6 +89,7 @@ try {
   assert.equal(created.body.participation, 'SINGLE');
   assert.deepEqual(created.body.condition.items, ['Create poster', 'Send source file']);
   assert.match(created.body.startTime, /\+07:00$/);
+  assert.match(created.headers['idempotency-key'], /^create-quest:/);
   assert.equal(await page.locator('#publish-quest').isDisabled(), true);
   await click('publish-check');
   assert.match(await page.locator('#quest-flow-status').textContent(), /Choose a Tag/);
