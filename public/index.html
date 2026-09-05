@@ -1,1165 +1,507 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>KUQuest API Test Bench</title>
-    <style>
-      :root {
-        color-scheme: light;
-        font-family:
-          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-          "Segoe UI", sans-serif;
-        color: #17211b;
-        background: #f3f6f4;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        min-width: 320px;
-        min-height: 100dvh;
-        margin: 0;
-        padding: 28px 18px 48px;
-        background:
-          radial-gradient(circle at 0% 0%, #dcefe3 0, transparent 32rem),
-          #f3f6f4;
-      }
-
-      main {
-        width: min(100%, 1180px);
-        margin: 0 auto;
-      }
-
-      header {
-        margin-bottom: 22px;
-      }
-
-      .eyebrow {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 10px;
-        color: #17653a;
-        font-size: 0.875rem;
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-      }
-
-      .dot {
-        width: 9px;
-        height: 9px;
-        border-radius: 999px;
-        background: #1b7f49;
-      }
-
-      h1,
-      h2,
-      h3,
-      p {
-        margin-top: 0;
-      }
-
-      h1 {
-        margin-bottom: 10px;
-        font-size: clamp(2rem, 6vw, 3.6rem);
-        line-height: 1.02;
-        text-wrap: balance;
-      }
-
-      header p {
-        max-width: 74ch;
-        margin-bottom: 0;
-        color: #58635c;
-        line-height: 1.6;
-        text-wrap: pretty;
-      }
-
-      .card {
-        min-width: 0;
-        padding: clamp(18px, 3vw, 28px);
-        border: 1px solid #dce4df;
-        border-radius: 18px;
-        background: #ffffff;
-        box-shadow: 0 12px 30px rgb(20 44 30 / 8%);
-      }
-
-      .card + .card,
-      .grid + .card {
-        margin-top: 18px;
-      }
-
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 18px;
-        margin-top: 18px;
-      }
-
-      .grid > .card {
-        margin-top: 0;
-      }
-
-      .wallet-card {
-        margin-top: 18px;
-        background: #17211b;
-        color: #ffffff;
-      }
-
-      .wallet-card .card-heading {
-        margin-bottom: 8px;
-      }
-
-      .wallet-card .muted,
-      .wallet-card label {
-        color: #b8c9be;
-      }
-
-      .wallet-card .badge {
-        background: #2c4c3a;
-        color: #d9f5e2;
-      }
-
-      .wallet-card button {
-        border-color: #557463;
-        background: transparent;
-        color: #ffffff;
-      }
-
-      .wallet-card button:hover:not(:disabled) {
-        background: #2c4c3a;
-      }
-
-      .wallet-grid {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 10px;
-        margin-top: 18px;
-      }
-
-      .wallet-item {
-        min-width: 0;
-        border: 1px solid #355643;
-        border-radius: 12px;
-        padding: 14px;
-        background: #213529;
-      }
-
-      .wallet-label {
-        display: block;
-        color: #b8c9be;
-        font-size: 0.75rem;
-        font-weight: 750;
-        text-transform: uppercase;
-      }
-
-      .wallet-value {
-        display: block;
-        margin-top: 6px;
-        color: #ffffff;
-        font-size: clamp(1rem, 2.2vw, 1.35rem);
-        font-weight: 850;
-        overflow-wrap: anywhere;
-      }
-
-      .wallet-foot {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        margin-top: 12px;
-        color: #b8c9be;
-        font-size: 0.82rem;
-      }
-
-      .wallet-foot .status {
-        margin: 0;
-        color: inherit;
-      }
-
-      .card-heading,
-      .toolbar,
-      .actions,
-      .result-heading {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 10px;
-      }
-
-      .card-heading,
-      .toolbar,
-      .result-heading {
-        justify-content: space-between;
-      }
-
-      .card-heading {
-        margin-bottom: 14px;
-      }
-
-      .card-heading h2,
-      .result-heading h3 {
-        margin-bottom: 0;
-      }
-
-      h2 {
-        font-size: 1.1rem;
-      }
-
-      h3 {
-        font-size: 0.98rem;
-      }
-
-      .muted,
-      .hint,
-      .note {
-        color: #69746d;
-        font-size: 0.875rem;
-        line-height: 1.5;
-      }
-
-      .hint,
-      .note {
-        margin: 10px 0 0;
-      }
-
-      .status {
-        min-height: 24px;
-        margin: 14px 0 0;
-        color: #455149;
-        line-height: 1.5;
-      }
-
-      .status[data-type="error"] {
-        color: #a12622;
-      }
-
-      .status[data-type="success"] {
-        color: #17653a;
-      }
-
-      .badge,
-      .method {
-        display: inline-flex;
-        align-items: center;
-        min-height: 26px;
-        border-radius: 999px;
-        padding: 4px 9px;
-        font-size: 0.75rem;
-        font-weight: 800;
-        letter-spacing: 0.03em;
-        text-transform: uppercase;
-      }
-
-      .badge {
-        background: #e8f2ec;
-        color: #17653a;
-      }
-
-      .badge[data-state="error"] {
-        background: #fceceb;
-        color: #a12622;
-      }
-
-      .method {
-        background: #17211b;
-        color: #ffffff;
-      }
-
-      .method[data-method="GET"] {
-        background: #285d89;
-      }
-
-      .method[data-method="POST"] {
-        background: #17653a;
-      }
-
-      .method[data-method="PATCH"] {
-        background: #8a5a00;
-      }
-
-      .method[data-method="DELETE"] {
-        background: #a12622;
-      }
-
-      button,
-      input,
-      select,
-      textarea {
-        font: inherit;
-      }
-
-      button {
-        min-height: 42px;
-        border: 1px solid #cbd6cf;
-        border-radius: 10px;
-        padding: 9px 14px;
-        cursor: pointer;
-        background: #ffffff;
-        color: #26332b;
-        font-weight: 750;
-      }
-
-      button:hover:not(:disabled) {
-        background: #f3f6f4;
-      }
-
-      button:focus-visible,
-      input:focus-visible,
-      select:focus-visible,
-      textarea:focus-visible {
-        outline: 3px solid #89c7a3;
-        outline-offset: 2px;
-      }
-
-      button:disabled {
-        cursor: wait;
-        opacity: 0.6;
-      }
-
-      .primary {
-        border-color: #17653a;
-        background: #17653a;
-        color: #ffffff;
-      }
-
-      .primary:hover:not(:disabled) {
-        background: #11542f;
-      }
-
-      .danger {
-        border-color: #a12622;
-        color: #a12622;
-      }
-
-      label {
-        display: grid;
-        gap: 6px;
-        color: #455149;
-        font-size: 0.82rem;
-        font-weight: 750;
-      }
-
-      input,
-      select,
-      textarea {
-        width: 100%;
-        border: 1px solid #cbd6cf;
-        border-radius: 9px;
-        padding: 9px 10px;
-        background: #ffffff;
-        color: #17211b;
-      }
-
-      input[type="checkbox"] {
-        width: auto;
-        min-height: 18px;
-      }
-
-      input[type="file"] {
-        padding: 7px;
-      }
-
-      textarea {
-        min-height: 100px;
-        resize: vertical;
-        font: 0.82rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-      }
-
-      .field-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
-      }
-
-      .field-grid .wide {
-        grid-column: 1 / -1;
-      }
-
-      .check-field {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-height: 42px;
-      }
-
-      .simple-flow {
-        border: 1px solid #dce4df;
-        border-radius: 14px;
-        padding: 16px;
-        background: #f7faf8;
-      }
-
-      .payout-tabs {
-        display: flex;
-        gap: 8px;
-        margin: 18px 0 10px;
-        border-bottom: 1px solid #dce4df;
-      }
-
-      .payout-tab {
-        border: 0;
-        border-bottom: 3px solid transparent;
-        border-radius: 8px 8px 0 0;
-        padding: 10px 12px;
-        background: transparent;
-        color: #58635c;
-      }
-
-      .payout-tab[aria-selected="true"] {
-        border-bottom-color: #17653a;
-        background: #e8f2ec;
-        color: #17653a;
-      }
-
-      .admin-grid {
-        display: grid;
-        grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
-        gap: 16px;
-        margin-top: 16px;
-      }
-
-      .admin-payout-list {
-        display: grid;
-        gap: 8px;
-      }
-
-      .admin-payout-row {
-        display: grid;
-        gap: 4px;
-        width: 100%;
-        border: 1px solid #dce4df;
-        border-radius: 10px;
-        padding: 12px;
-        background: #ffffff;
-        color: #26332b;
-        text-align: left;
-      }
-
-      .admin-payout-row:hover,
-      .admin-payout-row[aria-selected="true"] {
-        border-color: #83b999;
-        background: #e8f2ec;
-      }
-
-      .admin-payout-row strong,
-      .admin-payout-row small {
-        display: block;
-      }
-
-      .admin-payout-row small {
-        color: #69746d;
-      }
-
-      .admin-payout-detail {
-        min-height: 180px;
-        border: 1px solid #dce4df;
-        border-radius: 12px;
-        padding: 14px;
-        background: #ffffff;
-      }
-
-      .admin-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 14px;
-      }
-
-      .admin-queue-controls,
-      .admin-pagination {
-        display: flex;
-        align-items: end;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-top: 14px;
-      }
-
-      .admin-queue-controls label {
-        min-width: 170px;
-      }
-
-      .admin-pagination {
-        align-items: center;
-        justify-content: space-between;
-      }
-
-      .admin-pagination .status {
-        margin: 0;
-      }
-
-      .admin-history {
-        margin: 18px 0 0;
-        padding-left: 22px;
-      }
-
-      .admin-history li {
-        margin-top: 8px;
-        color: #455149;
-        font-size: 0.84rem;
-        line-height: 1.5;
-      }
-
-      .steps {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 10px;
-        margin: 14px 0;
-      }
-
-      .step {
-        min-width: 0;
-        border-left: 3px solid #9bc9aa;
-        padding: 4px 0 4px 10px;
-      }
-
-      .step-number {
-        display: block;
-        color: #17653a;
-        font-size: 0.72rem;
-        font-weight: 850;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-      }
-
-      .step-text {
-        display: block;
-        margin-top: 4px;
-        color: #455149;
-        font-size: 0.84rem;
-        line-height: 1.35;
-      }
-
-      details.advanced {
-        margin-top: 14px;
-        border-top: 1px solid #e5ebe7;
-        padding-top: 14px;
-      }
-
-      details.advanced summary {
-        cursor: pointer;
-        color: #17653a;
-        font-weight: 800;
-      }
-
-      .qr-result {
-        display: grid;
-        grid-template-columns: minmax(180px, 260px) 1fr;
-        align-items: center;
-        gap: 18px;
-        margin-top: 15px;
-        border: 1px solid #cfe0d4;
-        border-radius: 14px;
-        padding: 16px;
-        background: #f7faf8;
-      }
-
-      .qr-image {
-        display: block;
-        width: min(100%, 260px);
-        aspect-ratio: 1;
-        justify-self: center;
-        border-radius: 10px;
-        background: #ffffff;
-        padding: 10px;
-      }
-
-      .qr-meta h3 {
-        margin-bottom: 8px;
-      }
-
-      .qr-meta p {
-        margin-bottom: 0;
-      }
-
-      .result {
-        margin-top: 15px;
-      }
-
-      pre {
-        max-height: 360px;
-        margin: 8px 0 0;
-        overflow: auto;
-        border-radius: 10px;
-        padding: 13px;
-        background: #17211b;
-        color: #e8f2ec;
-        font: 0.79rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-
-      .small-pre {
-        max-height: 210px;
-      }
-
-      .operations-toolbar {
-        margin-bottom: 16px;
-      }
-
-      .operations-toolbar label {
-        min-width: min(100%, 280px);
-      }
-
-      .operation-list {
-        display: grid;
-        gap: 10px;
-      }
-
-      details.operation {
-        border: 1px solid #dce4df;
-        border-radius: 12px;
-        background: #fbfcfb;
-      }
-
-      details.operation[open] {
-        background: #ffffff;
-      }
-
-      details.operation summary {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 12px;
-        cursor: pointer;
-        list-style: none;
-      }
-
-      details.operation summary::-webkit-details-marker {
-        display: none;
-      }
-
-      .operation-path {
-        overflow-wrap: anywhere;
-        color: #455149;
-        font: 0.82rem ui-monospace, SFMono-Regular, Menlo, monospace;
-      }
-
-      .operation-body {
-        border-top: 1px solid #e5ebe7;
-        padding: 14px;
-      }
-
-      .operation-body form {
-        display: grid;
-        gap: 12px;
-      }
-
-      .operation-fields {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 10px;
-      }
-
-      .operation-fields .wide {
-        grid-column: 1 / -1;
-      }
-
-      .debug-heading {
-        margin-bottom: 0;
-      }
-
-      #debug-log {
-        min-height: 180px;
-        max-height: 420px;
-      }
-
-      .chat-card {
-        margin-top: 18px;
-      }
-
-      .chat-toolbar {
-        display: flex;
-        align-items: end;
-        justify-content: space-between;
-        gap: 14px;
-        margin-bottom: 16px;
-      }
-
-      .chat-toolbar label {
-        width: min(100%, 300px);
-      }
-
-      .chat-account-label {
-        display: block;
-        margin-bottom: 7px;
-        color: #69746d;
-        font-size: 0.75rem;
-        font-weight: 850;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-      }
-
-      .chat-account-switcher {
-        display: flex;
-        gap: 8px;
-      }
-
-      .chat-account-button {
-        display: grid;
-        gap: 2px;
-        min-width: 145px;
-        min-height: 58px;
-        padding: 9px 11px;
-        background: #ffffff;
-        text-align: left;
-      }
-
-      .chat-account-button strong {
-        color: #26332b;
-        font-size: 0.82rem;
-      }
-
-      .chat-account-button span {
-        color: #69746d;
-        font-size: 0.72rem;
-      }
-
-      .chat-account-button[data-active="true"] {
-        border-color: #17653a;
-        background: #e8f2ec;
-        box-shadow: inset 0 0 0 1px #17653a;
-      }
-
-      .chat-account-button[data-active="true"] strong,
-      .chat-account-button[data-active="true"] span {
-        color: #17653a;
-      }
-
-      .chat-shell {
-        display: grid;
-        grid-template-columns: minmax(210px, 0.32fr) minmax(0, 1fr);
-        min-height: 500px;
-        overflow: hidden;
-        border: 1px solid #dce4df;
-        border-radius: 14px;
-        background: #f7faf8;
-      }
-
-      .chat-sidebar {
-        border-right: 1px solid #dce4df;
-        padding: 16px;
-      }
-
-      .chat-quest {
-        display: grid;
-        gap: 5px;
-        border: 1px solid #cfe0d4;
-        border-radius: 12px;
-        padding: 13px;
-        background: #ffffff;
-      }
-
-      .chat-quest small,
-      .chat-member-role,
-      .chat-connection,
-      .chat-character-count {
-        color: #69746d;
-        font-size: 0.75rem;
-      }
-
-      .chat-quest small,
-      .chat-member-role {
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-      }
-
-      .chat-quest strong {
-        line-height: 1.35;
-      }
-
-      .chat-quest span {
-        color: #17653a;
-        font-size: 0.78rem;
-        font-weight: 750;
-      }
-
-      .chat-members-heading {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin: 22px 0 9px;
-        color: #455149;
-        font-size: 0.78rem;
-        font-weight: 850;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-      }
-
-      .chat-members-heading span {
-        display: inline-grid;
-        min-width: 22px;
-        min-height: 22px;
-        place-items: center;
-        border-radius: 999px;
-        background: #e8f2ec;
-        color: #17653a;
-        font-size: 0.72rem;
-      }
-
-      .chat-participants {
-        display: grid;
-        gap: 7px;
-      }
-
-      .chat-member {
-        display: grid;
-        grid-template-columns: 34px minmax(0, 1fr);
-        align-items: center;
-        gap: 9px;
-        width: 100%;
-        min-height: 56px;
-        border: 1px solid transparent;
-        border-radius: 10px;
-        padding: 8px;
-        background: transparent;
-        text-align: left;
-      }
-
-      button.chat-member {
-        cursor: pointer;
-      }
-
-      button.chat-member:hover:not(:disabled),
-      .chat-member[data-active="true"] {
-        border-color: #b8d6c0;
-        background: #e8f2ec;
-      }
-
-      .chat-avatar {
-        display: grid;
-        width: 34px;
-        height: 34px;
-        place-items: center;
-        border-radius: 50%;
-        background: #17653a;
-        color: #ffffff;
-        font-size: 0.72rem;
-        font-weight: 850;
-      }
-
-      .chat-member[data-role="WORKER"] .chat-avatar {
-        background: #285d89;
-      }
-
-      .chat-member-name {
-        display: block;
-        overflow: hidden;
-        color: #26332b;
-        font-size: 0.84rem;
-        font-weight: 800;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .chat-note {
-        margin: 20px 0 0;
-        color: #69746d;
-        font-size: 0.78rem;
-        line-height: 1.5;
-      }
-
-      .chat-main {
-        display: grid;
-        grid-template-rows: auto minmax(0, 1fr) auto auto;
-        min-width: 0;
-        background: #ffffff;
-      }
-
-      .chat-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        border-bottom: 1px solid #e5ebe7;
-        padding: 14px 18px;
-      }
-
-      .chat-header strong,
-      .chat-connection {
-        display: block;
-      }
-
-      .chat-connection {
-        margin-top: 3px;
-      }
-
-      .chat-header .badge {
-        flex-shrink: 0;
-      }
-
-      .chat-messages {
-        display: flex;
-        flex-direction: column;
-        gap: 11px;
-        min-height: 250px;
-        max-height: 430px;
-        overflow: auto;
-        padding: 18px;
-        background:
-          radial-gradient(circle at 100% 0%, #edf7ef 0, transparent 20rem),
-          #fbfdfb;
-      }
-
-      .chat-message {
-        display: flex;
-        align-items: flex-end;
-        gap: 8px;
-        max-width: min(82%, 520px);
-      }
-
-      .chat-message[data-mine="true"] {
-        align-self: flex-end;
-        flex-direction: row-reverse;
-      }
-
-      .chat-bubble {
-        border: 1px solid #dce4df;
-        border-radius: 14px 14px 14px 4px;
-        padding: 10px 12px;
-        background: #ffffff;
-      }
-
-      .chat-message[data-mine="true"] .chat-bubble {
-        border-color: #b8d6c0;
-        border-radius: 14px 14px 4px 14px;
-        background: #e8f2ec;
-      }
-
-      .chat-message-sender {
-        display: block;
-        margin-bottom: 3px;
-        color: #17653a;
-        font-size: 0.74rem;
-        font-weight: 850;
-      }
-
-      .chat-message-text {
-        margin: 0;
-        color: #26332b;
-        font-size: 0.88rem;
-        line-height: 1.45;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-
-      .chat-message-time {
-        display: block;
-        margin-top: 5px;
-        color: #69746d;
-        font-size: 0.68rem;
-        text-align: right;
-      }
-
-      .chat-message--system {
-        align-self: center;
-        max-width: 90%;
-      }
-
-      .chat-message--system .chat-bubble {
-        border-style: dashed;
-        border-radius: 10px;
-        background: #f3f6f4;
-        text-align: center;
-      }
-
-      .chat-message--system .chat-message-sender {
-        color: #69746d;
-      }
-
-      .chat-composer {
-        display: grid;
-        gap: 8px;
-        border-top: 1px solid #e5ebe7;
-        padding: 14px 18px 10px;
-      }
-
-      .chat-composer textarea {
-        min-height: 68px;
-        resize: none;
-        font: inherit;
-      }
-
-      .chat-composer-footer {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-      }
-
-      .chat-status {
-        margin: 0 18px 14px;
-      }
-
-      @media (max-width: 820px) {
-        .grid,
-        .wallet-grid,
-        .field-grid,
-        .operation-fields,
-        .admin-grid,
-        .chat-shell {
-          grid-template-columns: 1fr;
-        }
-
-        .chat-sidebar {
-          border-right: 0;
-          border-bottom: 1px solid #dce4df;
-        }
-
-        .chat-participants {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-
-        .chat-note {
-          margin-top: 12px;
-        }
-
-        .steps {
-          grid-template-columns: 1fr;
-        }
-
-        .field-grid .wide,
-        .operation-fields .wide {
-          grid-column: auto;
-        }
-      }
-
-      @media (max-width: 560px) {
-        body {
-          padding: 20px 12px 36px;
-        }
-
-        .actions,
-        .actions button,
-        .chat-toolbar,
-        .chat-toolbar label {
-          width: 100%;
-        }
-
-        .chat-toolbar {
-          align-items: stretch;
-          flex-direction: column;
-        }
-
-        .chat-account-switcher,
-        .chat-account-button {
-          width: 100%;
-        }
-
-        .chat-account-button {
-          min-width: 0;
-        }
-
-        .chat-participants {
-          grid-template-columns: 1fr;
-        }
-
-        .chat-message {
-          max-width: 94%;
-        }
-
-        .chat-composer-footer {
-          align-items: stretch;
-          flex-direction: column;
-        }
-
-        .chat-composer-footer button {
-          width: 100%;
-        }
-
-        .wallet-foot {
-          align-items: stretch;
-          flex-direction: column;
-        }
-
-        .qr-result {
-          grid-template-columns: 1fr;
-        }
-
-        details.operation summary {
-          align-items: flex-start;
-          flex-direction: column;
-        }
-      }
-    </style>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1" name="viewport"/>
+    <title>
+      KUQuest · Test Bench
+    </title>
+    <link href="/test-bench/styles.css" rel="stylesheet"/>
+    <script defer="" src="/test-bench/app.js">
+    </script>
   </head>
   <body>
-    <main>
-      <header>
-        <div class="eyebrow"><span class="dot" aria-hidden="true"></span>KUQuest API</div>
-        <h1>Quest and finance test bench</h1>
-        <p>
-          This local or staging page uses the configured test Member. It can run the
-          implemented Quest endpoints, the Quest Escrow flow, Funding Reservation,
-          Wallet, and the Xendit Test Mode payment simulation. Every request and
-          response is recorded in the debug panel.
-        </p>
+    <a class="skip-link" href="#main">
+      Skip to workspace
+    </a>
+    <aside class="sidebar">
+      <a class="brand" href="#member">
+        <span class="brand-mark">
+          K
+        </span>
+        KUQuest
+        <span class="brand-caption">
+          TEST BENCH
+        </span>
+      </a>
+      <p class="nav-label">
+        WORKSPACE
+      </p>
+      <nav aria-label="Workspace">
+        <a data-nav="member" href="#member">
+          <span>
+            01
+          </span>
+          Member
+        </a>
+        <a data-nav="quests" href="#quests">
+          <span>
+            02
+          </span>
+          Quests
+        </a>
+        <a data-nav="chat" href="#chat">
+          <span>
+            03
+          </span>
+          Work Chat
+        </a>
+        <a data-nav="wallet" href="#wallet">
+          <span>
+            04
+          </span>
+          Wallet & Payout
+        </a>
+        <a data-nav="admin" href="#admin">
+          <span>
+            05
+          </span>
+          Admin Approval
+        </a>
+        <a data-nav="explorer" href="#explorer">
+          <span>
+            06
+          </span>
+          API explorer
+        </a>
+        <a data-nav="log" href="#log">
+          <span>
+            07
+          </span>
+          Request log
+        </a>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="live-dot">
+        </span>
+        Connected to this Server
+        <small id="server-origin">
+        </small>
+      </div>
+    </aside>
+    <main id="main" tabindex="-1">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">
+            KUQUEST / TEST WORKSPACE
+          </p>
+          <h1 id="page-title">
+            Member
+          </h1>
+          <p id="page-description">
+            Choose a Member to begin.
+          </p>
+        </div>
+        <a class="session-chip" href="#member" id="current-member">
+          Checking Session…
+        </a>
       </header>
-
-      <section class="card" aria-labelledby="auth-heading">
-        <div class="card-heading">
-          <h2 id="auth-heading">Default test Member</h2>
-          <span class="badge" id="auth-badge" data-state="pending">checking</span>
-        </div>
-        <div class="actions">
-          <button class="primary" id="default-sign-in" type="button">Sign in as Account 1</button>
-          <button id="account-2-sign-in" type="button">Sign in as Account 2</button>
-          <button id="google-sign-in" type="button">Sign in with Google</button>
-          <button id="refresh-session" type="button">Refresh Session</button>
-          <button class="danger" id="sign-out" type="button">Sign out</button>
-        </div>
-        <p class="status" id="auth-status" role="status" aria-live="polite">Checking Session…</p>
-        <div class="result">
-          <div class="result-heading"><h3>Session</h3></div>
-          <pre class="small-pre" id="session-output" aria-live="polite">null</pre>
-        </div>
-        <p class="note">
-          Test Member sign-in is available only when staging test authentication is enabled.
-          The page does not receive or store either configured password.
-        </p>
-      </section>
-
-      <section class="card wallet-card" aria-labelledby="wallet-heading">
-        <div class="card-heading">
-          <div>
-            <h2 id="wallet-heading">Current Wallet</h2>
-            <p class="muted">The live Wallet projection for the signed-in test Member.</p>
-          </div>
-          <button id="refresh-wallet" type="button">Refresh Wallet</button>
-        </div>
-        <div class="wallet-grid" aria-live="polite">
-          <div class="wallet-item">
-            <span class="wallet-label">Spending Balance</span>
-            <strong class="wallet-value" id="wallet-spending">—</strong>
-          </div>
-          <div class="wallet-item">
-            <span class="wallet-label">Earnings Balance</span>
-            <strong class="wallet-value" id="wallet-earnings">—</strong>
-          </div>
-          <div class="wallet-item">
-            <span class="wallet-label">Funding Reserved</span>
-            <strong class="wallet-value" id="wallet-funding">—</strong>
-          </div>
-          <div class="wallet-item">
-            <span class="wallet-label">Payout Reserve</span>
-            <strong class="wallet-value" id="wallet-payout">—</strong>
-          </div>
-        </div>
-        <div class="wallet-foot">
-          <span id="wallet-member">No Wallet loaded.</span>
-          <span class="status" id="wallet-status" role="status" aria-live="polite">Sign in to read the Wallet.</span>
-        </div>
-      </section>
-
-      <div class="grid">
-        <section class="card" aria-labelledby="finance-heading">
+      <div aria-live="polite" class="status global-status" hidden="" id="action-status" role="status">
+      </div>
+      <div data-page="member">
+        <section aria-labelledby="auth-heading" class="card">
           <div class="card-heading">
-            <h2 id="finance-heading">Finance integration</h2>
-            <span class="badge">Xendit Test Mode</span>
+            <h2 id="auth-heading">
+              Choose a test Member
+            </h2>
+            <span class="badge" data-state="pending" id="auth-badge">
+              checking
+            </span>
+          </div>
+          <div class="actions">
+            <button class="primary" id="default-sign-in" type="button">
+              Sign in as Account 1
+            </button>
+            <button id="account-2-sign-in" type="button">
+              Sign in as Account 2
+            </button>
+            <button id="google-sign-in" type="button">
+              Sign in with Google
+            </button>
+            <button id="refresh-session" type="button">
+              Refresh Session
+            </button>
+            <button class="danger" id="sign-out" type="button">
+              Sign out
+            </button>
+          </div>
+          <p aria-live="polite" class="status" id="auth-status" role="status">
+            Checking Session…
+          </p>
+          <details class="result">
+            <summary>
+              Request details
+            </summary>
+            <pre class="small-pre" id="session-output">null</pre>
+          </details>
+          <p class="note">
+            Use Account 1 as the Hirer and Account 2 as the Worker for a two-Member test. Test sign-in must be enabled on the Server.
+          </p>
+          <div class="next-step">
+            <strong>
+              Next step
+            </strong>
+            <p>
+              Sign in, then create a Quest or open your Work Conversations.
+            </p>
+            <a class="button primary" href="#quests">
+              Open Quests →
+            </a>
+            <a class="button" href="#chat">
+              Open Work Chat →
+            </a>
+          </div>
+        </section>
+      </div>
+      <div data-page="quests" hidden="">
+        <section aria-labelledby="quest-heading" class="card">
+          <div class="card-heading">
+            <h2 id="quest-heading">
+              Your Quest workspace
+            </h2>
+            <span class="badge">
+              Quest + Wallet
+            </span>
+          </div>
+          <div class="advanced">
+            <h3>
+              1. Create a Draft
+            </h3>
+            <p class="muted">
+              The Hirer sets the work, selection mode, and funding. Creating a Draft does not reserve money.
+            </p>
+            <form class="field-grid" id="quest-form">
+              <label class="wide">
+                Title
+                <input id="quest-title" maxlength="120" placeholder="What work needs to be done?" required="" type="text" value=""/>
+              </label>
+              <label>
+                Quest Funding Total (Baht)
+                <input id="quest-reward" min="1" required="" step="0.01" type="number" value="100"/>
+              </label>
+              <label>
+                Headcount
+                <input id="quest-headcount" max="20" min="1" required="" step="1" type="number" value="1"/>
+              </label>
+              <label>
+                Mode
+                <select id="quest-mode">
+                  <option value="FIRST_COME_FIRST_SERVED">
+                    First come, first served
+                  </option>
+                  <option value="CANDIDATE">
+                    Candidate selection
+                  </option>
+                </select>
+              </label>
+              <label>
+                Participation
+                <select id="quest-participation">
+                  <option value="SINGLE">
+                    Single Worker
+                  </option>
+                  <option value="GROUP">
+                    Group
+                  </option>
+                </select>
+              </label>
+              <label>
+                Start time (Asia/Bangkok)
+                <input id="quest-start" required="" type="datetime-local"/>
+              </label>
+              <label>
+                Due time (Asia/Bangkok)
+                <input id="quest-due" required="" type="datetime-local"/>
+              </label>
+              <label>
+                Tag
+                <select id="quest-tag">
+                  <option value="">
+                    Load Tags after sign-in
+                  </option>
+                </select>
+              </label>
+              <label class="check-field">
+                <input checked="" id="quest-proof-required" type="checkbox"/>
+                Proof required
+              </label>
+              <label class="wide">
+                Condition
+                <textarea id="quest-condition" placeholder="One Condition Item per line" required="" rows="2"></textarea>
+              </label>
+              <button class="primary" form="quest-form" id="create-quest" type="submit">
+                Create Draft Quest
+              </button>
+            </form>
+            <div class="selected-quest">
+              <h3>
+                2. Select and manage a Quest
+              </h3>
+              <label class="wide">
+                Quest ID
+                <input id="quest-id" placeholder="Created Quest ID appears here" type="text"/>
+              </label>
+              <div class="quest-cards" id="quest-cards">
+                <p class="empty">
+                  Load your Quests or the Quest Board to select a Quest.
+                </p>
+              </div>
+              <div class="next-step" id="quest-summary">
+                No Quest selected.
+              </div>
+              <p class="status" id="quest-flow-status" role="status">
+                Create a Draft, then check publication.
+              </p>
+              <button id="list-mine" type="button">
+                List my Quests
+              </button>
+              <button id="list-board" type="button">
+                List Quest Board
+              </button>
+              <button id="get-detail" type="button">
+                Get selected detail
+              </button>
+              <button id="publish-check" type="button">
+                Check publication
+              </button>
+              <button class="primary" id="publish-quest" type="button">
+                Publish Quest
+              </button>
+              <button class="danger" id="cancel-quest" type="button">
+                Cancel Quest
+              </button>
+            </div>
+            <div class="actions">
+            </div>
+            <div class="actions">
+            </div>
+          </div>
+          <details class="result">
+            <summary>
+              Request details
+            </summary>
+            <pre id="quest-output">No Quest request yet.</pre>
+          </details>
+        </section>
+      </div>
+      <div data-page="chat" hidden="">
+        <section aria-labelledby="chat-heading" class="card chat-card">
+          <div class="card-heading">
+            <div>
+              <h2 id="chat-heading">
+                Work Conversations
+              </h2>
+              <p class="muted">
+                Use two real staging Member sessions to test a Quest chat. Each account button signs in as a different Member.
+              </p>
+            </div>
+            <span class="badge" id="chat-mode-badge">
+              Live API
+            </span>
+          </div>
+          <div class="chat-toolbar">
+            <div class="actions">
+              <label>
+                Conversation
+                <select id="conversation-select">
+                  <option value="">
+                    Select a Conversation
+                  </option>
+                </select>
+              </label>
+              <button id="chat-load-live" type="button">
+                Refresh Conversations
+              </button>
+              <button hidden="" id="chat-more-conversations" type="button">
+                More Conversations
+              </button>
+            </div>
+          </div>
+          <div class="chat-layout">
+            <aside aria-label="Work Conversation details" class="chat-sidebar">
+              <div class="chat-quest">
+                <small>
+                  Quest
+                </small>
+                <strong id="chat-quest-title">
+                  No Quest selected
+                </strong>
+                <span id="chat-quest-status">
+                  An Active Assignment opens Work Chat.
+                </span>
+              </div>
+              <div class="chat-members-heading">
+                <span>
+                  Participants
+                </span>
+                <span id="chat-participant-count">
+                  0
+                </span>
+              </div>
+              <div class="chat-participants" id="chat-participants">
+              </div>
+              <p class="chat-note">
+                Work Conversation membership is for the Hirer and current Active Workers. Messages are immutable after sending.
+              </p>
+            </aside>
+            <section aria-label="Work Conversation messages" class="chat-main">
+              <div class="chat-header">
+                <div>
+                  <strong id="chat-conversation-title">
+                    Work Conversation
+                  </strong>
+                  <span class="chat-connection" id="chat-connection">
+                    No Conversation loaded
+                  </span>
+                </div>
+                <span class="badge" id="chat-read-state">
+                  Read-only
+                </span>
+              </div>
+              <button hidden="" id="chat-older" type="button">
+                Load older Messages
+              </button>
+              <div aria-label="Message history" aria-live="polite" class="chat-messages" id="chat-messages" role="log">
+              </div>
+              <form class="chat-composer" id="chat-composer">
+                <textarea aria-label="Message text" disabled="" id="chat-message-input" maxlength="1000" placeholder="Write a Message…" rows="2"></textarea>
+                <div class="chat-composer-footer">
+                  <span class="chat-character-count" id="chat-character-count">
+                    0 / 1000
+                  </span>
+                  <button class="primary" disabled="" id="chat-send" type="submit">
+                    Send Message
+                  </button>
+                </div>
+              </form>
+              <p aria-live="polite" class="status chat-status" id="chat-status" role="status">
+                Sign in from the Member section, then refresh Conversations.
+              </p>
+            </section>
+          </div>
+          <p class="note">
+            Work Chat opens after an ASSIGNMENT_ACTIVE Assignment exists. Select a Conversation, then send a Message. Terminal Quests are read-only.
+          </p>
+        </section>
+      </div>
+      <div data-page="wallet" hidden="">
+        <section aria-labelledby="wallet-heading" class="card wallet-card">
+          <div class="card-heading">
+            <div>
+              <h2 id="wallet-heading">
+                Current Wallet
+              </h2>
+              <p class="muted">
+                The live Wallet projection for the signed-in test Member.
+              </p>
+            </div>
+            <button id="refresh-wallet" type="button">
+              Refresh Wallet
+            </button>
+          </div>
+          <div aria-live="polite" class="wallet-grid">
+            <div class="wallet-item">
+              <span class="wallet-label">
+                Spending Balance
+              </span>
+              <strong class="wallet-value" id="wallet-spending">
+                —
+              </strong>
+            </div>
+            <div class="wallet-item">
+              <span class="wallet-label">
+                Earnings Balance
+              </span>
+              <strong class="wallet-value" id="wallet-earnings">
+                —
+              </strong>
+            </div>
+            <div class="wallet-item">
+              <span class="wallet-label">
+                Funding Reserved
+              </span>
+              <strong class="wallet-value" id="wallet-funding">
+                —
+              </strong>
+            </div>
+            <div class="wallet-item">
+              <span class="wallet-label">
+                Payout Reserve
+              </span>
+              <strong class="wallet-value" id="wallet-payout">
+                —
+              </strong>
+            </div>
+          </div>
+          <div class="wallet-foot">
+            <span id="wallet-member">
+              No Wallet loaded.
+            </span>
+            <span aria-live="polite" class="status" id="wallet-status" role="status">
+              Sign in to read the Wallet.
+            </span>
+          </div>
+        </section>
+        <section aria-labelledby="payout-heading" class="card" id="student-payout-panel">
+          <div class="card-heading">
+            <div>
+              <h2 id="payout-heading">
+                Payout
+              </h2>
+              <p class="muted">
+                Quote a receipt amount and submit a Payout using the active encrypted Payout Destination.
+              </p>
+            </div>
+            <span class="badge">
+              Admin approval required
+            </span>
+          </div>
+          <div class="simple-flow">
+            <div class="field-grid">
+              <label>
+                Receipt amount (Baht)
+                <input id="payout-amount" min="1" step="0.01" type="number" value="100.00"/>
+              </label>
+              <label>
+                Active Payout Destination
+                <span class="badge" id="payout-destination">
+                  Shown after quote
+                </span>
+              </label>
+            </div>
+            <div class="actions">
+              <button class="primary" id="quote-payout" type="button">
+                Quote Payout
+              </button>
+              <button disabled="" id="submit-payout" type="button">
+                Submit Payout for approval
+              </button>
+              <button id="list-payouts" type="button">
+                Refresh Payouts
+              </button>
+            </div>
+            <p aria-live="polite" class="status" id="payout-status" role="status">
+              A Payout uses Earnings Balance and creates a Payout Reserve.
+            </p>
+          </div>
+          <details class="result">
+            <summary>
+              Request details
+            </summary>
+            <pre id="payout-output">No Payout request yet.</pre>
+          </details>
+        </section>
+        <section aria-labelledby="finance-heading" class="card">
+          <p class="notice">
+            These tools use the configured finance test Members. They can differ from your signed-in Member. Available only when local finance tests are enabled.
+          </p>
+          <div class="card-heading">
+            <h2 id="finance-heading">
+              Local finance tests
+            </h2>
+            <span class="badge">
+              Xendit Test Mode
+            </span>
           </div>
           <p class="muted">
             Enter a credit amount and press the button. The server creates the Xendit
@@ -1168,1895 +510,254 @@
           <div class="field-grid">
             <label>
               Top-up credit (Baht)
-              <input id="payment-amount" type="number" min="1" step="0.01" value="1.00" />
+              <input id="payment-amount" min="1" step="0.01" type="number" value="1.00"/>
             </label>
             <label>
               Payment action
-              <span class="badge">Manual Test Mode trigger</span>
+              <span class="badge">
+                Manual Test Mode trigger
+              </span>
             </label>
-          </div>
-          <div class="actions" style="margin-top: 12px">
-            <button class="primary" id="run-payment" type="button">Trigger Payment and show QR</button>
-            <button id="run-transfer" type="button">Run Funding Reservation transfer</button>
-          </div>
-          <p class="hint">Transfer amount (Baht): <input id="transfer-amount" type="number" min="1" step="0.01" value="1.00" style="width: 130px" /></p>
-          <div class="result">
-            <div class="result-heading"><h3>Latest finance result</h3></div>
-            <pre id="finance-output">No finance request yet.</pre>
-          </div>
-          <div class="qr-result" id="payment-qr-panel" hidden>
-            <img class="qr-image" id="payment-qr" alt="Xendit Test Mode payment QR" />
-            <div class="qr-meta">
-              <h3>Payment QR from Xendit</h3>
-              <p class="muted" id="payment-qr-status">Scan this QR with the Xendit Test Mode payment flow.</p>
-              <p class="note">The QR payload is not printed in the debug log.</p>
-            </div>
-          </div>
-        </section>
-
-        <section class="card" aria-labelledby="quest-heading">
-          <div class="card-heading">
-            <h2 id="quest-heading">Simple Quest test</h2>
-            <span class="badge">Quest + Wallet</span>
-          </div>
-          <div class="simple-flow">
-            <p class="muted">One button runs the complete low-value flow. It creates a Draft, checks and reserves Quest Escrow, reads the Quest, then cancels it and releases the funds.</p>
-            <div class="steps">
-              <div class="step"><span class="step-number">Step 1</span><span class="step-text">Create Draft</span></div>
-              <div class="step"><span class="step-number">Step 2</span><span class="step-text">Publish and reserve</span></div>
-              <div class="step"><span class="step-number">Step 3</span><span class="step-text">Cancel and release</span></div>
-            </div>
-            <button class="primary" id="simple-quest-smoke" type="button">Run simple Quest flow</button>
-            <p class="status" id="quest-flow-status" role="status" aria-live="polite">Ready. This uses a `NO_CANDIDATE` solo Quest.</p>
-          </div>
-          <details class="advanced">
-            <summary>Advanced Quest controls</summary>
-            <div class="field-grid" style="margin-top: 14px">
-              <label class="wide">
-                Quest ID
-                <input id="quest-id" type="text" placeholder="Created Quest ID appears here" />
-              </label>
-              <label class="wide">
-                Title
-                <input id="quest-title" type="text" value="Browser finance integration check" />
-              </label>
-              <label>
-              Reward (Baht)
-                <input id="quest-reward" type="number" min="1" step="1" value="100" />
-              </label>
-              <label>
-                Headcount
-                <input id="quest-headcount" type="number" min="1" max="20" step="1" value="1" />
-              </label>
-              <label>
-                Mode
-                <select id="quest-mode">
-                  <option value="NO_CANDIDATE">NO_CANDIDATE</option>
-                  <option value="CANDIDATE">CANDIDATE</option>
-                </select>
-              </label>
-              <label>
-                Participation
-                <select id="quest-participation">
-                  <option value="SOLO">SOLO</option>
-                  <option value="GROUP">GROUP</option>
-                </select>
-              </label>
-              <label>
-                Start time
-                <input id="quest-start" type="datetime-local" />
-              </label>
-              <label>
-                Due time
-                <input id="quest-due" type="datetime-local" />
-              </label>
-              <label>
-                Tag
-                <select id="quest-tag"><option value="">Load Tags after sign-in</option></select>
-              </label>
-              <label class="check-field">
-                <input id="quest-proof-required" type="checkbox" checked />
-                Proof required
-              </label>
-              <label class="wide">
-                Condition
-                <textarea id="quest-condition" rows="2">Submit a result and a short explanation.</textarea>
-              </label>
-            </div>
-            <div class="actions" style="margin-top: 12px">
-              <button id="create-quest" type="button">Create Draft Quest</button>
-              <button id="escrow-smoke" type="button">Run custom escrow smoke</button>
-              <button id="publish-check" type="button">Check publication</button>
-              <button id="publish-quest" type="button">Publish Quest</button>
-              <button class="danger" id="cancel-quest" type="button">Cancel Quest</button>
-            </div>
-            <div class="actions" style="margin-top: 10px">
-              <button id="list-mine" type="button">List my Quests</button>
-              <button id="list-board" type="button">List Quest Board</button>
-              <button id="get-detail" type="button">Get selected detail</button>
-              <button id="join-quest" type="button">Try direct join</button>
-            </div>
-          </details>
-          <div class="result">
-            <div class="result-heading"><h3>Latest Quest result</h3></div>
-            <pre id="quest-output">No Quest request yet.</pre>
-          </div>
-        </section>
-      </div>
-
-      <section class="card chat-card" aria-labelledby="chat-heading">
-        <div class="card-heading">
-          <div>
-            <h2 id="chat-heading">Work Conversation test</h2>
-            <p class="muted">Use two real staging Member sessions to test a Quest chat. Each account button signs in as a different Member.</p>
-          </div>
-          <span class="badge" id="chat-mode-badge">Browser demo</span>
-        </div>
-
-        <div class="chat-toolbar">
-          <div>
-            <span class="chat-account-label" id="chat-account-label">Test Member session</span>
-            <div class="chat-account-switcher" role="group" aria-label="Switch test account">
-              <button class="chat-account-button" data-chat-account="demo-hirer" data-chat-account-key="account-1" type="button">
-                <strong>Account 1</strong>
-                <span>Hirer · staging Member</span>
-              </button>
-              <button class="chat-account-button" data-chat-account="demo-worker" data-chat-account-key="account-2" type="button">
-                <strong>Account 2</strong>
-                <span>Worker · staging Member</span>
-              </button>
-            </div>
           </div>
           <div class="actions">
-            <button id="chat-load-live" type="button">Load live Work Conversation</button>
-            <button id="chat-reset" type="button">Reset demo</button>
+            <button class="primary" id="run-payment" type="button">
+              Trigger Payment and show QR
+            </button>
+            <button id="run-transfer" type="button">
+              Run Funding Reservation transfer
+            </button>
           </div>
-        </div>
-
-        <div class="chat-shell">
-          <aside class="chat-sidebar" aria-label="Work Conversation details">
-            <div class="chat-quest">
-              <small>Quest</small>
-              <strong id="chat-quest-title">Design a KU event poster</strong>
-              <span id="chat-quest-status">QUEST_IN_PROGRESS · ฿500</span>
+          <p class="hint">
+            Transfer amount (Baht):
+            <input id="transfer-amount" min="1" step="0.01" type="number" value="1.00"/>
+          </p>
+          <details class="result">
+            <summary>
+              Request details
+            </summary>
+            <pre id="finance-output">No finance request yet.</pre>
+          </details>
+          <div class="qr-result" hidden="" id="payment-qr-panel">
+            <img alt="Xendit Test Mode payment QR" class="qr-image" id="payment-qr"/>
+            <div class="qr-meta">
+              <h3>
+                Payment QR from Xendit
+              </h3>
+              <p class="muted" id="payment-qr-status">
+                Scan this QR with the Xendit Test Mode payment flow.
+              </p>
+              <p class="note">
+                The QR payload is not printed in the debug log.
+              </p>
             </div>
-            <div class="chat-members-heading">
-              <span>Participants</span>
-              <span id="chat-participant-count">2</span>
-            </div>
-            <div class="chat-participants" id="chat-participants"></div>
-            <p class="chat-note">Work Conversation membership is for the Hirer and current Active Workers. Messages are immutable after sending.</p>
-          </aside>
-
-          <section class="chat-main" aria-label="Work Conversation messages">
-            <div class="chat-header">
-              <div>
-                <strong id="chat-conversation-title">Work Conversation</strong>
-                <span class="chat-connection" id="chat-connection">CONVERSATION_WORK · browser demo</span>
-              </div>
-              <span class="badge" id="chat-read-state">ready</span>
-            </div>
-            <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-label="Message history"></div>
-            <form class="chat-composer" id="chat-composer">
-              <textarea id="chat-message-input" maxlength="1000" rows="2" placeholder="Write a Message…" aria-label="Message text"></textarea>
-              <div class="chat-composer-footer">
-                <span class="chat-character-count" id="chat-character-count">0 / 1000</span>
-                <button class="primary" id="chat-send" type="submit">Send Message</button>
-              </div>
-            </form>
-            <p class="status chat-status" id="chat-status" role="status" aria-live="polite">Ready. Switch to Account 1 or Account 2 to use a real Member session.</p>
-          </section>
-        </div>
-        <p class="note">The account buttons use server-side staging credentials and issue normal Better Auth session cookies. Use “Load live Work Conversation” after an Active Assignment exists.</p>
-      </section>
-
-      <div class="payout-tabs" role="tablist" aria-label="Payout tools">
-        <button class="payout-tab" id="student-payout-tab" type="button" role="tab" aria-selected="true" aria-controls="student-payout-panel">Student Payout</button>
-        <button class="payout-tab" id="admin-payout-tab" type="button" role="tab" aria-selected="false" aria-controls="admin-payout-panel">Admin Approval</button>
+          </div>
+        </section>
       </div>
-
-      <section class="card" id="student-payout-panel" role="tabpanel" aria-labelledby="student-payout-tab">
-        <div class="card-heading">
-          <div>
-            <h2 id="payout-heading">Payout</h2>
-            <p class="muted">Quote a receipt amount and submit a Payout using the active encrypted Payout Destination.</p>
-          </div>
-          <span class="badge">Admin approval required</span>
-        </div>
-        <div class="simple-flow">
-          <div class="field-grid">
-            <label>
-              Receipt amount (Baht)
-              <input id="payout-amount" type="number" min="1" step="0.01" value="100.00" />
-            </label>
-            <label>
-              Active Payout Destination
-              <span class="badge" id="payout-destination">Shown after quote</span>
-            </label>
-          </div>
-          <div class="actions" style="margin-top: 12px">
-            <button class="primary" id="quote-payout" type="button">Quote Payout</button>
-            <button id="submit-payout" type="button">Submit Payout for approval</button>
-            <button id="list-payouts" type="button">Refresh Payouts</button>
-          </div>
-          <p class="status" id="payout-status" role="status" aria-live="polite">A Payout uses Earnings Balance and creates a Payout Reserve.</p>
-        </div>
-        <div class="result">
-          <div class="result-heading"><h3>Latest Payout result</h3></div>
-          <pre id="payout-output">No Payout request yet.</pre>
-        </div>
-      </section>
-
-      <section class="card" id="admin-payout-panel" role="tabpanel" aria-labelledby="admin-payout-tab" hidden>
-        <div class="card-heading">
-          <div>
-            <h2 id="admin-payout-heading">Admin Payout Approval</h2>
-            <p class="muted">Review a Student Payout before the Payout Worker sends it to the Provider.</p>
-          </div>
-          <span class="badge" id="admin-auth-badge" data-state="pending">Admin sign-in required</span>
-        </div>
-
-        <div class="simple-flow">
-          <div class="field-grid">
-            <label>
-              Admin email
-              <input id="admin-email" type="email" autocomplete="username" placeholder="admin@example.com" />
-            </label>
-            <label>
-              Admin password
-              <input id="admin-password" type="password" autocomplete="current-password" />
-            </label>
-          </div>
-          <div class="actions" style="margin-top: 12px">
-            <button class="primary" id="admin-sign-in" type="button">Sign in as Admin</button>
-            <button id="admin-refresh-session" type="button">Check Admin Session</button>
-            <button class="danger" id="admin-sign-out" type="button">Sign out Admin</button>
-          </div>
-          <p class="status" id="admin-auth-status" role="status" aria-live="polite">Use an Admin account to open the approval queue.</p>
-        </div>
-
-        <div id="admin-payout-workspace" hidden>
-          <div class="toolbar" style="margin-top: 16px">
-            <p class="muted">Filter Payouts by status. Approving a waiting Payout changes it to <code>CREATING</code>.</p>
-          </div>
-          <div class="admin-queue-controls">
-            <label>
-              Payout status
-              <select id="admin-payout-status">
-                <option value="PENDING_ADMIN_APPROVAL">Waiting for Admin approval</option>
-                <option value="">All Payout statuses</option>
-                <option value="CREATING">CREATING</option>
-                <option value="PENDING">PENDING</option>
-                <option value="AWAITING_RECONCILIATION">AWAITING_RECONCILIATION</option>
-                <option value="COMPLETED">COMPLETED</option>
-                <option value="FAILED">FAILED</option>
-                <option value="CANCELLED">CANCELLED</option>
-              </select>
-            </label>
-            <label>
-              Sort
-              <select id="admin-payout-sort">
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-              </select>
-            </label>
-            <label>
-              Page size
-              <select id="admin-payout-limit">
-                <option value="10">10</option>
-                <option value="25">25</option>
-                <option value="50" selected>50</option>
-              </select>
-            </label>
-            <button id="admin-refresh-payouts" type="button">Refresh Approval Queue</button>
-          </div>
-          <div class="admin-pagination">
-            <button id="admin-payout-previous" type="button" disabled>Previous page</button>
-            <p class="status" id="admin-payout-page-status" role="status" aria-live="polite">Waiting for Admin Payouts.</p>
-            <button id="admin-payout-next" type="button" disabled>Next page</button>
-          </div>
-          <div class="admin-grid">
+      <div data-page="admin" hidden="">
+        <section aria-labelledby="admin-payout-heading" class="card" id="admin-payout-panel">
+          <div class="card-heading">
             <div>
-              <h3>Waiting Payouts</h3>
-              <div class="admin-payout-list" id="admin-payout-list" aria-live="polite">
-                <p class="muted">Sign in as Admin to load Payouts.</p>
+              <h2 id="admin-payout-heading">
+                Admin Payout Approval
+              </h2>
+              <p class="muted">
+                Review a Member Payout before the Payout Worker sends it to the Provider.
+              </p>
+            </div>
+            <span class="badge" data-state="pending" id="admin-auth-badge">
+              Admin sign-in required
+            </span>
+          </div>
+          <div class="simple-flow">
+            <div class="field-grid">
+              <label>
+                Admin email
+                <input autocomplete="username" id="admin-email" placeholder="admin@example.com" type="email"/>
+              </label>
+              <label>
+                Admin password
+                <input autocomplete="current-password" id="admin-password" type="password"/>
+              </label>
+            </div>
+            <div class="actions">
+              <button class="primary" id="admin-sign-in" type="button">
+                Sign in as Admin
+              </button>
+              <button id="admin-refresh-session" type="button">
+                Check Admin Session
+              </button>
+              <button class="danger" id="admin-sign-out" type="button">
+                Sign out Admin
+              </button>
+            </div>
+            <p aria-live="polite" class="status" id="admin-auth-status" role="status">
+              Use an Admin account to open the approval queue.
+            </p>
+          </div>
+          <div hidden="" id="admin-payout-workspace">
+            <div class="toolbar">
+              <p class="muted">
+                Filter Payouts by status. Approving a waiting Payout changes it to
+                <code>
+                  CREATING
+                </code>
+                .
+              </p>
+            </div>
+            <div class="admin-queue-controls">
+              <label>
+                Payout status
+                <select id="admin-payout-status">
+                  <option value="PENDING_ADMIN_APPROVAL">
+                    Waiting for Admin approval
+                  </option>
+                  <option value="">
+                    All Payout statuses
+                  </option>
+                  <option value="CREATING">
+                    CREATING
+                  </option>
+                  <option value="PENDING">
+                    PENDING
+                  </option>
+                  <option value="AWAITING_RECONCILIATION">
+                    AWAITING_RECONCILIATION
+                  </option>
+                  <option value="COMPLETED">
+                    COMPLETED
+                  </option>
+                  <option value="FAILED">
+                    FAILED
+                  </option>
+                  <option value="CANCELLED">
+                    CANCELLED
+                  </option>
+                </select>
+              </label>
+              <label>
+                Sort
+                <select id="admin-payout-sort">
+                  <option value="newest">
+                    Newest first
+                  </option>
+                  <option value="oldest">
+                    Oldest first
+                  </option>
+                </select>
+              </label>
+              <label>
+                Page size
+                <select id="admin-payout-limit">
+                  <option value="10">
+                    10
+                  </option>
+                  <option value="25">
+                    25
+                  </option>
+                  <option selected="" value="50">
+                    50
+                  </option>
+                </select>
+              </label>
+              <button id="admin-refresh-payouts" type="button">
+                Refresh Approval Queue
+              </button>
+            </div>
+            <div class="admin-pagination">
+              <button disabled="" id="admin-payout-previous" type="button">
+                Previous page
+              </button>
+              <p aria-live="polite" class="status" id="admin-payout-page-status" role="status">
+                Waiting for Admin Payouts.
+              </p>
+              <button disabled="" id="admin-payout-next" type="button">
+                Next page
+              </button>
+            </div>
+            <div class="admin-grid">
+              <div>
+                <h3>
+                  Waiting Payouts
+                </h3>
+                <div aria-live="polite" class="admin-payout-list" id="admin-payout-list">
+                  <p class="muted">
+                    Sign in as Admin to load Payouts.
+                  </p>
+                </div>
+              </div>
+              <div>
+                <h3>
+                  Selected Payout
+                </h3>
+                <div aria-live="polite" class="admin-payout-detail" id="admin-payout-detail">
+                  <p class="muted">
+                    Select a Payout to review it.
+                  </p>
+                </div>
               </div>
             </div>
-            <div>
-              <h3>Selected Payout</h3>
-              <div class="admin-payout-detail" id="admin-payout-detail" aria-live="polite">
-                <p class="muted">Select a Payout to review it.</p>
-              </div>
-            </div>
+            <details class="result">
+              <summary>
+                Request details
+              </summary>
+              <pre id="admin-payout-output">No Admin Payout action yet.</pre>
+            </details>
           </div>
-          <div class="result">
-            <div class="result-heading"><h3>Latest Admin result</h3></div>
-            <pre id="admin-payout-output">No Admin Payout action yet.</pre>
+        </section>
+      </div>
+      <div data-page="explorer" hidden="">
+        <section aria-labelledby="explorer-heading" class="card">
+          <div class="card-heading">
+            <h2 id="explorer-heading">
+              API explorer
+            </h2>
+            <span class="badge" id="operation-count">
+              loading
+            </span>
           </div>
-        </div>
-      </section>
-
-      <section class="card" aria-labelledby="explorer-heading">
-        <div class="card-heading">
-          <h2 id="explorer-heading">All implemented Quest API operations</h2>
-          <span class="badge" id="operation-count">loading</span>
-        </div>
-        <p class="muted">
-          This list is loaded from the server OpenAPI document. Money fields on this page use Baht.
-          It includes Quests,
-          Assignments, Candidates, Teams, Invitations, Proof, Reviews, and Quest
-          Settlement. Use the current Quest ID where a path field is pre-filled.
-        </p>
-        <div class="toolbar operations-toolbar">
-          <label>
-            Filter operations
-            <select id="operation-filter">
-              <option value="all">All Quest operations</option>
-            </select>
-          </label>
-          <button id="reload-operations" type="button">Reload from OpenAPI</button>
-        </div>
-        <div class="operation-list" id="operation-list">
-          <p class="muted">Loading operation list…</p>
-        </div>
-      </section>
-
-      <section class="card" aria-labelledby="debug-heading">
-        <div class="card-heading">
-          <h2 class="debug-heading" id="debug-heading">Debug messages</h2>
-          <button id="clear-debug" type="button">Clear log</button>
-        </div>
-        <pre id="debug-log" aria-live="polite"></pre>
-      </section>
+          <p class="muted">
+            Advanced controls from the Server OpenAPI contract. Request JSON uses the exact API field names and units. Select a Quest in the Quests section to fill its ID.
+          </p>
+          <div class="toolbar operations-toolbar">
+            <label>
+              Search operations
+              <input id="operation-search" placeholder="Search name or path…" type="search"/>
+            </label>
+            <label>
+              Filter operations
+              <select id="operation-filter">
+                <option value="all">
+                  All Quest operations
+                </option>
+              </select>
+            </label>
+            <button id="reload-operations" type="button">
+              Reload from OpenAPI
+            </button>
+          </div>
+          <div class="operation-list" id="operation-list">
+            <p class="muted">
+              Loading operation list…
+            </p>
+          </div>
+        </section>
+      </div>
+      <div data-page="log" hidden="">
+        <section aria-labelledby="debug-heading" class="card">
+          <div class="card-heading">
+            <h2 class="debug-heading" id="debug-heading">
+              Request log
+            </h2>
+            <button id="clear-debug" type="button">
+              Clear log
+            </button>
+          </div>
+          <pre id="debug-log"></pre>
+        </section>
+      </div>
     </main>
-
-    <script>
-      const appOrigin = window.location.origin;
-      const state = {
-        openApi: null,
-        operations: [],
-        session: null,
-        adminSession: null,
-        payoutQuote: null,
-        adminPayouts: [],
-        selectedAdminPayout: null,
-        adminPayoutQuery: {
-          status: 'PENDING_ADMIN_APPROVAL',
-          sort: 'newest',
-          limit: 50,
-          cursor: null,
-        },
-        adminPayoutNextCursor: null,
-        adminPayoutCursorHistory: [],
-        adminDecisionKeys: new Map(),
-      };
-      const demoChatMembers = [
-        {
-          id: 'demo-hirer',
-          role: 'HIRER',
-          displayName: 'Nattapong Srisawat',
-        },
-        {
-          id: 'demo-worker',
-          role: 'WORKER',
-          displayName: 'Warisara Boonmee',
-        },
-      ];
-      const createDemoChatMessages = () => {
-        const now = Date.now();
-        return [
-          {
-            id: 'demo-system-message',
-            kind: 'SYSTEM',
-            sender: { displayName: 'KU bot' },
-            text: 'Work Conversation opened for the Hirer and Worker.',
-            createdAt: new Date(now - 8 * 60_000).toISOString(),
-          },
-          {
-            id: 'demo-hirer-message',
-            kind: 'USER',
-            sender: { id: 'demo-hirer', displayName: 'Nattapong Srisawat' },
-            text: 'Hi Warisara, please use the green KUQuest style for the poster.',
-            createdAt: new Date(now - 6 * 60_000).toISOString(),
-          },
-          {
-            id: 'demo-worker-message',
-            kind: 'USER',
-            sender: { id: 'demo-worker', displayName: 'Warisara Boonmee' },
-            text: 'Got it. I will send the first draft here today.',
-            createdAt: new Date(now - 3 * 60_000).toISOString(),
-          },
-        ];
-      };
-      const chatState = {
-        mode: 'demo',
-        conversationId: null,
-        members: demoChatMembers,
-        messages: createDemoChatMessages(),
-        currentMemberId: 'demo-hirer',
-        activeAccountKey: 'account-1',
-      };
-      const questIdElement = document.querySelector('#quest-id');
-      const debugLog = document.querySelector('#debug-log');
-      const authBadge = document.querySelector('#auth-badge');
-      const authStatus = document.querySelector('#auth-status');
-      const sessionOutput = document.querySelector('#session-output');
-      const financeOutput = document.querySelector('#finance-output');
-      const questOutput = document.querySelector('#quest-output');
-      const payoutOutput = document.querySelector('#payout-output');
-      const adminAuthBadge = document.querySelector('#admin-auth-badge');
-      const adminAuthStatus = document.querySelector('#admin-auth-status');
-      const adminEmailInput = document.querySelector('#admin-email');
-      const adminPasswordInput = document.querySelector('#admin-password');
-      const adminPayoutWorkspace = document.querySelector('#admin-payout-workspace');
-      const adminPayoutList = document.querySelector('#admin-payout-list');
-      const adminPayoutDetail = document.querySelector('#admin-payout-detail');
-      const adminPayoutOutput = document.querySelector('#admin-payout-output');
-      const adminPayoutStatusInput = document.querySelector('#admin-payout-status');
-      const adminPayoutSortInput = document.querySelector('#admin-payout-sort');
-      const adminPayoutLimitInput = document.querySelector('#admin-payout-limit');
-      const adminPayoutPageStatus = document.querySelector('#admin-payout-page-status');
-      const adminPayoutPrevious = document.querySelector('#admin-payout-previous');
-      const adminPayoutNext = document.querySelector('#admin-payout-next');
-      const operationList = document.querySelector('#operation-list');
-      const operationFilter = document.querySelector('#operation-filter');
-      const chatModeBadge = document.querySelector('#chat-mode-badge');
-      const chatAccountLabel = document.querySelector('#chat-account-label');
-      const chatAccountButtons = [...document.querySelectorAll('[data-chat-account]')];
-      const chatLoadLiveButton = document.querySelector('#chat-load-live');
-      const chatResetButton = document.querySelector('#chat-reset');
-      const chatQuestTitle = document.querySelector('#chat-quest-title');
-      const chatQuestStatus = document.querySelector('#chat-quest-status');
-      const chatParticipantCount = document.querySelector('#chat-participant-count');
-      const chatParticipants = document.querySelector('#chat-participants');
-      const chatConversationTitle = document.querySelector('#chat-conversation-title');
-      const chatConnection = document.querySelector('#chat-connection');
-      const chatReadState = document.querySelector('#chat-read-state');
-      const chatMessages = document.querySelector('#chat-messages');
-      const chatComposer = document.querySelector('#chat-composer');
-      const chatMessageInput = document.querySelector('#chat-message-input');
-      const chatCharacterCount = document.querySelector('#chat-character-count');
-      const chatSendButton = document.querySelector('#chat-send');
-      const chatStatus = document.querySelector('#chat-status');
-
-      const renderAdminPaginationControls = () => {
-        adminPayoutPrevious.disabled = state.adminPayoutCursorHistory.length === 0;
-        adminPayoutNext.disabled = !state.adminPayoutNextCursor;
-      };
-
-      const redactKeys = new Set([
-        'accountNumber',
-        'account_number',
-        'authorization',
-        'cookie',
-        'password',
-        'qrPayload',
-        'qrDataUrl',
-        'qr_string',
-        'routingValue',
-        'routing_value',
-        'secret',
-        'token',
-        'x-callback-token',
-      ]);
-
-      const redact = (value) => {
-        if (Array.isArray(value)) return value.map(redact);
-        if (!value || typeof value !== 'object') return value;
-
-        return Object.fromEntries(
-          Object.entries(value).map(([key, entry]) => [
-            key,
-            redactKeys.has(key) || key.toLowerCase().includes('password')
-              ? '[redacted]'
-              : redact(entry),
-          ]),
-        );
-      };
-
-      const isSatangKey = (key = '') => key.endsWith('Satang');
-
-      const isBahtKey = (key = '') => ['maxReward', 'minReward', 'reward'].includes(key);
-
-      const displayKey = (key) => key.endsWith('Satang') ? key.replace(/Satang$/, 'Baht') : key;
-
-      const bahtTextFromSatang = (value) => {
-        if (!Number.isInteger(value)) return '—';
-        const sign = value < 0 ? '-' : '';
-        const absolute = Math.abs(value);
-        const wholeBaht = Math.floor(absolute / 100).toLocaleString('en-US');
-        const bahtPart = String(absolute % 100).padStart(2, '0');
-        return `${sign}฿${wholeBaht}.${bahtPart}`;
-      };
-
-      const bahtTextFromBaht = (value) => Number.isInteger(value) ? `฿${value.toLocaleString('en-US')}.00` : '—';
-
-      const bahtInputFromSatang = (value) => {
-        if (!Number.isInteger(value)) return '';
-        const sign = value < 0 ? '-' : '';
-        const absolute = Math.abs(value);
-        return `${sign}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}`;
-      };
-
-      const bahtToSatang = (value) => {
-        const normalized = String(value).trim();
-        if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) {
-          throw new Error('Enter a valid Baht amount with up to 2 decimal places.');
-        }
-        const [whole, fraction = ''] = normalized.split('.');
-        const satang = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
-        if (!Number.isSafeInteger(satang)) throw new Error('Baht amount is too large.');
-        return satang;
-      };
-
-      const readBahtInput = (selector) => bahtToSatang(document.querySelector(selector).value);
-
-      const toDisplayValue = (value, key = '') => {
-        if (Array.isArray(value)) return value.map((item) => toDisplayValue(item, key));
-        if (value && typeof value === 'object') {
-          return Object.fromEntries(Object.entries(value).map(([name, entry]) => [
-            displayKey(name),
-            isSatangKey(name) && Number.isInteger(entry)
-              ? bahtTextFromSatang(entry)
-              : isBahtKey(name) && Number.isInteger(entry)
-                ? bahtTextFromBaht(entry)
-                : toDisplayValue(entry, name),
-          ]));
-        }
-        if (isSatangKey(key) && Number.isInteger(value)) return bahtTextFromSatang(value);
-        if (isBahtKey(key) && Number.isInteger(value)) return bahtTextFromBaht(value);
-        return value;
-      };
-
-      const formatValue = (value) => {
-        if (typeof value === 'string') return value;
-        return JSON.stringify(toDisplayValue(redact(value)), null, 2);
-      };
-
-      const debug = (message, details) => {
-        const suffix = details === undefined ? '' : ` ${formatValue(details)}`;
-        debugLog.textContent += `[${new Date().toISOString()}] ${message}${suffix}\n`;
-        debugLog.scrollTop = debugLog.scrollHeight;
-      };
-
-      const setStatus = (element, message, type = 'info') => {
-        element.textContent = message;
-        element.dataset.type = type;
-      };
-
-      const chatInitials = (displayName) => displayName
-        .split(' ')
-        .map((part) => part[0])
-        .join('')
-        .slice(0, 2)
-        .toUpperCase();
-
-      const chatMemberById = (memberId) => chatState.members.find((member) => member.id === memberId);
-
-      const chatTime = (createdAt) => new Date(createdAt).toLocaleTimeString([], {
-        hour: 'numeric',
-        minute: '2-digit',
-      });
-
-      const renderChatMemberOptions = () => {
-        chatAccountButtons.forEach((button) => {
-          const active = button.dataset.chatAccountKey === chatState.activeAccountKey;
-          button.dataset.active = String(active);
-          button.setAttribute('aria-pressed', String(active));
-        });
-      };
-
-      const renderChatParticipants = () => {
-        chatParticipants.replaceChildren();
-        chatParticipantCount.textContent = String(chatState.members.length);
-        chatState.members.forEach((member) => {
-          const participant = document.createElement('button');
-          participant.type = 'button';
-          participant.className = 'chat-member';
-          participant.dataset.active = String(member.id === chatState.currentMemberId);
-          participant.dataset.role = member.role;
-          participant.disabled = chatState.mode === 'live';
-          const avatar = document.createElement('span');
-          avatar.className = 'chat-avatar';
-          avatar.ariaHidden = 'true';
-          avatar.textContent = chatInitials(member.displayName);
-          const details = document.createElement('span');
-          const name = document.createElement('span');
-          name.className = 'chat-member-name';
-          name.textContent = member.displayName;
-          const role = document.createElement('span');
-          role.className = 'chat-member-role';
-          role.textContent = member.role;
-          details.append(name, role);
-          participant.append(avatar, details);
-          participant.addEventListener('click', () => {
-            chatState.currentMemberId = member.id;
-            chatState.activeAccountKey = member.id === 'demo-worker' ? 'account-2' : 'account-1';
-            renderChatMemberOptions();
-            renderChatParticipants();
-            renderChatMessages();
-            setChatStatus(`${member.displayName} is now the current test Member.`, 'info');
-          });
-          chatParticipants.append(participant);
-        });
-      };
-
-      const renderChatMessages = () => {
-        chatMessages.replaceChildren();
-        if (chatState.messages.length === 0) {
-          const empty = document.createElement('p');
-          empty.className = 'muted';
-          empty.textContent = 'No Messages yet. Write the first Message.';
-          chatMessages.append(empty);
-          return;
-        }
-
-        chatState.messages.forEach((message) => {
-          const isSystem = message.kind === 'SYSTEM';
-          const senderId = message.sender?.id ?? message.senderId;
-          const member = chatMemberById(senderId);
-          const senderName = message.sender?.displayName ?? member?.displayName ?? 'Former member';
-          const messageElement = document.createElement('article');
-          messageElement.className = `chat-message${isSystem ? ' chat-message--system' : ''}`;
-          messageElement.dataset.mine = String(!isSystem && senderId === chatState.currentMemberId);
-
-          const bubble = document.createElement('div');
-          bubble.className = 'chat-bubble';
-          const sender = document.createElement('span');
-          sender.className = 'chat-message-sender';
-          sender.textContent = isSystem ? 'KU bot · System Message' : senderName;
-          const text = document.createElement('p');
-          text.className = 'chat-message-text';
-          text.textContent = message.text || (message.attachments?.length ? 'Attachment' : '');
-          const time = document.createElement('time');
-          time.className = 'chat-message-time';
-          time.dateTime = message.createdAt;
-          time.textContent = chatTime(message.createdAt);
-          bubble.append(sender, text, time);
-          messageElement.append(bubble);
-          chatMessages.append(messageElement);
-        });
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-      };
-
-      const setChatStatus = (message, type = 'info') => setStatus(chatStatus, message, type);
-
-      const renderChatMode = () => {
-        const isLive = chatState.mode === 'live';
-        const hasLiveConversation = isLive && Boolean(chatState.conversationId);
-        chatModeBadge.textContent = isLive ? 'Live API' : 'Browser demo';
-        chatAccountLabel.textContent = isLive ? 'Live signed-in Member' : 'Demo account';
-        chatConversationTitle.textContent = isLive
-          ? hasLiveConversation
-            ? chatState.members.length > 1 ? 'Work Conversation' : 'Work Conversation · 1 Member'
-            : 'No live Work Conversation loaded'
-          : 'Work Conversation';
-        chatConnection.textContent = hasLiveConversation
-          ? `CONVERSATION_WORK · ${chatState.conversationId}`
-          : isLive ? 'CONVERSATION_WORK · no Conversation loaded' : 'CONVERSATION_WORK · browser demo';
-        chatReadState.textContent = hasLiveConversation ? 'read' : isLive ? 'not loaded' : 'ready';
-        chatQuestTitle.textContent = isLive
-          ? chatState.questTitle ?? 'Live Quest'
-          : 'Design a KU event poster';
-        chatQuestStatus.textContent = isLive
-          ? chatState.questStatus ?? 'Work Conversation'
-          : 'QUEST_IN_PROGRESS · ฿500';
-        chatResetButton.hidden = isLive;
-        renderChatMemberOptions();
-        renderChatParticipants();
-        renderChatMessages();
-      };
-
-      const resetChatDemo = () => {
-        chatState.mode = 'demo';
-        chatState.conversationId = null;
-        chatState.members = demoChatMembers;
-        chatState.messages = createDemoChatMessages();
-        chatState.currentMemberId = 'demo-hirer';
-        chatState.activeAccountKey = 'account-1';
-        renderChatMode();
-        setChatStatus('Demo reset. Select either test Member to try the chat.', 'success');
-      };
-
-      const advanceLiveChatReadCursor = async () => {
-        const lastMessage = chatState.messages[chatState.messages.length - 1];
-        if (chatState.mode !== 'live' || !lastMessage || !chatState.conversationId) return;
-        try {
-          await jsonRequest(
-            `/api/v1/chat/conversations/${encodeURIComponent(chatState.conversationId)}/read`,
-            'POST',
-            { messageId: lastMessage.id },
-            'Advance Work Conversation Read Cursor',
-          );
-        } catch (error) {
-          debug('Work Conversation Read Cursor update skipped', error instanceof Error ? error.message : error);
-        }
-      };
-
-      const loadLiveWorkConversation = async () => {
-        if (!state.session?.user?.id) throw new Error('Sign in as a Member before loading a live Work Conversation.');
-        setChatStatus('Loading Work Conversations…', 'info');
-        const list = await request('/api/v1/chat/conversations?limit=20', {}, 'List Work Conversations');
-        const conversation = list?.data?.items?.[0];
-        if (!conversation) {
-          throw new Error('No live Work Conversation is available for this Member. Use the browser demo or create an Active Assignment first.');
-        }
-
-        const conversationId = conversation.id;
-        const [participantResponse, messageResponse] = await Promise.all([
-          request(`/api/v1/chat/conversations/${encodeURIComponent(conversationId)}/participants`, {}, 'List Work Conversation Participants'),
-          request(`/api/v1/chat/conversations/${encodeURIComponent(conversationId)}/messages?limit=50`, {}, 'List Work Conversation Messages'),
-        ]);
-        chatState.mode = 'live';
-        chatState.conversationId = conversationId;
-        chatState.members = participantResponse?.data?.participants ?? [];
-        chatState.messages = messageResponse?.data?.items ?? [];
-        chatState.currentMemberId = state.session.user.id;
-        chatState.questTitle = conversation.quest?.title;
-        chatState.questStatus = conversation.quest?.status;
-        renderChatMode();
-        await advanceLiveChatReadCursor();
-        setChatStatus(`Loaded ${chatState.messages.length} Messages from the live Work Conversation.`, 'success');
-      };
-
-      const switchTestAccountSession = async (accountKey) => {
-        const accountButton = chatAccountButtons.find((button) => button.dataset.chatAccountKey === accountKey);
-        if (!accountButton) throw new Error(`Unknown test account: ${accountKey}`);
-
-        const previousAccountKey = chatState.activeAccountKey;
-        let sessionSwitched = false;
-        chatAccountButtons.forEach((button) => { button.disabled = true; });
-        chatState.activeAccountKey = accountKey;
-        const accountName = accountButton.querySelector('strong').textContent;
-        setChatStatus(`Signing in as ${accountName}…`, 'info');
-        try {
-          await jsonRequest(
-            `/api/staging/test-auth/sign-in/${encodeURIComponent(accountKey)}`,
-            'POST',
-            {},
-            `Sign in as ${accountName}`,
-          );
-          const session = await refreshSession();
-          if (!session?.user?.id) throw new Error('The server returned no Member session.');
-          sessionSwitched = true;
-          await loadTags();
-          await refreshWallet();
-
-          try {
-            await loadLiveWorkConversation();
-          } catch (error) {
-            if (!(error instanceof Error) || !error.message.startsWith('No live Work Conversation')) throw error;
-            chatState.mode = 'live';
-            chatState.conversationId = null;
-            chatState.members = [];
-            chatState.messages = [];
-            chatState.currentMemberId = session.user.id;
-            chatState.questTitle = null;
-            chatState.questStatus = null;
-            renderChatMode();
-            setChatStatus(`${accountName} is signed in. No live Work Conversation exists for this Member yet.`, 'info');
-          }
-        } catch (error) {
-          if (!sessionSwitched) chatState.activeAccountKey = previousAccountKey;
-          setChatStatus(error instanceof Error ? error.message : 'Test Member sign-in failed.', 'error');
-        } finally {
-          chatAccountButtons.forEach((button) => { button.disabled = false; });
-          renderChatMemberOptions();
-        }
-      };
-
-      const sendChatMessage = async () => {
-        const text = chatMessageInput.value.trim();
-        if (!text) {
-          setChatStatus('Enter a Message before sending.', 'error');
-          chatMessageInput.focus();
-          return;
-        }
-
-        chatSendButton.disabled = true;
-        try {
-          if (chatState.mode === 'demo') {
-            const member = chatMemberById(chatState.currentMemberId);
-            chatState.messages.push({
-              id: `demo-message-${crypto.randomUUID()}`,
-              kind: 'USER',
-              sender: { id: chatState.currentMemberId, displayName: member.displayName },
-              text,
-              createdAt: new Date().toISOString(),
-            });
-            chatMessageInput.value = '';
-            renderChatMessages();
-            updateChatCharacterCount();
-            setChatStatus(`Message sent as ${member.role === 'HIRER' ? 'Hirer' : 'Worker'}.`, 'success');
-            return;
-          }
-
-          if (!chatState.conversationId) throw new Error('No live Work Conversation is loaded for this Member.');
-          const response = await jsonRequest(
-            `/api/v1/chat/conversations/${encodeURIComponent(chatState.conversationId)}/messages`,
-            'POST',
-            { clientMessageId: randomKey('browser-chat-message'), text },
-            'Send Work Conversation Message',
-          );
-          const message = response?.data?.message;
-          if (!message) throw new Error('The server returned no Message.');
-          chatState.messages.push(message);
-          chatMessageInput.value = '';
-          renderChatMessages();
-          updateChatCharacterCount();
-          await advanceLiveChatReadCursor();
-          setChatStatus('Message committed to the live Work Conversation.', 'success');
-        } catch (error) {
-          setChatStatus(error instanceof Error ? error.message : 'Message send failed. The text is preserved so you can retry.', 'error');
-        } finally {
-          chatSendButton.disabled = false;
-        }
-      };
-
-      const updateChatCharacterCount = () => {
-        chatCharacterCount.textContent = `${chatMessageInput.value.length} / 1000`;
-      };
-
-      renderChatMode();
-
-      const setBusy = (busy) => {
-        document.querySelectorAll('button, input, select, textarea').forEach((element) => {
-          element.disabled = busy;
-        });
-        document.querySelector('#clear-debug').disabled = false;
-      };
-
-      const renderWallet = (wallet, email = state.session?.user?.email) => {
-        const values = {
-          '#wallet-spending': wallet?.spendingBalanceSatang,
-          '#wallet-earnings': wallet?.earningsBalanceSatang,
-          '#wallet-funding': wallet?.fundingReservedSatang,
-          '#wallet-payout': wallet?.reservedForPayoutsSatang,
-        };
-        Object.entries(values).forEach(([selector, value]) => {
-          document.querySelector(selector).textContent = bahtTextFromSatang(value);
-        });
-        document.querySelector('#wallet-member').textContent = email ? `Member: ${email}` : 'No Wallet loaded.';
-      };
-
-      const refreshWallet = async () => {
-        if (!state.session) {
-          renderWallet(null, null);
-          setStatus(document.querySelector('#wallet-status'), 'Sign in to read the Wallet.', 'info');
-          return null;
-        }
-        try {
-          const response = await request('/api/v1/wallet', {}, 'Read current Wallet');
-          renderWallet(response?.data?.wallet);
-          setStatus(document.querySelector('#wallet-status'), 'Wallet projection is current.', 'success');
-          return response;
-        } catch (error) {
-          renderWallet(null);
-          setStatus(document.querySelector('#wallet-status'), error instanceof Error ? error.message : 'Wallet read failed', 'error');
-          return null;
-        }
-      };
-
-      const parseResponse = async (response) => {
-        const text = await response.text();
-        if (!text) return null;
-        try {
-          return JSON.parse(text);
-        } catch {
-          return text;
-        }
-      };
-
-      const request = async (path, options = {}, label = `${options.method ?? 'GET'} ${path}`) => {
-        const url = new URL(path, appOrigin).toString();
-        const requestDetails = {
-          method: options.method ?? 'GET',
-          url,
-          body: options.body && typeof options.body === 'string' ? JSON.parse(options.body) : undefined,
-        };
-        debug(`${label} →`, requestDetails);
-
-        let response;
-        try {
-          response = await fetch(url, { ...options, credentials: 'include' });
-        } catch (error) {
-          debug(`${label} network error`, error instanceof Error ? error.message : error);
-          throw error;
-        }
-
-        const body = await parseResponse(response);
-        debug(`${label} ← ${response.status}`, body);
-        if (!response.ok) {
-          const message = body?.error?.message ?? body?.message ?? `Request failed (${response.status})`;
-          const error = new Error(message);
-          error.status = response.status;
-          error.body = body;
-          throw error;
-        }
-        return body;
-      };
-
-      const jsonRequest = (path, method, body, label, headers = {}) => request(path, {
-        method,
-        headers: { 'content-type': 'application/json', ...headers },
-        body: JSON.stringify(body),
-      }, label);
-
-      const randomKey = (prefix) => `${prefix}:${crypto.randomUUID()}`;
-
-      const refreshSession = async () => {
-        try {
-          const data = await request('/api/auth/get-session', {}, 'Refresh Session');
-          state.session = data;
-          sessionOutput.textContent = formatValue(data ?? null);
-          const signedIn = Boolean(data);
-          authBadge.textContent = signedIn ? 'signed in' : 'signed out';
-          authBadge.dataset.state = signedIn ? 'success' : 'pending';
-          setStatus(authStatus, signedIn ? `Signed in as ${data.user.email}` : 'No Session', signedIn ? 'success' : 'info');
-          return data;
-        } catch (error) {
-          state.session = null;
-          sessionOutput.textContent = 'null';
-          authBadge.textContent = 'error';
-          authBadge.dataset.state = 'error';
-          setStatus(authStatus, error instanceof Error ? error.message : 'Session check failed', 'error');
-          return null;
-        }
-      };
-
-      const loadDefaultSession = async () => {
-        setBusy(true);
-        setStatus(authStatus, 'Signing in as the default test Member…');
-        try {
-          await jsonRequest('/api/staging/test-auth/sign-in/default', 'POST', {}, 'Default test sign-in');
-          await refreshSession();
-          await loadTags();
-          await refreshWallet();
-          setStatus(authStatus, 'Default test Member is ready', 'success');
-        } catch (error) {
-          setStatus(
-            authStatus,
-            error?.status === 404
-              ? 'Default test sign-in is disabled in this environment. Use Google sign-in or enable staging test authentication.'
-              : error instanceof Error ? error.message : 'Default sign-in failed',
-            'error',
-          );
-        } finally {
-          setBusy(false);
-          renderAdminPaginationControls();
-        }
-      };
-
-      const signInWithGoogle = async () => {
-        setBusy(true);
-        setStatus(authStatus, 'Opening Google account selector…');
-        try {
-          const data = await jsonRequest('/api/auth/sign-in/social', 'POST', {
-            provider: 'google',
-            callbackURL: `${appOrigin}/`,
-            errorCallbackURL: `${appOrigin}/`,
-            disableRedirect: true,
-          }, 'Google sign-in');
-          if (!data?.url) throw new Error('The server returned no Google authorization URL');
-          window.location.assign(data.url);
-        } catch (error) {
-          setStatus(authStatus, error instanceof Error ? error.message : 'Google sign-in failed', 'error');
-          setBusy(false);
-        }
-      };
-
-      const signOut = async () => {
-        setBusy(true);
-        try {
-          await jsonRequest('/api/auth/sign-out', 'POST', {}, 'Sign out');
-          state.session = null;
-          renderWallet(null, null);
-          await refreshSession();
-        } catch (error) {
-          setStatus(authStatus, error instanceof Error ? error.message : 'Sign out failed', 'error');
-        } finally {
-          setBusy(false);
-        }
-      };
-
-      const loadTags = async () => {
-        if (!state.session) return;
-        try {
-          const response = await request('/api/v1/tags', {}, 'List Tags');
-          const tags = response?.data ?? [];
-          const select = document.querySelector('#quest-tag');
-          select.replaceChildren(new Option('No Tag', ''));
-          tags.forEach((tag) => select.append(new Option(`${tag.name} (${tag.id})`, tag.id)));
-        } catch (error) {
-          debug('Tag loading skipped', error instanceof Error ? error.message : error);
-        }
-      };
-
-      const renderPaymentResult = (response) => {
-        financeOutput.textContent = formatValue(response);
-        const qrDataUrl = response?.data?.topUp?.qrDataUrl;
-        const panel = document.querySelector('#payment-qr-panel');
-        const image = document.querySelector('#payment-qr');
-        if (qrDataUrl) {
-          image.src = qrDataUrl;
-          panel.hidden = false;
-          document.querySelector('#payment-qr-status').textContent = response.data.topUp.topUpStatus === 'PAID'
-            ? 'This Payment Request is already paid in Test Mode. The QR came from the Xendit response.'
-            : 'Scan this QR with the Xendit Test Mode payment flow.';
-        } else {
-          image.removeAttribute('src');
-          panel.hidden = true;
-        }
-        if (response?.data?.wallet) renderWallet(response.data.wallet, response.data.testUserEmail);
-      };
-
-      const isoFromInput = (selector, fallbackMinutes) => {
-        const input = document.querySelector(selector);
-        if (input.value) return new Date(input.value).toISOString();
-        return new Date(Date.now() + fallbackMinutes * 60_000).toISOString();
-      };
-
-      const questBody = () => {
-        const description = document.querySelector('#quest-description')?.value?.trim();
-        const tagId = document.querySelector('#quest-tag').value;
-        return {
-          title: document.querySelector('#quest-title').value.trim(),
-          ...(description ? { description } : {}),
-          condition: document.querySelector('#quest-condition').value.trim(),
-          mode: document.querySelector('#quest-mode').value,
-          participation: document.querySelector('#quest-participation').value,
-          reward: Number(document.querySelector('#quest-reward').value),
-          headcount: Number(document.querySelector('#quest-headcount').value),
-          startTime: isoFromInput('#quest-start', 60),
-          dueAt: isoFromInput('#quest-due', 180),
-          tagId: tagId || undefined,
-          proofRequired: document.querySelector('#quest-proof-required').checked,
-        };
-      };
-
-      const selectedQuestId = () => questIdElement.value.trim();
-
-      const showQuest = (value) => {
-        questOutput.textContent = formatValue(value);
-        if (value?.data?.id) questIdElement.value = value.data.id;
-        if (value?.data?.quest?.id) questIdElement.value = value.data.quest.id;
-      };
-
-      const requireQuestId = () => {
-        const id = selectedQuestId();
-        if (!id) throw new Error('Enter or create a Quest ID first');
-        return id;
-      };
-
-      const createQuest = async () => {
-        const response = await jsonRequest('/api/v1/quests', 'POST', questBody(), 'Create Draft Quest');
-        showQuest(response);
-        return response;
-      };
-
-      const simpleQuestBody = () => ({
-        title: `Browser Quest Escrow test ${new Date().toISOString().slice(0, 19)}`,
-        description: 'Small browser test Quest for the Quest Escrow flow.',
-        condition: 'Return a short test result.',
-        mode: 'NO_CANDIDATE',
-        participation: 'SOLO',
-        reward: 1000,
-        headcount: 1,
-        startTime: new Date(Date.now() + 60 * 60_000).toISOString(),
-        dueAt: new Date(Date.now() + 3 * 60 * 60_000).toISOString(),
-        tagId: document.querySelector('#quest-tag').value || undefined,
-        proofRequired: false,
-      });
-
-      const runSimpleQuestSmoke = async () => {
-        const created = await jsonRequest('/api/v1/quests', 'POST', simpleQuestBody(), 'Create simple Draft Quest');
-        showQuest(created);
-        if (!created?.data?.id) throw new Error('Draft Quest creation returned no Quest ID');
-        setStatus(document.querySelector('#quest-flow-status'), 'Draft created. Checking publication…', 'info');
-        await publishCheck();
-        setStatus(document.querySelector('#quest-flow-status'), 'Publishing and reserving Quest Escrow…', 'info');
-        await publishQuest();
-        await getDetail();
-        setStatus(document.querySelector('#quest-flow-status'), 'Quest is open. Canceling and releasing Quest Escrow…', 'info');
-        await cancelQuest();
-        setStatus(document.querySelector('#quest-flow-status'), 'Complete: Draft → Open → Quest Escrow released.', 'success');
-      };
-
-      const publishCheck = async () => {
-        const id = requireQuestId();
-        const response = await request(`/api/v1/quests/${encodeURIComponent(id)}/publish-check`, {}, 'Check Quest publication');
-        showQuest(response);
-        return response;
-      };
-
-      const publishQuest = async () => {
-        const id = requireQuestId();
-        const response = await request(`/api/v1/quests/${encodeURIComponent(id)}/publish`, { method: 'POST' }, 'Publish Quest and reserve Quest Escrow');
-        showQuest(response);
-        return response;
-      };
-
-      const cancelQuest = async () => {
-        const id = requireQuestId();
-        const response = await request(`/api/v1/quests/${encodeURIComponent(id)}/cancel`, {
-          method: 'POST',
-          headers: { 'idempotency-key': randomKey('browser-cancel') },
-        }, 'Cancel Quest and release Quest Escrow');
-        showQuest(response);
-        return response;
-      };
-
-      const runEscrowSmoke = async () => {
-        const created = await createQuest();
-        if (!created?.data?.id) throw new Error('Draft Quest creation returned no Quest ID');
-        await publishCheck();
-        await publishQuest();
-        await request(`/api/v1/quests/${encodeURIComponent(requireQuestId())}`, {}, 'Get published Quest detail');
-        await cancelQuest();
-        setStatus(authStatus, 'Quest Escrow smoke completed: Draft → published → reserved → canceled → released', 'success');
-      };
-
-      const listMine = async () => showQuest(await request('/api/v1/quests/mine?limit=50', {}, 'List my Quests'));
-      const listBoard = async () => showQuest(await request('/api/v1/quests?limit=50', {}, 'List Quest Board'));
-      const getDetail = async () => {
-        const id = requireQuestId();
-        showQuest(await request(`/api/v1/quests/${encodeURIComponent(id)}`, {}, 'Get Quest detail'));
-      };
-      const joinQuest = async () => {
-        const id = requireQuestId();
-        showQuest(await request(`/api/v1/quests/${encodeURIComponent(id)}/join`, {
-          method: 'POST',
-          headers: { 'idempotency-key': randomKey('browser-join') },
-        }, 'Join Quest directly'));
-      };
-
-      const schemaFromRef = (schema) => {
-        if (!schema || !schema.$ref) return schema;
-        const name = schema.$ref.split('/').pop();
-        return state.openApi?.components?.schemas?.[name] ?? schema;
-      };
-
-      const exampleForSchema = (schema, propertyName = '') => {
-        const resolved = schemaFromRef(schema) ?? {};
-        if (resolved.example !== undefined) return resolved.example;
-        if (resolved.enum?.length) return resolved.enum[0];
-        if (resolved.oneOf?.length) return exampleForSchema(resolved.oneOf[0], propertyName);
-        if (resolved.anyOf?.length) return exampleForSchema(resolved.anyOf[0], propertyName);
-        if (resolved.allOf?.length) {
-          return resolved.allOf.reduce((value, item) => ({ ...value, ...exampleForSchema(item, propertyName) }), {});
-        }
-        if (resolved.type === 'object' || resolved.properties) {
-          return Object.fromEntries(Object.entries(resolved.properties ?? {}).map(([name, child]) => [name, exampleForSchema(child, name)]));
-        }
-        if (resolved.type === 'array') return [];
-        if (resolved.type === 'integer' || resolved.type === 'number') {
-          if (propertyName.toLowerCase().includes('rating')) return 5;
-          if (propertyName.toLowerCase().includes('headcount')) return 1;
-          if (propertyName.toLowerCase().includes('rework')) return 0;
-          return 100;
-        }
-        if (resolved.type === 'boolean') return true;
-        if (resolved.format === 'date-time') return new Date(Date.now() + 60 * 60_000).toISOString();
-        if (resolved.format === 'uuid') return propertyName.toLowerCase().includes('quest') ? selectedQuestId() : '';
-        if (propertyName.toLowerCase().includes('content')) return 'Browser test proof content';
-        if (propertyName.toLowerCase().includes('title')) return 'Browser test Quest';
-        if (propertyName.toLowerCase().includes('condition')) return 'Complete the browser test condition';
-        if (propertyName.toLowerCase().includes('name')) return 'Browser test';
-        return '';
-      };
-
-      const operationBodySchema = (operation) => {
-        const content = operation.requestBody?.content ?? {};
-        const mediaType = content['multipart/form-data'] ? 'multipart/form-data' : Object.keys(content)[0];
-        return mediaType ? { mediaType, schema: content[mediaType].schema } : null;
-      };
-
-      const isMoneyParameter = (name) => isSatangKey(name);
-
-      const toBahtInputValue = (value, key = '') => {
-        if (Array.isArray(value)) return value.map((item) => toBahtInputValue(item, key));
-        if (value && typeof value === 'object') {
-          return Object.fromEntries(Object.entries(value).map(([name, entry]) => [
-            displayKey(name),
-            isSatangKey(name) && Number.isInteger(entry) ? bahtInputFromSatang(entry) : toBahtInputValue(entry, name),
-          ]));
-        }
-        return isSatangKey(key) && Number.isInteger(value) ? bahtInputFromSatang(value) : value;
-      };
-
-      const toApiMoneyValue = (value, key = '') => {
-        if (Array.isArray(value)) return value.map((item) => toApiMoneyValue(item, key));
-        if (value && typeof value === 'object') {
-          return Object.fromEntries(Object.entries(value).map(([name, entry]) => {
-            const apiKey = name.endsWith('Baht') ? name.replace(/Baht$/, 'Satang') : name;
-            return [apiKey, isSatangKey(apiKey) ? bahtToSatang(entry) : toApiMoneyValue(entry, apiKey)];
-          }));
-        }
-        return isSatangKey(key) ? bahtToSatang(value) : value;
-      };
-
-      const operationExample = (operation) => {
-        const known = {
-          createQuest: questBody(),
-          createQuestApplication: { reworkLimit: 0 },
-          updateQuestApplication: { reworkLimit: 0 },
-          createQuestTeam: { name: 'Browser test team', reworkLimit: 0 },
-          updateQuestTeam: { name: 'Browser test team', reworkLimit: 0 },
-          submitQuestProof: { content: 'Browser test proof content' },
-          reviewQuestProof: { status: 'PROOF_APPROVED', reviewNote: 'Browser test review' },
-          confirmQuestWork: {},
-          createQuestReview: { rating: 5, comment: 'Browser test review' },
-          updateQuestReview: { rating: 5, comment: 'Browser test review' },
-          resolveQuestDispute: { outcome: 'REFUND_HIRER' },
-        };
-        const body = operationBodySchema(operation);
-        if (!body) return '';
-        return JSON.stringify(toBahtInputValue(known[operation.operationId] ?? exampleForSchema(body.schema)), null, 2);
-      };
-
-      const parameterInput = (parameter) => {
-        const input = document.createElement('input');
-        input.name = parameter.name;
-        input.dataset.parameter = parameter.in;
-        input.dataset.money = String(isMoneyParameter(parameter.name));
-        input.placeholder = parameter.required ? 'required' : 'optional';
-        input.value = parameter.in === 'path' && parameter.name === 'questId' ? selectedQuestId() : '';
-        if (parameter.in === 'header' && parameter.name.toLowerCase() === 'idempotency-key') input.value = randomKey('browser');
-        if (parameter.schema?.format === 'date-time') input.type = 'datetime-local';
-        if (isMoneyParameter(parameter.name)) {
-          input.type = 'number';
-          input.min = '0.01';
-          input.step = '0.01';
-        }
-        return input;
-      };
-
-      const buildOperationCard = ({ path, method, operation }) => {
-        const details = document.createElement('details');
-        details.className = 'operation';
-        details.dataset.tags = (operation.tags ?? []).join('|');
-        const summary = document.createElement('summary');
-        const methodBadge = document.createElement('span');
-        methodBadge.className = 'method';
-        methodBadge.dataset.method = method;
-        methodBadge.textContent = method;
-        const pathText = document.createElement('span');
-        pathText.className = 'operation-path';
-        pathText.textContent = operation.summary ? `${operation.summary} — ${path}` : path;
-        summary.append(methodBadge, pathText);
-
-        const body = document.createElement('div');
-        body.className = 'operation-body';
-        const form = document.createElement('form');
-        const parameters = operation.parameters ?? [];
-        const parameterFields = document.createElement('div');
-        parameterFields.className = 'operation-fields';
-        parameters.forEach((parameter) => {
-          const label = document.createElement('label');
-          const parameterName = isMoneyParameter(parameter.name) ? displayKey(parameter.name) : isBahtKey(parameter.name) ? `${parameter.name} (Baht)` : parameter.name;
-          label.textContent = `${parameter.in}: ${parameterName}${parameter.required ? ' *' : ''}`;
-          label.append(parameterInput(parameter));
-          parameterFields.append(label);
-        });
-        if (parameterFields.children.length) form.append(parameterFields);
-
-        const requestBody = operationBodySchema(operation);
-        let bodyInput;
-        let fileInput;
-        if (requestBody) {
-          const label = document.createElement('label');
-          label.className = 'wide';
-          label.textContent = `Request fields (${requestBody.mediaType})`;
-          bodyInput = document.createElement('textarea');
-          bodyInput.dataset.requestBody = requestBody.mediaType;
-          bodyInput.value = operationExample(operation);
-          label.append(bodyInput);
-          form.append(label);
-          if (requestBody.mediaType.includes('multipart')) {
-            const fileLabel = document.createElement('label');
-            fileLabel.className = 'wide';
-            fileLabel.textContent = 'Files (sent as images)';
-            fileInput = document.createElement('input');
-            fileInput.type = 'file';
-            fileInput.multiple = true;
-            fileLabel.append(fileInput);
-            form.append(fileLabel);
-          }
-        }
-
-        const send = document.createElement('button');
-        send.className = 'primary';
-        send.type = 'submit';
-        send.textContent = `Send ${method}`;
-        form.append(send);
-        const result = document.createElement('pre');
-        result.className = 'small-pre';
-        result.textContent = 'No request yet.';
-        form.append(result);
-
-        form.addEventListener('submit', async (event) => {
-          event.preventDefault();
-          send.disabled = true;
-          try {
-            let requestPath = path;
-            const query = new URLSearchParams();
-            const headers = {};
-            form.querySelectorAll('[data-parameter]').forEach((input) => {
-              const value = input.value.trim();
-              if (!value) return;
-              if (input.dataset.parameter === 'path') requestPath = requestPath.replace(`{${input.name}}`, encodeURIComponent(value));
-              if (input.dataset.parameter === 'query') {
-                query.set(input.name, input.dataset.money === 'true' ? String(bahtToSatang(value)) : value);
-              }
-              if (input.dataset.parameter === 'header') headers[input.name] = value;
-            });
-            if (["POST", "PATCH", "PUT"].includes(method) && operation.parameters?.some((parameter) => parameter.in === 'header' && parameter.name.toLowerCase() === 'idempotency-key') && !headers['idempotency-key']) {
-              headers['idempotency-key'] = randomKey('browser');
-            }
-            if (query.size) requestPath += `?${query.toString()}`;
-
-            const options = { method, headers };
-            if (bodyInput && requestBody.mediaType.includes('multipart')) {
-              const formData = new FormData();
-              const fields = bodyInput.value.trim() ? toApiMoneyValue(JSON.parse(bodyInput.value)) : {};
-              Object.entries(fields).forEach(([name, value]) => {
-                if (name === 'images') return;
-                if (Array.isArray(value)) value.forEach((entry) => formData.append(name, String(entry)));
-                else if (value !== undefined && value !== null) formData.append(name, String(value));
-              });
-              Array.from(fileInput?.files ?? []).forEach((file) => formData.append('images', file));
-              options.body = formData;
-            } else if (bodyInput && bodyInput.value.trim() && !['GET', 'DELETE'].includes(method)) {
-              options.headers = { ...headers, 'content-type': 'application/json' };
-              options.body = JSON.stringify(toApiMoneyValue(JSON.parse(bodyInput.value)));
-            }
-            const response = await request(requestPath, options, `${operation.operationId ?? method} ${requestPath}`);
-            result.textContent = formatValue(response);
-          } catch (error) {
-            result.textContent = formatValue(error?.body ?? { error: error instanceof Error ? error.message : String(error) });
-          } finally {
-            send.disabled = false;
-          }
-        });
-
-        body.append(form);
-        details.append(summary, body);
-        return details;
-      };
-
-      const renderOperations = () => {
-        const filter = operationFilter.value;
-        operationList.replaceChildren();
-        const operations = state.operations.filter(({ operation }) => filter === 'all' || (operation.tags ?? []).includes(filter));
-        if (!operations.length) {
-          operationList.append(Object.assign(document.createElement('p'), { className: 'muted', textContent: 'No operations match this filter.' }));
-          return;
-        }
-        operations.forEach((operation) => operationList.append(buildOperationCard(operation)));
-      };
-
-      const loadOperations = async () => {
-        try {
-          state.openApi = await request('/openapi/json', {}, 'Load OpenAPI operation list');
-          state.operations = Object.entries(state.openApi.paths ?? {}).flatMap(([path, pathItem]) => Object.entries(pathItem)
-            .filter(([method]) => ['get', 'post', 'patch', 'put', 'delete'].includes(method))
-            .map(([method, operation]) => ({ path, method: method.toUpperCase(), operation }))
-            .filter(({ path, operation }) => path.includes('/quests') || (operation.tags ?? []).some((tag) => ['Quests', 'Quest Assignments', 'Quest Candidates', 'Quest Teams', 'Quest Invitations', 'Quest Proof', 'Quest Settlement', 'Reviews'].includes(tag))));
-          const tags = [...new Set(state.operations.flatMap(({ operation }) => operation.tags ?? []))].sort();
-          operationFilter.replaceChildren(new Option('All Quest operations', 'all'));
-          tags.forEach((tag) => operationFilter.append(new Option(tag, tag)));
-          document.querySelector('#operation-count').textContent = `${state.operations.length} operations`;
-          renderOperations();
-        } catch (error) {
-          document.querySelector('#operation-count').textContent = 'error';
-          operationList.replaceChildren(Object.assign(document.createElement('p'), { className: 'status', textContent: error instanceof Error ? error.message : 'OpenAPI loading failed' }));
-        }
-      };
-
-      const runWithOutput = async (output, action, onSuccess = null) => {
-        setBusy(true);
-        try {
-          const value = await action();
-          if (onSuccess) onSuccess(value);
-          else output.textContent = formatValue(value);
-        } catch (error) {
-          output.textContent = formatValue(error?.body ?? { error: error instanceof Error ? error.message : String(error) });
-          debug('Action failed', error instanceof Error ? error.message : error);
-        } finally {
-          setBusy(false);
-        }
-      };
-
-      const quotePayout = async () => {
-        const response = await jsonRequest('/api/v1/payouts/quotes', 'POST', {
-          receiptSatang: readBahtInput('#payout-amount'),
-        }, 'Quote Payout');
-        state.payoutQuote = response?.data ?? null;
-        payoutOutput.textContent = formatValue(response);
-        const quote = state.payoutQuote;
-        document.querySelector('#payout-destination').textContent = quote?.payoutDestinationId
-          ? `Destination ready · quote ${quote.id.slice(0, 8)}…`
-          : 'Shown after quote';
-        setStatus(document.querySelector('#payout-status'), quote
-          ? `Quote ready. Maximum debit: ${bahtTextFromSatang(quote.maximumDebitSatang)}.`
-          : 'No Payout Quote returned.', 'success');
-        return response;
-      };
-
-      const submitPayout = async () => {
-        if (!state.payoutQuote?.id) throw new Error('Quote a Payout first');
-        const response = await jsonRequest('/api/v1/payouts', 'POST', {
-          quoteId: state.payoutQuote.id,
-        }, 'Submit Payout for Admin approval', { 'idempotency-key': randomKey('browser-payout') });
-        payoutOutput.textContent = formatValue(response);
-        setStatus(document.querySelector('#payout-status'), `Payout status: ${response?.data?.payoutStatus ?? 'submitted'}. Provider hand-off waits for Admin approval.`, 'success');
-        await refreshWallet();
-        return response;
-      };
-
-      const listPayouts = async () => {
-        const response = await request('/api/v1/payouts?limit=10', {}, 'List Payouts');
-        payoutOutput.textContent = formatValue(response);
-        return response;
-      };
-
-      const adminPayoutIsWaiting = (payout) => payout?.payoutStatus === 'PENDING_ADMIN_APPROVAL';
-
-      const adminPayoutStudentName = (payout) => [payout?.student?.firstName, payout?.student?.lastName]
-        .filter(Boolean)
-        .join(' ');
-
-      const adminPayoutStatusType = (payoutStatus) => {
-        if (['FAILED', 'CANCELLED'].includes(payoutStatus)) return 'error';
-        if (payoutStatus === 'COMPLETED') return 'success';
-        return 'info';
-      };
-
-      const requireSelectedAdminWaitingPayout = () => {
-        const payout = state.selectedAdminPayout;
-        if (!payout || !adminPayoutIsWaiting(payout)) throw new Error('Select a Payout waiting for Admin approval.');
-        return payout;
-      };
-
-      const adminDecisionIdempotencyKey = (action, payoutId, body) => {
-        const storageKey = `${action}:${payoutId}`;
-        const requestSignature = JSON.stringify(body);
-        const existing = state.adminDecisionKeys.get(storageKey);
-        if (!existing || existing.requestSignature !== requestSignature) {
-          const decision = { requestSignature, key: randomKey(`browser-admin-${action.toLowerCase()}`) };
-          state.adminDecisionKeys.set(storageKey, decision);
-          return decision.key;
-        }
-        return existing.key;
-      };
-
-      const resetAdminPayoutQuery = () => {
-        state.adminPayoutQuery = {
-          status: adminPayoutStatusInput.value,
-          sort: adminPayoutSortInput.value,
-          limit: Number(adminPayoutLimitInput.value),
-          cursor: null,
-        };
-        state.adminPayoutCursorHistory = [];
-        state.adminPayoutNextCursor = null;
-        state.selectedAdminPayout = null;
-      };
-
-      const setPayoutTab = (tab) => {
-        const adminSelected = tab === 'admin';
-        const studentTab = document.querySelector('#student-payout-tab');
-        const adminTab = document.querySelector('#admin-payout-tab');
-        const studentPanel = document.querySelector('#student-payout-panel');
-        const adminPanel = document.querySelector('#admin-payout-panel');
-        studentTab.setAttribute('aria-selected', String(!adminSelected));
-        adminTab.setAttribute('aria-selected', String(adminSelected));
-        studentPanel.hidden = adminSelected;
-        adminPanel.hidden = !adminSelected;
-        if (adminSelected && state.adminSession && state.adminPayouts.length === 0) {
-          void loadAdminPayouts().catch((error) => {
-            setStatus(adminAuthStatus, error instanceof Error ? error.message : 'Approval queue loading failed', 'error');
-          });
-        }
-      };
-
-      const renderAdminAuth = () => {
-        const signedIn = Boolean(state.adminSession?.user);
-        adminAuthBadge.textContent = signedIn
-          ? `Admin: ${state.adminSession.user.email}`
-          : 'Admin sign-in required';
-        adminAuthBadge.dataset.state = signedIn ? 'success' : 'pending';
-        adminPayoutWorkspace.hidden = !signedIn;
-        if (!signedIn) {
-          state.adminPayouts = [];
-          state.selectedAdminPayout = null;
-          state.adminPayoutNextCursor = null;
-          state.adminPayoutCursorHistory = [];
-          setStatus(adminAuthStatus, 'Use an Admin account to open the approval queue.', 'info');
-          adminPayoutList.replaceChildren(Object.assign(document.createElement('p'), {
-            className: 'muted',
-            textContent: 'Sign in as Admin to load Payouts.',
-          }));
-          adminPayoutDetail.replaceChildren(Object.assign(document.createElement('p'), {
-            className: 'muted',
-            textContent: 'Select a Payout to review it.',
-          }));
-          renderAdminPaginationControls();
-          setStatus(adminPayoutPageStatus, 'Sign in as Admin to load Payouts.', 'info');
-        } else {
-          setStatus(adminAuthStatus, `Signed in as Admin ${state.adminSession.user.email}.`, 'success');
-        }
-      };
-
-      const createAdminFact = (label, value) => {
-        const row = document.createElement('div');
-        const name = document.createElement('dt');
-        const content = document.createElement('dd');
-        name.textContent = label;
-        content.textContent = value ?? '—';
-        row.append(name, content);
-        return row;
-      };
-
-      const renderAdminPayoutList = () => {
-        adminPayoutList.replaceChildren();
-        if (!state.adminPayouts.length) {
-          adminPayoutList.append(Object.assign(document.createElement('p'), {
-            className: 'muted',
-            textContent: 'No Payout is waiting for Admin approval.',
-          }));
-          return;
-        }
-        state.adminPayouts.forEach((payout) => {
-          const button = document.createElement('button');
-          button.className = 'admin-payout-row';
-          button.type = 'button';
-          button.setAttribute('aria-selected', String(state.selectedAdminPayout?.id === payout.id));
-          const title = document.createElement('strong');
-          const summary = document.createElement('small');
-          title.textContent = adminPayoutStudentName(payout) || payout.student?.email || 'Student Payout';
-          summary.textContent = `${bahtTextFromSatang(payout.principalSatang)} · ${payout.payoutStatus}`;
-          button.append(title, summary);
-          button.addEventListener('click', () => void selectAdminPayout(payout));
-          adminPayoutList.append(button);
-        });
-      };
-
-      const renderAdminPayoutDetail = () => {
-        adminPayoutDetail.replaceChildren();
-        const payout = state.selectedAdminPayout;
-        if (!payout) {
-          adminPayoutDetail.append(Object.assign(document.createElement('p'), {
-            className: 'muted',
-            textContent: 'Select a Payout to review it.',
-          }));
-          return;
-        }
-
-        const heading = document.createElement('div');
-        const title = document.createElement('h3');
-        const status = document.createElement('span');
-        title.textContent = adminPayoutStudentName(payout) || payout.student?.email || 'Student Payout';
-        status.className = 'status';
-        status.dataset.type = adminPayoutStatusType(payout.payoutStatus);
-        status.textContent = payout.payoutStatus;
-        heading.className = 'result-heading';
-        heading.append(title, status);
-
-        const facts = document.createElement('dl');
-        facts.className = 'facts';
-        facts.append(
-          createAdminFact('Student', payout.student?.email),
-          createAdminFact('Receipt amount', bahtTextFromSatang(payout.receiptSatang)),
-          createAdminFact('Maximum debit', bahtTextFromSatang(payout.maximumDebitSatang)),
-          createAdminFact('Provider fee', bahtTextFromSatang(payout.maximumFeeSatang)),
-          createAdminFact('Provider tax', bahtTextFromSatang(payout.maximumTaxSatang)),
-          createAdminFact('Destination', `${payout.bankName} · ${payout.maskedDestinationValue}`),
-          createAdminFact('Destination type', payout.destinationType),
-          createAdminFact('Routing', payout.maskedRoutingValue),
-          createAdminFact('Provider status', payout.providerStatus),
-          createAdminFact('Provider reference', payout.providerReference),
-          createAdminFact('Created', payout.createdAt ? new Date(payout.createdAt).toLocaleString() : null),
-        );
-        adminPayoutDetail.append(heading, facts);
-
-        if (payout.history?.length) {
-          const historyHeading = document.createElement('h4');
-          historyHeading.textContent = 'Status history';
-          const history = document.createElement('ol');
-          history.className = 'admin-history';
-          payout.history.forEach((entry) => {
-            const item = document.createElement('li');
-            const transition = `${entry.fromStatus ?? 'NEW'} → ${entry.toStatus}`;
-            const reason = entry.reason ? ` · ${entry.reason}` : '';
-            item.textContent = `${new Date(entry.occurredAt).toLocaleString()} · ${transition} · ${entry.source}${reason}`;
-            history.append(item);
-          });
-          adminPayoutDetail.append(historyHeading, history);
-        }
-
-        if (!adminPayoutIsWaiting(payout)) {
-          if (payout.rejectionReason) adminPayoutDetail.append(createAdminFact('Rejection reason', payout.rejectionReason));
-          return;
-        }
-
-        const note = document.createElement('label');
-        const noteInput = document.createElement('input');
-        note.textContent = 'Approval note (optional)';
-        noteInput.id = 'admin-approval-note';
-        noteInput.maxLength = 500;
-        noteInput.placeholder = 'Reviewed amount and destination';
-        note.append(noteInput);
-
-        const reason = document.createElement('label');
-        const reasonInput = document.createElement('textarea');
-        reason.textContent = 'Rejection reason (required only for Reject)';
-        reasonInput.id = 'admin-rejection-reason';
-        reasonInput.maxLength = 500;
-        reasonInput.placeholder = 'Explain why this Payout is rejected';
-        reason.append(reasonInput);
-
-        const actions = document.createElement('div');
-        actions.className = 'admin-actions';
-        const approve = document.createElement('button');
-        approve.className = 'primary';
-        approve.type = 'button';
-        approve.textContent = 'Approve Payout';
-        approve.addEventListener('click', () => runWithOutput(adminPayoutOutput, approveSelectedAdminPayout));
-        const reject = document.createElement('button');
-        reject.className = 'danger';
-        reject.type = 'button';
-        reject.textContent = 'Reject Payout';
-        reject.addEventListener('click', () => runWithOutput(adminPayoutOutput, rejectSelectedAdminPayout));
-        actions.append(approve, reject);
-        adminPayoutDetail.append(note, reason, actions);
-      };
-
-      const loadAdminPayoutDetail = async (payoutId) => {
-        const response = await request(
-          `/api/v1/admin/payouts/${encodeURIComponent(payoutId)}`,
-          {},
-          'Get Admin Payout detail',
-        );
-        if (state.selectedAdminPayout?.id === payoutId) {
-          state.selectedAdminPayout = response?.data ?? state.selectedAdminPayout;
-          renderAdminPayoutDetail();
-        }
-        return response;
-      };
-
-      const selectAdminPayout = async (payout) => {
-        state.selectedAdminPayout = payout;
-        renderAdminPayoutList();
-        renderAdminPayoutDetail();
-        try {
-          return await loadAdminPayoutDetail(payout.id);
-        } catch (error) {
-          adminPayoutOutput.textContent = formatValue(error?.body ?? { error: error instanceof Error ? error.message : String(error) });
-          debug('Admin Payout detail loading failed', error instanceof Error ? error.message : error);
-          return null;
-        }
-      };
-
-      const loadAdminPayouts = async ({ reset = false } = {}) => {
-        if (!state.adminSession) return null;
-        if (reset) resetAdminPayoutQuery();
-        const query = new URLSearchParams({
-          limit: String(state.adminPayoutQuery.limit),
-          sort: state.adminPayoutQuery.sort,
-        });
-        if (state.adminPayoutQuery.status) query.set('status', state.adminPayoutQuery.status);
-        if (state.adminPayoutQuery.cursor) query.set('cursor', state.adminPayoutQuery.cursor);
-        const response = await request(
-          `/api/v1/admin/payouts?${query.toString()}`,
-          {},
-          'List Admin Payout approval queue',
-        );
-        const selectedId = state.selectedAdminPayout?.id;
-        state.adminPayouts = response?.data?.items ?? [];
-        state.adminPayoutNextCursor = response?.data?.nextCursor ?? null;
-        const queuedSelection = state.adminPayouts.find((payout) => payout.id === selectedId);
-        if (queuedSelection) state.selectedAdminPayout = queuedSelection;
-        else state.selectedAdminPayout = state.adminPayouts[0] ?? null;
-        renderAdminPayoutList();
-        renderAdminPayoutDetail();
-        renderAdminPaginationControls();
-        setStatus(
-          adminPayoutPageStatus,
-          state.adminPayouts.length
-            ? `Showing ${state.adminPayouts.length} Payout${state.adminPayouts.length === 1 ? '' : 's'}.`
-            : 'No Payouts match this filter.',
-          'info',
-        );
-        if (state.selectedAdminPayout) await loadAdminPayoutDetail(state.selectedAdminPayout.id);
-        return response;
-      };
-
-      const loadNextAdminPayoutPage = async () => {
-        if (!state.adminPayoutNextCursor) return null;
-        state.adminPayoutCursorHistory.push(state.adminPayoutQuery.cursor);
-        state.adminPayoutQuery.cursor = state.adminPayoutNextCursor;
-        return loadAdminPayouts();
-      };
-
-      const loadPreviousAdminPayoutPage = async () => {
-        if (!state.adminPayoutCursorHistory.length) return null;
-        state.adminPayoutQuery.cursor = state.adminPayoutCursorHistory.pop() ?? null;
-        return loadAdminPayouts();
-      };
-
-      const refreshAdminSession = async () => {
-        try {
-          const response = await request('/api/admin/auth/get-session', {}, 'Refresh Admin Session');
-          state.adminSession = response?.user ? response : null;
-          renderAdminAuth();
-          if (state.adminSession) await loadAdminPayouts();
-          return response;
-        } catch (error) {
-          state.adminSession = null;
-          renderAdminAuth();
-          debug('Admin session check failed', error instanceof Error ? error.message : error);
-          return null;
-        }
-      };
-
-      const signInAdmin = async () => {
-        const email = adminEmailInput.value.trim();
-        const password = adminPasswordInput.value;
-        if (!email || !password) throw new Error('Enter the Admin email and password.');
-        const response = await jsonRequest('/api/admin/auth/sign-in/email', 'POST', { email, password }, 'Admin sign-in');
-        state.adminSession = response?.user ? response : null;
-        adminPasswordInput.value = '';
-        renderAdminAuth();
-        if (!state.adminSession) throw new Error('Admin sign-in returned no Admin Session.');
-        await loadAdminPayouts();
-        setPayoutTab('admin');
-        return response;
-      };
-
-      const signOutAdmin = async () => {
-        await jsonRequest('/api/admin/auth/sign-out', 'POST', {}, 'Admin sign-out');
-        state.adminSession = null;
-        state.adminPayouts = [];
-        state.selectedAdminPayout = null;
-        renderAdminAuth();
-      };
-
-      const approveSelectedAdminPayout = async () => {
-        const payout = requireSelectedAdminWaitingPayout();
-        if (!window.confirm('Approve this Payout? The Payout Worker can then call the Provider.')) return null;
-        const note = document.querySelector('#admin-approval-note')?.value.trim();
-        const body = note ? { note } : {};
-        const response = await jsonRequest(
-          `/api/v1/admin/payouts/${encodeURIComponent(payout.id)}/approve`,
-          'POST',
-          body,
-          'Approve Payout',
-          { 'idempotency-key': adminDecisionIdempotencyKey('APPROVE', payout.id, body) },
-        );
-        state.selectedAdminPayout = response?.data ?? payout;
-        await loadAdminPayouts();
-        await refreshWallet();
-        return response;
-      };
-
-      const rejectSelectedAdminPayout = async () => {
-        const payout = requireSelectedAdminWaitingPayout();
-        const reason = document.querySelector('#admin-rejection-reason')?.value.trim() ?? '';
-        if (!reason) throw new Error('Enter a rejection reason.');
-        if (!window.confirm('Reject this Payout and release its Payout Reserve?')) return null;
-        const body = { reason };
-        const response = await jsonRequest(
-          `/api/v1/admin/payouts/${encodeURIComponent(payout.id)}/reject`,
-          'POST',
-          body,
-          'Reject Payout',
-          { 'idempotency-key': adminDecisionIdempotencyKey('REJECT', payout.id, body) },
-        );
-        state.selectedAdminPayout = response?.data ?? payout;
-        await loadAdminPayouts();
-        await refreshWallet();
-        return response;
-      };
-
-      const initializeDateInputs = () => {
-        const localInput = (minutes) => {
-          const date = new Date(Date.now() + minutes * 60_000);
-          const offset = date.getTimezoneOffset() * 60_000;
-          return new Date(date.getTime() - offset).toISOString().slice(0, 16);
-        };
-        document.querySelector('#quest-start').value = localInput(60);
-        document.querySelector('#quest-due').value = localInput(180);
-      };
-
-      document.querySelector('#default-sign-in').addEventListener('click', () => {
-        void switchTestAccountSession('account-1');
-      });
-      document.querySelector('#account-2-sign-in').addEventListener('click', () => {
-        void switchTestAccountSession('account-2');
-      });
-      document.querySelector('#google-sign-in').addEventListener('click', signInWithGoogle);
-      document.querySelector('#refresh-wallet').addEventListener('click', async () => {
-        setBusy(true);
-        await refreshWallet();
-        setBusy(false);
-      });
-      document.querySelector('#refresh-session').addEventListener('click', async () => {
-        setBusy(true);
-        await refreshSession();
-        await loadTags();
-        await refreshWallet();
-        setBusy(false);
-      });
-      document.querySelector('#sign-out').addEventListener('click', signOut);
-      document.querySelector('#clear-debug').addEventListener('click', () => { debugLog.textContent = ''; });
-      chatAccountButtons.forEach((button) => button.addEventListener('click', () => {
-        void switchTestAccountSession(button.dataset.chatAccountKey);
-      }));
-      chatMessageInput.addEventListener('input', updateChatCharacterCount);
-      chatComposer.addEventListener('submit', (event) => {
-        event.preventDefault();
-        void sendChatMessage();
-      });
-      chatLoadLiveButton.addEventListener('click', async () => {
-        chatLoadLiveButton.disabled = true;
-        try {
-          await loadLiveWorkConversation();
-        } catch (error) {
-          setChatStatus(error instanceof Error ? error.message : 'Live Work Conversation loading failed.', 'error');
-        } finally {
-          chatLoadLiveButton.disabled = false;
-        }
-      });
-      chatResetButton.addEventListener('click', resetChatDemo);
-      document.querySelector('#run-payment').addEventListener('click', () => runWithOutput(financeOutput, () => jsonRequest('/api/local/test/payment', 'POST', {
-        creditSatang: readBahtInput('#payment-amount'),
-        simulate: true,
-      }, 'Trigger Xendit Test Mode Payment', { 'idempotency-key': randomKey('browser-payment') }), renderPaymentResult));
-      document.querySelector('#run-transfer').addEventListener('click', () => runWithOutput(financeOutput, () => jsonRequest('/api/local/test/transfer', 'POST', {
-        amountSatang: readBahtInput('#transfer-amount'),
-      }, 'Run Funding Reservation transfer', { 'idempotency-key': randomKey('browser-transfer') }), (value) => {
-        financeOutput.textContent = formatValue(value);
-        if (value?.data?.payerWallet) renderWallet(value.data.payerWallet, value.data.payerEmail);
-      }));
-      document.querySelector('#quote-payout').addEventListener('click', () => runWithOutput(payoutOutput, quotePayout));
-      document.querySelector('#submit-payout').addEventListener('click', () => runWithOutput(payoutOutput, submitPayout));
-      document.querySelector('#list-payouts').addEventListener('click', () => runWithOutput(payoutOutput, listPayouts));
-      document.querySelector('#student-payout-tab').addEventListener('click', () => setPayoutTab('student'));
-      document.querySelector('#admin-payout-tab').addEventListener('click', () => setPayoutTab('admin'));
-      document.querySelector('#admin-sign-in').addEventListener('click', () => runWithOutput(adminPayoutOutput, signInAdmin));
-      document.querySelector('#admin-refresh-session').addEventListener('click', () => runWithOutput(adminPayoutOutput, refreshAdminSession));
-      document.querySelector('#admin-sign-out').addEventListener('click', () => runWithOutput(adminPayoutOutput, signOutAdmin));
-      document.querySelector('#admin-refresh-payouts').addEventListener('click', () => runWithOutput(adminPayoutOutput, () => loadAdminPayouts({ reset: true })));
-      adminPayoutStatusInput.addEventListener('change', () => runWithOutput(adminPayoutOutput, () => loadAdminPayouts({ reset: true })));
-      adminPayoutSortInput.addEventListener('change', () => runWithOutput(adminPayoutOutput, () => loadAdminPayouts({ reset: true })));
-      adminPayoutLimitInput.addEventListener('change', () => runWithOutput(adminPayoutOutput, () => loadAdminPayouts({ reset: true })));
-      adminPayoutPrevious.addEventListener('click', () => runWithOutput(adminPayoutOutput, loadPreviousAdminPayoutPage));
-      adminPayoutNext.addEventListener('click', () => runWithOutput(adminPayoutOutput, loadNextAdminPayoutPage));
-      document.querySelector('#simple-quest-smoke').addEventListener('click', () => runWithOutput(questOutput, runSimpleQuestSmoke));
-      document.querySelector('#create-quest').addEventListener('click', () => runWithOutput(questOutput, createQuest));
-      document.querySelector('#escrow-smoke').addEventListener('click', () => runWithOutput(questOutput, runEscrowSmoke));
-      document.querySelector('#publish-check').addEventListener('click', () => runWithOutput(questOutput, publishCheck));
-      document.querySelector('#publish-quest').addEventListener('click', () => runWithOutput(questOutput, publishQuest));
-      document.querySelector('#cancel-quest').addEventListener('click', () => runWithOutput(questOutput, cancelQuest));
-      document.querySelector('#list-mine').addEventListener('click', () => runWithOutput(questOutput, listMine));
-      document.querySelector('#list-board').addEventListener('click', () => runWithOutput(questOutput, listBoard));
-      document.querySelector('#get-detail').addEventListener('click', () => runWithOutput(questOutput, getDetail));
-      document.querySelector('#join-quest').addEventListener('click', () => runWithOutput(questOutput, joinQuest));
-      document.querySelector('#reload-operations').addEventListener('click', loadOperations);
-      operationFilter.addEventListener('change', renderOperations);
-
-      initializeDateInputs();
-      debug('Test bench loaded', { origin: appOrigin });
-      (async () => {
-        const session = await refreshSession();
-        if (session) {
-          await loadTags();
-          await refreshWallet();
-        }
-        else await loadDefaultSession();
-        await refreshAdminSession();
-        await loadOperations();
-      })();
-    </script>
+    <noscript>
+      Enable JavaScript to use the API Test Bench.
+    </noscript>
   </body>
 </html>

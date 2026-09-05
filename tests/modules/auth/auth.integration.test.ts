@@ -10,21 +10,14 @@ describe('authentication integration', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/html');
-    expect(body).toContain('KUQuest API Test Bench');
-    expect(body).toContain('/api/auth/sign-in/social');
-    expect(body).toContain('/api/staging/test-auth/sign-in/default');
-    expect(body).toContain('/api/v1/wallet');
-    expect(body).not.toContain('/api/local/test/wallet');
-    expect(body).toContain('/api/local/test/payment');
-    expect(body).toContain('Payment QR from Xendit');
-    expect(body).toContain('Top-up credit (Baht)');
-    expect(body).toContain('Receipt amount (Baht)');
-    expect(body).not.toContain('Top-up credit (Satang)');
-    expect(body).toContain('/api/v1/quests');
-    expect(body).toContain('Run simple Quest flow');
-    expect(body).toContain('/api/v1/payouts/quotes');
-    expect(body).toContain('All implemented Quest API operations');
-    expect(body).toContain('Debug messages');
+    expect(body).toContain('KUQuest · Test Bench');
+    expect(body).toContain('data-page="member"');
+    expect(body).toContain('data-page="quests"');
+    expect(body).toContain('data-page="chat"');
+    expect(body).toContain('data-page="wallet"');
+    expect(body).toContain('data-page="admin"');
+    expect(body).toContain('/test-bench/app.js');
+    expect(body).toContain('/test-bench/styles.css');
   });
 
   it('enables only Google sign-in', () => {
