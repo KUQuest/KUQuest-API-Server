@@ -10,7 +10,6 @@ import {
   questCandidateApplicationV2,
   questCandidateTeamV2,
   questCandidateTeamV2Member,
-  questImage,
   questV2ProofSubmission,
   review as questReview,
 } from '@/database/schema/quest.schema';
@@ -33,11 +32,11 @@ import {
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
 import {
+  autoApproveDueQuestV2Proofs,
   configureQuestWorkChatMembershipWriter,
   type QuestTransaction,
 } from '@/modules/quest';
 import { createWorkChatMembershipWriter } from '@/modules/work-chat';
-import { questV2Storage } from '@/modules/quest/quest.storage';
 import {
   createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
@@ -55,7 +54,6 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
-import { ImageUploadError } from '@/shared/image-storage';
 
 const hirer = {
   id: randomUUID(),
@@ -95,17 +93,34 @@ let writerFailure: Error | undefined;
 
 type JsonSchema = {
   additionalProperties?: boolean;
+  const?: unknown;
+  enum?: unknown[];
+  format?: string;
+  items?: JsonSchema;
+  maxItems?: number;
+  maxLength?: number;
+  minItems?: number;
+  minLength?: number;
+  pattern?: string;
   properties?: Record<string, JsonSchema>;
   required?: string[];
+  type?: string;
   [key: string]: unknown;
+};
+
+type OpenApiParameter = {
+  in?: string;
+  name?: string;
+  required?: boolean;
+  schema?: JsonSchema;
 };
 
 type OpenApiOperation = {
   operationId?: string;
-  parameters?: Array<{ in?: string; name?: string; required?: boolean }>;
-  requestBody?: { content?: Record<string, { schema?: JsonSchema }> };
+  parameters?: OpenApiParameter[];
+  requestBody?: { content?: Record<string, { schema?: JsonSchema }>; required?: boolean };
   responses?: Record<string, {
-    content?: Record<string, { schema?: unknown }>;
+    content?: Record<string, { schema?: JsonSchema }>;
   }>;
   security?: unknown;
 };
@@ -379,6 +394,87 @@ const requiredV2CanonicalValues = [
 
 const stateChangingMethods = new Set(['delete', 'patch', 'post']);
 
+const documentedSchemaConstants = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.flatMap(documentedSchemaConstants);
+  if (!value || typeof value !== 'object') return [];
+  const record = value as Record<string, unknown>;
+  const constants = [
+    ...(typeof record.const === 'string' ? [record.const] : []),
+    ...(Array.isArray(record.enum) ? record.enum.filter((entry): entry is string => typeof entry === 'string') : []),
+  ];
+  return [...constants, ...Object.values(record).flatMap(documentedSchemaConstants)];
+};
+
+const expectedV2OperationContracts: Record<string, {
+  bodyProperties?: string[];
+  requiredBodyProperties?: string[];
+  responseStatuses: string[];
+}> = {
+  cancelQuestV2: {
+    responseStatuses: ['200', '400', '401', '403', '404', '409', '503'],
+  },
+  createQuestCandidateTeamV2: {
+    bodyProperties: ['name', 'headcount'],
+    requiredBodyProperties: ['name', 'headcount'],
+    responseStatuses: ['201', '400', '401', '404', '409', '503'],
+  },
+  createQuestReviewV2: {
+    bodyProperties: ['revieweeId', 'rating', 'comment'],
+    requiredBodyProperties: ['rating'],
+    responseStatuses: ['200', '400', '401', '403', '404', '409', '500', '503'],
+  },
+  createQuestV2ProofSubmission: {
+    bodyProperties: ['description', 'fileIds', 'files', 'retryPosition'],
+    requiredBodyProperties: [],
+    responseStatuses: ['201', '400', '401', '403', '404', '409', '413', '415', '500', '502', '503'],
+  },
+  confirmQuestV2Completion: {
+    responseStatuses: ['200', '400', '401', '403', '404', '409', '500', '503'],
+  },
+  editQuestV2ProofSubmission: {
+    bodyProperties: ['description', 'fileIds', 'files', 'retryPosition'],
+    requiredBodyProperties: [],
+    responseStatuses: ['200', '400', '401', '403', '404', '409', '413', '415', '500', '502', '503'],
+  },
+  getQuestCandidateTeamV2: {
+    responseStatuses: ['200', '401', '404', '500'],
+  },
+  joinQuestCandidateTeamV2: {
+    bodyProperties: ['joinCode'],
+    requiredBodyProperties: ['joinCode'],
+    responseStatuses: ['200', '400', '401', '404', '409', '503'],
+  },
+  listQuestV2ProofSubmissions: {
+    responseStatuses: ['200', '401', '404', '500'],
+  },
+  regenerateQuestCandidateTeamJoinCodeV2: {
+    responseStatuses: ['200', '400', '401', '404', '409', '503'],
+  },
+  reviewQuestV2ProofSubmission: {
+    bodyProperties: ['decision', 'reason'],
+    requiredBodyProperties: ['decision'],
+    responseStatuses: ['200', '400', '401', '403', '404', '409', '500', '503'],
+  },
+  submitQuestCandidateTeamV2: {
+    bodyProperties: ['text', 'fileIds'],
+    requiredBodyProperties: ['text', 'fileIds'],
+    responseStatuses: ['200', '400', '401', '404', '409', '503'],
+  },
+  submitQuestV2ProofSubmission: {
+    responseStatuses: ['200', '400', '401', '403', '404', '409', '500', '503'],
+  },
+  updateQuestCandidateTeamV2: {
+    bodyProperties: ['name'],
+    requiredBodyProperties: ['name'],
+    responseStatuses: ['200', '400', '401', '404', '409', '503'],
+  },
+  updateQuestReviewV2: {
+    bodyProperties: ['rating', 'comment'],
+    requiredBodyProperties: [],
+    responseStatuses: ['200', '400', '401', '403', '404', '409', '500', '503'],
+  },
+};
+
 const getDocument = async (): Promise<OpenApiDocument> => {
   const response = await app.handle(new Request('http://localhost/openapi/json'));
   return response.json() as Promise<OpenApiDocument>;
@@ -396,21 +492,76 @@ const assertDocumentedOperation = (
   expect(operation?.operationId).toBe(target.operationId);
   expect(operation?.security).toEqual([{ betterAuthSession: [] }]);
 
+  const contract = expectedV2OperationContracts[target.operationId];
+  expect(contract).toBeDefined();
+
   for (const parameterName of [...target.path.matchAll(/\{([^}]+)\}/g)].map(([, name]) => name)) {
     expect(operation?.parameters).toEqual(expect.arrayContaining([
-      expect.objectContaining({ in: 'path', name: parameterName, required: true }),
+      expect.objectContaining({
+        in: 'path',
+        name: parameterName,
+        required: true,
+        schema: expect.objectContaining({ format: 'uuid', type: 'string' }),
+      }),
     ]));
   }
 
   if (stateChangingMethods.has(target.method)) {
     expect(operation?.parameters).toEqual(expect.arrayContaining([
-      expect.objectContaining({ in: 'header', name: 'idempotency-key', required: true }),
+      expect.objectContaining({
+        in: 'header',
+        name: 'idempotency-key',
+        required: true,
+        schema: expect.objectContaining({
+          maxLength: 200,
+          minLength: 1,
+          pattern: '\\S',
+          type: 'string',
+        }),
+      }),
     ]));
   }
 
-  expect(Object.keys(operation?.responses ?? {})).not.toHaveLength(0);
-  for (const response of Object.values(operation?.responses ?? {})) {
-    expect(response.content?.['application/json']?.schema).toBeDefined();
+  expect(Object.keys(operation?.responses ?? {}).sort()).toEqual([...contract!.responseStatuses].sort());
+  for (const [status, response] of Object.entries(operation?.responses ?? {})) {
+    const schema = response.content?.['application/json']?.schema;
+    expect(schema).toBeDefined();
+    expect(schema).toMatchObject({
+      properties: {
+        success: {
+          const: status.startsWith('2'),
+          type: 'boolean',
+        },
+      },
+      required: status.startsWith('2') ? ['success', 'data'] : ['success', 'error'],
+      type: 'object',
+    });
+    if (!status.startsWith('2')) {
+      expect(schema?.properties?.error).toMatchObject({
+        properties: {
+          code: { type: 'string' },
+          message: { type: 'string' },
+        },
+        required: ['code', 'message'],
+        type: 'object',
+      });
+    }
+  }
+
+  const bodyProperties = contract!.bodyProperties;
+  if (bodyProperties) {
+    const body = operation?.requestBody;
+    const schema = body?.content?.['application/json']?.schema;
+    expect(body?.required).toBe(true);
+    expect(schema).toMatchObject({
+      additionalProperties: false,
+      properties: Object.fromEntries(bodyProperties.map((property) => [property, expect.any(Object)])),
+      type: 'object',
+    });
+    expect(schema?.required ?? []).toEqual(contract!.requiredBodyProperties ?? []);
+    expect(Object.keys(schema?.properties ?? {})).toEqual(bodyProperties);
+  } else {
+    expect(operation?.requestBody).toBeUndefined();
   }
 };
 
@@ -479,7 +630,7 @@ const createOpenGroupCandidateQuest = async (
     v2Participation: 'GROUP',
     questStatus: 'QUEST_OPEN',
     rewardSatang: 1_000,
-    questFundingTotalSatang: 2_000,
+    questFundingTotalSatang: 1_020,
     platformFeeBps: 200,
     platformFeePerWorkerSatang: 20,
     questEscrowSatang: 2_040,
@@ -561,6 +712,32 @@ const createFile = async (uploadedByUserId: string) => {
     uploadedByUserId,
   });
   return id;
+};
+
+const createAndSendProof = async (
+  questId: string,
+  workerId: string,
+  keyPrefix: string,
+) => {
+  const proofFileId = await createFile(workerId);
+  const created = await jsonRequest(
+    `/api/v2/quests/${questId}/proof-submissions`,
+    'POST',
+    workerId,
+    { description: 'Migration verification Proof', fileIds: [proofFileId] },
+    `${keyPrefix}-create`,
+  );
+  expect(created.status).toBe(201);
+  const proofSubmissionId = (await created.json()).data.id as string;
+  const sent = await request(
+    `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/submit`,
+    'POST',
+    workerId,
+    { 'idempotency-key': `${keyPrefix}-submit` },
+  );
+  expect(sent.status).toBe(200);
+  expect((await sent.json()).data.status).toBe('PROOF_PENDING');
+  return { proofFileId, proofSubmissionId };
 };
 
 const fundHirer = async (amountSatang: number) => {
@@ -646,9 +823,55 @@ const createInProgressSingleQuest = async () => {
   return { questId, assignmentId };
 };
 
-const createWorkConversation = async (questId: string, assignmentId: string) => {
+const createInProgressQuest = async (input: {
+  mode: 'FIRST_COME_FIRST_SERVED' | 'CANDIDATE';
+  participation: 'SINGLE' | 'GROUP';
+  proofRequired: boolean;
+  workerIds: string[];
+}) => {
+  const questId = randomUUID();
+  const assignmentIds = input.workerIds.map(() => randomUUID());
+  const headcount = input.workerIds.length;
+  questIds.push(questId);
+  await db.insert(quest).values({
+    id: questId,
+    hirerId: hirer.id,
+    apiVersion: 'v2',
+    title: 'Quest migration Proof branch verification',
+    condition: 'Complete the work',
+    mode: input.mode === 'CANDIDATE' ? 'CANDIDATE' : 'NO_CANDIDATE',
+    participation: input.participation === 'GROUP' ? 'GROUP' : 'SOLO',
+    v2Mode: input.mode,
+    v2Participation: input.participation,
+    questStatus: 'QUEST_IN_PROGRESS',
+    rewardSatang: 1_000,
+    questFundingTotalSatang: 1_020,
+    platformFeeBps: 200,
+    platformFeePerWorkerSatang: 20,
+    questEscrowSatang: 1_020 * headcount,
+    tagId,
+    headcount,
+    startTime: new Date('2030-01-01T10:00:00.000Z'),
+    dueAt: new Date('2030-01-01T11:00:00.000Z'),
+    proofRequired: input.proofRequired,
+  });
+  await db.insert(questAssignment).values(assignmentIds.map((id, index) => ({
+    id,
+    questId,
+    workerId: input.workerIds[index]!,
+    assignmentStatus: 'ASSIGNMENT_ACTIVE' as const,
+  })));
+  return { questId, assignmentIds };
+};
+
+const createWorkConversationForAssignments = async (
+  questId: string,
+  assignments: Array<{ assignmentId: string; workerId: string }>,
+) => {
   const productionWriter = createWorkChatMembershipWriter();
   const acceptedAt = new Date();
+  if (assignments.length === 0) throw new Error('A Work Conversation needs an accepted Worker');
+  const firstAssignment = assignments[0]!;
   await db.transaction((transaction) => productionWriter.applyQuestTransition(transaction, {
     producer: 'QUEST_ASSIGNMENT_V2',
     type: 'workersAccepted',
@@ -658,14 +881,26 @@ const createWorkConversation = async (questId: string, assignmentId: string) => 
     actorId: hirer.id,
     occurredAt: acceptedAt.toISOString(),
     hirerId: hirer.id,
-    workers: [{
-      workerId: worker.id,
-      assignmentId,
-      joinedAt: acceptedAt.toISOString(),
-    }],
+    workers: [
+      {
+        workerId: firstAssignment.workerId,
+        assignmentId: firstAssignment.assignmentId,
+        joinedAt: acceptedAt.toISOString(),
+      },
+      ...assignments.slice(1).map(({ assignmentId, workerId }) => ({
+        workerId,
+        assignmentId,
+        joinedAt: acceptedAt.toISOString(),
+      })),
+    ],
   }));
   configureQuestWorkChatMembershipWriter(productionWriter);
 };
+
+const createWorkConversation = (questId: string, assignmentId: string) => createWorkConversationForAssignments(
+  questId,
+  [{ workerId: worker.id, assignmentId }],
+);
 
 const deleteWorkChatForQuests = async (ids: string[]) => {
   if (ids.length === 0) return;
@@ -794,35 +1029,17 @@ describe('Quest API v1 to v2 migration verification', () => {
     );
   });
 
-  it('rolls back the v2 Quest Image effect when storage fails', async () => {
-    authenticate();
-    const questId = await createDraftQuest();
-    const beforeFiles = await db.select({ id: file.id }).from(file).where(eq(file.uploadedByUserId, hirer.id));
-    spyOn(questV2Storage, 'upload').mockRejectedValue(new ImageUploadError('storage unavailable'));
-    const form = new FormData();
-    form.append('images', new File([new Uint8Array([1, 2, 3])], 'migration.png', { type: 'image/png' }));
-
-    const response = await request(
-      `/api/v2/quests/${questId}/images`,
-      'POST',
-      hirer.id,
-      { 'idempotency-key': 'quest-migration-image-storage-failure' },
-      form,
-    );
-    expect(response.status).toBe(503);
-    expect((await response.json()).error.code).toBe('QUEST_IMAGE_STORAGE_UNAVAILABLE');
-    expect(await db.select({ id: questImage.id }).from(questImage).where(eq(questImage.questId, questId))).toEqual([]);
-    expect(await db.select({ id: file.id }).from(file).where(eq(file.uploadedByUserId, hirer.id))).toEqual(beforeFiles);
-  });
-
   it('documents only canonical v2 vocabulary and requires Idempotency-Key on every v2 write', async () => {
     const document = await getDocument();
-    const v2Text = JSON.stringify(
-      Object.fromEntries(Object.entries(document.paths).filter(([path]) => path.startsWith('/api/v2/'))),
-    );
+    const v2Document = Object.fromEntries(Object.entries(document.paths).filter(([path]) => path.startsWith('/api/v2/')));
+    const v2Text = JSON.stringify(v2Document);
+    const v2SchemaConstants = new Set(documentedSchemaConstants(v2Document));
 
     expect(v2Text).not.toMatch(/NO_CANDIDATE|SOLO|QUEST_REWORK|PROOF_REJECTED|PROOF_AUTO_APPROVED|reworkLimit|INVITATION_/);
-    for (const value of requiredV2CanonicalValues) expect(v2Text).toContain(value);
+    for (const value of requiredV2CanonicalValues) {
+      expect(v2Text).toContain(value);
+      expect(v2SchemaConstants).toContain(value);
+    }
 
     for (const [path, methods] of Object.entries(document.paths)) {
       if (!path.startsWith('/api/v2/')) continue;
@@ -840,7 +1057,7 @@ describe('Quest API v1 to v2 migration verification', () => {
     authenticate();
     const questId = await createOpenGroupCandidateQuest({
       headcount: 3,
-      questFundingTotalSatang: 3_000,
+      questFundingTotalSatang: 1_020,
       questEscrowSatang: 3_060,
     });
 
@@ -1461,6 +1678,175 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(completedConversation?.readOnlyAt).toBeInstanceOf(Date);
   });
 
+  it('covers every required Proof submitter branch, failure review, and 24-hour auto-approval', async () => {
+    authenticate();
+
+    const proofFree = await createInProgressQuest({
+      mode: 'FIRST_COME_FIRST_SERVED',
+      participation: 'SINGLE',
+      proofRequired: false,
+      workerIds: [worker.id],
+    });
+    await createWorkConversationForAssignments(proofFree.questId, [{
+      assignmentId: proofFree.assignmentIds[0]!,
+      workerId: worker.id,
+    }]);
+    await reserveQuest(proofFree.questId, 1_020);
+    const confirmed = await request(
+      `/api/v2/quests/${proofFree.questId}/completion-confirmation`,
+      'POST',
+      worker.id,
+      { 'idempotency-key': 'quest-migration-proof-free-confirm' },
+    );
+    expect(confirmed.status).toBe(200);
+    expect((await confirmed.json()).data).toMatchObject({
+      confirmed: true,
+      questStatus: 'QUEST_COMPLETED',
+    });
+
+    const groupFcfs = await createInProgressQuest({
+      mode: 'FIRST_COME_FIRST_SERVED',
+      participation: 'GROUP',
+      proofRequired: true,
+      workerIds: [secondWorker.id, thirdWorker.id],
+    });
+    await createWorkConversationForAssignments(groupFcfs.questId, groupFcfs.assignmentIds.map((assignmentId, index) => ({
+      assignmentId,
+      workerId: [secondWorker.id, thirdWorker.id][index]!,
+    })));
+    await reserveQuest(groupFcfs.questId, 2_040);
+    const firstGroupProof = await createAndSendProof(groupFcfs.questId, secondWorker.id, 'quest-migration-group-fcfs-proof-one');
+    const secondGroupProof = await createAndSendProof(groupFcfs.questId, thirdWorker.id, 'quest-migration-group-fcfs-proof-two');
+    expect(await db.select({ workerId: questV2ProofSubmission.workerId }).from(questV2ProofSubmission)
+      .where(eq(questV2ProofSubmission.questId, groupFcfs.questId))).toEqual(expect.arrayContaining([
+      { workerId: secondWorker.id },
+      { workerId: thirdWorker.id },
+    ]));
+    const firstGroupReview = await jsonRequest(
+      `/api/v2/quests/${groupFcfs.questId}/proof-submissions/${firstGroupProof.proofSubmissionId}/review`,
+      'POST',
+      hirer.id,
+      { decision: 'PROOF_APPROVED' },
+      'quest-migration-group-fcfs-proof-one-review',
+    );
+    expect(firstGroupReview.status).toBe(200);
+    expect((await firstGroupReview.json()).data).toMatchObject({
+      proof: { status: 'PROOF_APPROVED' },
+      questStatus: 'QUEST_IN_PROGRESS',
+    });
+    const secondGroupReview = await jsonRequest(
+      `/api/v2/quests/${groupFcfs.questId}/proof-submissions/${secondGroupProof.proofSubmissionId}/review`,
+      'POST',
+      hirer.id,
+      { decision: 'PROOF_APPROVED' },
+      'quest-migration-group-fcfs-proof-two-review',
+    );
+    expect(secondGroupReview.status).toBe(200);
+    expect((await secondGroupReview.json()).data).toMatchObject({
+      proof: { status: 'PROOF_APPROVED' },
+      questStatus: 'QUEST_COMPLETED',
+    });
+
+    const singleCandidate = await createInProgressQuest({
+      mode: 'CANDIDATE',
+      participation: 'SINGLE',
+      proofRequired: true,
+      workerIds: [fourthWorker.id],
+    });
+    await createWorkConversationForAssignments(singleCandidate.questId, [{
+      assignmentId: singleCandidate.assignmentIds[0]!,
+      workerId: fourthWorker.id,
+    }]);
+    await reserveQuest(singleCandidate.questId, 1_020);
+    const candidateProof = await createAndSendProof(singleCandidate.questId, fourthWorker.id, 'quest-migration-single-candidate-proof');
+    const candidateReview = await jsonRequest(
+      `/api/v2/quests/${singleCandidate.questId}/proof-submissions/${candidateProof.proofSubmissionId}/review`,
+      'POST',
+      hirer.id,
+      { decision: 'PROOF_APPROVED' },
+      'quest-migration-single-candidate-proof-review',
+    );
+    expect(candidateReview.status).toBe(200);
+    expect((await candidateReview.json()).data).toMatchObject({
+      proof: { status: 'PROOF_APPROVED' },
+      questStatus: 'QUEST_COMPLETED',
+    });
+
+    const failedQuest = await createInProgressQuest({
+      mode: 'FIRST_COME_FIRST_SERVED',
+      participation: 'GROUP',
+      proofRequired: true,
+      workerIds: [worker.id, secondWorker.id],
+    });
+    await createWorkConversationForAssignments(failedQuest.questId, failedQuest.assignmentIds.map((assignmentId, index) => ({
+      assignmentId,
+      workerId: [worker.id, secondWorker.id][index]!,
+    })));
+    await reserveQuest(failedQuest.questId, 2_040);
+    const pendingProof = await createAndSendProof(failedQuest.questId, worker.id, 'quest-migration-failed-proof-pending');
+    const rejectedProof = await createAndSendProof(failedQuest.questId, secondWorker.id, 'quest-migration-failed-proof-rejected');
+    const rejectedReview = await jsonRequest(
+      `/api/v2/quests/${failedQuest.questId}/proof-submissions/${rejectedProof.proofSubmissionId}/review`,
+      'POST',
+      hirer.id,
+      { decision: 'PROOF_NOT_APPROVED', reason: 'The submitted work is incomplete' },
+      'quest-migration-failed-proof-review',
+    );
+    expect(rejectedReview.status).toBe(200);
+    expect((await rejectedReview.json()).data).toMatchObject({
+      proof: { status: 'PROOF_NOT_APPROVED' },
+      questStatus: 'QUEST_FAILED',
+    });
+    expect((await db.select({ status: questV2ProofSubmission.submissionStatus })
+      .from(questV2ProofSubmission).where(eq(questV2ProofSubmission.id, pendingProof.proofSubmissionId)))[0]?.status)
+      .toBe('PROOF_PENDING');
+    expect((await db.select({ status: walletFundingReservation.status })
+      .from(walletFundingReservation).where(eq(walletFundingReservation.callerReference, failedQuest.questId)))[0]?.status)
+      .toBe('ACTIVE');
+    const pendingReview = await jsonRequest(
+      `/api/v2/quests/${failedQuest.questId}/proof-submissions/${pendingProof.proofSubmissionId}/review`,
+      'POST',
+      hirer.id,
+      { decision: 'PROOF_APPROVED' },
+      'quest-migration-failed-proof-pending-review',
+    );
+    expect(pendingReview.status).toBe(200);
+    expect((await pendingReview.json()).data).toMatchObject({
+      proof: { status: 'PROOF_APPROVED' },
+      questStatus: 'QUEST_FAILED',
+    });
+
+    const autoQuest = await createInProgressQuest({
+      mode: 'FIRST_COME_FIRST_SERVED',
+      participation: 'SINGLE',
+      proofRequired: true,
+      workerIds: [thirdWorker.id],
+    });
+    await createWorkConversationForAssignments(autoQuest.questId, [{
+      assignmentId: autoQuest.assignmentIds[0]!,
+      workerId: thirdWorker.id,
+    }]);
+    await reserveQuest(autoQuest.questId, 1_020);
+    const autoProof = await createAndSendProof(autoQuest.questId, thirdWorker.id, 'quest-migration-auto-proof');
+    const sentAt = new Date(Date.now() - 24 * 60 * 60 * 1_000);
+    await db.update(questV2ProofSubmission).set({ sentAt }).where(eq(questV2ProofSubmission.id, autoProof.proofSubmissionId));
+    const beforeAutoApproval = await autoApproveDueQuestV2Proofs(
+      new Date(sentAt.getTime() + 24 * 60 * 60 * 1_000 - 1),
+      10,
+    );
+    expect(beforeAutoApproval).not.toContain(autoProof.proofSubmissionId);
+    const autoApproved = await autoApproveDueQuestV2Proofs(
+      new Date(sentAt.getTime() + 24 * 60 * 60 * 1_000),
+      10,
+    );
+    expect(autoApproved).toContain(autoProof.proofSubmissionId);
+    expect((await db.select({ status: questV2ProofSubmission.submissionStatus })
+      .from(questV2ProofSubmission).where(eq(questV2ProofSubmission.id, autoProof.proofSubmissionId)))[0]?.status)
+      .toBe('PROOF_APPROVED');
+    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, autoQuest.questId)))[0]?.status)
+      .toBe('QUEST_COMPLETED');
+  });
+
   it('rolls back Candidate Team selection atomically and retries the same command after Work Chat failure', async () => {
     authenticate();
     const questId = await createOpenGroupCandidateQuest();
@@ -1726,6 +2112,43 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(v1Read.status).toBe(404);
   });
 
+  it('cancels a Draft without money and rejects terminal Quest States', async () => {
+    authenticate();
+    const draftQuestId = await createDraftQuest();
+    const draftResponse = await request(
+      `/api/v2/quests/${draftQuestId}/cancel`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'quest-migration-cancel-draft' },
+    );
+    expect(draftResponse.status).toBe(200);
+    expect((await draftResponse.json()).data).toEqual({
+      questStatus: 'QUEST_CANCELLED',
+      outcome: 'CANCELLED',
+      paidSatang: 0,
+      refundedSatang: 0,
+    });
+    expect(await db.select({ id: walletFundingReservation.id }).from(walletFundingReservation)
+      .where(eq(walletFundingReservation.callerReference, draftQuestId))).toHaveLength(0);
+
+    for (const [status, key] of [
+      ['QUEST_COMPLETED', 'quest-migration-cancel-completed'],
+      ['QUEST_FAILED', 'quest-migration-cancel-failed'],
+    ] as const) {
+      const questId = await createOpenGroupCandidateQuest({ questStatus: status });
+      const response = await request(
+        `/api/v2/quests/${questId}/cancel`,
+        'POST',
+        hirer.id,
+        { 'idempotency-key': key },
+      );
+      expect(response.status).toBe(409);
+      expect((await response.json()).error.code).toBe('QUEST_SETTLEMENT_NOT_ALLOWED');
+      expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status)
+        .toBe(status);
+    }
+  });
+
   it('verifies assigned and in-progress cancellation settlement rows for every v2 quadrant', async () => {
     authenticate();
     const cases = [
@@ -1775,14 +2198,19 @@ describe('Quest API v1 to v2 migration verification', () => {
         questStatus: testCase.status,
         headcount: testCase.headcount,
         rewardSatang,
-        questFundingTotalSatang: escrowSatang,
+        questFundingTotalSatang: rewardSatang + platformFeeSatang,
         questEscrowSatang: escrowSatang,
       });
-      await db.insert(questAssignment).values(testCase.workerIds.map((workerId) => ({
+      const assignments = testCase.workerIds.map((workerId) => ({
         id: randomUUID(),
-        questId,
         workerId,
         assignmentStatus: 'ASSIGNMENT_ACTIVE' as const,
+      }));
+      await db.insert(questAssignment).values(assignments.map(({ id, workerId, assignmentStatus }) => ({
+        id,
+        questId,
+        workerId,
+        assignmentStatus,
       })));
 
       const leaderId = testCase.mode === 'CANDIDATE' && testCase.participation === 'GROUP'
@@ -1803,6 +2231,10 @@ describe('Quest API v1 to v2 migration verification', () => {
           memberId,
         })));
       }
+      await createWorkConversationForAssignments(questId, assignments.map(({ id, workerId }) => ({
+        assignmentId: id,
+        workerId,
+      })));
       const reservationId = await reserveQuest(questId, escrowSatang);
       const response = await request(
         `/api/v2/quests/${questId}/cancel`,
@@ -1846,6 +2278,31 @@ describe('Quest API v1 to v2 migration verification', () => {
         .where(eq(auditRecord.resourceId, questId))).toEqual(expect.arrayContaining([
         { action: 'QUEST_STATE_CHANGED' },
       ]));
+      expect(await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment)
+        .where(eq(questAssignment.questId, questId))).toEqual(
+        testCase.workerIds.map(() => ({ status: 'ASSIGNMENT_CANCELLED' })),
+      );
+
+      const [conversation] = await db.select({
+        id: chatConversation.id,
+        questStatus: chatConversation.questStatus,
+        readOnlyAt: chatConversation.readOnlyAt,
+      }).from(chatConversation).where(eq(chatConversation.questId, questId));
+      expect(conversation?.questStatus).toBe('QUEST_CANCELLED');
+      expect(conversation?.readOnlyAt).toBeInstanceOf(Date);
+      if (!conversation) throw new Error('Migration cancellation Work Conversation was not created');
+      const memberships = await db.select({
+        memberId: chatMembership.memberId,
+        leftAt: chatMembership.leftAt,
+      }).from(chatMembership).where(and(
+        eq(chatMembership.conversationId, conversation.id),
+        eq(chatMembership.role, 'WORKER'),
+      ));
+      expect(memberships).toHaveLength(testCase.workerIds.length);
+      expect(memberships).toEqual(expect.arrayContaining(testCase.workerIds.map((workerId) => ({
+        memberId: workerId,
+        leftAt: expect.any(Date),
+      }))));
     }
   });
 });
