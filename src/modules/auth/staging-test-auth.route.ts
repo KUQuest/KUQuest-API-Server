@@ -1,6 +1,7 @@
 import { env } from '@/config/env';
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
+import { ensureWallet } from '@/modules/wallet';
 
 import { Elysia } from 'elysia';
 import { eq } from 'drizzle-orm';
@@ -10,11 +11,24 @@ import { createStudentAuth } from './auth.config';
 
 const stagingTestAuthBasePath = '/api/staging/test-auth';
 const stagingTestAuthSignInPath = `${stagingTestAuthBasePath}/sign-in/email`;
+const stagingTestAuthDefaultSignInPath = `${stagingTestAuthBasePath}/sign-in/default`;
+const stagingTestAuthAccount1SignInPath = `${stagingTestAuthBasePath}/sign-in/account-1`;
+const stagingTestAuthAccount2SignInPath = `${stagingTestAuthBasePath}/sign-in/account-2`;
 const stagingTestAuthPaths = new Set([
   stagingTestAuthSignInPath,
+  stagingTestAuthDefaultSignInPath,
+  stagingTestAuthAccount1SignInPath,
+  stagingTestAuthAccount2SignInPath,
   `${stagingTestAuthBasePath}/get-session`,
   `${stagingTestAuthBasePath}/sign-out`,
 ]);
+
+type StagingTestAuthAccount = {
+  email?: string;
+  password?: string;
+  firstName?: string;
+  lastName?: string;
+};
 
 type StagingTestAuthOptions = {
   enabled?: boolean;
@@ -23,6 +37,7 @@ type StagingTestAuthOptions = {
   password?: string;
   firstName?: string;
   lastName?: string;
+  account2?: StagingTestAuthAccount;
 };
 
 type SignInBody = {
@@ -52,33 +67,69 @@ const readSignInBody = async (request: Request): Promise<SignInBody | null> => {
   }
 };
 
+const defaultSignInRequest = (request: Request, email: string, password: string): Request => {
+  const headers = new Headers(request.headers);
+  headers.set('content-type', 'application/json');
+  headers.delete('content-length');
+
+  return new Request(new URL(stagingTestAuthSignInPath, request.url), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ email, password }),
+  });
+};
+
+const validateTestAuthAccount = (label: string, account: StagingTestAuthAccount): void => {
+  if (
+    !account.email ||
+    !/^[^\s@]+@ku\.th$/.test(account.email) ||
+    !account.password ||
+    !isValidAdminPassword(account.password) ||
+    !account.firstName ||
+    !account.lastName
+  ) {
+    throw new Error(`${label} requires a valid @ku.th email, a compliant password, and a first and last name`);
+  }
+};
+
 export const createStagingTestAuthRoute = (
   options: StagingTestAuthOptions = {},
 ) => {
   const settings = {
     enabled: options.enabled ?? env.stagingTestAuthEnabled,
     deploymentEnv: options.deploymentEnv ?? env.deploymentEnv,
-    email:
-      options.email?.trim().toLowerCase() ?? env.stagingTestAuthEmail?.trim().toLowerCase(),
-    password: options.password ?? env.stagingTestAuthPassword,
-    firstName: options.firstName ?? env.stagingTestAuthFirstName,
-    lastName: options.lastName ?? env.stagingTestAuthLastName,
+    account1: {
+      email:
+        options.email?.trim().toLowerCase() ?? env.stagingTestAuthEmail?.trim().toLowerCase(),
+      password: options.password ?? env.stagingTestAuthPassword,
+      firstName: options.firstName ?? env.stagingTestAuthFirstName,
+      lastName: options.lastName ?? env.stagingTestAuthLastName,
+    },
+    account2: {
+      email:
+        options.account2?.email?.trim().toLowerCase() ?? env.stagingTestAuthAccount2Email?.trim().toLowerCase(),
+      password: options.account2?.password ?? env.stagingTestAuthAccount2Password,
+      firstName: options.account2?.firstName ?? env.stagingTestAuthAccount2FirstName,
+      lastName: options.account2?.lastName ?? env.stagingTestAuthAccount2LastName,
+    },
   };
   const enabled = settings.enabled && settings.deploymentEnv === 'staging';
 
-  if (
-    enabled &&
-    (!settings.email ||
-      !/^[^\s@]+@ku\.th$/.test(settings.email) ||
-      !settings.password ||
-      !isValidAdminPassword(settings.password) ||
-      !settings.firstName ||
-      !settings.lastName)
-  ) {
-    throw new Error(
-      'Staging test auth requires a valid @ku.th email, a compliant password, and a first and last name',
-    );
+  if (enabled) {
+    validateTestAuthAccount('Staging test auth', settings.account1);
+    const account2IsConfigured = Object.values(settings.account2).some(Boolean);
+    if (account2IsConfigured) validateTestAuthAccount('Staging Account 2 auth', settings.account2);
   }
+
+  const accounts = [
+    { key: 'account-1', signInPath: stagingTestAuthAccount1SignInPath, ...settings.account1 },
+    ...(settings.account2.email
+      ? [{ key: 'account-2', signInPath: stagingTestAuthAccount2SignInPath, ...settings.account2 }]
+      : []),
+  ];
+  const account1 = accounts[0];
+  if (!account1) throw new Error('Staging test Account 1 is missing');
+  const accountBySignInPath = new Map(accounts.map((account) => [account.signInPath, account]));
 
   const testAuth = createStudentAuth({
     basePath: stagingTestAuthBasePath,
@@ -87,37 +138,43 @@ export const createStagingTestAuthRoute = (
     autoSignIn: false,
   });
 
-  let ensureTestStudentPromise: Promise<void> | undefined;
+  const ensureTestStudentPromises = new Map<string, Promise<void>>();
 
-  const ensureTestStudent = async (): Promise<void> => {
-    if (ensureTestStudentPromise) return ensureTestStudentPromise;
+  const ensureTestStudent = async (account: (typeof accounts)[number]): Promise<void> => {
+    const existingPromise = ensureTestStudentPromises.get(account.key);
+    if (existingPromise) return existingPromise;
 
-    ensureTestStudentPromise = (async () => {
+    const promise = (async () => {
       const existingStudent = await db
         .select({ id: authUser.id })
         .from(authUser)
-        .where(eq(authUser.email, settings.email!))
+        .where(eq(authUser.email, account.email!))
         .limit(1);
 
-      if (existingStudent.length > 0) return;
+      let studentId = existingStudent[0]?.id;
+      if (!studentId) {
+        const result = await testAuth.api.signUpEmail({
+          body: {
+            email: account.email!,
+            password: account.password!,
+            name: `${account.firstName} ${account.lastName}`,
+            firstName: account.firstName!,
+            lastName: account.lastName!,
+          },
+        });
 
-      const result = await testAuth.api.signUpEmail({
-        body: {
-          email: settings.email!,
-          password: settings.password!,
-          name: `${settings.firstName} ${settings.lastName}`,
-          firstName: settings.firstName!,
-          lastName: settings.lastName!,
-        },
-      });
+        if (!result.user) throw new Error('Staging test Student could not be created');
+        studentId = result.user.id;
+      }
 
-      if (!result.user) throw new Error('Staging test Student could not be created');
+      await ensureWallet(studentId);
     })();
+    ensureTestStudentPromises.set(account.key, promise);
 
     try {
-      await ensureTestStudentPromise;
+      await promise;
     } finally {
-      ensureTestStudentPromise = undefined;
+      ensureTestStudentPromises.delete(account.key);
     }
   };
 
@@ -128,14 +185,29 @@ export const createStagingTestAuthRoute = (
       return new Response(null, { status: 404 });
     }
 
+    if (pathname === stagingTestAuthDefaultSignInPath) {
+      if (request.method !== 'POST') return new Response(null, { status: 404 });
+
+      await ensureTestStudent(account1);
+      return testAuth.handler(defaultSignInRequest(request, account1.email!, account1.password!));
+    }
+
+    const account = accountBySignInPath.get(pathname);
+    if (account) {
+      if (request.method !== 'POST') return new Response(null, { status: 404 });
+
+      await ensureTestStudent(account);
+      return testAuth.handler(defaultSignInRequest(request, account.email!, account.password!));
+    }
+
     if (pathname === stagingTestAuthSignInPath) {
       const body = await readSignInBody(request);
       const matchesConfiguredCredentials =
-        body?.email === settings.email && body?.password === settings.password;
+        body?.email === account1.email && body?.password === account1.password;
 
       if (!matchesConfiguredCredentials) return invalidCredentialsResponse();
 
-      await ensureTestStudent();
+      await ensureTestStudent(account1);
     }
 
     return testAuth.handler(request);

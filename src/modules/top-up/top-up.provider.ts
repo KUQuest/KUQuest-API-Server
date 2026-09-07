@@ -222,7 +222,7 @@ export class XenditPromptPayProvider implements InboundPaymentProvider, InboundP
           currency: 'THB',
           request_amount: toThb(input.paymentTotalSatang),
           capture_method: 'AUTOMATIC',
-          channel_code: 'QRPROMPTPAY',
+          channel_code: 'PROMPTPAY',
           channel_properties: {
             expires_at: input.expiresAt.toISOString(),
             qr_string_type: 'DYNAMIC',
@@ -308,7 +308,11 @@ export class XenditPromptPayProvider implements InboundPaymentProvider, InboundP
         'Xendit returned a different payment currency.',
       );
     }
-    if (payload.channel_code !== undefined && payload.channel_code !== 'QRPROMPTPAY') {
+    if (
+      payload.channel_code !== undefined
+      && payload.channel_code !== 'PROMPTPAY'
+      && payload.channel_code !== 'QRPROMPTPAY'
+    ) {
       throw this.error(
         'PROVIDER_UNCERTAIN',
         'Xendit returned a different payment channel.',
@@ -330,7 +334,7 @@ export class XenditPromptPayProvider implements InboundPaymentProvider, InboundP
       providerStatus,
       providerAmountSatang,
       providerApiVersion: this.apiVersion,
-      providerChannelCode: asText(payload.channel_code) ?? 'QRPROMPTPAY',
+      providerChannelCode: asText(payload.channel_code) ?? 'PROMPTPAY',
       qrPayload,
       qrExpiresAt,
     };

@@ -23,7 +23,7 @@ describe('Xendit PromptPay provider', () => {
           status: 'REQUIRES_ACTION',
           country: 'TH',
           currency: 'THB',
-          channel_code: 'QRPROMPTPAY',
+          channel_code: 'PROMPTPAY',
           channel_properties: { expires_at: '2026-08-26T10:05:00.000Z' },
           actions: [{ descriptor: 'QR_STRING', value: 'promptpay-qr' }],
         }), { status: 201 });
@@ -48,7 +48,7 @@ describe('Xendit PromptPay provider', () => {
       currency: 'THB',
       request_amount: 1.23,
       capture_method: 'AUTOMATIC',
-      channel_code: 'QRPROMPTPAY',
+      channel_code: 'PROMPTPAY',
       channel_properties: {
         expires_at: '2026-08-26T10:05:00.000Z',
         qr_string_type: 'DYNAMIC',
@@ -59,7 +59,7 @@ describe('Xendit PromptPay provider', () => {
       providerStatus: 'REQUIRES_ACTION',
       providerAmountSatang: positiveSatang(123),
       providerApiVersion: '2024-11-11',
-      providerChannelCode: 'QRPROMPTPAY',
+      providerChannelCode: 'PROMPTPAY',
       qrPayload: 'promptpay-qr',
       qrExpiresAt: new Date('2026-08-26T10:05:00.000Z'),
     });
@@ -98,7 +98,7 @@ describe('Xendit PromptPay provider', () => {
           reference_id: 'top-up:test-reference',
           request_amount: 1.23,
           status: 'SUCCEEDED',
-          channel_code: 'QRPROMPTPAY',
+          channel_code: 'PROMPTPAY',
           updated: '2026-08-27T00:00:00.000Z',
         }), { status: 200 });
       },
@@ -119,7 +119,7 @@ describe('Xendit PromptPay provider', () => {
       normalizedStatus: 'PAID',
       providerAmountSatang: positiveSatang(123),
       providerApiVersion: '2024-11-11',
-      providerChannelCode: 'QRPROMPTPAY',
+      providerChannelCode: 'PROMPTPAY',
       occurredAt: new Date('2026-08-27T00:00:00.000Z'),
     });
   });
@@ -137,7 +137,7 @@ describe('Xendit PromptPay provider', () => {
             reference_id: 'top-up:recovered-reference',
             request_amount: 1.23,
             status: 'SUCCEEDED',
-            channel_code: 'QRPROMPTPAY',
+            channel_code: 'PROMPTPAY',
             updated: '2026-08-27T00:00:00.000Z',
           }],
         }), { status: 200 });
@@ -168,7 +168,7 @@ describe('Xendit PromptPay provider', () => {
         status: 'REQUIRES_ACTION',
         country: 'TH',
         currency: 'THB',
-        channel_code: 'QRPROMPTPAY',
+        channel_code: 'PROMPTPAY',
         actions: [{ descriptor: 'QR_STRING', value: 'promptpay-qr' }],
       }), { status: 201 }),
     });
