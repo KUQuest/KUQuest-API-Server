@@ -8,8 +8,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { inArray } from 'drizzle-orm';
 
-const studentA = `test-onboarding-controller-a-${randomUUID()}`;
-const studentB = `test-onboarding-controller-b-${randomUUID()}`;
+const studentA = randomUUID();
+const studentB = randomUUID();
 const takenStudentId = `65${Math.floor(10_000_000 + Math.random() * 89_999_999)}`;
 
 const invokeUpdate = (userId: string, body: Parameters<typeof updateOnboarding>[0]['body']) => {
@@ -65,7 +65,7 @@ describe('updateOnboarding', () => {
   });
 
   it('answers a missing user with 404', async () => {
-    const { result, set } = invokeUpdate(`missing-${randomUUID()}`, { academicYear: 2026 });
+    const { result, set } = invokeUpdate(randomUUID(), { academicYear: 2026 });
 
     expect(await result).toEqual({
       success: false,

@@ -1,5 +1,10 @@
+import { serializeCertificate, listCertificates } from '@/modules/certificate';
 import type { AuthedContext } from '@/modules/auth';
+import { serializePortfolioItem, listPortfolio } from '@/modules/portfolio';
+import { listWorkExperiences, serializeWorkExperience } from '@/modules/work-experience';
 import { apiError, apiSuccess } from '@/shared/api-response';
+import { readResourceVersion } from '@/shared/resource-version';
+import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import type { ApiResponse } from '@/shared/api-response';
 import {
   ImageTooLargeError,
@@ -12,19 +17,28 @@ import type { Static } from 'elysia';
 
 import type {
   avatarUploadSchema,
+  publicProfileParamsSchema,
+  publicProfileResponseSchema,
   profileResponseSchema,
   profileUpdateSchema,
+  reviewsQuerySchema,
+  reviewsResponseSchema,
 } from './profile.schema';
 import {
   getPreviousAvatarFile,
+  getProfileReputation,
+  getProfileReviews,
+  getPublicProfile as getPublicProfileRecord,
   getProfile,
   markAvatarDeleted,
+  removeStudentAvatar,
   replaceStudentAvatar,
   updateProfile,
 } from './profile.service';
 import { avatarStorage } from './profile.storage';
 
 type Profile = Static<typeof profileResponseSchema>['data'];
+type PublicProfile = Static<typeof publicProfileResponseSchema>['data'];
 
 type StoredProfileAvatar = NonNullable<Awaited<ReturnType<typeof getProfile>>>['avatar'];
 
@@ -49,6 +63,12 @@ const userNotFound = (set: AuthedContext['set']) => {
   set.status = 404;
 
   return apiError('USER_NOT_FOUND', 'User not found');
+};
+
+const publicProfileNotFound = (set: AuthedContext['set']) => {
+  set.status = 404;
+
+  return apiError('PROFILE_NOT_FOUND', 'Profile not found');
 };
 
 
@@ -77,12 +97,120 @@ export const getOwnProfile = async ({
   return apiSuccess({ ...rest, avatar: describeAvatar(avatar) });
 };
 
+export const getReputation = async ({
+  session,
+}: AuthedContext): Promise<ApiResponse<Awaited<ReturnType<typeof getProfileReputation>>>> =>
+  apiSuccess(await getProfileReputation(session.user.id));
+
+type Reviews = Static<typeof reviewsResponseSchema>['data'];
+
+type ReviewQuery = Static<typeof reviewsQuerySchema>;
+
+const serializeReviews = (rows: Awaited<ReturnType<typeof getProfileReviews>>['rows']): Reviews['items'] =>
+  rows.map((row) => {
+    let avatar: { url: string } | null = null;
+    if (row.avatarBucket && row.avatarObjectKey) {
+      try {
+        avatar = { url: avatarStorage.linkFor({ bucket: row.avatarBucket, objectKey: row.avatarObjectKey }) };
+      } catch {
+        avatar = null;
+      }
+    }
+    return {
+      id: row.id,
+      reviewer: { displayName: `${row.reviewerFirstName} ${row.reviewerLastName}`.trim(), avatar },
+      rating: row.rating,
+      comment: row.comment,
+      createdAt: row.createdAt.toISOString(),
+      quest: { id: row.questId, title: row.questTitle },
+    };
+  });
+
+export const getReviews = async (context?: AuthedContext & { query: ReviewQuery }): Promise<ApiResponse<Reviews>> => {
+  if (!context) return apiSuccess({ items: [], total: 0, nextCursor: null });
+  const { query, session, set } = context;
+  try {
+    const limit = parsePageLimit(query.limit);
+    const cursor = decodeCursor(query.cursor);
+    const result = await getProfileReviews(session.user.id, { rating: query.rating, limit, cursor });
+    const last = result.rows[result.rows.length - 1];
+    return apiSuccess({
+      items: serializeReviews(result.rows),
+      total: result.total,
+      nextCursor: result.hasNext && last ? encodeCursor({ startTime: last.createdAt.toISOString(), id: last.id }) : null,
+    });
+  } catch (error) {
+    if (!(error instanceof CursorInputError)) throw error;
+    set.status = 400;
+    return apiError(error.code, error.message);
+  }
+};
+
+export const getPublicReviews = async ({
+  params,
+  query,
+  set,
+}: AuthedContext & { params: Static<typeof publicProfileParamsSchema>; query: ReviewQuery }): Promise<ApiResponse<Reviews>> => {
+  try {
+    if (!(await getPublicProfileRecord(params.userId))) {
+      set.status = 404;
+      return apiError('PROFILE_NOT_FOUND', 'Profile not found');
+    }
+    const limit = parsePageLimit(query.limit);
+    const cursor = decodeCursor(query.cursor);
+    const result = await getProfileReviews(params.userId, { rating: query.rating, limit, cursor });
+    const last = result.rows[result.rows.length - 1];
+    return apiSuccess({
+      items: serializeReviews(result.rows),
+      total: result.total,
+      nextCursor: result.hasNext && last ? encodeCursor({ startTime: last.createdAt.toISOString(), id: last.id }) : null,
+    });
+  } catch (error) {
+    if (!(error instanceof CursorInputError)) throw error;
+    set.status = 400;
+    return apiError(error.code, error.message);
+  }
+};
+
+export const getPublicProfile = async ({
+  params,
+  set,
+}: AuthedContext & { params: Static<typeof publicProfileParamsSchema> }): Promise<
+  ApiResponse<PublicProfile>
+> => {
+  const profile = await getPublicProfileRecord(params.userId);
+
+  if (!profile) return publicProfileNotFound(set);
+
+  const [portfolio, certificates, experience] = await Promise.all([
+    listPortfolio(params.userId),
+    listCertificates(params.userId),
+    listWorkExperiences(params.userId),
+  ]);
+
+  return apiSuccess({
+    ...profile,
+    avatar: describeAvatar(profile.avatar),
+    version: profile.version,
+    portfolio: portfolio.map(serializePortfolioItem),
+    certificates: certificates.map(serializeCertificate),
+    experience: experience.map(serializeWorkExperience),
+  });
+};
+
 export const updateOwnProfile = async ({
+  request,
   session,
   body,
   set,
-}: AuthedContext & { body: Static<typeof profileUpdateSchema> }): Promise<ApiResponse> => {
-  const outcome = await updateProfile(session.user.id, body);
+}: AuthedContext & { body: Static<typeof profileUpdateSchema> }): Promise<ApiResponse<Profile>> => {
+  const versionHeader = readResourceVersion(request);
+  if (versionHeader.invalid) {
+    set.status = 400;
+    return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
+  }
+
+  const outcome = await updateProfile(session.user.id, body, versionHeader.value);
 
   if (outcome === 'student-not-found') return userNotFound(set);
 
@@ -91,7 +219,34 @@ export const updateOwnProfile = async ({
     return apiError('DEPARTMENT_NOT_FOUND', 'Department not found');
   }
 
-  return apiSuccess();
+  if (outcome === 'conflict') {
+    set.status = 409;
+    return apiError('CONFLICT', 'Profile was changed by another request');
+  }
+
+  const profile = await getProfile(session.user.id);
+  if (!profile) return userNotFound(set);
+
+  const { avatar, ...rest } = profile;
+  return apiSuccess({ ...rest, avatar: describeAvatar(avatar) });
+};
+
+export const deleteAvatar = async ({
+  session,
+  set,
+}: AuthedContext): Promise<ApiResponse<{ fileId: string | null; version: number; avatar: null }>> => {
+  const result = await removeStudentAvatar(session.user.id);
+  if (!result) return userNotFound(set);
+
+  if (result.bucket && result.objectKey) {
+    try {
+      await avatarStorage.delete(result.bucket, result.objectKey);
+    } catch (error) {
+      console.error('[avatar-delete] Object deletion failed', error);
+    }
+  }
+
+  return apiSuccess({ fileId: null, version: result.version, avatar: null });
 };
 
 export const setAvatar = async ({
@@ -99,7 +254,7 @@ export const setAvatar = async ({
   session,
   set,
 }: AuthedContext & { body: Static<typeof avatarUploadSchema> }): Promise<
-  ApiResponse<{ fileId: string }>
+  ApiResponse<{ fileId: string; version: number; avatar: Profile['avatar'] }>
 > => {
   let storedAvatar;
 
@@ -168,7 +323,12 @@ export const setAvatar = async ({
       }
     }
 
-    return apiSuccess({ fileId: result.fileId });
+    const avatar = describeAvatar({ fileId: result.fileId, ...storedAvatar });
+    return apiSuccess({
+      fileId: result.fileId,
+      version: result.version,
+      avatar,
+    });
   } catch (error) {
     await discardUploadedAvatar(storedAvatar.bucket, storedAvatar.objectKey);
     throw error;

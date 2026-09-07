@@ -1,5 +1,6 @@
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { enabledAdminGuard } from '@/modules/auth/admin-auth.guard';
+import { authGuard } from '@/modules/auth/auth.guard';
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import {
@@ -19,6 +20,9 @@ const adminPassword = 'AdminPass1!';
 const protectedAdminApp = new Elysia({ name: 'admin-auth-test-app' })
   .use(enabledAdminGuard)
   .get('/admin-only', ({ admin }) => ({ email: admin.email }));
+const protectedStudentApp = new Elysia({ name: 'auth-guard-test-app' })
+  .use(authGuard)
+  .get('/student-only', ({ session }) => ({ email: session.user.email }));
 
 let adminId: string;
 
@@ -77,6 +81,18 @@ afterAll(async () => {
 });
 
 describe('Admin authentication with PostgreSQL', () => {
+  it('stores Admin credentials as a Better Auth password hash', async () => {
+    const accounts = await db
+      .select({ providerId: authAccount.providerId, password: authAccount.password })
+      .from(authAccount)
+      .where(eq(authAccount.adminId, adminId));
+
+    expect(accounts).toHaveLength(1);
+    expect(accounts[0].providerId).toBe('credential');
+    expect(accounts[0].password).toBeTruthy();
+    expect(accounts[0].password).not.toBe(adminPassword);
+  });
+
   it('signs in with credentials and creates an admin-owned session', async () => {
     const response = await requestAdminLogin(adminPassword);
     const body = await response.json();
@@ -128,6 +144,23 @@ describe('Admin authentication with PostgreSQL', () => {
     const response = await protectedAdminApp.handle(
       new Request('http://localhost/admin-only', {
         headers: { cookie: '__Secure-better-auth.session_token=student-session' },
+      }),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it('rejects a valid Admin session on a Student-protected route (QA-36)', async () => {
+    const loginResponse = await requestAdminLogin(adminPassword);
+    const cookie = getCookieHeader(loginResponse);
+
+    // The same cookie is proven to open an Admin-protected route above, so a 401
+    // here is the Student guard refusing an Admin, not a missing or invalid session.
+    expect(cookie).toContain('kuquest-admin.session_token=');
+
+    const response = await protectedStudentApp.handle(
+      new Request('http://localhost/student-only', {
+        headers: { cookie },
       }),
     );
 

@@ -18,13 +18,14 @@ export const profileCertificate = pgTable(
   'profile_certificate',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: text('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => authUser.id),
     name: text('name').notNull(),
     issuer: text('issuer').notNull(),
     issuedAt: date('issued_at').notNull(),
-    verifyUrl: text('verify_url'),
+    imageFileId: uuid('image_file_id').references(() => file.id),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -35,11 +36,12 @@ export const profilePortfolioItem = pgTable(
   'profile_portfolio_item',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: text('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => authUser.id),
     title: text('title').notNull(),
     description: text('description'),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -71,7 +73,7 @@ export const profileWorkExperience = pgTable(
   'profile_work_experience',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: text('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => authUser.id),
     title: text('title').notNull(),
@@ -80,6 +82,7 @@ export const profileWorkExperience = pgTable(
     description: text('description'),
     startedAt: date('started_at').notNull(),
     endedAt: date('ended_at'),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -96,6 +99,10 @@ export const profileCertificateRelations = relations(profileCertificate, ({ one 
   user: one(authUser, {
     fields: [profileCertificate.userId],
     references: [authUser.id],
+  }),
+  image: one(file, {
+    fields: [profileCertificate.imageFileId],
+    references: [file.id],
   }),
 }));
 

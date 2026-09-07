@@ -118,6 +118,7 @@ describe('portfolio integration', () => {
             string,
             {
               requestBody?: { content?: Record<string, unknown> };
+              parameters?: Array<Record<string, unknown>>;
               security?: Array<Record<string, unknown>>;
             }
           >
@@ -133,6 +134,10 @@ describe('portfolio integration', () => {
       expect(collectionPath?.post).toBeDefined();
       expect(itemPath?.patch).toBeDefined();
       expect(itemPath?.delete).toBeDefined();
+      expect(document.paths[`${basePath}/{portfolioId}/image`]?.post).toBeDefined();
+      expect(document.paths[`${basePath}/{portfolioId}/image`]?.delete).toBeDefined();
+      expect(document.paths[`${basePath}/{portfolioId}/image/{fileId}`]?.post).toBeDefined();
+      expect(document.paths[`${basePath}/{portfolioId}/image/{fileId}`]?.delete).toBeDefined();
     });
 
     it('marks every portfolio operation as requiring authentication', async () => {
@@ -144,14 +149,36 @@ describe('portfolio integration', () => {
       expect(collectionPath?.post?.security).toEqual([{ betterAuthSession: [] }]);
       expect(itemPath?.patch?.security).toEqual([{ betterAuthSession: [] }]);
       expect(itemPath?.delete?.security).toEqual([{ betterAuthSession: [] }]);
+      expect(document.paths[`${basePath}/{portfolioId}/image`]?.post?.security).toEqual([{ betterAuthSession: [] }]);
+      expect(document.paths[`${basePath}/{portfolioId}/image`]?.delete?.security).toEqual([{ betterAuthSession: [] }]);
+      expect(document.paths[`${basePath}/{portfolioId}/image/{fileId}`]?.post?.security).toEqual([{ betterAuthSession: [] }]);
+      expect(document.paths[`${basePath}/{portfolioId}/image/{fileId}`]?.delete?.security).toEqual([{ betterAuthSession: [] }]);
     });
 
-    it('documents the create endpoint as multipart', async () => {
+    it('documents the create endpoint as multipart with optional images', async () => {
       const document = await openapiDocument();
       const operation = document.paths[basePath]?.post;
+      const multipartSchema = operation?.requestBody?.content?.['multipart/form-data'] as {
+        schema?: { required?: string[]; properties?: Record<string, unknown> };
+      } | undefined;
 
       expect(operation).toBeDefined();
-      expect(operation?.requestBody?.content?.['multipart/form-data']).toBeDefined();
+      expect(multipartSchema).toBeDefined();
+      expect(multipartSchema?.schema?.required).toEqual(['title']);
+      expect(multipartSchema?.schema?.properties).toHaveProperty('images');
+    });
+
+    it('documents fileId as required only for targeted image routes', async () => {
+      const document = await openapiDocument();
+      const collectionParameters = document.paths[`${basePath}/{portfolioId}/image`]?.post?.parameters;
+      const targetedParameters = document.paths[`${basePath}/{portfolioId}/image/{fileId}`]?.post?.parameters;
+
+      expect(collectionParameters).toEqual([
+        expect.objectContaining({ name: 'portfolioId', required: true }),
+      ]);
+      expect(targetedParameters).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'fileId', required: true }),
+      ]));
     });
   });
 });

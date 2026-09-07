@@ -22,23 +22,28 @@ const studentAuthPaths = new Set([
   `${studentAuthBasePath}/sign-out`,
 ]);
 
-const authHandler = (request: Request) => {
-  const pathname = new URL(request.url).pathname;
+const createMountedAuthHandler = (
+  basePath: string,
+  allowedPaths: ReadonlySet<string>,
+  handler: (request: Request) => Response | Promise<Response>,
+) =>
+  (request: Request): Response | Promise<Response> => {
+    const requestUrl = new URL(request.url);
+    const pathname = `${basePath}${requestUrl.pathname}`;
 
-  if (
-    pathname === adminAuthBasePath ||
-    pathname.startsWith(`${adminAuthBasePath}/`)
-  ) {
-    if (!adminAuthPaths.has(pathname)) return new Response(null, { status: 404 });
+    if (!allowedPaths.has(pathname)) return new Response(null, { status: 404 });
 
-    return adminAuth.handler(request);
-  }
-
-  if (!studentAuthPaths.has(pathname)) return new Response(null, { status: 404 });
-
-  return auth.handler(request);
-};
+    return handler(
+      new Request(new URL(`${pathname}${requestUrl.search}`, request.url), request),
+    );
+  };
 
 export const authPlugin = new Elysia({
   name: 'auth-plugin',
-}).mount(authHandler);
+}).mount(
+  `${adminAuthBasePath}/*`,
+  createMountedAuthHandler(adminAuthBasePath, adminAuthPaths, adminAuth.handler),
+).mount(
+  `${studentAuthBasePath}/*`,
+  createMountedAuthHandler(studentAuthBasePath, studentAuthPaths, auth.handler),
+);

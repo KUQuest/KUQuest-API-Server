@@ -62,6 +62,18 @@ describe('certificate integration — authentication', () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual(unauthorized);
   });
+
+  it('rejects an unauthenticated image upload', async () => {
+    const form = new FormData();
+    form.set('image', new File(['not-an-image'], 'image.png', { type: 'image/png' }));
+
+    const response = await app.handle(
+      new Request(`${certificatesUrl}/${certificateId}/image`, { method: 'POST', body: form }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual(unauthorized);
+  });
 });
 
 describe('certificate integration — validation', () => {
@@ -91,18 +103,6 @@ describe('certificate integration — validation', () => {
   it('rejects a malformed issuedAt', async () => {
     await expectValidationError(
       json('POST', certificatesUrl, { ...validBody, issuedAt: 'last tuesday' }),
-    );
-  });
-
-  it('rejects a malformed verifyUrl', async () => {
-    await expectValidationError(
-      json('POST', certificatesUrl, { ...validBody, verifyUrl: 'not a url' }),
-    );
-  });
-
-  it('rejects a malformed verifyUrl on update', async () => {
-    await expectValidationError(
-      json('PATCH', `${certificatesUrl}/${certificateId}`, { verifyUrl: 'not a url' }),
     );
   });
 
@@ -156,5 +156,19 @@ describe('certificate integration — published documentation', () => {
     expect(recordPath?.get?.security).toEqual([{ betterAuthSession: [] }]);
     expect(recordPath?.patch?.security).toEqual([{ betterAuthSession: [] }]);
     expect(recordPath?.delete?.security).toEqual([{ betterAuthSession: [] }]);
+  });
+
+  it('documents the certificate image endpoint as multipart, without verifyUrl anywhere', async () => {
+    const document = await openapiDocument();
+    const imagePath =
+      document.paths['/api/v1/profile/certificates/:certificateId/image'] ??
+      document.paths['/api/v1/profile/certificates/{certificateId}/image'];
+
+    expect(imagePath?.post?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(
+      (imagePath?.post as { requestBody?: { content?: Record<string, unknown> } })?.requestBody
+        ?.content?.['multipart/form-data'],
+    ).toBeDefined();
+    expect(JSON.stringify(document)).not.toContain('verifyUrl');
   });
 });

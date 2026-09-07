@@ -24,15 +24,6 @@ export const certificateCreateSchema = t.Object(
       example: '2024-05-01',
       error: 'Issue date must be a calendar date in YYYY-MM-DD format',
     }),
-    verifyUrl: t.Optional(
-      t.Nullable(
-        t.String({
-          format: 'uri',
-          example: 'https://verify.example.com/abc123',
-          error: 'Verification link must be a valid URL',
-        }),
-      ),
-    ),
   },
   { additionalProperties: false },
 );
@@ -41,12 +32,18 @@ export const certificateCreateSchema = t.Object(
 // still validated by the create schema's rules.
 export const certificateUpdateSchema = t.Partial(certificateCreateSchema);
 
-const certificateSchema = t.Object({
+export const certificateImageSchema = t.Object({
+  fileId: t.String({ format: 'uuid' }),
+  url: t.String({ format: 'uri' }),
+});
+
+export const certificateSchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  version: t.Integer({ minimum: 1 }),
   name: t.String(),
   issuer: t.String(),
   issuedAt: t.String({ format: 'date' }),
-  verifyUrl: t.Nullable(t.String()),
+  image: t.Nullable(certificateImageSchema),
   createdAt: t.String({ format: 'date-time' }),
   updatedAt: t.String({ format: 'date-time' }),
 });
@@ -59,4 +56,19 @@ export const certificateResponseSchema = t.Object({
 export const certificateListResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({ certificates: t.Array(certificateSchema) }),
+});
+
+export const certificateImageUploadSchema = t.Object(
+  { image: t.File() },
+  { additionalProperties: false },
+);
+
+export const certificateMutationResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({ version: t.Integer({ minimum: 1 }) }),
+});
+
+export const certificateImageUploadResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({ image: certificateImageSchema, version: t.Integer({ minimum: 1 }) }),
 });

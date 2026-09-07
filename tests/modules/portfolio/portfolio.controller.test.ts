@@ -28,6 +28,7 @@ describe('listOwnPortfolio', () => {
     spyOn(portfolioService, 'listPortfolio').mockResolvedValue([
       {
         id: portfolioId,
+        version: 1,
         title: 'Capstone',
         description: 'A short description',
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -43,6 +44,7 @@ describe('listOwnPortfolio', () => {
       data: [
         {
           id: portfolioId,
+          version: 1,
           title: 'Capstone',
           description: 'A short description',
           createdAt: '2026-01-01T00:00:00.000Z',
@@ -56,6 +58,7 @@ describe('listOwnPortfolio', () => {
     spyOn(portfolioService, 'listPortfolio').mockResolvedValue([
       {
         id: portfolioId,
+        version: 1,
         title: 'Capstone',
         description: null,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -210,7 +213,7 @@ describe('updateOwnPortfolio', () => {
     expect(set.status).toBeUndefined();
     expect(portfolioService.updatePortfolio).toHaveBeenCalledWith(studentAuthId, portfolioId, {
       title: 'Updated',
-    });
+    }, undefined);
   });
 
   it('reports a missing or unowned entry as not found', async () => {
@@ -244,13 +247,14 @@ describe('deleteOwnPortfolio', () => {
     spyOn(portfolioService, 'deletePortfolio').mockResolvedValue({
       outcome: 'deleted',
       images: [{ fileId: fileIdOne, bucket: 'kuquest', objectKey: 'portfolio/a.png' }],
+      version: 2,
     });
     const deleteObject = spyOn(portfolioStorage, 'delete').mockResolvedValue();
     const markDeleted = spyOn(portfolioService, 'markPortfolioImageDeleted').mockResolvedValue();
 
     const { result, set } = invokeDelete();
 
-    expect(await result).toEqual({ success: true });
+    expect(await result).toEqual({ success: true, data: { version: 2 } });
     expect(set.status).toBeUndefined();
     expect(deleteObject).toHaveBeenCalledWith('kuquest', 'portfolio/a.png');
     expect(markDeleted).toHaveBeenCalledWith(studentAuthId, fileIdOne);
@@ -260,12 +264,13 @@ describe('deleteOwnPortfolio', () => {
     spyOn(portfolioService, 'deletePortfolio').mockResolvedValue({
       outcome: 'deleted',
       images: [{ fileId: fileIdOne, bucket: 'kuquest', objectKey: 'portfolio/a.png' }],
+      version: 2,
     });
     spyOn(portfolioStorage, 'delete').mockRejectedValue(new Error('object storage down'));
 
     const { result, set } = invokeDelete();
 
-    expect(await result).toEqual({ success: true });
+    expect(await result).toEqual({ success: true, data: { version: 2 } });
     expect(set.status).toBeUndefined();
   });
 
