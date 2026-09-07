@@ -7,6 +7,7 @@ import type { Static } from 'elysia';
 import { WorkChatTransitionError } from './quest-assignment.service';
 import {
   cancelQuest,
+  cancelQuestV2,
   resolveQuestDispute,
 } from './quest-settlement.service';
 import type {
@@ -56,11 +57,30 @@ const moneyError = (set: AuthedContext['set'] | AdminContext['set'], error: unkn
   return apiError(error.code, error.message);
 };
 
+const v2CancellationErrorResponse = (set: AuthedContext['set'], outcome: string) => {
+  if (outcome === 'invalid-idempotency-key') {
+    set.status = 400;
+    return apiError('INVALID_IDEMPOTENCY_KEY', 'The Idempotency-Key must be at most 200 characters');
+  }
+  return errorResponse(set, outcome);
+};
+
 export const cancelQuestController = async ({ params, request, session, set }: AuthedContext & { params: Params }): Promise<ApiResponse> => {
   const commandId = request?.headers.get('idempotency-key') ?? '';
   try {
     const result = await cancelQuest(session.user.id, params.questId, commandId);
     if (!('questStatus' in result)) return errorResponse(set, result.outcome);
+    return apiSuccess(result);
+  } catch (error) {
+    return moneyError(set, error);
+  }
+};
+
+export const cancelQuestV2Controller = async ({ params, request, session, set }: AuthedContext & { params: Params }): Promise<ApiResponse> => {
+  const commandId = request?.headers.get('idempotency-key') ?? '';
+  try {
+    const result = await cancelQuestV2(session.user.id, params.questId, commandId);
+    if (!('questStatus' in result)) return v2CancellationErrorResponse(set, result.outcome);
     return apiSuccess(result);
   } catch (error) {
     return moneyError(set, error);

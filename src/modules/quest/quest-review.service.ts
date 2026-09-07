@@ -3,9 +3,9 @@ import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment, review } from '@/database/schema/quest.schema';
 
-import { and, count, desc, eq, exists, lt, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, exists, inArray, lt, or, sql } from 'drizzle-orm';
 
-import { assignmentStatus, questStatus } from './quest.contract';
+import { assignmentStatus, questStatus, terminalQuestStatuses } from './quest.contract';
 import type { QuestTransaction } from './quest-assignment.service';
 
 type ReviewInput = { revieweeId?: string; rating: number; comment?: string };
@@ -203,7 +203,6 @@ const validReviewPredicate = (memberId: string) =>
             and(
               eq(questAssignment.questId, review.questId),
               eq(questAssignment.workerId, review.revieweeId),
-              eq(questAssignment.assignmentStatus, assignmentStatus.completed),
             ),
           ),
       ),
@@ -219,19 +218,18 @@ const validReviewPredicate = (memberId: string) =>
             and(
               eq(questAssignment.questId, review.questId),
               eq(questAssignment.workerId, review.reviewerId),
-              eq(questAssignment.assignmentStatus, assignmentStatus.completed),
             ),
           ),
       ),
     ),
   );
 
-/** Return only Reviews backed by a completed Quest Assignment relationship. */
+/** Return only Reviews backed by a terminal Quest and Assignment relationship. */
 export const listReviews = async (
   memberId: string,
   options: { rating?: number; limit?: number; cursor?: { startTime: string; id: string } } = {},
 ) => {
-  const conditions = [eq(quest.questStatus, questStatus.completed), validReviewPredicate(memberId)];
+  const conditions = [inArray(quest.questStatus, terminalQuestStatuses), validReviewPredicate(memberId)];
   if (options.rating !== undefined) conditions.push(eq(review.rating, options.rating));
   if (options.cursor) {
     conditions.push(
@@ -268,7 +266,7 @@ export const listReviews = async (
 };
 
 export const countReviews = async (memberId: string, rating?: number) => {
-  const conditions = [eq(quest.questStatus, questStatus.completed), validReviewPredicate(memberId)];
+  const conditions = [inArray(quest.questStatus, terminalQuestStatuses), validReviewPredicate(memberId)];
   if (rating !== undefined) conditions.push(eq(review.rating, rating));
   const [row] = await db
     .select({ total: count(review.id) })
@@ -283,7 +281,7 @@ export const getReceivedRatings = async (memberId: string): Promise<number[]> =>
     .select({ rating: review.rating })
     .from(review)
     .innerJoin(quest, eq(review.questId, quest.id))
-    .where(and(eq(quest.questStatus, questStatus.completed), validReviewPredicate(memberId)));
+    .where(and(inArray(quest.questStatus, terminalQuestStatuses), validReviewPredicate(memberId)));
   return rows.map(({ rating }) => rating);
 };
 

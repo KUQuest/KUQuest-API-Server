@@ -131,10 +131,11 @@ describe('Quest Image persistence', () => {
     ]);
 
     const [deletedFile] = await db
-      .select({ deletedAt: file.deletedAt })
+      .select({ deletedAt: file.deletedAt, objectDeletedAt: file.objectDeletedAt })
       .from(file)
       .where(eq(file.id, target.fileId));
     expect(deletedFile?.deletedAt).not.toBeNull();
+    expect(deletedFile?.objectDeletedAt).toBeNull();
   });
 
   it('rejects an upload that would exceed the three-image cap without storing it', async () => {

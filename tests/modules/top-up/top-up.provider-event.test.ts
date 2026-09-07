@@ -29,7 +29,7 @@ describe('Top-up Provider event parsing', () => {
         reference_id: 'top-up:top-up-1',
         status: 'SUCCEEDED',
         request_amount: 123.45,
-        channel_code: 'QRPROMPTPAY',
+        channel_code: 'PROMPTPAY',
         updated: '2026-08-27T00:01:00.000Z',
       },
     }), receivedAt);
@@ -42,7 +42,7 @@ describe('Top-up Provider event parsing', () => {
       providerAmountSatang: 12_345,
       providerStatus: 'SUCCEEDED',
       normalizedStatus: 'PAID',
-      providerChannelCode: 'QRPROMPTPAY',
+      providerChannelCode: 'PROMPTPAY',
     });
     expect(event.providerOccurredAt).toEqual(new Date('2026-08-27T00:01:00.000Z'));
   });

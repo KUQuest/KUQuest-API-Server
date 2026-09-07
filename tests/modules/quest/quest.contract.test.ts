@@ -69,7 +69,7 @@ describe('Quest domain contract', () => {
       'QUEST_COMPLETED',
       'QUEST_CANCELLED',
       'QUEST_DISPUTED',
-      'QUEST_HIDDEN',
+      'QUEST_FAILED',
     ]);
   });
 

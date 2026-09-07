@@ -42,7 +42,7 @@ export const questStatus = {
   completed: 'QUEST_COMPLETED',
   cancelled: 'QUEST_CANCELLED',
   disputed: 'QUEST_DISPUTED',
-  hidden: 'QUEST_HIDDEN',
+  failed: 'QUEST_FAILED',
 } as const;
 export const questStatuses = [
   questStatus.draft,
@@ -56,7 +56,7 @@ export const questStatuses = [
   questStatus.completed,
   questStatus.cancelled,
   questStatus.disputed,
-  questStatus.hidden,
+  questStatus.failed,
 ] as const;
 export type QuestStatus = (typeof questStatuses)[number];
 
@@ -137,11 +137,18 @@ export type InvitationStatus = (typeof invitationStatuses)[number];
 /** A Quest status from which the Work Conversation is read-only. */
 export type TerminalQuestStatus = Extract<
   QuestStatus,
-  (typeof questStatus)['completed' | 'cancelled']
+  (typeof questStatus)['completed' | 'cancelled' | 'failed']
 >;
+export const terminalQuestStatuses = [
+  questStatus.completed,
+  questStatus.cancelled,
+  questStatus.failed,
+] as const satisfies readonly TerminalQuestStatus[];
+export const isTerminalQuestStatus = (status: QuestStatus): status is TerminalQuestStatus =>
+  terminalQuestStatuses.includes(status as TerminalQuestStatus);
 
-/** An Assignment status of a departed Worker — no current Work Conversation membership. */
+/** An Assignment status of a Worker who has no current Work Conversation membership. */
 export type InactiveAssignmentStatus = Extract<
   AssignmentStatus,
-  (typeof assignmentStatus)['incomplete' | 'cancelled']
+  (typeof assignmentStatus)['completed' | 'incomplete' | 'cancelled']
 >;

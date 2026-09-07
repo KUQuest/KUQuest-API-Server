@@ -1,0 +1,1 @@
+ALTER TABLE "quest_candidate_team_v2" ALTER COLUMN "name" DROP DEFAULT;

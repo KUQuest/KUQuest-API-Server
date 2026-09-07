@@ -1,4 +1,5 @@
 import { questRoute } from '@/modules/quest/quest.route';
+import { adminQuestRoute } from '@/modules/quest/quest-admin.route';
 import { tagRoute } from '@/modules/tag';
 import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
 import { topUpWebhookRoute } from '@/modules/top-up';
@@ -7,8 +8,16 @@ import { questCandidateRoute } from '@/modules/quest/quest-candidate.route';
 import { questProofRoute } from '@/modules/quest/quest-proof.route';
 import { questReviewRoute } from '@/modules/quest/quest-review.route';
 import { questDisputeRoute, questSettlementRoute } from '@/modules/quest/quest-settlement.route';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest';
-import { workChatMembershipWriter } from '@/modules/work-chat';
+import {
+  configureQuestWorkChatMembershipWriter,
+  questAssignmentV2Route,
+  questCandidateV2Route,
+  questCandidateTeamV2Route,
+  questProofV2Route,
+  questReviewV2Route,
+  questV2Route,
+} from '@/modules/quest';
+import { candidateInquiryRoute, workChatMembershipWriter, workChatRoute } from '@/modules/work-chat';
 
 import { Elysia } from 'elysia';
 
@@ -20,6 +29,8 @@ import { onboardingRoute } from './modules/onboarding';
 import { portfolioRoute } from './modules/portfolio';
 import { profileRoute } from './modules/profile';
 import { workExperienceRoute } from './modules/work-experience';
+import { localFinanceTestRoute } from './modules/local-finance-test';
+import { walletRoute } from './modules/wallet';
 import { corsPlugin } from './plugins/cors';
 import { errorHandlerPlugin } from './plugins/error-handler';
 import { openapiPlugin } from './plugins/openapi';
@@ -34,6 +45,8 @@ export const createApp = () => {
     .use(corsPlugin)
     .use(authPlugin)
     .use(stagingTestAuthRoute)
+    .use(localFinanceTestRoute)
+    .use(walletRoute)
     .use(openapiPlugin)
     .get('/', () => 'Hello Elysia', {
       detail: {
@@ -54,11 +67,20 @@ export const createApp = () => {
     .use(questReviewRoute)
     .use(questSettlementRoute)
     .use(questDisputeRoute)
+    .use(questAssignmentV2Route)
+    .use(questCandidateV2Route)
+    .use(questCandidateTeamV2Route)
+    .use(questProofV2Route)
+    .use(questReviewV2Route)
+    .use(questV2Route)
     .use(questRoute)
+    .use(adminQuestRoute)
     .use(certificateRoute)
     .use(portfolioRoute)
     .use(workExperienceRoute)
     .use(tagRoute)
+    .use(candidateInquiryRoute)
+    .use(workChatRoute)
     .use(payoutRoute)
     .use(adminPayoutRoute)
     .use(payoutWebhookRoute)
