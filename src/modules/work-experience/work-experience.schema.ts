@@ -14,7 +14,7 @@ export const workExperienceCreateSchema = t.Object(
   {
     title: t.String({ minLength: 1, maxLength: 120, pattern: '\\S' }),
     employmentType: t.String({ minLength: 1, maxLength: 50, pattern: '\\S' }),
-    organization: t.Optional(t.Nullable(t.String({ maxLength: 120, pattern: '\\S' }))),
+    organization: t.Optional(t.Nullable(t.String({ maxLength: 200, pattern: '\\S' }))),
     description: t.Optional(t.Nullable(t.String({ maxLength: 1000, pattern: '\\S' }))),
     startedAt: dateSchema,
     endedAt: t.Optional(t.Nullable(dateSchema)),
