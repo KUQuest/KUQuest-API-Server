@@ -19,7 +19,7 @@ import { file } from './file.schema';
 export const authUser = pgTable(
   'auth_user',
   {
-    id: text('id').primaryKey(),
+    id: uuid('id').defaultRandom().primaryKey(),
     email: text('email').notNull(),
     emailVerified: boolean('email_verified').default(false).notNull(),
     // better-auth's core `image` field has no equivalent in the design's auth_user;
@@ -36,6 +36,7 @@ export const authUser = pgTable(
     occupationId: uuid('occupation_id').references(() => occupation.id),
     termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
     termsVersion: text('terms_version'),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
@@ -58,7 +59,7 @@ export const authUser = pgTable(
 export const authAdmin = pgTable(
   'auth_admin',
   {
-    id: text('id').primaryKey(),
+    id: uuid('id').defaultRandom().primaryKey(),
     username: text('username'),
     email: text('email').notNull(),
     emailVerified: boolean('email_verified').default(false).notNull(),
@@ -84,9 +85,11 @@ export const authAdmin = pgTable(
 export const authSession = pgTable(
   'auth_session',
   {
-    id: text('id').primaryKey(),
-    userId: text('user_id').references(() => authUser.id, { onDelete: 'cascade' }),
-    adminId: text('admin_id').references(() => authAdmin.id, { onDelete: 'cascade' }),
+    id: text('id')
+      .default(sql`gen_random_uuid()::text`)
+      .primaryKey(),
+    userId: uuid('user_id').references(() => authUser.id, { onDelete: 'cascade' }),
+    adminId: uuid('admin_id').references(() => authAdmin.id, { onDelete: 'cascade' }),
     token: text('token').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     ipAddress: text('ip_address'),
@@ -108,9 +111,11 @@ export const authSession = pgTable(
 export const authAccount = pgTable(
   'auth_account',
   {
-    id: text('id').primaryKey(),
-    userId: text('user_id').references(() => authUser.id, { onDelete: 'cascade' }),
-    adminId: text('admin_id').references(() => authAdmin.id, { onDelete: 'cascade' }),
+    id: text('id')
+      .default(sql`gen_random_uuid()::text`)
+      .primaryKey(),
+    userId: uuid('user_id').references(() => authUser.id, { onDelete: 'cascade' }),
+    adminId: uuid('admin_id').references(() => authAdmin.id, { onDelete: 'cascade' }),
     accountId: text('account_id').notNull(),
     providerId: text('provider_id').notNull(),
     accessToken: text('access_token'),
@@ -141,7 +146,9 @@ export const authAccount = pgTable(
 export const authVerification = pgTable(
   'auth_verification',
   {
-    id: text('id').primaryKey(),
+    id: text('id')
+      .default(sql`gen_random_uuid()::text`)
+      .primaryKey(),
     identifier: text('identifier').notNull(),
     value: text('value').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),

@@ -71,6 +71,384 @@
       "when": 1786257361502,
       "tag": "0009_last_ulik",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786257361503,
+      "tag": "0010_migrate_teacher_to_lecturer",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786518034625,
+      "tag": "0011_harsh_rick_jones",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786610304591,
+      "tag": "0012_new_masque",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786610519662,
+      "tag": "0013_moaning_blazing_skull",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786636182159,
+      "tag": "0014_rapid_skreet",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1787578088667,
+      "tag": "0015_bright_red_skull",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1787684975600,
+      "tag": "0016_short_mephistopheles",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787689799335,
+      "tag": "0017_fixed_gunslinger",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787750017825,
+      "tag": "0018_stiff_ikaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787751093080,
+      "tag": "0019_wallet_status_history_immutable",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787754297594,
+      "tag": "0020_right_synch",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787755950131,
+      "tag": "0021_retain_top_up_quotes",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1787759160522,
+      "tag": "0022_misty_gateway",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1787810513956,
+      "tag": "0023_smooth_wendell_rand",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1787812521479,
+      "tag": "0024_aromatic_risque",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1787837285671,
+      "tag": "0025_parched_thunderbolt_ross",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787854030379,
+      "tag": "0026_tearful_squadron_sinister",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1787854090379,
+      "tag": "0032_migrate_auth_ids_to_uuid",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1787854150379,
+      "tag": "0033_migrate_quest_schema_to_revised_edr",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1787854210379,
+      "tag": "0034_quest_edit_consent",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1787854270379,
+      "tag": "0035_quest_completion_confirmation",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1787854330379,
+      "tag": "0036_direct_join_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787854390379,
+      "tag": "0037_direct_join_result",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787854450379,
+      "tag": "0038_candidate_selection_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787854510379,
+      "tag": "0039_quest_settlement_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1787854570379,
+      "tag": "0040_review_comment_nullable",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787854630379,
+      "tag": "0041_team_disbanded_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787983770706,
+      "tag": "0042_quest_finance_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787983947834,
+      "tag": "0043_quest_auto_cancel_command",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1787986834534,
+      "tag": "0044_payout_admin_approval",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1787989635030,
+      "tag": "0045_payout_admin_approval_mask_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1787992224114,
+      "tag": "0046_work_chat_persistence",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1788075923125,
+      "tag": "0047_allow_cancelled_drafts_without_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1788078789647,
+      "tag": "0048_work_chat_attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788085170121,
+      "tag": "20260830101930_work_chat_pr_337_fixes",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1788088489339,
+      "tag": "20260830111449_absent_vertigo",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1788184724626,
+      "tag": "20260831135844_colorful_caretaker",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1788185369427,
+      "tag": "20260831140929_omniscient_doomsday",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1788260296166,
+      "tag": "20260901105816_tricky_luckman",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1788267491476,
+      "tag": "20260901125811_redundant_morg",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1788292959962,
+      "tag": "20260901200239_faulty_carmella_unuscione",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1788338161517,
+      "tag": "20260902083601_amazing_ezekiel",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1788364210285,
+      "tag": "20260902155010_abnormal_warstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1788371571318,
+      "tag": "20260902175251_bumpy_arachne",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1788398703155,
+      "tag": "20260903012503_conscious_argent",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1788421336943,
+      "tag": "20260903074216_chemical_moondragon",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1788424433123,
+      "tag": "20260903083353_first_patriot",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1788439086038,
+      "tag": "20260903123806_robust_kronos",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1788439631543,
+      "tag": "20260903124711_polite_slayback",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1788441658430,
+      "tag": "20260903132058_light_secret_warriors",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1788443864366,
+      "tag": "20260903135744_sturdy_mach_iv",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1788455909276,
+      "tag": "20260903171829_opposite_raider",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1788462232993,
+      "tag": "20260903190352_messy_secret_warriors",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1788465659464,
+      "tag": "20260903200059_unusual_the_watchers",
+      "breakpoints": true
     }
   ]
 }

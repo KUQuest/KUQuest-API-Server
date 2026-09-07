@@ -1,11 +1,20 @@
 import { authGuard } from '@/modules/auth';
-import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
 import { Elysia } from 'elysia';
 
-import { getOwnProfile, getPublicProfile, setAvatar, updateOwnProfile } from './profile.controller';
+import {
+  deleteAvatar,
+  getOwnProfile,
+  getPublicProfile,
+  getPublicReviews,
+  getReputation,
+  getReviews,
+  setAvatar,
+  updateOwnProfile,
+} from './profile.controller';
 import {
   avatarUploadResponseSchema,
   avatarUploadSchema,
@@ -13,6 +22,9 @@ import {
   publicProfileResponseSchema,
   profileResponseSchema,
   profileUpdateSchema,
+  reputationResponseSchema,
+  reviewsQuerySchema,
+  reviewsResponseSchema,
 } from './profile.schema';
 
 export const profileRoute = new Elysia({
@@ -31,6 +43,37 @@ export const profileRoute = new Elysia({
       security: betterAuthSecurity,
     },
   })
+  .get('/reputation', getReputation, {
+    response: responses(reputationResponseSchema, 401),
+    detail: {
+      tags: ['Profile'],
+      summary: 'Get own Profile Rating and completed Quest count',
+      operationId: 'getProfileReputation',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/reviews', getReviews, {
+    query: reviewsQuerySchema,
+    response: responses(reviewsResponseSchema, 400, 401),
+    detail: {
+      tags: ['Profile'],
+      summary: 'List own Profile Reviews',
+      operationId: 'listProfileReviews',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:userId/reviews', getPublicReviews, {
+    params: publicProfileParamsSchema,
+    query: reviewsQuerySchema,
+    response: responses(reviewsResponseSchema, 400, 401, 404),
+    detail: {
+      tags: ['Profile', 'Reviews'],
+      summary: 'List another Member’s Reviews',
+      description: 'Returns immediately visible Reviews received by the selected Member, with bounded stable pagination.',
+      operationId: 'listPublicProfileReviews',
+      security: betterAuthSecurity,
+    },
+  })
   .get('/:userId', getPublicProfile, {
     params: publicProfileParamsSchema,
     response: responses(publicProfileResponseSchema, 400, 401, 404),
@@ -46,13 +89,23 @@ export const profileRoute = new Elysia({
   .patch('', updateOwnProfile, {
     body: profileUpdateSchema,
     transform: rejectUnknownFields(profileUpdateSchema),
-    response: responses(apiSuccessSchema, 400, 401, 404),
+    response: responses(profileResponseSchema, 400, 401, 404, 409),
     detail: {
       tags: ['Profile'],
       summary: 'Update own profile',
       description:
         'Updates the profile of the authenticated student. Fields left out keep their current value; values cannot be cleared.',
       operationId: 'updateOwnProfile',
+      security: betterAuthSecurity,
+    },
+  })
+  .delete('/avatar', deleteAvatar, {
+    response: responses(avatarUploadResponseSchema, 401, 404),
+    detail: {
+      tags: ['Profile'],
+      summary: 'Delete the current Student avatar',
+      description: 'Removes the current avatar and tombstones its file metadata.',
+      operationId: 'deleteProfileAvatar',
       security: betterAuthSecurity,
     },
   })

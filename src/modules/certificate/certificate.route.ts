@@ -1,11 +1,12 @@
 import { authGuard } from '@/modules/auth';
-import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
 import { Elysia } from 'elysia';
 
 import {
+  deleteCertificateImageController,
   getCertificate,
   getCertificates,
   patchCertificate,
@@ -17,6 +18,7 @@ import {
   certificateCreateSchema,
   certificateImageUploadResponseSchema,
   certificateImageUploadSchema,
+  certificateMutationResponseSchema,
   certificateListResponseSchema,
   certificateParamsSchema,
   certificateResponseSchema,
@@ -65,7 +67,7 @@ export const certificateRoute = new Elysia({
     params: certificateParamsSchema,
     body: certificateUpdateSchema,
     transform: rejectUnknownFields(certificateUpdateSchema),
-    response: responses(certificateResponseSchema, 400, 401, 404),
+    response: responses(certificateResponseSchema, 400, 401, 404, 409),
     detail: {
       tags: ['Certificates'],
       summary: 'Update a certificate',
@@ -76,7 +78,7 @@ export const certificateRoute = new Elysia({
   })
   .delete('/:certificateId', removeCertificate, {
     params: certificateParamsSchema,
-    response: responses(apiSuccessSchema, 400, 401, 404),
+    response: responses(certificateMutationResponseSchema, 400, 401, 404, 409),
     detail: {
       tags: ['Certificates'],
       summary: 'Delete a certificate',
@@ -89,13 +91,23 @@ export const certificateRoute = new Elysia({
     params: certificateParamsSchema,
     body: certificateImageUploadSchema,
     type: 'multipart/form-data',
-    response: responses(certificateImageUploadResponseSchema, 400, 401, 404, 413, 415, 502),
+    response: responses(certificateImageUploadResponseSchema, 400, 401, 404, 409, 413, 415, 502),
     detail: {
       tags: ['Certificates'],
       summary: 'Set a certificate image',
       description:
         'Uploads a valid JPEG, PNG, or WebP image up to 5 MB and attaches it to a certificate owned by the current user. After replacement commits, the previous object is deleted and its file metadata is retained as a tombstone.',
       operationId: 'setCertificateImage',
+      security: betterAuthSecurity,
+    },
+  })
+  .delete('/:certificateId/image', deleteCertificateImageController, {
+    params: certificateParamsSchema,
+    response: responses(certificateMutationResponseSchema, 400, 401, 404, 409),
+    detail: {
+      tags: ['Certificates'],
+      summary: 'Delete a certificate image',
+      operationId: 'deleteCertificateImage',
       security: betterAuthSecurity,
     },
   });
