@@ -1,0 +1,38 @@
+meta {
+  name: Admin Sign In
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/admin/auth/sign-in/email
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Origin: http://localhost:3000
+}
+
+body:json {
+  {
+    "email": "{{adminEmail}}",
+    "password": "{{adminPassword}}",
+    "rememberMe": true
+  }
+}
+
+script:post-response {
+  const setCookie = res.getHeader("set-cookie");
+  const raw = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+  const match = raw && raw.match(/kuquest-admin\.session_token=[^;]+/);
+  if (match) bru.setEnvVar("adminSessionCookie", match[0]);
+}
+
+docs {
+  Seed the admin locally first: bun run db:seed-admin (reads ADMIN_EMAIL /
+  ADMIN_PASSWORD / ADMIN_FIRST_NAME / ADMIN_LAST_NAME / ADMIN_BETTER_AUTH_SECRET
+  from .env). On success this captures the session cookie into
+  adminSessionCookie automatically.
+}

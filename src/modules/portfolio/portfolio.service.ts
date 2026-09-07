@@ -5,7 +5,7 @@ import {
   profilePortfolioItemImage,
 } from '@/database/schema/profile.schema';
 
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 
 import type { StoredPortfolioImage } from './portfolio.storage';
 
@@ -18,6 +18,7 @@ export type PortfolioImage = {
 
 export type PortfolioItem = {
   id: string;
+  version: number;
   title: string;
   description: string | null;
   createdAt: Date;
@@ -31,6 +32,7 @@ export const listPortfolio = async (userId: string): Promise<PortfolioItem[]> =>
   const rows = await db
     .select({
       id: profilePortfolioItem.id,
+      version: profilePortfolioItem.version,
       title: profilePortfolioItem.title,
       description: profilePortfolioItem.description,
       createdAt: profilePortfolioItem.createdAt,
@@ -55,6 +57,7 @@ export const listPortfolio = async (userId: string): Promise<PortfolioItem[]> =>
     if (!item) {
       item = {
         id: row.id,
+        version: row.version,
         title: row.title,
         description: row.description,
         createdAt: row.createdAt,
@@ -78,7 +81,7 @@ export const listPortfolio = async (userId: string): Promise<PortfolioItem[]> =>
 
 export const createPortfolio = async (
   userId: string,
-  data: { title: string; description?: string; images: StoredPortfolioImage[] },
+  data: { title: string; description?: string; images?: StoredPortfolioImage[] },
 ): Promise<{ id: string }> =>
   db.transaction(async (transaction) => {
     const [item] = await transaction
@@ -87,7 +90,7 @@ export const createPortfolio = async (
       .returning({ id: profilePortfolioItem.id });
 
     await Promise.all(
-      data.images.map(async (image, position) => {
+      (data.images ?? []).map(async (image, position) => {
         const [createdFile] = await transaction
           .insert(file)
           .values({ ...image, uploadedByUserId: userId })
@@ -104,41 +107,60 @@ export const createPortfolio = async (
     return { id: item.id };
   });
 
-export type PortfolioUpdateOutcome = 'updated' | 'not-found';
+export type PortfolioUpdateOutcome = 'updated' | 'not-found' | 'conflict';
 
 export const updatePortfolio = async (
   userId: string,
   portfolioId: string,
   data: { title?: string; description?: string },
+  expectedVersion?: number,
 ): Promise<PortfolioUpdateOutcome> => {
-  if (Object.keys(data).length === 0) {
-    const [row] = await db
-      .select({ id: profilePortfolioItem.id })
-      .from(profilePortfolioItem)
-      .where(ownedBy(userId, portfolioId))
-      .limit(1);
+  const current = await db
+    .select({ version: profilePortfolioItem.version })
+    .from(profilePortfolioItem)
+    .where(ownedBy(userId, portfolioId))
+    .limit(1);
 
-    return row ? 'updated' : 'not-found';
-  }
+  if (current.length === 0) return 'not-found';
+  if (expectedVersion !== undefined && current[0]!.version !== expectedVersion) return 'conflict';
+  if (Object.keys(data).length === 0) return 'updated';
 
   const updated = await db
     .update(profilePortfolioItem)
-    .set({ ...data, updatedAt: new Date() })
-    .where(ownedBy(userId, portfolioId))
+    .set({ ...data, updatedAt: new Date(), version: sql`${profilePortfolioItem.version} + 1` })
+    .where(
+      expectedVersion === undefined
+        ? ownedBy(userId, portfolioId)
+        : and(ownedBy(userId, portfolioId), eq(profilePortfolioItem.version, expectedVersion)),
+    )
     .returning({ id: profilePortfolioItem.id });
 
-  return updated.length > 0 ? 'updated' : 'not-found';
+  return updated.length > 0 ? 'updated' : 'conflict';
 };
 
 export type PortfolioDeleteOutcome =
-  | { outcome: 'deleted'; images: Array<{ fileId: string; bucket: string; objectKey: string }> }
-  | { outcome: 'not-found' };
+  | { outcome: 'deleted'; images: Array<{ fileId: string; bucket: string; objectKey: string }>; version: number }
+  | { outcome: 'not-found' }
+  | { outcome: 'conflict' };
 
 export const deletePortfolio = async (
   userId: string,
   portfolioId: string,
+  expectedVersion?: number,
 ): Promise<PortfolioDeleteOutcome> =>
   db.transaction(async (transaction) => {
+    const [current] = await transaction
+      .select({ version: profilePortfolioItem.version })
+      .from(profilePortfolioItem)
+      .where(ownedBy(userId, portfolioId))
+      .limit(1)
+      .for('update');
+
+    if (!current) return { outcome: 'not-found' };
+    if (expectedVersion !== undefined && current.version !== expectedVersion) {
+      return { outcome: 'conflict' };
+    }
+
     const images = await transaction
       .select({ fileId: file.id, bucket: file.bucket, objectKey: file.objectKey })
       .from(profilePortfolioItem)
@@ -155,9 +177,150 @@ export const deletePortfolio = async (
       .where(ownedBy(userId, portfolioId))
       .returning({ id: profilePortfolioItem.id });
 
-    if (deleted.length === 0) return { outcome: 'not-found' };
+    if (deleted.length === 0) return { outcome: 'conflict' };
 
-    return { outcome: 'deleted', images };
+    return { outcome: 'deleted', images, version: current.version + 1 };
+  });
+
+export const replacePortfolioImage = async (
+  userId: string,
+  portfolioId: string,
+  fileData: StoredPortfolioImage,
+  targetFileId: string | undefined,
+  expectedVersion?: number,
+): Promise<
+  | {
+      fileId: string;
+      previousFileId: string | null;
+      previousBucket: string | null;
+      previousObjectKey: string | null;
+      version: number;
+    }
+  | { outcome: 'not-found' }
+  | { outcome: 'conflict' }
+> =>
+  db.transaction(async (transaction) => {
+    const [item] = await transaction
+      .select({ version: profilePortfolioItem.version })
+      .from(profilePortfolioItem)
+      .where(ownedBy(userId, portfolioId))
+      .limit(1)
+      .for('update');
+
+    if (!item) return { outcome: 'not-found' };
+    if (expectedVersion !== undefined && item.version !== expectedVersion) {
+      return { outcome: 'conflict' };
+    }
+
+    const [oldImage] = await transaction
+      .select({
+        fileId: file.id,
+        bucket: file.bucket,
+        objectKey: file.objectKey,
+        position: profilePortfolioItemImage.position,
+      })
+      .from(profilePortfolioItemImage)
+      .innerJoin(file, eq(profilePortfolioItemImage.fileId, file.id))
+      .where(
+        targetFileId
+          ? and(
+              eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
+              eq(profilePortfolioItemImage.fileId, targetFileId),
+            )
+          : eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
+      )
+      .orderBy(asc(profilePortfolioItemImage.position))
+      .limit(1);
+
+    if (targetFileId && !oldImage) return { outcome: 'not-found' };
+
+    const [createdFile] = await transaction
+      .insert(file)
+      .values({ ...fileData, uploadedByUserId: userId })
+      .returning({ fileId: file.id });
+
+    if (oldImage) {
+      await transaction
+        .update(profilePortfolioItemImage)
+        .set({ fileId: createdFile.fileId })
+        .where(
+          and(
+            eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
+            eq(profilePortfolioItemImage.fileId, oldImage.fileId),
+          ),
+        );
+    } else {
+      await transaction.insert(profilePortfolioItemImage).values({
+        portfolioItemId: portfolioId,
+        fileId: createdFile.fileId,
+        position: 0,
+      });
+    }
+
+    await transaction
+      .update(profilePortfolioItem)
+      .set({ version: sql`${profilePortfolioItem.version} + 1`, updatedAt: new Date() })
+      .where(eq(profilePortfolioItem.id, portfolioId));
+
+    return {
+      fileId: createdFile.fileId,
+      previousFileId: oldImage?.fileId ?? null,
+      previousBucket: oldImage?.bucket ?? null,
+      previousObjectKey: oldImage?.objectKey ?? null,
+      version: item.version + 1,
+    };
+  });
+
+export const deletePortfolioImage = async (
+  userId: string,
+  portfolioId: string,
+  fileId: string | undefined,
+  expectedVersion?: number,
+): Promise<{ outcome: 'deleted'; bucket: string; objectKey: string; version: number } | { outcome: 'not-found' } | { outcome: 'conflict' }> =>
+  db.transaction(async (transaction) => {
+    const [item] = await transaction
+      .select({ version: profilePortfolioItem.version })
+      .from(profilePortfolioItem)
+      .where(ownedBy(userId, portfolioId))
+      .limit(1)
+      .for('update');
+    if (!item) return { outcome: 'not-found' };
+    if (expectedVersion !== undefined && item.version !== expectedVersion) return { outcome: 'conflict' };
+
+    const [image] = await transaction
+      .select({ fileId: file.id, bucket: file.bucket, objectKey: file.objectKey })
+      .from(profilePortfolioItemImage)
+      .innerJoin(file, eq(profilePortfolioItemImage.fileId, file.id))
+      .where(
+        fileId
+          ? and(
+              eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
+              eq(profilePortfolioItemImage.fileId, fileId),
+            )
+          : eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
+      )
+      .orderBy(asc(profilePortfolioItemImage.position))
+      .limit(1);
+    if (!image) return { outcome: 'not-found' };
+
+    await transaction
+      .delete(profilePortfolioItemImage)
+      .where(
+        and(
+          eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
+          eq(profilePortfolioItemImage.fileId, image.fileId),
+        ),
+      );
+    await transaction
+      .update(file)
+      .set({ deletedAt: new Date() })
+      .where(eq(file.id, image.fileId));
+    await transaction
+      .update(profilePortfolioItem)
+      .set({ version: sql`${profilePortfolioItem.version} + 1`, updatedAt: new Date() })
+      .where(eq(profilePortfolioItem.id, portfolioId));
+
+    return { outcome: 'deleted', ...image, version: item.version + 1 };
   });
 
 export const markPortfolioImageDeleted = async (

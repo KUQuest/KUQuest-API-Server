@@ -1,0 +1,4 @@
+ALTER TABLE "quest_settlement_commands" DROP CONSTRAINT "quest_settlement_commands_actor_check";--> statement-breakpoint
+ALTER TABLE "quest_settlement_commands" DROP CONSTRAINT "quest_settlement_commands_type_check";--> statement-breakpoint
+ALTER TABLE "quest_settlement_commands" ADD CONSTRAINT "quest_settlement_commands_actor_check" CHECK (("quest_settlement_commands"."command_type" = 'AUTO_CANCEL' AND num_nonnulls("quest_settlement_commands"."actor_user_id", "quest_settlement_commands"."actor_admin_id") = 0) OR ("quest_settlement_commands"."command_type" <> 'AUTO_CANCEL' AND num_nonnulls("quest_settlement_commands"."actor_user_id", "quest_settlement_commands"."actor_admin_id") = 1));--> statement-breakpoint
+ALTER TABLE "quest_settlement_commands" ADD CONSTRAINT "quest_settlement_commands_type_check" CHECK ("quest_settlement_commands"."command_type" IN ('COMPLETE', 'CANCEL', 'DISPUTE_REFUND', 'DISPUTE_RELEASE', 'AUTO_CANCEL'));

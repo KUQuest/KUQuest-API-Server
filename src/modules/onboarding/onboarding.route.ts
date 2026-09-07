@@ -27,8 +27,8 @@ export const onboardingRoute = new Elysia({
         response: responses(academicOptionsResponseSchema, 401),
         detail: {
             tags: ['Onboarding'],
-            summary: 'List faculty and major options',
-            description: 'Lists the seeded faculties and their majors for the onboarding form',
+            summary: 'List faculty and department options',
+            description: 'Lists the seeded faculties and their departments for the onboarding form',
             operationId: 'getOnboardingAcademicOptions',
             security: betterAuthSecurity,
         },

@@ -1,0 +1,1 @@
+ALTER TABLE "quest_candidate_team_v2" ADD COLUMN "name" varchar(100) DEFAULT 'Candidate Team' NOT NULL;

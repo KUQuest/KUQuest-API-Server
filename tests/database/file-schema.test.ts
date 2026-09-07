@@ -17,6 +17,7 @@ describe('file reference database schema', () => {
     expect(fileColumns.sizeBytes.name).toBe('size_bytes');
     expect(fileColumns.uploadedByUserId.name).toBe('uploaded_by_user_id');
     expect(fileColumns.deletedAt.name).toBe('deleted_at');
+    expect(fileColumns.objectDeletedAt.name).toBe('object_deleted_at');
     expect(fileColumns).not.toHaveProperty('url');
   });
 });

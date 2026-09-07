@@ -81,6 +81,9 @@ export const createAdminAuth = ({
       modelName: 'authVerification',
     },
     advanced: {
+      database: {
+        generateId: 'uuid',
+      },
       cookiePrefix: 'kuquest-admin',
       defaultCookieAttributes,
     },

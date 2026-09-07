@@ -1,0 +1,33 @@
+meta {
+  name: Create Portfolio Entry
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v1/profile/portfolio
+  body: multipartForm
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+body:multipart-form {
+  title: My Portfolio Entry
+  description: Testing the portfolio create endpoint.
+  images: @file(/absolute/path/to/image1.jpg)
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.data && data.data.id) {
+    bru.setEnvVar("portfolioId", data.data.id);
+  }
+}
+
+docs {
+  Replace the @file(...) path with a real image. Up to 10 "images" fields may
+  be repeated for multiple files.
+}

@@ -13,13 +13,13 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
-import { major } from './academic.schema';
+import { department, occupation } from './academic.schema';
 import { file } from './file.schema';
 
 export const authUser = pgTable(
   'auth_user',
   {
-    id: text('id').primaryKey(),
+    id: uuid('id').defaultRandom().primaryKey(),
     email: text('email').notNull(),
     emailVerified: boolean('email_verified').default(false).notNull(),
     // better-auth's core `image` field has no equivalent in the design's auth_user;
@@ -31,8 +31,12 @@ export const authUser = pgTable(
     bio: text('bio'),
     studentId: text('student_id'),
     telephone: text('telephone'),
-    majorId: uuid('major_id').references(() => major.id),
+    departmentId: uuid('department_id').references(() => department.id),
     academicYear: integer('academic_year'),
+    occupationId: uuid('occupation_id').references(() => occupation.id),
+    termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
+    termsVersion: text('terms_version'),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
@@ -45,7 +49,7 @@ export const authUser = pgTable(
       'auth_user_academic_year_check',
       sql`${table.academicYear} IS NULL OR (${table.academicYear} >= 1000 AND ${table.academicYear} <= 9999)`,
     ),
-    index('auth_user_major_id_idx').on(table.majorId),
+    index('auth_user_department_id_idx').on(table.departmentId),
     uniqueIndex('auth_user_student_id_uidx')
       .on(table.studentId)
       .where(sql`${table.studentId} IS NOT NULL`),
@@ -55,7 +59,7 @@ export const authUser = pgTable(
 export const authAdmin = pgTable(
   'auth_admin',
   {
-    id: text('id').primaryKey(),
+    id: uuid('id').defaultRandom().primaryKey(),
     username: text('username'),
     email: text('email').notNull(),
     emailVerified: boolean('email_verified').default(false).notNull(),
@@ -81,9 +85,11 @@ export const authAdmin = pgTable(
 export const authSession = pgTable(
   'auth_session',
   {
-    id: text('id').primaryKey(),
-    userId: text('user_id').references(() => authUser.id, { onDelete: 'cascade' }),
-    adminId: text('admin_id').references(() => authAdmin.id, { onDelete: 'cascade' }),
+    id: text('id')
+      .default(sql`gen_random_uuid()::text`)
+      .primaryKey(),
+    userId: uuid('user_id').references(() => authUser.id, { onDelete: 'cascade' }),
+    adminId: uuid('admin_id').references(() => authAdmin.id, { onDelete: 'cascade' }),
     token: text('token').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     ipAddress: text('ip_address'),
@@ -105,9 +111,11 @@ export const authSession = pgTable(
 export const authAccount = pgTable(
   'auth_account',
   {
-    id: text('id').primaryKey(),
-    userId: text('user_id').references(() => authUser.id, { onDelete: 'cascade' }),
-    adminId: text('admin_id').references(() => authAdmin.id, { onDelete: 'cascade' }),
+    id: text('id')
+      .default(sql`gen_random_uuid()::text`)
+      .primaryKey(),
+    userId: uuid('user_id').references(() => authUser.id, { onDelete: 'cascade' }),
+    adminId: uuid('admin_id').references(() => authAdmin.id, { onDelete: 'cascade' }),
     accountId: text('account_id').notNull(),
     providerId: text('provider_id').notNull(),
     accessToken: text('access_token'),
@@ -138,7 +146,9 @@ export const authAccount = pgTable(
 export const authVerification = pgTable(
   'auth_verification',
   {
-    id: text('id').primaryKey(),
+    id: text('id')
+      .default(sql`gen_random_uuid()::text`)
+      .primaryKey(),
     identifier: text('identifier').notNull(),
     value: text('value').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -151,9 +161,13 @@ export const authVerification = pgTable(
 export const authUserRelations = relations(authUser, ({ many, one }) => ({
   sessions: many(authSession),
   accounts: many(authAccount),
-  major: one(major, {
-    fields: [authUser.majorId],
-    references: [major.id],
+  department: one(department, {
+    fields: [authUser.departmentId],
+    references: [department.id],
+  }),
+  occupation: one(occupation, {
+    fields: [authUser.occupationId],
+    references: [occupation.id],
   }),
   image: one(file, {
     fields: [authUser.imageFileId],

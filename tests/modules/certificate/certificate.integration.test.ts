@@ -62,6 +62,18 @@ describe('certificate integration — authentication', () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual(unauthorized);
   });
+
+  it('rejects an unauthenticated image upload', async () => {
+    const form = new FormData();
+    form.set('image', new File(['not-an-image'], 'image.png', { type: 'image/png' }));
+
+    const response = await app.handle(
+      new Request(`${certificatesUrl}/${certificateId}/image`, { method: 'POST', body: form }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual(unauthorized);
+  });
 });
 
 describe('certificate integration — validation', () => {
@@ -94,18 +106,6 @@ describe('certificate integration — validation', () => {
     );
   });
 
-  it('rejects a malformed verifyUrl', async () => {
-    await expectValidationError(
-      json('POST', certificatesUrl, { ...validBody, verifyUrl: 'not a url' }),
-    );
-  });
-
-  it('rejects a malformed verifyUrl on update', async () => {
-    await expectValidationError(
-      json('PATCH', `${certificatesUrl}/${certificateId}`, { verifyUrl: 'not a url' }),
-    );
-  });
-
   it('rejects a non-uuid certificate id on read', async () => {
     await expectValidationError(new Request(`${certificatesUrl}/not-a-uuid`));
   });
@@ -118,5 +118,57 @@ describe('certificate integration — validation', () => {
     await expectValidationError(
       new Request(`${certificatesUrl}/not-a-uuid`, { method: 'DELETE' }),
     );
+  });
+
+  it('rejects an unknown field on create', async () => {
+    await expectValidationError(json('POST', certificatesUrl, { ...validBody, bogus: 'x' }));
+  });
+
+  it('rejects an unknown field on update', async () => {
+    await expectValidationError(
+      json('PATCH', `${certificatesUrl}/${certificateId}`, { name: 'Renamed', bogus: 'x' }),
+    );
+  });
+});
+
+describe('certificate integration — published documentation', () => {
+  const openapiDocument = async () =>
+    (await (await app.handle(new Request('http://localhost/openapi/json'))).json()) as {
+      paths: Record<string, Record<string, { security?: Array<Record<string, unknown>> }>>;
+    };
+
+  it('publishes the collection operations without a trailing slash', async () => {
+    const document = await openapiDocument();
+
+    expect(Object.keys(document.paths)).toContain('/api/v1/profile/certificates');
+    expect(Object.keys(document.paths)).not.toContain('/api/v1/profile/certificates/');
+  });
+
+  it('marks every certificate operation as requiring authentication', async () => {
+    const document = await openapiDocument();
+    const collectionPath = document.paths['/api/v1/profile/certificates'];
+    const recordPath =
+      document.paths['/api/v1/profile/certificates/:certificateId'] ??
+      document.paths['/api/v1/profile/certificates/{certificateId}'];
+
+    expect(collectionPath?.get?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(collectionPath?.post?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(recordPath?.get?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(recordPath?.patch?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(recordPath?.delete?.security).toEqual([{ betterAuthSession: [] }]);
+  });
+
+  it('documents the certificate image endpoint as multipart, without verifyUrl anywhere', async () => {
+    const document = await openapiDocument();
+    const imagePath =
+      document.paths['/api/v1/profile/certificates/:certificateId/image'] ??
+      document.paths['/api/v1/profile/certificates/{certificateId}/image'];
+
+    expect(imagePath?.post?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(
+      (imagePath?.post as { requestBody?: { content?: Record<string, unknown> } })?.requestBody
+        ?.content?.['multipart/form-data'],
+    ).toBeDefined();
+    expect(JSON.stringify(document)).not.toContain('verifyUrl');
   });
 });

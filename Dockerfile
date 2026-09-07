@@ -48,10 +48,13 @@ COPY --from=production-dependencies \
   /app/node_modules \
   ./node_modules
 
+COPY --from=builder --chown=bun:bun /app/src ./src
 COPY --chown=bun:bun package.json ./
 COPY --chown=bun:bun drizzle.config.ts ./
+COPY --chown=bun:bun tsconfig.json ./
 COPY --chown=bun:bun drizzle ./drizzle
-COPY --chown=bun:bun src/database/schema ./src/database/schema
+COPY --chown=bun:bun scripts ./scripts
+COPY --chown=bun:bun public ./public
 
 USER bun
 

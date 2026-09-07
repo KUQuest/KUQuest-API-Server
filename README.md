@@ -1,284 +1,107 @@
 # KUQuest API Server
 
-Backend API for KUQuest Mobile and CMS, built with Elysia and Bun.
+Welcome to the **KUQuest API Server** — the core backend API for the student mutual-aid and task marketplace platform at Kasetsart University (supporting both the KUQuest Mobile App and KUQuest Admin Web App). Built with **Elysia**, **Bun**, **PostgreSQL**, and **RustFS**.
 
-## Requirements
+- 🚀 **Setup & Local Execution Guide:** See [SETUP.md](SETUP.md) for step-by-step instructions.
+- 📜 **Business Rules & Specifications:** See [Domain Rulebooks & Architecture](#-domain-rulebooks--specifications).
+- 🎮 **Interactive Simulation Suite (120 Scenarios):** Explore [human-read/quest-scenarios.html](human-read/quest-scenarios.html).
 
-- Bun: see `.bun-version`
-- Docker with Docker Compose
+---
 
-## Local setup
+## 📚 Domain Rulebooks & Specifications
 
-```bash
-cp .env.example .env
-bun install --frozen-lockfile
-docker compose up -d postgres
-bun run db:migrate
-bun run dev
-```
-
-Open `http://localhost:5000` in a browser to use the built-in Google login,
-session inspection, and sign-out test page.
-
-Do not open `public/index.html` directly with a `file://` URL. OAuth state and
-session cookies require the page to be served by the API origin.
-
-Generate a secure Better Auth secret and put the result in
-`BETTER_AUTH_SECRET`:
-
-```bash
-openssl rand -base64 32
-```
-
-Generate a separate secret for Admin authentication and put it in
-`ADMIN_BETTER_AUTH_SECRET` as well. Both secrets must be at least 32 characters
-long.
-
-Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to credentials from a Google
-Cloud OAuth 2.0 Web application. Add this authorized redirect URI in Google
-Cloud for local development:
+The business logic and system constraints of KUQuest are formally defined in authoritative **Domain Rulebooks** and **Architectural Decision Records (ADRs)**:
 
 ```text
-http://localhost:5000/api/auth/callback/google
+docs/
+├── rulebook/                  # 🌟 Authoritative Target Policy Rulebooks
+│   ├── quest/                 # Quest lifecycle, Work Chat, Proof submissions, and Cancellations
+│   ├── admin/                 # Moderation, Dispute resolution, Payout approvals, and Penalty ladders
+│   └── finance/               # Double-Entry Ledger, Wallet compartments, and Integer Satang math
+├── adr/                       # Architectural Decision Records
+├── quest/                     # Quest implementation & reconciliation guide
+├── admin/                     # Admin operations reconciliation guide
+└── human-read/                # Interactive behavioral simulation suite (HTML)
 ```
 
-The OAuth client must use the **Web application** type. If the CMS runs locally,
-add `http://localhost:3000` as an authorized JavaScript origin as well.
+### 1. 📘 Quest & Work Chat Rulebook
+- **Primary Source:** [`docs/rulebook/quest/quest-work-chat-rulebook.md`](docs/rulebook/quest/quest-work-chat-rulebook.md)
+- **Scope & Highlights:**
+  - Complete Quest Lifecycle across all 4 Quadrants (`SINGLE`/`GROUP` × `FIRST_COME_FIRST_SERVED`/`CANDIDATE`).
+  - Strict separation of Work Chat and Candidate Inquiry Conversation ([ADR 0019](docs/adr/0019-separate-candidate-inquiry-conversation.md)).
+  - Non-approval of proof immediately transitions Quest to failure with zero rework ([ADR 0016](docs/adr/0016-not-approved-proof-fails-quest.md)).
+  - Three-Tier Cancellation Matrix (Pre-start: 100% refund, Assigned: 20% worker compensation, In-progress: 100% full payout).
+  - 10-Minute Quest Edit Window in `QUEST_ASSIGNED` requiring unanimous worker consent.
 
-`CMS_ORIGIN` must match the frontend origin that sends cookie-based auth
-requests. The local default is `http://localhost:3000`.
+### 2. 🛡️ Admin Operations Rulebook
+- **Primary Source:** [`docs/rulebook/admin/admin-rulebook.md`](docs/rulebook/admin/admin-rulebook.md)
+- **Scope & Highlights:**
+  - Manual Admin verification and approval for Payouts ([ADR 0022](docs/adr/0022-manual-admin-approval-for-payouts.md)).
+  - Dispute resolution and 7-day money hold for failed quests ([ADR 0024](docs/adr/0024-hold-quest-failure-settlement-for-dispute-window.md)).
+  - Moderation Hide: quests are hidden from discovery while escrow and in-progress work remain intact ([ADR 0021](docs/adr/0021-keep-escrow-during-moderation-hide.md)).
+  - Wallet Freeze & Suspend mechanics with in-progress commitment protection.
+  - Member Penalty Ladders (Misconduct Ladder, Low-Average-Review Ladder, Red Flag, Auto-Freeze).
 
-## Authentication API
+### 3. 💰 Finance & Wallets Rulebook
+- **Primary Source:** [`docs/rulebook/finance/finance-rulebook.md`](docs/rulebook/finance/finance-rulebook.md)
+- **Scope & Highlights:**
+  - Strict Double-Entry General Ledger with integer Satang accounting ([ADR 0005](docs/adr/0005-integer-satang-for-money.md)).
+  - Wallet Compartments (`SPENDING`, `EARNINGS`, `Quest Escrow`, `Funding Reservation`).
+  - Immutable financial records and reversing ledger transaction correction pattern ([ADR 0010](docs/adr/0010-retain-and-correct-financial-records.md)).
+  - AES-256-GCM encryption for bank account and payout destination secrets ([ADR 0008](docs/adr/0008-encrypt-payout-destination-secrets.md)).
 
-Better Auth is mounted at `/api/auth`. The main endpoints are:
+### 4. 📖 Ubiquitous Language & Domain Model
+- **Primary Source:** [`CONTEXT.md`](CONTEXT.md)
+- Standardized terminology across actors (`Hirer`, `Worker`, `Candidate`), states (`QUEST_OPEN`, `QUEST_ASSIGNED`, `ASSIGNMENT_ACTIVE`, `PROOF_SUBMITTED`), and financial constructs (`Quest Escrow`, `Double-Entry Ledger`, `Remainder Satang`).
 
-- `POST /api/auth/sign-in/social` with `{ "provider": "google" }`
-- `GET /api/auth/get-session`
-- `POST /api/auth/sign-out`
+---
 
-Admin Better Auth is mounted separately at `/api/admin/auth` and supports login
-only. Public Admin signup is disabled. Create the first Admin from an
-operations environment with a local, ignored environment file:
+## 🎮 Interactive Simulation Suite (Human-Readable)
 
-```env
-DATABASE_URL=postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest
-ADMIN_BETTER_AUTH_SECRET=replace-with-a-32-character-secret
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=replace-with-a-compliant-password
-ADMIN_FIRST_NAME=System
-ADMIN_LAST_NAME=Administrator
-```
+For visualizing end-to-end user journeys, system state machines, double-entry ledger postings, and edge cases:
 
-Run the seed once with:
+* **Document File:** [`human-read/quest-scenarios.html`](human-read/quest-scenarios.html) *(or `docs/human-read/quest-scenarios.html`)*
+* **Key Features:**
+  * 🎯 **120 Comprehensive Scenarios:** Real-world campus stories covering standard workflows, disputes, cancellations, penalties, and concurrent race conditions.
+  * 💬 **Interactive Tooltips & Tracing:** Hover over any underlined system code (`QUEST_IN_PROGRESS`, `CONDUCT_OUT_OF_SCOPE`, `PC-11`, `Red Flag`) to view its definition, runtime consequences, and rulebook reference.
+  * 📊 **Sequence Diagrams (Mermaid.js):** Step-by-step visual message sequences, API triggers, and double-entry ledger postings.
+  * 🎛️ **Multi-Facet Filter Hub:** Filter instantly by Quadrant, Nature, Actors, or Outcome.
 
+Open in your browser:
 ```bash
-bun --env-file=.env.admin run db:seed-admin
+xdg-open human-read/quest-scenarios.html
 ```
 
-The password must be 8–25 characters and include uppercase, lowercase, a
-number, and an ASCII special character without whitespace. The seed lowercases
-the email, refuses to modify an existing Admin, and never prints or stores the
-plaintext password. Do not commit `.env.admin` or any real credentials.
+---
 
-The Admin endpoints are:
-
-- `POST /api/admin/auth/sign-in/email`
-- `GET /api/admin/auth/get-session`
-- `POST /api/admin/auth/sign-out`
-
-Interactive OpenAPI documentation, including request examples, session cookie
-security, response schemas, and OAuth errors, is available at
-`http://localhost:5000/openapi`. The raw specification is available at
-`http://localhost:5000/openapi/json`.
-
-Google is the only enabled sign-in provider, and the Google account must have an
-email address ending exactly in `@ku.th`. Email/password authentication is
-disabled. On first sign-in, Google profile data is saved in the `user` table as
-`user_id` (primary key), `first_name`, and `last_name`, along with Better Auth's
-required email and profile fields.
-
-## Database commands
-
-```bash
-bun run db:generate  # generate a SQL migration after schema changes
-bun run db:check     # verify schema sync and inherited migration history
-bun run db:migrate   # apply pending migrations
-bun run db:studio    # open Drizzle Studio
-```
-
-PostgreSQL data is persisted in the `postgres_data` Docker volume.
-
-### Database-change workflow
-
-Use this sequence for every Drizzle schema change:
-
-1. Edit the schema under `src/database/schema/`.
-2. Run `bun run db:generate`.
-3. Inspect the generated SQL under `drizzle/` and its metadata under
-   `drizzle/meta/`.
-4. Run `bun run db:check`.
-5. Commit the schema, generated SQL, and Drizzle metadata together.
-
-`db:check` runs the same generation contract used by CI. It fails when
-generation produces tracked or untracked artifacts that were not present
-before the check. In CI it also compares against the pull-request target or
-pre-push revision.
-
-Migration SQL and journal entries already inherited from `develop` are
-immutable: do not edit, rename, reorder, or delete them. Correct an applied or
-merged migration with a new forward migration. Drizzle metadata may advance
-when that new migration is generated.
-
-Database changes must follow expand-and-contract compatibility:
-
-- Expand first with backward-compatible tables, columns, and indexes.
-- Deploy code that works with both the old and expanded schema.
-- Contract obsolete structures in a later migration after no deployed code
-  depends on them.
-
-There are no automatic down migrations. Fix an applied defect with a new
-forward migration and restore from a verified backup only when an operator
-deliberately chooses database recovery.
-
-### CI migration validation
-
-Backend CI:
-
-- runs `db:check` with the correct pull-request or pre-push comparison base;
-- keeps linting, type validation, tests, and the production build required;
-- builds the production image;
-- applies that image's complete committed migration chain to PostgreSQL 17;
-- runs the same image migration command again against the current database;
-- starts the image and checks `/health`.
-
-This proves that committed artifacts are coherent, executable, repeatable, and
-present in the deployed image. It cannot prove that an arbitrary data
-transformation is correct for the business. Data migrations still need
-meaningful fixtures, assertions, and human SQL review.
-
-### Staging migration and recovery
-
-After successful CI on `develop`, staging CD records the running API image,
-pulls the validated image, and then performs:
-
-1. a compressed PostgreSQL 17 logical backup through the protected
-   `DATABASE_URL`;
-2. non-empty-file and `pg_restore --list` validation;
-3. rotation to the two newest valid backups;
-4. `bun run db:migrate` in a removable one-off instance of the Compose `api`
-   service;
-5. API replacement and the existing Compose readiness check.
-
-A pull request targeting `develop` runs CI only. Staging CD starts after that
-pull request is merged and the resulting push to `develop` passes Backend CI.
-
-CD publishes the PostgreSQL 17 client as a commit-tagged image in the same GHCR
-package as the API, so the staging host does not need direct Docker Hub access.
-
-The current API keeps serving during backup and migration. Backup or migration
-failure stops before replacement. If the new API fails readiness, CD restores
-the exact previous image and leaves successfully applied compatible migrations
-in place. An initial deployment with no previous image remains failed if
-readiness fails.
-
-Backups are stored in `/opt/backend/backups` on the staging host with restrictive
-permissions. Credentials stay in `/opt/backend/.env` and are not printed.
-
-### One-time staging bootstrap
-
-The currently empty staging database needs one deliberate bootstrap before
-recurring migration CD is enabled. This command is never called by CI or
-staging CD:
-
-```bash
-APP_IMAGE=ghcr.io/kuquest/kuquest-api-server:<validated-sha> \
-STAGING_DIR=/opt/backend \
-ENV_FILE=/opt/backend/.env \
-BACKUP_DIR=/opt/backend/backups \
-STAGING_NETWORK=kuquest-staging_default \
-bash scripts/staging-operations.sh bootstrap
-```
-
-The operation pulls the migration-capable image and creates and validates a
-final backup before prompting for the exact text:
+## 📂 Repository Structure
 
 ```text
-RESET staging public schema
+.
+├── docs/                      # Specification, rulebooks, and architectural documentation
+│   ├── rulebook/              # Authoritative domain rulebooks (Quest, Admin, Finance)
+│   ├── adr/                   # Architectural Decision Records
+│   ├── human-read/            # Single canonical simulation HTML document
+│   └── db/                    # Database and EDR SQL documentation
+├── human-read -> docs/human-read # Symlink for direct document access
+├── src/
+│   ├── config/                # Typed configuration and environment validation
+│   ├── database/              # Drizzle ORM schema and database client
+│   ├── modules/               # Feature modules (Auth, Quest, Wallet, Admin, Profile, Onboarding)
+│   ├── plugins/               # Cross-cutting Elysia plugins (Error handling, Logging, CORS)
+│   ├── app.ts                 # Application route composition
+│   └── index.ts               # HTTP startup and runtime initialization
+├── scripts/                   # Migration, seeding, background workers, and verification tools
+├── tests/                     # Automated test suites (Unit, Integration, Contract)
+├── drizzle/                   # Versioned SQL migrations and metadata ledger
+├── public/                    # API test bench and static web assets
+├── SETUP.md                   # 🚀 Setup, installation, testing, and operations guide
+└── CONTEXT.md                 # 📖 Canonical domain vocabulary and Ubiquitous Language
 ```
 
-Only the target database's `public` schema is dropped and recreated.
-PostgreSQL roles, the server instance, and unrelated databases are untouched.
-The image then applies the complete committed chain and verifies the
-authentication tables and Drizzle journal. Any post-backup failure prints the
-recovery backup path. This is not a routine deployment or recovery command.
+---
 
-Exercise the complete bootstrap safely against disposable PostgreSQL 17 with:
+## 🤝 Contribution & Pull Request Workflow
 
-```bash
-bash scripts/verify-staging-bootstrap.sh
-```
-
-This opt-in verification builds the production image, uses an isolated Docker
-network and database, runs the real typed-confirmation/reset/migration path,
-and validates the resulting custom-format backup with `pg_restore --list`. It
-is deliberately not part of recurring CI or staging CD.
-
-## Verification
-
-Run every repository check with:
-
-```bash
-bun run check
-```
-
-This runs linting, TypeScript validation, unit/integration tests, and the Bun
-production build, including the local migration-artifact contract.
-
-Some tests read and write real tables, so PostgreSQL must be running and
-migrated before `bun test` or `bun run check`:
-
-```bash
-docker compose up -d postgres
-bun run db:migrate
-```
-
-They connect through `DATABASE_URL`, the same variable the application uses, and
-clean up the rows they create. Point `DATABASE_URL` at a throwaway database to
-keep development data out of their way. CI does exactly that, running the suite
-against a `kuquest_test` database of its own.
-
-Tests are grouped by production boundary under `tests/` so a specific area can
-also be run independently, for example:
-
-```bash
-bun test tests/modules/auth
-bun test tests/database
-```
-
-## Project structure
-
-```text
-src/
-├── config/                    # Typed environment configuration
-├── database/
-│   ├── client.ts              # Shared Drizzle/PostgreSQL client
-│   └── schema/                # Database schemas grouped by concern
-├── modules/
-│   ├── auth/                  # Auth config, policy, routes, and plugin
-│   ├── certificate/           # Student profile certificates
-│   ├── health/                # Health route and response schema
-│   ├── onboarding/            # First sign-in details and academic options
-│   └── profile/               # Student profile fields and avatar
-├── plugins/                   # Cross-cutting Elysia plugins
-├── app.ts                     # Application composition
-└── index.ts                   # Runtime validation and HTTP startup
-public/                        # Browser-based auth test page
-drizzle/                       # Versioned SQL migrations and metadata
-tests/                         # Tests mirroring production boundaries
-```
-
-The service uses a feature-first modular monolith. Business rules such as the
-`@ku.th` email restriction stay inside their feature module, while database and
-cross-cutting HTTP concerns remain reusable infrastructure. This keeps module
-ownership clear without adding controller/repository abstractions before the
-domain needs them.
+- **Application, Test, and Documentation PRs:** Create pull requests targeting the **`develop`** branch.
+- **GitHub Actions Workflows (`.github/workflows/`):** Any workflow changes must be isolated in a separate pull request targeting the **`main`** branch (see [AGENTS.md](AGENTS.md)).

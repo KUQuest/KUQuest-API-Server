@@ -1,18 +1,24 @@
 import { authGuard } from '@/modules/auth';
-import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
+import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
 import { Elysia } from 'elysia';
 
 import {
+  deleteCertificateImageController,
   getCertificate,
   getCertificates,
   patchCertificate,
   postCertificate,
   removeCertificate,
+  setCertificateImage,
 } from './certificate.controller';
 import {
   certificateCreateSchema,
+  certificateImageUploadResponseSchema,
+  certificateImageUploadSchema,
+  certificateMutationResponseSchema,
   certificateListResponseSchema,
   certificateParamsSchema,
   certificateResponseSchema,
@@ -24,7 +30,7 @@ export const certificateRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/profile/certificates`,
 })
   .use(authGuard)
-  .get('/', getCertificates, {
+  .get('', getCertificates, {
     response: responses(certificateListResponseSchema, 401),
     detail: {
       tags: ['Certificates'],
@@ -45,8 +51,9 @@ export const certificateRoute = new Elysia({
       security: betterAuthSecurity,
     },
   })
-  .post('/', postCertificate, {
+  .post('', postCertificate, {
     body: certificateCreateSchema,
+    transform: rejectUnknownFields(certificateCreateSchema),
     response: responses(certificateResponseSchema, 400, 401),
     detail: {
       tags: ['Certificates'],
@@ -59,7 +66,8 @@ export const certificateRoute = new Elysia({
   .patch('/:certificateId', patchCertificate, {
     params: certificateParamsSchema,
     body: certificateUpdateSchema,
-    response: responses(certificateResponseSchema, 400, 401, 404),
+    transform: rejectUnknownFields(certificateUpdateSchema),
+    response: responses(certificateResponseSchema, 400, 401, 404, 409),
     detail: {
       tags: ['Certificates'],
       summary: 'Update a certificate',
@@ -70,12 +78,36 @@ export const certificateRoute = new Elysia({
   })
   .delete('/:certificateId', removeCertificate, {
     params: certificateParamsSchema,
-    response: responses(apiSuccessSchema, 400, 401, 404),
+    response: responses(certificateMutationResponseSchema, 400, 401, 404, 409),
     detail: {
       tags: ['Certificates'],
       summary: 'Delete a certificate',
       description: 'Delete a certificate owned by the current user.',
       operationId: 'deleteCertificate',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/:certificateId/image', setCertificateImage, {
+    params: certificateParamsSchema,
+    body: certificateImageUploadSchema,
+    type: 'multipart/form-data',
+    response: responses(certificateImageUploadResponseSchema, 400, 401, 404, 409, 413, 415, 502),
+    detail: {
+      tags: ['Certificates'],
+      summary: 'Set a certificate image',
+      description:
+        'Uploads a valid JPEG, PNG, or WebP image up to 5 MB and attaches it to a certificate owned by the current user. After replacement commits, the previous object is deleted and its file metadata is retained as a tombstone.',
+      operationId: 'setCertificateImage',
+      security: betterAuthSecurity,
+    },
+  })
+  .delete('/:certificateId/image', deleteCertificateImageController, {
+    params: certificateParamsSchema,
+    response: responses(certificateMutationResponseSchema, 400, 401, 404, 409),
+    detail: {
+      tags: ['Certificates'],
+      summary: 'Delete a certificate image',
+      operationId: 'deleteCertificateImage',
       security: betterAuthSecurity,
     },
   });

@@ -1,0 +1,15 @@
+meta {
+  name: List Academic Options
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/onboarding/academic-options
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}

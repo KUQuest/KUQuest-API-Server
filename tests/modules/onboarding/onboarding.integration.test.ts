@@ -36,7 +36,7 @@ describe('onboarding integration', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           telephone: '080-000-0000',
-          majorId: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+          departmentId: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
           studentId: '6500000000',
           academicYear: 2026,
         }),
@@ -174,6 +174,22 @@ describe('onboarding integration', () => {
     expect(body).toEqual({
       success: false,
       error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
+    });
+  });
+
+  describe('published documentation', () => {
+    const openapiDocument = async () =>
+      (await (await app.handle(new Request('http://localhost/openapi/json'))).json()) as {
+        paths: Record<string, Record<string, { operationId?: string; security?: Array<Record<string, unknown>> }>>;
+      };
+
+    it('publishes the academic options operation as requiring a Session', async () => {
+      const document = await openapiDocument();
+      const operation = document.paths['/api/v1/onboarding/academic-options']?.get;
+
+      expect(operation).toBeDefined();
+      expect(operation?.operationId).toBe('getOnboardingAcademicOptions');
+      expect(operation?.security).toEqual([{ betterAuthSession: [] }]);
     });
   });
 });

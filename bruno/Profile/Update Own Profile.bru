@@ -1,0 +1,26 @@
+meta {
+  name: Update Own Profile
+  type: http
+  seq: 2
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/profile
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "firstName": "KU",
+    "lastName": "Student",
+    "bio": "Testing the profile update endpoint.",
+    "telephone": "0800000000",
+    "departmentId": "{{departmentId}}"
+  }
+}

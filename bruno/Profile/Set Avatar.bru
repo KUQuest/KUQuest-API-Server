@@ -1,0 +1,24 @@
+meta {
+  name: Set Avatar
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v1/profile/avatar
+  body: multipartForm
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+body:multipart-form {
+  avatar: @file(/absolute/path/to/avatar.jpg)
+}
+
+docs {
+  Replace the @file(...) path with a real JPEG/PNG/WebP under 5 MB before
+  sending.
+}

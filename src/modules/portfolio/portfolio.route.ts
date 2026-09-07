@@ -8,13 +8,19 @@ import { Elysia } from 'elysia';
 import {
   createOwnPortfolio,
   deleteOwnPortfolio,
+  deleteOwnPortfolioImage,
   listOwnPortfolio,
+  replaceOwnPortfolioImage,
   updateOwnPortfolio,
 } from './portfolio.controller';
 import {
   portfolioCreateResponseSchema,
   portfolioCreateSchema,
+  portfolioImageCollectionParamSchema,
+  portfolioImageParamSchema,
+  portfolioImageUploadSchema,
   portfolioListRespondSchema,
+  portfolioMutationResponseSchema,
   portfolioParamSchema,
   portfolioUpdateSchema,
 } from './portfolio.schema';
@@ -42,7 +48,7 @@ export const portfolioRoute = new Elysia({
       tags: ['Portfolio'],
       summary: 'Create a portfolio entry',
       description:
-        'Creates a portfolio entry with up to 10 images and stores their file references.',
+        'Creates a portfolio entry with up to 10 images (each a valid JPEG, PNG, or WebP file up to 5 MB) and stores their file references.',
       operationId: 'createOwnPortfolio',
       security: betterAuthSecurity,
     },
@@ -51,7 +57,7 @@ export const portfolioRoute = new Elysia({
     params: portfolioParamSchema,
     body: portfolioUpdateSchema,
     transform: rejectUnknownFields(portfolioUpdateSchema),
-    response: responses(apiSuccessSchema, 400, 401, 404),
+    response: responses(apiSuccessSchema, 400, 401, 404, 409),
     detail: {
       tags: ['Portfolio'],
       summary: 'Update a portfolio entry',
@@ -63,13 +69,57 @@ export const portfolioRoute = new Elysia({
   })
   .delete('/:portfolioId', deleteOwnPortfolio, {
     params: portfolioParamSchema,
-    response: responses(apiSuccessSchema, 401, 404),
+    response: responses(portfolioMutationResponseSchema, 400, 401, 404, 409),
     detail: {
       tags: ['Portfolio'],
       summary: 'Delete a portfolio entry',
       description:
         'Deletes a portfolio entry owned by the authenticated student and removes its stored images.',
       operationId: 'deleteOwnPortfolio',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/:portfolioId/image', replaceOwnPortfolioImage, {
+    params: portfolioImageCollectionParamSchema,
+    body: portfolioImageUploadSchema,
+    type: 'multipart/form-data',
+    response: responses(portfolioMutationResponseSchema, 400, 401, 404, 409, 413, 415, 502),
+    detail: {
+      tags: ['Portfolio'],
+      summary: 'Replace a portfolio image',
+      operationId: 'replaceFirstPortfolioImage',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/:portfolioId/image/:fileId', replaceOwnPortfolioImage, {
+    params: portfolioImageParamSchema,
+    body: portfolioImageUploadSchema,
+    type: 'multipart/form-data',
+    response: responses(portfolioMutationResponseSchema, 400, 401, 404, 409, 413, 415, 502),
+    detail: {
+      tags: ['Portfolio'],
+      summary: 'Replace a portfolio image',
+      operationId: 'replacePortfolioImage',
+      security: betterAuthSecurity,
+    },
+  })
+  .delete('/:portfolioId/image', deleteOwnPortfolioImage, {
+    params: portfolioImageCollectionParamSchema,
+    response: responses(portfolioMutationResponseSchema, 400, 401, 404, 409),
+    detail: {
+      tags: ['Portfolio'],
+      summary: 'Delete a portfolio image',
+      operationId: 'deleteFirstPortfolioImage',
+      security: betterAuthSecurity,
+    },
+  })
+  .delete('/:portfolioId/image/:fileId', deleteOwnPortfolioImage, {
+    params: portfolioImageParamSchema,
+    response: responses(portfolioMutationResponseSchema, 400, 401, 404, 409),
+    detail: {
+      tags: ['Portfolio'],
+      summary: 'Delete a portfolio image',
+      operationId: 'deletePortfolioImage',
       security: betterAuthSecurity,
     },
   });

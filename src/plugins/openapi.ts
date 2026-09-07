@@ -27,18 +27,47 @@ export const openapiPlugin = openapi({
       },
       {
         name: 'Onboarding',
-        description: 'Authenticated endpoints for completing and reading onboarding information.',
+        description:
+          'Debug scaffolding, not a contract — superseded by Academic Registration below. Do not integrate against these routes or treat their validation rules as canonical.',
+      },
+      {
+        name: 'Academic Registration',
+        description:
+          "Authenticated endpoints for the Student's resumable first-run registration step (name, telephone, occupation, Student ID, Faculty/Department, Terms acceptance) — the canonical contract mobile integrates against.",
       },
       {
         name: 'Profile',
         description: 'Authenticated Student profile endpoints.',
       },
       {
+        name: 'Portfolio',
+        description: "Authenticated endpoints for managing the current Student's portfolio gallery.",
+      },
+      {
         name: 'Certificates',
         description: "Authenticated endpoints for managing the current Student's profile certificates.",
       },
+      {
+        name: 'Tags',
+        description: 'Authenticated Member reference data for Quest Tags.',
+      },
+      {
+        name: 'Xendit webhooks',
+        description: 'Provider callbacks for durable Top-up outcome processing.',
+      },
     ],
-    components: authOpenAPIComponents,
+    components: {
+      ...authOpenAPIComponents,
+      securitySchemes: {
+        ...authOpenAPIComponents.securitySchemes,
+        xenditWebhookAuth: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-callback-token',
+          description: 'Xendit webhook callback token.',
+        },
+      },
+    },
     paths: authOpenAPIPaths,
   },
 });

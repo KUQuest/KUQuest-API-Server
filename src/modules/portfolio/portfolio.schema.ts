@@ -1,19 +1,52 @@
-import {t} from 'elysia';
+import { t, type Static } from 'elysia';
 
 export const maxPortfolioImages = 10;
 
-const titleSchema = t.String({ minLength: 1, maxLength: 120, pattern: '\\S' });
-const descriptionSchema = t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' });
+const titleSchema = t.String({
+  minLength: 1,
+  maxLength: 120,
+  pattern: '\\S',
+  example: 'Capstone Project',
+});
+const descriptionSchema = t.String({
+  minLength: 1,
+  maxLength: 1000,
+  pattern: '\\S',
+  example: 'A short description of the work.',
+});
 
 export const portfolioParamSchema = t.Object({
   portfolioId: t.String({ format: 'uuid'}),
+});
+
+export const portfolioImageParamSchema = t.Object({
+  portfolioId: t.String({ format: 'uuid' }),
+  fileId: t.String({ format: 'uuid' }),
+});
+
+export const portfolioImageCollectionParamSchema = t.Object({
+  portfolioId: t.String({ format: 'uuid' }),
+});
+
+export type PortfolioImageTarget =
+  | Static<typeof portfolioImageParamSchema>
+  | Static<typeof portfolioImageCollectionParamSchema>;
+
+export const portfolioImageUploadSchema = t.Object(
+  { image: t.File() },
+  { additionalProperties: false },
+);
+
+export const portfolioMutationResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({ version: t.Integer({ minimum: 1 }) }),
 });
 
 export const portfolioCreateSchema = t.Object(
   {
     title: titleSchema,
     description: t.Optional(descriptionSchema),
-    images: t.Files({maxItems: maxPortfolioImages}),
+    images: t.Optional(t.Files({ maxItems: maxPortfolioImages })),
   },
   { additionalProperties: false},
 );
@@ -26,18 +59,19 @@ export const portfolioUpdateSchema = t.Object(
   {additionalProperties: false},
 );
 
-const portfolioImageSchema = t.Object({
-  fileId: t.String({format: 'uuid'}),
+export const portfolioImageSchema = t.Object({
+  fileId: t.String({ format: 'uuid' }),
   position: t.Integer(),
-  url: t.String({format: 'uri'}),
+  url: t.String({ format: 'uri', example: 'https://storage.example.com/portfolio/a.png' }),
 });
 
-const portfolioItemSchema = t.Object({
-  id: t.String({format:'uuid'}),
-  title: t.String(),
-  description: t.Nullable(t.String()),
+export const portfolioItemSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  version: t.Integer({ minimum: 1 }),
+  title: t.String({ example: 'Capstone Project' }),
+  description: t.Nullable(t.String({ example: 'A short description of the work.' })),
   images: t.Array(portfolioImageSchema),
-  createdAt: t.String({format: 'date-time'}),
+  createdAt: t.String({ format: 'date-time' }),
 });
 
 export const portfolioListRespondSchema = 

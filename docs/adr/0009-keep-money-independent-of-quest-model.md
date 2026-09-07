@@ -1,0 +1,3 @@
+# Keep money independent of the unfinished Quest model
+
+The money subsystem does not create Quest Escrow tables, Quest or assignment foreign keys, per-slot records, or Quest-specific services before the Quest model exists. It exposes a generic Funding Reservation with an opaque caller reference and remaining amount, operated through transaction-aware reserve, increase, release, and partial-settlement services. Each separately idempotent settlement credits one recipient's Earnings Balance and optional Platform Fee revenue; the future Quest module decides what a reservation represents and composes these primitives inside its transaction.

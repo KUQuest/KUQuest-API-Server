@@ -1,0 +1,15 @@
+meta {
+  name: List Certificates
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/profile/certificates
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
