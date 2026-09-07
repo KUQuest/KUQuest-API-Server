@@ -1,5 +1,10 @@
 import { db, sql } from '@/database/client';
-import { authAccount, authAdmin, authUser } from '@/database/schema/auth.schema';
+import {
+  authAccount,
+  authAdmin,
+  authSession,
+  authUser,
+} from '@/database/schema/auth.schema';
 
 import { randomUUID } from 'node:crypto';
 
@@ -111,6 +116,53 @@ describe('auth_account ownership and provider constraints (QA-44)', () => {
         constraint_name: 'auth_account_check1',
       });
     } finally {
+      await db.delete(authAdmin).where(eq(authAdmin.id, admin.id));
+    }
+  });
+});
+
+describe('auth_session ownership (QA-36)', () => {
+  it('rejects a session row owned by neither a Student nor an Admin', async () => {
+    const error = await db
+      .insert(authSession)
+      .values({ token: randomUUID(), expiresAt: new Date(Date.now() + 60_000) })
+      .catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as { cause?: { code?: string; constraint_name?: string } }).cause).toMatchObject({
+      code: '23514',
+      constraint_name: 'auth_session_check',
+    });
+  });
+
+  it('rejects a session row owned by both a Student and an Admin', async () => {
+    const [student] = await db
+      .insert(authUser)
+      .values({ email: `${randomUUID()}@ku.th`, firstName: 'Owns', lastName: 'Both' })
+      .returning({ id: authUser.id });
+    const [admin] = await db
+      .insert(authAdmin)
+      .values({ email: `${randomUUID()}@example.com`, firstName: 'Owns', lastName: 'Both' })
+      .returning({ id: authAdmin.id });
+
+    try {
+      const error = await db
+        .insert(authSession)
+        .values({
+          token: randomUUID(),
+          expiresAt: new Date(Date.now() + 60_000),
+          userId: student.id,
+          adminId: admin.id,
+        })
+        .catch((caught) => caught);
+
+      expect(error).toBeInstanceOf(Error);
+      expect((error as { cause?: { code?: string; constraint_name?: string } }).cause).toMatchObject({
+        code: '23514',
+        constraint_name: 'auth_session_check',
+      });
+    } finally {
+      await db.delete(authUser).where(eq(authUser.id, student.id));
       await db.delete(authAdmin).where(eq(authAdmin.id, admin.id));
     }
   });
