@@ -100,9 +100,9 @@ export const questRoute = new Elysia({
     response: responses(questDetailResponseSchema, 400, 401, 404, 409, 502),
     detail: {
       tags: ['Quests'],
-      summary: 'Edit an eligible QUEST_OPEN Quest before participation starts',
+      summary: 'Edit an eligible Draft or QUEST_OPEN Quest before participation starts',
       description:
-        'Updates the supplied fields of an eligible QUEST_OPEN Quest owned by the authenticated Hirer when no Candidate exists and no Worker or Team has been selected.',
+        'Updates the supplied fields of an eligible Draft or QUEST_OPEN Quest owned by the authenticated Hirer when no Candidate exists and no Worker or Team has been selected.',
       operationId: 'editQuest',
       security: betterAuthSecurity,
     },

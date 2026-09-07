@@ -32,6 +32,8 @@ describe('Quest database schema', () => {
     expect(questMode.enumValues).toEqual(['NO_CANDIDATE', 'CANDIDATE']);
     expect(questParticipation.enumValues).toEqual(['SOLO', 'GROUP']);
     expect(questStatus.enumValues).toContain('QUEST_AWAITING_CONSENT');
+    expect(questStatus.enumValues).toContain('QUEST_FAILED');
+    expect(questStatus.enumValues).not.toContain('QUEST_HIDDEN');
     expect(getTableColumns(quest)).toHaveProperty('hirerId');
     expect(getTableColumns(quest)).not.toHaveProperty('giverId');
     expect(getTableColumns(questApplication)).toHaveProperty('workerId');

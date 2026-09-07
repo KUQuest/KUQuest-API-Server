@@ -69,6 +69,59 @@ describe('work experience integration', () => {
     }
   });
 
+  it('still accepts an organization name at the old 120-character boundary', async () => {
+    const response = await request('/api/v1/profile/experience', 'POST', {
+      ...experience,
+      organization: 'A'.repeat(120),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  it('accepts an organization name in the previously-rejected 121-200 range', async () => {
+    const response = await request('/api/v1/profile/experience', 'POST', {
+      ...experience,
+      organization: 'A'.repeat(150),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  it('accepts an organization name up to 200 characters', async () => {
+    const response = await request('/api/v1/profile/experience', 'POST', {
+      ...experience,
+      organization: 'A'.repeat(200),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  it('rejects an organization name over 200 characters', async () => {
+    const response = await request('/api/v1/profile/experience', 'POST', {
+      ...experience,
+      organization: 'A'.repeat(201),
+    });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('VALIDATION');
+  });
+
+  it('accepts a PATCH organization name up to 200 characters', async () => {
+    const response = await request(`/api/v1/profile/experience/${randomUUID()}`, 'PATCH', {
+      organization: 'A'.repeat(200),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  it('rejects a PATCH organization name over 200 characters', async () => {
+    const response = await request(`/api/v1/profile/experience/${randomUUID()}`, 'PATCH', {
+      organization: 'A'.repeat(201),
+    });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('VALIDATION');  });
+
   it('publishes the CRUD operations with authentication and the documented response shapes', async () => {
     const document = (await (
       await app.handle(new Request('http://localhost/openapi/json'))

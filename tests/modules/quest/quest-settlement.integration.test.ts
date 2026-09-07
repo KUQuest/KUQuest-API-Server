@@ -3,7 +3,7 @@ import { db, sql } from '@/database/client';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { proofSubmission, quest, questAssignment, questSettlementCommand } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
+import { walletFundingReservation, walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
 import { auth, adminAuth } from '@/modules/auth';
 import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
@@ -127,6 +127,37 @@ afterAll(async () => {
 });
 
 describe('Quest terminal settlement HTTP contract', () => {
+  it('cancels a null-tag Draft without a Funding Reservation or refund', async () => {
+    if (!postgresAvailable) return;
+    spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => ({ user: { id: headers.get('x-user-id') ?? hirerId }, session: { userId: headers.get('x-user-id') ?? hirerId } }) as never) as never);
+    const questId = randomUUID();
+    questIds.push(questId);
+    await db.insert(quest).values({
+      id: questId,
+      hirerId,
+      title: 'Draft cancellation test',
+      condition: 'Complete the work',
+      mode: 'NO_CANDIDATE',
+      participation: 'SOLO',
+      questStatus: 'QUEST_DRAFT',
+      rewardSatang: 1_000,
+      headcount: 1,
+      startTime: new Date('2030-01-01T10:00:00.000Z'),
+      tagId: null,
+    });
+
+    const response = await request('POST', `/api/v1/quests/${questId}/cancel`, hirerId, undefined, { 'idempotency-key': `cancel-draft-${questId}` });
+    expect(response.status).toBe(200);
+    expect((await response.json()).data).toEqual({
+      questStatus: 'QUEST_CANCELLED',
+      outcome: 'CANCELLED',
+      paidSatang: 0,
+      refundedSatang: 0,
+    });
+    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status).toBe('QUEST_CANCELLED');
+    expect(await db.select({ id: walletFundingReservation.id }).from(walletFundingReservation).where(eq(walletFundingReservation.callerReference, questId))).toHaveLength(0);
+  });
+
   it('cancels OPEN, ASSIGNED, and IN_PROGRESS with exact integer-Satang outcomes', async () => {
     if (!postgresAvailable) return;
     const authenticate = spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => ({ user: { id: headers.get('x-user-id') ?? hirerId }, session: { userId: headers.get('x-user-id') ?? hirerId } }) as never) as never);

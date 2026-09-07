@@ -6,7 +6,7 @@
 **Scope:** Current process only. This document does not define a To-Be redesign.
 
 > **Legacy workflow analysis.** The product source of truth is
-> [`docs/quest/work-chat-system-target.md` §Resolved Quest lifecycle](../quest/work-chat-system-target.md#resolved-quest-lifecycle).
+> [`docs/rulebook/quest/quest-work-chat-rulebook.md` §Resolved Quest lifecycle](../rulebook/quest/quest-work-chat-rulebook.md#resolved-quest-lifecycle).
 > This document records an earlier process comparison. It does not define new
 > Quest behavior.
 

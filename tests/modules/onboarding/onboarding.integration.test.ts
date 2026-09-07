@@ -93,6 +93,25 @@ describe('onboarding integration', () => {
     expect(response.status).toBe(401);
   });
 
+  it('accepts the exact four-digit boundaries', async () => {
+    // Reaching the auth guard proves validation passed.
+    const responses = await Promise.all(
+      [1000, 9999].map((academicYear) =>
+        app.handle(
+          new Request('http://localhost/api/v1/onboarding/update', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ academicYear }),
+          }),
+        ),
+      ),
+    );
+
+    for (const response of responses) {
+      expect(response.status).toBe(401);
+    }
+  });
+
   it('rejects academic years outside the four-digit range', async () => {
     const cases = await Promise.all(
       [999, 10000].map(async (academicYear) => {
@@ -130,6 +149,21 @@ describe('onboarding integration', () => {
     expect(body.error.code).toBe('VALIDATION');
   });
 
+  it('rejects floating-point academic years', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/onboarding/update', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ academicYear: 2026.5 }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('VALIDATION');
+  });
+
   it('returns the shared error shape for an unauthenticated get-data request', async () => {
     const response = await app.handle(
       new Request('http://localhost/api/v1/onboarding/get-data'),
@@ -140,6 +174,22 @@ describe('onboarding integration', () => {
     expect(body).toEqual({
       success: false,
       error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
+    });
+  });
+
+  describe('published documentation', () => {
+    const openapiDocument = async () =>
+      (await (await app.handle(new Request('http://localhost/openapi/json'))).json()) as {
+        paths: Record<string, Record<string, { operationId?: string; security?: Array<Record<string, unknown>> }>>;
+      };
+
+    it('publishes the academic options operation as requiring a Session', async () => {
+      const document = await openapiDocument();
+      const operation = document.paths['/api/v1/onboarding/academic-options']?.get;
+
+      expect(operation).toBeDefined();
+      expect(operation?.operationId).toBe('getOnboardingAcademicOptions');
+      expect(operation?.security).toEqual([{ betterAuthSession: [] }]);
     });
   });
 });

@@ -13,6 +13,8 @@ import {
   type PayoutOutcomeStatus,
 } from './payout.provider-event';
 
+// Keep the validated Thai bank payout contract on V2. Current V3 requires
+// routing types and recipient details that Payout Destination does not model.
 export const XENDIT_PAYOUT_API_VERSION = '2020-02-01';
 
 export type PayoutProviderErrorCode =
@@ -24,13 +26,29 @@ type PayoutProviderErrorDetails = {
   providerCode?: string;
   providerStatus?: number;
   providerApiVersion?: string;
+  providerMessage?: string;
 };
+
+const providerDiagnosticMaxLength = 500;
+
+export const sanitizePayoutProviderDiagnostic = (value: string) => value
+  .replace(/[\r\n\t]+/g, ' ')
+  .replace(/\b(?:xnd|sk|pk)_[A-Za-z0-9_-]+\b/gi, '<REDACTED>')
+  .replace(/\b(?:bearer|basic)\s+[A-Za-z0-9+/=_-]+/gi, '<REDACTED>')
+  .replace(/\b(?:api[-_ ]?key|secret|token|password)\s*[:=]\s*\S+/gi, '<REDACTED>')
+  .replace(/\b\d[\d\s().-]{3,}\d\b/g, '<REDACTED>')
+  .replace(/\b\d{4,}\b/g, '<REDACTED>')
+  .replace(/\b[A-Za-z0-9_-]{24,}\b/g, '<REDACTED>')
+  .replace(/[^\x20-\x7E]/g, '?')
+  .trim()
+  .slice(0, providerDiagnosticMaxLength);
 
 export class PayoutProviderError extends Error {
   readonly code: PayoutProviderErrorCode;
   readonly providerCode?: string;
   readonly providerStatus?: number;
   readonly providerApiVersion?: string;
+  readonly providerMessage?: string;
 
   constructor(
     code: PayoutProviderErrorCode,
@@ -43,6 +61,9 @@ export class PayoutProviderError extends Error {
     this.providerCode = details.providerCode;
     this.providerStatus = details.providerStatus;
     this.providerApiVersion = details.providerApiVersion;
+    this.providerMessage = details.providerMessage
+      ? sanitizePayoutProviderDiagnostic(details.providerMessage) || undefined
+      : undefined;
   }
 }
 
@@ -134,10 +155,33 @@ const fromThb = (value: unknown, allowZero = false): Satang => {
   return allowZero ? satang(amount) : positiveSatang(amount);
 };
 
-const providerErrorDetails = (payload: JsonObject | null) => ({
-  providerCode: [asText(payload?.error_code), asText(payload?.code)]
-    .find((value): value is string => value !== null && /^[A-Z][A-Z_]{0,63}$/.test(value)) ?? undefined,
-});
+const providerValidationSummary = (value: unknown) => {
+  if (!Array.isArray(value)) return null;
+  const entries = value.slice(0, 5).map(asObject).filter((entry): entry is JsonObject => entry !== null);
+  const summary = entries.map((entry) => {
+    const field = asText(entry.field);
+    const messages = [
+      ...(Array.isArray(entry.messages) ? entry.messages.map(asText).filter((message): message is string => message !== null) : []),
+      asText(entry.message),
+    ].filter((message): message is string => message !== null);
+    return [field, messages.join(', ')].filter((part): part is string => part !== null && part.length > 0).join(': ');
+  }).filter((entry) => entry.length > 0);
+  return summary.length > 0 ? summary.join('; ') : null;
+};
+
+const providerErrorDetails = (payload: JsonObject | null) => {
+  const providerCode = [asText(payload?.error_code), asText(payload?.code)]
+    .find((value): value is string => value !== null && /^[A-Z][A-Z_]{0,63}$/.test(value));
+  const providerMessage = sanitizePayoutProviderDiagnostic([
+    asText(payload?.message),
+    asText(payload?.error_message),
+    providerValidationSummary(payload?.errors),
+  ].filter((value): value is string => value !== null).join(' '));
+  return {
+    providerCode,
+    providerMessage: providerMessage || undefined,
+  };
+};
 
 const acceptedProviderStatuses = new Set([
   'ACCEPTED',
@@ -163,11 +207,33 @@ const amountValue = (value: unknown): unknown => {
   return object?.amount ?? value;
 };
 
-const xenditChannelCode = (destination: PayoutDestinationForProvider): string => (
-  destination.routingType === 'BANK_ACCOUNT' && destination.bankCode === 'SCB'
-    ? 'TH_SCB'
-    : destination.bankCode
-);
+const xenditChannelCodeByBankCode: Record<string, string> = {
+  BAAC: 'TH_BAA',
+  BAY: 'TH_BAY',
+  BBL: 'TH_BBL',
+  CIMBT: 'TH_CIMB',
+  EXIM: 'TH_EXIM',
+  GHB: 'TH_GHB',
+  GSB: 'TH_GSB',
+  ICBC: 'TH_ICBC',
+  KBANK: 'TH_KKB',
+  KKP: 'TH_KNB',
+  KTB: 'TH_KTB',
+  LHBANK: 'TH_LHB',
+  SCB: 'TH_SCB',
+  TISCO: 'TH_TISCO',
+  TTB: 'TH_TTB',
+  UOBT: 'TH_UOB',
+  PROMPTPAY: 'PROMPTPAY',
+};
+
+const xenditChannelCode = (destination: PayoutDestinationForProvider): string => {
+  const channelCode = xenditChannelCodeByBankCode[destination.bankCode];
+  if (!channelCode) {
+    throw new PayoutProviderError('PROVIDER_CONFIGURATION', 'Payout Destination bank is not configured.');
+  }
+  return channelCode;
+};
 
 export class XenditPayoutProvider implements OutboundPayoutProvider {
   private readonly secretKey: string | undefined;
@@ -331,7 +397,6 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
     if (
       payload.channel_code !== undefined
       && payload.channel_code !== channelCode
-      && payload.channel_code !== input.destination.bankCode
     ) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different Payout channel.');
     }

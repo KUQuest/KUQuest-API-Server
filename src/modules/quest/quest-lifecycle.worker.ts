@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import {
   proofSubmission,
+  questApiVersion,
   quest,
   questAssignment,
   questCompletionConfirmation,
@@ -9,12 +10,32 @@ import {
   questTeamInvitation,
 } from '@/database/schema/quest.schema';
 
-import { and, asc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 
 import { assignmentStatus, questMode, questParticipation, questStatus } from './quest.contract';
 import { autoApproveDueProofs } from './quest-proof.service';
 import { cancelUnfilledQuest } from './quest-settlement.service';
 import { expireQuestEditRequest } from './quest.service';
+import {
+  expireQuestV2EditRequest,
+  hasPendingQuestV2EditRequest,
+  pendingQuestV2EditRequestIds,
+} from './quest-v2-edit.service';
+import {
+  detectQuestV2Underfilled,
+  expireQuestV2Underfilled,
+  pendingQuestV2UnderfilledQuestIds,
+} from './quest-underfilled-v2.service';
+import {
+  autoApproveDueQuestV2Proofs,
+  failDueAtQuestV2Proofs,
+  retryQuestV2ProofUploadCleanup,
+} from './quest-proof-v2.service';
+import {
+  cleanupQuestV2ImageObjects,
+  recoverQuestV2ImageUploadManifests,
+  retryQuestV2ImageCleanupManifests,
+} from './quest-v2.service';
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -39,7 +60,7 @@ export type QuestLifecycleWorkerOptions = {
 };
 
 export type QuestLifecycleWorkerError = {
-  operation: 'start' | 'auto-cancel' | 'dispute' | 'invitation-expiry' | 'edit-timeout' | 'auto-approval';
+  operation: 'start' | 'auto-cancel' | 'underfilled-detection' | 'underfilled-timeout' | 'dispute' | 'invitation-expiry' | 'edit-timeout' | 'auto-approval' | 'due-at-failure' | 'quest-image-cleanup' | 'quest-proof-upload-cleanup';
   id?: string;
   cause: unknown;
 };
@@ -47,7 +68,10 @@ export type QuestLifecycleWorkerError = {
 export type QuestLifecycleWorkerResult = {
   startedQuestIds: string[];
   autoCancelledQuestIds: string[];
+  underfilledQuestIds: string[];
+  timedOutUnderfilledQuestIds: string[];
   disputedQuestIds: string[];
+  failedQuestIds: string[];
   timedOutEditRequestIds: string[];
   expiredInvitationIds: string[];
   autoApprovedProofIds: string[];
@@ -68,6 +92,7 @@ const startQuest = async (questId: string, now: Date): Promise<boolean> => db.tr
     .limit(1)
     .for('update');
   if (!current) return false;
+  if (await hasPendingQuestV2EditRequest(transaction, questId)) return false;
 
   await transaction
     .select({ id: questAssignment.id })
@@ -81,7 +106,7 @@ const startQuest = async (questId: string, now: Date): Promise<boolean> => db.tr
     .where(and(eq(questAssignment.questId, questId), eq(questAssignment.assignmentStatus, assignmentStatus.active)));
   const [updated] = await transaction
     .update(quest)
-    .set({ questStatus: questStatus.inProgress, updatedAt: now })
+    .set({ questStatus: questStatus.inProgress, version: sql`${quest.version} + 1`, updatedAt: now })
     .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.assigned)))
     .returning({ id: quest.id });
 
@@ -173,7 +198,7 @@ const disputeQuest = async (questId: string, now: Date): Promise<boolean> => db.
       questStatus: quest.questStatus,
     })
     .from(quest)
-    .where(and(eq(quest.id, questId), inArray(quest.questStatus, [...dueDisputeStatuses]), lte(quest.dueAt, now)))
+    .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v1), inArray(quest.questStatus, [...dueDisputeStatuses]), lte(quest.dueAt, now)))
     .limit(1)
     .for('update');
   if (!current || !(await questHasIncompleteObligations(transaction, current))) return false;
@@ -238,7 +263,7 @@ const processIds = async (
 const dueQuestIds = async (now: Date, limit: number) => db
   .select({ id: quest.id })
   .from(quest)
-  .where(and(inArray(quest.questStatus, [...dueDisputeStatuses]), lte(quest.dueAt, now)))
+  .where(and(eq(quest.apiVersion, questApiVersion.v1), inArray(quest.questStatus, [...dueDisputeStatuses]), lte(quest.dueAt, now)))
   .orderBy(asc(quest.dueAt), asc(quest.id))
   .limit(limit);
 
@@ -258,6 +283,9 @@ const pendingEditRequestIds = async (limit: number) => db
 
 const timeoutEditRequest = async (requestId: string, now: Date) => expireQuestEditRequest(requestId, now)
   .then((result) => 'status' in result && result.status === 'EDIT_REQUEST_REJECTED');
+
+const timeoutQuestV2EditRequest = (requestId: string, now: Date) =>
+  expireQuestV2EditRequest(requestId, now);
 
 const dueInvitationIds = async (now: Date, limit: number) => db
   .select({ id: questTeamInvitation.id })
@@ -286,11 +314,28 @@ export const cancelDueUnfilledQuests = async (now = new Date(), limit = DEFAULT_
     ids.map(({ id }) => id),
     'auto-cancel',
     async (id) => {
+      const detected = await detectQuestV2Underfilled(id, now);
+      if (detected.underfilled) return expireQuestV2Underfilled(id, now);
       const result = await cancelUnfilledQuest(id, now);
       return 'questStatus' in result && result.outcome === 'CANCELLED' && !result.replayed;
     },
     errors,
   );
+};
+
+const processDueUnderfilledQuest = async (
+  questId: string,
+  now: Date,
+  underfilledQuestIds: string[],
+): Promise<boolean> => {
+  const detected = await detectQuestV2Underfilled(questId, now);
+  if (detected.underfilled) {
+    const expired = await expireQuestV2Underfilled(questId, now);
+    if (!expired) underfilledQuestIds.push(questId);
+    return expired;
+  }
+  const result = await cancelUnfilledQuest(questId, now);
+  return 'questStatus' in result && result.outcome === 'CANCELLED' && !result.replayed;
 };
 
 /** Dispute due Quests that still lack a proof or completion confirmation. */
@@ -320,6 +365,24 @@ export const runQuestLifecycleWorker = async (
   const limit = boundedSize(options.batchSize);
   const errors: QuestLifecycleWorkerError[] = [];
 
+  try {
+    await recoverQuestV2ImageUploadManifests(now, limit);
+    await retryQuestV2ImageCleanupManifests(limit);
+    await cleanupQuestV2ImageObjects(now, limit);
+  } catch (cause) {
+    const error = { operation: 'quest-image-cleanup' as const, cause };
+    errors.push(error);
+    reportError(options.onError, error);
+  }
+
+  try {
+    await retryQuestV2ProofUploadCleanup(limit);
+  } catch (cause) {
+    const error = { operation: 'quest-proof-upload-cleanup' as const, cause };
+    errors.push(error);
+    reportError(options.onError, error);
+  }
+
   let autoApprovedProofIds: string[] = [];
   try {
     autoApprovedProofIds = await (options.autoApprove ?? autoApproveDueProofs)(now);
@@ -329,10 +392,44 @@ export const runQuestLifecycleWorker = async (
     reportError(options.onError, error);
   }
 
-  const timedOutEditRequestIds = await processIds(
+  try {
+    autoApprovedProofIds = [
+      ...autoApprovedProofIds,
+      ...await autoApproveDueQuestV2Proofs(now, limit),
+    ];
+  } catch (cause) {
+    const error = { operation: 'auto-approval' as const, cause };
+    errors.push(error);
+    reportError(options.onError, error);
+  }
+
+  let failedQuestIds: string[] = [];
+  try {
+    failedQuestIds = await failDueAtQuestV2Proofs(now, limit);
+  } catch (cause) {
+    const error = { operation: 'due-at-failure' as const, cause };
+    errors.push(error);
+    reportError(options.onError, error);
+  }
+
+  const timedOutLegacyEditRequestIds = await processIds(
     (await pendingEditRequestIds(limit)).map(({ id }) => id),
     'edit-timeout',
     (id) => timeoutEditRequest(id, now),
+    errors,
+    options.onError,
+  );
+  const timedOutV2EditRequestIds = await processIds(
+    (await pendingQuestV2EditRequestIds(limit)).map(({ id }) => id),
+    'edit-timeout',
+    (id) => timeoutQuestV2EditRequest(id, now),
+    errors,
+    options.onError,
+  );
+  const timedOutUnderfilledQuestIds = await processIds(
+    (await pendingQuestV2UnderfilledQuestIds(now, limit)).map(({ questId }) => questId),
+    'underfilled-timeout',
+    (id) => expireQuestV2Underfilled(id, now),
     errors,
     options.onError,
   );
@@ -343,13 +440,11 @@ export const runQuestLifecycleWorker = async (
     errors,
     options.onError,
   );
+  const underfilledQuestIds: string[] = [];
   const autoCancelledQuestIds = await processIds(
     (await dueUnfilledQuestIds(now, limit)).map(({ id }) => id),
-    'auto-cancel',
-    async (id) => {
-      const result = await cancelUnfilledQuest(id, now);
-      return 'questStatus' in result && result.outcome === 'CANCELLED' && !result.replayed;
-    },
+    'underfilled-detection',
+    (id) => processDueUnderfilledQuest(id, now, underfilledQuestIds),
     errors,
     options.onError,
   );
@@ -368,7 +463,18 @@ export const runQuestLifecycleWorker = async (
     options.onError,
   );
 
-  return { startedQuestIds, autoCancelledQuestIds, disputedQuestIds, timedOutEditRequestIds, expiredInvitationIds, autoApprovedProofIds, errors };
+  return {
+    startedQuestIds,
+    autoCancelledQuestIds,
+    underfilledQuestIds,
+    timedOutUnderfilledQuestIds,
+    disputedQuestIds,
+    failedQuestIds,
+    timedOutEditRequestIds: [...timedOutLegacyEditRequestIds, ...timedOutV2EditRequestIds],
+    expiredInvitationIds,
+    autoApprovedProofIds,
+    errors,
+  };
 };
 
 export const runQuestLifecycle = runQuestLifecycleWorker;
