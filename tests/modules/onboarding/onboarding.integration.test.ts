@@ -142,4 +142,20 @@ describe('onboarding integration', () => {
       error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
     });
   });
+
+  describe('published documentation', () => {
+    const openapiDocument = async () =>
+      (await (await app.handle(new Request('http://localhost/openapi/json'))).json()) as {
+        paths: Record<string, Record<string, { operationId?: string; security?: Array<Record<string, unknown>> }>>;
+      };
+
+    it('publishes the academic options operation as requiring a Session', async () => {
+      const document = await openapiDocument();
+      const operation = document.paths['/api/v1/onboarding/academic-options']?.get;
+
+      expect(operation).toBeDefined();
+      expect(operation?.operationId).toBe('getOnboardingAcademicOptions');
+      expect(operation?.security).toEqual([{ betterAuthSession: [] }]);
+    });
+  });
 });

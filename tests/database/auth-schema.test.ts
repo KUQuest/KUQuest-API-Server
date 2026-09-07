@@ -22,4 +22,13 @@ describe('authentication database schema', () => {
     expect(columns.termsVersion.name).toBe('terms_version');
     expect(columns).not.toHaveProperty('majorId');
   });
+
+  it('leaves every onboarding field nullable, so no Student is forced to complete them', () => {
+    const columns = getTableColumns(authUser);
+
+    expect(columns.studentId.notNull).toBe(false);
+    expect(columns.telephone.notNull).toBe(false);
+    expect(columns.departmentId.notNull).toBe(false);
+    expect(columns.academicYear.notNull).toBe(false);
+  });
 });
