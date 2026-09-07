@@ -106,4 +106,21 @@ describe('updating onboarding information', () => {
       telephone: null,
     });
   });
+
+  it('keeps a stored academic year when a later update leaves it out', async () => {
+    expect(await updateOnboardingInfo(studentB, { academicYear: 2026 })).toBe('ok');
+    expect(await updateOnboardingInfo(studentB, { telephone: '080-000-0001' })).toBe('ok');
+
+    expect(await getOnboardingData(studentB)).toMatchObject({
+      academicYear: 2026,
+      telephone: '080-000-0001',
+    });
+  });
+
+  it('replaces a stored academic year with another valid year', async () => {
+    expect(await updateOnboardingInfo(studentB, { academicYear: 2026 })).toBe('ok');
+    expect(await updateOnboardingInfo(studentB, { academicYear: 2027 })).toBe('ok');
+
+    expect(await getOnboardingData(studentB)).toMatchObject({ academicYear: 2027 });
+  });
 });
