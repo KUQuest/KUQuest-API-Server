@@ -4,7 +4,7 @@ import { authAdmin } from '@/database/schema/auth.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { isValidAdminPassword } from '@/modules/auth/admin-auth.policy';
 
-import { sql as drizzleSql } from 'drizzle-orm';
+const firstAdminBootstrapLockName = 'kuquest:first-admin-bootstrap';
 
 const readRequiredEnv = (name: string, trim = true): string => {
   const rawValue = process.env[name];
@@ -34,30 +34,43 @@ const main = async (): Promise<void> => {
     );
   }
 
-  const existingAdmin = await db
-    .select({ id: authAdmin.id })
-    .from(authAdmin)
-    .where(drizzleSql`lower(${authAdmin.email}) = ${email}`)
-    .limit(1);
+  // Keep this transaction open for the full awaited critical section. Better Auth
+  // uses its own pooled connection, so this transaction provides the advisory
+  // lock only; Better Auth owns write atomicity. auth_admin has no one-row
+  // database constraint.
+  const result = await sql.begin(async (transaction) => {
+    await transaction`select pg_advisory_xact_lock(
+      hashtextextended(${firstAdminBootstrapLockName}, 0)
+    )`;
 
-  if (existingAdmin.length > 0) {
-    throw new Error('An Admin with this email already exists; no changes were made');
-  }
+    const existingAdmin = await db
+      .select({ email: authAdmin.email })
+      .from(authAdmin)
+      .limit(1);
 
-  const seedAuth = createAdminAuth({
-    allowSignUp: true,
-    autoSignIn: false,
-    markEmailVerified: true,
-  });
+    if (existingAdmin.length > 0) {
+      const errorMessage =
+        existingAdmin[0].email.toLowerCase() === email
+          ? 'An Admin with this email already exists; no changes were made'
+          : 'An Admin already exists; first-Admin bootstrap made no changes';
+      throw new Error(errorMessage);
+    }
 
-  const result = await seedAuth.api.signUpEmail({
-    body: {
-      email,
-      password,
-      name: firstName,
-      firstName,
-      lastName,
-    },
+    const seedAuth = createAdminAuth({
+      allowSignUp: true,
+      autoSignIn: false,
+      markEmailVerified: true,
+    });
+
+    return seedAuth.api.signUpEmail({
+      body: {
+        email,
+        password,
+        name: firstName,
+        firstName,
+        lastName,
+      },
+    });
   });
 
   if (!result.user) throw new Error('Better Auth did not create the Admin user');
@@ -67,6 +80,9 @@ const main = async (): Promise<void> => {
 
 try {
   await main();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : 'Admin seed failed.');
+  process.exitCode = 1;
 } finally {
   await sql.end();
 }

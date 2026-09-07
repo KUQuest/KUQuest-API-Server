@@ -4,19 +4,21 @@ import { ALLOWED_EMAIL_DOMAIN, auth } from '@/modules/auth';
 import { describe, expect, it } from 'bun:test';
 
 describe('authentication integration', () => {
-  it('serves the browser authentication test page', async () => {
+  it('serves the browser Quest and finance test bench', async () => {
     const response = await app.handle(new Request('http://localhost/'));
     const body = await response.text();
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/html');
-    expect(body).toContain('KUQuest Auth Test');
-    expect(body).toContain('/api/auth/sign-in/social');
-    expect(body).toContain('/api/v1/profile/avatar');
-    expect(body).toContain('upload-status');
-    expect(body).toContain('[avatar-upload] Response received');
-    expect(body).toContain("window.location.protocol === 'file:'");
-    expect(body).toContain('http://localhost:5000');
+    // The production-image CI smoke check matches this exact title line.
+    expect(body).toContain('<title>KUQuest API Test Bench</title>');
+    expect(body).toContain('data-page="member"');
+    expect(body).toContain('data-page="quests"');
+    expect(body).toContain('data-page="chat"');
+    expect(body).toContain('data-page="wallet"');
+    expect(body).toContain('data-page="admin"');
+    expect(body).toContain('/test-bench/app.js');
+    expect(body).toContain('/test-bench/styles.css');
   });
 
   it('enables only Google sign-in', () => {

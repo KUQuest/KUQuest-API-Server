@@ -394,6 +394,7 @@ describe('Top-up Provider event application services', () => {
 
   it('reconciles an uncertain Top-up by internal reference when Provider reference is missing', async () => {
     const { userId, topUp } = await createPendingTopUp('be116-reconcile-by-internal-reference');
+    const recoveredProviderReference = `be116-recovered-${crypto.randomUUID()}`;
     await db.update(paymentTopUp)
       .set({ providerReference: null })
       .where(eq(paymentTopUp.id, topUp.id));
@@ -402,7 +403,7 @@ describe('Top-up Provider event application services', () => {
       getPaymentStatus: async (input): Promise<InboundPaymentStatusResponse> => {
         request = input;
         return {
-          providerReference: 'be116-recovered-provider-reference',
+          providerReference: recoveredProviderReference,
           providerStatus: 'SUCCEEDED',
           normalizedStatus: 'PAID',
           providerAmountSatang: topUp.paymentTotalSatang,
@@ -421,7 +422,7 @@ describe('Top-up Provider event application services', () => {
     });
     expect(reconciled).toMatchObject({
       topUpStatus: 'PAID',
-      providerReference: 'be116-recovered-provider-reference',
+      providerReference: recoveredProviderReference,
     });
   });
 });

@@ -4,12 +4,28 @@ Backend serving the KUQuest Mobile app and Admin web app: authentication, onboar
 
 ## Language
 
+**Rulebook**:
+An accepted domain-policy document that defines what the Server must do for one domain, including state transitions, actor decisions, Admin control, and money movement. Only a domain-policy document is a Rulebook; ADRs record decisions, and reconciliation documents describe Legacy Implementation.
+_Avoid_: implementation guide, draft, historical document
+
+**Legacy Implementation**:
+Existing code, schema, or API behavior that does not implement an accepted Rulebook. It is evidence of the current server only; it does not define KUQuest policy.
+_Avoid_: Rulebook, accepted target, product policy
+
+**Domain Owner**:
+The named person who approves a Candidate Rulebook for one domain. A Rulebook becomes accepted only after that explicit approval.
+_Avoid_: code owner, automatic approver
+
+**Candidate Rulebook**:
+A proposed domain-policy document that awaits Domain Owner approval. It does not define current KUQuest policy.
+_Avoid_: Rulebook, draft Rulebook, accepted contract
+
 **Member**:
 The end user of KUQuest — anyone authenticated with a Google account under the `@ku.th` email domain. Represented by the `auth_user` table.
 _Avoid_: User, account holder, Student (use Member when the KUQuest identity matters, User only when referring generically to the auth record).
 
 **Admin**:
-A KUQuest Admin web app operator, signed in with credentials (not Google). Represented by the `auth_admin` table — a separate identity space from Member, sharing `auth_account`/`auth_session` via a nullable `userId`/`adminId` pair (exactly one set per row). Schema landed in [[BE-32]]; the second better-auth instance wiring credential login for Admins is a follow-up, not yet built.
+A KUQuest Admin web app operator, signed in with credentials (not Google). Represented by the `auth_admin` table — a separate identity space from Member, sharing `auth_account`/`auth_session` via a nullable `userId`/`adminId` pair (exactly one set per row). Schema landed in [[BE-32]]; the second better-auth instance wiring credential login for Admins is a follow-up, not yet built. One undifferentiated permission tier — `auth_admin` has no role/permission column. For Payout Approval, Dispute Case, Quest Hide, Wallet Freeze/Suspend, Trust & Safety moderation, and the Member penalty ladders, read `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: User (Admins are never Members and vice versa).
 
 **Onboarding**:
@@ -37,24 +53,42 @@ A shared Quest skill label used to describe the ability demonstrated by a Quest.
 _Avoid_: profile skill, occupation, treating Tags as editable Member fields.
 
 **Review**:
-A rating and optional comment that a Hirer or Worker gives to the other after a Quest is completed. A Review is tied to one Quest, each direction is allowed once per Quest, and the author may edit it until seven days after Quest completion. Reviews cannot be deleted and contribute to the reviewed Member's Reputation.
-_Avoid_: reviewing before Quest completion; treating a Review as a Profile field that can be edited by someone else.
+A rating and optional comment that a Hirer or Worker gives to the other after a Quest reaches any Terminal State: `QUEST_COMPLETED`, `QUEST_FAILED`, or `QUEST_CANCELLED`. A Review is tied to one Quest, each direction is allowed once per Quest, and the author may edit it until seven days after the Quest becomes Terminal. Reviews cannot be deleted and contribute to the reviewed Member's Reputation.
+_Avoid_: reviewing before a Quest becomes Terminal; treating a Review as a Profile field that can be edited by someone else.
+
+**Red Flag**:
+A temporary mark on a Member's Profile after an Admin confirms that Member's first violation, blocking that Member from applying as a Candidate, joining a `FIRST_COME_FIRST_SERVED` Quest, or publishing a new Quest while it lasts. It restricts both the Worker side and the Hirer side. Expires automatically; does not require Admin action to clear. Rules are defined in `docs/rulebook/admin/admin-rulebook.md`.
+_Avoid_: Ban, Suspension, treating Red Flag as a Wallet Status.
+
+**Member Ban**:
+A Member's account being made temporarily or permanently unable to sign in, reached by escalating a Misconduct ladder, which counts both hidden Messages and upheld Conduct Reports, or a low-average-review ladder. A ban also freezes the Member's Wallet. Rules, exemptions, and both ladders are defined in `docs/rulebook/admin/admin-rulebook.md`.
+_Avoid_: Wallet Freeze/Suspend alone (a Wallet hold does not by itself block sign-in), Admin disabling another Admin (a separate, out-of-scope capability).
+
+**Proof Review Window**:
+The 24-hour period after a required submitter sends Proof Submission during
+which the Hirer may decide the outcome. If the Hirer does not decide, the
+Server records `PROOF_APPROVED`.
+_Avoid_: mode-specific review deadlines.
 
 **Giver**:
-The Student who creates a Quest and funds its rewards.
-_Avoid_: Employer, client, job owner.
+Legacy term for Hirer. In new Quest and Work Chat text, use Hirer.
+_Avoid_: Giver in new domain text, Employer, client, job owner.
 
 **Hunter**:
-A Student who performs a Quest in exchange for its reward.
-_Avoid_: Worker, employee, contractor.
+Legacy term for Worker. In new Quest and Work Chat text, use Worker.
+_Avoid_: Hunter in new domain text, employee, contractor.
 
 **Quest Reward**:
-The amount earned by each Hunter who successfully completes a Quest; for a group Quest, the same reward applies independently to every Hunter slot. The displayed Quest Reward is the Hunter's full earnings and excludes the Platform Fee paid by the Giver.
+The portion of a Quest Funding Total paid from the Hirer's Quest Escrow to a Worker who successfully completes an Assignment. Settlement, visibility, failure, retry, and notification rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Wage, salary, shared prize pool.
 
+**Quest Funding Total**:
+The amount a Hirer commits for one Worker slot, including that slot's Quest Reward and Platform Fee. The Quest Escrow covers this total for each published headcount slot.
+_Avoid_: treating the total as the Worker's Quest Reward, adding Platform Fee after the total.
+
 **Platform Fee**:
-An amount paid by the Giver in addition to the Quest Rewards when Hunters successfully complete a Quest.
-_Avoid_: deducting the Platform Fee from a Hunter's displayed Quest Reward.
+The portion of a Quest Funding Total retained as Platform Fee when a Quest successfully completes. It is calculated from the net Quest Reward by the active Money Policy and is included in the total rather than added after it. The target failure and cancellation rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
+_Avoid_: deducting the Platform Fee from a Worker's displayed Quest Reward.
 
 **Wallet**:
 A Student's KUQuest funds, separated by whether they can be spent, paid out, or are temporarily committed to a Quest or Payout.
@@ -77,7 +111,7 @@ An immediate, fee-free, and irreversible transfer from a Student's Earnings Bala
 _Avoid_: Payout, reversible exchange.
 
 **Quest Escrow**:
-Spending Balance committed by a Giver to cover Quest Rewards and Platform Fees until the future Quest workflow settles or releases it. The Quest domain owns the timing and lifecycle; the Wallet only owns the reserved funds.
+Spending Balance committed by a Hirer to cover Quest Funding Totals until the Quest workflow settles or releases it. The Quest domain owns the timing and lifecycle; the target settlement rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Job hold, locked balance, inferring escrow from Wallet activity.
 
 **Funding Reservation**:
@@ -89,15 +123,19 @@ Earnings Balance committed to an in-progress Payout and unavailable for another 
 _Avoid_: Quest Escrow, withdrawn balance.
 
 **Top-up**:
-An inbound payment that adds its quoted amount to a Student's Spending Balance after the payment provider confirms it. The Student pays the provider fee and tax in addition to the amount credited.
+An inbound payment that adds its Provider-quoted credit amount to a Member's Spending Balance after the payment provider confirms the exact quoted payment total. The Provider sets the fee and tax for each operation; the Member pays them in addition to the amount credited.
 _Avoid_: Deposit, earnings, Wallet credit (too broad).
 
 **Payout**:
-An outbound transfer of a Student's Earnings Balance to their chosen payout destination. The transfer amount, provider fee, and tax are all debited from Earnings Balance.
+An outbound transfer of a Member's Earnings Balance to their chosen Thai bank account Payout Destination. The receipt amount, Provider fee, and tax are quoted and reserved from Earnings Balance first. The Provider call starts only after an Admin approves the Payout. The Member cannot cancel it; only an Admin can cancel it before submission. An Admin cancellation releases the full Payout Reserve back to the Member's Earnings Balance.
 _Avoid_: Withdrawal request (the Payout includes the full transfer lifecycle), Quest Reward.
 
+**Payout Approval**:
+The manual Admin decision that permits or cancels one Member Payout before the provider call. The Payout remains waiting for Admin action until an Admin approves or cancels it; there is no automatic cancellation after a time limit.
+_Avoid_: provider approval, automatic timeout, releasing funds without an Admin decision.
+
 **Payout Destination**:
-The Student's own Thai bank or PromptPay destination to which a Payout is sent. A Student has at most one active destination; replacing or removing it retires the old destination without erasing its historical association with prior Payouts.
+The Member's own Thai bank account to which a Payout is sent. PromptPay is a Top-up payment method, not a Payout Destination. A Member has at most one active destination; replacing or removing it retires the old destination without erasing its historical association with prior Payouts.
 _Avoid_: Wallet, bank account stored as disposable profile data.
 
 **Money Policy**:
@@ -136,6 +174,11 @@ The auth library (`better-auth`) providing session management, Google OAuth, and
 
 ## Quest and Work Chat
 
+The entries below define the vocabulary. For Quest lifecycle, selection, Start
+Work, Proof Submission, cancellation, failure, Work Chat, and reward behavior,
+read `docs/rulebook/quest/quest-work-chat-rulebook.md` §Resolved Quest lifecycle first.
+`docs/deprecated/` is historical evidence, not workflow authority.
+
 **Hirer**:
 The Member who creates a Quest, commissions its work, and remains its current owner for MVP.
 _Avoid_: Giver, client
@@ -148,17 +191,104 @@ _Avoid_: Hunter, candidate, assignee
 A Member or team that has applied to a Candidate Quest but has not been accepted as a Worker.
 _Avoid_: Chat member, assigned Worker
 
+**Candidate Team**:
+A forming group of Candidates for one `GROUP + CANDIDATE` Quest. A submitted
+Candidate Team is the unit the Hirer selects.
+_Avoid_: Work Conversation, Active Workers before selection.
+
+**Team Leader**:
+The Candidate who creates and represents a Candidate `GROUP` Team. If the
+Hirer selects the Team, the Team Leader becomes a Worker. The Team Leader
+starts and submits or confirms the Team's required work.
+_Avoid_: treating a Team Leader as the Hirer or as a leader of a FCFS Group.
+
+**First Come, First Served (FCFS)**:
+A Quest selection mode where an eligible Worker joins directly. It replaces the
+legacy `NO_CANDIDATE` name, which describes an absence instead of the selection
+rule.
+_Avoid_: `NO_CANDIDATE` in new contracts, treating FCFS as a third Quest mode.
+
+**Prospective Worker**:
+A Member who is considering work on a Quest but does not have an active Assignment for that Quest. A Prospective Worker may be a Candidate or a Member considering a direct join.
+_Avoid_: Worker, Accepted Participant
+
+**Join Code**:
+A Server-generated temporary code that lets an eligible Prospective Worker join
+a forming Candidate Team.
+_Avoid_: an invitation, a permanent shared secret.
+
 **Accepted Participant**:
 The current Hirer or an Active Worker. Only Accepted Participants have current Work Conversation membership.
 _Avoid_: Candidate, departed Worker
 
 **Quest**:
-One bounded agreement for work, owned by one Hirer and progressing through its lifecycle.
-_Avoid_: Job, task
+One bounded agreement for work, owned by one Hirer and progressing through its lifecycle. Target lifecycle and `dueAt` rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`. `/api/v2/quests/*` is the canonical Quest API contract. `/api/v1/quests/*` is deprecated: existing integrations keep working, but do not build new work against it, and do not treat its shape as canonical.
+_Avoid_: Job, task; building new Quest work against `/api/v1/quests/*`.
+
+**Quest Image**:
+An optional ordered image in a Quest's detail gallery. The `Hirer` owns it
+through the Quest, and it is not a Chat Attachment. The `/api/v2` contract
+accepts valid JPEG, PNG, or WebP files up to 5 MB each, with at most three
+images per Quest. Upload and remove are allowed only while the Quest is
+`QUEST_DRAFT`; the API uses `imageId`, returns a 15-minute temporary link, and
+soft-deletes removed file metadata. Quest Images are not shown on the Quest
+Board card.
+_Avoid_: image URL, Chat Attachment, treating an image as required for publish.
+
+**Quest Board Card**:
+A compact read-only summary of a non-hidden `QUEST_OPEN` Quest shown to an
+authenticated Member for discovery. It includes the applicable Quest Reward
+and current Active Worker count; full Quest Condition, Quest Images, and
+financial internals belong to other views.
+_Avoid_: treating the Board Card as the full Quest resource, exposing Quest
+Funding Total, Platform Fee, Wallet, or Funding Reservation.
+
+**Public Quest Detail**:
+The read-only view of a non-hidden `QUEST_OPEN` Quest available to an
+authenticated Member who is not its Hirer. It includes the full ordered Quest
+Condition and other public Quest details, but never exposes Platform Fee,
+Money Policy, Wallet, or Funding Reservation details.
+_Avoid_: anonymous Quest Detail, Hirer finance view, Candidate data.
+
+**Underfilled GROUP + FCFS Quest**:
+A `GROUP + FIRST_COME_FIRST_SERVED` Quest at `startTime` with fewer Active
+Workers than `headcount`.
+_Avoid_: an open Quest with no accepted Worker, an incomplete Candidate Team.
+
+**dueAt**:
+The deadline for the required Worker action on a Quest. The Server decides
+whether the action arrived on time. It cannot change after the Quest is
+assigned. Target deadline, reminder, and failure rules are defined in
+`docs/rulebook/quest/quest-work-chat-rulebook.md`.
+_Avoid_: client-side deadline, approximate deadline.
+
+**Quest Condition**:
+A set of separate requirements that define what a Worker must complete for a Quest. Condition size, ordering, visibility, and editing rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
+_Avoid_: condition text, Quest rule
+
+**Condition Item**:
+One ordered requirement within a Quest Condition. Its validation and Quest Edit rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
+_Avoid_: condition field
 
 **Assignment**:
 The accepted participation of one Worker in a Quest. It is the canonical record that a Worker is working on that Quest.
 _Avoid_: Application, team membership
+
+**Active Worker Count**:
+The number of `ASSIGNMENT_ACTIVE` Workers for a Quest at the time the Server
+reads it. It excludes Candidates and forming Candidate Team Members.
+_Avoid_: Candidate count, applicant count, published headcount.
+
+**Start Work**:
+The required starter's action that changes an assigned Quest to in progress.
+_Avoid_: a readiness signal, a Proof Submission.
+
+**Proof Submission**:
+A record of required work submitted by a Worker or Team Leader when the Quest
+requires proof. It is separate from Chat Messages and has one decision. Its
+fields, lifecycle, visibility, and UI rules are defined in
+`docs/rulebook/quest/quest-work-chat-rulebook.md`.
+_Avoid_: Work Message, treating proof as an ordinary Chat Message
 
 **Active Worker**:
 A Worker whose Assignment has not ended.
@@ -169,19 +299,32 @@ A former Active Worker whose Assignment ended before the Quest completed.
 _Avoid_: Active Worker, Candidate
 
 **Work Membership Window**:
-The inclusive period in which an Accepted Participant has current access to the Work Conversation. After the window ends, the former Worker may read only Messages created no later than their departure.
+The inclusive period in which an Accepted Participant has current access to the Work Conversation. After the window ends, the former Worker may read only Messages created no later than their departure and cannot send or receive new Messages.
 _Avoid_: Chat permission, participant status
 
 **Quest Edit**:
-A change to a Quest's details proposed by its Hirer.
+A proposed replacement of a Quest Condition by its Hirer while the Quest is
+`QUEST_ASSIGNED`. Every Active Worker gives one Quest Edit Response within ten
+minutes; the target timing, response, diff, and Quest State rules are defined
+in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Assignment change, membership transition
 
+**Quest Edit Response**:
+One `EDIT_RESPONSE_ACCEPTED` or `EDIT_RESPONSE_DECLINED` decision made by an
+Active Worker for one pending Quest Edit. A Worker can give only one response
+to that Quest Edit.
+_Avoid_: Hirer approval, Assignment consent, Proof Submission.
+
 **Conversation**:
-A persisted room for coordinating work on one Quest. In this context, the only Conversation is a Work Conversation.
+A persisted private room for one Quest. The target has two Conversation types: Candidate Inquiry Conversation and Work Conversation.
 _Avoid_: Direct message, group chat, team chat
 
+**Candidate Inquiry Conversation**:
+A private one-to-one Conversation between the Hirer and one Prospective Worker to clarify unclear Quest details while any Quest is `QUEST_OPEN` (across all selection modes and participation shapes). It becomes inaccessible when that Member gets an active Assignment, the Quest enters `QUEST_ASSIGNED`, or the Quest is cancelled before assignment; it never becomes a Work Conversation.
+_Avoid_: DM as a domain type, Work Conversation, public Quest comment
+
 **Work Conversation**:
-The one working Chat Conversation associated with a Quest. Its current Accepted Participants are the Hirer and the Active Workers, never Candidates.
+The one Chat Conversation for coordinating work on a Quest, created when the first Worker gets an active Assignment. Current members are the Hirer and Active Workers; Candidates and Prospective Workers never join it. The target membership, Message, Attachment, read, UI, offline, and Rate Limit rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Group chat, team chat
 
 **Chat Membership**:
@@ -189,24 +332,40 @@ The relationship between an Accepted Participant and a Work Conversation. It rec
 _Avoid_: Chat permission, participant status
 
 **Message**:
-A piece of content in a Work Conversation, sent by an Accepted Participant or created by the system. It may contain text, Attachments, or both, and becomes part of the retained Conversation history.
+A piece of immutable content in a Conversation, sent by a permitted participant or created by the system. The target text, Attachment, ordering, visibility, and retry rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Notification, post
 
 **Attachment**:
-A private file shared in a Message in a Work Conversation. A Member can access it only when the Member may read the containing Message. An Admin can access it only as retained evidence for an authorized Report Case. Both paths require the Attachment to pass the required safety checks.
+A private image, PDF, or video file shared in a Message. The target access, size, link, device-open, and upload-failure rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Public file, image URL
 
 **Read Cursor**:
-A private position that a Member has acknowledged in a Work Conversation. It only moves forward and supports unread counts and resume position; it is not a read receipt.
+A private position that a Member has acknowledged in a Conversation. It is not a Read Receipt. The target movement and unread-count rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Read receipt, last seen
 
 **System Message**:
-An immutable Message created from a Work Membership Transition to record a membership or Work Conversation lifecycle change.
+A system-created immutable Message that records a membership or Quest workflow Event and appears from KU bot. The target template, visibility, action-link, Popup, and notification rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
 _Avoid_: Notification, audit log
 
+**Audit Record**:
+An immutable internal record of a domain or money change. The target covered records, fields, visibility, and retention rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
+_Avoid_: System Message, editable history
+
+**Push Notification**:
+A short out-of-app alert for a Quest Event. Production targets Android through FCM; the target recipient, device, retry, deduplication, mute, foreground, and privacy rules are defined in `docs/rulebook/quest/quest-work-chat-rulebook.md`.
+_Avoid_: System Message, treating a push alert as Chat history
+
+**Push Device**:
+An Android device registered by a Member to receive Push Notifications, managed as an independent destination that can be disabled without disabling the Member's other devices. Only an authenticated Member can register or disable that Member's Push Device.
+_Avoid_: phone number, treating one Member as one device
+
 **Report Case**:
-A Trust & Safety record that groups Reporter Entries for one Message and tracks its moderation status: `PENDING`, `DISMISSED`, `HIDDEN`, or `RESTORED`. `PENDING` and `HIDDEN` are open statuses; `DISMISSED` and `RESTORED` are closed statuses. It retains the bounded evidence needed for moderation under the retention policy.
-_Avoid_: single Reporter Entry, Message flag
+A Trust & Safety record that groups Reporter Entries for one Message and tracks its moderation status: `REPORT_CASE_PENDING`, `REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN`, or `REPORT_CASE_RESTORED`. `REPORT_CASE_PENDING` and `REPORT_CASE_HIDDEN` are open statuses; `REPORT_CASE_DISMISSED` and `REPORT_CASE_RESTORED` are closed statuses. A new Reporter Entry against a Message whose most recent Report Case is closed opens a new Report Case rather than reopening the old one. It retains the bounded evidence needed by moderation while open; rules are defined in `docs/rulebook/admin/admin-rulebook.md`.
+_Avoid_: single Reporter Entry, Message flag, the superseded bare `PENDING`/`DISMISSED`/`HIDDEN`/`RESTORED` values
+
+**Conduct Report**:
+A Member's report about how another Member behaved on one Quest, chosen from a fixed reason list scoped to the pair's roles. Its evidence is the Quest record — the Assignment, the Proof Submission, and their times — not a Message, so it is a separate record from a Report Case: the clearest case is an unreachable Worker, where the complaint is that no Message exists. A Conduct Report an Admin upholds counts as a confirmed violation on the same penalty ladder as a hidden Message. Reasons, filers, timing, notifications, and decision rules are defined in `docs/rulebook/admin/admin-rulebook.md`.
+_Avoid_: Report Case (that is about one Message's content), Reporter Entry, treating abusive language as a Conduct Report reason — that opens a Report Case.
 
 **Evidence Reference**:
 A bounded reference from a Report Case to a Message or Attachment required for moderation. It identifies the retained domain record and its hold without copying Message text, file bytes, or signed URLs.
@@ -221,12 +380,26 @@ An immutable record of an Admin's decision to dismiss, hide, or restore a Report
 _Avoid_: Reporter Entry, Admin Action
 
 **Admin Action**:
-An immutable audit record of an Admin's Work Chat evidence access or moderation operation. It records the action and result for the affected domain records without storing Message text, file bytes, or signed URLs.
+An immutable audit record of an Admin's command or Work Chat evidence access or moderation operation. It records the action and result for the affected domain records without storing Message text, file bytes, or signed URLs.
 _Avoid_: Reporter Entry, Moderation Decision
 
+**Admin Review Item**:
+A system-created record for sending a confirmed `PROOF_NOT_APPROVED` decision to an Admin for review. It links the Quest, Assignment, Proof Submission, decision reason, and evidence references; it does not reopen the Quest or create Rework. It is one way an Admin learns a Dispute Case is warranted, but an Admin may open one without it; see `docs/rulebook/admin/admin-rulebook.md`.
+_Avoid_: Report Case, Admin override
+
+**Dispute Case**:
+A review opened by the Hirer, a Worker, or an Admin acting for a Worker, within a fixed window after a Failed Quest, that may redirect part of the Hirer's returned settlement to a Worker. It does not reopen or change the Quest State, and never reclaims a Reward already transferred to a Worker. Actors, timing, and decision rules are defined in `docs/rulebook/admin/admin-rulebook.md`.
+_Avoid_: Admin Review Item, `QUEST_DISPUTED`
+
 **Terminal Quest**:
-A Quest in `COMPLETED` or `CANCELLED`. Its Work Conversation is read-only.
+A Quest in `QUEST_COMPLETED`, `QUEST_CANCELLED`, or
+`QUEST_FAILED`. Its Work Conversation is read-only for Members, but the
+system may append System Messages for later workflow events.
 _Avoid_: Closed conversation
+
+**Failed Quest**:
+A Quest that ends because a Proof Submission was not approved or required proof was not submitted in time. It is terminal and has no Rework process.
+_Avoid_: Cancelled Quest, treating failed work as a cancellation
 
 **Work Membership Transition**:
 A change to Accepted Participant membership or terminal lifecycle state that changes Work Conversation membership or write access.

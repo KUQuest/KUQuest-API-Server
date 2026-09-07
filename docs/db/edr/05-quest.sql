@@ -17,6 +17,14 @@
 -- NO_CANDIDATE joins and Assignment creation are implemented by BE-181.
 -- Candidate selection and Assignment fan-out are implemented by BE-180.
 --
+-- Target workflow note: use docs/rulebook/quest/quest-work-chat-rulebook.md for the
+-- accepted Work Chat and Quest workflow. Reconcile workflow-specific values in
+-- this EDR before implementation when they differ from that target.
+--
+-- Workflow authority: this is the current implementation baseline, not the
+-- product workflow authority. For new Quest behavior, use
+-- docs/rulebook/quest/quest-work-chat-rulebook.md §Resolved Quest lifecycle.
+--
 -- Core quest table settled via /batch-grill-me. Old Quest model (prisma.ts) split/trimmed:
 --  - riskLevel/riskCheckedAt: cut, no consumer anywhere in the schema, no product
 --    requirement surfaced for it — revisit only if a moderation module needs it.
@@ -56,7 +64,7 @@ CREATE TYPE quest_participation AS ENUM ('SOLO', 'GROUP');
 CREATE TYPE quest_status AS ENUM ('QUEST_DRAFT', 'QUEST_OPEN', 'QUEST_AWAITING_CONSENT',
                                    'QUEST_ASSIGNED', 'QUEST_IN_PROGRESS', 'QUEST_SUBMITTED',
                                    'QUEST_APPROVED', 'QUEST_REWORK', 'QUEST_COMPLETED',
-                                   'QUEST_CANCELLED', 'QUEST_DISPUTED', 'QUEST_HIDDEN');
+                                   'QUEST_CANCELLED', 'QUEST_DISPUTED', 'QUEST_FAILED');
 
 CREATE TABLE quest (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -83,11 +91,9 @@ CREATE TABLE quest (
   cancelled_at TIMESTAMPTZ,
   cancelled_by_user_id  UUID REFERENCES auth_user(id),
   cancelled_by_admin_id UUID REFERENCES auth_admin(id),
-  -- QUEST_HIDDEN is moderation only: an admin unlists a published quest, escrow stays held,
-  -- and the quest can go back to QUEST_OPEN (which clears these). Hirers cannot hide their
-  -- own quest — they cancel it. Hence admin-only, unlike cancelled_by_*, which is
-  -- polymorphic because a Hirer can cancel too. Reason text belongs to Trust & Safety,
-  -- not here.
+  -- Moderation is an independent visibility overlay. Hiding does not change
+  -- Quest State, Assignment, Quest Escrow, or Work Conversation membership.
+  -- Reason codes belong to the immutable Admin Action, not this table.
   hidden_at    TIMESTAMPTZ,
   hidden_by_admin_id UUID REFERENCES auth_admin(id),
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -99,7 +105,6 @@ CREATE TABLE quest (
   CHECK (quest_status = 'QUEST_DRAFT' OR tag_id IS NOT NULL),
   CHECK (num_nonnulls(cancelled_by_user_id, cancelled_by_admin_id) <= 1),
   CHECK ((cancelled_at IS NULL) = (quest_status <> 'QUEST_CANCELLED')),
-  CHECK ((hidden_at IS NULL) = (quest_status <> 'QUEST_HIDDEN')),
   CHECK ((hidden_by_admin_id IS NULL) = (hidden_at IS NULL))
 );
 CREATE INDEX quest_hirer_id_idx ON quest (hirer_id);
@@ -576,5 +581,7 @@ CREATE INDEX proof_submission_image_submission_idx ON proof_submission_image (pr
 --    goes through WorkChatMembershipWriter inside the Quest database
 --    transaction. Chat never fetches members over HTTP and never creates or
 --    closes a membership window on its own.
--- Private Inquiry Conversations (Hirer <-> Candidate) are a separate Chat
--- concern, deliberately not covered by these requirements.
+-- Private Candidate Inquiry Conversations (Hirer <-> Prospective Worker) are
+-- separate from Work Conversation membership. Their target lifecycle is in
+-- docs/rulebook/quest/quest-work-chat-rulebook.md; they are not part of this Quest-owned
+-- membership writer block.

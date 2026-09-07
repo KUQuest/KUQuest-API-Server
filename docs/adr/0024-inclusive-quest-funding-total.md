@@ -1,0 +1,3 @@
+# Include Platform Fee in Quest Funding Total
+
+The v2 Quest contract treats the per-Worker-slot `Quest Funding Total` as the Hirer's inclusive commitment, supplied as `questFundingTotal` in Baht. It is split into the net `Quest Reward` paid to the Worker and the `Platform Fee` calculated from that Reward by the active `Money Policy`, with any rounding remainder kept in the fee. `Quest Escrow` reserves this total for each published headcount slot, and a successful publish returns the canonical open Quest with its finance snapshot. Hirer-owned reads may show the finance snapshot, while Public and Worker reads show only the applicable Quest Reward. This keeps the Hirer-facing budget fixed while preserving the domain meaning of `Quest Reward` and `Platform Fee`.

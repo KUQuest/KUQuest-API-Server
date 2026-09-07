@@ -7,8 +7,10 @@
  * The caller invokes WorkChatMembershipWriter inside the Quest database transaction.
  * Identities are native UUIDs (BE-170): a Member is auth_user.id, an Admin is
  * auth_admin.id.
- * This contract deliberately does not cover private Inquiry Conversations.
- * It also has no ownership-transfer transition because MVP ownership is immutable.
+ * This port covers Work Conversation membership only. Candidate Inquiry
+ * Conversations have a separate lifecycle and do not enter this membership
+ * transition. It also has no ownership-transfer transition because MVP
+ * ownership is immutable.
  */
 
 import type {
@@ -25,7 +27,9 @@ export type EventId = string;
 export type IsoTimestamp = string;
 export type QuestWorkChatTransitionProducer =
   | 'QUEST_DIRECT_JOIN'
+  | 'QUEST_ASSIGNMENT_V2'
   | 'QUEST_CANDIDATE_SELECTION'
+  | 'QUEST_UNDERFILLED'
   | 'QUEST_SETTLEMENT';
 
 export type TerminalQuestStatus = QuestTerminalQuestStatus;
@@ -38,9 +42,9 @@ export type AcceptedWorker = {
 };
 
 type TransitionBase = {
-  /** The Quest command boundary that produced this transition. */
+  /** Stable identity for this transition command within its producer and type. */
   producer: QuestWorkChatTransitionProducer;
-  /** The caller's idempotency key. Retries must return the prior result. */
+  /** Retries with this command identity must return the prior result. */
   commandId: CommandId;
   /** Stable event identity used to deduplicate Chat-side system messages. */
   eventId: EventId;
@@ -68,12 +72,18 @@ export type QuestWorkChatMembershipTransition =
       ];
     })
   | (TransitionBase & {
-      /** Chat closes this Worker's membership window at leftAt. */
+      /** Chat closes this Worker's membership window at leftAt after the Assignment becomes inactive. */
       type: 'workerBecameInactive';
       assignmentId: AssignmentId;
       workerId: MemberId;
       assignmentStatus: InactiveAssignmentStatus;
       leftAt: IsoTimestamp;
+    })
+  | (TransitionBase & {
+      /** Closes all remaining Candidate Inquiry Conversations when a Quest is assigned. */
+      type: 'questBecameAssigned';
+      questStatus: 'QUEST_ASSIGNED';
+      assignedAt: IsoTimestamp;
     })
   | (TransitionBase & {
       type: 'questBecameReadOnly';
