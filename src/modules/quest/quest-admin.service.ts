@@ -22,9 +22,10 @@ import {
 } from '@/database/schema/quest.schema';
 import type { CursorPayload } from '@/shared/cursor';
 
-import { and, asc, desc, eq, gt, isNotNull, isNull, lt, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 
 import { questMode, questParticipation, type QuestStatus } from './quest.contract';
+import { escapeLike } from './quest.service';
 import {
   questV2Mode,
   questV2Participation,
@@ -148,6 +149,7 @@ export const getAdminQuestSummaryInTransaction = async (
 };
 
 export type ListAdminQuestsInput = {
+  q?: string;
   status?: QuestStatus;
   mode?: QuestV2Mode;
   participation?: QuestV2Participation;
@@ -158,6 +160,7 @@ export type ListAdminQuestsInput = {
 };
 
 export const listAdminQuests = async ({
+  q,
   status,
   mode,
   participation,
@@ -179,8 +182,14 @@ export const listAdminQuests = async ({
         )
     : undefined;
 
+  const searchTerm = q?.trim();
+  const searchPattern = searchTerm ? `%${escapeLike(searchTerm)}%` : undefined;
+
   const rows = await adminQuestRows(db)
     .where(and(
+      searchPattern
+        ? sql`(${quest.title} ILIKE ${searchPattern} ESCAPE ${'\\'} OR ${quest.description} ILIKE ${searchPattern} ESCAPE ${'\\'})`
+        : undefined,
       status ? eq(quest.questStatus, status) : undefined,
       mode
         ? eq(quest.mode, mode === questV2Mode.firstComeFirstServed ? questMode.noCandidate : questMode.candidate)

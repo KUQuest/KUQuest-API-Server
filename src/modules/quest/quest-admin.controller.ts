@@ -104,6 +104,7 @@ export const listAdminQuestsController = async ({
 }: AdminContext & { query: AdminQuestListQuery }): Promise<ApiResponse<AdminQuestListResponse>> => {
   try {
     const result = await listAdminQuests({
+      q: query.q,
       status: query.status,
       mode: query.mode,
       participation: query.participation,
