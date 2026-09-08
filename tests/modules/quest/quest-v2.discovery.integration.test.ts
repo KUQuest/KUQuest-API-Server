@@ -457,7 +457,9 @@ describe('Quest API v2 discovery contract', () => {
     expect(body.data).not.toHaveProperty('candidate');
   });
 
-  it('returns public detail to active Workers even when a Quest is hidden or assigned', async () => {
+  // Public Quest Detail is not a Worker lifecycle view. An Active Worker reads a hidden
+  // or closed Quest through GET /api/v2/quests/:questId/participation instead.
+  it('refuses public detail to active Workers once a Quest is hidden or assigned', async () => {
     const hiddenQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Hidden Public` });
     await db.update(quest).set({
       questStatus: questStatus.open,
@@ -470,28 +472,15 @@ describe('Quest API v2 discovery contract', () => {
     await db.update(quest).set({ questStatus: questStatus.assigned }).where(eq(quest.id, assignedQuest));
     await addActiveWorkers(assignedQuest, [memberId]);
 
-    const hiddenResponse = await getPublicDetail(hiddenQuest);
-    expect(hiddenResponse.status).toBe(200);
-    const hiddenBody = (await hiddenResponse.json()) as { data: Record<string, unknown> };
-    expect(hiddenBody.data).toMatchObject({
-      id: hiddenQuest,
-      state: 'QUEST_OPEN',
-    });
-    expect(hiddenBody.data).not.toHaveProperty('hiddenAt');
+    expect((await getPublicDetail(hiddenQuest)).status).toBe(404);
+    expect((await getPublicDetail(assignedQuest)).status).toBe(404);
     const ownDetail = await getQuestV2Detail(ownerId, hiddenQuest);
     expect(ownDetail?.hiddenAt).toEqual(expect.any(String));
-
-    const assignedResponse = await getPublicDetail(assignedQuest);
-    expect(assignedResponse.status).toBe(200);
-    expect((await assignedResponse.json()).data).toMatchObject({
-      id: assignedQuest,
-      state: 'QUEST_ASSIGNED',
-    });
   });
 
-  // Participant access rests on an ACTIVE Assignment, and settlement makes every Active
-  // Assignment terminal, so a settled Quest closes the participant door behind itself.
-  it('stops returning public detail once the Worker Assignment leaves ASSIGNMENT_ACTIVE', async () => {
+  // Public access rests on QUEST_OPEN, so settlement closes this door for a Worker too.
+  // The Participation projection is where a settled Quest stays readable.
+  it('stops returning public detail once a Quest with Workers settles', async () => {
     const cancelledQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Cancelled Public` });
     await addActiveWorkers(cancelledQuest, [memberId]);
     const completedQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Completed Public` });

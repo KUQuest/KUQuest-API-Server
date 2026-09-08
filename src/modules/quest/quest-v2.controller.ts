@@ -21,6 +21,7 @@ import {
   editQuestV2,
   getPublicQuestV2Detail,
   getQuestV2Detail,
+  getQuestV2ParticipationDetail,
   getQuestV2PublishCheck,
   listOwnQuestV2,
   listQuestBoardV2,
@@ -60,6 +61,7 @@ import type {
   questV2MineResponseSchema,
   questV2BoardQuerySchema,
   questV2BoardResponseSchema,
+  questV2ParticipationDetailResponseSchema,
   questV2PublicDetailResponseSchema,
   questV2ParamsSchema,
   questV2PublishCheckResponseSchema,
@@ -84,6 +86,8 @@ type QuestV2WriteHeaders = Static<typeof questV2WriteHeadersSchema>;
 type QuestV2EditHeaders = Static<typeof questV2EditHeadersSchema>;
 type QuestV2DetailResponse = Static<typeof questV2DetailResponseSchema>['data'];
 type QuestV2PublicDetailResponse = Static<typeof questV2PublicDetailResponseSchema>['data'];
+type QuestV2ParticipationDetailResponse =
+  Static<typeof questV2ParticipationDetailResponseSchema>['data'];
 type QuestV2PublishCheckResponse = Static<typeof questV2PublishCheckResponseSchema>['data'];
 type QuestV2PublishResponse = Static<typeof questV2PublishResponseSchema>['data'];
 type QuestV2ImagesResponse = Static<typeof questV2ImagesResponseSchema>['data'];
@@ -690,6 +694,35 @@ export const getPublicQuestV2DetailController = async ({
   }
 
   let images: QuestV2PublicDetailResponse['images'];
+  try {
+    images = materializeQuestV2PublicImageResponse(questDetail.images);
+  } catch (error) {
+    if (!(error instanceof ImageLinkUnavailableError)) throw error;
+
+    set.status = 503;
+    return apiError(
+      'QUEST_IMAGE_STORAGE_UNAVAILABLE',
+      'Quest Image storage is unavailable',
+    );
+  }
+
+  return apiSuccess({ ...questDetail, images });
+};
+
+export const getQuestV2ParticipationDetailController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  params: QuestV2Params;
+}): Promise<ApiResponse<QuestV2ParticipationDetailResponse>> => {
+  const questDetail = await getQuestV2ParticipationDetail(session.user.id, params.questId);
+  if (!questDetail) {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+
+  let images: QuestV2ParticipationDetailResponse['images'];
   try {
     images = materializeQuestV2PublicImageResponse(questDetail.images);
   } catch (error) {

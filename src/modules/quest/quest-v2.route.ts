@@ -11,6 +11,7 @@ import {
   deleteQuestImageV2Controller,
   editQuestV2Controller,
   getPublicQuestV2DetailController,
+  getQuestV2ParticipationDetailController,
   getQuestV2DetailController,
   getQuestV2PublishCheckController,
   getQuestV2EditRequestController,
@@ -41,6 +42,7 @@ import {
   questV2ImagesResponseSchema,
   questV2ImagesUploadSchema,
   questV2ParamsSchema,
+  questV2ParticipationDetailResponseSchema,
   questV2PublicDetailResponseSchema,
   questV2PublishCheckHttpResponseSchema,
   questV2PublishHttpResponseSchema,
@@ -231,6 +233,18 @@ export const questV2Route = new Elysia({
       description:
         'Returns the public projection of a non-hidden QUEST_OPEN Quest to an authenticated Member who is not the Hirer. Candidate and Finance internals are excluded.',
       operationId: 'getPublicQuestV2Detail',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:questId/participation', getQuestV2ParticipationDetailController, {
+    params: questV2ParamsSchema,
+    response: responses(questV2ParticipationDetailResponseSchema, 400, 401, 404, 500, 503),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Get Participation Quest Detail through the v2 contract',
+      description:
+        'Returns the Quest to an authenticated Member who holds an Assignment on it, in every Quest State and while the Quest is hidden, together with that Member\'s own Assignment. Terminal Quests are read-only. Admin actions and Finance internals are excluded.',
+      operationId: 'getQuestV2ParticipationDetail',
       security: betterAuthSecurity,
     },
   })

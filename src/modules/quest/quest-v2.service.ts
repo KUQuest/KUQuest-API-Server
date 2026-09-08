@@ -39,7 +39,13 @@ import {
   sql,
 } from 'drizzle-orm';
 
-import { assignmentStatus, questStatus, type QuestStatus } from './quest.contract';
+import {
+  assignmentStatus,
+  isTerminalQuestStatus,
+  questStatus,
+  type AssignmentStatus,
+  type QuestStatus,
+} from './quest.contract';
 import { questV2StorageCompatibility } from './quest-storage.adapter';
 import {
   formatQuestV2ScheduleTime,
@@ -260,6 +266,11 @@ export type QuestV2PublicDetail = {
   hirerName: string;
   locations: Array<{ label: string }>;
   images: QuestV2ImageReference[];
+};
+
+export type QuestV2ParticipationDetail = QuestV2PublicDetail & {
+  assignment: { status: AssignmentStatus; startedAt: string | null };
+  capabilities: { canViewOnly: boolean };
 };
 
 type QuestV2ImageMutationOutcome =
@@ -2431,22 +2442,18 @@ const activeWorkerCountExpression = sql<number>`(
     AND ${questAssignment.assignmentStatus} = ${assignmentStatus.active}
 )`;
 
-const activeQuestAssignmentAccess = (userId: string) => exists(sql`(
+// Participation rests on an Assignment row in any state. Settlement makes an Active
+// Assignment terminal, and a Member who worked the Quest keeps the right to read it.
+const questAssignmentAccess = (userId: string) => exists(sql`(
   select 1
   from quest_assignment a
   where a.quest_id = ${quest.id}
     and a.worker_id = ${userId}
-    and a.assignment_status = ${assignmentStatus.active}
 )`);
 
-const questV2PublicReadConditions = (userId: string, includeActiveAssignment = false) => [
+const questV2PublicReadConditions = (userId: string) => [
   eq(quest.apiVersion, questApiVersion.v2),
-  includeActiveAssignment
-    ? or(
-        and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
-        activeQuestAssignmentAccess(userId),
-      )
-    : and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
+  and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
   ne(quest.hirerId, userId),
   isNotNull(quest.rewardSatang),
   isNotNull(quest.v2Mode),
@@ -2645,7 +2652,7 @@ export const getPublicQuestV2Detail = async (
     .from(quest)
     .innerJoin(authUser, eq(quest.hirerId, authUser.id))
     .leftJoin(tag, eq(quest.tagId, tag.id))
-    .where(and(eq(quest.id, questId), ...questV2PublicReadConditions(userId, true)))
+    .where(and(eq(quest.id, questId), ...questV2PublicReadConditions(userId)))
     .limit(1);
 
   if (!row) return undefined;
@@ -2679,6 +2686,90 @@ export const getPublicQuestV2Detail = async (
     hirerName: `${publicRow.hirerFirstName} ${publicRow.hirerLastName}`.trim(),
     locations,
     images,
+  };
+};
+
+export const getQuestV2ParticipationDetail = async (
+  userId: string,
+  questId: string,
+): Promise<QuestV2ParticipationDetail | undefined> => {
+  const [row] = await db
+    .select({
+      id: quest.id,
+      title: quest.title,
+      description: quest.description,
+      rewardSatang: quest.rewardSatang,
+      tagId: tag.id,
+      tagName: tag.name,
+      v2Mode: quest.v2Mode,
+      v2Participation: quest.v2Participation,
+      headcount: quest.headcount,
+      questStatus: quest.questStatus,
+      activeWorkerCount: activeWorkerCountExpression,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
+      proofRequired: quest.proofRequired,
+      hirerFirstName: authUser.firstName,
+      hirerLastName: authUser.lastName,
+      assignmentStatus: questAssignment.assignmentStatus,
+      assignmentStartedAt: questAssignment.startedAt,
+    })
+    .from(quest)
+    .innerJoin(authUser, eq(quest.hirerId, authUser.id))
+    .innerJoin(
+      questAssignment,
+      and(eq(questAssignment.questId, quest.id), eq(questAssignment.workerId, userId)),
+    )
+    .leftJoin(tag, eq(quest.tagId, tag.id))
+    .where(and(
+      eq(quest.id, questId),
+      eq(quest.apiVersion, questApiVersion.v2),
+      ne(quest.hirerId, userId),
+      questAssignmentAccess(userId),
+    ))
+    .limit(1);
+
+  if (!row) return undefined;
+  const participationRow = row as QuestV2PublicDetailRow & {
+    assignmentStatus: AssignmentStatus;
+    assignmentStartedAt: Date | null;
+  };
+  if (!isCompleteQuestV2DiscoveryRow(participationRow)) {
+    throw new Error(`Quest ${questId} has incomplete v2 Participation Detail data`);
+  }
+
+  const [conditionItems, locations, images] = await Promise.all([
+    selectConditionItems(db, questId),
+    selectLocations(db, questId),
+    selectQuestV2Images(db, questId),
+  ]);
+  if (conditionItems.length === 0) throw new Error(`Quest ${questId} has no Condition Items`);
+
+  return {
+    id: participationRow.id,
+    title: participationRow.title,
+    description: participationRow.description,
+    condition: { items: conditionItems },
+    tag: { id: participationRow.tagId, name: participationRow.tagName },
+    mode: participationRow.v2Mode,
+    participation: participationRow.v2Participation,
+    state: toV2State(participationRow.questStatus),
+    questReward: toBaht(satang(participationRow.rewardSatang)),
+    headcount: participationRow.headcount,
+    activeWorkerCount: Number(participationRow.activeWorkerCount),
+    startTime: formatQuestV2ScheduleTime(participationRow.startTime),
+    dueAt: formatQuestV2ScheduleTime(participationRow.dueAt),
+    proofRequired: participationRow.proofRequired,
+    hirerName: `${participationRow.hirerFirstName} ${participationRow.hirerLastName}`.trim(),
+    locations,
+    images,
+    assignment: {
+      status: participationRow.assignmentStatus,
+      startedAt: participationRow.assignmentStartedAt?.toISOString() ?? null,
+    },
+    capabilities: {
+      canViewOnly: isTerminalQuestStatus(participationRow.questStatus),
+    },
   };
 };
 

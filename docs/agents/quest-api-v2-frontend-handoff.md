@@ -101,13 +101,15 @@ it does not allow anonymous access.
 | --- | --- | --- |
 | `listQuestBoardV2` | `GET /api/v2/quests` | Any authenticated Member; `200` |
 | `getPublicQuestV2Detail` | `GET /api/v2/quests/:questId/public` | Authenticated Member who is not the Hirer; `200` |
+| `getQuestV2ParticipationDetail` | `GET /api/v2/quests/:questId/participation` | Authenticated Member who holds an Assignment on the Quest; `200` |
 | `createQuestEditRequestV2` | `POST /api/v2/quests/:questId/edit-requests` | Hirer of a `QUEST_ASSIGNED` Quest; `201` |
 | `getQuestEditRequestV2` | `GET /api/v2/quests/edit-requests/:requestId` | Hirer or current Active Worker; `200` |
 | `respondToQuestEditRequestV2` | `POST /api/v2/quests/edit-requests/:requestId/respond` | Current Active Worker; `200` |
 
 The existing `GET /api/v2/quests/:questId` remains the owner projection. A
-Hirer calling the `/public` route receives `404 QUEST_NOT_FOUND`. v1 routes,
-v1 rows, and v1 compatibility mapping are out of scope.
+Hirer calling the `/public` or `/participation` route receives
+`404 QUEST_NOT_FOUND`. v1 routes, v1 rows, and v1 compatibility mapping are out
+of scope.
 
 ### Quest Board
 
@@ -201,6 +203,31 @@ The response never contains Quest Funding Total, Platform Fee, Money Policy,
 Wallet, Funding Reservation, Hirer ID, Candidate data, or other Finance
 internals. A missing, hidden, closed, or unreadable Quest returns
 `404 QUEST_NOT_FOUND`. Public Detail is not a Worker lifecycle view.
+
+### Participation Quest Detail
+
+`GET /api/v2/quests/:questId/participation` returns the Quest to an
+authenticated Member who holds an `Assignment` on it. It is the Worker
+lifecycle view that Public Quest Detail is not. Its fields are the Public Quest
+Detail fields plus:
+
+```text
+assignment.status, assignment.startedAt, capabilities.canViewOnly
+```
+
+`assignment.status` carries one of the four `Assignment` states, so a Member
+keeps this view after settlement makes that `Assignment` terminal.
+`capabilities.canViewOnly` is `true` in `QUEST_COMPLETED`, `QUEST_CANCELLED`,
+and `QUEST_FAILED`: a Terminal Quest is read-only. The per-branch lifecycle
+capabilities are specified separately.
+
+Access does not depend on Quest State or on the hidden overlay, because Quest
+Hide is discovery isolation only and leaves Current Accepted Participants
+unaffected (`docs/rulebook/admin/admin-quest-hide-contract.md`). The response
+never contains the overlay itself, Quest Funding Total, Platform Fee, Money
+Policy, Wallet, Funding Reservation, Hirer ID, Candidate data, or any Admin
+action. A caller with no `Assignment` on the Quest, the Hirer, a v1 Quest, and
+a missing Quest all return `404 QUEST_NOT_FOUND`.
 
 ### Quest Edit
 
