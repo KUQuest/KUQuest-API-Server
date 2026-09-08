@@ -11,7 +11,7 @@ import {
 import { tag } from '@/database/schema/tag.schema';
 import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
-import { createQuestV2, getQuestV2Detail, type QuestV2CreateInput } from '@/modules/quest';
+import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import { questStatus } from '@/modules/quest/quest.contract';
 
 import { Elysia } from 'elysia';
@@ -457,7 +457,17 @@ describe('Quest API v2 discovery contract', () => {
     expect(body.data).not.toHaveProperty('candidate');
   });
 
-  it('returns public detail to active Workers even when a Quest is hidden or assigned', async () => {
+  it('returns public detail to an active Worker only for a visible open Quest', async () => {
+    const openQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Active Worker Public` });
+    await addActiveWorkers(openQuest, [memberId]);
+
+    const openResponse = await getPublicDetail(openQuest);
+    expect(openResponse.status).toBe(200);
+    expect((await openResponse.json()).data).toMatchObject({
+      id: openQuest,
+      state: 'QUEST_OPEN',
+    });
+
     const hiddenQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Hidden Public` });
     await db.update(quest).set({
       questStatus: questStatus.open,
@@ -466,27 +476,55 @@ describe('Quest API v2 discovery contract', () => {
     }).where(eq(quest.id, hiddenQuest));
     await addActiveWorkers(hiddenQuest, [memberId]);
 
-    const assignedQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Assigned Public` });
-    await db.update(quest).set({ questStatus: questStatus.assigned }).where(eq(quest.id, assignedQuest));
-    await addActiveWorkers(assignedQuest, [memberId]);
+    const nonOpenCases = [
+      { state: questStatus.assigned, mode: 'FIRST_COME_FIRST_SERVED', participation: 'SINGLE', headcount: 1 },
+      { state: questStatus.assigned, mode: 'FIRST_COME_FIRST_SERVED', participation: 'GROUP', headcount: 2 },
+      { state: questStatus.assigned, mode: 'CANDIDATE', participation: 'SINGLE', headcount: 1 },
+      { state: questStatus.assigned, mode: 'CANDIDATE', participation: 'GROUP', headcount: 2 },
+      { state: questStatus.inProgress, mode: 'FIRST_COME_FIRST_SERVED', participation: 'SINGLE', headcount: 1 },
+      { state: questStatus.inProgress, mode: 'FIRST_COME_FIRST_SERVED', participation: 'GROUP', headcount: 2 },
+      { state: questStatus.inProgress, mode: 'CANDIDATE', participation: 'SINGLE', headcount: 1 },
+      { state: questStatus.inProgress, mode: 'CANDIDATE', participation: 'GROUP', headcount: 2 },
+      { state: questStatus.assigned, mode: 'FIRST_COME_FIRST_SERVED', participation: 'SINGLE', headcount: 1, hidden: true },
+      { state: questStatus.inProgress, mode: 'CANDIDATE', participation: 'GROUP', headcount: 2, hidden: true },
+    ] as const;
+    const nonOpenQuestIds = await Promise.all(nonOpenCases.map(async (testCase, index) => {
+      const questId = await createOpenQuest(ownerId, {
+        title: `${fixturePrefix} ${testCase.state} ${index}`,
+        mode: testCase.mode,
+        participation: testCase.participation,
+        headcount: testCase.headcount,
+      });
+      await db.update(quest).set({ questStatus: testCase.state }).where(eq(quest.id, questId));
+      if ('hidden' in testCase && testCase.hidden) {
+        await db.update(quest).set({ hiddenAt: new Date(), hiddenByAdminId: adminId }).where(eq(quest.id, questId));
+      }
+      await addActiveWorkers(questId, [memberId]);
+      return questId;
+    }));
 
-    const hiddenResponse = await getPublicDetail(hiddenQuest);
-    expect(hiddenResponse.status).toBe(200);
-    const hiddenBody = (await hiddenResponse.json()) as { data: Record<string, unknown> };
-    expect(hiddenBody.data).toMatchObject({
-      id: hiddenQuest,
-      state: 'QUEST_OPEN',
-    });
-    expect(hiddenBody.data).not.toHaveProperty('hiddenAt');
-    const ownDetail = await getQuestV2Detail(ownerId, hiddenQuest);
-    expect(ownDetail?.hiddenAt).toEqual(expect.any(String));
-
-    const assignedResponse = await getPublicDetail(assignedQuest);
-    expect(assignedResponse.status).toBe(200);
-    expect((await assignedResponse.json()).data).toMatchObject({
-      id: assignedQuest,
-      state: 'QUEST_ASSIGNED',
-    });
+    const unreadableResponses = await Promise.all(
+      [hiddenQuest, ...nonOpenQuestIds].map(async (questId) => {
+        const response = await getPublicDetail(questId);
+        return { status: response.status, body: await response.json() };
+      }),
+    );
+    expect(unreadableResponses.map(({ status, body }) => ({
+      status,
+      code: body.error?.code,
+    }))).toEqual([
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+      { status: 404, code: 'QUEST_NOT_FOUND' },
+    ]);
   });
 
   // Participant access rests on an ACTIVE Assignment, and settlement makes every Active
