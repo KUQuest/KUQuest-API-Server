@@ -18,11 +18,13 @@ import {
   questV2EditRequest,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
+import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 
 import { randomUUID } from 'node:crypto';
 
+import { Elysia } from 'elysia';
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 
@@ -30,6 +32,20 @@ const adminEmail = `quest-admin-route-${randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';
 let adminCookie = '';
 let adminId = '';
+
+const memberEmail = `quest-admin-member-${randomUUID()}@ku.th`;
+const memberPassword = 'TestStudent1!';
+const memberAuthApp = new Elysia({ name: 'quest-admin-member-test-auth' }).use(
+  createStagingTestAuthRoute({
+    enabled: true,
+    deploymentEnv: 'staging',
+    email: memberEmail,
+    password: memberPassword,
+    firstName: 'Quest',
+    lastName: 'Member',
+  }),
+);
+let memberCookie = '';
 
 const hirerId = randomUUID();
 const workerIds = [randomUUID(), randomUUID(), randomUUID()];
@@ -86,6 +102,16 @@ beforeAll(async () => {
   adminCookie = getCookieHeader(loginResponse);
   const [admin] = await db.select({ id: authAdmin.id }).from(authAdmin).where(eq(authAdmin.email, adminEmail));
   adminId = admin!.id;
+
+  const memberLogin = await memberAuthApp.handle(
+    new Request('http://localhost/api/staging/test-auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: memberEmail, password: memberPassword }),
+    }),
+  );
+  if (memberLogin.status !== 200) throw new Error(`Member authentication failed: ${memberLogin.status}`);
+  memberCookie = getCookieHeader(memberLogin);
 
   openQuestId = randomUUID();
   questIds.push(openQuestId);
@@ -294,6 +320,18 @@ describe('Admin Quest API routes', () => {
     expect(command.status).toBe(401);
   });
 
+  it('rejects a Member Session on Admin Quest endpoints', async () => {
+    const list = await app.handle(new Request('http://localhost/api/v1/admin/quests', {
+      headers: { cookie: memberCookie },
+    }));
+    const detail = await app.handle(new Request(`http://localhost/api/v1/admin/quests/${openQuestId}`, {
+      headers: { cookie: memberCookie },
+    }));
+
+    expect(list.status).toBe(401);
+    expect(detail.status).toBe(401);
+  });
+
   it('publishes the Admin Quest contract in OpenAPI', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
     const document = await response.json() as {
@@ -348,6 +386,32 @@ describe('Admin Quest API routes', () => {
 
     const invalidCursor = await adminRequest('/api/v1/admin/quests?cursor=not-valid-base64url!!');
     expect(invalidCursor.status).toBe(400);
+  });
+
+  it('searches Quest title and description within the Admin filter scope', async () => {
+    type ListResponse = { data: { items: Array<Record<string, unknown>>; nextCursor: string | null } };
+
+    const byTitle = await adminRequest('/api/v1/admin/quests?q=Hidden%20list%20quest&limit=50');
+    const byTitleBody = await byTitle.json() as ListResponse;
+    expect(byTitle.status).toBe(200);
+    expect(byTitleBody.data.items.map((item) => item.id)).toContain(hiddenQuestId);
+    expect(byTitleBody.data.items.map((item) => item.id)).not.toContain(openQuestId);
+
+    const byDescription = await adminRequest('/api/v1/admin/quests?q=Full%20facet%20quest&limit=50');
+    const byDescriptionBody = await byDescription.json() as ListResponse;
+    expect(byDescription.status).toBe(200);
+    expect(byDescriptionBody.data.items.map((item) => item.id)).toContain(detailQuestId);
+
+    const withFilter = await adminRequest('/api/v1/admin/quests?q=list%20quest&hidden=false&limit=50');
+    const withFilterBody = await withFilter.json() as ListResponse;
+    expect(withFilter.status).toBe(200);
+    expect(withFilterBody.data.items.map((item) => item.id)).toContain(openQuestId);
+    expect(withFilterBody.data.items.map((item) => item.id)).not.toContain(hiddenQuestId);
+
+    const wildcard = await adminRequest('/api/v1/admin/quests?q=%25&limit=50');
+    const wildcardBody = await wildcard.json() as ListResponse;
+    expect(wildcard.status).toBe(200);
+    expect(wildcardBody.data.items.map((item) => item.id)).not.toContain(openQuestId);
   });
 
   it('reads full Quest detail facets for Admin review', async () => {

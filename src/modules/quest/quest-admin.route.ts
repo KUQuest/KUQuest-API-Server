@@ -34,7 +34,7 @@ export const adminQuestRoute = new Elysia({
     detail: {
       tags: ['Admin Quests'],
       summary: 'List Quests for Admin review',
-      description: 'Lists Quests across every state, mode, and participation shape, including hidden Quests, using bounded cursor pagination and safe filters.',
+      description: 'Lists Quests across every state, mode, and participation shape, including hidden Quests, using bounded cursor pagination, safe filters, and a title and description search.',
       operationId: 'listAdminQuests',
       security: betterAuthSecurity,
     },

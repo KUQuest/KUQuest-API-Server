@@ -343,7 +343,7 @@ const durationMinutes = (startTime: Date, dueAt: Date | null) => {
   return Math.max(1, Math.round((dueAt.getTime() - startTime.getTime()) / 60_000));
 };
 
-const escapeLike = (value: string) => value.replace(/[\\%_]/g, '\\$&');
+export const escapeLike = (value: string) => value.replace(/[\\%_]/g, '\\$&');
 
 const hirerName = (row: Pick<QuestRow, 'hirerFirstName' | 'hirerLastName'>) =>
   `${row.hirerFirstName} ${row.hirerLastName}`.trim();

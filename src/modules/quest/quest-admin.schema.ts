@@ -49,6 +49,7 @@ export const adminQuestTerminateBodySchema = t.Object({
 }, { additionalProperties: false });
 
 export const adminQuestListQuerySchema = t.Object({
+  q: t.Optional(t.String({ maxLength: 200 })),
   status: t.Optional(adminQuestStatusSchema),
   mode: t.Optional(adminQuestModeSchema),
   participation: t.Optional(adminQuestParticipationSchema),
