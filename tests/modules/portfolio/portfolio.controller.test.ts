@@ -1,7 +1,9 @@
 import {
   createOwnPortfolio,
   deleteOwnPortfolio,
+  deleteOwnPortfolioImage,
   listOwnPortfolio,
+  replaceOwnPortfolioImage,
   updateOwnPortfolio,
 } from '@/modules/portfolio/portfolio.controller';
 import * as portfolioService from '@/modules/portfolio/portfolio.service';
@@ -284,5 +286,173 @@ describe('deleteOwnPortfolio', () => {
       error: { code: 'PORTFOLIO_NOT_FOUND', message: 'Portfolio item not found' },
     });
     expect(set.status).toBe(404);
+  });
+});
+
+const storedImage = {
+  bucket: 'kuquest',
+  objectKey: 'portfolio/student-1/new.png',
+  contentType: 'image/png' as const,
+  sizeBytes: 12,
+};
+
+const invokeReplaceImage = (
+  params: { portfolioId: string; fileId?: string },
+  request?: Request,
+) => {
+  const set: { status?: number | string } = {};
+
+  return {
+    result: replaceOwnPortfolioImage({
+      body: { image: png('new.png') },
+      params: params as never,
+      request: request as never,
+      session: session as never,
+      set: set as never,
+    }),
+    set,
+  };
+};
+
+describe('replaceOwnPortfolioImage', () => {
+  it('uploads the image and returns the new version when there is no previous image', async () => {
+    spyOn(portfolioStorage, 'upload').mockResolvedValue(storedImage);
+    spyOn(portfolioService, 'replacePortfolioImage').mockResolvedValue({
+      fileId: fileIdOne,
+      previousFileId: null,
+      previousBucket: null,
+      previousObjectKey: null,
+      version: 2,
+    });
+
+    const { result, set } = invokeReplaceImage({ portfolioId });
+
+    expect(await result).toEqual({ success: true, data: { version: 2 } });
+    expect(set.status).toBeUndefined();
+    expect(portfolioService.replacePortfolioImage).toHaveBeenCalledWith(
+      studentAuthId,
+      portfolioId,
+      storedImage,
+      undefined,
+      undefined,
+    );
+  });
+
+  it('removes the previous image only after storing its replacement', async () => {
+    spyOn(portfolioStorage, 'upload').mockResolvedValue(storedImage);
+    spyOn(portfolioService, 'replacePortfolioImage').mockResolvedValue({
+      fileId: fileIdTwo,
+      previousFileId: fileIdOne,
+      previousBucket: 'kuquest',
+      previousObjectKey: 'portfolio/a.png',
+      version: 3,
+    });
+    const deleteObject = spyOn(portfolioStorage, 'delete').mockResolvedValue();
+    const markDeleted = spyOn(portfolioService, 'markPortfolioImageDeleted').mockResolvedValue();
+
+    const { result, set } = invokeReplaceImage({ portfolioId, fileId: fileIdOne });
+
+    expect(await result).toEqual({ success: true, data: { version: 3 } });
+    expect(set.status).toBeUndefined();
+    expect(portfolioService.replacePortfolioImage).toHaveBeenCalledWith(
+      studentAuthId,
+      portfolioId,
+      storedImage,
+      fileIdOne,
+      undefined,
+    );
+    expect(deleteObject).toHaveBeenCalledWith('kuquest', 'portfolio/a.png');
+    expect(markDeleted).toHaveBeenCalledWith(studentAuthId, fileIdOne);
+  });
+
+  it('discards the upload and reports a missing or unowned entry as not found', async () => {
+    spyOn(portfolioStorage, 'upload').mockResolvedValue(storedImage);
+    spyOn(portfolioService, 'replacePortfolioImage').mockResolvedValue({ outcome: 'not-found' });
+    const deleteObject = spyOn(portfolioStorage, 'delete').mockResolvedValue();
+
+    const { result, set } = invokeReplaceImage({ portfolioId });
+
+    expect(await result).toEqual({
+      success: false,
+      error: { code: 'PORTFOLIO_NOT_FOUND', message: 'Portfolio item not found' },
+    });
+    expect(set.status).toBe(404);
+    expect(deleteObject).toHaveBeenCalledWith(storedImage.bucket, storedImage.objectKey);
+  });
+
+  it('rejects an invalid resource version header without uploading anything', async () => {
+    const upload = spyOn(portfolioStorage, 'upload');
+    const request = new Request('http://localhost/x', { headers: { 'if-match': 'not-a-number' } });
+
+    const { result, set } = invokeReplaceImage({ portfolioId }, request);
+
+    expect(await result).toEqual({
+      success: false,
+      error: { code: 'INVALID_VERSION', message: 'Resource version must be a positive integer' },
+    });
+    expect(set.status).toBe(400);
+    expect(upload).not.toHaveBeenCalled();
+  });
+});
+
+const invokeDeleteImage = (params: { portfolioId: string; fileId?: string }) => {
+  const set: { status?: number | string } = {};
+
+  return {
+    result: deleteOwnPortfolioImage({
+      params: params as never,
+      request: undefined as never,
+      session: session as never,
+      set: set as never,
+    }),
+    set,
+  };
+};
+
+describe('deleteOwnPortfolioImage', () => {
+  it('deletes the stored image and returns the new version', async () => {
+    spyOn(portfolioService, 'deletePortfolioImage').mockResolvedValue({
+      outcome: 'deleted',
+      bucket: 'kuquest',
+      objectKey: 'portfolio/a.png',
+      version: 2,
+    });
+    const deleteObject = spyOn(portfolioStorage, 'delete').mockResolvedValue();
+
+    const { result, set } = invokeDeleteImage({ portfolioId, fileId: fileIdOne });
+
+    expect(await result).toEqual({ success: true, data: { version: 2 } });
+    expect(set.status).toBeUndefined();
+    expect(deleteObject).toHaveBeenCalledWith('kuquest', 'portfolio/a.png');
+    expect(portfolioService.deletePortfolioImage).toHaveBeenCalledWith(
+      studentAuthId,
+      portfolioId,
+      fileIdOne,
+      undefined,
+    );
+  });
+
+  it('reports a missing or unowned entry as not found', async () => {
+    spyOn(portfolioService, 'deletePortfolioImage').mockResolvedValue({ outcome: 'not-found' });
+
+    const { result, set } = invokeDeleteImage({ portfolioId });
+
+    expect(await result).toEqual({
+      success: false,
+      error: { code: 'PORTFOLIO_NOT_FOUND', message: 'Portfolio item not found' },
+    });
+    expect(set.status).toBe(404);
+  });
+
+  it('reports a version conflict', async () => {
+    spyOn(portfolioService, 'deletePortfolioImage').mockResolvedValue({ outcome: 'conflict' });
+
+    const { result, set } = invokeDeleteImage({ portfolioId });
+
+    expect(await result).toEqual({
+      success: false,
+      error: { code: 'CONFLICT', message: 'Portfolio was changed by another request' },
+    });
+    expect(set.status).toBe(409);
   });
 });
