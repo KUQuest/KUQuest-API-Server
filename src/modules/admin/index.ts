@@ -1,3 +1,4 @@
+export { adminOverviewRoute } from './admin-overview.route';
 export { createAdminActionService } from './admin-action.service';
 export type {
   AdminActionCommandInput,
