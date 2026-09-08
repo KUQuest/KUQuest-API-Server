@@ -8,6 +8,7 @@ import {
   deleteAvatar,
   getOwnProfile,
   getPublicProfile,
+  getPublicReviews,
   getReputation,
   getReviews,
   setAvatar,
@@ -238,6 +239,20 @@ const invokeGetOwnProfile = () => {
   return { result: getOwnProfile({ session: session as never, set: set as never }), set };
 };
 
+const invokeGetPublicReviews = (userId = 'student-2', query: Record<string, unknown> = {}) => {
+  const set: { status?: number | string } = {};
+
+  return {
+    result: getPublicReviews({
+      params: { userId },
+      query: query as never,
+      session: session as never,
+      set: set as never,
+    }),
+    set,
+  };
+};
+
 const invokeGetPublicProfile = (userId = 'student-2') => {
   const set: { status?: number | string } = {};
 
@@ -341,6 +356,79 @@ describe('getReviews', () => {
     expect(await getReviews()).toEqual({
       success: true,
       data: { items: [], total: 0, nextCursor: null },
+    });
+  });
+});
+
+describe('getPublicReviews', () => {
+  it('reports a missing target profile as PROFILE_NOT_FOUND', async () => {
+    spyOn(profileService, 'getPublicProfile').mockResolvedValue(undefined);
+    const getProfileReviews = spyOn(profileService, 'getProfileReviews');
+
+    const { result, set } = invokeGetPublicReviews();
+
+    expect(await result).toEqual({
+      success: false,
+      error: { code: 'PROFILE_NOT_FOUND', message: 'Profile not found' },
+    });
+    expect(set.status).toBe(404);
+    expect(getProfileReviews).not.toHaveBeenCalled();
+  });
+
+  it("returns another member's Reviews when the profile exists", async () => {
+    spyOn(profileService, 'getPublicProfile').mockResolvedValue({
+      version: 1,
+      firstName: 'Student',
+      lastName: 'Two',
+      bio: null,
+      academicYear: 2025,
+      department: null,
+      occupation: null,
+      avatar: null,
+    });
+    spyOn(profileService, 'getProfileReviews').mockResolvedValue({
+      rows: [
+        {
+          id: 'review-1',
+          reviewerFirstName: 'Student',
+          reviewerLastName: 'One',
+          rating: 5,
+          comment: 'Great work',
+          createdAt: new Date('2025-01-05T00:00:00.000Z'),
+          questId: 'quest-1',
+          questTitle: 'Tutor session',
+          avatarBucket: null,
+          avatarObjectKey: null,
+        },
+      ],
+      hasNext: false,
+      total: 1,
+    });
+
+    const { result, set } = invokeGetPublicReviews('student-2', { rating: 5 });
+
+    expect(await result).toEqual({
+      success: true,
+      data: {
+        items: [
+          {
+            id: 'review-1',
+            reviewer: { displayName: 'Student One', avatar: null },
+            rating: 5,
+            comment: 'Great work',
+            createdAt: '2025-01-05T00:00:00.000Z',
+            quest: { id: 'quest-1', title: 'Tutor session' },
+          },
+        ],
+        total: 1,
+        nextCursor: null,
+      },
+    });
+    expect(set.status).toBeUndefined();
+    expect(profileService.getProfileReviews).toHaveBeenCalledWith('student-2', {
+      rating: 5,
+      limit: 20,
+      cursor: undefined,
     });
   });
 });
