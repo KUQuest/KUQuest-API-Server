@@ -395,6 +395,7 @@ describe('getPublicReviews', () => {
           rating: 5,
           comment: 'Great work',
           createdAt: new Date('2025-01-05T00:00:00.000Z'),
+          updatedAt: new Date('2025-01-05T00:00:00.000Z'),
           questId: 'quest-1',
           questTitle: 'Tutor session',
           avatarBucket: null,
