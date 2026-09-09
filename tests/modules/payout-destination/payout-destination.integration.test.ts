@@ -188,7 +188,7 @@ describe('Payout Destination application services', () => {
       maximumFeeSatang: 0,
       maximumTaxSatang: 0,
       maximumDebitSatang: 100,
-      payoutStatus: 'CREATING',
+      payoutStatus: 'SUBMITTED_TO_PROVIDER',
       reserveLedgerTransactionId: ledgerTransaction.id,
     }).returning();
     if (!payout) throw new Error('Failed to create Payout fixture');
@@ -379,7 +379,7 @@ describe('Payout Destination application services', () => {
       maximumFeeSatang: 0,
       maximumTaxSatang: 0,
       maximumDebitSatang: 100,
-      payoutStatus: 'CREATING',
+      payoutStatus: 'SUBMITTED_TO_PROVIDER',
       reserveLedgerTransactionId: ledgerTransaction.id,
     }).execute()).rejects.toThrow();
   });

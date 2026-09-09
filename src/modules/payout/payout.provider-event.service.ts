@@ -473,12 +473,12 @@ const releasePayoutReserve = async (
   });
 };
 
-const reverseCompletedPayout = async (
+const reverseSucceededPayout = async (
   transaction: WalletTransaction,
   payout: typeof paymentPayouts.$inferSelect,
 ) => {
   if (!payout.finalLedgerTransactionId) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Completed Payout has no ledger transaction to reverse.');
+    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Succeeded Payout has no ledger transaction to reverse.');
   }
   const [existingCorrection] = await transaction
     .select({ id: walletLedgerTransaction.id })
@@ -492,7 +492,7 @@ const reverseCompletedPayout = async (
     .from(walletLedgerPosting)
     .where(eq(walletLedgerPosting.transactionId, payout.finalLedgerTransactionId));
   if (originalPostings.length === 0) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Completed Payout ledger postings are missing.');
+    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Succeeded Payout ledger postings are missing.');
   }
   await createSealedLedgerTransactionInTransaction(transaction, {
     businessReference: `payout-reversal:${payout.id}`,
@@ -530,7 +530,7 @@ const applyPayoutOutcomeInTransaction = async (
   }
 
   const providerFacts = providerFactsFor(payout, facts);
-  if (facts.normalizedStatus === 'COMPLETED') {
+  if (facts.normalizedStatus === 'SUCCEEDED') {
     const actualFeeSatang = facts.actualFeeSatang ?? (payout.actualFeeSatang === null ? satang(0) : satang(payout.actualFeeSatang));
     const actualTaxSatang = facts.actualTaxSatang ?? (payout.actualTaxSatang === null ? satang(0) : satang(payout.actualTaxSatang));
     const actualDebitSatang = facts.actualDebitSatang ?? (payout.actualDebitSatang === null
@@ -542,7 +542,7 @@ const applyPayoutOutcomeInTransaction = async (
     ) {
       throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider Payout amounts do not match the reserve.');
     }
-    if (payout.payoutStatus === 'COMPLETED') {
+    if (payout.payoutStatus === 'SUCCEEDED') {
       await transaction
         .update(paymentPayouts)
         .set({
@@ -551,6 +551,8 @@ const applyPayoutOutcomeInTransaction = async (
           actualTaxSatang,
           actualDebitSatang,
           providerSubmissionClaimedAt: null,
+          version: sql`${paymentPayouts.version} + 1`,
+          updatedAt: new Date(),
         })
         .where(eq(paymentPayouts.id, payout.id));
       return;
@@ -565,17 +567,19 @@ const applyPayoutOutcomeInTransaction = async (
         actualFeeSatang,
         actualTaxSatang,
         actualDebitSatang,
-        payoutStatus: 'COMPLETED',
+        payoutStatus: 'SUCCEEDED',
         finalLedgerTransactionId: ledger.id,
         providerSubmissionClaimedAt: null,
+        version: sql`${paymentPayouts.version} + 1`,
+        updatedAt: new Date(),
       })
       .where(eq(paymentPayouts.id, payout.id))
       .returning();
-    if (!updated) throw new MoneyDomainError('PAYOUT_UPDATE_FAILED', 'Completed Payout state could not be saved.');
+    if (!updated) throw new MoneyDomainError('PAYOUT_UPDATE_FAILED', 'Succeeded Payout state could not be saved.');
     await transaction.insert(paymentPayoutStatusHistory).values({
       payoutId: payout.id,
       fromStatus: payout.payoutStatus,
-      toStatus: 'COMPLETED',
+      toStatus: 'SUCCEEDED',
       providerStatus: facts.providerStatus,
       source,
       reason: 'Provider confirmed the Payout.',
@@ -584,43 +588,52 @@ const applyPayoutOutcomeInTransaction = async (
     return;
   }
 
-  if (payout.payoutStatus === 'COMPLETED') {
+  if (payout.payoutStatus === 'SUCCEEDED') {
     if (isPayoutProviderReversal(facts.providerStatus, facts.eventType)) {
-      await reverseCompletedPayout(transaction, payout);
+      await reverseSucceededPayout(transaction, payout);
       await transaction.insert(paymentPayoutStatusHistory).values({
         payoutId: payout.id,
-        fromStatus: 'COMPLETED',
-        toStatus: 'COMPLETED',
+        fromStatus: 'SUCCEEDED',
+        toStatus: 'SUCCEEDED',
         providerStatus: facts.providerStatus,
         source,
-        reason: 'Provider reversed the completed Payout; linked ledger corrections were recorded.',
+        reason: 'Provider reversed the succeeded Payout; linked ledger corrections were recorded.',
         occurredAt: facts.providerOccurredAt,
       });
-      await transaction.update(paymentPayouts).set(providerFacts).where(eq(paymentPayouts.id, payout.id));
+      await transaction.update(paymentPayouts).set({
+        ...providerFacts,
+        version: sql`${paymentPayouts.version} + 1`,
+      }).where(eq(paymentPayouts.id, payout.id));
     }
     return;
   }
   if (['FAILED', 'CANCELLED'].includes(payout.payoutStatus)) return;
 
   const nextStatus = facts.normalizedStatus === 'CANCELLED' ? 'CANCELLED' : 'FAILED';
-  if (facts.normalizedStatus === 'PENDING') {
-    if (payout.payoutStatus === 'CREATING' || payout.payoutStatus === 'AWAITING_RECONCILIATION') {
+  if (facts.normalizedStatus === 'PROVIDER_PENDING') {
+    if (payout.payoutStatus === 'SUBMITTED_TO_PROVIDER' || payout.payoutStatus === 'PROVIDER_PENDING') {
       await transaction.update(paymentPayouts).set({
         ...providerFacts,
-        payoutStatus: 'PENDING',
+        payoutStatus: 'PROVIDER_PENDING',
         providerSubmissionClaimedAt: null,
+        version: sql`${paymentPayouts.version} + 1`,
+        updatedAt: new Date(),
       }).where(eq(paymentPayouts.id, payout.id));
       await transaction.insert(paymentPayoutStatusHistory).values({
         payoutId: payout.id,
         fromStatus: payout.payoutStatus,
-        toStatus: 'PENDING',
+        toStatus: 'PROVIDER_PENDING',
         providerStatus: facts.providerStatus,
         source,
         reason: 'Provider reports the Payout is still in progress.',
         occurredAt: facts.providerOccurredAt,
       });
     } else {
-      await transaction.update(paymentPayouts).set({ ...providerFacts, providerSubmissionClaimedAt: null }).where(eq(paymentPayouts.id, payout.id));
+      await transaction.update(paymentPayouts).set({
+        ...providerFacts,
+        providerSubmissionClaimedAt: null,
+        version: sql`${paymentPayouts.version} + 1`,
+      }).where(eq(paymentPayouts.id, payout.id));
     }
     return;
   }
@@ -639,6 +652,8 @@ const applyPayoutOutcomeInTransaction = async (
       payoutStatus: nextStatus,
       finalLedgerTransactionId: ledger.id,
       providerSubmissionClaimedAt: null,
+      version: sql`${paymentPayouts.version} + 1`,
+      updatedAt: new Date(),
     })
     .where(eq(paymentPayouts.id, payout.id))
     .returning();

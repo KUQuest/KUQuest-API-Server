@@ -10,7 +10,7 @@ import {
   providerPayloadHash,
 } from '@/modules/top-up/top-up.provider-event';
 
-export type PayoutOutcomeStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+export type PayoutOutcomeStatus = 'PROVIDER_PENDING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
 
 export type ParsedPayoutProviderEvent = {
   provider: 'XENDIT';
@@ -88,10 +88,10 @@ const parseProviderDate = (value: unknown, fallback: Date): Date => {
 
 export const normalizePayoutOutcomeStatus = (providerStatus: string): PayoutOutcomeStatus => {
   const status = providerStatus.trim().toUpperCase().replaceAll('-', '_').replaceAll(' ', '_');
-  if (['SUCCEEDED', 'SUCCESS', 'COMPLETED', 'SETTLED'].includes(status)) return 'COMPLETED';
+  if (['SUCCEEDED', 'SUCCESS', 'COMPLETED', 'SETTLED'].includes(status)) return 'SUCCEEDED';
   if (['CANCELLED', 'CANCELED'].includes(status)) return 'CANCELLED';
   if (['FAILED', 'FAILURE', 'REJECTED', 'EXPIRED', 'REVERSED', 'COMPLIANCE_REJECTED'].includes(status)) return 'FAILED';
-  return 'PENDING';
+  return 'PROVIDER_PENDING';
 };
 
 export const isPayoutProviderReversal = (providerStatus: string, eventType?: string): boolean => (
@@ -190,9 +190,9 @@ export const parsePayoutProviderEvent = (
   let actualFeeSatang: Satang | null = null;
   let actualTaxSatang: Satang | null = null;
   let actualDebitSatang: Satang | null = null;
-  if (normalizedStatus === 'COMPLETED') {
+  if (normalizedStatus === 'SUCCEEDED') {
     if (providerAmountSatang === null) {
-      throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'A completed Provider payout must include an amount.');
+      throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'A succeeded Provider payout must include an amount.');
     }
     actualFeeSatang = parseOptionalThbAmount(actualAmountValue(data, [
       'fee',

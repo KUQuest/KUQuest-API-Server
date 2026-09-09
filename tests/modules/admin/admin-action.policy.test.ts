@@ -70,12 +70,16 @@ describe('Admin Action policy', () => {
       status: 'ASSIGNED',
       sequence: 2,
       flags: [true, null],
+      reasonCode: 'POLICY_REVIEW',
+      cancellationReasonCode: 'PAYOUT_INVALID_DESTINATION',
     })).toEqual({
       previousStatus: 'ACTIVE',
       nextStatus: 'FROZEN',
       status: 'ASSIGNED',
       sequence: 2,
       flags: [true, null],
+      reasonCode: 'POLICY_REVIEW',
+      cancellationReasonCode: 'PAYOUT_INVALID_DESTINATION',
     });
     expect(() => normalizeSafeObject({ text: 'private message' })).toThrowError(AdminActionError);
     expect(() => normalizeSafeObject({ credentials: 'private' })).toThrowError(AdminActionError);

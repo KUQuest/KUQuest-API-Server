@@ -1,6 +1,6 @@
 import { env } from '@/config/env';
 import { db, sql } from '@/database/client';
-import { authUser } from '@/database/schema/auth.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { paymentProviderEventInbox } from '@/database/schema/payment.schema';
 import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
 import {
@@ -10,6 +10,8 @@ import {
 import {
   getPayout,
   initiatePayout,
+  approvePayout,
+  processApprovedPayout,
   processPayoutProviderEvent,
   quotePayout,
   XenditPayoutProvider,
@@ -144,6 +146,17 @@ const createTestMember = async (runId: string) => {
   return { id, walletId: wallet.id };
 };
 
+const createTestAdmin = async (runId: string) => {
+  const id = crypto.randomUUID();
+  await db.insert(authAdmin).values({
+    id,
+    email: `local-xendit-admin-${runId}@ku.th`,
+    firstName: 'Local Xendit',
+    lastName: 'Admin',
+  });
+  return id;
+};
+
 const runInternalLedgerTest = async (userId: string, walletId: string, runId: string) => {
   const accounts = await db
     .select({ id: walletLedgerAccount.id, type: walletLedgerAccount.type })
@@ -199,7 +212,7 @@ const runPaymentTest = async (userId: string, runId: string) => {
   return `Xendit payment ${topUp.providerReference}; Top-up PAID; Spending Balance = 100 satang`;
 };
 
-const runPayoutTest = async (userId: string, runId: string) => {
+const runPayoutTest = async (userId: string, adminId: string, runId: string) => {
   const encryption = createPayoutDestinationEncryption();
   await savePayoutDestination({
     principalUserId: userId,
@@ -221,18 +234,34 @@ const runPayoutTest = async (userId: string, runId: string) => {
     principalUserId: userId,
     quoteId: quote.id,
     idempotency: { key: `local-xendit-payout:${runId}` },
-  }, new XenditPayoutProvider(), encryption);
-  assert(payout.providerReference, 'Xendit did not return a Payout reference.');
+  });
+  assert(payout.payoutStatus === 'PENDING_ADMIN_APPROVAL', 'Payout did not enter the Admin approval queue.');
+
+  const approved = await approvePayout({
+    adminId,
+    payoutId: payout.id,
+    idempotencyKey: `local-xendit-payout-approval:${runId}`,
+    expectedVersion: payout.version,
+    reasonCode: 'PAYOUT_POLICY_REVIEW',
+  });
+  assert(approved.resourceVersion === payout.version + 1, 'Admin approval did not advance the Payout version.');
+
+  const submitted = await processApprovedPayout(
+    payout.id,
+    new XenditPayoutProvider(),
+    encryption,
+  );
+  assert(submitted.providerReference, 'Xendit did not return a Payout reference.');
 
   const event = await waitForProviderEvent('PAYOUT', payout.internalReference);
   await processPayoutProviderEvent(event.id);
 
   const completed = await getPayout(userId, payout.id);
   const wallet = await getWallet(userId);
-  assert(completed.payoutStatus === 'COMPLETED', `Payout ended in ${completed.payoutStatus}, not COMPLETED.`);
-  assert(completed.finalLedgerTransactionId, 'Completed Payout has no final Ledger transaction.');
-  assert(wallet.reservedForPayoutsSatang === 0, 'Completed Payout did not release the Payout Reserve.');
-  return `Xendit Payout ${payout.providerReference}; Payout COMPLETED; Payout Reserve = 0 satang`;
+  assert(completed.payoutStatus === 'SUCCEEDED', `Payout ended in ${completed.payoutStatus}, not SUCCEEDED.`);
+  assert(completed.finalLedgerTransactionId, 'Succeeded Payout has no final Ledger transaction.');
+  assert(wallet.reservedForPayoutsSatang === 0, 'Succeeded Payout did not release the Payout Reserve.');
+  return `Xendit Payout ${completed.providerReference}; Payout SUCCEEDED; Payout Reserve = 0 satang`;
 };
 
 const run = async () => {
@@ -244,6 +273,7 @@ const run = async () => {
 
   const runId = crypto.randomUUID();
   const member = await createTestMember(runId);
+  const adminId = await createTestAdmin(runId);
   console.log(`[local-xendit] local Member fixture: ${member.id}`);
   console.log(`[local-xendit] Payout test destination: ${payoutBankCode} / account number hidden`);
 
@@ -251,7 +281,7 @@ const run = async () => {
   const cases: Array<[string, () => Promise<string>]> = [
     ['internal Ledger transaction', () => runInternalLedgerTest(member.id, member.walletId, runId)],
     ['real Xendit payment and callback', () => runPaymentTest(member.id, runId)],
-    ['real Xendit Payout and callback', () => runPayoutTest(member.id, runId)],
+    ['real Xendit Payout and callback', () => runPayoutTest(member.id, adminId, runId)],
   ];
 
   for (const [name, test] of cases) {

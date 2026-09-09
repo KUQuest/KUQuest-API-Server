@@ -443,7 +443,7 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
     const providerStatus = asText(payload.status);
     if (!providerStatus) throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an incomplete Payout status.');
     const normalizedStatus = normalizePayoutOutcomeStatus(providerStatus);
-    const eventType = normalizedStatus === 'COMPLETED'
+    const eventType = normalizedStatus === 'SUCCEEDED'
       ? 'v3_payout.succeeded'
       : normalizedStatus === 'CANCELLED'
         ? 'v3_payout.failed'

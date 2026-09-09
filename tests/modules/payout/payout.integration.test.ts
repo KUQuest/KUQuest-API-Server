@@ -1,7 +1,10 @@
 import { db, sql } from '@/database/client';
+import { adminAction } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   paymentPayoutAccounts,
+  paymentPayoutSubmissionJobs,
+  paymentPayoutStatusHistory,
   paymentPayouts,
   paymentPayoutQuotes,
 } from '@/database/schema/payment.schema';
@@ -28,6 +31,7 @@ import {
 import {
   getPayout,
   approvePayout,
+  cancelPayout,
   getAdminPayout,
   initiatePayout,
   listAdminPayouts,
@@ -35,8 +39,8 @@ import {
   listPayoutStatusHistory,
   listPayouts,
   processApprovedPayout,
+  processApprovedPayouts,
   quotePayout,
-  rejectPayout,
 } from '@/modules/payout';
 import type {
   OutboundPayoutProvider,
@@ -148,6 +152,34 @@ const creditEarnings = async (studentId: string, amountSatang: number) => {
   });
 };
 
+const approveForTest = (
+  adminId: string,
+  payoutId: string,
+  idempotencyKey: string,
+  expectedVersion = 1,
+  reasonCode = 'PAYOUT_POLICY_REVIEW',
+) => approvePayout({
+  adminId,
+  payoutId,
+  idempotencyKey,
+  expectedVersion,
+  reasonCode,
+});
+
+const cancelForTest = (
+  adminId: string,
+  payoutId: string,
+  idempotencyKey: string,
+  expectedVersion = 1,
+  reasonCode = 'PAYOUT_INVALID_DESTINATION',
+) => cancelPayout({
+  adminId,
+  payoutId,
+  idempotencyKey,
+  expectedVersion,
+  reasonCode,
+});
+
 beforeAll(async () => {
   await sql`select 1`;
   await ensureInitialMoneyPolicy();
@@ -188,22 +220,32 @@ describe('Payout application services', () => {
       idempotency: { key: 'be199-approval-submit-1' },
     });
 
-    const approved = await approvePayout(adminId, payout.id, {
+    await expect(approvePayout({
+      adminId,
+      payoutId: payout.id,
+      idempotencyKey: 'be199-approval-invalid-reason-1',
+      expectedVersion: payout.version,
+      reasonCode: 'PAYOUT_INVALID_DESTINATION',
+    })).rejects.toMatchObject({ code: 'ADMIN_ACTION_INVALID_REASON_CODE' });
+
+    const approved = await approveForTest(adminId, payout.id, 'be199-approval-decision-1');
+    const replay = await approveForTest(adminId, payout.id, 'be199-approval-decision-1');
+    await expect(approvePayout({
+      adminId,
+      payoutId: payout.id,
       idempotencyKey: 'be199-approval-decision-1',
-      note: 'Reviewed destination and amount',
-    });
-    const replay = await approvePayout(adminId, payout.id, {
-      idempotencyKey: 'be199-approval-decision-1',
-      note: 'Reviewed destination and amount',
-    });
-    await expect(approvePayout(adminId, payout.id, {
-      idempotencyKey: 'be199-approval-decision-1',
-      note: 'Different note',
-    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+      expectedVersion: payout.version,
+      reasonCode: 'PAYOUT_RISK_REVIEW',
+    })).rejects.toMatchObject({ code: 'ADMIN_ACTION_KEY_REUSED' });
 
     expect(approved).toMatchObject({
-      id: payout.id,
-      payoutStatus: 'CREATING',
+      resourceSummary: {
+        id: payout.id,
+        payoutStatus: 'SUBMITTED_TO_PROVIDER',
+        version: 2,
+      },
+      resourceVersion: 2,
+      adminActionId: expect.any(String),
     });
     expect(replay).toEqual(approved);
     expect(await getWallet(studentId)).toMatchObject({
@@ -213,58 +255,116 @@ describe('Payout application services', () => {
     expect(await listPayoutStatusHistory(studentId, payout.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         fromStatus: 'PENDING_ADMIN_APPROVAL',
-        toStatus: 'CREATING',
+        toStatus: 'SUBMITTED_TO_PROVIDER',
         actorAdminId: adminId,
-        reason: 'Reviewed destination and amount',
+        reason: 'PAYOUT_POLICY_REVIEW',
       }),
     ]));
   });
 
-  it('allows an Admin to reject a waiting Payout and release the full Payout Reserve', async () => {
-    const studentId = await createStudent('be199-rejection');
+  it('allows an Admin to cancel a waiting Payout and release the full Payout Reserve', async () => {
+    const studentId = await createStudent('be199-cancellation');
     const adminId = await createAdmin();
     await creditEarnings(studentId, 10_000);
     const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
     const payout = await initiatePayout({
       principalUserId: studentId,
       quoteId: quote.id,
-      idempotency: { key: 'be199-rejection-submit-1' },
+      idempotency: { key: 'be199-cancellation-submit-1' },
     });
-    await expect(rejectPayout(adminId, payout.id, {
-      idempotencyKey: 'be199-rejection-missing-reason',
-      reason: '   ',
-    })).rejects.toMatchObject({ code: 'PAYOUT_REJECTION_REASON_REQUIRED' });
+    await expect(cancelPayout({
+      adminId,
+      payoutId: payout.id,
+      idempotencyKey: 'be199-cancellation-missing-reason',
+      expectedVersion: payout.version,
+      reasonCode: '   ',
+    })).rejects.toMatchObject({ code: 'ADMIN_ACTION_REASON_REQUIRED' });
 
-    const rejected = await rejectPayout(adminId, payout.id, {
-      idempotencyKey: 'be199-rejection-decision-1',
-      reason: 'Destination needs verification',
-    });
-    const replay = await rejectPayout(adminId, payout.id, {
-      idempotencyKey: 'be199-rejection-decision-1',
-      reason: 'Destination needs verification',
-    });
+    const cancelled = await cancelForTest(adminId, payout.id, 'be199-cancellation-decision-1');
+    const replay = await cancelForTest(adminId, payout.id, 'be199-cancellation-decision-1');
 
-    expect(rejected).toMatchObject({
-      id: payout.id,
-      payoutStatus: 'CANCELLED',
-      finalLedgerTransactionId: expect.any(String),
+    expect(cancelled).toMatchObject({
+      resourceSummary: {
+        id: payout.id,
+        payoutStatus: 'CANCELLED',
+        cancellationReasonCode: 'PAYOUT_INVALID_DESTINATION',
+        version: 2,
+      },
+      resourceVersion: 2,
+      adminActionId: expect.any(String),
     });
-    expect(replay).toEqual(rejected);
+    expect(replay).toEqual(cancelled);
     expect(await getWallet(studentId)).toMatchObject({
       earningsBalanceSatang: 10_000,
       reservedForPayoutsSatang: 0,
     });
     expect(await db.select().from(walletLedgerTransaction).where(
-      eq(walletLedgerTransaction.businessReference, `payout-admin-rejection-release:${payout.id}`),
+      eq(walletLedgerTransaction.businessReference, `payout-admin-cancellation:${payout.id}`),
     )).toHaveLength(1);
     expect(await listPayoutStatusHistory(studentId, payout.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         fromStatus: 'PENDING_ADMIN_APPROVAL',
         toStatus: 'CANCELLED',
         actorAdminId: adminId,
-        reason: 'Destination needs verification',
+        reason: 'PAYOUT_INVALID_DESTINATION',
       }),
     ]));
+  });
+
+  it('serializes concurrent Admin approval and cancellation decisions', async () => {
+    const studentId = await createStudent('be199-admin-race');
+    const approveAdminId = await createAdmin();
+    const cancelAdminId = await createAdmin();
+    await creditEarnings(studentId, 10_000);
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const payout = await initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be199-admin-race-submit-1' },
+    });
+
+    const results = await Promise.allSettled([
+      approvePayout({
+        adminId: approveAdminId,
+        payoutId: payout.id,
+        idempotencyKey: 'be199-admin-race-approve-1',
+        expectedVersion: payout.version,
+        reasonCode: 'PAYOUT_POLICY_REVIEW',
+      }),
+      cancelPayout({
+        adminId: cancelAdminId,
+        payoutId: payout.id,
+        idempotencyKey: 'be199-admin-race-cancel-1',
+        expectedVersion: payout.version,
+        reasonCode: 'PAYOUT_INVALID_DESTINATION',
+      }),
+    ]);
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+
+    const [storedPayout] = await db
+      .select({ payoutStatus: paymentPayouts.payoutStatus, version: paymentPayouts.version })
+      .from(paymentPayouts)
+      .where(eq(paymentPayouts.id, payout.id));
+    const actions = await db
+      .select({ id: adminAction.id, action: adminAction.action })
+      .from(adminAction)
+      .where(and(
+        eq(adminAction.resourceType, 'payout'),
+        eq(adminAction.resourceId, payout.id),
+      ));
+    const releaseTransactions = await db
+      .select({ id: walletLedgerTransaction.id })
+      .from(walletLedgerTransaction)
+      .where(eq(walletLedgerTransaction.businessReference, `payout-admin-cancellation:${payout.id}`));
+
+    expect(storedPayout?.version).toBe(2);
+    expect(['SUBMITTED_TO_PROVIDER', 'CANCELLED']).toContain(storedPayout?.payoutStatus);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]?.action).toMatch(/^PAYOUT_(APPROVE|CANCEL)$/);
+    expect(releaseTransactions).toHaveLength(storedPayout?.payoutStatus === 'CANCELLED' ? 1 : 0);
   });
 
   it('lets the Payout Worker call the Provider only after approval', async () => {
@@ -280,15 +380,76 @@ describe('Payout application services', () => {
     });
 
     expect(provider.requests).toHaveLength(0);
-    await approvePayout(adminId, payout.id, { idempotencyKey: 'be199-worker-approval-1' });
+    await approveForTest(adminId, payout.id, 'be199-worker-approval-1');
     const processed = await processApprovedPayout(payout.id, provider, encryption);
 
     expect(processed).toMatchObject({
       id: payout.id,
-      payoutStatus: 'PENDING',
+      payoutStatus: 'PROVIDER_PENDING',
       providerReference: `${provider.referencePrefix}-1`,
     });
     expect(provider.requests).toHaveLength(1);
+  });
+
+  it('enqueues and consumes a Payout Worker job after Admin approval', async () => {
+    const studentId = await createStudent('be199-worker-job');
+    const adminId = await createAdmin();
+    await creditEarnings(studentId, 1_000);
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const payout = await initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be199-worker-job-submit-1' },
+    });
+    const provider = new FakePayoutProvider();
+
+    await approveForTest(adminId, payout.id, 'be199-worker-job-approval-1');
+
+    const [job] = await db
+      .select({ payoutId: paymentPayoutSubmissionJobs.payoutId, processedAt: paymentPayoutSubmissionJobs.processedAt })
+      .from(paymentPayoutSubmissionJobs)
+      .where(eq(paymentPayoutSubmissionJobs.payoutId, payout.id));
+    expect(job).toMatchObject({ payoutId: payout.id, processedAt: null });
+
+    expect(await processApprovedPayouts(20, provider, encryption)).toBeGreaterThanOrEqual(1);
+    expect(provider.requests.some((request) => request.internalReference === payout.internalReference)).toBe(true);
+
+    const [processedJob] = await db
+      .select({ processedAt: paymentPayoutSubmissionJobs.processedAt })
+      .from(paymentPayoutSubmissionJobs)
+      .where(eq(paymentPayoutSubmissionJobs.payoutId, payout.id));
+    expect(processedJob?.processedAt).toBeInstanceOf(Date);
+  });
+
+  it('does not expose a legacy free-form Admin cancellation reason', async () => {
+    const studentId = await createStudent('be199-legacy-cancellation');
+    const adminId = await createAdmin();
+    await creditEarnings(studentId, 1_000);
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const payout = await initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be199-legacy-cancellation-submit-1' },
+    });
+
+    await cancelForTest(adminId, payout.id, 'be199-legacy-cancellation-decision-1');
+    await db.insert(paymentPayoutStatusHistory).values({
+      payoutId: payout.id,
+      fromStatus: 'PENDING_ADMIN_APPROVAL',
+      toStatus: 'CANCELLED',
+      actorAdminId: adminId,
+      source: 'ADMIN_CANCELLATION',
+      reason: 'legacy rejection text',
+      occurredAt: new Date(Date.now() + 1_000),
+    });
+
+    const detail = await getAdminPayout(payout.id);
+    const history = await listAdminPayoutStatusHistory(payout.id);
+
+    expect(detail.cancellationReasonCode).toBeNull();
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'ADMIN_CANCELLATION', reason: null }),
+    ]));
   });
 
   it('claims an approved Payout so concurrent Worker retries submit once', async () => {
@@ -301,7 +462,7 @@ describe('Payout application services', () => {
       quoteId: quote.id,
       idempotency: { key: 'be199-worker-retry-submit-1' },
     });
-    await approvePayout(adminId, payout.id, { idempotencyKey: 'be199-worker-retry-approval-1' });
+    await approveForTest(adminId, payout.id, 'be199-worker-retry-approval-1');
 
     const requests: OutboundPayoutRequest[] = [];
     let markStarted = () => {};
@@ -336,13 +497,13 @@ describe('Payout application services', () => {
     const processed = await first;
     const replay = await processApprovedPayout(payout.id, provider, encryption);
 
-    expect(second.payoutStatus).toBe('CREATING');
-    expect(processed.payoutStatus).toBe('PENDING');
+    expect(second.payoutStatus).toBe('SUBMITTED_TO_PROVIDER');
+    expect(processed.payoutStatus).toBe('PROVIDER_PENDING');
     expect(replay).toEqual(processed);
     expect(requests).toHaveLength(1);
   });
 
-  it('does not submit a CREATING Payout without an Admin approval record', async () => {
+  it('does not submit a SUBMITTED_TO_PROVIDER Payout without an Admin approval record', async () => {
     const studentId = await createStudent('be199-worker-unapproved');
     await creditEarnings(studentId, 10_000);
     const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
@@ -352,13 +513,13 @@ describe('Payout application services', () => {
       idempotency: { key: 'be199-worker-unapproved-submit-1' },
     });
     await db.update(paymentPayouts)
-      .set({ payoutStatus: 'CREATING' })
+      .set({ payoutStatus: 'SUBMITTED_TO_PROVIDER' })
       .where(eq(paymentPayouts.id, payout.id));
     const provider = new FakePayoutProvider();
 
     const result = await processApprovedPayout(payout.id, provider, encryption);
 
-    expect(result.payoutStatus).toBe('CREATING');
+    expect(result.payoutStatus).toBe('SUBMITTED_TO_PROVIDER');
     expect(provider.requests).toHaveLength(0);
   });
 
@@ -395,6 +556,36 @@ describe('Payout application services', () => {
     expect(detail).toEqual(listed);
   });
 
+  it('does not expose legacy free-form Admin decision reasons', async () => {
+    const studentId = await createStudent('be199-admin-legacy-reason');
+    const adminId = await createAdmin();
+    await creditEarnings(studentId, 10_000);
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const payout = await initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be199-admin-legacy-reason-submit-1' },
+    });
+    await db.insert(paymentPayoutStatusHistory).values({
+      payoutId: payout.id,
+      fromStatus: 'PENDING_ADMIN_APPROVAL',
+      toStatus: 'SUBMITTED_TO_PROVIDER',
+      actorAdminId: adminId,
+      source: 'ADMIN_APPROVAL',
+      reason: 'Approved because the old Admin UI allowed free-form text.',
+    });
+
+    const history = await listAdminPayoutStatusHistory(payout.id);
+
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: 'ADMIN_APPROVAL',
+        reason: null,
+      }),
+    ]));
+    expect(JSON.stringify(history)).not.toContain('old Admin UI');
+  });
+
   it('quotes, reserves Earnings Balance, and initiates one Payout', async () => {
     const studentId = await createStudent('be115-success');
     const adminId = await createAdmin();
@@ -419,13 +610,13 @@ describe('Payout application services', () => {
 
     expect(submitted.payoutStatus).toBe('PENDING_ADMIN_APPROVAL');
     expect(provider.requests).toHaveLength(0);
-    await approvePayout(adminId, submitted.id, { idempotencyKey: 'be115-success-approval-1' });
+    await approveForTest(adminId, submitted.id, 'be115-success-approval-1');
     const payout = await processApprovedPayout(submitted.id, provider, encryption);
 
     expect(payout).toMatchObject({
       principalUserId: studentId,
       quoteId: quote.id,
-      payoutStatus: 'PENDING',
+      payoutStatus: 'PROVIDER_PENDING',
       receiptSatang: 1_234,
       maximumDebitSatang: 1_234,
       providerReference: `${provider.referencePrefix}-1`,
@@ -447,8 +638,8 @@ describe('Payout application services', () => {
     expect(await listPayouts(studentId)).toHaveLength(1);
     expect(await listPayoutStatusHistory(studentId, payout.id)).toMatchObject([
       { fromStatus: null, toStatus: 'PENDING_ADMIN_APPROVAL', source: 'INITIATION' },
-      { fromStatus: 'PENDING_ADMIN_APPROVAL', toStatus: 'CREATING', source: 'ADMIN_APPROVAL' },
-      { fromStatus: 'CREATING', toStatus: 'PENDING', source: 'PROVIDER' },
+      { fromStatus: 'PENDING_ADMIN_APPROVAL', toStatus: 'SUBMITTED_TO_PROVIDER', source: 'ADMIN_APPROVAL' },
+      { fromStatus: 'SUBMITTED_TO_PROVIDER', toStatus: 'PROVIDER_PENDING', source: 'PROVIDER' },
     ]);
   });
 
@@ -497,7 +688,7 @@ describe('Payout application services', () => {
       quoteId: rejectedQuote.id,
       idempotency: { key: 'be115-rejected-1' },
     });
-    await approvePayout(rejectedAdmin, rejectedPayout.id, { idempotencyKey: 'be115-rejected-approval-1' });
+    await approveForTest(rejectedAdmin, rejectedPayout.id, 'be115-rejected-approval-1');
     await expect(processApprovedPayout(rejectedPayout.id, rejectedProvider, encryption))
       .rejects.toMatchObject({ code: 'PROVIDER_REJECTED' });
     const [failed] = await db.select().from(paymentPayouts).where(eq(paymentPayouts.quoteId, rejectedQuote.id));
@@ -534,11 +725,11 @@ describe('Payout application services', () => {
       idempotency: { key: 'be115-uncertain-1' },
     };
     const uncertainPayout = await initiatePayout(uncertainInput);
-    await approvePayout(uncertainAdmin, uncertainPayout.id, { idempotencyKey: 'be115-uncertain-approval-1' });
+    await approveForTest(uncertainAdmin, uncertainPayout.id, 'be115-uncertain-approval-1');
     await expect(processApprovedPayout(uncertainPayout.id, uncertainProvider, encryption))
       .rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
     const [awaiting] = await db.select().from(paymentPayouts).where(eq(paymentPayouts.quoteId, uncertainQuote.id));
-    expect(awaiting?.payoutStatus).toBe('AWAITING_RECONCILIATION');
+    expect(awaiting?.payoutStatus).toBe('PROVIDER_PENDING');
     expect(await getWallet(uncertainStudent)).toMatchObject({ earningsBalanceSatang: 900, reservedForPayoutsSatang: 100 });
     expect(uncertainProvider.requests.map(({ internalReference }) => internalReference)).toEqual([
       uncertainPayout.internalReference,
@@ -561,7 +752,7 @@ describe('Payout application services', () => {
       quoteId: quote.id,
       idempotency: { key: 'be115-decryption-failure-1' },
     });
-    await approvePayout(adminId, submittedPayout.id, { idempotencyKey: 'be115-decryption-failure-approval-1' });
+    await approveForTest(adminId, submittedPayout.id, 'be115-decryption-failure-approval-1');
     await expect(processApprovedPayout(submittedPayout.id, provider, unavailableKey))
       .rejects.toBeInstanceOf(PayoutDestinationEncryptionError);
 
@@ -590,7 +781,7 @@ describe('Payout application services', () => {
       quoteId: quote.id,
       idempotency: { key: 'be115-provider-configuration-1' },
     });
-    await approvePayout(adminId, payout.id, { idempotencyKey: 'be115-provider-configuration-approval-1' });
+    await approveForTest(adminId, payout.id, 'be115-provider-configuration-approval-1');
     await expect(processApprovedPayout(payout.id, provider, encryption))
       .rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION' });
 
@@ -624,7 +815,7 @@ describe('Payout application services', () => {
       })
       .where(eq(paymentPayoutAccounts.id, payoutRecord.payoutAccountId));
 
-    await approvePayout(adminId, payout.id, { idempotencyKey: 'be115-snapshot-approval-1' });
+    await approveForTest(adminId, payout.id, 'be115-snapshot-approval-1');
     await processApprovedPayout(payout.id, provider, encryption);
 
     expect(provider.requests.map(({ destination }) => destination.accountNumber)).toEqual([
@@ -692,10 +883,7 @@ describe('Payout application services', () => {
       quoteId: quote.id,
       idempotency: { key: 'be115-consumed-quote-1' },
     });
-    await rejectPayout(adminId, payout.id, {
-      idempotencyKey: 'be115-consumed-quote-rejection-1',
-      reason: 'Test rejection',
-    });
+    await cancelForTest(adminId, payout.id, 'be115-consumed-quote-cancellation-1');
     await expect(initiatePayout({
       principalUserId: studentId,
       quoteId: quote.id,
