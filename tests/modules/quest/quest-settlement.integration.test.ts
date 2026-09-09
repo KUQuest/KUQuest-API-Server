@@ -1,10 +1,10 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
-import { authAdmin, authUser } from '@/database/schema/auth.schema';
+import { authUser } from '@/database/schema/auth.schema';
 import { proofSubmission, quest, questAssignment, questSettlementCommand } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletFundingReservation, walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
-import { auth, adminAuth } from '@/modules/auth';
+import { auth } from '@/modules/auth';
 import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import type { QuestWorkChatMembershipTransition } from '@/modules/quest';
@@ -25,7 +25,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock,
 let postgresAvailable = false;
 const hirerId = randomUUID();
 const workerIds = [randomUUID(), randomUUID(), randomUUID()];
-const adminId = randomUUID();
 const tagId = randomUUID();
 const questIds: string[] = [];
 const applyQuestWorkChatTransition = mock(async (
@@ -59,7 +58,7 @@ const fundWallet = async (userId: string, amountSatang: number) => {
   });
 };
 
-const createQuest = async (status: 'QUEST_OPEN' | 'QUEST_ASSIGNED' | 'QUEST_IN_PROGRESS' | 'QUEST_SUBMITTED' | 'QUEST_DISPUTED', workers: string[] = [], rewardSatang = 1_000) => {
+const createQuest = async (status: 'QUEST_OPEN' | 'QUEST_ASSIGNED' | 'QUEST_IN_PROGRESS' | 'QUEST_SUBMITTED', workers: string[] = [], rewardSatang = 1_000) => {
   const questId = randomUUID();
   questIds.push(questId);
   await db.insert(quest).values({
@@ -105,7 +104,6 @@ beforeAll(async () => {
     { id: hirerId, email: `${hirerId}@ku.th`, firstName: 'Settlement', lastName: 'Hirer' },
     ...workerIds.map((id, index) => ({ id, email: `${id}@ku.th`, firstName: 'Settlement', lastName: `Worker ${index}` })),
   ]);
-  await db.insert(authAdmin).values({ id: adminId, email: `${adminId}@admin.kuquest`, firstName: 'Settlement', lastName: 'Admin' });
   await db.insert(tag).values({ id: tagId, name: `Settlement test ${tagId}` });
   await ensureWallet(hirerId);
   for (const workerId of workerIds) await ensureWallet(workerId);
@@ -217,38 +215,16 @@ describe('Quest terminal settlement HTTP contract', () => {
     expect(await db.select().from(questSettlementCommand).where(eq(questSettlementCommand.questId, questId))).toHaveLength(1);
   });
 
-  it('allows an Admin to refund a disputed Quest or release explicit Worker allocations', async () => {
+  it('does not expose the legacy Admin dispute route', async () => {
     if (!postgresAvailable) return;
-    spyOn(adminAuth.api, 'getSession').mockImplementation((async () => ({ user: { id: adminId }, session: { userId: adminId } }) as never) as never);
-    const refundQuest = await createQuest('QUEST_DISPUTED', [workerIds[0]]);
-    const refund = await request('POST', `/api/v1/admin/quests/${refundQuest}/dispute/resolve`, adminId, { outcome: 'REFUND_HIRER' }, { 'idempotency-key': 'be184-refund' });
-    expect(refund.status).toBe(200);
-    expect((await refund.json()).data.outcome).toBe('REFUNDED');
-    expect(applyQuestWorkChatTransition.mock.calls
-      .map(([, transition]) => transition)
-      .filter((transition) => transition.questId === refundQuest)
-      .map(({ type }) => type)).toEqual(['workerBecameInactive', 'questBecameReadOnly']);
-
-    const releaseQuest = await createQuest('QUEST_DISPUTED', [workerIds[1], workerIds[2]], 500);
-    const release = await request('POST', `/api/v1/admin/quests/${releaseQuest}/dispute/resolve`, adminId, {
-      outcome: 'RELEASE_TO_WORKER',
-      allocations: [
-        { workerId: workerIds[1], amountSatang: 601 },
-      ],
-    }, { 'idempotency-key': 'be184-release' });
-    expect(release.status).toBe(200);
-    expect((await release.json()).data).toMatchObject({ outcome: 'RELEASED_TO_WORKER', paidSatang: 601, refundedSatang: 419 });
-    const releaseTransitions = applyQuestWorkChatTransition.mock.calls
-      .map(([, transition]) => transition)
-      .filter((transition) => transition.questId === releaseQuest);
-    expect(releaseTransitions.map(({ type }) => type)).toEqual([
-      'workerBecameInactive',
-      'questBecameReadOnly',
-    ]);
-    expect(releaseTransitions[0]).toMatchObject({
-      assignmentStatus: 'ASSIGNMENT_INCOMPLETE',
-      workerId: workerIds[2],
-    });
+    const response = await request(
+      'POST',
+      `/api/v1/admin/quests/${randomUUID()}/dispute/resolve`,
+      randomUUID(),
+      { outcome: 'REFUND_HIRER' },
+      { 'idempotency-key': 'be184-legacy-dispute-disabled' },
+    );
+    expect(response.status).toBe(404);
   });
 
   it('rolls back Quest, Assignment, Wallet, and command changes when Work Chat rejects the terminal transition', async () => {

@@ -605,7 +605,6 @@ const consentStatuses = new Set<QuestStatus>([
   questStatus.submitted,
   questStatus.approved,
   questStatus.rework,
-  questStatus.disputed,
 ]);
 
 const consentFields = new Set([

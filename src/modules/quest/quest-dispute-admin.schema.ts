@@ -16,6 +16,14 @@ export const adminDisputeParamsSchema = t.Object({
   disputeCaseId: t.String({ format: 'uuid' }),
 });
 
+export const adminDisputeOpenParamsSchema = t.Object({
+  questId: t.String({ format: 'uuid' }),
+});
+
+export const adminDisputeOpenBodySchema = t.Object({
+  workerId: t.String({ format: 'uuid' }),
+}, { additionalProperties: false });
+
 export const adminDisputeListQuerySchema = t.Object({
   status: t.Optional(disputeCaseStatusSchema),
   limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
@@ -51,7 +59,7 @@ export const adminDisputeResolveBodySchema = t.Object({
   amountSatang: t.Optional(t.Integer({ minimum: 1, maximum: 2_000_000_000 })),
 }, { additionalProperties: false });
 
-const adminDisputeSummarySchema = t.Object({
+export const adminDisputeSummarySchema = t.Object({
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
   filerUserId: t.String({ format: 'uuid' }),
@@ -141,6 +149,11 @@ export const adminDisputeCommandResponseSchema = t.Object({
     resourceVersion: t.Integer({ minimum: 1 }),
     adminActionId: t.String({ format: 'uuid' }),
   }),
+});
+
+export const adminDisputeOpenResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: adminDisputeSummarySchema,
 });
 
 export type AdminDisputeListQuery = typeof adminDisputeListQuerySchema.static;

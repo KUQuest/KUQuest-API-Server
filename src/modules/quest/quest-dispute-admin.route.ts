@@ -5,6 +5,7 @@ import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { Elysia } from 'elysia';
 
 import {
+  createAdminDisputeController,
   getAdminDisputeController,
   getAdminDisputeEvidenceController,
   listAdminDisputesController,
@@ -15,6 +16,9 @@ import {
   adminDisputeDetailResponseSchema,
   adminDisputeEvidenceHeadersSchema,
   adminDisputeEvidenceResponseSchema,
+  adminDisputeOpenBodySchema,
+  adminDisputeOpenParamsSchema,
+  adminDisputeOpenResponseSchema,
   adminDisputeListQuerySchema,
   adminDisputeListResponseSchema,
   adminDisputeParamsSchema,
@@ -27,6 +31,18 @@ export const adminDisputeRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/admin/disputes`,
 })
   .use(enabledAdminGuard)
+  .post('/open/:questId', createAdminDisputeController, {
+    params: adminDisputeOpenParamsSchema,
+    body: adminDisputeOpenBodySchema,
+    response: responses(adminDisputeOpenResponseSchema, 400, 401, 403, 404, 409),
+    detail: {
+      tags: ['Admin Disputes'],
+      summary: 'Open a Dispute Case for a Worker',
+      description: 'Opens one Admin-filed Dispute Case for a Worker with an Assignment on a failed Quest within the five-day filing window.',
+      operationId: 'openAdminDispute',
+      security: betterAuthSecurity,
+    },
+  })
   .get('', listAdminDisputesController, {
     query: adminDisputeListQuerySchema,
     response: responses(adminDisputeListResponseSchema, 400, 401, 403),

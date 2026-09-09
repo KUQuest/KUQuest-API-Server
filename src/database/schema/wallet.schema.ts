@@ -343,7 +343,7 @@ export const walletFundingReservationSettlement = pgTable(
   ],
 );
 
-/** A post-hold Dispute transfer. It is separate from reservation settlement history because the reservation is already RELEASED. */
+/** A Dispute transfer audit row. It covers active-hold redirections and post-release transfers. */
 export const walletDisputeSettlement = pgTable(
   'wallet_dispute_settlements',
   {

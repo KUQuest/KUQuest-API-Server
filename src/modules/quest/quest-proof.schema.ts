@@ -15,7 +15,7 @@ export const proofSubmitSchema = t.Object({
 }, { additionalProperties: false });
 export const proofConfirmationSchema = t.Object({}, { additionalProperties: false });
 export const proofReviewSchema = t.Object({
-  status: t.Union([t.Literal('PROOF_APPROVED'), t.Literal('PROOF_REJECTED')]),
+  status: t.Union([t.Literal('PROOF_APPROVED'), t.Literal('PROOF_NOT_APPROVED')]),
   reviewNote: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
 }, { additionalProperties: false });
 

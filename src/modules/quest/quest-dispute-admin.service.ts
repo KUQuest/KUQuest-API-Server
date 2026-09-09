@@ -47,9 +47,9 @@ export const disputeAdminActionCatalog: AdminActionReasonCatalog = {
 };
 
 const adminActionService = createAdminActionService(disputeAdminActionCatalog);
-const MAX_DISPUTE_EVIDENCE_ASSIGNMENTS = 100;
-const MAX_DISPUTE_EVIDENCE_PROOF_SUBMISSIONS = 100;
-const MAX_DISPUTE_EVIDENCE_FILES = 5;
+const maxDisputeEvidenceAssignments = 100;
+const maxDisputeEvidenceProofSubmissions = 100;
+const maxDisputeEvidenceFiles = 5;
 
 export class AdminDisputeCaseError extends Error {
   readonly code:
@@ -152,13 +152,20 @@ export type ResolveAdminDisputeCaseInput = {
   now?: Date;
 };
 
+export type CreateAdminDisputeCaseInput = {
+  questId: string;
+  filerUserId: string;
+  openedByAdminId?: string;
+  now?: Date;
+};
+
 export type ResolveAdminDisputeCaseResult = AdminActionResult<AdminDisputeCaseSummary> & {
   outcome: DisputeCaseOutcome;
 };
 
 const serializeDate = (value: Date | null): string | null => value?.toISOString() ?? null;
 
-const summaryFromRecord = (
+export const summaryFromRecord = (
   record: typeof adminDisputeCase.$inferSelect,
 ): AdminDisputeCaseSummary => ({
   id: record.id,
@@ -207,6 +214,88 @@ const listCursorCondition = (
       and(eq(adminDisputeCase.createdAt, cursorDate), lt(adminDisputeCase.id, cursor.id)),
     );
 };
+
+/** Create the queue record after a filing adapter has authenticated its actor. */
+export const createAdminDisputeCaseInTransaction = async (
+  transaction: WalletTransaction,
+  input: CreateAdminDisputeCaseInput,
+) => {
+  const now = input.now ?? new Date();
+  const [existing] = await transaction
+    .select()
+    .from(adminDisputeCase)
+    .where(and(
+      eq(adminDisputeCase.questId, input.questId),
+      eq(adminDisputeCase.filerUserId, input.filerUserId),
+    ))
+    .limit(1);
+  if (existing) return existing;
+
+  const [currentQuest] = await transaction
+    .select({
+      id: quest.id,
+      hirerId: quest.hirerId,
+      questStatus: quest.questStatus,
+      failedAt: quest.failedAt,
+      updatedAt: quest.updatedAt,
+    })
+    .from(quest)
+    .where(eq(quest.id, input.questId))
+    .for('update');
+  if (!currentQuest || currentQuest.questStatus !== 'QUEST_FAILED') {
+    throw new AdminDisputeCaseError('DISPUTE_CASE_QUEST_NOT_FAILED', 'Only a failed Quest can receive a Dispute Case.');
+  }
+
+  const filingWindow = input.openedByAdminId ? 5 : 1;
+  const failedAt = currentQuest.failedAt ?? currentQuest.updatedAt;
+  if (now.getTime() > failedAt.getTime() + filingWindow * 24 * 60 * 60 * 1000) {
+    throw new AdminDisputeCaseError('DISPUTE_CASE_WINDOW_EXPIRED', 'The Dispute Case filing window has expired.');
+  }
+  if (input.openedByAdminId && input.filerUserId === currentQuest.hirerId) {
+    throw new AdminDisputeCaseError('DISPUTE_CASE_WORKER_NOT_ASSIGNED', 'An Admin may open a Dispute Case only on behalf of a Worker.');
+  }
+  if (input.filerUserId !== currentQuest.hirerId) {
+    const [assignment] = await transaction
+      .select({ id: questAssignment.id })
+      .from(questAssignment)
+      .where(and(
+        eq(questAssignment.questId, input.questId),
+        eq(questAssignment.workerId, input.filerUserId),
+      ))
+      .limit(1);
+    if (!assignment) {
+      throw new AdminDisputeCaseError('DISPUTE_CASE_WORKER_NOT_ASSIGNED', 'The filer did not hold an Assignment on this Quest.');
+    }
+  }
+
+  const [created] = await transaction
+    .insert(adminDisputeCase)
+    .values({
+      questId: input.questId,
+      filerUserId: input.filerUserId,
+      openedByAdminId: input.openedByAdminId,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing({
+      target: [adminDisputeCase.questId, adminDisputeCase.filerUserId],
+    })
+    .returning();
+  if (created) return created;
+  const [concurrent] = await transaction
+    .select()
+    .from(adminDisputeCase)
+    .where(and(
+      eq(adminDisputeCase.questId, input.questId),
+      eq(adminDisputeCase.filerUserId, input.filerUserId),
+    ))
+    .limit(1);
+  if (!concurrent) throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case could not be created.');
+  return concurrent;
+};
+
+export const createAdminDisputeCase = async (input: CreateAdminDisputeCaseInput) =>
+  db.transaction((transaction) => createAdminDisputeCaseInTransaction(transaction, input));
 
 export const listAdminDisputeCases = async ({
   status = 'DISPUTE_CASE_PENDING',
@@ -307,8 +396,8 @@ const evidenceForCaseInTransaction = async (
     .from(questAssignment)
     .where(eq(questAssignment.questId, caseRow.questId))
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id))
-    .limit(MAX_DISPUTE_EVIDENCE_ASSIGNMENTS + 1);
-  const assignmentsTruncated = assignments.length > MAX_DISPUTE_EVIDENCE_ASSIGNMENTS;
+    .limit(maxDisputeEvidenceAssignments + 1);
+  const assignmentsTruncated = assignments.length > maxDisputeEvidenceAssignments;
 
   const legacyProofRows = await transaction
     .select({
@@ -328,7 +417,7 @@ const evidenceForCaseInTransaction = async (
     .leftJoin(file, eq(file.id, proofSubmissionImage.fileId))
     .where(eq(proofSubmission.questId, caseRow.questId))
     .orderBy(asc(proofSubmission.submittedAt), asc(proofSubmission.id), asc(proofSubmissionImage.position))
-    .limit(MAX_DISPUTE_EVIDENCE_PROOF_SUBMISSIONS + 1);
+    .limit(maxDisputeEvidenceProofSubmissions + 1);
   const v2ProofRows = await transaction
     .select({
       id: questV2ProofSubmission.id,
@@ -347,7 +436,7 @@ const evidenceForCaseInTransaction = async (
     .leftJoin(file, eq(file.id, questV2ProofSubmissionFile.fileId))
     .where(eq(questV2ProofSubmission.questId, caseRow.questId))
     .orderBy(asc(questV2ProofSubmission.sentAt), asc(questV2ProofSubmission.id), asc(questV2ProofSubmissionFile.position))
-    .limit(MAX_DISPUTE_EVIDENCE_PROOF_SUBMISSIONS + 1);
+    .limit(maxDisputeEvidenceProofSubmissions + 1);
 
   const proofSubmissions = new Map<string, AdminDisputeEvidence['proofSubmissions'][number]>();
   for (const row of [...legacyProofRows, ...v2ProofRows]) {
@@ -371,13 +460,13 @@ const evidenceForCaseInTransaction = async (
     proofSubmissions.set(row.id, proof);
   }
   const proofItems = [...proofSubmissions.values()];
-  const proofSubmissionsTruncated = legacyProofRows.length > MAX_DISPUTE_EVIDENCE_PROOF_SUBMISSIONS ||
-    v2ProofRows.length > MAX_DISPUTE_EVIDENCE_PROOF_SUBMISSIONS ||
-    proofItems.length > MAX_DISPUTE_EVIDENCE_PROOF_SUBMISSIONS;
+  const proofSubmissionsTruncated = legacyProofRows.length > maxDisputeEvidenceProofSubmissions ||
+    v2ProofRows.length > maxDisputeEvidenceProofSubmissions ||
+    proofItems.length > maxDisputeEvidenceProofSubmissions;
   let filesTruncated = false;
   for (const proof of proofItems) {
-    if (proof.files.length > MAX_DISPUTE_EVIDENCE_FILES) filesTruncated = true;
-    proof.files = proof.files.slice(0, MAX_DISPUTE_EVIDENCE_FILES);
+    if (proof.files.length > maxDisputeEvidenceFiles) filesTruncated = true;
+    proof.files = proof.files.slice(0, maxDisputeEvidenceFiles);
   }
 
   return {
@@ -389,12 +478,12 @@ const evidenceForCaseInTransaction = async (
       questStatus: questRow.questStatus,
       failedAt: serializeDate(questRow.failedAt),
     },
-    assignments: assignments.slice(0, MAX_DISPUTE_EVIDENCE_ASSIGNMENTS).map((assignment) => ({
+    assignments: assignments.slice(0, maxDisputeEvidenceAssignments).map((assignment) => ({
       ...assignment,
       startedAt: serializeDate(assignment.startedAt),
       createdAt: assignment.createdAt.toISOString(),
     })),
-    proofSubmissions: proofItems.slice(0, MAX_DISPUTE_EVIDENCE_PROOF_SUBMISSIONS),
+    proofSubmissions: proofItems.slice(0, maxDisputeEvidenceProofSubmissions),
   };
 };
 
@@ -557,19 +646,19 @@ export const resolveAdminDisputeCase = async (
             throw new AdminDisputeCaseError('DISPUTE_CASE_RESERVATION_NOT_FOUND', 'The failed Quest has no Funding Reservation.');
           }
 
-          await settleDisputeCase(transaction, {
+          const settlement = await settleDisputeCase(transaction, {
             ownerUserId: currentQuest.hirerId,
             reservationId: currentQuest.fundingReservationId,
             settlementReference: `dispute-case:${current.id}`,
             recipientUserId: input.workerId!,
-            recipientAmountSatang: positiveSatang(input.amountSatang!),
+            requestedAmountSatang: positiveSatang(input.amountSatang!),
           });
           const [updated] = await transaction
             .update(adminDisputeCase)
             .set({
               status: 'DISPUTE_CASE_RESOLVED',
               resolvedWorkerId: input.workerId,
-              resolvedAmountSatang: input.amountSatang,
+              resolvedAmountSatang: settlement.recipientAmountSatang,
               resolvedByAdminId: input.adminId,
               resolvedAt: now,
               version: sql`${adminDisputeCase.version} + 1`,

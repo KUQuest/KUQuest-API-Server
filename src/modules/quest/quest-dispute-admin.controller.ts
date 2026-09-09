@@ -1,5 +1,5 @@
 import { AdminActionError } from '@/modules/admin';
-import type { AdminContext } from '@/modules/auth';
+import type { AdminContext, AuthedContext } from '@/modules/auth';
 import { MoneyDomainError } from '@/modules/wallet';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
@@ -10,15 +10,20 @@ import type { Static } from 'elysia';
 
 import {
   AdminDisputeCaseError,
+  createAdminDisputeCase,
   getAdminDisputeCase,
   getAdminDisputeEvidence,
   listAdminDisputeCases,
   resolveAdminDisputeCase,
+  summaryFromRecord,
 } from './quest-dispute-admin.service';
 import type {
   adminDisputeCommandResponseSchema,
   adminDisputeDetailResponseSchema,
   adminDisputeEvidenceResponseSchema,
+  adminDisputeOpenBodySchema,
+  adminDisputeOpenResponseSchema,
+  adminDisputeOpenParamsSchema,
   adminDisputeListQuerySchema,
   adminDisputeListResponseSchema,
   adminDisputeParamsSchema,
@@ -32,6 +37,9 @@ type AdminDisputeListResponse = Static<typeof adminDisputeListResponseSchema>['d
 type AdminDisputeDetailResponse = Static<typeof adminDisputeDetailResponseSchema>['data'];
 type AdminDisputeEvidenceResponse = Static<typeof adminDisputeEvidenceResponseSchema>['data'];
 type AdminDisputeCommandResponse = Static<typeof adminDisputeCommandResponseSchema>['data'];
+type AdminDisputeOpenBody = Static<typeof adminDisputeOpenBodySchema>;
+type AdminDisputeOpenParams = Static<typeof adminDisputeOpenParamsSchema>;
+type AdminDisputeOpenResponse = Static<typeof adminDisputeOpenResponseSchema>['data'];
 
 const mapAdminDisputeError = (set: AdminContext['set'], error: unknown): ApiResponse => {
   if (error instanceof CursorInputError) {
@@ -82,6 +90,45 @@ export const listAdminDisputesController = async ({
     });
   } catch (error) {
     return mapAdminDisputeError(set, error) as ApiResponse<AdminDisputeListResponse>;
+  }
+};
+
+export const createAdminDisputeController = async ({
+  body,
+  params,
+  admin,
+  set,
+}: AdminContext & {
+  body: AdminDisputeOpenBody;
+  params: AdminDisputeOpenParams;
+}): Promise<ApiResponse<AdminDisputeOpenResponse>> => {
+  try {
+    const created = await createAdminDisputeCase({
+      questId: params.questId,
+      filerUserId: body.workerId,
+      openedByAdminId: admin.id,
+    });
+    return apiSuccess(summaryFromRecord(created));
+  } catch (error) {
+    return mapAdminDisputeError(set, error) as ApiResponse<AdminDisputeOpenResponse>;
+  }
+};
+
+export const fileAdminDisputeCaseController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  params: AdminDisputeOpenParams;
+}): Promise<ApiResponse<AdminDisputeOpenResponse>> => {
+  try {
+    const created = await createAdminDisputeCase({
+      questId: params.questId,
+      filerUserId: session.user.id,
+    });
+    return apiSuccess(summaryFromRecord(created));
+  } catch (error) {
+    return mapAdminDisputeError(set, error) as ApiResponse<AdminDisputeOpenResponse>;
   }
 };
 
