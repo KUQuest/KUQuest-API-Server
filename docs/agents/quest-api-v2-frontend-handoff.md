@@ -966,7 +966,7 @@ assignment and capabilities:
     "activeWorkerCount": 1,
     "assignment": {
       "status": "ASSIGNMENT_ACTIVE",
-      "startedAt": "2026-09-30T09:00:00.000+07:00"
+      "startedAt": "2026-09-30T02:00:00.000Z"
     },
     "capabilities": {
       "canViewOnly": false
@@ -980,6 +980,8 @@ ASSIGNMENT_INCOMPLETE, or ASSIGNMENT_CANCELLED.
 Access rests on the Assignment row in any of those states, so the Member keeps
 this view after settlement makes the Assignment terminal.
 assignment.startedAt is null until automatic start sets it.
+It is a UTC instant with a Z suffix. The +07:00 rule in section 2.5 covers
+Quest schedule fields such as startTime and dueAt, not this one.
 
 capabilities.canViewOnly is true in QUEST_COMPLETED, QUEST_CANCELLED, and
 QUEST_FAILED. A terminal Quest is read-only, and the client must not offer a
