@@ -109,6 +109,79 @@ describe('portfolio integration', () => {
     expect(response.status).toBe(401);
   });
 
+  describe('image routes', () => {
+    const fileId = randomUUID();
+    const imageForm = () => {
+      const form = new FormData();
+      form.set('image', new File(['not-an-image'], 'a.png', { type: 'image/png' }));
+
+      return form;
+    };
+
+    const imagePaths = [
+      ['collection', `${basePath}/${portfolioId}/image`],
+      ['targeted', `${basePath}/${portfolioId}/image/${fileId}`],
+    ] as const;
+
+    for (const [description, path] of imagePaths) {
+      it(`requires authentication before replacing the ${description} image`, async () => {
+        const response = await app.handle(
+          new Request(`http://localhost${path}`, { method: 'POST', body: imageForm() }),
+        );
+
+        expect(response.status).toBe(401);
+        expect(await response.json()).toEqual({
+          success: false,
+          error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
+        });
+      });
+
+      it(`requires authentication before deleting the ${description} image`, async () => {
+        const response = await app.handle(
+          new Request(`http://localhost${path}`, { method: 'DELETE' }),
+        );
+
+        expect(response.status).toBe(401);
+        expect(await response.json()).toEqual({
+          success: false,
+          error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
+        });
+      });
+    }
+
+    it('rejects a portfolio id that is not a uuid before authentication runs', async () => {
+      const response = await app.handle(
+        new Request(`http://localhost${basePath}/not-a-uuid/image`, { method: 'DELETE' }),
+      );
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe('VALIDATION');
+    });
+
+    it('rejects a file id that is not a uuid before authentication runs', async () => {
+      const response = await app.handle(
+        new Request(`http://localhost${basePath}/${portfolioId}/image/not-a-uuid`, {
+          method: 'DELETE',
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe('VALIDATION');
+    });
+
+    it('rejects a replacement that carries no image file', async () => {
+      const response = await app.handle(
+        new Request(`http://localhost${basePath}/${portfolioId}/image`, {
+          method: 'POST',
+          body: new FormData(),
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe('VALIDATION');
+    });
+  });
+
   describe('published documentation', () => {
     const openapiDocument = async () =>
       (await (await app.handle(new Request('http://localhost/openapi/json'))).json()) as {

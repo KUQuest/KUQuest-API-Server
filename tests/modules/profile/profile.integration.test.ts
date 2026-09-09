@@ -50,6 +50,24 @@ describe('profile integration', () => {
     },
   );
 
+  it('requires authentication for another member’s reviews endpoint', async () => {
+    const response = await app.handle(
+      new Request(`http://localhost/api/v1/profile/${randomUUID()}/reviews`),
+    );
+
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('rejects a non-UUID id on another member’s reviews endpoint before authentication runs', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/profile/not-a-uuid/reviews'),
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('VALIDATION');
+  });
+
   it('rejects a non-UUID public profile id before authentication runs', async () => {
     const response = await app.handle(
       new Request('http://localhost/api/v1/profile/not-a-uuid'),
