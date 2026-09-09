@@ -25,7 +25,7 @@ This document and its disclosed sub-contracts define the accepted target behavio
 
 Admin encompasses seven core areas of operational responsibility:
 
-- **Payout Approval**: Approve or cancel submitted Student Payouts.
+- **Payout Approval**: Approve or cancel submitted Member Payouts.
 - **Dispute Case**: Reverse part of a `QUEST_FAILED` settlement between Hirer and Worker.
 - **Quest Hide**: Remove a Quest from public discovery without mutating its lifecycle or escrow.
 - **Wallet Freeze/Suspend**: Restrict a Student's Wallet against starting new commitments.

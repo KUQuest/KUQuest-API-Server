@@ -433,6 +433,25 @@ export const paymentPayouts = pgTable(
   ],
 );
 
+export const paymentPayoutSubmissionJobs = pgTable(
+  'payment_payout_submission_jobs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    payoutId: uuid('payout_id')
+      .notNull()
+      .unique()
+      .references(() => paymentPayouts.id),
+    processedAt: time('processed_at'),
+    createdAt: time('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('payment_payout_submission_jobs_pending_idx').on(
+      table.processedAt,
+      table.createdAt,
+    ),
+  ],
+);
+
 export const paymentPayoutStatusHistory = pgTable(
   'payment_payout_status_history',
   {

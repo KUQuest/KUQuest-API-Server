@@ -575,7 +575,7 @@ const applyPayoutOutcomeInTransaction = async (
       })
       .where(eq(paymentPayouts.id, payout.id))
       .returning();
-  if (!updated) throw new MoneyDomainError('PAYOUT_UPDATE_FAILED', 'Succeeded Payout state could not be saved.');
+    if (!updated) throw new MoneyDomainError('PAYOUT_UPDATE_FAILED', 'Succeeded Payout state could not be saved.');
     await transaction.insert(paymentPayoutStatusHistory).values({
       payoutId: payout.id,
       fromStatus: payout.payoutStatus,

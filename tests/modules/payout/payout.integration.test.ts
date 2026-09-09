@@ -3,6 +3,8 @@ import { adminAction } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   paymentPayoutAccounts,
+  paymentPayoutSubmissionJobs,
+  paymentPayoutStatusHistory,
   paymentPayouts,
   paymentPayoutQuotes,
 } from '@/database/schema/payment.schema';
@@ -37,6 +39,7 @@ import {
   listPayoutStatusHistory,
   listPayouts,
   processApprovedPayout,
+  processApprovedPayouts,
   quotePayout,
 } from '@/modules/payout';
 import type {
@@ -386,6 +389,67 @@ describe('Payout application services', () => {
       providerReference: `${provider.referencePrefix}-1`,
     });
     expect(provider.requests).toHaveLength(1);
+  });
+
+  it('enqueues and consumes a Payout Worker job after Admin approval', async () => {
+    const studentId = await createStudent('be199-worker-job');
+    const adminId = await createAdmin();
+    await creditEarnings(studentId, 1_000);
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const payout = await initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be199-worker-job-submit-1' },
+    });
+    const provider = new FakePayoutProvider();
+
+    await approveForTest(adminId, payout.id, 'be199-worker-job-approval-1');
+
+    const [job] = await db
+      .select({ payoutId: paymentPayoutSubmissionJobs.payoutId, processedAt: paymentPayoutSubmissionJobs.processedAt })
+      .from(paymentPayoutSubmissionJobs)
+      .where(eq(paymentPayoutSubmissionJobs.payoutId, payout.id));
+    expect(job).toMatchObject({ payoutId: payout.id, processedAt: null });
+
+    expect(await processApprovedPayouts(20, provider, encryption)).toBeGreaterThanOrEqual(1);
+    expect(provider.requests.some((request) => request.internalReference === payout.internalReference)).toBe(true);
+
+    const [processedJob] = await db
+      .select({ processedAt: paymentPayoutSubmissionJobs.processedAt })
+      .from(paymentPayoutSubmissionJobs)
+      .where(eq(paymentPayoutSubmissionJobs.payoutId, payout.id));
+    expect(processedJob?.processedAt).toBeInstanceOf(Date);
+  });
+
+  it('does not expose a legacy free-form Admin cancellation reason', async () => {
+    const studentId = await createStudent('be199-legacy-cancellation');
+    const adminId = await createAdmin();
+    await creditEarnings(studentId, 1_000);
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const payout = await initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be199-legacy-cancellation-submit-1' },
+    });
+
+    await cancelForTest(adminId, payout.id, 'be199-legacy-cancellation-decision-1');
+    await db.insert(paymentPayoutStatusHistory).values({
+      payoutId: payout.id,
+      fromStatus: 'PENDING_ADMIN_APPROVAL',
+      toStatus: 'CANCELLED',
+      actorAdminId: adminId,
+      source: 'ADMIN_CANCELLATION',
+      reason: 'legacy rejection text',
+      occurredAt: new Date(Date.now() + 1_000),
+    });
+
+    const detail = await getAdminPayout(payout.id);
+    const history = await listAdminPayoutStatusHistory(payout.id);
+
+    expect(detail.cancellationReasonCode).toBeNull();
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'ADMIN_CANCELLATION', reason: null }),
+    ]));
   });
 
   it('claims an approved Payout so concurrent Worker retries submit once', async () => {

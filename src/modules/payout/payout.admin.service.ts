@@ -34,6 +34,11 @@ const payoutApprovalReasonCodes = [
 ] as const;
 
 const payoutCancellationReasonCodes = payoutAdminReasonCodes;
+const payoutAdminReasonCodeSet = new Set<string>(payoutAdminReasonCodes);
+
+const safePayoutReasonCode = (reason: string | null) => (
+  reason && payoutAdminReasonCodeSet.has(reason) ? reason : null
+);
 
 export const payoutAdminActionCatalog: AdminActionReasonCatalog = {
   version: 1,
@@ -226,7 +231,7 @@ const cancellationReasonCodeFor = async (
     ))
     .orderBy(desc(paymentPayoutStatusHistory.occurredAt), desc(paymentPayoutStatusHistory.id))
     .limit(1);
-  return entry?.reason ?? null;
+  return safePayoutReasonCode(entry?.reason ?? null);
 };
 
 const adminPayoutRows = (executor: typeof db | AdminActionTransaction) => executor
@@ -277,6 +282,11 @@ const executePayoutAdminCommand = async (
   metadata: {},
   expectedVersion: input.expectedVersion,
   prepare: async (transaction, _context) => {
+    const decision = {
+      payoutId: input.payoutId,
+      adminId: input.adminId,
+      reasonCode: input.reasonCode,
+    };
     const [current] = await transaction
       .select({ version: paymentPayouts.version })
       .from(paymentPayouts)
@@ -288,17 +298,9 @@ const executePayoutAdminCommand = async (
       currentVersion: current.version,
       apply: async () => {
         if (action === 'PAYOUT_APPROVE') {
-          await approvePayoutInTransaction(transaction, {
-            payoutId: input.payoutId,
-            adminId: input.adminId,
-            reasonCode: input.reasonCode,
-          });
+          await approvePayoutInTransaction(transaction, decision);
         } else {
-          await cancelPayoutInTransaction(transaction, {
-            payoutId: input.payoutId,
-            adminId: input.adminId,
-            reasonCode: input.reasonCode,
-          });
+          await cancelPayoutInTransaction(transaction, decision);
         }
         const payout = await getAdminPayoutInTransaction(transaction, input.payoutId);
         return {
@@ -340,7 +342,10 @@ const adminPayoutHistory = async (payoutId: string): Promise<AdminPayoutStatusHi
     .from(paymentPayoutStatusHistory)
     .where(eq(paymentPayoutStatusHistory.payoutId, payoutId))
     .orderBy(asc(paymentPayoutStatusHistory.occurredAt), asc(paymentPayoutStatusHistory.id));
-  return rows as AdminPayoutStatusHistory[];
+  return rows.map((row) => {
+    if (row.source !== 'ADMIN_CANCELLATION') return row;
+    return { ...row, reason: safePayoutReasonCode(row.reason) };
+  }) as AdminPayoutStatusHistory[];
 };
 
 export const getAdminPayout = async (payoutId: string): Promise<AdminPayout> => {

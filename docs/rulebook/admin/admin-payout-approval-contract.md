@@ -1,6 +1,6 @@
 # Admin Payout Approval Contract
 
-Part of the [Admin Rulebook](admin-rulebook.md). Defines accepted policy for manual Admin review and approval of Student Payout requests.
+Part of the [Admin Rulebook](admin-rulebook.md). Defines accepted policy for manual Admin review and approval of Member Payout requests.
 
 ## Workflow and review queue
 
@@ -17,6 +17,6 @@ Fully specified by `docs/adr/0022-manual-admin-approval-for-payouts.md` and `doc
 ## Decisions and provider hand-off
 
 - **Approve**: Commits the approval record in the database, transitioning the Payout to provider-processing. A background Payout worker then initiates the transfer with the external provider.
-- **Cancel**: Releases held reserves back to the Student's Earnings Balance with an immutable reversing Ledger Transaction (ADR 0010).
+- **Cancel**: Releases held reserves back to the Member's Earnings Balance with an immutable reversing Ledger Transaction (ADR 0010).
 - All decisions require an `Idempotency-Key`, a numeric `If-Match` Payout version, and a controlled `reasonCode`. `PAYOUT_APPROVE` accepts `PAYOUT_POLICY_REVIEW` or `PAYOUT_RISK_REVIEW`. `PAYOUT_CANCEL` also accepts `PAYOUT_INVALID_DESTINATION`. The Server records the immutable Admin Action and the Payout change in one transaction. A successful command returns the updated Payout summary, its new `resourceVersion`, and the `adminActionId`.
 - Once decided, the Admin decision is final and provider webhooks own subsequent status transitions.

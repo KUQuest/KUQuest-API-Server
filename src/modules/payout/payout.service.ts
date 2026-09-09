@@ -3,6 +3,7 @@ import { authUser } from '@/database/schema/auth.schema';
 import {
   paymentPayoutAccounts,
   paymentPayoutQuotes,
+  paymentPayoutSubmissionJobs,
   paymentPayoutStatusHistory,
   paymentPayouts,
   type PayoutStatus,
@@ -363,6 +364,16 @@ const lockedPayoutForAdminDecision = async (
   return payout;
 };
 
+const enqueuePayoutSubmissionJobInTransaction = async (
+  transaction: WalletTransaction,
+  payoutId: string,
+) => {
+  await transaction
+    .insert(paymentPayoutSubmissionJobs)
+    .values({ payoutId })
+    .onConflictDoNothing({ target: paymentPayoutSubmissionJobs.payoutId });
+};
+
 export const approvePayoutInTransaction = async (
   transaction: WalletTransaction,
   input: PayoutAdminDecisionInput,
@@ -386,6 +397,7 @@ export const approvePayoutInTransaction = async (
     source: 'ADMIN_APPROVAL',
     reason: input.reasonCode,
   });
+  await enqueuePayoutSubmissionJobInTransaction(transaction, payout.id);
   return updated;
 };
 
@@ -833,6 +845,16 @@ export const initiatePayout = async (
 
 const providerSubmissionLeaseMs = 5 * 60 * 1000;
 
+const completePayoutSubmissionJob = async (jobId: string) => {
+  await db
+    .update(paymentPayoutSubmissionJobs)
+    .set({ processedAt: new Date() })
+    .where(and(
+      eq(paymentPayoutSubmissionJobs.id, jobId),
+      isNull(paymentPayoutSubmissionJobs.processedAt),
+    ));
+};
+
 const claimApprovedPayout = async (payoutId: string) => db.transaction(async (transaction) => {
   const [record] = await transaction
     .select()
@@ -926,22 +948,42 @@ export const processApprovedPayouts = async (
   }
   const staleBefore = new Date(Date.now() - providerSubmissionLeaseMs);
   const candidates = await db
-    .select({ id: paymentPayouts.id })
-    .from(paymentPayouts)
+    .select({
+      jobId: paymentPayoutSubmissionJobs.id,
+      payoutId: paymentPayoutSubmissionJobs.payoutId,
+    })
+    .from(paymentPayoutSubmissionJobs)
+    .innerJoin(paymentPayouts, eq(paymentPayouts.id, paymentPayoutSubmissionJobs.payoutId))
     .where(and(
+      isNull(paymentPayoutSubmissionJobs.processedAt),
       eq(paymentPayouts.payoutStatus, 'SUBMITTED_TO_PROVIDER'),
       or(isNull(paymentPayouts.providerSubmissionClaimedAt), lt(paymentPayouts.providerSubmissionClaimedAt, staleBefore)),
     ))
-    .orderBy(asc(paymentPayouts.createdAt), asc(paymentPayouts.id))
+    .orderBy(asc(paymentPayoutSubmissionJobs.createdAt), asc(paymentPayoutSubmissionJobs.id))
     .limit(limit);
   let processed = 0;
   for (const candidate of candidates) {
     try {
       // Process one Payout at a time to keep Wallet locks ordered.
       // eslint-disable-next-line no-await-in-loop
-      const payout = await processApprovedPayout(candidate.id, provider, encryption);
-      if (payout.payoutStatus !== 'SUBMITTED_TO_PROVIDER') processed += 1;
+      const payout = await processApprovedPayout(candidate.payoutId, provider, encryption);
+      if (payout.payoutStatus !== 'SUBMITTED_TO_PROVIDER') {
+        // eslint-disable-next-line no-await-in-loop
+        await completePayoutSubmissionJob(candidate.jobId);
+        processed += 1;
+      }
     } catch {
+      // A failed Provider attempt can leave the Payout pending for retry. Mark only
+      // terminal or Provider-pending states as consumed; keep uncertain submissions retryable.
+      // eslint-disable-next-line no-await-in-loop
+      const [current] = await db
+        .select({ payoutStatus: paymentPayouts.payoutStatus })
+        .from(paymentPayouts)
+        .where(eq(paymentPayouts.id, candidate.payoutId));
+      if (current && current.payoutStatus !== 'SUBMITTED_TO_PROVIDER') {
+        // eslint-disable-next-line no-await-in-loop
+        await completePayoutSubmissionJob(candidate.jobId);
+      }
       processed += 1;
     }
   }

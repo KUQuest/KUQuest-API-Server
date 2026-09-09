@@ -254,6 +254,14 @@ CREATE TABLE payment_payouts (
 );
 CREATE UNIQUE INDEX payment_payouts_active_user_uidx ON payment_payouts (user_id) WHERE payout_status IN ('PENDING_ADMIN_APPROVAL','SUBMITTED_TO_PROVIDER','PROVIDER_PENDING');
 
+CREATE TABLE payment_payout_submission_jobs (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  payout_id    UUID NOT NULL UNIQUE REFERENCES payment_payouts(id),
+  processed_at TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX payment_payout_submission_jobs_pending_idx ON payment_payout_submission_jobs (processed_at, created_at);
+
 CREATE TABLE payment_payout_status_history (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   payout_id       UUID NOT NULL REFERENCES payment_payouts(id),
