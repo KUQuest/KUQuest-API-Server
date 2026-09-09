@@ -8,6 +8,7 @@ import {
   deleteAvatar,
   getOwnProfile,
   getPublicProfile,
+  getPublicReviews,
   getReputation,
   getReviews,
   setAvatar,
@@ -15,6 +16,7 @@ import {
 } from '@/modules/profile/profile.controller';
 import * as profileService from '@/modules/profile/profile.service';
 import { avatarStorage } from '@/modules/profile/profile.storage';
+import { encodeCursor } from '@/shared/cursor';
 import { ImageLinkUnavailableError, ImageUploadError } from '@/shared/image-storage';
 
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
@@ -238,6 +240,20 @@ const invokeGetOwnProfile = () => {
   return { result: getOwnProfile({ session: session as never, set: set as never }), set };
 };
 
+const invokeGetPublicReviews = (userId = 'student-2', query: Record<string, unknown> = {}) => {
+  const set: { status?: number | string } = {};
+
+  return {
+    result: getPublicReviews({
+      params: { userId },
+      query: query as never,
+      session: session as never,
+      set: set as never,
+    }),
+    set,
+  };
+};
+
 const invokeGetPublicProfile = (userId = 'student-2') => {
   const set: { status?: number | string } = {};
 
@@ -342,6 +358,271 @@ describe('getReviews', () => {
       success: true,
       data: { items: [], total: 0, nextCursor: null },
     });
+  });
+});
+
+describe('getPublicReviews', () => {
+  it('reports a missing target profile as PROFILE_NOT_FOUND', async () => {
+    spyOn(profileService, 'getPublicProfile').mockResolvedValue(undefined);
+    const getProfileReviews = spyOn(profileService, 'getProfileReviews');
+
+    const { result, set } = invokeGetPublicReviews();
+
+    expect(await result).toEqual({
+      success: false,
+      error: { code: 'PROFILE_NOT_FOUND', message: 'Profile not found' },
+    });
+    expect(set.status).toBe(404);
+    expect(getProfileReviews).not.toHaveBeenCalled();
+  });
+
+  it("returns another member's Reviews when the profile exists", async () => {
+    spyOn(profileService, 'getPublicProfile').mockResolvedValue({
+      version: 1,
+      firstName: 'Student',
+      lastName: 'Two',
+      bio: null,
+      academicYear: 2025,
+      department: null,
+      occupation: null,
+      avatar: null,
+    });
+    spyOn(profileService, 'getProfileReviews').mockResolvedValue({
+      rows: [
+        {
+          id: 'review-1',
+          reviewerFirstName: 'Student',
+          reviewerLastName: 'One',
+          rating: 5,
+          comment: 'Great work',
+          createdAt: new Date('2025-01-05T00:00:00.000Z'),
+          updatedAt: new Date('2025-01-05T00:00:00.000Z'),
+          questId: 'quest-1',
+          questTitle: 'Tutor session',
+          avatarBucket: null,
+          avatarObjectKey: null,
+        },
+      ],
+      hasNext: false,
+      total: 1,
+    });
+
+    const { result, set } = invokeGetPublicReviews('student-2', { rating: 5 });
+
+    expect(await result).toEqual({
+      success: true,
+      data: {
+        items: [
+          {
+            id: 'review-1',
+            reviewer: { displayName: 'Student One', avatar: null },
+            rating: 5,
+            comment: 'Great work',
+            createdAt: '2025-01-05T00:00:00.000Z',
+            quest: { id: 'quest-1', title: 'Tutor session' },
+          },
+        ],
+        total: 1,
+        nextCursor: null,
+      },
+    });
+    expect(set.status).toBeUndefined();
+    expect(profileService.getProfileReviews).toHaveBeenCalledWith('student-2', {
+      rating: 5,
+      limit: 20,
+      cursor: undefined,
+    });
+  });
+});
+
+const reviewOne = '018f47a7-1c7d-7c98-9a11-690d7e834311';
+const reviewTwo = '018f47a7-1c7d-7c98-9a11-690d7e834312';
+
+const reviewRow = (id: string, overrides: Record<string, unknown> = {}) => ({
+  id,
+  reviewerFirstName: 'Student',
+  reviewerLastName: 'One',
+  rating: 5,
+  comment: 'Great work',
+  createdAt: new Date('2025-01-05T00:00:00.000Z'),
+  updatedAt: new Date('2025-01-05T00:00:00.000Z'),
+  questId: 'quest-1',
+  questTitle: 'Tutor session',
+  avatarBucket: null,
+  avatarObjectKey: null,
+  ...overrides,
+});
+
+const publicProfileRecord = {
+  version: 1,
+  firstName: 'Student',
+  lastName: 'Two',
+  bio: null,
+  academicYear: 2025,
+  department: null,
+  occupation: null,
+  avatar: null,
+};
+
+describe('getPublicReviews pagination', () => {
+  it('hands back a cursor pointing at the last row when more pages remain', async () => {
+    spyOn(profileService, 'getPublicProfile').mockResolvedValue(publicProfileRecord);
+    spyOn(profileService, 'getProfileReviews').mockResolvedValue({
+      rows: [reviewRow(reviewOne), reviewRow(reviewTwo)],
+      hasNext: true,
+      total: 9,
+    });
+
+    const { result } = invokeGetPublicReviews('student-2', { limit: 2 });
+    const body = (await result) as { data: { nextCursor: string } };
+
+    expect(JSON.parse(atob(body.data.nextCursor.replaceAll('-', '+').replaceAll('_', '/')))).toEqual({
+      v: 1,
+      startTime: '2025-01-05T00:00:00.000Z',
+      id: reviewTwo,
+    });
+    expect(profileService.getProfileReviews).toHaveBeenCalledWith('student-2', {
+      rating: undefined,
+      limit: 2,
+      cursor: undefined,
+    });
+  });
+
+  it('forwards a decoded cursor to the service', async () => {
+    spyOn(profileService, 'getPublicProfile').mockResolvedValue(publicProfileRecord);
+    spyOn(profileService, 'getProfileReviews').mockResolvedValue({
+      rows: [],
+      hasNext: false,
+      total: 0,
+    });
+    const cursor = encodeCursor({ startTime: '2025-01-05T00:00:00.000Z', id: reviewOne });
+
+    const { result } = invokeGetPublicReviews('student-2', { cursor });
+
+    expect(await result).toEqual({
+      success: true,
+      data: { items: [], total: 0, nextCursor: null },
+    });
+    expect(profileService.getProfileReviews).toHaveBeenCalledWith('student-2', {
+      rating: undefined,
+      limit: 20,
+      cursor: { v: 1, startTime: '2025-01-05T00:00:00.000Z', id: reviewOne },
+    });
+  });
+
+  it('rejects an unreadable cursor with INVALID_CURSOR', async () => {
+    spyOn(profileService, 'getPublicProfile').mockResolvedValue(publicProfileRecord);
+    const getProfileReviews = spyOn(profileService, 'getProfileReviews');
+
+    const { result, set } = invokeGetPublicReviews('student-2', { cursor: 'not-a-cursor' });
+    const body = (await result) as { error: { code: string } };
+
+    expect(set.status).toBe(400);
+    expect(body.error.code).toBe('INVALID_CURSOR');
+    expect(getProfileReviews).not.toHaveBeenCalled();
+  });
+
+  it('rejects a limit above the page maximum with INVALID_LIMIT', async () => {
+    spyOn(profileService, 'getPublicProfile').mockResolvedValue(publicProfileRecord);
+    const getProfileReviews = spyOn(profileService, 'getProfileReviews');
+
+    const { result, set } = invokeGetPublicReviews('student-2', { limit: 999 });
+    const body = (await result) as { error: { code: string } };
+
+    expect(set.status).toBe(400);
+    expect(body.error.code).toBe('INVALID_LIMIT');
+    expect(getProfileReviews).not.toHaveBeenCalled();
+  });
+
+  it('inlines the reviewer avatar when one is stored', async () => {
+    spyOn(profileService, 'getPublicProfile').mockResolvedValue(publicProfileRecord);
+    spyOn(profileService, 'getProfileReviews').mockResolvedValue({
+      rows: [reviewRow(reviewOne, { avatarBucket: 'kuquest', avatarObjectKey: 'avatar/a.png' })],
+      hasNext: false,
+      total: 1,
+    });
+    spyOn(avatarStorage, 'linkFor').mockReturnValue('https://storage.test/avatar');
+
+    const { result } = invokeGetPublicReviews();
+    const body = (await result) as { data: { items: Array<{ reviewer: unknown }> } };
+
+    expect(body.data.items[0]?.reviewer).toEqual({
+      displayName: 'Student One',
+      avatar: { url: 'https://storage.test/avatar' },
+    });
+  });
+
+  it('drops the reviewer avatar when its link cannot be built', async () => {
+    spyOn(profileService, 'getPublicProfile').mockResolvedValue(publicProfileRecord);
+    spyOn(profileService, 'getProfileReviews').mockResolvedValue({
+      rows: [reviewRow(reviewOne, { avatarBucket: 'kuquest', avatarObjectKey: 'avatar/a.png' })],
+      hasNext: false,
+      total: 1,
+    });
+    spyOn(avatarStorage, 'linkFor').mockImplementation(() => {
+      throw new ImageLinkUnavailableError('Object storage is not configured');
+    });
+
+    const { result } = invokeGetPublicReviews();
+    const body = (await result) as { data: { items: Array<{ reviewer: { avatar: unknown } }> } };
+
+    expect(body.data.items[0]?.reviewer.avatar).toBeNull();
+  });
+});
+
+describe('getReviews with a request context', () => {
+  const invokeGetReviews = (query: Record<string, unknown> = {}) => {
+    const set: { status?: number | string } = {};
+
+    return {
+      result: getReviews({ query: query as never, session: session as never, set: set as never }),
+      set,
+    };
+  };
+
+  it('reads the Reviews of the signed-in Member', async () => {
+    spyOn(profileService, 'getProfileReviews').mockResolvedValue({
+      rows: [reviewRow(reviewOne)],
+      hasNext: false,
+      total: 1,
+    });
+
+    const { result, set } = invokeGetReviews({ rating: 5 });
+
+    expect(await result).toEqual({
+      success: true,
+      data: {
+        items: [
+          {
+            id: reviewOne,
+            reviewer: { displayName: 'Student One', avatar: null },
+            rating: 5,
+            comment: 'Great work',
+            createdAt: '2025-01-05T00:00:00.000Z',
+            quest: { id: 'quest-1', title: 'Tutor session' },
+          },
+        ],
+        total: 1,
+        nextCursor: null,
+      },
+    });
+    expect(set.status).toBeUndefined();
+    expect(profileService.getProfileReviews).toHaveBeenCalledWith(studentAuthId, {
+      rating: 5,
+      limit: 20,
+      cursor: undefined,
+    });
+  });
+
+  it('rejects an unreadable cursor with INVALID_CURSOR', async () => {
+    const getProfileReviews = spyOn(profileService, 'getProfileReviews');
+
+    const { result, set } = invokeGetReviews({ cursor: 'not-a-cursor' });
+    const body = (await result) as { error: { code: string } };
+
+    expect(set.status).toBe(400);
+    expect(body.error.code).toBe('INVALID_CURSOR');
+    expect(getProfileReviews).not.toHaveBeenCalled();
   });
 });
 

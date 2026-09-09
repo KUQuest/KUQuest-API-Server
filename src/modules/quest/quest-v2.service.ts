@@ -26,7 +26,6 @@ import {
   and,
   asc,
   eq,
-  exists,
   gt,
   gte,
   inArray,
@@ -2431,22 +2430,9 @@ const activeWorkerCountExpression = sql<number>`(
     AND ${questAssignment.assignmentStatus} = ${assignmentStatus.active}
 )`;
 
-const activeQuestAssignmentAccess = (userId: string) => exists(sql`(
-  select 1
-  from quest_assignment a
-  where a.quest_id = ${quest.id}
-    and a.worker_id = ${userId}
-    and a.assignment_status = ${assignmentStatus.active}
-)`);
-
-const questV2PublicReadConditions = (userId: string, includeActiveAssignment = false) => [
+const questV2PublicReadConditions = (userId: string) => [
   eq(quest.apiVersion, questApiVersion.v2),
-  includeActiveAssignment
-    ? or(
-        and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
-        activeQuestAssignmentAccess(userId),
-      )
-    : and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
+  and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
   ne(quest.hirerId, userId),
   isNotNull(quest.rewardSatang),
   isNotNull(quest.v2Mode),
@@ -2645,7 +2631,7 @@ export const getPublicQuestV2Detail = async (
     .from(quest)
     .innerJoin(authUser, eq(quest.hirerId, authUser.id))
     .leftJoin(tag, eq(quest.tagId, tag.id))
-    .where(and(eq(quest.id, questId), ...questV2PublicReadConditions(userId, true)))
+    .where(and(eq(quest.id, questId), ...questV2PublicReadConditions(userId)))
     .limit(1);
 
   if (!row) return undefined;
