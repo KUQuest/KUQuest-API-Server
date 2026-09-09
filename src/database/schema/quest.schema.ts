@@ -83,6 +83,7 @@ export const quest = pgTable(
     headcount: integer('headcount').default(1).notNull(),
     startTime: time('start_time').notNull(),
     dueAt: time('due_at'),
+    failedAt: time('failed_at'),
     proofRequired: boolean('proof_required').default(true).notNull(),
     cancelledAt: time('cancelled_at'),
     cancelledByUserId: uuid('cancelled_by_user_id').references(() => authUser.id),
@@ -123,6 +124,7 @@ export const quest = pgTable(
     check('quest_finance_snapshot_amounts_check', sql`${table.platformFeePerWorkerSatang} IS NULL OR ${table.platformFeePerWorkerSatang} >= 0`),
     check('quest_finance_snapshot_escrow_check', sql`${table.questEscrowSatang} IS NULL OR ${table.questEscrowSatang} > 0`),
     check('quest_headcount_check', sql`${table.headcount} > 0`),
+    check('quest_failed_at_check', sql`(${table.failedAt} IS NOT NULL) = (${table.questStatus} = 'QUEST_FAILED')`),
     check(
       'quest_participation_headcount_check',
       sql`(

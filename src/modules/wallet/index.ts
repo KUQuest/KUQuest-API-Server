@@ -19,12 +19,15 @@ export {
   increaseFundingReservation,
   releaseFundingReservation,
   reserveSpending,
+  settleDisputeCase,
   settleFundingReservation,
 } from './wallet.funding.service';
 export type {
   IncreaseFundingReservationInput,
   ReleaseFundingReservationInput,
   ReserveSpendingInput,
+  SettleDisputeCaseInput,
+  SettleDisputeCaseResult,
   SettleFundingReservationInput,
 } from './wallet.funding.service';
 export {

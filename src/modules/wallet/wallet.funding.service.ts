@@ -1,6 +1,7 @@
 import {
   paymentMoneyPolicyRevision,
   walletActivity,
+  walletDisputeSettlement,
   walletFundingReservation,
   walletFundingReservationOperation,
   walletFundingReservationSettlement,
@@ -11,7 +12,7 @@ import {
   walletWallet,
 } from '@/database/schema/wallet.schema';
 
-import { and, desc, eq, gt, inArray, isNull, lte, or } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 
 import {
   MAX_WALLET_CAPACITY_SATANG,
@@ -20,9 +21,14 @@ import {
   type Satang,
   positiveSatang,
   satang,
+  signedSatang,
 } from './wallet.money';
 import { assertWalletOperationAllowed } from './wallet.status.service';
-import { ensureWalletInTransaction, type WalletTransaction } from './wallet.service';
+import {
+  createSealedLedgerTransactionInTransaction,
+  ensureWalletInTransaction,
+  type WalletTransaction,
+} from './wallet.service';
 
 export type ReserveSpendingInput = {
   ownerUserId: string;
@@ -53,6 +59,20 @@ export type SettleFundingReservationInput = {
   platformFeeSatang?: Satang;
   /** Use only when a Quest allocates the already snapshotted fee pool. */
   platformFeeValidation?: 'POLICY' | 'QUEST_ESCROW_SNAPSHOT';
+};
+
+export type SettleDisputeCaseInput = {
+  ownerUserId: string;
+  reservationId: string;
+  settlementReference: string;
+  recipientUserId: string;
+  recipientAmountSatang: Satang;
+};
+
+export type SettleDisputeCaseResult = {
+  ledgerTransactionId: string;
+  recipientAmountSatang: Satang;
+  reservationStatus: 'ACTIVE' | 'RELEASED' | 'SETTLED';
 };
 
 const requireOpaqueReference = (value: string, field: string) => {
@@ -869,4 +889,222 @@ export const settleFundingReservation = async (
     .where(eq(walletIdempotencyKey.id, idempotency.id));
 
   return settlement;
+};
+
+/**
+ * Redirect a Dispute Case amount from the Quest Funding Reservation.
+ *
+ * A failed Quest keeps its unspent reservation ACTIVE during the dispute
+ * window. If the automatic hold release already ran, the same Quest cap is
+ * enforced from the settlement history and the transfer uses the Hirer's
+ * Spending Balance. Admin code calls this Wallet operation and never writes
+ * ledger rows directly.
+ */
+export const settleDisputeCase = async (
+  transaction: WalletTransaction,
+  input: SettleDisputeCaseInput,
+): Promise<SettleDisputeCaseResult> => {
+  requireOpaqueReference(input.settlementReference, 'Settlement reference');
+  const recipientAmountSatang = positiveSatang(input.recipientAmountSatang);
+  const policy = await effectivePolicyInTransaction(transaction);
+  if (recipientAmountSatang > policy.maximumFundingReservationSatang) {
+    throw new MoneyDomainError(
+      'AMOUNT_OUT_OF_RANGE',
+      'Dispute amount is outside the active Money Policy limit.',
+    );
+  }
+
+  const [snapshot] = await transaction
+    .select()
+    .from(walletFundingReservation)
+    .where(and(
+      eq(walletFundingReservation.id, input.reservationId),
+      eq(walletFundingReservation.ownerUserId, input.ownerUserId),
+    ))
+    .limit(1);
+  if (!snapshot) {
+    throw new MoneyDomainError('FUNDING_RESERVATION_NOT_FOUND', 'Funding Reservation does not exist.');
+  }
+
+  if (snapshot.status === 'ACTIVE') {
+    const settlement = await settleFundingReservation(transaction, {
+      ownerUserId: input.ownerUserId,
+      reservationId: input.reservationId,
+      settlementReference: input.settlementReference,
+      recipientUserId: input.recipientUserId,
+      recipientAmountSatang,
+      platformFeeSatang: satang(0),
+      platformFeeValidation: 'POLICY',
+    });
+    const [reservation] = await transaction
+      .select({ status: walletFundingReservation.status })
+      .from(walletFundingReservation)
+      .where(eq(walletFundingReservation.id, input.reservationId));
+    if (!reservation) {
+      throw new MoneyDomainError('FUNDING_RESERVATION_NOT_FOUND', 'Funding Reservation does not exist.');
+    }
+    return {
+      ledgerTransactionId: settlement.ledgerTransactionId,
+      recipientAmountSatang,
+      reservationStatus: reservation.status,
+    };
+  }
+
+  if (snapshot.status !== 'RELEASED') {
+    throw new MoneyDomainError(
+      'FUNDING_RESERVATION_NOT_ACTIVE',
+      'A settled Funding Reservation has no Dispute Case funds remaining.',
+    );
+  }
+
+  const operationScope = `wallet.dispute-settlement:${input.reservationId}`;
+  const requestHash = await sha256Json({
+    recipientUserId: input.recipientUserId,
+    recipientAmountSatang,
+  });
+  const { created, idempotency } = await acquireIdempotency(
+    transaction,
+    input.ownerUserId,
+    operationScope,
+    input.settlementReference,
+    requestHash,
+  );
+  if (idempotency.resourceId) {
+    const [settlement] = await transaction
+      .select({
+        ledgerTransactionId: walletDisputeSettlement.ledgerTransactionId,
+        amountSatang: walletDisputeSettlement.amountSatang,
+      })
+      .from(walletDisputeSettlement)
+      .where(eq(walletDisputeSettlement.id, idempotency.resourceId));
+    const [reservation] = await transaction
+      .select({ status: walletFundingReservation.status })
+      .from(walletFundingReservation)
+      .where(eq(walletFundingReservation.id, input.reservationId));
+    if (!settlement || !reservation) {
+      throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'The idempotent Dispute settlement is missing.');
+    }
+    return {
+      ledgerTransactionId: settlement.ledgerTransactionId,
+      recipientAmountSatang: satang(settlement.amountSatang),
+      reservationStatus: reservation.status,
+    };
+  }
+  if (!created) {
+    throw new MoneyDomainError('IDEMPOTENCY_IN_PROGRESS', 'A Dispute settlement with this key is still processing.');
+  }
+
+  const [reservation] = await transaction
+    .select()
+    .from(walletFundingReservation)
+    .where(and(
+      eq(walletFundingReservation.id, input.reservationId),
+      eq(walletFundingReservation.ownerUserId, input.ownerUserId),
+    ))
+    .for('update');
+  if (!reservation) {
+    throw new MoneyDomainError('FUNDING_RESERVATION_NOT_FOUND', 'Funding Reservation does not exist.');
+  }
+  if (reservation.status !== 'RELEASED') {
+    throw new MoneyDomainError('FUNDING_RESERVATION_NOT_ACTIVE', 'Funding Reservation state changed before settlement.');
+  }
+
+  const [fundingSettled] = await transaction
+    .select({ totalAmountSatang: sql<number>`coalesce(sum(${walletFundingReservationSettlement.totalAmountSatang}), 0)` })
+    .from(walletFundingReservationSettlement)
+    .where(eq(walletFundingReservationSettlement.reservationId, reservation.id));
+  const [disputeSettled] = await transaction
+    .select({ amountSatang: sql<number>`coalesce(sum(${walletDisputeSettlement.amountSatang}), 0)` })
+    .from(walletDisputeSettlement)
+    .where(eq(walletDisputeSettlement.reservationId, reservation.id));
+  const alreadySettledSatang = Number(fundingSettled?.totalAmountSatang ?? 0) + Number(disputeSettled?.amountSatang ?? 0);
+  const availableSatang = reservation.totalReservedSatang - alreadySettledSatang;
+  if (recipientAmountSatang > availableSatang) {
+    throw new MoneyDomainError(
+      'FUNDING_RESERVATION_INSUFFICIENT',
+      'Dispute amount exceeds the Quest Funding Reservation cap.',
+    );
+  }
+
+  const recipientWallet = await ensureWalletInTransaction(transaction, input.recipientUserId);
+  const walletIds = [...new Set([reservation.walletId, recipientWallet.id])].sort();
+  const wallets = await transaction
+    .select()
+    .from(walletWallet)
+    .where(inArray(walletWallet.id, walletIds))
+    .orderBy(walletWallet.id)
+    .for('update');
+  const ownerWallet = wallets.find(({ id }) => id === reservation.walletId);
+  const lockedRecipientWallet = wallets.find(({ id }) => id === recipientWallet.id);
+  if (!ownerWallet || !lockedRecipientWallet) {
+    throw new MoneyDomainError('WALLET_NOT_FOUND', 'Settlement Wallet does not exist.');
+  }
+  if (ownerWallet.spendingBalanceSatang < recipientAmountSatang) {
+    throw new MoneyDomainError('INSUFFICIENT_SPENDING_BALANCE', 'Hirer Spending Balance is insufficient.');
+  }
+  const recipientTotal = lockedRecipientWallet.spendingBalanceSatang +
+    lockedRecipientWallet.earningsBalanceSatang +
+    lockedRecipientWallet.fundingReservedSatang +
+    lockedRecipientWallet.reservedForPayoutsSatang;
+  if (
+    ownerWallet.id !== lockedRecipientWallet.id &&
+    recipientTotal + recipientAmountSatang > MAX_WALLET_CAPACITY_SATANG
+  ) {
+    throw new MoneyDomainError('WALLET_CAPACITY_EXCEEDED', 'Recipient Wallet capacity would be exceeded.');
+  }
+
+  const ownerAccounts = await walletAccountIds(transaction, ownerWallet.id);
+  const recipientAccounts = ownerWallet.id === lockedRecipientWallet.id
+    ? ownerAccounts
+    : await walletAccountIds(transaction, lockedRecipientWallet.id);
+  const spendingAccountId = ownerAccounts.get('SPENDING');
+  const recipientEarningsAccountId = recipientAccounts.get('EARNINGS');
+  if (!spendingAccountId || !recipientEarningsAccountId) {
+    throw new MoneyDomainError('WALLET_ACCOUNT_NOT_FOUND', 'Required Dispute settlement ledger account does not exist.');
+  }
+
+  const ledgerTransaction = await createSealedLedgerTransactionInTransaction(transaction, {
+    businessReference: `dispute-settlement:${await sha256Json({
+      reservationId: reservation.id,
+      settlementReference: input.settlementReference,
+    })}`,
+    eventType: 'ADJUSTMENT',
+    idempotencyKeyId: idempotency.id,
+    createdByUserId: input.ownerUserId,
+    description: 'Redirect Dispute Case funds after Funding Reservation release',
+    postings: [
+      { accountId: spendingAccountId, amountSatang: signedSatang(-recipientAmountSatang) },
+      { accountId: recipientEarningsAccountId, amountSatang: signedSatang(recipientAmountSatang) },
+    ],
+  });
+  const [settlement] = await transaction
+    .insert(walletDisputeSettlement)
+    .values({
+      reservationId: reservation.id,
+      settlementReference: input.settlementReference,
+      recipientWalletId: lockedRecipientWallet.id,
+      recipientUserId: input.recipientUserId,
+      amountSatang: recipientAmountSatang,
+      ledgerTransactionId: ledgerTransaction.id,
+      idempotencyKeyId: idempotency.id,
+    })
+    .returning({ id: walletDisputeSettlement.id });
+  if (!settlement) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Dispute Case settlement could not be recorded.');
+  }
+  await transaction
+    .update(walletIdempotencyKey)
+    .set({
+      resourceType: 'wallet_dispute_settlement',
+      resourceId: settlement.id,
+      processingStatus: 'COMPLETED',
+      completedAt: new Date(),
+    })
+    .where(eq(walletIdempotencyKey.id, idempotency.id));
+
+  return {
+    ledgerTransactionId: ledgerTransaction.id,
+    recipientAmountSatang,
+    reservationStatus: reservation.status,
+  };
 };

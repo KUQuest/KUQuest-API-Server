@@ -151,6 +151,7 @@ const createQuest = async (
     v2Participation: group ? 'GROUP' : 'SINGLE',
     rewardSatang: status === 'QUEST_DRAFT' ? null : 1_000,
     questStatus: status,
+    failedAt: status === 'QUEST_FAILED' ? new Date() : null,
     questFundingTotalSatang: group ? 2_040 : 1_020,
     platformFeePerWorkerSatang: 20,
     questEscrowSatang: group ? 2_040 : 1_020,

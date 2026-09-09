@@ -9,6 +9,8 @@ import {
   questTeam,
   questTeamInvitation,
 } from '@/database/schema/quest.schema';
+import { walletFundingReservation } from '@/database/schema/wallet.schema';
+import { releaseFundingReservation } from '@/modules/wallet';
 
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 
@@ -60,7 +62,7 @@ export type QuestLifecycleWorkerOptions = {
 };
 
 export type QuestLifecycleWorkerError = {
-  operation: 'start' | 'auto-cancel' | 'underfilled-detection' | 'underfilled-timeout' | 'dispute' | 'invitation-expiry' | 'edit-timeout' | 'auto-approval' | 'due-at-failure' | 'quest-image-cleanup' | 'quest-proof-upload-cleanup';
+  operation: 'start' | 'auto-cancel' | 'underfilled-detection' | 'underfilled-timeout' | 'dispute' | 'failure-hold-release' | 'invitation-expiry' | 'edit-timeout' | 'auto-approval' | 'due-at-failure' | 'quest-image-cleanup' | 'quest-proof-upload-cleanup';
   id?: string;
   cause: unknown;
 };
@@ -72,6 +74,7 @@ export type QuestLifecycleWorkerResult = {
   timedOutUnderfilledQuestIds: string[];
   disputedQuestIds: string[];
   failedQuestIds: string[];
+  releasedFailedQuestIds: string[];
   timedOutEditRequestIds: string[];
   expiredInvitationIds: string[];
   autoApprovedProofIds: string[];
@@ -267,6 +270,50 @@ const dueQuestIds = async (now: Date, limit: number) => db
   .orderBy(asc(quest.dueAt), asc(quest.id))
   .limit(limit);
 
+const dueFailedQuestIds = async (now: Date, limit: number) => db
+  .select({ id: quest.id })
+  .from(quest)
+  .where(and(
+    eq(quest.questStatus, questStatus.failed),
+    lte(quest.failedAt, new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)),
+  ))
+  .orderBy(asc(quest.failedAt), asc(quest.id))
+  .limit(limit);
+
+const releaseFailedQuestReservation = async (questId: string, now: Date): Promise<boolean> =>
+  db.transaction(async (transaction) => {
+    const [current] = await transaction
+      .select({
+        id: quest.id,
+        hirerId: quest.hirerId,
+        fundingReservationId: quest.fundingReservationId,
+        failedAt: quest.failedAt,
+        questStatus: quest.questStatus,
+      })
+      .from(quest)
+      .where(eq(quest.id, questId))
+      .for('update');
+    if (
+      !current ||
+      current.questStatus !== questStatus.failed ||
+      !current.fundingReservationId ||
+      !current.failedAt ||
+      current.failedAt.getTime() > now.getTime() - 7 * 24 * 60 * 60 * 1000
+    ) return false;
+    const [reservation] = await transaction
+      .select({ status: walletFundingReservation.status })
+      .from(walletFundingReservation)
+      .where(eq(walletFundingReservation.id, current.fundingReservationId))
+      .for('update');
+    if (!reservation || reservation.status !== 'ACTIVE') return false;
+    await releaseFundingReservation(transaction, {
+      ownerUserId: current.hirerId,
+      reservationId: current.fundingReservationId,
+      operationReference: `quest-failure-hold-release:${current.id}`,
+    });
+    return true;
+  });
+
 const dueUnfilledQuestIds = async (now: Date, limit: number) => db
   .select({ id: quest.id })
   .from(quest)
@@ -412,6 +459,14 @@ export const runQuestLifecycleWorker = async (
     reportError(options.onError, error);
   }
 
+  const releasedFailedQuestIds = await processIds(
+    (await dueFailedQuestIds(now, limit)).map(({ id }) => id),
+    'failure-hold-release',
+    (id) => releaseFailedQuestReservation(id, now),
+    errors,
+    options.onError,
+  );
+
   const timedOutLegacyEditRequestIds = await processIds(
     (await pendingEditRequestIds(limit)).map(({ id }) => id),
     'edit-timeout',
@@ -470,6 +525,7 @@ export const runQuestLifecycleWorker = async (
     timedOutUnderfilledQuestIds,
     disputedQuestIds,
     failedQuestIds,
+    releasedFailedQuestIds,
     timedOutEditRequestIds: [...timedOutLegacyEditRequestIds, ...timedOutV2EditRequestIds],
     expiredInvitationIds,
     autoApprovedProofIds,

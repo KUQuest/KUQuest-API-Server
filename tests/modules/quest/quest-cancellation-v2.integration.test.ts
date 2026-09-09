@@ -137,6 +137,7 @@ const createV2Quest = async (input: {
     v2Mode: mode,
     v2Participation: participation,
     questStatus: input.status,
+    failedAt: input.status === 'QUEST_FAILED' ? new Date() : null,
     rewardSatang: input.status === 'QUEST_DRAFT' ? null : rewardSatang,
     questFundingTotalSatang: input.status === 'QUEST_DRAFT' ? null : rewardSatang + platformFeeSatang,
     platformFeeBps: input.status === 'QUEST_DRAFT' ? null : 200,

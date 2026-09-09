@@ -707,6 +707,7 @@ export const failQuestV2InTransaction = async (
     .update(quest)
     .set({
       questStatus: questStatus.failed,
+      failedAt: now,
       version: sql`${quest.version} + 1`,
       updatedAt: now,
     })
