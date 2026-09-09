@@ -39,7 +39,7 @@ import {
   sql,
 } from 'drizzle-orm';
 
-import { assignmentStatus, questStatus, type QuestStatus } from './quest.contract';
+import { assignmentStatus, questStatus, terminalQuestStatuses, type QuestStatus } from './quest.contract';
 import { questV2StorageCompatibility } from './quest-storage.adapter';
 import {
   formatQuestV2ScheduleTime,
@@ -2431,12 +2431,15 @@ const activeWorkerCountExpression = sql<number>`(
     AND ${questAssignment.assignmentStatus} = ${assignmentStatus.active}
 )`;
 
-const activeQuestAssignmentAccess = (userId: string) => exists(sql`(
+// Omitting `status` matches any Assignment the Member ever held, active or not;
+// a terminal participant needs that to keep read access after settlement moves
+// their Assignment off ACTIVE.
+const questAssignmentAccess = (userId: string, status?: string) => exists(sql`(
   select 1
   from quest_assignment a
   where a.quest_id = ${quest.id}
     and a.worker_id = ${userId}
-    and a.assignment_status = ${assignmentStatus.active}
+    ${status ? sql`and a.assignment_status = ${status}` : sql``}
 )`);
 
 const questV2PublicReadConditions = (userId: string, includeActiveAssignment = false) => [
@@ -2444,7 +2447,8 @@ const questV2PublicReadConditions = (userId: string, includeActiveAssignment = f
   includeActiveAssignment
     ? or(
         and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
-        activeQuestAssignmentAccess(userId),
+        questAssignmentAccess(userId, assignmentStatus.active),
+        and(inArray(quest.questStatus, terminalQuestStatuses), questAssignmentAccess(userId)),
       )
     : and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
   ne(quest.hirerId, userId),

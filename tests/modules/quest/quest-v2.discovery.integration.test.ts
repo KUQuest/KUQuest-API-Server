@@ -489,16 +489,36 @@ describe('Quest API v2 discovery contract', () => {
     });
   });
 
-  // Participant access rests on an ACTIVE Assignment, and settlement makes every Active
-  // Assignment terminal, so a settled Quest closes the participant door behind itself.
-  it('stops returning public detail once the Worker Assignment leaves ASSIGNMENT_ACTIVE', async () => {
+  // A Departed Worker (Assignment ended, Quest still ongoing for others) is not a
+  // terminal participant yet and does not regain a Prospective Worker's OPEN-only access.
+  it('stops returning public detail to a Departed Worker while the Quest is still ongoing', async () => {
+    const assignedQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Departed Ongoing` });
+    await addActiveWorkers(assignedQuest, [memberId]);
+    await db.update(quest).set({ questStatus: questStatus.assigned }).where(eq(quest.id, assignedQuest));
+
+    expect((await getPublicDetail(assignedQuest)).status).toBe(200);
+
+    await db.update(questAssignment).set({ assignmentStatus: 'ASSIGNMENT_INCOMPLETE' })
+      .where(eq(questAssignment.questId, assignedQuest));
+
+    const response = await getPublicDetail(assignedQuest);
+    expect(response.status).toBe(404);
+    expect((await response.json()).error.code).toBe('QUEST_NOT_FOUND');
+  });
+
+  // A terminal participant keeps read access once the Quest itself reaches a Terminal
+  // State, even though settlement also moves their Assignment off ACTIVE.
+  it('keeps returning public detail to a Worker once the Quest reaches a Terminal State', async () => {
     const cancelledQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Cancelled Public` });
     await addActiveWorkers(cancelledQuest, [memberId]);
     const completedQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Completed Public` });
     await addActiveWorkers(completedQuest, [memberId]);
+    const failedQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Failed Public` });
+    await addActiveWorkers(failedQuest, [memberId]);
 
     expect((await getPublicDetail(cancelledQuest)).status).toBe(200);
     expect((await getPublicDetail(completedQuest)).status).toBe(200);
+    expect((await getPublicDetail(failedQuest)).status).toBe(200);
 
     await db.update(quest).set({
       questStatus: questStatus.cancelled,
@@ -510,15 +530,34 @@ describe('Quest API v2 discovery contract', () => {
     await db.update(quest).set({ questStatus: questStatus.completed }).where(eq(quest.id, completedQuest));
     await db.update(questAssignment).set({ assignmentStatus: 'ASSIGNMENT_COMPLETED' })
       .where(eq(questAssignment.questId, completedQuest));
+    await db.update(quest).set({ questStatus: questStatus.failed }).where(eq(quest.id, failedQuest));
+    await db.update(questAssignment).set({ assignmentStatus: 'ASSIGNMENT_INCOMPLETE' })
+      .where(eq(questAssignment.questId, failedQuest));
 
-    const responses = await Promise.all([cancelledQuest, completedQuest].map(async (questId) => {
-      const response = await getPublicDetail(questId);
-      return { status: response.status, code: (await response.json()).error.code };
-    }));
+    const responses = await Promise.all(
+      [cancelledQuest, completedQuest, failedQuest].map(async (questId) => {
+        const response = await getPublicDetail(questId);
+        const body = (await response.json()) as { data?: { state: string } };
+        return { status: response.status, state: body.data?.state };
+      }),
+    );
     expect(responses).toEqual([
-      { status: 404, code: 'QUEST_NOT_FOUND' },
-      { status: 404, code: 'QUEST_NOT_FOUND' },
+      { status: 200, state: 'QUEST_CANCELLED' },
+      { status: 200, state: 'QUEST_COMPLETED' },
+      { status: 200, state: 'QUEST_FAILED' },
     ]);
+  });
+
+  it('still returns QUEST_NOT_FOUND for an unrelated Member reading a Terminal Quest', async () => {
+    const completedQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Completed No Access` });
+    await addActiveWorkers(completedQuest, workerIds.slice(0, 1));
+    await db.update(quest).set({ questStatus: questStatus.completed }).where(eq(quest.id, completedQuest));
+    await db.update(questAssignment).set({ assignmentStatus: 'ASSIGNMENT_COMPLETED' })
+      .where(eq(questAssignment.questId, completedQuest));
+
+    const response = await getPublicDetail(completedQuest);
+    expect(response.status).toBe(404);
+    expect((await response.json()).error.code).toBe('QUEST_NOT_FOUND');
   });
 
   it('returns QUEST_NOT_FOUND for unreadable Public Quest Detail', async () => {

@@ -244,10 +244,12 @@ _Avoid_: treating the Board Card as the full Quest resource, exposing Quest
 Funding Total, Platform Fee, Wallet, or Funding Reservation.
 
 **Public Quest Detail**:
-The read-only view of a non-hidden `QUEST_OPEN` Quest available to an
-authenticated Member who is not its Hirer. It includes the full ordered Quest
-Condition and other public Quest details, but never exposes Platform Fee,
-Money Policy, Wallet, or Funding Reservation details.
+The read-only view available to an authenticated Member who is not its Hirer:
+a non-hidden `QUEST_OPEN` Quest as a Prospective Worker, any Quest State while
+the Member holds an active Assignment, or a Terminal Quest State the Member
+ever held an Assignment for. It includes the full ordered Quest Condition and
+other public Quest details, but never exposes Platform Fee, Money Policy,
+Wallet, or Funding Reservation details.
 _Avoid_: anonymous Quest Detail, Hirer finance view, Candidate data.
 
 **Underfilled GROUP + FCFS Quest**:
