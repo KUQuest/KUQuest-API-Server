@@ -111,7 +111,7 @@ CREATE TABLE payment_provider_event_inbox (
   provider_reference    TEXT,
   provider_api_version  TEXT,
   provider_status       TEXT NOT NULL,
-  normalized_status     TEXT NOT NULL CHECK (normalized_status IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED', 'COMPLETED', 'CANCELLED')),
+  normalized_status     TEXT NOT NULL CHECK (normalized_status IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED', 'PROVIDER_PENDING', 'SUCCEEDED', 'CANCELLED')),
   provider_amount_satang INTEGER CHECK (provider_amount_satang IS NULL OR provider_amount_satang > 0),
   provider_actual_fee_satang INTEGER,
   provider_actual_tax_satang INTEGER,
@@ -238,9 +238,8 @@ CREATE TABLE payment_payouts (
   actual_fee_satang               INTEGER,
   actual_tax_satang               INTEGER,
   actual_debit_satang             INTEGER,
-  -- payout_status vocab settled via /grilling (2026-08-09): the 3 non-terminal values
-  -- payment_payouts_active_user_uidx below already relied on, plus 3 terminal states.
-  payout_status                  TEXT NOT NULL CHECK (payout_status IN ('CREATING', 'PENDING', 'AWAITING_RECONCILIATION', 'COMPLETED', 'FAILED', 'CANCELLED')),
+  payout_status                  TEXT NOT NULL CHECK (payout_status IN ('PENDING_ADMIN_APPROVAL', 'SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING', 'SUCCEEDED', 'FAILED', 'CANCELLED')),
+  version                       INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
   reserve_ledger_transaction_id  UUID NOT NULL UNIQUE REFERENCES wallet_ledger_transactions(id),
   final_ledger_transaction_id    UUID UNIQUE REFERENCES wallet_ledger_transactions(id),
   created_at                     TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -253,14 +252,14 @@ CREATE TABLE payment_payouts (
   UNIQUE (id, user_id),
   CHECK (destination_account_country = 'TH' AND destination_account_currency = 'THB')
 );
-CREATE UNIQUE INDEX payment_payouts_active_user_uidx ON payment_payouts (user_id) WHERE payout_status IN ('CREATING','PENDING','AWAITING_RECONCILIATION');
+CREATE UNIQUE INDEX payment_payouts_active_user_uidx ON payment_payouts (user_id) WHERE payout_status IN ('PENDING_ADMIN_APPROVAL','SUBMITTED_TO_PROVIDER','PROVIDER_PENDING');
 
 CREATE TABLE payment_payout_status_history (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   payout_id       UUID NOT NULL REFERENCES payment_payouts(id),
   -- from_status/to_status inherit payment_payouts.payout_status's vocab (see above).
-  from_status     TEXT CHECK (from_status IN ('CREATING', 'PENDING', 'AWAITING_RECONCILIATION', 'COMPLETED', 'FAILED', 'CANCELLED')),
-  to_status       TEXT NOT NULL CHECK (to_status IN ('CREATING', 'PENDING', 'AWAITING_RECONCILIATION', 'COMPLETED', 'FAILED', 'CANCELLED')),
+  from_status     TEXT CHECK (from_status IN ('PENDING_ADMIN_APPROVAL', 'SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING', 'SUCCEEDED', 'FAILED', 'CANCELLED')),
+  to_status       TEXT NOT NULL CHECK (to_status IN ('PENDING_ADMIN_APPROVAL', 'SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING', 'SUCCEEDED', 'FAILED', 'CANCELLED')),
   provider_status TEXT,
   actor_user_id   UUID REFERENCES auth_user(id),
   actor_admin_id  UUID REFERENCES auth_admin(id),

@@ -253,9 +253,8 @@ const ensurePendingPayout = async (userId: string): Promise<{ id: string; payout
       eq(paymentPayouts.userId, userId),
       inArray(paymentPayouts.payoutStatus, [
         'PENDING_ADMIN_APPROVAL',
-        'CREATING',
-        'PENDING',
-        'AWAITING_RECONCILIATION',
+        'SUBMITTED_TO_PROVIDER',
+        'PROVIDER_PENDING',
       ]),
     ))
     .limit(1);

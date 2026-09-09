@@ -36,7 +36,7 @@ import {
 } from '@/modules/wallet/wallet.service';
 import type { WalletTransaction } from '@/modules/wallet/wallet.service';
 
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 
 import {
   PayoutProviderError,
@@ -105,6 +105,7 @@ export type Payout = {
   actualTaxSatang: Satang | null;
   actualDebitSatang: Satang | null;
   payoutStatus: PayoutStatus;
+  version: number;
   reserveLedgerTransactionId: string;
   finalLedgerTransactionId: string | null;
   createdAt: Date;
@@ -177,6 +178,7 @@ const payoutFromRecord = (record: typeof paymentPayouts.$inferSelect): Payout =>
   actualTaxSatang: optionalSatang(record.actualTaxSatang),
   actualDebitSatang: optionalSatang(record.actualDebitSatang),
   payoutStatus: record.payoutStatus,
+  version: record.version,
   reserveLedgerTransactionId: record.reserveLedgerTransactionId,
   finalLedgerTransactionId: record.finalLedgerTransactionId,
   createdAt: record.createdAt,
@@ -336,6 +338,98 @@ const accountIdsForPayout = async (transaction: WalletTransaction, walletId: str
   return { earningsId: earnings.id, payoutReserveId: payoutReserve.id };
 };
 
+export type PayoutAdminDecisionInput = {
+  payoutId: string;
+  adminId: string;
+  reasonCode: string;
+};
+
+const lockedPayoutForAdminDecision = async (
+  transaction: WalletTransaction,
+  payoutId: string,
+) => {
+  const [payout] = await transaction
+    .select()
+    .from(paymentPayouts)
+    .where(eq(paymentPayouts.id, payoutId))
+    .for('update');
+  if (!payout) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
+  if (payout.payoutStatus !== 'PENDING_ADMIN_APPROVAL') {
+    throw new MoneyDomainError(
+      'PAYOUT_DECISION_NOT_ALLOWED',
+      'The Payout no longer waits for Admin approval.',
+    );
+  }
+  return payout;
+};
+
+export const approvePayoutInTransaction = async (
+  transaction: WalletTransaction,
+  input: PayoutAdminDecisionInput,
+) => {
+  const payout = await lockedPayoutForAdminDecision(transaction, input.payoutId);
+  const [updated] = await transaction
+    .update(paymentPayouts)
+    .set({
+      payoutStatus: 'SUBMITTED_TO_PROVIDER',
+      version: sql`${paymentPayouts.version} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(eq(paymentPayouts.id, payout.id))
+    .returning();
+  if (!updated) throw new MoneyDomainError('PAYOUT_UPDATE_FAILED', 'Payout approval could not be saved.');
+  await transaction.insert(paymentPayoutStatusHistory).values({
+    payoutId: payout.id,
+    fromStatus: 'PENDING_ADMIN_APPROVAL',
+    toStatus: 'SUBMITTED_TO_PROVIDER',
+    actorAdminId: input.adminId,
+    source: 'ADMIN_APPROVAL',
+    reason: input.reasonCode,
+  });
+  return updated;
+};
+
+export const cancelPayoutInTransaction = async (
+  transaction: WalletTransaction,
+  input: PayoutAdminDecisionInput,
+) => {
+  const payout = await lockedPayoutForAdminDecision(transaction, input.payoutId);
+  const wallet = await ensureWalletInTransaction(transaction, payout.userId);
+  const { earningsId, payoutReserveId } = await accountIdsForPayout(transaction, wallet.id);
+  const releaseLedger = await createSealedLedgerTransactionInTransaction(transaction, {
+    businessReference: `payout-admin-cancellation:${payout.id}`,
+    eventType: 'PAYOUT',
+    createdByUserId: payout.userId,
+    description: 'Release cancelled Payout reserve',
+    postings: [
+      { accountId: earningsId, amountSatang: signedSatang(payout.maximumDebitSatang) },
+      { accountId: payoutReserveId, amountSatang: signedSatang(-payout.maximumDebitSatang) },
+    ],
+  });
+  if (!releaseLedger) throw new MoneyDomainError('PAYOUT_UPDATE_FAILED', 'Payout reserve could not be released.');
+  const [updated] = await transaction
+    .update(paymentPayouts)
+    .set({
+      payoutStatus: 'CANCELLED',
+      finalLedgerTransactionId: releaseLedger.id,
+      providerSubmissionClaimedAt: null,
+      version: sql`${paymentPayouts.version} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(eq(paymentPayouts.id, payout.id))
+    .returning();
+  if (!updated) throw new MoneyDomainError('PAYOUT_UPDATE_FAILED', 'Payout cancellation could not be saved.');
+  await transaction.insert(paymentPayoutStatusHistory).values({
+    payoutId: payout.id,
+    fromStatus: 'PENDING_ADMIN_APPROVAL',
+    toStatus: 'CANCELLED',
+    actorAdminId: input.adminId,
+    source: 'ADMIN_CANCELLATION',
+    reason: input.reasonCode,
+  });
+  return updated;
+};
+
 const preparePayout = async (
   input: InitiatePayoutInput,
   requestHash: string,
@@ -359,7 +453,7 @@ const preparePayout = async (
     .from(paymentPayouts)
     .where(and(
       eq(paymentPayouts.userId, input.principalUserId),
-      inArray(paymentPayouts.payoutStatus, ['PENDING_ADMIN_APPROVAL', 'CREATING', 'PENDING', 'AWAITING_RECONCILIATION']),
+      inArray(paymentPayouts.payoutStatus, ['PENDING_ADMIN_APPROVAL', 'SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING']),
     ))
     .limit(1);
   if (active) throw new MoneyDomainError('PAYOUT_ACTIVE_EXISTS', 'The Student already has an active Payout.');
@@ -521,7 +615,7 @@ const finalizeProviderResponse = async (
     .where(and(eq(paymentPayouts.id, prepared.payout.id), eq(paymentPayouts.userId, input.principalUserId)))
     .for('update');
   if (!record) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
-  if (!['CREATING', 'AWAITING_RECONCILIATION'].includes(record.payoutStatus)) return payoutFromRecord(record);
+  if (!['SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING'].includes(record.payoutStatus)) return payoutFromRecord(record);
   if (
     response.providerAmountSatang !== record.principalSatang ||
     response.actualDebitSatang !== record.principalSatang + response.actualFeeSatang + response.actualTaxSatang ||
@@ -539,8 +633,9 @@ const finalizeProviderResponse = async (
       actualFeeSatang: response.actualFeeSatang,
       actualTaxSatang: response.actualTaxSatang,
       actualDebitSatang: response.actualDebitSatang,
-      payoutStatus: 'PENDING',
+      payoutStatus: 'PROVIDER_PENDING',
       providerSubmissionClaimedAt: null,
+      version: sql`${paymentPayouts.version} + 1`,
       updatedAt: new Date(),
     })
     .where(eq(paymentPayouts.id, record.id))
@@ -549,7 +644,7 @@ const finalizeProviderResponse = async (
   await transaction.insert(paymentPayoutStatusHistory).values({
     payoutId: record.id,
     fromStatus: record.payoutStatus,
-    toStatus: 'PENDING',
+    toStatus: 'PROVIDER_PENDING',
     providerStatus: response.providerStatus,
     source: 'PROVIDER',
   });
@@ -573,9 +668,9 @@ const finalizeUncertain = async (
     .where(and(eq(paymentPayouts.id, prepared.payout.id), eq(paymentPayouts.userId, input.principalUserId)))
     .for('update');
   if (!record) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
-  if (!['CREATING', 'AWAITING_RECONCILIATION'].includes(record.payoutStatus)) return payoutFromRecord(record);
+  if (!['SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING'].includes(record.payoutStatus)) return payoutFromRecord(record);
   const providerStatus = providerStatusForError(error);
-  const nextStatus = record.payoutStatus === 'CREATING' ? 'AWAITING_RECONCILIATION' : record.payoutStatus;
+  const nextStatus = record.payoutStatus === 'SUBMITTED_TO_PROVIDER' ? 'PROVIDER_PENDING' : record.payoutStatus;
   const [updated] = await transaction
     .update(paymentPayouts)
     .set({
@@ -583,6 +678,7 @@ const finalizeUncertain = async (
       providerStatus,
       payoutStatus: nextStatus,
       providerSubmissionClaimedAt: null,
+      version: sql`${paymentPayouts.version} + 1`,
       updatedAt: new Date(),
     })
     .where(eq(paymentPayouts.id, record.id))
@@ -619,7 +715,7 @@ const finalizeFailed = async (
     .where(and(eq(paymentPayouts.id, prepared.payout.id), eq(paymentPayouts.userId, input.principalUserId)))
     .for('update');
   if (!record) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
-  if (!['CREATING', 'AWAITING_RECONCILIATION'].includes(record.payoutStatus)) return payoutFromRecord(record);
+  if (!['SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING'].includes(record.payoutStatus)) return payoutFromRecord(record);
 
   const wallet = await ensureWalletInTransaction(transaction, input.principalUserId);
   const { earningsId, payoutReserveId } = await accountIdsForPayout(transaction, wallet.id);
@@ -644,6 +740,7 @@ const finalizeFailed = async (
       payoutStatus: 'FAILED',
       finalLedgerTransactionId: releaseLedger.id,
       providerSubmissionClaimedAt: null,
+      version: sql`${paymentPayouts.version} + 1`,
       updatedAt: new Date(),
     })
     .where(eq(paymentPayouts.id, record.id))
@@ -743,14 +840,14 @@ const claimApprovedPayout = async (payoutId: string) => db.transaction(async (tr
     .where(eq(paymentPayouts.id, payoutId))
     .for('update');
   if (!record) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
-  if (record.payoutStatus !== 'CREATING') return { payout: payoutFromRecord(record), claimed: false };
+  if (record.payoutStatus !== 'SUBMITTED_TO_PROVIDER') return { payout: payoutFromRecord(record), claimed: false };
 
   const [approval] = await transaction
     .select({ id: paymentPayoutStatusHistory.id })
     .from(paymentPayoutStatusHistory)
     .where(and(
       eq(paymentPayoutStatusHistory.payoutId, record.id),
-      eq(paymentPayoutStatusHistory.toStatus, 'CREATING'),
+      eq(paymentPayoutStatusHistory.toStatus, 'SUBMITTED_TO_PROVIDER'),
       eq(paymentPayoutStatusHistory.source, 'ADMIN_APPROVAL'),
       isNotNull(paymentPayoutStatusHistory.actorAdminId),
     ))
@@ -764,7 +861,11 @@ const claimApprovedPayout = async (payoutId: string) => db.transaction(async (tr
 
   const [claimed] = await transaction
     .update(paymentPayouts)
-    .set({ providerSubmissionClaimedAt: new Date(), updatedAt: new Date() })
+    .set({
+      providerSubmissionClaimedAt: new Date(),
+      version: sql`${paymentPayouts.version} + 1`,
+      updatedAt: new Date(),
+    })
     .where(eq(paymentPayouts.id, record.id))
     .returning();
   if (!claimed) throw new MoneyDomainError('PAYOUT_UPDATE_FAILED', 'Payout could not be claimed by the Worker.');
@@ -828,7 +929,7 @@ export const processApprovedPayouts = async (
     .select({ id: paymentPayouts.id })
     .from(paymentPayouts)
     .where(and(
-      eq(paymentPayouts.payoutStatus, 'CREATING'),
+      eq(paymentPayouts.payoutStatus, 'SUBMITTED_TO_PROVIDER'),
       or(isNull(paymentPayouts.providerSubmissionClaimedAt), lt(paymentPayouts.providerSubmissionClaimedAt, staleBefore)),
     ))
     .orderBy(asc(paymentPayouts.createdAt), asc(paymentPayouts.id))
@@ -839,7 +940,7 @@ export const processApprovedPayouts = async (
       // Process one Payout at a time to keep Wallet locks ordered.
       // eslint-disable-next-line no-await-in-loop
       const payout = await processApprovedPayout(candidate.id, provider, encryption);
-      if (payout.payoutStatus !== 'CREATING') processed += 1;
+      if (payout.payoutStatus !== 'SUBMITTED_TO_PROVIDER') processed += 1;
     } catch {
       processed += 1;
     }
@@ -881,9 +982,8 @@ const studentProviderStatus = (providerStatus: string | null) => {
 const studentProviderHistoryReason = (toStatus: PayoutStatus) => {
   if (toStatus === 'FAILED') return 'Provider rejected the Payout.';
   if (toStatus === 'CANCELLED') return 'Provider cancelled the Payout.';
-  if (toStatus === 'AWAITING_RECONCILIATION') return 'Provider response is uncertain.';
-  if (toStatus === 'PENDING') return 'Provider reports the Payout is still in progress.';
-  if (toStatus === 'COMPLETED') return 'Provider confirmed the Payout.';
+  if (toStatus === 'PROVIDER_PENDING') return 'Provider response is pending or uncertain.';
+  if (toStatus === 'SUCCEEDED') return 'Provider confirmed the Payout.';
   return 'Provider updated the Payout.';
 };
 

@@ -25,7 +25,7 @@ This document and its disclosed sub-contracts define the accepted target behavio
 
 Admin encompasses seven core areas of operational responsibility:
 
-- **Payout Approval**: Approve or reject submitted Student Payouts.
+- **Payout Approval**: Approve or cancel submitted Student Payouts.
 - **Dispute Case**: Reverse part of a `QUEST_FAILED` settlement between Hirer and Worker.
 - **Quest Hide**: Remove a Quest from public discovery without mutating its lifecycle or escrow.
 - **Wallet Freeze/Suspend**: Restrict a Student's Wallet against starting new commitments.
@@ -55,7 +55,7 @@ Follow the context pointer for the Admin branch being planned or implemented:
 
 | Branch / Responsibility | Topic and triggers | Sub-contract file |
 | --- | --- | --- |
-| **Payout Approval** | Manual approval queue under `/api/v1/admin/payouts`, masked destination accounts, idempotent approve/reject, provider worker hand-off. | [admin-payout-approval-contract.md](admin-payout-approval-contract.md) |
+| **Payout Approval** | Manual approval queue under `/api/v1/admin/payouts`, masked destination accounts, idempotent approve/cancel, provider worker hand-off. | [admin-payout-approval-contract.md](admin-payout-approval-contract.md) |
 | **Dispute Cases** | Reversing `QUEST_FAILED` settlement, 1-day self-file window, 5-day Admin window, 7-day money hold in Funding Reservation, Satang redirection. | [admin-dispute-case-contract.md](admin-dispute-case-contract.md) |
 | **Quest Hide & Restore** | Independent `hiddenAt`/`hiddenByAdminId` flags across non-terminal Quests, discovery removal only, Push notifications to Hirer, idempotency. | [admin-quest-hide-contract.md](admin-quest-hide-contract.md) |
 | **Wallet Freeze & Suspend** | Setting `FROZEN`/`SUSPENDED` statuses, blocking new commitments while honoring active obligations, discretionary vs auto-ban freeze. | [admin-wallet-freeze-contract.md](admin-wallet-freeze-contract.md) |

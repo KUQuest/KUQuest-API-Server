@@ -62,7 +62,6 @@ export type MoneyDomainErrorCode =
   | 'PAYOUT_QUOTE_EXPIRED'
   | 'PAYOUT_QUOTE_NOT_FOUND'
   | 'PAYOUT_RECONCILIATION_NOT_ALLOWED'
-  | 'PAYOUT_REJECTION_REASON_REQUIRED'
   | 'PAYOUT_UPDATE_FAILED';
 
 export class MoneyDomainError extends Error {

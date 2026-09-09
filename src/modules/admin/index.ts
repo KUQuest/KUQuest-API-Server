@@ -3,6 +3,7 @@ export type {
   AdminActionCommandInput,
   AdminActionResult,
   AdminActionCommandRevision,
+  AdminActionTransaction,
 } from './admin-action.service';
 export {
   AdminActionError,

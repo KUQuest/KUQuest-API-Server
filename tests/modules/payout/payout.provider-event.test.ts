@@ -25,13 +25,13 @@ describe('Payout Provider event parsing', () => {
     }), new Date('2026-08-27T00:00:00.000Z'));
 
     expect(event).toMatchObject({
-      providerEventId: 'derived:v3_payout.succeeded:po-123:COMPLETED',
+      providerEventId: 'derived:v3_payout.succeeded:po-123:SUCCEEDED',
       eventType: 'v3_payout.succeeded',
       internalReference: 'payout:payout-123',
       providerReference: 'po-123',
       providerApiVersion: '2025-09-01',
       providerStatus: 'SUCCEEDED',
-      normalizedStatus: 'COMPLETED',
+      normalizedStatus: 'SUCCEEDED',
       providerAmountSatang: 12_345,
       actualFeeSatang: 10,
       actualTaxSatang: 5,
@@ -41,7 +41,7 @@ describe('Payout Provider event parsing', () => {
   });
 
   it('normalizes pending, failure, and cancellation outcomes', () => {
-    expect(normalizePayoutOutcomeStatus('REQUESTED')).toBe('PENDING');
+    expect(normalizePayoutOutcomeStatus('REQUESTED')).toBe('PROVIDER_PENDING');
     expect(normalizePayoutOutcomeStatus('FAILED')).toBe('FAILED');
     expect(normalizePayoutOutcomeStatus('CANCELLED')).toBe('CANCELLED');
     expect(normalizePayoutOutcomeStatus('REVERSED')).toBe('FAILED');

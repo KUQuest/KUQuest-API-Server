@@ -12,7 +12,7 @@ If the provider rejects or fails a Payout after Admin approval, the existing pro
 
 Admin Payout detail may show the Member, amount, fees, tax, bank name, destination type, masked destination value, status, history, and cancellation reason. It must not show plaintext bank account numbers, encrypted destination payloads, provider secrets, or raw provider payloads.
 
-Admin approval and cancellation require an `Idempotency-Key`. A retry returns the same decision result and cannot submit a Payout to the provider twice or release the Payout Reserve twice.
+Admin approval and cancellation require an `Idempotency-Key`, the current numeric Payout version, and a controlled reason code. A retry returns the same decision result and cannot submit a Payout to the provider twice or release the Payout Reserve twice.
 
 The Admin review queue lists `PENDING_ADMIN_APPROVAL` Payouts by default. It supports cursor pagination, newest or oldest sorting, and an optional status filter for historical Payouts.
 
@@ -22,6 +22,6 @@ The Admin API provides a review queue, Payout detail, status history, approval, 
 
 The approval endpoint records the decision and commits it. A Payout worker calls the provider after approval, outside the database transaction. This gives the approved Payout a durable hand-off if the API process stops after the Admin decision.
 
-An Admin can approve the Payout, which allows the existing provider flow to continue, or cancel the Payout, which releases the full Payout Reserve back to the Member's Earnings Balance in a sealed Ledger Transaction. A cancellation requires a non-empty reason. An approval may include an optional note. The decision and the release are recorded together with the Admin actor. There is no automatic cancellation or release after a time limit; an Admin must approve or cancel every Payout.
+An Admin can approve the Payout, which allows the existing provider flow to continue, or cancel the Payout, which releases the full Payout Reserve back to the Member's Earnings Balance in a sealed Ledger Transaction. Both decisions require an action-specific controlled reason code. `PAYOUT_APPROVE` accepts `PAYOUT_POLICY_REVIEW` or `PAYOUT_RISK_REVIEW`; `PAYOUT_CANCEL` also accepts `PAYOUT_INVALID_DESTINATION`. Free-form reason text is not accepted or persisted. The decision and the release are recorded together with the Admin actor. There is no automatic cancellation or release after a time limit; an Admin must approve or cancel every Payout.
 
 This keeps the provider call behind a manual control point and makes the return of funds auditable. It also means a Payout can remain waiting for Admin action until an Admin handles it.
