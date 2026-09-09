@@ -2,7 +2,7 @@ import { questRoute } from '@/modules/quest/quest.route';
 import { adminQuestRoute } from '@/modules/quest/quest-admin.route';
 import { tagRoute } from '@/modules/tag';
 import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
-import { topUpWebhookRoute } from '@/modules/top-up';
+import { topUpRoute, topUpWebhookRoute } from '@/modules/top-up';
 import { questAssignmentRoute } from '@/modules/quest/quest-assignment.route';
 import { questCandidateRoute } from '@/modules/quest/quest-candidate.route';
 import { questProofRoute } from '@/modules/quest/quest-proof.route';
@@ -84,6 +84,7 @@ export const createApp = () => {
     .use(payoutRoute)
     .use(adminPayoutRoute)
     .use(payoutWebhookRoute)
+    .use(topUpRoute)
     .use(topUpWebhookRoute);
 };
 
