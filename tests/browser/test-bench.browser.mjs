@@ -16,6 +16,8 @@ let failPayout = true;
 let admin = false;
 let quoteLifetime = 300000;
 let walletGate = null;
+let assignmentRead = 0;
+let completed = false;
 const writes = [];
 const messageKeys = [];
 const payoutKeys = [];
@@ -40,10 +42,23 @@ await page.route('**/api/**', async (route) => {
   else if (path === '/api/v1/admin/payouts') data = ok({ items: [], nextCursor: null });
   else if (path === '/api/v1/tags') data = ok([{ id: 'tag-1', name: 'Design' }]);
   else if (path === '/api/v1/wallet') data = ok({ wallet: { spendingBalanceSatang: 10000, earningsBalanceSatang: 20000, fundingReservedSatang: 0, reservedForPayoutsSatang: 0 } });
-  else if (path === '/api/v2/quests' && method === 'POST') { Object.assign(quest, body); data = ok(quest); }
-  else if (path === '/api/v2/quests/mine' || path === '/api/v2/quests') data = ok({ items: [quest], nextCursor: null });
+  else if (path === '/api/v2/quests' && method === 'POST') { Object.assign(quest, body); quest.state = 'QUEST_DRAFT'; completed = false; assignmentRead = 0; data = ok(quest); }
+  else if (path === '/api/v2/quests/mine') data = ok({ items: [quest], nextCursor: null });
+  else if (path === '/api/v2/quests') { const boardQuest = { ...quest }; delete boardQuest.state; data = ok({ items: [boardQuest], nextCursor: null }); }
   else if (path.endsWith('/publish-check')) data = ok({ canPublish: allowPublish, blockingReasons: allowPublish ? [] : [{ code: 'TAG_REQUIRED', message: 'Choose a Tag.' }], escrowRequirementSatang: 10000 });
   else if (path.endsWith('/publish')) { quest.state = 'QUEST_OPEN'; data = ok({ quest }); }
+  else if (path.endsWith('/join')) {
+    quest.state = 'QUEST_ASSIGNED';
+    assignmentRead = 0;
+    data = ok({ id: 'assignment-1', questId: quest.id, workerId: 'account-2', state: 'ASSIGNMENT_ACTIVE', questState: quest.state, startedAt: null, createdAt: new Date().toISOString() });
+  }
+  else if (path.endsWith('/assignments')) {
+    assignmentRead += 1;
+    if (assignmentRead > 0 && !completed) quest.state = 'QUEST_IN_PROGRESS';
+    data = ok({ items: [{ id: 'assignment-1', questId: quest.id, workerId: 'account-2', state: 'ASSIGNMENT_ACTIVE', questState: quest.state, startedAt: quest.state === 'QUEST_IN_PROGRESS' ? new Date().toISOString() : null, createdAt: new Date().toISOString() }] });
+  }
+  else if (path.endsWith('/completion-confirmation')) { completed = true; quest.state = 'QUEST_COMPLETED'; data = ok({ confirmed: true, confirmedAt: new Date().toISOString(), questStatus: quest.state }); }
+  else if (path.endsWith('/reviews') && method === 'POST') data = ok({ id: `review-${member}`, questId: quest.id, reviewerId: member, revieweeId: member === 'account-1' ? 'account-2' : 'account-1', rating: body.rating, comment: body.comment ?? null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
   else if (path.endsWith('/cancel')) { quest.state = 'QUEST_CANCELLED'; data = ok({ questStatus: 'QUEST_CANCELLED', outcome: 'CANCELLED', paidSatang: 0, refundedSatang: 10000 }); }
   else if (path === `/api/v2/quests/${quest.id}` || path.endsWith('/public')) data = ok(quest);
   else if (path === '/api/v1/chat/conversations') data = ok({ items: [conversation('c1', false), conversation('c2', true)], nextCursor: null });
@@ -75,16 +90,37 @@ try {
   assert.equal(writes.length, 0, 'Opening the page must not sign in or mutate data');
   assert.equal(await page.locator('[data-page]:visible').count(), 1);
   assert.equal(await page.locator('#chat-send').isDisabled(), true);
+  await nav('member');
   await click('default-sign-in');
   assert.match(await page.locator('#current-member').textContent(), /account-1/);
   assert.equal(await page.locator('#debug-log').textContent().then((text) => text.includes('SECRET_SESSION')), false);
   console.log('PASS: explicit sign-in, Session display, redacted logs');
 
+  await nav('flow');
+  await click('simple-start-test');
+  allowPublish = true;
+  await click('simple-create-publish');
+  assert.match(await page.locator('#simple-flow-state-badge').textContent(), /QUEST_OPEN/);
+  await click('simple-worker-join');
+  assert.match(await page.locator('#simple-flow-state-badge').textContent(), /QUEST_IN_PROGRESS/);
+  assert.match(await page.locator('#simple-flow-actor').textContent(), /Account 2 · Worker/);
+  assert.equal(await page.locator('#simple-start-work').count(), 0);
+  await click('simple-confirm');
+  assert.match(await page.locator('#simple-flow-state-badge').textContent(), /QUEST_COMPLETED/);
+  await click('simple-review-hirer');
+  await click('simple-review-worker');
+  assert.match(await page.locator('#simple-flow-status').textContent(), /finished/);
+  assert.match(await page.locator('#simple-flow-receipt').textContent(), /POST.*completion-confirmation/);
+  allowPublish = false;
+  await nav('member');
+  await click('default-sign-in');
+  console.log('PASS: guided proof-free Quest flow, lifecycle wait, completion, Reviews, endpoint receipt');
+
   await nav('quests');
   await page.locator('#quest-title').fill('Design a KU poster');
   await page.locator('#quest-condition').fill('Create poster\nSend source file');
   await click('create-quest');
-  const created = writes.find((item) => item.path === '/api/v2/quests');
+  const created = writes.findLast((item) => item.path === '/api/v2/quests');
   assert.equal(created.body.mode, 'FIRST_COME_FIRST_SERVED');
   assert.equal(created.body.participation, 'SINGLE');
   assert.deepEqual(created.body.condition.items, ['Create poster', 'Send source file']);
@@ -97,6 +133,9 @@ try {
   allowPublish = true;
   await click('publish-check'); await click('publish-quest');
   assert.match(await page.locator('#quest-summary').textContent(), /QUEST_OPEN/);
+  await click('list-board');
+  assert.match(await page.locator('.quest-card small').textContent(), /QUEST_OPEN/);
+  assert.doesNotMatch(await page.locator('.quest-card small').textContent(), /undefined/);
   page.once('dialog', (dialog) => dialog.accept());
   await click('cancel-quest');
   assert.match(await page.locator('#quest-summary').textContent(), /QUEST_CANCELLED/);
@@ -176,7 +215,7 @@ try {
   /* eslint-disable no-await-in-loop */
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    for (const key of ['member', 'quests', 'chat', 'wallet', 'admin', 'explorer', 'log']) {
+    for (const key of ['member', 'flow', 'quests', 'chat', 'wallet', 'admin', 'explorer', 'log']) {
       await nav(key);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Overflow: ${key} at ${width}px`);
     }
@@ -184,5 +223,5 @@ try {
     await page.screenshot({ path: `/tmp/kuquest-bench-verification/member-${width}.png`, fullPage: true });
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: all seven sections at desktop and phone sizes; no browser errors');
+  console.log('PASS: all eight sections at desktop and phone sizes; no browser errors');
 } finally { await browser.close(); }
