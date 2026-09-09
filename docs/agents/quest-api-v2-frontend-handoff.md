@@ -1,571 +1,2751 @@
-# Portable Frontend Handoff: Quest API v2
+# Quest v2 Frontend Agent Handoff
 
-Read this file when a Frontend or Mobile task covers a `Member` who discovers a
-`Quest`, or a `Hirer` who creates, edits, checks, or publishes a `Quest` through
-`/api/v2`. This file is portable: it contains the required Quest context for
-an agent in another repository.
+This file is the frontend integration contract for the current Quest v2 HTTP
+API. A frontend agent must be able to implement the Quest flow from this file.
+The frontend agent must not infer missing behavior from old Quest v1 docs or
+from backend source code.
 
-The target contract is [Spec #336](https://github.com/KUQuest/KUQuest-API-Server/issues/336),
-part of [Wayfinder Map #319](https://github.com/KUQuest/KUQuest-API-Server/issues/319).
+The contract uses the domain terms from CONTEXT.md:
 
-## Cross-repository context
+- Hirer: the Member who creates and funds a Quest.
+- Worker: the Member who has an active Assignment.
+- Prospective Worker: a Member who may join, apply, or form a Candidate Team.
+- Candidate: the role used by a Candidate-mode Quest.
+- Accepted Participant: a Worker after the Assignment is active.
+- Quest: the work opportunity.
+- Condition Item: one item in the Quest condition list.
+- Assignment: the relationship between a Quest and an accepted Worker.
+- Work Chat: the conversation for an assigned Quest.
+- Candidate Inquiry Conversation: the pre-assignment conversation.
+- Proof Submission: work evidence submitted by a Worker.
+- Rating Review: a review after a terminal Quest state.
+- Quest Funding Total: the inclusive amount entered by the Hirer.
+- Quest Reward: the amount paid to one Worker for one slot.
 
-The Frontend repository and the Backend repository use different context files.
-Use this bridge for this task:
+The current route set is mounted under /api/v2.
+The contract in this file is current for 2026-09-08.
 
-| Frontend context | Quest API v2 context |
+## 1. How to use this document
+
+1. Read the common HTTP rules.
+2. Identify the actor, Quest State, mode, and participation.
+3. Select one lifecycle branch.
+4. Send only the fields listed for the endpoint.
+5. Read the response envelope.
+6. Refresh the relevant resource after a command or conflict.
+7. Check the completion criteria at the end.
+
+The frontend agent must complete each step with a checkable result:
+
+- The request has the correct path, headers, body, and role.
+- The response is parsed from the data property.
+- The returned state is rendered as the source of truth.
+- A documented error code has a safe UI action.
+
+## 2. Common HTTP rules
+
+### 2.1 Response envelope
+
+Every successful response uses one of these shapes:
+
+~~~json
+{ "success": true }
+~~~
+
+~~~json
+{ "success": true, "data": { } }
+~~~
+
+Every error uses this shape:
+
+~~~json
+{
+  "success": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable message"
+  }
+}
+~~~
+
+Read business fields from data.
+Branch on error.code, not on error.message.
+
+### 2.2 Authentication
+
+All Quest v2 routes require an authenticated Member session.
+Send the same session credentials used by the rest of the application.
+The public Quest detail endpoint is also authenticated.
+
+The server checks the role and relationship on every command.
+A frontend route guard is not authorization.
+
+### 2.3 Content types
+
+Use application/json for JSON bodies.
+Use multipart/form-data for file upload endpoints.
+Let the browser set the multipart boundary.
+Do not set the multipart boundary manually.
+
+### 2.4 Idempotency
+
+Every state-changing command requires this header:
+
+~~~http
+Idempotency-Key: unique-non-blank-key
+~~~
+
+The key must be at most 200 characters.
+Use a new key for each logical user action.
+If a request may have reached the server, retry with the same key and the same
+body. Do not retry with a new key until the first action is known not to have
+completed.
+
+Common idempotency errors:
+
+- IDEMPOTENCY_KEY_REQUIRED: header is missing.
+- INVALID_IDEMPOTENCY_KEY: header is blank or invalid.
+- IDEMPOTENCY_KEY_REUSED: same key has a different request fingerprint.
+- IDEMPOTENCY_IN_PROGRESS: the first request is still processing.
+- IDEMPOTENCY_UNAVAILABLE: the stored result cannot be returned.
+
+### 2.5 Date and time
+
+Quest schedule values use Bangkok time with an explicit +07:00 offset.
+Use RFC3339 date-time text.
+Input accepts zero to three fractional digits.
+Quest responses use three fractional digits.
+
+Example:
+
+~~~text
+2026-09-30T09:00:00+07:00
+~~~
+
+Do not send a local date without an offset.
+Do not send a UTC value with a Z suffix for Quest schedule fields.
+
+### 2.6 Money
+
+Quest money input and normal Quest money output use Baht as JSON numbers.
+The value must have at most two decimal digits.
+Escrow and settlement responses also include exact integer Satang fields.
+Use Satang fields for exact calculations.
+Do not calculate settlement with binary floating point.
+
+Quest Funding Total is the inclusive amount for one Worker slot.
+The server calculates Quest Reward and Platform Fee with integer Satang.
+The server reserves Quest Funding Total multiplied by headcount.
+
+### 2.7 Unknown fields
+
+The request schemas reject unknown fields.
+Send only fields listed in this document.
+
+### 2.8 Optimistic concurrency
+
+Draft edit uses the If-Match header.
+Use the version from the latest CanonicalQuest:
+
+~~~http
+If-Match: 3
+~~~
+
+A plain positive integer is the preferred format.
+After a successful edit, replace the local Quest with the returned Quest.
+Do not increment version locally.
+
+### 2.9 Temporary image URLs
+
+Quest image url values are temporary links.
+They expire about 15 minutes after they are materialized.
+Call Quest detail again when a link expires.
+Do not store a temporary URL as a permanent asset URL.
+
+## 3. Quest states and lifecycle
+
+The Quest State values are:
+
+~~~text
+QUEST_DRAFT
+QUEST_OPEN
+QUEST_ASSIGNED
+QUEST_IN_PROGRESS
+QUEST_COMPLETED
+QUEST_CANCELLED
+QUEST_FAILED
+~~~
+
+The normal lifecycle is:
+
+~~~text
+QUEST_DRAFT -> QUEST_OPEN -> QUEST_ASSIGNED -> QUEST_IN_PROGRESS -> QUEST_COMPLETED
+
+QUEST_OPEN, QUEST_ASSIGNED, or QUEST_IN_PROGRESS -> QUEST_CANCELLED
+QUEST_IN_PROGRESS -> QUEST_FAILED
+~~~
+
+The backend owns all state transitions.
+The frontend must render the state returned by the server.
+
+### Important: no v2 Start Work endpoint
+
+There is no endpoint named Start Work in the current Quest v2 API.
+There is no POST /api/v2/quests/:questId/start route.
+Do not invent or call one.
+
+When a Quest is QUEST_ASSIGNED and startTime is due, the backend lifecycle
+worker changes it to QUEST_IN_PROGRESS.
+The worker also sets startedAt on active Assignments.
+The transition can be delayed by worker scheduling.
+Poll or refresh the Quest and Assignment with the application's normal refresh
+mechanism.
+
+A pending Quest Edit prevents the assigned-to-in-progress transition.
+
+## 4. Select the correct lifecycle branch
+
+Before planning a screen, identify these facts:
+
+1. Actor: Hirer, Worker, Prospective Worker, Candidate, or another Accepted
+   Participant.
+2. Quest State.
+3. Quest mode.
+4. Participation: SINGLE or GROUP.
+5. proofRequired and dueAt for work and completion screens.
+
+Use this table:
+
+| Known condition | Use this branch |
 | --- | --- |
-| `KU User` | `Member`: the authenticated KUQuest identity. |
-| A user who creates a Quest | `Hirer`: the Member who owns that Quest. `Hirer` is a role, not a new account type. |
-| A user who performs a Quest | `Worker`: the Member who receives an Assignment. |
-| App or screen state | `Quest State`: the Server-owned lifecycle value such as `QUEST_DRAFT` or `QUEST_OPEN`. |
-| User-entered budget | `Quest Funding Total`: the inclusive amount for one Worker slot. |
-| Location input | A label-only location. It is not latitude, longitude, GPS, address, distance, or a map object. |
-| Image picker result | `Quest Image`: an optional image resource owned by the Quest. |
+| Hirer is creating a Quest | Draft and publish |
+| Any authenticated Member is browsing | Quest Board and public detail |
+| FIRST_COME_FIRST_SERVED | Worker join |
+| CANDIDATE plus SINGLE | Candidate application |
+| CANDIDATE plus GROUP | Candidate Team |
+| GROUP first-come Quest is not full at startTime | Underfilled decision and consent |
+| Quest is assigned | Assignment, Work Chat, automatic start |
+| Quest is in progress | Proof Submission or completion confirmation |
+| Quest is terminal | Rating Review |
 
-`Onboarding`, `Profile`, `Wallet`, and Work Chat are separate domains. This
-handoff covers the Hirer Quest Draft-to-Open boundary only. A Frontend
-`CONTEXT.md` that does not yet define Quest terms does not remove the rules in
-this file.
+Do not apply a SINGLE rule to a GROUP Quest.
+Do not apply a FIRST_COME_FIRST_SERVED rule to a CANDIDATE Quest.
 
-Use these exact names in API types, state values, analytics, and UI-to-API
-mapping:
+## 5. Hirer journey: create, edit, add images, publish
 
-- Quest States: `QUEST_DRAFT`, `QUEST_OPEN`, `QUEST_ASSIGNED`,
-  `QUEST_IN_PROGRESS`, `QUEST_COMPLETED`, `QUEST_CANCELLED`, and
-  `QUEST_FAILED`.
-- Quest modes: `FIRST_COME_FIRST_SERVED` and `CANDIDATE`.
-- Participation shapes: `SINGLE` and `GROUP`.
-- Money terms: `Quest Funding Total`, `Quest Reward`, `Platform Fee`, `Quest
-  Escrow`, `Spending Balance`, and `Funding Reservation`.
+The complete Hirer flow is:
 
-## Source of truth
+~~~text
+POST /quests
+  -> GET /quests/mine or GET /quests/:questId
+  -> PATCH /quests/:questId
+  -> POST /quests/:questId/images
+  -> GET /quests/:questId/publish-check
+  -> POST /quests/:questId/publish
+  -> Quest State becomes QUEST_OPEN
+~~~
 
-Use the following order when sources disagree:
+The flow is complete when the response from Publish contains a Quest with
+state QUEST_OPEN and a Quest Escrow snapshot.
 
-1. The generated Backend OpenAPI contract, when it is available for the
-   endpoint.
-2. [Spec #336](https://github.com/KUQuest/KUQuest-API-Server/issues/336), which
-   defines the accepted v2 contract.
-3. This handoff for the cross-repository context bridge and Client behavior.
-4. The Frontend repository's `AGENTS.md`, `CONTEXT.md`, and code style for
-   platform, navigation, translation, and testing conventions.
+### 5.1 Create a Draft
 
-When the Backend repository is available, its supporting references are
-`CONTEXT.md`, `docs/quest/work-chat-system-target.md`, and the Quest ADRs. They
-explain the domain decisions. Quest API v1 is deprecated and is not part of the
-v2 contract: v2 does not map v1 fields, rows, or semantics, and does not
-maintain backward compatibility. Existing v1 code is unchanged by #367; its
-removal is separate work.
+Request:
 
-The Backend delivery order is:
+~~~http
+POST /api/v2/quests
+Idempotency-Key: create-quest-client-action-id
+Content-Type: application/json
+~~~
 
-- [#338](https://github.com/KUQuest/KUQuest-API-Server/issues/338): Draft
-  foundation, create, list, and detail.
-- [#339](https://github.com/KUQuest/KUQuest-API-Server/issues/339): Draft edit
-  and optimistic concurrency; blocked by #338.
-- [#340](https://github.com/KUQuest/KUQuest-API-Server/issues/340): publish
-  check and funding quote; blocked by #338.
-- [#341](https://github.com/KUQuest/KUQuest-API-Server/issues/341): Quest
-  Image gallery; blocked by #338.
-- [#342](https://github.com/KUQuest/KUQuest-API-Server/issues/342): publish
-  and Quest Escrow; blocked by #340.
-- [#343](https://github.com/KUQuest/KUQuest-API-Server/issues/343): complete
-  the remaining v2 flow; v1 compatibility is excluded by the accepted #367
-  contract. It is blocked by #339, #340, #341, and #342.
+~~~json
+{
+  "title": "Design a landing page",
+  "description": "Create one responsive landing page.",
+  "condition": {
+    "items": [
+      "Use the supplied brand colors",
+      "Include a mobile layout"
+    ]
+  },
+  "mode": "FIRST_COME_FIRST_SERVED",
+  "participation": "SINGLE",
+  "questFundingTotal": 1000.00,
+  "headcount": 1,
+  "startTime": "2026-09-30T09:00:00+07:00",
+  "dueAt": "2026-10-07T18:00:00+07:00",
+  "tagId": "00000000-0000-0000-0000-000000000000",
+  "proofRequired": true,
+  "locations": [
+    { "label": "Online" }
+  ]
+}
+~~~
 
-## Target outcome
+Request fields:
 
-Provide one reliable Frontend journey:
+| Field | Type | Required | Rule |
+| --- | --- | --- | --- |
+| title | string | yes | 1 to 120 characters after trim; not blank |
+| description | string or null | no | Maximum 1000 characters; omitted or null becomes null |
+| condition.items | string array | yes | At least one item; each item is 1 to 255 characters after trim |
+| mode | enum | yes | FIRST_COME_FIRST_SERVED or CANDIDATE |
+| participation | enum | yes | SINGLE or GROUP |
+| questFundingTotal | number | yes | 1 to 700000 Baht; maximum two decimal digits |
+| headcount | integer | yes | SINGLE requires 1; GROUP requires 2 to 20 |
+| startTime | date-time | yes | Bangkok +07:00 schedule value |
+| dueAt | date-time or null | no | If supplied, after startTime; Draft may be null |
+| tagId | UUID or null | no | Existing Tag; null means no Tag |
+| proofRequired | boolean | no | Defaults to true |
+| locations | object array | no | Maximum 10 objects; each object is label with 1 to 100 characters |
 
-`create Draft → edit Draft → manage Quest Images → check publish → publish`
+The server trims text values.
+The server converts Quest Funding Total from Baht to integer Satang.
+The new Quest State is QUEST_DRAFT.
 
-Provide two additional v2 journeys:
+Success status: HTTP 200.
+The data value is a complete CanonicalQuest.
 
-- `Quest Board Card → Public Quest Detail` for discovery.
-- `QUEST_ASSIGNED → Quest Edit Request → all Active Worker responses` for a
-  complete Quest Condition replacement.
+Example response:
 
-The Client owns form state, screen state, retry presentation, and recoverable
-local data. The Server owns validation, time, money, ownership, Quest State,
-temporary URLs, and command results.
-
-## Quest discovery and Quest Edit contract (#367)
-
-This section is the accepted v2 contract for issue #367. All routes require an
-authenticated `Member` Session and use the shared `{ success, data }` or
-`{ success, error }` envelope. The `/public` path means a Public projection;
-it does not allow anonymous access.
-
-| Operation ID | Method and endpoint | Actor and success |
-| --- | --- | --- |
-| `listQuestBoardV2` | `GET /api/v2/quests` | Any authenticated Member; `200` |
-| `getPublicQuestV2Detail` | `GET /api/v2/quests/:questId/public` | Authenticated Member who is not the Hirer; `200` |
-| `createQuestEditRequestV2` | `POST /api/v2/quests/:questId/edit-requests` | Hirer of a `QUEST_ASSIGNED` Quest; `201` |
-| `getQuestEditRequestV2` | `GET /api/v2/quests/edit-requests/:requestId` | Hirer or current Active Worker; `200` |
-| `respondToQuestEditRequestV2` | `POST /api/v2/quests/edit-requests/:requestId/respond` | Current Active Worker; `200` |
-
-The existing `GET /api/v2/quests/:questId` remains the owner projection. A
-Hirer calling the `/public` route receives `404 QUEST_NOT_FOUND`. v1 routes,
-v1 rows, and v1 compatibility mapping are out of scope.
-
-### Quest Board
-
-`GET /api/v2/quests` returns:
-
-```json
+~~~json
 {
   "success": true,
   "data": {
-    "items": [],
+    "id": "quest-uuid",
+    "version": 1,
+    "hiddenAt": null,
+    "title": "Design a landing page",
+    "description": "Create one responsive landing page.",
+    "condition": {
+      "items": [
+        { "position": 0, "text": "Use the supplied brand colors" },
+        { "position": 1, "text": "Include a mobile layout" }
+      ]
+    },
+    "tag": {
+      "id": "tag-uuid",
+      "name": "Design"
+    },
+    "mode": "FIRST_COME_FIRST_SERVED",
+    "participation": "SINGLE",
+    "state": "QUEST_DRAFT",
+    "questFundingTotal": 1000,
+    "headcount": 1,
+    "startTime": "2026-09-30T09:00:00.000+07:00",
+    "dueAt": "2026-10-07T18:00:00.000+07:00",
+    "proofRequired": true,
+    "locations": [
+      { "label": "Online" }
+    ],
+    "createdAt": "2026-09-08T10:00:00.000+07:00",
+    "updatedAt": "2026-09-08T10:00:00.000+07:00"
+  }
+}
+~~~
+
+The create response does not include Quest Images.
+Call Quest detail if the screen needs the gallery.
+
+Create errors:
+
+- 400 VALIDATION
+- 400 INVALID_TITLE
+- 400 INVALID_DESCRIPTION
+- 400 INVALID_CONDITION
+- 400 INVALID_LOCATIONS
+- 400 INVALID_HEADCOUNT
+- 400 INVALID_QUEST_FUNDING_TOTAL
+- 400 INVALID_QUEST_DATES
+- 400 TAG_NOT_FOUND
+- 400 IDEMPOTENCY_KEY_REQUIRED
+- 400 INVALID_IDEMPOTENCY_KEY
+- 409 IDEMPOTENCY_KEY_REUSED
+- 409 IDEMPOTENCY_IN_PROGRESS
+- 503 IDEMPOTENCY_UNAVAILABLE
+
+### 5.2 List the Hirer’s Quests
+
+Request:
+
+~~~http
+GET /api/v2/quests/mine?limit=20&cursor=opaque-cursor
+~~~
+
+Query fields:
+
+| Query | Type | Default | Rule |
+| --- | --- | --- | --- |
+| limit | integer | 20 | 1 to 50 |
+| cursor | string | none | Opaque value from nextCursor |
+
+The list is sorted by startTime ascending and then id ascending.
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "quest-uuid",
+        "version": 1,
+        "state": "QUEST_DRAFT"
+      }
+    ],
+    "nextCursor": "opaque-cursor-or-null"
+  }
+}
+~~~
+
+Each item is a complete CanonicalQuest without the image gallery.
+The example is shortened. Use the CanonicalQuest shape in section 16.
+
+### 5.3 Read the Hirer’s Quest detail
+
+Request:
+
+~~~http
+GET /api/v2/quests/:questId
+~~~
+
+Only the owning Hirer can read this endpoint.
+
+Success status: HTTP 200.
+The data value is CanonicalQuest plus images.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "id": "quest-uuid",
+    "version": 1,
+    "hiddenAt": null,
+    "title": "Design a landing page",
+    "description": "Create one responsive landing page.",
+    "condition": {
+      "items": [
+        { "position": 0, "text": "Use the supplied brand colors" }
+      ]
+    },
+    "tag": null,
+    "mode": "FIRST_COME_FIRST_SERVED",
+    "participation": "SINGLE",
+    "state": "QUEST_DRAFT",
+    "questFundingTotal": 1000,
+    "headcount": 1,
+    "startTime": "2026-09-30T09:00:00.000+07:00",
+    "dueAt": "2026-10-07T18:00:00.000+07:00",
+    "proofRequired": true,
+    "locations": [],
+    "createdAt": "2026-09-08T10:00:00.000+07:00",
+    "updatedAt": "2026-09-08T10:00:00.000+07:00",
+    "images": [
+      {
+        "imageId": "image-uuid",
+        "fileId": "file-uuid",
+        "position": 0,
+        "url": "temporary-url",
+        "urlExpiresAt": "2026-09-08T10:15:00.000+07:00"
+      }
+    ]
+  }
+}
+~~~
+
+Image fields:
+
+| Field | Meaning |
+| --- | --- |
+| imageId | Quest Image identifier used by delete |
+| fileId | Private File identifier |
+| position | Zero-based gallery position |
+| url | Temporary read URL |
+| urlExpiresAt | Expiry time |
+
+Errors:
+
+- 404 QUEST_NOT_FOUND for a missing Quest or a Quest not owned by the caller.
+- 503 QUEST_IMAGE_STORAGE_UNAVAILABLE when links cannot be materialized.
+
+### 5.4 Edit a Draft
+
+Request:
+
+~~~http
+PATCH /api/v2/quests/:questId
+Idempotency-Key: edit-quest-client-action-id
+If-Match: 1
+Content-Type: application/json
+~~~
+
+The body is a partial Draft update.
+It must contain at least one field.
+Omitted fields stay unchanged.
+Nullable fields set to null clear their value.
+condition.items and locations are full replacements.
+
+All create fields can be edited:
+
+~~~json
+{
+  "title": "New title",
+  "description": null,
+  "condition": {
+    "items": [
+      "New condition"
+    ]
+  },
+  "mode": "CANDIDATE",
+  "participation": "GROUP",
+  "questFundingTotal": 1200.50,
+  "headcount": 3,
+  "startTime": "2026-10-01T09:00:00+07:00",
+  "dueAt": null,
+  "tagId": null,
+  "proofRequired": false,
+  "locations": [
+    { "label": "Bangkok" }
+  ]
+}
+~~~
+
+Only an owned QUEST_DRAFT can be edited.
+The server checks If-Match against version.
+The server increments version after a successful edit.
+
+Success status: HTTP 200.
+The data value is a complete CanonicalQuest.
+
+Errors:
+
+- 400 VALIDATION
+- 400 INVALID_VERSION
+- 400 INVALID_TITLE
+- 400 INVALID_DESCRIPTION
+- 400 INVALID_CONDITION
+- 400 INVALID_LOCATIONS
+- 400 INVALID_HEADCOUNT
+- 400 INVALID_QUEST_FUNDING_TOTAL
+- 400 INVALID_QUEST_DATES
+- 400 TAG_NOT_FOUND
+- 404 QUEST_NOT_FOUND
+- 409 QUEST_NOT_DRAFT
+- 409 QUEST_EDIT_CONFLICT
+- idempotency errors
+
+On INVALID_VERSION or QUEST_EDIT_CONFLICT, read the latest Quest.
+Do not overwrite the latest version blindly.
+
+### 5.5 Add Quest Images
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/images
+Idempotency-Key: add-quest-images-client-action-id
+Content-Type: multipart/form-data
+~~~
+
+Use a multipart field named images.
+Send one to three files in request order.
+
+File rules:
+
+- decoded type must be JPEG, PNG, or WebP;
+- maximum size per file is 5 MB;
+- maximum Quest Image count after the command is 3;
+- files append to the ordered gallery;
+- the whole batch is validated before any file is attached.
+
+Only an owned QUEST_DRAFT can receive images.
+Delete an image before uploading a replacement when the gallery is full.
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "images": [
+      {
+        "imageId": "image-uuid",
+        "fileId": "file-uuid",
+        "position": 0,
+        "url": "temporary-url",
+        "urlExpiresAt": "2026-09-08T10:15:00.000+07:00"
+      }
+    ]
+  }
+}
+~~~
+
+The images array is the complete gallery after the command.
+
+Errors:
+
+- 404 QUEST_NOT_FOUND
+- 409 QUEST_NOT_DRAFT
+- 409 QUEST_IMAGE_LIMIT_REACHED
+- 413 IMAGE_TOO_LARGE
+- 415 UNSUPPORTED_IMAGE_TYPE
+- 503 QUEST_IMAGE_STORAGE_UNAVAILABLE
+- idempotency errors
+
+### 5.6 Delete a Quest Image
+
+Request:
+
+~~~http
+DELETE /api/v2/quests/:questId/images/:imageId
+Idempotency-Key: delete-quest-image-client-action-id
+~~~
+
+Only the owning Hirer can delete an image from an owned QUEST_DRAFT.
+The server soft-deletes image metadata and repacks remaining positions from
+zero.
+
+Success status: HTTP 200.
+The data value is:
+
+~~~json
+{
+  "images": [
+    {
+      "imageId": "image-uuid",
+      "fileId": "file-uuid",
+      "position": 0,
+      "url": "temporary-url",
+      "urlExpiresAt": "2026-09-08T10:15:00.000+07:00"
+    }
+  ]
+}
+~~~
+
+Errors:
+
+- 404 QUEST_NOT_FOUND
+- 404 QUEST_IMAGE_NOT_FOUND
+- 409 QUEST_NOT_DRAFT
+- idempotency errors
+- 503 QUEST_IMAGE_STORAGE_UNAVAILABLE
+
+### 5.7 Check publish requirements
+
+Request:
+
+~~~http
+GET /api/v2/quests/:questId/publish-check
+~~~
+
+Only the owning Hirer can check an owned QUEST_DRAFT.
+There is no body and no idempotency key.
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "blockingReasons": [
+      {
+        "code": "QUEST_DUE_AT_REQUIRED",
+        "message": "dueAt is required before publishing"
+      }
+    ],
+    "warnings": [],
+    "canPublish": false,
+    "questFundingTotal": 1000,
+    "questFundingTotalSatang": 100000,
+    "questReward": 980,
+    "questRewardSatang": 98000,
+    "platformFee": 20,
+    "platformFeeSatang": 2000,
+    "escrowRequirement": 1000,
+    "escrowRequirementSatang": 100000,
+    "headcount": 1,
+    "platformFeeBps": 200,
+    "feeRoundingMode": "UP",
+    "policyRevisionId": "policy-revision-uuid",
+    "policyRevision": 1
+  }
+}
+~~~
+
+Field meaning:
+
+| Field | Meaning |
+| --- | --- |
+| blockingReasons | Conditions that prevent Publish |
+| warnings | Non-blocking notices |
+| canPublish | True only when there are no blocking reasons |
+| questFundingTotal | Inclusive amount in Baht per slot |
+| questFundingTotalSatang | Exact inclusive amount per slot |
+| questReward | Worker amount in Baht per slot |
+| questRewardSatang | Exact Worker amount per slot |
+| platformFee | Fee in Baht per slot |
+| platformFeeSatang | Exact fee per slot |
+| escrowRequirement | Reserved amount in Baht for all slots |
+| escrowRequirementSatang | Exact reserved amount for all slots |
+| headcount | Number of slots |
+| platformFeeBps | Fee rate in basis points |
+| feeRoundingMode | Current value is UP |
+| policyRevisionId | Fee policy snapshot identifier |
+| policyRevision | Fee policy snapshot revision |
+
+Known blocking codes:
+
+- QUEST_HEADCOUNT_INVALID
+- QUEST_TAG_REQUIRED
+- QUEST_CONDITION_REQUIRED
+- QUEST_DUE_AT_REQUIRED
+- QUEST_DUE_AT_INVALID
+- QUEST_DUE_AT_NOT_AFTER_START_TIME
+- QUEST_START_TIME_NOT_IN_FUTURE
+- WALLET_NOT_ACTIVE
+- QUEST_ESCROW_AMOUNT_OUT_OF_RANGE
+- INSUFFICIENT_SPENDING_BALANCE
+
+Possible infrastructure error:
+
+- 503 QUEST_ESCROW_UNAVAILABLE
+
+Use canPublish and blockingReasons to control the Publish button.
+The server checks all rules again during Publish.
+
+### 5.8 Publish the Draft
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/publish
+Idempotency-Key: publish-quest-client-action-id
+~~~
+
+There is no business body.
+Only the owning Hirer can publish an owned QUEST_DRAFT.
+Publish validates again and reserves exact escrow atomically.
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "quest": {
+      "id": "quest-uuid",
+      "version": 2,
+      "state": "QUEST_OPEN"
+    },
+    "questEscrow": {
+      "reservationId": "reservation-uuid",
+      "questFundingTotal": 1000,
+      "questFundingTotalSatang": 100000,
+      "questReward": 980,
+      "questRewardSatang": 98000,
+      "platformFee": 20,
+      "platformFeeSatang": 2000,
+      "escrowRequirement": 1000,
+      "escrowRequirementSatang": 100000,
+      "headcount": 1,
+      "platformFeeBps": 200,
+      "feeRoundingMode": "UP",
+      "policyRevisionId": "policy-revision-uuid",
+      "policyRevision": 1
+    }
+  }
+}
+~~~
+
+The example Quest is shortened.
+The actual quest value is a complete CanonicalQuest.
+Do not recalculate fee or escrow in the frontend.
+
+Funding examples:
+
+- 20.00 can produce 19.60 Quest Reward and 0.40 Platform Fee.
+- 1.03 can produce 1.00 Quest Reward and 0.03 Platform Fee.
+- Escrow requirement is inclusive Quest Funding Total multiplied by headcount.
+
+Publish errors:
+
+- 404 QUEST_NOT_FOUND
+- 409 QUEST_NOT_DRAFT
+- 409 with the first blocking publish reason
+- 409 WALLET_NOT_ACTIVE
+- 409 INSUFFICIENT_SPENDING_BALANCE
+- 409 QUEST_ESCROW_AMOUNT_OUT_OF_RANGE
+- idempotency errors
+- 503 QUEST_ESCROW_UNAVAILABLE
+
+After success, render Quest State QUEST_OPEN.
+
+## 6. Quest Board and public detail
+
+### 6.1 Read the Quest Board
+
+Request:
+
+~~~http
+GET /api/v2/quests
+~~~
+
+Query fields:
+
+| Query | Type | Meaning |
+| --- | --- | --- |
+| q | string | Text search |
+| tagId | UUID | Filter by Tag |
+| mode | enum | FIRST_COME_FIRST_SERVED or CANDIDATE |
+| participation | enum | SINGLE or GROUP |
+| minQuestReward | number | Minimum per-slot Quest Reward in Baht |
+| maxQuestReward | number | Maximum per-slot Quest Reward in Baht |
+| maxDurationMinutes | integer | Maximum duration |
+| startFrom | date-time | Earliest start; Bangkok +07:00 |
+| startTo | date-time | Latest start; Bangkok +07:00 |
+| limit | integer | 1 to 50; default 20 |
+| cursor | string | Opaque cursor |
+
+Money query values accept at most two decimal digits.
+startFrom must not be after startTo.
+
+The Board returns visible, non-hidden, QUEST_OPEN v2 Quests that are
+joinable for the current caller.
+The current Hirer does not see their own Quest.
+The Quest must have a future startTime.
+
+Joinable rules:
+
+- Candidate Quest: open before start; application or team rules apply.
+- First-come SINGLE: activeWorkerCount is zero.
+- First-come GROUP: activeWorkerCount is lower than headcount.
+
+The result is sorted by startTime ascending and then id ascending.
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "quest-uuid",
+        "title": "Design a landing page",
+        "questReward": 980,
+        "tag": {
+          "id": "tag-uuid",
+          "name": "Design"
+        },
+        "mode": "FIRST_COME_FIRST_SERVED",
+        "participation": "SINGLE",
+        "headcount": 1,
+        "activeWorkerCount": 0,
+        "startTime": "2026-09-30T09:00:00.000+07:00",
+        "dueAt": "2026-10-07T18:00:00.000+07:00",
+        "hirerName": "Hirer display name",
+        "location": "Online"
+      }
+    ],
     "nextCursor": null
   }
 }
-```
+~~~
 
-Supported query fields are `q`, `tagId`, `mode`, `participation`,
-`minQuestReward`, `maxQuestReward`, `maxDurationMinutes`, `startFrom`,
-`startTo`, `limit`, and `cursor`.
+Board Card fields:
 
-- `q` is a trimmed, case-insensitive partial match against `title` and
-  `description`. It does not search Quest Condition.
-- `tagId` is one exact Tag UUID. Repeated or comma-separated values are
-  invalid.
-- `mode` and `participation` use the canonical enum values
-  `FIRST_COME_FIRST_SERVED`, `CANDIDATE`, `SINGLE`, and `GROUP`.
-- Reward bounds are Baht JSON numbers with at most two decimal places. The
-  range is inclusive.
-- `maxDurationMinutes` compares the duration from `startTime` to `dueAt`.
-- `startFrom` and `startTo` are inclusive v2 schedule timestamps with the
-  fixed `+07:00` offset.
-- `limit` is an integer from `1` to `50`, with default `20`. `cursor` is
-  opaque. Results sort by `startTime` ascending, then Quest ID ascending.
-- A reversed range returns `400 VALIDATION`.
+| Field | Meaning |
+| --- | --- |
+| id | Quest identifier |
+| title | Quest title |
+| questReward | Per-slot Worker reward in Baht |
+| tag | null or object with id and name |
+| mode | Quest mode |
+| participation | SINGLE or GROUP |
+| headcount | Required slot count |
+| activeWorkerCount | Current active Assignment count |
+| startTime | Scheduled start |
+| dueAt | Deadline or null |
+| hirerName | Display name only |
+| location | Display location or null |
 
-The Server applies non-hidden, ownership, State, timing, and joinability rules
-before it applies the cursor and page limit. A Quest is listed only when it is
-non-hidden, `QUEST_OPEN`, owned by another Member, before `startTime`, and
-joinable at read time:
+Board Card does not include state, description, condition, images, Hirer ID,
+Quest Funding Total, fee, escrow, wallet, or policy data.
+Call public detail for full public Quest content.
 
-- `SINGLE + FIRST_COME_FIRST_SERVED`: `activeWorkerCount` is `0`.
-- `GROUP + FIRST_COME_FIRST_SERVED`: `activeWorkerCount` is below `headcount`.
-- `CANDIDATE + SINGLE` and `CANDIDATE + GROUP`: the Quest is shown while open
-  and before `startTime`, regardless of Candidate or forming team count.
-- An open Quest after `startTime` is not listed. An underfilled `GROUP +
-  FIRST_COME_FIRST_SERVED` Quest at `startTime` is also not listed while the
-  Hirer decision and Worker consent process applies.
+### 6.2 Read public Quest detail
 
-Each `Quest Board Card` contains only:
+Request:
 
-```json
+~~~http
+GET /api/v2/quests/:questId/public
+~~~
+
+The caller must be authenticated and must not be the owning Hirer.
+The Quest must be visible and in QUEST_OPEN.
+
+Success status: HTTP 200.
+
+~~~json
 {
-  "id": "quest-id",
-  "title": "Quest title",
-  "questReward": 100.00,
-  "tag": { "id": "tag-id", "name": "Programming" },
-  "mode": "FIRST_COME_FIRST_SERVED",
-  "participation": "SINGLE",
-  "headcount": 1,
-  "activeWorkerCount": 0,
-  "startTime": "2026-09-02T09:00:00.000+07:00",
-  "dueAt": "2026-09-02T12:00:00.000+07:00",
-  "hirerName": "Hirer display name",
-  "location": "Engineering building"
-}
-```
-
-`questReward` is the applicable Worker Reward in Baht. `activeWorkerCount`
-counts only `ASSIGNMENT_ACTIVE` Workers; it excludes Candidates and forming
-Candidate Team Members. `location` is the first ordered display location.
-The Board Card does not contain the full Quest Condition, description, Quest
-Images, Quest State, Hirer ID, Quest Funding Total, Platform Fee, Money Policy,
-Wallet, or Funding Reservation.
-
-### Public Quest Detail
-
-`GET /api/v2/quests/:questId/public` returns a non-hidden `QUEST_OPEN` Quest to
-an authenticated Member who is not its Hirer. Its public fields are:
-
-```text
-id, title, description, condition.items, tag, mode, participation, state,
-questReward, headcount, activeWorkerCount, startTime, dueAt, proofRequired,
-hirerName, locations, images
-```
-
-`condition.items` is ordered. `locations` contains all ordered label-only
-locations. Public Quest Image entries contain `imageId`, `position`, `url`,
-and `urlExpiresAt`; `fileId` is a private file reference and is omitted. Image
-links expire after 15 minutes.
-
-The response never contains Quest Funding Total, Platform Fee, Money Policy,
-Wallet, Funding Reservation, Hirer ID, Candidate data, or other Finance
-internals. A missing, hidden, closed, or unreadable Quest returns
-`404 QUEST_NOT_FOUND`. Public Detail is not a Worker lifecycle view.
-
-### Quest Edit
-
-The Hirer can create a Quest Edit only while the Quest is `QUEST_ASSIGNED`.
-The request is a complete replacement of the Quest Condition:
-
-```json
-{
-  "condition": {
-    "items": ["First requirement", "Second requirement"]
+  "success": true,
+  "data": {
+    "id": "quest-uuid",
+    "title": "Design a landing page",
+    "description": "Create one responsive landing page.",
+    "condition": {
+      "items": [
+        { "position": 0, "text": "Use the supplied brand colors" }
+      ]
+    },
+    "tag": {
+      "id": "tag-uuid",
+      "name": "Design"
+    },
+    "mode": "FIRST_COME_FIRST_SERVED",
+    "participation": "SINGLE",
+    "state": "QUEST_OPEN",
+    "questReward": 980,
+    "headcount": 1,
+    "activeWorkerCount": 0,
+    "startTime": "2026-09-30T09:00:00.000+07:00",
+    "dueAt": "2026-10-07T18:00:00.000+07:00",
+    "proofRequired": true,
+    "hirerName": "Hirer display name",
+    "locations": [
+      { "label": "Online" }
+    ],
+    "images": [
+      {
+        "imageId": "image-uuid",
+        "position": 0,
+        "url": "temporary-url",
+        "urlExpiresAt": "2026-09-08T10:15:00.000+07:00"
+      }
+    ]
   }
 }
-```
+~~~
 
-The request must contain at least one non-blank item. Each item is at most 255
-characters. The Server trims and validates items, assigns zero-based
-positions, and rejects a replacement identical to the current Condition with
-`409 QUEST_EDIT_NO_CHANGE`.
+Public detail does not expose fileId.
+It exposes only temporary image URLs.
 
-The read representation uses the canonical position shape:
+Error:
 
-```json
+- 404 QUEST_NOT_FOUND for missing, hidden, not-open, or unreadable detail.
+
+## 7. First-come Quest flow
+
+Use this branch only when mode is FIRST_COME_FIRST_SERVED.
+
+### 7.1 Join a Quest
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/join
+Idempotency-Key: join-quest-client-action-id
+~~~
+
+There is no business body.
+The caller must be a non-Hirer Prospective Worker.
+The Quest must be visible, QUEST_OPEN, and before startTime.
+The command creates Work Chat membership through the backend.
+
+For SINGLE, the Quest becomes QUEST_ASSIGNED.
+For GROUP, the Quest stays QUEST_OPEN until activeWorkerCount reaches
+headcount.
+
+Success status: HTTP 200.
+
+~~~json
 {
-  "position": 0,
-  "text": "First requirement"
+  "success": true,
+  "data": {
+    "id": "assignment-uuid",
+    "questId": "quest-uuid",
+    "workerId": "worker-uuid",
+    "state": "ASSIGNMENT_ACTIVE",
+    "questState": "QUEST_ASSIGNED",
+    "startedAt": null,
+    "createdAt": "2026-09-08T10:00:00.000+07:00"
+  }
 }
-```
+~~~
 
-A Quest Edit resource contains `requestId`, `questId`, `status`, `createdAt`,
-`expiresAt`, nullable `appliedAt`, nullable `failedAt`,
-`previousCondition`, `proposedCondition`, and `responseSummary`.
-`responseSummary` contains `totalCount`, `acceptedCount`, `declinedCount`,
-and `pendingCount`. Audit timestamps use UTC `Z`; `expiresAt` is ten minutes
-after `createdAt`.
+For an unfilled GROUP Quest, questState can be QUEST_OPEN.
 
-Every Active Worker gives one whole-request decision within ten minutes:
+Errors:
 
-- `EDIT_RESPONSE_ACCEPTED` or `EDIT_RESPONSE_DECLINED`.
-- `reason` is optional, allowed only for a declined response, and is at most
-  255 characters.
-- The last acceptance applies the proposed Quest Condition atomically and
-  changes the request to `EDIT_REQUEST_APPLIED`.
-- Any decline, timeout, or Active Worker departure changes the request to
-  `EDIT_REQUEST_FAILED` and leaves the old Quest Condition unchanged.
-- A pending Quest Edit cannot be cancelled and does not use
-  `QUEST_AWAITING_CONSENT`.
-- A pending Quest Edit blocks the Quest from leaving `QUEST_ASSIGNED`.
-- When no Active Worker exists at create time, no resource is created and the
-  Server returns `409 QUEST_EDIT_NO_ACTIVE_WORKERS`.
+- 404 QUEST_NOT_FOUND
+- 409 QUEST_MODE_NOT_ALLOWED
+- 409 QUEST_PARTICIPATION_NOT_ALLOWED
+- 409 HIRER_CANNOT_JOIN
+- 409 QUEST_NOT_OPEN
+- 409 QUEST_ROSTER_FROZEN
+- 409 ASSIGNMENT_ALREADY_EXISTS
+- 409 QUEST_FULL
+- 503 WORK_CHAT_UNAVAILABLE
+- idempotency errors
 
-The Hirer sees every Active Worker response with `workerId`, decision, reason,
-and `respondedAt`. A Worker sees only its own response and the summary; it
-does not see another Worker's identity or reason. Candidate, Prospective
-Worker, and Departed Worker cannot read or respond to the Quest Edit. The
-failure codes are `EDIT_REQUEST_DECLINED`, `EDIT_REQUEST_TIMEOUT`, and
-`ACTIVE_WORKER_LEFT`.
+If the response is lost, retry with the same key.
+Then read the Assignment list.
 
-The Server materializes timeout under the Quest row lock. After `expiresAt`, a
-read or response cannot observe `PENDING`; a response attempt returns
-`409 QUEST_EDIT_EXPIRED` after the request is marked failed. Concurrent
-responses use first-commit-wins behavior. Create and respond require a
-non-blank `Idempotency-Key`; the key is scoped by authenticated Member and
-operation, retained for at least 24 hours, and checked with a normalized
-request fingerprint. A matching retry replays the original status and body;
-reuse with a different request returns `409 IDEMPOTENCY_KEY_REUSED`; a request
-still processing returns `409 IDEMPOTENCY_IN_PROGRESS`.
+### 7.2 List my active Assignments
 
-The remaining Quest Edit conflicts are:
+Request:
 
-| Condition | Error |
+~~~http
+GET /api/v2/assignments/mine
+~~~
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "assignment-uuid",
+        "questId": "quest-uuid",
+        "workerId": "worker-uuid",
+        "state": "ASSIGNMENT_ACTIVE",
+        "questState": "QUEST_ASSIGNED",
+        "startedAt": null,
+        "createdAt": "2026-09-08T10:00:00.000+07:00"
+      }
+    ]
+  }
+}
+~~~
+
+This endpoint has no cursor or limit.
+It returns active v2 Assignments for the authenticated Worker.
+
+Assignment fields:
+
+| Field | Meaning |
 | --- | --- |
-| Missing or unreadable Quest Edit Request | `404 QUEST_EDIT_NOT_FOUND` |
-| A Pending request already exists | `409 QUEST_EDIT_PENDING` |
-| Request has already ended | `409 QUEST_EDIT_NOT_PENDING` |
-| Worker already responded | `409 QUEST_EDIT_ALREADY_RESPONDED` |
-| Invalid body, decision, reason, or request parameters | `400 VALIDATION` |
-| No authenticated Session | `401 UNAUTHORIZED` |
-| Unexpected Server failure | `500 INTERNAL_ERROR` |
+| id | Assignment identifier |
+| questId | Quest identifier |
+| workerId | Worker Member identifier |
+| state | ASSIGNMENT_ACTIVE, ASSIGNMENT_COMPLETED, ASSIGNMENT_INCOMPLETE, or ASSIGNMENT_CANCELLED |
+| questState | Current Quest State |
+| startedAt | Automatic start time or null |
+| createdAt | Assignment creation time |
 
-An empty Board result is successful: `200` with an empty `items` array and a
-null `nextCursor`. Invalid query ranges, limits, or cursors return
-`400 VALIDATION`.
+### 7.3 List Quest Assignments
 
-## Agent sequence
+Request:
 
-### 1. Establish the v2 Client boundary
+~~~http
+GET /api/v2/quests/:questId/assignments
+~~~
 
-Create explicit v2 request, response, and error types. Keep the API version in
-the transport boundary so v1 and v2 fields cannot mix.
+The owning Hirer receives all active Assignments.
+The current active Worker receives only their own Assignment.
+Other callers receive a masked 404 QUEST_NOT_FOUND.
 
-| Operation | Endpoint | Client rule | Result |
+Success response:
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "assignment-uuid",
+        "questId": "quest-uuid",
+        "workerId": "worker-uuid",
+        "state": "ASSIGNMENT_ACTIVE",
+        "questState": "QUEST_IN_PROGRESS",
+        "startedAt": "2026-09-30T09:00:02.000+07:00",
+        "createdAt": "2026-09-08T10:00:00.000+07:00"
+      }
+    ]
+  }
+}
+~~~
+
+## 8. Candidate SINGLE flow
+
+Use this branch only when mode is CANDIDATE and participation is SINGLE.
+
+### 8.1 Apply
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/applications
+Idempotency-Key: apply-quest-client-action-id
+~~~
+
+There is no business body.
+The caller must be a non-Hirer Candidate.
+The Quest must be open, visible, and before startTime.
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "id": "application-uuid",
+    "questId": "quest-uuid",
+    "memberId": "candidate-uuid",
+    "state": "APPLICATION_APPLIED",
+    "appliedAt": "2026-09-08T10:00:00.000+07:00"
+  }
+}
+~~~
+
+Application fields:
+
+| Field | Meaning |
+| --- | --- |
+| id | Application identifier |
+| questId | Quest identifier |
+| memberId | Candidate Member identifier |
+| state | APPLICATION_APPLIED, APPLICATION_SELECTED, APPLICATION_REJECTED, or APPLICATION_WITHDRAWN |
+| appliedAt | Application time |
+
+Errors:
+
+- 404 QUEST_NOT_FOUND
+- 409 QUEST_MODE_NOT_ALLOWED
+- 409 QUEST_PARTICIPATION_NOT_ALLOWED
+- 409 HIRER_CANNOT_APPLY
+- 409 QUEST_NOT_OPEN
+- 409 APPLICATION_ALREADY_EXISTS
+- idempotency errors
+
+### 8.2 List applications
+
+Request:
+
+~~~http
+GET /api/v2/quests/:questId/applications
+~~~
+
+The owning Hirer sees all applications.
+The Candidate sees only their own application.
+The endpoint is readable while the Quest is QUEST_OPEN or QUEST_ASSIGNED.
+Other callers receive a masked 404 QUEST_NOT_FOUND.
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "application-uuid",
+        "questId": "quest-uuid",
+        "memberId": "candidate-uuid",
+        "state": "APPLICATION_APPLIED",
+        "appliedAt": "2026-09-08T10:00:00.000+07:00"
+      }
+    ]
+  }
+}
+~~~
+
+This endpoint has no pagination.
+
+### 8.3 Read one application
+
+Request:
+
+~~~http
+GET /api/v2/quests/:questId/applications/:applicationId
+~~~
+
+The same role and state rules as the list endpoint apply.
+The data value is one Application object.
+
+### 8.4 Withdraw an application
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/applications/:applicationId/withdraw
+Idempotency-Key: withdraw-application-client-action-id
+~~~
+
+There is no business body.
+Only the application owner can withdraw while the Quest is open and before
+selection.
+
+Success status: HTTP 200.
+The data value is the Application with state APPLICATION_WITHDRAWN.
+
+Errors:
+
+- 404 APPLICATION_NOT_FOUND
+- 409 APPLICATION_NOT_WITHDRAWABLE
+- 409 HIRER_CANNOT_WITHDRAW
+- idempotency errors
+
+### 8.5 Select an application
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/applications/:applicationId/select
+Idempotency-Key: select-application-client-action-id
+~~~
+
+There is no business body.
+Only the owning Hirer can select.
+The Quest must be QUEST_OPEN and before startTime.
+
+The command atomically:
+
+1. marks the selected application APPLICATION_SELECTED;
+2. rejects other applications;
+3. creates the Assignment;
+4. changes the Quest to QUEST_ASSIGNED;
+5. creates Work Chat membership.
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "assignments": [
+      {
+        "id": "assignment-uuid",
+        "questId": "quest-uuid",
+        "workerId": "candidate-uuid",
+        "state": "ASSIGNMENT_ACTIVE",
+        "questState": "QUEST_ASSIGNED",
+        "startedAt": null,
+        "createdAt": "2026-09-08T10:00:00.000+07:00"
+      }
+    ],
+    "questState": "QUEST_ASSIGNED"
+  }
+}
+~~~
+
+Errors:
+
+- 404 QUEST_NOT_FOUND
+- 404 APPLICATION_NOT_FOUND
+- 409 CANDIDATE_SELECTION_NOT_ALLOWED
+- 409 CANDIDATE_NOT_SELECTABLE
+- 409 ASSIGNMENT_ALREADY_EXISTS
+- 503 WORK_CHAT_UNAVAILABLE
+- idempotency errors
+
+## 9. Candidate GROUP flow: Candidate Teams
+
+Use this branch only when mode is CANDIDATE and participation is GROUP.
+
+A Candidate Team is a team of Prospective Workers.
+The Team Leader creates and submits it.
+The Hirer selects one submitted Team.
+
+### 9.1 Team response shape
+
+~~~json
+{
+  "id": "team-uuid",
+  "questId": "quest-uuid",
+  "leaderId": "leader-uuid",
+  "name": "Frontend team",
+  "headcount": 3,
+  "state": "TEAM_FORMING",
+  "joinCode": "ABCD2345",
+  "joinCodeExpiresAt": "2026-09-09T10:00:00.000+07:00",
+  "members": [
+    {
+      "memberId": "leader-uuid",
+      "joinedAt": "2026-09-08T10:00:00.000+07:00"
+    }
+  ],
+  "submission": null,
+  "createdAt": "2026-09-08T10:00:00.000+07:00"
+}
+~~~
+
+Team fields:
+
+| Field | Meaning |
+| --- | --- |
+| id | Team identifier |
+| questId | Quest identifier |
+| leaderId | Current Team Leader |
+| name | Team name |
+| headcount | Required team size |
+| state | TEAM_FORMING, TEAM_SUBMITTED, TEAM_SELECTED, TEAM_REJECTED, or TEAM_DISBANDED |
+| joinCode | Plaintext code only when a new code is created; reads can return null |
+| joinCodeExpiresAt | Code expiry time |
+| members | Members with memberId and joinedAt |
+| submission | Submission object or null |
+| createdAt | Team creation time |
+
+Join codes use eight characters from ABCDEFGHJKLMNPQRSTUVWXYZ23456789.
+Input is trimmed and uppercased.
+The plaintext code is returned when a Team is created or a code is regenerated.
+The code becomes null after submission.
+
+### 9.2 Create a Candidate Team
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/teams
+Idempotency-Key: create-team-client-action-id
+Content-Type: application/json
+~~~
+
+~~~json
+{
+  "name": "Frontend team",
+  "headcount": 3
+}
+~~~
+
+Fields:
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| name | string | Non-blank team name |
+| headcount | integer | At least 2 and no more than Quest headcount |
+
+The caller becomes Team Leader and first member.
+The Quest must be open and before startTime.
+
+Success status: HTTP 201.
+The data value is the complete Team object.
+
+Errors:
+
+- 404 QUEST_NOT_FOUND
+- 409 QUEST_MODE_NOT_ALLOWED
+- 409 QUEST_PARTICIPATION_NOT_ALLOWED
+- 409 HIRER_CANNOT_JOIN_TEAM
+- 409 QUEST_NOT_OPEN
+- 409 TEAM_HEADCOUNT_NOT_ALLOWED
+- idempotency errors
+
+### 9.3 List Candidate Teams
+
+Request:
+
+~~~http
+GET /api/v2/quests/:questId/teams
+~~~
+
+The Quest must be QUEST_OPEN.
+The Hirer sees all non-disbanded Teams.
+A Team member sees their own Team.
+This endpoint is not a Team history endpoint after assignment.
+
+Success status: HTTP 200.
+The data value is an object with items, where each item is a complete Team.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "team-uuid",
+        "questId": "quest-uuid",
+        "leaderId": "leader-uuid",
+        "name": "Frontend team",
+        "headcount": 3,
+        "state": "TEAM_FORMING",
+        "joinCode": null,
+        "joinCodeExpiresAt": null,
+        "members": [],
+        "submission": null,
+        "createdAt": "2026-09-08T10:00:00.000+07:00"
+      }
+    ]
+  }
+}
+~~~
+
+### 9.4 Read a Candidate Team
+
+Request:
+
+~~~http
+GET /api/v2/quests/:questId/teams/:teamId
+~~~
+
+The same visibility rules as the list endpoint apply.
+The data value is one complete Team object.
+
+### 9.5 Update the Team name
+
+Request:
+
+~~~http
+PATCH /api/v2/quests/:questId/teams/:teamId
+Idempotency-Key: update-team-client-action-id
+Content-Type: application/json
+~~~
+
+~~~json
+{ "name": "New team name" }
+~~~
+
+Only the Team Leader can update a TEAM_FORMING Team while the Quest is open.
+Success status: HTTP 200.
+The data value is the complete Team object.
+
+### 9.6 Join a Candidate Team
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/teams/:teamId/join
+Idempotency-Key: join-team-client-action-id
+Content-Type: application/json
+~~~
+
+~~~json
+{ "joinCode": "abcd2345" }
+~~~
+
+The server normalizes the code to uppercase.
+The caller must be a Prospective Worker.
+The Team must be forming, open, not full, and before startTime.
+
+Success status: HTTP 200.
+The data value is the complete Team object.
+
+Errors:
+
+- 404 TEAM_NOT_FOUND
+- 409 TEAM_MEMBERSHIP_ALREADY_EXISTS
+- 409 TEAM_FULL
+- 409 TEAM_NOT_FORMING
+- 409 JOIN_CODE_INVALID
+- 409 JOIN_CODE_EXPIRED
+- 409 HIRER_CANNOT_JOIN_TEAM
+- 409 QUEST_NOT_OPEN
+- idempotency errors
+
+### 9.7 Leave a Candidate Team
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/teams/:teamId/leave
+Idempotency-Key: leave-team-client-action-id
+~~~
+
+There is no business body.
+The caller must be a Team member.
+The Team must be forming and the Quest must be open.
+If the Team Leader leaves, leadership transfers when possible.
+If the last member leaves, the Team is disbanded.
+
+Success status: HTTP 200.
+The data value is the complete Team object.
+
+### 9.8 Remove a Team member
+
+Request:
+
+~~~http
+DELETE /api/v2/quests/:questId/teams/:teamId/members/:memberId
+Idempotency-Key: remove-team-member-client-action-id
+~~~
+
+There is no business body.
+Only the Team Leader can remove another member.
+The Team Leader cannot remove themself.
+The Team must be forming and the Quest must be open.
+
+Success status: HTTP 200.
+The data value is the complete Team object.
+
+Errors:
+
+- 404 TEAM_NOT_FOUND
+- 404 TEAM_MEMBER_NOT_FOUND
+- 409 TEAM_LEADER_REQUIRED
+- 409 TEAM_LEADER_CANNOT_REMOVE_SELF
+- 409 TEAM_NOT_FORMING
+- idempotency errors
+
+### 9.9 Regenerate a Team join code
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/teams/:teamId/join-code
+Idempotency-Key: regenerate-team-code-client-action-id
+~~~
+
+Only the Team Leader can regenerate a code for a forming Team.
+The Quest must be open.
+
+Success status: HTTP 200.
+The data value is the complete Team object and includes the new plaintext
+joinCode and joinCodeExpiresAt.
+
+### 9.10 Submit a Candidate Team
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/teams/:teamId/submit
+Idempotency-Key: submit-team-client-action-id
+Content-Type: application/json
+~~~
+
+~~~json
+{
+  "text": "We will complete the Quest as a three-person team.",
+  "fileIds": [
+    "private-file-uuid"
+  ]
+}
+~~~
+
+Fields:
+
+| Field | Type | Required | Rule |
 | --- | --- | --- | --- |
-| Create Draft | `POST /api/v2/quests` | `Idempotency-Key` required | Canonical Quest in `QUEST_DRAFT` |
-| List own Quests | `GET /api/v2/quests/mine` | Read; no idempotency key | `{ items, nextCursor }` |
-| Read own Quest | `GET /api/v2/quests/:questId` | Read; no idempotency key | Canonical Quest |
-| Edit Draft | `PATCH /api/v2/quests/:questId` | `If-Match` and `Idempotency-Key` required | Updated canonical Quest |
-| Add Quest Images | `POST /api/v2/quests/:questId/images` | Multipart `images` and `Idempotency-Key` required | Current ordered `images` |
-| Remove Quest Image | `DELETE /api/v2/quests/:questId/images/:imageId` | `Idempotency-Key` required | Current ordered `images` |
-| Check publish | `GET /api/v2/quests/:questId/publish-check` | Read; no idempotency key | Readiness and funding quote |
-| Publish Quest | `POST /api/v2/quests/:questId/publish` | Empty business body and `Idempotency-Key` required | `QUEST_OPEN` Quest and Quest Escrow snapshot |
+| text | string | yes | Non-blank submission text |
+| fileIds | UUID array | yes | Files owned by Team Leader; allowed image, PDF, and video types; total maximum 10 MB |
 
-Use the existing authenticated Session transport from the Frontend repository.
-Use the exact field representation from OpenAPI for money and dates. Keep
-`Idempotency-Key` stable for one intent and generate a new key for a changed
-intent.
+The Team Leader can submit only when the Team is full.
+Submission changes the Team to TEAM_SUBMITTED.
+The submission is immutable.
 
-Completion criterion: every request in the journey uses a v2 type and endpoint;
-the v1 adapter has no silent field reuse.
+Submission response:
 
-### 2. Build the Draft editor
+~~~json
+{
+  "text": "We will complete the Quest as a three-person team.",
+  "fileIds": ["private-file-uuid"],
+  "submittedAt": "2026-09-08T10:00:00.000+07:00"
+}
+~~~
 
-The create request requires:
+Important file identifier gap:
 
-- `title`: trimmed, 1–120 characters.
-- `condition.items`: at least one ordered, non-blank item; each item is at
-  most 255 characters.
-- `mode`: `FIRST_COME_FIRST_SERVED` or `CANDIDATE`.
-- `participation`: `SINGLE` or `GROUP`.
-- `questFundingTotal`: inclusive amount in Baht for one Worker slot, with exact
-  satang precision.
-- `headcount`: `SINGLE` requires `1`; `GROUP` requires `2`–`20`.
-- `startTime`: RFC 3339 date-time with the fixed `+07:00` offset. Requests
-  may use zero to three fractional-second digits.
+- This endpoint requires private File IDs.
+- Work Chat upload returns a Chat Attachment ID.
+- A Chat Attachment ID is not a private File ID.
+- The current v2 contract has no generic frontend file upload route that
+  returns the required private File ID.
 
-Draft-only optional fields are:
+Do not send a Chat Attachment ID as fileIds.
+Do not guess an ID conversion.
+If this blocks the UI, report the missing backend contract.
 
-- `description`: nullable, at most 1,000 characters.
-- `dueAt`: nullable while the Quest is a Draft. A non-null value uses the same
-  `+07:00` wire format as `startTime`.
-- `tagId`: nullable while the Quest is a Draft.
-- `proofRequired`: defaults to `true`.
-- `locations`: zero to ten label-only objects; each label is at most 100
-  characters.
+Errors:
 
-Quest schedule time contract:
+- 409 TEAM_HEADCOUNT_MISMATCH
+- 409 TEAM_SUBMISSION_INVALID
+- 409 TEAM_SUBMISSION_FILES_INVALID
+- 409 TEAM_NOT_FORMING
+- idempotency errors
 
-- The v2 wire contract accepts only `+07:00` for `startTime` and non-null
-  `dueAt`. `Z` and other numeric offsets are invalid.
-- The Server normalizes accepted values to UTC instants and stores them in
-  PostgreSQL `timestamptz`. It compares `startTime` and `dueAt` as instants.
-- Canonical Quest responses serialize `startTime` and non-null `dueAt` as
-  `YYYY-MM-DDTHH:mm:ss.sss+07:00`. A null `dueAt` remains null.
-- `createdAt`, `updatedAt`, and cursor timestamps remain UTC `Z`; this rule is
-  only for Quest scheduling fields.
-- Existing stored timestamps are read as instants and do not need a data
-  migration. `dueAt` remains required by publish readiness and immutable after
-  the Quest reaches `QUEST_ASSIGNED`.
+### 9.11 Select a Candidate Team
 
-Keep two values in Client state:
+Request:
 
-- `canonicalQuest`: the last resource confirmed by the Server.
-- `draftForm`: the current local form, including unsaved edits.
+~~~http
+POST /api/v2/quests/:questId/teams/:teamId/select
+Idempotency-Key: select-team-client-action-id
+~~~
 
-`PATCH /api/v2/quests/:questId` is a top-level partial update:
+There is no business body.
+Only the owning Hirer can select a submitted full Team.
 
-- An omitted field stays unchanged.
-- `null` clears a nullable field.
-- `locations: []` clears every location.
-- A supplied `condition.items` replaces the complete ordered Condition Item
-  collection.
-- A supplied `locations` replaces the complete location collection.
-- Required fields remain present.
-- An empty body is invalid.
-- `If-Match` uses the value supplied by the API. The Client does not derive it
-  from `updatedAt` or local time.
+The command atomically:
 
-An online Quest can use `locations: []`. Zero Quest Images also remains valid.
-An incomplete Draft may have no canonical `Tag` and no `dueAt`; publish check
-reports those later.
+1. changes the selected Team to TEAM_SELECTED;
+2. rejects other submitted Teams;
+3. creates one active Assignment for each Team member;
+4. changes the Quest to QUEST_ASSIGNED;
+5. creates Work Chat membership for all accepted Workers.
 
-Completion criterion: the editor creates an incomplete Draft, saves valid
-partial edits, replaces Conditions and locations as complete collections, and
-shows a review path after a stale `If-Match` conflict.
+Success status: HTTP 200.
 
-### 3. Present the inclusive money model
+~~~json
+{
+  "success": true,
+  "data": {
+    "questState": "QUEST_ASSIGNED",
+    "assignments": [
+      {
+        "id": "assignment-uuid",
+        "questId": "quest-uuid",
+        "workerId": "member-uuid",
+        "state": "ASSIGNMENT_ACTIVE",
+        "questState": "QUEST_ASSIGNED",
+        "startedAt": null,
+        "createdAt": "2026-09-08T10:00:00.000+07:00"
+      }
+    ]
+  }
+}
+~~~
 
-The Hirer enters `questFundingTotal`. This is the complete budget for one
-Worker slot. The Client presents it as the budget and lets the Server derive:
+Errors:
 
-- net `questReward` for the Worker;
-- `platformFee` for the Platform; and
-- the exact inclusive total.
+- 404 QUEST_NOT_FOUND
+- 404 TEAM_NOT_FOUND
+- 409 CANDIDATE_SELECTION_NOT_ALLOWED
+- 409 CANDIDATE_TEAM_NOT_SELECTABLE
+- 409 ASSIGNMENT_ALREADY_EXISTS
+- 503 WORK_CHAT_UNAVAILABLE
+- idempotency errors
 
-The Platform Fee is inside the entered total. The Client displays the quote
-returned by the Server and uses integer satang in local form handling. It keeps
-the Server as the only calculation authority.
+## 10. Automatic start and Work Chat
 
-Contract fixtures:
+### 10.1 Automatic start
 
-- Total ฿20.00 at 2%: Quest Reward ฿19.60 and Platform Fee ฿0.40.
-- Total ฿1.03 at 2%: Quest Reward ฿1.00 and Platform Fee ฿0.03. A ฿1.01
-  Reward would require ฿0.03 and exceed the total.
+After an Assignment is created:
 
-Hirer-owned responses may contain `questFundingTotal`, `questReward`,
-`platformFee`, fee rate, rounding mode, Money Policy revision, and an opaque
-reservation reference. Worker and public views show the applicable Quest
-Reward only. Shared components must keep Platform Fee, Money Policy, Wallet,
-and Funding Reservation details out of those views.
+1. Render QUEST_ASSIGNED before startTime.
+2. Refresh after the scheduled start.
+3. Enable work and Proof Submission UI after QUEST_IN_PROGRESS.
+4. Handle a delayed worker transition without showing a false failure.
+5. Check for a pending Quest Edit before assuming that the Quest can start.
 
-Completion criterion: the UI has one exact Hirer budget, shows the net Worker
-Reward and Platform Fee as parts of that budget, and uses the Server quote for
-all displayed calculations.
+There is no client Start Work command.
 
-### 4. Manage Quest Images as a separate resource
+### 10.2 Work Chat
 
-Create the Draft before uploading images. Keep image operations separate from
-Draft create and Draft PATCH.
+Quest v2 does not expose Work Chat routes under /api/v2.
+Work Chat is under the existing /api/v1/chat/conversations API.
+Quest v2 commands create or update Work Chat membership at the Assignment
+boundary.
 
-Image contract:
+Use Work Chat only after an active Assignment exists.
+Do not grant membership from the frontend.
+Do not use Candidate Inquiry Conversation as Work Chat.
 
-- Upload uses multipart field `images`.
-- Accepted file formats are JPEG, PNG, and WebP.
-- Each file is at most 5 MB; a Quest has zero to three images.
-- The Server checks decoded file content and actual byte size.
-- Upload appends images in request order.
-- A batch that exceeds the image limit fails as one batch.
-- Replacement is explicit: remove the old image, then upload the new image.
-- Remove by `imageId`. `fileId` is a file reference, not the image resource
-  identity.
-- After remove, render the returned list. The Server repacks positions from
-  `0`.
-- Each image has `imageId`, `fileId`, `position`, `url`, and `urlExpiresAt`.
-- Temporary links are valid for 15 minutes and are generated on read.
-- Quest Images are optional and are not shown on the Quest Board card.
-- Image writes are allowed for the owning Hirer only while the Quest is
-  `QUEST_DRAFT`.
+Main Work Chat endpoints:
 
-Keep selected files available after a correctable failure. On a successful
-remove or upload, replace local image state with the complete Server list. On
-an expired or failed temporary URL, reload the Quest resource. The Client does
-not persist or display a permanent storage URL.
+~~~text
+GET    /api/v1/chat/conversations
+GET    /api/v1/chat/conversations/:conversationId/participants
+POST   /api/v1/chat/conversations/:conversationId/attachments
+GET    /api/v1/chat/conversations/:conversationId/attachments/:attachmentId/link
+DELETE /api/v1/chat/conversations/:conversationId/attachments/:attachmentId
+GET    /api/v1/chat/conversations/:conversationId/messages
+POST   /api/v1/chat/conversations/:conversationId/messages
+POST   /api/v1/chat/conversations/:conversationId/read
+WS     /api/v1/chat/conversations/:conversationId/events
+~~~
 
-Completion criterion: the image manager supports ordered add, remove,
-replacement, retry, limit feedback, and expired-link recovery without changing
-Draft text or money state.
+REST is authoritative.
+Use WebSocket messages as updates, then refresh from REST when exact state is
+needed.
 
-### 5. Build publish readiness
+Work Chat summary:
 
-`GET /api/v2/quests/:questId/publish-check` is an advisory read. It does not
-save the Draft, change Quest State, reserve money, or upload files.
+~~~json
+{
+  "id": "conversation-uuid",
+  "type": "CONVERSATION_WORK",
+  "quest": {
+    "id": "quest-uuid",
+    "title": "Design a landing page",
+    "status": "QUEST_IN_PROGRESS"
+  },
+  "latestMessage": {
+    "id": "message-uuid",
+    "kind": "USER",
+    "preview": "I submitted the work.",
+    "createdAt": "2026-09-30T10:00:00.000+07:00"
+  },
+  "lastActivityAt": "2026-09-30T10:00:00.000+07:00",
+  "archived": false,
+  "readOnly": false,
+  "unreadCount": 0
+}
+~~~
 
-Render every returned `blockingReasons` entry, every `warnings` entry, and the
-funding quote. Known blockers include:
+Work Chat message body:
 
-- missing canonical `Tag`;
-- missing or invalid `dueAt`;
-- `dueAt <= startTime`;
-- `startTime` is not in the future by Server time;
-- invalid Quest Condition;
-- insufficient `Spending Balance` for Quest Escrow;
-- `Wallet Status` is not `ACTIVE`; and
-- the total Quest Escrow amount is outside the active Money Policy's
-  Funding Reservation limits.
+~~~json
+{
+  "clientMessageId": "client-generated-unique-id",
+  "text": "I will submit the work soon.",
+  "attachmentIds": ["attachment-uuid"]
+}
+~~~
 
-`QUEST_ESCROW_AMOUNT_OUT_OF_RANGE` is returned when the headcount-multiplied
-Quest Escrow amount is below or above those active limits. This is a
-publish-check blocker because the later Funding Reservation would reject the
-same amount. A missing Wallet or unavailable Money Policy is a dependency
-failure and returns `503 QUEST_ESCROW_UNAVAILABLE`.
+text and attachmentIds are optional, but the message must have usable content.
+An attachment ID is valid for Chat messages only.
+It is not the private fileId required by Candidate Team submission.
 
-Empty locations and zero Quest Images are valid. They are neither blockers nor
-warnings.
+### 10.3 Quest Edit after assignment
 
-Keep the current form while the check is loading. If the response shows a
-changed Quest or a conflict, reload the canonical resource and let the Hirer
-review unsaved local edits before replacing them.
+A Hirer can propose a Condition change only while the Quest is
+QUEST_ASSIGNED and there is at least one active Worker.
+A pending Quest Edit blocks automatic start.
 
-Completion criterion: the readiness screen shows all Server blockers, warnings,
-and the current quote, with a route back to each affected Draft field.
+Create request:
 
-### 6. Publish with safe retry
+~~~http
+POST /api/v2/quests/:questId/edit-requests
+Idempotency-Key: create-edit-request-client-action-id
+Content-Type: application/json
+~~~
 
-Publish has no business request body. The request identifies the Draft in the
-path and uses a stable `Idempotency-Key`.
+~~~json
+{
+  "condition": {
+    "items": [
+      "Use the new brand colors",
+      "Include a mobile layout"
+    ]
+  }
+}
+~~~
 
-For each v2 write:
+The body replaces the complete Condition list.
+Each item is 1 to 255 non-blank characters.
+Only one pending request can exist.
+The request expires after 10 minutes.
 
-- Generate one key for one user intent.
-- Reuse the key for a network retry of the same request.
-- A same-key retry with the same request replays the original result.
-- A changed request gets a new key.
-- For `IDEMPOTENCY_IN_PROGRESS`, keep the same request identity and retry,
-  wait, or re-read according to the transport policy.
+Success status: HTTP 201.
 
-On a confirmed success, replace the Draft view with the returned canonical
-Quest in `QUEST_OPEN` and store the returned Hirer-only Quest Escrow snapshot.
-The Client treats a timeout as an unknown result. It re-reads or retries with
-the same key instead of inferring a local publish.
+~~~json
+{
+  "success": true,
+  "data": {
+    "requestId": "edit-request-uuid",
+    "questId": "quest-uuid",
+    "status": "EDIT_REQUEST_PENDING",
+    "failureCode": null,
+    "createdAt": "2026-09-30T08:00:00.000+07:00",
+    "expiresAt": "2026-09-30T08:10:00.000+07:00",
+    "appliedAt": null,
+    "failedAt": null,
+    "previousCondition": {
+      "items": [
+        { "position": 0, "text": "Old condition" }
+      ]
+    },
+    "proposedCondition": {
+      "items": [
+        { "position": 0, "text": "Use the new brand colors" },
+        { "position": 1, "text": "Include a mobile layout" }
+      ]
+    },
+    "responseSummary": {
+      "totalCount": 1,
+      "acceptedCount": 0,
+      "declinedCount": 0,
+      "pendingCount": 1
+    },
+    "responses": [],
+    "ownResponse": null
+  }
+}
+~~~
 
-Completion criterion: a lost response cannot create a duplicate Quest State
-transition or Funding Reservation, and a confirmed response drives the screen
-from the returned `QUEST_OPEN` resource.
+Hirer view includes responses.
+Active Worker view includes ownResponse and responseSummary.
+Candidate, Prospective Worker, and departed Worker cannot read it.
 
-## Shared response and error contract
+Read request:
 
-Success and error use these envelopes:
+~~~http
+GET /api/v2/quests/edit-requests/:requestId
+~~~
 
-```json
-{ "success": true, "data": {} }
-```
+Only the Hirer or a current active Worker can read it.
+The data value has the same Quest Edit Request shape.
 
-```json
-{ "success": false, "error": { "code": "...", "message": "..." } }
-```
+Worker response:
 
-Use `error.code` for UI behavior. Treat `message` as display text or a
-fallback; exact message text is not a stable contract.
+~~~http
+POST /api/v2/quests/edit-requests/:requestId/respond
+Idempotency-Key: respond-edit-request-client-action-id
+Content-Type: application/json
+~~~
 
-| Result | Client behavior |
+Accept:
+
+~~~json
+{ "decision": "EDIT_RESPONSE_ACCEPTED" }
+~~~
+
+Decline:
+
+~~~json
+{
+  "decision": "EDIT_RESPONSE_DECLINED",
+  "reason": "The new condition is not feasible before the deadline."
+}
+~~~
+
+reason is allowed only for a decline and is at most 255 characters.
+A Worker can respond once.
+All active Workers accepting applies the proposed Condition.
+Any decline, timeout, or active Worker departure fails the request.
+The old Condition remains when the request fails.
+
+Errors:
+
+- 404 QUEST_EDIT_NOT_FOUND
+- 409 QUEST_EDIT_NOT_ALLOWED
+- 409 QUEST_EDIT_PENDING
+- 409 QUEST_EDIT_NO_ACTIVE_WORKERS
+- 409 QUEST_EDIT_NO_CHANGE
+- 409 QUEST_EDIT_NOT_PENDING
+- 409 QUEST_EDIT_ALREADY_RESPONDED
+- 409 QUEST_EDIT_EXPIRED
+- validation and idempotency errors
+
+## 11. GROUP first-come underfilled flow
+
+Use this branch only when:
+
+~~~text
+mode = FIRST_COME_FIRST_SERVED
+participation = GROUP
+activeWorkerCount < headcount at startTime
+~~~
+
+At the scheduled start, the backend can create an Underfilled decision.
+The frontend does not create this object.
+
+### 11.1 Read Underfilled status
+
+Request:
+
+~~~http
+GET /api/v2/quests/:questId/underfilled
+~~~
+
+The Hirer sees decision and all Worker responses.
+An active Worker sees the decision and ownResponse.
+Other callers receive 404 QUEST_UNDERFILLED_NOT_FOUND.
+
+Response:
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "id": "underfilled-uuid",
+    "questId": "quest-uuid",
+    "questState": "QUEST_IN_PROGRESS",
+    "state": "UNDERFILLED_DECISION_PENDING",
+    "activeWorkerCount": 1,
+    "headcount": 3,
+    "workerRewardPool": 1960,
+    "questReward": null,
+    "dueAt": "2026-10-07T18:00:00.000+07:00",
+    "decision": {
+      "status": "UNDERFILLED_DECISION_PENDING",
+      "value": null,
+      "expiresAt": "2026-09-30T09:10:00.000+07:00"
+    },
+    "consent": {
+      "status": "UNDERFILLED_CONSENT_NOT_STARTED",
+      "expiresAt": null,
+      "totalCount": 0,
+      "acceptedCount": 0,
+      "declinedCount": 0,
+      "pendingCount": 0
+    },
+    "responses": [],
+    "ownResponse": null
+  }
+}
+~~~
+
+Underfilled fields:
+
+| Field | Meaning |
 | --- | --- |
-| `400 VALIDATION` | Keep entered data and show field or form correction. |
-| `401 UNAUTHORIZED` | Restore Sign-In and preserve recoverable local Draft data. |
-| `404 QUEST_NOT_FOUND` | Stop showing the resource. Missing and not-owned Quest use the same view. |
-| `409 QUEST_EDIT_CONFLICT` | Reload the canonical Draft and show a review or merge path. |
-| `409 QUEST_NOT_DRAFT` or `QUEST_STATE_CONFLICT` | Refresh Quest State and remove Draft-only controls. |
-| `409 IDEMPOTENCY_KEY_REUSED` | Treat the request as a different intent and create a new key. |
-| `409 IDEMPOTENCY_IN_PROGRESS` | Keep the same key and request identity. Retry or re-read. |
-| `409` Wallet correction | Show the correction, such as insufficient Spending Balance. |
-| `413` image too large | Keep the file selectable and show the 5 MB limit. |
-| `415` unsupported image | Keep valid files and ask for a supported replacement. |
-| `503 QUEST_IMAGE_STORAGE_UNAVAILABLE` | Keep selected files and offer retry. |
-| `503 QUEST_ESCROW_UNAVAILABLE` | Keep the Draft and offer publish retry. |
-| `500 INTERNAL_ERROR` | Keep recoverable local state and show a generic retry path. |
+| id | Underfilled process identifier |
+| questId | Quest identifier |
+| questState | Current Quest State |
+| state | UNDERFILLED_DECISION_PENDING, UNDERFILLED_CONSENT_PENDING, UNDERFILLED_COMPLETED, or UNDERFILLED_CANCELLED |
+| activeWorkerCount | Number of active Workers |
+| headcount | Required slot count |
+| workerRewardPool | Hirer-facing Worker pool or null |
+| questReward | Worker-facing reward or null |
+| dueAt | Quest deadline or null |
+| decision | Hirer decision status, value, and expiry |
+| consent | Worker consent status, expiry, and counts |
+| responses | Hirer-facing response list |
+| ownResponse | Worker-facing response |
 
-The Client uses `404` behavior for ownership failures and exposes no other
-Member's Quest data.
+Decision response items:
 
-## Client state and transport checklist
+~~~json
+{
+  "workerId": "worker-uuid",
+  "assignmentId": "assignment-uuid",
+  "decision": "ACCEPT",
+  "questReward": 1960,
+  "respondedAt": "2026-09-30T09:05:00.000+07:00"
+}
+~~~
 
-Represent these states explicitly:
+The Hirer can see workerRewardPool and responses.
+The Worker can see questReward and ownResponse.
 
-- initial load, loading, loaded, and load failure;
-- clean Draft, dirty Draft, save in progress, save success, and save conflict;
-- image upload in progress, upload success, upload failure, and remove in
-  progress;
-- publish-check loading, ready, blocked, stale, and unavailable; and
-- publish in progress, published, retryable failure, and Quest State conflict.
+### 11.2 Hirer decision
 
-Keep API calls behind one v2 Client boundary. A mock transport may support UI
-work while Backend tickets are in progress, but its fixtures must use the
-shared envelope and this contract. Replace the transport at that boundary when
-the Backend endpoint is available.
+Request:
 
-## Verification path
+~~~http
+POST /api/v2/quests/:questId/underfilled/decision
+Idempotency-Key: underfilled-decision-client-action-id
+Content-Type: application/json
+~~~
 
-Verify these Client journeys at the API boundary:
+Proceed:
 
-1. Create a minimal valid `QUEST_DRAFT`.
-2. Save an incomplete Draft with no `Tag`, no `dueAt`, zero locations, and
-   zero images.
-3. Edit title, Condition Items, label-only locations, funding total, and dates.
-4. Send a stale `If-Match` and recover without silent overwrite.
-5. Upload three valid images in order, remove the middle image, and verify
-   positions `0` and `1`.
-6. Handle unsupported format, file over 5 MB, and a fourth image.
-7. Render all publish blockers in one readiness result.
-8. Verify the ฿20.00 and ฿1.03 inclusive funding examples.
-9. Retry create, edit, image, and publish commands with the same key and
-   request; verify one result for each intent.
-10. Confirm publish returns `QUEST_OPEN` and the Hirer-only Quest Escrow
-    snapshot.
-11. Confirm public or Worker presentation hides Platform Fee, Money Policy,
-    Wallet, and Funding Reservation details.
-12. Confirm v1 screens and adapters retain their existing behavior.
+~~~json
+{ "decision": "PROCEED" }
+~~~
 
-The handoff is complete when the Client tests cover these journeys, each listed
-failure has a recoverable UI state, and the Client takes no authority over
-Quest State, money split, ownership, or permanent file URLs.
+Cancel:
+
+~~~json
+{ "decision": "CANCEL" }
+~~~
+
+Only the Hirer can call this command.
+The decision window is time limited.
+PROCEED starts Worker consent.
+CANCEL cancels the Quest and settles the applicable money outcome.
+The success data value is the complete Underfilled object.
+
+Errors:
+
+- 404 QUEST_UNDERFILLED_NOT_FOUND
+- 409 QUEST_NOT_UNDERFILLED
+- 409 QUEST_UNDERFILLED_NOT_PENDING
+- 409 QUEST_UNDERFILLED_EXPIRED
+- idempotency errors
+
+### 11.3 Worker consent
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/underfilled/consent
+Idempotency-Key: underfilled-consent-client-action-id
+Content-Type: application/json
+~~~
+
+Accept:
+
+~~~json
+{ "decision": "ACCEPT" }
+~~~
+
+Decline:
+
+~~~json
+{ "decision": "DECLINE" }
+~~~
+
+Only an active Worker can call this command.
+Each Worker responds once.
+All active Workers accepting changes the Quest to QUEST_ASSIGNED with the
+underfilled reward split.
+Any decline or expiry cancels the Quest.
+The success data value is the complete Underfilled object.
+
+Errors:
+
+- 404 QUEST_UNDERFILLED_NOT_FOUND
+- 409 QUEST_NOT_UNDERFILLED
+- 409 QUEST_UNDERFILLED_NOT_PENDING
+- 409 QUEST_UNDERFILLED_EXPIRED
+- 409 QUEST_UNDERFILLED_ALREADY_RESPONDED
+- 503 WORK_CHAT_UNAVAILABLE
+- idempotency errors
+
+## 12. Proof Submission flow
+
+Use this branch only when the Quest is QUEST_IN_PROGRESS.
+The active Worker is the Proof submitter.
+The Hirer reviews the Proof.
+
+### 12.1 Proof response shape
+
+~~~json
+{
+  "id": "proof-uuid",
+  "questId": "quest-uuid",
+  "workerId": "worker-uuid",
+  "teamId": null,
+  "submittedByUserId": "member-uuid",
+  "description": "Completed the landing page.",
+  "status": "PROOF_PENDING",
+  "submittedAt": "2026-10-01T10:00:00.000+07:00",
+  "createdAt": "2026-10-01T09:00:00.000+07:00",
+  "updatedAt": "2026-10-01T10:00:00.000+07:00",
+  "visibility": "FULL",
+  "fileIds": ["private-file-uuid"],
+  "files": [
+    {
+      "fileId": "private-file-uuid",
+      "contentType": "application/pdf",
+      "sizeBytes": 12345,
+      "position": 0,
+      "uploadStatus": "PROOF_FILE_READY",
+      "failureCode": null
+    }
+  ]
+}
+~~~
+
+Proof status values:
+
+- Draft: status null and submittedAt null.
+- Submitted and awaiting review: PROOF_PENDING.
+- Approved: PROOF_APPROVED.
+- Not approved: PROOF_NOT_APPROVED.
+
+visibility is FULL for the submitter and Hirer.
+Other permitted viewers can receive SUMMARY.
+
+### 12.2 Create a Proof Draft
+
+JSON request:
+
+~~~http
+POST /api/v2/quests/:questId/proof-submissions
+Idempotency-Key: create-proof-client-action-id
+Content-Type: application/json
+~~~
+
+~~~json
+{
+  "description": "Completed the landing page.",
+  "fileIds": [
+    "private-file-uuid"
+  ]
+}
+~~~
+
+Multipart request:
+
+~~~http
+POST /api/v2/quests/:questId/proof-submissions
+Idempotency-Key: create-proof-client-action-id
+Content-Type: multipart/form-data
+~~~
+
+Multipart fields:
+
+- description: optional text, maximum 1000 characters;
+- files: up to five uploaded files;
+- fileIds: private file IDs when using existing files;
+- retryPosition: not allowed on create.
+
+Do not send fileIds and files in the same request.
+The Draft must contain a description or at least one file.
+The active Worker can have one Draft Proof for the Quest.
+The request must be before dueAt.
+
+The data value is a Proof object with null status.
+
+Errors include:
+
+- 404 QUEST_NOT_FOUND
+- 409 QUEST_NOT_IN_PROGRESS
+- 409 PROOF_ALREADY_EXISTS
+- 409 PROOF_NOT_ALLOWED
+- 409 PROOF_DEADLINE_PASSED
+- 400 PROOF_CONTENT_REQUIRED
+- file validation and upload errors
+- idempotency errors
+
+### 12.3 Edit a Proof Draft
+
+Request:
+
+~~~http
+PATCH /api/v2/quests/:questId/proof-submissions/:proofSubmissionId
+Idempotency-Key: edit-proof-client-action-id
+Content-Type: application/json
+~~~
+
+~~~json
+{
+  "description": "Updated description.",
+  "fileIds": [
+    "private-file-uuid"
+  ]
+}
+~~~
+
+The body must contain at least one property.
+description is a partial value.
+fileIds replaces the complete file list.
+
+For a failed upload slot, use multipart with exactly one new file and
+retryPosition equal to the failed zero-based slot.
+Do not combine retryPosition with fileIds.
+
+Only the owner can edit an unsent Draft before dueAt.
+Submitted Proof is locked.
+The data value is the updated Proof object.
+
+### 12.4 Delete a Proof Draft
+
+Request:
+
+~~~http
+DELETE /api/v2/quests/:questId/proof-submissions/:proofSubmissionId
+Idempotency-Key: delete-proof-client-action-id
+~~~
+
+Only the owner can delete an unsent Draft.
+There is no business body.
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "deleted": true,
+    "proofSubmissionId": "proof-uuid"
+  }
+}
+~~~
+
+### 12.5 Submit a Proof Draft
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/submit
+Idempotency-Key: submit-proof-client-action-id
+~~~
+
+There is no business body.
+The Draft must have at least one ready file and no failed file slot.
+The submitter must be an active Worker before dueAt.
+
+Success data is the locked Proof:
+
+~~~json
+{
+  "status": "PROOF_PENDING",
+  "submittedAt": "2026-10-01T10:00:00.000+07:00"
+}
+~~~
+
+### 12.6 List Proof Submissions
+
+Request:
+
+~~~http
+GET /api/v2/quests/:questId/proof-submissions
+~~~
+
+Visibility:
+
+- Hirer: all relevant Proof Submissions with FULL visibility.
+- Worker: their own Proof Submission with FULL visibility.
+- Other permitted participants: role-appropriate SUMMARY visibility.
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "proof-uuid",
+        "questId": "quest-uuid",
+        "workerId": "worker-uuid",
+        "teamId": null,
+        "submittedByUserId": "member-uuid",
+        "description": "Completed the landing page.",
+        "status": "PROOF_PENDING",
+        "submittedAt": "2026-10-01T10:00:00.000+07:00",
+        "createdAt": "2026-10-01T09:00:00.000+07:00",
+        "updatedAt": "2026-10-01T10:00:00.000+07:00",
+        "visibility": "FULL",
+        "fileIds": [],
+        "files": []
+      }
+    ]
+  }
+}
+~~~
+
+### 12.7 Review a Proof
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/review
+Idempotency-Key: review-proof-client-action-id
+Content-Type: application/json
+~~~
+
+Approve:
+
+~~~json
+{ "decision": "PROOF_APPROVED" }
+~~~
+
+Do not approve:
+
+~~~json
+{
+  "decision": "PROOF_NOT_APPROVED",
+  "reason": "The mobile layout is missing."
+}
+~~~
+
+Only the owning Hirer can review.
+The first final review wins.
+reason is required for PROOF_NOT_APPROVED.
+reason is invalid for PROOF_APPROVED.
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "proof": {
+      "id": "proof-uuid",
+      "status": "PROOF_APPROVED"
+    },
+    "questStatus": "QUEST_COMPLETED"
+  }
+}
+~~~
+
+Approval settles the relevant money and can complete the Quest.
+Non-approval changes the Quest to QUEST_FAILED and creates the relevant admin
+review item.
+The system can auto-approve a pending Proof after 24 hours.
+
+Errors include:
+
+- 404 QUEST_NOT_FOUND
+- 404 PROOF_NOT_FOUND
+- 409 PROOF_NOT_REVIEWABLE
+- 409 PROOF_ALREADY_REVIEWED
+- 409 PROOF_REVIEW_INVALID
+- 409 QUEST_NOT_IN_PROGRESS
+- idempotency errors
+
+### 12.8 Confirm completion when proof is not required
+
+Use this command only when proofRequired is false.
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/completion-confirmation
+Idempotency-Key: confirm-completion-client-action-id
+~~~
+
+There is no business body.
+Only the required accepted Worker can confirm.
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "confirmed": true,
+    "confirmedAt": "2026-10-07T17:00:00.000+07:00",
+    "questStatus": "QUEST_COMPLETED"
+  }
+}
+~~~
+
+For a GROUP Quest, the Quest can remain QUEST_IN_PROGRESS until all required
+Accepted Participants complete their obligation.
+
+Errors include:
+
+- 404 QUEST_NOT_FOUND
+- 409 QUEST_NOT_IN_PROGRESS
+- 409 PROOF_REQUIRED
+- 409 COMPLETION_ALREADY_CONFIRMED
+- 409 COMPLETION_NOT_ALLOWED
+- idempotency errors
+
+## 13. Cancellation and money outcomes
+
+### 13.1 Cancel a Quest
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/cancel
+Idempotency-Key: cancel-quest-client-action-id
+~~~
+
+There is no business body.
+Only the owning Hirer can cancel.
+Allowed Quest States:
+
+- QUEST_DRAFT
+- QUEST_OPEN
+- QUEST_ASSIGNED
+- QUEST_IN_PROGRESS
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "questStatus": "QUEST_CANCELLED",
+    "outcome": "CANCELLED",
+    "paidSatang": 0,
+    "refundedSatang": 100000
+  }
+}
+~~~
+
+Settlement meaning:
+
+| State before cancel | Money outcome |
+| --- | --- |
+| QUEST_DRAFT | No payment and no refund |
+| QUEST_OPEN | Refund 100 percent of reserved funding |
+| QUEST_ASSIGNED | Pay 20 percent of Worker pool; refund remaining 80 percent and fee |
+| QUEST_IN_PROGRESS | Full applicable settlement |
+
+The returned paidSatang and refundedSatang values are authoritative.
+Do not calculate them in the frontend.
+
+Errors:
+
+- 404 QUEST_NOT_FOUND
+- 403 QUEST_NOT_AUTHORIZED
+- 409 QUEST_SETTLEMENT_NOT_ALLOWED
+- money domain errors with HTTP 409
+- 503 WORK_CHAT_UNAVAILABLE
+- idempotency errors
+
+## 14. Rating Review flow
+
+Rating Review is allowed after:
+
+~~~text
+QUEST_COMPLETED
+QUEST_FAILED
+QUEST_CANCELLED
+~~~
+
+Review does not change Quest State, Assignment state, Work Chat, or money.
+The review window is seven days.
+Each direction has one review:
+
+- Hirer reviews Worker.
+- Worker reviews Hirer.
+
+### 14.1 Create a Rating Review
+
+Request:
+
+~~~http
+POST /api/v2/quests/:questId/reviews
+Idempotency-Key: create-review-client-action-id
+Content-Type: application/json
+~~~
+
+Hirer body:
+
+~~~json
+{
+  "revieweeId": "worker-uuid",
+  "rating": 5,
+  "comment": "Clear requirements and fast feedback."
+}
+~~~
+
+Worker body:
+
+~~~json
+{
+  "rating": 5,
+  "comment": "The Quest had clear conditions."
+}
+~~~
+
+Fields:
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| revieweeId | UUID | Required for Hirer; Worker must omit |
+| rating | integer | 1 to 5 |
+| comment | string | Optional; 1 to 1000 chars when supplied; not blank |
+
+Success status: HTTP 200.
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "id": "review-uuid",
+    "questId": "quest-uuid",
+    "reviewerId": "member-uuid",
+    "revieweeId": "other-member-uuid",
+    "rating": 5,
+    "comment": "Clear requirements and fast feedback.",
+    "createdAt": "2026-10-08T10:00:00.000+07:00",
+    "updatedAt": "2026-10-08T10:00:00.000+07:00"
+  }
+}
+~~~
+
+Errors:
+
+- 404 QUEST_NOT_FOUND
+- 409 QUEST_NOT_TERMINAL
+- 409 REVIEW_NOT_ALLOWED
+- 400 REVIEWEE_REQUIRED
+- 400 INVALID_RATING
+- 400 INVALID_COMMENT
+- 409 REVIEW_ALREADY_EXISTS
+- 409 REVIEW_WINDOW_EXPIRED
+- idempotency errors
+
+### 14.2 Edit a Rating Review
+
+Request:
+
+~~~http
+PATCH /api/v2/quests/:questId/reviews/:reviewId
+Idempotency-Key: edit-review-client-action-id
+Content-Type: application/json
+~~~
+
+~~~json
+{
+  "rating": 4,
+  "comment": "Updated comment."
+}
+~~~
+
+At least one field is required.
+Only the review author can edit within seven days.
+Null is not valid for rating or comment.
+The data value is the complete Rating Review.
+
+Errors:
+
+- 404 REVIEW_NOT_FOUND
+- 409 REVIEW_CONFLICT
+- 409 REVIEW_WINDOW_EXPIRED
+- 400 INVALID_RATING
+- 400 INVALID_COMMENT
+- idempotency errors
+
+## 15. Candidate Inquiry Conversation
+
+Candidate Inquiry Conversation is not Work Chat.
+It is for a Prospective Worker and Hirer before Assignment.
+It does not grant Work Chat membership.
+
+Routes are under /api/v1/chat/candidate-inquiries:
+
+~~~text
+POST   /api/v1/chat/candidate-inquiries
+GET    /api/v1/chat/candidate-inquiries
+GET    /api/v1/chat/candidate-inquiries/:conversationId
+GET    /api/v1/chat/candidate-inquiries/:conversationId/participants
+POST   /api/v1/chat/candidate-inquiries/:conversationId/attachments
+GET    /api/v1/chat/candidate-inquiries/:conversationId/attachments/:attachmentId/link
+DELETE /api/v1/chat/candidate-inquiries/:conversationId/attachments/:attachmentId
+GET    /api/v1/chat/candidate-inquiries/:conversationId/messages
+POST   /api/v1/chat/candidate-inquiries/:conversationId/messages
+POST   /api/v1/chat/candidate-inquiries/:conversationId/read
+WS     /api/v1/chat/candidate-inquiries/:conversationId/events
+~~~
+
+Create body:
+
+~~~json
+{ "questId": "quest-uuid" }
+~~~
+
+Use this conversation only before assignment while the Candidate opportunity
+is open.
+After assignment, use Work Chat.
+
+## 16. Canonical response types
+
+### 16.1 CanonicalQuest
+
+~~~json
+{
+  "id": "quest-uuid",
+  "version": 1,
+  "hiddenAt": null,
+  "title": "Quest title",
+  "description": "Quest description or null",
+  "condition": {
+    "items": [
+      {
+        "position": 0,
+        "text": "Condition Item text"
+      }
+    ]
+  },
+  "tag": {
+    "id": "tag-uuid",
+    "name": "Tag name"
+  },
+  "mode": "FIRST_COME_FIRST_SERVED",
+  "participation": "SINGLE",
+  "state": "QUEST_DRAFT",
+  "questFundingTotal": 1000,
+  "headcount": 1,
+  "startTime": "2026-09-30T09:00:00.000+07:00",
+  "dueAt": "2026-10-07T18:00:00.000+07:00",
+  "proofRequired": true,
+  "locations": [
+    { "label": "Online" }
+  ],
+  "createdAt": "2026-09-08T10:00:00.000+07:00",
+  "updatedAt": "2026-09-08T10:00:00.000+07:00"
+}
+~~~
+
+tag can be null.
+description and dueAt can be null.
+Quest detail adds images.
+
+### 16.2 Quest Image
+
+~~~json
+{
+  "imageId": "image-uuid",
+  "fileId": "file-uuid",
+  "position": 0,
+  "url": "temporary-url",
+  "urlExpiresAt": "2026-09-08T10:15:00.000+07:00"
+}
+~~~
+
+Public detail omits fileId.
+
+### 16.3 Assignment
+
+~~~json
+{
+  "id": "assignment-uuid",
+  "questId": "quest-uuid",
+  "workerId": "worker-uuid",
+  "state": "ASSIGNMENT_ACTIVE",
+  "questState": "QUEST_ASSIGNED",
+  "startedAt": null,
+  "createdAt": "2026-09-08T10:00:00.000+07:00"
+}
+~~~
+
+### 16.4 Application
+
+~~~json
+{
+  "id": "application-uuid",
+  "questId": "quest-uuid",
+  "memberId": "member-uuid",
+  "state": "APPLICATION_APPLIED",
+  "appliedAt": "2026-09-08T10:00:00.000+07:00"
+}
+~~~
+
+### 16.5 Quest Edit Request
+
+~~~json
+{
+  "requestId": "request-uuid",
+  "questId": "quest-uuid",
+  "status": "EDIT_REQUEST_PENDING",
+  "failureCode": null,
+  "createdAt": "2026-09-30T08:00:00.000+07:00",
+  "expiresAt": "2026-09-30T08:10:00.000+07:00",
+  "appliedAt": null,
+  "failedAt": null,
+  "previousCondition": {
+    "items": [
+      { "position": 0, "text": "Old condition" }
+    ]
+  },
+  "proposedCondition": {
+    "items": [
+      { "position": 0, "text": "New condition" }
+    ]
+  },
+  "responseSummary": {
+    "totalCount": 1,
+    "acceptedCount": 0,
+    "declinedCount": 0,
+    "pendingCount": 1
+  },
+  "responses": [
+    {
+      "workerId": "worker-uuid",
+      "decision": null,
+      "reason": null,
+      "respondedAt": null
+    }
+  ],
+  "ownResponse": null
+}
+~~~
+
+failureCode can be EDIT_REQUEST_DECLINED, EDIT_REQUEST_TIMEOUT,
+ACTIVE_WORKER_LEFT, or null.
+status can be EDIT_REQUEST_PENDING, EDIT_REQUEST_APPLIED, or
+EDIT_REQUEST_FAILED.
+
+## 17. Complete endpoint catalog
+
+The current Quest v2 route set has 44 endpoints:
+
+| # | Method | Path | Main actor |
+| ---: | --- | --- | --- |
+| 1 | GET | /api/v2/quests | authenticated Board reader |
+| 2 | POST | /api/v2/quests | Hirer |
+| 3 | GET | /api/v2/quests/mine | Hirer |
+| 4 | POST | /api/v2/quests/:questId/edit-requests | Hirer |
+| 5 | GET | /api/v2/quests/edit-requests/:requestId | Hirer or active Worker |
+| 6 | POST | /api/v2/quests/edit-requests/:requestId/respond | active Worker |
+| 7 | PATCH | /api/v2/quests/:questId | Hirer with Draft |
+| 8 | POST | /api/v2/quests/:questId/images | Hirer with Draft |
+| 9 | DELETE | /api/v2/quests/:questId/images/:imageId | Hirer with Draft |
+| 10 | POST | /api/v2/quests/:questId/publish | Hirer |
+| 11 | POST | /api/v2/quests/:questId/cancel | Hirer |
+| 12 | GET | /api/v2/quests/:questId/publish-check | Hirer |
+| 13 | GET | /api/v2/quests/:questId/public | authenticated non-owner |
+| 14 | GET | /api/v2/quests/:questId | owning Hirer |
+| 15 | GET | /api/v2/assignments/mine | Worker |
+| 16 | GET | /api/v2/quests/:questId/assignments | Hirer or active Worker |
+| 17 | POST | /api/v2/quests/:questId/join | Prospective Worker |
+| 18 | GET | /api/v2/quests/:questId/underfilled | Hirer or active Worker |
+| 19 | POST | /api/v2/quests/:questId/underfilled/decision | Hirer |
+| 20 | POST | /api/v2/quests/:questId/underfilled/consent | active Worker |
+| 21 | POST | /api/v2/quests/:questId/applications | Candidate |
+| 22 | GET | /api/v2/quests/:questId/applications | Hirer or Candidate |
+| 23 | GET | /api/v2/quests/:questId/applications/:applicationId | Hirer or Candidate |
+| 24 | POST | /api/v2/quests/:questId/applications/:applicationId/withdraw | Candidate |
+| 25 | POST | /api/v2/quests/:questId/applications/:applicationId/select | Hirer |
+| 26 | POST | /api/v2/quests/:questId/teams | Prospective Worker |
+| 27 | GET | /api/v2/quests/:questId/teams | Hirer or Team member |
+| 28 | GET | /api/v2/quests/:questId/teams/:teamId | Hirer or Team member |
+| 29 | PATCH | /api/v2/quests/:questId/teams/:teamId | Team Leader |
+| 30 | POST | /api/v2/quests/:questId/teams/:teamId/join | Prospective Worker |
+| 31 | POST | /api/v2/quests/:questId/teams/:teamId/leave | Team member |
+| 32 | DELETE | /api/v2/quests/:questId/teams/:teamId/members/:memberId | Team Leader |
+| 33 | POST | /api/v2/quests/:questId/teams/:teamId/join-code | Team Leader |
+| 34 | POST | /api/v2/quests/:questId/teams/:teamId/submit | Team Leader |
+| 35 | POST | /api/v2/quests/:questId/teams/:teamId/select | Hirer |
+| 36 | POST | /api/v2/quests/:questId/proof-submissions | Worker |
+| 37 | PATCH | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId | Proof owner |
+| 38 | DELETE | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId | Proof owner |
+| 39 | POST | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/submit | Proof owner |
+| 40 | POST | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/review | Hirer |
+| 41 | GET | /api/v2/quests/:questId/proof-submissions | permitted participant |
+| 42 | POST | /api/v2/quests/:questId/completion-confirmation | Worker |
+| 43 | POST | /api/v2/quests/:questId/reviews | Hirer or Worker |
+| 44 | PATCH | /api/v2/quests/:questId/reviews/:reviewId | review author |
+
+## 18. Error handling checklist
+
+For every response:
+
+1. Check HTTP status.
+2. Check success.
+3. If success is false, branch on error.code.
+4. Preserve the idempotency key for a safe retry.
+5. Refresh the resource after a conflict or successful command.
+
+Recommended mapping:
+
+| Error code | Frontend action |
+| --- | --- |
+| VALIDATION | Show field or request validation |
+| QUEST_NOT_FOUND | Remove stale resource or show not found |
+| QUEST_NOT_OPEN | Refresh Quest and disable join, apply, or team action |
+| QUEST_NOT_DRAFT | Refresh Quest and leave Draft editor |
+| QUEST_EDIT_CONFLICT | Refresh Quest and ask the user to review |
+| QUEST_FULL | Refresh Board or Team state |
+| ASSIGNMENT_ALREADY_EXISTS | Read Assignments and continue as Worker |
+| IDEMPOTENCY_KEY_REUSED | Stop; do not change key or body silently |
+| IDEMPOTENCY_IN_PROGRESS | Retry with same key after a short delay |
+| IDEMPOTENCY_UNAVAILABLE | Keep retry state and use same key |
+| WORK_CHAT_UNAVAILABLE | Do not show the assignment as fully ready until result is known |
+| QUEST_IMAGE_STORAGE_UNAVAILABLE | Keep Draft and show retry |
+| QUEST_ESCROW_UNAVAILABLE | Keep Draft and show retry |
+
+Keep the raw error.code for diagnostics.
+Provide a safe retry or refresh action when a command may have completed.
+
+## 19. Frontend completion criteria
+
+The Quest v2 integration is complete only when all items below are true:
+
+- [ ] The client uses the success/data and success/error response envelopes.
+- [ ] The client sends an authenticated session on every v2 request.
+- [ ] The client sends Idempotency-Key on every state-changing command.
+- [ ] The client retries uncertain commands with the same idempotency key.
+- [ ] The client uses Bangkok +07:00 schedule values.
+- [ ] The client uses exact money values and Satang fields when present.
+- [ ] The client uses If-Match for Draft edits.
+- [ ] The client refreshes temporary image URLs after expiry.
+- [ ] The client selects the correct mode and participation branch.
+- [ ] The client does not call or invent a v2 Start Work endpoint.
+- [ ] The client handles automatic QUEST_ASSIGNED to QUEST_IN_PROGRESS.
+- [ ] The client does not grant Work Chat membership.
+- [ ] The client does not confuse Candidate Inquiry Conversation with Work Chat.
+- [ ] The client does not send Chat Attachment IDs as Candidate Team fileIds.
+- [ ] The client handles SINGLE and GROUP completion separately.
+- [ ] The client handles proof-required and proof-not-required completion separately.
+- [ ] The client renders cancellation settlement from returned Satang values.
+- [ ] The client prevents reviews outside terminal state or the review window.
+- [ ] The client handles documented conflict and idempotency codes.
+
+## 20. Known contract gaps
+
+### 20.1 No v2 Start Work command
+
+The lifecycle requires an automatic start transition.
+The current v2 route set has no Start Work endpoint.
+The frontend must wait for the lifecycle worker and refresh state.
+
+### 20.2 Candidate Team file upload identifier gap
+
+Candidate Team submission requires private fileIds.
+Chat upload returns Chat Attachment IDs.
+There is no documented generic file upload route that returns the required
+private fileId.
+Do not build an ID conversion assumption.
+
+### 20.3 Work Chat is v1
+
+Quest commands are v2, but Work Chat and Candidate Inquiry Conversation use
+the /api/v1/chat routes.
+Do not add /api/v2 to those chat routes.
+
+When one of these gaps blocks a user journey, report the missing backend
+contract. Do not silently invent a frontend workaround.
