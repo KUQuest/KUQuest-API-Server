@@ -8,6 +8,7 @@ const state = {
   payoutQuote: null,
   adminPayouts: [],
   selectedAdminPayout: null,
+  tags: [],
   adminPayoutQuery: {
     status: 'PENDING_ADMIN_APPROVAL',
     sort: 'newest',
@@ -19,6 +20,18 @@ const state = {
   adminDecisionKeys: new Map(),
 };
 const chatState = { mode: 'live', members: [], messages: [], conversationId: null, currentMemberId: null, readOnly: true, conversations: [], nextCursor: null, messageCursor: null, pendingMessage: null };
+const simpleFlowState = {
+  quest: null,
+  assignment: null,
+  hirerId: null,
+  workerId: null,
+  reviews: { hirer: false, worker: false },
+  receipts: new Map(),
+  keys: new Map(),
+  pollTimer: null,
+  pollBusy: false,
+  lastCheckedAt: null,
+};
 
 const questIdElement = document.querySelector('#quest-id');
 const debugLog = document.querySelector('#debug-log');
@@ -58,6 +71,14 @@ const chatMessageInput = document.querySelector('#chat-message-input');
 const chatCharacterCount = document.querySelector('#chat-character-count');
 const chatSendButton = document.querySelector('#chat-send');
 const chatStatus = document.querySelector('#chat-status');
+const simpleFlowOutput = document.querySelector('#simple-flow-output');
+const simpleFlowSteps = document.querySelector('#simple-flow-steps');
+const simpleFlowReceipt = document.querySelector('#simple-flow-receipt');
+const simpleFlowStatus = document.querySelector('#simple-flow-status');
+const simpleFlowLastChecked = document.querySelector('#simple-flow-last-checked');
+const simpleFlowQuestId = document.querySelector('#simple-flow-quest-id');
+const simpleFlowStateBadge = document.querySelector('#simple-flow-state-badge');
+const simpleFlowActor = document.querySelector('#simple-flow-actor');
 
 const renderAdminPaginationControls = () => {
   adminPayoutPrevious.disabled = state.adminPayoutCursorHistory.length === 0;
@@ -424,10 +445,13 @@ const loadTags = async () => {
   try {
     const response = await request('/api/v1/tags', {}, 'List Tags');
     const tags = response?.data ?? [];
+    state.tags = tags;
     const select = document.querySelector('#quest-tag');
     select.replaceChildren(new Option('Select a Tag', ''));
     tags.forEach((tag) => select.append(new Option(`${tag.name} (${tag.id})`, tag.id)));
+    return tags;
   } catch (error) {
+    state.tags = [];
     debug('Tag loading skipped', error instanceof Error ? error.message : error);
   }
 };
@@ -556,7 +580,8 @@ const listQuests = async (mine) => {
   items.forEach((quest) => {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'quest-card';
     const title = document.createElement('strong'); title.textContent = quest.title;
-    const status = document.createElement('small'); status.textContent = `${quest.state} · ${quest.mode} · ${quest.participation}`;
+    const labels = [quest.state ?? (!mine ? 'QUEST_OPEN' : null), quest.mode, quest.participation].filter(Boolean);
+    const status = document.createElement('small'); status.textContent = labels.join(' · ');
     button.append(title, status);
     button.addEventListener('click', () => runWithOutput(questOutput, async () => {
       questIdElement.value = quest.id;
@@ -572,6 +597,289 @@ const listQuests = async (mine) => {
 };
 const listMine = () => listQuests(true);
 const listBoard = () => listQuests(false);
+
+const simpleQuestStates = ['QUEST_DRAFT', 'QUEST_OPEN', 'QUEST_ASSIGNED', 'QUEST_IN_PROGRESS', 'QUEST_COMPLETED'];
+const simpleTerminalStates = ['QUEST_COMPLETED', 'QUEST_FAILED', 'QUEST_CANCELLED'];
+const simpleFlowStepDefinitions = [
+  { key: 'member', label: 'Member Session' },
+  { key: 'create', label: 'Draft → Open' },
+  { key: 'join', label: 'Assignment' },
+  { key: 'start', label: 'Server starts Work' },
+  { key: 'complete', label: 'Completion' },
+  { key: 'review', label: 'Rating Reviews' },
+];
+
+const simpleCurrentMember = () => {
+  if (!state.session?.user?.id) return 'No Member Session';
+  if (state.session.user.id === simpleFlowState.hirerId) return 'Account 1 · Hirer';
+  if (state.session.user.id === simpleFlowState.workerId) return 'Account 2 · Worker';
+  return state.session.user.email;
+};
+
+const simpleCurrentState = () => simpleFlowState.quest?.state ?? 'SETUP';
+const simpleStateIndex = () => {
+  const index = simpleQuestStates.indexOf(simpleCurrentState());
+  return index < 0 ? -1 : index;
+};
+
+const simpleErrorText = (error) => {
+  const code = error?.body?.error?.code;
+  const message = error instanceof Error ? error.message : String(error);
+  return code ? `${code}: ${message}` : message;
+};
+
+const renderSimpleFlow = () => {
+  const currentState = simpleCurrentState();
+  const currentIndex = simpleStateIndex();
+  const terminal = simpleTerminalStates.includes(currentState);
+  simpleFlowStateBadge.textContent = currentState;
+  simpleFlowStateBadge.dataset.state = terminal ? 'success' : currentState === 'SETUP' ? 'pending' : 'info';
+  simpleFlowActor.textContent = simpleCurrentMember();
+  simpleFlowQuestId.textContent = simpleFlowState.quest?.id ?? '—';
+  simpleFlowLastChecked.textContent = simpleFlowState.lastCheckedAt
+    ? `Last Server check: ${new Date(simpleFlowState.lastCheckedAt).toLocaleTimeString()}`
+    : 'No Server check yet.';
+
+  simpleFlowSteps.replaceChildren();
+  simpleFlowStepsList(currentIndex, terminal).forEach((step) => simpleFlowSteps.append(step));
+  simpleFlowReceipt.replaceChildren();
+  if (!simpleFlowState.receipts.size) {
+    simpleFlowReceipt.append(Object.assign(document.createElement('li'), { className: 'empty', textContent: 'No endpoint has run yet.' }));
+  } else {
+    simpleFlowState.receipts.forEach((receipt) => {
+      const item = document.createElement('li');
+      item.dataset.status = receipt.status.toLowerCase();
+      const result = document.createElement('strong');
+      result.textContent = receipt.status;
+      const endpoint = document.createElement('code');
+      endpoint.textContent = `${receipt.method} ${receipt.path}`;
+      const detail = document.createElement('span');
+      detail.textContent = receipt.detail;
+      item.append(result, endpoint, detail);
+      simpleFlowReceipt.append(item);
+    });
+  }
+  syncSimpleFlowControls();
+};
+
+const simpleFlowStepsList = (currentIndex, terminal) => simpleFlowStepDefinitions.map((step, index) => {
+  const item = document.createElement('div');
+  const done = terminal ? index <= 5 : index < currentIndex + 1;
+  const active = !done && index === currentIndex + 1;
+  item.className = 'guided-step';
+  item.dataset.state = done ? 'done' : active ? 'active' : 'pending';
+  const number = document.createElement('span');
+  number.className = 'guided-step-number';
+  number.textContent = done ? '✓' : String(index + 1);
+  const label = document.createElement('span');
+  label.textContent = step.label;
+  item.append(number, label);
+  return item;
+});
+
+const simpleReceipt = (key, status, method, path, detail) => {
+  simpleFlowState.receipts.set(key, { status, method, path, detail });
+  renderSimpleFlow();
+};
+
+const simpleCall = async (key, method, path, body, label, headers = {}) => {
+  try {
+    const response = body === undefined
+      ? await request(path, { method, headers }, label)
+      : await jsonRequest(path, method, body, label, headers);
+    simpleFlowOutput.textContent = formatValue(response);
+    simpleReceipt(key, 'PASS', method, path, 'HTTP request succeeded.');
+    return response;
+  } catch (error) {
+    simpleFlowOutput.textContent = formatValue(error?.body ?? { error: simpleErrorText(error) });
+    simpleReceipt(key, 'FAIL', method, path, simpleErrorText(error));
+    throw error;
+  }
+};
+
+const simpleKey = (action) => {
+  const key = `${simpleFlowState.quest?.id ?? 'new'}:${action}`;
+  if (!simpleFlowState.keys.has(key)) simpleFlowState.keys.set(key, randomKey(`simple-${action}`));
+  return simpleFlowState.keys.get(key);
+};
+
+const simpleScheduleTime = (minutes) => new Date(Date.now() + (420 + minutes) * 60_000).toISOString().slice(0, 16);
+const simpleWireTime = (value) => `${value}:00+07:00`;
+
+const resetSimpleFlow = () => {
+  if (simpleFlowState.pollTimer) clearInterval(simpleFlowState.pollTimer);
+  Object.assign(simpleFlowState, {
+    quest: null,
+    assignment: null,
+    hirerId: null,
+    workerId: null,
+    reviews: { hirer: false, worker: false },
+    receipts: new Map(),
+    keys: new Map(),
+    pollTimer: null,
+    pollBusy: false,
+    lastCheckedAt: null,
+  });
+  simpleFlowStatus.textContent = 'Start a new test to prepare Account 1.';
+  renderSimpleFlow();
+};
+
+const startSimpleTest = async () => {
+  resetSimpleFlow();
+  await switchTestAccountSession('account-1');
+  simpleFlowState.hirerId = state.session.user.id;
+  simpleFlowStatus.textContent = 'Account 1 is ready as the Hirer. Create and publish the Quest.';
+  renderSimpleFlow();
+  return state.session;
+};
+
+const simpleCreateAndPublish = async () => {
+  if (!state.session?.user?.id || state.session.user.id !== simpleFlowState.hirerId) throw new Error('Use Account 1 as the Hirer before creating the Quest.');
+  const title = document.querySelector('#simple-flow-title').value.trim();
+  const condition = document.querySelector('#simple-flow-condition').value.trim();
+  if (!title) throw new Error('Enter a Quest Title.');
+  if (!condition) throw new Error('Enter one Condition Item.');
+  const reward = readBahtInput('#simple-flow-reward') / 100;
+  if (!state.tags.length) await loadTags();
+  const tagId = state.tags[0]?.id;
+  if (!tagId) throw new Error('The Server returned no Tag. Load Tags before creating the Quest.');
+  const body = {
+    title,
+    condition: { items: [condition] },
+    mode: 'FIRST_COME_FIRST_SERVED',
+    participation: 'SINGLE',
+    questFundingTotal: reward,
+    headcount: 1,
+    startTime: simpleWireTime(simpleScheduleTime(1)),
+    dueAt: simpleWireTime(simpleScheduleTime(10)),
+    tagId,
+    proofRequired: false,
+  };
+  const created = await simpleCall('create', 'POST', '/api/v2/quests', body, 'Create simple Quest Draft', { 'idempotency-key': simpleKey('create') });
+  simpleFlowState.quest = created?.data?.quest ?? created?.data;
+  renderSimpleFlow();
+  const questId = simpleFlowState.quest?.id;
+  if (!questId) throw new Error('The Server returned no Quest ID.');
+  const publishResult = await simpleCall('publish-check', 'GET', `/api/v2/quests/${encodeURIComponent(questId)}/publish-check`, undefined, 'Check simple Quest publication');
+  const check = publishResult?.data;
+  if (!check?.canPublish) {
+    const reasons = check?.blockingReasons?.map((reason) => reason.message ?? reason.code).join(' ') || 'Resolve the publication blockers.';
+    simpleReceipt('publish-check', 'PASS', 'GET', `/api/v2/quests/${encodeURIComponent(questId)}/publish-check`, `HTTP request succeeded, but publication is blocked: ${reasons}`);
+    throw new Error(`Publication blocked: ${reasons}`);
+  }
+  const published = await simpleCall('publish', 'POST', `/api/v2/quests/${encodeURIComponent(questId)}/publish`, undefined, 'Publish simple Quest', { 'idempotency-key': simpleKey('publish') });
+  simpleFlowState.quest = published?.data?.quest ?? simpleFlowState.quest;
+  simpleFlowStatus.textContent = 'Quest is open. Switch to Account 2 and join it as the Worker.';
+  renderSimpleFlow();
+  return published;
+};
+
+const refreshSimpleFlow = async ({ silent = false } = {}) => {
+  const questId = simpleFlowState.quest?.id;
+  if (!questId || !state.session?.user?.id) throw new Error('Start the simple test and create a Quest first.');
+  const prefix = `/api/v2/quests/${encodeURIComponent(questId)}`;
+  const [detail, assignments] = await Promise.all([
+    simpleCall('public-detail', 'GET', `${prefix}/public`, undefined, 'Read simple Quest state'),
+    simpleCall('assignments', 'GET', `${prefix}/assignments`, undefined, 'Read simple Quest Assignment'),
+  ]);
+  simpleFlowState.assignment = assignments?.data?.items?.[0] ?? simpleFlowState.assignment;
+  simpleFlowState.quest = detail?.data
+    ? { ...detail.data, state: simpleFlowState.assignment?.questState ?? detail.data.state }
+    : simpleFlowState.quest;
+  simpleFlowState.lastCheckedAt = new Date().toISOString();
+  const currentState = simpleCurrentState();
+  if (currentState === 'QUEST_ASSIGNED') {
+    const started = simpleFlowState.quest.startTime && new Date(simpleFlowState.quest.startTime).getTime() <= Date.now();
+    simpleReceipt('assignments', started ? 'FAIL' : 'WAIT', 'GET', `${prefix}/assignments`, started
+      ? 'The Quest is past startTime but still QUEST_ASSIGNED. Check worker:quest-lifecycle.'
+      : 'ASSIGNMENT_ACTIVE · waiting for the Server lifecycle worker.');
+    simpleFlowStatus.textContent = started
+      ? 'The Server has not started Work after startTime. There is no Start Work endpoint. Check the Quest lifecycle worker.'
+      : 'The Worker is assigned. Waiting for the Server lifecycle worker to start Work.';
+  } else if (currentState === 'QUEST_IN_PROGRESS') {
+    simpleFlowStatus.textContent = 'The Server started Work. Confirm completion as Account 2.';
+    if (simpleFlowState.pollTimer) {
+      clearInterval(simpleFlowState.pollTimer);
+      simpleFlowState.pollTimer = null;
+    }
+  } else if (simpleTerminalStates.includes(currentState)) {
+    simpleFlowStatus.textContent = 'The Quest is Terminal. Submit one Rating Review from each Member.';
+    if (simpleFlowState.pollTimer) {
+      clearInterval(simpleFlowState.pollTimer);
+      simpleFlowState.pollTimer = null;
+    }
+  } else if (!silent) {
+    simpleFlowStatus.textContent = `Current Quest State: ${currentState}.`;
+  }
+  renderSimpleFlow();
+  return detail;
+};
+
+const startSimplePolling = () => {
+  if (simpleFlowState.pollTimer) clearInterval(simpleFlowState.pollTimer);
+  simpleFlowState.pollTimer = setInterval(() => {
+    if (simpleFlowState.pollBusy) return;
+    simpleFlowState.pollBusy = true;
+    void refreshSimpleFlow({ silent: true }).catch((error) => debug('Simple flow refresh failed', simpleErrorText(error))).finally(() => { simpleFlowState.pollBusy = false; });
+  }, 5_000);
+};
+
+const joinSimpleQuest = async () => {
+  const questId = simpleFlowState.quest?.id;
+  if (!questId) throw new Error('Create and publish a Quest first.');
+  await switchTestAccountSession('account-2');
+  simpleFlowState.workerId = state.session.user.id;
+  const response = await simpleCall('join', 'POST', `/api/v2/quests/${encodeURIComponent(questId)}/join`, undefined, 'Join simple Quest as Worker', { 'idempotency-key': simpleKey('join') });
+  simpleFlowState.assignment = response?.data ?? null;
+  simpleFlowState.quest = { ...simpleFlowState.quest, state: response?.data?.questState ?? 'QUEST_ASSIGNED' };
+  simpleFlowStatus.textContent = 'Assignment is active. Waiting for the Server lifecycle worker.';
+  renderSimpleFlow();
+  await refreshSimpleFlow();
+  if (simpleCurrentState() === 'QUEST_ASSIGNED') startSimplePolling();
+  return response;
+};
+
+const confirmSimpleCompletion = async () => {
+  const questId = simpleFlowState.quest?.id;
+  if (state.session?.user?.id !== simpleFlowState.workerId) throw new Error('Use Account 2 as the Worker before confirming completion.');
+  if (simpleCurrentState() !== 'QUEST_IN_PROGRESS') throw new Error('Completion is available only in QUEST_IN_PROGRESS. Refresh Server status and wait.');
+  const response = await simpleCall('completion', 'POST', `/api/v2/quests/${encodeURIComponent(questId)}/completion-confirmation`, undefined, 'Confirm simple Quest completion', { 'idempotency-key': simpleKey('completion') });
+  simpleFlowState.quest = { ...simpleFlowState.quest, state: response?.data?.questStatus ?? 'QUEST_COMPLETED' };
+  simpleFlowStatus.textContent = 'Completion is confirmed. The Quest is Terminal. Submit both Rating Reviews.';
+  await refreshSimpleFlow();
+  return response;
+};
+
+const reviewSimpleQuest = async (role) => {
+  const questId = simpleFlowState.quest?.id;
+  if (!simpleTerminalStates.includes(simpleCurrentState())) throw new Error('Reviews are available only after a Terminal Quest State.');
+  const account = role === 'hirer' ? 'account-1' : 'account-2';
+  await switchTestAccountSession(account);
+  const body = role === 'hirer'
+    ? { revieweeId: simpleFlowState.workerId, rating: 5, comment: 'The simple Quest flow was clear.' }
+    : { rating: 5, comment: 'The Quest had clear Conditions.' };
+  const response = await simpleCall(`review-${role}`, 'POST', `/api/v2/quests/${encodeURIComponent(questId)}/reviews`, body, `Submit ${role} Rating Review`, { 'idempotency-key': simpleKey(`review-${role}`) });
+  simpleFlowState.reviews[role] = true;
+  simpleFlowStatus.textContent = simpleFlowState.reviews.hirer && simpleFlowState.reviews.worker
+    ? 'The simple Quest flow is finished. Both Rating Reviews were saved.'
+    : 'One Rating Review is saved. Submit the other Review.';
+  renderSimpleFlow();
+  return response;
+};
+
+const syncSimpleFlowControls = () => {
+  const hasMember = Boolean(state.session?.user?.id);
+  const currentState = simpleCurrentState();
+  const isHirer = state.session?.user?.id === simpleFlowState.hirerId;
+  const isWorker = state.session?.user?.id === simpleFlowState.workerId;
+  document.querySelector('#simple-start-test').disabled = false;
+  document.querySelector('#simple-create-publish').disabled = !isHirer || Boolean(simpleFlowState.quest);
+  document.querySelector('#simple-worker-join').disabled = !simpleFlowState.quest || currentState !== 'QUEST_OPEN';
+  document.querySelector('#simple-refresh').disabled = !simpleFlowState.quest || !hasMember;
+  document.querySelector('#simple-confirm').disabled = !isWorker || currentState !== 'QUEST_IN_PROGRESS';
+  document.querySelector('#simple-review-hirer').disabled = !simpleTerminalStates.includes(currentState) || simpleFlowState.reviews.hirer;
+  document.querySelector('#simple-review-worker').disabled = !simpleTerminalStates.includes(currentState) || simpleFlowState.reviews.worker;
+};
 
 
 const schemaFromRef = (schema) => {
@@ -1205,6 +1513,7 @@ const rejectSelectedAdminPayout = async () => {
 
 const pages = {
   member: ['Member', 'Choose a Member, then continue to a task.'],
+  flow: ['Simple Flow', 'Run the normal Hirer and Worker Quest path with guided actions.'],
   quests: ['Quests', 'Create work, check funding, and manage your next step.'],
   chat: ['Work Chat', 'Open a live Work Conversation with Accepted Participants.'],
   wallet: ['Wallet & Payout', 'Check balances, get a Quote, and submit a Payout.'],
@@ -1218,7 +1527,7 @@ const announce = (message, type = 'info') => {
   setStatus(status, message, type);
 };
 const navigate = () => {
-  const key = Object.hasOwn(pages, location.hash.slice(1)) ? location.hash.slice(1) : 'member';
+  const key = Object.hasOwn(pages, location.hash.slice(1)) ? location.hash.slice(1) : 'flow';
   document.querySelectorAll('[data-page]').forEach((page) => { page.hidden = page.dataset.page !== key; });
   document.querySelectorAll('[data-nav]').forEach((link) => {
     if (link.dataset.nav === key) link.setAttribute('aria-current', 'page');
@@ -1242,6 +1551,7 @@ const syncControls = () => {
   document.querySelector('#get-detail').disabled = !hasMember || !hasQuest;
   document.querySelector('#cancel-quest').disabled = !hasMember || !hasQuest || !['QUEST_DRAFT', 'QUEST_OPEN', 'QUEST_ASSIGNED', 'QUEST_IN_PROGRESS'].includes(state.quest?.state);
   document.querySelector('#submit-payout').disabled = !hasMember || !validPayoutQuote();
+  syncSimpleFlowControls();
   syncChatControls();
   const memberBusy = [...document.querySelectorAll('.card[data-busy=true]')].some((card) => card.id !== 'admin-payout-panel');
   sessionOutput.closest('.card').querySelectorAll('button').forEach((button) => { button.disabled = memberBusy; });
@@ -1249,10 +1559,11 @@ const syncControls = () => {
 };
 const updateMember = () => {
   document.querySelector('#current-member').textContent = state.session?.user?.email || 'Sign in to begin';
+  renderSimpleFlow();
   syncControls();
 };
 const clearMemberData = () => {
-  state.payoutQuote = null; state.quest = null; state.publishCheck = null;
+  state.payoutQuote = null; state.quest = null; state.publishCheck = null; state.tags = [];
   questIdElement.value = '';
   document.querySelector('#quest-summary').textContent = 'No Quest selected.';
   document.querySelector('#quest-cards').replaceChildren();
@@ -1265,6 +1576,7 @@ const clearMemberData = () => {
   document.querySelector('#conversation-select').replaceChildren(new Option('Select a Conversation', ''));
   chatMessageInput.value = '';
   renderChatMode();
+  renderSimpleFlow();
   setChatStatus('Sign in from the Member section, then refresh Conversations.');
 };
 const bind = (id, output, action, onSuccess = null) => document.querySelector(`#${id}`).addEventListener('click', () => runWithOutput(output, action, onSuccess));
@@ -1274,6 +1586,14 @@ bind('google-sign-in', sessionOutput, signInWithGoogle);
 bind('refresh-session', sessionOutput, async () => { const session = await refreshSession(); await Promise.all([loadTags(), refreshWallet()]); return session; });
 bind('sign-out', sessionOutput, signOut);
 bind('refresh-wallet', document.querySelector('#wallet-status'), refreshWallet, () => {});
+bind('simple-new-test', simpleFlowOutput, startSimpleTest);
+bind('simple-start-test', simpleFlowOutput, startSimpleTest);
+bind('simple-create-publish', simpleFlowOutput, simpleCreateAndPublish);
+bind('simple-worker-join', simpleFlowOutput, joinSimpleQuest);
+bind('simple-refresh', simpleFlowOutput, refreshSimpleFlow);
+bind('simple-confirm', simpleFlowOutput, confirmSimpleCompletion);
+bind('simple-review-hirer', simpleFlowOutput, () => reviewSimpleQuest('hirer'));
+bind('simple-review-worker', simpleFlowOutput, () => reviewSimpleQuest('worker'));
 bind('list-mine', questOutput, listMine);
 bind('list-board', questOutput, listBoard);
 bind('get-detail', questOutput, getDetail);
@@ -1342,6 +1662,7 @@ setInterval(() => {
   }
 }, 1000);
 renderChatMode();
+renderSimpleFlow();
 navigate();
 void (async () => {
   await Promise.all([refreshSession(), refreshAdminSession(), loadOperations()]);

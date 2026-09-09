@@ -5,7 +5,7 @@
     <meta content="width=device-width, initial-scale=1" name="viewport"/>
     <title>KUQuest API Test Bench</title>
     <link href="/test-bench/styles.css" rel="stylesheet"/>
-    <script defer="" src="/test-bench/app.js?v=2b09307">
+    <script defer="" src="/test-bench/app.js?v=guided-flow-1">
     </script>
   </head>
   <body>
@@ -32,39 +32,45 @@
           </span>
           Member
         </a>
-        <a data-nav="quests" href="#quests">
+        <a data-nav="flow" href="#flow">
           <span>
             02
+          </span>
+          Simple Flow
+        </a>
+        <a data-nav="quests" href="#quests">
+          <span>
+            03
           </span>
           Quests
         </a>
         <a data-nav="chat" href="#chat">
           <span>
-            03
+            04
           </span>
           Work Chat
         </a>
         <a data-nav="wallet" href="#wallet">
           <span>
-            04
+            05
           </span>
           Wallet & Payout
         </a>
         <a data-nav="admin" href="#admin">
           <span>
-            05
+            06
           </span>
           Admin Approval
         </a>
         <a data-nav="explorer" href="#explorer">
           <span>
-            06
+            07
           </span>
           API explorer
         </a>
         <a data-nav="log" href="#log">
           <span>
-            07
+            08
           </span>
           Request log
         </a>
@@ -149,6 +155,101 @@
               Open Work Chat →
             </a>
           </div>
+        </section>
+      </div>
+      <div data-page="flow" hidden="">
+        <section aria-labelledby="simple-flow-heading" class="card guided-card" id="simple-flow-card">
+          <div class="card-heading">
+            <div>
+              <h2 id="simple-flow-heading">
+                Run one simple Quest
+              </h2>
+              <p class="muted">
+                Test the normal Hirer → Worker path. The Server supplies the Quest State changes.
+              </p>
+            </div>
+            <span class="badge" id="simple-flow-state-badge">
+              SETUP
+            </span>
+          </div>
+          <div class="guided-toolbar">
+            <span class="badge">FIRST_COME_FIRST_SERVED · SINGLE · headcount 1</span>
+            <span class="badge">proofRequired=false</span>
+            <span class="guided-actor" id="simple-flow-actor">No Member Session</span>
+            <button id="simple-new-test" type="button">Start new test</button>
+          </div>
+          <div class="guided-fields">
+            <label>
+              Quest Title
+              <input id="simple-flow-title" maxlength="120" type="text" value="Simple staging Quest"/>
+            </label>
+            <label>
+              Quest Funding Total (Baht)
+              <input id="simple-flow-reward" min="1" step="0.01" type="number" value="100"/>
+            </label>
+            <label class="wide">
+              Condition Item
+              <input id="simple-flow-condition" maxlength="255" type="text" value="Complete the simple staging test"/>
+            </label>
+          </div>
+          <p class="hint">
+            The Test Bench selects the first Tag and creates short valid times in Asia/Bangkok. Start a new test before you create a Quest.
+          </p>
+          <div class="guided-steps" id="simple-flow-steps">
+          </div>
+          <div class="guided-actions">
+            <div class="guided-action" data-step="member">
+              <strong>1. Member Session</strong>
+              <span>Account 1 is the Hirer. Account 2 is the Worker.</span>
+              <button class="primary" id="simple-start-test" type="button">Use Account 1 as Hirer</button>
+            </div>
+            <div class="guided-action" data-step="create">
+              <strong>2. Create and publish</strong>
+              <span>Create the Draft, run Publish Check, then reserve Quest Escrow.</span>
+              <button class="primary" id="simple-create-publish" type="button">Create and publish Quest</button>
+            </div>
+            <div class="guided-action" data-step="join">
+              <strong>3. Worker joins</strong>
+              <span>The Test Bench switches to Account 2 and creates an Assignment.</span>
+              <button class="primary" id="simple-worker-join" type="button">Switch to Worker and join</button>
+            </div>
+            <div class="guided-action" data-step="start">
+              <strong>4. Server starts Work</strong>
+              <span>Wait for QUEST_ASSIGNED → QUEST_IN_PROGRESS. There is no Start Work endpoint.</span>
+              <button id="simple-refresh" type="button">Refresh Server status</button>
+            </div>
+            <div class="guided-action" data-step="complete">
+              <strong>5. Worker confirms completion</strong>
+              <span>This proof-free path uses the completion confirmation command.</span>
+              <button class="primary" id="simple-confirm" type="button">Confirm completion</button>
+            </div>
+            <div class="guided-action" data-step="review">
+              <strong>6. Members submit Reviews</strong>
+              <span>Each Member submits one Rating Review after the Quest is Terminal.</span>
+              <div class="actions">
+                <button id="simple-review-hirer" type="button">Use Hirer and review Worker</button>
+                <button id="simple-review-worker" type="button">Use Worker and review Hirer</button>
+              </div>
+            </div>
+          </div>
+          <div class="guided-status" aria-live="polite">
+            <strong id="simple-flow-status">Start a new test to prepare Account 1.</strong>
+            <span id="simple-flow-last-checked">No Server check yet.</span>
+            <span>Quest ID: <code id="simple-flow-quest-id">—</code></span>
+          </div>
+          <details class="result" open="">
+            <summary>Endpoint receipt</summary>
+            <ul class="endpoint-receipt" id="simple-flow-receipt">
+              <li class="empty">No endpoint has run yet.</li>
+            </ul>
+          </details>
+          <details class="result">
+            <summary>Last response details</summary>
+            <pre id="simple-flow-output">No simple flow request yet.</pre>
+          </details>
+          <p class="note">
+            This wizard covers the proof-free SINGLE + FIRST_COME_FIRST_SERVED path. Use Quests and API explorer for Candidate, GROUP, Proof, cancellation, Work Chat, Wallet, and Admin flows.
+          </p>
         </section>
       </div>
       <div data-page="quests" hidden="">

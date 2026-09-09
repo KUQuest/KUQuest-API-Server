@@ -3,8 +3,8 @@
 Run `bun run dev`, then open the API Server root URL. The Server serves the
 HTML, CSS, and JavaScript directly. No frontend build is required.
 
-The workspace has seven sections: Member, Quests, Work Chat, Wallet & Payout,
-Admin Approval, API explorer, and Request log. Navigation works with browser
+The workspace has eight sections: Member, Simple Flow, Quests, Work Chat, Wallet
+& Payout, Admin Approval, API explorer, and Request log. Navigation works with browser
 Back and Forward and with links such as `/#chat`.
 
 1. Sign in explicitly with a configured test Member or Google. Test accounts
@@ -16,10 +16,17 @@ Back and Forward and with links such as `/#chat`.
    The API explorer contains Draft edits and other advanced Quest actions.
    Select a Quest first to fill its ID in the explorer. v1 Quest actions are
    marked as Legacy Implementation.
-4. Switch Members from the Member section. Work Chat lists live Work
+4. For the normal proof-free test, open `/#flow`. Start a new test, create and
+   publish the prefilled `FIRST_COME_FIRST_SERVED` + `SINGLE` Quest, then switch
+   to Account 2 and join. The Simple Flow polls the Assignment while the Server
+   moves `QUEST_ASSIGNED` to `QUEST_IN_PROGRESS`. Confirm completion as the
+   Worker, then submit both Rating Reviews. The Endpoint receipt shows each
+   API request. It does not show a Start Work action because the v2 contract
+   has no Start Work endpoint.
+5. Switch Members from the Member section. Work Chat lists live Work
    Conversations. It never supplies demo Messages. Select a Conversation;
    use Refresh to load new Messages and Load older Messages for history.
-5. For a Payout, get a Quote before submitting. An amount change, Member
+6. For a Payout, get a Quote before submitting. An amount change, Member
    change, successful submission, or Quote expiry invalidates that Quote.
    A separate Admin Session opens the Approval Queue.
 
@@ -54,10 +61,11 @@ node tests/browser/test-bench.browser.mjs
 
 Set `CHROMIUM_PATH` to use an existing Chromium executable. The suite checks
 explicit sign-in, navigation, v2 Draft creation, publication blockers,
-cancellation, Conversation selection, read-only chat, failed Message retries,
-Payout Quote expiry and retries, Admin sign-in, API search, and Member data
-reset. It checks all sections at 1440px and 390px widths and saves screenshots
-under `/tmp/kuquest-bench-verification`.
+cancellation, the guided proof-free Quest flow, Conversation selection,
+read-only chat, failed Message retries, Payout Quote expiry and retries,
+Admin sign-in, API search, and Member data reset. It checks all sections at
+1440px and 390px widths and saves screenshots under
+`/tmp/kuquest-bench-verification`.
 
 Live Google OAuth, external payment providers, and a full multi-Member Quest
 lifecycle still require a configured test environment. Browser fixtures do
