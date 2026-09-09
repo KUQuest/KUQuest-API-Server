@@ -7,7 +7,7 @@ import { walletWallet } from '@/database/schema/wallet.schema';
 import { questStatus, questStatuses, type QuestStatus } from '@/modules/quest/quest.contract';
 import type { CursorPayload } from '@/shared/cursor';
 
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, lt, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 
 export type AdminOverviewCounters = {
   quests: {
@@ -132,17 +132,18 @@ export const listAdminActivity = async ({
   cursor,
   sort = 'newest',
 }: ListAdminActivityInput = {}) => {
-  const cursorDate = cursor ? new Date(cursor.startTime) : undefined;
-  const cursorCondition = cursor && cursorDate
+  // The page boundary reads `created_at` back from the Admin Action the cursor names,
+  // because `now()` writes microseconds and the cursor text holds milliseconds. Compared
+  // against the truncated text an Admin Action never matches its own cursor: `oldest`
+  // returns that row on every page, and `newest` drops the rows that share its
+  // millisecond. An Admin Action is immutable, so the row is always there to read.
+  const anchor = cursor
+    ? sql`(select ${adminAction.createdAt}, ${adminAction.id} from ${adminAction} where ${adminAction.id} = ${cursor.id})`
+    : undefined;
+  const cursorCondition = anchor
     ? sort === 'oldest'
-      ? or(
-          gt(adminAction.createdAt, cursorDate),
-          and(eq(adminAction.createdAt, cursorDate), gt(adminAction.id, cursor.id)),
-        )
-      : or(
-          lt(adminAction.createdAt, cursorDate),
-          and(eq(adminAction.createdAt, cursorDate), lt(adminAction.id, cursor.id)),
-        )
+      ? sql`(${adminAction.createdAt}, ${adminAction.id}) > ${anchor}`
+      : sql`(${adminAction.createdAt}, ${adminAction.id}) < ${anchor}`
     : undefined;
 
   const rows = await db

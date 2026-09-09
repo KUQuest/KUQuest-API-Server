@@ -112,6 +112,29 @@ const seedAdminAction = async (values: {
   return row!.id;
 };
 
+// PostgreSQL stores created_at at microsecond precision, which a JS Date cannot
+// express, so these fixtures are written through raw SQL.
+const seedAdminActionAt = async (values: {
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  createdAt: string;
+}) => {
+  const requestKey = `overview-${randomUUID()}`;
+  requestKeys.push(requestKey);
+  const [row] = await sql`
+    insert into admin_action
+      (admin_id, action, resource_type, resource_id, request_key, request_hash,
+       reason_catalog_version, reason_code, metadata, result_data, created_at)
+    values
+      (${adminId}, ${values.action}, ${values.resourceType}, ${values.resourceId}, ${requestKey},
+       ${'a'.repeat(64)}, 1, 'POLICY_REVIEW', '{}'::jsonb, '{}'::jsonb, ${values.createdAt}::timestamptz)
+    returning id`;
+  const id = (row as { id: string }).id;
+  actionIds.push(id);
+  return id;
+};
+
 beforeAll(async () => {
   await sql`select 1`;
 
@@ -255,6 +278,44 @@ describe('Admin Overview and Activity Log', () => {
 
     const invalidCursor = await adminRequest('/api/v1/admin/activity-log?cursor=not-valid-base64url!!');
     expect(invalidCursor.status).toBe(400);
+  });
+
+  // The cursor carries milliseconds, so a microsecond created_at must not make a row
+  // match its own cursor. Reading every page must reach every entry exactly once.
+  it('pages the Activity Log when created_at carries microseconds', async () => {
+    const resourceId = randomUUID();
+    const at = (microseconds: string) => `2030-07-05T00:00:00.${microseconds}Z`;
+    // The first two Admin Actions share one millisecond.
+    const first = await seedAdminActionAt({
+      action: 'QUEST_HIDE', resourceType: 'quest', resourceId, createdAt: at('100200'),
+    });
+    const second = await seedAdminActionAt({
+      action: 'QUEST_HIDE', resourceType: 'quest', resourceId, createdAt: at('100800'),
+    });
+    const third = await seedAdminActionAt({
+      action: 'QUEST_HIDE', resourceType: 'quest', resourceId, createdAt: at('101300'),
+    });
+
+    const readEveryPage = async (sort: 'newest' | 'oldest') => {
+      const ids: unknown[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 6; page++) {
+        const query = `resourceId=${resourceId}&sort=${sort}&limit=1`;
+        const response = await adminRequest(
+          `/api/v1/admin/activity-log?${query}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+        );
+        expect(response.status).toBe(200);
+        const body = await response.json() as ActivityResponse;
+        ids.push(...body.data.items.map((item) => item.id));
+        cursor = body.data.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      return ids;
+    };
+
+    expect(await readEveryPage('newest')).toEqual([third, second, first]);
+    expect(await readEveryPage('oldest')).toEqual([first, second, third]);
   });
 
   it('keeps Admin Action metadata, request keys, and hashes out of the Activity Log', async () => {
