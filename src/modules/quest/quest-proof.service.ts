@@ -14,7 +14,11 @@ import {
 
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 
-import { settleApprovedQuestInTransaction } from './quest-settlement.service';
+import {
+  failQuestInTransaction,
+  settleApprovedLegacyQuestProofAfterFailureInTransaction,
+  settleApprovedQuestInTransaction,
+} from './quest-settlement.service';
 import {
   assignmentStatus,
   questMode,
@@ -40,11 +44,14 @@ type QuestProofRow = {
   images: string[];
 };
 
+const approvedProofStatuses = ['PROOF_APPROVED'] as const;
+const notApprovedProofStatuses = ['PROOF_NOT_APPROVED'] as const;
+
 export type ProofOutcome =
-  | { outcome: 'not-found' | 'not-allowed' | 'invalid-state' | 'already-submitted' | 'files-invalid' | 'proof-required' | 'no-rework' | 'disputed' }
+  | { outcome: 'not-found' | 'not-allowed' | 'invalid-state' | 'already-submitted' | 'files-invalid' | 'proof-required' | 'no-rework' }
   | { proof: QuestProofRow };
 export type ReviewOutcome =
-  | { outcome: 'not-found' | 'not-authorized' | 'not-pending' | 'invalid-review-state' | 'disputed' }
+  | { outcome: 'not-found' | 'not-authorized' | 'not-pending' | 'invalid-review-state' | 'failed' }
   | { proof: QuestProofRow; questStatus: string };
 
 const ownerCondition = (owner: Owner) => owner.workerId
@@ -63,6 +70,8 @@ const lockQuest = async (tx: Tx, questId: string) => {
     participation: quest.participation,
     questStatus: quest.questStatus,
     proofRequired: quest.proofRequired,
+    dueAt: quest.dueAt,
+    failedAt: quest.failedAt,
   }).from(quest).where(eq(quest.id, questId)).limit(1).for('update');
   return row;
 };
@@ -123,7 +132,11 @@ const loadProof = async (tx: Tx, id: string): Promise<QuestProofRow | undefined>
   if (!row) return undefined;
   const images = await tx.select({ fileId: proofSubmissionImage.fileId }).from(proofSubmissionImage)
     .where(eq(proofSubmissionImage.proofSubmissionId, id)).orderBy(asc(proofSubmissionImage.position));
-  return { ...row, images: images.map((image) => image.fileId) };
+  return {
+    ...row,
+    submissionStatus: row.submissionStatus,
+    images: images.map((image) => image.fileId),
+  };
 };
 
 const hasOppositeOwnerSubmission = async (tx: Tx, questId: string, owner: Owner) => {
@@ -140,30 +153,34 @@ const ownerHasSubmission = async (tx: Tx, questId: string, owner: Owner, statuse
   return rows.length > 0;
 };
 
-const ownerCount = async (tx: Tx, questId: string, owner: Owner, status: string) => {
+const ownerCount = async (tx: Tx, questId: string, owner: Owner, statuses: string[]) => {
   const [row] = await tx.select({ count: sql<number>`count(*)` }).from(proofSubmission)
-    .where(and(eq(proofSubmission.questId, questId), ownerCondition(owner), eq(proofSubmission.submissionStatus, status)));
+    .where(and(eq(proofSubmission.questId, questId), ownerCondition(owner), inArray(proofSubmission.submissionStatus, statuses)));
   return Number(row?.count ?? 0);
 };
 
 const sameOwner = (left: Owner, right: Owner) => left.workerId === right.workerId && left.teamId === right.teamId;
-const isReviewLifecycle = (status: string) => status === questStatus.submitted || status === questStatus.rework;
+const isReviewLifecycle = (status: string) =>
+  status === questStatus.submitted || status === questStatus.rework || status === questStatus.failed;
 
 const latestRejectedOwner = async (tx: Tx, questId: string): Promise<Owner | undefined> => {
   const [row] = await tx.select({ workerId: proofSubmission.workerId, teamId: proofSubmission.teamId })
-    .from(proofSubmission).where(and(eq(proofSubmission.questId, questId), eq(proofSubmission.submissionStatus, 'PROOF_REJECTED')))
+    .from(proofSubmission).where(and(eq(proofSubmission.questId, questId), inArray(proofSubmission.submissionStatus, [...notApprovedProofStatuses])))
     .orderBy(sql`${proofSubmission.reviewedAt} DESC NULLS LAST`, sql`${proofSubmission.id} DESC`).limit(1);
   return row?.workerId ? { workerId: row.workerId } : row?.teamId ? { teamId: row.teamId } : undefined;
 };
 
-const ownersForQuest = async (tx: Tx, current: { id: string; mode: string; participation: string }): Promise<Owner[]> => {
+const ownersForQuest = async (tx: Tx, current: { id: string; mode: string; participation: string; questStatus?: string }): Promise<Owner[]> => {
   if (current.mode === questMode.candidate && current.participation === questParticipation.group) {
     const [team] = await tx.select({ id: questTeam.id }).from(questTeam)
       .where(and(eq(questTeam.questId, current.id), eq(questTeam.teamStatus, teamStatus.selected))).limit(1).for('update');
     return team ? [{ teamId: team.id }] : [];
   }
+  const assignmentState = current.questStatus === questStatus.failed
+    ? assignmentStatus.incomplete
+    : assignmentStatus.active;
   const assignments = await tx.select({ workerId: questAssignment.workerId }).from(questAssignment)
-    .where(and(eq(questAssignment.questId, current.id), eq(questAssignment.assignmentStatus, assignmentStatus.active)))
+    .where(and(eq(questAssignment.questId, current.id), eq(questAssignment.assignmentStatus, assignmentState)))
     .for('update');
   return assignments.map(({ workerId }) => ({ workerId }));
 };
@@ -176,7 +193,7 @@ const allObligationsSubmitted = async (tx: Tx, current: { id: string; mode: stri
       .from(questCompletionConfirmation).where(eq(questCompletionConfirmation.questId, current.id));
     return owners.every((owner) => confirmations.some((confirmation) => owner.workerId === confirmation.workerId && owner.teamId === confirmation.teamId));
   }
-  return Promise.all(owners.map((owner) => ownerHasSubmission(tx, current.id, owner, ['PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_AUTO_APPROVED'])))
+  return Promise.all(owners.map((owner) => ownerHasSubmission(tx, current.id, owner, ['PROOF_PENDING', ...approvedProofStatuses])))
     .then((values) => values.every(Boolean));
 };
 
@@ -184,7 +201,7 @@ const allObligationsApproved = async (tx: Tx, current: { id: string; mode: strin
   if (!current.proofRequired) return false;
   const owners = await ownersForQuest(tx, current);
   if (owners.length === 0) return false;
-  return Promise.all(owners.map((owner) => ownerHasSubmission(tx, current.id, owner, ['PROOF_APPROVED', 'PROOF_AUTO_APPROVED'])))
+  return Promise.all(owners.map((owner) => ownerHasSubmission(tx, current.id, owner, [...approvedProofStatuses])))
     .then((values) => values.every(Boolean));
 };
 
@@ -218,10 +235,11 @@ export const submitProof = async (userId: string, questId: string, content: stri
   if (!current) return { outcome: 'not-found' };
   if (current.hirerId === userId) return { outcome: 'not-allowed' };
   if (current.questStatus !== questStatus.inProgress && current.questStatus !== questStatus.rework) return { outcome: 'invalid-state' };
+  if (current.dueAt && now.getTime() >= current.dueAt.getTime()) return { outcome: 'invalid-state' };
   if (!current.proofRequired) return { outcome: 'proof-required' };
   const owner = await findOwner(tx, questId, userId);
   if (!owner) return { outcome: 'not-allowed' };
-  const rejected = await ownerCount(tx, questId, owner, 'PROOF_REJECTED');
+  const rejected = await ownerCount(tx, questId, owner, [...notApprovedProofStatuses]);
   if (rejected > 0 && current.questStatus !== questStatus.rework) return { outcome: 'no-rework' };
   if (current.questStatus === questStatus.rework) {
     const rejectedOwner = await latestRejectedOwner(tx, questId);
@@ -235,7 +253,7 @@ export const submitProof = async (userId: string, questId: string, content: stri
   }
   if (!(await fileIdsForProof(tx, userId, persistedFileIds))) return { outcome: 'files-invalid' };
   if (await hasOppositeOwnerSubmission(tx, questId, owner)) return { outcome: 'already-submitted' };
-  if (await ownerHasSubmission(tx, questId, owner, ['PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_AUTO_APPROVED'])) return { outcome: 'already-submitted' };
+  if (await ownerHasSubmission(tx, questId, owner, ['PROOF_PENDING', ...approvedProofStatuses])) return { outcome: 'already-submitted' };
   if (current.mode === questMode.noCandidate && rejected > 0) return { outcome: 'no-rework' };
   const proof = await insertProof(tx, { questId, userId, owner, content, fileIds: persistedFileIds, submittedAt: now });
   await moveIfSubmitted(tx, current, now);
@@ -259,21 +277,33 @@ export const confirmProofFreeWork = async (userId: string, questId: string, now 
   return { confirmed: true, questStatus: updated?.questStatus ?? current.questStatus };
 });
 
-export const reviewProof = async (hirerId: string, questId: string, proofId: string, decision: 'PROOF_APPROVED' | 'PROOF_REJECTED', note: string | null = null, now = new Date()): Promise<ReviewOutcome> => db.transaction(async (tx) => {
+export const reviewProof = async (hirerId: string, questId: string, proofId: string, decision: 'PROOF_APPROVED' | 'PROOF_NOT_APPROVED', note: string | null = null, now = new Date()): Promise<ReviewOutcome> => db.transaction(async (tx) => {
   const current = await lockQuest(tx, questId);
   if (!current) return { outcome: 'not-found' };
   if (current.hirerId !== hirerId) return { outcome: 'not-authorized' };
   if (!isReviewLifecycle(current.questStatus)) return { outcome: 'invalid-review-state' };
-  const [proof] = await tx.select({ id: proofSubmission.id, workerId: proofSubmission.workerId, teamId: proofSubmission.teamId, submissionStatus: proofSubmission.submissionStatus })
+  const [proof] = await tx.select({
+    id: proofSubmission.id,
+    workerId: proofSubmission.workerId,
+    teamId: proofSubmission.teamId,
+    submissionStatus: proofSubmission.submissionStatus,
+    submittedAt: proofSubmission.submittedAt,
+  })
     .from(proofSubmission)
     .innerJoin(quest, eq(proofSubmission.questId, quest.id))
     .where(and(
       eq(proofSubmission.id, proofId),
       eq(proofSubmission.questId, questId),
-      inArray(quest.questStatus, [questStatus.submitted, questStatus.rework]),
+      inArray(quest.questStatus, [questStatus.submitted, questStatus.rework, questStatus.failed]),
     )).limit(1).for('update');
   if (!proof) return { outcome: 'not-found' };
   if (proof.submissionStatus !== 'PROOF_PENDING') return { outcome: 'not-pending' };
+  if (
+    current.questStatus === questStatus.failed &&
+    (current.dueAt && proof.submittedAt >= current.dueAt || !current.failedAt || proof.submittedAt >= current.failedAt)
+  ) {
+    return { outcome: 'invalid-review-state' };
+  }
   const proofOwner: Owner | undefined = proof.workerId
     ? { workerId: proof.workerId }
     : proof.teamId
@@ -283,9 +313,9 @@ export const reviewProof = async (hirerId: string, questId: string, proofId: str
   if (!validOwners) return { outcome: 'not-found' };
   const status = decision;
   await tx.update(proofSubmission).set({ submissionStatus: status, reviewNote: note, reviewedAt: now }).where(eq(proofSubmission.id, proofId));
-  if (decision === 'PROOF_REJECTED') {
+  if (decision === 'PROOF_NOT_APPROVED') {
     const owner = proofOwner!;
-    const rejected = await ownerCount(tx, questId, owner, 'PROOF_REJECTED');
+    const rejected = await ownerCount(tx, questId, owner, [...notApprovedProofStatuses]);
     let limit = 0;
     if (proof.teamId) {
       const [team] = await tx.select({ reworkLimit: questTeam.reworkLimit }).from(questTeam).where(eq(questTeam.id, proof.teamId)).limit(1).for('update');
@@ -294,11 +324,16 @@ export const reviewProof = async (hirerId: string, questId: string, proofId: str
       const [application] = await tx.select({ reworkLimit: questApplication.reworkLimit }).from(questApplication).where(and(eq(questApplication.questId, questId), eq(questApplication.workerId, proof.workerId!))).limit(1).for('update');
       limit = application?.reworkLimit ?? 0;
     }
+    if (current.questStatus === questStatus.failed) {
+      return { outcome: 'failed' };
+    }
     if (current.mode === questMode.noCandidate || rejected > limit) {
-      await tx.update(quest).set({ questStatus: questStatus.disputed, version: sql`${quest.version} + 1`, updatedAt: now }).where(eq(quest.id, questId));
-      return { outcome: 'disputed' };
+      await failQuestInTransaction(tx, questId, `quest-failure:${questId}`, now, hirerId);
+      return { outcome: 'failed' };
     }
     await tx.update(quest).set({ questStatus: questStatus.rework, version: sql`${quest.version} + 1`, updatedAt: now }).where(eq(quest.id, questId));
+  } else if (current.questStatus === questStatus.failed) {
+    await settleApprovedLegacyQuestProofAfterFailureInTransaction(tx, questId, proofId);
   } else if (await allObligationsApproved(tx, current)) {
     await tx.update(quest).set({ questStatus: questStatus.approved, version: sql`${quest.version} + 1`, updatedAt: now }).where(eq(quest.id, questId));
     await settleApprovedQuestInTransaction(tx, questId, hirerId, `quest-completion:${questId}`, now);
@@ -320,7 +355,10 @@ export const listProofs = async (userId: string, questId: string) => {
     submittedAt: proofSubmission.submittedAt,
     reviewedAt: proofSubmission.reviewedAt,
   }).from(proofSubmission).innerJoin(quest, eq(proofSubmission.questId, quest.id)).where(and(eq(proofSubmission.questId, questId), or(eq(quest.hirerId, userId), eq(proofSubmission.submittedByUserId, userId)))).orderBy(asc(proofSubmission.submittedAt));
-  return Promise.all(rows.map(async (row) => ({ ...row, images: (await db.select({ fileId: proofSubmissionImage.fileId }).from(proofSubmissionImage).where(eq(proofSubmissionImage.proofSubmissionId, row.id)).orderBy(asc(proofSubmissionImage.position))).map(({ fileId }) => fileId) })));
+  return Promise.all(rows.map(async (row) => ({
+    ...row,
+    images: (await db.select({ fileId: proofSubmissionImage.fileId }).from(proofSubmissionImage).where(eq(proofSubmissionImage.proofSubmissionId, row.id)).orderBy(asc(proofSubmissionImage.position))).map(({ fileId }) => fileId),
+  })));
 };
 
 const autoApproveDueProofFreeQuests = async (tx: Tx, now: Date) => {
@@ -345,28 +383,42 @@ const autoApproveDueProofFreeQuests = async (tx: Tx, now: Date) => {
 };
 
 export const autoApproveDueProofs = async (now = new Date()): Promise<string[]> => db.transaction(async (tx) => {
-  const candidates = await tx.select({ id: proofSubmission.id, questId: proofSubmission.questId, submittedAt: proofSubmission.submittedAt, mode: quest.mode })
+  const candidates = await tx.select({
+    id: proofSubmission.id,
+    questId: proofSubmission.questId,
+    submittedAt: proofSubmission.submittedAt,
+  })
     .from(proofSubmission).innerJoin(quest, eq(proofSubmission.questId, quest.id))
     .where(and(
       eq(proofSubmission.submissionStatus, 'PROOF_PENDING'),
-      inArray(quest.questStatus, [questStatus.submitted, questStatus.rework]),
-      sql`${proofSubmission.submittedAt} <= ${now.toISOString()}::timestamptz - interval '1 hour'`,
+      inArray(quest.questStatus, [questStatus.submitted, questStatus.rework, questStatus.failed]),
+      sql`${proofSubmission.submittedAt} <= ${now.toISOString()}::timestamptz - interval '24 hours'`,
+      or(isNull(quest.dueAt), sql`${proofSubmission.submittedAt} < ${quest.dueAt}`),
+      or(isNull(quest.failedAt), sql`${proofSubmission.submittedAt} < ${quest.failedAt}`),
     ))
     .orderBy(asc(proofSubmission.submittedAt), asc(proofSubmission.id));
   const approved: string[] = [];
   for (const candidate of candidates) {
     const current = await lockQuest(tx, candidate.questId);
     if (!current || !isReviewLifecycle(current.questStatus)) continue;
-    const [proof] = await tx.select({ id: proofSubmission.id, status: proofSubmission.submissionStatus }).from(proofSubmission)
+    const [proof] = await tx.select({
+      id: proofSubmission.id,
+      status: proofSubmission.submissionStatus,
+      submittedAt: proofSubmission.submittedAt,
+    }).from(proofSubmission)
       .innerJoin(quest, eq(proofSubmission.questId, quest.id))
       .where(and(
         eq(proofSubmission.id, candidate.id),
-        inArray(quest.questStatus, [questStatus.submitted, questStatus.rework]),
+        inArray(quest.questStatus, [questStatus.submitted, questStatus.rework, questStatus.failed]),
       )).limit(1).for('update');
     if (!proof || proof.status !== 'PROOF_PENDING') continue;
-    await tx.update(proofSubmission).set({ submissionStatus: 'PROOF_AUTO_APPROVED', reviewedAt: now }).where(and(eq(proofSubmission.id, candidate.id), eq(proofSubmission.submissionStatus, 'PROOF_PENDING')));
+    if (current.dueAt && proof.submittedAt >= current.dueAt) continue;
+    if (current.questStatus === questStatus.failed && (!current.failedAt || proof.submittedAt >= current.failedAt)) continue;
+    await tx.update(proofSubmission).set({ submissionStatus: 'PROOF_APPROVED', reviewedAt: now }).where(and(eq(proofSubmission.id, candidate.id), eq(proofSubmission.submissionStatus, 'PROOF_PENDING')));
     approved.push(candidate.id);
-    if (await allObligationsApproved(tx, current)) {
+    if (current.questStatus === questStatus.failed) {
+      await settleApprovedLegacyQuestProofAfterFailureInTransaction(tx, candidate.questId, candidate.id);
+    } else if (await allObligationsApproved(tx, current)) {
       const [approvedQuest] = await tx.update(quest).set({ questStatus: questStatus.approved, version: sql`${quest.version} + 1`, updatedAt: now }).where(and(eq(quest.id, current.id), inArray(quest.questStatus, [questStatus.submitted, questStatus.rework]))).returning({ id: quest.id });
       if (approvedQuest) await settleApprovedQuestInTransaction(tx, candidate.questId, current.hirerId, `quest-completion:${candidate.questId}`, now);
     }

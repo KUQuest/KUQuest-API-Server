@@ -1,24 +1,16 @@
-import { type AdminContext, type AuthedContext } from '@/modules/auth';
+import { type AuthedContext } from '@/modules/auth';
 import { MoneyDomainError } from '@/modules/wallet';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import type { Static } from 'elysia';
 
 import { WorkChatTransitionError } from './quest-assignment.service';
-import {
-  cancelQuest,
-  cancelQuestV2,
-  resolveQuestDispute,
-} from './quest-settlement.service';
-import type {
-  questDisputeResolutionSchema,
-  questSettlementParamsSchema,
-} from './quest-settlement.schema';
+import { cancelQuest, cancelQuestV2 } from './quest-settlement.service';
+import type { questSettlementParamsSchema } from './quest-settlement.schema';
 
 type Params = Static<typeof questSettlementParamsSchema>;
-type DisputeInput = Static<typeof questDisputeResolutionSchema>;
 
-const errorResponse = (set: AuthedContext['set'] | AdminContext['set'], outcome: string) => {
+const errorResponse = (set: AuthedContext['set'], outcome: string) => {
   if (outcome === 'not-found') {
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
@@ -35,10 +27,6 @@ const errorResponse = (set: AuthedContext['set'] | AdminContext['set'], outcome:
     set.status = 409;
     return apiError('IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
   }
-  if (outcome === 'allocations-invalid') {
-    set.status = 400;
-    return apiError('DISPUTE_ALLOCATIONS_INVALID', 'Dispute allocations must name active Workers and fit the reserved amount');
-  }
   if (outcome === 'idempotency-unavailable') {
     set.status = 503;
     return apiError('IDEMPOTENCY_UNAVAILABLE', 'The Idempotency-Key result is unavailable');
@@ -47,7 +35,7 @@ const errorResponse = (set: AuthedContext['set'] | AdminContext['set'], outcome:
   return apiError('QUEST_SETTLEMENT_NOT_ALLOWED', 'The Quest is not in a state that accepts this settlement');
 };
 
-const moneyError = (set: AuthedContext['set'] | AdminContext['set'], error: unknown) => {
+const moneyError = (set: AuthedContext['set'], error: unknown) => {
   if (error instanceof WorkChatTransitionError) {
     set.status = 503;
     return apiError('WORK_CHAT_UNAVAILABLE', 'Work Chat membership could not be updated');
@@ -86,16 +74,3 @@ export const cancelQuestV2Controller = async ({ params, request, session, set }:
     return moneyError(set, error);
   }
 };
-
-export const resolveQuestDisputeController = async ({ body, params, request, admin, set }: AdminContext & { body: DisputeInput; params: Params; request: Request }): Promise<ApiResponse> => {
-  const commandId = request.headers.get('idempotency-key') ?? '';
-  try {
-    const result = await resolveQuestDispute(admin.id, params.questId, commandId, body.outcome, body.allocations ?? []);
-    if (!('questStatus' in result)) return errorResponse(set, result.outcome);
-    return apiSuccess(result);
-  } catch (error) {
-    return moneyError(set, error);
-  }
-};
-
-export const settlementErrorResponse = errorResponse;

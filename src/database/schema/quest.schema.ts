@@ -42,9 +42,11 @@ export const questStatus = pgEnum('quest_status', [
   'QUEST_REWORK',
   'QUEST_COMPLETED',
   'QUEST_CANCELLED',
+  // Historical database value. Active Quest code uses QUEST_FAILED and never writes this state.
   'QUEST_DISPUTED',
   'QUEST_FAILED',
 ]);
+type ActiveQuestStatus = Exclude<(typeof questStatus.enumValues)[number], 'QUEST_DISPUTED'>;
 
 export const quest = pgTable(
   'quest',
@@ -68,7 +70,7 @@ export const quest = pgTable(
     v2Participation: varchar('v2_participation', { length: 16 }).$type<
       'SINGLE' | 'GROUP'
     >(),
-    questStatus: questStatus('quest_status').default('QUEST_DRAFT').notNull(),
+    questStatus: questStatus('quest_status').$type<ActiveQuestStatus>().default('QUEST_DRAFT').notNull(),
     version: integer('version').default(1).notNull(),
     rewardSatang: integer('reward_satang'),
     questFundingTotalSatang: integer('quest_funding_total_satang'),
@@ -83,6 +85,7 @@ export const quest = pgTable(
     headcount: integer('headcount').default(1).notNull(),
     startTime: time('start_time').notNull(),
     dueAt: time('due_at'),
+    failedAt: time('failed_at'),
     proofRequired: boolean('proof_required').default(true).notNull(),
     cancelledAt: time('cancelled_at'),
     cancelledByUserId: uuid('cancelled_by_user_id').references(() => authUser.id),
@@ -123,6 +126,7 @@ export const quest = pgTable(
     check('quest_finance_snapshot_amounts_check', sql`${table.platformFeePerWorkerSatang} IS NULL OR ${table.platformFeePerWorkerSatang} >= 0`),
     check('quest_finance_snapshot_escrow_check', sql`${table.questEscrowSatang} IS NULL OR ${table.questEscrowSatang} > 0`),
     check('quest_headcount_check', sql`${table.headcount} > 0`),
+    check('quest_failed_at_check', sql`(${table.failedAt} IS NOT NULL) = (${table.questStatus} = 'QUEST_FAILED')`),
     check(
       'quest_participation_headcount_check',
       sql`(
@@ -297,7 +301,7 @@ export const questEditRequest = pgTable(
       .notNull()
       .references(() => authUser.id),
     proposedChanges: jsonb('proposed_changes').notNull(),
-    previousQuestStatus: questStatus('previous_quest_status').notNull(),
+    previousQuestStatus: questStatus('previous_quest_status').$type<ActiveQuestStatus>().notNull(),
     requestStatus: varchar('request_status', { length: 32 })
       .default('EDIT_REQUEST_PENDING')
       .notNull(),
@@ -1011,7 +1015,7 @@ export const questDirectJoinCommand = pgTable(
     resultAssignmentStatus: varchar('result_assignment_status', { length: 32 }),
     resultStartedAt: time('result_started_at'),
     resultCreatedAt: time('result_created_at'),
-    resultQuestStatus: questStatus('result_quest_status'),
+    resultQuestStatus: questStatus('result_quest_status').$type<ActiveQuestStatus>(),
     processingStatus: varchar('processing_status', { length: 32 })
       .default('PROCESSING')
       .notNull(),
@@ -1065,7 +1069,7 @@ export const proofSubmission = pgTable(
     ),
     check(
       'proof_submission_status_check',
-      sql`${table.submissionStatus} IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_REJECTED', 'PROOF_AUTO_APPROVED')`,
+      sql`${table.submissionStatus} IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED')`,
     ),
     index('proof_submission_quest_id_idx').on(table.questId),
     index('proof_submission_status_idx').on(table.submissionStatus),
@@ -1474,7 +1478,7 @@ export const questCandidateSelectionCommand = pgTable(
     targetId: uuid('target_id').notNull(),
     requestHash: varchar('request_hash', { length: 64 }).notNull(),
     resultAssignmentIds: jsonb('result_assignment_ids'),
-    resultQuestStatus: questStatus('result_quest_status'),
+    resultQuestStatus: questStatus('result_quest_status').$type<ActiveQuestStatus>(),
     processingStatus: varchar('processing_status', { length: 32 }).default('PROCESSING').notNull(),
     createdAt: time('created_at').defaultNow().notNull(),
     completedAt: time('completed_at'),

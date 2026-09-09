@@ -383,6 +383,8 @@ export type SealedLedgerTransactionInput = {
   postings: LedgerPostingInput[];
   idempotencyKeyId?: string;
   correctionOfTransactionId?: string;
+  /** An account redirection may reuse the source account with the opposite sign. */
+  correctionMode?: 'ACCOUNT_REDIRECTION';
   createdByUserId?: string;
   description?: string;
   idempotency?: {
@@ -411,9 +413,24 @@ export const createSealedLedgerTransactionInTransaction = async (
   if (input.postings.reduce((total, posting) => total + posting.amountSatang, 0) !== 0) {
     throw new MoneyDomainError('UNBALANCED_LEDGER', 'Ledger postings must balance to zero.');
   }
+  if (input.correctionMode && !input.correctionOfTransactionId) {
+    throw new MoneyDomainError(
+      'INVALID_LEDGER_CORRECTION',
+      'A ledger correction mode requires a correction target.',
+    );
+  }
+  if (input.correctionMode && input.eventType !== 'ADJUSTMENT') {
+    throw new MoneyDomainError(
+      'INVALID_LEDGER_CORRECTION',
+      'An account redirection correction must use the ADJUSTMENT event type.',
+    );
+  }
   if (input.correctionOfTransactionId) {
     const correctedPostings = await transaction
-      .select({ accountId: walletLedgerPosting.accountId })
+      .select({
+        accountId: walletLedgerPosting.accountId,
+        amountSatang: walletLedgerPosting.amountSatang,
+      })
       .from(walletLedgerTransaction)
       .innerJoin(
         walletLedgerPosting,
@@ -424,11 +441,20 @@ export const createSealedLedgerTransactionInTransaction = async (
         isNotNull(walletLedgerTransaction.sealedAt),
       ));
     const correctedAccountIds = new Set(correctedPostings.map(({ accountId }) => accountId));
-    const correctionAccountIds = new Set(input.postings.map(({ accountId }) => accountId));
+    const correctionPostings = new Map(input.postings.map(({ accountId, amountSatang }) => [accountId, amountSatang]));
+    const reversesSourceAccount = correctedPostings.some(({ accountId, amountSatang }) => {
+      const correctionAmount = correctionPostings.get(accountId);
+      return correctionAmount !== undefined && Math.sign(correctionAmount) === -Math.sign(amountSatang);
+    });
+    const validAccountRedirection = input.correctionMode === 'ACCOUNT_REDIRECTION' &&
+      input.eventType === 'ADJUSTMENT' &&
+      reversesSourceAccount;
     if (
       correctedAccountIds.size === 0 ||
-      correctedAccountIds.size !== correctionAccountIds.size ||
-      [...correctedAccountIds].some((accountId) => !correctionAccountIds.has(accountId))
+      (!validAccountRedirection && (
+        correctedAccountIds.size !== correctionPostings.size ||
+        [...correctedAccountIds].some((accountId) => !correctionPostings.has(accountId))
+      ))
     ) {
       throw new MoneyDomainError(
         'INVALID_LEDGER_CORRECTION',

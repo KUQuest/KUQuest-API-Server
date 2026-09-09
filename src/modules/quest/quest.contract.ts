@@ -41,7 +41,6 @@ export const questStatus = {
   rework: 'QUEST_REWORK',
   completed: 'QUEST_COMPLETED',
   cancelled: 'QUEST_CANCELLED',
-  disputed: 'QUEST_DISPUTED',
   failed: 'QUEST_FAILED',
 } as const;
 export const questStatuses = [
@@ -55,7 +54,6 @@ export const questStatuses = [
   questStatus.rework,
   questStatus.completed,
   questStatus.cancelled,
-  questStatus.disputed,
   questStatus.failed,
 ] as const;
 export type QuestStatus = (typeof questStatuses)[number];
@@ -107,8 +105,7 @@ export type AssignmentStatus = (typeof assignmentStatuses)[number];
 export const proofStatuses = [
   'PROOF_PENDING',
   'PROOF_APPROVED',
-  'PROOF_REJECTED',
-  'PROOF_AUTO_APPROVED',
+  'PROOF_NOT_APPROVED',
 ] as const;
 export type ProofStatus = (typeof proofStatuses)[number];
 

@@ -151,6 +151,7 @@ const createQuest = async (
     v2Participation: group ? 'GROUP' : 'SINGLE',
     rewardSatang: status === 'QUEST_DRAFT' ? null : 1_000,
     questStatus: status,
+    failedAt: status === 'QUEST_FAILED' ? new Date() : null,
     questFundingTotalSatang: group ? 2_040 : 1_020,
     platformFeePerWorkerSatang: 20,
     questEscrowSatang: group ? 2_040 : 1_020,
@@ -388,7 +389,6 @@ describe('Admin Quest moderation commands', () => {
       'QUEST_SUBMITTED',
       'QUEST_APPROVED',
       'QUEST_REWORK',
-      'QUEST_DISPUTED',
     ] as const;
     const questIdsByState = await Promise.all(states.map((state) => createQuest(state)));
 
@@ -633,7 +633,7 @@ describe('Admin Quest moderation commands', () => {
   // hidden for the rest of its life.
   it('restores a hidden Quest that moved past QUEST_OPEN while hidden', async () => {
     if (!postgresAvailable) return;
-    const states = ['QUEST_DRAFT', 'QUEST_ASSIGNED', 'QUEST_IN_PROGRESS', 'QUEST_DISPUTED'] as const;
+    const states = ['QUEST_DRAFT', 'QUEST_ASSIGNED', 'QUEST_IN_PROGRESS', 'QUEST_SUBMITTED'] as const;
     const questIdsByState = await Promise.all(states.map((state) => createQuest(state)));
     await Promise.all(questIdsByState.map((questId) => db.update(quest)
       .set({ hiddenAt: new Date(), hiddenByAdminId: adminId })
@@ -693,7 +693,7 @@ describe('Admin Quest moderation commands', () => {
   // than inventing a settlement for it.
   it('refuses to terminate a non-terminal Quest with no defined settlement', async () => {
     if (!postgresAvailable) return;
-    const states = ['QUEST_AWAITING_CONSENT', 'QUEST_SUBMITTED', 'QUEST_APPROVED', 'QUEST_REWORK', 'QUEST_DISPUTED'] as const;
+    const states = ['QUEST_AWAITING_CONSENT', 'QUEST_SUBMITTED', 'QUEST_APPROVED', 'QUEST_REWORK'] as const;
     const questIdsByState = await Promise.all(states.map((state) => createQuest(state)));
     await Promise.all(questIdsByState.map((questId) => db.transaction((transaction) => reserveSpending(transaction, {
       ownerUserId: hirerId,

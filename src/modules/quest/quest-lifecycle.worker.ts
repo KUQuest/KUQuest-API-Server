@@ -9,12 +9,14 @@ import {
   questTeam,
   questTeamInvitation,
 } from '@/database/schema/quest.schema';
+import { walletFundingReservation } from '@/database/schema/wallet.schema';
+import { releaseFundingReservation } from '@/modules/wallet';
 
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 
 import { assignmentStatus, questMode, questParticipation, questStatus } from './quest.contract';
 import { autoApproveDueProofs } from './quest-proof.service';
-import { cancelUnfilledQuest } from './quest-settlement.service';
+import { cancelUnfilledQuest, failQuestInTransaction } from './quest-settlement.service';
 import { expireQuestEditRequest } from './quest.service';
 import {
   expireQuestV2EditRequest,
@@ -40,8 +42,8 @@ import {
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const DEFAULT_BATCH_SIZE = 100;
-const dueDisputeStatuses = [questStatus.inProgress, questStatus.submitted, questStatus.rework] as const;
-const validProofStatuses = ['PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_AUTO_APPROVED'] as const;
+const dueFailureStatuses = [questStatus.inProgress, questStatus.submitted, questStatus.rework] as const;
+const validProofStatuses = ['PROOF_PENDING', 'PROOF_APPROVED'] as const;
 
 /** The only time source used by the lifecycle worker. */
 export interface QuestLifecycleClock {
@@ -60,7 +62,7 @@ export type QuestLifecycleWorkerOptions = {
 };
 
 export type QuestLifecycleWorkerError = {
-  operation: 'start' | 'auto-cancel' | 'underfilled-detection' | 'underfilled-timeout' | 'dispute' | 'invitation-expiry' | 'edit-timeout' | 'auto-approval' | 'due-at-failure' | 'quest-image-cleanup' | 'quest-proof-upload-cleanup';
+  operation: 'start' | 'auto-cancel' | 'underfilled-detection' | 'underfilled-timeout' | 'failure-hold-release' | 'invitation-expiry' | 'edit-timeout' | 'auto-approval' | 'due-at-failure' | 'quest-image-cleanup' | 'quest-proof-upload-cleanup';
   id?: string;
   cause: unknown;
 };
@@ -70,8 +72,8 @@ export type QuestLifecycleWorkerResult = {
   autoCancelledQuestIds: string[];
   underfilledQuestIds: string[];
   timedOutUnderfilledQuestIds: string[];
-  disputedQuestIds: string[];
   failedQuestIds: string[];
+  releasedFailedQuestIds: string[];
   timedOutEditRequestIds: string[];
   expiredInvitationIds: string[];
   autoApprovedProofIds: string[];
@@ -187,7 +189,7 @@ const questHasIncompleteObligations = async (
   return false;
 };
 
-const disputeQuest = async (questId: string, now: Date): Promise<boolean> => db.transaction(async (transaction) => {
+const failLegacyQuest = async (questId: string, now: Date): Promise<boolean> => db.transaction(async (transaction) => {
   const [current] = await transaction
     .select({
       id: quest.id,
@@ -198,17 +200,19 @@ const disputeQuest = async (questId: string, now: Date): Promise<boolean> => db.
       questStatus: quest.questStatus,
     })
     .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v1), inArray(quest.questStatus, [...dueDisputeStatuses]), lte(quest.dueAt, now)))
+    .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v1), inArray(quest.questStatus, [...dueFailureStatuses]), lte(quest.dueAt, now)))
     .limit(1)
     .for('update');
   if (!current || !(await questHasIncompleteObligations(transaction, current))) return false;
 
-  const [updated] = await transaction
-    .update(quest)
-    .set({ questStatus: questStatus.disputed, updatedAt: now })
-    .where(and(eq(quest.id, questId), inArray(quest.questStatus, [...dueDisputeStatuses])))
-    .returning({ id: quest.id });
-  return Boolean(updated);
+  const result = await failQuestInTransaction(
+    transaction,
+    questId,
+    `quest-failure:${questId}`,
+    now,
+    null,
+  );
+  return result.incompleteAssignmentIds.length > 0;
 });
 
 const expireInvitation = async (invitationId: string, now: Date): Promise<boolean> => db.transaction(async (transaction) => {
@@ -263,9 +267,53 @@ const processIds = async (
 const dueQuestIds = async (now: Date, limit: number) => db
   .select({ id: quest.id })
   .from(quest)
-  .where(and(eq(quest.apiVersion, questApiVersion.v1), inArray(quest.questStatus, [...dueDisputeStatuses]), lte(quest.dueAt, now)))
+  .where(and(eq(quest.apiVersion, questApiVersion.v1), inArray(quest.questStatus, [...dueFailureStatuses]), lte(quest.dueAt, now)))
   .orderBy(asc(quest.dueAt), asc(quest.id))
   .limit(limit);
+
+const dueFailedQuestIds = async (now: Date, limit: number) => db
+  .select({ id: quest.id })
+  .from(quest)
+  .where(and(
+    eq(quest.questStatus, questStatus.failed),
+    lte(quest.failedAt, new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)),
+  ))
+  .orderBy(asc(quest.failedAt), asc(quest.id))
+  .limit(limit);
+
+const releaseFailedQuestReservation = async (questId: string, now: Date): Promise<boolean> =>
+  db.transaction(async (transaction) => {
+    const [current] = await transaction
+      .select({
+        id: quest.id,
+        hirerId: quest.hirerId,
+        fundingReservationId: quest.fundingReservationId,
+        failedAt: quest.failedAt,
+        questStatus: quest.questStatus,
+      })
+      .from(quest)
+      .where(eq(quest.id, questId))
+      .for('update');
+    if (
+      !current ||
+      current.questStatus !== questStatus.failed ||
+      !current.fundingReservationId ||
+      !current.failedAt ||
+      current.failedAt.getTime() > now.getTime() - 7 * 24 * 60 * 60 * 1000
+    ) return false;
+    const [reservation] = await transaction
+      .select({ status: walletFundingReservation.status })
+      .from(walletFundingReservation)
+      .where(eq(walletFundingReservation.id, current.fundingReservationId))
+      .for('update');
+    if (!reservation || reservation.status !== 'ACTIVE') return false;
+    await releaseFundingReservation(transaction, {
+      ownerUserId: current.hirerId,
+      reservationId: current.fundingReservationId,
+      operationReference: `quest-failure-hold-release:${current.id}`,
+    });
+    return true;
+  });
 
 const dueUnfilledQuestIds = async (now: Date, limit: number) => db
   .select({ id: quest.id })
@@ -338,11 +386,11 @@ const processDueUnderfilledQuest = async (
   return 'questStatus' in result && result.outcome === 'CANCELLED' && !result.replayed;
 };
 
-/** Dispute due Quests that still lack a proof or completion confirmation. */
-export const disputeOverdueQuests = async (now = new Date(), limit = DEFAULT_BATCH_SIZE) => {
+/** Fail due legacy Quests that still lack a Proof Submission or completion confirmation. */
+export const failOverdueQuests = async (now = new Date(), limit = DEFAULT_BATCH_SIZE) => {
   const ids = await dueQuestIds(now, boundedSize(limit));
   const errors: QuestLifecycleWorkerError[] = [];
-  return processIds(ids.map(({ id }) => id), 'dispute', (id) => disputeQuest(id, now), errors);
+  return processIds(ids.map(({ id }) => id), 'due-at-failure', (id) => failLegacyQuest(id, now), errors);
 };
 
 /** Expire pending invitations only from this explicit worker operation. */
@@ -412,6 +460,14 @@ export const runQuestLifecycleWorker = async (
     reportError(options.onError, error);
   }
 
+  const releasedFailedQuestIds = await processIds(
+    (await dueFailedQuestIds(now, limit)).map(({ id }) => id),
+    'failure-hold-release',
+    (id) => releaseFailedQuestReservation(id, now),
+    errors,
+    options.onError,
+  );
+
   const timedOutLegacyEditRequestIds = await processIds(
     (await pendingEditRequestIds(limit)).map(({ id }) => id),
     'edit-timeout',
@@ -448,10 +504,10 @@ export const runQuestLifecycleWorker = async (
     errors,
     options.onError,
   );
-  const disputedQuestIds = await processIds(
+  const legacyFailedQuestIds = await processIds(
     (await dueQuestIds(now, limit)).map(({ id }) => id),
-    'dispute',
-    (id) => disputeQuest(id, now),
+    'due-at-failure',
+    (id) => failLegacyQuest(id, now),
     errors,
     options.onError,
   );
@@ -468,8 +524,8 @@ export const runQuestLifecycleWorker = async (
     autoCancelledQuestIds,
     underfilledQuestIds,
     timedOutUnderfilledQuestIds,
-    disputedQuestIds,
-    failedQuestIds,
+    failedQuestIds: [...failedQuestIds, ...legacyFailedQuestIds],
+    releasedFailedQuestIds,
     timedOutEditRequestIds: [...timedOutLegacyEditRequestIds, ...timedOutV2EditRequestIds],
     expiredInvitationIds,
     autoApprovedProofIds,

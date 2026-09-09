@@ -343,6 +343,35 @@ export const walletFundingReservationSettlement = pgTable(
   ],
 );
 
+/** A Dispute transfer audit row. It covers active-hold redirections and post-release transfers. */
+export const walletDisputeSettlement = pgTable(
+  'wallet_dispute_settlements',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reservationId: uuid('reservation_id').notNull().references(() => walletFundingReservation.id),
+    settlementReference: text('settlement_reference').notNull(),
+    recipientWalletId: uuid('recipient_wallet_id').notNull(),
+    recipientUserId: uuid('recipient_user_id').notNull().references(() => authUser.id),
+    amountSatang: integer('amount_satang').notNull(),
+    ledgerTransactionId: uuid('ledger_transaction_id').notNull().unique().references(() => walletLedgerTransaction.id),
+    idempotencyKeyId: uuid('idempotency_key_id').notNull().unique().references(() => walletIdempotencyKey.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('wallet_dispute_settlements_reservation_reference_key').on(
+      table.reservationId,
+      table.settlementReference,
+    ),
+    foreignKey({
+      columns: [table.recipientWalletId, table.recipientUserId],
+      foreignColumns: [walletWallet.id, walletWallet.userId],
+      name: 'wallet_dispute_settlements_recipient_owner_fk',
+    }),
+    check('wallet_dispute_settlements_amount_check', sql`${table.amountSatang} BETWEEN 1 AND 2000000000`),
+    index('wallet_dispute_settlements_reservation_idx').on(table.reservationId, table.createdAt),
+  ],
+);
+
 export const walletActivity = pgTable(
   'wallet_activities',
   {
@@ -415,6 +444,7 @@ export const walletFundingReservationRelations = relations(
       references: [walletLedgerTransaction.id],
     }),
     settlements: many(walletFundingReservationSettlement),
+    disputeSettlements: many(walletDisputeSettlement),
     operations: many(walletFundingReservationOperation),
   }),
 );
@@ -462,6 +492,29 @@ export const walletFundingReservationSettlementRelations = relations(
     }),
   }),
 );
+
+export const walletDisputeSettlementRelations = relations(walletDisputeSettlement, ({ one }) => ({
+  reservation: one(walletFundingReservation, {
+    fields: [walletDisputeSettlement.reservationId],
+    references: [walletFundingReservation.id],
+  }),
+  recipientWallet: one(walletWallet, {
+    fields: [walletDisputeSettlement.recipientWalletId],
+    references: [walletWallet.id],
+  }),
+  recipient: one(authUser, {
+    fields: [walletDisputeSettlement.recipientUserId],
+    references: [authUser.id],
+  }),
+  ledgerTransaction: one(walletLedgerTransaction, {
+    fields: [walletDisputeSettlement.ledgerTransactionId],
+    references: [walletLedgerTransaction.id],
+  }),
+  idempotencyKey: one(walletIdempotencyKey, {
+    fields: [walletDisputeSettlement.idempotencyKeyId],
+    references: [walletIdempotencyKey.id],
+  }),
+}));
 
 export const walletEarningsConversionRelations = relations(walletEarningsConversion, ({ one }) => ({
   principal: one(authUser, { fields: [walletEarningsConversion.principalUserId], references: [authUser.id] }),

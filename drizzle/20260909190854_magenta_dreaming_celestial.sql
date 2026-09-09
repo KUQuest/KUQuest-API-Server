@@ -1,0 +1,2 @@
+ALTER TABLE "proof_submission" DROP CONSTRAINT "proof_submission_status_check";--> statement-breakpoint
+ALTER TABLE "proof_submission" ADD CONSTRAINT "proof_submission_status_check" CHECK ("proof_submission"."submission_status" IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED'));

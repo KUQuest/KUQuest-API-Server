@@ -68,7 +68,6 @@ describe('Quest domain contract', () => {
       'QUEST_REWORK',
       'QUEST_COMPLETED',
       'QUEST_CANCELLED',
-      'QUEST_DISPUTED',
       'QUEST_FAILED',
     ]);
   });
@@ -90,8 +89,7 @@ describe('Quest domain contract', () => {
     expect(proofStatuses).toEqual([
       'PROOF_PENDING',
       'PROOF_APPROVED',
-      'PROOF_REJECTED',
-      'PROOF_AUTO_APPROVED',
+      'PROOF_NOT_APPROVED',
     ]);
     expect(editRequestStatuses).toEqual([
       'EDIT_REQUEST_PENDING',
