@@ -71,3 +71,10 @@ export type {
   ProviderEventEncryptionOptions,
 } from './top-up.provider-event.crypto';
 export { topUpWebhookRoute } from './top-up.webhook.route';
+export { topUpRoute } from './top-up.route';
+export {
+  simulateTopUpPayment,
+  topUpTestSimulationIsEnabled,
+  TopUpTestModeError,
+} from './top-up.test-mode.service';
+export type { TopUpTestSimulationResult } from './top-up.test-mode.service';
