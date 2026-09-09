@@ -8,7 +8,7 @@ import {
 } from '@/modules/portfolio/portfolio.controller';
 import * as portfolioService from '@/modules/portfolio/portfolio.service';
 import { portfolioStorage } from '@/modules/portfolio/portfolio.storage';
-import { ImageUploadError, UnsupportedImageTypeError } from '@/shared/image-storage';
+import { ImageTooLargeError, ImageUploadError, UnsupportedImageTypeError } from '@/shared/image-storage';
 
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
@@ -454,5 +454,176 @@ describe('deleteOwnPortfolioImage', () => {
       error: { code: 'CONFLICT', message: 'Portfolio was changed by another request' },
     });
     expect(set.status).toBe(409);
+  });
+});
+
+const versioned = (version: string) =>
+  new Request('http://localhost/x', { headers: { 'if-match': version } });
+
+describe('replaceOwnPortfolioImage version and failure handling', () => {
+  it('reports a version conflict and discards the freshly uploaded object', async () => {
+    spyOn(portfolioStorage, 'upload').mockResolvedValue(storedImage);
+    spyOn(portfolioService, 'replacePortfolioImage').mockResolvedValue({ outcome: 'conflict' });
+    const deleteObject = spyOn(portfolioStorage, 'delete').mockResolvedValue();
+
+    const { result, set } = invokeReplaceImage({ portfolioId });
+
+    expect(await result).toEqual({
+      success: false,
+      error: { code: 'CONFLICT', message: 'Portfolio was changed by another request' },
+    });
+    expect(set.status).toBe(409);
+    expect(deleteObject).toHaveBeenCalledWith(storedImage.bucket, storedImage.objectKey);
+  });
+
+  it('forwards the requested resource version to the service', async () => {
+    spyOn(portfolioStorage, 'upload').mockResolvedValue(storedImage);
+    spyOn(portfolioService, 'replacePortfolioImage').mockResolvedValue({
+      fileId: fileIdOne,
+      previousFileId: null,
+      previousBucket: null,
+      previousObjectKey: null,
+      version: 4,
+    });
+
+    const { result } = invokeReplaceImage({ portfolioId }, versioned('"3"'));
+
+    expect(await result).toEqual({ success: true, data: { version: 4 } });
+    expect(portfolioService.replacePortfolioImage).toHaveBeenCalledWith(
+      studentAuthId,
+      portfolioId,
+      storedImage,
+      undefined,
+      3,
+    );
+  });
+
+  it('maps an oversized image to 413 without touching the entry', async () => {
+    spyOn(portfolioStorage, 'upload').mockRejectedValue(
+      new ImageTooLargeError('Image must be 5 MB or smaller'),
+    );
+    const replace = spyOn(portfolioService, 'replacePortfolioImage');
+
+    const { result, set } = invokeReplaceImage({ portfolioId });
+
+    expect(await result).toEqual({
+      success: false,
+      error: { code: 'IMAGE_TOO_LARGE', message: 'Image must be 5 MB or smaller' },
+    });
+    expect(set.status).toBe(413);
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it('hides the storage detail behind IMAGE_UPLOAD_FAILED', async () => {
+    spyOn(portfolioStorage, 'upload').mockRejectedValue(
+      new ImageUploadError('secret storage detail'),
+    );
+
+    const { result, set } = invokeReplaceImage({ portfolioId });
+    const body = await result;
+
+    expect(set.status).toBe(502);
+    expect(body).toEqual({
+      success: false,
+      error: { code: 'IMAGE_UPLOAD_FAILED', message: 'Image upload failed' },
+    });
+    expect(JSON.stringify(body)).not.toContain('secret storage detail');
+  });
+
+  it('still reports success when removing the previous image fails', async () => {
+    spyOn(portfolioStorage, 'upload').mockResolvedValue(storedImage);
+    spyOn(portfolioService, 'replacePortfolioImage').mockResolvedValue({
+      fileId: fileIdTwo,
+      previousFileId: fileIdOne,
+      previousBucket: 'kuquest',
+      previousObjectKey: 'portfolio/a.png',
+      version: 3,
+    });
+    spyOn(portfolioStorage, 'delete').mockRejectedValue(new Error('object storage down'));
+    const markDeleted = spyOn(portfolioService, 'markPortfolioImageDeleted').mockResolvedValue();
+
+    const { result, set } = invokeReplaceImage({ portfolioId, fileId: fileIdOne });
+
+    expect(await result).toEqual({ success: true, data: { version: 3 } });
+    expect(set.status).toBeUndefined();
+    expect(markDeleted).not.toHaveBeenCalled();
+  });
+
+  it('discards the uploaded object and rethrows when the entry cannot be read', async () => {
+    spyOn(portfolioStorage, 'upload').mockResolvedValue(storedImage);
+    spyOn(portfolioService, 'replacePortfolioImage').mockRejectedValue(new Error('db down'));
+    const deleteObject = spyOn(portfolioStorage, 'delete').mockResolvedValue();
+
+    const { result } = invokeReplaceImage({ portfolioId });
+
+    await expect(result).rejects.toThrow('db down');
+    expect(deleteObject).toHaveBeenCalledWith(storedImage.bucket, storedImage.objectKey);
+  });
+});
+
+const invokeDeleteImageWith = (
+  params: { portfolioId: string; fileId?: string },
+  request?: Request,
+) => {
+  const set: { status?: number | string } = {};
+
+  return {
+    result: deleteOwnPortfolioImage({
+      params: params as never,
+      request: request as never,
+      session: session as never,
+      set: set as never,
+    }),
+    set,
+  };
+};
+
+describe('deleteOwnPortfolioImage version and failure handling', () => {
+  it('forwards the requested resource version to the service', async () => {
+    spyOn(portfolioService, 'deletePortfolioImage').mockResolvedValue({
+      outcome: 'deleted',
+      bucket: 'kuquest',
+      objectKey: 'portfolio/a.png',
+      version: 5,
+    });
+    spyOn(portfolioStorage, 'delete').mockResolvedValue();
+
+    const { result } = invokeDeleteImageWith({ portfolioId, fileId: fileIdOne }, versioned('4'));
+
+    expect(await result).toEqual({ success: true, data: { version: 5 } });
+    expect(portfolioService.deletePortfolioImage).toHaveBeenCalledWith(
+      studentAuthId,
+      portfolioId,
+      fileIdOne,
+      4,
+    );
+  });
+
+  it('rejects an invalid resource version header without touching the entry', async () => {
+    const deletePortfolioImage = spyOn(portfolioService, 'deletePortfolioImage');
+
+    const { result, set } = invokeDeleteImageWith({ portfolioId }, versioned('not-a-number'));
+
+    expect(await result).toEqual({
+      success: false,
+      error: { code: 'INVALID_VERSION', message: 'Resource version must be a positive integer' },
+    });
+    expect(set.status).toBe(400);
+    expect(deletePortfolioImage).not.toHaveBeenCalled();
+  });
+
+  it('reports the removal as done even when the object cannot be deleted', async () => {
+    spyOn(portfolioService, 'deletePortfolioImage').mockResolvedValue({
+      outcome: 'deleted',
+      bucket: 'kuquest',
+      objectKey: 'portfolio/a.png',
+      version: 2,
+    });
+    spyOn(portfolioStorage, 'delete').mockRejectedValue(new Error('object storage down'));
+
+    const { result, set } = invokeDeleteImageWith({ portfolioId, fileId: fileIdOne });
+
+    expect(await result).toEqual({ success: true, data: { version: 2 } });
+    expect(set.status).toBeUndefined();
   });
 });
