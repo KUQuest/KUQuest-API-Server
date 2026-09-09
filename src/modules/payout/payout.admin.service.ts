@@ -34,11 +34,18 @@ const payoutApprovalReasonCodes = [
 ] as const;
 
 const payoutCancellationReasonCodes = payoutAdminReasonCodes;
-const payoutAdminReasonCodeSet = new Set<string>(payoutAdminReasonCodes);
+const payoutApprovalReasonCodeSet = new Set<string>(payoutApprovalReasonCodes);
+const payoutCancellationReasonCodeSet = new Set<string>(payoutCancellationReasonCodes);
 
-const safePayoutReasonCode = (reason: string | null) => (
-  reason && payoutAdminReasonCodeSet.has(reason) ? reason : null
-);
+const safePayoutReasonCode = (
+  reason: string | null,
+  action: 'PAYOUT_APPROVE' | 'PAYOUT_CANCEL',
+) => {
+  const allowedReasonCodes = action === 'PAYOUT_APPROVE'
+    ? payoutApprovalReasonCodeSet
+    : payoutCancellationReasonCodeSet;
+  return reason && allowedReasonCodes.has(reason) ? reason : null;
+};
 
 export const payoutAdminActionCatalog: AdminActionReasonCatalog = {
   version: 1,
@@ -231,7 +238,7 @@ const cancellationReasonCodeFor = async (
     ))
     .orderBy(desc(paymentPayoutStatusHistory.occurredAt), desc(paymentPayoutStatusHistory.id))
     .limit(1);
-  return safePayoutReasonCode(entry?.reason ?? null);
+  return safePayoutReasonCode(entry?.reason ?? null, 'PAYOUT_CANCEL');
 };
 
 const adminPayoutRows = (executor: typeof db | AdminActionTransaction) => executor
@@ -343,8 +350,13 @@ const adminPayoutHistory = async (payoutId: string): Promise<AdminPayoutStatusHi
     .where(eq(paymentPayoutStatusHistory.payoutId, payoutId))
     .orderBy(asc(paymentPayoutStatusHistory.occurredAt), asc(paymentPayoutStatusHistory.id));
   return rows.map((row) => {
-    if (row.source !== 'ADMIN_CANCELLATION') return row;
-    return { ...row, reason: safePayoutReasonCode(row.reason) };
+    if (row.source === 'ADMIN_APPROVAL') {
+      return { ...row, reason: safePayoutReasonCode(row.reason, 'PAYOUT_APPROVE') };
+    }
+    if (row.source === 'ADMIN_CANCELLATION') {
+      return { ...row, reason: safePayoutReasonCode(row.reason, 'PAYOUT_CANCEL') };
+    }
+    return row;
   }) as AdminPayoutStatusHistory[];
 };
 

@@ -556,6 +556,36 @@ describe('Payout application services', () => {
     expect(detail).toEqual(listed);
   });
 
+  it('does not expose legacy free-form Admin decision reasons', async () => {
+    const studentId = await createStudent('be199-admin-legacy-reason');
+    const adminId = await createAdmin();
+    await creditEarnings(studentId, 10_000);
+    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const payout = await initiatePayout({
+      principalUserId: studentId,
+      quoteId: quote.id,
+      idempotency: { key: 'be199-admin-legacy-reason-submit-1' },
+    });
+    await db.insert(paymentPayoutStatusHistory).values({
+      payoutId: payout.id,
+      fromStatus: 'PENDING_ADMIN_APPROVAL',
+      toStatus: 'SUBMITTED_TO_PROVIDER',
+      actorAdminId: adminId,
+      source: 'ADMIN_APPROVAL',
+      reason: 'Approved because the old Admin UI allowed free-form text.',
+    });
+
+    const history = await listAdminPayoutStatusHistory(payout.id);
+
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: 'ADMIN_APPROVAL',
+        reason: null,
+      }),
+    ]));
+    expect(JSON.stringify(history)).not.toContain('old Admin UI');
+  });
+
   it('quotes, reserves Earnings Balance, and initiates one Payout', async () => {
     const studentId = await createStudent('be115-success');
     const adminId = await createAdmin();

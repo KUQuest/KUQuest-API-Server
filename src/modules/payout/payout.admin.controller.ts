@@ -36,6 +36,14 @@ const serializePayout = (payout: Awaited<ReturnType<typeof getAdminPayout>>) => 
 const serializeHistory = (history: Awaited<ReturnType<typeof listAdminPayoutStatusHistory>>) =>
   history.map((entry) => ({ ...entry, occurredAt: entry.occurredAt.toISOString() }));
 
+const setAdminActionStatus = (set: AdminContext['set'], code: string) => {
+  set.status = code === 'ADMIN_ACTION_ADMIN_NOT_FOUND'
+    ? 403
+    : ['ADMIN_ACTION_KEY_REUSED', 'ADMIN_ACTION_CONFLICT', 'ADMIN_ACTION_WRITE_FAILED'].includes(code)
+      ? 409
+      : 400;
+};
+
 const mapAdminError = (set: AdminContext['set'], error: unknown) => {
   if (error instanceof CursorInputError) {
     set.status = 400;
@@ -44,8 +52,7 @@ const mapAdminError = (set: AdminContext['set'], error: unknown) => {
   if (!(error instanceof Error) || !('code' in error)) throw error;
   const code = error.code as string;
   if (code === 'PAYOUT_NOT_FOUND') set.status = 404;
-  else if (code === 'ADMIN_ACTION_ADMIN_NOT_FOUND') set.status = 403;
-  else if (code.startsWith('ADMIN_ACTION_') && !['ADMIN_ACTION_KEY_REUSED', 'ADMIN_ACTION_CONFLICT', 'ADMIN_ACTION_WRITE_FAILED'].includes(code)) set.status = 400;
+  else if (code.startsWith('ADMIN_ACTION_')) setAdminActionStatus(set, code);
   else if (code === 'IDEMPOTENCY_UNAVAILABLE') set.status = 503;
   else set.status = 409;
   return apiError(code, error.message);
@@ -53,13 +60,7 @@ const mapAdminError = (set: AdminContext['set'], error: unknown) => {
 
 const mapAdminCommandError = (set: AdminContext['set'], error: unknown) => {
   if (error instanceof AdminActionError) {
-    if (error.code === 'ADMIN_ACTION_ADMIN_NOT_FOUND') set.status = 403;
-    else if (
-      error.code === 'ADMIN_ACTION_KEY_REUSED' ||
-      error.code === 'ADMIN_ACTION_CONFLICT' ||
-      error.code === 'ADMIN_ACTION_WRITE_FAILED'
-    ) set.status = 409;
-    else set.status = 400;
+    setAdminActionStatus(set, error.code);
     return apiError(error.code, error.message);
   }
   if (error instanceof MoneyDomainError) {
