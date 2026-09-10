@@ -405,6 +405,16 @@ _Avoid_: Cancelled Quest, treating failed work as a cancellation
 A change to Accepted Participant membership or terminal lifecycle state that changes Work Conversation membership or write access.
 _Avoid_: Chat event, message event
 
+**Quest Command**:
+One Quest API v2 write command, identified by the principal, the operation
+scope, and the Idempotency-Key the client sent, and holding the result the
+Server replays for a retry. A Quest Command that a business rule rejects keeps
+its recorded rejection, so the same Idempotency-Key always gives the same
+answer. Storage and scope are defined in
+`docs/adr/0029-quest-owns-its-command-records.md`.
+_Avoid_: Idempotency-Key (that is the client's header), command log, wallet
+idempotency key
+
 ## Consumers
 
 - **KUQuest Mobile** — Expo app, uses native Google Sign-In (not a webview redirect) to reach this API.
