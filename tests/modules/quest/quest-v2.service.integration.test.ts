@@ -1,11 +1,7 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import {
-  quest,
-  questConditionItem,
-  questImage,
-} from '@/database/schema/quest.schema';
+import { quest, questConditionItem, questImage } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
   walletFundingReservation,
@@ -51,7 +47,7 @@ const authTestApp = new Elysia({ name: 'quest-v2-test-auth' }).use(
     password: testPassword,
     firstName: 'Quest v2',
     lastName: 'Hirer',
-  }),
+  })
 );
 const noWalletAuth = createStudentAuth({
   basePath: '/api/staging/quest-v2-no-wallet-auth',
@@ -61,9 +57,7 @@ const noWalletAuth = createStudentAuth({
 });
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 let hirerId = '';
 let sessionCookie = '';
@@ -94,10 +88,9 @@ const fundHirer = async (amountSatang: number) => {
   const [spendingAccount] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
-    .where(and(
-      eq(walletLedgerAccount.walletId, wallet.id),
-      eq(walletLedgerAccount.type, 'SPENDING'),
-    ));
+    .where(
+      and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, 'SPENDING'))
+    );
   const [suspenseAccount] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
@@ -143,7 +136,10 @@ const readPublishCheckSnapshot = async (questId: string, userId: string) => {
   const ledger = await db
     .select({ id: walletLedgerTransaction.id })
     .from(walletLedgerTransaction)
-    .innerJoin(walletLedgerPosting, eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id))
+    .innerJoin(
+      walletLedgerPosting,
+      eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id)
+    )
     .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
     .where(eq(walletLedgerAccount.walletId, walletSnapshot.id));
 
@@ -165,28 +161,28 @@ const postQuest = (body: unknown, key = `quest-v2-http-${randomUUID()}`) =>
         cookie: sessionCookie,
       },
       body: JSON.stringify(body),
-    }),
+    })
   );
 
 const getQuest = (questId: string) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/${questId}`, {
       headers: { cookie: sessionCookie },
-    }),
+    })
   );
 
 const getPublishCheck = (questId: string, cookie = sessionCookie) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/${questId}/publish-check`, {
       headers: { cookie },
-    }),
+    })
   );
 
 const patchQuest = (
   questId: string,
   body: unknown,
   version: number | string | undefined,
-  key = `quest-v2-edit-${randomUUID()}`,
+  key = `quest-v2-edit-${randomUUID()}`
 ) => {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
@@ -200,7 +196,7 @@ const patchQuest = (
       method: 'PATCH',
       headers,
       body: JSON.stringify(body),
-    }),
+    })
   );
 };
 
@@ -211,7 +207,7 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: testEmail, password: testPassword }),
-    }),
+    })
   );
   if (loginResponse.status !== 200) {
     throw new Error(`Quest v2 test authentication failed: ${loginResponse.status}`);
@@ -232,10 +228,12 @@ beforeAll(async () => {
         firstName: 'No Wallet',
         lastName: 'Hirer',
       }),
-    }),
+    })
   );
   if (noWalletSignUpResponse.status !== 200) {
-    throw new Error(`Quest v2 no-Wallet test Member creation failed: ${noWalletSignUpResponse.status}`);
+    throw new Error(
+      `Quest v2 no-Wallet test Member creation failed: ${noWalletSignUpResponse.status}`
+    );
   }
 
   const noWalletLoginResponse = await noWalletAuth.handler(
@@ -243,10 +241,12 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: noWalletTestEmail, password: testPassword }),
-    }),
+    })
   );
   if (noWalletLoginResponse.status !== 200) {
-    throw new Error(`Quest v2 no-Wallet test authentication failed: ${noWalletLoginResponse.status}`);
+    throw new Error(
+      `Quest v2 no-Wallet test authentication failed: ${noWalletLoginResponse.status}`
+    );
   }
 
   const noWalletLoginBody = (await noWalletLoginResponse.json()) as { user: { id: string } };
@@ -264,15 +264,13 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.delete(walletIdempotencyKey).where(
-    eq(walletIdempotencyKey.principalUserId, hirerId),
-  );
-  await db.delete(walletIdempotencyKey).where(
-    eq(walletIdempotencyKey.principalUserId, otherMemberId),
-  );
-  await db.delete(walletIdempotencyKey).where(
-    eq(walletIdempotencyKey.principalUserId, noWalletMemberId),
-  );
+  await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.principalUserId, hirerId));
+  await db
+    .delete(walletIdempotencyKey)
+    .where(eq(walletIdempotencyKey.principalUserId, otherMemberId));
+  await db
+    .delete(walletIdempotencyKey)
+    .where(eq(walletIdempotencyKey.principalUserId, noWalletMemberId));
   await db
     .update(walletWallet)
     .set({ walletStatus: 'ACTIVE' })
@@ -284,15 +282,13 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  await db.delete(walletIdempotencyKey).where(
-    eq(walletIdempotencyKey.principalUserId, hirerId),
-  );
-  await db.delete(walletIdempotencyKey).where(
-    eq(walletIdempotencyKey.principalUserId, otherMemberId),
-  );
-  await db.delete(walletIdempotencyKey).where(
-    eq(walletIdempotencyKey.principalUserId, noWalletMemberId),
-  );
+  await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.principalUserId, hirerId));
+  await db
+    .delete(walletIdempotencyKey)
+    .where(eq(walletIdempotencyKey.principalUserId, otherMemberId));
+  await db
+    .delete(walletIdempotencyKey)
+    .where(eq(walletIdempotencyKey.principalUserId, noWalletMemberId));
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(tag).where(eq(tag.id, retryTagId));
@@ -335,7 +331,7 @@ describe('Quest API v2 persistence', () => {
     const changed = await createQuestV2(
       hirerId,
       { ...baseInput, title: 'Changed title' },
-      'v2-create-1',
+      'v2-create-1'
     );
     expect(changed).toEqual({ outcome: 'idempotency-key-reused' });
 
@@ -379,8 +375,8 @@ describe('Quest API v2 persistence', () => {
         and(
           eq(walletIdempotencyKey.principalUserId, hirerId),
           eq(walletIdempotencyKey.operationScope, questV2CreateOperationScope),
-          eq(walletIdempotencyKey.key, 'v2-create-1'),
-        ),
+          eq(walletIdempotencyKey.key, 'v2-create-1')
+        )
       );
     expect(storedIdempotency?.resultData).toMatchObject({ questFundingTotalSatang: 103 });
     expect(storedIdempotency?.resultData).not.toHaveProperty('questFundingTotal');
@@ -397,26 +393,31 @@ describe('Quest API v2 persistence', () => {
 
   it('rejects a v2 GROUP Quest with fewer than two Workers at persistence', async () => {
     const questId = randomUUID();
-    let databaseError: {
-      cause?: { code?: string; constraint_name?: string };
-    } | undefined;
+    let databaseError:
+      | {
+          cause?: { code?: string; constraint_name?: string };
+        }
+      | undefined;
 
     try {
-      await db.insert(quest).values({
-        id: questId,
-        hirerId,
-        apiVersion: 'v2',
-        title: 'Invalid GROUP headcount',
-        condition: 'Complete the work',
-        mode: 'NO_CANDIDATE',
-        participation: 'GROUP',
-        v2Mode: 'FIRST_COME_FIRST_SERVED',
-        v2Participation: 'GROUP',
-        questStatus: 'QUEST_DRAFT',
-        questFundingTotalSatang: 103,
-        headcount: 1,
-        startTime: new Date('2030-08-26T10:00:00.000Z'),
-      }).execute();
+      await db
+        .insert(quest)
+        .values({
+          id: questId,
+          hirerId,
+          apiVersion: 'v2',
+          title: 'Invalid GROUP headcount',
+          condition: 'Complete the work',
+          mode: 'NO_CANDIDATE',
+          participation: 'GROUP',
+          v2Mode: 'FIRST_COME_FIRST_SERVED',
+          v2Participation: 'GROUP',
+          questStatus: 'QUEST_DRAFT',
+          questFundingTotalSatang: 103,
+          headcount: 1,
+          startTime: new Date('2030-08-26T10:00:00.000Z'),
+        })
+        .execute();
     } catch (error) {
       databaseError = error as typeof databaseError;
     } finally {
@@ -436,7 +437,7 @@ describe('Quest API v2 persistence', () => {
     const result = await createQuestV2(
       hirerId,
       { ...baseInput, questFundingTotal: funding },
-      `v2-funding-${randomUUID()}`,
+      `v2-funding-${randomUUID()}`
     );
     if (!('quest' in result)) throw new Error(`Create failed: ${result.outcome}`);
     questIds.push(result.quest.id);
@@ -459,7 +460,7 @@ describe('Quest API v2 persistence', () => {
     const result = await createQuestV2(
       hirerId,
       { ...baseInput, questFundingTotal: 1.001 },
-      `v2-funding-precision-${randomUUID()}`,
+      `v2-funding-precision-${randomUUID()}`
     );
 
     expect(result).toEqual({ outcome: 'invalid-funding' });
@@ -473,7 +474,7 @@ describe('Quest API v2 persistence', () => {
     const result = await createQuestV2(
       hirerId,
       { ...baseInput, locations: [location] } as unknown as QuestV2CreateInput,
-      `v2-location-${randomUUID()}`,
+      `v2-location-${randomUUID()}`
     );
 
     expect(result).toEqual({ outcome: 'invalid-location' });
@@ -513,8 +514,8 @@ describe('Quest API v2 persistence', () => {
         and(
           eq(walletIdempotencyKey.principalUserId, hirerId),
           eq(walletIdempotencyKey.operationScope, questV2CreateOperationScope),
-          eq(walletIdempotencyKey.key, 'v2-http-create-1'),
-        ),
+          eq(walletIdempotencyKey.key, 'v2-http-create-1')
+        )
       );
     if (!storedIdempotency) throw new Error('Missing create idempotency record');
     if (
@@ -549,7 +550,7 @@ describe('Quest API v2 persistence', () => {
           tagId: null,
           locations: [],
         }),
-      }),
+      })
     );
     expect(replay.status).toBe(200);
     expect((await replay.json()).data).toEqual(created.data);
@@ -557,7 +558,7 @@ describe('Quest API v2 persistence', () => {
     const list = await app.handle(
       new Request('http://localhost/api/v2/quests/mine', {
         headers: { cookie: sessionCookie },
-      }),
+      })
     );
     expect(list.status).toBe(200);
     expect((await list.json()).data.items).toEqual([created.data]);
@@ -565,7 +566,7 @@ describe('Quest API v2 persistence', () => {
     const detail = await app.handle(
       new Request(`http://localhost/api/v2/quests/${created.data.id}`, {
         headers: { cookie: sessionCookie },
-      }),
+      })
     );
     expect(detail.status).toBe(200);
     const detailBody = (await detail.json()).data;
@@ -580,7 +581,7 @@ describe('Quest API v2 publish check', () => {
     const created = await createQuestV2(
       hirerId,
       { ...baseInput, locations: [] },
-      `v2-publish-check-read-${randomUUID()}`,
+      `v2-publish-check-read-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -589,7 +590,7 @@ describe('Quest API v2 publish check', () => {
       await db
         .select({ id: questImage.id })
         .from(questImage)
-        .where(eq(questImage.questId, created.quest.id)),
+        .where(eq(questImage.questId, created.quest.id))
     ).toEqual([]);
 
     const beforeSnapshot = await readPublishCheckSnapshot(created.quest.id, hirerId);
@@ -627,32 +628,38 @@ describe('Quest API v2 publish check', () => {
     const created = await createQuestV2(
       hirerId,
       { ...baseInput, tagId: null, dueAt: null, locations: [], questFundingTotal: 700000 },
-      `v2-publish-check-incomplete-${randomUUID()}`,
+      `v2-publish-check-incomplete-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
     await db.delete(questConditionItem).where(eq(questConditionItem.questId, created.quest.id));
 
     const result = await getQuestV2PublishCheck(hirerId, created.quest.id);
-    if (!result || 'outcome' in result) throw new Error('Publish check did not return a Draft check');
+    if (!result || 'outcome' in result)
+      throw new Error('Publish check did not return a Draft check');
     expect(result).toMatchObject({
       canPublish: false,
       warnings: [],
       questFundingTotalSatang: 70_000_000,
     });
-    expect(result.blockingReasons).toEqual(expect.arrayContaining([
-      { code: 'QUEST_TAG_REQUIRED', message: 'Quest requires a Tag' },
-      { code: 'QUEST_CONDITION_REQUIRED', message: 'Quest requires at least one Condition Item' },
-      { code: 'QUEST_DUE_AT_REQUIRED', message: 'Quest requires a dueAt' },
-      { code: 'INSUFFICIENT_SPENDING_BALANCE', message: 'Spending Balance is insufficient for Quest Escrow' },
-    ]));
+    expect(result.blockingReasons).toEqual(
+      expect.arrayContaining([
+        { code: 'QUEST_TAG_REQUIRED', message: 'Quest requires a Tag' },
+        { code: 'QUEST_CONDITION_REQUIRED', message: 'Quest requires at least one Condition Item' },
+        { code: 'QUEST_DUE_AT_REQUIRED', message: 'Quest requires a dueAt' },
+        {
+          code: 'INSUFFICIENT_SPENDING_BALANCE',
+          message: 'Spending Balance is insufficient for Quest Escrow',
+        },
+      ])
+    );
   });
 
   it('returns 404 for a non-owned Draft and 409 for a non-Draft Quest', async () => {
     const created = await createQuestV2(
       hirerId,
       baseInput,
-      `v2-publish-check-ownership-${randomUUID()}`,
+      `v2-publish-check-ownership-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -673,7 +680,7 @@ describe('Quest API v2 publish check', () => {
     const created = await createQuestV2(
       hirerId,
       { ...baseInput, locations: [] },
-      `v2-publish-check-http-${randomUUID()}`,
+      `v2-publish-check-http-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -707,7 +714,7 @@ describe('Quest API v2 publish check', () => {
     const created = await createQuestV2(
       noWalletMemberId,
       baseInput,
-      `v2-publish-check-missing-wallet-${randomUUID()}`,
+      `v2-publish-check-missing-wallet-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -783,36 +790,38 @@ describe('Quest API v2 publish check', () => {
     expect(checkBody.data.platformFeeSatang).toBeGreaterThanOrEqual(0);
     expect(checkBody.data.escrowRequirement).toBe(14_000_000);
     expect(checkBody.data.escrowRequirementSatang).toBe(1_400_000_000);
-    expect(checkBody.data.blockingReasons).toEqual(expect.arrayContaining([
-      { code: 'QUEST_TAG_REQUIRED', message: 'Quest requires a Tag' },
-      { code: 'QUEST_CONDITION_REQUIRED', message: 'Quest requires at least one Condition Item' },
-      { code: 'QUEST_DUE_AT_REQUIRED', message: 'Quest requires a dueAt' },
-      { code: 'QUEST_START_TIME_NOT_IN_FUTURE', message: 'Quest startTime must be in the future' },
-      {
-        code: 'QUEST_ESCROW_AMOUNT_OUT_OF_RANGE',
-        message: 'Quest Escrow amount is outside the active Money Policy limits',
-      },
-      {
-        code: 'INSUFFICIENT_SPENDING_BALANCE',
-        message: 'Spending Balance is insufficient for Quest Escrow',
-      },
-    ]));
+    expect(checkBody.data.blockingReasons).toEqual(
+      expect.arrayContaining([
+        { code: 'QUEST_TAG_REQUIRED', message: 'Quest requires a Tag' },
+        { code: 'QUEST_CONDITION_REQUIRED', message: 'Quest requires at least one Condition Item' },
+        { code: 'QUEST_DUE_AT_REQUIRED', message: 'Quest requires a dueAt' },
+        {
+          code: 'QUEST_START_TIME_NOT_IN_FUTURE',
+          message: 'Quest startTime must be in the future',
+        },
+        {
+          code: 'QUEST_ESCROW_AMOUNT_OUT_OF_RANGE',
+          message: 'Quest Escrow amount is outside the active Money Policy limits',
+        },
+        {
+          code: 'INSUFFICIENT_SPENDING_BALANCE',
+          message: 'Spending Balance is insufficient for Quest Escrow',
+        },
+      ])
+    );
   });
 
   it('returns the Server-time boundary blocker through HTTP', async () => {
     const created = await createQuestV2(
       hirerId,
       { ...baseInput, locations: [] },
-      `v2-publish-check-time-${randomUUID()}`,
+      `v2-publish-check-time-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
 
     const startTime = new Date();
-    await db
-      .update(quest)
-      .set({ startTime })
-      .where(eq(quest.id, created.quest.id));
+    await db.update(quest).set({ startTime }).where(eq(quest.id, created.quest.id));
 
     const response = await getPublishCheck(created.quest.id);
     expect(response.status).toBe(200);
@@ -833,15 +842,12 @@ describe('Quest API v2 publish check', () => {
       const created = await createQuestV2(
         hirerId,
         { ...baseInput, locations: [] },
-        `v2-publish-check-wallet-status-${randomUUID()}`,
+        `v2-publish-check-wallet-status-${randomUUID()}`
       );
       if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
       questIds.push(created.quest.id);
 
-      await db
-        .update(walletWallet)
-        .set({ walletStatus })
-        .where(eq(walletWallet.userId, hirerId));
+      await db.update(walletWallet).set({ walletStatus }).where(eq(walletWallet.userId, hirerId));
       const [beforeWallet] = await db
         .select({
           spendingBalanceSatang: walletWallet.spendingBalanceSatang,
@@ -880,7 +886,7 @@ describe('Quest API v2 publish check', () => {
           .set({ walletStatus: 'ACTIVE' })
           .where(eq(walletWallet.userId, hirerId));
       }
-    },
+    }
   );
 
   it('maps missing, non-owned, and non-Draft Quests at the HTTP boundary', async () => {
@@ -895,7 +901,7 @@ describe('Quest API v2 publish check', () => {
     const other = await createQuestV2(
       otherMemberId,
       baseInput,
-      `v2-publish-check-http-owner-${randomUUID()}`,
+      `v2-publish-check-http-owner-${randomUUID()}`
     );
     if (!('quest' in other)) throw new Error(`Create failed: ${other.outcome}`);
     questIds.push(other.quest.id);
@@ -906,7 +912,7 @@ describe('Quest API v2 publish check', () => {
     const owned = await createQuestV2(
       hirerId,
       baseInput,
-      `v2-publish-check-http-state-${randomUUID()}`,
+      `v2-publish-check-http-state-${randomUUID()}`
     );
     if (!('quest' in owned)) throw new Error(`Create failed: ${owned.outcome}`);
     questIds.push(owned.quest.id);
@@ -926,11 +932,7 @@ describe('Quest API v2 publish check', () => {
 
 describe('Quest API v2 Draft editing', () => {
   it('edits an owned Draft and replaces its collections atomically', async () => {
-    const created = await createQuestV2(
-      hirerId,
-      baseInput,
-      `v2-edit-create-${randomUUID()}`,
-    );
+    const created = await createQuestV2(hirerId, baseInput, `v2-edit-create-${randomUUID()}`);
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
 
@@ -942,7 +944,7 @@ describe('Quest API v2 Draft editing', () => {
         condition: { items: ['Only the final PDF', 'Include the source file'] },
         locations: [],
       },
-      1,
+      1
     );
 
     expect(response.status).toBe(200);
@@ -981,7 +983,7 @@ describe('Quest API v2 Draft editing', () => {
       const created = await createQuestV2(
         hirerId,
         { ...baseInput, mode, participation: 'GROUP', headcount: 2 },
-        `v2-edit-group-headcount-create-${mode}-${randomUUID()}`,
+        `v2-edit-group-headcount-create-${mode}-${randomUUID()}`
       );
       if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
       questIds.push(created.quest.id);
@@ -990,7 +992,7 @@ describe('Quest API v2 Draft editing', () => {
         created.quest.id,
         { headcount: 1 },
         1,
-        `v2-edit-group-headcount-${mode}-${randomUUID()}`,
+        `v2-edit-group-headcount-${mode}-${randomUUID()}`
       );
 
       expect(response.status).toBe(400);
@@ -1005,15 +1007,11 @@ describe('Quest API v2 Draft editing', () => {
 
       const detail = await getQuestV2Detail(hirerId, created.quest.id);
       expect(detail?.headcount).toBe(2);
-    },
+    }
   );
 
   it('accepts Bangkok schedule times in a Draft edit and returns canonical precision', async () => {
-    const created = await createQuestV2(
-      hirerId,
-      baseInput,
-      `v2-edit-time-create-${randomUUID()}`,
-    );
+    const created = await createQuestV2(hirerId, baseInput, `v2-edit-time-create-${randomUUID()}`);
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
 
@@ -1024,7 +1022,7 @@ describe('Quest API v2 Draft editing', () => {
         dueAt: '2030-08-26T13:00:00.1+07:00',
       },
       1,
-      `v2-edit-time-${randomUUID()}`,
+      `v2-edit-time-${randomUUID()}`
     );
 
     expect(response.status).toBe(200);
@@ -1057,7 +1055,7 @@ describe('Quest API v2 Draft editing', () => {
     const created = await createQuestV2(
       hirerId,
       baseInput,
-      `v2-edit-invalid-time-create-${randomUUID()}`,
+      `v2-edit-invalid-time-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -1066,16 +1064,14 @@ describe('Quest API v2 Draft editing', () => {
       created.quest.id,
       body,
       1,
-      `v2-edit-invalid-time-${randomUUID()}`,
+      `v2-edit-invalid-time-${randomUUID()}`
     );
 
     expect(response.status).toBe(400);
     expect((await response.json()).error.code).toBe('INVALID_QUEST_DATES');
     const detail = await getQuestV2Detail(hirerId, created.quest.id);
     expect(detail?.[field]).toBe(
-      field === 'startTime'
-        ? '2030-08-26T10:00:00.000+07:00'
-        : '2030-08-26T12:00:00.000+07:00',
+      field === 'startTime' ? '2030-08-26T10:00:00.000+07:00' : '2030-08-26T12:00:00.000+07:00'
     );
   });
 
@@ -1083,7 +1079,7 @@ describe('Quest API v2 Draft editing', () => {
     const created = await createQuestV2(
       hirerId,
       baseInput,
-      `v2-edit-conflict-create-${randomUUID()}`,
+      `v2-edit-conflict-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -1092,7 +1088,7 @@ describe('Quest API v2 Draft editing', () => {
       created.quest.id,
       { title: 'Current title' },
       1,
-      `v2-edit-current-${randomUUID()}`,
+      `v2-edit-current-${randomUUID()}`
     );
     expect(current.status).toBe(200);
     const currentBody = await current.json();
@@ -1105,7 +1101,7 @@ describe('Quest API v2 Draft editing', () => {
         locations: [],
       },
       1,
-      `v2-edit-stale-${randomUUID()}`,
+      `v2-edit-stale-${randomUUID()}`
     );
     expect(stale.status).toBe(409);
     expect(await stale.json()).toEqual({
@@ -1126,7 +1122,7 @@ describe('Quest API v2 Draft editing', () => {
     const created = await createQuestV2(
       hirerId,
       baseInput,
-      `v2-edit-concurrent-create-${randomUUID()}`,
+      `v2-edit-concurrent-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -1136,21 +1132,20 @@ describe('Quest API v2 Draft editing', () => {
         created.quest.id,
         { title: 'First concurrent title' },
         1,
-        `v2-edit-concurrent-a-${randomUUID()}`,
+        `v2-edit-concurrent-a-${randomUUID()}`
       ),
       patchQuest(
         created.quest.id,
         { title: 'Second concurrent title' },
         1,
-        `v2-edit-concurrent-b-${randomUUID()}`,
+        `v2-edit-concurrent-b-${randomUUID()}`
       ),
     ]);
     expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
 
     const bodies = await Promise.all(responses.map((response) => response.json()));
     const conflict = bodies.find((body) => body.success === false) as
-      | { success: false; error: { code: string } }
-      | undefined;
+      { success: false; error: { code: string } } | undefined;
     expect(conflict?.error.code).toBe('QUEST_EDIT_CONFLICT');
 
     const detail = await getQuestV2Detail(hirerId, created.quest.id);
@@ -1163,7 +1158,7 @@ describe('Quest API v2 Draft editing', () => {
     const created = await createQuestV2(
       hirerId,
       baseInput,
-      `v2-edit-rollback-create-${randomUUID()}`,
+      `v2-edit-rollback-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -1183,7 +1178,7 @@ describe('Quest API v2 Draft editing', () => {
         locations: [],
       },
       maximumIntegerVersion,
-      `v2-edit-rollback-${randomUUID()}`,
+      `v2-edit-rollback-${randomUUID()}`
     );
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({
@@ -1195,11 +1190,7 @@ describe('Quest API v2 Draft editing', () => {
   });
 
   it('allows the same idempotency key to retry after a transaction rollback', async () => {
-    const created = await createQuestV2(
-      hirerId,
-      baseInput,
-      `v2-edit-retry-create-${randomUUID()}`,
-    );
+    const created = await createQuestV2(hirerId, baseInput, `v2-edit-retry-create-${randomUUID()}`);
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
 
@@ -1219,8 +1210,8 @@ describe('Quest API v2 Draft editing', () => {
         and(
           eq(walletIdempotencyKey.principalUserId, hirerId),
           eq(walletIdempotencyKey.operationScope, questV2EditOperationScope),
-          eq(walletIdempotencyKey.key, key),
-        ),
+          eq(walletIdempotencyKey.key, key)
+        )
       );
     expect(rolledBackIdempotency).toBeUndefined();
 
@@ -1237,7 +1228,7 @@ describe('Quest API v2 Draft editing', () => {
     const created = await createQuestV2(
       hirerId,
       baseInput,
-      `v2-edit-idempotency-create-${randomUUID()}`,
+      `v2-edit-idempotency-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -1255,8 +1246,8 @@ describe('Quest API v2 Draft editing', () => {
         and(
           eq(walletIdempotencyKey.principalUserId, hirerId),
           eq(walletIdempotencyKey.operationScope, questV2EditOperationScope),
-          eq(walletIdempotencyKey.key, key),
-        ),
+          eq(walletIdempotencyKey.key, key)
+        )
       );
     if (!storedIdempotency) throw new Error('Missing edit idempotency record');
     if (
@@ -1281,7 +1272,7 @@ describe('Quest API v2 Draft editing', () => {
       created.quest.id,
       { title: 'Later title' },
       2,
-      `v2-edit-later-${randomUUID()}`,
+      `v2-edit-later-${randomUUID()}`
     );
     expect(later.status).toBe(200);
 
@@ -1304,7 +1295,7 @@ describe('Quest API v2 Draft editing', () => {
     const created = await createQuestV2(
       hirerId,
       baseInput,
-      `v2-edit-version-create-${randomUUID()}`,
+      `v2-edit-version-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -1313,7 +1304,7 @@ describe('Quest API v2 Draft editing', () => {
       created.quest.id,
       { title: 'Missing version' },
       undefined,
-      `v2-edit-missing-version-${randomUUID()}`,
+      `v2-edit-missing-version-${randomUUID()}`
     );
     expect(missing.status).toBe(400);
     expect((await missing.json()).error.code).toBe('VALIDATION');
@@ -1322,7 +1313,7 @@ describe('Quest API v2 Draft editing', () => {
       created.quest.id,
       { title: 'Malformed version' },
       'not-a-version',
-      `v2-edit-malformed-version-${randomUUID()}`,
+      `v2-edit-malformed-version-${randomUUID()}`
     );
     expect(malformed.status).toBe(400);
     expect((await malformed.json()).error).toEqual({
@@ -1330,29 +1321,20 @@ describe('Quest API v2 Draft editing', () => {
       message: 'If-Match must be a positive integer',
     });
 
-    const empty = await patchQuest(
-      created.quest.id,
-      {},
-      1,
-      `v2-edit-empty-${randomUUID()}`,
-    );
+    const empty = await patchQuest(created.quest.id, {}, 1, `v2-edit-empty-${randomUUID()}`);
     expect(empty.status).toBe(400);
     expect((await empty.json()).error.code).toBe('VALIDATION');
   });
 
   it('allows only the owning Hirer to edit a Draft and rejects non-Draft State', async () => {
-    const created = await createQuestV2(
-      hirerId,
-      baseInput,
-      `v2-edit-owner-create-${randomUUID()}`,
-    );
+    const created = await createQuestV2(hirerId, baseInput, `v2-edit-owner-create-${randomUUID()}`);
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
 
     const otherOwner = await createQuestV2(
       otherMemberId,
       { ...baseInput, title: 'Other Hirer Draft' },
-      `v2-edit-other-owner-${randomUUID()}`,
+      `v2-edit-other-owner-${randomUUID()}`
     );
     if (!('quest' in otherOwner)) throw new Error(`Create failed: ${otherOwner.outcome}`);
     questIds.push(otherOwner.quest.id);
@@ -1361,7 +1343,7 @@ describe('Quest API v2 Draft editing', () => {
       otherOwner.quest.id,
       { title: 'Not allowed' },
       1,
-      `v2-edit-not-owned-${randomUUID()}`,
+      `v2-edit-not-owned-${randomUUID()}`
     );
     expect(notOwned.status).toBe(404);
     expect(await notOwned.json()).toEqual({
@@ -1378,7 +1360,7 @@ describe('Quest API v2 Draft editing', () => {
       created.quest.id,
       { title: 'Closed for editing' },
       1,
-      `v2-edit-not-draft-${randomUUID()}`,
+      `v2-edit-not-draft-${randomUUID()}`
     );
     expect(notDraft.status).toBe(409);
     expect(await notDraft.json()).toEqual({
@@ -1398,16 +1380,8 @@ const invalidHttpInputs: Array<[string, Record<string, unknown>, string]> = [
     { startTime: '2030-02-31T10:00:00.000+07:00' },
     'INVALID_QUEST_DATES',
   ],
-  [
-    'invalid calendar dueAt',
-    { dueAt: '2030-09-31T12:00:00.000+07:00' },
-    'INVALID_QUEST_DATES',
-  ],
-  [
-    'dueAt before startTime',
-    { dueAt: '2030-08-26T09:00:00.000+07:00' },
-    'INVALID_QUEST_DATES',
-  ],
+  ['invalid calendar dueAt', { dueAt: '2030-09-31T12:00:00.000+07:00' }, 'INVALID_QUEST_DATES'],
+  ['dueAt before startTime', { dueAt: '2030-08-26T09:00:00.000+07:00' }, 'INVALID_QUEST_DATES'],
   ['funding with more than two decimals', { questFundingTotal: 1.001 }, 'VALIDATION'],
   ['headcount over maximum', { headcount: 21 }, 'VALIDATION'],
   ['SINGLE participation with multiple Workers', { headcount: 2 }, 'INVALID_HEADCOUNT'],
@@ -1435,24 +1409,27 @@ describe('Quest API v2 HTTP validation and ownership', () => {
             'SINGLE participation requires headcount 1 and GROUP participation requires headcount 2 to 20',
         },
       });
-    },
+    }
   );
 
-  it.each(invalidHttpInputs)('rejects %s with the shared error envelope', async (_, changes, code) => {
-    const response = await postQuest({ ...baseInput, ...changes });
-    const body = (await response.json()) as {
-      success: boolean;
-      data?: { id: string };
-      error?: { code: string; message: string };
-    };
-    if (response.status === 200 && body.data) questIds.push(body.data.id);
+  it.each(invalidHttpInputs)(
+    'rejects %s with the shared error envelope',
+    async (_, changes, code) => {
+      const response = await postQuest({ ...baseInput, ...changes });
+      const body = (await response.json()) as {
+        success: boolean;
+        data?: { id: string };
+        error?: { code: string; message: string };
+      };
+      if (response.status === 200 && body.data) questIds.push(body.data.id);
 
-    expect(response.status).toBe(400);
-    expect(body).toEqual({
-      success: false,
-      error: { code, message: expect.any(String) },
-    });
-  });
+      expect(response.status).toBe(400);
+      expect(body).toEqual({
+        success: false,
+        error: { code, message: expect.any(String) },
+      });
+    }
+  );
 
   it('accepts exact two-decimal funding at the HTTP boundary', async () => {
     const response = await postQuest({
@@ -1505,7 +1482,7 @@ describe('Quest API v2 HTTP validation and ownership', () => {
     const mine = await app.handle(
       new Request('http://localhost/api/v2/quests/mine', {
         headers: { cookie: sessionCookie },
-      }),
+      })
     );
     expect(mine.status).toBe(200);
     expect((await mine.json()).data.items).toContainEqual(body.data);
@@ -1554,7 +1531,7 @@ describe('Quest API v2 HTTP validation and ownership', () => {
     const created = await createQuestV2(
       otherMemberId,
       { ...baseInput, title: 'Other Hirer Quest' },
-      `v2-other-owned-${randomUUID()}`,
+      `v2-other-owned-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);

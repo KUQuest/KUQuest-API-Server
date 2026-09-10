@@ -37,8 +37,8 @@ export const questAssignmentV2Route = new Elysia({
     response: responses(questV2AssignmentListResponseSchema, 401, 500),
     detail: {
       tags: ['Quest Assignments v2'],
-      summary: 'List the authenticated Worker\'s v2 Assignments',
-      description: 'Returns the authenticated Worker\'s active Assignments from v2 Quests.',
+      summary: "List the authenticated Worker's v2 Assignments",
+      description: "Returns the authenticated Worker's active Assignments from v2 Quests.",
       operationId: 'listMyQuestAssignmentsV2',
       security: betterAuthSecurity,
     },
@@ -49,7 +49,8 @@ export const questAssignmentV2Route = new Elysia({
     detail: {
       tags: ['Quest Assignments v2'],
       summary: 'List permitted v2 Quest Assignments',
-      description: 'The owning Hirer can read all active Assignments. An active Worker can read only that Worker\'s Assignment.',
+      description:
+        "The owning Hirer can read all active Assignments. An active Worker can read only that Worker's Assignment.",
       operationId: 'listQuestAssignmentsV2',
       security: betterAuthSecurity,
     },
@@ -61,7 +62,8 @@ export const questAssignmentV2Route = new Elysia({
     detail: {
       tags: ['Quest Assignments v2'],
       summary: 'Join an open v2 FCFS Quest',
-      description: 'Creates an active Assignment for an eligible Worker. A GROUP Quest remains open until its published headcount is full.',
+      description:
+        'Creates an active Assignment for an eligible Worker. A GROUP Quest remains open until its published headcount is full.',
       operationId: 'joinQuestV2',
       security: betterAuthSecurity,
     },
@@ -72,7 +74,8 @@ export const questAssignmentV2Route = new Elysia({
     detail: {
       tags: ['Quests v2'],
       summary: 'Get an underfilled GROUP + FCFS Quest process',
-      description: 'Returns the Hirer decision or Active Worker consent window for an underfilled Quest.',
+      description:
+        'Returns the Hirer decision or Active Worker consent window for an underfilled Quest.',
       operationId: 'getQuestUnderfilledV2',
       security: betterAuthSecurity,
     },
@@ -85,7 +88,8 @@ export const questAssignmentV2Route = new Elysia({
     detail: {
       tags: ['Quests v2'],
       summary: 'Choose an underfilled Quest decision',
-      description: 'The owning Hirer chooses PROCEED or CANCEL during the ten-minute decision window.',
+      description:
+        'The owning Hirer chooses PROCEED or CANCEL during the ten-minute decision window.',
       operationId: 'decideQuestUnderfilledV2',
       security: betterAuthSecurity,
     },
@@ -98,7 +102,8 @@ export const questAssignmentV2Route = new Elysia({
     detail: {
       tags: ['Quests v2'],
       summary: 'Respond to an underfilled Quest consent request',
-      description: 'An Active Worker accepts or declines the revised Quest Reward during the ten-minute consent window.',
+      description:
+        'An Active Worker accepts or declines the revised Quest Reward during the ten-minute consent window.',
       operationId: 'respondToQuestUnderfilledV2',
       security: betterAuthSecurity,
     },

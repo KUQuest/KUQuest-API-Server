@@ -42,7 +42,17 @@ import {
 import { randomUUID } from 'node:crypto';
 
 import { and, eq, inArray } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test';
 
 const hirer = {
   id: randomUUID(),
@@ -77,35 +87,43 @@ let postgresAvailable = false;
 const successfulWriter = {
   applyQuestTransition: async (
     _transaction: QuestTransaction,
-    _transition: QuestWorkChatMembershipTransition,
+    _transition: QuestWorkChatMembershipTransition
   ) => ({ conversationId: 'underfilled-test-conversation', outcome: 'APPLIED' as const }),
 };
 
-const authenticate = () => spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => {
-  const memberId = headers.get('x-member-id') ?? workers[0].id;
-  const member = [hirer, ...workers].find(({ id }) => id === memberId) ?? workers[0];
-  return { user: member, session: { userId: member.id } } as never;
-}) as never);
+const authenticate = () =>
+  spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => {
+    const memberId = headers.get('x-member-id') ?? workers[0].id;
+    const member = [hirer, ...workers].find(({ id }) => id === memberId) ?? workers[0];
+    return { user: member, session: { userId: member.id } } as never;
+  }) as never);
 
 const request = (
   path: string,
   method: 'GET' | 'POST',
   memberId: string,
   body?: unknown,
-  headers: HeadersInit = {},
-) => app.handle(new Request(`http://localhost${path}`, {
-  method,
-  headers: {
-    ...headers,
-    'x-member-id': memberId,
-    ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-  },
-  body: body === undefined ? undefined : JSON.stringify(body),
-}));
+  headers: HeadersInit = {}
+) =>
+  app.handle(
+    new Request(`http://localhost${path}`, {
+      method,
+      headers: {
+        ...headers,
+        'x-member-id': memberId,
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  );
 
 const account = async (userId: string, type: 'SPENDING' | 'FUNDING_RESERVED') => {
-  const [wallet] = await db.select({ id: walletWallet.id }).from(walletWallet).where(eq(walletWallet.userId, userId));
-  const [row] = await db.select({ id: walletLedgerAccount.id })
+  const [wallet] = await db
+    .select({ id: walletWallet.id })
+    .from(walletWallet)
+    .where(eq(walletWallet.userId, userId));
+  const [row] = await db
+    .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
     .where(and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, type)));
   return row.id;
@@ -113,7 +131,8 @@ const account = async (userId: string, type: 'SPENDING' | 'FUNDING_RESERVED') =>
 
 const fundHirer = async (amountSatang: number) => {
   const spending = await account(hirer.id, 'SPENDING');
-  const [suspense] = await db.select({ id: walletLedgerAccount.id })
+  const [suspense] = await db
+    .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
     .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
   await createSealedLedgerTransaction({
@@ -129,7 +148,7 @@ const fundHirer = async (amountSatang: number) => {
 const hashRequest = async (value: object) => {
   const digest = await crypto.subtle.digest(
     'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value)),
+    new TextEncoder().encode(JSON.stringify(value))
   );
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
@@ -137,7 +156,7 @@ const hashRequest = async (value: object) => {
 const createQuest = async (
   workerIds: string[],
   reserve = false,
-  startTime = new Date(Date.now() - 1_000),
+  startTime = new Date(Date.now() - 1_000)
 ) => {
   const now = new Date();
   const questId = randomUUID();
@@ -161,27 +180,32 @@ const createQuest = async (
     startTime,
     dueAt: new Date(now.getTime() + 60 * 60 * 1_000),
   });
-  await db.insert(questAssignment).values(workerIds.map((workerId, index) => ({
-    questId,
-    workerId,
-    assignmentStatus: 'ASSIGNMENT_ACTIVE',
-    createdAt: new Date(now.getTime() - 10_000 + index),
-  })));
+  await db.insert(questAssignment).values(
+    workerIds.map((workerId, index) => ({
+      questId,
+      workerId,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+      createdAt: new Date(now.getTime() - 10_000 + index),
+    }))
+  );
   if (reserve) {
-    await db.transaction((transaction) => reserveSpending(transaction, {
-      ownerUserId: hirer.id,
-      callerScope: 'quest',
-      callerReference: questId,
-      amountSatang: positiveSatang(16_000),
-    }));
+    await db.transaction((transaction) =>
+      reserveSpending(transaction, {
+        ownerUserId: hirer.id,
+        callerScope: 'quest',
+        callerReference: questId,
+        amountSatang: positiveSatang(16_000),
+      })
+    );
   }
   return questId;
 };
 
-const detect = (now: Date) => runQuestLifecycleWorker({
-  clock: { now: () => now },
-  autoApprove: async () => [],
-});
+const detect = (now: Date) =>
+  runQuestLifecycleWorker({
+    clock: { now: () => now },
+    autoApprove: async () => [],
+  });
 
 beforeAll(async () => {
   try {
@@ -209,25 +233,41 @@ afterEach(async () => {
   mock.restore();
   if (!postgresAvailable) return;
   if (questIds.length > 0) {
-    const conversations = await db.select({ id: chatConversation.id })
+    const conversations = await db
+      .select({ id: chatConversation.id })
       .from(chatConversation)
       .where(inArray(chatConversation.questId, questIds));
     const conversationIds = conversations.map(({ id }) => id);
     await db.transaction(async (transaction) => {
-      await transaction.delete(chatTransitionCommand).where(inArray(chatTransitionCommand.questId, questIds));
+      await transaction
+        .delete(chatTransitionCommand)
+        .where(inArray(chatTransitionCommand.questId, questIds));
       if (conversationIds.length > 0) {
-        await transaction.delete(chatReadCursor).where(inArray(chatReadCursor.conversationId, conversationIds));
-        const messages = await transaction.select({ id: chatMessage.id })
+        await transaction
+          .delete(chatReadCursor)
+          .where(inArray(chatReadCursor.conversationId, conversationIds));
+        const messages = await transaction
+          .select({ id: chatMessage.id })
           .from(chatMessage)
           .where(inArray(chatMessage.conversationId, conversationIds));
         const messageIds = messages.map(({ id }) => id);
         if (messageIds.length > 0) {
-          await transaction.delete(chatMessageAttachment).where(inArray(chatMessageAttachment.messageId, messageIds));
+          await transaction
+            .delete(chatMessageAttachment)
+            .where(inArray(chatMessageAttachment.messageId, messageIds));
         }
-        await transaction.delete(chatMessage).where(inArray(chatMessage.conversationId, conversationIds));
-        await transaction.delete(chatAttachment).where(inArray(chatAttachment.conversationId, conversationIds));
-        await transaction.delete(chatMembership).where(inArray(chatMembership.conversationId, conversationIds));
-        await transaction.delete(chatConversation).where(inArray(chatConversation.id, conversationIds));
+        await transaction
+          .delete(chatMessage)
+          .where(inArray(chatMessage.conversationId, conversationIds));
+        await transaction
+          .delete(chatAttachment)
+          .where(inArray(chatAttachment.conversationId, conversationIds));
+        await transaction
+          .delete(chatMembership)
+          .where(inArray(chatMembership.conversationId, conversationIds));
+        await transaction
+          .delete(chatConversation)
+          .where(inArray(chatConversation.id, conversationIds));
       }
     });
     await db.delete(quest).where(inArray(quest.id, questIds));
@@ -245,21 +285,35 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
     if (!postgresAvailable) return;
     const questId = await createQuest([workers[0].id]);
 
-    const unrelatedGet = await request(`/api/v2/quests/${questId}/underfilled`, 'GET', workers[1].id);
+    const unrelatedGet = await request(
+      `/api/v2/quests/${questId}/underfilled`,
+      'GET',
+      workers[1].id
+    );
     expect(unrelatedGet.status).toBe(404);
     expect((await unrelatedGet.json()).error.code).toBe('QUEST_UNDERFILLED_NOT_FOUND');
-    expect(await db.select().from(questV2UnderfilledDecision).where(eq(questV2UnderfilledDecision.questId, questId))).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(questV2UnderfilledDecision)
+        .where(eq(questV2UnderfilledDecision.questId, questId))
+    ).toHaveLength(0);
 
     const unrelatedConsent = await request(
       `/api/v2/quests/${questId}/underfilled/consent`,
       'POST',
       workers[1].id,
       { decision: 'ACCEPT' },
-      { 'idempotency-key': 'underfilled-unrelated-consent' },
+      { 'idempotency-key': 'underfilled-unrelated-consent' }
     );
     expect(unrelatedConsent.status).toBe(404);
     expect((await unrelatedConsent.json()).error.code).toBe('QUEST_UNDERFILLED_NOT_FOUND');
-    expect(await db.select().from(questV2UnderfilledDecision).where(eq(questV2UnderfilledDecision.questId, questId))).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(questV2UnderfilledDecision)
+        .where(eq(questV2UnderfilledDecision.questId, questId))
+    ).toHaveLength(0);
   });
 
   it('opens the decision window at startTime and keeps the Quest OPEN', async () => {
@@ -288,11 +342,14 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       'POST',
       workers[1].id,
       undefined,
-      { 'idempotency-key': 'underfilled-late-join' },
+      { 'idempotency-key': 'underfilled-late-join' }
     );
     expect(lateJoin.status).toBe(409);
     expect((await lateJoin.json()).error.code).toBe('QUEST_ROSTER_FROZEN');
-    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status).toBe('QUEST_OPEN');
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_OPEN');
   });
 
   it('does not reopen an expired decision window when lifecycle detection is late', async () => {
@@ -301,13 +358,16 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
     const questId = await createQuest(
       [workers[0].id],
       true,
-      new Date(now.getTime() - 11 * 60 * 1_000),
+      new Date(now.getTime() - 11 * 60 * 1_000)
     );
 
     const result = await detect(now);
     expect(result.autoCancelledQuestIds).toContain(questId);
     expect(result.underfilledQuestIds).not.toContain(questId);
-    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status).toBe('QUEST_CANCELLED');
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_CANCELLED');
   });
 
   it('lets the Hirer proceed, exposes the exact revised Reward, and replays the decision command', async () => {
@@ -320,7 +380,7 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       'POST',
       hirer.id,
       { decision: 'PROCEED' },
-      { 'idempotency-key': 'underfilled-proceed' },
+      { 'idempotency-key': 'underfilled-proceed' }
     );
     expect(first.status).toBe(200);
     const firstBody = await first.json();
@@ -343,7 +403,7 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       'POST',
       hirer.id,
       { decision: 'PROCEED' },
-      { 'idempotency-key': 'underfilled-proceed' },
+      { 'idempotency-key': 'underfilled-proceed' }
     );
     expect(replay.status).toBe(200);
     expect((await replay.json()).data).toEqual(firstBody.data);
@@ -353,7 +413,7 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       'POST',
       hirer.id,
       { decision: 'CANCEL' },
-      { 'idempotency-key': 'underfilled-proceed' },
+      { 'idempotency-key': 'underfilled-proceed' }
     );
     expect(changed.status).toBe(409);
     expect((await changed.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
@@ -368,16 +428,22 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       'POST',
       hirer.id,
       { decision: 'PROCEED' },
-      { 'idempotency-key': 'underfilled-all-proceed' },
+      { 'idempotency-key': 'underfilled-all-proceed' }
     );
 
-    const [first, second] = await Promise.all(workers.slice(0, 2).map((worker, index) => request(
-      `/api/v2/quests/${questId}/underfilled/consent`,
-      'POST',
-      worker.id,
-      { decision: 'ACCEPT' },
-      { 'idempotency-key': `underfilled-consent-${index}` },
-    )));
+    const [first, second] = await Promise.all(
+      workers
+        .slice(0, 2)
+        .map((worker, index) =>
+          request(
+            `/api/v2/quests/${questId}/underfilled/consent`,
+            'POST',
+            worker.id,
+            { decision: 'ACCEPT' },
+            { 'idempotency-key': `underfilled-consent-${index}` }
+          )
+        )
+    );
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     const final = await request(`/api/v2/quests/${questId}/underfilled`, 'GET', hirer.id);
@@ -388,13 +454,20 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       questState: 'QUEST_ASSIGNED',
       consent: { acceptedCount: 2, pendingCount: 0 },
     });
-    expect(await db.select({ rewardSatang: questV2UnderfilledConsent.rewardSatang })
-      .from(questV2UnderfilledConsent)
-      .where(eq(questV2UnderfilledConsent.questId, questId))).toEqual([
-      { rewardSatang: 2_000 },
-      { rewardSatang: 2_000 },
-    ]);
-    expect((await db.select({ headcount: quest.headcount, state: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]).toEqual({
+    expect(
+      await db
+        .select({ rewardSatang: questV2UnderfilledConsent.rewardSatang })
+        .from(questV2UnderfilledConsent)
+        .where(eq(questV2UnderfilledConsent.questId, questId))
+    ).toEqual([{ rewardSatang: 2_000 }, { rewardSatang: 2_000 }]);
+    expect(
+      (
+        await db
+          .select({ headcount: quest.headcount, state: quest.questStatus })
+          .from(quest)
+          .where(eq(quest.id, questId))
+      )[0]
+    ).toEqual({
       headcount: 4,
       state: 'QUEST_ASSIGNED',
     });
@@ -404,7 +477,7 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       'POST',
       workers[0].id,
       { decision: 'DECLINE' },
-      { 'idempotency-key': 'underfilled-consent-0' },
+      { 'idempotency-key': 'underfilled-consent-0' }
     );
     expect(changedConsent.status).toBe(409);
     expect((await changedConsent.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
@@ -412,16 +485,18 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
     const afterConsentWindow = await getQuestV2Underfilled(
       hirer.id,
       questId,
-      new Date(Date.now() + 10 * 60 * 1_000 + 1),
+      new Date(Date.now() + 10 * 60 * 1_000 + 1)
     );
-    expect('underfilled' in afterConsentWindow && afterConsentWindow.underfilled.state).toBe('UNDERFILLED_COMPLETED');
+    expect('underfilled' in afterConsentWindow && afterConsentWindow.underfilled.state).toBe(
+      'UNDERFILLED_COMPLETED'
+    );
 
     const lateJoin = await request(
       `/api/v2/quests/${questId}/join`,
       'POST',
       workers[2].id,
       undefined,
-      { 'idempotency-key': 'underfilled-after-consent' },
+      { 'idempotency-key': 'underfilled-after-consent' }
     );
     expect(lateJoin.status).toBe(409);
   });
@@ -430,12 +505,9 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
     if (!postgresAvailable) return;
     configureQuestWorkChatMembershipWriter(createWorkChatMembershipWriter());
     const questId = await createQuest([workers[0].id, workers[1].id]);
-    const opened = await request(
-      '/api/v1/chat/candidate-inquiries',
-      'POST',
-      workers[2].id,
-      { questId },
-    );
+    const opened = await request('/api/v1/chat/candidate-inquiries', 'POST', workers[2].id, {
+      questId,
+    });
     expect(opened.status).toBe(200);
     const conversationId = (await opened.json()).data.inquiry.id as string;
 
@@ -445,27 +517,32 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       'POST',
       hirer.id,
       { decision: 'PROCEED' },
-      { 'idempotency-key': 'underfilled-close-inquiries-proceed' },
+      { 'idempotency-key': 'underfilled-close-inquiries-proceed' }
     );
     await request(
       `/api/v2/quests/${questId}/underfilled/consent`,
       'POST',
       workers[0].id,
       { decision: 'ACCEPT' },
-      { 'idempotency-key': 'underfilled-close-inquiries-first' },
+      { 'idempotency-key': 'underfilled-close-inquiries-first' }
     );
     const finalConsent = await request(
       `/api/v2/quests/${questId}/underfilled/consent`,
       'POST',
       workers[1].id,
       { decision: 'ACCEPT' },
-      { 'idempotency-key': 'underfilled-close-inquiries-final' },
+      { 'idempotency-key': 'underfilled-close-inquiries-final' }
     );
 
     expect(finalConsent.status).toBe(200);
-    expect((await db.select({ state: chatConversation.state })
-      .from(chatConversation)
-      .where(eq(chatConversation.id, conversationId)))[0]?.state).toBe('INQUIRY_CLOSED');
+    expect(
+      (
+        await db
+          .select({ state: chatConversation.state })
+          .from(chatConversation)
+          .where(eq(chatConversation.id, conversationId))
+      )[0]?.state
+    ).toBe('INQUIRY_CLOSED');
   });
 
   it('cancels on Hirer refusal and refunds the open Quest Escrow', async () => {
@@ -478,24 +555,32 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       'POST',
       hirer.id,
       { decision: 'CANCEL' },
-      { 'idempotency-key': 'underfilled-cancel' },
+      { 'idempotency-key': 'underfilled-cancel' }
     );
     expect(response.status).toBe(200);
     expect((await response.json()).data).toMatchObject({
       state: 'UNDERFILLED_CANCELLED',
       questState: 'QUEST_CANCELLED',
     });
-    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status).toBe('QUEST_CANCELLED');
-    expect((await db.select({ status: walletFundingReservation.status })
-      .from(walletFundingReservation)
-      .where(eq(walletFundingReservation.callerReference, questId)))[0]?.status).toBe('RELEASED');
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_CANCELLED');
+    expect(
+      (
+        await db
+          .select({ status: walletFundingReservation.status })
+          .from(walletFundingReservation)
+          .where(eq(walletFundingReservation.callerReference, questId))
+      )[0]?.status
+    ).toBe('RELEASED');
 
     const replay = await request(
       `/api/v2/quests/${questId}/underfilled/decision`,
       'POST',
       hirer.id,
       { decision: 'CANCEL' },
-      { 'idempotency-key': 'underfilled-cancel' },
+      { 'idempotency-key': 'underfilled-cancel' }
     );
     expect(replay.status).toBe(200);
   });
@@ -511,10 +596,21 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       autoApprove: async () => [],
     });
     expect(result.timedOutUnderfilledQuestIds).toContain(questId);
-    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status).toBe('QUEST_CANCELLED');
-    expect((await db.select({ type: questSettlementCommand.commandType, actorUserId: questSettlementCommand.actorUserId })
-      .from(questSettlementCommand)
-      .where(eq(questSettlementCommand.questId, questId)))[0]).toEqual({ type: 'AUTO_CANCEL', actorUserId: null });
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_CANCELLED');
+    expect(
+      (
+        await db
+          .select({
+            type: questSettlementCommand.commandType,
+            actorUserId: questSettlementCommand.actorUserId,
+          })
+          .from(questSettlementCommand)
+          .where(eq(questSettlementCommand.questId, questId))
+      )[0]
+    ).toEqual({ type: 'AUTO_CANCEL', actorUserId: null });
   });
 
   it('cancels on Worker decline and on consent timeout', async () => {
@@ -526,17 +622,20 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       'POST',
       hirer.id,
       { decision: 'PROCEED' },
-      { 'idempotency-key': 'underfilled-decline-proceed' },
+      { 'idempotency-key': 'underfilled-decline-proceed' }
     );
     const declined = await request(
       `/api/v2/quests/${declinedQuestId}/underfilled/consent`,
       'POST',
       workers[0].id,
       { decision: 'DECLINE' },
-      { 'idempotency-key': 'underfilled-decline' },
+      { 'idempotency-key': 'underfilled-decline' }
     );
     expect(declined.status).toBe(200);
-    expect((await declined.json()).data).toMatchObject({ state: 'UNDERFILLED_CANCELLED', questState: 'QUEST_CANCELLED' });
+    expect((await declined.json()).data).toMatchObject({
+      state: 'UNDERFILLED_CANCELLED',
+      questState: 'QUEST_CANCELLED',
+    });
 
     const timeoutQuestId = await createQuest([workers[1].id], true);
     const detectedAt = new Date();
@@ -546,7 +645,7 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       'POST',
       hirer.id,
       { decision: 'PROCEED' },
-      { 'idempotency-key': 'underfilled-timeout-proceed' },
+      { 'idempotency-key': 'underfilled-timeout-proceed' }
     );
     const consentStartedAt = new Date();
     const result = await runQuestLifecycleWorker({
@@ -554,7 +653,14 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       autoApprove: async () => [],
     });
     expect(result.timedOutUnderfilledQuestIds).toContain(timeoutQuestId);
-    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, timeoutQuestId)))[0]?.status).toBe('QUEST_CANCELLED');
+    expect(
+      (
+        await db
+          .select({ status: quest.questStatus })
+          .from(quest)
+          .where(eq(quest.id, timeoutQuestId))
+      )[0]?.status
+    ).toBe('QUEST_CANCELLED');
   });
 
   it('returns IDEMPOTENCY_IN_PROGRESS for an unfinished underfilled command', async () => {
@@ -580,25 +686,42 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       'POST',
       hirer.id,
       { decision: 'PROCEED' },
-      { 'idempotency-key': key },
+      { 'idempotency-key': key }
     );
     expect(response.status).toBe(409);
     expect((await response.json()).error.code).toBe('IDEMPOTENCY_IN_PROGRESS');
-    expect(await db.select().from(questV2UnderfilledDecision).where(eq(questV2UnderfilledDecision.questId, questId))).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(questV2UnderfilledDecision)
+        .where(eq(questV2UnderfilledDecision.questId, questId))
+    ).toHaveLength(0);
   });
 
   it('publishes authenticated, actor-scoped underfilled operations', async () => {
     if (!postgresAvailable) return;
-    const document = await (await app.handle(new Request('http://localhost/openapi/json'))).json() as {
+    const document = (await (
+      await app.handle(new Request('http://localhost/openapi/json'))
+    ).json()) as {
       paths: Record<string, Record<string, { operationId?: string }>>;
     };
-    expect(document.paths['/api/v2/quests/{questId}/underfilled']?.get?.operationId).toBe('getQuestUnderfilledV2');
-    expect(document.paths['/api/v2/quests/{questId}/underfilled/decision']?.post?.operationId).toBe('decideQuestUnderfilledV2');
-    expect(document.paths['/api/v2/quests/{questId}/underfilled/consent']?.post?.operationId).toBe('respondToQuestUnderfilledV2');
+    expect(document.paths['/api/v2/quests/{questId}/underfilled']?.get?.operationId).toBe(
+      'getQuestUnderfilledV2'
+    );
+    expect(document.paths['/api/v2/quests/{questId}/underfilled/decision']?.post?.operationId).toBe(
+      'decideQuestUnderfilledV2'
+    );
+    expect(document.paths['/api/v2/quests/{questId}/underfilled/consent']?.post?.operationId).toBe(
+      'respondToQuestUnderfilledV2'
+    );
 
     const questId = await createQuest([workers[0].id]);
     await detect(new Date());
-    const otherWorker = await request(`/api/v2/quests/${questId}/underfilled`, 'GET', workers[1].id);
+    const otherWorker = await request(
+      `/api/v2/quests/${questId}/underfilled`,
+      'GET',
+      workers[1].id
+    );
     expect(otherWorker.status).toBe(404);
   });
 });

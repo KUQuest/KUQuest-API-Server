@@ -153,7 +153,7 @@ describe('Quest Image persistence', () => {
 
     expect(result).toEqual({ outcome: 'limit-reached' });
     expect(
-      await db.select({ id: file.id }).from(file).where(eq(file.uploadedByUserId, hirerId)),
+      await db.select({ id: file.id }).from(file).where(eq(file.uploadedByUserId, hirerId))
     ).toHaveLength(before.length);
     expect((await getQuestDetail(hirerId, questId))?.images).toHaveLength(2);
   });

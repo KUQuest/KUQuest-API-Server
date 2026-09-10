@@ -50,17 +50,10 @@ import {
   type QuestV2Participation,
   type QuestV2State,
 } from './quest-v2.contract';
-import {
-  buildQuestV2PublishCheck,
-  type QuestV2PublishCheck,
-} from './quest-v2.publish.policy';
+import { buildQuestV2PublishCheck, type QuestV2PublishCheck } from './quest-v2.publish.policy';
 import { softDeleteQuestImageAndRepack } from './quest-image.service';
 import { maxQuestV2Images } from './quest-v2.schema';
-import type {
-  QuestV2BoardQuery,
-  QuestV2CreateInput,
-  QuestV2EditInput,
-} from './quest-v2.schema';
+import type { QuestV2BoardQuery, QuestV2CreateInput, QuestV2EditInput } from './quest-v2.schema';
 import { questV2Storage, type StoredQuestImage } from './quest.storage';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -145,18 +138,13 @@ export type QuestV2CreateOutcome =
   | { quest: QuestV2CanonicalQuest }
   | {
       outcome:
-        | QuestV2CreateValidationOutcome
-        | 'idempotency-key-reused'
-        | 'idempotency-in-progress';
+        QuestV2CreateValidationOutcome | 'idempotency-key-reused' | 'idempotency-in-progress';
     };
 
 export type QuestV2EditOutcome =
-  | { quest: QuestV2CanonicalQuest }
-  | { outcome: QuestV2EditOutcomeCode };
+  { quest: QuestV2CanonicalQuest } | { outcome: QuestV2EditOutcomeCode };
 
-export type QuestV2PublishCheckOutcome =
-  | QuestV2PublishCheck
-  | { outcome: 'not-draft' };
+export type QuestV2PublishCheckOutcome = QuestV2PublishCheck | { outcome: 'not-draft' };
 
 export type QuestV2QuestEscrowSnapshot = {
   reservationId: string;
@@ -338,16 +326,13 @@ type CompleteQuestV2DiscoveryRow = QuestV2BoardRow & {
   dueAt: Date;
 };
 
-const isCompleteQuestV2DiscoveryRow = (
-  row: QuestV2BoardRow,
-): row is CompleteQuestV2DiscoveryRow => (
+const isCompleteQuestV2DiscoveryRow = (row: QuestV2BoardRow): row is CompleteQuestV2DiscoveryRow =>
   row.rewardSatang !== null &&
   row.tagId !== null &&
   row.tagName !== null &&
   row.v2Mode !== null &&
   row.v2Participation !== null &&
-  row.dueAt !== null
-);
+  row.dueAt !== null;
 
 const questV2RowSelection = {
   id: quest.id,
@@ -388,7 +373,7 @@ type QuestV2PublishCommandErrorCode = 'blocked' | 'not-draft' | 'not-found';
 class QuestV2PublishError extends Error {
   constructor(
     readonly outcome: QuestV2PublishCommandErrorCode,
-    readonly check?: QuestV2PublishCheck,
+    readonly check?: QuestV2PublishCheck
   ) {
     super(outcome);
     this.name = 'QuestV2PublishError';
@@ -400,7 +385,7 @@ const idempotencyExpiry = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
 const sha256Json = async (value: object): Promise<string> => {
   const digest = await crypto.subtle.digest(
     'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value)),
+    new TextEncoder().encode(JSON.stringify(value))
   );
 
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -433,8 +418,12 @@ const parseQuestFundingTotalSatang = (value: number): Satang | undefined => {
 };
 
 const normalizeCreateInput = (
-  data: QuestV2CreateInput,
-): NormalizedCreateInput | { outcome: Exclude<QuestV2CreateValidationOutcome, 'tag-not-found' | 'idempotency-unavailable'> } => {
+  data: QuestV2CreateInput
+):
+  | NormalizedCreateInput
+  | {
+      outcome: Exclude<QuestV2CreateValidationOutcome, 'tag-not-found' | 'idempotency-unavailable'>;
+    } => {
   const conditionItems = data.condition.items.map((item) => item.trim());
   if (
     conditionItems.length === 0 ||
@@ -473,12 +462,11 @@ const normalizeCreateInput = (
     return { outcome: 'invalid-description' };
   }
   const normalizedLocations = (data.locations ?? []).map((location) => ({
-    label:
-      location && typeof location.label === 'string' ? location.label.trim() : null,
+    label: location && typeof location.label === 'string' ? location.label.trim() : null,
   }));
   const locations = normalizedLocations.filter(
     (location): location is { label: string } =>
-      location.label !== null && location.label.length > 0 && location.label.length <= 100,
+      location.label !== null && location.label.length > 0 && location.label.length <= 100
   );
   if (locations.length > 10 || locations.length !== normalizedLocations.length) {
     return { outcome: 'invalid-location' };
@@ -502,12 +490,12 @@ const normalizeCreateInput = (
 
 const hasEditField = <K extends keyof QuestV2EditInput>(
   data: QuestV2EditInput,
-  field: K,
+  field: K
 ): data is QuestV2EditInput & Required<Pick<QuestV2EditInput, K>> =>
   Object.prototype.hasOwnProperty.call(data, field);
 
 const normalizeEditInput = (
-  data: QuestV2EditInput,
+  data: QuestV2EditInput
 ): NormalizedEditInput | { outcome: QuestV2EditValidationOutcome } => {
   if (Object.keys(data).length === 0) return { outcome: 'empty-edit' };
 
@@ -538,7 +526,7 @@ const normalizeEditInput = (
       return { outcome: 'invalid-condition' };
     }
     const conditionItems = data.condition.items.map((item) =>
-      typeof item === 'string' ? item.trim() : '',
+      typeof item === 'string' ? item.trim() : ''
     );
     if (
       conditionItems.length === 0 ||
@@ -630,7 +618,7 @@ const editRequestHashFor = (
   userId: string,
   questId: string,
   expectedVersion: number,
-  input: NormalizedEditInput,
+  input: NormalizedEditInput
 ): Promise<string> =>
   sha256Json({
     authenticatedMemberId: userId,
@@ -645,12 +633,12 @@ const selectQuestV2Row = async (
   database: QuestDatabase,
   userId: string,
   questId: string,
-  lock = false,
+  lock = false
 ): Promise<QuestV2Row | undefined> => {
   const ownerCondition = and(
     eq(quest.id, questId),
     eq(quest.hirerId, userId),
-    eq(quest.apiVersion, questApiVersion.v2),
+    eq(quest.apiVersion, questApiVersion.v2)
   );
 
   // Lock the Quest table row separately. PostgreSQL does not allow FOR UPDATE
@@ -708,7 +696,7 @@ const toV2State = (status: QuestStatus): QuestV2State => {
 
 const buildCanonicalQuest = async (
   database: QuestDatabase,
-  row: QuestV2Row,
+  row: QuestV2Row
 ): Promise<QuestV2CanonicalQuest> => {
   if (!row.v2Mode || !row.v2Participation || row.questFundingTotalSatang === null) {
     throw new Error(`Quest ${row.id} has incomplete v2 persistence data`);
@@ -749,7 +737,7 @@ const buildQuestV2PublishCheckForRow = async (
   database: QuestTransaction,
   userId: string,
   row: QuestV2Row,
-  lockWallet: boolean,
+  lockWallet: boolean
 ): Promise<QuestV2PublishCheck> => {
   if (row.questFundingTotalSatang === null || !row.v2Participation) {
     throw new Error(`Quest ${row.id} has incomplete v2 persistence data`);
@@ -774,10 +762,12 @@ const buildQuestV2PublishCheckForRow = async (
   return buildQuestV2PublishCheck({
     participation: row.v2Participation,
     tagId: row.tagId,
-    conditionValid: conditionItems.length > 0 && conditionItems.every((item, position) => {
-      const text = item.text.trim();
-      return item.position === position && text.length > 0 && text.length <= 255;
-    }),
+    conditionValid:
+      conditionItems.length > 0 &&
+      conditionItems.every((item, position) => {
+        const text = item.text.trim();
+        return item.position === position && text.length > 0 && text.length <= 255;
+      }),
     startTime: row.startTime,
     dueAt: row.dueAt,
     now: new Date(),
@@ -796,7 +786,7 @@ const buildQuestV2PublishCheckForRow = async (
 
 const selectQuestV2Images = async (
   database: QuestDatabase,
-  questId: string,
+  questId: string
 ): Promise<QuestV2ImageReference[]> =>
   database
     .select({
@@ -820,7 +810,7 @@ type QuestV2ImageUploadManifest = {
 };
 
 const toQuestV2ImageUploadManifest = (
-  objects: QuestV2ImageUploadObject[],
+  objects: QuestV2ImageUploadObject[]
 ): QuestV2ImageUploadManifest => ({
   upload: {
     objects: objects.map(({ bucket, objectKey }) => ({ bucket, objectKey })),
@@ -828,7 +818,7 @@ const toQuestV2ImageUploadManifest = (
 });
 
 const fromQuestV2ImageUploadManifest = (
-  resultData: unknown,
+  resultData: unknown
 ): QuestV2ImageUploadManifest | undefined => {
   if (!resultData || typeof resultData !== 'object' || Array.isArray(resultData)) {
     return undefined;
@@ -866,7 +856,7 @@ type QuestV2ImageIdempotencySnapshot = {
 
 const toQuestV2ImageIdempotencySnapshot = (
   images: QuestV2ImageReference[],
-  response: QuestV2ImageResponse[],
+  response: QuestV2ImageResponse[]
 ): QuestV2ImageIdempotencySnapshot => ({ images, response });
 
 const isQuestV2ImageReference = (value: unknown): value is QuestV2ImageReference => {
@@ -900,7 +890,7 @@ const isQuestV2ImageResponse = (value: unknown): value is QuestV2ImageResponse =
 };
 
 const fromQuestV2ImageIdempotencySnapshot = (
-  resultData: unknown,
+  resultData: unknown
 ): QuestV2ImageIdempotencySnapshot | undefined => {
   if (!resultData || typeof resultData !== 'object' || Array.isArray(resultData)) {
     return undefined;
@@ -920,23 +910,24 @@ const fromQuestV2ImageIdempotencySnapshot = (
 };
 
 export const materializeQuestV2ImageResponse = (
-  images: QuestV2ImageReference[],
-): QuestV2ImageResponse[] => images.map((image) => {
-  const link = questV2Storage.linkForWithExpiry(image);
-  return {
-    imageId: image.imageId,
-    fileId: image.fileId,
-    position: image.position,
-    url: link.url,
-    urlExpiresAt: link.expiresAt.toISOString(),
-  };
-});
+  images: QuestV2ImageReference[]
+): QuestV2ImageResponse[] =>
+  images.map((image) => {
+    const link = questV2Storage.linkForWithExpiry(image);
+    return {
+      imageId: image.imageId,
+      fileId: image.fileId,
+      position: image.position,
+      url: link.url,
+      urlExpiresAt: link.expiresAt.toISOString(),
+    };
+  });
 
 const completeQuestV2ImageCommand = async (
   transaction: QuestTransaction,
   questId: string,
   idempotencyKeyId: string,
-  completedAt: Date,
+  completedAt: Date
 ): Promise<{ images: QuestV2ImageReference[]; response: QuestV2ImageResponse[] }> => {
   const images = await selectQuestV2Images(transaction, questId);
   const response = materializeQuestV2ImageResponse(images);
@@ -967,7 +958,7 @@ const findQuestV2ImageIdempotency = async (
   transaction: QuestTransaction,
   userId: string,
   operationScope: string,
-  key: string,
+  key: string
 ) => {
   const [record] = await transaction
     .select(questV2ImageIdempotencySelection)
@@ -976,8 +967,8 @@ const findQuestV2ImageIdempotency = async (
       and(
         eq(walletIdempotencyKey.principalUserId, userId),
         eq(walletIdempotencyKey.operationScope, operationScope),
-        eq(walletIdempotencyKey.key, key),
-      ),
+        eq(walletIdempotencyKey.key, key)
+      )
     )
     .limit(1)
     .for('update');
@@ -992,7 +983,7 @@ const readQuestV2ImageReplay = (
     resultData: unknown;
     processingStatus: string;
   },
-  requestHash: string,
+  requestHash: string
 ): QuestV2ImageUploadPreflight => {
   if (record.requestHash !== requestHash) return { outcome: 'idempotency-key-reused' };
   if (record.resourceId) {
@@ -1015,7 +1006,7 @@ const imageRequestHash = (value: object): Promise<string> =>
   sha256Hex(new TextEncoder().encode(JSON.stringify(value)));
 
 const normalizeQuestV2ImageCommandContext = (
-  context: QuestV2ImageCommandContext,
+  context: QuestV2ImageCommandContext
 ): QuestV2ImageCommandContext | undefined => {
   const key = context.key.trim();
   if (key.length === 0 || key.length > 200) return undefined;
@@ -1026,7 +1017,7 @@ const normalizeQuestV2ImageCommandContext = (
 export const questV2ImageUploadRequestHash = async (
   userId: string,
   questId: string,
-  images: File[],
+  images: File[]
 ): Promise<string> => {
   const files = [];
   for (const image of images) {
@@ -1051,7 +1042,7 @@ export const questV2ImageUploadRequestHash = async (
 export const questV2ImageRemoveRequestHash = (
   userId: string,
   questId: string,
-  imageId: string,
+  imageId: string
 ): Promise<string> =>
   imageRequestHash({
     authenticatedMemberId: userId,
@@ -1063,7 +1054,7 @@ export const questV2ImageRemoveRequestHash = (
 
 const lockQuestV2ImageOwner = async (
   transaction: QuestTransaction,
-  context: QuestV2ImageCommandContext,
+  context: QuestV2ImageCommandContext
 ) => {
   const [ownedQuest] = await transaction
     .select({ id: quest.id, questStatus: quest.questStatus })
@@ -1072,8 +1063,8 @@ const lockQuestV2ImageOwner = async (
       and(
         eq(quest.id, context.questId),
         eq(quest.hirerId, context.userId),
-        eq(quest.apiVersion, questApiVersion.v2),
-      ),
+        eq(quest.apiVersion, questApiVersion.v2)
+      )
     )
     .limit(1)
     .for('update');
@@ -1084,7 +1075,7 @@ const lockQuestV2ImageOwner = async (
 export const checkQuestV2ImageUpload = async (
   context: QuestV2ImageCommandContext,
   imageCount: number,
-  plannedObjects: QuestV2ImageUploadObject[],
+  plannedObjects: QuestV2ImageUploadObject[]
 ): Promise<QuestV2ImageUploadPreflight> => {
   const normalizedContext = normalizeQuestV2ImageCommandContext(context);
   if (!normalizedContext) {
@@ -1096,7 +1087,7 @@ export const checkQuestV2ImageUpload = async (
       transaction,
       normalizedContext.userId,
       questV2ImageUploadOperationScope,
-      normalizedContext.key,
+      normalizedContext.key
     );
     if (
       existing &&
@@ -1120,7 +1111,7 @@ export const checkQuestV2ImageUpload = async (
       normalizedContext.key,
       normalizedContext.requestHash,
       false,
-      true,
+      true
     );
     if ('outcome' in reservation) return reservation;
     if (!reservation.created) {
@@ -1156,7 +1147,7 @@ class QuestV2ImageCommandError extends Error {
 }
 
 const throwQuestV2ImageCommandError = (
-  outcome: Exclude<QuestV2ImageMutationOutcome, 'invalid-idempotency-key'>,
+  outcome: Exclude<QuestV2ImageMutationOutcome, 'invalid-idempotency-key'>
 ): never => {
   throw new QuestV2ImageCommandError(outcome);
 };
@@ -1165,7 +1156,7 @@ const addQuestV2ImagesInTransaction = async (
   transaction: QuestTransaction,
   context: QuestV2ImageCommandContext,
   images: StoredQuestImage[],
-  allowExistingProcessing: boolean,
+  allowExistingProcessing: boolean
 ): Promise<QuestV2ImageUploadOutcome> => {
   const idempotency = await acquireQuestV2Idempotency(
     transaction,
@@ -1174,15 +1165,13 @@ const addQuestV2ImagesInTransaction = async (
     context.key,
     context.requestHash,
     allowExistingProcessing,
-    true,
+    true
   );
   if ('outcome' in idempotency) return idempotency;
 
   if (!idempotency.created && idempotency.record.resourceId) {
     const snapshot = fromQuestV2ImageIdempotencySnapshot(idempotency.record.resultData);
-    return snapshot
-      ? { ...snapshot, replayed: true }
-      : { outcome: 'idempotency-unavailable' };
+    return snapshot ? { ...snapshot, replayed: true } : { outcome: 'idempotency-unavailable' };
   }
 
   const ownedQuest = await lockQuestV2ImageOwner(transaction, context);
@@ -1216,20 +1205,20 @@ const addQuestV2ImagesInTransaction = async (
     transaction,
     context.questId,
     idempotency.record.id,
-    new Date(),
+    new Date()
   );
 };
 
 export const addQuestV2Images = async (
   context: QuestV2ImageCommandContext,
-  images: StoredQuestImage[],
+  images: StoredQuestImage[]
 ): Promise<QuestV2ImageUploadOutcome> => {
   const normalizedContext = normalizeQuestV2ImageCommandContext(context);
   if (!normalizedContext) return { outcome: 'invalid-idempotency-key' };
 
   try {
     return await db.transaction((transaction) =>
-      addQuestV2ImagesInTransaction(transaction, normalizedContext, images, true),
+      addQuestV2ImagesInTransaction(transaction, normalizedContext, images, true)
     );
   } catch (error) {
     if (error instanceof QuestV2ImageCommandError) return { outcome: error.outcome };
@@ -1238,7 +1227,7 @@ export const addQuestV2Images = async (
 };
 
 export const releaseQuestV2ImageUploadReservation = async (
-  context: QuestV2ImageCommandContext,
+  context: QuestV2ImageCommandContext
 ): Promise<void> => {
   const normalizedContext = normalizeQuestV2ImageCommandContext(context);
   if (!normalizedContext) return;
@@ -1252,8 +1241,8 @@ export const releaseQuestV2ImageUploadReservation = async (
         eq(walletIdempotencyKey.key, normalizedContext.key),
         eq(walletIdempotencyKey.requestHash, normalizedContext.requestHash),
         eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
-        isNull(walletIdempotencyKey.resourceId),
-      ),
+        isNull(walletIdempotencyKey.resourceId)
+      )
     );
 };
 
@@ -1294,14 +1283,14 @@ const isStoredQuestImage = (value: unknown): value is StoredQuestImage => {
 
 const toQuestV2ImageCleanupManifest = (
   images: StoredQuestImage[],
-  deletedAt: Date,
+  deletedAt: Date
 ): QuestV2ImageCleanupManifest => ({
   images,
   deletedAt: deletedAt.toISOString(),
 });
 
 const fromQuestV2ImageCleanupManifest = (
-  resultData: unknown,
+  resultData: unknown
 ): QuestV2ImageCleanupManifest | undefined => {
   if (!resultData || typeof resultData !== 'object' || Array.isArray(resultData)) {
     return undefined;
@@ -1313,7 +1302,8 @@ const fromQuestV2ImageCleanupManifest = (
   }
 
   const manifest = result.cleanup as Partial<QuestV2ImageCleanupManifest>;
-  const deletedAt = typeof manifest.deletedAt === 'string' ? new Date(manifest.deletedAt) : undefined;
+  const deletedAt =
+    typeof manifest.deletedAt === 'string' ? new Date(manifest.deletedAt) : undefined;
   if (
     !Array.isArray(manifest.images) ||
     manifest.images.length === 0 ||
@@ -1335,13 +1325,13 @@ const hasQuestV2ImageCleanupManifest = (resultData: unknown): boolean =>
 
 const hasQuestV2ImageRecoveryManifest = (resultData: unknown): boolean =>
   Boolean(
-    fromQuestV2ImageUploadManifest(resultData) || fromQuestV2ImageCleanupManifest(resultData),
+    fromQuestV2ImageUploadManifest(resultData) || fromQuestV2ImageCleanupManifest(resultData)
   );
 
 export const recordQuestV2ImageCleanupTombstones = async (
   userId: string,
   images: StoredQuestImage[],
-  deletedAt = new Date(),
+  deletedAt = new Date()
 ): Promise<void> => {
   if (images.length === 0) return;
 
@@ -1352,7 +1342,7 @@ export const recordQuestV2ImageCleanupTombstones = async (
         ...image,
         uploadedByUserId: userId,
         deletedAt,
-      })),
+      }))
     )
     .onConflictDoNothing();
 };
@@ -1360,7 +1350,7 @@ export const recordQuestV2ImageCleanupTombstones = async (
 export const recordQuestV2ImageCleanupRetry = async (
   context: QuestV2ImageCommandContext,
   images: StoredQuestImage[],
-  deletedAt: Date,
+  deletedAt: Date
 ): Promise<void> => {
   const normalizedContext = normalizeQuestV2ImageCommandContext(context);
   if (!normalizedContext || images.length === 0) return;
@@ -1380,8 +1370,8 @@ export const recordQuestV2ImageCleanupRetry = async (
           eq(walletIdempotencyKey.key, normalizedContext.key),
           eq(walletIdempotencyKey.requestHash, normalizedContext.requestHash),
           eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
-          isNull(walletIdempotencyKey.resourceId),
-        ),
+          isNull(walletIdempotencyKey.resourceId)
+        )
       )
       .returning({ id: walletIdempotencyKey.id });
   } catch (cause) {
@@ -1390,7 +1380,7 @@ export const recordQuestV2ImageCleanupRetry = async (
 
   if (!updated) {
     throw new QuestV2ImageCleanupUnavailableError(
-      new Error('Quest Image upload reservation was not available for cleanup retry'),
+      new Error('Quest Image upload reservation was not available for cleanup retry')
     );
   }
 };
@@ -1408,8 +1398,8 @@ export const retryQuestV2ImageCleanupManifests = async (limit = 100): Promise<nu
         eq(walletIdempotencyKey.operationScope, questV2ImageUploadOperationScope),
         eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
         isNull(walletIdempotencyKey.resourceId),
-        sql`${walletIdempotencyKey.resultData} IS NOT NULL`,
-      ),
+        sql`${walletIdempotencyKey.resultData} IS NOT NULL`
+      )
     )
     .orderBy(asc(walletIdempotencyKey.id))
     .limit(limit);
@@ -1423,7 +1413,7 @@ export const retryQuestV2ImageCleanupManifests = async (limit = 100): Promise<nu
       await recordQuestV2ImageCleanupTombstones(
         record.userId,
         manifest.images,
-        new Date(manifest.deletedAt),
+        new Date(manifest.deletedAt)
       );
       await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.id, record.id));
       retried += 1;
@@ -1439,7 +1429,7 @@ export const retryQuestV2ImageCleanupManifests = async (limit = 100): Promise<nu
 };
 
 const deleteQuestV2ImageUploadObject = async (
-  object: QuestV2ImageUploadObject,
+  object: QuestV2ImageUploadObject
 ): Promise<boolean> => {
   try {
     await questV2Storage.delete(object.bucket, object.objectKey);
@@ -1456,7 +1446,7 @@ const deleteQuestV2ImageUploadObject = async (
 
 export const recoverQuestV2ImageUploadManifests = async (
   now = new Date(),
-  limit = 100,
+  limit = 100
 ): Promise<number> => {
   const pending = await db
     .select({
@@ -1470,8 +1460,8 @@ export const recoverQuestV2ImageUploadManifests = async (
         eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
         isNull(walletIdempotencyKey.resourceId),
         lte(walletIdempotencyKey.expiresAt, now),
-        sql`${walletIdempotencyKey.resultData} IS NOT NULL`,
-      ),
+        sql`${walletIdempotencyKey.resultData} IS NOT NULL`
+      )
     )
     .orderBy(asc(walletIdempotencyKey.expiresAt), asc(walletIdempotencyKey.id))
     .limit(limit);
@@ -1482,7 +1472,7 @@ export const recoverQuestV2ImageUploadManifests = async (
     if (!manifest) continue;
 
     const deleted = await Promise.all(
-      manifest.upload.objects.map((object) => deleteQuestV2ImageUploadObject(object)),
+      manifest.upload.objects.map((object) => deleteQuestV2ImageUploadObject(object))
     );
     if (deleted.some((result) => !result)) continue;
 
@@ -1493,8 +1483,8 @@ export const recoverQuestV2ImageUploadManifests = async (
           and(
             eq(walletIdempotencyKey.id, record.id),
             eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
-            isNull(walletIdempotencyKey.resourceId),
-          ),
+            isNull(walletIdempotencyKey.resourceId)
+          )
         )
         .returning({ id: walletIdempotencyKey.id });
       if (removed) recovered += 1;
@@ -1519,8 +1509,8 @@ const cleanupQuestV2ImageObject = async (tombstone: QuestV2ImageTombstone): Prom
         and(
           eq(file.id, tombstone.fileId),
           isNull(file.objectDeletedAt),
-          eq(file.deletedAt, tombstone.tombstonedAt),
-        ),
+          eq(file.deletedAt, tombstone.tombstonedAt)
+        )
       );
     return true;
   } catch (error) {
@@ -1537,7 +1527,7 @@ const cleanupQuestV2ImageObject = async (tombstone: QuestV2ImageTombstone): Prom
 
 export const cleanupQuestV2ImageObjects = async (
   now = new Date(),
-  limit = 100,
+  limit = 100
 ): Promise<number> => {
   const pending = await db
     .select({
@@ -1552,14 +1542,14 @@ export const cleanupQuestV2ImageObjects = async (
         like(file.objectKey, 'quests/v2/%'),
         sql`${file.deletedAt} IS NOT NULL`,
         isNull(file.objectDeletedAt),
-        lte(file.deletedAt, now),
-      ),
+        lte(file.deletedAt, now)
+      )
     )
     .orderBy(asc(file.deletedAt), asc(file.id))
     .limit(limit)
-    .then((objects): QuestV2ImageTombstone[] => objects.filter(
-      (object): object is QuestV2ImageTombstone => object.tombstonedAt !== null,
-    ));
+    .then((objects): QuestV2ImageTombstone[] =>
+      objects.filter((object): object is QuestV2ImageTombstone => object.tombstonedAt !== null)
+    );
 
   const results = await Promise.all(pending.map((object) => cleanupQuestV2ImageObject(object)));
   return results.filter(Boolean).length;
@@ -1568,14 +1558,14 @@ export const cleanupQuestV2ImageObjects = async (
 const deleteQuestV2ImageInTransaction = async (
   transaction: QuestTransaction,
   context: QuestV2ImageCommandContext,
-  imageId: string,
+  imageId: string
 ): Promise<QuestV2ImageRemoveOutcome & { cleanup?: QuestV2ImageTombstone }> => {
   const idempotency = await acquireQuestV2Idempotency(
     transaction,
     context.userId,
     questV2ImageRemoveOperationScope,
     context.key,
-    context.requestHash,
+    context.requestHash
   );
   if ('outcome' in idempotency) return idempotency;
 
@@ -1615,7 +1605,7 @@ const deleteQuestV2ImageInTransaction = async (
     transaction,
     context.questId,
     idempotency.record.id,
-    deletedAt,
+    deletedAt
   );
 
   return {
@@ -1631,7 +1621,7 @@ const deleteQuestV2ImageInTransaction = async (
 
 export const deleteQuestV2Image = async (
   context: QuestV2ImageCommandContext,
-  imageId: string,
+  imageId: string
 ): Promise<QuestV2ImageRemoveOutcome> => {
   const normalizedContext = normalizeQuestV2ImageCommandContext(context);
   if (!normalizedContext) return { outcome: 'invalid-idempotency-key' };
@@ -1639,7 +1629,7 @@ export const deleteQuestV2Image = async (
   let result: QuestV2ImageRemoveOutcome & { cleanup?: QuestV2ImageTombstone };
   try {
     result = await db.transaction((transaction) =>
-      deleteQuestV2ImageInTransaction(transaction, normalizedContext, imageId),
+      deleteQuestV2ImageInTransaction(transaction, normalizedContext, imageId)
     );
   } catch (error) {
     if (error instanceof QuestV2ImageCommandError) return { outcome: error.outcome };
@@ -1668,7 +1658,7 @@ const normalizeQuestV2SnapshotScheduleTime = (value: unknown): string | undefine
 };
 
 const toQuestV2IdempotencySnapshot = (
-  canonicalQuest: QuestV2CanonicalQuest,
+  canonicalQuest: QuestV2CanonicalQuest
 ): QuestV2IdempotencySnapshot => {
   const questFundingTotalSatang = parseQuestFundingTotalSatang(canonicalQuest.questFundingTotal);
   if (!questFundingTotalSatang) {
@@ -1679,9 +1669,7 @@ const toQuestV2IdempotencySnapshot = (
   return { ...canonicalFields, questFundingTotalSatang };
 };
 
-const fromQuestV2IdempotencySnapshot = (
-  resultData: unknown,
-): QuestV2CanonicalQuest | undefined => {
+const fromQuestV2IdempotencySnapshot = (resultData: unknown): QuestV2CanonicalQuest | undefined => {
   if (!resultData || typeof resultData !== 'object' || Array.isArray(resultData)) {
     return undefined;
   }
@@ -1713,7 +1701,7 @@ const fromQuestV2IdempotencySnapshot = (
 
 const toQuestV2QuestEscrowSnapshot = (
   reservationId: string,
-  check: QuestV2PublishCheck,
+  check: QuestV2PublishCheck
 ): QuestV2QuestEscrowSnapshot => ({
   reservationId,
   questFundingTotal: toBaht(check.questFundingTotalSatang),
@@ -1733,10 +1721,7 @@ const toQuestV2QuestEscrowSnapshot = (
 
 type QuestV2QuestEscrowIdempotencySnapshot = Omit<
   QuestV2QuestEscrowSnapshot,
-  | 'questFundingTotal'
-  | 'questReward'
-  | 'platformFee'
-  | 'escrowRequirement'
+  'questFundingTotal' | 'questReward' | 'platformFee' | 'escrowRequirement'
 >;
 
 type QuestV2PublishIdempotencySnapshot = {
@@ -1745,7 +1730,7 @@ type QuestV2PublishIdempotencySnapshot = {
 };
 
 const toQuestV2PublishIdempotencySnapshot = (
-  result: QuestV2PublishResponse,
+  result: QuestV2PublishResponse
 ): QuestV2PublishIdempotencySnapshot => ({
   quest: toQuestV2IdempotencySnapshot(result.quest),
   questEscrow: {
@@ -1763,7 +1748,7 @@ const toQuestV2PublishIdempotencySnapshot = (
 });
 
 const fromQuestV2QuestEscrowIdempotencySnapshot = (
-  value: unknown,
+  value: unknown
 ): QuestV2QuestEscrowSnapshot | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
 
@@ -1789,12 +1774,8 @@ const fromQuestV2QuestEscrowIdempotencySnapshot = (
     return undefined;
   }
 
-  const [
-    questFundingTotalSatang,
-    questRewardSatang,
-    platformFeeSatang,
-    escrowRequirementSatang,
-  ] = satangFields as [number, number, number, number];
+  const [questFundingTotalSatang, questRewardSatang, platformFeeSatang, escrowRequirementSatang] =
+    satangFields as [number, number, number, number];
   if (
     questFundingTotalSatang < 100 ||
     questFundingTotalSatang > 70_000_000 ||
@@ -1839,7 +1820,7 @@ const fromQuestV2QuestEscrowIdempotencySnapshot = (
 };
 
 const fromQuestV2PublishIdempotencySnapshot = (
-  resultData: unknown,
+  resultData: unknown
 ): QuestV2PublishResponse | undefined => {
   if (!resultData || typeof resultData !== 'object' || Array.isArray(resultData)) {
     return undefined;
@@ -1869,7 +1850,7 @@ const acquireQuestV2Idempotency = async (
   key: string,
   requestHash: string,
   allowExistingProcessing = false,
-  recoverExpiredProcessing = false,
+  recoverExpiredProcessing = false
 ): Promise<
   | { created: true; record: IdempotencyRecord }
   | { created: false; record: IdempotencyRecord }
@@ -1911,8 +1892,8 @@ const acquireQuestV2Idempotency = async (
             and(
               eq(walletIdempotencyKey.principalUserId, userId),
               eq(walletIdempotencyKey.operationScope, operationScope),
-              eq(walletIdempotencyKey.key, key),
-            ),
+              eq(walletIdempotencyKey.key, key)
+            )
           )
           .limit(1)
           .for('update')
@@ -1928,9 +1909,7 @@ const acquireQuestV2Idempotency = async (
     !hasQuestV2ImageRecoveryManifest(record.resultData) &&
     record.expiresAt <= new Date()
   ) {
-    await transaction
-      .delete(walletIdempotencyKey)
-      .where(eq(walletIdempotencyKey.id, record.id));
+    await transaction.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.id, record.id));
     [created] = await transaction
       .insert(walletIdempotencyKey)
       .values({
@@ -1967,7 +1946,7 @@ const acquireQuestV2Idempotency = async (
 
 const throwQuestV2PublishError = (
   outcome: QuestV2PublishCommandErrorCode,
-  check?: QuestV2PublishCheck,
+  check?: QuestV2PublishCheck
 ): never => {
   throw new QuestV2PublishError(outcome, check);
 };
@@ -1977,14 +1956,14 @@ const publishQuestV2InTransaction = async (
   userId: string,
   questId: string,
   key: string,
-  requestHash: string,
+  requestHash: string
 ): Promise<QuestV2PublishOutcome> => {
   const idempotency = await acquireQuestV2Idempotency(
     transaction,
     userId,
     questV2PublishOperationScope,
     key,
-    requestHash,
+    requestHash
   );
   if ('outcome' in idempotency) return idempotency;
 
@@ -2011,7 +1990,7 @@ const publishQuestV2InTransaction = async (
   if (reservation.policyRevisionId !== check.policyRevisionId) {
     throw new MoneyDomainError(
       'POLICY_NOT_AVAILABLE',
-      'Money Policy changed while publishing the Quest.',
+      'Money Policy changed while publishing the Quest.'
     );
   }
 
@@ -2036,8 +2015,8 @@ const publishQuestV2InTransaction = async (
         eq(quest.id, questId),
         eq(quest.hirerId, userId),
         eq(quest.apiVersion, questApiVersion.v2),
-        eq(quest.questStatus, questStatus.draft),
-      ),
+        eq(quest.questStatus, questStatus.draft)
+      )
     )
     .returning({ id: quest.id });
   if (!updated) throwQuestV2PublishError('not-draft');
@@ -2074,14 +2053,14 @@ const createQuestInTransaction = async (
   userId: string,
   key: string,
   input: NormalizedCreateInput,
-  requestHash: string,
+  requestHash: string
 ): Promise<QuestV2CreateOutcome> => {
   const idempotency = await acquireQuestV2Idempotency(
     transaction,
     userId,
     questV2CreateOperationScope,
     key,
-    requestHash,
+    requestHash
   );
   if ('outcome' in idempotency) return idempotency;
 
@@ -2134,7 +2113,7 @@ const createQuestInTransaction = async (
       questId: createdQuest.id,
       position,
       text,
-    })),
+    }))
   );
 
   if (input.locations.length > 0) {
@@ -2142,7 +2121,7 @@ const createQuestInTransaction = async (
       input.locations.map((location) => ({
         questId: createdQuest.id,
         label: location.label,
-      })),
+      }))
     );
   }
 
@@ -2167,7 +2146,7 @@ const createQuestInTransaction = async (
 export const createQuestV2 = async (
   userId: string,
   data: QuestV2CreateInput,
-  rawIdempotencyKey: string,
+  rawIdempotencyKey: string
 ): Promise<QuestV2CreateOutcome> => {
   const key = rawIdempotencyKey.trim();
   if (key.length === 0 || key.length > 200) return { outcome: 'invalid-idempotency-key' };
@@ -2179,7 +2158,7 @@ export const createQuestV2 = async (
 
   try {
     return await db.transaction((transaction) =>
-      createQuestInTransaction(transaction, userId, key, input, requestHash),
+      createQuestInTransaction(transaction, userId, key, input, requestHash)
     );
   } catch (error) {
     if (error instanceof QuestV2InputError) return { outcome: error.outcome };
@@ -2198,14 +2177,14 @@ const editQuestV2InTransaction = async (
   key: string,
   expectedVersion: number,
   input: NormalizedEditInput,
-  requestHash: string,
+  requestHash: string
 ): Promise<QuestV2EditOutcome> => {
   const idempotency = await acquireQuestV2Idempotency(
     transaction,
     userId,
     questV2EditOperationScope,
     key,
-    requestHash,
+    requestHash
   );
   if ('outcome' in idempotency) return idempotency;
 
@@ -2239,8 +2218,8 @@ const editQuestV2InTransaction = async (
       and(
         eq(quest.id, questId),
         eq(quest.hirerId, userId),
-        eq(quest.apiVersion, questApiVersion.v2),
-      ),
+        eq(quest.apiVersion, questApiVersion.v2)
+      )
     )
     .limit(1)
     .for('update');
@@ -2299,17 +2278,17 @@ const editQuestV2InTransaction = async (
   if (input.conditionItems !== undefined) {
     updates.condition = input.conditionItems.join('\n').slice(0, 4000);
     await transaction.delete(questConditionItem).where(eq(questConditionItem.questId, questId));
-    await transaction.insert(questConditionItem).values(
-      input.conditionItems.map((text, position) => ({ questId, position, text })),
-    );
+    await transaction
+      .insert(questConditionItem)
+      .values(input.conditionItems.map((text, position) => ({ questId, position, text })));
   }
 
   if (input.locations !== undefined) {
     await transaction.delete(questLocation).where(eq(questLocation.questId, questId));
     if (input.locations.length > 0) {
-      await transaction.insert(questLocation).values(
-        input.locations.map((location) => ({ questId, label: location.label })),
-      );
+      await transaction
+        .insert(questLocation)
+        .values(input.locations.map((location) => ({ questId, label: location.label })));
     }
   }
 
@@ -2322,8 +2301,8 @@ const editQuestV2InTransaction = async (
         eq(quest.hirerId, userId),
         eq(quest.apiVersion, questApiVersion.v2),
         eq(quest.questStatus, questStatus.draft),
-        eq(quest.version, expectedVersion),
-      ),
+        eq(quest.version, expectedVersion)
+      )
     )
     .returning({ id: quest.id });
   if (!updated) throwEditError('conflict');
@@ -2351,7 +2330,7 @@ export const editQuestV2 = async (
   questId: string,
   data: QuestV2EditInput,
   expectedVersion: number,
-  rawIdempotencyKey: string,
+  rawIdempotencyKey: string
 ): Promise<QuestV2EditOutcome> => {
   const key = rawIdempotencyKey.trim();
   if (key.length === 0 || key.length > 200) return { outcome: 'invalid-idempotency-key' };
@@ -2373,8 +2352,8 @@ export const editQuestV2 = async (
         key,
         expectedVersion,
         input,
-        requestHash,
-      ),
+        requestHash
+      )
     );
   } catch (error) {
     if (error instanceof QuestV2EditError) return { outcome: error.outcome };
@@ -2382,10 +2361,7 @@ export const editQuestV2 = async (
   }
 };
 
-const publishRequestHashFor = (
-  userId: string,
-  questId: string,
-): Promise<string> =>
+const publishRequestHashFor = (userId: string, questId: string): Promise<string> =>
   sha256Json({
     authenticatedMemberId: userId,
     operation: questV2PublishOperationScope,
@@ -2397,7 +2373,7 @@ const publishRequestHashFor = (
 export const publishQuestV2 = async (
   userId: string,
   questId: string,
-  rawIdempotencyKey: string,
+  rawIdempotencyKey: string
 ): Promise<QuestV2PublishOutcome | undefined> => {
   const key = rawIdempotencyKey.trim();
   if (key.length === 0 || key.length > 200) {
@@ -2408,7 +2384,7 @@ export const publishQuestV2 = async (
 
   try {
     return await db.transaction((transaction) =>
-      publishQuestV2InTransaction(transaction, userId, questId, key, requestHash),
+      publishQuestV2InTransaction(transaction, userId, questId, key, requestHash)
     );
   } catch (error) {
     if (!(error instanceof QuestV2PublishError)) throw error;
@@ -2452,7 +2428,7 @@ const boardCursorCondition = (cursor: ReturnType<typeof decodeCursor>) => {
   const startTime = new Date(cursor.startTime);
   return or(
     gt(quest.startTime, startTime),
-    and(eq(quest.startTime, startTime), gt(quest.id, cursor.id)),
+    and(eq(quest.startTime, startTime), gt(quest.id, cursor.id))
   );
 };
 
@@ -2475,7 +2451,7 @@ const firstLocationLabels = async (questIds: string[]) => {
 
 const toQuestV2BoardCard = (
   row: QuestV2BoardRow,
-  locations: Map<string, string | null>,
+  locations: Map<string, string | null>
 ): QuestV2BoardCard => {
   if (!isCompleteQuestV2DiscoveryRow(row)) {
     throw new Error(`Quest ${row.id} has incomplete v2 Board data`);
@@ -2499,7 +2475,7 @@ const toQuestV2BoardCard = (
 
 export const listQuestBoardV2 = async (
   userId: string,
-  filters: QuestV2BoardQuery,
+  filters: QuestV2BoardQuery
 ): Promise<{ items: QuestV2BoardCard[]; nextCursor: string | null }> => {
   const limit = parsePageLimit(filters.limit);
   const cursor = decodeCursor(filters.cursor);
@@ -2511,16 +2487,13 @@ export const listQuestBoardV2 = async (
       and(
         eq(quest.v2Mode, 'FIRST_COME_FIRST_SERVED'),
         or(
-          and(
-            eq(quest.v2Participation, 'SINGLE'),
-            sql`${activeWorkerCountExpression} = 0`,
-          ),
+          and(eq(quest.v2Participation, 'SINGLE'), sql`${activeWorkerCountExpression} = 0`),
           and(
             eq(quest.v2Participation, 'GROUP'),
-            sql`${activeWorkerCountExpression} < ${quest.headcount}`,
-          ),
-        ),
-      ),
+            sql`${activeWorkerCountExpression} < ${quest.headcount}`
+          )
+        )
+      )
     ),
   ];
 
@@ -2528,25 +2501,21 @@ export const listQuestBoardV2 = async (
   if (queryText) {
     const pattern = `%${queryText.replace(/[\\%_]/g, '\\$&')}%`;
     conditions.push(
-      sql`(${quest.title} ILIKE ${pattern} ESCAPE ${'\\'} OR ${quest.description} ILIKE ${pattern} ESCAPE ${'\\'})`,
+      sql`(${quest.title} ILIKE ${pattern} ESCAPE ${'\\'} OR ${quest.description} ILIKE ${pattern} ESCAPE ${'\\'})`
     );
   }
   if (filters.tagId) conditions.push(eq(quest.tagId, filters.tagId));
   if (filters.mode) conditions.push(eq(quest.v2Mode, filters.mode));
   if (filters.participation) conditions.push(eq(quest.v2Participation, filters.participation));
   if (filters.minQuestReward !== undefined) {
-    conditions.push(
-      sql`${quest.rewardSatang} >= ${parseBahtFilterSatang(filters.minQuestReward)}`,
-    );
+    conditions.push(sql`${quest.rewardSatang} >= ${parseBahtFilterSatang(filters.minQuestReward)}`);
   }
   if (filters.maxQuestReward !== undefined) {
-    conditions.push(
-      sql`${quest.rewardSatang} <= ${parseBahtFilterSatang(filters.maxQuestReward)}`,
-    );
+    conditions.push(sql`${quest.rewardSatang} <= ${parseBahtFilterSatang(filters.maxQuestReward)}`);
   }
   if (filters.maxDurationMinutes !== undefined) {
     conditions.push(
-      sql`${quest.dueAt} IS NOT NULL AND EXTRACT(EPOCH FROM (${quest.dueAt} - ${quest.startTime})) / 60 <= ${filters.maxDurationMinutes}`,
+      sql`${quest.dueAt} IS NOT NULL AND EXTRACT(EPOCH FROM (${quest.dueAt} - ${quest.startTime})) / 60 <= ${filters.maxDurationMinutes}`
     );
   }
   if (filters.startFrom) conditions.push(gte(quest.startTime, new Date(filters.startFrom)));
@@ -2594,20 +2563,21 @@ export const listQuestBoardV2 = async (
 };
 
 export const materializeQuestV2PublicImageResponse = (
-  images: QuestV2ImageReference[],
-): QuestV2PublicImageResponse[] => images.map((image) => {
-  const link = questV2Storage.linkForWithExpiry(image);
-  return {
-    imageId: image.imageId,
-    position: image.position,
-    url: link.url,
-    urlExpiresAt: link.expiresAt.toISOString(),
-  };
-});
+  images: QuestV2ImageReference[]
+): QuestV2PublicImageResponse[] =>
+  images.map((image) => {
+    const link = questV2Storage.linkForWithExpiry(image);
+    return {
+      imageId: image.imageId,
+      position: image.position,
+      url: link.url,
+      urlExpiresAt: link.expiresAt.toISOString(),
+    };
+  });
 
 export const getPublicQuestV2Detail = async (
   userId: string,
-  questId: string,
+  questId: string
 ): Promise<QuestV2PublicDetail | undefined> => {
   const [row] = await db
     .select({
@@ -2670,20 +2640,17 @@ export const getPublicQuestV2Detail = async (
 
 export const listOwnQuestV2 = async (
   userId: string,
-  filters: { limit?: number; cursor?: string },
+  filters: { limit?: number; cursor?: string }
 ) => {
   const limit = parsePageLimit(filters.limit);
   const cursor = decodeCursor(filters.cursor);
-  const conditions = [
-    eq(quest.apiVersion, questApiVersion.v2),
-    eq(quest.hirerId, userId),
-  ];
+  const conditions = [eq(quest.apiVersion, questApiVersion.v2), eq(quest.hirerId, userId)];
 
   if (cursor) {
     const startTime = new Date(cursor.startTime);
     const cursorCondition = or(
       gt(quest.startTime, startTime),
-      and(eq(quest.startTime, startTime), gt(quest.id, cursor.id)),
+      and(eq(quest.startTime, startTime), gt(quest.id, cursor.id))
     );
     if (cursorCondition) conditions.push(cursorCondition);
   }
@@ -2712,7 +2679,7 @@ export const listOwnQuestV2 = async (
 
 export const getQuestV2Detail = async (
   userId: string,
-  questId: string,
+  questId: string
 ): Promise<QuestV2Detail | undefined> => {
   const row = await selectQuestV2Row(db, userId, questId);
   if (!row) return undefined;
@@ -2726,7 +2693,7 @@ export const getQuestV2Detail = async (
 
 export const getQuestV2PublishCheck = async (
   userId: string,
-  questId: string,
+  questId: string
 ): Promise<QuestV2PublishCheckOutcome | undefined> =>
   db.transaction(async (transaction) => {
     const row = await selectQuestV2Row(transaction, userId, questId);

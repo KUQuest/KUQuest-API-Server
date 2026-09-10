@@ -51,18 +51,25 @@ const mapAdminDisputeError = (set: AdminContext['set'], error: unknown): ApiResp
     else if (
       error.code === 'DISPUTE_CASE_OUTCOME_INVALID' ||
       error.code === 'DISPUTE_CASE_AMOUNT_REQUIRED'
-    ) set.status = 400;
+    )
+      set.status = 400;
     else set.status = 409;
     return apiError(error.code, error.message);
   }
   if (error instanceof AdminActionError) {
     if (error.code === 'ADMIN_ACTION_ADMIN_NOT_FOUND') set.status = 403;
-    else if (error.code === 'ADMIN_ACTION_INVALID_VERSION' || error.code === 'ADMIN_ACTION_REASON_REQUIRED' || error.code === 'ADMIN_ACTION_INVALID_REASON_CODE') set.status = 400;
+    else if (
+      error.code === 'ADMIN_ACTION_INVALID_VERSION' ||
+      error.code === 'ADMIN_ACTION_REASON_REQUIRED' ||
+      error.code === 'ADMIN_ACTION_INVALID_REASON_CODE'
+    )
+      set.status = 400;
     else if (
       error.code === 'ADMIN_ACTION_KEY_REUSED' ||
       error.code === 'ADMIN_ACTION_CONFLICT' ||
       error.code === 'ADMIN_ACTION_WRITE_FAILED'
-    ) set.status = 409;
+    )
+      set.status = 409;
     else set.status = 400;
     return apiError(error.code, error.message);
   }
@@ -76,7 +83,9 @@ const mapAdminDisputeError = (set: AdminContext['set'], error: unknown): ApiResp
 export const listAdminDisputesController = async ({
   query,
   set,
-}: AdminContext & { query: AdminDisputeListQuery }): Promise<ApiResponse<AdminDisputeListResponse>> => {
+}: AdminContext & { query: AdminDisputeListQuery }): Promise<
+  ApiResponse<AdminDisputeListResponse>
+> => {
   try {
     const result = await listAdminDisputeCases({
       status: query.status,
@@ -135,7 +144,9 @@ export const fileAdminDisputeCaseController = async ({
 export const getAdminDisputeController = async ({
   params,
   set,
-}: AdminContext & { params: AdminDisputeParams }): Promise<ApiResponse<AdminDisputeDetailResponse>> => {
+}: AdminContext & { params: AdminDisputeParams }): Promise<
+  ApiResponse<AdminDisputeDetailResponse>
+> => {
   try {
     return apiSuccess(await getAdminDisputeCase(params.disputeCaseId));
   } catch (error) {
@@ -148,13 +159,17 @@ export const getAdminDisputeEvidenceController = async ({
   request,
   admin,
   set,
-}: AdminContext & { params: AdminDisputeParams; request: Request }): Promise<ApiResponse<AdminDisputeEvidenceResponse>> => {
+}: AdminContext & { params: AdminDisputeParams; request: Request }): Promise<
+  ApiResponse<AdminDisputeEvidenceResponse>
+> => {
   try {
-    return apiSuccess(await getAdminDisputeEvidence(
-      admin.id,
-      params.disputeCaseId,
-      request.headers.get('idempotency-key') ?? '',
-    ));
+    return apiSuccess(
+      await getAdminDisputeEvidence(
+        admin.id,
+        params.disputeCaseId,
+        request.headers.get('idempotency-key') ?? ''
+      )
+    );
   } catch (error) {
     return mapAdminDisputeError(set, error) as ApiResponse<AdminDisputeEvidenceResponse>;
   }
@@ -190,7 +205,10 @@ export const resolveAdminDisputeController = async ({
     });
     if (result.resourceVersion === null) {
       set.status = 500;
-      return apiError('ADMIN_ACTION_INVALID_RESULT', 'Admin Action did not return a Dispute Case version.');
+      return apiError(
+        'ADMIN_ACTION_INVALID_RESULT',
+        'Admin Action did not return a Dispute Case version.'
+      );
     }
     return apiSuccess({
       resourceSummary: result.resourceSummary,

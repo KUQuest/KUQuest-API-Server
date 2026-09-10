@@ -12,7 +12,9 @@ describe('Quest lifecycle scheduler', () => {
     const tasks: (() => void)[] = [];
     let runs = 0;
     const scheduler = createQuestLifecycleScheduler({
-      run: async () => { runs += 1; },
+      run: async () => {
+        runs += 1;
+      },
       intervalMs: 10_000,
       schedule: (task) => {
         tasks.push(task);
@@ -38,7 +40,10 @@ describe('Quest lifecycle scheduler', () => {
     const scheduler = createQuestLifecycleScheduler({
       run: () => {
         runs += 1;
-        if (runs === 1) return new Promise<void>((resolve) => { releaseFirst = resolve; });
+        if (runs === 1)
+          return new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+          });
         return Promise.reject(new Error('sweep failed'));
       },
       schedule: (task) => {

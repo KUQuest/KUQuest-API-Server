@@ -15,6 +15,7 @@ import {
   type QuestV2CandidateApplicationOutcome,
   type QuestV2CandidateSelectionOutcome,
 } from './quest-candidate-v2.service';
+import { mapQuestCommandOutcome } from './quest-command.controller';
 import { WorkChatTransitionError } from './quest-work-chat.port';
 
 type Application = Extract<QuestV2CandidateApplicationOutcome, { id: string }>;
@@ -36,10 +37,7 @@ const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   return apiError(code, message);
 };
 
-const mapApplicationError = (
-  set: AuthedContext['set'],
-  outcome: ApplicationError,
-) => {
+const mapApplicationError = (set: AuthedContext['set'], outcome: ApplicationError) => {
   if (outcome.outcome === 'not-found') {
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
@@ -48,7 +46,11 @@ const mapApplicationError = (
     return conflict(set, 'QUEST_MODE_NOT_ALLOWED', 'Only CANDIDATE Quests accept applications');
   }
   if (outcome.outcome === 'not-single') {
-    return conflict(set, 'QUEST_PARTICIPATION_NOT_ALLOWED', 'Only SINGLE Candidate Quests accept applications');
+    return conflict(
+      set,
+      'QUEST_PARTICIPATION_NOT_ALLOWED',
+      'Only SINGLE Candidate Quests accept applications'
+    );
   }
   if (outcome.outcome === 'hirer-not-allowed') {
     return conflict(set, 'HIRER_CANNOT_APPLY', 'The Hirer cannot apply to their own Quest');
@@ -57,20 +59,13 @@ const mapApplicationError = (
     return conflict(set, 'QUEST_NOT_OPEN', 'Only an open Quest accepts Candidate applications');
   }
   if (outcome.outcome === 'already-exists') {
-    return conflict(set, 'APPLICATION_ALREADY_EXISTS', 'The Member already has an application for this Quest');
+    return conflict(
+      set,
+      'APPLICATION_ALREADY_EXISTS',
+      'The Member already has an application for this Quest'
+    );
   }
-  if (outcome.outcome === 'idempotency-key-reused') {
-    return conflict(set, 'IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
-  }
-  if (outcome.outcome === 'idempotency-in-progress') {
-    return conflict(set, 'IDEMPOTENCY_IN_PROGRESS', 'The Idempotency-Key is still processing');
-  }
-  if (outcome.outcome === 'idempotency-unavailable') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'The Idempotency-Key result is unavailable');
-  }
-  set.status = 400;
-  return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
+  return mapQuestCommandOutcome(set, outcome.outcome);
 };
 
 export const createQuestV2CandidateApplicationController = async ({
@@ -88,7 +83,7 @@ export const createQuestV2CandidateApplicationController = async ({
   const result = await createQuestV2CandidateApplication(
     session.user.id,
     params.questId,
-    commandId,
+    commandId
   );
   if ('outcome' in result) return mapApplicationError(set, result);
   return apiSuccess(serializeApplication(result));
@@ -115,22 +110,19 @@ export const getQuestV2CandidateApplicationController = async ({
   const result = await getQuestV2CandidateApplication(
     session.user.id,
     params.questId,
-    params.applicationId,
+    params.applicationId
   );
   if ('outcome' in result) {
     set.status = 404;
     return apiError(
       result.outcome === 'not-found' ? 'QUEST_NOT_FOUND' : 'APPLICATION_NOT_FOUND',
-      result.outcome === 'not-found' ? 'Quest not found' : 'Application not found',
+      result.outcome === 'not-found' ? 'Quest not found' : 'Application not found'
     );
   }
   return apiSuccess(serializeApplication(result));
 };
 
-const mapWithdrawError = (
-  set: AuthedContext['set'],
-  outcome: WithdrawError,
-) => {
+const mapWithdrawError = (set: AuthedContext['set'], outcome: WithdrawError) => {
   if (outcome.outcome === 'not-found') {
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
@@ -140,32 +132,37 @@ const mapWithdrawError = (
     return apiError('APPLICATION_NOT_FOUND', 'Application not found');
   }
   if (outcome.outcome === 'not-withdrawable') {
-    return conflict(set, 'APPLICATION_NOT_WITHDRAWABLE', 'Only an applied application can be withdrawn');
+    return conflict(
+      set,
+      'APPLICATION_NOT_WITHDRAWABLE',
+      'Only an applied application can be withdrawn'
+    );
   }
   if (outcome.outcome === 'not-candidate') {
     return conflict(set, 'QUEST_MODE_NOT_ALLOWED', 'Only CANDIDATE Quests accept applications');
   }
   if (outcome.outcome === 'not-single') {
-    return conflict(set, 'QUEST_PARTICIPATION_NOT_ALLOWED', 'Only SINGLE Candidate Quests accept applications');
+    return conflict(
+      set,
+      'QUEST_PARTICIPATION_NOT_ALLOWED',
+      'Only SINGLE Candidate Quests accept applications'
+    );
   }
   if (outcome.outcome === 'hirer-not-allowed') {
-    return conflict(set, 'HIRER_CANNOT_WITHDRAW', 'The Hirer cannot withdraw a Candidate application');
+    return conflict(
+      set,
+      'HIRER_CANNOT_WITHDRAW',
+      'The Hirer cannot withdraw a Candidate application'
+    );
   }
   if (outcome.outcome === 'not-open') {
-    return conflict(set, 'QUEST_NOT_OPEN', 'Applications can be withdrawn only while the Quest is open');
+    return conflict(
+      set,
+      'QUEST_NOT_OPEN',
+      'Applications can be withdrawn only while the Quest is open'
+    );
   }
-  if (outcome.outcome === 'idempotency-key-reused') {
-    return conflict(set, 'IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
-  }
-  if (outcome.outcome === 'idempotency-in-progress') {
-    return conflict(set, 'IDEMPOTENCY_IN_PROGRESS', 'The Idempotency-Key is still processing');
-  }
-  if (outcome.outcome === 'idempotency-unavailable') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'The Idempotency-Key result is unavailable');
-  }
-  set.status = 400;
-  return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
+  return mapQuestCommandOutcome(set, outcome.outcome);
 };
 
 export const withdrawQuestV2CandidateApplicationController = async ({
@@ -184,7 +181,7 @@ export const withdrawQuestV2CandidateApplicationController = async ({
     session.user.id,
     params.questId,
     params.applicationId,
-    commandId,
+    commandId
   );
   if ('outcome' in result) return mapWithdrawError(set, result);
   return apiSuccess(serializeApplication(result));
@@ -208,10 +205,7 @@ const serializeSelectionAssignment = (assignment: {
   createdAt: assignment.createdAt.toISOString(),
 });
 
-const mapSelectionError = (
-  set: AuthedContext['set'],
-  outcome: SelectionError,
-) => {
+const mapSelectionError = (set: AuthedContext['set'], outcome: SelectionError) => {
   if (outcome.outcome === 'not-found') {
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
@@ -221,29 +215,34 @@ const mapSelectionError = (
     return apiError('APPLICATION_NOT_FOUND', 'Application not found');
   }
   if (outcome.outcome === 'not-allowed') {
-    return conflict(set, 'CANDIDATE_SELECTION_NOT_ALLOWED', 'Only the owning Hirer can select a Candidate application');
+    return conflict(
+      set,
+      'CANDIDATE_SELECTION_NOT_ALLOWED',
+      'Only the owning Hirer can select a Candidate application'
+    );
   }
   if (outcome.outcome === 'not-open') {
-    return conflict(set, 'QUEST_NOT_OPEN', 'Candidate selection is allowed only while the Quest is open');
+    return conflict(
+      set,
+      'QUEST_NOT_OPEN',
+      'Candidate selection is allowed only while the Quest is open'
+    );
   }
   if (outcome.outcome === 'not-selectable') {
-    return conflict(set, 'CANDIDATE_NOT_SELECTABLE', 'The Candidate application is not available for selection');
+    return conflict(
+      set,
+      'CANDIDATE_NOT_SELECTABLE',
+      'The Candidate application is not available for selection'
+    );
   }
   if (outcome.outcome === 'already-assigned') {
-    return conflict(set, 'ASSIGNMENT_ALREADY_EXISTS', 'The Candidate is already assigned to this Quest');
+    return conflict(
+      set,
+      'ASSIGNMENT_ALREADY_EXISTS',
+      'The Candidate is already assigned to this Quest'
+    );
   }
-  if (outcome.outcome === 'idempotency-key-reused') {
-    return conflict(set, 'IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
-  }
-  if (outcome.outcome === 'idempotency-in-progress') {
-    return conflict(set, 'IDEMPOTENCY_IN_PROGRESS', 'The Idempotency-Key is still processing');
-  }
-  if (outcome.outcome === 'idempotency-unavailable') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'The Idempotency-Key result is unavailable');
-  }
-  set.status = 400;
-  return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
+  return mapQuestCommandOutcome(set, outcome.outcome);
 };
 
 export const selectQuestV2CandidateApplicationController = async ({
@@ -263,7 +262,7 @@ export const selectQuestV2CandidateApplicationController = async ({
       session.user.id,
       params.questId,
       params.applicationId,
-      commandId,
+      commandId
     );
     if ('outcome' in result) return mapSelectionError(set, result);
     return apiSuccess({

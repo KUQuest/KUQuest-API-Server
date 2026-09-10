@@ -21,7 +21,7 @@ describe('Quest integration', () => {
             : hasBody
               ? JSON.stringify({ title: 'Edit' })
               : undefined,
-      }),
+      })
     );
 
     expect(response.status).toBe(method === 'POST' ? 400 : 401);
@@ -29,19 +29,29 @@ describe('Quest integration', () => {
   });
 
   it('validates consent request bodies before authentication', async () => {
-    const invalid = await app.handle(new Request('http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/edit-requests', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ unknown: true }),
-    }));
+    const invalid = await app.handle(
+      new Request(
+        'http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/edit-requests',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ unknown: true }),
+        }
+      )
+    );
     expect(invalid.status).toBe(400);
     expect((await invalid.json()).error.code).toBe('VALIDATION');
 
-    const unauthenticated = await app.handle(new Request('http://localhost/api/v1/quests/edit-requests/018f47a7-1c7d-7c98-9a11-690d7e83430c/respond', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ decision: 'EDIT_RESPONSE_APPROVED' }),
-    }));
+    const unauthenticated = await app.handle(
+      new Request(
+        'http://localhost/api/v1/quests/edit-requests/018f47a7-1c7d-7c98-9a11-690d7e83430c/respond',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ decision: 'EDIT_RESPONSE_APPROVED' }),
+        }
+      )
+    );
     expect(unauthenticated.status).toBe(401);
     expect((await unauthenticated.json()).error.code).toBe('UNAUTHORIZED');
   });
@@ -56,22 +66,26 @@ describe('Quest integration', () => {
     ];
 
     for (const field of immutableFields) {
-      const response = await app.handle(new Request('http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c', {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(field),
-      }));
+      const response = await app.handle(
+        new Request('http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(field),
+        })
+      );
       expect(response.status).toBe(400);
       expect((await response.json()).error.code).toBe('VALIDATION');
     }
   });
 
   it('accepts a Tag field for the authenticated Draft edit path', async () => {
-    const response = await app.handle(new Request('http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c', {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tagId: '018f47a7-1c7d-7c98-9a11-690d7e834301' }),
-    }));
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tagId: '018f47a7-1c7d-7c98-9a11-690d7e834301' }),
+      })
+    );
 
     expect(response.status).toBe(401);
     expect((await response.json()).error.code).toBe('UNAUTHORIZED');
@@ -82,10 +96,10 @@ describe('Quest integration', () => {
     form.set('images', new File(['not-an-image'], 'quest.png', { type: 'image/png' }));
 
     const response = await app.handle(
-      new Request(
-        'http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/images',
-        { method: 'POST', body: form },
-      ),
+      new Request('http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/images', {
+        method: 'POST',
+        body: form,
+      })
     );
 
     expect(response.status).toBe(401);
@@ -96,8 +110,8 @@ describe('Quest integration', () => {
     const response = await app.handle(
       new Request(
         'http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/images/018f47a7-1c7d-7c98-9a11-690d7e834301',
-        { method: 'DELETE' },
-      ),
+        { method: 'DELETE' }
+      )
     );
 
     expect(response.status).toBe(401);
@@ -110,7 +124,7 @@ describe('Quest integration', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ unknown: true }),
-      }),
+      })
     );
 
     expect(response.status).toBe(400);
@@ -123,7 +137,7 @@ describe('Quest integration', () => {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ title: 'Edit', unknown: true }),
-      }),
+      })
     );
 
     expect(response.status).toBe(400);
@@ -144,50 +158,54 @@ describe('Quest integration', () => {
     expect(document.paths['/api/v1/quests/{questId}']?.patch?.security).toEqual([
       { betterAuthSession: [] },
     ]);
-    expect(document.paths['/api/v1/quests']?.get?.security).toEqual([
-      { betterAuthSession: [] },
-    ]);
+    expect(document.paths['/api/v1/quests']?.get?.security).toEqual([{ betterAuthSession: [] }]);
     expect(document.paths['/api/v1/quests/{questId}/publish-check']?.get?.operationId).toBe(
-      'getQuestPublishCheck',
+      'getQuestPublishCheck'
     );
     expect(document.paths['/api/v1/quests/{questId}/publish-check']?.get?.security).toEqual([
       { betterAuthSession: [] },
     ]);
     expect(document.paths['/api/v1/quests/{questId}/publish']?.post?.operationId).toBe(
-      'publishQuest',
+      'publishQuest'
     );
     expect(document.paths['/api/v1/quests/{questId}/edit-requests']?.post?.operationId).toBe(
-      'createQuestEditRequest',
+      'createQuestEditRequest'
     );
     expect(document.paths['/api/v1/quests/edit-requests/{requestId}']?.get?.operationId).toBe(
-      'getQuestEditRequest',
+      'getQuestEditRequest'
     );
-    expect(document.paths['/api/v1/quests/edit-requests/{requestId}/respond']?.post?.operationId).toBe(
-      'respondToQuestEditRequest',
-    );
+    expect(
+      document.paths['/api/v1/quests/edit-requests/{requestId}/respond']?.post?.operationId
+    ).toBe('respondToQuestEditRequest');
     expect(document.paths['/api/v1/quests/{questId}/publish']?.post?.security).toEqual([
       { betterAuthSession: [] },
     ]);
     expect(document.paths['/api/v1/quests/{questId}/images']?.post?.operationId).toBe(
-      'addQuestImages',
+      'addQuestImages'
     );
     expect(document.paths['/api/v1/quests/{questId}/images']?.post?.security).toEqual([
       { betterAuthSession: [] },
     ]);
-    expect(
-      document.paths['/api/v1/quests/{questId}/images/{imageId}']?.delete?.operationId,
-    ).toBe('deleteQuestImage');
-    expect(
-      document.paths['/api/v1/quests/{questId}/images/{imageId}']?.delete?.security,
-    ).toEqual([{ betterAuthSession: [] }]);
+    expect(document.paths['/api/v1/quests/{questId}/images/{imageId}']?.delete?.operationId).toBe(
+      'deleteQuestImage'
+    );
+    expect(document.paths['/api/v1/quests/{questId}/images/{imageId}']?.delete?.security).toEqual([
+      { betterAuthSession: [] },
+    ]);
   });
 
   it('documents Quest Image upload as multipart with the images field', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
     const document = (await response.json()) as {
-      paths: Record<string, Record<string, {
-        requestBody?: { content?: Record<string, unknown> };
-      }>>;
+      paths: Record<
+        string,
+        Record<
+          string,
+          {
+            requestBody?: { content?: Record<string, unknown> };
+          }
+        >
+      >;
     };
     const operation = document.paths['/api/v1/quests/{questId}/images']?.post;
 
@@ -201,10 +219,10 @@ describe('Quest integration', () => {
     }
 
     const response = await app.handle(
-      new Request(
-        'http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/images',
-        { method: 'POST', body: form },
-      ),
+      new Request('http://localhost/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/images', {
+        method: 'POST',
+        body: form,
+      })
     );
 
     expect(response.status).toBe(400);
@@ -215,9 +233,7 @@ describe('Quest integration', () => {
     ['GET', '/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/publish-check'],
     ['POST', '/api/v1/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/publish'],
   ])('%s %s requires Member authentication', async (method, path) => {
-    const response = await app.handle(
-      new Request(`http://localhost${path}`, { method }),
-    );
+    const response = await app.handle(new Request(`http://localhost${path}`, { method }));
 
     expect(response.status).toBe(401);
     expect((await response.json()).error.code).toBe('UNAUTHORIZED');

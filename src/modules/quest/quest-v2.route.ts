@@ -20,12 +20,8 @@ import {
   respondToQuestV2EditRequestController,
 } from './quest-v2.controller';
 import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
-import {
-  cancelQuestV2Controller,
-} from './quest-settlement.controller';
-import {
-  questCancellationResponseSchema,
-} from './quest-settlement.schema';
+import { cancelQuestV2Controller } from './quest-settlement.controller';
+import { questCancellationResponseSchema } from './quest-settlement.schema';
 import {
   questV2CreateHttpResponseSchema,
   questV2CreateHttpSchema,
@@ -93,7 +89,7 @@ export const questV2Route = new Elysia({
     response: responses(questV2MineHttpResponseSchema, 400, 401, 500),
     detail: {
       tags: ['Quests v2'],
-      summary: 'List the Hirer\'s v2 Quests',
+      summary: "List the Hirer's v2 Quests",
       description: 'Returns the authenticated Hirer’s Quests owned through the v2 contract.',
       operationId: 'listOwnQuestsV2',
       security: betterAuthSecurity,
@@ -104,7 +100,16 @@ export const questV2Route = new Elysia({
     body: questV2EditRequestCreateSchema,
     headers: questV2WriteHeadersSchema,
     transform: normalizeQuestV2EditRequestCreateBody,
-    response: responses(questV2EditRequestResponseSchema, { successStatus: 201 }, 400, 401, 404, 409, 500, 503),
+    response: responses(
+      questV2EditRequestResponseSchema,
+      { successStatus: 201 },
+      400,
+      401,
+      404,
+      409,
+      500,
+      503
+    ),
     detail: {
       tags: ['Quests v2'],
       summary: 'Create a v2 Quest Edit Request',

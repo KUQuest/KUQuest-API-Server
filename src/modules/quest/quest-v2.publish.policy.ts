@@ -1,9 +1,5 @@
 import type { WalletStatus } from '@/database/schema/wallet.schema';
-import {
-  calculatePlatformFeeSatang,
-  satang,
-  type Satang,
-} from '@/modules/wallet';
+import { calculatePlatformFeeSatang, satang, type Satang } from '@/modules/wallet';
 
 import {
   isValidQuestV2Headcount,
@@ -78,11 +74,11 @@ const greatestRewardSatang = (questFundingTotalSatang: Satang, platformFeeBps: n
 };
 
 export const calculateQuestV2FundingQuote = (
-  input: QuestV2FundingQuoteInput,
+  input: QuestV2FundingQuoteInput
 ): QuestV2FundingQuote => {
   const questRewardSatang = greatestRewardSatang(
     input.questFundingTotalSatang,
-    input.platformFeeBps,
+    input.platformFeeBps
   );
   const platformFeeSatang = satang(input.questFundingTotalSatang - questRewardSatang);
   const escrowRequirementSatang = satang(input.questFundingTotalSatang * input.headcount);
@@ -100,9 +96,7 @@ export const calculateQuestV2FundingQuote = (
   };
 };
 
-export const buildQuestV2PublishCheck = (
-  snapshot: QuestV2PublishSnapshot,
-): QuestV2PublishCheck => {
+export const buildQuestV2PublishCheck = (snapshot: QuestV2PublishSnapshot): QuestV2PublishCheck => {
   const quote = calculateQuestV2FundingQuote(snapshot);
   const blockingReasons: QuestV2PublishReason[] = [];
 

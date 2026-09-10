@@ -20,9 +20,12 @@ export const adminDisputeOpenParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
 });
 
-export const adminDisputeOpenBodySchema = t.Object({
-  workerId: t.String({ format: 'uuid' }),
-}, { additionalProperties: false });
+export const adminDisputeOpenBodySchema = t.Object(
+  {
+    workerId: t.String({ format: 'uuid' }),
+  },
+  { additionalProperties: false }
+);
 
 export const adminDisputeListQuerySchema = t.Object({
   status: t.Optional(disputeCaseStatusSchema),
@@ -49,15 +52,15 @@ export const adminDisputeEvidenceHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
 });
 
-export const adminDisputeResolveBodySchema = t.Object({
-  outcome: t.Union([
-    t.Literal('DISPUTE_CASE_DISMISSED'),
-    t.Literal('DISPUTE_CASE_RESOLVED'),
-  ]),
-  reasonCode: adminDisputeReasonCodeSchema,
-  workerId: t.Optional(t.String({ format: 'uuid' })),
-  amountSatang: t.Optional(t.Integer({ minimum: 1, maximum: 2_000_000_000 })),
-}, { additionalProperties: false });
+export const adminDisputeResolveBodySchema = t.Object(
+  {
+    outcome: t.Union([t.Literal('DISPUTE_CASE_DISMISSED'), t.Literal('DISPUTE_CASE_RESOLVED')]),
+    reasonCode: adminDisputeReasonCodeSchema,
+    workerId: t.Optional(t.String({ format: 'uuid' })),
+    amountSatang: t.Optional(t.Integer({ minimum: 1, maximum: 2_000_000_000 })),
+  },
+  { additionalProperties: false }
+);
 
 export const adminDisputeSummarySchema = t.Object({
   id: t.String({ format: 'uuid' }),
@@ -111,27 +114,33 @@ const adminDisputeEvidenceSchema = t.Object({
     hirerId: t.String({ format: 'uuid' }),
     failedAt: t.Nullable(t.String({ format: 'date-time' })),
   }),
-  assignments: t.Array(t.Object({
-    id: t.String({ format: 'uuid' }),
-    workerId: t.String({ format: 'uuid' }),
-    assignmentStatus: t.String(),
-    startedAt: t.Nullable(t.String({ format: 'date-time' })),
-    createdAt: t.String({ format: 'date-time' }),
-  })),
-  proofSubmissions: t.Array(t.Object({
-    id: t.String({ format: 'uuid' }),
-    workerId: t.Nullable(t.String({ format: 'uuid' })),
-    teamId: t.Nullable(t.String({ format: 'uuid' })),
-    submittedByUserId: t.String({ format: 'uuid' }),
-    submissionStatus: t.String(),
-    submittedAt: t.Nullable(t.String({ format: 'date-time' })),
-    files: t.Array(t.Object({
-      fileId: t.String({ format: 'uuid' }),
-      contentType: t.String(),
-      sizeBytes: t.Integer({ minimum: 0 }),
-      position: t.Integer({ minimum: 0 }),
-    })),
-  })),
+  assignments: t.Array(
+    t.Object({
+      id: t.String({ format: 'uuid' }),
+      workerId: t.String({ format: 'uuid' }),
+      assignmentStatus: t.String(),
+      startedAt: t.Nullable(t.String({ format: 'date-time' })),
+      createdAt: t.String({ format: 'date-time' }),
+    })
+  ),
+  proofSubmissions: t.Array(
+    t.Object({
+      id: t.String({ format: 'uuid' }),
+      workerId: t.Nullable(t.String({ format: 'uuid' })),
+      teamId: t.Nullable(t.String({ format: 'uuid' })),
+      submittedByUserId: t.String({ format: 'uuid' }),
+      submissionStatus: t.String(),
+      submittedAt: t.Nullable(t.String({ format: 'date-time' })),
+      files: t.Array(
+        t.Object({
+          fileId: t.String({ format: 'uuid' }),
+          contentType: t.String(),
+          sizeBytes: t.Integer({ minimum: 0 }),
+          position: t.Integer({ minimum: 0 }),
+        })
+      ),
+    })
+  ),
 });
 
 export const adminDisputeEvidenceResponseSchema = t.Object({

@@ -13,10 +13,7 @@ import { isTerminalQuestStatus } from './quest.contract';
 import type { QuestStatus } from './quest.contract';
 import type { QuestTransaction } from './quest-work-chat.port';
 
-import type {
-  QuestV2ReviewCreateInput,
-  QuestV2ReviewUpdateInput,
-} from './quest-review-v2.schema';
+import type { QuestV2ReviewCreateInput, QuestV2ReviewUpdateInput } from './quest-review-v2.schema';
 
 type ReviewCreateInput = QuestV2ReviewCreateInput;
 type ReviewUpdateInput = QuestV2ReviewUpdateInput;
@@ -49,9 +46,7 @@ type ReviewOutcomeCode =
   | 'reviewee-required'
   | 'window-expired';
 
-export type QuestV2ReviewOutcome =
-  | QuestV2ReviewRow
-  | { outcome: ReviewOutcomeCode };
+export type QuestV2ReviewOutcome = QuestV2ReviewRow | { outcome: ReviewOutcomeCode };
 
 const reviewFields = {
   id: review.id,
@@ -117,12 +112,9 @@ const updateReviewPath = '/api/v2/quests/:questId/reviews/:reviewId';
 const sha256Json = async (value: object): Promise<string> => {
   const digest = await crypto.subtle.digest(
     'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value)),
+    new TextEncoder().encode(JSON.stringify(value))
   );
-  return Array.from(
-    new Uint8Array(digest),
-    (byte) => byte.toString(16).padStart(2, '0'),
-  ).join('');
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
 const reviewDeadline = (terminalAt: Date): Date =>
@@ -132,18 +124,16 @@ const isValidRating = (rating: number): boolean =>
   Number.isInteger(rating) && rating >= 1 && rating <= 5;
 
 const normalizeComment = (
-  comment: string | undefined,
+  comment: string | undefined
 ): { value: string | null } | { outcome: 'invalid-comment' } => {
   if (comment === undefined) return { value: null };
   const value = comment.trim();
-  return value.length > 0 && value.length <= 1000
-    ? { value }
-    : { outcome: 'invalid-comment' };
+  return value.length > 0 && value.length <= 1000 ? { value } : { outcome: 'invalid-comment' };
 };
 
 const lockQuest = async (
   transaction: QuestTransaction,
-  questId: string,
+  questId: string
 ): Promise<QuestRow | undefined> => {
   const [current] = await transaction
     .select({
@@ -165,7 +155,7 @@ const acquireIdempotency = async (
   operation: string,
   key: string,
   requestHash: string,
-  now: Date,
+  now: Date
 ): Promise<IdempotencyAcquireResult> => {
   const [created] = await transaction
     .insert(questV2ReviewCommand)
@@ -200,7 +190,7 @@ const completeIdempotency = async (
   commandId: string,
   resourceId: string | null,
   resultData: object,
-  now: Date,
+  now: Date
 ): Promise<void> => {
   await transaction
     .update(questV2ReviewCommand)
@@ -245,7 +235,8 @@ const reviewFromSnapshot = (value: unknown): QuestV2ReviewRow | undefined => {
     (snapshot.comment !== null && typeof snapshot.comment !== 'string') ||
     !createdAt ||
     !updatedAt
-  ) return undefined;
+  )
+    return undefined;
   return {
     id: snapshot.id,
     questId: snapshot.questId,
@@ -276,7 +267,7 @@ const commandFailure = async (
   transaction: QuestTransaction,
   commandId: string,
   outcome: ReviewOutcomeCode,
-  now: Date,
+  now: Date
 ): Promise<{ outcome: ReviewOutcomeCode }> => {
   await completeIdempotency(transaction, commandId, null, { outcome }, now);
   return { outcome };
@@ -287,29 +278,31 @@ const reviewRequestHash = (
   operation: 'create' | 'update',
   questId: string,
   reviewId: string | null,
-  input: ReviewCreateInput | ReviewUpdateInput,
-): Promise<string> => sha256Json({
-  authenticatedMemberId: memberId,
-  operation: `${reviewOperationScope}.${operation}`,
-  path: operation === 'create' ? createReviewPath : updateReviewPath,
-  questId,
-  reviewId,
-  body: operation === 'create'
-    ? {
-        revieweeId: (input as ReviewCreateInput).revieweeId ?? null,
-        rating: (input as ReviewCreateInput).rating,
-        comment: (input as ReviewCreateInput).comment?.trim() ?? null,
-      }
-    : {
-        rating: (input as ReviewUpdateInput).rating ?? null,
-        comment: (input as ReviewUpdateInput).comment?.trim() ?? null,
-      },
-});
+  input: ReviewCreateInput | ReviewUpdateInput
+): Promise<string> =>
+  sha256Json({
+    authenticatedMemberId: memberId,
+    operation: `${reviewOperationScope}.${operation}`,
+    path: operation === 'create' ? createReviewPath : updateReviewPath,
+    questId,
+    reviewId,
+    body:
+      operation === 'create'
+        ? {
+            revieweeId: (input as ReviewCreateInput).revieweeId ?? null,
+            rating: (input as ReviewCreateInput).rating,
+            comment: (input as ReviewCreateInput).comment?.trim() ?? null,
+          }
+        : {
+            rating: (input as ReviewUpdateInput).rating ?? null,
+            comment: (input as ReviewUpdateInput).comment?.trim() ?? null,
+          },
+  });
 
 const assignmentExists = async (
   transaction: QuestTransaction,
   questId: string,
-  workerId: string,
+  workerId: string
 ): Promise<boolean> => {
   const [assignment] = await transaction
     .select({ id: questAssignment.id })
@@ -325,14 +318,15 @@ const revieweeForCreate = async (
   current: QuestRow,
   questId: string,
   reviewerId: string,
-  requestedRevieweeId: string | undefined,
+  requestedRevieweeId: string | undefined
 ): Promise<{ revieweeId: string } | { outcome: 'not-authorized' | 'reviewee-required' }> => {
   if (reviewerId === current.hirerId) {
     if (!requestedRevieweeId) return { outcome: 'reviewee-required' };
     if (
       requestedRevieweeId === current.hirerId ||
       !(await assignmentExists(transaction, questId, requestedRevieweeId))
-    ) return { outcome: 'not-authorized' };
+    )
+      return { outcome: 'not-authorized' };
     return { revieweeId: requestedRevieweeId };
   }
 
@@ -345,39 +339,41 @@ const revieweeForCreate = async (
   return { revieweeId: current.hirerId };
 };
 
-const existingReview = async (
-  transaction: QuestTransaction,
-  questId: string,
-  reviewId: string,
-) => (await transaction
-  .select(reviewFields)
-  .from(review)
-  .where(and(eq(review.id, reviewId), eq(review.questId, questId)))
-  .limit(1)
-  .for('update'))[0];
+const existingReview = async (transaction: QuestTransaction, questId: string, reviewId: string) =>
+  (
+    await transaction
+      .select(reviewFields)
+      .from(review)
+      .where(and(eq(review.id, reviewId), eq(review.questId, questId)))
+      .limit(1)
+      .for('update')
+  )[0];
 
 const isValidReviewPair = async (
   transaction: QuestTransaction,
   current: QuestRow,
   questId: string,
   reviewerId: string,
-  revieweeId: string,
+  revieweeId: string
 ): Promise<boolean> => {
   if (reviewerId === current.hirerId) {
-    return revieweeId !== current.hirerId && await assignmentExists(transaction, questId, revieweeId);
+    return (
+      revieweeId !== current.hirerId && (await assignmentExists(transaction, questId, revieweeId))
+    );
   }
-  return revieweeId === current.hirerId && await assignmentExists(transaction, questId, reviewerId);
+  return (
+    revieweeId === current.hirerId && (await assignmentExists(transaction, questId, reviewerId))
+  );
 };
 
-const isReviewable = (current: QuestRow): boolean =>
-  isTerminalQuestStatus(current.questStatus);
+const isReviewable = (current: QuestRow): boolean => isTerminalQuestStatus(current.questStatus);
 
 export const createQuestV2Review = async (
   reviewerId: string,
   questId: string,
   input: ReviewCreateInput,
   rawCommandId: string,
-  now = new Date(),
+  now = new Date()
 ): Promise<QuestV2ReviewOutcome> => {
   const commandId = rawCommandId.trim();
   if (commandId.length === 0 || commandId.length > 200) {
@@ -396,7 +392,7 @@ export const createQuestV2Review = async (
       `${reviewOperationScope}.create`,
       commandId,
       requestHash,
-      now,
+      now
     );
     if ('outcome' in idempotency) return idempotency;
     if (!idempotency.created) return replayReview(idempotency.record);
@@ -414,18 +410,20 @@ export const createQuestV2Review = async (
       current,
       questId,
       reviewerId,
-      input.revieweeId,
+      input.revieweeId
     );
     if ('outcome' in reviewee) return fail(reviewee.outcome);
 
     const existing = await transaction
       .select({ id: review.id })
       .from(review)
-      .where(and(
-        eq(review.questId, questId),
-        eq(review.reviewerId, reviewerId),
-        eq(review.revieweeId, reviewee.revieweeId),
-      ))
+      .where(
+        and(
+          eq(review.questId, questId),
+          eq(review.reviewerId, reviewerId),
+          eq(review.revieweeId, reviewee.revieweeId)
+        )
+      )
       .limit(1)
       .for('update');
     if (existing[0]) return fail('already-exists');
@@ -453,7 +451,7 @@ export const createQuestV2Review = async (
       idempotency.record.id,
       created.id,
       reviewSnapshot(created),
-      now,
+      now
     );
     return created;
   });
@@ -465,7 +463,7 @@ export const updateQuestV2Review = async (
   reviewId: string,
   input: ReviewUpdateInput,
   rawCommandId: string,
-  now = new Date(),
+  now = new Date()
 ): Promise<QuestV2ReviewOutcome> => {
   const commandId = rawCommandId.trim();
   if (commandId.length === 0 || commandId.length > 200) {
@@ -484,7 +482,7 @@ export const updateQuestV2Review = async (
       `${reviewOperationScope}.update`,
       commandId,
       requestHash,
-      now,
+      now
     );
     if ('outcome' in idempotency) return idempotency;
     if (!idempotency.created) return replayReview(idempotency.record);
@@ -496,13 +494,16 @@ export const updateQuestV2Review = async (
     const currentReview = await existingReview(transaction, questId, reviewId);
     if (!currentReview) return fail('review-not-found');
     if (currentReview.reviewerId !== reviewerId) return fail('not-authorized');
-    if (!(await isValidReviewPair(
-      transaction,
-      current,
-      questId,
-      currentReview.reviewerId,
-      currentReview.revieweeId,
-    ))) return fail('not-authorized');
+    if (
+      !(await isValidReviewPair(
+        transaction,
+        current,
+        questId,
+        currentReview.reviewerId,
+        currentReview.revieweeId
+      ))
+    )
+      return fail('not-authorized');
     if (now.getTime() > reviewDeadline(current.updatedAt).getTime()) return fail('window-expired');
 
     const values: {
@@ -533,7 +534,7 @@ export const updateQuestV2Review = async (
       idempotency.record.id,
       updated.id,
       reviewSnapshot(updated),
-      now,
+      now
     );
     return updated;
   });

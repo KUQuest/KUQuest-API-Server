@@ -50,7 +50,7 @@ describe('Quest publish policy', () => {
         tagId: null,
         dueAt: null,
         startTime: new Date('2026-08-25T10:00:00.000Z'),
-      }).blockingReasons,
+      }).blockingReasons
     ).toEqual([
       {
         code: 'QUEST_TAG_REQUIRED',
@@ -73,7 +73,7 @@ describe('Quest publish policy', () => {
         ...baseSnapshot,
         hasImages: false,
         hasLocations: false,
-      }),
+      })
     ).toMatchObject({
       blockingReasons: [],
       warnings: [

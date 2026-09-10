@@ -28,19 +28,39 @@ const mapOutcome = (set: AuthedContext['set'], result: UnderfilledError) => {
     return apiError('QUEST_UNDERFILLED_NOT_FOUND', 'The underfilled Quest process was not found');
   }
   if (result.outcome === 'not-underfilled') {
-    return conflict(set, 'QUEST_NOT_UNDERFILLED', 'The Quest is not an underfilled GROUP + FIRST_COME_FIRST_SERVED Quest');
+    return conflict(
+      set,
+      'QUEST_NOT_UNDERFILLED',
+      'The Quest is not an underfilled GROUP + FIRST_COME_FIRST_SERVED Quest'
+    );
   }
   if (result.outcome === 'not-pending') {
-    return conflict(set, 'QUEST_UNDERFILLED_NOT_PENDING', 'The underfilled decision or consent window is not pending');
+    return conflict(
+      set,
+      'QUEST_UNDERFILLED_NOT_PENDING',
+      'The underfilled decision or consent window is not pending'
+    );
   }
   if (result.outcome === 'already-responded') {
-    return conflict(set, 'QUEST_UNDERFILLED_ALREADY_RESPONDED', 'The Worker already responded to this consent window');
+    return conflict(
+      set,
+      'QUEST_UNDERFILLED_ALREADY_RESPONDED',
+      'The Worker already responded to this consent window'
+    );
   }
   if (result.outcome === 'expired') {
-    return conflict(set, 'QUEST_UNDERFILLED_EXPIRED', 'The underfilled decision or consent window has expired');
+    return conflict(
+      set,
+      'QUEST_UNDERFILLED_EXPIRED',
+      'The underfilled decision or consent window has expired'
+    );
   }
   if (result.outcome === 'idempotency-key-reused') {
-    return conflict(set, 'IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
+    return conflict(
+      set,
+      'IDEMPOTENCY_KEY_REUSED',
+      'The Idempotency-Key was used for a different request'
+    );
   }
   if (result.outcome === 'idempotency-in-progress') {
     return conflict(set, 'IDEMPOTENCY_IN_PROGRESS', 'The Idempotency-Key is still processing');

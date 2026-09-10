@@ -2,12 +2,7 @@ import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
-import {
-  quest,
-  questAssignment,
-  questImage,
-  questLocation,
-} from '@/database/schema/quest.schema';
+import { quest, questAssignment, questImage, questLocation } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
@@ -16,14 +11,7 @@ import { questStatus } from '@/modules/quest/quest.contract';
 
 import { Elysia } from 'elysia';
 import { asc, eq, inArray } from 'drizzle-orm';
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-} from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 
 const testEmail = `quest-v2-discovery-${crypto.randomUUID()}@ku.th`;
 const testPassword = 'TestStudent1!';
@@ -35,13 +23,11 @@ const authTestApp = new Elysia({ name: 'quest-v2-discovery-test-auth' }).use(
     password: testPassword,
     firstName: 'Discovery',
     lastName: 'Member',
-  }),
+  })
 );
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 let memberId = '';
 let sessionCookie = '';
@@ -74,12 +60,12 @@ const baseInput: QuestV2CreateInput = {
 const createOpenQuest = async (
   owner: string,
   overrides: Partial<QuestV2CreateInput> = {},
-  rewardSatang = 1234,
+  rewardSatang = 1234
 ) => {
   const result = await createQuestV2(
     owner,
     { ...baseInput, ...overrides },
-    `discovery-create-${crypto.randomUUID()}`,
+    `discovery-create-${crypto.randomUUID()}`
   );
   if (!('quest' in result)) throw new Error(`Create failed: ${result.outcome}`);
   questIds.push(result.quest.id);
@@ -96,19 +82,23 @@ const addActiveWorkers = async (questId: string, workers: string[]) => {
       questId,
       workerId,
       assignmentStatus: 'ASSIGNMENT_ACTIVE',
-    })),
+    }))
   );
 };
 
 const getBoard = (query = '') =>
-  app.handle(new Request(`http://localhost/api/v2/quests${query}`, {
-    headers: { cookie: sessionCookie },
-  }));
+  app.handle(
+    new Request(`http://localhost/api/v2/quests${query}`, {
+      headers: { cookie: sessionCookie },
+    })
+  );
 
 const getPublicDetail = (questId: string, cookie = sessionCookie) =>
-  app.handle(new Request(`http://localhost/api/v2/quests/${questId}/public`, {
-    headers: { cookie },
-  }));
+  app.handle(
+    new Request(`http://localhost/api/v2/quests/${questId}/public`, {
+      headers: { cookie },
+    })
+  );
 
 beforeAll(async () => {
   await sql`select 1`;
@@ -117,9 +107,10 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: testEmail, password: testPassword }),
-    }),
+    })
   );
-  if (loginResponse.status !== 200) throw new Error(`Test authentication failed: ${loginResponse.status}`);
+  if (loginResponse.status !== 200)
+    throw new Error(`Test authentication failed: ${loginResponse.status}`);
   memberId = ((await loginResponse.json()) as { user: { id: string } }).user.id;
   sessionCookie = getCookieHeader(loginResponse);
 
@@ -156,9 +147,9 @@ beforeEach(async () => {
 
 afterAll(async () => {
   if (questIds.length > 0) await db.delete(quest).where(inArray(quest.id, questIds));
-  await db.delete(walletIdempotencyKey).where(
-    inArray(walletIdempotencyKey.principalUserId, [memberId, ownerId, ...workerIds]),
-  );
+  await db
+    .delete(walletIdempotencyKey)
+    .where(inArray(walletIdempotencyKey.principalUserId, [memberId, ownerId, ...workerIds]));
   if (fileIds.length > 0) await db.delete(file).where(inArray(file.id, fileIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(tag).where(eq(tag.id, otherTagId));
@@ -209,43 +200,42 @@ describe('Quest API v2 discovery contract', () => {
     const board = document.paths['/api/v2/quests']?.get;
     expect(board?.operationId).toBe('listQuestBoardV2');
     expect(board?.security).toEqual([{ betterAuthSession: [] }]);
-    expect(board?.parameters?.map((parameter) => parameter.name)).toEqual(expect.arrayContaining([
-      'q',
-      'tagId',
-      'mode',
-      'participation',
-      'minQuestReward',
-      'maxQuestReward',
-      'maxDurationMinutes',
-      'startFrom',
-      'startTo',
-      'limit',
-      'cursor',
-    ]));
+    expect(board?.parameters?.map((parameter) => parameter.name)).toEqual(
+      expect.arrayContaining([
+        'q',
+        'tagId',
+        'mode',
+        'participation',
+        'minQuestReward',
+        'maxQuestReward',
+        'maxDurationMinutes',
+        'startFrom',
+        'startTo',
+        'limit',
+        'cursor',
+      ])
+    );
 
     const publicDetail = document.paths['/api/v2/quests/{questId}/public']?.get;
     expect(publicDetail?.operationId).toBe('getPublicQuestV2Detail');
     expect(publicDetail?.security).toEqual([{ betterAuthSession: [] }]);
-    expect(Object.keys(publicDetail?.responses ?? {})).toEqual(expect.arrayContaining([
-      '200',
-      '400',
-      '401',
-      '404',
-      '500',
-      '503',
-    ]));
+    expect(Object.keys(publicDetail?.responses ?? {})).toEqual(
+      expect.arrayContaining(['200', '400', '401', '404', '500', '503'])
+    );
 
-    const boardData = board?.responses?.['200']?.content?.['application/json']?.schema
-      ?.properties?.data;
-    expect(boardData?.properties?.items?.items?.properties).toEqual(expect.objectContaining({
-      id: expect.any(Object),
-      questReward: expect.any(Object),
-      activeWorkerCount: expect.any(Object),
-    }));
+    const boardData =
+      board?.responses?.['200']?.content?.['application/json']?.schema?.properties?.data;
+    expect(boardData?.properties?.items?.items?.properties).toEqual(
+      expect.objectContaining({
+        id: expect.any(Object),
+        questReward: expect.any(Object),
+        activeWorkerCount: expect.any(Object),
+      })
+    );
     expect(boardData?.required).toEqual(['items', 'nextCursor']);
 
-    const publicData = publicDetail?.responses?.['200']?.content?.['application/json']?.schema
-      ?.properties?.data;
+    const publicData =
+      publicDetail?.responses?.['200']?.content?.['application/json']?.schema?.properties?.data;
     expect(publicData?.properties?.images?.properties).toBeUndefined();
     expect(publicData?.properties?.condition?.properties).toBeDefined();
   });
@@ -353,20 +343,29 @@ describe('Quest API v2 discovery contract', () => {
 
   it('excludes hidden, closed, expired, and non-joinable Quests and returns an empty page', async () => {
     const hiddenQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Hidden` });
-    await db.update(quest).set({
-      questStatus: questStatus.open,
-      hiddenAt: new Date(),
-      hiddenByAdminId: adminId,
-    }).where(eq(quest.id, hiddenQuest));
+    await db
+      .update(quest)
+      .set({
+        questStatus: questStatus.open,
+        hiddenAt: new Date(),
+        hiddenByAdminId: adminId,
+      })
+      .where(eq(quest.id, hiddenQuest));
 
     const closedQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Closed` });
-    await db.update(quest).set({ questStatus: questStatus.assigned }).where(eq(quest.id, closedQuest));
+    await db
+      .update(quest)
+      .set({ questStatus: questStatus.assigned })
+      .where(eq(quest.id, closedQuest));
 
     const expiredQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Expired` });
-    await db.update(quest).set({
-      startTime: new Date('2020-08-26T03:00:00.000Z'),
-      dueAt: new Date('2020-08-26T05:00:00.000Z'),
-    }).where(eq(quest.id, expiredQuest));
+    await db
+      .update(quest)
+      .set({
+        startTime: new Date('2020-08-26T03:00:00.000Z'),
+        dueAt: new Date('2020-08-26T05:00:00.000Z'),
+      })
+      .where(eq(quest.id, expiredQuest));
 
     const fullQuest = await createOpenQuest(ownerId, {
       title: `${fixturePrefix} Full Capacity`,
@@ -431,12 +430,14 @@ describe('Quest API v2 discovery contract', () => {
       activeWorkerCount: 0,
       proofRequired: true,
       hirerName: 'Quest Owner',
-      images: [{
-        imageId: expect.any(String),
-        position: 0,
-        url: expect.stringMatching(/^https?:\/\//),
-        urlExpiresAt: expect.any(String),
-      }],
+      images: [
+        {
+          imageId: expect.any(String),
+          position: 0,
+          url: expect.stringMatching(/^https?:\/\//),
+          urlExpiresAt: expect.any(String),
+        },
+      ],
     });
     expect(body.data.condition.items).toEqual([
       { position: 0, text: 'First condition' },
@@ -458,7 +459,9 @@ describe('Quest API v2 discovery contract', () => {
   });
 
   it('returns public detail to an active Worker only for a visible open Quest', async () => {
-    const openQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Active Worker Public` });
+    const openQuest = await createOpenQuest(ownerId, {
+      title: `${fixturePrefix} Active Worker Public`,
+    });
     await addActiveWorkers(openQuest, [memberId]);
 
     const openResponse = await getPublicDetail(openQuest);
@@ -469,50 +472,92 @@ describe('Quest API v2 discovery contract', () => {
     });
 
     const hiddenQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Hidden Public` });
-    await db.update(quest).set({
-      questStatus: questStatus.open,
-      hiddenAt: new Date(),
-      hiddenByAdminId: adminId,
-    }).where(eq(quest.id, hiddenQuest));
+    await db
+      .update(quest)
+      .set({
+        questStatus: questStatus.open,
+        hiddenAt: new Date(),
+        hiddenByAdminId: adminId,
+      })
+      .where(eq(quest.id, hiddenQuest));
     await addActiveWorkers(hiddenQuest, [memberId]);
 
     const nonOpenCases = [
-      { state: questStatus.assigned, mode: 'FIRST_COME_FIRST_SERVED', participation: 'SINGLE', headcount: 1 },
-      { state: questStatus.assigned, mode: 'FIRST_COME_FIRST_SERVED', participation: 'GROUP', headcount: 2 },
+      {
+        state: questStatus.assigned,
+        mode: 'FIRST_COME_FIRST_SERVED',
+        participation: 'SINGLE',
+        headcount: 1,
+      },
+      {
+        state: questStatus.assigned,
+        mode: 'FIRST_COME_FIRST_SERVED',
+        participation: 'GROUP',
+        headcount: 2,
+      },
       { state: questStatus.assigned, mode: 'CANDIDATE', participation: 'SINGLE', headcount: 1 },
       { state: questStatus.assigned, mode: 'CANDIDATE', participation: 'GROUP', headcount: 2 },
-      { state: questStatus.inProgress, mode: 'FIRST_COME_FIRST_SERVED', participation: 'SINGLE', headcount: 1 },
-      { state: questStatus.inProgress, mode: 'FIRST_COME_FIRST_SERVED', participation: 'GROUP', headcount: 2 },
+      {
+        state: questStatus.inProgress,
+        mode: 'FIRST_COME_FIRST_SERVED',
+        participation: 'SINGLE',
+        headcount: 1,
+      },
+      {
+        state: questStatus.inProgress,
+        mode: 'FIRST_COME_FIRST_SERVED',
+        participation: 'GROUP',
+        headcount: 2,
+      },
       { state: questStatus.inProgress, mode: 'CANDIDATE', participation: 'SINGLE', headcount: 1 },
       { state: questStatus.inProgress, mode: 'CANDIDATE', participation: 'GROUP', headcount: 2 },
-      { state: questStatus.assigned, mode: 'FIRST_COME_FIRST_SERVED', participation: 'SINGLE', headcount: 1, hidden: true },
-      { state: questStatus.inProgress, mode: 'CANDIDATE', participation: 'GROUP', headcount: 2, hidden: true },
+      {
+        state: questStatus.assigned,
+        mode: 'FIRST_COME_FIRST_SERVED',
+        participation: 'SINGLE',
+        headcount: 1,
+        hidden: true,
+      },
+      {
+        state: questStatus.inProgress,
+        mode: 'CANDIDATE',
+        participation: 'GROUP',
+        headcount: 2,
+        hidden: true,
+      },
     ] as const;
-    const nonOpenQuestIds = await Promise.all(nonOpenCases.map(async (testCase, index) => {
-      const questId = await createOpenQuest(ownerId, {
-        title: `${fixturePrefix} ${testCase.state} ${index}`,
-        mode: testCase.mode,
-        participation: testCase.participation,
-        headcount: testCase.headcount,
-      });
-      await db.update(quest).set({ questStatus: testCase.state }).where(eq(quest.id, questId));
-      if ('hidden' in testCase && testCase.hidden) {
-        await db.update(quest).set({ hiddenAt: new Date(), hiddenByAdminId: adminId }).where(eq(quest.id, questId));
-      }
-      await addActiveWorkers(questId, [memberId]);
-      return questId;
-    }));
+    const nonOpenQuestIds = await Promise.all(
+      nonOpenCases.map(async (testCase, index) => {
+        const questId = await createOpenQuest(ownerId, {
+          title: `${fixturePrefix} ${testCase.state} ${index}`,
+          mode: testCase.mode,
+          participation: testCase.participation,
+          headcount: testCase.headcount,
+        });
+        await db.update(quest).set({ questStatus: testCase.state }).where(eq(quest.id, questId));
+        if ('hidden' in testCase && testCase.hidden) {
+          await db
+            .update(quest)
+            .set({ hiddenAt: new Date(), hiddenByAdminId: adminId })
+            .where(eq(quest.id, questId));
+        }
+        await addActiveWorkers(questId, [memberId]);
+        return questId;
+      })
+    );
 
     const unreadableResponses = await Promise.all(
       [hiddenQuest, ...nonOpenQuestIds].map(async (questId) => {
         const response = await getPublicDetail(questId);
         return { status: response.status, body: await response.json() };
-      }),
+      })
     );
-    expect(unreadableResponses.map(({ status, body }) => ({
-      status,
-      code: body.error?.code,
-    }))).toEqual([
+    expect(
+      unreadableResponses.map(({ status, body }) => ({
+        status,
+        code: body.error?.code,
+      }))
+    ).toEqual([
       { status: 404, code: 'QUEST_NOT_FOUND' },
       { status: 404, code: 'QUEST_NOT_FOUND' },
       { status: 404, code: 'QUEST_NOT_FOUND' },
@@ -530,29 +575,45 @@ describe('Quest API v2 discovery contract', () => {
   // Participant access rests on an ACTIVE Assignment, and settlement makes every Active
   // Assignment terminal, so a settled Quest closes the participant door behind itself.
   it('stops returning public detail once the Worker Assignment leaves ASSIGNMENT_ACTIVE', async () => {
-    const cancelledQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Cancelled Public` });
+    const cancelledQuest = await createOpenQuest(ownerId, {
+      title: `${fixturePrefix} Cancelled Public`,
+    });
     await addActiveWorkers(cancelledQuest, [memberId]);
-    const completedQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Completed Public` });
+    const completedQuest = await createOpenQuest(ownerId, {
+      title: `${fixturePrefix} Completed Public`,
+    });
     await addActiveWorkers(completedQuest, [memberId]);
 
     expect((await getPublicDetail(cancelledQuest)).status).toBe(200);
     expect((await getPublicDetail(completedQuest)).status).toBe(200);
 
-    await db.update(quest).set({
-      questStatus: questStatus.cancelled,
-      cancelledAt: new Date(),
-      cancelledByUserId: ownerId,
-    }).where(eq(quest.id, cancelledQuest));
-    await db.update(questAssignment).set({ assignmentStatus: 'ASSIGNMENT_CANCELLED' })
+    await db
+      .update(quest)
+      .set({
+        questStatus: questStatus.cancelled,
+        cancelledAt: new Date(),
+        cancelledByUserId: ownerId,
+      })
+      .where(eq(quest.id, cancelledQuest));
+    await db
+      .update(questAssignment)
+      .set({ assignmentStatus: 'ASSIGNMENT_CANCELLED' })
       .where(eq(questAssignment.questId, cancelledQuest));
-    await db.update(quest).set({ questStatus: questStatus.completed }).where(eq(quest.id, completedQuest));
-    await db.update(questAssignment).set({ assignmentStatus: 'ASSIGNMENT_COMPLETED' })
+    await db
+      .update(quest)
+      .set({ questStatus: questStatus.completed })
+      .where(eq(quest.id, completedQuest));
+    await db
+      .update(questAssignment)
+      .set({ assignmentStatus: 'ASSIGNMENT_COMPLETED' })
       .where(eq(questAssignment.questId, completedQuest));
 
-    const responses = await Promise.all([cancelledQuest, completedQuest].map(async (questId) => {
-      const response = await getPublicDetail(questId);
-      return { status: response.status, code: (await response.json()).error.code };
-    }));
+    const responses = await Promise.all(
+      [cancelledQuest, completedQuest].map(async (questId) => {
+        const response = await getPublicDetail(questId);
+        return { status: response.status, code: (await response.json()).error.code };
+      })
+    );
     expect(responses).toEqual([
       { status: 404, code: 'QUEST_NOT_FOUND' },
       { status: 404, code: 'QUEST_NOT_FOUND' },
@@ -561,21 +622,27 @@ describe('Quest API v2 discovery contract', () => {
 
   it('returns QUEST_NOT_FOUND for unreadable Public Quest Detail', async () => {
     const hiddenQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Hidden Public` });
-    await db.update(quest).set({
-      questStatus: questStatus.open,
-      hiddenAt: new Date(),
-      hiddenByAdminId: adminId,
-    }).where(eq(quest.id, hiddenQuest));
+    await db
+      .update(quest)
+      .set({
+        questStatus: questStatus.open,
+        hiddenAt: new Date(),
+        hiddenByAdminId: adminId,
+      })
+      .where(eq(quest.id, hiddenQuest));
 
     const closedQuest = await createOpenQuest(ownerId, { title: `${fixturePrefix} Closed Public` });
-    await db.update(quest).set({ questStatus: questStatus.assigned }).where(eq(quest.id, closedQuest));
+    await db
+      .update(quest)
+      .set({ questStatus: questStatus.assigned })
+      .where(eq(quest.id, closedQuest));
 
     const ownQuest = await createOpenQuest(memberId, { title: `${fixturePrefix} Own Public` });
     const unreadableResponses = await Promise.all(
       [hiddenQuest, closedQuest, ownQuest, crypto.randomUUID()].map(async (questId) => {
         const response = await getPublicDetail(questId);
         return { status: response.status, body: await response.json() };
-      }),
+      })
     );
     for (const response of unreadableResponses) {
       expect(response.status).toBe(404);
@@ -585,36 +652,52 @@ describe('Quest API v2 discovery contract', () => {
 
   it('applies the approved filters inclusively and paginates with an opaque cursor', async () => {
     const filterPrefix = `${fixturePrefix} Filter`;
-    const target = await createOpenQuest(ownerId, {
-      title: `${filterPrefix} Target`,
-      description: 'Find this description needle',
-      mode: 'CANDIDATE',
-      participation: 'GROUP',
-      headcount: 2,
-      tagId,
-      startTime: '2030-09-02T10:00:00.000+07:00',
-      dueAt: '2030-09-02T11:30:00.000+07:00',
-    }, 1250);
-    const otherTagQuest = await createOpenQuest(ownerId, {
-      title: `${filterPrefix} Other Tag`,
-      description: 'Do not find this one',
-      tagId: otherTagId,
-      startTime: '2030-09-02T09:00:00.000+07:00',
-      dueAt: '2030-09-02T10:00:00.000+07:00',
-    }, 2000);
-    const second = await createOpenQuest(ownerId, {
-      title: `${filterPrefix} Second`,
-      tagId,
-      startTime: '2030-09-02T12:00:00.000+07:00',
-      dueAt: '2030-09-02T13:00:00.000+07:00',
-    }, 1250);
+    const target = await createOpenQuest(
+      ownerId,
+      {
+        title: `${filterPrefix} Target`,
+        description: 'Find this description needle',
+        mode: 'CANDIDATE',
+        participation: 'GROUP',
+        headcount: 2,
+        tagId,
+        startTime: '2030-09-02T10:00:00.000+07:00',
+        dueAt: '2030-09-02T11:30:00.000+07:00',
+      },
+      1250
+    );
+    const otherTagQuest = await createOpenQuest(
+      ownerId,
+      {
+        title: `${filterPrefix} Other Tag`,
+        description: 'Do not find this one',
+        tagId: otherTagId,
+        startTime: '2030-09-02T09:00:00.000+07:00',
+        dueAt: '2030-09-02T10:00:00.000+07:00',
+      },
+      2000
+    );
+    const second = await createOpenQuest(
+      ownerId,
+      {
+        title: `${filterPrefix} Second`,
+        tagId,
+        startTime: '2030-09-02T12:00:00.000+07:00',
+        dueAt: '2030-09-02T13:00:00.000+07:00',
+      },
+      1250
+    );
 
-    const filtered = await getBoard(`?q=${encodeURIComponent('  needle ')}&tagId=${tagId}` +
-      '&mode=CANDIDATE&participation=GROUP&minQuestReward=12.50&maxQuestReward=12.50' +
-      '&maxDurationMinutes=90&startFrom=2030-09-02T10:00:00.000%2B07:00' +
-      '&startTo=2030-09-02T10:00:00.000%2B07:00');
+    const filtered = await getBoard(
+      `?q=${encodeURIComponent('  needle ')}&tagId=${tagId}` +
+        '&mode=CANDIDATE&participation=GROUP&minQuestReward=12.50&maxQuestReward=12.50' +
+        '&maxDurationMinutes=90&startFrom=2030-09-02T10:00:00.000%2B07:00' +
+        '&startTo=2030-09-02T10:00:00.000%2B07:00'
+    );
     expect(filtered.status).toBe(200);
-    expect((await filtered.json()).data.items.map((item: { id: string }) => item.id)).toEqual([target]);
+    expect((await filtered.json()).data.items.map((item: { id: string }) => item.id)).toEqual([
+      target,
+    ]);
 
     const firstPage = await getBoard(`?q=${encodeURIComponent(filterPrefix)}&limit=1`);
     expect(firstPage.status).toBe(200);
@@ -626,17 +709,22 @@ describe('Quest API v2 discovery contract', () => {
     expect(firstBody.data.nextCursor).not.toContain('2030');
 
     const secondPage = await getBoard(
-      `?q=${encodeURIComponent(filterPrefix)}&limit=1&cursor=${firstBody.data.nextCursor}`,
+      `?q=${encodeURIComponent(filterPrefix)}&limit=1&cursor=${firstBody.data.nextCursor}`
     );
     expect(secondPage.status).toBe(200);
-    expect((await secondPage.json()).data.items.map((item: { id: string }) => item.id)).toEqual([target]);
+    expect((await secondPage.json()).data.items.map((item: { id: string }) => item.id)).toEqual([
+      target,
+    ]);
     expect(otherTagQuest).not.toBe(target);
     expect(second).not.toBe(target);
   });
 
   it.each([
     ['reversed reward range', '?minQuestReward=20&maxQuestReward=10'],
-    ['reversed start range', '?startFrom=2030-09-03T10:00:00.000%2B07:00&startTo=2030-09-02T10:00:00.000%2B07:00'],
+    [
+      'reversed start range',
+      '?startFrom=2030-09-03T10:00:00.000%2B07:00&startTo=2030-09-02T10:00:00.000%2B07:00',
+    ],
     ['repeated tagId', `?tagId=${tagId}&tagId=${otherTagId}`],
     ['comma-separated tagId', `?tagId=${tagId},${otherTagId}`],
     ['invalid limit', '?limit=51'],

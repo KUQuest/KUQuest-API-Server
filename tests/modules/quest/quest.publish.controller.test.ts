@@ -120,7 +120,7 @@ describe('Quest publishing controllers', () => {
 
   it('maps insufficient Spending Balance when Escrow reservation fails', async () => {
     spyOn(questService, 'publishQuest').mockRejectedValue(
-      new MoneyDomainError('INSUFFICIENT_SPENDING_BALANCE', 'Spending Balance is insufficient.'),
+      new MoneyDomainError('INSUFFICIENT_SPENDING_BALANCE', 'Spending Balance is insufficient.')
     );
     const set: { status?: number } = {};
 

@@ -3,10 +3,7 @@ import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 
 import type { QuestAssignmentParams } from './quest-assignment.schema';
-import {
-  joinNoCandidateQuest,
-  WorkChatTransitionError,
-} from './quest-assignment.service';
+import { joinNoCandidateQuest, WorkChatTransitionError } from './quest-assignment.service';
 
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 409;
@@ -47,7 +44,11 @@ export const joinNoCandidateQuestController = async ({
       return apiError('QUEST_NOT_FOUND', 'Quest not found');
     }
     if (result.outcome === 'not-direct-join') {
-      return conflict(set, 'DIRECT_JOIN_NOT_ALLOWED', 'Only NO_CANDIDATE Quests accept direct joins');
+      return conflict(
+        set,
+        'DIRECT_JOIN_NOT_ALLOWED',
+        'Only NO_CANDIDATE Quests accept direct joins'
+      );
     }
     if (result.outcome === 'not-open') {
       return conflict(set, 'QUEST_NOT_OPEN', 'Only an open Quest can accept a direct join');
@@ -56,10 +57,18 @@ export const joinNoCandidateQuestController = async ({
       return conflict(set, 'HIRER_CANNOT_JOIN', 'The Hirer cannot join their own Quest');
     }
     if (result.outcome === 'already-assigned') {
-      return conflict(set, 'ASSIGNMENT_ALREADY_EXISTS', 'The Worker is already assigned to this Quest');
+      return conflict(
+        set,
+        'ASSIGNMENT_ALREADY_EXISTS',
+        'The Worker is already assigned to this Quest'
+      );
     }
     if (result.outcome === 'idempotency-key-reused') {
-      return conflict(set, 'IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
+      return conflict(
+        set,
+        'IDEMPOTENCY_KEY_REUSED',
+        'The Idempotency-Key was used for a different request'
+      );
     }
     if (result.outcome === 'idempotency-unavailable') {
       set.status = 503;

@@ -24,6 +24,7 @@ import {
   type QuestV2CandidateTeamOutcome,
   type QuestV2CandidateTeamSelectionOutcome,
 } from './quest-candidate-team-v2.service';
+import { mapQuestCommandOutcome } from './quest-command.controller';
 import { WorkChatTransitionError } from './quest-work-chat.port';
 
 type CandidateTeam = Extract<QuestV2CandidateTeamOutcome, { id: string }>;
@@ -59,20 +60,14 @@ const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   return apiError(code, message);
 };
 
-const requiredCommandId = (
-  request: Request | undefined,
-  set: AuthedContext['set'],
-) => {
+const requiredCommandId = (request: Request | undefined, set: AuthedContext['set']) => {
   const commandId = request?.headers.get('idempotency-key');
   if (commandId?.trim()) return commandId;
   set.status = 400;
   return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
 };
 
-const mapTeamError = (
-  set: AuthedContext['set'],
-  outcome: CandidateTeamError,
-) => {
+const mapTeamError = (set: AuthedContext['set'], outcome: CandidateTeamError) => {
   if (outcome.outcome === 'not-found') {
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
@@ -90,22 +85,46 @@ const mapTeamError = (
     return apiError('TEAM_NOT_FOUND', 'Candidate Team not found');
   }
   if (outcome.outcome === 'not-candidate') {
-    return conflict(set, 'QUEST_MODE_NOT_ALLOWED', 'Only CANDIDATE Quests can form Candidate Teams');
+    return conflict(
+      set,
+      'QUEST_MODE_NOT_ALLOWED',
+      'Only CANDIDATE Quests can form Candidate Teams'
+    );
   }
   if (outcome.outcome === 'not-group') {
-    return conflict(set, 'QUEST_PARTICIPATION_NOT_ALLOWED', 'Only GROUP Candidate Quests can form Candidate Teams');
+    return conflict(
+      set,
+      'QUEST_PARTICIPATION_NOT_ALLOWED',
+      'Only GROUP Candidate Quests can form Candidate Teams'
+    );
   }
   if (outcome.outcome === 'hirer-not-allowed') {
-    return conflict(set, 'HIRER_CANNOT_JOIN_TEAM', 'The Hirer cannot join or form a Candidate Team');
+    return conflict(
+      set,
+      'HIRER_CANNOT_JOIN_TEAM',
+      'The Hirer cannot join or form a Candidate Team'
+    );
   }
   if (outcome.outcome === 'not-open') {
-    return conflict(set, 'QUEST_NOT_OPEN', 'Candidate Team commands are allowed only while the Quest is open');
+    return conflict(
+      set,
+      'QUEST_NOT_OPEN',
+      'Candidate Team commands are allowed only while the Quest is open'
+    );
   }
   if (outcome.outcome === 'already-member') {
-    return conflict(set, 'TEAM_MEMBERSHIP_ALREADY_EXISTS', 'The Member already belongs to a Candidate Team for this Quest');
+    return conflict(
+      set,
+      'TEAM_MEMBERSHIP_ALREADY_EXISTS',
+      'The Member already belongs to a Candidate Team for this Quest'
+    );
   }
   if (outcome.outcome === 'already-assigned') {
-    return conflict(set, 'ASSIGNMENT_ALREADY_EXISTS', 'The Member already has an active Assignment for this Quest');
+    return conflict(
+      set,
+      'ASSIGNMENT_ALREADY_EXISTS',
+      'The Member already has an active Assignment for this Quest'
+    );
   }
   if (outcome.outcome === 'not-forming') {
     return conflict(set, 'TEAM_NOT_FORMING', 'The Candidate Team is no longer forming');
@@ -123,38 +142,51 @@ const mapTeamError = (
     return conflict(set, 'TEAM_LEADER_REQUIRED', 'Only the Team Leader can perform this command');
   }
   if (outcome.outcome === 'leader-removal-not-allowed') {
-    return conflict(set, 'TEAM_LEADER_CANNOT_REMOVE_SELF', 'The Team Leader cannot remove themself');
+    return conflict(
+      set,
+      'TEAM_LEADER_CANNOT_REMOVE_SELF',
+      'The Team Leader cannot remove themself'
+    );
   }
   if (outcome.outcome === 'headcount-not-allowed') {
-    return conflict(set, 'TEAM_HEADCOUNT_NOT_ALLOWED', 'Team headcount must be from 2 through the published Quest headcount');
+    return conflict(
+      set,
+      'TEAM_HEADCOUNT_NOT_ALLOWED',
+      'Team headcount must be from 2 through the published Quest headcount'
+    );
   }
   if (outcome.outcome === 'headcount-mismatch') {
-    return conflict(set, 'TEAM_HEADCOUNT_MISMATCH', 'The Candidate Team must be full before submission');
+    return conflict(
+      set,
+      'TEAM_HEADCOUNT_MISMATCH',
+      'The Candidate Team must be full before submission'
+    );
   }
   if (outcome.outcome === 'submission-invalid') {
-    return conflict(set, 'TEAM_SUBMISSION_INVALID', 'Team submission text is required and must be at most 1,000 characters');
+    return conflict(
+      set,
+      'TEAM_SUBMISSION_INVALID',
+      'Team submission text is required and must be at most 1,000 characters'
+    );
   }
   if (outcome.outcome === 'submission-files-invalid') {
-    return conflict(set, 'TEAM_SUBMISSION_FILES_INVALID', 'Team submission must contain valid Work Conversation Attachment files');
+    return conflict(
+      set,
+      'TEAM_SUBMISSION_FILES_INVALID',
+      'Team submission must contain valid Work Conversation Attachment files'
+    );
   }
-  if (outcome.outcome === 'idempotency-key-reused') {
-    return conflict(set, 'IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
+  if (outcome.outcome === 'not-selectable') {
+    return conflict(
+      set,
+      'CANDIDATE_TEAM_NOT_SELECTABLE',
+      'The Candidate Team is not submitted for selection'
+    );
   }
-  if (outcome.outcome === 'idempotency-in-progress') {
-    return conflict(set, 'IDEMPOTENCY_IN_PROGRESS', 'The Idempotency-Key is still processing');
-  }
-  if (outcome.outcome === 'idempotency-unavailable') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'The Idempotency-Key result is unavailable');
-  }
-  set.status = 400;
-  return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
+  return mapQuestCommandOutcome(set, outcome.outcome);
 };
 
-const mapSelectionError = (
-  set: AuthedContext['set'],
-  outcome: SelectionError,
-) => {
+const mapSelectionError = (set: AuthedContext['set'], outcome: SelectionError) => {
   if (outcome.outcome === 'not-found') {
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
@@ -164,28 +196,56 @@ const mapSelectionError = (
     return apiError('TEAM_NOT_FOUND', 'Candidate Team not found');
   }
   if (outcome.outcome === 'not-authorized') {
-    return conflict(set, 'CANDIDATE_SELECTION_NOT_ALLOWED', 'Only the owning Hirer can select a Candidate Team');
+    return conflict(
+      set,
+      'CANDIDATE_SELECTION_NOT_ALLOWED',
+      'Only the owning Hirer can select a Candidate Team'
+    );
   }
   if (outcome.outcome === 'not-candidate') {
-    return conflict(set, 'QUEST_MODE_NOT_ALLOWED', 'Only CANDIDATE Quests accept Candidate Team selection');
+    return conflict(
+      set,
+      'QUEST_MODE_NOT_ALLOWED',
+      'Only CANDIDATE Quests accept Candidate Team selection'
+    );
   }
   if (outcome.outcome === 'not-group') {
-    return conflict(set, 'QUEST_PARTICIPATION_NOT_ALLOWED', 'Only GROUP Candidate Quests accept Candidate Team selection');
+    return conflict(
+      set,
+      'QUEST_PARTICIPATION_NOT_ALLOWED',
+      'Only GROUP Candidate Quests accept Candidate Team selection'
+    );
   }
   if (outcome.outcome === 'not-open') {
-    return conflict(set, 'QUEST_NOT_OPEN', 'Candidate Team selection is allowed only while the Quest is open');
+    return conflict(
+      set,
+      'QUEST_NOT_OPEN',
+      'Candidate Team selection is allowed only while the Quest is open'
+    );
   }
   if (outcome.outcome === 'not-selectable') {
-    return conflict(set, 'CANDIDATE_TEAM_NOT_SELECTABLE', 'The Candidate Team is not submitted for selection');
+    return conflict(
+      set,
+      'CANDIDATE_TEAM_NOT_SELECTABLE',
+      'The Candidate Team is not submitted for selection'
+    );
   }
   if (outcome.outcome === 'already-assigned') {
-    return conflict(set, 'ASSIGNMENT_ALREADY_EXISTS', 'A Team Member is already assigned to this Quest');
+    return conflict(
+      set,
+      'ASSIGNMENT_ALREADY_EXISTS',
+      'A Team Member is already assigned to this Quest'
+    );
   }
   if (outcome.outcome === 'headcount-mismatch') {
     return conflict(set, 'TEAM_HEADCOUNT_MISMATCH', 'The submitted Candidate Team is not full');
   }
   if (outcome.outcome === 'idempotency-key-reused') {
-    return conflict(set, 'IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
+    return conflict(
+      set,
+      'IDEMPOTENCY_KEY_REUSED',
+      'The Idempotency-Key was used for a different request'
+    );
   }
   if (outcome.outcome === 'idempotency-in-progress') {
     return conflict(set, 'IDEMPOTENCY_IN_PROGRESS', 'The Idempotency-Key is still processing');
@@ -249,7 +309,7 @@ export const getQuestV2CandidateTeamController = async ({
     set.status = 404;
     return apiError(
       result.outcome === 'not-found' ? 'QUEST_NOT_FOUND' : 'TEAM_NOT_FOUND',
-      result.outcome === 'not-found' ? 'Quest not found' : 'Candidate Team not found',
+      result.outcome === 'not-found' ? 'Quest not found' : 'Candidate Team not found'
     );
   }
   return apiSuccess(serializeTeam(result));
@@ -272,7 +332,7 @@ export const updateQuestV2CandidateTeamController = async ({
     params.questId,
     params.teamId,
     body,
-    commandId,
+    commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
   return apiSuccess(serializeTeam(result));
@@ -295,7 +355,7 @@ export const joinQuestV2CandidateTeamController = async ({
     params.questId,
     params.teamId,
     body,
-    commandId,
+    commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
   return apiSuccess(serializeTeam(result));
@@ -313,7 +373,7 @@ export const leaveQuestV2CandidateTeamController = async ({
     session.user.id,
     params.questId,
     params.teamId,
-    commandId,
+    commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
   return apiSuccess(serializeTeam(result));
@@ -332,7 +392,7 @@ export const removeQuestV2CandidateTeamMemberController = async ({
     params.questId,
     params.teamId,
     params.memberId,
-    commandId,
+    commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
   return apiSuccess(serializeTeam(result));
@@ -350,7 +410,7 @@ export const regenerateQuestV2CandidateTeamJoinCodeController = async ({
     session.user.id,
     params.questId,
     params.teamId,
-    commandId,
+    commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
   return apiSuccess(serializeTeam(result));
@@ -373,7 +433,7 @@ export const submitQuestV2CandidateTeamController = async ({
     params.questId,
     params.teamId,
     body,
-    commandId,
+    commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
   return apiSuccess(serializeTeam(result));
@@ -393,7 +453,7 @@ export const selectQuestV2CandidateTeamController = async ({
       session.user.id,
       params.questId,
       params.teamId,
-      commandId,
+      commandId
     );
     if ('outcome' in result) return mapSelectionError(set, result);
     return apiSuccess({

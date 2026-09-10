@@ -31,7 +31,8 @@ export const questReviewRoute = new Elysia({
     detail: {
       tags: ['Reviews'],
       summary: 'Create a Review after Quest completion',
-      description: 'Allows the Hirer to review each completed Worker and each completed Worker to review the Hirer, once per direction within seven days of completion. A second create for the same direction returns REVIEW_ALREADY_EXISTS; use the edit operation to change an authored Review.',
+      description:
+        'Allows the Hirer to review each completed Worker and each completed Worker to review the Hirer, once per direction within seven days of completion. A second create for the same direction returns REVIEW_ALREADY_EXISTS; use the edit operation to change an authored Review.',
       operationId: 'createQuestReview',
       security: betterAuthSecurity,
     },
@@ -44,7 +45,8 @@ export const questReviewRoute = new Elysia({
     detail: {
       tags: ['Reviews'],
       summary: 'Edit an authored Review',
-      description: 'Edits a Review without changing its author, direction, or Quest. The seven-day deadline is measured from Quest completion and does not move when edited.',
+      description:
+        'Edits a Review without changing its author, direction, or Quest. The seven-day deadline is measured from Quest completion and does not move when edited.',
       operationId: 'updateQuestReview',
       security: betterAuthSecurity,
     },

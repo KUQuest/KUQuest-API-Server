@@ -18,7 +18,7 @@ import { describe, expect, it } from 'bun:test';
 
 const questEdr = readFileSync(
   join(import.meta.dir, '..', '..', '..', 'docs', 'db', 'edr', '05-quest.sql'),
-  'utf8',
+  'utf8'
 );
 
 const parseValueList = (list: string) =>
@@ -86,20 +86,13 @@ describe('Quest domain contract', () => {
       'ASSIGNMENT_INCOMPLETE',
       'ASSIGNMENT_CANCELLED',
     ]);
-    expect(proofStatuses).toEqual([
-      'PROOF_PENDING',
-      'PROOF_APPROVED',
-      'PROOF_NOT_APPROVED',
-    ]);
+    expect(proofStatuses).toEqual(['PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED']);
     expect(editRequestStatuses).toEqual([
       'EDIT_REQUEST_PENDING',
       'EDIT_REQUEST_APPROVED',
       'EDIT_REQUEST_REJECTED',
     ]);
-    expect(editResponseDecisions).toEqual([
-      'EDIT_RESPONSE_APPROVED',
-      'EDIT_RESPONSE_REJECTED',
-    ]);
+    expect(editResponseDecisions).toEqual(['EDIT_RESPONSE_APPROVED', 'EDIT_RESPONSE_REJECTED']);
     expect(invitationStatuses).toEqual([
       'INVITATION_PENDING',
       'INVITATION_ACCEPTED',
@@ -113,9 +106,7 @@ describe('Quest domain contract', () => {
 describe('Quest EDR parity (docs/db/edr/05-quest.sql)', () => {
   it('matches every native ENUM vocabulary', () => {
     for (const [typeName, vocabulary] of Object.entries(enumTypeToVocabulary)) {
-      const match = questEdr.match(
-        new RegExp(`CREATE TYPE ${typeName} AS ENUM \\(([^)]*)\\)`),
-      );
+      const match = questEdr.match(new RegExp(`CREATE TYPE ${typeName} AS ENUM \\(([^)]*)\\)`));
       expect(match, `CREATE TYPE ${typeName} is missing from the EDR`).not.toBeNull();
       expect(parseValueList(match![1]!)).toEqual([...vocabulary]);
     }

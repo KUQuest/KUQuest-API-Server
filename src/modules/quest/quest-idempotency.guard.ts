@@ -50,20 +50,28 @@ const pathNeedsIdempotencyKey = (scope: IdempotencyKeyScope, pathname: string, m
       return isUuid(parts[6]);
     }
     if (method === 'POST' && parts.length === 8) {
-      return isUuid(parts[6]) && ['join', 'join-code', 'leave', 'select', 'submit'].includes(parts[7]!);
+      return (
+        isUuid(parts[6]) && ['join', 'join-code', 'leave', 'select', 'submit'].includes(parts[7]!)
+      );
     }
-    return method === 'DELETE' &&
+    return (
+      method === 'DELETE' &&
       parts.length === 9 &&
       isUuid(parts[6]) &&
       parts[7] === 'members' &&
-      isUuid(parts[8]);
+      isUuid(parts[8])
+    );
   }
 
   if (scope === 'proof-submission-v2') {
     if (!pathname.startsWith(`${API_V2_PREFIX}/quests/`)) return false;
     if (!isUuid(parts[4])) return false;
     if (method === 'POST' && parts.length === 6 && parts[5] === 'proof-submissions') return true;
-    if ((method === 'PATCH' || method === 'DELETE') && parts.length === 7 && parts[5] === 'proof-submissions') {
+    if (
+      (method === 'PATCH' || method === 'DELETE') &&
+      parts.length === 7 &&
+      parts[5] === 'proof-submissions'
+    ) {
       return isUuid(parts[6]);
     }
     if (method === 'POST' && parts.length === 8 && parts[5] === 'proof-submissions') {
@@ -87,14 +95,15 @@ const pathNeedsIdempotencyKey = (scope: IdempotencyKeyScope, pathname: string, m
   return false;
 };
 
-export const createQuestIdempotencyKeyGuard = (scope: IdempotencyKeyScope) => new Elysia({
-  name: `${scope}-idempotency-key-guard`,
-}).onRequest(({ request, set }) => {
-  const pathname = new URL(request.url).pathname;
-  if (!pathNeedsIdempotencyKey(scope, pathname, request.method)) return;
+export const createQuestIdempotencyKeyGuard = (scope: IdempotencyKeyScope) =>
+  new Elysia({
+    name: `${scope}-idempotency-key-guard`,
+  }).onRequest(({ request, set }) => {
+    const pathname = new URL(request.url).pathname;
+    if (!pathNeedsIdempotencyKey(scope, pathname, request.method)) return;
 
-  if (request.headers.get('idempotency-key')?.trim()) return;
+    if (request.headers.get('idempotency-key')?.trim()) return;
 
-  set.status = 400;
-  return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
-});
+    set.status = 400;
+    return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
+  });

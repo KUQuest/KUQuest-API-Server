@@ -51,8 +51,7 @@ type QuestV2EditOutcomeCode =
   | 'idempotency-unavailable';
 
 export type QuestV2EditRequestOutcome =
-  | { request: QuestV2EditRequestData }
-  | { outcome: QuestV2EditOutcomeCode };
+  { request: QuestV2EditRequestData } | { outcome: QuestV2EditOutcomeCode };
 
 type IdempotencyRecord = {
   id: string;
@@ -70,7 +69,7 @@ type IdempotencyResult =
 const sha256Json = async (value: object): Promise<string> => {
   const digest = await crypto.subtle.digest(
     'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value)),
+    new TextEncoder().encode(JSON.stringify(value))
   );
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
@@ -87,7 +86,8 @@ const validFailureCode = (value: unknown): value is QuestV2EditFailureCode =>
   typeof value === 'string' && (questV2EditFailureCodes as readonly string[]).includes(value);
 
 const validOutcome = (value: unknown): value is QuestV2EditOutcomeCode =>
-  typeof value === 'string' && [
+  typeof value === 'string' &&
+  [
     'invalid-input',
     'invalid-idempotency-key',
     'not-found',
@@ -127,11 +127,10 @@ const toConditionSnapshot = (items: ConditionItem[]): ConditionSnapshot => ({
 });
 
 const conditionItemsEqual = (left: ConditionItem[], right: ConditionItem[]) =>
-  left.length === right.length && left.every((item, position) => item.text === right[position]?.text);
+  left.length === right.length &&
+  left.every((item, position) => item.text === right[position]?.text);
 
-const normalizeCondition = (
-  data: QuestV2EditRequestCreateInput,
-): ConditionSnapshot | undefined => {
+const normalizeCondition = (data: QuestV2EditRequestCreateInput): ConditionSnapshot | undefined => {
   if (!data || !data.condition || !Array.isArray(data.condition.items)) return undefined;
   const items = data.condition.items.map((text) => text.trim());
   if (items.length === 0 || items.some((text) => text.length === 0 || text.length > 255)) {
@@ -141,7 +140,7 @@ const normalizeCondition = (
 };
 
 const normalizeResponse = (
-  data: QuestV2EditRequestResponseInput,
+  data: QuestV2EditRequestResponseInput
 ): { decision: QuestV2EditResponseDecision; reason: string | null } | undefined => {
   if (!data || !validDecision(data.decision)) return undefined;
   const reason = data.reason?.trim() ?? null;
@@ -153,26 +152,28 @@ const normalizeResponse = (
 const createRequestHash = (
   userId: string,
   questId: string,
-  condition: ConditionSnapshot,
-): Promise<string> => sha256Json({
-  authenticatedMemberId: userId,
-  operation: questV2EditRequestCreateOperationScope,
-  path: '/api/v2/quests/:questId/edit-requests',
-  questId,
-  body: { condition },
-});
+  condition: ConditionSnapshot
+): Promise<string> =>
+  sha256Json({
+    authenticatedMemberId: userId,
+    operation: questV2EditRequestCreateOperationScope,
+    path: '/api/v2/quests/:questId/edit-requests',
+    questId,
+    body: { condition },
+  });
 
 const respondRequestHash = (
   userId: string,
   requestId: string,
-  response: { decision: QuestV2EditResponseDecision; reason: string | null },
-): Promise<string> => sha256Json({
-  authenticatedMemberId: userId,
-  operation: questV2EditRequestRespondOperationScope,
-  path: '/api/v2/quests/edit-requests/:requestId/respond',
-  requestId,
-  body: response,
-});
+  response: { decision: QuestV2EditResponseDecision; reason: string | null }
+): Promise<string> =>
+  sha256Json({
+    authenticatedMemberId: userId,
+    operation: questV2EditRequestRespondOperationScope,
+    path: '/api/v2/quests/edit-requests/:requestId/respond',
+    requestId,
+    body: response,
+  });
 
 const idempotencyFields = {
   id: walletIdempotencyKey.id,
@@ -188,7 +189,7 @@ const acquireIdempotency = async (
   operationScope: string,
   key: string,
   requestHash: string,
-  now: Date,
+  now: Date
 ): Promise<IdempotencyResult> => {
   const [created] = await transaction
     .insert(walletIdempotencyKey)
@@ -202,18 +203,22 @@ const acquireIdempotency = async (
     .onConflictDoNothing()
     .returning(idempotencyFields);
 
-  const record = created ?? (
-    await transaction
-      .select(idempotencyFields)
-      .from(walletIdempotencyKey)
-      .where(and(
-        eq(walletIdempotencyKey.principalUserId, userId),
-        eq(walletIdempotencyKey.operationScope, operationScope),
-        eq(walletIdempotencyKey.key, key),
-      ))
-      .limit(1)
-      .for('update')
-  )[0];
+  const record =
+    created ??
+    (
+      await transaction
+        .select(idempotencyFields)
+        .from(walletIdempotencyKey)
+        .where(
+          and(
+            eq(walletIdempotencyKey.principalUserId, userId),
+            eq(walletIdempotencyKey.operationScope, operationScope),
+            eq(walletIdempotencyKey.key, key)
+          )
+        )
+        .limit(1)
+        .for('update')
+    )[0];
 
   if (!record) return { outcome: 'idempotency-unavailable' };
   if (record.requestHash !== requestHash) return { outcome: 'idempotency-key-reused' };
@@ -223,10 +228,12 @@ const acquireIdempotency = async (
   return { outcome: 'idempotency-unavailable' };
 };
 
-const parseReplay = (
-  record: IdempotencyRecord,
-): QuestV2EditRequestOutcome | undefined => {
-  if (!record.resultData || typeof record.resultData !== 'object' || Array.isArray(record.resultData)) {
+const parseReplay = (record: IdempotencyRecord): QuestV2EditRequestOutcome | undefined => {
+  if (
+    !record.resultData ||
+    typeof record.resultData !== 'object' ||
+    Array.isArray(record.resultData)
+  ) {
     return undefined;
   }
   const result = record.resultData as { request?: unknown; outcome?: unknown };
@@ -261,7 +268,9 @@ const isQuestV2EditRequestData = (value: unknown): value is QuestV2EditRequestDa
     Number.isInteger(data.responseSummary.declinedCount) &&
     Number.isInteger(data.responseSummary.pendingCount) &&
     (data.responses === undefined || Array.isArray(data.responses)) &&
-    (data.ownResponse === undefined || data.ownResponse === null || typeof data.ownResponse === 'object')
+    (data.ownResponse === undefined ||
+      data.ownResponse === null ||
+      typeof data.ownResponse === 'object')
   );
 };
 
@@ -270,7 +279,7 @@ const completeIdempotency = async (
   idempotencyId: string,
   resourceId: string,
   resultData: object,
-  now: Date,
+  now: Date
 ) => {
   await transaction
     .update(walletIdempotencyKey)
@@ -289,7 +298,7 @@ const completeOutcome = async (
   idempotencyId: string,
   resourceId: string,
   outcome: QuestV2EditOutcomeCode,
-  now: Date,
+  now: Date
 ): Promise<QuestV2EditRequestOutcome> => {
   await completeIdempotency(transaction, idempotencyId, resourceId, { outcome }, now);
   return { outcome };
@@ -322,27 +331,29 @@ const selectRequest = async (transaction: QuestTransaction, requestId: string, l
 
 const selectCondition = async (
   transaction: QuestTransaction,
-  questId: string,
-): Promise<ConditionItem[]> => transaction
-  .select({ position: questConditionItem.position, text: questConditionItem.text })
-  .from(questConditionItem)
-  .where(eq(questConditionItem.questId, questId))
-  .orderBy(asc(questConditionItem.position));
+  questId: string
+): Promise<ConditionItem[]> =>
+  transaction
+    .select({ position: questConditionItem.position, text: questConditionItem.text })
+    .from(questConditionItem)
+    .where(eq(questConditionItem.questId, questId))
+    .orderBy(asc(questConditionItem.position));
 
 const selectResponses = async (
   transaction: QuestTransaction,
-  requestId: string,
-): Promise<QuestV2EditResponseRow[]> => transaction
-  .select()
-  .from(questV2EditRequestResponse)
-  .where(eq(questV2EditRequestResponse.requestId, requestId))
-  .orderBy(asc(questV2EditRequestResponse.workerId));
+  requestId: string
+): Promise<QuestV2EditResponseRow[]> =>
+  transaction
+    .select()
+    .from(questV2EditRequestResponse)
+    .where(eq(questV2EditRequestResponse.requestId, requestId))
+    .orderBy(asc(questV2EditRequestResponse.workerId));
 
 const failRequest = async (
   transaction: QuestTransaction,
   request: QuestV2EditRequestRow,
   failureCode: QuestV2EditFailureCode,
-  now: Date,
+  now: Date
 ): Promise<QuestV2EditRequestRow> => {
   await transaction
     .update(questV2EditRequest)
@@ -351,10 +362,12 @@ const failRequest = async (
       failureCode,
       failedAt: now,
     })
-    .where(and(
-      eq(questV2EditRequest.id, request.id),
-      eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING'),
-    ));
+    .where(
+      and(
+        eq(questV2EditRequest.id, request.id),
+        eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING')
+      )
+    );
   return {
     ...request,
     requestStatus: 'EDIT_REQUEST_FAILED',
@@ -367,7 +380,7 @@ const materializePendingRequest = async (
   transaction: QuestTransaction,
   questId: string,
   request: QuestV2EditRequestRow,
-  now: Date,
+  now: Date
 ): Promise<{ request: QuestV2EditRequestRow; outcome?: 'expired' | 'departed' }> => {
   if (request.requestStatus !== 'EDIT_REQUEST_PENDING') return { request };
 
@@ -378,13 +391,18 @@ const materializePendingRequest = async (
   const active = await transaction
     .select({ workerId: questAssignment.workerId })
     .from(questAssignment)
-    .where(and(
-      eq(questAssignment.questId, questId),
-      eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
-    ));
+    .where(
+      and(
+        eq(questAssignment.questId, questId),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+      )
+    );
   const snapshotIds = snapshot.map(({ workerId }) => workerId).sort();
   const activeIds = active.map(({ workerId }) => workerId).sort();
-  if (snapshotIds.length !== activeIds.length || snapshotIds.some((id, index) => id !== activeIds[index])) {
+  if (
+    snapshotIds.length !== activeIds.length ||
+    snapshotIds.some((id, index) => id !== activeIds[index])
+  ) {
     return {
       request: await failRequest(transaction, request, 'ACTIVE_WORKER_LEFT', now),
       outcome: 'departed',
@@ -403,8 +421,10 @@ const materializePendingRequest = async (
 
 const responseSummary = (responses: QuestV2EditResponseRow[]) => ({
   totalCount: responses.length,
-  acceptedCount: responses.filter((response) => response.decision === 'EDIT_RESPONSE_ACCEPTED').length,
-  declinedCount: responses.filter((response) => response.decision === 'EDIT_RESPONSE_DECLINED').length,
+  acceptedCount: responses.filter((response) => response.decision === 'EDIT_RESPONSE_ACCEPTED')
+    .length,
+  declinedCount: responses.filter((response) => response.decision === 'EDIT_RESPONSE_DECLINED')
+    .length,
   pendingCount: responses.filter((response) => response.decision === null).length,
 });
 
@@ -412,9 +432,12 @@ const projectRequest = async (
   transaction: QuestTransaction,
   memberId: string,
   questRow: { hirerId: string },
-  request: QuestV2EditRequestRow,
+  request: QuestV2EditRequestRow
 ): Promise<QuestV2EditRequestData | undefined> => {
-  if (!isConditionSnapshot(request.previousCondition) || !isConditionSnapshot(request.proposedCondition)) {
+  if (
+    !isConditionSnapshot(request.previousCondition) ||
+    !isConditionSnapshot(request.proposedCondition)
+  ) {
     throw new Error(`Quest Edit Request ${request.id} has invalid Condition snapshots`);
   }
   const responses = await selectResponses(transaction, request.id);
@@ -425,11 +448,13 @@ const projectRequest = async (
     const [activeAssignment] = await transaction
       .select({ id: questAssignment.id })
       .from(questAssignment)
-      .where(and(
-        eq(questAssignment.questId, request.questId),
-        eq(questAssignment.workerId, memberId),
-        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
-      ))
+      .where(
+        and(
+          eq(questAssignment.questId, request.questId),
+          eq(questAssignment.workerId, memberId),
+          eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+        )
+      )
       .limit(1);
     if (!activeAssignment) return undefined;
   }
@@ -468,11 +493,10 @@ const projectRequest = async (
   return result;
 };
 
-const replayOrOutcome = (
-  idempotency: IdempotencyResult,
-): QuestV2EditRequestOutcome | undefined => {
+const replayOrOutcome = (idempotency: IdempotencyResult): QuestV2EditRequestOutcome | undefined => {
   if ('outcome' in idempotency) return { outcome: idempotency.outcome };
-  if (!idempotency.created) return parseReplay(idempotency.record) ?? { outcome: 'idempotency-unavailable' };
+  if (!idempotency.created)
+    return parseReplay(idempotency.record) ?? { outcome: 'idempotency-unavailable' };
   return undefined;
 };
 
@@ -481,7 +505,7 @@ export const createQuestV2EditRequest = async (
   questId: string,
   data: QuestV2EditRequestCreateInput,
   rawIdempotencyKey: string,
-  now = new Date(),
+  now = new Date()
 ): Promise<QuestV2EditRequestOutcome> => {
   const key = rawIdempotencyKey.trim();
   const condition = normalizeCondition(data);
@@ -496,7 +520,7 @@ export const createQuestV2EditRequest = async (
       questV2EditRequestCreateOperationScope,
       key,
       requestHash,
-      now,
+      now
     );
     const replay = replayOrOutcome(idempotency);
     if (replay) return replay;
@@ -513,14 +537,17 @@ export const createQuestV2EditRequest = async (
     const [pendingIdentity] = await transaction
       .select({ id: questV2EditRequest.id })
       .from(questV2EditRequest)
-      .where(and(
-        eq(questV2EditRequest.questId, questId),
-        eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING'),
-      ))
+      .where(
+        and(
+          eq(questV2EditRequest.questId, questId),
+          eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING')
+        )
+      )
       .limit(1);
     if (pendingIdentity) {
       const pending = await selectRequest(transaction, pendingIdentity.id, true);
-      if (!pending) return completeOutcome(transaction, idempotency.record.id, questId, 'not-found', now);
+      if (!pending)
+        return completeOutcome(transaction, idempotency.record.id, questId, 'not-found', now);
       const materialized = await materializePendingRequest(transaction, questId, pending, now);
       if (materialized.request.requestStatus === 'EDIT_REQUEST_PENDING') {
         return completeOutcome(transaction, idempotency.record.id, questId, 'pending-request', now);
@@ -536,10 +563,12 @@ export const createQuestV2EditRequest = async (
     const workers = await transaction
       .select({ workerId: questAssignment.workerId })
       .from(questAssignment)
-      .where(and(
-        eq(questAssignment.questId, questId),
-        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
-      ))
+      .where(
+        and(
+          eq(questAssignment.questId, questId),
+          eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+        )
+      )
       .orderBy(asc(questAssignment.workerId))
       .for('update');
     if (workers.length === 0) {
@@ -559,12 +588,18 @@ export const createQuestV2EditRequest = async (
       .returning();
     if (!created) return { outcome: 'idempotency-unavailable' };
 
-    await transaction.insert(questV2EditRequestResponse).values(
-      workers.map(({ workerId }) => ({ requestId: created.id, workerId })),
-    );
+    await transaction
+      .insert(questV2EditRequestResponse)
+      .values(workers.map(({ workerId }) => ({ requestId: created.id, workerId })));
     const resource = await projectRequest(transaction, userId, current, created);
     if (!resource) throw new Error(`Quest Edit Request ${created.id} could not be projected`);
-    await completeIdempotency(transaction, idempotency.record.id, created.id, { request: resource }, now);
+    await completeIdempotency(
+      transaction,
+      idempotency.record.id,
+      created.id,
+      { request: resource },
+      now
+    );
     return { request: resource };
   });
 };
@@ -574,7 +609,7 @@ export const respondToQuestV2EditRequest = async (
   requestId: string,
   data: QuestV2EditRequestResponseInput,
   rawIdempotencyKey: string,
-  now = new Date(),
+  now = new Date()
 ): Promise<QuestV2EditRequestOutcome> => {
   const key = rawIdempotencyKey.trim();
   const responseInput = normalizeResponse(data);
@@ -589,7 +624,7 @@ export const respondToQuestV2EditRequest = async (
       questV2EditRequestRespondOperationScope,
       key,
       requestHash,
-      now,
+      now
     );
     const replay = replayOrOutcome(idempotency);
     if (replay) return replay;
@@ -609,24 +644,28 @@ export const respondToQuestV2EditRequest = async (
       return completeOutcome(transaction, idempotency.record.id, requestId, 'not-found', now);
     }
     const request = await selectRequest(transaction, requestId, true);
-    if (!request) return completeOutcome(transaction, idempotency.record.id, requestId, 'not-found', now);
+    if (!request)
+      return completeOutcome(transaction, idempotency.record.id, requestId, 'not-found', now);
 
     const materialized = await materializePendingRequest(
       transaction,
       request.questId,
       request,
-      now,
+      now
     );
-    const ownResponse = (await selectResponses(transaction, requestId))
-      .find((candidate) => candidate.workerId === userId);
+    const ownResponse = (await selectResponses(transaction, requestId)).find(
+      (candidate) => candidate.workerId === userId
+    );
     const [activeAssignment] = await transaction
       .select({ id: questAssignment.id })
       .from(questAssignment)
-      .where(and(
-        eq(questAssignment.questId, request.questId),
-        eq(questAssignment.workerId, userId),
-        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
-      ))
+      .where(
+        and(
+          eq(questAssignment.questId, request.questId),
+          eq(questAssignment.workerId, userId),
+          eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+        )
+      )
       .limit(1);
     if (!ownResponse || !activeAssignment) {
       return completeOutcome(transaction, idempotency.record.id, requestId, 'not-found', now);
@@ -644,7 +683,13 @@ export const respondToQuestV2EditRequest = async (
       return completeOutcome(transaction, idempotency.record.id, requestId, 'not-pending', now);
     }
     if (ownResponse.decision !== null) {
-      return completeOutcome(transaction, idempotency.record.id, requestId, 'already-responded', now);
+      return completeOutcome(
+        transaction,
+        idempotency.record.id,
+        requestId,
+        'already-responded',
+        now
+      );
     }
 
     await transaction
@@ -671,18 +716,23 @@ export const respondToQuestV2EditRequest = async (
         if (!isConditionSnapshot(request.proposedCondition)) {
           throw new Error(`Quest Edit Request ${request.id} has invalid proposed Condition`);
         }
-        await transaction.delete(questConditionItem).where(eq(questConditionItem.questId, request.questId));
+        await transaction
+          .delete(questConditionItem)
+          .where(eq(questConditionItem.questId, request.questId));
         await transaction.insert(questConditionItem).values(
           request.proposedCondition.items.map(({ position, text }) => ({
             questId: request.questId,
             position,
             text,
-          })),
+          }))
         );
         await transaction
           .update(quest)
           .set({
-            condition: request.proposedCondition.items.map(({ text }) => text).join('\n').slice(0, 4000),
+            condition: request.proposedCondition.items
+              .map(({ text }) => text)
+              .join('\n')
+              .slice(0, 4000),
             version: sql`${quest.version} + 1`,
             updatedAt: now,
           })
@@ -701,7 +751,13 @@ export const respondToQuestV2EditRequest = async (
     if (!updatedRequest) throw new Error(`Quest Edit Request ${requestId} could not be read back`);
     const resource = await projectRequest(transaction, userId, currentQuest, updatedRequest);
     if (!resource) throw new Error(`Quest Edit Request ${requestId} could not be projected`);
-    await completeIdempotency(transaction, idempotency.record.id, requestId, { request: resource }, now);
+    await completeIdempotency(
+      transaction,
+      idempotency.record.id,
+      requestId,
+      { request: resource },
+      now
+    );
     return { request: resource };
   });
 };
@@ -709,59 +765,74 @@ export const respondToQuestV2EditRequest = async (
 export const getQuestV2EditRequest = async (
   userId: string,
   requestId: string,
-  now = new Date(),
-): Promise<QuestV2EditRequestData | undefined> => db.transaction(async (transaction) => {
-  const [identity] = await transaction
-    .select({ questId: questV2EditRequest.questId })
-    .from(questV2EditRequest)
-    .where(eq(questV2EditRequest.id, requestId))
-    .limit(1);
-  if (!identity) return undefined;
+  now = new Date()
+): Promise<QuestV2EditRequestData | undefined> =>
+  db.transaction(async (transaction) => {
+    const [identity] = await transaction
+      .select({ questId: questV2EditRequest.questId })
+      .from(questV2EditRequest)
+      .where(eq(questV2EditRequest.id, requestId))
+      .limit(1);
+    if (!identity) return undefined;
 
-  const currentQuest = await selectQuestForEdit(transaction, identity.questId);
-  if (!currentQuest || currentQuest.apiVersion !== 'v2') return undefined;
-  const request = await selectRequest(transaction, requestId, true);
-  if (!request) return undefined;
-  const materialized = await materializePendingRequest(transaction, request.questId, request, now);
-  return projectRequest(transaction, userId, currentQuest, materialized.request);
-});
+    const currentQuest = await selectQuestForEdit(transaction, identity.questId);
+    if (!currentQuest || currentQuest.apiVersion !== 'v2') return undefined;
+    const request = await selectRequest(transaction, requestId, true);
+    if (!request) return undefined;
+    const materialized = await materializePendingRequest(
+      transaction,
+      request.questId,
+      request,
+      now
+    );
+    return projectRequest(transaction, userId, currentQuest, materialized.request);
+  });
 
 export const expireQuestV2EditRequest = async (
   requestId: string,
-  now = new Date(),
-): Promise<boolean> => db.transaction(async (transaction) => {
-  const [identity] = await transaction
-    .select({ questId: questV2EditRequest.questId })
-    .from(questV2EditRequest)
-    .where(eq(questV2EditRequest.id, requestId))
-    .limit(1);
-  if (!identity) return false;
-  const currentQuest = await selectQuestForEdit(transaction, identity.questId);
-  if (!currentQuest) return false;
-  const request = await selectRequest(transaction, requestId, true);
-  if (!request) return false;
-  const materialized = await materializePendingRequest(transaction, request.questId, request, now);
-  return materialized.outcome === 'expired';
-});
+  now = new Date()
+): Promise<boolean> =>
+  db.transaction(async (transaction) => {
+    const [identity] = await transaction
+      .select({ questId: questV2EditRequest.questId })
+      .from(questV2EditRequest)
+      .where(eq(questV2EditRequest.id, requestId))
+      .limit(1);
+    if (!identity) return false;
+    const currentQuest = await selectQuestForEdit(transaction, identity.questId);
+    if (!currentQuest) return false;
+    const request = await selectRequest(transaction, requestId, true);
+    if (!request) return false;
+    const materialized = await materializePendingRequest(
+      transaction,
+      request.questId,
+      request,
+      now
+    );
+    return materialized.outcome === 'expired';
+  });
 
-export const pendingQuestV2EditRequestIds = async (limit: number) => db
-  .select({ id: questV2EditRequest.id })
-  .from(questV2EditRequest)
-  .where(eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING'))
-  .orderBy(asc(questV2EditRequest.expiresAt), asc(questV2EditRequest.id))
-  .limit(limit);
+export const pendingQuestV2EditRequestIds = async (limit: number) =>
+  db
+    .select({ id: questV2EditRequest.id })
+    .from(questV2EditRequest)
+    .where(eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING'))
+    .orderBy(asc(questV2EditRequest.expiresAt), asc(questV2EditRequest.id))
+    .limit(limit);
 
 export const hasPendingQuestV2EditRequest = async (
   transaction: QuestTransaction,
-  questId: string,
+  questId: string
 ): Promise<boolean> => {
   const [pending] = await transaction
     .select({ id: questV2EditRequest.id })
     .from(questV2EditRequest)
-    .where(and(
-      eq(questV2EditRequest.questId, questId),
-      eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING'),
-    ))
+    .where(
+      and(
+        eq(questV2EditRequest.questId, questId),
+        eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING')
+      )
+    )
     .limit(1);
   return Boolean(pending);
 };
