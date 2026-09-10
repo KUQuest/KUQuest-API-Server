@@ -114,10 +114,15 @@ export const adminReviewItem = pgTable(
   ],
 );
 
+export const disputeCaseStatus = {
+  pending: 'DISPUTE_CASE_PENDING',
+  dismissed: 'DISPUTE_CASE_DISMISSED',
+  resolved: 'DISPUTE_CASE_RESOLVED',
+} as const;
 export const disputeCaseStatuses = [
-  'DISPUTE_CASE_PENDING',
-  'DISPUTE_CASE_DISMISSED',
-  'DISPUTE_CASE_RESOLVED',
+  disputeCaseStatus.pending,
+  disputeCaseStatus.dismissed,
+  disputeCaseStatus.resolved,
 ] as const;
 export type DisputeCaseStatus = (typeof disputeCaseStatuses)[number];
 

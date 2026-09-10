@@ -17,7 +17,19 @@ import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 
 import { authAdmin, authUser } from './auth.schema';
 
-export const walletStatuses = ['ACTIVE', 'FROZEN', 'SUSPENDED', 'CLOSED'] as const;
+export const walletStatus = {
+  active: 'ACTIVE',
+  frozen: 'FROZEN',
+  suspended: 'SUSPENDED',
+  closed: 'CLOSED',
+} as const;
+export const walletStatuses = [
+  walletStatus.active,
+  walletStatus.frozen,
+  walletStatus.suspended,
+  walletStatus.closed,
+] as const;
+export const walletAdminHoldStatuses = [walletStatus.frozen, walletStatus.suspended] as const;
 export type WalletStatus = (typeof walletStatuses)[number];
 
 export const ledgerAccountTypes = [

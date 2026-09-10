@@ -4,6 +4,8 @@ import { Elysia } from 'elysia';
 import type { StatusMap } from 'elysia/utils';
 
 import { adminAuth } from './admin-auth.config';
+import { adminMemberSessionGuard } from './admin-member-session.guard';
+import { getAdminSession } from './admin-session';
 
 export type AuthenticatedAdminSession = NonNullable<
   Awaited<ReturnType<typeof adminAuth.api.getSession>>
@@ -17,7 +19,7 @@ export type AdminContext = {
 
 export const adminAuthenticationGuard = new Elysia({ name: 'admin-authentication-guard' })
   .derive({ as: 'scoped' }, async ({ request }) => {
-    const session = await adminAuth.api.getSession({ headers: request.headers });
+    const session = await getAdminSession(request);
     return { adminSession: session };
   })
   .onBeforeHandle({ as: 'scoped' }, ({ adminSession, set }) => {
@@ -37,16 +39,8 @@ export const adminAuthenticationGuard = new Elysia({ name: 'admin-authentication
 
 export const enabledAdminGuard = (app: Elysia) =>
   app
+    .use(adminMemberSessionGuard)
     .use(adminAuthenticationGuard)
-    // Exception to ADR 0001's "one unsafe cast, in the guard file" rule: this second
-    // cast is required, not just convenient. adminAuthenticationGuard's own resolve()
-    // narrows adminSession, but that narrowing is lost once it crosses this `.use()`
-    // boundary — confirmed by removing the cast, which reintroduces a TS18048
-    // possibly-undefined error here. The onBeforeHandle null check above already
-    // guarantees non-null at runtime; this re-derives the type to match.
-    .resolve({ as: 'scoped' }, ({ adminSession }) => ({
-      adminSession: adminSession as NonNullable<typeof adminSession>,
-    }))
     .onBeforeHandle({ as: 'scoped' }, ({ adminSession, set }) => {
       // The 401 hook above may already have responded, but Elysia still runs
       // this sibling hook — skip when the session is absent.
