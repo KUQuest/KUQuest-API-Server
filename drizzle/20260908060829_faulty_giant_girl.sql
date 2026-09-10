@@ -11,6 +11,7 @@ SET "payout_status" = CASE "payout_status"
   WHEN 'COMPLETED' THEN 'SUCCEEDED'
   ELSE "payout_status"
 END;--> statement-breakpoint
+ALTER TABLE "payment_payout_status_history" DISABLE TRIGGER "payment_payout_status_history_immutable";--> statement-breakpoint
 UPDATE "payment_payout_status_history"
 SET
   "from_status" = CASE "from_status"
@@ -28,6 +29,7 @@ SET
     ELSE "to_status"
   END,
   "source" = CASE "source" WHEN 'ADMIN_REJECTION' THEN 'ADMIN_CANCELLATION' ELSE "source" END;--> statement-breakpoint
+ALTER TABLE "payment_payout_status_history" ENABLE TRIGGER "payment_payout_status_history_immutable";--> statement-breakpoint
 UPDATE "payment_provider_event_inbox"
 SET "normalized_status" = CASE "normalized_status"
   WHEN 'PENDING' THEN 'PROVIDER_PENDING'

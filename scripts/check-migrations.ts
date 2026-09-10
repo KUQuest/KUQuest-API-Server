@@ -1,5 +1,46 @@
 import process from 'node:process';
 
+const migrationRepairManifestPath = 'docs/agents/migration-repairs.json';
+
+type MigrationRepair = {
+  baseBlob: string;
+  path: string;
+  reason: string;
+  repairedBlob: string;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const isMigrationRepair = (value: unknown): value is MigrationRepair =>
+  isRecord(value) &&
+  typeof value.baseBlob === 'string' &&
+  typeof value.path === 'string' &&
+  typeof value.reason === 'string' &&
+  typeof value.repairedBlob === 'string';
+
+const readMigrationRepairs = async (): Promise<MigrationRepair[]> => {
+  const file = Bun.file(migrationRepairManifestPath);
+  if (!(await file.exists())) return [];
+
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(await file.text());
+  } catch {
+    throw new Error('Migration repair manifest is not valid JSON.');
+  }
+
+  if (
+    !isRecord(manifest) ||
+    !Array.isArray(manifest.repairs) ||
+    !manifest.repairs.every(isMigrationRepair)
+  ) {
+    throw new Error('Migration repair manifest has an invalid shape.');
+  }
+
+  return manifest.repairs;
+};
+
 const parseJournalEntries = (contents: string): unknown[] => {
   const journal: unknown = JSON.parse(contents);
 
@@ -117,13 +158,50 @@ if (baseReference) {
     return comparison.exitCode !== 0;
   });
 
-  if (changedSqlFiles.length > 0) {
+  const migrationRepairs = await readMigrationRepairs();
+  const repairByPath = new Map(
+    migrationRepairs.map((repair) => [repair.path, repair]),
+  );
+  const inheritedSqlFileSet = new Set(inheritedSqlFiles);
+  const changedSqlFileSet = new Set(changedSqlFiles);
+  const hasDuplicateRepairPath =
+    repairByPath.size !== migrationRepairs.length;
+  const hasInvalidRepair = migrationRepairs.some((repair) => {
+    if (!repair.reason.trim() || !inheritedSqlFileSet.has(repair.path)) {
+      return true;
+    }
+
+    if (!changedSqlFileSet.has(repair.path)) return false;
+
+    const baseBlob = gitOutput([
+      'rev-parse',
+      `${baseReference}:${repair.path}`,
+    ]).trim();
+    const repairedBlob = gitOutput([
+      'hash-object',
+      '--',
+      repair.path,
+    ]).trim();
+
+    return (
+      repair.baseBlob !== baseBlob || repair.repairedBlob !== repairedBlob
+    );
+  });
+  const unapprovedChangedSqlFiles = changedSqlFiles.filter(
+    (path) => !repairByPath.has(path),
+  );
+
+  if (
+    hasDuplicateRepairPath ||
+    hasInvalidRepair ||
+    unapprovedChangedSqlFiles.length > 0
+  ) {
     console.error('Inherited migration SQL is immutable:');
-    for (const path of changedSqlFiles) {
+    for (const path of unapprovedChangedSqlFiles) {
       console.error(`- ${path}`);
     }
     console.error(
-      'Restore the inherited SQL and represent the correction in a new forward migration.',
+      'Restore the inherited SQL and represent the correction in a new forward migration, or record an exact approved repair in docs/agents/migration-repairs.json.',
     );
     process.exit(1);
   }

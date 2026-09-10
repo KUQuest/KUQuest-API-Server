@@ -1,0 +1,10 @@
+{
+  "repairs": [
+    {
+      "path": "drizzle/20260908060829_faulty_giant_girl.sql",
+      "baseBlob": "c8bb1da627081f31e784ef8ae62ab941aaba5b54",
+      "repairedBlob": "7aa2888b1c795212cda40332137818a459f6e38c",
+      "reason": "Staging did not commit this migration because its existing payout status history trigger rejected the legacy status rewrite. The repair disables that trigger only for the rewrite and enables it again before the migration continues."
+    }
+  ]
+}
