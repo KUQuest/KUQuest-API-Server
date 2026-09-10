@@ -5,7 +5,7 @@
     <meta content="width=device-width, initial-scale=1" name="viewport"/>
     <title>KUQuest API Test Bench</title>
     <link href="/test-bench/styles.css" rel="stylesheet"/>
-    <script defer="" src="/test-bench/app.js?v=guided-flow-1">
+    <script defer="" src="/test-bench/app.js?v=guided-flow-2">
     </script>
   </head>
   <body>
@@ -141,14 +141,23 @@
           <p class="note">
             Use Account 1 as the Hirer and Account 2 as the Worker for a two-Member test. Test sign-in must be enabled on the Server.
           </p>
+          <div class="hero-flow-banner">
+            <span class="badge" style="background:#d4ecd9;color:#13573c;">Recommended Staging Walkthrough</span>
+            <h3>Simple Flow & Work Chat Inspector</h3>
+            <p>Experience the complete end-to-end KUQuest lifecycle: Hirer creates & funds Quest with Escrow, Worker joins, both chat in live Work Chat, Worker completes work, Escrow settles into Earnings, both submit Reviews, and Worker converts or withdraws earnings.</p>
+            <a class="button primary" href="#flow">Launch Simple Flow →</a>
+          </div>
           <div class="next-step">
             <strong>
               Next step
             </strong>
             <p>
-              Sign in, then create a Quest or open your Work Conversations.
+              Sign in, then run the guided Simple Flow or create a Quest.
             </p>
-            <a class="button primary" href="#quests">
+            <a class="button primary" href="#flow">
+              Run Simple Flow →
+            </a>
+            <a class="button" href="#quests">
               Open Quests →
             </a>
             <a class="button" href="#chat">
@@ -185,7 +194,7 @@
             </label>
             <label>
               Quest Funding Total (Baht)
-              <input id="simple-flow-reward" min="1" step="0.01" type="number" value="100"/>
+              <input id="simple-flow-reward" min="1" step="0.01" type="number" value="20"/>
             </label>
             <label class="wide">
               Condition Item
@@ -218,19 +227,56 @@
               <span>Wait for QUEST_ASSIGNED → QUEST_IN_PROGRESS. There is no Start Work endpoint.</span>
               <button id="simple-refresh" type="button">Refresh Server status</button>
             </div>
+            <div class="guided-action" data-step="chat">
+              <strong>5. Live Work Chat</strong>
+              <span>Inspect real-time messages between Hirer and Worker below.</span>
+              <button id="simple-flow-focus-chat" type="button">Focus Work Chat ↓</button>
+            </div>
             <div class="guided-action" data-step="complete">
-              <strong>5. Worker confirms completion</strong>
+              <strong>6. Worker confirms completion</strong>
               <span>This proof-free path uses the completion confirmation command.</span>
               <button class="primary" id="simple-confirm" type="button">Confirm completion</button>
             </div>
             <div class="guided-action" data-step="review">
-              <strong>6. Members submit Reviews</strong>
+              <strong>7. Members submit Reviews</strong>
               <span>Each Member submits one Rating Review after the Quest is Terminal.</span>
               <div class="actions">
                 <button id="simple-review-hirer" type="button">Use Hirer and review Worker</button>
                 <button id="simple-review-worker" type="button">Use Worker and review Hirer</button>
               </div>
             </div>
+          </div>
+          <div class="simple-chat-section" id="simple-flow-chat-section">
+            <div class="card-heading" style="margin-bottom:12px;">
+              <div>
+                <h3 style="margin:0 0 4px;font-size:16px;">Live Work Chat Inspector</h3>
+                <p class="muted" style="margin:0;font-size:12px;">Inspect real-time messages between Hirer and Worker for this Quest.</p>
+              </div>
+              <div class="actions" style="margin:0;">
+                <span class="badge" id="simple-chat-badge">No Quest Conversation</span>
+                <button id="simple-chat-refresh-btn" type="button">Refresh Messages</button>
+                <a class="button" href="#chat" style="padding:6px 12px;font-size:12px;">Full Chat Screen →</a>
+              </div>
+            </div>
+            <div class="chat-persona-bar">
+              <span class="persona-label">Persona:</span>
+              <button id="simple-chat-as-hirer" type="button" class="persona-btn" data-active="false">Account 1 (Hirer)</button>
+              <button id="simple-chat-as-worker" type="button" class="persona-btn" data-active="false">Account 2 (Worker)</button>
+              <span class="active-speaker-tag" id="simple-chat-speaker">Current session: —</span>
+            </div>
+            <div class="chat-stream-box" id="simple-flow-messages-box">
+              <p class="empty" id="simple-chat-empty-hint">Work Chat opens once Worker joins the Quest. Start the test and join to see messages.</p>
+            </div>
+            <div class="quick-replies-group">
+              <span style="font-size:11px;color:#6a816f;">Quick suggestions:</span>
+              <button type="button" class="prompt-chip" data-text="Hello! I have started work on this task.">"Started work"</button>
+              <button type="button" class="prompt-chip" data-text="Deliverables are ready for your review.">"Ready for review"</button>
+              <button type="button" class="prompt-chip" data-text="Everything looks great, thank you!">"Looks great!"</button>
+            </div>
+            <form id="simple-flow-chat-form" style="display:flex;gap:8px;margin-top:4px;">
+              <input id="simple-flow-chat-input" type="text" placeholder="Write a message as current persona…" maxlength="1000" disabled style="flex:1;" />
+              <button id="simple-flow-chat-send" type="submit" class="primary" disabled>Send Message</button>
+            </form>
           </div>
           <div class="guided-status" aria-live="polite">
             <strong id="simple-flow-status">Start a new test to prepare Account 1.</strong>
@@ -415,6 +461,11 @@
                 More Conversations
               </button>
             </div>
+            <div class="chat-persona-bar" style="margin-left:auto;">
+              <span class="persona-label">Persona:</span>
+              <button id="chat-switch-account-1" type="button" class="persona-btn">Account 1 (Hirer)</button>
+              <button id="chat-switch-account-2" type="button" class="persona-btn">Account 2 (Worker)</button>
+            </div>
           </div>
           <div class="chat-layout">
             <aside aria-label="Work Conversation details" class="chat-sidebar">
@@ -473,6 +524,12 @@
                   </button>
                 </div>
               </form>
+              <div class="quick-replies-group" style="padding:0 16px 10px;">
+                <span style="font-size:11px;color:#6a816f;">Quick suggestions:</span>
+                <button type="button" class="prompt-chip" data-target="chat-message-input" data-text="Hello! I have started working on the conditions.">"Started working"</button>
+                <button type="button" class="prompt-chip" data-target="chat-message-input" data-text="Deliverables are submitted, please check.">"Deliverables submitted"</button>
+                <button type="button" class="prompt-chip" data-target="chat-message-input" data-text="Approved and confirmed, thank you!">"Approved!"</button>
+              </div>
               <p aria-live="polite" class="status chat-status" id="chat-status" role="status">
                 Sign in from the Member section, then refresh Conversations.
               </p>
@@ -482,6 +539,10 @@
             Work Chat opens after an ASSIGNMENT_ACTIVE Assignment exists. Select a Conversation, then send a Message. Terminal Quests are read-only.
           </p>
         </section>
+          <details class="result" style="margin-top:16px;">
+            <summary>Inspect Raw Conversation / Message Payload</summary>
+            <pre id="chat-inspect-output">Select a conversation or send a message to inspect JSON.</pre>
+          </details>
       </div>
       <div data-page="wallet" hidden="">
         <section aria-labelledby="wallet-heading" class="card wallet-card">
