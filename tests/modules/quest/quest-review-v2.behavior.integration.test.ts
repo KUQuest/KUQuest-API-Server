@@ -156,7 +156,7 @@ beforeAll(async () => {
     const [tables] = await sql<{ review: string | null; command: string | null }[]>`
       select
         to_regclass('public.review') as review,
-        to_regclass('public.quest_v2_review_command') as command
+        to_regclass('public.quest_command') as command
     `;
     reviewSchemaAvailable = tables?.review !== null && tables?.command !== null;
   } catch {
@@ -258,6 +258,59 @@ describe('Quest Review API v2 behavior', () => {
       });
     }
   );
+
+  it('allows two Members to use the same Idempotency-Key for their own Reviews', async () => {
+    if (!postgresAvailable || !reviewSchemaAvailable) return;
+    const questId = await createQuest('QUEST_COMPLETED');
+    const key = commandKey('shared-member-key', questId);
+
+    const hirerResponse = await request(
+      'POST',
+      `/api/v2/quests/${questId}/reviews`,
+      hirer.id,
+      { revieweeId: worker.id, rating: 5 },
+      { 'idempotency-key': key }
+    );
+    expect(hirerResponse.status).toBe(200);
+    expect((await jsonBody(hirerResponse)).data).toMatchObject({
+      reviewerId: hirer.id,
+      revieweeId: worker.id,
+      rating: 5,
+    });
+
+    const workerResponse = await request(
+      'POST',
+      `/api/v2/quests/${questId}/reviews`,
+      worker.id,
+      { rating: 4 },
+      { 'idempotency-key': key }
+    );
+    expect(workerResponse.status).toBe(200);
+    expect((await jsonBody(workerResponse)).data).toMatchObject({
+      reviewerId: worker.id,
+      revieweeId: hirer.id,
+      rating: 4,
+    });
+
+    expect(
+      await db.select({ id: review.id }).from(review).where(eq(review.questId, questId))
+    ).toHaveLength(2);
+  });
+
+  it('rejects an over-length Idempotency-Key through Quest Command validation', async () => {
+    if (!postgresAvailable || !reviewSchemaAvailable) return;
+    const questId = await createQuest('QUEST_COMPLETED');
+    const response = await request(
+      'POST',
+      `/api/v2/quests/${questId}/reviews`,
+      hirer.id,
+      { revieweeId: worker.id, rating: 5 },
+      { 'idempotency-key': 'x'.repeat(201) }
+    );
+
+    expect(response.status).toBe(400);
+    expect((await jsonBody(response)).error?.code).toBe('INVALID_IDEMPOTENCY_KEY');
+  });
 
   it('keeps GROUP Reviews pair-scoped and rejects Worker-to-Worker Reviews', async () => {
     if (!postgresAvailable || !reviewSchemaAvailable) return;

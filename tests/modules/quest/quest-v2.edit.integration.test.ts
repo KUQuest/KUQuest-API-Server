@@ -1,8 +1,7 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
-import { quest, questAssignment } from '@/database/schema/quest.schema';
+import { quest, questAssignment, questCommand } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, expireQuestV2EditRequest, type QuestV2CreateInput } from '@/modules/quest';
 
@@ -170,10 +169,10 @@ beforeEach(async () => {
 
 afterAll(async () => {
   if (questIds.length > 0) await db.delete(quest).where(inArray(quest.id, questIds));
-  await db.delete(tag).where(eq(tag.id, tagId));
   await db
-    .delete(walletIdempotencyKey)
-    .where(inArray(walletIdempotencyKey.principalUserId, [owner.id, worker.id, secondWorker.id]));
+    .delete(questCommand)
+    .where(inArray(questCommand.principalUserId, [owner.id, worker.id, secondWorker.id]));
+  await db.delete(tag).where(eq(tag.id, tagId));
 });
 
 describe('Quest Edit v2', () => {
@@ -208,6 +207,35 @@ describe('Quest Edit v2', () => {
     expect(Object.keys(read?.responses ?? {})).toEqual(
       expect.arrayContaining(['200', '400', '401', '404', '500'])
     );
+  });
+
+  it('rejects an over-length Idempotency-Key through Quest Command validation', async () => {
+    const questId = await createAssignedQuest();
+    const response = await createEdit(
+      questId,
+      { condition: { items: ['Malformed key requirement'] } },
+      'x'.repeat(201)
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('INVALID_IDEMPOTENCY_KEY');
+  });
+
+  it('requires an Idempotency-Key before a Quest Edit command runs', async () => {
+    const questId = await createAssignedQuest();
+    const response = await app.handle(
+      new Request(`http://localhost/api/v2/quests/${questId}/edit-requests`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: owner.cookie,
+        },
+        body: JSON.stringify({ condition: { items: ['Missing key requirement'] } }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
   });
 
   it('creates, reads, and applies a complete Condition replacement', async () => {
@@ -254,13 +282,16 @@ describe('Quest Edit v2', () => {
     expect(workerBody.data).toHaveProperty('ownResponse');
     expect(workerBody.data).not.toHaveProperty('responses');
 
+    const responseKey = `respond-replay-${crypto.randomUUID()}`;
     const responded = await respondToEdit(
       createdBody.data.requestId,
       { decision: 'EDIT_RESPONSE_ACCEPTED' },
-      worker.cookie
+      worker.cookie,
+      responseKey
     );
     expect(responded.status).toBe(200);
-    expect((await responded.json()).data).toMatchObject({
+    const respondedBody = await responded.json();
+    expect(respondedBody.data).toMatchObject({
       status: 'EDIT_REQUEST_APPLIED',
       responseSummary: {
         totalCount: 1,
@@ -268,6 +299,53 @@ describe('Quest Edit v2', () => {
         declinedCount: 0,
         pendingCount: 0,
       },
+    });
+
+    const responseReplay = await respondToEdit(
+      createdBody.data.requestId,
+      { decision: 'EDIT_RESPONSE_ACCEPTED' },
+      worker.cookie,
+      responseKey
+    );
+    expect(responseReplay.status).toBe(200);
+    expect(await responseReplay.json()).toEqual(respondedBody);
+
+    const rejectedKey = `respond-rejected-${crypto.randomUUID()}`;
+    const rejected = await respondToEdit(
+      createdBody.data.requestId,
+      { decision: 'EDIT_RESPONSE_ACCEPTED' },
+      worker.cookie,
+      rejectedKey
+    );
+    expect(rejected.status).toBe(409);
+    expect((await rejected.json()).error.code).toBe('QUEST_EDIT_NOT_PENDING');
+
+    const rejectedReplay = await respondToEdit(
+      createdBody.data.requestId,
+      { decision: 'EDIT_RESPONSE_ACCEPTED' },
+      worker.cookie,
+      rejectedKey
+    );
+    expect(rejectedReplay.status).toBe(409);
+    expect((await rejectedReplay.json()).error.code).toBe('QUEST_EDIT_NOT_PENDING');
+
+    const [rejectedCommand] = await db
+      .select({
+        processingStatus: questCommand.processingStatus,
+        resultData: questCommand.resultData,
+      })
+      .from(questCommand)
+      .where(
+        and(
+          eq(questCommand.principalUserId, worker.id),
+          eq(questCommand.operationScope, 'quest.v2.edit-request.respond'),
+          eq(questCommand.key, rejectedKey)
+        )
+      );
+    expect(rejectedCommand?.processingStatus).toBe('COMPLETED');
+    expect(rejectedCommand?.resultData).toMatchObject({
+      kind: 'rejected',
+      rejection: 'not-pending',
     });
 
     const [condition] = await db

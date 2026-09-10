@@ -13,12 +13,10 @@ export const questV2ReviewHeadersSchema = t.Object(
   {
     'idempotency-key': t.String({
       minLength: 1,
-      maxLength: 200,
-      pattern: '\\S',
       description: 'Non-blank command identity for replay-safe Rating Review commands',
     }),
   },
-  { additionalProperties: false }
+  { additionalProperties: true }
 );
 
 export const questV2ReviewCreateSchema = t.Object(

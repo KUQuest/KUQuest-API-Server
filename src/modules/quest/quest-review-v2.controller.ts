@@ -13,6 +13,7 @@ import {
   type QuestV2ReviewOutcome,
   type QuestV2ReviewRow,
 } from './quest-review-v2.service';
+import { mapQuestCommandOutcome } from './quest-command.controller';
 
 const serializeReview = (review: QuestV2ReviewRow) => ({
   id: review.id,
@@ -78,19 +79,13 @@ const mapReviewError = (
       'Reviews can only be created or edited within seven days of the Quest becoming Terminal'
     );
   }
-  if (result.outcome === 'idempotency-key-reused') {
-    return conflict(
-      set,
-      'IDEMPOTENCY_KEY_REUSED',
-      'The Idempotency-Key was used for a different request'
-    );
-  }
-  if (result.outcome === 'idempotency-in-progress') {
-    return conflict(set, 'IDEMPOTENCY_IN_PROGRESS', 'The Idempotency-Key is still processing');
-  }
-  if (result.outcome === 'idempotency-unavailable') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'The Idempotency-Key result is unavailable');
+  if (
+    result.outcome === 'idempotency-key-reused' ||
+    result.outcome === 'idempotency-in-progress' ||
+    result.outcome === 'idempotency-unavailable' ||
+    result.outcome === 'invalid-idempotency-key'
+  ) {
+    return mapQuestCommandOutcome(set, result.outcome);
   }
   if (result.outcome === 'invalid-rating') {
     set.status = 400;
@@ -99,10 +94,6 @@ const mapReviewError = (
   if (result.outcome === 'invalid-comment') {
     set.status = 400;
     return apiError('INVALID_COMMENT', 'comment must be non-blank and at most 1,000 characters');
-  }
-  if (result.outcome === 'invalid-idempotency-key') {
-    set.status = 400;
-    return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
   }
   set.status = 409;
   return apiError('REVIEW_CONFLICT', 'The Review could not be saved');

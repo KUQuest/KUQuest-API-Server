@@ -12,6 +12,7 @@ import type {
   QuestV2UnderfilledDecisionInput,
   QuestV2UnderfilledParams,
 } from './quest-underfilled-v2.schema';
+import { mapQuestCommandOutcome } from './quest-command.controller';
 import { WorkChatTransitionError } from './quest-work-chat.port';
 
 type UnderfilledData = Extract<QuestV2UnderfilledOutcome, { underfilled: unknown }>['underfilled'];
@@ -55,22 +56,7 @@ const mapOutcome = (set: AuthedContext['set'], result: UnderfilledError) => {
       'The underfilled decision or consent window has expired'
     );
   }
-  if (result.outcome === 'idempotency-key-reused') {
-    return conflict(
-      set,
-      'IDEMPOTENCY_KEY_REUSED',
-      'The Idempotency-Key was used for a different request'
-    );
-  }
-  if (result.outcome === 'idempotency-in-progress') {
-    return conflict(set, 'IDEMPOTENCY_IN_PROGRESS', 'The Idempotency-Key is still processing');
-  }
-  if (result.outcome === 'idempotency-unavailable' || result.outcome === 'invalid-funding') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'The underfilled command result is unavailable');
-  }
-  set.status = 400;
-  return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
+  return mapQuestCommandOutcome(set, result.outcome);
 };
 
 const commandId = (request: Request | undefined) => request?.headers.get('idempotency-key');
@@ -117,7 +103,13 @@ export const decideQuestUnderfilledV2Controller = async ({
   const key = requireCommandId(set, request);
   if (typeof key !== 'string') return key;
   try {
-    const result = await decideQuestV2Underfilled(session.user.id, params.questId, body, key);
+    const result = await decideQuestV2Underfilled(
+      session.user.id,
+      params.questId,
+      body,
+      key,
+      new Date()
+    );
     if ('outcome' in result) return mapOutcome(set, result);
     return apiSuccess(result.underfilled as UnderfilledData);
   } catch (error) {
@@ -140,7 +132,13 @@ export const respondToQuestUnderfilledV2Controller = async ({
   const key = requireCommandId(set, request);
   if (typeof key !== 'string') return key;
   try {
-    const result = await respondToQuestV2Underfilled(session.user.id, params.questId, body, key);
+    const result = await respondToQuestV2Underfilled(
+      session.user.id,
+      params.questId,
+      body,
+      key,
+      new Date()
+    );
     if ('outcome' in result) return mapOutcome(set, result);
     return apiSuccess(result.underfilled as UnderfilledData);
   } catch (error) {

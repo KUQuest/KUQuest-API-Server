@@ -1,15 +1,21 @@
 import { db } from '@/database/client';
 import {
   quest,
+  questApiVersion,
   questAssignment,
   questConditionItem,
   questV2EditRequest,
   questV2EditRequestResponse,
 } from '@/database/schema/quest.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 
 import { and, asc, eq, sql } from 'drizzle-orm';
 
+import {
+  runQuestCommand,
+  sha256Json,
+  type QuestCommandOutcomeCode,
+  type QuestCommandWork,
+} from './quest-command.service';
 import {
   questV2EditFailureCodes,
   questV2EditRequestStatuses,
@@ -35,9 +41,7 @@ type QuestV2EditResponseRow = typeof questV2EditRequestResponse.$inferSelect;
 export const questV2EditRequestCreateOperationScope = 'quest.v2.edit-request.create';
 export const questV2EditRequestRespondOperationScope = 'quest.v2.edit-request.respond';
 
-type QuestV2EditOutcomeCode =
-  | 'invalid-input'
-  | 'invalid-idempotency-key'
+type QuestV2EditBusinessOutcomeCode =
   | 'not-found'
   | 'not-assigned'
   | 'pending-request'
@@ -45,36 +49,13 @@ type QuestV2EditOutcomeCode =
   | 'no-change'
   | 'not-pending'
   | 'already-responded'
-  | 'expired'
-  | 'idempotency-key-reused'
-  | 'idempotency-in-progress'
-  | 'idempotency-unavailable';
+  | 'expired';
+
+type QuestV2EditOutcomeCode =
+  'invalid-input' | QuestV2EditBusinessOutcomeCode | QuestCommandOutcomeCode;
 
 export type QuestV2EditRequestOutcome =
   { request: QuestV2EditRequestData } | { outcome: QuestV2EditOutcomeCode };
-
-type IdempotencyRecord = {
-  id: string;
-  requestHash: string;
-  resourceId: string | null;
-  resultData: unknown;
-  processingStatus: string;
-};
-
-type IdempotencyResult =
-  | { created: true; record: IdempotencyRecord }
-  | { created: false; record: IdempotencyRecord }
-  | { outcome: 'idempotency-key-reused' | 'idempotency-in-progress' | 'idempotency-unavailable' };
-
-const sha256Json = async (value: object): Promise<string> => {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value))
-  );
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-};
-
-const idempotencyExpiry = (now: Date) => new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
 const validStatus = (value: unknown): value is QuestV2EditRequestStatus =>
   typeof value === 'string' && (questV2EditRequestStatuses as readonly string[]).includes(value);
@@ -84,24 +65,6 @@ const validDecision = (value: unknown): value is QuestV2EditResponseDecision =>
 
 const validFailureCode = (value: unknown): value is QuestV2EditFailureCode =>
   typeof value === 'string' && (questV2EditFailureCodes as readonly string[]).includes(value);
-
-const validOutcome = (value: unknown): value is QuestV2EditOutcomeCode =>
-  typeof value === 'string' &&
-  [
-    'invalid-input',
-    'invalid-idempotency-key',
-    'not-found',
-    'not-assigned',
-    'pending-request',
-    'no-active-workers',
-    'no-change',
-    'not-pending',
-    'already-responded',
-    'expired',
-    'idempotency-key-reused',
-    'idempotency-in-progress',
-    'idempotency-unavailable',
-  ].includes(value);
 
 const isConditionSnapshot = (value: unknown): value is ConditionSnapshot => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -175,77 +138,6 @@ const respondRequestHash = (
     body: response,
   });
 
-const idempotencyFields = {
-  id: walletIdempotencyKey.id,
-  requestHash: walletIdempotencyKey.requestHash,
-  resourceId: walletIdempotencyKey.resourceId,
-  resultData: walletIdempotencyKey.resultData,
-  processingStatus: walletIdempotencyKey.processingStatus,
-};
-
-const acquireIdempotency = async (
-  transaction: QuestTransaction,
-  userId: string,
-  operationScope: string,
-  key: string,
-  requestHash: string,
-  now: Date
-): Promise<IdempotencyResult> => {
-  const [created] = await transaction
-    .insert(walletIdempotencyKey)
-    .values({
-      principalUserId: userId,
-      operationScope,
-      key,
-      requestHash,
-      expiresAt: idempotencyExpiry(now),
-    })
-    .onConflictDoNothing()
-    .returning(idempotencyFields);
-
-  const record =
-    created ??
-    (
-      await transaction
-        .select(idempotencyFields)
-        .from(walletIdempotencyKey)
-        .where(
-          and(
-            eq(walletIdempotencyKey.principalUserId, userId),
-            eq(walletIdempotencyKey.operationScope, operationScope),
-            eq(walletIdempotencyKey.key, key)
-          )
-        )
-        .limit(1)
-        .for('update')
-    )[0];
-
-  if (!record) return { outcome: 'idempotency-unavailable' };
-  if (record.requestHash !== requestHash) return { outcome: 'idempotency-key-reused' };
-  if (created) return { created: true, record };
-  if (record.resourceId) return { created: false, record };
-  if (record.processingStatus === 'PROCESSING') return { outcome: 'idempotency-in-progress' };
-  return { outcome: 'idempotency-unavailable' };
-};
-
-const parseReplay = (record: IdempotencyRecord): QuestV2EditRequestOutcome | undefined => {
-  if (
-    !record.resultData ||
-    typeof record.resultData !== 'object' ||
-    Array.isArray(record.resultData)
-  ) {
-    return undefined;
-  }
-  const result = record.resultData as { request?: unknown; outcome?: unknown };
-  if (validOutcome(result.outcome)) {
-    return { outcome: result.outcome };
-  }
-  if (result.request && isQuestV2EditRequestData(result.request)) {
-    return { request: result.request };
-  }
-  return undefined;
-};
-
 const isQuestV2EditRequestData = (value: unknown): value is QuestV2EditRequestData => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const data = value as Partial<QuestV2EditRequestData>;
@@ -274,46 +166,17 @@ const isQuestV2EditRequestData = (value: unknown): value is QuestV2EditRequestDa
   );
 };
 
-const completeIdempotency = async (
-  transaction: QuestTransaction,
-  idempotencyId: string,
-  resourceId: string,
-  resultData: object,
-  now: Date
-) => {
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({
-      resourceType: 'quest-v2-edit-request',
-      resourceId,
-      resultData,
-      processingStatus: 'COMPLETED',
-      completedAt: now,
-    })
-    .where(eq(walletIdempotencyKey.id, idempotencyId));
-};
-
-const completeOutcome = async (
-  transaction: QuestTransaction,
-  idempotencyId: string,
-  resourceId: string,
-  outcome: QuestV2EditOutcomeCode,
-  now: Date
-): Promise<QuestV2EditRequestOutcome> => {
-  await completeIdempotency(transaction, idempotencyId, resourceId, { outcome }, now);
-  return { outcome };
-};
+const requestFromSnapshot = (value: unknown): QuestV2EditRequestData | undefined =>
+  isQuestV2EditRequestData(value) ? value : undefined;
 
 const selectQuestForEdit = async (transaction: QuestTransaction, questId: string) => {
   const [row] = await transaction
     .select({
-      id: quest.id,
       hirerId: quest.hirerId,
-      apiVersion: quest.apiVersion,
       questStatus: quest.questStatus,
     })
     .from(quest)
-    .where(eq(quest.id, questId))
+    .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
     .limit(1)
     .for('update');
   return row;
@@ -493,13 +356,6 @@ const projectRequest = async (
   return result;
 };
 
-const replayOrOutcome = (idempotency: IdempotencyResult): QuestV2EditRequestOutcome | undefined => {
-  if ('outcome' in idempotency) return { outcome: idempotency.outcome };
-  if (!idempotency.created)
-    return parseReplay(idempotency.record) ?? { outcome: 'idempotency-unavailable' };
-  return undefined;
-};
-
 export const createQuestV2EditRequest = async (
   userId: string,
   questId: string,
@@ -507,100 +363,105 @@ export const createQuestV2EditRequest = async (
   rawIdempotencyKey: string,
   now = new Date()
 ): Promise<QuestV2EditRequestOutcome> => {
-  const key = rawIdempotencyKey.trim();
   const condition = normalizeCondition(data);
-  if (key.length === 0 || key.length > 200) return { outcome: 'invalid-idempotency-key' };
   if (!condition) return { outcome: 'invalid-input' };
 
   const requestHash = await createRequestHash(userId, questId, condition);
   return db.transaction(async (transaction) => {
-    const idempotency = await acquireIdempotency(
-      transaction,
-      userId,
-      questV2EditRequestCreateOperationScope,
-      key,
-      requestHash,
-      now
-    );
-    const replay = replayOrOutcome(idempotency);
-    if (replay) return replay;
-    if ('outcome' in idempotency) return idempotency;
-
+    // Lock before runQuestCommand: the Quest Command foreign key insert takes FOR KEY SHARE.
     const current = await selectQuestForEdit(transaction, questId);
-    if (!current || current.apiVersion !== 'v2' || current.hirerId !== userId) {
-      return completeOutcome(transaction, idempotency.record.id, questId, 'not-found', now);
-    }
-    if (current.questStatus !== questStatus.assigned) {
-      return completeOutcome(transaction, idempotency.record.id, questId, 'not-assigned', now);
-    }
+    if (!current) return { outcome: 'not-found' };
 
-    const [pendingIdentity] = await transaction
-      .select({ id: questV2EditRequest.id })
-      .from(questV2EditRequest)
-      .where(
-        and(
-          eq(questV2EditRequest.questId, questId),
-          eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING')
-        )
-      )
-      .limit(1);
-    if (pendingIdentity) {
-      const pending = await selectRequest(transaction, pendingIdentity.id, true);
-      if (!pending)
-        return completeOutcome(transaction, idempotency.record.id, questId, 'not-found', now);
-      const materialized = await materializePendingRequest(transaction, questId, pending, now);
-      if (materialized.request.requestStatus === 'EDIT_REQUEST_PENDING') {
-        return completeOutcome(transaction, idempotency.record.id, questId, 'pending-request', now);
-      }
-    }
-
-    const previousItems = await selectCondition(transaction, questId);
-    if (previousItems.length === 0) throw new Error(`Quest ${questId} has no Condition Items`);
-    if (conditionItemsEqual(previousItems, condition.items)) {
-      return completeOutcome(transaction, idempotency.record.id, questId, 'no-change', now);
-    }
-
-    const workers = await transaction
-      .select({ workerId: questAssignment.workerId })
-      .from(questAssignment)
-      .where(
-        and(
-          eq(questAssignment.questId, questId),
-          eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
-        )
-      )
-      .orderBy(asc(questAssignment.workerId))
-      .for('update');
-    if (workers.length === 0) {
-      return completeOutcome(transaction, idempotency.record.id, questId, 'no-active-workers', now);
-    }
-
-    const [created] = await transaction
-      .insert(questV2EditRequest)
-      .values({
-        questId,
-        previousCondition: toConditionSnapshot(previousItems),
-        proposedCondition: condition,
-        requestStatus: 'EDIT_REQUEST_PENDING',
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
-      })
-      .returning();
-    if (!created) return { outcome: 'idempotency-unavailable' };
-
-    await transaction
-      .insert(questV2EditRequestResponse)
-      .values(workers.map(({ workerId }) => ({ requestId: created.id, workerId })));
-    const resource = await projectRequest(transaction, userId, current, created);
-    if (!resource) throw new Error(`Quest Edit Request ${created.id} could not be projected`);
-    await completeIdempotency(
+    const command = await runQuestCommand({
       transaction,
-      idempotency.record.id,
-      created.id,
-      { request: resource },
-      now
-    );
-    return { request: resource };
+      identity: {
+        principalUserId: userId,
+        operationScope: questV2EditRequestCreateOperationScope,
+        key: rawIdempotencyKey,
+        requestHash,
+        questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<QuestV2EditRequestData, QuestV2EditBusinessOutcomeCode>
+      > => {
+        if (current.hirerId !== userId) return { kind: 'rejected', rejection: 'not-found' };
+        if (current.questStatus !== questStatus.assigned) {
+          return { kind: 'rejected', rejection: 'not-assigned' };
+        }
+
+        const [pendingIdentity] = await transaction
+          .select({ id: questV2EditRequest.id })
+          .from(questV2EditRequest)
+          .where(
+            and(
+              eq(questV2EditRequest.questId, questId),
+              eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING')
+            )
+          )
+          .limit(1);
+        if (pendingIdentity) {
+          const pending = await selectRequest(transaction, pendingIdentity.id, true);
+          if (!pending) return { kind: 'rejected', rejection: 'not-found' };
+          const materialized = await materializePendingRequest(transaction, questId, pending, now);
+          if (materialized.request.requestStatus === 'EDIT_REQUEST_PENDING') {
+            return { kind: 'rejected', rejection: 'pending-request' };
+          }
+        }
+
+        const previousItems = await selectCondition(transaction, questId);
+        if (previousItems.length === 0) throw new Error(`Quest ${questId} has no Condition Items`);
+        if (conditionItemsEqual(previousItems, condition.items)) {
+          return { kind: 'rejected', rejection: 'no-change' };
+        }
+
+        const workers = await transaction
+          .select({ workerId: questAssignment.workerId })
+          .from(questAssignment)
+          .where(
+            and(
+              eq(questAssignment.questId, questId),
+              eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+            )
+          )
+          .orderBy(asc(questAssignment.workerId))
+          .for('update');
+        if (workers.length === 0) {
+          return { kind: 'rejected', rejection: 'no-active-workers' };
+        }
+
+        const [created] = await transaction
+          .insert(questV2EditRequest)
+          .values({
+            questId,
+            previousCondition: toConditionSnapshot(previousItems),
+            proposedCondition: condition,
+            requestStatus: 'EDIT_REQUEST_PENDING',
+            createdAt: now,
+            expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
+          })
+          .returning();
+        if (!created) throw new Error('Quest Edit Request insert returned no row');
+
+        await transaction
+          .insert(questV2EditRequestResponse)
+          .values(workers.map(({ workerId }) => ({ requestId: created.id, workerId })));
+        const resource = await projectRequest(transaction, userId, current, created);
+        if (!resource) throw new Error(`Quest Edit Request ${created.id} could not be projected`);
+        return {
+          kind: 'success',
+          result: resource,
+          resourceType: 'quest-v2-edit-request',
+          resourceId: created.id,
+        };
+      },
+      toSnapshot: (result) => result,
+      fromSnapshot: requestFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return { request: command.result };
+    return { outcome: command.rejection };
   });
 };
 
@@ -611,154 +472,153 @@ export const respondToQuestV2EditRequest = async (
   rawIdempotencyKey: string,
   now = new Date()
 ): Promise<QuestV2EditRequestOutcome> => {
-  const key = rawIdempotencyKey.trim();
   const responseInput = normalizeResponse(data);
-  if (key.length === 0 || key.length > 200) return { outcome: 'invalid-idempotency-key' };
   if (!responseInput) return { outcome: 'invalid-input' };
 
   const requestHash = await respondRequestHash(userId, requestId, responseInput);
   return db.transaction(async (transaction) => {
-    const idempotency = await acquireIdempotency(
-      transaction,
-      userId,
-      questV2EditRequestRespondOperationScope,
-      key,
-      requestHash,
-      now
-    );
-    const replay = replayOrOutcome(idempotency);
-    if (replay) return replay;
-    if ('outcome' in idempotency) return idempotency;
-
     const [identity] = await transaction
       .select({ questId: questV2EditRequest.questId })
       .from(questV2EditRequest)
       .where(eq(questV2EditRequest.id, requestId))
       .limit(1);
-    if (!identity) {
-      return completeOutcome(transaction, idempotency.record.id, requestId, 'not-found', now);
-    }
+    if (!identity) return { outcome: 'not-found' };
 
+    // Lock before runQuestCommand: the Quest Command foreign key insert takes FOR KEY SHARE.
     const currentQuest = await selectQuestForEdit(transaction, identity.questId);
-    if (!currentQuest || currentQuest.apiVersion !== 'v2') {
-      return completeOutcome(transaction, idempotency.record.id, requestId, 'not-found', now);
-    }
-    const request = await selectRequest(transaction, requestId, true);
-    if (!request)
-      return completeOutcome(transaction, idempotency.record.id, requestId, 'not-found', now);
+    if (!currentQuest) return { outcome: 'not-found' };
 
-    const materialized = await materializePendingRequest(
+    const command = await runQuestCommand({
       transaction,
-      request.questId,
-      request,
-      now
-    );
-    const ownResponse = (await selectResponses(transaction, requestId)).find(
-      (candidate) => candidate.workerId === userId
-    );
-    const [activeAssignment] = await transaction
-      .select({ id: questAssignment.id })
-      .from(questAssignment)
-      .where(
-        and(
-          eq(questAssignment.questId, request.questId),
-          eq(questAssignment.workerId, userId),
-          eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
-        )
-      )
-      .limit(1);
-    if (!ownResponse || !activeAssignment) {
-      return completeOutcome(transaction, idempotency.record.id, requestId, 'not-found', now);
-    }
-    if (currentQuest.questStatus !== questStatus.assigned) {
-      return completeOutcome(transaction, idempotency.record.id, requestId, 'not-pending', now);
-    }
-    if (materialized.outcome === 'expired') {
-      return completeOutcome(transaction, idempotency.record.id, requestId, 'expired', now);
-    }
-    if (materialized.request.requestStatus !== 'EDIT_REQUEST_PENDING') {
-      if (materialized.request.failureCode === 'EDIT_REQUEST_TIMEOUT') {
-        return completeOutcome(transaction, idempotency.record.id, requestId, 'expired', now);
-      }
-      return completeOutcome(transaction, idempotency.record.id, requestId, 'not-pending', now);
-    }
-    if (ownResponse.decision !== null) {
-      return completeOutcome(
-        transaction,
-        idempotency.record.id,
-        requestId,
-        'already-responded',
-        now
-      );
-    }
+      identity: {
+        principalUserId: userId,
+        operationScope: questV2EditRequestRespondOperationScope,
+        key: rawIdempotencyKey,
+        requestHash,
+        questId: identity.questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<QuestV2EditRequestData, QuestV2EditBusinessOutcomeCode>
+      > => {
+        const request = await selectRequest(transaction, requestId, true);
+        if (!request) return { kind: 'rejected', rejection: 'not-found' };
 
-    await transaction
-      .update(questV2EditRequestResponse)
-      .set({
-        decision: responseInput.decision,
-        reason: responseInput.reason,
-        respondedAt: now,
-      })
-      .where(eq(questV2EditRequestResponse.id, ownResponse.id));
-
-    if (responseInput.decision === 'EDIT_RESPONSE_DECLINED') {
-      await transaction
-        .update(questV2EditRequest)
-        .set({
-          requestStatus: 'EDIT_REQUEST_FAILED',
-          failureCode: 'EDIT_REQUEST_DECLINED',
-          failedAt: now,
-        })
-        .where(eq(questV2EditRequest.id, requestId));
-    } else {
-      const responses = await selectResponses(transaction, requestId);
-      if (responses.every((candidate) => candidate.decision === 'EDIT_RESPONSE_ACCEPTED')) {
-        if (!isConditionSnapshot(request.proposedCondition)) {
-          throw new Error(`Quest Edit Request ${request.id} has invalid proposed Condition`);
-        }
-        await transaction
-          .delete(questConditionItem)
-          .where(eq(questConditionItem.questId, request.questId));
-        await transaction.insert(questConditionItem).values(
-          request.proposedCondition.items.map(({ position, text }) => ({
-            questId: request.questId,
-            position,
-            text,
-          }))
+        const materialized = await materializePendingRequest(
+          transaction,
+          request.questId,
+          request,
+          now
         );
-        await transaction
-          .update(quest)
-          .set({
-            condition: request.proposedCondition.items
-              .map(({ text }) => text)
-              .join('\n')
-              .slice(0, 4000),
-            version: sql`${quest.version} + 1`,
-            updatedAt: now,
-          })
-          .where(and(eq(quest.id, request.questId), eq(quest.questStatus, questStatus.assigned)));
-        await transaction
-          .update(questV2EditRequest)
-          .set({
-            requestStatus: 'EDIT_REQUEST_APPLIED',
-            appliedAt: now,
-          })
-          .where(eq(questV2EditRequest.id, requestId));
-      }
-    }
+        const ownResponse = (await selectResponses(transaction, requestId)).find(
+          (candidate) => candidate.workerId === userId
+        );
+        const [activeAssignment] = await transaction
+          .select({ id: questAssignment.id })
+          .from(questAssignment)
+          .where(
+            and(
+              eq(questAssignment.questId, request.questId),
+              eq(questAssignment.workerId, userId),
+              eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+            )
+          )
+          .limit(1);
+        if (!ownResponse || !activeAssignment) {
+          return { kind: 'rejected', rejection: 'not-found' };
+        }
+        if (currentQuest.questStatus !== questStatus.assigned) {
+          return { kind: 'rejected', rejection: 'not-pending' };
+        }
+        if (materialized.outcome === 'expired') {
+          return { kind: 'rejected', rejection: 'expired' };
+        }
+        if (materialized.request.requestStatus !== 'EDIT_REQUEST_PENDING') {
+          if (materialized.request.failureCode === 'EDIT_REQUEST_TIMEOUT') {
+            return { kind: 'rejected', rejection: 'expired' };
+          }
+          return { kind: 'rejected', rejection: 'not-pending' };
+        }
+        if (ownResponse.decision !== null) {
+          return { kind: 'rejected', rejection: 'already-responded' };
+        }
 
-    const updatedRequest = await selectRequest(transaction, requestId);
-    if (!updatedRequest) throw new Error(`Quest Edit Request ${requestId} could not be read back`);
-    const resource = await projectRequest(transaction, userId, currentQuest, updatedRequest);
-    if (!resource) throw new Error(`Quest Edit Request ${requestId} could not be projected`);
-    await completeIdempotency(
-      transaction,
-      idempotency.record.id,
-      requestId,
-      { request: resource },
-      now
-    );
-    return { request: resource };
+        await transaction
+          .update(questV2EditRequestResponse)
+          .set({
+            decision: responseInput.decision,
+            reason: responseInput.reason,
+            respondedAt: now,
+          })
+          .where(eq(questV2EditRequestResponse.id, ownResponse.id));
+
+        if (responseInput.decision === 'EDIT_RESPONSE_DECLINED') {
+          await transaction
+            .update(questV2EditRequest)
+            .set({
+              requestStatus: 'EDIT_REQUEST_FAILED',
+              failureCode: 'EDIT_REQUEST_DECLINED',
+              failedAt: now,
+            })
+            .where(eq(questV2EditRequest.id, requestId));
+        } else {
+          const responses = await selectResponses(transaction, requestId);
+          if (responses.every((candidate) => candidate.decision === 'EDIT_RESPONSE_ACCEPTED')) {
+            if (!isConditionSnapshot(request.proposedCondition)) {
+              throw new Error(`Quest Edit Request ${request.id} has invalid proposed Condition`);
+            }
+            await transaction
+              .delete(questConditionItem)
+              .where(eq(questConditionItem.questId, request.questId));
+            await transaction.insert(questConditionItem).values(
+              request.proposedCondition.items.map(({ position, text }) => ({
+                questId: request.questId,
+                position,
+                text,
+              }))
+            );
+            await transaction
+              .update(quest)
+              .set({
+                condition: request.proposedCondition.items
+                  .map(({ text }) => text)
+                  .join('\n')
+                  .slice(0, 4000),
+                version: sql`${quest.version} + 1`,
+                updatedAt: now,
+              })
+              .where(
+                and(eq(quest.id, request.questId), eq(quest.questStatus, questStatus.assigned))
+              );
+            await transaction
+              .update(questV2EditRequest)
+              .set({
+                requestStatus: 'EDIT_REQUEST_APPLIED',
+                appliedAt: now,
+              })
+              .where(eq(questV2EditRequest.id, requestId));
+          }
+        }
+
+        const updatedRequest = await selectRequest(transaction, requestId);
+        if (!updatedRequest)
+          throw new Error(`Quest Edit Request ${requestId} could not be read back`);
+        const resource = await projectRequest(transaction, userId, currentQuest, updatedRequest);
+        if (!resource) throw new Error(`Quest Edit Request ${requestId} could not be projected`);
+        return {
+          kind: 'success',
+          result: resource,
+          resourceType: 'quest-v2-edit-request',
+          resourceId: requestId,
+        };
+      },
+      toSnapshot: (result) => result,
+      fromSnapshot: requestFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return { request: command.result };
+    return { outcome: command.rejection };
   });
 };
 
@@ -776,7 +636,7 @@ export const getQuestV2EditRequest = async (
     if (!identity) return undefined;
 
     const currentQuest = await selectQuestForEdit(transaction, identity.questId);
-    if (!currentQuest || currentQuest.apiVersion !== 'v2') return undefined;
+    if (!currentQuest) return undefined;
     const request = await selectRequest(transaction, requestId, true);
     if (!request) return undefined;
     const materialized = await materializePendingRequest(

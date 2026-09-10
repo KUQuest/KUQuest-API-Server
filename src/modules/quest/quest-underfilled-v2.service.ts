@@ -6,7 +6,6 @@ import {
   questV2UnderfilledConsent,
   questV2UnderfilledDecision,
 } from '@/database/schema/quest.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { satang, toBaht } from '@/modules/wallet';
 
 import { and, asc, eq, isNull, lte, or } from 'drizzle-orm';
@@ -17,6 +16,12 @@ import {
   WorkChatTransitionError,
   type QuestTransaction,
 } from './quest-work-chat.port';
+import {
+  runQuestCommand,
+  sha256Json,
+  type QuestCommandOutcomeCode,
+  type QuestCommandWork,
+} from './quest-command.service';
 import {
   formatQuestV2ScheduleTime,
   questV2Mode,
@@ -64,54 +69,19 @@ type BusinessOutcomeCode =
   | 'not-underfilled'
   | 'not-pending'
   | 'already-responded'
-  | 'expired'
-  | 'invalid-funding';
-type IdempotencyOutcomeCode =
-  | 'invalid-idempotency-key'
-  | 'idempotency-key-reused'
-  | 'idempotency-in-progress'
-  | 'idempotency-unavailable';
-type OutcomeCode = BusinessOutcomeCode | IdempotencyOutcomeCode;
+  | 'expired';
+
+type UnderfilledBusinessRejectionCode = Exclude<BusinessOutcomeCode, 'not-found'>;
+
+type OutcomeCode = BusinessOutcomeCode | QuestCommandOutcomeCode;
 
 export type QuestV2UnderfilledOutcome =
   { underfilled: QuestV2UnderfilledData } | { outcome: OutcomeCode };
-
-type IdempotencyRecord = {
-  id: string;
-  requestHash: string;
-  resourceId: string | null;
-  resultData: unknown;
-  processingStatus: string;
-};
-
-type IdempotencyResult =
-  | { created: true; record: IdempotencyRecord }
-  | { created: false; record: IdempotencyRecord }
-  | { outcome: Exclude<IdempotencyOutcomeCode, 'invalid-idempotency-key'> };
 
 export type QuestV2UnderfilledDetectionResult = {
   underfilled: boolean;
   created: boolean;
 };
-
-const idempotencyFields = {
-  id: walletIdempotencyKey.id,
-  requestHash: walletIdempotencyKey.requestHash,
-  resourceId: walletIdempotencyKey.resourceId,
-  resultData: walletIdempotencyKey.resultData,
-  processingStatus: walletIdempotencyKey.processingStatus,
-};
-
-const sha256Json = async (value: object): Promise<string> => {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value))
-  );
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-};
-
-const idempotencyExpiry = (now: Date) => new Date(now.getTime() + 24 * 60 * 60 * 1_000);
-
 const isUnderfilledState = (value: unknown): value is QuestV2UnderfilledState =>
   typeof value === 'string' && (questV2UnderfilledStates as readonly string[]).includes(value);
 
@@ -141,16 +111,39 @@ const isData = (value: unknown): value is QuestV2UnderfilledData => {
     Number.isInteger(data.headcount) &&
     (data.workerRewardPool === null || typeof data.workerRewardPool === 'number') &&
     (data.questReward === null || typeof data.questReward === 'number') &&
-    (typeof data.dueAt === 'string' || data.dueAt === null)
+    (typeof data.dueAt === 'string' || data.dueAt === null) &&
+    typeof data.decision === 'object' &&
+    data.decision !== null &&
+    typeof data.consent === 'object' &&
+    data.consent !== null
   );
 };
+
+const snapshotFor = (data: QuestV2UnderfilledData): Record<string, unknown> => ({
+  id: data.id,
+  questId: data.questId,
+  questState: data.questState,
+  state: data.state,
+  activeWorkerCount: data.activeWorkerCount,
+  headcount: data.headcount,
+  workerRewardPool: data.workerRewardPool,
+  questReward: data.questReward,
+  dueAt: data.dueAt,
+  decision: data.decision,
+  consent: data.consent,
+  ...(data.responses !== undefined ? { responses: data.responses } : {}),
+  ...(data.ownResponse !== undefined ? { ownResponse: data.ownResponse } : {}),
+});
+
+const underfilledFromSnapshot = (value: unknown): QuestV2UnderfilledData | undefined =>
+  isData(value) ? value : undefined;
 
 const requestHashFor = (
   userId: string,
   questId: string,
   operation: string,
   path: string,
-  decision: string
+  decision: string | undefined
 ): Promise<string> =>
   sha256Json({
     authenticatedMemberId: userId,
@@ -159,46 +152,6 @@ const requestHashFor = (
     questId,
     body: { decision },
   });
-
-const acquireIdempotency = async (
-  transaction: QuestTransaction,
-  userId: string,
-  operationScope: string,
-  key: string,
-  requestHash: string,
-  now: Date
-): Promise<IdempotencyResult> => {
-  const [created] = await transaction
-    .insert(walletIdempotencyKey)
-    .values({
-      principalUserId: userId,
-      operationScope,
-      key,
-      requestHash,
-      expiresAt: idempotencyExpiry(now),
-    })
-    .onConflictDoNothing()
-    .returning(idempotencyFields);
-  if (created) return { created: true, record: created };
-
-  const [existing] = await transaction
-    .select(idempotencyFields)
-    .from(walletIdempotencyKey)
-    .where(
-      and(
-        eq(walletIdempotencyKey.principalUserId, userId),
-        eq(walletIdempotencyKey.operationScope, operationScope),
-        eq(walletIdempotencyKey.key, key)
-      )
-    )
-    .limit(1)
-    .for('update');
-  if (!existing) return { outcome: 'idempotency-unavailable' };
-  if (existing.requestHash !== requestHash) return { outcome: 'idempotency-key-reused' };
-  if (existing.resourceId) return { created: false, record: existing };
-  if (existing.processingStatus === 'PROCESSING') return { outcome: 'idempotency-in-progress' };
-  return { outcome: 'idempotency-unavailable' };
-};
 
 const lockQuest = async (
   transaction: QuestTransaction,
@@ -341,37 +294,6 @@ const createDecisionInTransaction = async (
     }))
   );
   return { underfilled: true, created: true };
-};
-
-const completeIdempotency = async (
-  transaction: QuestTransaction,
-  idempotencyId: string,
-  resourceId: string,
-  data: QuestV2UnderfilledData,
-  now: Date
-) => {
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({
-      resourceType: 'quest-v2-underfilled',
-      resourceId,
-      resultData: { underfilled: data },
-      processingStatus: 'COMPLETED',
-      completedAt: now,
-    })
-    .where(eq(walletIdempotencyKey.id, idempotencyId));
-};
-
-const replayOrOutcome = (idempotency: IdempotencyResult): QuestV2UnderfilledOutcome | undefined => {
-  if ('outcome' in idempotency) return { outcome: idempotency.outcome };
-  if (idempotency.created) return undefined;
-  if (!idempotency.record.resultData || typeof idempotency.record.resultData !== 'object') {
-    return { outcome: 'idempotency-unavailable' };
-  }
-  const result = idempotency.record.resultData as { underfilled?: unknown };
-  return isData(result.underfilled)
-    ? { underfilled: result.underfilled }
-    : { outcome: 'idempotency-unavailable' };
 };
 
 const decisionStatusFor = (decision: DecisionRow) => {
@@ -600,94 +522,106 @@ export const decideQuestV2Underfilled = async (
   data: QuestV2UnderfilledDecisionInput,
   rawIdempotencyKey: string,
   now = new Date()
-): Promise<QuestV2UnderfilledOutcome> => {
-  const key = rawIdempotencyKey.trim();
-  if (key.length === 0 || key.length > 200) return { outcome: 'invalid-idempotency-key' };
-  if (!isDecision(data?.decision)) return { outcome: 'not-pending' };
-  const requestHash = await requestHashFor(
-    hirerId,
-    questId,
-    questV2UnderfilledDecisionOperationScope,
-    '/api/v2/quests/:questId/underfilled/decision',
-    data.decision
-  );
-
-  return db.transaction(async (transaction) => {
+): Promise<QuestV2UnderfilledOutcome> =>
+  db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command. The command row's
+    // quest foreign key takes FOR KEY SHARE on the Quest row, so taking the caller's
+    // FOR UPDATE after the module's insert deadlocks two concurrent commands that target
+    // the same Quest.
     const current = await lockQuest(transaction, questId);
     if (!current) return { outcome: 'not-found' };
-    const idempotency = await acquireIdempotency(
-      transaction,
-      hirerId,
-      questV2UnderfilledDecisionOperationScope,
-      key,
-      requestHash,
-      now
-    );
-    const replay = replayOrOutcome(idempotency);
-    if (replay) return replay;
-    if ('outcome' in idempotency) return idempotency;
-    const discard = async (outcome: BusinessOutcomeCode): Promise<QuestV2UnderfilledOutcome> => {
-      await transaction
-        .delete(walletIdempotencyKey)
-        .where(eq(walletIdempotencyKey.id, idempotency.record.id));
-      return { outcome };
-    };
 
-    if (current.hirerId !== hirerId) return discard('not-authorized');
-    let decision = await selectDecision(transaction, questId, true);
-    if (!decision) {
-      const created = await createDecisionInTransaction(transaction, current, now);
-      if (!created.underfilled) return discard('not-underfilled');
-      decision = await selectDecision(transaction, questId, true);
-    }
-    if (!decision) return discard('not-underfilled');
-    if (current.questState !== 'QUEST_OPEN') return discard('not-pending');
-    if (decision.state !== 'UNDERFILLED_DECISION_PENDING') return discard('not-pending');
-    const expired = await expireInTransaction(transaction, current, decision, now);
-    if (expired.expired) {
-      await transaction
-        .delete(walletIdempotencyKey)
-        .where(eq(walletIdempotencyKey.id, idempotency.record.id));
-      return { outcome: 'expired' };
-    }
-
-    let nextCurrent = current;
-    let nextDecision = decision;
-    if (data.decision === 'CANCEL') {
-      const cancelled = await cancelUnderfilledInTransaction(
+    const command = await runQuestCommand<QuestV2UnderfilledData, UnderfilledBusinessRejectionCode>(
+      {
         transaction,
-        current,
-        decision,
-        'HIRER_CANCELLED',
-        now
-      );
-      nextCurrent = cancelled.current;
-      nextDecision = cancelled.decision;
-    } else {
-      const [updated] = await transaction
-        .update(questV2UnderfilledDecision)
-        .set({
-          state: 'UNDERFILLED_CONSENT_PENDING',
-          decision: 'PROCEED',
-          consentExpiresAt: new Date(now.getTime() + WINDOW_MILLISECONDS),
-        })
-        .where(
-          and(
-            eq(questV2UnderfilledDecision.id, decision.id),
-            eq(questV2UnderfilledDecision.state, 'UNDERFILLED_DECISION_PENDING')
-          )
-        )
-        .returning();
-      if (!updated) return discard('not-pending');
-      nextDecision = updated;
-    }
-    const dataResult = await project(transaction, hirerId, nextCurrent, nextDecision);
-    if (!dataResult)
-      throw new Error(`Underfilled Decision ${nextDecision.id} could not be projected`);
-    await completeIdempotency(transaction, idempotency.record.id, nextDecision.id, dataResult, now);
-    return { underfilled: dataResult };
+        identity: {
+          principalUserId: hirerId,
+          operationScope: questV2UnderfilledDecisionOperationScope,
+          key: rawIdempotencyKey,
+          requestHash: await requestHashFor(
+            hirerId,
+            questId,
+            questV2UnderfilledDecisionOperationScope,
+            '/api/v2/quests/:questId/underfilled/decision',
+            data?.decision
+          ),
+          questId,
+        },
+        now,
+        work: async (): Promise<
+          QuestCommandWork<QuestV2UnderfilledData, UnderfilledBusinessRejectionCode>
+        > => {
+          if (!isDecision(data?.decision)) return { kind: 'rejected', rejection: 'not-pending' };
+          if (current.hirerId !== hirerId) return { kind: 'rejected', rejection: 'not-authorized' };
+
+          let decision = await selectDecision(transaction, questId, true);
+          if (!decision) {
+            const created = await createDecisionInTransaction(transaction, current, now);
+            if (!created.underfilled) return { kind: 'rejected', rejection: 'not-underfilled' };
+            decision = await selectDecision(transaction, questId, true);
+          }
+          if (!decision) return { kind: 'rejected', rejection: 'not-underfilled' };
+          if (current.questState !== 'QUEST_OPEN')
+            return { kind: 'rejected', rejection: 'not-pending' };
+          if (decision.state !== 'UNDERFILLED_DECISION_PENDING') {
+            return { kind: 'rejected', rejection: 'not-pending' };
+          }
+          const expired = await expireInTransaction(transaction, current, decision, now);
+          if (expired.expired) {
+            return { kind: 'rejected', rejection: 'expired' };
+          }
+
+          let nextCurrent = current;
+          let nextDecision = decision;
+          if (data.decision === 'CANCEL') {
+            const cancelled = await cancelUnderfilledInTransaction(
+              transaction,
+              current,
+              decision,
+              'HIRER_CANCELLED',
+              now
+            );
+            nextCurrent = cancelled.current;
+            nextDecision = cancelled.decision;
+          } else {
+            const [updated] = await transaction
+              .update(questV2UnderfilledDecision)
+              .set({
+                state: 'UNDERFILLED_CONSENT_PENDING',
+                decision: 'PROCEED',
+                consentExpiresAt: new Date(now.getTime() + WINDOW_MILLISECONDS),
+              })
+              .where(
+                and(
+                  eq(questV2UnderfilledDecision.id, decision.id),
+                  eq(questV2UnderfilledDecision.state, 'UNDERFILLED_DECISION_PENDING')
+                )
+              )
+              .returning();
+            if (!updated) return { kind: 'rejected', rejection: 'not-pending' };
+            nextDecision = updated;
+          }
+
+          const dataResult = await project(transaction, hirerId, nextCurrent, nextDecision);
+          if (!dataResult) {
+            throw new Error(`Underfilled Decision ${nextDecision.id} could not be projected`);
+          }
+          return {
+            kind: 'success',
+            result: dataResult,
+            resourceType: 'quest-v2-underfilled',
+            resourceId: nextDecision.id,
+          };
+        },
+        toSnapshot: snapshotFor,
+        fromSnapshot: underfilledFromSnapshot,
+      }
+    );
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return { underfilled: command.result };
+    return { outcome: command.rejection };
   });
-};
 
 export const respondToQuestV2Underfilled = async (
   workerId: string,
@@ -695,138 +629,157 @@ export const respondToQuestV2Underfilled = async (
   data: QuestV2UnderfilledConsentInput,
   rawIdempotencyKey: string,
   now = new Date()
-): Promise<QuestV2UnderfilledOutcome> => {
-  const key = rawIdempotencyKey.trim();
-  if (key.length === 0 || key.length > 200) return { outcome: 'invalid-idempotency-key' };
-  if (!isConsentDecision(data?.decision)) return { outcome: 'not-pending' };
-  const requestHash = await requestHashFor(
-    workerId,
-    questId,
-    questV2UnderfilledConsentOperationScope,
-    '/api/v2/quests/:questId/underfilled/consent',
-    data.decision
-  );
-
-  return db.transaction(async (transaction) => {
+): Promise<QuestV2UnderfilledOutcome> =>
+  db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command. The command row's
+    // quest foreign key takes FOR KEY SHARE on the Quest row, so taking the caller's
+    // FOR UPDATE after the module's insert deadlocks two concurrent commands that target
+    // the same Quest.
     const current = await lockQuest(transaction, questId);
     if (!current) return { outcome: 'not-found' };
-    const idempotency = await acquireIdempotency(
-      transaction,
-      workerId,
-      questV2UnderfilledConsentOperationScope,
-      key,
-      requestHash,
-      now
-    );
-    const replay = replayOrOutcome(idempotency);
-    if (replay) return replay;
-    if ('outcome' in idempotency) return idempotency;
-    const discard = async (outcome: BusinessOutcomeCode): Promise<QuestV2UnderfilledOutcome> => {
-      await transaction
-        .delete(walletIdempotencyKey)
-        .where(eq(walletIdempotencyKey.id, idempotency.record.id));
-      return { outcome };
-    };
 
-    if (
-      current.hirerId === workerId ||
-      !(await hasActiveAssignment(transaction, questId, workerId))
-    ) {
-      return discard('not-authorized');
-    }
-    let decision = await selectDecision(transaction, questId, true);
-    if (!decision) {
-      const created = await createDecisionInTransaction(transaction, current, now);
-      if (!created.underfilled) return discard('not-underfilled');
-      decision = await selectDecision(transaction, questId, true);
-    }
-    if (!decision) return discard('not-underfilled');
-    const consents = await selectConsents(transaction, decision.id, true);
-    const ownResponse = consents.find(({ workerId: candidate }) => candidate === workerId);
-    if (!ownResponse) return discard('not-authorized');
-    if (current.questState !== 'QUEST_OPEN') return discard('not-pending');
-    const expired = await expireInTransaction(transaction, current, decision, now);
-    if (expired.expired) {
-      await transaction
-        .delete(walletIdempotencyKey)
-        .where(eq(walletIdempotencyKey.id, idempotency.record.id));
-      return { outcome: 'expired' };
-    }
-    if (decision.state !== 'UNDERFILLED_CONSENT_PENDING') {
-      return discard(ownResponse.decision === null ? 'not-pending' : 'already-responded');
-    }
-    if (ownResponse.decision !== null) return discard('already-responded');
-
-    const [updatedResponse] = await transaction
-      .update(questV2UnderfilledConsent)
-      .set({ decision: data.decision as QuestV2UnderfilledConsentDecision, respondedAt: now })
-      .where(
-        and(
-          eq(questV2UnderfilledConsent.id, ownResponse.id),
-          isNull(questV2UnderfilledConsent.decision)
-        )
-      )
-      .returning();
-    if (!updatedResponse) return discard('already-responded');
-
-    let nextCurrent = current;
-    let nextDecision = decision;
-    if (data.decision === 'DECLINE') {
-      const cancelled = await cancelUnderfilledInTransaction(
+    const command = await runQuestCommand<QuestV2UnderfilledData, UnderfilledBusinessRejectionCode>(
+      {
         transaction,
-        current,
-        decision,
-        'WORKER_DECLINED',
-        now
-      );
-      nextCurrent = cancelled.current;
-      nextDecision = cancelled.decision;
-    } else {
-      const responses = await selectConsents(transaction, decision.id);
-      if (responses.every(({ decision: responseDecision }) => responseDecision === 'ACCEPT')) {
-        const [completed] = await transaction
-          .update(questV2UnderfilledDecision)
-          .set({ state: 'UNDERFILLED_COMPLETED', resolvedAt: now })
-          .where(
-            and(
-              eq(questV2UnderfilledDecision.id, decision.id),
-              eq(questV2UnderfilledDecision.state, 'UNDERFILLED_CONSENT_PENDING')
-            )
-          )
-          .returning();
-        if (!completed) return discard('not-pending');
-        await transaction
-          .update(quest)
-          .set({ questStatus: 'QUEST_ASSIGNED', updatedAt: now })
-          .where(and(eq(quest.id, questId), eq(quest.questStatus, 'QUEST_OPEN')));
-        const writer = requireQuestWorkChatMembershipWriter();
-        try {
-          await writer.applyQuestTransition(transaction, {
-            producer: 'QUEST_UNDERFILLED',
-            type: 'questBecameAssigned',
-            commandId: `quest-v2-underfilled-assigned:${completed.id}`,
-            eventId: completed.id,
+        identity: {
+          principalUserId: workerId,
+          operationScope: questV2UnderfilledConsentOperationScope,
+          key: rawIdempotencyKey,
+          requestHash: await requestHashFor(
+            workerId,
             questId,
-            actorId: workerId,
-            occurredAt: now.toISOString(),
-            questStatus: 'QUEST_ASSIGNED',
-            assignedAt: now.toISOString(),
-          });
-        } catch (cause) {
-          throw new WorkChatTransitionError(cause);
-        }
-        nextDecision = completed;
-        nextCurrent = { ...current, questState: 'QUEST_ASSIGNED' };
-      }
-    }
+            questV2UnderfilledConsentOperationScope,
+            '/api/v2/quests/:questId/underfilled/consent',
+            data?.decision
+          ),
+          questId,
+        },
+        now,
+        work: async (): Promise<
+          QuestCommandWork<QuestV2UnderfilledData, UnderfilledBusinessRejectionCode>
+        > => {
+          if (!isConsentDecision(data?.decision)) {
+            return { kind: 'rejected', rejection: 'not-pending' };
+          }
+          if (
+            current.hirerId === workerId ||
+            !(await hasActiveAssignment(transaction, questId, workerId))
+          ) {
+            return { kind: 'rejected', rejection: 'not-authorized' };
+          }
 
-    const dataResult = await project(transaction, workerId, nextCurrent, nextDecision);
-    if (!dataResult)
-      throw new Error(`Underfilled Decision ${nextDecision.id} could not be projected`);
-    await completeIdempotency(transaction, idempotency.record.id, nextDecision.id, dataResult, now);
-    return { underfilled: dataResult };
+          let decision = await selectDecision(transaction, questId, true);
+          if (!decision) {
+            const created = await createDecisionInTransaction(transaction, current, now);
+            if (!created.underfilled) return { kind: 'rejected', rejection: 'not-underfilled' };
+            decision = await selectDecision(transaction, questId, true);
+          }
+          if (!decision) return { kind: 'rejected', rejection: 'not-underfilled' };
+
+          const consents = await selectConsents(transaction, decision.id, true);
+          const ownResponse = consents.find(({ workerId: candidate }) => candidate === workerId);
+          if (!ownResponse) return { kind: 'rejected', rejection: 'not-authorized' };
+          if (current.questState !== 'QUEST_OPEN')
+            return { kind: 'rejected', rejection: 'not-pending' };
+
+          const expired = await expireInTransaction(transaction, current, decision, now);
+          if (expired.expired) {
+            return { kind: 'rejected', rejection: 'expired' };
+          }
+          if (decision.state !== 'UNDERFILLED_CONSENT_PENDING') {
+            return {
+              kind: 'rejected',
+              rejection: ownResponse.decision === null ? 'not-pending' : 'already-responded',
+            };
+          }
+          if (ownResponse.decision !== null)
+            return { kind: 'rejected', rejection: 'already-responded' };
+
+          const [updatedResponse] = await transaction
+            .update(questV2UnderfilledConsent)
+            .set({ decision: data.decision as QuestV2UnderfilledConsentDecision, respondedAt: now })
+            .where(
+              and(
+                eq(questV2UnderfilledConsent.id, ownResponse.id),
+                isNull(questV2UnderfilledConsent.decision)
+              )
+            )
+            .returning();
+          if (!updatedResponse) return { kind: 'rejected', rejection: 'already-responded' };
+
+          let nextCurrent = current;
+          let nextDecision = decision;
+          if (data.decision === 'DECLINE') {
+            const cancelled = await cancelUnderfilledInTransaction(
+              transaction,
+              current,
+              decision,
+              'WORKER_DECLINED',
+              now
+            );
+            nextCurrent = cancelled.current;
+            nextDecision = cancelled.decision;
+          } else {
+            const responses = await selectConsents(transaction, decision.id);
+            if (
+              responses.every(({ decision: responseDecision }) => responseDecision === 'ACCEPT')
+            ) {
+              const [completed] = await transaction
+                .update(questV2UnderfilledDecision)
+                .set({ state: 'UNDERFILLED_COMPLETED', resolvedAt: now })
+                .where(
+                  and(
+                    eq(questV2UnderfilledDecision.id, decision.id),
+                    eq(questV2UnderfilledDecision.state, 'UNDERFILLED_CONSENT_PENDING')
+                  )
+                )
+                .returning();
+              if (!completed) return { kind: 'rejected', rejection: 'not-pending' };
+              await transaction
+                .update(quest)
+                .set({ questStatus: 'QUEST_ASSIGNED', updatedAt: now })
+                .where(and(eq(quest.id, questId), eq(quest.questStatus, 'QUEST_OPEN')));
+              const writer = requireQuestWorkChatMembershipWriter();
+              try {
+                await writer.applyQuestTransition(transaction, {
+                  producer: 'QUEST_UNDERFILLED',
+                  type: 'questBecameAssigned',
+                  commandId: `quest-v2-underfilled-assigned:${completed.id}`,
+                  eventId: completed.id,
+                  questId,
+                  actorId: workerId,
+                  occurredAt: now.toISOString(),
+                  questStatus: 'QUEST_ASSIGNED',
+                  assignedAt: now.toISOString(),
+                });
+              } catch (cause) {
+                throw new WorkChatTransitionError(cause);
+              }
+              nextDecision = completed;
+              nextCurrent = { ...current, questState: 'QUEST_ASSIGNED' };
+            }
+          }
+
+          const dataResult = await project(transaction, workerId, nextCurrent, nextDecision);
+          if (!dataResult) {
+            throw new Error(`Underfilled Decision ${nextDecision.id} could not be projected`);
+          }
+          return {
+            kind: 'success',
+            result: dataResult,
+            resourceType: 'quest-v2-underfilled',
+            resourceId: nextDecision.id,
+          };
+        },
+        toSnapshot: snapshotFor,
+        fromSnapshot: underfilledFromSnapshot,
+      }
+    );
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return { underfilled: command.result };
+    return { outcome: command.rejection };
   });
-};
 
 export const expireQuestV2Underfilled = async (
   questId: string,

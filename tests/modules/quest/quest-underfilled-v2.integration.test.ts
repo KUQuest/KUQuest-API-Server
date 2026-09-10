@@ -4,6 +4,7 @@ import { authUser } from '@/database/schema/auth.schema';
 import {
   quest,
   questAssignment,
+  questCommand,
   questSettlementCommand,
   questV2UnderfilledConsent,
   questV2UnderfilledDecision,
@@ -20,14 +21,16 @@ import {
 } from '@/database/schema/work-chat.schema';
 import {
   walletFundingReservation,
-  walletIdempotencyKey,
   walletLedgerAccount,
   walletWallet,
 } from '@/database/schema/wallet.schema';
 import { auth } from '@/modules/auth';
 import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
-import { getQuestV2Underfilled } from '@/modules/quest/quest-underfilled-v2.service';
+import {
+  decideQuestV2Underfilled,
+  getQuestV2Underfilled,
+} from '@/modules/quest/quest-underfilled-v2.service';
 import type { QuestTransaction, QuestWorkChatMembershipTransition } from '@/modules/quest';
 import { createWorkChatMembershipWriter } from '@/modules/work-chat';
 import {
@@ -273,6 +276,9 @@ afterEach(async () => {
     await db.delete(quest).where(inArray(quest.id, questIds));
     questIds.splice(0, questIds.length);
   }
+  await db
+    .delete(questCommand)
+    .where(inArray(questCommand.principalUserId, [hirer.id, ...workers.map((w) => w.id)]));
 });
 
 afterAll(async () => {
@@ -667,7 +673,7 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
     if (!postgresAvailable) return;
     const questId = await createQuest([workers[0].id]);
     const key = 'underfilled-v2-in-progress';
-    await db.insert(walletIdempotencyKey).values({
+    await db.insert(questCommand).values({
       principalUserId: hirer.id,
       operationScope: 'quest.v2.underfilled.decision',
       key,
@@ -696,6 +702,125 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
         .from(questV2UnderfilledDecision)
         .where(eq(questV2UnderfilledDecision.questId, questId))
     ).toHaveLength(0);
+  });
+
+  it('replays the same rejection when a rejected underfilled decision is retried rather than freeing the key', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest([workers[0].id, workers[1].id]);
+    await detect(new Date());
+
+    // Worker attempts consent while the quest is still in UNDERFILLED_DECISION_PENDING (before Hirer proceeds).
+    // This is rejected with 409 QUEST_UNDERFILLED_NOT_PENDING.
+    const key = 'underfilled-v2-rejected-consent-replay';
+    const refused = await request(
+      `/api/v2/quests/${questId}/underfilled/consent`,
+      'POST',
+      workers[0].id,
+      { decision: 'ACCEPT' },
+      { 'idempotency-key': key }
+    );
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error.code).toBe('QUEST_UNDERFILLED_NOT_PENDING');
+
+    // Confirm that quest_command recorded the rejection with COMPLETED status.
+    const [commandRow] = await db
+      .select({
+        status: questCommand.processingStatus,
+        resultData: questCommand.resultData,
+      })
+      .from(questCommand)
+      .where(
+        and(
+          eq(questCommand.principalUserId, workers[0].id),
+          eq(questCommand.operationScope, 'quest.v2.underfilled.consent'),
+          eq(questCommand.key, key)
+        )
+      );
+    expect(commandRow?.status).toBe('COMPLETED');
+    expect(commandRow?.resultData).toEqual({
+      kind: 'rejected',
+      rejection: 'not-pending',
+    });
+
+    // Now the Hirer proceeds, opening the consent window.
+    const proceed = await request(
+      `/api/v2/quests/${questId}/underfilled/decision`,
+      'POST',
+      hirer.id,
+      { decision: 'PROCEED' },
+      { 'idempotency-key': 'underfilled-rejection-test-proceed' }
+    );
+    expect(proceed.status).toBe(200);
+
+    // Retrying with the same key must replay the original 409 QUEST_UNDERFILLED_NOT_PENDING rejection,
+    // NOT execute against the newly-open consent window (which would have returned 200 before this change).
+    const retried = await request(
+      `/api/v2/quests/${questId}/underfilled/consent`,
+      'POST',
+      workers[0].id,
+      { decision: 'ACCEPT' },
+      { 'idempotency-key': key }
+    );
+    expect(retried.status).toBe(409);
+    expect((await retried.json()).error.code).toBe('QUEST_UNDERFILLED_NOT_PENDING');
+
+    // The Worker can still legitimately consent using a NEW key.
+    const freshKeyConsent = await request(
+      `/api/v2/quests/${questId}/underfilled/consent`,
+      'POST',
+      workers[0].id,
+      { decision: 'ACCEPT' },
+      { 'idempotency-key': 'underfilled-v2-fresh-consent-key' }
+    );
+    expect(freshKeyConsent.status).toBe(200);
+  });
+
+  it('rejects and replays when a Hirer decision arrives past the injected 10-minute deadline', async () => {
+    if (!postgresAvailable) return;
+    const startTime = new Date();
+    const questId = await createQuest([workers[0].id, workers[1].id], true, startTime);
+    await detect(startTime);
+
+    // 10 minutes and 1 millisecond later
+    const pastDeadline = new Date(startTime.getTime() + 10 * 60 * 1_000 + 1);
+    const result = await decideQuestV2Underfilled(
+      hirer.id,
+      questId,
+      { decision: 'PROCEED' },
+      'underfilled-expired-decision-key',
+      pastDeadline
+    );
+    expect(result).toEqual({ outcome: 'expired' });
+
+    // Confirm the rejection was recorded in quest_command
+    const [commandRow] = await db
+      .select({
+        status: questCommand.processingStatus,
+        resultData: questCommand.resultData,
+      })
+      .from(questCommand)
+      .where(
+        and(
+          eq(questCommand.principalUserId, hirer.id),
+          eq(questCommand.operationScope, 'quest.v2.underfilled.decision'),
+          eq(questCommand.key, 'underfilled-expired-decision-key')
+        )
+      );
+    expect(commandRow?.status).toBe('COMPLETED');
+    expect(commandRow?.resultData).toEqual({
+      kind: 'rejected',
+      rejection: 'expired',
+    });
+
+    // Retry replays the same rejection
+    const replay = await decideQuestV2Underfilled(
+      hirer.id,
+      questId,
+      { decision: 'PROCEED' },
+      'underfilled-expired-decision-key',
+      pastDeadline
+    );
+    expect(replay).toEqual({ outcome: 'expired' });
   });
 
   it('publishes authenticated, actor-scoped underfilled operations', async () => {

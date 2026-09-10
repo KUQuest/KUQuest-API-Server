@@ -98,7 +98,6 @@ export const questV2Route = new Elysia({
   .post('/:questId/edit-requests', createQuestV2EditRequestController, {
     params: questV2ParamsSchema,
     body: questV2EditRequestCreateSchema,
-    headers: questV2WriteHeadersSchema,
     transform: normalizeQuestV2EditRequestCreateBody,
     response: responses(
       questV2EditRequestResponseSchema,
@@ -134,7 +133,6 @@ export const questV2Route = new Elysia({
   .post('/edit-requests/:requestId/respond', respondToQuestV2EditRequestController, {
     params: questV2EditRequestParamsSchema,
     body: questV2EditRequestResponseInputSchema,
-    headers: questV2WriteHeadersSchema,
     transform: normalizeQuestV2EditRequestResponseBody,
     response: responses(questV2EditRequestResponseSchema, 400, 401, 404, 409, 500, 503),
     detail: {
