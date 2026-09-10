@@ -12,6 +12,7 @@ import {
   type PayoutDestination,
 } from './payout-destination.service';
 import type { payoutDestinationCreateSchema } from './payout-destination.schema';
+import { PayoutDestinationEncryptionError } from './payout-destination.crypto';
 
 type PayoutDestinationCreateInput = Static<typeof payoutDestinationCreateSchema>;
 
@@ -22,6 +23,10 @@ const serializePayoutDestination = (destination: PayoutDestination) => ({
 });
 
 const mapPayoutDestinationError = (set: AuthedContext['set'], error: unknown) => {
+  if (error instanceof PayoutDestinationEncryptionError) {
+    set.status = 503;
+    return apiError(error.code, error.message);
+  }
   if (error instanceof PayoutDestinationError) {
     if (error.code === 'PAYOUT_DESTINATION_MEMBER_NOT_FOUND') {
       set.status = 404;

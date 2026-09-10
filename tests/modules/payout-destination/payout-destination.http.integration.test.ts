@@ -1,8 +1,9 @@
 import { app } from '@/app';
+import { env } from '@/config/env';
 import { createStagingTestAuthRoute } from '@/modules/auth/staging-test-auth.route';
 
 import { Elysia } from 'elysia';
-import { describe, expect, it } from 'bun:test';
+import { beforeAll, describe, expect, it } from 'bun:test';
 
 const testAuthApp = new Elysia({ name: 'payout-destination-test-auth' }).use(
   createStagingTestAuthRoute({
@@ -31,6 +32,12 @@ const signInTestMember = async (): Promise<string> => {
   if (!cookie) throw new Error('Failed to extract session cookie from staging test auth login.');
   return cookie;
 };
+beforeAll(() => {
+  Object.assign(env, {
+    payoutDestinationEncryptionKey: 'p'.repeat(32),
+    payoutDestinationEncryptionKeyVersion: 'v1',
+  });
+});
 
 describe('Payout Destination HTTP routes', () => {
   it('requires Member authentication for all Payout Destination operations', async () => {
