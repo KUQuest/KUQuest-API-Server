@@ -1,3 +1,4 @@
+import type { AuthedContext } from '@/modules/auth';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { questCommand } from '@/database/schema/quest.schema';
@@ -10,6 +11,7 @@ import {
   type QuestCommandResult,
   type QuestCommandWork,
 } from '@/modules/quest/quest-command.service';
+import { requireQuestCommandId } from '@/modules/quest/quest-command.controller';
 
 import { randomUUID } from 'node:crypto';
 
@@ -408,5 +410,41 @@ describe('Quest Command', () => {
         now,
       })
     ).toBeUndefined();
+  });
+
+  it('requireQuestCommandId validates header presence and rejects missing or blank keys', () => {
+    type ContextSet = AuthedContext['set'];
+    const set = { status: 200 } as unknown as ContextSet;
+    const missing = requireQuestCommandId(undefined, set);
+    expect(set.status).toBe(400);
+    expect(missing).toEqual({
+      success: false,
+      error: {
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'The Idempotency-Key header is required',
+      },
+    });
+
+    const blankRequest = new Request('http://localhost', {
+      headers: { 'idempotency-key': '   ' },
+    });
+    set.status = 200;
+    const blank = requireQuestCommandId(blankRequest, set);
+    expect(set.status).toBe(400);
+    expect(blank).toEqual({
+      success: false,
+      error: {
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'The Idempotency-Key header is required',
+      },
+    });
+
+    const validRequest = new Request('http://localhost', {
+      headers: { 'idempotency-key': '  valid-key  ' },
+    });
+    set.status = 200;
+    const valid = requireQuestCommandId(validRequest, set);
+    expect(set.status).toBe(200);
+    expect(valid).toBe('valid-key');
   });
 });

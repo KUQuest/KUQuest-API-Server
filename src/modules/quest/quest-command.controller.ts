@@ -31,3 +31,18 @@ export const mapQuestCommandOutcome = (
   set.status = 400;
   return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
 };
+
+/**
+ * Reads and validates the Idempotency-Key header for a Quest Command.
+ * Sets status 400 and returns an ApiError when the header is missing or blank;
+ * returns the non-empty trimmed key string on success.
+ */
+export const requireQuestCommandId = (
+  request: Request | undefined,
+  set: AuthedContext['set']
+): string | ApiError => {
+  const commandId = request?.headers.get('idempotency-key');
+  if (commandId?.trim()) return commandId;
+  set.status = 400;
+  return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
+};

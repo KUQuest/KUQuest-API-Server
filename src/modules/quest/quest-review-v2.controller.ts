@@ -13,7 +13,7 @@ import {
   type QuestV2ReviewOutcome,
   type QuestV2ReviewRow,
 } from './quest-review-v2.service';
-import { mapQuestCommandOutcome } from './quest-command.controller';
+import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 
 const serializeReview = (review: QuestV2ReviewRow) => ({
   id: review.id,
@@ -25,13 +25,6 @@ const serializeReview = (review: QuestV2ReviewRow) => ({
   createdAt: review.createdAt.toISOString(),
   updatedAt: review.updatedAt.toISOString(),
 });
-
-const requiredCommandId = (request: Request | undefined, set: AuthedContext['set']) => {
-  const commandId = request?.headers.get('idempotency-key');
-  if (commandId?.trim()) return commandId;
-  set.status = 400;
-  return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
-};
 
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 409;
@@ -109,7 +102,7 @@ export const createQuestV2ReviewController = async ({
   body: QuestV2ReviewCreateInput;
   params: QuestV2ReviewParams;
 }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
 
   const result = await createQuestV2Review(session.user.id, params.questId, body, commandId);
@@ -127,7 +120,7 @@ export const updateQuestV2ReviewController = async ({
   body: QuestV2ReviewUpdateInput;
   params: QuestV2ReviewDetailParams;
 }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
 
   const result = await updateQuestV2Review(

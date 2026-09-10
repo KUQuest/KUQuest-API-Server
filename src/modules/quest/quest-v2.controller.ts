@@ -40,7 +40,7 @@ import {
   respondToQuestV2EditRequest,
   type QuestV2EditRequestOutcome,
 } from './quest-v2-edit.service';
-import { mapQuestCommandOutcome } from './quest-command.controller';
+import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 import type { QuestV2ImageCommandContext, QuestV2ImageReference } from './quest-v2.service';
 import type { QuestV2PublishCheck } from './quest-v2.publish.policy';
 import { questV2Storage } from './quest.storage';
@@ -96,13 +96,6 @@ type QuestV2EditRequestParams = Static<typeof questV2EditRequestParamsSchema>;
 const invalidInput = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 400;
   return apiError(code, message);
-};
-
-const requiredQuestV2EditCommandId = (request: Request | undefined, set: AuthedContext['set']) => {
-  const commandId = request?.headers.get('idempotency-key');
-  if (commandId?.trim()) return commandId;
-  set.status = 400;
-  return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
 };
 
 const compensateQuestV2ImageUpload = async (
@@ -713,7 +706,7 @@ export const createQuestV2EditRequestController = async ({
   body: QuestV2EditRequestCreateInput;
   params: QuestV2Params;
 }): Promise<ApiResponse<QuestV2EditRequestResponse>> => {
-  const commandId = requiredQuestV2EditCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
 
   const result = await createQuestV2EditRequest(session.user.id, params.questId, body, commandId);
@@ -749,7 +742,7 @@ export const respondToQuestV2EditRequestController = async ({
   body: QuestV2EditRequestResponseInput;
   params: QuestV2EditRequestParams;
 }): Promise<ApiResponse<QuestV2EditRequestResponse>> => {
-  const commandId = requiredQuestV2EditCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
 
   const result = await respondToQuestV2EditRequest(

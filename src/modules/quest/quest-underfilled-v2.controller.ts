@@ -12,7 +12,7 @@ import type {
   QuestV2UnderfilledDecisionInput,
   QuestV2UnderfilledParams,
 } from './quest-underfilled-v2.schema';
-import { mapQuestCommandOutcome } from './quest-command.controller';
+import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 import { WorkChatTransitionError } from './quest-work-chat.port';
 
 type UnderfilledData = Extract<QuestV2UnderfilledOutcome, { underfilled: unknown }>['underfilled'];
@@ -59,15 +59,6 @@ const mapOutcome = (set: AuthedContext['set'], result: UnderfilledError) => {
   return mapQuestCommandOutcome(set, result.outcome);
 };
 
-const commandId = (request: Request | undefined) => request?.headers.get('idempotency-key');
-
-const requireCommandId = (set: AuthedContext['set'], request: Request | undefined) => {
-  const value = commandId(request);
-  if (value?.trim()) return value;
-  set.status = 400;
-  return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
-};
-
 const handleWorkChatError = (set: AuthedContext['set'], error: unknown) => {
   if (!(error instanceof WorkChatTransitionError)) return undefined;
   set.status = 503;
@@ -100,7 +91,7 @@ export const decideQuestUnderfilledV2Controller = async ({
   params: QuestV2UnderfilledParams;
   body: QuestV2UnderfilledDecisionInput;
 }) => {
-  const key = requireCommandId(set, request);
+  const key = requireQuestCommandId(request, set);
   if (typeof key !== 'string') return key;
   try {
     const result = await decideQuestV2Underfilled(
@@ -129,7 +120,7 @@ export const respondToQuestUnderfilledV2Controller = async ({
   params: QuestV2UnderfilledParams;
   body: QuestV2UnderfilledConsentInput;
 }) => {
-  const key = requireCommandId(set, request);
+  const key = requireQuestCommandId(request, set);
   if (typeof key !== 'string') return key;
   try {
     const result = await respondToQuestV2Underfilled(

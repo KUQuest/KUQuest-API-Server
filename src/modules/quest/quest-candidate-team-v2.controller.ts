@@ -24,7 +24,7 @@ import {
   type QuestV2CandidateTeamOutcome,
   type QuestV2CandidateTeamSelectionOutcome,
 } from './quest-candidate-team-v2.service';
-import { mapQuestCommandOutcome } from './quest-command.controller';
+import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 import { WorkChatTransitionError } from './quest-work-chat.port';
 
 type CandidateTeam = Extract<QuestV2CandidateTeamOutcome, { id: string }>;
@@ -58,13 +58,6 @@ const serializeTeam = (team: CandidateTeam) => ({
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 409;
   return apiError(code, message);
-};
-
-const requiredCommandId = (request: Request | undefined, set: AuthedContext['set']) => {
-  const commandId = request?.headers.get('idempotency-key');
-  if (commandId?.trim()) return commandId;
-  set.status = 400;
-  return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
 };
 
 const mapTeamError = (set: AuthedContext['set'], outcome: CandidateTeamError) => {
@@ -263,7 +256,7 @@ export const createQuestV2CandidateTeamController = async ({
   body: QuestV2CandidateTeamCreateInput;
   params: QuestV2CandidateTeamParams;
 }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   const result = await createQuestV2CandidateTeam(session.user.id, params.questId, body, commandId);
   if ('outcome' in result) return mapTeamError(set, result);
@@ -310,7 +303,7 @@ export const updateQuestV2CandidateTeamController = async ({
   body: QuestV2CandidateTeamUpdateInput;
   params: QuestV2CandidateTeamDetailParams;
 }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   const result = await updateQuestV2CandidateTeam(
     session.user.id,
@@ -333,7 +326,7 @@ export const joinQuestV2CandidateTeamController = async ({
   body: QuestV2CandidateTeamJoinInput;
   params: QuestV2CandidateTeamDetailParams;
 }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   const result = await joinQuestV2CandidateTeam(
     session.user.id,
@@ -352,7 +345,7 @@ export const leaveQuestV2CandidateTeamController = async ({
   session,
   set,
 }: AuthedContext & { params: QuestV2CandidateTeamDetailParams }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   const result = await leaveQuestV2CandidateTeam(
     session.user.id,
@@ -370,7 +363,7 @@ export const removeQuestV2CandidateTeamMemberController = async ({
   session,
   set,
 }: AuthedContext & { params: QuestV2CandidateTeamMemberParams }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   const result = await removeQuestV2CandidateTeamMember(
     session.user.id,
@@ -389,7 +382,7 @@ export const regenerateQuestV2CandidateTeamJoinCodeController = async ({
   session,
   set,
 }: AuthedContext & { params: QuestV2CandidateTeamDetailParams }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   const result = await regenerateQuestV2CandidateTeamJoinCode(
     session.user.id,
@@ -411,7 +404,7 @@ export const submitQuestV2CandidateTeamController = async ({
   body: QuestV2CandidateTeamSubmissionInput;
   params: QuestV2CandidateTeamDetailParams;
 }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   const result = await submitQuestV2CandidateTeam(
     session.user.id,
@@ -430,7 +423,7 @@ export const selectQuestV2CandidateTeamController = async ({
   session,
   set,
 }: AuthedContext & { params: QuestV2CandidateTeamDetailParams }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
 
   try {

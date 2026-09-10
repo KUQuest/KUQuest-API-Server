@@ -7,7 +7,7 @@ import {
 } from '@/modules/work-chat/work-chat.storage';
 import { apiError, apiSuccess } from '@/shared/api-response';
 
-import { mapQuestCommandOutcome } from './quest-command.controller';
+import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 import type { QuestCommandOutcomeCode } from './quest-command.service';
 import type {
   QuestV2ProofSubmissionCreateInput,
@@ -54,13 +54,6 @@ const serializeSubmission = (submission: QuestV2ProofSubmission) => ({
   fileIds: submission.fileIds,
   files: submission.files,
 });
-
-const requiredCommandId = (request: Request | undefined, set: AuthedContext['set']) => {
-  const commandId = request?.headers.get('idempotency-key');
-  if (commandId?.trim()) return commandId;
-  set.status = 400;
-  return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
-};
 
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 409;
@@ -356,7 +349,7 @@ export const createQuestV2ProofSubmissionController = async ({
   body: QuestV2ProofSubmissionCreateInput;
   params: QuestV2ProofSubmissionParams;
 }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   if (body.fileIds !== undefined && (body.files?.length ?? 0) > 0) {
     set.status = 400;
@@ -421,7 +414,7 @@ export const editQuestV2ProofSubmissionController = async ({
   body: QuestV2ProofSubmissionEditInput;
   params: QuestV2ProofSubmissionDetailParams;
 }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   if (body.fileIds !== undefined && (body.files?.length ?? 0) > 0) {
     set.status = 400;
@@ -489,7 +482,7 @@ export const deleteQuestV2ProofSubmissionController = async ({
   session,
   set,
 }: AuthedContext & { params: QuestV2ProofSubmissionDetailParams }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   const result = await deleteQuestV2ProofSubmission(
     session.user.id,
@@ -507,7 +500,7 @@ export const submitQuestV2ProofSubmissionController = async ({
   session,
   set,
 }: AuthedContext & { params: QuestV2ProofSubmissionDetailParams }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   const result = await submitQuestV2ProofSubmission(
     session.user.id,
@@ -528,7 +521,7 @@ export const reviewQuestV2ProofSubmissionController = async ({
   body: QuestV2ProofSubmissionReviewInput;
   params: QuestV2ProofSubmissionDetailParams;
 }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   let result: Awaited<ReturnType<typeof reviewQuestV2ProofSubmission>>;
   try {
@@ -584,7 +577,7 @@ export const confirmQuestV2CompletionController = async ({
   session,
   set,
 }: AuthedContext & { params: QuestV2ProofSubmissionParams }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
   let result: QuestV2CompletionConfirmationOutcome;
   try {

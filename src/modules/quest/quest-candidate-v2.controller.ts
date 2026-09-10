@@ -15,7 +15,7 @@ import {
   type QuestV2CandidateApplicationOutcome,
   type QuestV2CandidateSelectionOutcome,
 } from './quest-candidate-v2.service';
-import { mapQuestCommandOutcome } from './quest-command.controller';
+import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 import { WorkChatTransitionError } from './quest-work-chat.port';
 
 type Application = Extract<QuestV2CandidateApplicationOutcome, { id: string }>;
@@ -74,11 +74,8 @@ export const createQuestV2CandidateApplicationController = async ({
   session,
   set,
 }: AuthedContext & { params: QuestV2CandidateApplicationParams }) => {
-  const commandId = request?.headers.get('idempotency-key');
-  if (!commandId?.trim()) {
-    set.status = 400;
-    return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
-  }
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
 
   const result = await createQuestV2CandidateApplication(
     session.user.id,
@@ -171,11 +168,8 @@ export const withdrawQuestV2CandidateApplicationController = async ({
   session,
   set,
 }: AuthedContext & { params: QuestV2CandidateApplicationDetailParams }) => {
-  const commandId = request?.headers.get('idempotency-key');
-  if (!commandId?.trim()) {
-    set.status = 400;
-    return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
-  }
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
 
   const result = await withdrawQuestV2CandidateApplication(
     session.user.id,
@@ -251,11 +245,8 @@ export const selectQuestV2CandidateApplicationController = async ({
   session,
   set,
 }: AuthedContext & { params: QuestV2CandidateSelectionParams }) => {
-  const commandId = request?.headers.get('idempotency-key');
-  if (!commandId?.trim()) {
-    set.status = 400;
-    return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
-  }
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
 
   try {
     const result = await selectQuestV2CandidateApplication(

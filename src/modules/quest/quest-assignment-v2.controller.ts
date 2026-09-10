@@ -7,7 +7,7 @@ import {
   listQuestV2Assignments,
   type QuestV2AssignmentOutcome,
 } from './quest-assignment-v2.service';
-import { mapQuestCommandOutcome } from './quest-command.controller';
+import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 import type { QuestV2AssignmentParams } from './quest-assignment-v2.schema';
 import { WorkChatTransitionError } from './quest-work-chat.port';
 
@@ -80,11 +80,8 @@ export const joinQuestV2Controller = async ({
   session,
   set,
 }: AuthedContext & { params: QuestV2AssignmentParams }) => {
-  const commandId = request?.headers.get('idempotency-key');
-  if (!commandId?.trim()) {
-    set.status = 400;
-    return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
-  }
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
 
   try {
     const result = await joinQuestV2(session.user.id, params.questId, commandId, new Date());

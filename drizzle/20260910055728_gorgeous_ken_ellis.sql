@@ -17,7 +17,7 @@ SELECT
   "resource_id"::uuid,
   CASE
     WHEN "result_data" ? 'outcome'
-      THEN jsonb_build_object('kind', 'rejected', 'rejection', "result_data")
+      THEN jsonb_build_object('kind', 'rejected', 'rejection', "result_data" -> 'outcome')
     WHEN "processing_status" = 'COMPLETED'
       THEN jsonb_build_object('kind', 'success', 'result', "result_data")
     ELSE "result_data"
@@ -54,7 +54,7 @@ SELECT
   "resource_id"::uuid,
   CASE
     WHEN "result_data" ? 'outcome'
-      THEN jsonb_build_object('kind', 'rejected', 'rejection', "result_data")
+      THEN jsonb_build_object('kind', 'rejected', 'rejection', "result_data" -> 'outcome')
     WHEN "processing_status" = 'COMPLETED'
       THEN jsonb_build_object('kind', 'success', 'result', "result_data")
     ELSE "result_data"

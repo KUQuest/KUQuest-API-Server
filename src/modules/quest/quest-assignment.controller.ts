@@ -4,6 +4,7 @@ import type { ApiResponse } from '@/shared/api-response';
 
 import type { QuestAssignmentParams } from './quest-assignment.schema';
 import { joinNoCandidateQuest, WorkChatTransitionError } from './quest-assignment.service';
+import { requireQuestCommandId } from './quest-command.controller';
 
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 409;
@@ -16,11 +17,8 @@ export const joinNoCandidateQuestController = async ({
   session,
   set,
 }: AuthedContext & { params: QuestAssignmentParams }): Promise<ApiResponse> => {
-  const commandId = request?.headers.get('idempotency-key');
-  if (!commandId?.trim()) {
-    set.status = 400;
-    return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
-  }
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
 
   try {
     const result = await joinNoCandidateQuest(session.user.id, params.questId, {

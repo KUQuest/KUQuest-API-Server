@@ -958,6 +958,37 @@ describe('Quest Candidate API v2', () => {
     ).toHaveLength(0);
   });
 
+  it('replays a migrated rejection snapshot with primitive rejection code', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenCandidateQuest();
+    authenticate();
+    const key = 'candidate-v2-migrated-rejection-replay';
+    const requestHash = await sha256Json({
+      authenticatedMemberId: hirer.id,
+      operation: 'quest.v2.candidate-application.create',
+      path: '/api/v2/quests/:questId/applications',
+      questId,
+      body: {},
+    });
+    await db.insert(questCommand).values({
+      questId,
+      principalUserId: hirer.id,
+      operationScope: 'quest.v2.candidate-application.create',
+      key,
+      requestHash,
+      resultData: { kind: 'rejected', rejection: 'hirer-not-allowed' },
+      processingStatus: 'COMPLETED',
+      completedAt: new Date(),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+    });
+
+    const retry = await request(`/api/v2/quests/${questId}/applications`, 'POST', hirer.id, {
+      'idempotency-key': key,
+    });
+    expect(retry.status).toBe(409);
+    expect((await retry.json()).error.code).toBe('HIRER_CANNOT_APPLY');
+  });
+
   it('returns IDEMPOTENCY_IN_PROGRESS for an unfinished Candidate application command', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenCandidateQuest();

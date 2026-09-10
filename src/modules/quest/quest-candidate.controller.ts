@@ -25,6 +25,7 @@ import {
   updateTeam,
   withdrawApplication,
 } from './quest-candidate.service';
+import { requireQuestCommandId } from './quest-command.controller';
 import type {
   applicationCreateSchema,
   applicationDetailParamsSchema,
@@ -100,11 +101,8 @@ export const selectCandidateController = async ({
     typeof candidateSelectionApplicationParamsSchema | typeof candidateSelectionTeamParamsSchema
   >;
 }) => {
-  const commandId = request?.headers.get('idempotency-key');
-  if (!commandId?.trim()) {
-    set.status = 400;
-    return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
-  }
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
   const target =
     'applicationId' in params
       ? { type: 'APPLICATION' as const, id: params.applicationId }
