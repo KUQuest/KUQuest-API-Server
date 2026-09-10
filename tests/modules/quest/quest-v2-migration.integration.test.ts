@@ -19,7 +19,6 @@ import {
   walletFundingReservation,
   walletFundingReservationOperation,
   walletFundingReservationSettlement,
-  walletIdempotencyKey,
   walletLedgerAccount,
   walletLedgerPosting,
   walletLedgerTransaction,

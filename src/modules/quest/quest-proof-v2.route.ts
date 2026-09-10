@@ -27,13 +27,11 @@ import {
   questV2ProofSubmissionReviewResponseSchema,
   questV2ProofSubmissionReviewSchema,
 } from './quest-proof-v2.schema';
-import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
 
 export const questProofV2Route = new Elysia({
   name: 'quest-proof-v2-route',
   prefix: `${API_V2_PREFIX}/quests`,
 })
-  .use(createQuestIdempotencyKeyGuard('proof-submission-v2'))
   .use(authGuard)
   .post('/:questId/proof-submissions', createQuestV2ProofSubmissionController, {
     params: questV2ProofSubmissionParamsSchema,

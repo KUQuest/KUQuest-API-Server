@@ -10,13 +10,11 @@ import {
   questSettlementHeadersSchema,
   questSettlementParamsSchema,
 } from './quest-settlement.schema';
-import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
 
 export const questSettlementRoute = new Elysia({
   name: 'quest-settlement-route',
   prefix: `${API_V1_PREFIX}/quests`,
 })
-  .use(createQuestIdempotencyKeyGuard('quest-cancellation'))
   .use(authGuard)
   .post('/:questId/cancel', cancelQuestController, {
     params: questSettlementParamsSchema,

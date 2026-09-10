@@ -30,13 +30,11 @@ import {
   questV2CandidateTeamUpdateSchema,
 } from './quest-candidate-team-v2.schema';
 import { questV2CandidateSelectionResponseSchema } from './quest-candidate-v2.schema';
-import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
 
 export const questCandidateTeamV2Route = new Elysia({
   name: 'quest-candidate-team-v2-route',
   prefix: API_V2_PREFIX,
 })
-  .use(createQuestIdempotencyKeyGuard('candidate-team-v2'))
   .use(authGuard)
   .post('/quests/:questId/teams', createQuestV2CandidateTeamController, {
     params: questV2CandidateTeamParamsSchema,

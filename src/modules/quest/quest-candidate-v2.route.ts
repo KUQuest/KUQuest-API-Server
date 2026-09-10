@@ -20,13 +20,11 @@ import {
   questV2CandidateSelectionParamsSchema,
   questV2CandidateSelectionResponseSchema,
 } from './quest-candidate-v2.schema';
-import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
 
 export const questCandidateV2Route = new Elysia({
   name: 'quest-candidate-v2-route',
   prefix: API_V2_PREFIX,
 })
-  .use(createQuestIdempotencyKeyGuard('candidate-application-v2'))
   .use(authGuard)
   .post('/quests/:questId/applications', createQuestV2CandidateApplicationController, {
     params: questV2CandidateApplicationParamsSchema,

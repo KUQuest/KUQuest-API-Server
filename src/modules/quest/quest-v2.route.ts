@@ -19,7 +19,6 @@ import {
   publishQuestV2Controller,
   respondToQuestV2EditRequestController,
 } from './quest-v2.controller';
-import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
 import { cancelQuestV2Controller } from './quest-settlement.controller';
 import { questCancellationResponseSchema } from './quest-settlement.schema';
 import {
@@ -56,7 +55,6 @@ export const questV2Route = new Elysia({
   name: 'quest-v2-route',
   prefix: `${API_V2_PREFIX}/quests`,
 })
-  .use(createQuestIdempotencyKeyGuard('quest-cancellation'))
   .use(authGuard)
   .get('', listQuestBoardV2Controller, {
     query: questV2BoardQueryHttpSchema,
@@ -97,6 +95,7 @@ export const questV2Route = new Elysia({
   })
   .post('/:questId/edit-requests', createQuestV2EditRequestController, {
     params: questV2ParamsSchema,
+    headers: questV2WriteHeadersSchema,
     body: questV2EditRequestCreateSchema,
     transform: normalizeQuestV2EditRequestCreateBody,
     response: responses(
@@ -132,6 +131,7 @@ export const questV2Route = new Elysia({
   })
   .post('/edit-requests/:requestId/respond', respondToQuestV2EditRequestController, {
     params: questV2EditRequestParamsSchema,
+    headers: questV2WriteHeadersSchema,
     body: questV2EditRequestResponseInputSchema,
     transform: normalizeQuestV2EditRequestResponseBody,
     response: responses(questV2EditRequestResponseSchema, 400, 401, 404, 409, 500, 503),

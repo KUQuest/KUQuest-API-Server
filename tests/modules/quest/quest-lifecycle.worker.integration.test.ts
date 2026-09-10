@@ -5,11 +5,11 @@ import {
   proofSubmission,
   quest,
   questAssignment,
+  questCommand,
   questTeam,
   questTeamInvitation,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import { questV2Storage } from '@/modules/quest/quest.storage';
@@ -75,7 +75,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   configureQuestWorkChatMembershipWriter(undefined);
-  await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.principalUserId, hirerId));
+  await db.delete(questCommand).where(eq(questCommand.principalUserId, hirerId));
   await db.delete(file).where(inArray(file.id, cleanupFileIds));
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(questTeam).where(inArray(questTeam.id, teamIds));
@@ -235,12 +235,13 @@ describe('Quest lifecycle worker', () => {
       bucket: 'test-bucket',
       objectKey: `quests/v2/${hirerId}/lifecycle-crashed-upload`,
     };
-    await db.insert(walletIdempotencyKey).values({
+    await db.insert(questCommand).values({
       principalUserId: hirerId,
       operationScope: questV2ImageUploadOperationScope,
       key,
-      requestHash: 'lifecycle-crashed-upload-request',
+      requestHash: 'c'.repeat(64),
       resultData: { upload: { objects: [object] } },
+      processingStatus: 'PROCESSING',
       expiresAt: new Date(testNow.getTime() - 1),
     });
     const deleteObject = spyOn(questV2Storage, 'delete').mockResolvedValue();
@@ -254,10 +255,10 @@ describe('Quest lifecycle worker', () => {
     expect(deleteObject).toHaveBeenCalledWith(object.bucket, object.objectKey);
     expect(
       await db
-        .select({ id: walletIdempotencyKey.id })
-        .from(walletIdempotencyKey)
-        .where(eq(walletIdempotencyKey.key, key))
-    ).toEqual([]);
+        .select({ status: questCommand.processingStatus })
+        .from(questCommand)
+        .where(eq(questCommand.key, key))
+    ).toEqual([{ status: 'COMPLETED' }]);
   });
 
   it('reports image cleanup errors and continues lifecycle processing', async () => {

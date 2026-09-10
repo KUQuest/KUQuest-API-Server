@@ -54,13 +54,11 @@ import {
   teamResponseSchema,
   teamUpdateSchema,
 } from './quest-candidate.schema';
-import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
 
 export const questCandidateRoute = new Elysia({
   name: 'quest-candidate-route',
   prefix: `${API_V1_PREFIX}/quests`,
 })
-  .use(createQuestIdempotencyKeyGuard('candidate-selection'))
   .use(authGuard)
   .post('/:questId/applications', createApplicationController, {
     params: applicationParamsSchema,

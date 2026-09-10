@@ -42,6 +42,7 @@ import {
 import {
   completeQuestCommand,
   findOpenQuestCommandPayloads,
+  normalizeQuestCommandKey,
   openQuestCommand,
   parkQuestCommandPayload,
   runQuestCommand,
@@ -998,8 +999,8 @@ const imageRequestHash = (value: object): Promise<string> => sha256Json(value);
 const normalizeQuestV2ImageCommandContext = (
   context: QuestV2ImageCommandContext
 ): QuestV2ImageCommandContext | undefined => {
-  const key = context.key.trim();
-  if (key.length === 0 || key.length > 200) return undefined;
+  const key = normalizeQuestCommandKey(context.key);
+  if (!key) return undefined;
 
   return { ...context, key };
 };
@@ -1897,11 +1898,13 @@ const lockQuestV2CommandQuest = async (transaction: QuestTransaction, questId: s
   return current;
 };
 
-type QuestV2PublishRejection =
-  | { outcome: 'blocked'; check: QuestV2PublishCheck }
-  | { outcome: 'not-draft' }
-  | { outcome: 'not-found' };
+class QuestV2PublishBlockedError extends Error {
+  constructor(readonly check: QuestV2PublishCheck) {
+    super('Quest publish blocked');
+  }
+}
 
+type QuestV2PublishRejection = { outcome: 'not-draft' } | { outcome: 'not-found' };
 const publishQuestV2InTransaction = async (
   transaction: QuestTransaction,
   userId: string,
@@ -1937,7 +1940,7 @@ const publishQuestV2InTransaction = async (
 
       const check = await buildQuestV2PublishCheckForRow(transaction, userId, row, true);
       if (!check.canPublish) {
-        return { kind: 'rejected', rejection: { outcome: 'blocked', check } };
+        throw new QuestV2PublishBlockedError(check);
       }
 
       const reservation = await reserveSpending(transaction, {
@@ -2315,9 +2318,16 @@ export const publishQuestV2 = async (
 ): Promise<QuestV2PublishOutcome | undefined> => {
   const requestHash = await publishRequestHashFor(userId, questId);
   const now = new Date();
-  return db.transaction((transaction) =>
-    publishQuestV2InTransaction(transaction, userId, questId, rawIdempotencyKey, requestHash, now)
-  );
+  try {
+    return await db.transaction((transaction) =>
+      publishQuestV2InTransaction(transaction, userId, questId, rawIdempotencyKey, requestHash, now)
+    );
+  } catch (error) {
+    if (error instanceof QuestV2PublishBlockedError) {
+      return { outcome: 'blocked', check: error.check };
+    }
+    throw error;
+  }
 };
 
 const activeWorkerCountExpression = sql<number>`(

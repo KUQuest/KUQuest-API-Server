@@ -93,9 +93,15 @@ const replayQuestCommand = <TResult, TRejection>(
  * Lock order, load-bearing: when `identity.questId` is set, the Quest Command
  * insert takes FOR KEY SHARE on that Quest row through the foreign key. A
  * caller whose work then takes FOR UPDATE on the same Quest row deadlocks
- * against a concurrent command for that Quest. Take the Quest row lock
- * BEFORE calling this function, never inside the work callback.
+ * against concurrent commands on the same Quest. Callers that lock the Quest
+ * row must therefore take FOR UPDATE before calling `runQuestCommand`.
  */
+export const normalizeQuestCommandKey = (key: string): string | undefined => {
+  const trimmed = key.trim();
+  if (trimmed.length === 0 || trimmed.length > 200) return undefined;
+  return trimmed;
+};
+
 export const runQuestCommand = async <TResult, TRejection>(input: {
   transaction: QuestTransaction;
   identity: QuestCommandIdentity;
@@ -110,8 +116,8 @@ export const runQuestCommand = async <TResult, TRejection>(input: {
   toSnapshot: (result: TResult) => unknown;
   fromSnapshot: (snapshot: unknown) => TResult | undefined;
 }): Promise<QuestCommandResult<TResult, TRejection>> => {
-  const key = input.identity.key.trim();
-  if (key.length === 0 || key.length > 200) return { outcome: 'invalid-idempotency-key' };
+  const key = normalizeQuestCommandKey(input.identity.key);
+  if (!key) return { outcome: 'invalid-idempotency-key' };
 
   const [created] = await input.transaction
     .insert(questCommand)
