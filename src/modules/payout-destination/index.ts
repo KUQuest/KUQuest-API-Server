@@ -27,3 +27,4 @@ export {
 export type {
   PayoutDestinationForProvider,
 } from './payout-destination.provider-boundary';
+export { payoutDestinationRoute } from './payout-destination.route';
