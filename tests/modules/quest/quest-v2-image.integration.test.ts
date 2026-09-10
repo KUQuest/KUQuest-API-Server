@@ -1,8 +1,7 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { file } from '@/database/schema/file.schema';
-import { quest, questImage } from '@/database/schema/quest.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
+import { quest, questCommand, questImage } from '@/database/schema/quest.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import {
   checkQuestV2ImageUpload,
@@ -207,7 +206,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.principalUserId, hirerId));
+  await db.delete(questCommand).where(eq(questCommand.principalUserId, hirerId));
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(file).where(eq(file.uploadedByUserId, hirerId));
   questIds.splice(0, questIds.length);
@@ -219,7 +218,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.principalUserId, hirerId));
+  await db.delete(questCommand).where(eq(questCommand.principalUserId, hirerId));
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(file).where(eq(file.uploadedByUserId, hirerId));
 });
@@ -337,9 +336,9 @@ describe('Quest API v2 Quest Image integration', () => {
     const firstRequest = postImages(draft.id, 'image-concurrent-1', [makeImageFile('first.png')]);
     await firstUploadStarted;
     const [reservation] = await db
-      .select({ resultData: walletIdempotencyKey.resultData })
-      .from(walletIdempotencyKey)
-      .where(eq(walletIdempotencyKey.key, 'image-concurrent-1'));
+      .select({ resultData: questCommand.resultData })
+      .from(questCommand)
+      .where(eq(questCommand.key, 'image-concurrent-1'));
     expect(reservation?.resultData).toMatchObject({
       upload: {
         objects: [
@@ -405,7 +404,8 @@ describe('Quest API v2 Quest Image integration', () => {
     const image = makeImageFile('expired-reservation.png');
     const key = 'image-expired-reservation';
     const requestHash = await questV2ImageUploadRequestHash(hirerId, draft.id, [image]);
-    await db.insert(walletIdempotencyKey).values({
+    await db.insert(questCommand).values({
+      questId: draft.id,
       principalUserId: hirerId,
       operationScope: questV2ImageUploadOperationScope,
       key,
@@ -428,18 +428,17 @@ describe('Quest API v2 Quest Image integration', () => {
     expect(response.status).toBe(200);
     expect((await response.json()).data.images).toHaveLength(1);
   });
-
-  it('recovers an expired upload manifest before releasing its idempotency reservation', async () => {
+  it('recovers an expired upload manifest before completing its idempotency command', async () => {
     const key = 'image-expired-upload-manifest';
     const object = {
       bucket: 'test-bucket',
       objectKey: `quests/v2/${hirerId}/crashed-upload`,
     };
-    await db.insert(walletIdempotencyKey).values({
+    await db.insert(questCommand).values({
       principalUserId: hirerId,
       operationScope: questV2ImageUploadOperationScope,
       key,
-      requestHash: 'crashed-upload-request',
+      requestHash: 'a'.repeat(64),
       resultData: { upload: { objects: [object] } },
       expiresAt: new Date(Date.now() - 1),
     });
@@ -447,12 +446,18 @@ describe('Quest API v2 Quest Image integration', () => {
 
     expect(await recoverQuestV2ImageUploadManifests()).toBe(1);
     expect(deleteObject).toHaveBeenCalledWith(object.bucket, object.objectKey);
-    expect(
-      await db
-        .select({ id: walletIdempotencyKey.id })
-        .from(walletIdempotencyKey)
-        .where(eq(walletIdempotencyKey.key, key))
-    ).toEqual([]);
+    const [command] = await db
+      .select({
+        processingStatus: questCommand.processingStatus,
+        resultData: questCommand.resultData,
+      })
+      .from(questCommand)
+      .where(eq(questCommand.key, key));
+    expect(command?.processingStatus).toBe('COMPLETED');
+    expect(command?.resultData).toEqual({
+      kind: 'rejected',
+      rejection: 'idempotency-unavailable',
+    });
   });
 
   it('removes one image, repacks positions, soft-deletes its file, and retries cleanup', async () => {
@@ -731,11 +736,11 @@ describe('Quest API v2 Quest Image integration', () => {
 
     const [reservation] = await db
       .select({
-        processingStatus: walletIdempotencyKey.processingStatus,
-        resultData: walletIdempotencyKey.resultData,
+        processingStatus: questCommand.processingStatus,
+        resultData: questCommand.resultData,
       })
-      .from(walletIdempotencyKey)
-      .where(eq(walletIdempotencyKey.key, 'image-cleanup-manifest'));
+      .from(questCommand)
+      .where(eq(questCommand.key, 'image-cleanup-manifest'));
     expect(reservation?.processingStatus).toBe('PROCESSING');
     expect(reservation?.resultData).toMatchObject({
       cleanup: { images: [{ objectKey: first.objectKey }] },
@@ -745,6 +750,18 @@ describe('Quest API v2 Quest Image integration', () => {
     ).toEqual([]);
 
     expect(await retryQuestV2ImageCleanupManifests()).toBe(1);
+    const [completed] = await db
+      .select({
+        processingStatus: questCommand.processingStatus,
+        resultData: questCommand.resultData,
+      })
+      .from(questCommand)
+      .where(eq(questCommand.key, 'image-cleanup-manifest'));
+    expect(completed?.processingStatus).toBe('COMPLETED');
+    expect(completed?.resultData).toEqual({
+      kind: 'rejected',
+      rejection: 'idempotency-unavailable',
+    });
     const [tombstone] = await db
       .select({ deletedAt: file.deletedAt, objectDeletedAt: file.objectDeletedAt })
       .from(file)

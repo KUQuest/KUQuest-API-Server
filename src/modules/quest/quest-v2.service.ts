@@ -4,13 +4,14 @@ import {
   quest,
   questAssignment,
   questApiVersion,
+  questCommand,
   questConditionItem,
   questImage,
   questLocation,
 } from '@/database/schema/quest.schema';
 import { file } from '@/database/schema/file.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletIdempotencyKey, walletWallet } from '@/database/schema/wallet.schema';
+import { walletWallet } from '@/database/schema/wallet.schema';
 import {
   getEffectiveFundingReservationPolicy,
   MoneyDomainError,
@@ -38,6 +39,16 @@ import {
   sql,
 } from 'drizzle-orm';
 
+import {
+  completeQuestCommand,
+  findOpenQuestCommandPayloads,
+  openQuestCommand,
+  parkQuestCommandPayload,
+  runQuestCommand,
+  sha256Json,
+  type QuestCommandOutcomeCode,
+  type QuestCommandWork,
+} from './quest-command.service';
 import { assignmentStatus, questStatus, type QuestStatus } from './quest.contract';
 import { questV2StorageCompatibility } from './quest-storage.adapter';
 import {
@@ -352,43 +363,6 @@ const questV2RowSelection = {
   tagName: tag.name,
   createdAt: quest.createdAt,
   updatedAt: quest.updatedAt,
-};
-
-class QuestV2InputError extends Error {
-  constructor(readonly outcome: QuestV2CreateValidationOutcome) {
-    super(outcome);
-    this.name = 'QuestV2InputError';
-  }
-}
-
-class QuestV2EditError extends Error {
-  constructor(readonly outcome: QuestV2EditOutcomeCode) {
-    super(outcome);
-    this.name = 'QuestV2EditError';
-  }
-}
-
-type QuestV2PublishCommandErrorCode = 'blocked' | 'not-draft' | 'not-found';
-
-class QuestV2PublishError extends Error {
-  constructor(
-    readonly outcome: QuestV2PublishCommandErrorCode,
-    readonly check?: QuestV2PublishCheck
-  ) {
-    super(outcome);
-    this.name = 'QuestV2PublishError';
-  }
-}
-
-const idempotencyExpiry = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-const sha256Json = async (value: object): Promise<string> => {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value))
-  );
-
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
 const parseQuestFundingTotalSatang = (value: number): Satang | undefined => {
@@ -923,78 +897,95 @@ export const materializeQuestV2ImageResponse = (
     };
   });
 
-const completeQuestV2ImageCommand = async (
-  transaction: QuestTransaction,
-  questId: string,
-  idempotencyKeyId: string,
-  completedAt: Date
-): Promise<{ images: QuestV2ImageReference[]; response: QuestV2ImageResponse[] }> => {
-  const images = await selectQuestV2Images(transaction, questId);
-  const response = materializeQuestV2ImageResponse(images);
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({
-      resourceType: 'quest-image',
-      resourceId: questId,
-      resultData: toQuestV2ImageIdempotencySnapshot(images, response),
-      processingStatus: 'COMPLETED',
-      completedAt,
-    })
-    .where(eq(walletIdempotencyKey.id, idempotencyKeyId));
-
-  return { images, response };
+type QuestV2ImageCommandRecord = {
+  id: string;
+  requestHash: string;
+  resultData: unknown;
+  processingStatus: string;
+  expiresAt?: Date;
 };
 
-const questV2ImageIdempotencySelection = {
-  id: walletIdempotencyKey.id,
-  requestHash: walletIdempotencyKey.requestHash,
-  resourceId: walletIdempotencyKey.resourceId,
-  resultData: walletIdempotencyKey.resultData,
-  processingStatus: walletIdempotencyKey.processingStatus,
-  expiresAt: walletIdempotencyKey.expiresAt,
+const questV2ImageCommandSelection = {
+  id: questCommand.id,
+  requestHash: questCommand.requestHash,
+  resultData: questCommand.resultData,
+  processingStatus: questCommand.processingStatus,
+  expiresAt: questCommand.expiresAt,
 };
 
-const findQuestV2ImageIdempotency = async (
+const findQuestV2ImageCommand = async (
   transaction: QuestTransaction,
-  userId: string,
-  operationScope: string,
-  key: string
-) => {
+  context: QuestV2ImageCommandContext,
+  operationScope: string
+): Promise<QuestV2ImageCommandRecord | undefined> => {
   const [record] = await transaction
-    .select(questV2ImageIdempotencySelection)
-    .from(walletIdempotencyKey)
+    .select(questV2ImageCommandSelection)
+    .from(questCommand)
     .where(
       and(
-        eq(walletIdempotencyKey.principalUserId, userId),
-        eq(walletIdempotencyKey.operationScope, operationScope),
-        eq(walletIdempotencyKey.key, key)
+        eq(questCommand.principalUserId, context.userId),
+        eq(questCommand.operationScope, operationScope),
+        eq(questCommand.key, context.key)
       )
     )
     .limit(1)
     .for('update');
-
   return record;
 };
 
+const imageCommandBusinessOutcomes: readonly string[] = ['not-found', 'not-draft', 'limit-reached'];
+
+type QuestV2ImageCommandRead =
+  | { kind: 'success'; snapshot: QuestV2ImageIdempotencySnapshot }
+  | { kind: 'rejected'; outcome: QuestV2ImageMutationOutcome }
+  | { outcome: 'idempotency-key-reused' | 'idempotency-in-progress' | 'idempotency-unavailable' };
+
+const readQuestV2ImageCommand = (
+  record: QuestV2ImageCommandRecord,
+  requestHash: string
+): QuestV2ImageCommandRead => {
+  if (record.requestHash !== requestHash) return { outcome: 'idempotency-key-reused' };
+  if (record.processingStatus === 'PROCESSING') {
+    return { outcome: 'idempotency-in-progress' };
+  }
+  if (record.processingStatus !== 'COMPLETED') {
+    return { outcome: 'idempotency-unavailable' };
+  }
+
+  if (!record.resultData || typeof record.resultData !== 'object') {
+    return { outcome: 'idempotency-unavailable' };
+  }
+  const envelope = record.resultData as { kind?: unknown; result?: unknown; rejection?: unknown };
+  if (envelope.kind === 'success') {
+    const snapshot = fromQuestV2ImageIdempotencySnapshot(envelope.result);
+    return snapshot ? { kind: 'success', snapshot } : { outcome: 'idempotency-unavailable' };
+  }
+  if (envelope.kind === 'rejected' && typeof envelope.rejection === 'string') {
+    if (imageCommandBusinessOutcomes.includes(envelope.rejection)) {
+      return {
+        kind: 'rejected',
+        outcome: envelope.rejection as QuestV2ImageMutationOutcome,
+      };
+    }
+    if (envelope.rejection === 'idempotency-unavailable') {
+      return { outcome: 'idempotency-unavailable' };
+    }
+  }
+  return { outcome: 'idempotency-unavailable' };
+};
+
 const readQuestV2ImageReplay = (
-  record: {
-    requestHash: string;
-    resourceId: string | null;
-    resultData: unknown;
-    processingStatus: string;
-  },
+  record: QuestV2ImageCommandRecord,
   requestHash: string
 ): QuestV2ImageUploadPreflight => {
-  if (record.requestHash !== requestHash) return { outcome: 'idempotency-key-reused' };
-  if (record.resourceId) {
-    const snapshot = fromQuestV2ImageIdempotencySnapshot(record.resultData);
-    return snapshot
-      ? { replay: { images: snapshot.response } }
-      : { outcome: 'idempotency-unavailable' };
+  const result = readQuestV2ImageCommand(record, requestHash);
+  if ('kind' in result && result.kind === 'success') {
+    return { replay: { images: result.snapshot.response } };
   }
-  return record.processingStatus === 'PROCESSING'
-    ? { outcome: 'idempotency-in-progress' }
-    : { outcome: 'idempotency-unavailable' };
+  if ('kind' in result && result.kind === 'rejected') {
+    return { outcome: result.outcome };
+  }
+  return result;
 };
 
 const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
@@ -1002,8 +993,7 @@ const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
-const imageRequestHash = (value: object): Promise<string> =>
-  sha256Hex(new TextEncoder().encode(JSON.stringify(value)));
+const imageRequestHash = (value: object): Promise<string> => sha256Json(value);
 
 const normalizeQuestV2ImageCommandContext = (
   context: QuestV2ImageCommandContext
@@ -1083,100 +1073,154 @@ export const checkQuestV2ImageUpload = async (
   }
 
   return db.transaction(async (transaction) => {
-    const existing = await findQuestV2ImageIdempotency(
-      transaction,
-      normalizedContext.userId,
-      questV2ImageUploadOperationScope,
-      normalizedContext.key
-    );
-    if (
-      existing &&
-      !(
-        existing.processingStatus === 'PROCESSING' &&
-        existing.expiresAt <= new Date() &&
-        !hasQuestV2ImageRecoveryManifest(existing.resultData)
-      )
-    ) {
-      return readQuestV2ImageReplay(existing, normalizedContext.requestHash);
-    }
-
     const ownedQuest = await lockQuestV2ImageOwner(transaction, normalizedContext);
     if (!ownedQuest) return { outcome: 'not-found' };
-    if (ownedQuest.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
 
-    const reservation = await acquireQuestV2Idempotency(
+    const existing = await findQuestV2ImageCommand(
       transaction,
-      normalizedContext.userId,
-      questV2ImageUploadOperationScope,
-      normalizedContext.key,
-      normalizedContext.requestHash,
-      false,
-      true
+      normalizedContext,
+      questV2ImageUploadOperationScope
     );
-    if ('outcome' in reservation) return reservation;
-    if (!reservation.created) {
-      return readQuestV2ImageReplay(reservation.record, normalizedContext.requestHash);
+    const now = new Date();
+    if (existing) {
+      const canRecover =
+        existing.requestHash === normalizedContext.requestHash &&
+        existing.processingStatus === 'PROCESSING' &&
+        existing.resultData === null &&
+        existing.expiresAt !== undefined &&
+        existing.expiresAt <= now;
+      if (canRecover) {
+        if (ownedQuest.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
+        const [imageCountRow] = await transaction
+          .select({ count: sql<number>`count(*)` })
+          .from(questImage)
+          .where(eq(questImage.questId, normalizedContext.questId));
+        const exceedsLimit = Number(imageCountRow?.count ?? 0) + imageCount > maxQuestV2Images;
+        if (exceedsLimit) {
+          await completeQuestCommand({
+            executor: transaction,
+            id: existing.id,
+            payload: { kind: 'rejected', rejection: 'limit-reached' },
+            now,
+          });
+          return { outcome: 'limit-reached' };
+        }
+        const parked = await parkQuestCommandPayload({
+          executor: transaction,
+          identity: {
+            principalUserId: normalizedContext.userId,
+            operationScope: questV2ImageUploadOperationScope,
+            key: normalizedContext.key,
+            requestHash: normalizedContext.requestHash,
+            questId: normalizedContext.questId,
+          },
+          payload: toQuestV2ImageUploadManifest(plannedObjects),
+          now,
+        });
+        return parked ? { canUpload: true } : { outcome: 'idempotency-unavailable' };
+      }
+      return readQuestV2ImageReplay(existing, normalizedContext.requestHash);
     }
+    if (ownedQuest.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
 
     const [imageCountRow] = await transaction
       .select({ count: sql<number>`count(*)` })
       .from(questImage)
       .where(eq(questImage.questId, normalizedContext.questId));
-    if (Number(imageCountRow?.count ?? 0) + imageCount > maxQuestV2Images) {
-      await transaction
-        .delete(walletIdempotencyKey)
-        .where(eq(walletIdempotencyKey.id, reservation.record.id));
+    const exceedsLimit = Number(imageCountRow?.count ?? 0) + imageCount > maxQuestV2Images;
+    const commandId = await openQuestCommand({
+      executor: transaction,
+      identity: {
+        principalUserId: normalizedContext.userId,
+        operationScope: questV2ImageUploadOperationScope,
+        key: normalizedContext.key,
+        requestHash: normalizedContext.requestHash,
+        questId: normalizedContext.questId,
+      },
+      payload: toQuestV2ImageUploadManifest(plannedObjects),
+      now,
+    });
+    if (exceedsLimit) {
+      await completeQuestCommand({
+        executor: transaction,
+        id: commandId,
+        payload: { kind: 'rejected', rejection: 'limit-reached' },
+        now,
+      });
       return { outcome: 'limit-reached' };
     }
 
     // Commit the object targets before any storage write so a crashed request remains recoverable.
-    await transaction
-      .update(walletIdempotencyKey)
-      .set({ resultData: toQuestV2ImageUploadManifest(plannedObjects) })
-      .where(eq(walletIdempotencyKey.id, reservation.record.id));
-
     return { canUpload: true };
   });
-};
-
-class QuestV2ImageCommandError extends Error {
-  constructor(readonly outcome: Exclude<QuestV2ImageMutationOutcome, 'invalid-idempotency-key'>) {
-    super(outcome);
-    this.name = 'QuestV2ImageCommandError';
-  }
-}
-
-const throwQuestV2ImageCommandError = (
-  outcome: Exclude<QuestV2ImageMutationOutcome, 'invalid-idempotency-key'>
-): never => {
-  throw new QuestV2ImageCommandError(outcome);
 };
 
 const addQuestV2ImagesInTransaction = async (
   transaction: QuestTransaction,
   context: QuestV2ImageCommandContext,
-  images: StoredQuestImage[],
-  allowExistingProcessing: boolean
+  images: StoredQuestImage[]
 ): Promise<QuestV2ImageUploadOutcome> => {
-  const idempotency = await acquireQuestV2Idempotency(
-    transaction,
-    context.userId,
-    questV2ImageUploadOperationScope,
-    context.key,
-    context.requestHash,
-    allowExistingProcessing,
-    true
-  );
-  if ('outcome' in idempotency) return idempotency;
+  const ownedQuest = await lockQuestV2ImageOwner(transaction, context);
+  if (!ownedQuest) return { outcome: 'not-found' };
 
-  if (!idempotency.created && idempotency.record.resourceId) {
-    const snapshot = fromQuestV2ImageIdempotencySnapshot(idempotency.record.resultData);
-    return snapshot ? { ...snapshot, replayed: true } : { outcome: 'idempotency-unavailable' };
+  let command = await findQuestV2ImageCommand(
+    transaction,
+    context,
+    questV2ImageUploadOperationScope
+  );
+  if (command && command.requestHash !== context.requestHash) {
+    return { outcome: 'idempotency-key-reused' };
   }
 
-  const ownedQuest = await lockQuestV2ImageOwner(transaction, context);
-  if (!ownedQuest) throwQuestV2ImageCommandError('not-found');
-  if (ownedQuest.questStatus !== questStatus.draft) throwQuestV2ImageCommandError('not-draft');
+  if (command?.processingStatus === 'COMPLETED') {
+    const replay = readQuestV2ImageCommand(command, context.requestHash);
+    if ('kind' in replay && replay.kind === 'success') {
+      return { ...replay.snapshot, replayed: true };
+    }
+    if ('kind' in replay && replay.kind === 'rejected') {
+      return { outcome: replay.outcome };
+    }
+    return replay;
+  }
+  if (
+    command?.processingStatus === 'PROCESSING' &&
+    !fromQuestV2ImageUploadManifest(command.resultData)
+  ) {
+    return { outcome: 'idempotency-in-progress' };
+  }
+
+  const now = new Date();
+  if (!command) {
+    const commandId = await openQuestCommand({
+      executor: transaction,
+      identity: {
+        principalUserId: context.userId,
+        operationScope: questV2ImageUploadOperationScope,
+        key: context.key,
+        requestHash: context.requestHash,
+        questId: context.questId,
+      },
+      payload: toQuestV2ImageUploadManifest(images),
+      now,
+    });
+    command = {
+      id: commandId,
+      requestHash: context.requestHash,
+      resultData: toQuestV2ImageUploadManifest(images),
+      processingStatus: 'PROCESSING',
+    };
+  }
+  if (!command) return { outcome: 'idempotency-unavailable' };
+
+  if (ownedQuest.questStatus !== questStatus.draft) {
+    await completeQuestCommand({
+      executor: transaction,
+      id: command.id,
+      payload: { kind: 'rejected', rejection: 'not-draft' },
+      now,
+    });
+    return { outcome: 'not-draft' };
+  }
 
   const [imageCountRow] = await transaction
     .select({ count: sql<number>`count(*)` })
@@ -1184,7 +1228,13 @@ const addQuestV2ImagesInTransaction = async (
     .where(eq(questImage.questId, context.questId));
   const currentCount = Number(imageCountRow?.count ?? 0);
   if (currentCount + images.length > maxQuestV2Images) {
-    throwQuestV2ImageCommandError('limit-reached');
+    await completeQuestCommand({
+      executor: transaction,
+      id: command.id,
+      payload: { kind: 'rejected', rejection: 'limit-reached' },
+      now,
+    });
+    return { outcome: 'limit-reached' };
   }
 
   for (const [index, image] of images.entries()) {
@@ -1201,12 +1251,19 @@ const addQuestV2ImagesInTransaction = async (
     });
   }
 
-  return completeQuestV2ImageCommand(
-    transaction,
-    context.questId,
-    idempotency.record.id,
-    new Date()
-  );
+  const imageReferences = await selectQuestV2Images(transaction, context.questId);
+  const response = materializeQuestV2ImageResponse(imageReferences);
+  const completed = await completeQuestCommand({
+    executor: transaction,
+    id: command.id,
+    payload: {
+      kind: 'success',
+      result: toQuestV2ImageIdempotencySnapshot(imageReferences, response),
+    },
+    now,
+  });
+  if (!completed) return { outcome: 'idempotency-unavailable' };
+  return { images: imageReferences, response };
 };
 
 export const addQuestV2Images = async (
@@ -1216,14 +1273,9 @@ export const addQuestV2Images = async (
   const normalizedContext = normalizeQuestV2ImageCommandContext(context);
   if (!normalizedContext) return { outcome: 'invalid-idempotency-key' };
 
-  try {
-    return await db.transaction((transaction) =>
-      addQuestV2ImagesInTransaction(transaction, normalizedContext, images, true)
-    );
-  } catch (error) {
-    if (error instanceof QuestV2ImageCommandError) return { outcome: error.outcome };
-    throw error;
-  }
+  return db.transaction((transaction) =>
+    addQuestV2ImagesInTransaction(transaction, normalizedContext, images)
+  );
 };
 
 export const releaseQuestV2ImageUploadReservation = async (
@@ -1232,18 +1284,35 @@ export const releaseQuestV2ImageUploadReservation = async (
   const normalizedContext = normalizeQuestV2ImageCommandContext(context);
   if (!normalizedContext) return;
 
-  await db
-    .delete(walletIdempotencyKey)
+  const [command] = await db
+    .select({
+      id: questCommand.id,
+      requestHash: questCommand.requestHash,
+      processingStatus: questCommand.processingStatus,
+    })
+    .from(questCommand)
     .where(
       and(
-        eq(walletIdempotencyKey.principalUserId, normalizedContext.userId),
-        eq(walletIdempotencyKey.operationScope, questV2ImageUploadOperationScope),
-        eq(walletIdempotencyKey.key, normalizedContext.key),
-        eq(walletIdempotencyKey.requestHash, normalizedContext.requestHash),
-        eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
-        isNull(walletIdempotencyKey.resourceId)
+        eq(questCommand.principalUserId, normalizedContext.userId),
+        eq(questCommand.operationScope, questV2ImageUploadOperationScope),
+        eq(questCommand.key, normalizedContext.key)
       )
-    );
+    )
+    .limit(1);
+  if (
+    !command ||
+    command.requestHash !== normalizedContext.requestHash ||
+    command.processingStatus !== 'PROCESSING'
+  ) {
+    return;
+  }
+
+  await completeQuestCommand({
+    executor: db,
+    id: command.id,
+    payload: { kind: 'rejected', rejection: 'idempotency-unavailable' },
+    now: new Date(),
+  });
 };
 
 type QuestV2ImageTombstone = {
@@ -1320,14 +1389,6 @@ const fromQuestV2ImageCleanupManifest = (
   };
 };
 
-const hasQuestV2ImageCleanupManifest = (resultData: unknown): boolean =>
-  Boolean(fromQuestV2ImageCleanupManifest(resultData));
-
-const hasQuestV2ImageRecoveryManifest = (resultData: unknown): boolean =>
-  Boolean(
-    fromQuestV2ImageUploadManifest(resultData) || fromQuestV2ImageCleanupManifest(resultData)
-  );
-
 export const recordQuestV2ImageCleanupTombstones = async (
   userId: string,
   images: StoredQuestImage[],
@@ -1355,72 +1416,56 @@ export const recordQuestV2ImageCleanupRetry = async (
   const normalizedContext = normalizeQuestV2ImageCommandContext(context);
   if (!normalizedContext || images.length === 0) return;
 
-  let updated: { id: string } | undefined;
   try {
-    [updated] = await db
-      .update(walletIdempotencyKey)
-      .set({
-        resultData: { cleanup: toQuestV2ImageCleanupManifest(images, deletedAt) },
-        expiresAt: idempotencyExpiry(),
-      })
-      .where(
-        and(
-          eq(walletIdempotencyKey.principalUserId, normalizedContext.userId),
-          eq(walletIdempotencyKey.operationScope, questV2ImageUploadOperationScope),
-          eq(walletIdempotencyKey.key, normalizedContext.key),
-          eq(walletIdempotencyKey.requestHash, normalizedContext.requestHash),
-          eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
-          isNull(walletIdempotencyKey.resourceId)
-        )
-      )
-      .returning({ id: walletIdempotencyKey.id });
+    const parked = await parkQuestCommandPayload({
+      executor: db,
+      identity: {
+        principalUserId: normalizedContext.userId,
+        operationScope: questV2ImageUploadOperationScope,
+        key: normalizedContext.key,
+        requestHash: normalizedContext.requestHash,
+        questId: normalizedContext.questId,
+      },
+      payload: { cleanup: toQuestV2ImageCleanupManifest(images, deletedAt) },
+      now: deletedAt,
+    });
+    if (!parked) {
+      throw new Error('Quest Image upload command was not available for cleanup retry');
+    }
   } catch (cause) {
     throw new QuestV2ImageCleanupUnavailableError(cause);
-  }
-
-  if (!updated) {
-    throw new QuestV2ImageCleanupUnavailableError(
-      new Error('Quest Image upload reservation was not available for cleanup retry')
-    );
   }
 };
 
 export const retryQuestV2ImageCleanupManifests = async (limit = 100): Promise<number> => {
-  const pending = await db
-    .select({
-      id: walletIdempotencyKey.id,
-      userId: walletIdempotencyKey.principalUserId,
-      resultData: walletIdempotencyKey.resultData,
-    })
-    .from(walletIdempotencyKey)
-    .where(
-      and(
-        eq(walletIdempotencyKey.operationScope, questV2ImageUploadOperationScope),
-        eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
-        isNull(walletIdempotencyKey.resourceId),
-        sql`${walletIdempotencyKey.resultData} IS NOT NULL`
-      )
-    )
-    .orderBy(asc(walletIdempotencyKey.id))
-    .limit(limit);
+  const pending = await findOpenQuestCommandPayloads({
+    executor: db,
+    operationScope: questV2ImageUploadOperationScope,
+    limit,
+  });
 
   let retried = 0;
   for (const record of pending) {
-    const manifest = fromQuestV2ImageCleanupManifest(record.resultData);
+    const manifest = fromQuestV2ImageCleanupManifest(record.payload);
     if (!manifest) continue;
 
     try {
       await recordQuestV2ImageCleanupTombstones(
-        record.userId,
+        record.principalUserId,
         manifest.images,
         new Date(manifest.deletedAt)
       );
-      await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.id, record.id));
-      retried += 1;
+      const completed = await completeQuestCommand({
+        executor: db,
+        id: record.id,
+        payload: { kind: 'rejected', rejection: 'idempotency-unavailable' },
+        now: new Date(),
+      });
+      if (completed) retried += 1;
     } catch (error) {
       console.error('[quest-image-cleanup] Cleanup tombstone retry failed', {
         error,
-        idempotencyKeyId: record.id,
+        commandId: record.id,
       });
     }
   }
@@ -1450,20 +1495,19 @@ export const recoverQuestV2ImageUploadManifests = async (
 ): Promise<number> => {
   const pending = await db
     .select({
-      id: walletIdempotencyKey.id,
-      resultData: walletIdempotencyKey.resultData,
+      id: questCommand.id,
+      resultData: questCommand.resultData,
     })
-    .from(walletIdempotencyKey)
+    .from(questCommand)
     .where(
       and(
-        eq(walletIdempotencyKey.operationScope, questV2ImageUploadOperationScope),
-        eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
-        isNull(walletIdempotencyKey.resourceId),
-        lte(walletIdempotencyKey.expiresAt, now),
-        sql`${walletIdempotencyKey.resultData} IS NOT NULL`
+        eq(questCommand.operationScope, questV2ImageUploadOperationScope),
+        eq(questCommand.processingStatus, 'PROCESSING'),
+        lte(questCommand.expiresAt, now),
+        sql`${questCommand.resultData} IS NOT NULL`
       )
     )
-    .orderBy(asc(walletIdempotencyKey.expiresAt), asc(walletIdempotencyKey.id))
+    .orderBy(asc(questCommand.expiresAt), asc(questCommand.id))
     .limit(limit);
 
   let recovered = 0;
@@ -1477,21 +1521,17 @@ export const recoverQuestV2ImageUploadManifests = async (
     if (deleted.some((result) => !result)) continue;
 
     try {
-      const [removed] = await db
-        .delete(walletIdempotencyKey)
-        .where(
-          and(
-            eq(walletIdempotencyKey.id, record.id),
-            eq(walletIdempotencyKey.processingStatus, 'PROCESSING'),
-            isNull(walletIdempotencyKey.resourceId)
-          )
-        )
-        .returning({ id: walletIdempotencyKey.id });
-      if (removed) recovered += 1;
+      const completed = await completeQuestCommand({
+        executor: db,
+        id: record.id,
+        payload: { kind: 'rejected', rejection: 'idempotency-unavailable' },
+        now,
+      });
+      if (completed) recovered += 1;
     } catch (error) {
-      console.error('[quest-image-upload-recovery] Idempotency reservation cleanup failed', {
+      console.error('[quest-image-upload-recovery] Quest Command completion failed', {
         error,
-        idempotencyKeyId: record.id,
+        commandId: record.id,
       });
     }
   }
@@ -1555,68 +1595,93 @@ export const cleanupQuestV2ImageObjects = async (
   return results.filter(Boolean).length;
 };
 
+type QuestV2ImageRemoveCommandResult = {
+  images: QuestV2ImageReference[];
+  response: QuestV2ImageResponse[];
+  cleanup?: QuestV2ImageTombstone;
+};
+
 const deleteQuestV2ImageInTransaction = async (
   transaction: QuestTransaction,
   context: QuestV2ImageCommandContext,
-  imageId: string
-): Promise<QuestV2ImageRemoveOutcome & { cleanup?: QuestV2ImageTombstone }> => {
-  const idempotency = await acquireQuestV2Idempotency(
-    transaction,
-    context.userId,
-    questV2ImageRemoveOperationScope,
-    context.key,
-    context.requestHash
-  );
-  if ('outcome' in idempotency) return idempotency;
-
-  if (!idempotency.created && idempotency.record.resourceId) {
-    const snapshot = fromQuestV2ImageIdempotencySnapshot(idempotency.record.resultData);
-    return snapshot ? snapshot : { outcome: 'idempotency-unavailable' };
-  }
-
+  imageId: string,
+  now: Date
+): Promise<QuestV2ImageRemoveOutcome> => {
+  // Lock before runQuestCommand: the Quest Command foreign key insert takes
+  // FOR KEY SHARE on the Quest row.
   const ownedQuest = await lockQuestV2ImageOwner(transaction, context);
-  if (!ownedQuest) throwQuestV2ImageCommandError('not-found');
-  if (ownedQuest.questStatus !== questStatus.draft) throwQuestV2ImageCommandError('not-draft');
+  if (!ownedQuest) return { outcome: 'not-found' };
 
-  const [image] = await transaction
-    .select({
-      imageId: questImage.id,
-      fileId: file.id,
-      bucket: file.bucket,
-      objectKey: file.objectKey,
-    })
-    .from(questImage)
-    .innerJoin(file, and(eq(questImage.fileId, file.id), isNull(file.deletedAt)))
-    .where(and(eq(questImage.questId, context.questId), eq(questImage.id, imageId)))
-    .limit(1)
-    .for('update');
-  if (!image) throwQuestV2ImageCommandError('not-found');
+  const command = await runQuestCommand({
+    transaction,
+    identity: {
+      principalUserId: context.userId,
+      operationScope: questV2ImageRemoveOperationScope,
+      key: context.key,
+      requestHash: context.requestHash,
+      questId: context.questId,
+    },
+    now,
+    work: async (): Promise<
+      QuestCommandWork<QuestV2ImageRemoveCommandResult, 'not-found' | 'not-draft'>
+    > => {
+      if (ownedQuest.questStatus !== questStatus.draft) {
+        return { kind: 'rejected', rejection: 'not-draft' };
+      }
 
-  const deletedAt = new Date();
-  await softDeleteQuestImageAndRepack(transaction, {
-    questId: context.questId,
-    questImageId: image.imageId,
-    fileId: image.fileId,
-    deletedAt,
-    positionOffset: maxQuestV2Images,
+      const [image] = await transaction
+        .select({
+          imageId: questImage.id,
+          fileId: file.id,
+          bucket: file.bucket,
+          objectKey: file.objectKey,
+        })
+        .from(questImage)
+        .innerJoin(file, and(eq(questImage.fileId, file.id), isNull(file.deletedAt)))
+        .where(and(eq(questImage.questId, context.questId), eq(questImage.id, imageId)))
+        .limit(1)
+        .for('update');
+      if (!image) return { kind: 'rejected', rejection: 'not-found' };
+
+      await softDeleteQuestImageAndRepack(transaction, {
+        questId: context.questId,
+        questImageId: image.imageId,
+        fileId: image.fileId,
+        deletedAt: now,
+        positionOffset: maxQuestV2Images,
+      });
+
+      const images = await selectQuestV2Images(transaction, context.questId);
+      const response = materializeQuestV2ImageResponse(images);
+      return {
+        kind: 'success',
+        result: {
+          images,
+          response,
+          cleanup: {
+            fileId: image.fileId,
+            bucket: image.bucket,
+            objectKey: image.objectKey,
+            tombstonedAt: now,
+          },
+        },
+        resourceType: 'quest-image',
+        resourceId: image.imageId,
+      };
+    },
+    toSnapshot: ({ images, response }) => toQuestV2ImageIdempotencySnapshot(images, response),
+    fromSnapshot: (snapshot) => {
+      const result = fromQuestV2ImageIdempotencySnapshot(snapshot);
+      return result ? { images: result.images, response: result.response } : undefined;
+    },
   });
 
-  const completed = await completeQuestV2ImageCommand(
-    transaction,
-    context.questId,
-    idempotency.record.id,
-    deletedAt
-  );
-
-  return {
-    ...completed,
-    cleanup: {
-      fileId: image.fileId,
-      bucket: image.bucket,
-      objectKey: image.objectKey,
-      tombstonedAt: deletedAt,
-    },
-  };
+  if ('outcome' in command) return { outcome: command.outcome };
+  if (command.kind === 'success') {
+    if (command.result.cleanup) await cleanupQuestV2ImageObject(command.result.cleanup);
+    return { images: command.result.images, response: command.result.response };
+  }
+  return { outcome: command.rejection };
 };
 
 export const deleteQuestV2Image = async (
@@ -1626,22 +1691,10 @@ export const deleteQuestV2Image = async (
   const normalizedContext = normalizeQuestV2ImageCommandContext(context);
   if (!normalizedContext) return { outcome: 'invalid-idempotency-key' };
 
-  let result: QuestV2ImageRemoveOutcome & { cleanup?: QuestV2ImageTombstone };
-  try {
-    result = await db.transaction((transaction) =>
-      deleteQuestV2ImageInTransaction(transaction, normalizedContext, imageId)
-    );
-  } catch (error) {
-    if (error instanceof QuestV2ImageCommandError) return { outcome: error.outcome };
-    throw error;
-  }
-
-  if ('outcome' in result) return result;
-  if ('cleanup' in result && result.cleanup) {
-    await cleanupQuestV2ImageObject(result.cleanup);
-  }
-
-  return { images: result.images, response: result.response };
+  const now = new Date();
+  return db.transaction((transaction) =>
+    deleteQuestV2ImageInTransaction(transaction, normalizedContext, imageId, now)
+  );
 };
 
 type QuestV2IdempotencySnapshot = Omit<QuestV2CanonicalQuest, 'questFundingTotal'> & {
@@ -1834,313 +1887,214 @@ const fromQuestV2PublishIdempotencySnapshot = (
   return { quest: canonicalQuest, questEscrow };
 };
 
-type IdempotencyRecord = {
-  id: string;
-  requestHash: string;
-  resourceId: string | null;
-  resultData: unknown;
-  processingStatus: string;
-  expiresAt: Date;
+const lockQuestV2CommandQuest = async (transaction: QuestTransaction, questId: string) => {
+  const [current] = await transaction
+    .select({ id: quest.id, hirerId: quest.hirerId, questStatus: quest.questStatus })
+    .from(quest)
+    .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
+    .limit(1)
+    .for('update');
+  return current;
 };
 
-const acquireQuestV2Idempotency = async (
-  transaction: QuestTransaction,
-  userId: string,
-  operationScope: string,
-  key: string,
-  requestHash: string,
-  allowExistingProcessing = false,
-  recoverExpiredProcessing = false
-): Promise<
-  | { created: true; record: IdempotencyRecord }
-  | { created: false; record: IdempotencyRecord }
-  | { outcome: 'idempotency-key-reused' | 'idempotency-in-progress' | 'idempotency-unavailable' }
-> => {
-  let [created] = await transaction
-    .insert(walletIdempotencyKey)
-    .values({
-      principalUserId: userId,
-      operationScope,
-      key,
-      requestHash,
-      expiresAt: idempotencyExpiry(),
-    })
-    .onConflictDoNothing()
-    .returning({
-      id: walletIdempotencyKey.id,
-      requestHash: walletIdempotencyKey.requestHash,
-      resourceId: walletIdempotencyKey.resourceId,
-      resultData: walletIdempotencyKey.resultData,
-      processingStatus: walletIdempotencyKey.processingStatus,
-      expiresAt: walletIdempotencyKey.expiresAt,
-    });
-
-  let record = created
-    ? created
-    : (
-        await transaction
-          .select({
-            id: walletIdempotencyKey.id,
-            requestHash: walletIdempotencyKey.requestHash,
-            resourceId: walletIdempotencyKey.resourceId,
-            resultData: walletIdempotencyKey.resultData,
-            processingStatus: walletIdempotencyKey.processingStatus,
-            expiresAt: walletIdempotencyKey.expiresAt,
-          })
-          .from(walletIdempotencyKey)
-          .where(
-            and(
-              eq(walletIdempotencyKey.principalUserId, userId),
-              eq(walletIdempotencyKey.operationScope, operationScope),
-              eq(walletIdempotencyKey.key, key)
-            )
-          )
-          .limit(1)
-          .for('update')
-      )[0];
-
-  if (!record) return { outcome: 'idempotency-unavailable' };
-  if (record.requestHash !== requestHash) return { outcome: 'idempotency-key-reused' };
-  if (record.resourceId) return { created: false, record };
-  if (
-    !created &&
-    recoverExpiredProcessing &&
-    record.processingStatus === 'PROCESSING' &&
-    !hasQuestV2ImageRecoveryManifest(record.resultData) &&
-    record.expiresAt <= new Date()
-  ) {
-    await transaction.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.id, record.id));
-    [created] = await transaction
-      .insert(walletIdempotencyKey)
-      .values({
-        principalUserId: userId,
-        operationScope,
-        key,
-        requestHash,
-        expiresAt: idempotencyExpiry(),
-      })
-      .returning({
-        id: walletIdempotencyKey.id,
-        requestHash: walletIdempotencyKey.requestHash,
-        resourceId: walletIdempotencyKey.resourceId,
-        resultData: walletIdempotencyKey.resultData,
-        processingStatus: walletIdempotencyKey.processingStatus,
-        expiresAt: walletIdempotencyKey.expiresAt,
-      });
-    if (!created) return { outcome: 'idempotency-unavailable' };
-    record = created;
-  }
-  if (
-    !created &&
-    allowExistingProcessing &&
-    record.processingStatus === 'PROCESSING' &&
-    !hasQuestV2ImageCleanupManifest(record.resultData)
-  ) {
-    return { created: true, record };
-  }
-  if (!created) return { outcome: 'idempotency-in-progress' };
-  if (record.processingStatus !== 'PROCESSING') return { outcome: 'idempotency-unavailable' };
-
-  return { created: true, record };
-};
-
-const throwQuestV2PublishError = (
-  outcome: QuestV2PublishCommandErrorCode,
-  check?: QuestV2PublishCheck
-): never => {
-  throw new QuestV2PublishError(outcome, check);
-};
+type QuestV2PublishRejection =
+  | { outcome: 'blocked'; check: QuestV2PublishCheck }
+  | { outcome: 'not-draft' }
+  | { outcome: 'not-found' };
 
 const publishQuestV2InTransaction = async (
   transaction: QuestTransaction,
   userId: string,
   questId: string,
-  key: string,
-  requestHash: string
-): Promise<QuestV2PublishOutcome> => {
-  const idempotency = await acquireQuestV2Idempotency(
+  rawIdempotencyKey: string,
+  requestHash: string,
+  now: Date
+): Promise<QuestV2PublishOutcome | undefined> => {
+  // Lock before runQuestCommand: the Quest Command foreign key insert takes
+  // FOR KEY SHARE on the Quest row.
+  const current = await lockQuestV2CommandQuest(transaction, questId);
+  if (!current) return undefined;
+
+  const command = await runQuestCommand({
     transaction,
-    userId,
-    questV2PublishOperationScope,
-    key,
-    requestHash
-  );
-  if ('outcome' in idempotency) return idempotency;
+    identity: {
+      principalUserId: userId,
+      operationScope: questV2PublishOperationScope,
+      key: rawIdempotencyKey,
+      requestHash,
+      questId,
+    },
+    now,
+    work: async (): Promise<QuestCommandWork<QuestV2PublishResponse, QuestV2PublishRejection>> => {
+      if (current.hirerId !== userId)
+        return { kind: 'rejected', rejection: { outcome: 'not-found' } };
+      if (current.questStatus !== questStatus.draft) {
+        return { kind: 'rejected', rejection: { outcome: 'not-draft' } };
+      }
 
-  if (!idempotency.created && idempotency.record.resourceId) {
-    const snapshot = fromQuestV2PublishIdempotencySnapshot(idempotency.record.resultData);
-    return snapshot ? snapshot : { outcome: 'idempotency-unavailable' };
-  }
+      const row = await selectQuestV2Row(transaction, userId, questId);
+      if (!row) return { kind: 'rejected', rejection: { outcome: 'not-found' } };
 
-  const row = await selectQuestV2Row(transaction, userId, questId, true);
-  if (!row) {
-    throw new QuestV2PublishError('not-found');
-  }
-  if (row.questStatus !== questStatus.draft) throwQuestV2PublishError('not-draft');
+      const check = await buildQuestV2PublishCheckForRow(transaction, userId, row, true);
+      if (!check.canPublish) {
+        return { kind: 'rejected', rejection: { outcome: 'blocked', check } };
+      }
 
-  const check = await buildQuestV2PublishCheckForRow(transaction, userId, row, true);
-  if (!check.canPublish) throwQuestV2PublishError('blocked', check);
+      const reservation = await reserveSpending(transaction, {
+        ownerUserId: userId,
+        callerScope: 'quest',
+        callerReference: questId,
+        amountSatang: check.escrowRequirementSatang,
+      });
+      if (reservation.policyRevisionId !== check.policyRevisionId) {
+        throw new MoneyDomainError(
+          'POLICY_NOT_AVAILABLE',
+          'Money Policy changed while publishing the Quest.'
+        );
+      }
 
-  const reservation = await reserveSpending(transaction, {
-    ownerUserId: userId,
-    callerScope: 'quest',
-    callerReference: questId,
-    amountSatang: check.escrowRequirementSatang,
+      const [updated] = await transaction
+        .update(quest)
+        .set({
+          questStatus: questStatus.open,
+          rewardSatang: check.questRewardSatang,
+          questFundingTotalSatang: check.questFundingTotalSatang,
+          headcount: check.headcount,
+          fundingReservationId: reservation.id,
+          policyRevisionId: check.policyRevisionId,
+          platformFeeBps: check.platformFeeBps,
+          platformFeePerWorkerSatang: check.platformFeeSatang,
+          questEscrowSatang: check.escrowRequirementSatang,
+          version: sql`${quest.version} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(quest.id, questId),
+            eq(quest.hirerId, userId),
+            eq(quest.apiVersion, questApiVersion.v2),
+            eq(quest.questStatus, questStatus.draft)
+          )
+        )
+        .returning({ id: quest.id });
+      if (!updated) return { kind: 'rejected', rejection: { outcome: 'not-draft' } };
+
+      const updatedRow = await selectQuestV2Row(transaction, userId, questId);
+      if (!updatedRow) throw new Error(`Published Quest ${questId} could not be read back`);
+
+      return {
+        kind: 'success',
+        result: {
+          quest: await buildCanonicalQuest(transaction, updatedRow),
+          questEscrow: toQuestV2QuestEscrowSnapshot(reservation.id, check),
+        },
+        resourceType: 'quest',
+        resourceId: questId,
+      };
+    },
+    toSnapshot: toQuestV2PublishIdempotencySnapshot,
+    fromSnapshot: fromQuestV2PublishIdempotencySnapshot,
   });
-  if (reservation.policyRevisionId !== check.policyRevisionId) {
-    throw new MoneyDomainError(
-      'POLICY_NOT_AVAILABLE',
-      'Money Policy changed while publishing the Quest.'
-    );
-  }
 
-  const publishedAt = new Date();
-  const [updated] = await transaction
-    .update(quest)
-    .set({
-      questStatus: questStatus.open,
-      rewardSatang: check.questRewardSatang,
-      questFundingTotalSatang: check.questFundingTotalSatang,
-      headcount: check.headcount,
-      fundingReservationId: reservation.id,
-      policyRevisionId: check.policyRevisionId,
-      platformFeeBps: check.platformFeeBps,
-      platformFeePerWorkerSatang: check.platformFeeSatang,
-      questEscrowSatang: check.escrowRequirementSatang,
-      version: sql`${quest.version} + 1`,
-      updatedAt: publishedAt,
-    })
-    .where(
-      and(
-        eq(quest.id, questId),
-        eq(quest.hirerId, userId),
-        eq(quest.apiVersion, questApiVersion.v2),
-        eq(quest.questStatus, questStatus.draft)
-      )
-    )
-    .returning({ id: quest.id });
-  if (!updated) throwQuestV2PublishError('not-draft');
-
-  const updatedRow = await selectQuestV2Row(transaction, userId, questId);
-  if (!updatedRow) {
-    throw new Error(`Published Quest ${questId} could not be read back`);
-  }
-
-  const result: QuestV2PublishResponse = {
-    quest: await buildCanonicalQuest(transaction, updatedRow),
-    questEscrow: toQuestV2QuestEscrowSnapshot(reservation.id, check),
-  };
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({
-      resourceType: 'quest',
-      resourceId: questId,
-      resultData: toQuestV2PublishIdempotencySnapshot(result),
-      processingStatus: 'COMPLETED',
-      completedAt: publishedAt,
-    })
-    .where(eq(walletIdempotencyKey.id, idempotency.record.id));
-
-  return result;
+  if ('outcome' in command) return { outcome: command.outcome };
+  if (command.kind === 'success') return command.result;
+  return command.rejection.outcome === 'not-found' ? undefined : command.rejection;
 };
 
-const throwInputError = (outcome: QuestV2CreateValidationOutcome): never => {
-  throw new QuestV2InputError(outcome);
-};
+type QuestV2CreateBusinessOutcomeCode = Exclude<
+  QuestV2CreateValidationOutcome,
+  QuestCommandOutcomeCode
+>;
 
 const createQuestInTransaction = async (
   transaction: QuestTransaction,
   userId: string,
-  key: string,
   input: NormalizedCreateInput,
-  requestHash: string
+  requestHash: string,
+  rawIdempotencyKey: string,
+  now: Date
 ): Promise<QuestV2CreateOutcome> => {
-  const idempotency = await acquireQuestV2Idempotency(
+  const command = await runQuestCommand({
     transaction,
-    userId,
-    questV2CreateOperationScope,
-    key,
-    requestHash
-  );
-  if ('outcome' in idempotency) return idempotency;
+    identity: {
+      principalUserId: userId,
+      operationScope: questV2CreateOperationScope,
+      key: rawIdempotencyKey,
+      requestHash,
+    },
+    now,
+    work: async (): Promise<
+      QuestCommandWork<QuestV2CanonicalQuest, QuestV2CreateBusinessOutcomeCode>
+    > => {
+      if (input.tagId) {
+        const [existingTag] = await transaction
+          .select({ id: tag.id })
+          .from(tag)
+          .where(eq(tag.id, input.tagId))
+          .limit(1);
+        if (!existingTag) return { kind: 'rejected', rejection: 'tag-not-found' };
+      }
 
-  if (!idempotency.created && idempotency.record.resourceId) {
-    const snapshot = fromQuestV2IdempotencySnapshot(idempotency.record.resultData);
-    if (snapshot) return { quest: snapshot };
+      // The unchanged v1 storage columns are required. These compatibility values
+      // are internal and are never exposed by the v2 contract.
+      const storageCompatibility = questV2StorageCompatibility(input);
+      const [createdQuest] = await transaction
+        .insert(quest)
+        .values({
+          hirerId: userId,
+          apiVersion: questApiVersion.v2,
+          title: input.title,
+          description: input.description,
+          condition: input.conditionItems.join('\n').slice(0, 4000),
+          ...storageCompatibility,
+          v2Mode: input.mode,
+          v2Participation: input.participation,
+          questStatus: questStatus.draft,
+          questFundingTotalSatang: input.questFundingTotalSatang,
+          tagId: input.tagId,
+          headcount: input.headcount,
+          startTime: input.startTime,
+          dueAt: input.dueAt,
+          proofRequired: input.proofRequired,
+        })
+        .returning({ id: quest.id });
+      if (!createdQuest) throw new Error('Quest insert returned no row');
 
-    const replayed = await selectQuestV2Row(transaction, userId, idempotency.record.resourceId);
-    if (!replayed) return { outcome: 'idempotency-unavailable' };
+      await transaction.insert(questConditionItem).values(
+        input.conditionItems.map((text, position) => ({
+          questId: createdQuest.id,
+          position,
+          text,
+        }))
+      );
 
-    return { quest: await buildCanonicalQuest(transaction, replayed) };
-  }
+      if (input.locations.length > 0) {
+        await transaction.insert(questLocation).values(
+          input.locations.map((location) => ({
+            questId: createdQuest.id,
+            label: location.label,
+          }))
+        );
+      }
 
-  if (input.tagId) {
-    const [existingTag] = await transaction
-      .select({ id: tag.id })
-      .from(tag)
-      .where(eq(tag.id, input.tagId))
-      .limit(1);
-    if (!existingTag) throwInputError('tag-not-found');
-  }
+      const createdRow = await selectQuestV2Row(transaction, userId, createdQuest.id);
+      if (!createdRow) throw new Error(`Created Quest ${createdQuest.id} could not be read back`);
+      const canonicalQuest = await buildCanonicalQuest(transaction, createdRow);
 
-  // The unchanged v1 storage columns are required. These compatibility values
-  // are internal and are never exposed by the v2 contract.
-  const storageCompatibility = questV2StorageCompatibility(input);
-  const [createdQuest] = await transaction
-    .insert(quest)
-    .values({
-      hirerId: userId,
-      apiVersion: questApiVersion.v2,
-      title: input.title,
-      description: input.description,
-      condition: input.conditionItems.join('\n').slice(0, 4000),
-      ...storageCompatibility,
-      v2Mode: input.mode,
-      v2Participation: input.participation,
-      questStatus: questStatus.draft,
-      questFundingTotalSatang: input.questFundingTotalSatang,
-      tagId: input.tagId,
-      headcount: input.headcount,
-      startTime: input.startTime,
-      dueAt: input.dueAt,
-      proofRequired: input.proofRequired,
-    })
-    .returning({ id: quest.id });
-  if (!createdQuest) return { outcome: 'idempotency-unavailable' };
+      return {
+        kind: 'success',
+        result: canonicalQuest,
+        resourceType: 'quest',
+        resourceId: createdQuest.id,
+      };
+    },
+    toSnapshot: toQuestV2IdempotencySnapshot,
+    fromSnapshot: fromQuestV2IdempotencySnapshot,
+  });
 
-  await transaction.insert(questConditionItem).values(
-    input.conditionItems.map((text, position) => ({
-      questId: createdQuest.id,
-      position,
-      text,
-    }))
-  );
-
-  if (input.locations.length > 0) {
-    await transaction.insert(questLocation).values(
-      input.locations.map((location) => ({
-        questId: createdQuest.id,
-        label: location.label,
-      }))
-    );
-  }
-
-  const createdRow = await selectQuestV2Row(transaction, userId, createdQuest.id);
-  if (!createdRow) return { outcome: 'idempotency-unavailable' };
-  const canonicalQuest = await buildCanonicalQuest(transaction, createdRow);
-
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({
-      resourceType: 'quest',
-      resourceId: createdQuest.id,
-      resultData: toQuestV2IdempotencySnapshot(canonicalQuest),
-      processingStatus: 'COMPLETED',
-      completedAt: new Date(),
-    })
-    .where(eq(walletIdempotencyKey.id, idempotency.record.id));
-
-  return { quest: canonicalQuest };
+  if ('outcome' in command) return { outcome: command.outcome };
+  if (command.kind === 'success') return { quest: command.result };
+  return { outcome: command.rejection };
 };
 
 export const createQuestV2 = async (
@@ -2148,181 +2102,171 @@ export const createQuestV2 = async (
   data: QuestV2CreateInput,
   rawIdempotencyKey: string
 ): Promise<QuestV2CreateOutcome> => {
-  const key = rawIdempotencyKey.trim();
-  if (key.length === 0 || key.length > 200) return { outcome: 'invalid-idempotency-key' };
-
   const input = normalizeCreateInput(data);
   if ('outcome' in input) return input;
 
   const requestHash = await requestHashFor(userId, input);
-
-  try {
-    return await db.transaction((transaction) =>
-      createQuestInTransaction(transaction, userId, key, input, requestHash)
-    );
-  } catch (error) {
-    if (error instanceof QuestV2InputError) return { outcome: error.outcome };
-    throw error;
-  }
+  const now = new Date();
+  return db.transaction((transaction) =>
+    createQuestInTransaction(transaction, userId, input, requestHash, rawIdempotencyKey, now)
+  );
 };
 
-const throwEditError = (outcome: QuestV2EditOutcomeCode): never => {
-  throw new QuestV2EditError(outcome);
-};
+type QuestV2EditBusinessOutcomeCode = Exclude<QuestV2EditOutcomeCode, QuestCommandOutcomeCode>;
 
 const editQuestV2InTransaction = async (
   transaction: QuestTransaction,
   userId: string,
   questId: string,
-  key: string,
   expectedVersion: number,
   input: NormalizedEditInput,
-  requestHash: string
+  requestHash: string,
+  rawIdempotencyKey: string,
+  now: Date
 ): Promise<QuestV2EditOutcome> => {
-  const idempotency = await acquireQuestV2Idempotency(
+  // Lock before runQuestCommand: the Quest Command foreign key insert takes
+  // FOR KEY SHARE on the Quest row.
+  const lockedQuest = await lockQuestV2CommandQuest(transaction, questId);
+  if (!lockedQuest) return { outcome: 'not-found' };
+
+  const command = await runQuestCommand({
     transaction,
-    userId,
-    questV2EditOperationScope,
-    key,
-    requestHash
-  );
-  if ('outcome' in idempotency) return idempotency;
+    identity: {
+      principalUserId: userId,
+      operationScope: questV2EditOperationScope,
+      key: rawIdempotencyKey,
+      requestHash,
+      questId,
+    },
+    now,
+    work: async (): Promise<
+      QuestCommandWork<QuestV2CanonicalQuest, QuestV2EditBusinessOutcomeCode>
+    > => {
+      if (lockedQuest.hirerId !== userId) return { kind: 'rejected', rejection: 'not-found' };
 
-  if (!idempotency.created && idempotency.record.resourceId) {
-    const snapshot = fromQuestV2IdempotencySnapshot(idempotency.record.resultData);
-    if (snapshot) return { quest: snapshot };
+      const [current] = await transaction
+        .select({
+          id: quest.id,
+          version: quest.version,
+          title: quest.title,
+          description: quest.description,
+          v2Mode: quest.v2Mode,
+          v2Participation: quest.v2Participation,
+          questStatus: quest.questStatus,
+          headcount: quest.headcount,
+          startTime: quest.startTime,
+          dueAt: quest.dueAt,
+          proofRequired: quest.proofRequired,
+          tagId: quest.tagId,
+        })
+        .from(quest)
+        .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
+        .limit(1);
 
-    const replayed = await selectQuestV2Row(transaction, userId, idempotency.record.resourceId);
-    if (!replayed) return { outcome: 'idempotency-unavailable' };
+      if (!current) return { kind: 'rejected', rejection: 'not-found' };
+      if (current.questStatus !== questStatus.draft) {
+        return { kind: 'rejected', rejection: 'not-draft' };
+      }
+      if (current.version !== expectedVersion) {
+        return { kind: 'rejected', rejection: 'conflict' };
+      }
+      if (!current.v2Mode || !current.v2Participation) {
+        throw new Error(`Quest ${questId} has incomplete v2 persistence data`);
+      }
 
-    return { quest: await buildCanonicalQuest(transaction, replayed) };
-  }
+      const nextParticipation = input.participation ?? current.v2Participation;
+      const nextHeadcount = input.headcount ?? current.headcount;
+      if (!isValidQuestV2Headcount(nextParticipation, nextHeadcount)) {
+        return { kind: 'rejected', rejection: 'invalid-headcount' };
+      }
 
-  const [current] = await transaction
-    .select({
-      id: quest.id,
-      version: quest.version,
-      title: quest.title,
-      description: quest.description,
-      v2Mode: quest.v2Mode,
-      v2Participation: quest.v2Participation,
-      questStatus: quest.questStatus,
-      headcount: quest.headcount,
-      startTime: quest.startTime,
-      dueAt: quest.dueAt,
-      proofRequired: quest.proofRequired,
-      tagId: quest.tagId,
-    })
-    .from(quest)
-    .where(
-      and(
-        eq(quest.id, questId),
-        eq(quest.hirerId, userId),
-        eq(quest.apiVersion, questApiVersion.v2)
-      )
-    )
-    .limit(1)
-    .for('update');
+      const nextStartTime = input.startTime ?? current.startTime;
+      const nextDueAt = input.dueAt === undefined ? current.dueAt : input.dueAt;
+      if (nextDueAt !== null && nextDueAt <= nextStartTime) {
+        return { kind: 'rejected', rejection: 'invalid-dates' };
+      }
 
-  if (!current) throwEditError('not-found');
-  if (current.questStatus !== questStatus.draft) throwEditError('not-draft');
-  if (current.version !== expectedVersion) throwEditError('conflict');
-  if (!current.v2Mode || !current.v2Participation) {
-    throw new Error(`Quest ${questId} has incomplete v2 persistence data`);
-  }
+      if (input.tagId) {
+        const [existingTag] = await transaction
+          .select({ id: tag.id })
+          .from(tag)
+          .where(eq(tag.id, input.tagId))
+          .limit(1);
+        if (!existingTag) return { kind: 'rejected', rejection: 'tag-not-found' };
+      }
 
-  const nextParticipation = input.participation ?? current.v2Participation;
-  const nextHeadcount = input.headcount ?? current.headcount;
-  if (!isValidQuestV2Headcount(nextParticipation, nextHeadcount)) {
-    throwEditError('invalid-headcount');
-  }
+      const updates: Partial<Omit<typeof quest.$inferInsert, 'version'>> = { updatedAt: now };
 
-  const nextStartTime = input.startTime ?? current.startTime;
-  const nextDueAt = input.dueAt === undefined ? current.dueAt : input.dueAt;
-  if (nextDueAt !== null && nextDueAt <= nextStartTime) throwEditError('invalid-dates');
+      if (input.title !== undefined) updates.title = input.title;
+      if (input.description !== undefined) updates.description = input.description;
+      if (input.questFundingTotalSatang !== undefined) {
+        updates.questFundingTotalSatang = input.questFundingTotalSatang;
+      }
+      if (input.headcount !== undefined) updates.headcount = input.headcount;
+      if (input.startTime !== undefined) updates.startTime = input.startTime;
+      if (input.dueAt !== undefined) updates.dueAt = input.dueAt;
+      if (input.tagId !== undefined) updates.tagId = input.tagId;
+      if (input.proofRequired !== undefined) updates.proofRequired = input.proofRequired;
 
-  if (input.tagId) {
-    const [existingTag] = await transaction
-      .select({ id: tag.id })
-      .from(tag)
-      .where(eq(tag.id, input.tagId))
-      .limit(1);
-    if (!existingTag) throwEditError('tag-not-found');
-  }
+      if (input.mode !== undefined || input.participation !== undefined) {
+        const storageCompatibility = questV2StorageCompatibility({
+          mode: input.mode ?? current.v2Mode,
+          participation: nextParticipation,
+        });
+        updates.mode = storageCompatibility.mode;
+        updates.participation = storageCompatibility.participation;
+        updates.v2Mode = input.mode ?? current.v2Mode;
+        updates.v2Participation = nextParticipation;
+      }
 
-  const now = new Date();
-  const updates: Partial<Omit<typeof quest.$inferInsert, 'version'>> = { updatedAt: now };
+      if (input.conditionItems !== undefined) {
+        updates.condition = input.conditionItems.join('\n').slice(0, 4000);
+        await transaction.delete(questConditionItem).where(eq(questConditionItem.questId, questId));
+        await transaction
+          .insert(questConditionItem)
+          .values(input.conditionItems.map((text, position) => ({ questId, position, text })));
+      }
 
-  if (input.title !== undefined) updates.title = input.title;
-  if (input.description !== undefined) updates.description = input.description;
-  if (input.questFundingTotalSatang !== undefined) {
-    updates.questFundingTotalSatang = input.questFundingTotalSatang;
-  }
-  if (input.headcount !== undefined) updates.headcount = input.headcount;
-  if (input.startTime !== undefined) updates.startTime = input.startTime;
-  if (input.dueAt !== undefined) updates.dueAt = input.dueAt;
-  if (input.tagId !== undefined) updates.tagId = input.tagId;
-  if (input.proofRequired !== undefined) updates.proofRequired = input.proofRequired;
+      if (input.locations !== undefined) {
+        await transaction.delete(questLocation).where(eq(questLocation.questId, questId));
+        if (input.locations.length > 0) {
+          await transaction
+            .insert(questLocation)
+            .values(input.locations.map((location) => ({ questId, label: location.label })));
+        }
+      }
 
-  if (input.mode !== undefined || input.participation !== undefined) {
-    const storageCompatibility = questV2StorageCompatibility({
-      mode: input.mode ?? current.v2Mode,
-      participation: nextParticipation,
-    });
-    updates.mode = storageCompatibility.mode;
-    updates.participation = storageCompatibility.participation;
-    updates.v2Mode = input.mode ?? current.v2Mode;
-    updates.v2Participation = nextParticipation;
-  }
+      const [updated] = await transaction
+        .update(quest)
+        .set({ ...updates, version: sql`${quest.version} + 1` })
+        .where(
+          and(
+            eq(quest.id, questId),
+            eq(quest.hirerId, userId),
+            eq(quest.apiVersion, questApiVersion.v2),
+            eq(quest.questStatus, questStatus.draft),
+            eq(quest.version, expectedVersion)
+          )
+        )
+        .returning({ id: quest.id });
+      if (!updated) return { kind: 'rejected', rejection: 'conflict' };
 
-  if (input.conditionItems !== undefined) {
-    updates.condition = input.conditionItems.join('\n').slice(0, 4000);
-    await transaction.delete(questConditionItem).where(eq(questConditionItem.questId, questId));
-    await transaction
-      .insert(questConditionItem)
-      .values(input.conditionItems.map((text, position) => ({ questId, position, text })));
-  }
+      const updatedRow = await selectQuestV2Row(transaction, userId, questId);
+      if (!updatedRow) throw new Error(`Updated Quest ${questId} could not be read back`);
+      return {
+        kind: 'success',
+        result: await buildCanonicalQuest(transaction, updatedRow),
+        resourceType: 'quest',
+        resourceId: questId,
+      };
+    },
+    toSnapshot: toQuestV2IdempotencySnapshot,
+    fromSnapshot: fromQuestV2IdempotencySnapshot,
+  });
 
-  if (input.locations !== undefined) {
-    await transaction.delete(questLocation).where(eq(questLocation.questId, questId));
-    if (input.locations.length > 0) {
-      await transaction
-        .insert(questLocation)
-        .values(input.locations.map((location) => ({ questId, label: location.label })));
-    }
-  }
-
-  const [updated] = await transaction
-    .update(quest)
-    .set({ ...updates, version: sql`${quest.version} + 1` })
-    .where(
-      and(
-        eq(quest.id, questId),
-        eq(quest.hirerId, userId),
-        eq(quest.apiVersion, questApiVersion.v2),
-        eq(quest.questStatus, questStatus.draft),
-        eq(quest.version, expectedVersion)
-      )
-    )
-    .returning({ id: quest.id });
-  if (!updated) throwEditError('conflict');
-
-  const updatedRow = await selectQuestV2Row(transaction, userId, questId);
-  if (!updatedRow) return { outcome: 'idempotency-unavailable' };
-  const canonicalQuest = await buildCanonicalQuest(transaction, updatedRow);
-
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({
-      resourceType: 'quest',
-      resourceId: questId,
-      resultData: toQuestV2IdempotencySnapshot(canonicalQuest),
-      processingStatus: 'COMPLETED',
-      completedAt: now,
-    })
-    .where(eq(walletIdempotencyKey.id, idempotency.record.id));
-
-  return { quest: canonicalQuest };
+  if ('outcome' in command) return { outcome: command.outcome };
+  if (command.kind === 'success') return { quest: command.result };
+  return { outcome: command.rejection };
 };
 
 export const editQuestV2 = async (
@@ -2332,8 +2276,6 @@ export const editQuestV2 = async (
   expectedVersion: number,
   rawIdempotencyKey: string
 ): Promise<QuestV2EditOutcome> => {
-  const key = rawIdempotencyKey.trim();
-  if (key.length === 0 || key.length > 200) return { outcome: 'invalid-idempotency-key' };
   if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
     return { outcome: 'invalid-version' };
   }
@@ -2342,23 +2284,19 @@ export const editQuestV2 = async (
   if ('outcome' in input) return input;
 
   const requestHash = await editRequestHashFor(userId, questId, expectedVersion, input);
-
-  try {
-    return await db.transaction((transaction) =>
-      editQuestV2InTransaction(
-        transaction,
-        userId,
-        questId,
-        key,
-        expectedVersion,
-        input,
-        requestHash
-      )
-    );
-  } catch (error) {
-    if (error instanceof QuestV2EditError) return { outcome: error.outcome };
-    throw error;
-  }
+  const now = new Date();
+  return db.transaction((transaction) =>
+    editQuestV2InTransaction(
+      transaction,
+      userId,
+      questId,
+      expectedVersion,
+      input,
+      requestHash,
+      rawIdempotencyKey,
+      now
+    )
+  );
 };
 
 const publishRequestHashFor = (userId: string, questId: string): Promise<string> =>
@@ -2375,28 +2313,11 @@ export const publishQuestV2 = async (
   questId: string,
   rawIdempotencyKey: string
 ): Promise<QuestV2PublishOutcome | undefined> => {
-  const key = rawIdempotencyKey.trim();
-  if (key.length === 0 || key.length > 200) {
-    return { outcome: 'invalid-idempotency-key' };
-  }
-
   const requestHash = await publishRequestHashFor(userId, questId);
-
-  try {
-    return await db.transaction((transaction) =>
-      publishQuestV2InTransaction(transaction, userId, questId, key, requestHash)
-    );
-  } catch (error) {
-    if (!(error instanceof QuestV2PublishError)) throw error;
-    if (error.outcome === 'not-found') return undefined;
-    if (error.outcome === 'blocked') {
-      if (!error.check) {
-        throw new Error('Blocked Quest publish is missing its readiness check', { cause: error });
-      }
-      return { outcome: 'blocked', check: error.check };
-    }
-    return { outcome: error.outcome };
-  }
+  const now = new Date();
+  return db.transaction((transaction) =>
+    publishQuestV2InTransaction(transaction, userId, questId, rawIdempotencyKey, requestHash, now)
+  );
 };
 
 const activeWorkerCountExpression = sql<number>`(

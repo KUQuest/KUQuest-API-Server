@@ -1,11 +1,15 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { quest, questConditionItem, questImage } from '@/database/schema/quest.schema';
+import {
+  quest,
+  questCommand,
+  questConditionItem,
+  questImage,
+} from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
   walletFundingReservation,
-  walletIdempotencyKey,
   walletLedgerAccount,
   walletLedgerPosting,
   walletLedgerTransaction,
@@ -264,13 +268,9 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.principalUserId, hirerId));
-  await db
-    .delete(walletIdempotencyKey)
-    .where(eq(walletIdempotencyKey.principalUserId, otherMemberId));
-  await db
-    .delete(walletIdempotencyKey)
-    .where(eq(walletIdempotencyKey.principalUserId, noWalletMemberId));
+  await db.delete(questCommand).where(eq(questCommand.principalUserId, hirerId));
+  await db.delete(questCommand).where(eq(questCommand.principalUserId, otherMemberId));
+  await db.delete(questCommand).where(eq(questCommand.principalUserId, noWalletMemberId));
   await db
     .update(walletWallet)
     .set({ walletStatus: 'ACTIVE' })
@@ -282,13 +282,9 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.principalUserId, hirerId));
-  await db
-    .delete(walletIdempotencyKey)
-    .where(eq(walletIdempotencyKey.principalUserId, otherMemberId));
-  await db
-    .delete(walletIdempotencyKey)
-    .where(eq(walletIdempotencyKey.principalUserId, noWalletMemberId));
+  await db.delete(questCommand).where(eq(questCommand.principalUserId, hirerId));
+  await db.delete(questCommand).where(eq(questCommand.principalUserId, otherMemberId));
+  await db.delete(questCommand).where(eq(questCommand.principalUserId, noWalletMemberId));
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(tag).where(eq(tag.id, retryTagId));
@@ -369,17 +365,20 @@ describe('Quest API v2 persistence', () => {
     });
 
     const [storedIdempotency] = await db
-      .select({ resultData: walletIdempotencyKey.resultData })
-      .from(walletIdempotencyKey)
+      .select({ resultData: questCommand.resultData })
+      .from(questCommand)
       .where(
         and(
-          eq(walletIdempotencyKey.principalUserId, hirerId),
-          eq(walletIdempotencyKey.operationScope, questV2CreateOperationScope),
-          eq(walletIdempotencyKey.key, 'v2-create-1')
+          eq(questCommand.principalUserId, hirerId),
+          eq(questCommand.operationScope, questV2CreateOperationScope),
+          eq(questCommand.key, 'v2-create-1')
         )
       );
-    expect(storedIdempotency?.resultData).toMatchObject({ questFundingTotalSatang: 103 });
-    expect(storedIdempotency?.resultData).not.toHaveProperty('questFundingTotal');
+    expect(storedIdempotency?.resultData).toMatchObject({
+      kind: 'success',
+      result: { questFundingTotalSatang: 103 },
+    });
+    expect(storedIdempotency?.resultData).not.toHaveProperty('result.questFundingTotal');
 
     const conditionRows = await db
       .select({ position: questConditionItem.position, text: questConditionItem.text })
@@ -508,13 +507,13 @@ describe('Quest API v2 persistence', () => {
     });
 
     const [storedIdempotency] = await db
-      .select({ id: walletIdempotencyKey.id, resultData: walletIdempotencyKey.resultData })
-      .from(walletIdempotencyKey)
+      .select({ id: questCommand.id, resultData: questCommand.resultData })
+      .from(questCommand)
       .where(
         and(
-          eq(walletIdempotencyKey.principalUserId, hirerId),
-          eq(walletIdempotencyKey.operationScope, questV2CreateOperationScope),
-          eq(walletIdempotencyKey.key, 'v2-http-create-1')
+          eq(questCommand.principalUserId, hirerId),
+          eq(questCommand.operationScope, questV2CreateOperationScope),
+          eq(questCommand.key, 'v2-http-create-1')
         )
       );
     if (!storedIdempotency) throw new Error('Missing create idempotency record');
@@ -525,16 +524,20 @@ describe('Quest API v2 persistence', () => {
     ) {
       throw new Error('Missing create idempotency snapshot');
     }
+    const resultData = storedIdempotency.resultData as Record<string, unknown>;
     await db
-      .update(walletIdempotencyKey)
+      .update(questCommand)
       .set({
         resultData: {
-          ...(storedIdempotency.resultData as Record<string, unknown>),
-          startTime: '2030-08-26T03:00:00.000Z',
-          dueAt: '2030-08-26T05:00:00.000Z',
+          ...resultData,
+          result: {
+            ...(resultData.result as Record<string, unknown>),
+            startTime: '2030-08-26T03:00:00.000Z',
+            dueAt: '2030-08-26T05:00:00.000Z',
+          },
         },
       })
-      .where(eq(walletIdempotencyKey.id, storedIdempotency.id));
+      .where(eq(questCommand.id, storedIdempotency.id));
 
     const replay = await app.handle(
       new Request('http://localhost/api/v2/quests', {
@@ -1189,7 +1192,7 @@ describe('Quest API v2 Draft editing', () => {
     expect(await getQuestV2Detail(hirerId, created.quest.id)).toEqual(before);
   });
 
-  it('allows the same idempotency key to retry after a transaction rollback', async () => {
+  it('persists a rejected edit command and requires a new key after correction', async () => {
     const created = await createQuestV2(hirerId, baseInput, `v2-edit-retry-create-${randomUUID()}`);
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -1203,20 +1206,31 @@ describe('Quest API v2 Draft editing', () => {
       error: { code: 'TAG_NOT_FOUND', message: 'Tag not found' },
     });
 
-    const [rolledBackIdempotency] = await db
-      .select({ id: walletIdempotencyKey.id })
-      .from(walletIdempotencyKey)
+    const [storedCommand] = await db
+      .select({ id: questCommand.id, resultData: questCommand.resultData })
+      .from(questCommand)
       .where(
         and(
-          eq(walletIdempotencyKey.principalUserId, hirerId),
-          eq(walletIdempotencyKey.operationScope, questV2EditOperationScope),
-          eq(walletIdempotencyKey.key, key)
+          eq(questCommand.principalUserId, hirerId),
+          eq(questCommand.operationScope, questV2EditOperationScope),
+          eq(questCommand.key, key)
         )
       );
-    expect(rolledBackIdempotency).toBeUndefined();
+    expect(storedCommand).toBeDefined();
+    expect(storedCommand?.resultData).toEqual({
+      kind: 'rejected',
+      rejection: 'tag-not-found',
+    });
 
     await db.insert(tag).values({ id: retryTagId, name: `Retry Tag ${retryTagId}` });
-    const retried = await patchQuest(created.quest.id, edit, 1, key);
+    const replayed = await patchQuest(created.quest.id, edit, 1, key);
+    expect(replayed.status).toBe(400);
+    expect(await replayed.json()).toEqual({
+      success: false,
+      error: { code: 'TAG_NOT_FOUND', message: 'Tag not found' },
+    });
+
+    const retried = await patchQuest(created.quest.id, edit, 1, `${key}-after-rejection`);
     expect(retried.status).toBe(200);
     expect((await retried.json()).data).toMatchObject({
       version: 2,
@@ -1240,13 +1254,13 @@ describe('Quest API v2 Draft editing', () => {
     const firstBody = await first.json();
 
     const [storedIdempotency] = await db
-      .select({ id: walletIdempotencyKey.id, resultData: walletIdempotencyKey.resultData })
-      .from(walletIdempotencyKey)
+      .select({ id: questCommand.id, resultData: questCommand.resultData })
+      .from(questCommand)
       .where(
         and(
-          eq(walletIdempotencyKey.principalUserId, hirerId),
-          eq(walletIdempotencyKey.operationScope, questV2EditOperationScope),
-          eq(walletIdempotencyKey.key, key)
+          eq(questCommand.principalUserId, hirerId),
+          eq(questCommand.operationScope, questV2EditOperationScope),
+          eq(questCommand.key, key)
         )
       );
     if (!storedIdempotency) throw new Error('Missing edit idempotency record');
@@ -1257,16 +1271,20 @@ describe('Quest API v2 Draft editing', () => {
     ) {
       throw new Error('Missing edit idempotency snapshot');
     }
+    const resultData = storedIdempotency.resultData as Record<string, unknown>;
     await db
-      .update(walletIdempotencyKey)
+      .update(questCommand)
       .set({
         resultData: {
-          ...(storedIdempotency.resultData as Record<string, unknown>),
-          startTime: '2030-08-26T03:00:00.000Z',
-          dueAt: '2030-08-26T05:00:00.000Z',
+          ...resultData,
+          result: {
+            ...(resultData.result as Record<string, unknown>),
+            startTime: '2030-08-26T03:00:00.000Z',
+            dueAt: '2030-08-26T05:00:00.000Z',
+          },
         },
       })
-      .where(eq(walletIdempotencyKey.id, storedIdempotency.id));
+      .where(eq(questCommand.id, storedIdempotency.id));
 
     const later = await patchQuest(
       created.quest.id,
@@ -1286,7 +1304,7 @@ describe('Quest API v2 Draft editing', () => {
       success: false,
       error: {
         code: 'IDEMPOTENCY_KEY_REUSED',
-        message: 'Idempotency key was used with a different request',
+        message: 'The Idempotency-Key was used for a different request',
       },
     });
   });

@@ -161,33 +161,6 @@ const serializeQuestV2Images = (
   }
 };
 
-type IdempotencyOutcome =
-  | 'invalid-idempotency-key'
-  | 'idempotency-key-reused'
-  | 'idempotency-in-progress'
-  | 'idempotency-unavailable';
-
-const mapIdempotencyOutcome = (
-  set: AuthedContext['set'],
-  outcome: IdempotencyOutcome,
-  inProgressMessage: string
-): ReturnType<typeof apiError> => {
-  if (outcome === 'idempotency-key-reused') {
-    set.status = 409;
-    return apiError('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request');
-  }
-  if (outcome === 'idempotency-in-progress') {
-    set.status = 409;
-    return apiError('IDEMPOTENCY_IN_PROGRESS', inProgressMessage);
-  }
-  if (outcome === 'idempotency-unavailable') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency record is unavailable');
-  }
-
-  return invalidInput(set, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency key must not be empty');
-};
-
 const mapQuestV2ImageMutationOutcome = (
   set: AuthedContext['set'],
   outcome:
@@ -212,7 +185,7 @@ const mapQuestV2ImageMutationOutcome = (
     return apiError('QUEST_IMAGE_LIMIT_REACHED', 'A Quest can have at most 3 images');
   }
 
-  return mapIdempotencyOutcome(set, outcome, 'A Quest Image operation is still processing');
+  return mapQuestCommandOutcome(set, outcome, 'A Quest Image operation is still processing');
 };
 
 const mapQuestV2ImageStorageError = (set: AuthedContext['set'], error: unknown) => {
@@ -275,7 +248,7 @@ const mapCreateOutcome = (
     outcome === 'idempotency-unavailable' ||
     outcome === 'invalid-idempotency-key'
   ) {
-    return mapIdempotencyOutcome(
+    return mapQuestCommandOutcome(
       set,
       outcome,
       'A Quest with this idempotency key is still processing'
@@ -326,7 +299,7 @@ const mapEditOutcome = (
     outcome === 'idempotency-unavailable' ||
     outcome === 'invalid-idempotency-key'
   ) {
-    return mapIdempotencyOutcome(
+    return mapQuestCommandOutcome(
       set,
       outcome,
       'A Quest edit with this idempotency key is still processing'
@@ -840,7 +813,7 @@ export const publishQuestV2Controller = async ({
       set.status = 409;
       return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be published');
     }
-    return mapIdempotencyOutcome(
+    return mapQuestCommandOutcome(
       set,
       result.outcome,
       'A Quest publish with this idempotency key is still processing'
