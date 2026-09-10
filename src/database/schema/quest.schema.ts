@@ -64,13 +64,12 @@ export const quest = pgTable(
     condition: varchar('condition', { length: 4000 }).notNull(),
     mode: questMode('mode').notNull(),
     participation: questParticipation('participation').default('SOLO').notNull(),
-    v2Mode: varchar('v2_mode', { length: 32 }).$type<
-      'FIRST_COME_FIRST_SERVED' | 'CANDIDATE'
-    >(),
-    v2Participation: varchar('v2_participation', { length: 16 }).$type<
-      'SINGLE' | 'GROUP'
-    >(),
-    questStatus: questStatus('quest_status').$type<ActiveQuestStatus>().default('QUEST_DRAFT').notNull(),
+    v2Mode: varchar('v2_mode', { length: 32 }).$type<'FIRST_COME_FIRST_SERVED' | 'CANDIDATE'>(),
+    v2Participation: varchar('v2_participation', { length: 16 }).$type<'SINGLE' | 'GROUP'>(),
+    questStatus: questStatus('quest_status')
+      .$type<ActiveQuestStatus>()
+      .default('QUEST_DRAFT')
+      .notNull(),
     version: integer('version').default(1).notNull(),
     rewardSatang: integer('reward_satang'),
     questFundingTotalSatang: integer('quest_funding_total_satang'),
@@ -99,34 +98,46 @@ export const quest = pgTable(
     check('quest_api_version_check', sql`${table.apiVersion} IN ('v1', 'v2')`),
     check(
       'quest_v2_mode_check',
-      sql`${table.v2Mode} IS NULL OR ${table.v2Mode} IN ('FIRST_COME_FIRST_SERVED', 'CANDIDATE')`,
+      sql`${table.v2Mode} IS NULL OR ${table.v2Mode} IN ('FIRST_COME_FIRST_SERVED', 'CANDIDATE')`
     ),
     check(
       'quest_v2_participation_check',
-      sql`${table.v2Participation} IS NULL OR ${table.v2Participation} IN ('SINGLE', 'GROUP')`,
+      sql`${table.v2Participation} IS NULL OR ${table.v2Participation} IN ('SINGLE', 'GROUP')`
     ),
     check('quest_version_check', sql`${table.version} >= 1`),
     check(
       'quest_funding_total_check',
-      sql`${table.questFundingTotalSatang} IS NULL OR ${table.questFundingTotalSatang} BETWEEN 100 AND 70000000`,
+      sql`${table.questFundingTotalSatang} IS NULL OR ${table.questFundingTotalSatang} BETWEEN 100 AND 70000000`
     ),
     check('quest_reward_check', sql`${table.rewardSatang} IS NULL OR ${table.rewardSatang} > 0`),
     check(
       'quest_v2_draft_reward_check',
-      sql`${table.apiVersion} <> 'v2' OR ${table.questStatus} <> 'QUEST_DRAFT' OR ${table.rewardSatang} IS NULL`,
+      sql`${table.apiVersion} <> 'v2' OR ${table.questStatus} <> 'QUEST_DRAFT' OR ${table.rewardSatang} IS NULL`
     ),
     check(
       'quest_reward_required_check',
       sql`(
         (${table.apiVersion} = 'v2' AND ${table.questStatus} IN ('QUEST_DRAFT', 'QUEST_CANCELLED') AND ${table.fundingReservationId} IS NULL)
         OR ${table.rewardSatang} IS NOT NULL
-      )`,
+      )`
     ),
-    check('quest_finance_snapshot_bps_check', sql`${table.platformFeeBps} IS NULL OR ${table.platformFeeBps} BETWEEN 0 AND 10000`),
-    check('quest_finance_snapshot_amounts_check', sql`${table.platformFeePerWorkerSatang} IS NULL OR ${table.platformFeePerWorkerSatang} >= 0`),
-    check('quest_finance_snapshot_escrow_check', sql`${table.questEscrowSatang} IS NULL OR ${table.questEscrowSatang} > 0`),
+    check(
+      'quest_finance_snapshot_bps_check',
+      sql`${table.platformFeeBps} IS NULL OR ${table.platformFeeBps} BETWEEN 0 AND 10000`
+    ),
+    check(
+      'quest_finance_snapshot_amounts_check',
+      sql`${table.platformFeePerWorkerSatang} IS NULL OR ${table.platformFeePerWorkerSatang} >= 0`
+    ),
+    check(
+      'quest_finance_snapshot_escrow_check',
+      sql`${table.questEscrowSatang} IS NULL OR ${table.questEscrowSatang} > 0`
+    ),
     check('quest_headcount_check', sql`${table.headcount} > 0`),
-    check('quest_failed_at_check', sql`(${table.failedAt} IS NOT NULL) = (${table.questStatus} = 'QUEST_FAILED')`),
+    check(
+      'quest_failed_at_check',
+      sql`(${table.failedAt} IS NOT NULL) = (${table.questStatus} = 'QUEST_FAILED')`
+    ),
     check(
       'quest_participation_headcount_check',
       sql`(
@@ -139,31 +150,31 @@ export const quest = pgTable(
           (${table.v2Participation} = 'SINGLE' AND ${table.headcount} = 1) OR
           (${table.v2Participation} = 'GROUP' AND ${table.headcount} BETWEEN 2 AND 20)
         )
-      )`,
+      )`
     ),
     check('quest_due_at_check', sql`${table.dueAt} IS NULL OR ${table.dueAt} > ${table.startTime}`),
     check(
       'quest_tag_check',
-      sql`${table.questStatus} IN ('QUEST_DRAFT', 'QUEST_CANCELLED') OR ${table.tagId} IS NOT NULL`,
+      sql`${table.questStatus} IN ('QUEST_DRAFT', 'QUEST_CANCELLED') OR ${table.tagId} IS NOT NULL`
     ),
     check(
       'quest_cancelled_by_check',
-      sql`num_nonnulls(${table.cancelledByUserId}, ${table.cancelledByAdminId}) <= 1`,
+      sql`num_nonnulls(${table.cancelledByUserId}, ${table.cancelledByAdminId}) <= 1`
     ),
     check(
       'quest_cancelled_at_check',
-      sql`(${table.cancelledAt} IS NULL) = (${table.questStatus} <> 'QUEST_CANCELLED')`,
+      sql`(${table.cancelledAt} IS NULL) = (${table.questStatus} <> 'QUEST_CANCELLED')`
     ),
     check(
       'quest_hidden_by_check',
-      sql`(${table.hiddenByAdminId} IS NULL) = (${table.hiddenAt} IS NULL)`,
+      sql`(${table.hiddenByAdminId} IS NULL) = (${table.hiddenAt} IS NULL)`
     ),
     index('quest_hirer_id_idx').on(table.hirerId),
     index('quest_status_idx').on(table.questStatus),
     index('quest_mode_idx').on(table.mode),
     index('quest_tag_id_idx').on(table.tagId),
     index('quest_start_time_idx').on(table.startTime),
-  ],
+  ]
 );
 
 export const questConditionItem = pgTable(
@@ -181,7 +192,7 @@ export const questConditionItem = pgTable(
     check('quest_condition_item_text_check', sql`btrim(${table.text}) <> ''`),
     unique('quest_condition_item_quest_id_position_key').on(table.questId, table.position),
     index('quest_condition_item_quest_id_idx').on(table.questId),
-  ],
+  ]
 );
 
 export const review = pgTable(
@@ -209,11 +220,11 @@ export const review = pgTable(
     unique('review_quest_reviewer_reviewee_key').on(
       table.questId,
       table.reviewerId,
-      table.revieweeId,
+      table.revieweeId
     ),
     index('review_quest_id_idx').on(table.questId),
     index('review_reviewee_id_idx').on(table.revieweeId),
-  ],
+  ]
 );
 
 /** Durable command identity and replay result for v2 Rating Review commands. */
@@ -232,9 +243,7 @@ export const questV2ReviewCommand = pgTable(
     requestHash: varchar('request_hash', { length: 64 }).notNull(),
     resourceId: uuid('resource_id'),
     resultData: jsonb('result_data'),
-    processingStatus: varchar('processing_status', { length: 32 })
-      .default('PROCESSING')
-      .notNull(),
+    processingStatus: varchar('processing_status', { length: 32 }).default('PROCESSING').notNull(),
     createdAt: time('created_at').defaultNow().notNull(),
     completedAt: time('completed_at'),
     expiresAt: time('expires_at').notNull(),
@@ -242,22 +251,19 @@ export const questV2ReviewCommand = pgTable(
   (table) => [
     check('quest_v2_review_command_key_check', sql`btrim(${table.key}) <> ''`),
     check('quest_v2_review_command_operation_check', sql`btrim(${table.operation}) <> ''`),
-    check(
-      'quest_v2_review_command_hash_check',
-      sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
-    ),
+    check('quest_v2_review_command_hash_check', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
     check(
       'quest_v2_review_command_status_check',
-      sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`,
+      sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`
     ),
     check(
       'quest_v2_review_command_completion_check',
-      sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`,
+      sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`
     ),
     index('quest_v2_review_command_quest_idx').on(table.questId),
     index('quest_v2_review_command_principal_idx').on(table.principalUserId),
     index('quest_v2_review_command_expiry_idx').on(table.expiresAt),
-  ],
+  ]
 );
 
 export const questLocation = pgTable(
@@ -269,7 +275,7 @@ export const questLocation = pgTable(
       .references(() => quest.id, { onDelete: 'cascade' }),
     label: varchar('label', { length: 100 }),
   },
-  (table) => [index('quest_location_quest_id_idx').on(table.questId)],
+  (table) => [index('quest_location_quest_id_idx').on(table.questId)]
 );
 
 export const questImage = pgTable(
@@ -287,7 +293,7 @@ export const questImage = pgTable(
   (table) => [
     unique('quest_image_quest_id_position_key').on(table.questId, table.position),
     index('quest_image_quest_id_idx').on(table.questId),
-  ],
+  ]
 );
 
 export const questEditRequest = pgTable(
@@ -311,13 +317,13 @@ export const questEditRequest = pgTable(
   (table) => [
     check(
       'quest_edit_request_status_check',
-      sql`${table.requestStatus} IN ('EDIT_REQUEST_PENDING', 'EDIT_REQUEST_APPROVED', 'EDIT_REQUEST_REJECTED')`,
+      sql`${table.requestStatus} IN ('EDIT_REQUEST_PENDING', 'EDIT_REQUEST_APPROVED', 'EDIT_REQUEST_REJECTED')`
     ),
     index('quest_edit_request_quest_idx').on(table.questId),
     uniqueIndex('quest_edit_request_one_pending_uidx')
       .on(table.questId)
       .where(sql`${table.requestStatus} = 'EDIT_REQUEST_PENDING'`),
-  ],
+  ]
 );
 
 export const questEditRequestResponse = pgTable(
@@ -336,14 +342,11 @@ export const questEditRequestResponse = pgTable(
   (table) => [
     check(
       'quest_edit_request_response_decision_check',
-      sql`${table.decision} IN ('EDIT_RESPONSE_APPROVED', 'EDIT_RESPONSE_REJECTED')`,
+      sql`${table.decision} IN ('EDIT_RESPONSE_APPROVED', 'EDIT_RESPONSE_REJECTED')`
     ),
-    unique('quest_edit_request_response_request_id_user_id_key').on(
-      table.requestId,
-      table.userId,
-    ),
+    unique('quest_edit_request_response_request_id_user_id_key').on(table.requestId, table.userId),
     index('quest_edit_request_response_request_idx').on(table.requestId),
-  ],
+  ]
 );
 
 export const questV2EditRequest = pgTable(
@@ -370,30 +373,30 @@ export const questV2EditRequest = pgTable(
   (table) => [
     check(
       'quest_v2_edit_request_status_check',
-      sql`${table.requestStatus} IN ('EDIT_REQUEST_PENDING', 'EDIT_REQUEST_APPLIED', 'EDIT_REQUEST_FAILED')`,
+      sql`${table.requestStatus} IN ('EDIT_REQUEST_PENDING', 'EDIT_REQUEST_APPLIED', 'EDIT_REQUEST_FAILED')`
     ),
     check(
       'quest_v2_edit_request_failure_code_check',
-      sql`${table.failureCode} IS NULL OR ${table.failureCode} IN ('EDIT_REQUEST_DECLINED', 'EDIT_REQUEST_TIMEOUT', 'ACTIVE_WORKER_LEFT')`,
+      sql`${table.failureCode} IS NULL OR ${table.failureCode} IN ('EDIT_REQUEST_DECLINED', 'EDIT_REQUEST_TIMEOUT', 'ACTIVE_WORKER_LEFT')`
     ),
     check('quest_v2_edit_request_expiry_check', sql`${table.expiresAt} > ${table.createdAt}`),
     check(
       'quest_v2_edit_request_applied_at_check',
-      sql`(${table.appliedAt} IS NOT NULL) = (${table.requestStatus} = 'EDIT_REQUEST_APPLIED')`,
+      sql`(${table.appliedAt} IS NOT NULL) = (${table.requestStatus} = 'EDIT_REQUEST_APPLIED')`
     ),
     check(
       'quest_v2_edit_request_failed_at_check',
-      sql`(${table.failedAt} IS NOT NULL) = (${table.requestStatus} = 'EDIT_REQUEST_FAILED')`,
+      sql`(${table.failedAt} IS NOT NULL) = (${table.requestStatus} = 'EDIT_REQUEST_FAILED')`
     ),
     check(
       'quest_v2_edit_request_failure_status_check',
-      sql`(${table.failureCode} IS NOT NULL) = (${table.requestStatus} = 'EDIT_REQUEST_FAILED')`,
+      sql`(${table.failureCode} IS NOT NULL) = (${table.requestStatus} = 'EDIT_REQUEST_FAILED')`
     ),
     index('quest_v2_edit_request_quest_idx').on(table.questId),
     uniqueIndex('quest_v2_edit_request_one_pending_uidx')
       .on(table.questId)
       .where(sql`${table.requestStatus} = 'EDIT_REQUEST_PENDING'`),
-  ],
+  ]
 );
 
 export const questV2EditRequestResponse = pgTable(
@@ -415,23 +418,20 @@ export const questV2EditRequestResponse = pgTable(
   (table) => [
     check(
       'quest_v2_edit_request_response_decision_check',
-      sql`${table.decision} IS NULL OR ${table.decision} IN ('EDIT_RESPONSE_ACCEPTED', 'EDIT_RESPONSE_DECLINED')`,
+      sql`${table.decision} IS NULL OR ${table.decision} IN ('EDIT_RESPONSE_ACCEPTED', 'EDIT_RESPONSE_DECLINED')`
     ),
     check(
       'quest_v2_edit_request_response_reason_check',
-      sql`${table.reason} IS NULL OR (${table.decision} = 'EDIT_RESPONSE_DECLINED' AND btrim(${table.reason}) <> '')`,
+      sql`${table.reason} IS NULL OR (${table.decision} = 'EDIT_RESPONSE_DECLINED' AND btrim(${table.reason}) <> '')`
     ),
     check(
       'quest_v2_edit_request_response_responded_at_check',
-      sql`(${table.respondedAt} IS NOT NULL) = (${table.decision} IS NOT NULL)`,
+      sql`(${table.respondedAt} IS NOT NULL) = (${table.decision} IS NOT NULL)`
     ),
-    unique('quest_v2_edit_request_response_request_worker_key').on(
-      table.requestId,
-      table.workerId,
-    ),
+    unique('quest_v2_edit_request_response_request_worker_key').on(table.requestId, table.workerId),
     index('quest_v2_edit_request_response_request_idx').on(table.requestId),
     index('quest_v2_edit_request_response_worker_idx').on(table.workerId),
-  ],
+  ]
 );
 
 export const questEditHistory = pgTable(
@@ -452,10 +452,10 @@ export const questEditHistory = pgTable(
   (table) => [
     check(
       'quest_edit_history_editor_check',
-      sql`num_nonnulls(${table.editedByUserId}, ${table.editedByAdminId}) <= 1`,
+      sql`num_nonnulls(${table.editedByUserId}, ${table.editedByAdminId}) <= 1`
     ),
     index('quest_edit_history_quest_idx').on(table.questId, table.editedAt),
-  ],
+  ]
 );
 
 export const questTeam = pgTable(
@@ -469,16 +469,14 @@ export const questTeam = pgTable(
       .notNull()
       .references(() => authUser.id),
     name: varchar('name', { length: 100 }).notNull(),
-    teamStatus: varchar('team_status', { length: 32 })
-      .default('TEAM_FORMING')
-      .notNull(),
+    teamStatus: varchar('team_status', { length: 32 }).default('TEAM_FORMING').notNull(),
     reworkLimit: integer('rework_limit').default(0).notNull(),
     createdAt: time('created_at').defaultNow().notNull(),
   },
   (table) => [
     check(
       'quest_team_status_check',
-      sql`${table.teamStatus} IN ('TEAM_FORMING', 'TEAM_SUBMITTED', 'TEAM_SELECTED', 'TEAM_REJECTED', 'TEAM_DISBANDED')`,
+      sql`${table.teamStatus} IN ('TEAM_FORMING', 'TEAM_SUBMITTED', 'TEAM_SELECTED', 'TEAM_REJECTED', 'TEAM_DISBANDED')`
     ),
     check('quest_team_rework_limit_check', sql`${table.reworkLimit} >= 0`),
     unique('quest_team_id_leader_id_key').on(table.id, table.leaderId),
@@ -486,7 +484,7 @@ export const questTeam = pgTable(
     uniqueIndex('quest_team_one_selected_uidx')
       .on(table.questId)
       .where(sql`${table.teamStatus} = 'TEAM_SELECTED'`),
-  ],
+  ]
 );
 
 export const questTeamMember = pgTable(
@@ -503,7 +501,7 @@ export const questTeamMember = pgTable(
   (table) => [
     primaryKey({ columns: [table.teamId, table.userId] }),
     index('quest_team_member_user_id_idx').on(table.userId),
-  ],
+  ]
 );
 
 export const questCandidateApplicationV2 = pgTable(
@@ -516,23 +514,24 @@ export const questCandidateApplicationV2 = pgTable(
     memberId: uuid('member_id')
       .notNull()
       .references(() => authUser.id),
-    state: varchar('state', { length: 32 })
-      .default('APPLICATION_APPLIED')
-      .notNull(),
+    state: varchar('state', { length: 32 }).default('APPLICATION_APPLIED').notNull(),
     appliedAt: time('applied_at').defaultNow().notNull(),
   },
   (table) => [
     check(
       'quest_candidate_application_v2_state_check',
-      sql`${table.state} IN ('APPLICATION_APPLIED', 'APPLICATION_SELECTED', 'APPLICATION_REJECTED', 'APPLICATION_WITHDRAWN')`,
+      sql`${table.state} IN ('APPLICATION_APPLIED', 'APPLICATION_SELECTED', 'APPLICATION_REJECTED', 'APPLICATION_WITHDRAWN')`
     ),
-    unique('quest_candidate_application_v2_quest_id_member_id_key').on(table.questId, table.memberId),
+    unique('quest_candidate_application_v2_quest_id_member_id_key').on(
+      table.questId,
+      table.memberId
+    ),
     index('quest_candidate_application_v2_quest_id_idx').on(table.questId),
     index('quest_candidate_application_v2_state_idx').on(table.state),
     uniqueIndex('quest_candidate_application_v2_one_selected_uidx')
       .on(table.questId)
       .where(sql`${table.state} = 'APPLICATION_SELECTED'`),
-  ],
+  ]
 );
 
 export const questCandidateTeamV2 = pgTable(
@@ -547,9 +546,7 @@ export const questCandidateTeamV2 = pgTable(
       .references(() => authUser.id),
     name: varchar('name', { length: 100 }).notNull(),
     headcount: integer('headcount').notNull(),
-    state: varchar('state', { length: 32 })
-      .default('TEAM_FORMING')
-      .notNull(),
+    state: varchar('state', { length: 32 }).default('TEAM_FORMING').notNull(),
     joinCodeHash: varchar('join_code_hash', { length: 64 }),
     joinCodeExpiresAt: time('join_code_expires_at'),
     submissionText: varchar('submission_text', { length: 1000 }),
@@ -559,26 +556,26 @@ export const questCandidateTeamV2 = pgTable(
   (table) => [
     check(
       'quest_candidate_team_v2_state_check',
-      sql`${table.state} IN ('TEAM_FORMING', 'TEAM_SUBMITTED', 'TEAM_SELECTED', 'TEAM_REJECTED', 'TEAM_DISBANDED')`,
+      sql`${table.state} IN ('TEAM_FORMING', 'TEAM_SUBMITTED', 'TEAM_SELECTED', 'TEAM_REJECTED', 'TEAM_DISBANDED')`
     ),
     check('quest_candidate_team_v2_headcount_check', sql`${table.headcount} BETWEEN 2 AND 20`),
     check(
       'quest_candidate_team_v2_join_code_fields_check',
-      sql`(${table.joinCodeHash} IS NULL) = (${table.joinCodeExpiresAt} IS NULL)`,
+      sql`(${table.joinCodeHash} IS NULL) = (${table.joinCodeExpiresAt} IS NULL)`
     ),
     check(
       'quest_candidate_team_v2_submission_fields_check',
-      sql`(${table.submissionText} IS NULL) = (${table.submittedAt} IS NULL)`,
+      sql`(${table.submissionText} IS NULL) = (${table.submittedAt} IS NULL)`
     ),
     check(
       'quest_candidate_team_v2_submission_text_check',
-      sql`${table.submissionText} IS NULL OR btrim(${table.submissionText}) <> ''`,
+      sql`${table.submissionText} IS NULL OR btrim(${table.submissionText}) <> ''`
     ),
     index('quest_candidate_team_v2_quest_id_idx').on(table.questId),
     uniqueIndex('quest_candidate_team_v2_one_selected_uidx')
       .on(table.questId)
       .where(sql`${table.state} = 'TEAM_SELECTED'`),
-  ],
+  ]
 );
 
 export const questCandidateTeamV2Member = pgTable(
@@ -595,7 +592,7 @@ export const questCandidateTeamV2Member = pgTable(
   (table) => [
     primaryKey({ columns: [table.teamId, table.memberId] }),
     index('quest_candidate_team_v2_member_member_id_idx').on(table.memberId),
-  ],
+  ]
 );
 
 export const questCandidateTeamV2SubmissionFile = pgTable(
@@ -612,10 +609,13 @@ export const questCandidateTeamV2SubmissionFile = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.teamId, table.fileId] }),
-    unique('quest_candidate_team_v2_submission_file_team_position_key').on(table.teamId, table.position),
+    unique('quest_candidate_team_v2_submission_file_team_position_key').on(
+      table.teamId,
+      table.position
+    ),
     check('quest_candidate_team_v2_submission_file_position_check', sql`${table.position} >= 0`),
     index('quest_candidate_team_v2_submission_file_team_idx').on(table.teamId),
-  ],
+  ]
 );
 
 export const questV2ProofSubmission = pgTable(
@@ -641,19 +641,19 @@ export const questV2ProofSubmission = pgTable(
   (table) => [
     check(
       'quest_v2_proof_submission_owner_check',
-      sql`num_nonnulls(${table.workerId}, ${table.teamId}) = 1`,
+      sql`num_nonnulls(${table.workerId}, ${table.teamId}) = 1`
     ),
     check(
       'quest_v2_proof_submission_status_check',
-      sql`${table.submissionStatus} IS NULL OR ${table.submissionStatus} IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED')`,
+      sql`${table.submissionStatus} IS NULL OR ${table.submissionStatus} IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED')`
     ),
     check(
       'quest_v2_proof_submission_draft_check',
-      sql`(${table.submissionStatus} IS NULL) = (${table.sentAt} IS NULL)`,
+      sql`(${table.submissionStatus} IS NULL) = (${table.sentAt} IS NULL)`
     ),
     check(
       'quest_v2_proof_submission_description_check',
-      sql`${table.description} IS NULL OR btrim(${table.description}) <> ''`,
+      sql`${table.description} IS NULL OR btrim(${table.description}) <> ''`
     ),
     uniqueIndex('quest_v2_proof_submission_one_worker_uidx').on(table.questId, table.workerId),
     uniqueIndex('quest_v2_proof_submission_one_team_uidx').on(table.questId, table.teamId),
@@ -661,7 +661,7 @@ export const questV2ProofSubmission = pgTable(
     index('quest_v2_proof_submission_worker_idx').on(table.workerId),
     index('quest_v2_proof_submission_team_idx').on(table.teamId),
     index('quest_v2_proof_submission_status_idx').on(table.submissionStatus),
-  ],
+  ]
 );
 
 export const questV2ProofSubmissionFile = pgTable(
@@ -683,30 +683,30 @@ export const questV2ProofSubmissionFile = pgTable(
   (table) => [
     unique('quest_v2_proof_submission_file_position_key').on(
       table.proofSubmissionId,
-      table.position,
+      table.position
     ),
     check(
       'quest_v2_proof_submission_file_position_check',
-      sql`${table.position} >= 0 AND ${table.position} < 5`,
+      sql`${table.position} >= 0 AND ${table.position} < 5`
     ),
     check(
       'quest_v2_proof_submission_file_status_check',
-      sql`${table.uploadStatus} IN ('PROOF_FILE_READY', 'PROOF_FILE_FAILED')`,
+      sql`${table.uploadStatus} IN ('PROOF_FILE_READY', 'PROOF_FILE_FAILED')`
     ),
     check(
       'quest_v2_proof_submission_file_ready_check',
-      sql`(${table.uploadStatus} = 'PROOF_FILE_READY') = (${table.fileId} IS NOT NULL)`,
+      sql`(${table.uploadStatus} = 'PROOF_FILE_READY') = (${table.fileId} IS NOT NULL)`
     ),
     check(
       'quest_v2_proof_submission_file_failure_check',
-      sql`(${table.uploadStatus} = 'PROOF_FILE_FAILED') = (${table.failureCode} IS NOT NULL)`,
+      sql`(${table.uploadStatus} = 'PROOF_FILE_FAILED') = (${table.failureCode} IS NOT NULL)`
     ),
     check(
       'quest_v2_proof_submission_file_failure_code_check',
-      sql`${table.failureCode} IS NULL OR btrim(${table.failureCode}) <> ''`,
+      sql`${table.failureCode} IS NULL OR btrim(${table.failureCode}) <> ''`
     ),
     index('quest_v2_proof_submission_file_submission_idx').on(table.proofSubmissionId),
-  ],
+  ]
 );
 
 export const questV2CompletionConfirmation = pgTable(
@@ -726,12 +726,12 @@ export const questV2CompletionConfirmation = pgTable(
   (table) => [
     check(
       'quest_v2_completion_confirmation_owner_check',
-      sql`num_nonnulls(${table.workerId}, ${table.teamId}) = 1`,
+      sql`num_nonnulls(${table.workerId}, ${table.teamId}) = 1`
     ),
     unique('quest_v2_completion_confirmation_worker_key').on(table.questId, table.workerId),
     unique('quest_v2_completion_confirmation_team_key').on(table.questId, table.teamId),
     index('quest_v2_completion_confirmation_quest_idx').on(table.questId),
-  ],
+  ]
 );
 
 export const questV2ProofCommand = pgTable(
@@ -750,38 +750,70 @@ export const questV2ProofCommand = pgTable(
     resourceType: varchar('resource_type', { length: 64 }),
     resourceId: uuid('resource_id'),
     resultData: jsonb('result_data'),
-    processingStatus: varchar('processing_status', { length: 32 })
-      .default('PROCESSING')
-      .notNull(),
+    processingStatus: varchar('processing_status', { length: 32 }).default('PROCESSING').notNull(),
     createdAt: time('created_at').defaultNow().notNull(),
     completedAt: time('completed_at'),
     expiresAt: time('expires_at').notNull(),
   },
   (table) => [
-    check(
-      'quest_v2_proof_command_key_check',
-      sql`btrim(${table.key}) <> ''`,
-    ),
-    check(
-      'quest_v2_proof_command_operation_check',
-      sql`btrim(${table.operation}) <> ''`,
-    ),
-    check(
-      'quest_v2_proof_command_hash_check',
-      sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
-    ),
+    check('quest_v2_proof_command_key_check', sql`btrim(${table.key}) <> ''`),
+    check('quest_v2_proof_command_operation_check', sql`btrim(${table.operation}) <> ''`),
+    check('quest_v2_proof_command_hash_check', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
     check(
       'quest_v2_proof_command_status_check',
-      sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`,
+      sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`
     ),
     check(
       'quest_v2_proof_command_completion_check',
-      sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`,
+      sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`
     ),
     index('quest_v2_proof_command_quest_idx').on(table.questId),
     index('quest_v2_proof_command_principal_idx').on(table.principalUserId),
     index('quest_v2_proof_command_expiry_idx').on(table.expiresAt),
-  ],
+  ]
+);
+
+/** Durable command identity and replay result for Quest API v2 write commands. */
+export const questCommand = pgTable(
+  'quest_command',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id').references(() => quest.id, { onDelete: 'cascade' }),
+    principalUserId: uuid('principal_user_id')
+      .notNull()
+      .references(() => authUser.id),
+    operationScope: varchar('operation_scope', { length: 64 }).notNull(),
+    key: varchar('key', { length: 200 }).notNull(),
+    requestHash: varchar('request_hash', { length: 64 }).notNull(),
+    resourceType: varchar('resource_type', { length: 64 }),
+    resourceId: uuid('resource_id'),
+    resultData: jsonb('result_data'),
+    processingStatus: varchar('processing_status', { length: 32 }).default('PROCESSING').notNull(),
+    createdAt: time('created_at').defaultNow().notNull(),
+    completedAt: time('completed_at'),
+    expiresAt: time('expires_at').notNull(),
+  },
+  (table) => [
+    check('quest_command_key_check', sql`btrim(${table.key}) <> ''`),
+    check('quest_command_operation_scope_check', sql`btrim(${table.operationScope}) <> ''`),
+    check('quest_command_hash_check', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      'quest_command_status_check',
+      sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`
+    ),
+    check(
+      'quest_command_completion_check',
+      sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`
+    ),
+    unique('quest_command_principal_user_id_operation_scope_key_key').on(
+      table.principalUserId,
+      table.operationScope,
+      table.key
+    ),
+    index('quest_command_quest_idx').on(table.questId),
+    index('quest_command_principal_idx').on(table.principalUserId),
+    index('quest_command_expiry_idx').on(table.expiresAt),
+  ]
 );
 
 export const questTeamInvitation = pgTable(
@@ -807,19 +839,19 @@ export const questTeamInvitation = pgTable(
   (table) => [
     check(
       'quest_team_invitation_status_check',
-      sql`${table.invitationStatus} IN ('INVITATION_PENDING', 'INVITATION_ACCEPTED', 'INVITATION_DECLINED', 'INVITATION_EXPIRED', 'INVITATION_REVOKED')`,
+      sql`${table.invitationStatus} IN ('INVITATION_PENDING', 'INVITATION_ACCEPTED', 'INVITATION_DECLINED', 'INVITATION_EXPIRED', 'INVITATION_REVOKED')`
     ),
     check('quest_team_invitation_expires_at_check', sql`${table.expiresAt} > ${table.createdAt}`),
     check(
       'quest_team_invitation_responded_at_check',
-      sql`(${table.respondedAt} IS NULL) = (${table.invitationStatus} = 'INVITATION_PENDING')`,
+      sql`(${table.respondedAt} IS NULL) = (${table.invitationStatus} = 'INVITATION_PENDING')`
     ),
     index('quest_team_invitation_team_id_idx').on(table.teamId),
     index('quest_team_invitation_invited_user_id_idx').on(table.invitedUserId),
     uniqueIndex('quest_team_invitation_one_pending_uidx')
       .on(table.teamId, table.invitedUserId)
       .where(sql`${table.invitationStatus} = 'INVITATION_PENDING'`),
-  ],
+  ]
 );
 
 export const questApplication = pgTable(
@@ -841,7 +873,7 @@ export const questApplication = pgTable(
   (table) => [
     check(
       'quest_application_status_check',
-      sql`${table.applicationStatus} IN ('APPLICATION_APPLIED', 'APPLICATION_SELECTED', 'APPLICATION_REJECTED', 'APPLICATION_WITHDRAWN')`,
+      sql`${table.applicationStatus} IN ('APPLICATION_APPLIED', 'APPLICATION_SELECTED', 'APPLICATION_REJECTED', 'APPLICATION_WITHDRAWN')`
     ),
     check('quest_application_rework_limit_check', sql`${table.reworkLimit} >= 0`),
     unique('quest_application_quest_id_worker_id_key').on(table.questId, table.workerId),
@@ -850,7 +882,7 @@ export const questApplication = pgTable(
     uniqueIndex('quest_application_one_selected_uidx')
       .on(table.questId)
       .where(sql`${table.applicationStatus} = 'APPLICATION_SELECTED'`),
-  ],
+  ]
 );
 
 export const questAssignment = pgTable(
@@ -872,13 +904,13 @@ export const questAssignment = pgTable(
   (table) => [
     check(
       'quest_assignment_status_check',
-      sql`${table.assignmentStatus} IN ('ASSIGNMENT_ACTIVE', 'ASSIGNMENT_COMPLETED', 'ASSIGNMENT_INCOMPLETE', 'ASSIGNMENT_CANCELLED')`,
+      sql`${table.assignmentStatus} IN ('ASSIGNMENT_ACTIVE', 'ASSIGNMENT_COMPLETED', 'ASSIGNMENT_INCOMPLETE', 'ASSIGNMENT_CANCELLED')`
     ),
     unique('quest_assignment_quest_id_worker_id_key').on(table.questId, table.workerId),
     index('quest_assignment_quest_id_idx').on(table.questId),
     index('quest_assignment_worker_id_idx').on(table.workerId),
     index('quest_assignment_status_idx').on(table.assignmentStatus),
-  ],
+  ]
 );
 
 export const questV2UnderfilledDecision = pgTable(
@@ -892,10 +924,10 @@ export const questV2UnderfilledDecision = pgTable(
     workerRewardPoolSatang: integer('worker_reward_pool_satang').notNull(),
     state: varchar('state', { length: 40 })
       .$type<
-        'UNDERFILLED_DECISION_PENDING' |
-          'UNDERFILLED_CONSENT_PENDING' |
-          'UNDERFILLED_COMPLETED' |
-          'UNDERFILLED_CANCELLED'
+        | 'UNDERFILLED_DECISION_PENDING'
+        | 'UNDERFILLED_CONSENT_PENDING'
+        | 'UNDERFILLED_COMPLETED'
+        | 'UNDERFILLED_CANCELLED'
       >()
       .default('UNDERFILLED_DECISION_PENDING')
       .notNull(),
@@ -912,22 +944,22 @@ export const questV2UnderfilledDecision = pgTable(
     unique('quest_v2_underfilled_decisions_quest_id_key').on(table.questId),
     check(
       'quest_v2_underfilled_decisions_state_check',
-      sql`${table.state} IN ('UNDERFILLED_DECISION_PENDING', 'UNDERFILLED_CONSENT_PENDING', 'UNDERFILLED_COMPLETED', 'UNDERFILLED_CANCELLED')`,
+      sql`${table.state} IN ('UNDERFILLED_DECISION_PENDING', 'UNDERFILLED_CONSENT_PENDING', 'UNDERFILLED_COMPLETED', 'UNDERFILLED_CANCELLED')`
     ),
     check('quest_v2_underfilled_decisions_worker_count_check', sql`${table.activeWorkerCount} > 0`),
     check('quest_v2_underfilled_decisions_pool_check', sql`${table.workerRewardPoolSatang} > 0`),
     check(
       'quest_v2_underfilled_decisions_decision_check',
-      sql`${table.decision} IS NULL OR ${table.decision} IN ('PROCEED', 'CANCEL')`,
+      sql`${table.decision} IS NULL OR ${table.decision} IN ('PROCEED', 'CANCEL')`
     ),
     check(
       'quest_v2_underfilled_decisions_resolution_check',
-      sql`${table.resolutionCode} IS NULL OR ${table.resolutionCode} IN ('HIRER_CANCELLED', 'HIRER_DECISION_TIMEOUT', 'WORKER_DECLINED', 'WORKER_CONSENT_TIMEOUT')`,
+      sql`${table.resolutionCode} IS NULL OR ${table.resolutionCode} IN ('HIRER_CANCELLED', 'HIRER_DECISION_TIMEOUT', 'WORKER_DECLINED', 'WORKER_CONSENT_TIMEOUT')`
     ),
     index('quest_v2_underfilled_decisions_state_idx').on(table.state),
     index('quest_v2_underfilled_decisions_decision_expires_at_idx').on(table.decisionExpiresAt),
     index('quest_v2_underfilled_decisions_consent_expires_at_idx').on(table.consentExpiresAt),
-  ],
+  ]
 );
 
 export const questV2UnderfilledConsent = pgTable(
@@ -952,20 +984,26 @@ export const questV2UnderfilledConsent = pgTable(
     createdAt: time('created_at').defaultNow().notNull(),
   },
   (table) => [
-    unique('quest_v2_underfilled_consents_decision_worker_key').on(table.decisionId, table.workerId),
-    unique('quest_v2_underfilled_consents_decision_assignment_key').on(table.decisionId, table.assignmentId),
+    unique('quest_v2_underfilled_consents_decision_worker_key').on(
+      table.decisionId,
+      table.workerId
+    ),
+    unique('quest_v2_underfilled_consents_decision_assignment_key').on(
+      table.decisionId,
+      table.assignmentId
+    ),
     check('quest_v2_underfilled_consents_reward_check', sql`${table.rewardSatang} > 0`),
     check(
       'quest_v2_underfilled_consents_decision_check',
-      sql`${table.decision} IS NULL OR ${table.decision} IN ('ACCEPT', 'DECLINE')`,
+      sql`${table.decision} IS NULL OR ${table.decision} IN ('ACCEPT', 'DECLINE')`
     ),
     check(
       'quest_v2_underfilled_consents_response_check',
-      sql`(${table.decision} IS NULL) = (${table.respondedAt} IS NULL)`,
+      sql`(${table.decision} IS NULL) = (${table.respondedAt} IS NULL)`
     ),
     index('quest_v2_underfilled_consents_quest_id_idx').on(table.questId),
     index('quest_v2_underfilled_consents_worker_id_idx').on(table.workerId),
-  ],
+  ]
 );
 
 /** Durable command identity and replay result for Quest terminal settlement commands. */
@@ -974,7 +1012,9 @@ export const questSettlementCommand = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     commandId: varchar('command_id', { length: 200 }).notNull(),
-    questId: uuid('quest_id').notNull().references(() => quest.id, { onDelete: 'cascade' }),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
     actorUserId: uuid('actor_user_id').references(() => authUser.id),
     actorAdminId: uuid('actor_admin_id').references(() => authAdmin.id),
     commandType: varchar('command_type', { length: 32 }).notNull(),
@@ -988,14 +1028,26 @@ export const questSettlementCommand = pgTable(
     unique('quest_settlement_commands_command_id_key').on(table.commandId),
     check(
       'quest_settlement_commands_actor_check',
-      sql`(${table.commandType} = 'AUTO_CANCEL' AND num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) = 0) OR (${table.commandType} <> 'AUTO_CANCEL' AND num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) = 1)`,
+      sql`(${table.commandType} = 'AUTO_CANCEL' AND num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) = 0) OR (${table.commandType} <> 'AUTO_CANCEL' AND num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) = 1)`
     ),
-    check('quest_settlement_commands_type_check', sql`${table.commandType} IN ('COMPLETE', 'CANCEL', 'DISPUTE_REFUND', 'DISPUTE_RELEASE', 'AUTO_CANCEL')`),
-    check('quest_settlement_commands_status_check', sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`),
-    check('quest_settlement_commands_completion_check', sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`),
-    check('quest_settlement_commands_result_check', sql`${table.processingStatus} = 'PROCESSING' OR ${table.resultData} IS NOT NULL`),
+    check(
+      'quest_settlement_commands_type_check',
+      sql`${table.commandType} IN ('COMPLETE', 'CANCEL', 'DISPUTE_REFUND', 'DISPUTE_RELEASE', 'AUTO_CANCEL')`
+    ),
+    check(
+      'quest_settlement_commands_status_check',
+      sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`
+    ),
+    check(
+      'quest_settlement_commands_completion_check',
+      sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`
+    ),
+    check(
+      'quest_settlement_commands_result_check',
+      sql`${table.processingStatus} = 'PROCESSING' OR ${table.resultData} IS NOT NULL`
+    ),
     index('quest_settlement_commands_quest_id_idx').on(table.questId),
-  ],
+  ]
 );
 
 /** Durable command identity and replay result for direct Worker joins. */
@@ -1011,14 +1063,14 @@ export const questDirectJoinCommand = pgTable(
       .notNull()
       .references(() => quest.id, { onDelete: 'cascade' }),
     requestHash: varchar('request_hash', { length: 64 }).notNull(),
-    assignmentId: uuid('assignment_id').references(() => questAssignment.id, { onDelete: 'cascade' }),
+    assignmentId: uuid('assignment_id').references(() => questAssignment.id, {
+      onDelete: 'cascade',
+    }),
     resultAssignmentStatus: varchar('result_assignment_status', { length: 32 }),
     resultStartedAt: time('result_started_at'),
     resultCreatedAt: time('result_created_at'),
     resultQuestStatus: questStatus('result_quest_status').$type<ActiveQuestStatus>(),
-    processingStatus: varchar('processing_status', { length: 32 })
-      .default('PROCESSING')
-      .notNull(),
+    processingStatus: varchar('processing_status', { length: 32 }).default('PROCESSING').notNull(),
     createdAt: time('created_at').defaultNow().notNull(),
     completedAt: time('completed_at'),
   },
@@ -1027,19 +1079,19 @@ export const questDirectJoinCommand = pgTable(
     unique('quest_direct_join_commands_assignment_id_key').on(table.assignmentId),
     check(
       'quest_direct_join_commands_status_check',
-      sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`,
+      sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`
     ),
     check(
       'quest_direct_join_commands_completion_check',
-      sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`,
+      sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`
     ),
     check(
       'quest_direct_join_commands_result_check',
-      sql`${table.processingStatus} = 'PROCESSING' OR (${table.assignmentId} IS NOT NULL AND ${table.resultAssignmentStatus} IS NOT NULL AND ${table.resultCreatedAt} IS NOT NULL AND ${table.resultQuestStatus} IS NOT NULL)`,
+      sql`${table.processingStatus} = 'PROCESSING' OR (${table.assignmentId} IS NOT NULL AND ${table.resultAssignmentStatus} IS NOT NULL AND ${table.resultCreatedAt} IS NOT NULL AND ${table.resultQuestStatus} IS NOT NULL)`
     ),
     index('quest_direct_join_commands_quest_id_idx').on(table.questId),
     index('quest_direct_join_commands_worker_id_idx').on(table.workerId),
-  ],
+  ]
 );
 
 export const proofSubmission = pgTable(
@@ -1065,17 +1117,17 @@ export const proofSubmission = pgTable(
   (table) => [
     check(
       'proof_submission_owner_check',
-      sql`num_nonnulls(${table.workerId}, ${table.teamId}) = 1`,
+      sql`num_nonnulls(${table.workerId}, ${table.teamId}) = 1`
     ),
     check(
       'proof_submission_status_check',
-      sql`${table.submissionStatus} IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED')`,
+      sql`${table.submissionStatus} IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED')`
     ),
     index('proof_submission_quest_id_idx').on(table.questId),
     index('proof_submission_status_idx').on(table.submissionStatus),
     index('proof_submission_worker_id_idx').on(table.workerId),
     index('proof_submission_team_id_idx').on(table.teamId),
-  ],
+  ]
 );
 
 export const questCompletionConfirmation = pgTable(
@@ -1093,11 +1145,14 @@ export const questCompletionConfirmation = pgTable(
     confirmedAt: time('confirmed_at').defaultNow().notNull(),
   },
   (table) => [
-    check('quest_completion_confirmation_owner_check', sql`num_nonnulls(${table.workerId}, ${table.teamId}) = 1`),
+    check(
+      'quest_completion_confirmation_owner_check',
+      sql`num_nonnulls(${table.workerId}, ${table.teamId}) = 1`
+    ),
     unique('quest_completion_confirmation_worker_key').on(table.questId, table.workerId),
     unique('quest_completion_confirmation_team_key').on(table.questId, table.teamId),
     index('quest_completion_confirmation_quest_idx').on(table.questId),
-  ],
+  ]
 );
 
 export const proofSubmissionImage = pgTable(
@@ -1115,10 +1170,10 @@ export const proofSubmissionImage = pgTable(
   (table) => [
     unique('proof_submission_image_submission_id_position_key').on(
       table.proofSubmissionId,
-      table.position,
+      table.position
     ),
     index('proof_submission_image_submission_idx').on(table.proofSubmissionId),
-  ],
+  ]
 );
 
 export const questRelations = relations(quest, ({ one, many }) => ({
@@ -1227,19 +1282,16 @@ export const questEditRequestRelations = relations(questEditRequest, ({ one, man
   responses: many(questEditRequestResponse),
 }));
 
-export const questEditRequestResponseRelations = relations(
-  questEditRequestResponse,
-  ({ one }) => ({
-    request: one(questEditRequest, {
-      fields: [questEditRequestResponse.requestId],
-      references: [questEditRequest.id],
-    }),
-    user: one(authUser, {
-      fields: [questEditRequestResponse.userId],
-      references: [authUser.id],
-    }),
+export const questEditRequestResponseRelations = relations(questEditRequestResponse, ({ one }) => ({
+  request: one(questEditRequest, {
+    fields: [questEditRequestResponse.requestId],
+    references: [questEditRequest.id],
   }),
-);
+  user: one(authUser, {
+    fields: [questEditRequestResponse.userId],
+    references: [authUser.id],
+  }),
+}));
 
 export const questEditHistoryRelations = relations(questEditHistory, ({ one }) => ({
   quest: one(quest, {
@@ -1286,16 +1338,19 @@ export const questTeamMemberRelations = relations(questTeamMember, ({ one }) => 
   }),
 }));
 
-export const questCandidateApplicationV2Relations = relations(questCandidateApplicationV2, ({ one }) => ({
-  quest: one(quest, {
-    fields: [questCandidateApplicationV2.questId],
-    references: [quest.id],
-  }),
-  member: one(authUser, {
-    fields: [questCandidateApplicationV2.memberId],
-    references: [authUser.id],
-  }),
-}));
+export const questCandidateApplicationV2Relations = relations(
+  questCandidateApplicationV2,
+  ({ one }) => ({
+    quest: one(quest, {
+      fields: [questCandidateApplicationV2.questId],
+      references: [quest.id],
+    }),
+    member: one(authUser, {
+      fields: [questCandidateApplicationV2.memberId],
+      references: [authUser.id],
+    }),
+  })
+);
 
 export const questCandidateTeamV2Relations = relations(questCandidateTeamV2, ({ one, many }) => ({
   quest: one(quest, {
@@ -1312,58 +1367,70 @@ export const questCandidateTeamV2Relations = relations(questCandidateTeamV2, ({ 
   completionConfirmations: many(questV2CompletionConfirmation),
 }));
 
-export const questCandidateTeamV2MemberRelations = relations(questCandidateTeamV2Member, ({ one }) => ({
-  team: one(questCandidateTeamV2, {
-    fields: [questCandidateTeamV2Member.teamId],
-    references: [questCandidateTeamV2.id],
-  }),
-  member: one(authUser, {
-    fields: [questCandidateTeamV2Member.memberId],
-    references: [authUser.id],
-  }),
-}));
+export const questCandidateTeamV2MemberRelations = relations(
+  questCandidateTeamV2Member,
+  ({ one }) => ({
+    team: one(questCandidateTeamV2, {
+      fields: [questCandidateTeamV2Member.teamId],
+      references: [questCandidateTeamV2.id],
+    }),
+    member: one(authUser, {
+      fields: [questCandidateTeamV2Member.memberId],
+      references: [authUser.id],
+    }),
+  })
+);
 
-export const questCandidateTeamV2SubmissionFileRelations = relations(questCandidateTeamV2SubmissionFile, ({ one }) => ({
-  team: one(questCandidateTeamV2, {
-    fields: [questCandidateTeamV2SubmissionFile.teamId],
-    references: [questCandidateTeamV2.id],
-  }),
-  file: one(file, {
-    fields: [questCandidateTeamV2SubmissionFile.fileId],
-    references: [file.id],
-  }),
-}));
+export const questCandidateTeamV2SubmissionFileRelations = relations(
+  questCandidateTeamV2SubmissionFile,
+  ({ one }) => ({
+    team: one(questCandidateTeamV2, {
+      fields: [questCandidateTeamV2SubmissionFile.teamId],
+      references: [questCandidateTeamV2.id],
+    }),
+    file: one(file, {
+      fields: [questCandidateTeamV2SubmissionFile.fileId],
+      references: [file.id],
+    }),
+  })
+);
 
-export const questV2ProofSubmissionRelations = relations(questV2ProofSubmission, ({ one, many }) => ({
-  quest: one(quest, {
-    fields: [questV2ProofSubmission.questId],
-    references: [quest.id],
-  }),
-  worker: one(authUser, {
-    fields: [questV2ProofSubmission.workerId],
-    references: [authUser.id],
-  }),
-  team: one(questCandidateTeamV2, {
-    fields: [questV2ProofSubmission.teamId],
-    references: [questCandidateTeamV2.id],
-  }),
-  submittedByUser: one(authUser, {
-    fields: [questV2ProofSubmission.submittedByUserId],
-    references: [authUser.id],
-  }),
-  files: many(questV2ProofSubmissionFile),
-}));
+export const questV2ProofSubmissionRelations = relations(
+  questV2ProofSubmission,
+  ({ one, many }) => ({
+    quest: one(quest, {
+      fields: [questV2ProofSubmission.questId],
+      references: [quest.id],
+    }),
+    worker: one(authUser, {
+      fields: [questV2ProofSubmission.workerId],
+      references: [authUser.id],
+    }),
+    team: one(questCandidateTeamV2, {
+      fields: [questV2ProofSubmission.teamId],
+      references: [questCandidateTeamV2.id],
+    }),
+    submittedByUser: one(authUser, {
+      fields: [questV2ProofSubmission.submittedByUserId],
+      references: [authUser.id],
+    }),
+    files: many(questV2ProofSubmissionFile),
+  })
+);
 
-export const questV2ProofSubmissionFileRelations = relations(questV2ProofSubmissionFile, ({ one }) => ({
-  proofSubmission: one(questV2ProofSubmission, {
-    fields: [questV2ProofSubmissionFile.proofSubmissionId],
-    references: [questV2ProofSubmission.id],
-  }),
-  file: one(file, {
-    fields: [questV2ProofSubmissionFile.fileId],
-    references: [file.id],
-  }),
-}));
+export const questV2ProofSubmissionFileRelations = relations(
+  questV2ProofSubmissionFile,
+  ({ one }) => ({
+    proofSubmission: one(questV2ProofSubmission, {
+      fields: [questV2ProofSubmissionFile.proofSubmissionId],
+      references: [questV2ProofSubmission.id],
+    }),
+    file: one(file, {
+      fields: [questV2ProofSubmissionFile.fileId],
+      references: [file.id],
+    }),
+  })
+);
 
 export const questV2ProofCommandRelations = relations(questV2ProofCommand, ({ one }) => ({
   quest: one(quest, {
@@ -1376,24 +1443,27 @@ export const questV2ProofCommandRelations = relations(questV2ProofCommand, ({ on
   }),
 }));
 
-export const questV2CompletionConfirmationRelations = relations(questV2CompletionConfirmation, ({ one }) => ({
-  quest: one(quest, {
-    fields: [questV2CompletionConfirmation.questId],
-    references: [quest.id],
-  }),
-  worker: one(authUser, {
-    fields: [questV2CompletionConfirmation.workerId],
-    references: [authUser.id],
-  }),
-  team: one(questCandidateTeamV2, {
-    fields: [questV2CompletionConfirmation.teamId],
-    references: [questCandidateTeamV2.id],
-  }),
-  confirmedByUser: one(authUser, {
-    fields: [questV2CompletionConfirmation.confirmedByUserId],
-    references: [authUser.id],
-  }),
-}));
+export const questV2CompletionConfirmationRelations = relations(
+  questV2CompletionConfirmation,
+  ({ one }) => ({
+    quest: one(quest, {
+      fields: [questV2CompletionConfirmation.questId],
+      references: [quest.id],
+    }),
+    worker: one(authUser, {
+      fields: [questV2CompletionConfirmation.workerId],
+      references: [authUser.id],
+    }),
+    team: one(questCandidateTeamV2, {
+      fields: [questV2CompletionConfirmation.teamId],
+      references: [questCandidateTeamV2.id],
+    }),
+    confirmedByUser: one(authUser, {
+      fields: [questV2CompletionConfirmation.confirmedByUserId],
+      references: [authUser.id],
+    }),
+  })
+);
 
 export const questTeamInvitationRelations = relations(questTeamInvitation, ({ one }) => ({
   team: one(questTeam, {
@@ -1472,8 +1542,12 @@ export const questCandidateSelectionCommand = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     commandId: varchar('command_id', { length: 200 }).notNull(),
-    hirerId: uuid('hirer_id').notNull().references(() => authUser.id),
-    questId: uuid('quest_id').notNull().references(() => quest.id, { onDelete: 'cascade' }),
+    hirerId: uuid('hirer_id')
+      .notNull()
+      .references(() => authUser.id),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
     targetType: varchar('target_type', { length: 32 }).notNull(),
     targetId: uuid('target_id').notNull(),
     requestHash: varchar('request_hash', { length: 64 }).notNull(),
@@ -1485,33 +1559,48 @@ export const questCandidateSelectionCommand = pgTable(
   },
   (table) => [
     unique('quest_candidate_selection_commands_command_id_key').on(table.commandId),
-    check('quest_candidate_selection_commands_target_type_check', sql`${table.targetType} IN ('APPLICATION', 'TEAM')`),
-    check('quest_candidate_selection_commands_status_check', sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`),
-    check('quest_candidate_selection_commands_completion_check', sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`),
-    check('quest_candidate_selection_commands_result_check', sql`${table.processingStatus} = 'PROCESSING' OR (${table.resultAssignmentIds} IS NOT NULL AND ${table.resultQuestStatus} IS NOT NULL)`),
+    check(
+      'quest_candidate_selection_commands_target_type_check',
+      sql`${table.targetType} IN ('APPLICATION', 'TEAM')`
+    ),
+    check(
+      'quest_candidate_selection_commands_status_check',
+      sql`${table.processingStatus} IN ('PROCESSING', 'COMPLETED')`
+    ),
+    check(
+      'quest_candidate_selection_commands_completion_check',
+      sql`(${table.processingStatus} = 'COMPLETED') = (${table.completedAt} IS NOT NULL)`
+    ),
+    check(
+      'quest_candidate_selection_commands_result_check',
+      sql`${table.processingStatus} = 'PROCESSING' OR (${table.resultAssignmentIds} IS NOT NULL AND ${table.resultQuestStatus} IS NOT NULL)`
+    ),
     index('quest_candidate_selection_commands_quest_id_idx').on(table.questId),
     index('quest_candidate_selection_commands_hirer_id_idx').on(table.hirerId),
-  ],
+  ]
 );
 
-export const questCompletionConfirmationRelations = relations(questCompletionConfirmation, ({ one }) => ({
-  quest: one(quest, {
-    fields: [questCompletionConfirmation.questId],
-    references: [quest.id],
-  }),
-  worker: one(authUser, {
-    fields: [questCompletionConfirmation.workerId],
-    references: [authUser.id],
-  }),
-  team: one(questTeam, {
-    fields: [questCompletionConfirmation.teamId],
-    references: [questTeam.id],
-  }),
-  confirmedByUser: one(authUser, {
-    fields: [questCompletionConfirmation.confirmedByUserId],
-    references: [authUser.id],
-  }),
-}));
+export const questCompletionConfirmationRelations = relations(
+  questCompletionConfirmation,
+  ({ one }) => ({
+    quest: one(quest, {
+      fields: [questCompletionConfirmation.questId],
+      references: [quest.id],
+    }),
+    worker: one(authUser, {
+      fields: [questCompletionConfirmation.workerId],
+      references: [authUser.id],
+    }),
+    team: one(questTeam, {
+      fields: [questCompletionConfirmation.teamId],
+      references: [questTeam.id],
+    }),
+    confirmedByUser: one(authUser, {
+      fields: [questCompletionConfirmation.confirmedByUserId],
+      references: [authUser.id],
+    }),
+  })
+);
 
 export const proofSubmissionRelations = relations(proofSubmission, ({ one, many }) => ({
   quest: one(quest, {
