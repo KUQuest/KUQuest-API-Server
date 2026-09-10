@@ -1,15 +1,33 @@
 import { app } from '@/app';
+import { createStagingTestAuthRoute } from '@/modules/auth/staging-test-auth.route';
 
+import { Elysia } from 'elysia';
 import { describe, expect, it } from 'bun:test';
 
-const signInTestMember = async (accountPath = 'account-1'): Promise<string> => {
-  const loginResponse = await app.handle(
-    new Request(`http://localhost/api/staging/test-auth/sign-in/${accountPath}`, {
+const testAuthApp = new Elysia({ name: 'payout-destination-test-auth' }).use(
+  createStagingTestAuthRoute({
+    enabled: true,
+    deploymentEnv: 'staging',
+    email: `payout-dest-${crypto.randomUUID()}@ku.th`,
+    password: 'TestStudent1!',
+    firstName: 'Payout',
+    lastName: 'Tester',
+  }),
+);
+
+const getCookieHeader = (response: Response): string =>
+  (response.headers.getSetCookie?.() ?? [])
+    .map((cookie) => cookie.split(';', 1)[0])
+    .join('; ');
+
+const signInTestMember = async (): Promise<string> => {
+  const loginResponse = await testAuthApp.handle(
+    new Request('http://localhost/api/staging/test-auth/sign-in/default', {
       method: 'POST',
     }),
   );
   expect(loginResponse.status).toBe(200);
-  const cookie = loginResponse.headers.getSetCookie()?.[0]?.split(';')[0];
+  const cookie = getCookieHeader(loginResponse);
   if (!cookie) throw new Error('Failed to extract session cookie from staging test auth login.');
   return cookie;
 };
@@ -62,7 +80,7 @@ describe('Payout Destination HTTP routes', () => {
   });
 
   it('handles save, get, and retire lifecycle for an authenticated Student', async () => {
-    const cookie = await signInTestMember('account-1');
+    const cookie = await signInTestMember();
 
     // Clean up any existing active destination first
     await app.handle(
@@ -160,7 +178,7 @@ describe('Payout Destination HTTP routes', () => {
   });
 
   it('rejects invalid destination input with 400', async () => {
-    const cookie = await signInTestMember('account-1');
+    const cookie = await signInTestMember();
 
     const invalidBank = await app.handle(
       new Request('http://localhost/api/v1/payout-destinations', {

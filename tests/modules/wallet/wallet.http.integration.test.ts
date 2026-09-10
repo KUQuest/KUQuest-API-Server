@@ -1,5 +1,6 @@
 import { app } from '@/app';
 import { db } from '@/database/client';
+import { createStagingTestAuthRoute } from '@/modules/auth/staging-test-auth.route';
 import { walletLedgerAccount } from '@/database/schema/wallet.schema';
 import {
   createSealedLedgerTransaction,
@@ -7,17 +8,40 @@ import {
   signedSatang,
 } from '@/modules/wallet';
 
+import { Elysia } from 'elysia';
 import { describe, expect, it } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 
+const testAuthApp = new Elysia({ name: 'wallet-http-test-auth' }).use(
+  createStagingTestAuthRoute({
+    enabled: true,
+    deploymentEnv: 'staging',
+    email: `wallet-test-1-${crypto.randomUUID()}@ku.th`,
+    password: 'TestStudent1!',
+    firstName: 'Wallet',
+    lastName: 'Tester',
+    account2: {
+      email: `wallet-test-2-${crypto.randomUUID()}@ku.th`,
+      password: 'TestStudent2!',
+      firstName: 'Wallet2',
+      lastName: 'Tester2',
+    },
+  }),
+);
+
+const getCookieHeader = (response: Response): string =>
+  (response.headers.getSetCookie?.() ?? [])
+    .map((cookie) => cookie.split(';', 1)[0])
+    .join('; ');
+
 const signInTestMember = async (accountPath = 'account-1'): Promise<{ cookie: string; userId: string }> => {
-  const loginResponse = await app.handle(
+  const loginResponse = await testAuthApp.handle(
     new Request(`http://localhost/api/staging/test-auth/sign-in/${accountPath}`, {
       method: 'POST',
     }),
   );
   expect(loginResponse.status).toBe(200);
-  const cookie = loginResponse.headers.getSetCookie()?.[0]?.split(';')[0];
+  const cookie = getCookieHeader(loginResponse);
   if (!cookie) throw new Error('Failed to extract session cookie from staging test auth login.');
   const body = (await loginResponse.json()) as { user: { id: string } };
   return { cookie, userId: body.user.id };
