@@ -17,6 +17,7 @@ export const adminOverviewResponseSchema = t.Object({
     quests: t.Object({
       total: counterSchema,
       hidden: counterSchema,
+      /** Wire-compatible PR #438 key; its keys are canonical Quest State values. */
       byStatus: adminQuestStateCountsSchema,
     }),
     disputes: t.Object({

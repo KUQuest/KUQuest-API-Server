@@ -1,8 +1,20 @@
 import { db } from '@/database/client';
-import { adminDisputeCase } from '@/database/schema/admin.schema';
-import { paymentPayouts } from '@/database/schema/payment.schema';
+import {
+  adminDisputeCase,
+  disputeCaseStatus,
+} from '@/database/schema/admin.schema';
+import {
+  paymentPayouts,
+  payoutAdminApprovalStatuses,
+  payoutProviderInFlightStatuses,
+  payoutStatus,
+} from '@/database/schema/payment.schema';
 import { quest } from '@/database/schema/quest.schema';
-import { walletWallet } from '@/database/schema/wallet.schema';
+import {
+  walletAdminHoldStatuses,
+  walletStatus,
+  walletWallet,
+} from '@/database/schema/wallet.schema';
 
 import { and, count, inArray, isNotNull } from 'drizzle-orm';
 
@@ -29,13 +41,11 @@ export type AdminOverviewCounters = {
 };
 
 const payoutQueueStatuses = [
-  'PENDING_ADMIN_APPROVAL',
-  'SUBMITTED_TO_PROVIDER',
-  'PROVIDER_PENDING',
+  ...payoutAdminApprovalStatuses,
+  ...payoutProviderInFlightStatuses,
 ] as const;
-const walletQueueStatuses = ['FROZEN', 'SUSPENDED'] as const;
 
-const emptyQuestStatusCounts = (): Record<(typeof adminOverviewQuestStates)[number], number> =>
+const emptyQuestStateCounts = (): Record<(typeof adminOverviewQuestStates)[number], number> =>
   Object.fromEntries(adminOverviewQuestStates.map((status) => [status, 0])) as Record<
     (typeof adminOverviewQuestStates)[number],
     number
@@ -67,13 +77,13 @@ export const getAdminOverview = async (): Promise<AdminOverviewCounters> =>
     const walletStatusRows = await transaction
       .select({ status: walletWallet.walletStatus, total: count() })
       .from(walletWallet)
-      .where(inArray(walletWallet.walletStatus, walletQueueStatuses))
+      .where(inArray(walletWallet.walletStatus, walletAdminHoldStatuses))
       .groupBy(walletWallet.walletStatus);
 
-    const byStatus = emptyQuestStatusCounts();
+    const byState = emptyQuestStateCounts();
     for (const row of questStatusRows) {
       if (adminOverviewQuestStates.includes(row.questStatus as (typeof adminOverviewQuestStates)[number])) {
-        byStatus[row.questStatus as (typeof adminOverviewQuestStates)[number]] = row.total;
+        byState[row.questStatus as (typeof adminOverviewQuestStates)[number]] = row.total;
       }
     }
 
@@ -84,20 +94,20 @@ export const getAdminOverview = async (): Promise<AdminOverviewCounters> =>
       quests: {
         total: questStatusRows.reduce((total, row) => total + row.total, 0),
         hidden: hiddenQuestRows[0]?.total ?? 0,
-        byStatus,
+        byStatus: byState,
       },
       disputes: {
         total: disputeStatusRows.reduce((total, row) => total + row.total, 0),
-        awaitingResolution: countFor(disputeStatusRows, 'DISPUTE_CASE_PENDING'),
+        awaitingResolution: countFor(disputeStatusRows, disputeCaseStatus.pending),
       },
       payouts: {
-        pendingAdminApproval: countFor(payoutStatusRows, 'PENDING_ADMIN_APPROVAL'),
-        inFlight: countFor(payoutStatusRows, 'SUBMITTED_TO_PROVIDER')
-          + countFor(payoutStatusRows, 'PROVIDER_PENDING'),
+        pendingAdminApproval: countFor(payoutStatusRows, payoutStatus.pendingAdminApproval),
+        inFlight: countFor(payoutStatusRows, payoutStatus.submittedToProvider)
+          + countFor(payoutStatusRows, payoutStatus.providerPending),
       },
       members: {
-        frozenWallets: countFor(walletStatusRows, 'FROZEN'),
-        suspendedWallets: countFor(walletStatusRows, 'SUSPENDED'),
+        frozenWallets: countFor(walletStatusRows, walletStatus.frozen),
+        suspendedWallets: countFor(walletStatusRows, walletStatus.suspended),
       },
     };
   }, { isolationLevel: 'repeatable read', accessMode: 'read only' });

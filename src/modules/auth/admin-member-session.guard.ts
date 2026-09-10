@@ -2,13 +2,13 @@ import { apiError } from '@/shared/api-response';
 
 import { Elysia } from 'elysia';
 
-import { adminAuth } from './admin-auth.config';
 import { auth } from './auth.config';
+import { getAdminSession } from './admin-session';
 
 export const adminMemberSessionGuard = new Elysia({ name: 'admin-member-session-guard' })
   .derive({ as: 'scoped' }, async ({ request }) => {
     const [adminSession, memberSession] = await Promise.all([
-      adminAuth.api.getSession({ headers: request.headers }),
+      getAdminSession(request),
       auth.api.getSession({ headers: request.headers }),
     ]);
     return { adminSession, memberSession };

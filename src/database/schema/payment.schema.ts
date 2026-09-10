@@ -34,13 +34,26 @@ export const providerEventProcessingStatuses = [
 ] as const;
 export type ProviderEventProcessingStatus = (typeof providerEventProcessingStatuses)[number];
 
+export const payoutStatus = {
+  pendingAdminApproval: 'PENDING_ADMIN_APPROVAL',
+  submittedToProvider: 'SUBMITTED_TO_PROVIDER',
+  providerPending: 'PROVIDER_PENDING',
+  succeeded: 'SUCCEEDED',
+  failed: 'FAILED',
+  cancelled: 'CANCELLED',
+} as const;
 export const payoutStatuses = [
-  'PENDING_ADMIN_APPROVAL',
-  'SUBMITTED_TO_PROVIDER',
-  'PROVIDER_PENDING',
-  'SUCCEEDED',
-  'FAILED',
-  'CANCELLED',
+  payoutStatus.pendingAdminApproval,
+  payoutStatus.submittedToProvider,
+  payoutStatus.providerPending,
+  payoutStatus.succeeded,
+  payoutStatus.failed,
+  payoutStatus.cancelled,
+] as const;
+export const payoutAdminApprovalStatuses = [payoutStatus.pendingAdminApproval] as const;
+export const payoutProviderInFlightStatuses = [
+  payoutStatus.submittedToProvider,
+  payoutStatus.providerPending,
 ] as const;
 export type PayoutStatus = (typeof payoutStatuses)[number];
 

@@ -5,6 +5,7 @@ import type { StatusMap } from 'elysia/utils';
 
 import { adminAuth } from './admin-auth.config';
 import { adminMemberSessionGuard } from './admin-member-session.guard';
+import { getAdminSession } from './admin-session';
 
 export type AuthenticatedAdminSession = NonNullable<
   Awaited<ReturnType<typeof adminAuth.api.getSession>>
@@ -18,7 +19,7 @@ export type AdminContext = {
 
 export const adminAuthenticationGuard = new Elysia({ name: 'admin-authentication-guard' })
   .derive({ as: 'scoped' }, async ({ request }) => {
-    const session = await adminAuth.api.getSession({ headers: request.headers });
+    const session = await getAdminSession(request);
     return { adminSession: session };
   })
   .onBeforeHandle({ as: 'scoped' }, ({ adminSession, set }) => {
