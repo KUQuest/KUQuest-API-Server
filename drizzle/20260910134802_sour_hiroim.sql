@@ -1,0 +1,1 @@
+CREATE INDEX "admin_action_created_idx" ON "admin_action" USING btree ("created_at","id");

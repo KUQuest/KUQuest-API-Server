@@ -50,6 +50,7 @@ export const adminAction = pgTable(
     ),
     index('admin_action_resource_idx').on(table.resourceType, table.resourceId, table.createdAt),
     index('admin_action_admin_created_idx').on(table.adminId, table.createdAt),
+    index('admin_action_created_idx').on(table.createdAt, table.id),
     check('admin_action_action_check', sql`btrim(${table.action}) <> ''`),
     check('admin_action_resource_type_check', sql`btrim(${table.resourceType}) <> ''`),
     check('admin_action_resource_id_check', sql`btrim(${table.resourceId}) <> ''`),
