@@ -1,14 +1,13 @@
+import { Elysia } from 'elysia';
+
 import { adminAuth } from './admin-auth.config';
+import { auth } from './auth.config';
 
-type AdminSession = Awaited<ReturnType<typeof adminAuth.api.getSession>>;
-
-const adminSessionPromises = new WeakMap<Request, Promise<AdminSession>>();
-
-export const getAdminSession = (request: Request): Promise<AdminSession> => {
-  const existingPromise = adminSessionPromises.get(request);
-  if (existingPromise) return existingPromise;
-
-  const sessionPromise = adminAuth.api.getSession({ headers: request.headers });
-  adminSessionPromises.set(request, sessionPromise);
-  return sessionPromise;
-};
+export const adminSessionResolver = new Elysia({ name: 'admin-session-resolver' })
+  .derive({ as: 'scoped' }, async ({ request }) => {
+    const [adminSession, memberSession] = await Promise.all([
+      adminAuth.api.getSession({ headers: request.headers }),
+      auth.api.getSession({ headers: request.headers }),
+    ]);
+    return { adminSession, memberSession };
+  });

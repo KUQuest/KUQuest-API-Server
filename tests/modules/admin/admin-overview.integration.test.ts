@@ -20,6 +20,7 @@ import {
   adminOverviewQuestStates,
   type AdminOverviewQuestState,
 } from '@/modules/admin/admin-overview.contract';
+import type { AdminOverviewData } from '@/modules/admin/admin-overview.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import {
@@ -65,13 +66,6 @@ const payoutEncryption = createPayoutDestinationEncryption({
   keys: { v1: 'o'.repeat(32) },
 });
 
-type OverviewData = {
-  quests: { total: number; hidden: number; byStatus: Record<string, number> };
-  disputes: { total: number; awaitingResolution: number };
-  payouts: { pendingAdminApproval: number; inFlight: number };
-  members: { frozenWallets: number; suspendedWallets: number };
-};
-
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? [])
     .map((cookie) => cookie.split(';', 1)[0])
@@ -82,10 +76,10 @@ const overviewRequest = (cookie?: string) => app.handle(new Request(
   cookie ? { headers: { cookie } } : undefined,
 ));
 
-const readOverview = async (): Promise<OverviewData> => {
+const readOverview = async (): Promise<AdminOverviewData> => {
   const response = await overviewRequest(adminCookie);
   expect(response.status).toBe(200);
-  return (await response.json() as { data: OverviewData }).data;
+  return (await response.json() as { data: AdminOverviewData }).data;
 };
 
 const waitForOverviewQueryToBlock = async (attempt = 0): Promise<void> => {
@@ -448,7 +442,7 @@ describe('Admin Overview API', () => {
     expect(after.quests.hidden - before.quests.hidden).toBe(1);
     for (const status of adminOverviewQuestStates) {
       const expectedDelta = status === 'QUEST_OPEN' ? 2 : status === 'QUEST_FAILED' ? 5 : 1;
-      expect(after.quests.byStatus[status]! - before.quests.byStatus[status]!).toBe(expectedDelta);
+    expect(after.quests.byState[status]! - before.quests.byState[status]!).toBe(expectedDelta);
     }
     expect(after.disputes.total - before.disputes.total).toBe(3);
     expect(after.disputes.awaitingResolution - before.disputes.awaitingResolution).toBe(1);
@@ -471,8 +465,8 @@ describe('Admin Overview API', () => {
     expect(after.disputes.total).toBe(before.disputes.total);
     expect(after.disputes.awaitingResolution).toBe(before.disputes.awaitingResolution);
     expect(after.quests.total).toBe(before.quests.total);
-    expect(after.quests.byStatus.QUEST_OPEN).toBe(before.quests.byStatus.QUEST_OPEN);
-    expect(after.quests.byStatus).not.toHaveProperty('QUEST_DISPUTED');
+    expect(after.quests.byState.QUEST_OPEN).toBe(before.quests.byState.QUEST_OPEN);
+    expect(after.quests.byState).not.toHaveProperty('QUEST_DISPUTED');
   });
 
   it('counts only the accepted Payout approval and Provider in-flight statuses', async () => {
@@ -538,17 +532,17 @@ describe('Admin Overview API', () => {
     }
     const duringCommitResponse = await duringCommit;
     expect(duringCommitResponse.status).toBe(200);
-    const duringCommitData = await duringCommitResponse.json() as { data: OverviewData };
+    const duringCommitData = await duringCommitResponse.json() as { data: AdminOverviewData };
     await writer;
 
-    expect(duringCommitData.data.quests.byStatus.QUEST_OPEN).toBe(before.quests.byStatus.QUEST_OPEN);
-    expect(duringCommitData.data.quests.byStatus.QUEST_CANCELLED).toBe(before.quests.byStatus.QUEST_CANCELLED);
+    expect(duringCommitData.data.quests.byState.QUEST_OPEN).toBe(before.quests.byState.QUEST_OPEN);
+    expect(duringCommitData.data.quests.byState.QUEST_CANCELLED).toBe(before.quests.byState.QUEST_CANCELLED);
     expect(duringCommitData.data.members.frozenWallets).toBe(before.members.frozenWallets);
     expect(duringCommitData.data.members.suspendedWallets).toBe(before.members.suspendedWallets);
 
     const after = await readOverview();
-    expect(after.quests.byStatus.QUEST_OPEN).toBe(before.quests.byStatus.QUEST_OPEN - 1);
-    expect(after.quests.byStatus.QUEST_CANCELLED).toBe(before.quests.byStatus.QUEST_CANCELLED + 1);
+    expect(after.quests.byState.QUEST_OPEN).toBe(before.quests.byState.QUEST_OPEN - 1);
+    expect(after.quests.byState.QUEST_CANCELLED).toBe(before.quests.byState.QUEST_CANCELLED + 1);
     expect(after.members.frozenWallets).toBe(before.members.frozenWallets - 1);
     expect(after.members.suspendedWallets).toBe(before.members.suspendedWallets + 1);
   });

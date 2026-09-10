@@ -24,7 +24,7 @@ export type AdminOverviewCounters = {
   quests: {
     total: number;
     hidden: number;
-    byStatus: Record<(typeof adminOverviewQuestStates)[number], number>;
+    byState: Record<(typeof adminOverviewQuestStates)[number], number>;
   };
   disputes: {
     total: number;
@@ -94,7 +94,7 @@ export const getAdminOverview = async (): Promise<AdminOverviewCounters> =>
       quests: {
         total: questStatusRows.reduce((total, row) => total + row.total, 0),
         hidden: hiddenQuestRows[0]?.total ?? 0,
-        byStatus: byState,
+        byState,
       },
       disputes: {
         total: disputeStatusRows.reduce((total, row) => total + row.total, 0),

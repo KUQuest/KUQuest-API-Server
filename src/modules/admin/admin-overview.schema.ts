@@ -1,4 +1,4 @@
-import { t } from 'elysia';
+import { t, type Static } from 'elysia';
 
 import { adminOverviewQuestStates } from './admin-overview.contract';
 
@@ -17,8 +17,7 @@ export const adminOverviewResponseSchema = t.Object({
     quests: t.Object({
       total: counterSchema,
       hidden: counterSchema,
-      /** Wire-compatible PR #438 key; its keys are canonical Quest State values. */
-      byStatus: adminQuestStateCountsSchema,
+      byState: adminQuestStateCountsSchema,
     }),
     disputes: t.Object({
       total: counterSchema,
@@ -34,3 +33,5 @@ export const adminOverviewResponseSchema = t.Object({
     }),
   }),
 });
+
+export type AdminOverviewData = Static<typeof adminOverviewResponseSchema>['data'];
