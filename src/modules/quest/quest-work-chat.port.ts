@@ -16,7 +16,7 @@ let configuredWorkChatWriter: QuestWorkChatWriter | undefined;
  * WORK_CHAT_UNAVAILABLE rather than committing Quest-only participation.
  */
 export const configureQuestWorkChatMembershipWriter = (
-  writer: QuestWorkChatWriter | undefined,
+  writer: QuestWorkChatWriter | undefined
 ): void => {
   configuredWorkChatWriter = writer;
 };

@@ -1,14 +1,9 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
-import { quest, questAssignment } from '@/database/schema/quest.schema';
+import { quest, questAssignment, questCommand } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
-import {
-  createQuestV2,
-  expireQuestV2EditRequest,
-  type QuestV2CreateInput,
-} from '@/modules/quest';
+import { createQuestV2, expireQuestV2EditRequest, type QuestV2CreateInput } from '@/modules/quest';
 
 import { Elysia } from 'elysia';
 import { and, eq, inArray } from 'drizzle-orm';
@@ -27,7 +22,7 @@ const ownerAuthApp = new Elysia({ name: 'quest-v2-edit-owner-auth' }).use(
     password,
     firstName: 'Edit',
     lastName: 'Hirer',
-  }),
+  })
 );
 const workerAuthApp = new Elysia({ name: 'quest-v2-edit-worker-auth' }).use(
   createStagingTestAuthRoute({
@@ -37,7 +32,7 @@ const workerAuthApp = new Elysia({ name: 'quest-v2-edit-worker-auth' }).use(
     password,
     firstName: 'Edit',
     lastName: 'Worker',
-  }),
+  })
 );
 const secondWorkerAuthApp = new Elysia({ name: 'quest-v2-edit-worker-two-auth' }).use(
   createStagingTestAuthRoute({
@@ -47,13 +42,11 @@ const secondWorkerAuthApp = new Elysia({ name: 'quest-v2-edit-worker-two-auth' }
     password,
     firstName: 'Edit',
     lastName: 'Worker Two',
-  }),
+  })
 );
 
 const cookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 const signIn = async (authApp: Elysia, email: string) => {
   const response = await authApp.handle(
@@ -61,7 +54,7 @@ const signIn = async (authApp: Elysia, email: string) => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email, password }),
-    }),
+    })
   );
   if (response.status !== 200) throw new Error(`Test authentication failed: ${response.status}`);
   const body = (await response.json()) as { user: { id: string } };
@@ -90,18 +83,19 @@ const baseInput: QuestV2CreateInput = {
 };
 
 const createAssignedQuest = async (workerIds = [worker.id]) => {
-  const input: QuestV2CreateInput = workerIds.length > 1
-    ? {
-        ...baseInput,
-        participation: 'GROUP',
-        questFundingTotal: 40,
-        headcount: workerIds.length,
-      }
-    : baseInput;
+  const input: QuestV2CreateInput =
+    workerIds.length > 1
+      ? {
+          ...baseInput,
+          participation: 'GROUP',
+          questFundingTotal: 40,
+          headcount: workerIds.length,
+        }
+      : baseInput;
   const result = await createQuestV2(
     owner.id,
     { ...input, title: `${input.title} ${crypto.randomUUID()}` },
-    `quest-v2-edit-create-${crypto.randomUUID()}`,
+    `quest-v2-edit-create-${crypto.randomUUID()}`
   );
   if (!('quest' in result)) throw new Error(`Quest creation failed: ${result.outcome}`);
   questIds.push(result.quest.id);
@@ -110,11 +104,13 @@ const createAssignedQuest = async (workerIds = [worker.id]) => {
     .update(quest)
     .set({ questStatus: 'QUEST_ASSIGNED', rewardSatang: 100 })
     .where(eq(quest.id, result.quest.id));
-  await db.insert(questAssignment).values(workerIds.map((workerId) => ({
-    questId: result.quest.id,
-    workerId,
-    assignmentStatus: 'ASSIGNMENT_ACTIVE' as const,
-  })));
+  await db.insert(questAssignment).values(
+    workerIds.map((workerId) => ({
+      questId: result.quest.id,
+      workerId,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE' as const,
+    }))
+  );
   return result.quest.id;
 };
 
@@ -128,21 +124,21 @@ const createEdit = (questId: string, body: unknown, key = `edit-${crypto.randomU
         cookie: owner.cookie,
       },
       body: JSON.stringify(body),
-    }),
+    })
   );
 
 const readEdit = (requestId: string, cookie: string) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/edit-requests/${requestId}`, {
       headers: { cookie },
-    }),
+    })
   );
 
 const respondToEdit = (
   requestId: string,
   body: unknown,
   cookie: string,
-  key = `respond-${crypto.randomUUID()}`,
+  key = `respond-${crypto.randomUUID()}`
 ) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/edit-requests/${requestId}/respond`, {
@@ -153,7 +149,7 @@ const respondToEdit = (
         cookie,
       },
       body: JSON.stringify(body),
-    }),
+    })
   );
 
 beforeAll(async () => {
@@ -173,21 +169,27 @@ beforeEach(async () => {
 
 afterAll(async () => {
   if (questIds.length > 0) await db.delete(quest).where(inArray(quest.id, questIds));
+  await db
+    .delete(questCommand)
+    .where(inArray(questCommand.principalUserId, [owner.id, worker.id, secondWorker.id]));
   await db.delete(tag).where(eq(tag.id, tagId));
-  await db.delete(walletIdempotencyKey).where(
-    inArray(walletIdempotencyKey.principalUserId, [owner.id, worker.id, secondWorker.id]),
-  );
 });
 
 describe('Quest Edit v2', () => {
   it('publishes the authenticated v2 Quest Edit operations', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
     const document = (await response.json()) as {
-      paths: Record<string, Record<string, {
-        operationId?: string;
-        security?: unknown;
-        responses?: Record<string, unknown>;
-      }>>;
+      paths: Record<
+        string,
+        Record<
+          string,
+          {
+            operationId?: string;
+            security?: unknown;
+            responses?: Record<string, unknown>;
+          }
+        >
+      >;
     };
     const create = document.paths['/api/v2/quests/{questId}/edit-requests']?.post;
     const read = document.paths['/api/v2/quests/edit-requests/{requestId}']?.get;
@@ -200,11 +202,40 @@ describe('Quest Edit v2', () => {
     expect(read?.security).toEqual([{ betterAuthSession: [] }]);
     expect(respond?.security).toEqual([{ betterAuthSession: [] }]);
     expect(Object.keys(create?.responses ?? {})).toEqual(
-      expect.arrayContaining(['201', '400', '401', '404', '409', '500', '503']),
+      expect.arrayContaining(['201', '400', '401', '404', '409', '500', '503'])
     );
     expect(Object.keys(read?.responses ?? {})).toEqual(
-      expect.arrayContaining(['200', '400', '401', '404', '500']),
+      expect.arrayContaining(['200', '400', '401', '404', '500'])
     );
+  });
+
+  it('rejects an over-length Idempotency-Key through Quest Command validation', async () => {
+    const questId = await createAssignedQuest();
+    const response = await createEdit(
+      questId,
+      { condition: { items: ['Malformed key requirement'] } },
+      'x'.repeat(201)
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('INVALID_IDEMPOTENCY_KEY');
+  });
+
+  it('requires an Idempotency-Key before a Quest Edit command runs', async () => {
+    const questId = await createAssignedQuest();
+    const response = await app.handle(
+      new Request(`http://localhost/api/v2/quests/${questId}/edit-requests`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: owner.cookie,
+        },
+        body: JSON.stringify({ condition: { items: ['Missing key requirement'] } }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
   });
 
   it('creates, reads, and applies a complete Condition replacement', async () => {
@@ -251,13 +282,16 @@ describe('Quest Edit v2', () => {
     expect(workerBody.data).toHaveProperty('ownResponse');
     expect(workerBody.data).not.toHaveProperty('responses');
 
+    const responseKey = `respond-replay-${crypto.randomUUID()}`;
     const responded = await respondToEdit(
       createdBody.data.requestId,
       { decision: 'EDIT_RESPONSE_ACCEPTED' },
       worker.cookie,
+      responseKey
     );
     expect(responded.status).toBe(200);
-    expect((await responded.json()).data).toMatchObject({
+    const respondedBody = await responded.json();
+    expect(respondedBody.data).toMatchObject({
       status: 'EDIT_REQUEST_APPLIED',
       responseSummary: {
         totalCount: 1,
@@ -265,6 +299,53 @@ describe('Quest Edit v2', () => {
         declinedCount: 0,
         pendingCount: 0,
       },
+    });
+
+    const responseReplay = await respondToEdit(
+      createdBody.data.requestId,
+      { decision: 'EDIT_RESPONSE_ACCEPTED' },
+      worker.cookie,
+      responseKey
+    );
+    expect(responseReplay.status).toBe(200);
+    expect(await responseReplay.json()).toEqual(respondedBody);
+
+    const rejectedKey = `respond-rejected-${crypto.randomUUID()}`;
+    const rejected = await respondToEdit(
+      createdBody.data.requestId,
+      { decision: 'EDIT_RESPONSE_ACCEPTED' },
+      worker.cookie,
+      rejectedKey
+    );
+    expect(rejected.status).toBe(409);
+    expect((await rejected.json()).error.code).toBe('QUEST_EDIT_NOT_PENDING');
+
+    const rejectedReplay = await respondToEdit(
+      createdBody.data.requestId,
+      { decision: 'EDIT_RESPONSE_ACCEPTED' },
+      worker.cookie,
+      rejectedKey
+    );
+    expect(rejectedReplay.status).toBe(409);
+    expect((await rejectedReplay.json()).error.code).toBe('QUEST_EDIT_NOT_PENDING');
+
+    const [rejectedCommand] = await db
+      .select({
+        processingStatus: questCommand.processingStatus,
+        resultData: questCommand.resultData,
+      })
+      .from(questCommand)
+      .where(
+        and(
+          eq(questCommand.principalUserId, worker.id),
+          eq(questCommand.operationScope, 'quest.v2.edit-request.respond'),
+          eq(questCommand.key, rejectedKey)
+        )
+      );
+    expect(rejectedCommand?.processingStatus).toBe('COMPLETED');
+    expect(rejectedCommand?.resultData).toMatchObject({
+      kind: 'rejected',
+      rejection: 'not-pending',
     });
 
     const [condition] = await db
@@ -285,9 +366,13 @@ describe('Quest Edit v2', () => {
     expect(replay.status).toBe(201);
     expect((await replay.json()).data.requestId).toBe(createdBody.data.requestId);
 
-    const reused = await createEdit(questId, {
-      condition: { items: ['A different requirement'] },
-    }, key);
+    const reused = await createEdit(
+      questId,
+      {
+        condition: { items: ['A different requirement'] },
+      },
+      key
+    );
     expect(reused.status).toBe(409);
     expect((await reused.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
 
@@ -300,7 +385,7 @@ describe('Quest Edit v2', () => {
     const response = await respondToEdit(
       createdBody.data.requestId,
       { decision: 'EDIT_RESPONSE_DECLINED', reason: 'The scope is not clear' },
-      worker.cookie,
+      worker.cookie
     );
     expect(response.status).toBe(200);
     expect((await response.json()).data).toMatchObject({
@@ -343,7 +428,7 @@ describe('Quest Edit v2', () => {
     const lateResponse = await respondToEdit(
       createdBody.data.requestId,
       { decision: 'EDIT_RESPONSE_ACCEPTED' },
-      worker.cookie,
+      worker.cookie
     );
     expect(lateResponse.status).toBe(409);
     expect((await lateResponse.json()).error.code).toBe('QUEST_EDIT_EXPIRED');
@@ -387,12 +472,12 @@ describe('Quest Edit v2', () => {
       respondToEdit(
         createdBody.data.requestId,
         { decision: 'EDIT_RESPONSE_ACCEPTED' },
-        worker.cookie,
+        worker.cookie
       ),
       respondToEdit(
         createdBody.data.requestId,
         { decision: 'EDIT_RESPONSE_ACCEPTED' },
-        secondWorker.cookie,
+        secondWorker.cookie
       ),
     ]);
     expect(responses.map((response) => response.status).sort()).toEqual([200, 200]);

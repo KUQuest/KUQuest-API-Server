@@ -1,11 +1,11 @@
 # Code Styles
 
-Observed conventions in this repo — there's no Prettier config enforcing formatting, and `oxlint` only enforces `import/no-default-export` beyond correctness/suspicious/perf (no quote-style or import-order rules exist in oxlint), so this file is the source of truth for everything else until tooling covers it.
+Observed conventions in this repo — Prettier (`.prettierrc`) enforces indentation, quotes, semicolons, and a 100-column width on every staged file through the Husky pre-commit hook, and `oxlint` only enforces `import/no-default-export` beyond correctness/suspicious/perf (no import-order rules exist in oxlint), so this file is the source of truth for import order, module layout, and everything Prettier does not cover.
 
 ## Formatting
 
 - 2-space indentation, single quotes, semicolons everywhere.
-  - Exception: `src/modules/onboarding/*` currently uses 4-space indentation — a pre-existing deviation, not the target. Match the file you're in; don't spread 4-space to new modules.
+  - `src/modules/onboarding/*` still carries 4-space indentation from before Prettier. The hook rewrites each of those files to 2-space the next time it is staged; that churn is expected, not a mistake.
 - `strict: true` in `tsconfig.json` — no implicit `any` beyond deliberate escape hatches (see Elysia section below).
 
 ## Imports

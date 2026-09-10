@@ -38,7 +38,8 @@ export const adminDisputeRoute = new Elysia({
     detail: {
       tags: ['Admin Disputes'],
       summary: 'Open a Dispute Case for a Worker',
-      description: 'Opens one Admin-filed Dispute Case for a Worker with an Assignment on a failed Quest within the five-day filing window.',
+      description:
+        'Opens one Admin-filed Dispute Case for a Worker with an Assignment on a failed Quest within the five-day filing window.',
       operationId: 'openAdminDispute',
       security: betterAuthSecurity,
     },
@@ -61,7 +62,8 @@ export const adminDisputeRoute = new Elysia({
     detail: {
       tags: ['Admin Disputes'],
       summary: 'Read case-scoped Dispute evidence',
-      description: 'Returns only Quest, Assignment, Proof, and file metadata for this Dispute Case. The evidence access is audited as an Admin Action.',
+      description:
+        'Returns only Quest, Assignment, Proof, and file metadata for this Dispute Case. The evidence access is audited as an Admin Action.',
       operationId: 'getAdminDisputeEvidence',
       security: betterAuthSecurity,
     },
@@ -72,7 +74,8 @@ export const adminDisputeRoute = new Elysia({
     detail: {
       tags: ['Admin Disputes'],
       summary: 'Get Dispute Case detail for Admin review',
-      description: 'Returns the Dispute Case and its failed Quest summary without unrelated Member or Conversation data.',
+      description:
+        'Returns the Dispute Case and its failed Quest summary without unrelated Member or Conversation data.',
       operationId: 'getAdminDispute',
       security: betterAuthSecurity,
     },
@@ -85,7 +88,8 @@ export const adminDisputeRoute = new Elysia({
     detail: {
       tags: ['Admin Disputes'],
       summary: 'Dismiss or resolve a Dispute Case',
-      description: 'Accepts only DISPUTE_CASE_DISMISSED or DISPUTE_CASE_RESOLVED. Wallet owns the balanced financial settlement.',
+      description:
+        'Accepts only DISPUTE_CASE_DISMISSED or DISPUTE_CASE_RESOLVED. Wallet owns the balanced financial settlement.',
       operationId: 'resolveAdminDispute',
       security: betterAuthSecurity,
     },

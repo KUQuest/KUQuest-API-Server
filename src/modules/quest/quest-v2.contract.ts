@@ -17,7 +17,7 @@ export type QuestV2Participation = (typeof questV2Participations)[number];
 
 export const isValidQuestV2Headcount = (
   participation: QuestV2Participation,
-  headcount: number,
+  headcount: number
 ): boolean => {
   if (!Number.isInteger(headcount) || headcount < 1 || headcount > 20) return false;
   return participation === questV2Participation.single ? headcount === 1 : headcount >= 2;
@@ -52,15 +52,7 @@ export const isQuestV2ScheduleTime = (value: string): boolean => {
   const minute = Number(minuteText);
   const second = Number(secondText);
   const milliseconds = Number((fractionText ?? '').padEnd(3, '0'));
-  if (
-    month < 1 ||
-    month > 12 ||
-    day < 1 ||
-    day > 31 ||
-    hour > 23 ||
-    minute > 59 ||
-    second > 59
-  ) {
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) {
     return false;
   }
 

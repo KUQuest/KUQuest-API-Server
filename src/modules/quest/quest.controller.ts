@@ -89,13 +89,11 @@ const discardUploadedImages = async (images: StoredQuestImage[]): Promise<void> 
           objectKey: image.objectKey,
         });
       }
-    }),
+    })
   );
 };
 
-const buildQuestImage = (
-  image: QuestImage,
-): QuestImagesUploadResponse['images'][number] => {
+const buildQuestImage = (image: QuestImage): QuestImagesUploadResponse['images'][number] => {
   try {
     return {
       fileId: image.fileId,
@@ -113,7 +111,7 @@ const serializeQuestImages = (images: QuestImage[]) => images.map(buildQuestImag
 
 const serializeQuestImagesOrError = (
   set: AuthedContext['set'],
-  images: QuestImage[],
+  images: QuestImage[]
 ): QuestImagesUploadResponse['images'] | ReturnType<typeof apiError> => {
   try {
     return serializeQuestImages(images);
@@ -146,7 +144,7 @@ const mapImageUploadError = (set: AuthedContext['set'], error: unknown) => {
 
 const mapQuestImageMutationOutcome = (
   set: AuthedContext['set'],
-  outcome: QuestImageMutationOutcome,
+  outcome: QuestImageMutationOutcome
 ) => {
   if (outcome.outcome === 'not-found') {
     set.status = 404;
@@ -168,7 +166,7 @@ const questNotFound = (set: AuthedContext['set']) => {
 
 const mapQuestEditOutcome = (
   set: AuthedContext['set'],
-  outcome: Exclude<Awaited<ReturnType<typeof editQuest>>, { id: string }>['outcome'],
+  outcome: Exclude<Awaited<ReturnType<typeof editQuest>>, { id: string }>['outcome']
 ) => {
   if (outcome === 'not-found') return questNotFound(set);
 
@@ -176,7 +174,7 @@ const mapQuestEditOutcome = (
     set.status = 409;
     return apiError(
       'QUEST_EDIT_REQUIRES_CONSENT',
-      'Quest edits require consent after participation starts',
+      'Quest edits require consent after participation starts'
     );
   }
 
@@ -241,7 +239,7 @@ const validateMineQuery = (query: MineQuery, set: AuthedContext['set']) => {
 
 const serializeQuestDetailResponse = (
   set: AuthedContext['set'],
-  questDetail: QuestDetail,
+  questDetail: QuestDetail
 ): ApiResponse<DetailResponse> => {
   const images = serializeQuestImagesOrError(set, questDetail.images);
   if ('success' in images) return images;
@@ -282,7 +280,7 @@ export const addQuestImagesController = async ({
   const uploadCheck = await checkQuestImageUpload(
     session.user.id,
     params.questId,
-    body.images.length,
+    body.images.length
   );
   if (uploadCheck) return mapQuestImageMutationOutcome(set, uploadCheck);
 
@@ -380,7 +378,9 @@ export const createQuestEditRequestController = async ({
   params,
   session,
   set,
-}: AuthedContext & { body: EditInput; params: QuestParams }): Promise<ApiResponse<EditRequestCreateResponse>> => {
+}: AuthedContext & { body: EditInput; params: QuestParams }): Promise<
+  ApiResponse<EditRequestCreateResponse>
+> => {
   const result = await createQuestEditRequest(session.user.id, params.questId, body);
   if ('outcome' in result) {
     if (result.outcome === 'not-found') return questNotFound(set);
@@ -392,12 +392,27 @@ export const createQuestEditRequestController = async ({
       set.status = 409;
       return apiError('QUEST_NOT_EDITABLE', 'This Quest cannot accept an edit request');
     }
-    if (result.outcome === 'invalid-dates') return invalidInput(set, 'INVALID_QUEST_DATES', 'dueAt must be after startTime');
-    if (result.outcome === 'invalid-files') return invalidInput(set, 'QUEST_EDIT_IMAGES_INVALID', 'A proposed Quest Image is unavailable');
-    if (result.outcome === 'forbidden-fields') return invalidInput(set, 'QUEST_EDIT_FIELD_NOT_ALLOWED', 'Core Quest commitments cannot be edited');
+    if (result.outcome === 'invalid-dates')
+      return invalidInput(set, 'INVALID_QUEST_DATES', 'dueAt must be after startTime');
+    if (result.outcome === 'invalid-files')
+      return invalidInput(
+        set,
+        'QUEST_EDIT_IMAGES_INVALID',
+        'A proposed Quest Image is unavailable'
+      );
+    if (result.outcome === 'forbidden-fields')
+      return invalidInput(
+        set,
+        'QUEST_EDIT_FIELD_NOT_ALLOWED',
+        'Core Quest commitments cannot be edited'
+      );
     return invalidInput(set, 'EMPTY_QUEST_EDIT', 'At least one Quest field must be supplied');
   }
-  return apiSuccess({ requestId: result.requestId, status: result.status, expiresAt: result.expiresAt.toISOString() });
+  return apiSuccess({
+    requestId: result.requestId,
+    status: result.status,
+    expiresAt: result.expiresAt.toISOString(),
+  });
 };
 
 export const respondToQuestEditRequestController = async ({
@@ -405,10 +420,13 @@ export const respondToQuestEditRequestController = async ({
   params,
   session,
   set,
-}: AuthedContext & { body: EditDecisionInput; params: { requestId: string } }): Promise<ApiResponse<EditRequestResponse>> => {
+}: AuthedContext & { body: EditDecisionInput; params: { requestId: string } }): Promise<
+  ApiResponse<EditRequestResponse>
+> => {
   const result = await respondToQuestEditRequest(session.user.id, params.requestId, body.decision);
   if ('outcome' in result) {
-    if (result.outcome === 'not-found' || result.outcome === 'not-authorized') return questNotFound(set);
+    if (result.outcome === 'not-found' || result.outcome === 'not-authorized')
+      return questNotFound(set);
     if (result.outcome === 'expired') {
       set.status = 409;
       return apiError('QUEST_EDIT_REQUEST_EXPIRED', 'The edit request expired');
@@ -427,7 +445,9 @@ export const getQuestEditRequestController = async ({
   params,
   session,
   set,
-}: AuthedContext & { params: { requestId: string } }): Promise<ApiResponse<EditRequestDetailResponse>> => {
+}: AuthedContext & { params: { requestId: string } }): Promise<
+  ApiResponse<EditRequestDetailResponse>
+> => {
   const result = await getQuestEditRequest(session.user.id, params.requestId);
   if (!result) return questNotFound(set);
   return apiSuccess({

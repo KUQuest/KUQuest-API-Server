@@ -20,10 +20,7 @@ import {
   listAdminQuests,
   serializeAdminQuestSummary,
 } from './quest-admin.service';
-import type {
-  AdminQuestDetail,
-  AdminQuestEditHistoryEntry,
-} from './quest-admin.service';
+import type { AdminQuestDetail, AdminQuestEditHistoryEntry } from './quest-admin.service';
 import type {
   QuestAdminCommandInput,
   QuestAdminCommandResult,
@@ -53,18 +50,19 @@ const questNotFound = (set: AdminContext['set']) => {
   return apiError('QUEST_NOT_FOUND', 'Quest not found');
 };
 
-const serializeEditHistoryEntry = (entry: AdminQuestEditHistoryEntry) => entry.kind === 'FIELD_EDIT'
-  ? { ...entry, editedAt: entry.editedAt.toISOString() }
-  : {
-      ...entry,
-      createdAt: entry.createdAt.toISOString(),
-      expiresAt: entry.expiresAt ? entry.expiresAt.toISOString() : null,
-      resolvedAt: entry.resolvedAt ? entry.resolvedAt.toISOString() : null,
-      responses: entry.responses.map((response) => ({
-        ...response,
-        respondedAt: response.respondedAt ? response.respondedAt.toISOString() : null,
-      })),
-    };
+const serializeEditHistoryEntry = (entry: AdminQuestEditHistoryEntry) =>
+  entry.kind === 'FIELD_EDIT'
+    ? { ...entry, editedAt: entry.editedAt.toISOString() }
+    : {
+        ...entry,
+        createdAt: entry.createdAt.toISOString(),
+        expiresAt: entry.expiresAt ? entry.expiresAt.toISOString() : null,
+        resolvedAt: entry.resolvedAt ? entry.resolvedAt.toISOString() : null,
+        responses: entry.responses.map((response) => ({
+          ...response,
+          respondedAt: response.respondedAt ? response.respondedAt.toISOString() : null,
+        })),
+      };
 
 const serializeQuestDetail = (quest: AdminQuestDetail): AdminQuestDetailResponse => ({
   ...quest,
@@ -95,7 +93,10 @@ const serializeQuestDetail = (quest: AdminQuestDetail): AdminQuestDetailResponse
     reviewedAt: proof.reviewedAt ? proof.reviewedAt.toISOString() : null,
   })),
   editHistory: quest.editHistory.map(serializeEditHistoryEntry),
-  adminActions: quest.adminActions.map((action) => ({ ...action, createdAt: action.createdAt.toISOString() })),
+  adminActions: quest.adminActions.map((action) => ({
+    ...action,
+    createdAt: action.createdAt.toISOString(),
+  })),
 });
 
 export const listAdminQuestsController = async ({
@@ -137,7 +138,7 @@ export const getAdminQuestDetailController = async ({
 };
 const mapQuestAdminCommandError = (
   set: AdminContext['set'],
-  error: unknown,
+  error: unknown
 ): ApiResponse<AdminQuestCommandResponse> => {
   if (error instanceof QuestAdminCommandError) {
     set.status = error.code === 'QUEST_NOT_FOUND' ? 404 : 409;
@@ -149,7 +150,8 @@ const mapQuestAdminCommandError = (
       error.code === 'ADMIN_ACTION_KEY_REUSED' ||
       error.code === 'ADMIN_ACTION_CONFLICT' ||
       error.code === 'ADMIN_ACTION_WRITE_FAILED'
-    ) set.status = 409;
+    )
+      set.status = 409;
     else set.status = 400;
     return apiError(error.code, error.message);
   }
@@ -170,7 +172,7 @@ const runQuestAdminCommand = async (
   adminId: string,
   questId: string,
   reasonCode: string | undefined,
-  execute: (input: QuestAdminCommandInput) => Promise<QuestAdminCommandResult>,
+  execute: (input: QuestAdminCommandInput) => Promise<QuestAdminCommandResult>
 ): Promise<ApiResponse<AdminQuestCommandResponse>> => {
   const revision = readResourceVersion(request);
   if (revision.invalid || revision.value === undefined) {
@@ -188,7 +190,10 @@ const runQuestAdminCommand = async (
     });
     if (result.resourceVersion === null) {
       set.status = 500;
-      return apiError('ADMIN_ACTION_INVALID_RESULT', 'Admin Action did not return a Quest version.');
+      return apiError(
+        'ADMIN_ACTION_INVALID_RESULT',
+        'Admin Action did not return a Quest version.'
+      );
     }
     return apiSuccess({
       resourceSummary: result.resourceSummary,
@@ -210,14 +215,8 @@ export const hideAdminQuestController = async ({
   body: AdminQuestHideBody;
   params: AdminQuestParams;
   request: Request;
-}): Promise<ApiResponse<AdminQuestCommandResponse>> => runQuestAdminCommand(
-  set,
-  request,
-  admin.id,
-  params.questId,
-  body.reasonCode,
-  hideQuest,
-);
+}): Promise<ApiResponse<AdminQuestCommandResponse>> =>
+  runQuestAdminCommand(set, request, admin.id, params.questId, body.reasonCode, hideQuest);
 
 export const restoreAdminQuestController = async ({
   body,
@@ -229,14 +228,8 @@ export const restoreAdminQuestController = async ({
   body: AdminQuestRestoreBody;
   params: AdminQuestParams;
   request: Request;
-}): Promise<ApiResponse<AdminQuestCommandResponse>> => runQuestAdminCommand(
-  set,
-  request,
-  admin.id,
-  params.questId,
-  body.reasonCode,
-  restoreQuest,
-);
+}): Promise<ApiResponse<AdminQuestCommandResponse>> =>
+  runQuestAdminCommand(set, request, admin.id, params.questId, body.reasonCode, restoreQuest);
 
 export const terminateAdminQuestController = async ({
   body,
@@ -248,11 +241,5 @@ export const terminateAdminQuestController = async ({
   body: AdminQuestTerminateBody;
   params: AdminQuestParams;
   request: Request;
-}): Promise<ApiResponse<AdminQuestCommandResponse>> => runQuestAdminCommand(
-  set,
-  request,
-  admin.id,
-  params.questId,
-  body.reasonCode,
-  terminateQuest,
-);
+}): Promise<ApiResponse<AdminQuestCommandResponse>> =>
+  runQuestAdminCommand(set, request, admin.id, params.questId, body.reasonCode, terminateQuest);

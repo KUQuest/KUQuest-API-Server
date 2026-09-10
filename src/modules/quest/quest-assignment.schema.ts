@@ -6,7 +6,7 @@ const status = t.Union(
   assignmentStatuses.map((value) => t.Literal(value)) as [
     ReturnType<typeof t.Literal<string>>,
     ...ReturnType<typeof t.Literal<string>>[],
-  ],
+  ]
 );
 
 export const questAssignmentParamsSchema = t.Object({
@@ -35,7 +35,7 @@ const questStatus = t.Union(
   questStatuses.map((value) => t.Literal(value)) as [
     ReturnType<typeof t.Literal<string>>,
     ...ReturnType<typeof t.Literal<string>>[],
-  ],
+  ]
 );
 
 export const questAssignmentResponseSchema = t.Object({

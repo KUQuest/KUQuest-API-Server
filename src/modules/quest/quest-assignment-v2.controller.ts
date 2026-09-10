@@ -7,6 +7,7 @@ import {
   listQuestV2Assignments,
   type QuestV2AssignmentOutcome,
 } from './quest-assignment-v2.service';
+import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 import type { QuestV2AssignmentParams } from './quest-assignment-v2.schema';
 import { WorkChatTransitionError } from './quest-work-chat.port';
 
@@ -28,19 +29,24 @@ const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   return apiError(code, message);
 };
 
-const mapJoinOutcome = (
-  set: AuthedContext['set'],
-  outcome: QuestV2AssignmentError,
-) => {
+const mapJoinOutcome = (set: AuthedContext['set'], outcome: QuestV2AssignmentError) => {
   if (outcome.outcome === 'not-found') {
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
   if (outcome.outcome === 'not-first-come-first-served') {
-    return conflict(set, 'QUEST_MODE_NOT_ALLOWED', 'Only FIRST_COME_FIRST_SERVED Quests accept direct joins');
+    return conflict(
+      set,
+      'QUEST_MODE_NOT_ALLOWED',
+      'Only FIRST_COME_FIRST_SERVED Quests accept direct joins'
+    );
   }
   if (outcome.outcome === 'not-supported-participation') {
-    return conflict(set, 'QUEST_PARTICIPATION_NOT_ALLOWED', 'Only SINGLE or GROUP Quests accept direct joins');
+    return conflict(
+      set,
+      'QUEST_PARTICIPATION_NOT_ALLOWED',
+      'Only SINGLE or GROUP Quests accept direct joins'
+    );
   }
   if (outcome.outcome === 'hirer-not-allowed') {
     return conflict(set, 'HIRER_CANNOT_JOIN', 'The Hirer cannot join their own Quest');
@@ -49,26 +55,23 @@ const mapJoinOutcome = (
     return conflict(set, 'QUEST_NOT_OPEN', 'Only an open Quest can accept a direct join');
   }
   if (outcome.outcome === 'roster-frozen') {
-    return conflict(set, 'QUEST_ROSTER_FROZEN', 'The accepted Worker roster is frozen after the Quest start boundary');
+    return conflict(
+      set,
+      'QUEST_ROSTER_FROZEN',
+      'The accepted Worker roster is frozen after the Quest start boundary'
+    );
   }
   if (outcome.outcome === 'already-assigned') {
-    return conflict(set, 'ASSIGNMENT_ALREADY_EXISTS', 'The Worker is already assigned to this Quest');
+    return conflict(
+      set,
+      'ASSIGNMENT_ALREADY_EXISTS',
+      'The Worker is already assigned to this Quest'
+    );
   }
   if (outcome.outcome === 'full') {
     return conflict(set, 'QUEST_FULL', 'The Quest has no open Worker slots');
   }
-  if (outcome.outcome === 'idempotency-key-reused') {
-    return conflict(set, 'IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
-  }
-  if (outcome.outcome === 'idempotency-in-progress') {
-    return conflict(set, 'IDEMPOTENCY_IN_PROGRESS', 'The Idempotency-Key is still processing');
-  }
-  if (outcome.outcome === 'idempotency-unavailable') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'The Idempotency-Key result is unavailable');
-  }
-  set.status = 400;
-  return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
+  return mapQuestCommandOutcome(set, outcome.outcome);
 };
 
 export const joinQuestV2Controller = async ({
@@ -77,14 +80,11 @@ export const joinQuestV2Controller = async ({
   session,
   set,
 }: AuthedContext & { params: QuestV2AssignmentParams }) => {
-  const commandId = request?.headers.get('idempotency-key');
-  if (!commandId?.trim()) {
-    set.status = 400;
-    return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
-  }
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
 
   try {
-    const result = await joinQuestV2(session.user.id, params.questId, commandId);
+    const result = await joinQuestV2(session.user.id, params.questId, commandId, new Date());
     if ('outcome' in result) return mapJoinOutcome(set, result);
     return apiSuccess(serializeAssignment(result));
   } catch (error) {

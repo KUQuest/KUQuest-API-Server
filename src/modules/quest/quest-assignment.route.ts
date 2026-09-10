@@ -5,7 +5,6 @@ import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { Elysia } from 'elysia';
 
 import { joinNoCandidateQuestController } from './quest-assignment.controller';
-import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
 import {
   questAssignmentHeadersSchema,
   questAssignmentParamsSchema,
@@ -17,7 +16,6 @@ export const questAssignmentRoute = new Elysia({
   name: 'quest-assignment-route',
   prefix: `${API_V1_PREFIX}/quests`,
 })
-  .use(createQuestIdempotencyKeyGuard('quest-join'))
   .use(authGuard)
   .post('/:questId/join', joinNoCandidateQuestController, {
     params: questAssignmentParamsSchema,

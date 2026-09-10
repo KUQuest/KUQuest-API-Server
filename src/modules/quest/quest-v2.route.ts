@@ -19,13 +19,8 @@ import {
   publishQuestV2Controller,
   respondToQuestV2EditRequestController,
 } from './quest-v2.controller';
-import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
-import {
-  cancelQuestV2Controller,
-} from './quest-settlement.controller';
-import {
-  questCancellationResponseSchema,
-} from './quest-settlement.schema';
+import { cancelQuestV2Controller } from './quest-settlement.controller';
+import { questCancellationResponseSchema } from './quest-settlement.schema';
 import {
   questV2CreateHttpResponseSchema,
   questV2CreateHttpSchema,
@@ -60,7 +55,6 @@ export const questV2Route = new Elysia({
   name: 'quest-v2-route',
   prefix: `${API_V2_PREFIX}/quests`,
 })
-  .use(createQuestIdempotencyKeyGuard('quest-cancellation'))
   .use(authGuard)
   .get('', listQuestBoardV2Controller, {
     query: questV2BoardQueryHttpSchema,
@@ -93,7 +87,7 @@ export const questV2Route = new Elysia({
     response: responses(questV2MineHttpResponseSchema, 400, 401, 500),
     detail: {
       tags: ['Quests v2'],
-      summary: 'List the Hirer\'s v2 Quests',
+      summary: "List the Hirer's v2 Quests",
       description: 'Returns the authenticated Hirer’s Quests owned through the v2 contract.',
       operationId: 'listOwnQuestsV2',
       security: betterAuthSecurity,
@@ -101,10 +95,19 @@ export const questV2Route = new Elysia({
   })
   .post('/:questId/edit-requests', createQuestV2EditRequestController, {
     params: questV2ParamsSchema,
-    body: questV2EditRequestCreateSchema,
     headers: questV2WriteHeadersSchema,
+    body: questV2EditRequestCreateSchema,
     transform: normalizeQuestV2EditRequestCreateBody,
-    response: responses(questV2EditRequestResponseSchema, { successStatus: 201 }, 400, 401, 404, 409, 500, 503),
+    response: responses(
+      questV2EditRequestResponseSchema,
+      { successStatus: 201 },
+      400,
+      401,
+      404,
+      409,
+      500,
+      503
+    ),
     detail: {
       tags: ['Quests v2'],
       summary: 'Create a v2 Quest Edit Request',
@@ -128,8 +131,8 @@ export const questV2Route = new Elysia({
   })
   .post('/edit-requests/:requestId/respond', respondToQuestV2EditRequestController, {
     params: questV2EditRequestParamsSchema,
-    body: questV2EditRequestResponseInputSchema,
     headers: questV2WriteHeadersSchema,
+    body: questV2EditRequestResponseInputSchema,
     transform: normalizeQuestV2EditRequestResponseBody,
     response: responses(questV2EditRequestResponseSchema, 400, 401, 404, 409, 500, 503),
     detail: {

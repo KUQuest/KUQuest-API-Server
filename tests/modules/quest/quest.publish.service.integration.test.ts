@@ -7,11 +7,7 @@ import {
   walletLedgerAccount,
   walletWallet,
 } from '@/database/schema/wallet.schema';
-import {
-  createQuest,
-  getQuestPublishCheck,
-  publishQuest,
-} from '@/modules/quest/quest.service';
+import { createQuest, getQuestPublishCheck, publishQuest } from '@/modules/quest/quest.service';
 import type { QuestCreateInput } from '@/modules/quest/quest.schema';
 import {
   createSealedLedgerTransaction,
@@ -50,10 +46,9 @@ const fundHirer = async (amountSatang: number) => {
   const [spendingAccount] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
-    .where(and(
-      eq(walletLedgerAccount.walletId, wallet.id),
-      eq(walletLedgerAccount.type, 'SPENDING'),
-    ));
+    .where(
+      and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, 'SPENDING'))
+    );
   const [suspenseAccount] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
@@ -174,7 +169,10 @@ describe('Quest publishing service', () => {
   it('reserves Quest Escrow before changing a valid Draft to Open', async () => {
     const questId = await createFixture();
     const [beforeWallet] = await db
-      .select({ spending: walletWallet.spendingBalanceSatang, reserved: walletWallet.fundingReservedSatang })
+      .select({
+        spending: walletWallet.spendingBalanceSatang,
+        reserved: walletWallet.fundingReservedSatang,
+      })
       .from(walletWallet)
       .where(eq(walletWallet.userId, hirerId));
     const preview = await getQuestPublishCheck(hirerId, questId);
@@ -184,11 +182,13 @@ describe('Quest publishing service', () => {
     const [reservation] = await db
       .select()
       .from(walletFundingReservation)
-      .where(and(
-        eq(walletFundingReservation.ownerUserId, hirerId),
-        eq(walletFundingReservation.callerScope, 'quest'),
-        eq(walletFundingReservation.callerReference, questId),
-      ));
+      .where(
+        and(
+          eq(walletFundingReservation.ownerUserId, hirerId),
+          eq(walletFundingReservation.callerScope, 'quest'),
+          eq(walletFundingReservation.callerReference, questId)
+        )
+      );
     expect(reservation).toMatchObject({
       totalReservedSatang: 51_000,
       remainingSatang: 51_000,
@@ -199,7 +199,10 @@ describe('Quest publishing service', () => {
     expect(preview.escrowRequirementSatang).toBe(51_000);
     expect(preview.escrowRequirement * 100).toBe(reservation?.totalReservedSatang);
     const [wallet] = await db
-      .select({ spending: walletWallet.spendingBalanceSatang, reserved: walletWallet.fundingReservedSatang })
+      .select({
+        spending: walletWallet.spendingBalanceSatang,
+        reserved: walletWallet.fundingReservedSatang,
+      })
       .from(walletWallet)
       .where(eq(walletWallet.userId, hirerId));
     expect(wallet).toEqual({
@@ -207,7 +210,10 @@ describe('Quest publishing service', () => {
       reserved: (beforeWallet?.reserved ?? 0) + 51_000,
     });
 
-    const [stored] = await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId));
+    const [stored] = await db
+      .select({ status: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, questId));
     expect(stored?.status).toBe('QUEST_OPEN');
   });
 
@@ -255,7 +261,10 @@ describe('Quest publishing service', () => {
   it('keeps the Draft and Wallet unchanged when Escrow cannot be funded', async () => {
     const questId = await createFixture({ reward: 600_000 });
     const [beforeWallet] = await db
-      .select({ spending: walletWallet.spendingBalanceSatang, reserved: walletWallet.fundingReservedSatang })
+      .select({
+        spending: walletWallet.spendingBalanceSatang,
+        reserved: walletWallet.fundingReservedSatang,
+      })
       .from(walletWallet)
       .where(eq(walletWallet.userId, hirerId));
 
@@ -263,20 +272,28 @@ describe('Quest publishing service', () => {
       code: 'INSUFFICIENT_SPENDING_BALANCE',
     });
 
-    const [stored] = await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId));
+    const [stored] = await db
+      .select({ status: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, questId));
     const [afterWallet] = await db
-      .select({ spending: walletWallet.spendingBalanceSatang, reserved: walletWallet.fundingReservedSatang })
+      .select({
+        spending: walletWallet.spendingBalanceSatang,
+        reserved: walletWallet.fundingReservedSatang,
+      })
       .from(walletWallet)
       .where(eq(walletWallet.userId, hirerId));
     expect(stored?.status).toBe('QUEST_DRAFT');
     expect(afterWallet).toEqual(beforeWallet);
-    expect(await db
-      .select()
-      .from(walletFundingReservation)
-      .where(eq(walletFundingReservation.callerReference, questId))).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(walletFundingReservation)
+        .where(eq(walletFundingReservation.callerReference, questId))
+    ).toHaveLength(0);
   });
 
-  it('does not expose another Member\'s Quest and rejects a non-Draft', async () => {
+  it("does not expose another Member's Quest and rejects a non-Draft", async () => {
     const questId = await createFixture();
 
     expect(await getQuestPublishCheck(otherMemberId, questId)).toBeUndefined();
@@ -297,9 +314,11 @@ describe('Quest publishing service', () => {
 
     expect(results.filter((result) => result?.outcome === 'published')).toHaveLength(1);
     expect(results.filter((result) => result?.outcome === 'not-draft')).toHaveLength(1);
-    expect(await db
-      .select()
-      .from(walletFundingReservation)
-      .where(eq(walletFundingReservation.callerReference, questId))).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(walletFundingReservation)
+        .where(eq(walletFundingReservation.callerReference, questId))
+    ).toHaveLength(1);
   });
 });

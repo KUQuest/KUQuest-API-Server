@@ -1,6 +1,5 @@
 import { db } from '@/database/client';
 import { quest, questApiVersion, questAssignment } from '@/database/schema/quest.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 
 import { and, asc, eq, sql } from 'drizzle-orm';
 
@@ -9,6 +8,12 @@ import {
   requireQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
 } from './quest-work-chat.port';
+import {
+  runQuestCommand,
+  sha256Json,
+  type QuestCommandOutcomeCode,
+  type QuestCommandWork,
+} from './quest-command.service';
 import {
   questV2AssignmentStates,
   questV2Mode,
@@ -44,36 +49,13 @@ type QuestV2AssignmentBusinessOutcomeCode =
   | 'roster-frozen'
   | 'not-first-come-first-served';
 
-type QuestV2AssignmentIdempotencyOutcomeCode =
-  | 'idempotency-in-progress'
-  | 'idempotency-key-reused'
-  | 'idempotency-unavailable'
-  | 'invalid-idempotency-key';
-
-type QuestV2AssignmentOutcomeCode =
-  | QuestV2AssignmentBusinessOutcomeCode
-  | QuestV2AssignmentIdempotencyOutcomeCode;
+type QuestV2AssignmentOutcomeCode = QuestV2AssignmentBusinessOutcomeCode | QuestCommandOutcomeCode;
 
 export type QuestV2AssignmentOutcome =
-  | QuestV2AssignmentRow
-  | { outcome: QuestV2AssignmentOutcomeCode };
+  QuestV2AssignmentRow | { outcome: QuestV2AssignmentOutcomeCode };
 
 export type QuestV2AssignmentReadOutcome =
-  | QuestV2AssignmentRow[]
-  | { outcome: 'not-authorized' | 'not-found' };
-
-type IdempotencyRecord = {
-  id: string;
-  requestHash: string;
-  resourceId: string | null;
-  resultData: unknown;
-  processingStatus: string;
-};
-
-type CommandAcquireResult =
-  | { created: true; record: IdempotencyRecord }
-  | { created: false; record: IdempotencyRecord }
-  | { outcome: QuestV2AssignmentIdempotencyOutcomeCode };
+  QuestV2AssignmentRow[] | { outcome: 'not-authorized' | 'not-found' };
 
 const assignmentFields = {
   id: questAssignment.id,
@@ -84,17 +66,6 @@ const assignmentFields = {
   createdAt: questAssignment.createdAt,
 };
 
-const sha256Json = async (value: object): Promise<string> => {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value)),
-  );
-  return Array.from(
-    new Uint8Array(digest),
-    (byte) => byte.toString(16).padStart(2, '0'),
-  ).join('');
-};
-
 const requestHashFor = (userId: string, questId: string): Promise<string> =>
   sha256Json({
     authenticatedMemberId: userId,
@@ -103,8 +74,6 @@ const requestHashFor = (userId: string, questId: string): Promise<string> =>
     questId,
     body: {},
   });
-
-const idempotencyExpiry = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
 
 const isQuestV2State = (value: string): value is QuestV2State =>
   (questV2States as readonly string[]).includes(value);
@@ -118,7 +87,7 @@ const toQuestV2AssignmentRow = (
     startedAt: Date | null;
     createdAt: Date;
   },
-  questState: string,
+  questState: string
 ): QuestV2AssignmentRow => {
   if (!(questV2AssignmentStates as readonly string[]).includes(assignment.state)) {
     throw new Error('Assignment has an invalid state for Quest API V2');
@@ -154,7 +123,8 @@ const assignmentFromSnapshot = (value: unknown): QuestV2AssignmentRow | undefine
     typeof snapshot.questState !== 'string' ||
     typeof snapshot.createdAt !== 'string' ||
     (snapshot.startedAt !== null && typeof snapshot.startedAt !== 'string')
-  ) return undefined;
+  )
+    return undefined;
   if (!(questV2AssignmentStates as readonly string[]).includes(snapshot.state)) return undefined;
   if (!isQuestV2State(snapshot.questState)) return undefined;
   const createdAt = new Date(snapshot.createdAt);
@@ -171,54 +141,6 @@ const assignmentFromSnapshot = (value: unknown): QuestV2AssignmentRow | undefine
     startedAt,
     createdAt,
   };
-};
-
-const idempotencyFields = {
-  id: walletIdempotencyKey.id,
-  requestHash: walletIdempotencyKey.requestHash,
-  resourceId: walletIdempotencyKey.resourceId,
-  resultData: walletIdempotencyKey.resultData,
-  processingStatus: walletIdempotencyKey.processingStatus,
-};
-
-const acquireIdempotency = async (
-  transaction: QuestTransaction,
-  userId: string,
-  key: string,
-  requestHash: string,
-): Promise<CommandAcquireResult> => {
-  const [created] = await transaction
-    .insert(walletIdempotencyKey)
-    .values({
-      principalUserId: userId,
-      operationScope: questV2AssignmentJoinOperationScope,
-      key,
-      requestHash,
-      expiresAt: idempotencyExpiry(),
-    })
-    .onConflictDoNothing()
-    .returning(idempotencyFields);
-  if (created) return { created: true, record: created };
-
-  const [existing] = await transaction
-    .select(idempotencyFields)
-    .from(walletIdempotencyKey)
-    .where(
-      and(
-        eq(walletIdempotencyKey.principalUserId, userId),
-        eq(walletIdempotencyKey.operationScope, questV2AssignmentJoinOperationScope),
-        eq(walletIdempotencyKey.key, key),
-      ),
-    )
-    .limit(1)
-    .for('update');
-  if (!existing) return { outcome: 'idempotency-unavailable' };
-  if (existing.requestHash !== requestHash) return { outcome: 'idempotency-key-reused' };
-  if (existing.resourceId) return { created: false, record: existing };
-  if (existing.processingStatus !== 'PROCESSING') {
-    return { outcome: 'idempotency-unavailable' };
-  }
-  return { outcome: 'idempotency-in-progress' };
 };
 
 const lockQuest = async (transaction: QuestTransaction, questId: string) => {
@@ -245,7 +167,7 @@ const transitionFor = (
   assignmentId: string,
   hirerId: string,
   now: Date,
-  commandId: string,
+  commandId: string
 ): QuestWorkChatMembershipTransition => ({
   producer: 'QUEST_ASSIGNMENT_V2',
   type: 'workersAccepted',
@@ -267,7 +189,7 @@ const transitionFor = (
 const listAssignments = async (
   transaction: QuestTransaction,
   questId: string,
-  questState: string,
+  questState: string
 ): Promise<QuestV2AssignmentRow[]> => {
   const rows = await transaction
     .select(assignmentFields)
@@ -275,8 +197,8 @@ const listAssignments = async (
     .where(
       and(
         eq(questAssignment.questId, questId),
-        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
-      ),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+      )
     )
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
   return rows.map((row) => toQuestV2AssignmentRow(row, questState));
@@ -286,140 +208,127 @@ const joinQuestV2InTransaction = async (
   transaction: QuestTransaction,
   userId: string,
   questId: string,
-  commandId: string,
-  requestHash: string,
+  key: string,
   now: Date,
-  writer: WorkChatMembershipWriter<QuestTransaction>,
+  writer: WorkChatMembershipWriter<QuestTransaction>
 ): Promise<QuestV2AssignmentOutcome> => {
+  // The Quest row is locked before the module records the command. The command row's
+  // quest foreign key takes FOR KEY SHARE on the Quest row, so taking the caller's
+  // FOR UPDATE after the module's insert deadlocks two concurrent Joins that target
+  // the same Quest.
   const current = await lockQuest(transaction, questId);
   if (!current) return { outcome: 'not-found' };
 
-  const idempotency = await acquireIdempotency(transaction, userId, commandId, requestHash);
-  if ('outcome' in idempotency) return idempotency;
-
-  if (!idempotency.created && idempotency.record.resourceId) {
-    const replay = assignmentFromSnapshot(idempotency.record.resultData);
-    return replay ? replay : { outcome: 'idempotency-unavailable' };
-  }
-
-  const discardIdempotency = async (
-    outcome: QuestV2AssignmentBusinessOutcomeCode,
-  ) => {
-    await transaction
-      .delete(walletIdempotencyKey)
-      .where(eq(walletIdempotencyKey.id, idempotency.record.id));
-    return { outcome };
-  };
-
-  if (current.v2Mode !== questV2Mode.firstComeFirstServed) {
-    return discardIdempotency('not-first-come-first-served');
-  }
-  const isSingleQuest = current.v2Participation === questV2Participation.single;
-  const isGroupQuest = current.v2Participation === questV2Participation.group;
-  if (!isSingleQuest && !isGroupQuest) {
-    return discardIdempotency('not-supported-participation');
-  }
-  if (current.hirerId === userId) return discardIdempotency('hirer-not-allowed');
-
-  const [existing] = await transaction
-    .select({ id: questAssignment.id })
-    .from(questAssignment)
-    .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, userId)))
-    .limit(1);
-  if (existing) return discardIdempotency('already-assigned');
-  // A hidden Quest is out of reach for Members, so it refuses a join the same way a
-  // Quest that is not open does.
-  if (current.questState !== 'QUEST_OPEN' || current.hiddenAt !== null) {
-    return discardIdempotency('not-open');
-  }
-  if (current.startTime.getTime() <= now.getTime()) {
-    return discardIdempotency(isGroupQuest ? 'roster-frozen' : 'not-open');
-  }
-
-  const [activeCount] = await transaction
-    .select({ count: sql<number>`count(*)` })
-    .from(questAssignment)
-    .where(
-      and(
-        eq(questAssignment.questId, questId),
-        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
-      ),
-    );
-  const joinedCount = Number(activeCount?.count ?? 0);
-  if (joinedCount >= current.headcount) return discardIdempotency('full');
-
-  const [createdAssignment] = await transaction
-    .insert(questAssignment)
-    .values({
+  const command = await runQuestCommand({
+    transaction,
+    identity: {
+      principalUserId: userId,
+      operationScope: questV2AssignmentJoinOperationScope,
+      key,
+      requestHash: await requestHashFor(userId, questId),
       questId,
-      workerId: userId,
-      assignmentStatus: 'ASSIGNMENT_ACTIVE',
-      createdAt: now,
-    })
-    .returning(assignmentFields);
-  if (!createdAssignment) return { outcome: 'idempotency-unavailable' };
+    },
+    now,
+    work: async (): Promise<
+      QuestCommandWork<QuestV2AssignmentRow, QuestV2AssignmentBusinessOutcomeCode>
+    > => {
+      if (current.v2Mode !== questV2Mode.firstComeFirstServed) {
+        return { kind: 'rejected', rejection: 'not-first-come-first-served' };
+      }
+      const isSingleQuest = current.v2Participation === questV2Participation.single;
+      const isGroupQuest = current.v2Participation === questV2Participation.group;
+      if (!isSingleQuest && !isGroupQuest) {
+        return { kind: 'rejected', rejection: 'not-supported-participation' };
+      }
+      if (current.hirerId === userId) return { kind: 'rejected', rejection: 'hirer-not-allowed' };
 
-  const nextQuestState = isSingleQuest || joinedCount + 1 === current.headcount
-    ? 'QUEST_ASSIGNED'
-    : 'QUEST_OPEN';
-  await transaction
-    .update(quest)
-    .set({ questStatus: nextQuestState, updatedAt: now })
-    .where(and(eq(quest.id, questId), eq(quest.questStatus, 'QUEST_OPEN')));
+      const [existing] = await transaction
+        .select({ id: questAssignment.id })
+        .from(questAssignment)
+        .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, userId)))
+        .limit(1);
+      if (existing) return { kind: 'rejected', rejection: 'already-assigned' };
+      // A hidden Quest is out of reach for Members, so it refuses a join the same way a
+      // Quest that is not open does.
+      if (current.questState !== 'QUEST_OPEN' || current.hiddenAt !== null) {
+        return { kind: 'rejected', rejection: 'not-open' };
+      }
+      if (current.startTime.getTime() <= now.getTime()) {
+        return { kind: 'rejected', rejection: isGroupQuest ? 'roster-frozen' : 'not-open' };
+      }
 
-  const assignment = toQuestV2AssignmentRow(createdAssignment, nextQuestState);
-  const workChatCommandId = `quest-assignment-v2:${assignment.id}`;
-  try {
-    await writer.applyQuestTransition(
-      transaction,
-      transitionFor(questId, userId, assignment.id, current.hirerId, now, workChatCommandId),
-    );
-  } catch (cause) {
-    throw new WorkChatTransitionError(cause);
-  }
+      const [activeCount] = await transaction
+        .select({ count: sql<number>`count(*)` })
+        .from(questAssignment)
+        .where(
+          and(
+            eq(questAssignment.questId, questId),
+            eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+          )
+        );
+      const joinedCount = Number(activeCount?.count ?? 0);
+      if (joinedCount >= current.headcount) return { kind: 'rejected', rejection: 'full' };
 
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({
-      resourceType: 'quest-assignment-v2',
-      resourceId: assignment.id,
-      resultData: snapshotFor(assignment),
-      processingStatus: 'COMPLETED',
-      completedAt: now,
-    })
-    .where(eq(walletIdempotencyKey.id, idempotency.record.id));
+      const [createdAssignment] = await transaction
+        .insert(questAssignment)
+        .values({
+          questId,
+          workerId: userId,
+          assignmentStatus: 'ASSIGNMENT_ACTIVE',
+          createdAt: now,
+        })
+        .returning(assignmentFields);
+      if (!createdAssignment) throw new Error('Assignment insert returned no row');
 
-  return assignment;
+      const nextQuestState =
+        isSingleQuest || joinedCount + 1 === current.headcount ? 'QUEST_ASSIGNED' : 'QUEST_OPEN';
+      await transaction
+        .update(quest)
+        .set({ questStatus: nextQuestState, updatedAt: now })
+        .where(and(eq(quest.id, questId), eq(quest.questStatus, 'QUEST_OPEN')));
+
+      const assignment = toQuestV2AssignmentRow(createdAssignment, nextQuestState);
+      const workChatCommandId = `quest-assignment-v2:${assignment.id}`;
+      try {
+        await writer.applyQuestTransition(
+          transaction,
+          transitionFor(questId, userId, assignment.id, current.hirerId, now, workChatCommandId)
+        );
+      } catch (cause) {
+        throw new WorkChatTransitionError(cause);
+      }
+
+      return {
+        kind: 'success',
+        result: assignment,
+        resourceType: 'quest-assignment-v2',
+        resourceId: assignment.id,
+      };
+    },
+    toSnapshot: snapshotFor,
+    fromSnapshot: assignmentFromSnapshot,
+  });
+
+  if ('outcome' in command) return { outcome: command.outcome };
+  if (command.kind === 'success') return command.result;
+  return { outcome: command.rejection };
 };
 
 export const joinQuestV2 = async (
   workerId: string,
   questId: string,
   rawCommandId: string,
-  now = new Date(),
+  now: Date
 ): Promise<QuestV2AssignmentOutcome> => {
-  const commandId = rawCommandId.trim();
-  if (commandId.length === 0 || commandId.length > 200) {
-    return { outcome: 'invalid-idempotency-key' };
-  }
-  const requestHash = await requestHashFor(workerId, questId);
   const writer = requireQuestWorkChatMembershipWriter();
   return db.transaction((transaction) =>
-    joinQuestV2InTransaction(
-      transaction,
-      workerId,
-      questId,
-      commandId,
-      requestHash,
-      now,
-      writer,
-    ),
+    joinQuestV2InTransaction(transaction, workerId, questId, rawCommandId, now, writer)
   );
 };
 
 export const listQuestV2Assignments = async (
   memberId: string,
-  questId: string,
+  questId: string
 ): Promise<QuestV2AssignmentReadOutcome> => {
   const [current] = await db
     .select({ hirerId: quest.hirerId, questState: quest.questStatus })
@@ -430,7 +339,7 @@ export const listQuestV2Assignments = async (
 
   if (current.hirerId === memberId) {
     return db.transaction((transaction) =>
-      listAssignments(transaction, questId, current.questState),
+      listAssignments(transaction, questId, current.questState)
     );
   }
 
@@ -441,8 +350,8 @@ export const listQuestV2Assignments = async (
       and(
         eq(questAssignment.questId, questId),
         eq(questAssignment.workerId, memberId),
-        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
-      ),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+      )
     )
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
   if (assignments.length === 0) return { outcome: 'not-authorized' };
@@ -450,7 +359,7 @@ export const listQuestV2Assignments = async (
 };
 
 export const listMyQuestV2Assignments = async (
-  workerId: string,
+  workerId: string
 ): Promise<QuestV2AssignmentRow[]> => {
   const rows = await db
     .select({
@@ -463,8 +372,8 @@ export const listMyQuestV2Assignments = async (
       and(
         eq(questAssignment.workerId, workerId),
         eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
-        eq(quest.apiVersion, questApiVersion.v2),
-      ),
+        eq(quest.apiVersion, questApiVersion.v2)
+      )
     )
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
   return rows.map((row) => toQuestV2AssignmentRow(row, row.questState));

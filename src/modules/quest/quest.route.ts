@@ -76,7 +76,8 @@ export const questRoute = new Elysia({
     detail: {
       tags: ['Quests'],
       summary: 'Check whether a Quest Draft can be published',
-      description: 'Returns publish blockers, warnings, and the required Escrow amount for the Hirer.',
+      description:
+        'Returns publish blockers, warnings, and the required Escrow amount for the Hirer.',
       operationId: 'getQuestPublishCheck',
       security: betterAuthSecurity,
     },
@@ -115,7 +116,8 @@ export const questRoute = new Elysia({
     detail: {
       tags: ['Quests'],
       summary: 'Request consent for a post-Assignment Quest edit',
-      description: 'Pauses an assigned Quest and asks every Active Worker to approve the proposed mutable changes within five minutes.',
+      description:
+        'Pauses an assigned Quest and asks every Active Worker to approve the proposed mutable changes within five minutes.',
       operationId: 'createQuestEditRequest',
       security: betterAuthSecurity,
     },
@@ -172,7 +174,8 @@ export const questRoute = new Elysia({
     detail: {
       tags: ['Quests'],
       summary: 'Get Quest detail',
-      description: 'Returns full detail for an owned Quest or a QUEST_OPEN Quest visible to the caller.',
+      description:
+        'Returns full detail for an owned Quest or a QUEST_OPEN Quest visible to the caller.',
       operationId: 'getQuestDetail',
       security: betterAuthSecurity,
     },

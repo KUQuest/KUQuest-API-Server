@@ -1,0 +1,300 @@
+import { db } from '@/database/client';
+import { questCommand } from '@/database/schema/quest.schema';
+
+import { and, asc, eq, isNotNull } from 'drizzle-orm';
+
+import type { QuestTransaction } from './quest-work-chat.port';
+
+/** Hashes a request body into the 64 lowercase hex characters of a request digest. */
+export const sha256Json = async (value: object): Promise<string> => {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(value))
+  );
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
+export type QuestCommandIdentity = {
+  principalUserId: string;
+  operationScope: string;
+  /** The raw Idempotency-Key header value, untrimmed. */
+  key: string;
+  /** 64 lowercase hex characters, as returned by {@link sha256Json}. */
+  requestHash: string;
+  questId?: string;
+};
+
+export type QuestCommandOutcomeCode =
+  | 'idempotency-in-progress'
+  | 'idempotency-key-reused'
+  | 'idempotency-unavailable'
+  | 'invalid-idempotency-key';
+
+/** The work outcome: a business rejection is a recorded, replayable result. */
+export type QuestCommandWork<TResult, TRejection> =
+  | { kind: 'success'; result: TResult; resourceType?: string; resourceId?: string }
+  | { kind: 'rejected'; rejection: TRejection };
+
+export type QuestCommandResult<TResult, TRejection> =
+  | { kind: 'success'; result: TResult }
+  | { kind: 'rejected'; rejection: TRejection }
+  | { outcome: QuestCommandOutcomeCode };
+
+type QuestCommandRecord = {
+  id: string;
+  requestHash: string;
+  resultData: unknown;
+  processingStatus: string;
+};
+
+type QuestCommandSnapshot =
+  { kind: 'success'; result: unknown } | { kind: 'rejected'; rejection: unknown };
+
+const questCommandRecordFields = {
+  id: questCommand.id,
+  requestHash: questCommand.requestHash,
+  resultData: questCommand.resultData,
+  processingStatus: questCommand.processingStatus,
+};
+
+const questCommandTtlMs = 24 * 60 * 60 * 1000;
+
+const questCommandSnapshotOf = (value: unknown): QuestCommandSnapshot | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const envelope = value as Record<string, unknown>;
+  if (envelope.kind === 'success') return { kind: 'success', result: envelope.result };
+  if (envelope.kind === 'rejected') return { kind: 'rejected', rejection: envelope.rejection };
+  return undefined;
+};
+
+const replayQuestCommand = <TResult, TRejection>(
+  record: QuestCommandRecord,
+  fromSnapshot: (snapshot: unknown) => TResult | undefined
+): QuestCommandResult<TResult, TRejection> => {
+  if (record.processingStatus === 'PROCESSING') return { outcome: 'idempotency-in-progress' };
+  if (record.processingStatus !== 'COMPLETED') return { outcome: 'idempotency-unavailable' };
+  const snapshot = questCommandSnapshotOf(record.resultData);
+  if (!snapshot) return { outcome: 'idempotency-unavailable' };
+  if (snapshot.kind === 'rejected') {
+    return { kind: 'rejected', rejection: snapshot.rejection as TRejection };
+  }
+  const result = fromSnapshot(snapshot.result);
+  if (result === undefined) return { outcome: 'idempotency-unavailable' };
+  return { kind: 'success', result };
+};
+
+/**
+ * Records the Quest Command for a Quest API v2 write command, runs the work
+ * inside the caller's transaction, and stores the outcome. A retry with the
+ * same principal, operation scope, and Idempotency-Key replays the stored
+ * outcome instead of running the work again. A business rejection is recorded
+ * and completed; no path deletes the Quest Command.
+ *
+ * Lock order, load-bearing: when `identity.questId` is set, the Quest Command
+ * insert takes FOR KEY SHARE on that Quest row through the foreign key. A
+ * caller whose work then takes FOR UPDATE on the same Quest row deadlocks
+ * against concurrent commands on the same Quest. Callers that lock the Quest
+ * row must therefore take FOR UPDATE before calling `runQuestCommand`.
+ */
+export const normalizeQuestCommandKey = (key: string): string | undefined => {
+  const trimmed = key.trim();
+  if (trimmed.length === 0 || trimmed.length > 200) return undefined;
+  return trimmed;
+};
+
+export const runQuestCommand = async <TResult, TRejection>(input: {
+  transaction: QuestTransaction;
+  identity: QuestCommandIdentity;
+  now: Date;
+  work: (context: { commandId: string }) => Promise<QuestCommandWork<TResult, TRejection>>;
+  /**
+   * Serializes a real success for replay. Must never return `undefined`:
+   * `fromSnapshot` returning `undefined` is the module's "cannot rebuild"
+   * sentinel, so a `toSnapshot` that returns `undefined` would misread a
+   * stored success as corruption and replay it as `idempotency-unavailable`.
+   */
+  toSnapshot: (result: TResult) => unknown;
+  fromSnapshot: (snapshot: unknown) => TResult | undefined;
+}): Promise<QuestCommandResult<TResult, TRejection>> => {
+  const key = normalizeQuestCommandKey(input.identity.key);
+  if (!key) return { outcome: 'invalid-idempotency-key' };
+
+  const [created] = await input.transaction
+    .insert(questCommand)
+    .values({
+      key,
+      questId: input.identity.questId ?? null,
+      principalUserId: input.identity.principalUserId,
+      operationScope: input.identity.operationScope,
+      requestHash: input.identity.requestHash,
+      expiresAt: new Date(input.now.getTime() + questCommandTtlMs),
+    })
+    .onConflictDoNothing()
+    .returning(questCommandRecordFields);
+
+  if (!created) {
+    const [existing] = await input.transaction
+      .select(questCommandRecordFields)
+      .from(questCommand)
+      .where(
+        and(
+          eq(questCommand.principalUserId, input.identity.principalUserId),
+          eq(questCommand.operationScope, input.identity.operationScope),
+          eq(questCommand.key, key)
+        )
+      )
+      .limit(1)
+      .for('update');
+    if (!existing) return { outcome: 'idempotency-unavailable' };
+    if (existing.requestHash !== input.identity.requestHash) {
+      return { outcome: 'idempotency-key-reused' };
+    }
+    return replayQuestCommand(existing, input.fromSnapshot);
+  }
+
+  const work = await input.work({ commandId: created.id });
+  const completion =
+    work.kind === 'success'
+      ? {
+          resourceType: work.resourceType ?? null,
+          resourceId: work.resourceId ?? null,
+          resultData: { kind: 'success', result: input.toSnapshot(work.result) },
+        }
+      : {
+          resultData: { kind: 'rejected', rejection: work.rejection },
+        };
+  await input.transaction
+    .update(questCommand)
+    .set({ ...completion, processingStatus: 'COMPLETED', completedAt: input.now })
+    .where(eq(questCommand.id, created.id));
+  return work.kind === 'success'
+    ? { kind: 'success', result: work.result }
+    : { kind: 'rejected', rejection: work.rejection };
+};
+
+/**
+ * The executor a Quest Command primitive runs on: the caller's transaction
+ * for request-scoped paths, or the shared db handle for worker paths that
+ * run outside any request. Callers pass it; this module never uses db.
+ */
+export type QuestCommandExecutor = typeof db | QuestTransaction;
+
+/**
+ * A raw payload carried by a worker command, stored as the bare `result_data`
+ * value. Deliberately NOT the `{ kind: 'success' | 'rejected' }` snapshot
+ * envelope that {@link runQuestCommand} writes: a parked cleanup manifest is
+ * neither a success nor a rejection and must never be replayed as a command
+ * result.
+ */
+export type QuestCommandOpenPayload = {
+  id: string;
+  principalUserId: string;
+  questId: string | null;
+  payload: unknown;
+};
+
+/**
+ * Opens a server-originated Quest Command that stays PROCESSING and carries a
+ * payload, for paths with no client Idempotency-Key. Returns the command id.
+ */
+export const openQuestCommand = async (input: {
+  executor: QuestCommandExecutor;
+  identity: QuestCommandIdentity;
+  payload: unknown;
+  now: Date;
+}): Promise<string> => {
+  const [created] = await input.executor
+    .insert(questCommand)
+    .values({
+      key: input.identity.key,
+      questId: input.identity.questId ?? null,
+      principalUserId: input.identity.principalUserId,
+      operationScope: input.identity.operationScope,
+      requestHash: input.identity.requestHash,
+      resultData: input.payload,
+      expiresAt: new Date(input.now.getTime() + questCommandTtlMs),
+    })
+    .returning({ id: questCommand.id });
+  return created.id;
+};
+
+/**
+ * Parks a raw payload on the open (PROCESSING) Quest Command matching the
+ * identity and refreshes its expiry from `now`. Returns the command id, or
+ * `undefined` when no PROCESSING row matches.
+ */
+export const parkQuestCommandPayload = async (input: {
+  executor: QuestCommandExecutor;
+  identity: QuestCommandIdentity;
+  payload: unknown;
+  now: Date;
+}): Promise<string | undefined> => {
+  const [parked] = await input.executor
+    .update(questCommand)
+    .set({
+      resultData: input.payload,
+      expiresAt: new Date(input.now.getTime() + questCommandTtlMs),
+    })
+    .where(
+      and(
+        eq(questCommand.principalUserId, input.identity.principalUserId),
+        eq(questCommand.operationScope, input.identity.operationScope),
+        eq(questCommand.key, input.identity.key.trim()),
+        eq(questCommand.requestHash, input.identity.requestHash),
+        eq(questCommand.processingStatus, 'PROCESSING')
+      )
+    )
+    .returning({ id: questCommand.id });
+  return parked?.id;
+};
+
+/**
+ * Finds open (PROCESSING) Quest Commands of one operation scope that carry a
+ * payload, ordered by id and bounded by `limit`.
+ */
+export const findOpenQuestCommandPayloads = async (input: {
+  executor: QuestCommandExecutor;
+  operationScope: string;
+  limit: number;
+}): Promise<QuestCommandOpenPayload[]> =>
+  input.executor
+    .select({
+      id: questCommand.id,
+      principalUserId: questCommand.principalUserId,
+      questId: questCommand.questId,
+      payload: questCommand.resultData,
+    })
+    .from(questCommand)
+    .where(
+      and(
+        eq(questCommand.operationScope, input.operationScope),
+        eq(questCommand.processingStatus, 'PROCESSING'),
+        isNotNull(questCommand.resultData)
+      )
+    )
+    .orderBy(asc(questCommand.id))
+    .limit(input.limit);
+
+/**
+ * Completes one Quest Command by id, guarded on it still being PROCESSING,
+ * writing the final payload and `completed_at` from `now`. Returns whether
+ * this call won the race; the row is never deleted, and a losing completion
+ * leaves the winner's outcome untouched.
+ */
+export const completeQuestCommand = async (input: {
+  executor: QuestCommandExecutor;
+  id: string;
+  payload: unknown;
+  now: Date;
+}): Promise<boolean> => {
+  const [completed] = await input.executor
+    .update(questCommand)
+    .set({
+      resultData: input.payload,
+      processingStatus: 'COMPLETED',
+      completedAt: input.now,
+    })
+    .where(and(eq(questCommand.id, input.id), eq(questCommand.processingStatus, 'PROCESSING')))
+    .returning({ id: questCommand.id });
+  return completed !== undefined;
+};

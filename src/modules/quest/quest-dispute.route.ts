@@ -21,7 +21,8 @@ export const questDisputeRoute = new Elysia({
     detail: {
       tags: ['Quest Disputes'],
       summary: 'File a Dispute Case as the Hirer or Worker',
-      description: 'Files one Dispute Case for the authenticated Hirer or an assigned Worker on a failed Quest within the one-day self-file window.',
+      description:
+        'Files one Dispute Case for the authenticated Hirer or an assigned Worker on a failed Quest within the one-day self-file window.',
       operationId: 'fileQuestDispute',
       security: betterAuthSecurity,
     },

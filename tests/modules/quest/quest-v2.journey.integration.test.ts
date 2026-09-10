@@ -3,10 +3,7 @@ import { db, sql } from '@/database/client';
 import { file } from '@/database/schema/file.schema';
 import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import {
-  walletFundingReservation,
-  walletLedgerAccount,
-} from '@/database/schema/wallet.schema';
+import { walletFundingReservation, walletLedgerAccount } from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import type { QuestV2CreateInput } from '@/modules/quest';
 import { questV2Storage } from '@/modules/quest/quest.storage';
@@ -34,13 +31,11 @@ const authTestApp = new Elysia({ name: 'quest-v2-journey-test-auth' }).use(
     password: testPassword,
     firstName: 'Journey',
     lastName: 'Hirer',
-  }),
+  })
 );
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 let hirerId = '';
 let sessionCookie = '';
@@ -67,10 +62,9 @@ const fundHirer = async (amountSatang: number) => {
   const [spendingAccount] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
-    .where(and(
-      eq(walletLedgerAccount.walletId, wallet.id),
-      eq(walletLedgerAccount.type, 'SPENDING'),
-    ));
+    .where(
+      and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, 'SPENDING'))
+    );
   const [suspenseAccount] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
@@ -97,15 +91,10 @@ const postQuest = (body: QuestV2CreateInput, key: string) =>
         cookie: sessionCookie,
       },
       body: JSON.stringify(body),
-    }),
+    })
   );
 
-const patchQuest = (
-  questId: string,
-  body: unknown,
-  version: number,
-  key: string,
-) =>
+const patchQuest = (questId: string, body: unknown, version: number, key: string) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/${questId}`, {
       method: 'PATCH',
@@ -116,7 +105,7 @@ const patchQuest = (
         cookie: sessionCookie,
       },
       body: JSON.stringify(body),
-    }),
+    })
   );
 
 const postImages = (questId: string, files: File[], key: string) => {
@@ -128,7 +117,7 @@ const postImages = (questId: string, files: File[], key: string) => {
       method: 'POST',
       headers: { 'idempotency-key': key, cookie: sessionCookie },
       body: form,
-    }),
+    })
   );
 };
 
@@ -136,14 +125,14 @@ const getQuest = (questId: string) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/${questId}`, {
       headers: { cookie: sessionCookie },
-    }),
+    })
   );
 
 const getPublishCheck = (questId: string) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/${questId}/publish-check`, {
       headers: { cookie: sessionCookie },
-    }),
+    })
   );
 
 const postPublish = (questId: string, key: string) =>
@@ -151,7 +140,7 @@ const postPublish = (questId: string, key: string) =>
     new Request(`http://localhost/api/v2/quests/${questId}/publish`, {
       method: 'POST',
       headers: { 'idempotency-key': key, cookie: sessionCookie },
-    }),
+    })
   );
 
 const makeImageFile = () =>
@@ -166,7 +155,7 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: testEmail, password: testPassword }),
-    }),
+    })
   );
   if (loginResponse.status !== 200) {
     throw new Error(`Quest v2 journey authentication failed: ${loginResponse.status}`);
@@ -186,17 +175,23 @@ afterAll(async () => {
   const reservations = await db
     .select({ id: walletFundingReservation.id })
     .from(walletFundingReservation)
-    .where(and(
-      eq(walletFundingReservation.ownerUserId, hirerId),
-      eq(walletFundingReservation.status, 'ACTIVE'),
-    ));
-  await Promise.all(reservations.map((reservation) =>
-    db.transaction((transaction) => releaseFundingReservation(transaction, {
-      ownerUserId: hirerId,
-      reservationId: reservation.id,
-      operationReference: `quest-v2-journey-cleanup-${randomUUID()}`,
-    })),
-  ));
+    .where(
+      and(
+        eq(walletFundingReservation.ownerUserId, hirerId),
+        eq(walletFundingReservation.status, 'ACTIVE')
+      )
+    );
+  await Promise.all(
+    reservations.map((reservation) =>
+      db.transaction((transaction) =>
+        releaseFundingReservation(transaction, {
+          ownerUserId: hirerId,
+          reservationId: reservation.id,
+          operationReference: `quest-v2-journey-cleanup-${randomUUID()}`,
+        })
+      )
+    )
+  );
 
   await db.delete(tag).where(eq(tag.id, tagId));
 });
@@ -268,7 +263,7 @@ describe('Quest API v2 Hirer journey', () => {
         created.data.id,
         { title: 'Changed edit request' },
         2,
-        editKey,
+        editKey
       );
       expect(editConflict.status).toBe(409);
       expect((await editConflict.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
@@ -283,7 +278,7 @@ describe('Quest API v2 Hirer journey', () => {
           objectKey: plan?.objectKey ?? `quests/v2/${hirerId}/${image.name}`,
           contentType: 'image/png',
           sizeBytes: image.size,
-        }),
+        })
       );
       spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation((image) => ({
         url: `https://storage.test/${image.objectKey}`,
@@ -309,7 +304,7 @@ describe('Quest API v2 Hirer journey', () => {
       const imageConflict = await postImages(
         created.data.id,
         [new File([new Uint8Array([4, 5, 6])], 'changed.png', { type: 'image/png' })],
-        imageKey,
+        imageKey
       );
       expect(imageConflict.status).toBe(409);
       expect((await imageConflict.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
@@ -389,20 +384,20 @@ describe('Quest API v2 Hirer journey', () => {
       const mineResponse = await app.handle(
         new Request('http://localhost/api/v2/quests/mine', {
           headers: { cookie: sessionCookie },
-        }),
+        })
       );
       expect(mineResponse.status).toBe(200);
       const mineItems = (await mineResponse.json()).data.items as Array<Record<string, unknown>>;
       const { images: _images, ...canonicalQuest } = detail.data;
       expect(mineItems).toContainEqual(canonicalQuest);
-    },
+    }
   );
 
   it('publishes an online Quest with zero locations and zero Quest Images', async () => {
     await fundHirer(5_000);
     const createResponse = await postQuest(
       { ...baseInput, locations: [] },
-      `journey-online-create-${randomUUID()}`,
+      `journey-online-create-${randomUUID()}`
     );
     expect(createResponse.status).toBe(200);
     const created = (await createResponse.json()) as { success: true; data: { id: string } };
@@ -410,7 +405,7 @@ describe('Quest API v2 Hirer journey', () => {
 
     const publishResponse = await postPublish(
       created.data.id,
-      `journey-online-publish-${randomUUID()}`,
+      `journey-online-publish-${randomUUID()}`
     );
     expect(publishResponse.status).toBe(200);
 
@@ -427,7 +422,7 @@ describe('Quest API v2 Hirer journey', () => {
     await fundHirer(5_000);
     const createResponse = await postQuest(
       { ...baseInput, title: 'Race source Quest', locations: [] },
-      `journey-race-create-${randomUUID()}`,
+      `journey-race-create-${randomUUID()}`
     );
     expect(createResponse.status).toBe(200);
     const created = (await createResponse.json()) as { success: true; data: { id: string } };
@@ -438,7 +433,7 @@ describe('Quest API v2 Hirer journey', () => {
         created.data.id,
         { title: 'Race edited Quest' },
         1,
-        `journey-race-edit-${randomUUID()}`,
+        `journey-race-edit-${randomUUID()}`
       ),
       postPublish(created.data.id, `journey-race-publish-${randomUUID()}`),
     ]);
@@ -463,18 +458,20 @@ describe('Quest API v2 Hirer journey', () => {
     };
     expect(detail).toMatchObject({ state: 'QUEST_OPEN' });
     expect(detail.title).toBe(
-      editResponse.status === 200 ? 'Race edited Quest' : 'Race source Quest',
+      editResponse.status === 200 ? 'Race edited Quest' : 'Race source Quest'
     );
     expect(detail.version).toBe(editResponse.status === 200 ? 3 : 2);
 
     const reservations = await db
       .select({ id: walletFundingReservation.id })
       .from(walletFundingReservation)
-      .where(and(
-        eq(walletFundingReservation.ownerUserId, hirerId),
-        eq(walletFundingReservation.callerScope, 'quest'),
-        eq(walletFundingReservation.callerReference, created.data.id),
-      ));
+      .where(
+        and(
+          eq(walletFundingReservation.ownerUserId, hirerId),
+          eq(walletFundingReservation.callerScope, 'quest'),
+          eq(walletFundingReservation.callerReference, created.data.id)
+        )
+      );
     expect(reservations).toHaveLength(1);
   });
 
@@ -482,7 +479,7 @@ describe('Quest API v2 Hirer journey', () => {
     await fundHirer(5_000);
     const createResponse = await postQuest(
       { ...baseInput, title: 'Version boundary Quest', locations: [] },
-      `journey-v1-boundary-create-${randomUUID()}`,
+      `journey-v1-boundary-create-${randomUUID()}`
     );
     expect(createResponse.status).toBe(200);
     const created = (await createResponse.json()) as { success: true; data: { id: string } };
@@ -490,24 +487,24 @@ describe('Quest API v2 Hirer journey', () => {
 
     const publishResponse = await postPublish(
       created.data.id,
-      `journey-v1-boundary-publish-${randomUUID()}`,
+      `journey-v1-boundary-publish-${randomUUID()}`
     );
     expect(publishResponse.status).toBe(200);
 
     const v1MineResponse = await app.handle(
       new Request('http://localhost/api/v1/quests/mine', {
         headers: { cookie: sessionCookie },
-      }),
+      })
     );
     expect(v1MineResponse.status).toBe(200);
     expect(
-      (await v1MineResponse.json()).data.items.map((item: { id: string }) => item.id),
+      (await v1MineResponse.json()).data.items.map((item: { id: string }) => item.id)
     ).not.toContain(created.data.id);
 
     const v1DetailResponse = await app.handle(
       new Request(`http://localhost/api/v1/quests/${created.data.id}`, {
         headers: { cookie: sessionCookie },
-      }),
+      })
     );
     expect(v1DetailResponse.status).toBe(404);
     expect((await v1DetailResponse.json()).error.code).toBe('QUEST_NOT_FOUND');

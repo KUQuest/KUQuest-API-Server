@@ -24,10 +24,7 @@ export const questParticipation = {
   solo: 'SOLO',
   group: 'GROUP',
 } as const;
-export const questParticipations = [
-  questParticipation.solo,
-  questParticipation.group,
-] as const;
+export const questParticipations = [questParticipation.solo, questParticipation.group] as const;
 export type QuestParticipation = (typeof questParticipations)[number];
 
 export const questStatus = {
@@ -102,11 +99,7 @@ export const assignmentStatuses = [
 ] as const;
 export type AssignmentStatus = (typeof assignmentStatuses)[number];
 
-export const proofStatuses = [
-  'PROOF_PENDING',
-  'PROOF_APPROVED',
-  'PROOF_NOT_APPROVED',
-] as const;
+export const proofStatuses = ['PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED'] as const;
 export type ProofStatus = (typeof proofStatuses)[number];
 
 export const editRequestStatuses = [
@@ -116,10 +109,7 @@ export const editRequestStatuses = [
 ] as const;
 export type EditRequestStatus = (typeof editRequestStatuses)[number];
 
-export const editResponseDecisions = [
-  'EDIT_RESPONSE_APPROVED',
-  'EDIT_RESPONSE_REJECTED',
-] as const;
+export const editResponseDecisions = ['EDIT_RESPONSE_APPROVED', 'EDIT_RESPONSE_REJECTED'] as const;
 export type EditResponseDecision = (typeof editResponseDecisions)[number];
 
 export const invitationStatuses = [

@@ -37,22 +37,26 @@ describe('Quest v2 publish policy', () => {
   });
 
   it('keeps the one-satang rounding remainder in the Platform Fee', () => {
-    expect(calculateQuestV2FundingQuote({
-      questFundingTotalSatang: positiveSatang(103),
-      headcount: 1,
-      ...policy,
-    })).toMatchObject({
+    expect(
+      calculateQuestV2FundingQuote({
+        questFundingTotalSatang: positiveSatang(103),
+        headcount: 1,
+        ...policy,
+      })
+    ).toMatchObject({
       questRewardSatang: 100,
       platformFeeSatang: 3,
     });
   });
 
   it('multiplies the exact per-slot total by headcount', () => {
-    expect(calculateQuestV2FundingQuote({
-      questFundingTotalSatang: positiveSatang(103),
-      headcount: 3,
-      ...policy,
-    })).toMatchObject({
+    expect(
+      calculateQuestV2FundingQuote({
+        questFundingTotalSatang: positiveSatang(103),
+        headcount: 3,
+        ...policy,
+      })
+    ).toMatchObject({
       questRewardSatang: 100,
       platformFeeSatang: 3,
       escrowRequirementSatang: 309,
@@ -95,13 +99,21 @@ describe('Quest v2 publish policy', () => {
     });
 
     expect(check.canPublish).toBe(false);
-    expect(check.blockingReasons).toEqual(expect.arrayContaining([
-      { code: 'QUEST_TAG_REQUIRED', message: 'Quest requires a Tag' },
-      { code: 'QUEST_CONDITION_REQUIRED', message: 'Quest requires at least one Condition Item' },
-      { code: 'QUEST_DUE_AT_REQUIRED', message: 'Quest requires a dueAt' },
-      { code: 'QUEST_START_TIME_NOT_IN_FUTURE', message: 'Quest startTime must be in the future' },
-      { code: 'INSUFFICIENT_SPENDING_BALANCE', message: 'Spending Balance is insufficient for Quest Escrow' },
-    ]));
+    expect(check.blockingReasons).toEqual(
+      expect.arrayContaining([
+        { code: 'QUEST_TAG_REQUIRED', message: 'Quest requires a Tag' },
+        { code: 'QUEST_CONDITION_REQUIRED', message: 'Quest requires at least one Condition Item' },
+        { code: 'QUEST_DUE_AT_REQUIRED', message: 'Quest requires a dueAt' },
+        {
+          code: 'QUEST_START_TIME_NOT_IN_FUTURE',
+          message: 'Quest startTime must be in the future',
+        },
+        {
+          code: 'INSUFFICIENT_SPENDING_BALANCE',
+          message: 'Spending Balance is insufficient for Quest Escrow',
+        },
+      ])
+    );
     expect(check.warnings).toEqual([]);
     expect(Number(check.questRewardSatang)).toBe(100);
   });

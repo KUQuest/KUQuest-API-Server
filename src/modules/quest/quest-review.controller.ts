@@ -26,11 +26,17 @@ const mapOutcome = (set: AuthedContext['set'], result: Exclude<ReviewResult, { i
   }
   if (result.outcome === 'already-exists') {
     set.status = 409;
-    return apiError('REVIEW_ALREADY_EXISTS', 'A Review already exists for this Quest and direction');
+    return apiError(
+      'REVIEW_ALREADY_EXISTS',
+      'A Review already exists for this Quest and direction'
+    );
   }
   if (result.outcome === 'expired') {
     set.status = 409;
-    return apiError('REVIEW_WINDOW_EXPIRED', 'Reviews can only be created or edited within seven days of Quest completion');
+    return apiError(
+      'REVIEW_WINDOW_EXPIRED',
+      'Reviews can only be created or edited within seven days of Quest completion'
+    );
   }
   if (result.outcome === 'delete-not-allowed') {
     set.status = 409;

@@ -498,6 +498,48 @@
       "when": 1788980934314,
       "tag": "20260909190854_magenta_dreaming_celestial",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1789016002563,
+      "tag": "20260910045322_fast_sandman",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1789016062563,
+      "tag": "20260910050500_move_assignment_join_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1789019848546,
+      "tag": "20260910055728_gorgeous_ken_ellis",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789022580930,
+      "tag": "20260910064300_good_guardian",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1789022640930,
+      "tag": "20260910072000_move_quest_v2_core_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1789022700930,
+      "tag": "20260910073500_move_candidate_team_submit_select",
+      "breakpoints": true
     }
   ]
 }

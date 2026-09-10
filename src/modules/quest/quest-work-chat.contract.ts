@@ -66,10 +66,7 @@ export type QuestWorkChatMembershipTransition =
        */
       type: 'workersAccepted';
       hirerId: MemberId;
-      workers: readonly [
-        firstWorker: AcceptedWorker,
-        ...otherWorkers: AcceptedWorker[],
-      ];
+      workers: readonly [firstWorker: AcceptedWorker, ...otherWorkers: AcceptedWorker[]];
     })
   | (TransitionBase & {
       /** Chat closes this Worker's membership window at leftAt after the Assignment becomes inactive. */
@@ -103,6 +100,6 @@ export type ApplyQuestWorkChatMembershipResult = {
 export interface WorkChatMembershipWriter<Transaction> {
   applyQuestTransition(
     transaction: Transaction,
-    transition: QuestWorkChatMembershipTransition,
+    transition: QuestWorkChatMembershipTransition
   ): Promise<ApplyQuestWorkChatMembershipResult>;
 }
