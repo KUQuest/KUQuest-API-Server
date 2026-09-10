@@ -64,7 +64,7 @@ CREATE TYPE quest_participation AS ENUM ('SOLO', 'GROUP');
 CREATE TYPE quest_status AS ENUM ('QUEST_DRAFT', 'QUEST_OPEN', 'QUEST_AWAITING_CONSENT',
                                    'QUEST_ASSIGNED', 'QUEST_IN_PROGRESS', 'QUEST_SUBMITTED',
                                    'QUEST_APPROVED', 'QUEST_REWORK', 'QUEST_COMPLETED',
-                                   'QUEST_CANCELLED', 'QUEST_DISPUTED', 'QUEST_FAILED');
+                                   'QUEST_CANCELLED', 'QUEST_FAILED');
 
 CREATE TABLE quest (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -491,7 +491,7 @@ CREATE INDEX quest_settlement_commands_quest_id_idx ON quest_settlement_commands
 -- rejectReason/reworkNote (two fields in old schema) merged into one
 -- review_note, per interview.
 --
--- reworkUsed derives as COUNT(*) WHERE owner = X AND submission_status = 'PROOF_REJECTED',
+-- reworkUsed derives as COUNT(*) WHERE owner = X AND submission_status = 'PROOF_NOT_APPROVED',
 -- checked against quest_application.rework_limit / quest_team.rework_limit —
 -- no attempt_number stored, same derive-don't-store call as elsewhere.
 --
@@ -517,7 +517,7 @@ CREATE TABLE proof_submission (
   submitted_by_user_id UUID NOT NULL REFERENCES auth_user(id),
   content              VARCHAR(5000) NOT NULL,
   submission_status    VARCHAR(32) NOT NULL DEFAULT 'PROOF_PENDING'
-                       CHECK (submission_status IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_REJECTED', 'PROOF_AUTO_APPROVED')),
+                       CHECK (submission_status IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED')),
   review_note          VARCHAR(1000),
   submitted_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   reviewed_at          TIMESTAMPTZ,
@@ -573,8 +573,8 @@ CREATE INDEX proof_submission_image_submission_idx ON proof_submission_image (pr
 --  - Messages are retained: a retained Work Conversation references
 --    quest(id) with a restrictive FK (ON DELETE RESTRICT or equivalent), so
 --    physical Quest deletion fails while that Chat data exists.
---  - Terminal Quests (QUEST_COMPLETED, QUEST_CANCELLED) make the conversation
---    read-only; QUEST_DISPUTED stays writable while the dispute resolves.
+--  - Terminal Quests (QUEST_COMPLETED, QUEST_CANCELLED, QUEST_FAILED) make the
+--    conversation read-only. A Dispute Case does not change the Quest State.
 --  - System-message/event and command deduplication: retries reuse commandId
 --    (returning the prior result) and eventId (deduplicating system messages).
 --  - Quest owns membership atomically: every membership/write-access change

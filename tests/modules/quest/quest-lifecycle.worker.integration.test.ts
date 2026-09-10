@@ -10,6 +10,7 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
+import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import { questV2Storage } from '@/modules/quest/quest.storage';
 import { questV2ImageUploadOperationScope } from '@/modules/quest/quest-v2.service';
@@ -62,9 +63,13 @@ beforeAll(async () => {
     { id: workerId, email: `${workerId}@ku.th`, firstName: 'Lifecycle', lastName: 'Worker' },
   ]);
   await db.insert(tag).values({ id: tagId, name: `Lifecycle ${tagId}` });
+  configureQuestWorkChatMembershipWriter({
+    applyQuestTransition: async () => ({ conversationId: 'lifecycle-test-conversation', outcome: 'APPLIED' }),
+  });
 });
 
 afterAll(async () => {
+  configureQuestWorkChatMembershipWriter(undefined);
   await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.principalUserId, hirerId));
   await db.delete(file).where(inArray(file.id, cleanupFileIds));
   await db.delete(quest).where(inArray(quest.id, questIds));
@@ -117,7 +122,7 @@ describe('Quest lifecycle worker', () => {
     expect(row?.startedAt?.getTime()).toBe(testNow.getTime());
   });
 
-  it('disputes due Quests with missing proof or confirmation, but keeps a submitted proof path', async () => {
+  it('fails due Quests with missing Proof or confirmation, but keeps a submitted Proof path', async () => {
     const missingProofId = await createQuest({ dueAt: new Date(testNow.getTime() - 1) });
     const missingConfirmationId = await createQuest({ proofRequired: false, dueAt: new Date(testNow.getTime() - 1) });
     const submittedId = await createQuest({ questStatus: 'QUEST_SUBMITTED', dueAt: new Date(testNow.getTime() - 1) });
@@ -134,8 +139,11 @@ describe('Quest lifecycle worker', () => {
     });
 
     const result = await runQuestLifecycleWorker({ clock: { now: () => testNow }, autoApprove: async () => [] });
-    expect(result.disputedQuestIds).toEqual(expect.arrayContaining([missingProofId, missingConfirmationId]));
-    const rows = await db.select({ id: quest.id, status: quest.questStatus }).from(quest).where(inArray(quest.id, [missingProofId, missingConfirmationId, submittedId]));
+    expect(result.failedQuestIds).toEqual(expect.arrayContaining([missingProofId, missingConfirmationId]));
+    const rows = await db.select({ id: quest.id, status: quest.questStatus, failedAt: quest.failedAt }).from(quest).where(inArray(quest.id, [missingProofId, missingConfirmationId, submittedId]));
+    expect(rows.find((row) => row.id === missingProofId)?.status).toBe('QUEST_FAILED');
+    expect(rows.find((row) => row.id === missingProofId)?.failedAt?.getTime()).toBe(testNow.getTime());
+    expect(rows.find((row) => row.id === missingConfirmationId)?.status).toBe('QUEST_FAILED');
     expect(rows.find((row) => row.id === submittedId)?.status).toBe('QUEST_SUBMITTED');
   });
 

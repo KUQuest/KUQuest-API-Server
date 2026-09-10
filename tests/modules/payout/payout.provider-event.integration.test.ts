@@ -136,7 +136,13 @@ const createPendingPayout = async (
     idempotency: { key: `${prefix}-${crypto.randomUUID()}` },
   });
   if (!approve) return { userId, payout };
-  await approvePayout(adminId, payout.id, { idempotencyKey: `${prefix}-approval-${crypto.randomUUID()}` });
+  await approvePayout({
+    adminId,
+    payoutId: payout.id,
+    idempotencyKey: `${prefix}-approval-${crypto.randomUUID()}`,
+    expectedVersion: payout.version,
+    reasonCode: 'PAYOUT_POLICY_REVIEW',
+  });
   try {
     payout = await processApprovedPayout(payout.id, provider, encryption);
   } catch (error: unknown) {
@@ -235,7 +241,7 @@ describe('Payout Provider event application services', () => {
     expect(processed.processingStatus).toBe('PROCESSED');
     expect(replayed.processingStatus).toBe('PROCESSED');
     expect(await getPayout(userId, payout.id)).toMatchObject({
-      payoutStatus: 'COMPLETED',
+      payoutStatus: 'SUCCEEDED',
       finalLedgerTransactionId: expect.any(String),
     });
     expect(await getWallet(userId)).toMatchObject({
@@ -273,7 +279,7 @@ describe('Payout Provider event application services', () => {
     });
     expect(await db.select().from(paymentPayoutStatusHistory).where(
       eq(paymentPayoutStatusHistory.payoutId, payout.id),
-    )).toContainEqual(expect.objectContaining({ fromStatus: 'PENDING', toStatus: 'FAILED' }));
+    )).toContainEqual(expect.objectContaining({ fromStatus: 'PROVIDER_PENDING', toStatus: 'FAILED' }));
   });
 
   it('releases the full reserve for a confirmed cancellation', async () => {
@@ -311,7 +317,7 @@ describe('Payout Provider event application services', () => {
     ]);
 
     expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
-    expect(await getPayout(userId, payout.id)).toMatchObject({ payoutStatus: 'COMPLETED' });
+    expect(await getPayout(userId, payout.id)).toMatchObject({ payoutStatus: 'SUCCEEDED' });
     expect(await db.select().from(walletLedgerTransaction).where(
       eq(walletLedgerTransaction.businessReference, `payout-settle:${payout.id}`),
     )).toHaveLength(1);
@@ -331,7 +337,7 @@ describe('Payout Provider event application services', () => {
     }));
 
     expect(await processPayoutProviderEvents()).toBeGreaterThanOrEqual(1);
-    expect(await getPayout(userId, payout.id)).toMatchObject({ payoutStatus: 'COMPLETED' });
+    expect(await getPayout(userId, payout.id)).toMatchObject({ payoutStatus: 'SUCCEEDED' });
     expect(await getWallet(userId)).toMatchObject({
       walletStatus: 'FROZEN',
       reservedForPayoutsSatang: 0,
@@ -350,7 +356,7 @@ describe('Payout Provider event application services', () => {
         return {
           providerReference: payout.providerReference!,
           providerStatus: 'SUCCEEDED',
-          normalizedStatus: 'COMPLETED',
+          normalizedStatus: 'SUCCEEDED',
           providerAmountSatang: payout.principalSatang,
           actualFeeSatang: satang(0),
           actualTaxSatang: satang(0),
@@ -369,7 +375,7 @@ describe('Payout Provider event application services', () => {
       expectedPrincipalSatang: payout.principalSatang,
       maximumDebitSatang: payout.maximumDebitSatang,
     });
-    expect(reconciled).toMatchObject({ payoutStatus: 'COMPLETED' });
+    expect(reconciled).toMatchObject({ payoutStatus: 'SUCCEEDED' });
     expect(await getWallet(userId)).toMatchObject({ reservedForPayoutsSatang: 0 });
     const [retainedOutcome] = await db
       .select()
@@ -377,7 +383,7 @@ describe('Payout Provider event application services', () => {
       .where(eq(paymentProviderEventInbox.internalReference, payout.internalReference));
     expect(retainedOutcome).toMatchObject({
       resourceType: 'PAYOUT',
-      eventType: 'reconciliation.completed',
+      eventType: 'reconciliation.succeeded',
       processingStatus: 'PROCESSED',
       providerAmountSatang: payout.principalSatang,
       providerActualFeeSatang: 0,
@@ -402,7 +408,7 @@ describe('Payout Provider event application services', () => {
       .where(eq(paymentProviderEventInbox.id, event.id));
     expect(stored).toMatchObject({
       resourceType: 'PAYOUT',
-      normalizedStatus: 'COMPLETED',
+      normalizedStatus: 'SUCCEEDED',
       providerAmountSatang: payout.principalSatang,
       providerActualFeeSatang: 0,
       providerActualTaxSatang: 0,

@@ -8,6 +8,7 @@ export const adminPayoutParamsSchema = t.Object({
 
 export const adminPayoutHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
+  'if-match': t.String({ minLength: 1, maxLength: 100, pattern: '^[1-9]\\d*$' }),
 });
 
 export const adminPayoutListQuerySchema = t.Object({
@@ -17,12 +18,18 @@ export const adminPayoutListQuerySchema = t.Object({
   sort: t.Optional(t.Union([t.Literal('newest'), t.Literal('oldest')])),
 });
 
+const adminPayoutReasonCodeSchema = t.String({
+  minLength: 1,
+  maxLength: 100,
+  pattern: '^[A-Z][A-Z0-9_.-]*$',
+});
+
 export const adminPayoutApprovalSchema = t.Object({
-  note: t.Optional(t.String({ maxLength: 500 })),
+  reasonCode: adminPayoutReasonCodeSchema,
 }, { additionalProperties: false });
 
-export const adminPayoutRejectionSchema = t.Object({
-  reason: t.String({ minLength: 1, maxLength: 500, pattern: '\\S' }),
+export const adminPayoutCancellationSchema = t.Object({
+  reasonCode: adminPayoutReasonCodeSchema,
 }, { additionalProperties: false });
 
 const adminPayoutDataSchema = t.Object({
@@ -50,7 +57,8 @@ const adminPayoutDataSchema = t.Object({
   providerReference: t.Union([t.String(), t.Null()]),
   providerStatus: t.Union([t.String(), t.Null()]),
   payoutStatus: payoutStatusSchema,
-  rejectionReason: t.Union([t.String(), t.Null()]),
+  cancellationReasonCode: t.Union([t.String(), t.Null()]),
+  version: t.Integer({ minimum: 1 }),
   createdAt: t.String({ format: 'date-time' }),
   updatedAt: t.String({ format: 'date-time' }),
 });
@@ -67,9 +75,13 @@ const adminPayoutHistoryEntrySchema = t.Object({
   occurredAt: t.String({ format: 'date-time' }),
 });
 
-export const adminPayoutResponseSchema = t.Object({
+export const adminPayoutCommandResponseSchema = t.Object({
   success: t.Literal(true),
-  data: adminPayoutDataSchema,
+  data: t.Object({
+    resourceSummary: adminPayoutDataSchema,
+    resourceVersion: t.Integer({ minimum: 1 }),
+    adminActionId: t.String({ format: 'uuid' }),
+  }),
 });
 
 export const adminPayoutDetailResponseSchema = t.Object({
@@ -95,4 +107,4 @@ export const adminPayoutHistoryResponseSchema = t.Object({
 
 export type AdminPayoutListQuery = typeof adminPayoutListQuerySchema.static;
 export type AdminPayoutApprovalInput = typeof adminPayoutApprovalSchema.static;
-export type AdminPayoutRejectionInput = typeof adminPayoutRejectionSchema.static;
+export type AdminPayoutCancellationInput = typeof adminPayoutCancellationSchema.static;

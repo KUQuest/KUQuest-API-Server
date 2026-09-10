@@ -81,6 +81,7 @@ const maximumSafeStringLength = 512;
 
 const hasUnsafeMetadataKey = (key: string): boolean => {
   const normalized = key.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
+  if (normalized === 'reason_code' || normalized.endsWith('_reason_code')) return false;
   if (normalized.includes('reason_text')) return true;
   return normalized.split('_').some((token) => unsafeMetadataKeyTokens[token] === true);
 };

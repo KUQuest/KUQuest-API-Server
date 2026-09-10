@@ -40,7 +40,8 @@ const failure = (set: AuthedContext['set'], outcome: string) => {
     'files-invalid': ['PROOF_FILES_INVALID', 'One or more proof images are missing, deleted, or unauthorized'],
     'proof-required': ['PROOF_NOT_REQUIRED', 'This Quest requires a completion confirmation instead'],
     'not-pending': ['PROOF_NOT_PENDING', 'Only a pending Proof Submission can be reviewed'],
-    'no-rework': ['PROOF_REWORK_NOT_ALLOWED', 'This rejected proof cannot be resubmitted'],
+    'no-rework': ['PROOF_REWORK_NOT_ALLOWED', 'This not-approved Proof Submission cannot be resubmitted'],
+    failed: ['QUEST_FAILED', 'The Quest failed after the Proof Submission was not approved'],
   };
   const [code, message] = messages[outcome] ?? ['PROOF_COMMAND_REJECTED', 'The Proof Submission command was rejected'];
   return apiError(code, message);

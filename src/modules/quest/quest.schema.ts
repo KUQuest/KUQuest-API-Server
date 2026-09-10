@@ -29,7 +29,6 @@ const questStatusSchema = t.Union([
   t.Literal(questStatuses[8]),
   t.Literal(questStatuses[9]),
   t.Literal(questStatuses[10]),
-  t.Literal(questStatuses[11]),
 ]);
 
 const locationInputSchema = t.Object(

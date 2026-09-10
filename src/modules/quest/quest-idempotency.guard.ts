@@ -14,8 +14,7 @@ type IdempotencyKeyScope =
   | 'candidate-team-v2'
   | 'proof-submission-v2'
   | 'rating-review-v2'
-  | 'quest-cancellation'
-  | 'quest-dispute-resolution';
+  | 'quest-cancellation';
 
 const pathNeedsIdempotencyKey = (scope: IdempotencyKeyScope, pathname: string, method: string) => {
   const parts = pathname.split('/');
@@ -85,8 +84,7 @@ const pathNeedsIdempotencyKey = (scope: IdempotencyKeyScope, pathname: string, m
     return pathname.endsWith('/cancel') && isUuid(questId);
   }
 
-  const questId = parts[parts.length - 3];
-  return pathname.endsWith('/dispute/resolve') && isUuid(questId);
+  return false;
 };
 
 export const createQuestIdempotencyKeyGuard = (scope: IdempotencyKeyScope) => new Elysia({

@@ -2,38 +2,78 @@ import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import {
   paymentPayoutStatusHistory,
+  paymentPayoutQuotes,
   paymentPayouts,
   type PayoutStatus,
 } from '@/database/schema/payment.schema';
 import {
-  walletIdempotencyKey,
-  walletLedgerAccount,
-} from '@/database/schema/wallet.schema';
-import {
-  createSealedLedgerTransactionInTransaction,
-  ensureWalletInTransaction,
-  MoneyDomainError,
-  signedSatang,
-  type WalletTransaction,
-} from '@/modules/wallet';
+  createAdminActionService,
+  type AdminActionReasonCatalog,
+  type AdminActionResult,
+  type AdminActionTransaction,
+} from '@/modules/admin';
+import { MoneyDomainError } from '@/modules/wallet';
 import type { CursorPayload } from '@/shared/cursor';
 
-import { and, asc, desc, eq, gt, inArray, lt, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, lt, or } from 'drizzle-orm';
 
-import { getPayout, type Payout } from './payout.service';
+import {
+  approvePayoutInTransaction,
+  cancelPayoutInTransaction,
+} from './payout.service';
 
-export const payoutApprovalOperationScope = 'wallet.payout.admin.approve';
-export const payoutRejectionOperationScope = 'wallet.payout.admin.reject';
+export const payoutAdminReasonCodes = [
+  'PAYOUT_POLICY_REVIEW',
+  'PAYOUT_RISK_REVIEW',
+  'PAYOUT_INVALID_DESTINATION',
+] as const;
 
-export type ApprovePayoutInput = {
-  idempotencyKey: string;
-  note?: string;
+const payoutApprovalReasonCodes = [
+  'PAYOUT_POLICY_REVIEW',
+  'PAYOUT_RISK_REVIEW',
+] as const;
+
+const payoutCancellationReasonCodes = payoutAdminReasonCodes;
+const payoutApprovalReasonCodeSet = new Set<string>(payoutApprovalReasonCodes);
+const payoutCancellationReasonCodeSet = new Set<string>(payoutCancellationReasonCodes);
+
+const safePayoutReasonCode = (
+  reason: string | null,
+  action: 'PAYOUT_APPROVE' | 'PAYOUT_CANCEL',
+) => {
+  const allowedReasonCodes = action === 'PAYOUT_APPROVE'
+    ? payoutApprovalReasonCodeSet
+    : payoutCancellationReasonCodeSet;
+  return reason && allowedReasonCodes.has(reason) ? reason : null;
 };
 
-export type RejectPayoutInput = {
-  idempotencyKey: string;
-  reason: string;
+export const payoutAdminActionCatalog: AdminActionReasonCatalog = {
+  version: 1,
+  actions: {
+    PAYOUT_APPROVE: {
+      kind: 'COMMAND',
+      requiresReason: true,
+      allowedReasonCodes: payoutApprovalReasonCodes,
+    },
+    PAYOUT_CANCEL: {
+      kind: 'COMMAND',
+      requiresReason: true,
+      allowedReasonCodes: payoutCancellationReasonCodes,
+    },
+  },
 };
+
+const adminActionService = createAdminActionService(payoutAdminActionCatalog);
+
+export type AdminPayoutDecisionInput = {
+  adminId: string;
+  payoutId: string;
+  idempotencyKey: string;
+  expectedVersion: number;
+  reasonCode: string;
+};
+
+export type AdminPayoutCommandResult = AdminActionResult<AdminPayoutCommandSummary>;
 
 export type AdminPayoutSort = 'newest' | 'oldest';
 
@@ -62,9 +102,15 @@ export type AdminPayout = {
   providerReference: string | null;
   providerStatus: string | null;
   payoutStatus: PayoutStatus;
-  rejectionReason: string | null;
+  cancellationReasonCode: string | null;
+  version: number;
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type AdminPayoutCommandSummary = Omit<AdminPayout, 'createdAt' | 'updatedAt'> & {
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AdminPayoutStatusHistory = {
@@ -103,6 +149,7 @@ const safePayoutColumns = {
   id: paymentPayouts.id,
   userId: paymentPayouts.userId,
   quoteId: paymentPayouts.quoteId,
+  receiptSatang: paymentPayoutQuotes.receiptSatang,
   principalSatang: paymentPayouts.principalSatang,
   maximumFeeSatang: paymentPayouts.maximumFeeSatang,
   maximumTaxSatang: paymentPayouts.maximumTaxSatang,
@@ -117,6 +164,7 @@ const safePayoutColumns = {
   providerReference: paymentPayouts.providerReference,
   providerStatus: paymentPayouts.providerStatus,
   payoutStatus: paymentPayouts.payoutStatus,
+  version: paymentPayouts.version,
   createdAt: paymentPayouts.createdAt,
   updatedAt: paymentPayouts.updatedAt,
 };
@@ -125,6 +173,7 @@ type SafePayoutRecord = {
   id: string;
   userId: string;
   quoteId: string;
+  receiptSatang: number;
   principalSatang: number;
   maximumFeeSatang: number;
   maximumTaxSatang: number;
@@ -139,6 +188,7 @@ type SafePayoutRecord = {
   providerReference: string | null;
   providerStatus: string | null;
   payoutStatus: PayoutStatus;
+  version: number;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -146,13 +196,13 @@ type SafePayoutRecord = {
 const adminPayoutFromRecord = (
   record: SafePayoutRecord,
   student: AdminPayout['student'],
-  rejectionReason: string | null,
+  cancellationReasonCode: string | null,
 ): AdminPayout => ({
   id: record.id,
   student,
   quoteId: record.quoteId,
   principalSatang: record.principalSatang,
-  receiptSatang: record.principalSatang,
+  receiptSatang: record.receiptSatang,
   maximumFeeSatang: record.maximumFeeSatang,
   maximumTaxSatang: record.maximumTaxSatang,
   maximumDebitSatang: record.maximumDebitSatang,
@@ -169,228 +219,29 @@ const adminPayoutFromRecord = (
   providerReference: record.providerReference,
   providerStatus: record.providerStatus,
   payoutStatus: record.payoutStatus,
-  rejectionReason,
+  cancellationReasonCode,
+  version: record.version,
   createdAt: record.createdAt,
   updatedAt: record.updatedAt,
 });
 
-const rejectionReasonFor = async (payoutId: string, transaction = db) => {
+const cancellationReasonCodeFor = async (
+  payoutId: string,
+  transaction: typeof db | AdminActionTransaction = db,
+) => {
   const [entry] = await transaction
     .select({ reason: paymentPayoutStatusHistory.reason })
     .from(paymentPayoutStatusHistory)
     .where(and(
       eq(paymentPayoutStatusHistory.payoutId, payoutId),
-      eq(paymentPayoutStatusHistory.source, 'ADMIN_REJECTION'),
+      eq(paymentPayoutStatusHistory.source, 'ADMIN_CANCELLATION'),
     ))
     .orderBy(desc(paymentPayoutStatusHistory.occurredAt), desc(paymentPayoutStatusHistory.id))
     .limit(1);
-  return entry?.reason ?? null;
+  return safePayoutReasonCode(entry?.reason ?? null, 'PAYOUT_CANCEL');
 };
 
-const idempotencyExpiry = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-const requestHash = async (value: object) => {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value)),
-  );
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-};
-
-export const approvePayout = async (
-  adminId: string,
-  payoutId: string,
-  input: ApprovePayoutInput,
-): Promise<Payout> => {
-  if (!input.idempotencyKey.trim()) {
-    throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key must not be empty.');
-  }
-  const note = input.note?.trim() || undefined;
-  const hash = await requestHash({ payoutId, action: 'APPROVE', note: note ?? null });
-  const result = await db.transaction(async (transaction) => {
-    const [payout] = await transaction
-      .select()
-      .from(paymentPayouts)
-      .where(eq(paymentPayouts.id, payoutId))
-      .for('update');
-    if (!payout) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
-
-    const [created] = await transaction
-      .insert(walletIdempotencyKey)
-      .values({
-        principalUserId: payout.userId,
-        operationScope: payoutApprovalOperationScope,
-        key: input.idempotencyKey,
-        requestHash: hash,
-        expiresAt: idempotencyExpiry(),
-      })
-      .onConflictDoNothing()
-      .returning();
-    const [idempotency] = created
-      ? [created]
-      : await transaction
-        .select()
-        .from(walletIdempotencyKey)
-        .where(and(
-          eq(walletIdempotencyKey.principalUserId, payout.userId),
-          eq(walletIdempotencyKey.operationScope, payoutApprovalOperationScope),
-          eq(walletIdempotencyKey.key, input.idempotencyKey),
-        ))
-        .for('update');
-    if (!idempotency) throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key could not be acquired.');
-    if (idempotency.requestHash !== hash) {
-      throw new MoneyDomainError('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request.');
-    }
-    if (idempotency.resourceId) return { payoutId: idempotency.resourceId, userId: payout.userId };
-    if (!created) throw new MoneyDomainError('IDEMPOTENCY_IN_PROGRESS', 'The Admin decision is still processing.');
-    if (payout.payoutStatus !== 'PENDING_ADMIN_APPROVAL') {
-      throw new MoneyDomainError('PAYOUT_DECISION_NOT_ALLOWED', 'The Payout no longer waits for Admin approval.');
-    }
-
-    const [updated] = await transaction
-      .update(paymentPayouts)
-      .set({ payoutStatus: 'CREATING', updatedAt: new Date() })
-      .where(eq(paymentPayouts.id, payout.id))
-      .returning({ id: paymentPayouts.id });
-    if (!updated) throw new MoneyDomainError('PAYOUT_UPDATE_FAILED', 'Payout approval could not be saved.');
-    await transaction.insert(paymentPayoutStatusHistory).values({
-      payoutId: payout.id,
-      fromStatus: 'PENDING_ADMIN_APPROVAL',
-      toStatus: 'CREATING',
-      actorAdminId: adminId,
-      source: 'ADMIN_APPROVAL',
-      reason: note,
-    });
-    await transaction
-      .update(walletIdempotencyKey)
-      .set({
-        resourceType: 'payment_payout',
-        resourceId: payout.id,
-        processingStatus: 'COMPLETED',
-        completedAt: new Date(),
-      })
-      .where(eq(walletIdempotencyKey.id, idempotency.id));
-    return { payoutId: payout.id, userId: payout.userId };
-  });
-
-  return getPayout(result.userId, result.payoutId);
-};
-
-const payoutAccountIds = async (transaction: WalletTransaction, userId: string, walletId: string) => {
-  const accounts = await transaction
-    .select({ id: walletLedgerAccount.id, type: walletLedgerAccount.type })
-    .from(walletLedgerAccount)
-    .where(and(
-      eq(walletLedgerAccount.walletId, walletId),
-      inArray(walletLedgerAccount.type, ['EARNINGS', 'RESERVED_FOR_PAYOUTS']),
-    ))
-    .for('update');
-  const earnings = accounts.find(({ type }) => type === 'EARNINGS');
-  const payoutReserve = accounts.find(({ type }) => type === 'RESERVED_FOR_PAYOUTS');
-  if (!earnings || !payoutReserve) {
-    throw new MoneyDomainError('WALLET_ACCOUNT_NOT_FOUND', `Payout Wallet accounts for ${userId} do not exist.`);
-  }
-  return { earningsId: earnings.id, payoutReserveId: payoutReserve.id };
-};
-
-export const rejectPayout = async (
-  adminId: string,
-  payoutId: string,
-  input: RejectPayoutInput,
-): Promise<Payout> => {
-  if (!input.idempotencyKey.trim()) {
-    throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key must not be empty.');
-  }
-  const reason = input.reason.trim();
-  if (!reason) throw new MoneyDomainError('PAYOUT_REJECTION_REASON_REQUIRED', 'Payout rejection reason is required.');
-  const hash = await requestHash({ payoutId, action: 'REJECT', reason });
-  const result = await db.transaction(async (transaction) => {
-    const [payout] = await transaction
-      .select()
-      .from(paymentPayouts)
-      .where(eq(paymentPayouts.id, payoutId))
-      .for('update');
-    if (!payout) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
-
-    const [created] = await transaction
-      .insert(walletIdempotencyKey)
-      .values({
-        principalUserId: payout.userId,
-        operationScope: payoutRejectionOperationScope,
-        key: input.idempotencyKey,
-        requestHash: hash,
-        expiresAt: idempotencyExpiry(),
-      })
-      .onConflictDoNothing()
-      .returning();
-    const [idempotency] = created
-      ? [created]
-      : await transaction
-        .select()
-        .from(walletIdempotencyKey)
-        .where(and(
-          eq(walletIdempotencyKey.principalUserId, payout.userId),
-          eq(walletIdempotencyKey.operationScope, payoutRejectionOperationScope),
-          eq(walletIdempotencyKey.key, input.idempotencyKey),
-        ))
-        .for('update');
-    if (!idempotency) throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key could not be acquired.');
-    if (idempotency.requestHash !== hash) {
-      throw new MoneyDomainError('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request.');
-    }
-    if (idempotency.resourceId) return { payoutId: idempotency.resourceId, userId: payout.userId };
-    if (!created) throw new MoneyDomainError('IDEMPOTENCY_IN_PROGRESS', 'The Admin decision is still processing.');
-    if (payout.payoutStatus !== 'PENDING_ADMIN_APPROVAL') {
-      throw new MoneyDomainError('PAYOUT_DECISION_NOT_ALLOWED', 'The Payout no longer waits for Admin approval.');
-    }
-
-    const wallet = await ensureWalletInTransaction(transaction, payout.userId);
-    const { earningsId, payoutReserveId } = await payoutAccountIds(transaction, payout.userId, wallet.id);
-    const releaseLedger = await createSealedLedgerTransactionInTransaction(transaction, {
-      businessReference: `payout-admin-rejection-release:${payout.id}`,
-      eventType: 'PAYOUT',
-      createdByUserId: payout.userId,
-      description: 'Release rejected Payout reserve',
-      postings: [
-        { accountId: earningsId, amountSatang: signedSatang(payout.maximumDebitSatang) },
-        { accountId: payoutReserveId, amountSatang: signedSatang(-payout.maximumDebitSatang) },
-      ],
-    });
-    const [updated] = await transaction
-      .update(paymentPayouts)
-      .set({
-        payoutStatus: 'CANCELLED',
-        finalLedgerTransactionId: releaseLedger.id,
-        providerSubmissionClaimedAt: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(paymentPayouts.id, payout.id))
-      .returning({ id: paymentPayouts.id });
-    if (!updated) throw new MoneyDomainError('PAYOUT_UPDATE_FAILED', 'Payout rejection could not be saved.');
-    await transaction.insert(paymentPayoutStatusHistory).values({
-      payoutId: payout.id,
-      fromStatus: 'PENDING_ADMIN_APPROVAL',
-      toStatus: 'CANCELLED',
-      actorAdminId: adminId,
-      source: 'ADMIN_REJECTION',
-      reason,
-    });
-    await transaction
-      .update(walletIdempotencyKey)
-      .set({
-        resourceType: 'payment_payout',
-        resourceId: payout.id,
-        processingStatus: 'COMPLETED',
-        completedAt: new Date(),
-      })
-      .where(eq(walletIdempotencyKey.id, idempotency.id));
-    return { payoutId: payout.id, userId: payout.userId };
-  });
-
-  return getPayout(result.userId, result.payoutId);
-};
-
-const adminPayoutRows = (executor: typeof db) => executor
+const adminPayoutRows = (executor: typeof db | AdminActionTransaction) => executor
   .select({
     payout: safePayoutColumns,
     student: {
@@ -401,7 +252,79 @@ const adminPayoutRows = (executor: typeof db) => executor
     },
   })
   .from(paymentPayouts)
-  .innerJoin(authUser, eq(authUser.id, paymentPayouts.userId));
+  .innerJoin(authUser, eq(authUser.id, paymentPayouts.userId))
+  .innerJoin(paymentPayoutQuotes, eq(paymentPayoutQuotes.id, paymentPayouts.quoteId));
+
+const getAdminPayoutInTransaction = async (
+  transaction: typeof db | AdminActionTransaction,
+  payoutId: string,
+): Promise<AdminPayout> => {
+  const [row] = await adminPayoutRows(transaction)
+    .where(eq(paymentPayouts.id, payoutId));
+  if (!row) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
+  return adminPayoutFromRecord(
+    row.payout as SafePayoutRecord,
+    row.student,
+    await cancellationReasonCodeFor(payoutId, transaction),
+  );
+};
+
+const adminPayoutCommandSummary = (payout: AdminPayout): AdminPayoutCommandSummary => ({
+  ...payout,
+  createdAt: payout.createdAt.toISOString(),
+  updatedAt: payout.updatedAt.toISOString(),
+});
+
+const executePayoutAdminCommand = async (
+  action: 'PAYOUT_APPROVE' | 'PAYOUT_CANCEL',
+  input: AdminPayoutDecisionInput,
+): Promise<AdminPayoutCommandResult> => adminActionService.executeCommand({
+  adminId: input.adminId,
+  action,
+  resourceType: 'payout',
+  resourceId: input.payoutId,
+  requestKey: input.idempotencyKey,
+  reasonCode: input.reasonCode,
+  request: {},
+  metadata: {},
+  expectedVersion: input.expectedVersion,
+  prepare: async (transaction, _context) => {
+    const decision = {
+      payoutId: input.payoutId,
+      adminId: input.adminId,
+      reasonCode: input.reasonCode,
+    };
+    const [current] = await transaction
+      .select({ version: paymentPayouts.version })
+      .from(paymentPayouts)
+      .where(eq(paymentPayouts.id, input.payoutId))
+      .for('update');
+    if (!current) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
+
+    return {
+      currentVersion: current.version,
+      apply: async () => {
+        if (action === 'PAYOUT_APPROVE') {
+          await approvePayoutInTransaction(transaction, decision);
+        } else {
+          await cancelPayoutInTransaction(transaction, decision);
+        }
+        const payout = await getAdminPayoutInTransaction(transaction, input.payoutId);
+        return {
+          resourceSummary: adminPayoutCommandSummary(payout),
+          resourceVersion: payout.version,
+          resourceTimestamp: null,
+        };
+      },
+    };
+  },
+});
+
+export const approvePayout = (input: AdminPayoutDecisionInput) =>
+  executePayoutAdminCommand('PAYOUT_APPROVE', input);
+
+export const cancelPayout = (input: AdminPayoutDecisionInput) =>
+  executePayoutAdminCommand('PAYOUT_CANCEL', input);
 
 const adminPayoutHistory = async (payoutId: string): Promise<AdminPayoutStatusHistory[]> => {
   const [payout] = await db
@@ -426,7 +349,15 @@ const adminPayoutHistory = async (payoutId: string): Promise<AdminPayoutStatusHi
     .from(paymentPayoutStatusHistory)
     .where(eq(paymentPayoutStatusHistory.payoutId, payoutId))
     .orderBy(asc(paymentPayoutStatusHistory.occurredAt), asc(paymentPayoutStatusHistory.id));
-  return rows as AdminPayoutStatusHistory[];
+  return rows.map((row) => {
+    if (row.source === 'ADMIN_APPROVAL') {
+      return { ...row, reason: safePayoutReasonCode(row.reason, 'PAYOUT_APPROVE') };
+    }
+    if (row.source === 'ADMIN_CANCELLATION') {
+      return { ...row, reason: safePayoutReasonCode(row.reason, 'PAYOUT_CANCEL') };
+    }
+    return row;
+  }) as AdminPayoutStatusHistory[];
 };
 
 export const getAdminPayout = async (payoutId: string): Promise<AdminPayout> => {
@@ -436,7 +367,7 @@ export const getAdminPayout = async (payoutId: string): Promise<AdminPayout> => 
   return adminPayoutFromRecord(
     row.payout as SafePayoutRecord,
     row.student,
-    await rejectionReasonFor(payoutId),
+    await cancellationReasonCodeFor(payoutId),
   );
 };
 
@@ -485,10 +416,13 @@ export const listAdminPayouts = async ({
     .limit(limit + 1);
   const hasNext = rows.length > limit;
   const page = rows.slice(0, limit);
-  const items = await Promise.all(page.map(async (row) => adminPayoutFromRecord(
+  const items = await Promise.all(page.map(async (row: {
+    payout: SafePayoutRecord;
+    student: AdminPayout['student'];
+  }) => adminPayoutFromRecord(
     row.payout as SafePayoutRecord,
     row.student,
-    await rejectionReasonFor(row.payout.id),
+    await cancellationReasonCodeFor(row.payout.id),
   )));
   const last = page[page.length - 1];
   return {

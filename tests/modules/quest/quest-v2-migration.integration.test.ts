@@ -639,6 +639,7 @@ const createOpenGroupCandidateQuest = async (
     startTime: new Date('2030-01-01T10:00:00.000Z'),
     dueAt: new Date('2030-01-01T11:00:00.000Z'),
     proofRequired: true,
+    failedAt: overrides.questStatus === 'QUEST_FAILED' ? new Date() : null,
     ...overrides,
   });
   return id;

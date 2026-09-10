@@ -35,7 +35,7 @@ const createFixture = async (status: 'QUEST_IN_PROGRESS' | 'QUEST_SUBMITTED' | '
     startTime: new Date('2026-08-27T08:00:00.000Z'),
   });
   await db.insert(questAssignment).values({ questId, workerId, assignmentStatus: 'ASSIGNMENT_ACTIVE' });
-  await db.insert(proofSubmission).values({ id: proofId, questId, workerId, submittedByUserId: workerId, content: 'Done', submittedAt: new Date(now.getTime() - 2 * 60 * 60 * 1000) });
+  await db.insert(proofSubmission).values({ id: proofId, questId, workerId, submittedByUserId: workerId, content: 'Done', submittedAt: new Date(now.getTime() - 25 * 60 * 60 * 1000) });
   return { questId, proofId };
 };
 
@@ -78,11 +78,11 @@ describe('Quest Proof lifecycle gates', () => {
     expect(approved).not.toContain(inProgress.proofId);
     expect(approved).not.toContain(terminal.proofId);
     const rows = await db.select({ id: proofSubmission.id, status: proofSubmission.submissionStatus }).from(proofSubmission).where(inArray(proofSubmission.id, [submitted.proofId, inProgress.proofId, terminal.proofId]));
-    expect(rows.find(({ id }) => id === submitted.proofId)?.status).toBe('PROOF_AUTO_APPROVED');
+    expect(rows.find(({ id }) => id === submitted.proofId)?.status).toBe('PROOF_APPROVED');
     expect(rows.filter(({ id }) => id !== submitted.proofId).every(({ status }) => status === 'PROOF_PENDING')).toBe(true);
   });
 
-  it('uses one hour for a Candidate proof review window', async () => {
+  it('uses 24 hours for a Candidate proof review window', async () => {
     const candidateQuestId = randomUUID();
     const candidateProofId = randomUUID();
     questIds.push(candidateQuestId);
@@ -110,7 +110,7 @@ describe('Quest Proof lifecycle gates', () => {
       workerId,
       submittedByUserId: workerId,
       content: 'Candidate work',
-      submittedAt: new Date(now.getTime() - 60 * 60 * 1000 - 1),
+      submittedAt: new Date(now.getTime() - 24 * 60 * 60 * 1000 - 1),
     });
 
     expect(await autoApproveDueProofs(now)).toContain(candidateProofId);

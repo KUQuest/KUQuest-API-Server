@@ -1,8 +1,11 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
+import { adminAction } from '@/database/schema/admin.schema';
 import { authUser } from '@/database/schema/auth.schema';
+import { paymentPayouts } from '@/database/schema/payment.schema';
 import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
+import { createStagingTestAuthRoute } from '@/modules/auth';
 import {
   createPayoutDestinationEncryption,
   savePayoutDestination,
@@ -17,6 +20,7 @@ import {
 import { initiatePayout, quotePayout } from '@/modules/payout';
 
 import { beforeAll, describe, expect, it } from 'bun:test';
+import { Elysia } from 'elysia';
 import { eq } from 'drizzle-orm';
 
 const adminEmail = `payout-admin-route-${crypto.randomUUID()}@example.com`;
@@ -26,6 +30,19 @@ const encryption = createPayoutDestinationEncryption({
   keys: { v1: 'p'.repeat(32) },
 });
 let adminCookie = '';
+const memberEmail = `payout-admin-member-${crypto.randomUUID()}@ku.th`;
+const memberPassword = 'TestStudent1!';
+const memberAuthApp = new Elysia({ name: 'payout-admin-member-test-auth' }).use(
+  createStagingTestAuthRoute({
+    enabled: true,
+    deploymentEnv: 'staging',
+    email: memberEmail,
+    password: memberPassword,
+    firstName: 'Payout',
+    lastName: 'Member',
+  }),
+);
+let memberCookie = '';
 
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? [])
@@ -110,6 +127,15 @@ beforeAll(async () => {
   }));
   if (loginResponse.status !== 200) throw new Error('Admin test session could not be created.');
   adminCookie = getCookieHeader(loginResponse);
+  const memberLogin = await memberAuthApp.handle(
+    new Request('http://localhost/api/staging/test-auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: memberEmail, password: memberPassword }),
+    }),
+  );
+  if (memberLogin.status !== 200) throw new Error(`Member authentication failed: ${memberLogin.status}`);
+  memberCookie = getCookieHeader(memberLogin);
 });
 
 describe('Payout API routes', () => {
@@ -132,12 +158,25 @@ describe('Payout API routes', () => {
       headers: {
         'content-type': 'application/json',
         'idempotency-key': 'admin-auth-check',
+        'if-match': '1',
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ reasonCode: 'PAYOUT_POLICY_REVIEW' }),
     }));
 
     expect(list.status).toBe(401);
     expect(approval.status).toBe(401);
+  });
+
+  it('keeps Member and Admin Payout sessions separate', async () => {
+    const memberOnAdmin = await app.handle(new Request('http://localhost/api/v1/admin/payouts', {
+      headers: { cookie: memberCookie },
+    }));
+    const adminOnMember = await app.handle(new Request('http://localhost/api/v1/payouts', {
+      headers: { cookie: adminCookie },
+    }));
+
+    expect(memberOnAdmin.status).toBe(401);
+    expect(adminOnMember.status).toBe(401);
   });
 
   it('publishes Student and Admin Payout contracts in OpenAPI', async () => {
@@ -151,7 +190,7 @@ describe('Payout API routes', () => {
     expect(document.paths['/api/v1/payouts']?.get?.operationId).toBe('listPayouts');
     expect(document.paths['/api/v1/admin/payouts']?.get?.operationId).toBe('listAdminPayouts');
     expect(document.paths['/api/v1/admin/payouts/{payoutId}/approve']?.post?.operationId).toBe('approvePayout');
-    expect(document.paths['/api/v1/admin/payouts/{payoutId}/reject']?.post?.operationId).toBe('rejectPayout');
+    expect(document.paths['/api/v1/admin/payouts/{payoutId}/cancel']?.post?.operationId).toBe('cancelPayout');
   });
 
   it('serves the authenticated Admin queue, cursor, detail, and history contracts', async () => {
@@ -192,20 +231,29 @@ describe('Payout API routes', () => {
           cookie: adminCookie,
           'content-type': 'application/json',
           'idempotency-key': `payout-admin-route-approval-${crypto.randomUUID()}`,
+          'if-match': String(firstPayout.version),
         },
-        body: JSON.stringify({ note: 'Approved by the route test.' }),
+        body: JSON.stringify({ reasonCode: 'PAYOUT_POLICY_REVIEW' }),
       },
     ));
     expect(approvalResponse.status).toBe(200);
-    expect((await approvalResponse.json()).data.payoutStatus).toBe('CREATING');
+    expect((await approvalResponse.json()).data).toMatchObject({
+      resourceSummary: {
+        id: firstPayout.id,
+        payoutStatus: 'SUBMITTED_TO_PROVIDER',
+        version: 2,
+      },
+      resourceVersion: 2,
+      adminActionId: expect.any(String),
+    });
 
     const historicalResponse = await app.handle(new Request(
-      'http://localhost/api/v1/admin/payouts?status=CREATING&limit=50',
+      'http://localhost/api/v1/admin/payouts?status=SUBMITTED_TO_PROVIDER&limit=50',
       { headers: { cookie: adminCookie } },
     ));
     expect(historicalResponse.status).toBe(200);
     expect((await historicalResponse.json()).data.items).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: firstPayout.id, payoutStatus: 'CREATING' })]),
+      expect.arrayContaining([expect.objectContaining({ id: firstPayout.id, payoutStatus: 'SUBMITTED_TO_PROVIDER', version: 2 })]),
     );
 
     const detailResponse = await app.handle(new Request(
@@ -217,8 +265,13 @@ describe('Payout API routes', () => {
     };
     expect(detailResponse.status).toBe(200);
     expect(detail.data.history).toEqual(expect.arrayContaining([
-      expect.objectContaining({ source: 'ADMIN_APPROVAL', reason: 'Approved by the route test.' }),
+      expect.objectContaining({ source: 'ADMIN_APPROVAL', reason: 'PAYOUT_POLICY_REVIEW' }),
     ]));
+    expect(detail.data).toMatchObject({
+      maskedDestinationValue: '****7890',
+      maskedRoutingValue: '****7890',
+    });
+    expect(JSON.stringify(detail)).not.toContain('1234567890');
     expect(JSON.stringify(detail)).not.toContain('destinationAccountNumberCiphertext');
     expect(JSON.stringify(detail)).not.toContain('destinationRoutingValueCiphertext');
 
@@ -239,19 +292,20 @@ describe('Payout API routes', () => {
     expect((await missingHistoryResponse.json()).error.code).toBe('PAYOUT_NOT_FOUND');
   });
 
-  it('serves the authenticated Admin rejection contract', async () => {
+  it('serves the authenticated Admin cancellation contract', async () => {
     const payout = await createPendingPayout();
-    const idempotencyKey = `payout-admin-route-rejection-${crypto.randomUUID()}`;
+    const idempotencyKey = `payout-admin-route-cancellation-${crypto.randomUUID()}`;
     const request = () => app.handle(new Request(
-      `http://localhost/api/v1/admin/payouts/${payout.id}/reject`,
+      `http://localhost/api/v1/admin/payouts/${payout.id}/cancel`,
       {
         method: 'POST',
         headers: {
           cookie: adminCookie,
           'content-type': 'application/json',
           'idempotency-key': idempotencyKey,
+          'if-match': String(payout.version),
         },
-        body: JSON.stringify({ reason: 'Rejected by the route test.' }),
+        body: JSON.stringify({ reasonCode: 'PAYOUT_INVALID_DESTINATION' }),
       },
     ));
 
@@ -262,11 +316,62 @@ describe('Payout API routes', () => {
 
     expect(first.status).toBe(200);
     expect(firstBody.data).toMatchObject({
-      id: payout.id,
-      payoutStatus: 'CANCELLED',
-      rejectionReason: 'Rejected by the route test.',
+      resourceSummary: {
+        id: payout.id,
+        payoutStatus: 'CANCELLED',
+        cancellationReasonCode: 'PAYOUT_INVALID_DESTINATION',
+        version: 2,
+      },
+      resourceVersion: 2,
+      adminActionId: expect.any(String),
     });
     expect(replay.status).toBe(200);
     expect(replayBody).toEqual(firstBody);
+  });
+
+  it('rejects a stale Payout version without changing the Payout or writing an Admin Action', async () => {
+    const payout = await createPendingPayout();
+    const idempotencyKey = `payout-admin-route-stale-${crypto.randomUUID()}`;
+    const response = await app.handle(new Request(
+      `http://localhost/api/v1/admin/payouts/${payout.id}/approve`,
+      {
+        method: 'POST',
+        headers: {
+          cookie: adminCookie,
+          'content-type': 'application/json',
+          'idempotency-key': idempotencyKey,
+          'if-match': String(payout.version + 1),
+        },
+        body: JSON.stringify({ reasonCode: 'PAYOUT_POLICY_REVIEW' }),
+      },
+    ));
+    const body = await response.json();
+    const [storedPayout] = await db
+      .select({ payoutStatus: paymentPayouts.payoutStatus, version: paymentPayouts.version })
+      .from(paymentPayouts)
+      .where(eq(paymentPayouts.id, payout.id));
+    const actions = await db
+      .select({ id: adminAction.id })
+      .from(adminAction)
+      .where(eq(adminAction.requestKey, idempotencyKey));
+
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe('ADMIN_ACTION_CONFLICT');
+    expect(storedPayout).toEqual({ payoutStatus: 'PENDING_ADMIN_APPROVAL', version: payout.version });
+    expect(actions).toHaveLength(0);
+  });
+
+  it('rejects invalid queue bounds and cursors', async () => {
+    const invalidLimit = await app.handle(new Request(
+      'http://localhost/api/v1/admin/payouts?limit=51',
+      { headers: { cookie: adminCookie } },
+    ));
+    const invalidCursor = await app.handle(new Request(
+      'http://localhost/api/v1/admin/payouts?cursor=not-a-cursor',
+      { headers: { cookie: adminCookie } },
+    ));
+
+    expect(invalidLimit.status).toBe(400);
+    expect(invalidCursor.status).toBe(400);
   });
 });
