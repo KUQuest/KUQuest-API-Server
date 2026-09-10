@@ -26,7 +26,6 @@ import {
   and,
   asc,
   eq,
-  exists,
   gt,
   gte,
   inArray,
@@ -2442,15 +2441,6 @@ const activeWorkerCountExpression = sql<number>`(
     AND ${questAssignment.assignmentStatus} = ${assignmentStatus.active}
 )`;
 
-// Participation rests on an Assignment row in any state. Settlement makes an Active
-// Assignment terminal, and a Member who worked the Quest keeps the right to read it.
-const questAssignmentAccess = (userId: string) => exists(sql`(
-  select 1
-  from quest_assignment a
-  where a.quest_id = ${quest.id}
-    and a.worker_id = ${userId}
-)`);
-
 const questV2PublicReadConditions = (userId: string) => [
   eq(quest.apiVersion, questApiVersion.v2),
   and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
@@ -2716,6 +2706,8 @@ export const getQuestV2ParticipationDetail = async (
     })
     .from(quest)
     .innerJoin(authUser, eq(quest.hirerId, authUser.id))
+    // Participation rests on an Assignment row in any state. Settlement makes an Active
+    // Assignment terminal, and a Member who worked the Quest keeps the right to read it.
     .innerJoin(
       questAssignment,
       and(eq(questAssignment.questId, quest.id), eq(questAssignment.workerId, userId)),
@@ -2725,7 +2717,6 @@ export const getQuestV2ParticipationDetail = async (
       eq(quest.id, questId),
       eq(quest.apiVersion, questApiVersion.v2),
       ne(quest.hirerId, userId),
-      questAssignmentAccess(userId),
     ))
     .limit(1);
 

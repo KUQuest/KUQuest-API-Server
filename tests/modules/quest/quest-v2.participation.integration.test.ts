@@ -106,8 +106,10 @@ const assign = async (questId: string, status: AssignmentStatus = assignmentStat
 const setQuestState = async (questId: string, status: QuestStatus) => {
   await db.update(quest).set({
     questStatus: status,
-    // The quest_cancelled_at_check constraint pairs the state with its timestamp.
+    // The quest_cancelled_at_check and quest_failed_at_check constraints pair each
+    // terminal state with its timestamp.
     ...(status === questStatus.cancelled ? { cancelledAt: new Date() } : {}),
+    ...(status === questStatus.failed ? { failedAt: new Date() } : {}),
   }).where(eq(quest.id, questId));
 };
 
@@ -285,6 +287,21 @@ describe('Quest v2 Participation Detail', () => {
     }).where(eq(quest.id, result.quest.id));
     await assign(result.quest.id);
 
+    expect((await getParticipation(result.quest.id)).status).toBe(404);
+  });
+
+  // AC: a different Hirer cannot access a Draft. A Draft has no Assignment, so
+  // no Member other than its Hirer can read it through this path.
+  it('refuses a Draft to a Member who is not its Hirer', async () => {
+    const result = await createQuestV2(
+      ownerId,
+      baseInput,
+      `participation-draft-${crypto.randomUUID()}`,
+    );
+    if (!('quest' in result)) throw new Error(`Create failed: ${result.outcome}`);
+    questIds.push(result.quest.id);
+
+    expect((await getParticipation(result.quest.id, outsiderCookie)).status).toBe(404);
     expect((await getParticipation(result.quest.id)).status).toBe(404);
   });
 
