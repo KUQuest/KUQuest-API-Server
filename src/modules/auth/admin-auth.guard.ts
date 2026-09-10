@@ -5,7 +5,7 @@ import type { StatusMap } from 'elysia/utils';
 
 import { adminAuth } from './admin-auth.config';
 import { adminMemberSessionGuard } from './admin-member-session.guard';
-import { adminSessionResolver } from './admin-session';
+import { getAdminSession } from './admin-session';
 
 export type AuthenticatedAdminSession = NonNullable<
   Awaited<ReturnType<typeof adminAuth.api.getSession>>
@@ -17,23 +17,25 @@ export type AdminContext = {
   set: { status?: number | keyof StatusMap };
 };
 
-export const adminAuthenticationGuard = (app: Elysia) =>
-  app
-    .use(adminSessionResolver)
-    .onBeforeHandle({ as: 'scoped' }, ({ adminSession, set }) => {
-      if (!adminSession) {
-        set.status = 401;
-        return apiError('UNAUTHORIZED', 'Unauthorized');
-      }
-    })
-    .resolve({ as: 'scoped' }, ({ adminSession }) => {
-      const session = adminSession as NonNullable<typeof adminSession>;
+export const adminAuthenticationGuard = new Elysia({ name: 'admin-authentication-guard' })
+  .derive({ as: 'scoped' }, async ({ request }) => {
+    const session = await getAdminSession(request);
+    return { adminSession: session };
+  })
+  .onBeforeHandle({ as: 'scoped' }, ({ adminSession, set }) => {
+    if (!adminSession) {
+      set.status = 401;
+      return apiError('UNAUTHORIZED', 'Unauthorized');
+    }
+  })
+  .resolve({ as: 'scoped' }, ({ adminSession }) => {
+    const session = adminSession as NonNullable<typeof adminSession>;
 
-      return {
-        adminSession: session,
-        admin: session.user,
-      };
-    });
+    return {
+      adminSession: session,
+      admin: session.user,
+    };
+  });
 
 export const enabledAdminGuard = (app: Elysia) =>
   app

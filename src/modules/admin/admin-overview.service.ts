@@ -19,39 +19,19 @@ import {
 import { and, count, inArray, isNotNull } from 'drizzle-orm';
 
 import { adminOverviewQuestStates } from './admin-overview.contract';
-
-export type AdminOverviewCounters = {
-  quests: {
-    total: number;
-    hidden: number;
-    byState: Record<(typeof adminOverviewQuestStates)[number], number>;
-  };
-  disputes: {
-    total: number;
-    awaitingResolution: number;
-  };
-  payouts: {
-    pendingAdminApproval: number;
-    inFlight: number;
-  };
-  members: {
-    frozenWallets: number;
-    suspendedWallets: number;
-  };
-};
+import type { AdminOverviewData } from './admin-overview.schema';
 
 const payoutQueueStatuses = [
   ...payoutAdminApprovalStatuses,
   ...payoutProviderInFlightStatuses,
 ] as const;
 
-const emptyQuestStateCounts = (): Record<(typeof adminOverviewQuestStates)[number], number> =>
-  Object.fromEntries(adminOverviewQuestStates.map((status) => [status, 0])) as Record<
-    (typeof adminOverviewQuestStates)[number],
-    number
-  >;
+const emptyQuestStateCounts = (): AdminOverviewData['quests']['byState'] =>
+  Object.fromEntries(
+    adminOverviewQuestStates.map((status) => [status, 0]),
+  ) as AdminOverviewData['quests']['byState'];
 
-export const getAdminOverview = async (): Promise<AdminOverviewCounters> =>
+export const getAdminOverview = async (): Promise<AdminOverviewData> =>
   db.transaction(async (transaction) => {
     const questStatusRows = await transaction
       .select({ questStatus: quest.questStatus, total: count() })

@@ -442,7 +442,7 @@ describe('Admin Overview API', () => {
     expect(after.quests.hidden - before.quests.hidden).toBe(1);
     for (const status of adminOverviewQuestStates) {
       const expectedDelta = status === 'QUEST_OPEN' ? 2 : status === 'QUEST_FAILED' ? 5 : 1;
-    expect(after.quests.byState[status]! - before.quests.byState[status]!).toBe(expectedDelta);
+      expect(after.quests.byState[status]! - before.quests.byState[status]!).toBe(expectedDelta);
     }
     expect(after.disputes.total - before.disputes.total).toBe(3);
     expect(after.disputes.awaitingResolution - before.disputes.awaitingResolution).toBe(1);
