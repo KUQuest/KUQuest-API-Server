@@ -274,6 +274,7 @@ export type AdminQuestFieldEditEntry = {
   editedAt: Date;
   editedByUserId: string | null;
   editedByAdminId: string | null;
+  v2EditRequestId: string | null;
 };
 
 export type AdminQuestEditRequestEntry = {
@@ -461,6 +462,7 @@ const editHistoryFor = async (questId: string): Promise<AdminQuestEditHistoryEnt
     editedAt: row.editedAt,
     editedByUserId: row.editedByUserId,
     editedByAdminId: row.editedByAdminId,
+    v2EditRequestId: row.v2EditRequestId,
   }));
 
   const v1Requests = await db.select().from(questEditRequest).where(eq(questEditRequest.questId, questId));

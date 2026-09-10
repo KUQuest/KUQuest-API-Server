@@ -442,6 +442,7 @@ export const questEditHistory = pgTable(
       .notNull()
       .references(() => quest.id, { onDelete: 'cascade' }),
     editRequestId: uuid('edit_request_id').references(() => questEditRequest.id),
+    v2EditRequestId: uuid('v2_edit_request_id').references(() => questV2EditRequest.id),
     fieldName: varchar('field_name', { length: 100 }).notNull(),
     oldValue: jsonb('old_value'),
     newValue: jsonb('new_value'),
@@ -453,6 +454,10 @@ export const questEditHistory = pgTable(
     check(
       'quest_edit_history_editor_check',
       sql`num_nonnulls(${table.editedByUserId}, ${table.editedByAdminId}) <= 1`,
+    ),
+    check(
+      'quest_edit_history_edit_request_check',
+      sql`num_nonnulls(${table.editRequestId}, ${table.v2EditRequestId}) <= 1`,
     ),
     index('quest_edit_history_quest_idx').on(table.questId, table.editedAt),
   ],
@@ -1249,6 +1254,10 @@ export const questEditHistoryRelations = relations(questEditHistory, ({ one }) =
   editRequest: one(questEditRequest, {
     fields: [questEditHistory.editRequestId],
     references: [questEditRequest.id],
+  }),
+  v2EditRequest: one(questV2EditRequest, {
+    fields: [questEditHistory.v2EditRequestId],
+    references: [questV2EditRequest.id],
   }),
   editedByUser: one(authUser, {
     fields: [questEditHistory.editedByUserId],

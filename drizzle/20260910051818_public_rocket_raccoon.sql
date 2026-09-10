@@ -1,0 +1,3 @@
+ALTER TABLE "quest_edit_history" ADD COLUMN "v2_edit_request_id" uuid;--> statement-breakpoint
+ALTER TABLE "quest_edit_history" ADD CONSTRAINT "quest_edit_history_v2_edit_request_id_quest_v2_edit_request_id_fk" FOREIGN KEY ("v2_edit_request_id") REFERENCES "public"."quest_v2_edit_request"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "quest_edit_history" ADD CONSTRAINT "quest_edit_history_edit_request_check" CHECK (num_nonnulls("quest_edit_history"."edit_request_id", "quest_edit_history"."v2_edit_request_id") <= 1);

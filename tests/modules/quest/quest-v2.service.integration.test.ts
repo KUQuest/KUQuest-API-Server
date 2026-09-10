@@ -4,6 +4,7 @@ import { authUser } from '@/database/schema/auth.schema';
 import {
   quest,
   questConditionItem,
+  questEditHistory,
   questImage,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
@@ -973,6 +974,66 @@ describe('Quest API v2 Draft editing', () => {
     const detailBody = (await detail.json()).data;
     expect(detailBody).toMatchObject(body.data);
     expect(detailBody.images).toEqual([]);
+
+    const history = await db
+      .select()
+      .from(questEditHistory)
+      .where(eq(questEditHistory.questId, created.quest.id));
+    const byField = new Map(history.map((row) => [row.fieldName, row]));
+    expect([...byField.keys()].sort()).toEqual([
+      'condition',
+      'description',
+      'locations',
+      'title',
+    ]);
+    expect(byField.get('title')).toMatchObject({
+      oldValue: 'Design a poster',
+      newValue: 'Updated poster',
+      editedByUserId: hirerId,
+      editedByAdminId: null,
+      v2EditRequestId: null,
+    });
+    expect(byField.get('description')).toMatchObject({
+      oldValue: 'A short description',
+      newValue: null,
+    });
+    expect(byField.get('condition')).toMatchObject({
+      oldValue: {
+        items: [
+          { position: 0, text: 'Use the KUQuest brand' },
+          { position: 1, text: 'Return an editable file' },
+        ],
+      },
+      newValue: {
+        items: [
+          { position: 0, text: 'Only the final PDF' },
+          { position: 1, text: 'Include the source file' },
+        ],
+      },
+    });
+    expect(byField.get('locations')).toMatchObject({
+      oldValue: [{ label: 'Online' }],
+      newValue: [],
+    });
+  });
+
+  it('writes no Draft edit history for a field the Hirer resends unchanged', async () => {
+    const created = await createQuestV2(
+      hirerId,
+      baseInput,
+      `v2-edit-unchanged-create-${randomUUID()}`,
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+
+    const response = await patchQuest(created.quest.id, { title: 'Design a poster' }, 1);
+    expect(response.status).toBe(200);
+
+    const history = await db
+      .select()
+      .from(questEditHistory)
+      .where(eq(questEditHistory.questId, created.quest.id));
+    expect(history).toHaveLength(0);
   });
 
   it.each(['FIRST_COME_FIRST_SERVED', 'CANDIDATE'] as const)(

@@ -10,6 +10,7 @@ import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 
 import { and, asc, eq, sql } from 'drizzle-orm';
 
+import { recordQuestEditHistory } from './quest-edit-history.service';
 import {
   questV2EditFailureCodes,
   questV2EditRequestStatuses,
@@ -694,6 +695,17 @@ export const respondToQuestV2EditRequest = async (
             appliedAt: now,
           })
           .where(eq(questV2EditRequest.id, requestId));
+        await recordQuestEditHistory(transaction, {
+          questId: request.questId,
+          entries: [{
+            fieldName: 'condition',
+            oldValue: request.previousCondition,
+            newValue: request.proposedCondition,
+          }],
+          editedAt: now,
+          editedByUserId: currentQuest.hirerId,
+          v2EditRequestId: requestId,
+        });
       }
     }
 
