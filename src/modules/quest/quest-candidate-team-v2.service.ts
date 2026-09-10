@@ -9,7 +9,6 @@ import {
   questCandidateTeamV2Member,
   questCandidateTeamV2SubmissionFile,
 } from '@/database/schema/quest.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 
 import { and, asc, eq, exists, inArray, isNull, ne, sql } from 'drizzle-orm';
 
@@ -116,34 +115,6 @@ type QuestV2CandidateTeamBusinessOutcomeCode =
 
 type TeamCommandOutcomeCode = QuestV2CandidateTeamBusinessOutcomeCode | QuestCommandOutcomeCode;
 
-const teamCommandOutcomeCodes: readonly TeamCommandOutcomeCode[] = [
-  'already-assigned',
-  'already-member',
-  'headcount-mismatch',
-  'headcount-not-allowed',
-  'hirer-not-allowed',
-  'idempotency-in-progress',
-  'idempotency-key-reused',
-  'idempotency-unavailable',
-  'invalid-idempotency-key',
-  'join-code-expired',
-  'join-code-invalid',
-  'leader-removal-not-allowed',
-  'member-not-found',
-  'not-authorized',
-  'not-candidate',
-  'not-forming',
-  'not-group',
-  'not-leader',
-  'not-open',
-  'not-selectable',
-  'submission-files-invalid',
-  'submission-invalid',
-  'team-full',
-  'team-not-found',
-  'not-found',
-];
-
 export type QuestV2CandidateTeamOutcome = CandidateTeam | { outcome: TeamCommandOutcomeCode };
 
 export type QuestV2CandidateTeamReadOutcome =
@@ -179,12 +150,13 @@ type SelectionOutcomeCode = Extract<
   | 'headcount-mismatch'
 >;
 
+type SelectionSuccess = {
+  assignments: SelectionAssignment[];
+  questState: 'QUEST_ASSIGNED';
+};
+
 export type QuestV2CandidateTeamSelectionOutcome =
-  | {
-      assignments: SelectionAssignment[];
-      questState: 'QUEST_ASSIGNED';
-    }
-  | { outcome: SelectionOutcomeCode };
+  SelectionSuccess | { outcome: SelectionOutcomeCode };
 
 const teamFields = {
   id: questCandidateTeamV2.id,
@@ -208,44 +180,7 @@ const assignmentFields = {
   startedAt: questAssignment.startedAt,
   createdAt: questAssignment.createdAt,
 };
-
-const idempotencyFields = {
-  id: walletIdempotencyKey.id,
-  requestHash: walletIdempotencyKey.requestHash,
-  resourceId: walletIdempotencyKey.resourceId,
-  resultData: walletIdempotencyKey.resultData,
-  processingStatus: walletIdempotencyKey.processingStatus,
-};
-
-type IdempotencyRecord = {
-  id: string;
-  requestHash: string;
-  resourceId: string | null;
-  resultData: unknown;
-  processingStatus: string;
-};
-
-type IdempotencyAcquireResult =
-  | { created: true; record: IdempotencyRecord }
-  | { created: false; record: IdempotencyRecord }
-  | { outcome: Extract<TeamCommandOutcomeCode, `idempotency-${string}`> };
-
 type Database = typeof db | QuestTransaction;
-
-const requestHashFor = (
-  operation: string,
-  memberId: string,
-  path: string,
-  body: object
-): Promise<string> =>
-  sha256Json({
-    authenticatedMemberId: memberId,
-    operation,
-    path,
-    body,
-  });
-
-const idempotencyExpiry = () => new Date(Date.now() + dayInMilliseconds);
 
 const normalizeJoinCode = (value: string): string => value.trim().toUpperCase();
 
@@ -471,17 +406,6 @@ const teamFromSnapshot = (value: unknown): CandidateTeam | undefined => {
   };
 };
 
-const teamOutcomeFromSnapshot = (value: unknown): QuestV2CandidateTeamOutcome | undefined => {
-  const team = teamFromSnapshot(value);
-  if (team) return team;
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const outcome = (value as Record<string, unknown>).outcome;
-  return typeof outcome === 'string' &&
-    teamCommandOutcomeCodes.includes(outcome as TeamCommandOutcomeCode)
-    ? { outcome: outcome as TeamCommandOutcomeCode }
-    : undefined;
-};
-
 const selectionAssignmentFromSnapshot = (value: unknown): SelectionAssignment | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const snapshot = value as Record<string, unknown>;
@@ -511,10 +435,7 @@ const selectionAssignmentFromSnapshot = (value: unknown): SelectionAssignment | 
   };
 };
 
-const selectionSnapshotFor = (result: {
-  assignments: SelectionAssignment[];
-  questState: 'QUEST_ASSIGNED';
-}) => ({
+const selectionSnapshotFor = (result: SelectionSuccess) => ({
   questState: result.questState,
   assignments: result.assignments.map((assignment) => ({
     id: assignment.id,
@@ -527,32 +448,9 @@ const selectionSnapshotFor = (result: {
   })),
 });
 
-const selectionFromSnapshot = (
-  value: unknown
-): QuestV2CandidateTeamSelectionOutcome | undefined => {
+const selectionFromSnapshot = (value: unknown): SelectionSuccess | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const snapshot = value as Record<string, unknown>;
-  const selectionOutcomeCodes: readonly SelectionOutcomeCode[] = [
-    'already-assigned',
-    'idempotency-in-progress',
-    'idempotency-key-reused',
-    'idempotency-unavailable',
-    'invalid-idempotency-key',
-    'not-authorized',
-    'not-candidate',
-    'not-found',
-    'not-group',
-    'not-open',
-    'not-selectable',
-    'team-not-found',
-    'headcount-mismatch',
-  ];
-  if (
-    typeof snapshot.outcome === 'string' &&
-    selectionOutcomeCodes.includes(snapshot.outcome as SelectionOutcomeCode)
-  ) {
-    return { outcome: snapshot.outcome as SelectionOutcomeCode };
-  }
   if (snapshot.questState !== 'QUEST_ASSIGNED' || !Array.isArray(snapshot.assignments))
     return undefined;
   const assignments: SelectionAssignment[] = [];
@@ -593,62 +491,6 @@ const readableQuest = (current: {
 
 const questStartHasPassed = (current: { startTime: Date }, now: Date) =>
   current.startTime.getTime() <= now.getTime();
-
-const acquireIdempotency = async (
-  transaction: QuestTransaction,
-  memberId: string,
-  commandId: string,
-  requestHash: string,
-  operationScope: string
-): Promise<IdempotencyAcquireResult> => {
-  const [created] = await transaction
-    .insert(walletIdempotencyKey)
-    .values({
-      principalUserId: memberId,
-      operationScope,
-      key: commandId,
-      requestHash,
-      expiresAt: idempotencyExpiry(),
-    })
-    .onConflictDoNothing()
-    .returning(idempotencyFields);
-  if (created) return { created: true, record: created };
-
-  const [existing] = await transaction
-    .select(idempotencyFields)
-    .from(walletIdempotencyKey)
-    .where(
-      and(
-        eq(walletIdempotencyKey.principalUserId, memberId),
-        eq(walletIdempotencyKey.operationScope, operationScope),
-        eq(walletIdempotencyKey.key, commandId)
-      )
-    )
-    .limit(1)
-    .for('update');
-  if (!existing) return { outcome: 'idempotency-unavailable' };
-  if (existing.requestHash !== requestHash) return { outcome: 'idempotency-key-reused' };
-  if (existing.processingStatus === 'COMPLETED') return { created: false, record: existing };
-  return { outcome: 'idempotency-in-progress' };
-};
-
-const discardIdempotency = async <T extends TeamCommandOutcomeCode>(
-  transaction: QuestTransaction,
-  idempotencyId: string,
-  outcome: T,
-  completedAt = new Date()
-): Promise<{ outcome: T }> => {
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({
-      resourceType: 'quest-v2-candidate-team',
-      resultData: { outcome },
-      processingStatus: 'COMPLETED',
-      completedAt,
-    })
-    .where(eq(walletIdempotencyKey.id, idempotencyId));
-  return { outcome };
-};
 
 const lockTeam = async (transaction: QuestTransaction, questId: string, teamId: string) => {
   const [team] = await transaction
@@ -704,25 +546,6 @@ const hasActiveAssignment = async (
 const validTeamHeadcount = (headcount: number, questHeadcount: number): boolean =>
   Number.isInteger(headcount) && headcount >= 2 && headcount <= questHeadcount;
 
-const completeTeamCommand = async (
-  transaction: QuestTransaction,
-  idempotencyId: string,
-  team: CandidateTeam,
-  resourceType: string,
-  completedAt: Date
-) => {
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({
-      resourceType,
-      resourceId: team.id,
-      resultData: snapshotFor(team),
-      processingStatus: 'COMPLETED',
-      completedAt,
-    })
-    .where(eq(walletIdempotencyKey.id, idempotencyId));
-};
-
 const validateSubmissionFiles = async (
   transaction: QuestTransaction,
   memberId: string,
@@ -748,25 +571,6 @@ const validateSubmissionFiles = async (
   );
 };
 
-const completeSelectionCommand = async (
-  transaction: QuestTransaction,
-  idempotencyId: string,
-  teamId: string,
-  result: { assignments: SelectionAssignment[]; questState: 'QUEST_ASSIGNED' },
-  completedAt: Date
-) => {
-  await transaction
-    .update(walletIdempotencyKey)
-    .set({
-      resourceType: 'quest-v2-candidate-team-selection',
-      resourceId: teamId,
-      resultData: selectionSnapshotFor(result),
-      processingStatus: 'COMPLETED',
-      completedAt,
-    })
-    .where(eq(walletIdempotencyKey.id, idempotencyId));
-};
-
 export const createQuestV2CandidateTeam = async (
   leaderId: string,
   questId: string,
@@ -774,12 +578,12 @@ export const createQuestV2CandidateTeam = async (
   rawCommandId: string,
   now = new Date()
 ): Promise<QuestV2CandidateTeamOutcome> => {
-  const requestHash = await requestHashFor(
-    questV2CandidateTeamCreateOperationScope,
-    leaderId,
-    '/api/v2/quests/:questId/teams',
-    { questId, name: input.name, headcount: input.headcount }
-  );
+  const requestHash = await sha256Json({
+    authenticatedMemberId: leaderId,
+    operation: questV2CandidateTeamCreateOperationScope,
+    path: '/api/v2/quests/:questId/teams',
+    body: { questId, name: input.name, headcount: input.headcount },
+  });
 
   return db.transaction(async (transaction) => {
     // The Quest row is locked before the module records the command. The command row's
@@ -955,12 +759,12 @@ export const updateQuestV2CandidateTeam = async (
   rawCommandId: string,
   now = new Date()
 ): Promise<QuestV2CandidateTeamOutcome> => {
-  const requestHash = await requestHashFor(
-    questV2CandidateTeamUpdateOperationScope,
-    leaderId,
-    '/api/v2/quests/:questId/teams/:teamId',
-    { questId, teamId, name: input.name }
-  );
+  const requestHash = await sha256Json({
+    authenticatedMemberId: leaderId,
+    operation: questV2CandidateTeamUpdateOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId',
+    body: { questId, teamId, name: input.name },
+  });
 
   return db.transaction(async (transaction) => {
     // The Quest row is locked before the module records the command; see the lock-order
@@ -1031,12 +835,12 @@ export const joinQuestV2CandidateTeam = async (
   now = new Date()
 ): Promise<QuestV2CandidateTeamOutcome> => {
   const joinCode = normalizeJoinCode(input.joinCode);
-  const requestHash = await requestHashFor(
-    questV2CandidateTeamJoinOperationScope,
-    memberId,
-    '/api/v2/quests/:questId/teams/:teamId/join',
-    { questId, teamId, joinCode }
-  );
+  const requestHash = await sha256Json({
+    authenticatedMemberId: memberId,
+    operation: questV2CandidateTeamJoinOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/join',
+    body: { questId, teamId, joinCode },
+  });
 
   return db.transaction(async (transaction) => {
     // The Quest row is locked before the module records the command; see the lock-order
@@ -1124,10 +928,15 @@ const leaveOrRemoveTeamMember = async (
   removeMemberId: string | undefined,
   now: Date
 ): Promise<QuestV2CandidateTeamOutcome> => {
-  const requestHash = await requestHashFor(operationScope, memberId, path, {
-    questId,
-    teamId,
-    ...(removeMemberId ? { memberId: removeMemberId } : {}),
+  const requestHash = await sha256Json({
+    authenticatedMemberId: memberId,
+    operation: operationScope,
+    path,
+    body: {
+      questId,
+      teamId,
+      ...(removeMemberId ? { memberId: removeMemberId } : {}),
+    },
   });
 
   return db.transaction(async (transaction) => {
@@ -1281,12 +1090,12 @@ export const regenerateQuestV2CandidateTeamJoinCode = async (
   rawCommandId: string,
   now = new Date()
 ): Promise<QuestV2CandidateTeamOutcome> => {
-  const requestHash = await requestHashFor(
-    questV2CandidateTeamRegenerateCodeOperationScope,
-    leaderId,
-    '/api/v2/quests/:questId/teams/:teamId/join-code',
-    { questId, teamId }
-  );
+  const requestHash = await sha256Json({
+    authenticatedMemberId: leaderId,
+    operation: questV2CandidateTeamRegenerateCodeOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/join-code',
+    body: { questId, teamId },
+  });
 
   return db.transaction(async (transaction) => {
     // The Quest row is locked before the module records the command; see the lock-order
@@ -1357,91 +1166,102 @@ export const submitQuestV2CandidateTeam = async (
   rawCommandId: string,
   now = new Date()
 ): Promise<QuestV2CandidateTeamOutcome> => {
-  const commandId = rawCommandId.trim();
-  if (commandId.length === 0 || commandId.length > 200)
-    return { outcome: 'invalid-idempotency-key' };
   const text = input.text.trim();
-  const requestHash = await requestHashFor(
-    questV2CandidateTeamSubmitOperationScope,
-    leaderId,
-    '/api/v2/quests/:questId/teams/:teamId/submit',
-    { questId, teamId, text, fileIds: input.fileIds }
-  );
+  const requestHash = await sha256Json({
+    authenticatedMemberId: leaderId,
+    operation: questV2CandidateTeamSubmitOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/submit',
+    body: { questId, teamId, text, fileIds: input.fileIds },
+  });
 
   return db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command; see the lock-order
+    // note on createQuestV2CandidateTeam.
     const current = await lockQuest(transaction, questId);
     if (!current) return { outcome: 'not-found' };
-    const idempotency = await acquireIdempotency(
+
+    const command = await runQuestCommand({
       transaction,
-      leaderId,
-      commandId,
-      requestHash,
-      questV2CandidateTeamSubmitOperationScope
-    );
-    if ('outcome' in idempotency) return idempotency;
-    if (!idempotency.created) {
-      const replay = teamOutcomeFromSnapshot(idempotency.record.resultData);
-      return replay ?? { outcome: 'idempotency-unavailable' };
-    }
+      identity: {
+        principalUserId: leaderId,
+        operationScope: questV2CandidateTeamSubmitOperationScope,
+        key: rawCommandId,
+        requestHash,
+        questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<CandidateTeam, QuestV2CandidateTeamBusinessOutcomeCode>
+      > => {
+        if (current.v2Mode !== questV2Mode.candidate) {
+          return { kind: 'rejected', rejection: 'not-candidate' };
+        }
+        if (current.v2Participation !== questV2Participation.group) {
+          return { kind: 'rejected', rejection: 'not-group' };
+        }
+        if (current.questState !== 'QUEST_OPEN') return { kind: 'rejected', rejection: 'not-open' };
+        if (questStartHasPassed(current, now)) return { kind: 'rejected', rejection: 'not-open' };
 
-    if (current.v2Mode !== questV2Mode.candidate)
-      return discardIdempotency(transaction, idempotency.record.id, 'not-candidate');
-    if (current.v2Participation !== questV2Participation.group)
-      return discardIdempotency(transaction, idempotency.record.id, 'not-group');
-    if (current.questState !== 'QUEST_OPEN')
-      return discardIdempotency(transaction, idempotency.record.id, 'not-open');
-    if (questStartHasPassed(current, now))
-      return discardIdempotency(transaction, idempotency.record.id, 'not-open');
-    const team = await lockTeam(transaction, questId, teamId);
-    if (!team) return discardIdempotency(transaction, idempotency.record.id, 'team-not-found');
-    if (team.leaderId !== leaderId)
-      return discardIdempotency(transaction, idempotency.record.id, 'not-leader');
-    if (team.state !== 'TEAM_FORMING')
-      return discardIdempotency(transaction, idempotency.record.id, 'not-forming');
-    const members = await teamMembers(transaction, teamId, true);
-    if (team.headcount === null || members.length !== team.headcount)
-      return discardIdempotency(transaction, idempotency.record.id, 'headcount-mismatch');
-    if (!text || text.length > 1000)
-      return discardIdempotency(transaction, idempotency.record.id, 'submission-invalid');
-    if (!(await validateSubmissionFiles(transaction, leaderId, input.fileIds)))
-      return discardIdempotency(transaction, idempotency.record.id, 'submission-files-invalid');
+        const team = await lockTeam(transaction, questId, teamId);
+        if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+        if (team.leaderId !== leaderId) return { kind: 'rejected', rejection: 'not-leader' };
+        if (team.state !== 'TEAM_FORMING') return { kind: 'rejected', rejection: 'not-forming' };
+        const members = await teamMembers(transaction, teamId, true);
+        if (team.headcount === null || members.length !== team.headcount) {
+          return { kind: 'rejected', rejection: 'headcount-mismatch' };
+        }
+        if (!text || text.length > 1000) {
+          return { kind: 'rejected', rejection: 'submission-invalid' };
+        }
+        if (!(await validateSubmissionFiles(transaction, leaderId, input.fileIds))) {
+          return { kind: 'rejected', rejection: 'submission-files-invalid' };
+        }
 
-    const [usedFile] = await transaction
-      .select({ fileId: questCandidateTeamV2SubmissionFile.fileId })
-      .from(questCandidateTeamV2SubmissionFile)
-      .where(inArray(questCandidateTeamV2SubmissionFile.fileId, input.fileIds))
-      .limit(1);
-    if (usedFile)
-      return discardIdempotency(transaction, idempotency.record.id, 'submission-files-invalid');
+        const [usedFile] = await transaction
+          .select({ fileId: questCandidateTeamV2SubmissionFile.fileId })
+          .from(questCandidateTeamV2SubmissionFile)
+          .where(inArray(questCandidateTeamV2SubmissionFile.fileId, input.fileIds))
+          .limit(1);
+        if (usedFile) {
+          return { kind: 'rejected', rejection: 'submission-files-invalid' };
+        }
 
-    const [updatedTeam] = await transaction
-      .update(questCandidateTeamV2)
-      .set({
-        state: 'TEAM_SUBMITTED',
-        joinCodeHash: null,
-        joinCodeExpiresAt: null,
-        submissionText: text,
-        submittedAt: now,
-      })
-      .where(
-        and(eq(questCandidateTeamV2.id, teamId), eq(questCandidateTeamV2.state, 'TEAM_FORMING'))
-      )
-      .returning(teamFields);
-    if (!updatedTeam) return { outcome: 'idempotency-unavailable' };
-    await transaction
-      .insert(questCandidateTeamV2SubmissionFile)
-      .values(
-        input.fileIds.map((fileId, position) => ({ teamId, fileId, position, attachedAt: now }))
-      );
-    const result = await readTeam(transaction, updatedTeam);
-    await completeTeamCommand(
-      transaction,
-      idempotency.record.id,
-      result,
-      'quest-v2-candidate-team',
-      now
-    );
-    return result;
+        const [updatedTeam] = await transaction
+          .update(questCandidateTeamV2)
+          .set({
+            state: 'TEAM_SUBMITTED',
+            joinCodeHash: null,
+            joinCodeExpiresAt: null,
+            submissionText: text,
+            submittedAt: now,
+          })
+          .where(
+            and(eq(questCandidateTeamV2.id, teamId), eq(questCandidateTeamV2.state, 'TEAM_FORMING'))
+          )
+          .returning(teamFields);
+        if (!updatedTeam) throw new Error('Candidate Team submission update returned no row');
+
+        await transaction
+          .insert(questCandidateTeamV2SubmissionFile)
+          .values(
+            input.fileIds.map((fileId, position) => ({ teamId, fileId, position, attachedAt: now }))
+          );
+
+        const result = await readTeam(transaction, updatedTeam);
+        return {
+          kind: 'success',
+          result,
+          resourceType: 'quest-v2-candidate-team',
+          resourceId: result.id,
+        };
+      },
+      toSnapshot: snapshotFor,
+      fromSnapshot: teamFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return command.result;
+    return { outcome: command.rejection };
   });
 };
 
@@ -1490,6 +1310,16 @@ const selectionTransitionFor = (
   };
 };
 
+type SelectionBusinessOutcomeCode =
+  | 'already-assigned'
+  | 'headcount-mismatch'
+  | 'not-authorized'
+  | 'not-candidate'
+  | 'not-group'
+  | 'not-open'
+  | 'not-selectable'
+  | 'team-not-found';
+
 export const selectQuestV2CandidateTeam = async (
   hirerId: string,
   questId: string,
@@ -1497,140 +1327,156 @@ export const selectQuestV2CandidateTeam = async (
   rawCommandId: string,
   now = new Date()
 ): Promise<QuestV2CandidateTeamSelectionOutcome> => {
-  const commandId = rawCommandId.trim();
-  if (commandId.length === 0 || commandId.length > 200)
-    return { outcome: 'invalid-idempotency-key' };
-  const requestHash = await requestHashFor(
-    questV2CandidateTeamSelectOperationScope,
-    hirerId,
-    '/api/v2/quests/:questId/teams/:teamId/select',
-    { questId, teamId }
-  );
+  const requestHash = await sha256Json({
+    authenticatedMemberId: hirerId,
+    operation: questV2CandidateTeamSelectOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/select',
+    body: { questId, teamId },
+  });
 
   return db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command; see the lock-order
+    // note on createQuestV2CandidateTeam.
     const current = await lockQuest(transaction, questId);
     if (!current) return { outcome: 'not-found' };
-    const idempotency = await acquireIdempotency(
+
+    const command = await runQuestCommand({
       transaction,
-      hirerId,
-      commandId,
-      requestHash,
-      questV2CandidateTeamSelectOperationScope
-    );
-    if ('outcome' in idempotency) return idempotency;
-    if (!idempotency.created)
-      return (
-        selectionFromSnapshot(idempotency.record.resultData) ?? {
-          outcome: 'idempotency-unavailable',
+      identity: {
+        principalUserId: hirerId,
+        operationScope: questV2CandidateTeamSelectOperationScope,
+        key: rawCommandId,
+        requestHash,
+        questId,
+      },
+      now,
+      work: async (): Promise<QuestCommandWork<SelectionSuccess, SelectionBusinessOutcomeCode>> => {
+        if (current.hirerId !== hirerId) return { kind: 'rejected', rejection: 'not-authorized' };
+        if (current.v2Mode !== questV2Mode.candidate) {
+          return { kind: 'rejected', rejection: 'not-candidate' };
         }
-      );
+        if (current.v2Participation !== questV2Participation.group) {
+          return { kind: 'rejected', rejection: 'not-group' };
+        }
+        if (current.questState !== 'QUEST_OPEN') return { kind: 'rejected', rejection: 'not-open' };
+        if (questStartHasPassed(current, now)) return { kind: 'rejected', rejection: 'not-open' };
 
-    if (current.hirerId !== hirerId)
-      return discardIdempotency(transaction, idempotency.record.id, 'not-authorized');
-    if (current.v2Mode !== questV2Mode.candidate)
-      return discardIdempotency(transaction, idempotency.record.id, 'not-candidate');
-    if (current.v2Participation !== questV2Participation.group)
-      return discardIdempotency(transaction, idempotency.record.id, 'not-group');
-    if (current.questState !== 'QUEST_OPEN')
-      return discardIdempotency(transaction, idempotency.record.id, 'not-open');
-    if (questStartHasPassed(current, now))
-      return discardIdempotency(transaction, idempotency.record.id, 'not-open');
+        const team = await lockTeam(transaction, questId, teamId);
+        if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+        if (
+          team.state !== 'TEAM_SUBMITTED' ||
+          team.submissionText === null ||
+          team.submittedAt === null
+        ) {
+          return { kind: 'rejected', rejection: 'not-selectable' };
+        }
+        if (team.headcount === null) {
+          return { kind: 'rejected', rejection: 'headcount-mismatch' };
+        }
+        const members = await teamMembers(transaction, teamId, true);
+        if (members.length !== team.headcount) {
+          return { kind: 'rejected', rejection: 'headcount-mismatch' };
+        }
+        const submissionFileIds = await teamSubmissionFileIds(transaction, teamId);
+        if (!(await validateSubmissionFiles(transaction, team.leaderId, submissionFileIds))) {
+          return { kind: 'rejected', rejection: 'not-selectable' };
+        }
 
-    const team = await lockTeam(transaction, questId, teamId);
-    if (!team) return discardIdempotency(transaction, idempotency.record.id, 'team-not-found');
-    if (
-      team.state !== 'TEAM_SUBMITTED' ||
-      team.submissionText === null ||
-      team.submittedAt === null
-    )
-      return discardIdempotency(transaction, idempotency.record.id, 'not-selectable');
-    if (team.headcount === null)
-      return discardIdempotency(transaction, idempotency.record.id, 'headcount-mismatch');
-    const members = await teamMembers(transaction, teamId, true);
-    if (members.length !== team.headcount)
-      return discardIdempotency(transaction, idempotency.record.id, 'headcount-mismatch');
-    const submissionFileIds = await teamSubmissionFileIds(transaction, teamId);
-    if (!(await validateSubmissionFiles(transaction, team.leaderId, submissionFileIds))) {
-      return discardIdempotency(transaction, idempotency.record.id, 'not-selectable');
-    }
+        const existingAssignments = await transaction
+          .select(assignmentFields)
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, questId))
+          .for('update');
+        const memberIds = members.map((member) => member.memberId);
+        if (existingAssignments.some((assignment) => memberIds.includes(assignment.workerId))) {
+          return { kind: 'rejected', rejection: 'already-assigned' };
+        }
 
-    const existingAssignments = await transaction
-      .select(assignmentFields)
-      .from(questAssignment)
-      .where(eq(questAssignment.questId, questId))
-      .for('update');
-    const memberIds = members.map((member) => member.memberId);
-    if (existingAssignments.some((assignment) => memberIds.includes(assignment.workerId))) {
-      return discardIdempotency(transaction, idempotency.record.id, 'already-assigned');
-    }
+        await transaction
+          .update(questCandidateTeamV2)
+          .set({ state: 'TEAM_SELECTED' })
+          .where(
+            and(
+              eq(questCandidateTeamV2.id, teamId),
+              eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED')
+            )
+          );
+        await transaction
+          .update(questCandidateTeamV2)
+          .set({ state: 'TEAM_REJECTED' })
+          .where(
+            and(
+              eq(questCandidateTeamV2.questId, questId),
+              eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED'),
+              ne(questCandidateTeamV2.id, teamId)
+            )
+          );
+        await transaction
+          .update(questCandidateApplicationV2)
+          .set({ state: 'APPLICATION_REJECTED' })
+          .where(
+            and(
+              eq(questCandidateApplicationV2.questId, questId),
+              eq(questCandidateApplicationV2.state, 'APPLICATION_APPLIED')
+            )
+          );
 
-    await transaction
-      .update(questCandidateTeamV2)
-      .set({ state: 'TEAM_SELECTED' })
-      .where(
-        and(eq(questCandidateTeamV2.id, teamId), eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED'))
-      );
-    await transaction
-      .update(questCandidateTeamV2)
-      .set({ state: 'TEAM_REJECTED' })
-      .where(
-        and(
-          eq(questCandidateTeamV2.questId, questId),
-          eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED'),
-          ne(questCandidateTeamV2.id, teamId)
-        )
-      );
-    await transaction
-      .update(questCandidateApplicationV2)
-      .set({ state: 'APPLICATION_REJECTED' })
-      .where(
-        and(
-          eq(questCandidateApplicationV2.questId, questId),
-          eq(questCandidateApplicationV2.state, 'APPLICATION_APPLIED')
-        )
-      );
+        const createdAssignments = await transaction
+          .insert(questAssignment)
+          .values(
+            memberIds.map((workerId) => ({
+              questId,
+              workerId,
+              assignmentStatus: 'ASSIGNMENT_ACTIVE',
+              createdAt: now,
+            }))
+          )
+          .returning(assignmentFields);
+        if (createdAssignments.length !== memberIds.length) {
+          throw new Error('Candidate Team Assignment insert returned invalid rows');
+        }
+        const assignmentByWorkerId = new Map(
+          createdAssignments.map((assignment) => [assignment.workerId, assignment])
+        );
+        const assignments = memberIds.map((workerId) => {
+          const assignment = assignmentByWorkerId.get(workerId);
+          if (!assignment) throw new Error('Candidate Team Assignment could not be read');
+          return toSelectionAssignment(assignment);
+        });
 
-    const createdAssignments = await transaction
-      .insert(questAssignment)
-      .values(
-        memberIds.map((workerId) => ({
-          questId,
-          workerId,
-          assignmentStatus: 'ASSIGNMENT_ACTIVE',
-          createdAt: now,
-        }))
-      )
-      .returning(assignmentFields);
-    if (createdAssignments.length !== memberIds.length)
-      return { outcome: 'idempotency-unavailable' };
-    const assignmentByWorkerId = new Map(
-      createdAssignments.map((assignment) => [assignment.workerId, assignment])
-    );
-    const assignments = memberIds.map((workerId) => {
-      const assignment = assignmentByWorkerId.get(workerId);
-      if (!assignment) throw new Error('Candidate Team Assignment could not be read');
-      return toSelectionAssignment(assignment);
+        await transaction
+          .update(quest)
+          .set({ questStatus: 'QUEST_ASSIGNED', updatedAt: now })
+          .where(and(eq(quest.id, questId), eq(quest.questStatus, 'QUEST_OPEN')));
+
+        const writer = getQuestWorkChatMembershipWriter();
+        if (!writer)
+          throw new WorkChatTransitionError(
+            new Error('Work Chat membership writer is not configured')
+          );
+        try {
+          await writer.applyQuestTransition(
+            transaction,
+            selectionTransitionFor(questId, hirerId, teamId, now, assignments)
+          );
+        } catch (cause) {
+          throw new WorkChatTransitionError(cause);
+        }
+
+        const result: SelectionSuccess = { assignments, questState: 'QUEST_ASSIGNED' };
+        return {
+          kind: 'success',
+          result,
+          resourceType: 'quest-v2-candidate-team-selection',
+          resourceId: teamId,
+        };
+      },
+      toSnapshot: selectionSnapshotFor,
+      fromSnapshot: selectionFromSnapshot,
     });
 
-    await transaction
-      .update(quest)
-      .set({ questStatus: 'QUEST_ASSIGNED', updatedAt: now })
-      .where(and(eq(quest.id, questId), eq(quest.questStatus, 'QUEST_OPEN')));
-
-    const writer = getQuestWorkChatMembershipWriter();
-    if (!writer)
-      throw new WorkChatTransitionError(new Error('Work Chat membership writer is not configured'));
-    try {
-      await writer.applyQuestTransition(
-        transaction,
-        selectionTransitionFor(questId, hirerId, teamId, now, assignments)
-      );
-    } catch (cause) {
-      throw new WorkChatTransitionError(cause);
-    }
-
-    const result = { assignments, questState: 'QUEST_ASSIGNED' as const };
-    await completeSelectionCommand(transaction, idempotency.record.id, teamId, result, now);
-    return result;
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return command.result;
+    return { outcome: command.rejection };
   });
 };

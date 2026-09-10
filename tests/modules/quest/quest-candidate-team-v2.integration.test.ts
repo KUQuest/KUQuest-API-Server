@@ -11,7 +11,6 @@ import {
   questCommand,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import {
   chatConversation,
   chatMembership,
@@ -283,9 +282,6 @@ afterEach(async () => {
     fileIds.splice(0, fileIds.length);
   }
   await db.delete(questCommand).where(inArray(questCommand.principalUserId, memberIds));
-  await db
-    .delete(walletIdempotencyKey)
-    .where(inArray(walletIdempotencyKey.principalUserId, memberIds));
 });
 
 afterAll(async () => {
@@ -1037,6 +1033,23 @@ describe('Quest Candidate Team API v2', () => {
     expect(retry.status).toBe(200);
     expect((await retry.json()).data).toEqual(body);
 
+    const [storedSubmitCommand] = await db
+      .select({
+        processingStatus: questCommand.processingStatus,
+        resourceType: questCommand.resourceType,
+        resultData: questCommand.resultData,
+      })
+      .from(questCommand)
+      .where(
+        and(
+          eq(questCommand.principalUserId, candidate.id),
+          eq(questCommand.operationScope, 'quest.v2.candidate-team.submit'),
+          eq(questCommand.key, 'candidate-team-v2-submit-valid')
+        )
+      );
+    expect(storedSubmitCommand?.processingStatus).toBe('COMPLETED');
+    expect(storedSubmitCommand?.resourceType).toBe('quest-v2-candidate-team');
+    expect(storedSubmitCommand?.resultData).toMatchObject({ kind: 'success' });
     const joinAfterSubmit = await joinTeam(
       questId,
       team.id,
@@ -1148,6 +1161,23 @@ describe('Quest Candidate Team API v2', () => {
     expect(replay.status).toBe(200);
     expect((await replay.json()).data).toEqual(selectedBody);
 
+    const [storedSelectCommand] = await db
+      .select({
+        processingStatus: questCommand.processingStatus,
+        resourceType: questCommand.resourceType,
+        resultData: questCommand.resultData,
+      })
+      .from(questCommand)
+      .where(
+        and(
+          eq(questCommand.principalUserId, hirer.id),
+          eq(questCommand.operationScope, 'quest.v2.candidate-team.select'),
+          eq(questCommand.key, 'candidate-team-v2-select-one')
+        )
+      );
+    expect(storedSelectCommand?.processingStatus).toBe('COMPLETED');
+    expect(storedSelectCommand?.resourceType).toBe('quest-v2-candidate-team-selection');
+    expect(storedSelectCommand?.resultData).toMatchObject({ kind: 'success' });
     const [currentQuest] = await db
       .select({ state: quest.questStatus })
       .from(quest)
@@ -1858,6 +1888,97 @@ describe('Quest Candidate Team API v2', () => {
     expect(storedCommand?.resultData).toMatchObject({
       kind: 'rejected',
       rejection: 'hirer-not-allowed',
+    });
+  });
+  it('replays the same rejection when a refused submission or selection command is retried with the same Idempotency-Key', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+
+    const team = await createTeam(
+      questId,
+      candidate.id,
+      2,
+      'candidate-team-v2-reject-replay-create'
+    );
+    const submitFileId = await createFile(candidate.id);
+    const submitKey = 'candidate-team-v2-rejected-submit-retry';
+
+    const refusedSubmit = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/submit`,
+      'POST',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': submitKey },
+      JSON.stringify({ text: 'Underfilled team', fileIds: [submitFileId] })
+    );
+    expect(refusedSubmit.status).toBe(409);
+    expect((await refusedSubmit.json()).error.code).toBe('TEAM_HEADCOUNT_MISMATCH');
+
+    const retrySubmit = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/submit`,
+      'POST',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': submitKey },
+      JSON.stringify({ text: 'Underfilled team', fileIds: [submitFileId] })
+    );
+    expect(retrySubmit.status).toBe(409);
+    expect((await retrySubmit.json()).error.code).toBe('TEAM_HEADCOUNT_MISMATCH');
+
+    const [storedSubmitCommand] = await db
+      .select({
+        resultData: questCommand.resultData,
+        processingStatus: questCommand.processingStatus,
+      })
+      .from(questCommand)
+      .where(
+        and(
+          eq(questCommand.principalUserId, candidate.id),
+          eq(questCommand.operationScope, 'quest.v2.candidate-team.submit'),
+          eq(questCommand.key, submitKey)
+        )
+      );
+    expect(storedSubmitCommand?.processingStatus).toBe('COMPLETED');
+    expect(storedSubmitCommand?.resultData).toMatchObject({
+      kind: 'rejected',
+      rejection: 'headcount-mismatch',
+    });
+
+    const selectKey = 'candidate-team-v2-rejected-select-retry';
+    const refusedSelect = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': selectKey }
+    );
+    expect(refusedSelect.status).toBe(409);
+    expect((await refusedSelect.json()).error.code).toBe('CANDIDATE_TEAM_NOT_SELECTABLE');
+
+    const retrySelect = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': selectKey }
+    );
+    expect(retrySelect.status).toBe(409);
+    expect((await retrySelect.json()).error.code).toBe('CANDIDATE_TEAM_NOT_SELECTABLE');
+
+    const [storedSelectCommand] = await db
+      .select({
+        resultData: questCommand.resultData,
+        processingStatus: questCommand.processingStatus,
+      })
+      .from(questCommand)
+      .where(
+        and(
+          eq(questCommand.principalUserId, hirer.id),
+          eq(questCommand.operationScope, 'quest.v2.candidate-team.select'),
+          eq(questCommand.key, selectKey)
+        )
+      );
+    expect(storedSelectCommand?.processingStatus).toBe('COMPLETED');
+    expect(storedSelectCommand?.resultData).toMatchObject({
+      kind: 'rejected',
+      rejection: 'not-selectable',
     });
   });
 

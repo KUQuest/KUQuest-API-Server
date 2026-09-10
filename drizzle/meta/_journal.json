@@ -533,6 +533,13 @@
       "when": 1789022640930,
       "tag": "20260910072000_move_quest_v2_core_commands",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1789022700930,
+      "tag": "20260910073500_move_candidate_team_submit_select",
+      "breakpoints": true
     }
   ]
 }

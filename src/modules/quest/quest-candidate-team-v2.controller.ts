@@ -240,22 +240,7 @@ const mapSelectionError = (set: AuthedContext['set'], outcome: SelectionError) =
   if (outcome.outcome === 'headcount-mismatch') {
     return conflict(set, 'TEAM_HEADCOUNT_MISMATCH', 'The submitted Candidate Team is not full');
   }
-  if (outcome.outcome === 'idempotency-key-reused') {
-    return conflict(
-      set,
-      'IDEMPOTENCY_KEY_REUSED',
-      'The Idempotency-Key was used for a different request'
-    );
-  }
-  if (outcome.outcome === 'idempotency-in-progress') {
-    return conflict(set, 'IDEMPOTENCY_IN_PROGRESS', 'The Idempotency-Key is still processing');
-  }
-  if (outcome.outcome === 'idempotency-unavailable') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'The Idempotency-Key result is unavailable');
-  }
-  set.status = 400;
-  return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
+  return mapQuestCommandOutcome(set, outcome.outcome);
 };
 
 const serializeSelectionAssignment = (assignment: SelectionSuccess['assignments'][number]) => ({
