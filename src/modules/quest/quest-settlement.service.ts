@@ -11,8 +11,10 @@ import {
   questV2UnderfilledDecision,
   questV2UnderfilledConsent,
   questV2ProofSubmission,
+  proofSubmission,
   questSettlementCommand,
   questTeam,
+  questTeamMember,
 } from '@/database/schema/quest.schema';
 import {
   calculatePlatformFeeSatang,
@@ -33,12 +35,11 @@ import { hasPendingQuestV2EditRequest } from './quest-v2-edit.service';
 import type { InactiveAssignmentStatus } from './quest-work-chat.contract';
 
 export type QuestSettlementOutcome =
-  | { outcome: 'not-found' | 'not-authorized' | 'invalid-state' | 'invalid-idempotency-key' | 'idempotency-key-reused' | 'idempotency-key-required' | 'idempotency-unavailable' | 'allocations-invalid' }
-  | { questStatus: QuestStatus; outcome: 'COMPLETED' | 'CANCELLED' | 'REFUNDED' | 'RELEASED_TO_WORKER'; paidSatang: number; refundedSatang: number };
+  | { outcome: 'not-found' | 'not-authorized' | 'invalid-state' | 'invalid-idempotency-key' | 'idempotency-key-reused' | 'idempotency-key-required' | 'idempotency-unavailable' }
+  | { questStatus: QuestStatus; outcome: 'COMPLETED' | 'CANCELLED'; paidSatang: number; refundedSatang: number };
 
 type Actor = { userId?: string; adminId?: string };
-type CommandType = 'COMPLETE' | 'CANCEL' | 'AUTO_CANCEL' | 'DISPUTE_REFUND' | 'DISPUTE_RELEASE';
-type Allocation = { workerId: string; amountSatang: number };
+type CommandType = 'COMPLETE' | 'CANCEL' | 'AUTO_CANCEL';
 type CommandResult = Extract<QuestSettlementOutcome, { questStatus: QuestStatus }>;
 
 export const questV2CancellationOperationScope = 'quest.v2.cancellation';
@@ -137,6 +138,8 @@ const lockQuest = async (tx: QuestTransaction, questId: string) => (await tx.sel
   fundingReservationId: quest.fundingReservationId,
   headcount: quest.headcount,
   startTime: quest.startTime,
+  dueAt: quest.dueAt,
+  failedAt: quest.failedAt,
 }).from(quest).where(eq(quest.id, questId)).limit(1).for('update'))[0];
 
 const activeAssignments = async (tx: QuestTransaction, questId: string) => tx.select({
@@ -279,7 +282,7 @@ const releaseRemaining = async (tx: QuestTransaction, ownerUserId: string, reser
   return before.remainingSatang;
 };
 
-const completeInTransaction = async (tx: QuestTransaction, questId: string, actorUserId: string, commandId: string, now: Date, allowDisputed = false): Promise<QuestSettlementOutcome> => {
+const completeInTransaction = async (tx: QuestTransaction, questId: string, actorUserId: string, commandId: string, now: Date): Promise<QuestSettlementOutcome> => {
   const current = await lockQuest(tx, questId);
   if (!current) return { outcome: 'not-found' };
   if (current.hirerId !== actorUserId) return { outcome: 'not-authorized' };
@@ -296,7 +299,7 @@ const completeInTransaction = async (tx: QuestTransaction, questId: string, acto
     return { outcome: command.outcome };
   }
   if ('replay' in command) return command.replay;
-  if (current.questStatus !== questStatus.approved && !(allowDisputed && current.questStatus === questStatus.disputed)) {
+  if (current.questStatus !== questStatus.approved) {
     await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId));
     return { outcome: 'invalid-state' };
   }
@@ -331,6 +334,111 @@ const completeInTransaction = async (tx: QuestTransaction, questId: string, acto
 
 /** Complete an approved Quest in the caller's existing transaction. */
 export const settleApprovedQuestInTransaction = completeInTransaction;
+
+/** Settle one legacy Proof approved after the Quest already failed. */
+export const settleApprovedLegacyQuestProofAfterFailureInTransaction = async (
+  tx: QuestTransaction,
+  questId: string,
+  proofSubmissionId: string,
+): Promise<{ questStatus: 'QUEST_FAILED'; paidSatang: number; completedAssignmentIds: string[] }> => {
+  const current = await lockQuest(tx, questId);
+  if (!current || current.apiVersion !== 'v1' || current.questStatus !== questStatus.failed) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The failed legacy Quest is not reviewable.');
+  }
+
+  const reservation = await reservationFor(tx, current.hirerId, questId);
+  if (!reservation || reservation.status !== 'ACTIVE') {
+    throw new MoneyDomainError('FUNDING_RESERVATION_NOT_FOUND', 'Quest Escrow is not active.');
+  }
+
+  const [submission] = await tx
+    .select({
+      workerId: proofSubmission.workerId,
+      teamId: proofSubmission.teamId,
+      submissionStatus: proofSubmission.submissionStatus,
+      submittedAt: proofSubmission.submittedAt,
+    })
+    .from(proofSubmission)
+    .where(and(
+      eq(proofSubmission.id, proofSubmissionId),
+      eq(proofSubmission.questId, questId),
+    ))
+    .limit(1)
+    .for('update');
+  if (!submission || submission.submissionStatus !== 'PROOF_APPROVED') {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The approved Proof Submission is missing.');
+  }
+  if (
+    (current.dueAt && submission.submittedAt >= current.dueAt) ||
+    !current.failedAt ||
+    submission.submittedAt >= current.failedAt
+  ) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The Proof Submission was sent after the allowed deadline.');
+  }
+
+  const assignmentRows = submission.workerId
+    ? await tx.select({ id: questAssignment.id, workerId: questAssignment.workerId })
+      .from(questAssignment)
+      .where(and(
+        eq(questAssignment.questId, questId),
+        eq(questAssignment.workerId, submission.workerId),
+        inArray(questAssignment.assignmentStatus, [assignmentStatus.active, assignmentStatus.incomplete]),
+      ))
+      .limit(1)
+      .for('update')
+    : [];
+  const teamAssignments = submission.teamId
+    ? await tx.select({ id: questAssignment.id, workerId: questAssignment.workerId })
+      .from(questAssignment)
+      .innerJoin(questTeamMember, eq(questTeamMember.userId, questAssignment.workerId))
+      .where(and(
+        eq(questAssignment.questId, questId),
+        eq(questTeamMember.teamId, submission.teamId),
+        inArray(questAssignment.assignmentStatus, [assignmentStatus.active, assignmentStatus.incomplete]),
+      ))
+      .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id))
+      .for('update')
+    : [];
+  const assignments = submission.teamId ? teamAssignments : assignmentRows;
+  if (assignments.length === 0) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The approved Worker Assignment is missing.');
+  }
+
+  const rewardSatang = requireQuestReward(current.rewardSatang);
+  const fee = await feeForQuest(tx, current, reservation, rewardSatang);
+  const expectedEscrow = current.questEscrowSatang ?? (rewardSatang + Number(fee)) * current.headcount;
+  if (reservation.remainingSatang > expectedEscrow) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Quest Escrow does not match the published funding terms.');
+  }
+
+  const teamLeaderId = submission.teamId ? await selectedTeamLeader(tx, questId) : undefined;
+  if (submission.teamId && (!teamLeaderId || !assignments.some(({ workerId }) => workerId === teamLeaderId))) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Selected Team Leader Assignment is missing.');
+  }
+  const workers = submission.teamId
+    ? Array.from({ length: current.headcount }, () => ({ workerId: teamLeaderId!, amountSatang: rewardSatang }))
+    : [{ workerId: submission.workerId!, amountSatang: rewardSatang }];
+  const paidSatang = await settleWorkers(
+    tx,
+    current.hirerId,
+    reservation.id,
+    workers,
+    () => Promise.resolve(fee),
+    `quest-proof-after-failure:${proofSubmissionId}`,
+  );
+  await tx.update(questAssignment)
+    .set({ assignmentStatus: assignmentStatus.completed })
+    .where(and(
+      inArray(questAssignment.id, assignments.map(({ id }) => id)),
+      inArray(questAssignment.assignmentStatus, [assignmentStatus.active, assignmentStatus.incomplete]),
+    ));
+
+  return {
+    questStatus: questStatus.failed,
+    paidSatang,
+    completedAssignmentIds: assignments.map(({ id }) => id),
+  };
+};
 
 /** Complete a proof-free v2 Quest after every required work confirmation exists. */
 export const settleProofFreeQuestV2InTransaction = async (
@@ -707,6 +815,7 @@ export const failQuestV2InTransaction = async (
     .update(quest)
     .set({
       questStatus: questStatus.failed,
+      failedAt: now,
       version: sql`${quest.version} + 1`,
       updatedAt: now,
     })
@@ -715,6 +824,74 @@ export const failQuestV2InTransaction = async (
   return {
     questStatus: questStatus.failed,
     incompleteAssignmentIds: affected.map(({ id }) => id),
+  };
+};
+
+/** Apply the terminal failure transition for a legacy Quest without releasing held Quest Escrow. */
+export const failQuestInTransaction = async (
+  tx: QuestTransaction,
+  questId: string,
+  commandId: string,
+  now: Date,
+  actorId: string | null,
+): Promise<QuestV2FailureEffect> => {
+  const current = await lockQuest(tx, questId);
+  if (!current || current.apiVersion !== 'v1') {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The Quest is not a legacy Quest.');
+  }
+  if (current.questStatus === questStatus.failed) {
+    return { questStatus: questStatus.failed, incompleteAssignmentIds: [] };
+  }
+  if (![questStatus.inProgress, questStatus.submitted, questStatus.rework].includes(current.questStatus as never)) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The Quest cannot fail from its current state.');
+  }
+
+  const active = await activeAssignments(tx, questId);
+  const approvedProofs = await tx
+    .select({ id: proofSubmission.id })
+    .from(proofSubmission)
+    .where(and(
+      eq(proofSubmission.questId, questId),
+      eq(proofSubmission.submissionStatus, 'PROOF_APPROVED'),
+    ))
+    .for('update');
+  if (active.length > 0) {
+    await tx
+      .update(questAssignment)
+      .set({ assignmentStatus: assignmentStatus.incomplete })
+      .where(and(
+        inArray(questAssignment.id, active.map(({ id }) => id)),
+        eq(questAssignment.assignmentStatus, assignmentStatus.active),
+      ));
+    await inactiveWorkersChat(tx, current, active, assignmentStatus.incomplete, now, actorId);
+  }
+
+  const [updated] = await tx
+    .update(quest)
+    .set({
+      questStatus: questStatus.failed,
+      failedAt: now,
+      version: sql`${quest.version} + 1`,
+      updatedAt: now,
+    })
+    .where(and(
+      eq(quest.id, questId),
+      inArray(quest.questStatus, [questStatus.inProgress, questStatus.submitted, questStatus.rework]),
+    ))
+    .returning({ id: quest.id });
+  if (!updated) return { questStatus: questStatus.failed, incompleteAssignmentIds: [] };
+
+  await terminalChat(tx, current, questStatus.failed, commandId, now, actorId);
+  const completedAssignmentIds = new Set<string>();
+  for (const proof of approvedProofs) {
+    const settlement = await settleApprovedLegacyQuestProofAfterFailureInTransaction(tx, questId, proof.id);
+    for (const assignmentId of settlement.completedAssignmentIds) completedAssignmentIds.add(assignmentId);
+  }
+  return {
+    questStatus: questStatus.failed,
+    incompleteAssignmentIds: active
+      .map(({ id }) => id)
+      .filter((id) => !completedAssignmentIds.has(id)),
   };
 };
 
@@ -1359,54 +1536,3 @@ export const cancelUnfilledQuest = async (
   `quest-auto-cancel:${questId}`,
   now,
 ));
-
-export const resolveQuestDispute = async (adminId: string, questId: string, commandId: string, outcome: 'REFUND_HIRER' | 'RELEASE_TO_WORKER', allocations: Allocation[] = [], now = new Date()) => {
-  if (!commandId.trim()) return { outcome: 'idempotency-key-required' as const };
-  const normalized = allocations.map(({ workerId, amountSatang }) => ({ workerId, amountSatang }));
-  const requestHash = await hash({ command: outcome, questId, allocations: normalized });
-  return db.transaction(async (tx) => {
-    const command = await acquireCommand(tx, { commandId, questId, commandType: outcome === 'REFUND_HIRER' ? 'DISPUTE_REFUND' : 'DISPUTE_RELEASE', requestHash, actor: { adminId }, now });
-    if ('outcome' in command) return command.outcome === 'idempotency-in-progress' ? { outcome: 'idempotency-unavailable' as const } : command;
-    if ('replay' in command) return command.replay;
-    const current = await lockQuest(tx, questId);
-    if (!current) { await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId)); return { outcome: 'not-found' as const }; }
-    if (current.questStatus !== questStatus.disputed) { await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId)); return { outcome: 'invalid-state' as const }; }
-    const reservation = await reservationFor(tx, current.hirerId, questId);
-    if (!reservation || reservation.status !== 'ACTIVE') { await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId)); return { outcome: 'invalid-state' as const }; }
-    const workers = await activeAssignments(tx, questId);
-    let paid = 0;
-    if (outcome === 'RELEASE_TO_WORKER') {
-      const workerIds = new Set(workers.map(({ workerId }) => workerId));
-      if (normalized.length === 0 || normalized.some(({ workerId, amountSatang }) => !workerIds.has(workerId) || !Number.isSafeInteger(amountSatang) || amountSatang <= 0) || new Set(normalized.map(({ workerId }) => workerId)).size !== normalized.length) {
-        await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId));
-        return { outcome: 'allocations-invalid' as const };
-      }
-      const remaining = reservation.remainingSatang;
-      const allocationTotal = normalized.reduce((sum, allocation) => sum + allocation.amountSatang, 0);
-      if (!Number.isSafeInteger(allocationTotal) || allocationTotal > remaining) {
-        await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId));
-        return { outcome: 'allocations-invalid' as const };
-      }
-      paid = await settleWorkers(tx, current.hirerId, reservation.id, normalized, () => Promise.resolve(0), `quest-dispute:${commandId}`);
-      await releaseRemaining(tx, current.hirerId, reservation.id, `quest-dispute-refund:${commandId}`);
-      const awarded = new Set(normalized.map(({ workerId }) => workerId));
-      const incompleteWorkers = workers.filter(({ workerId }) => !awarded.has(workerId));
-      await tx.update(questAssignment).set({ assignmentStatus: assignmentStatus.completed }).where(and(eq(questAssignment.questId, questId), eq(questAssignment.assignmentStatus, assignmentStatus.active), inArray(questAssignment.workerId, [...awarded])));
-      await tx.update(questAssignment).set({ assignmentStatus: assignmentStatus.incomplete }).where(and(eq(questAssignment.questId, questId), eq(questAssignment.assignmentStatus, assignmentStatus.active)));
-      await inactiveWorkersChat(tx, current, incompleteWorkers, assignmentStatus.incomplete, now, adminId);
-      await tx.update(quest).set({ questStatus: questStatus.completed, version: sql`${quest.version} + 1`, updatedAt: now }).where(eq(quest.id, questId));
-      await terminalChat(tx, current, questStatus.completed, commandId, now);
-      const result: CommandResult = { questStatus: questStatus.completed, outcome: 'RELEASED_TO_WORKER', paidSatang: paid, refundedSatang: remaining - paid };
-      await finishCommand(tx, commandId, result, now);
-      return result;
-    }
-    const refunded = await releaseRemaining(tx, current.hirerId, reservation.id, `quest-dispute-refund:${commandId}`);
-    await tx.update(questAssignment).set({ assignmentStatus: assignmentStatus.cancelled }).where(and(eq(questAssignment.questId, questId), eq(questAssignment.assignmentStatus, assignmentStatus.active)));
-    await inactiveWorkersChat(tx, current, workers, assignmentStatus.cancelled, now, adminId);
-    await tx.update(quest).set({ questStatus: questStatus.cancelled, cancelledAt: now, cancelledByAdminId: adminId, version: sql`${quest.version} + 1`, updatedAt: now }).where(eq(quest.id, questId));
-    await terminalChat(tx, current, questStatus.cancelled, commandId, now);
-    const result: CommandResult = { questStatus: questStatus.cancelled, outcome: 'REFUNDED', paidSatang: 0, refundedSatang: refunded };
-    await finishCommand(tx, commandId, result, now);
-    return result;
-  });
-};

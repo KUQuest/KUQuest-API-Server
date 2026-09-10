@@ -16,6 +16,15 @@ column to the Wallet, whose four balances (`SPENDING`, `EARNINGS`,
 `FUNDING_RESERVED`, `RESERVED_FOR_PAYOUTS`) stay as they are. The release at
 day 7 is an ordinary `FUNDING_RELEASE`.
 
+While the Funding Reservation is still `ACTIVE`, no `FUNDING_RELEASE` exists.
+Therefore a partial Dispute Case redirection links its `ADJUSTMENT` to the
+reservation's sealed creation Ledger Transaction (`createdLedgerTransactionId`)
+as the canonical source of the held `FUNDING_RESERVED` amount. This is a
+partial account redirection, not a reversal of the whole reservation. After
+the hold releases, the redirection links to the `FUNDING_RELEASE` Ledger
+Transaction instead. The implementation must not create a synthetic release
+only to obtain a correction target, because that would break the ACTIVE hold.
+
 The whole returned amount is held, including the Platform Fee that a failed
 Quest returns to the Hirer. Splitting the reservation to release the fee
 early adds machinery for no product gain.

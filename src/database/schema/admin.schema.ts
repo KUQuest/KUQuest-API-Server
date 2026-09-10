@@ -113,3 +113,50 @@ export const adminReviewItem = pgTable(
     index('admin_review_item_worker_idx').on(table.workerId),
   ],
 );
+
+export const disputeCaseStatuses = [
+  'DISPUTE_CASE_PENDING',
+  'DISPUTE_CASE_DISMISSED',
+  'DISPUTE_CASE_RESOLVED',
+] as const;
+export type DisputeCaseStatus = (typeof disputeCaseStatuses)[number];
+
+/** An Admin queue record for a payment dispute on a failed Quest. */
+export const adminDisputeCase = pgTable(
+  'admin_dispute_cases',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    filerUserId: uuid('filer_user_id')
+      .notNull()
+      .references(() => authUser.id),
+    openedByAdminId: uuid('opened_by_admin_id').references(() => authAdmin.id),
+    status: text('status').$type<DisputeCaseStatus>().default('DISPUTE_CASE_PENDING').notNull(),
+    version: integer('version').default(1).notNull(),
+    resolvedWorkerId: uuid('resolved_worker_id').references(() => authUser.id),
+    resolvedAmountSatang: integer('resolved_amount_satang'),
+    resolvedByAdminId: uuid('resolved_by_admin_id').references(() => authAdmin.id),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('admin_dispute_cases_quest_filer_key').on(table.questId, table.filerUserId),
+    index('admin_dispute_cases_status_created_idx').on(table.status, table.createdAt, table.id),
+    index('admin_dispute_cases_quest_idx').on(table.questId, table.createdAt),
+    index('admin_dispute_cases_filer_idx').on(table.filerUserId),
+    check('admin_dispute_cases_status_check', sql`${table.status} IN ('DISPUTE_CASE_PENDING', 'DISPUTE_CASE_DISMISSED', 'DISPUTE_CASE_RESOLVED')`),
+    check('admin_dispute_cases_version_check', sql`${table.version} >= 1`),
+    check('admin_dispute_cases_amount_check', sql`${table.resolvedAmountSatang} IS NULL OR ${table.resolvedAmountSatang} BETWEEN 1 AND 2000000000`),
+    check(
+      'admin_dispute_cases_terminal_fields_check',
+      sql`(
+        (${table.status} = 'DISPUTE_CASE_PENDING' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}, ${table.resolvedByAdminId}, ${table.resolvedAt}) = 0)
+        OR (${table.status} = 'DISPUTE_CASE_DISMISSED' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}) = 0 AND num_nonnulls(${table.resolvedByAdminId}, ${table.resolvedAt}) = 2)
+        OR (${table.status} = 'DISPUTE_CASE_RESOLVED' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}, ${table.resolvedByAdminId}, ${table.resolvedAt}) = 4)
+      )`,
+    ),
+  ],
+);

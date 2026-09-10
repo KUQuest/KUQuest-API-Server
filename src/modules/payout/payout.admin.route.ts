@@ -6,21 +6,21 @@ import { Elysia } from 'elysia';
 
 import {
   approvePayoutController,
+  cancelPayoutController,
   getAdminPayoutController,
   listAdminPayoutStatusHistoryController,
   listAdminPayoutsController,
-  rejectPayoutController,
 } from './payout.admin.controller';
 import {
   adminPayoutApprovalSchema,
+  adminPayoutCancellationSchema,
   adminPayoutDetailResponseSchema,
   adminPayoutHeadersSchema,
   adminPayoutHistoryResponseSchema,
   adminPayoutListQuerySchema,
   adminPayoutListResponseSchema,
   adminPayoutParamsSchema,
-  adminPayoutRejectionSchema,
-  adminPayoutResponseSchema,
+  adminPayoutCommandResponseSchema,
 } from './payout.admin.schema';
 
 export const adminPayoutRoute = new Elysia({
@@ -63,7 +63,7 @@ export const adminPayoutRoute = new Elysia({
     params: adminPayoutParamsSchema,
     headers: adminPayoutHeadersSchema,
     body: adminPayoutApprovalSchema,
-    response: responses(adminPayoutResponseSchema, 400, 401, 403, 404, 409, 503),
+    response: responses(adminPayoutCommandResponseSchema, 400, 401, 403, 404, 409, 503),
     detail: {
       tags: ['Admin Payouts'],
       summary: 'Approve a waiting Payout',
@@ -72,16 +72,16 @@ export const adminPayoutRoute = new Elysia({
       security: betterAuthSecurity,
     },
   })
-  .post('/:payoutId/reject', rejectPayoutController, {
+  .post('/:payoutId/cancel', cancelPayoutController, {
     params: adminPayoutParamsSchema,
     headers: adminPayoutHeadersSchema,
-    body: adminPayoutRejectionSchema,
-    response: responses(adminPayoutResponseSchema, 400, 401, 403, 404, 409, 503),
+    body: adminPayoutCancellationSchema,
+    response: responses(adminPayoutCommandResponseSchema, 400, 401, 403, 404, 409, 503),
     detail: {
       tags: ['Admin Payouts'],
-      summary: 'Reject a waiting Payout',
-      description: 'Records a final Admin rejection with a reason and releases the full Payout Reserve to Earnings Balance.',
-      operationId: 'rejectPayout',
+      summary: 'Cancel a waiting Payout',
+      description: 'Records a final Admin cancellation with a controlled reason code and releases the full Payout Reserve to Earnings Balance.',
+      operationId: 'cancelPayout',
       security: betterAuthSecurity,
     },
   });

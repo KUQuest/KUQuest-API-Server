@@ -77,7 +77,7 @@ describe('Xendit Payout provider', () => {
     expect(called?.init?.method).toBe('GET');
     expect(result).toMatchObject({
       providerReference: 'po-reconcile-123',
-      normalizedStatus: 'COMPLETED',
+      normalizedStatus: 'SUCCEEDED',
       providerAmountSatang: 12_345,
       actualFeeSatang: 10,
       actualTaxSatang: 5,

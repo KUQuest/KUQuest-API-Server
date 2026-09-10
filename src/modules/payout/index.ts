@@ -10,8 +10,11 @@ export {
   payoutOperationScope,
   processApprovedPayout,
   processApprovedPayouts,
+  approvePayoutInTransaction,
+  cancelPayoutInTransaction,
 } from './payout.service';
 export type {
+  PayoutAdminDecisionInput,
   InitiatePayoutInput,
   Payout,
   PayoutQuote,
@@ -19,20 +22,21 @@ export type {
 } from './payout.service';
 export {
   approvePayout,
-  payoutApprovalOperationScope,
-  payoutRejectionOperationScope,
-  rejectPayout,
+  cancelPayout,
+  payoutAdminActionCatalog,
+  payoutAdminReasonCodes,
   getAdminPayout,
   listAdminPayouts,
   listAdminPayoutStatusHistory,
 } from './payout.admin.service';
 export type {
   AdminPayout,
+  AdminPayoutCommandResult,
+  AdminPayoutCommandSummary,
+  AdminPayoutDecisionInput,
   AdminPayoutSort,
   AdminPayoutStatusHistory,
-  ApprovePayoutInput,
   ListAdminPayoutsInput,
-  RejectPayoutInput,
 } from './payout.admin.service';
 export {
   PayoutProviderError,

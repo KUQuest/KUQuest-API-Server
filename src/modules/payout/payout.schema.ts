@@ -2,10 +2,9 @@ import { t } from 'elysia';
 
 export const payoutStatusSchema = t.Union([
   t.Literal('PENDING_ADMIN_APPROVAL'),
-  t.Literal('CREATING'),
-  t.Literal('PENDING'),
-  t.Literal('AWAITING_RECONCILIATION'),
-  t.Literal('COMPLETED'),
+  t.Literal('SUBMITTED_TO_PROVIDER'),
+  t.Literal('PROVIDER_PENDING'),
+  t.Literal('SUCCEEDED'),
   t.Literal('FAILED'),
   t.Literal('CANCELLED'),
 ]);
@@ -81,6 +80,7 @@ const payoutDataSchema = t.Object({
   actualTaxSatang: t.Union([t.Integer({ minimum: 0 }), t.Null()]),
   actualDebitSatang: t.Union([t.Integer({ minimum: 1 }), t.Null()]),
   payoutStatus: payoutStatusSchema,
+  version: t.Integer({ minimum: 1 }),
   reserveLedgerTransactionId: t.String({ format: 'uuid' }),
   finalLedgerTransactionId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
   createdAt: dateTime,
