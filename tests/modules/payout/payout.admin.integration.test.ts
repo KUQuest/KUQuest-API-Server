@@ -175,7 +175,7 @@ describe('Payout API routes', () => {
       headers: { cookie: adminCookie },
     }));
 
-    expect(memberOnAdmin.status).toBe(401);
+    expect(memberOnAdmin.status).toBe(403);
     expect(adminOnMember.status).toBe(401);
   });
 

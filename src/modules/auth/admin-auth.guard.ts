@@ -4,6 +4,7 @@ import { Elysia } from 'elysia';
 import type { StatusMap } from 'elysia/utils';
 
 import { adminAuth } from './admin-auth.config';
+import { adminMemberSessionGuard } from './admin-member-session.guard';
 
 export type AuthenticatedAdminSession = NonNullable<
   Awaited<ReturnType<typeof adminAuth.api.getSession>>
@@ -37,6 +38,7 @@ export const adminAuthenticationGuard = new Elysia({ name: 'admin-authentication
 
 export const enabledAdminGuard = (app: Elysia) =>
   app
+    .use(adminMemberSessionGuard)
     .use(adminAuthenticationGuard)
     // Exception to ADR 0001's "one unsafe cast, in the guard file" rule: this second
     // cast is required, not just convenient. adminAuthenticationGuard's own resolve()
