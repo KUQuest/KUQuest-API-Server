@@ -2,6 +2,10 @@ import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { questCommand } from '@/database/schema/quest.schema';
 import {
+  completeQuestCommand,
+  findOpenQuestCommandPayloads,
+  openQuestCommand,
+  parkQuestCommandPayload,
   runQuestCommand,
   type QuestCommandResult,
   type QuestCommandWork,
@@ -17,6 +21,11 @@ const now = new Date('2026-09-10T12:00:00.000Z');
 const expiry = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
+const WORKER_NOW_A = new Date(now.getTime() + 60_000);
+const WORKER_NOW_B = new Date(now.getTime() + 120_000);
+const WORKER_EXPIRY_A = new Date(WORKER_NOW_A.getTime() + 24 * 60 * 60 * 1000);
+// Distinct per call, so each test only sees its own rows in find results.
+const workerScope = () => `worker-test-${randomUUID()}`;
 
 const principal = {
   id: randomUUID(),
@@ -243,5 +252,161 @@ describe('Quest Command', () => {
       .from(questCommand)
       .where(eq(questCommand.key, key));
     expect(rows).toHaveLength(2);
+  });
+
+  it('opens a worker command that stays PROCESSING and finds it for its scope', async () => {
+    if (!postgresAvailable || !schemaAvailable) return;
+    const operationScope = workerScope();
+    const payload = { cleanup: { objects: [{ bucket: 'quest-proof', objectKey: 'a/b' }] } };
+    const id = await openQuestCommand({
+      executor: db,
+      identity: {
+        principalUserId: principal.id,
+        operationScope,
+        key: `worker-${randomUUID()}`,
+        requestHash: HASH_A,
+      },
+      payload,
+      now,
+    });
+    const [row] = await db.select().from(questCommand).where(eq(questCommand.id, id));
+    expect(row.processingStatus).toBe('PROCESSING');
+    expect(row.completedAt).toBeNull();
+    expect(row.resultData).toEqual(payload);
+    const found = await findOpenQuestCommandPayloads({ executor: db, operationScope, limit: 100 });
+    expect(found).toEqual([{ id, principalUserId: principal.id, questId: null, payload }]);
+  });
+
+  it('completes a worker command with the injected now and keeps the row', async () => {
+    if (!postgresAvailable || !schemaAvailable) return;
+    const id = await openQuestCommand({
+      executor: db,
+      identity: {
+        principalUserId: principal.id,
+        operationScope: workerScope(),
+        key: `worker-${randomUUID()}`,
+        requestHash: HASH_A,
+      },
+      payload: { cleanup: { objects: [{ bucket: 'b', objectKey: 'k' }] } },
+      now,
+    });
+    const finalPayload = { cleanup: { objects: [] } };
+    expect(
+      await completeQuestCommand({ executor: db, id, payload: finalPayload, now: WORKER_NOW_A })
+    ).toBe(true);
+    const [row] = await db.select().from(questCommand).where(eq(questCommand.id, id));
+    expect(row.processingStatus).toBe('COMPLETED');
+    expect(row.completedAt).toEqual(WORKER_NOW_A);
+    expect(row.resultData).toEqual(finalPayload);
+  });
+
+  it('keeps the first completion when a second completion loses the race', async () => {
+    if (!postgresAvailable || !schemaAvailable) return;
+    const id = await openQuestCommand({
+      executor: db,
+      identity: {
+        principalUserId: principal.id,
+        operationScope: workerScope(),
+        key: `worker-${randomUUID()}`,
+        requestHash: HASH_A,
+      },
+      payload: { cleanup: { objects: [] } },
+      now,
+    });
+    const firstPayload = { cleanup: { objects: [{ bucket: 'b', objectKey: 'first' }] } };
+    expect(
+      await completeQuestCommand({ executor: db, id, payload: firstPayload, now: WORKER_NOW_A })
+    ).toBe(true);
+    expect(
+      await completeQuestCommand({
+        executor: db,
+        id,
+        payload: { cleanup: { objects: [{ bucket: 'b', objectKey: 'second' }] } },
+        now: WORKER_NOW_B,
+      })
+    ).toBe(false);
+    const [row] = await db.select().from(questCommand).where(eq(questCommand.id, id));
+    expect(row.resultData).toEqual(firstPayload);
+    expect(row.completedAt).toEqual(WORKER_NOW_A);
+  });
+
+  it('finds only open commands of the operation scope that carry a payload', async () => {
+    if (!postgresAvailable || !schemaAvailable) return;
+    const operationScope = workerScope();
+    const payload = { cleanup: { objects: [] } };
+    const openWorker = (key: string) =>
+      openQuestCommand({
+        executor: db,
+        identity: { principalUserId: principal.id, operationScope, key, requestHash: HASH_A },
+        payload,
+        now,
+      });
+    const keptId = await openWorker(`worker-${randomUUID()}`);
+    const otherId = await openWorker(`worker-${randomUUID()}`);
+    const completedId = await openWorker(`worker-${randomUUID()}`);
+    await completeQuestCommand({ executor: db, id: completedId, payload, now: WORKER_NOW_A });
+    await openQuestCommand({
+      executor: db,
+      identity: {
+        principalUserId: principal.id,
+        operationScope: workerScope(),
+        key: `worker-${randomUUID()}`,
+        requestHash: HASH_A,
+      },
+      payload,
+      now,
+    });
+    await db.insert(questCommand).values({
+      key: `worker-${randomUUID()}`,
+      principalUserId: principal.id,
+      operationScope,
+      requestHash: HASH_A,
+      expiresAt: expiry,
+    });
+    const found = await findOpenQuestCommandPayloads({ executor: db, operationScope, limit: 100 });
+    expect(found.map(({ id }) => id).sort()).toEqual([keptId, otherId].sort());
+    expect(found.map(({ payload: carried }) => carried)).toEqual([payload, payload]);
+    expect(
+      (await findOpenQuestCommandPayloads({ executor: db, operationScope, limit: 1 })).length
+    ).toBe(1);
+  });
+
+  it('parks a payload on an open command and reports failure without a match', async () => {
+    if (!postgresAvailable || !schemaAvailable) return;
+    const identity = {
+      principalUserId: principal.id,
+      operationScope: workerScope(),
+      key: `worker-${randomUUID()}`,
+      requestHash: HASH_A,
+    };
+    const id = await openQuestCommand({
+      executor: db,
+      identity,
+      payload: { cleanup: { objects: [] } },
+      now,
+    });
+    const manifest = { cleanup: { objects: [{ bucket: 'b', objectKey: 'parked' }] } };
+    const parked = await db.transaction((transaction) =>
+      parkQuestCommandPayload({
+        executor: transaction,
+        identity,
+        payload: manifest,
+        now: WORKER_NOW_A,
+      })
+    );
+    expect(parked).toBe(id);
+    const [row] = await db.select().from(questCommand).where(eq(questCommand.id, id));
+    expect(row.resultData).toEqual(manifest);
+    expect(row.processingStatus).toBe('PROCESSING');
+    expect(row.completedAt).toBeNull();
+    expect(row.expiresAt).toEqual(WORKER_EXPIRY_A);
+    expect(
+      await parkQuestCommandPayload({
+        executor: db,
+        identity: { ...identity, requestHash: HASH_B },
+        payload: manifest,
+        now,
+      })
+    ).toBeUndefined();
   });
 });
