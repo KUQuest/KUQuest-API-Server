@@ -5,6 +5,12 @@
       "baseBlob": "c8bb1da627081f31e784ef8ae62ab941aaba5b54",
       "repairedBlob": "7aa2888b1c795212cda40332137818a459f6e38c",
       "reason": "Staging did not commit this migration because its existing payout status history trigger rejected the legacy status rewrite. The repair disables that trigger only for the rewrite and enables it again before the migration continues."
+    },
+    {
+      "path": "drizzle/20260910014123_validate_dispute_history.sql",
+      "baseBlob": "12dba5f887672e6e305a3445e4091939c5250340",
+      "repairedBlob": "05b4bafb4830078c36063fa24a0e8769775ca19c",
+      "reason": "Staging did not commit this migration because its legacy Proof Submission status constraint rejected the PROOF_REJECTED to PROOF_NOT_APPROVED rewrite. The repair replaces the legacy constraint around the normalization and restores the canonical Proof Submission statuses before the migration continues."
     }
   ]
 }
