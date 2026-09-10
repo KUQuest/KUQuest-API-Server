@@ -1,0 +1,2 @@
+# drizzle-kit owns these; formatting them fights every `bun run db:generate`
+drizzle/meta/
