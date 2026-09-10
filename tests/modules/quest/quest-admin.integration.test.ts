@@ -328,8 +328,8 @@ describe('Admin Quest API routes', () => {
       headers: { cookie: memberCookie },
     }));
 
-    expect(list.status).toBe(401);
-    expect(detail.status).toBe(401);
+    expect(list.status).toBe(403);
+    expect(detail.status).toBe(403);
   });
 
   it('publishes the Admin Quest contract in OpenAPI', async () => {
