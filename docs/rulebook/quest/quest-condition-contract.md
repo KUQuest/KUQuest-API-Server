@@ -24,6 +24,14 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 A Worker may decline without a reason. An optional decline reason is at most 255 characters. The Hirer and the Worker who wrote it can see it; other Active Workers see only that the Quest Edit has `EDIT_REQUEST_FAILED`.
 
+## Quest edit history
+
+- The Server appends a Quest edit history row for every applied change to a Quest. A row records the Quest, the changed field, the old value, the new value, the time, and the actor.
+- A Quest Edit that becomes `EDIT_REQUEST_APPLIED` appends one `condition` row that links back to that Quest Edit. The actor is the Hirer who submitted it, not the Worker whose acceptance applied it.
+- A `QUEST_DRAFT` edit appends one row per changed field. A field the Hirer resends unchanged appends no row.
+- An `EDIT_REQUEST_FAILED` Quest Edit appends no row, because the Condition does not change.
+- The history is append only. No actor can update or delete a row. Admin reads it as part of the Quest record.
+
 ## Due time and deadline rules
 
 - The Hirer sets `dueAt` before publishing the Quest.

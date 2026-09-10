@@ -1,6 +1,6 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
-import { quest, questAssignment } from '@/database/schema/quest.schema';
+import { quest, questAssignment, questEditHistory } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
@@ -272,6 +272,47 @@ describe('Quest Edit v2', () => {
       .from(quest)
       .where(eq(quest.id, questId));
     expect(condition?.text).toBe('New requirement\nSecond requirement');
+
+    const history = await db
+      .select()
+      .from(questEditHistory)
+      .where(eq(questEditHistory.questId, questId));
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      fieldName: 'condition',
+      editedByUserId: owner.id,
+      editedByAdminId: null,
+      v2EditRequestId: createdBody.data.requestId,
+      oldValue: { items: [{ position: 0, text: 'Old requirement' }] },
+      newValue: {
+        items: [
+          { position: 0, text: 'New requirement' },
+          { position: 1, text: 'Second requirement' },
+        ],
+      },
+    });
+  });
+
+  it('writes no edit history when every Active Worker does not accept', async () => {
+    const questId = await createAssignedQuest();
+    const created = await createEdit(questId, {
+      condition: { items: ['Rejected requirement'] },
+    });
+    const createdBody = (await created.json()) as { data: { requestId: string } };
+
+    const responded = await respondToEdit(
+      createdBody.data.requestId,
+      { decision: 'EDIT_RESPONSE_DECLINED' },
+      worker.cookie,
+    );
+    expect(responded.status).toBe(200);
+    expect((await responded.json()).data.status).toBe('EDIT_REQUEST_FAILED');
+
+    const history = await db
+      .select()
+      .from(questEditHistory)
+      .where(eq(questEditHistory.questId, questId));
+    expect(history).toHaveLength(0);
   });
 
   it('fails a request on decline and replays idempotent results', async () => {

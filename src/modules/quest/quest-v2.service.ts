@@ -39,6 +39,10 @@ import {
 } from 'drizzle-orm';
 
 import { assignmentStatus, questStatus, type QuestStatus } from './quest.contract';
+import {
+  recordQuestEditHistory,
+  type QuestEditHistoryEntry,
+} from './quest-edit-history.service';
 import { questV2StorageCompatibility } from './quest-storage.adapter';
 import {
   formatQuestV2ScheduleTime,
@@ -2233,6 +2237,7 @@ const editQuestV2InTransaction = async (
       dueAt: quest.dueAt,
       proofRequired: quest.proofRequired,
       tagId: quest.tagId,
+      questFundingTotalSatang: quest.questFundingTotalSatang,
     })
     .from(quest)
     .where(
@@ -2273,17 +2278,47 @@ const editQuestV2InTransaction = async (
 
   const now = new Date();
   const updates: Partial<Omit<typeof quest.$inferInsert, 'version'>> = { updatedAt: now };
+  const historyEntries: QuestEditHistoryEntry[] = [];
+  const trackEdit = (fieldName: string, oldValue: unknown, newValue: unknown): void => {
+    historyEntries.push({ fieldName, oldValue, newValue });
+  };
 
-  if (input.title !== undefined) updates.title = input.title;
-  if (input.description !== undefined) updates.description = input.description;
+  if (input.title !== undefined) {
+    updates.title = input.title;
+    trackEdit('title', current.title, input.title);
+  }
+  if (input.description !== undefined) {
+    updates.description = input.description;
+    trackEdit('description', current.description, input.description);
+  }
   if (input.questFundingTotalSatang !== undefined) {
     updates.questFundingTotalSatang = input.questFundingTotalSatang;
+    trackEdit(
+      'questFundingTotalSatang',
+      current.questFundingTotalSatang,
+      input.questFundingTotalSatang,
+    );
   }
-  if (input.headcount !== undefined) updates.headcount = input.headcount;
-  if (input.startTime !== undefined) updates.startTime = input.startTime;
-  if (input.dueAt !== undefined) updates.dueAt = input.dueAt;
-  if (input.tagId !== undefined) updates.tagId = input.tagId;
-  if (input.proofRequired !== undefined) updates.proofRequired = input.proofRequired;
+  if (input.headcount !== undefined) {
+    updates.headcount = input.headcount;
+    trackEdit('headcount', current.headcount, input.headcount);
+  }
+  if (input.startTime !== undefined) {
+    updates.startTime = input.startTime;
+    trackEdit('startTime', current.startTime, input.startTime);
+  }
+  if (input.dueAt !== undefined) {
+    updates.dueAt = input.dueAt;
+    trackEdit('dueAt', current.dueAt, input.dueAt);
+  }
+  if (input.tagId !== undefined) {
+    updates.tagId = input.tagId;
+    trackEdit('tagId', current.tagId, input.tagId);
+  }
+  if (input.proofRequired !== undefined) {
+    updates.proofRequired = input.proofRequired;
+    trackEdit('proofRequired', current.proofRequired, input.proofRequired);
+  }
 
   if (input.mode !== undefined || input.participation !== undefined) {
     const storageCompatibility = questV2StorageCompatibility({
@@ -2294,21 +2329,38 @@ const editQuestV2InTransaction = async (
     updates.participation = storageCompatibility.participation;
     updates.v2Mode = input.mode ?? current.v2Mode;
     updates.v2Participation = nextParticipation;
+    trackEdit('mode', current.v2Mode, updates.v2Mode);
+    trackEdit('participation', current.v2Participation, updates.v2Participation);
   }
 
   if (input.conditionItems !== undefined) {
+    const previousItems = await transaction
+      .select({ position: questConditionItem.position, text: questConditionItem.text })
+      .from(questConditionItem)
+      .where(eq(questConditionItem.questId, questId))
+      .orderBy(asc(questConditionItem.position));
+    const nextItems = input.conditionItems.map((text, position) => ({ position, text }));
+    trackEdit('condition', { items: previousItems }, { items: nextItems });
+
     updates.condition = input.conditionItems.join('\n').slice(0, 4000);
     await transaction.delete(questConditionItem).where(eq(questConditionItem.questId, questId));
     await transaction.insert(questConditionItem).values(
-      input.conditionItems.map((text, position) => ({ questId, position, text })),
+      nextItems.map(({ position, text }) => ({ questId, position, text })),
     );
   }
 
   if (input.locations !== undefined) {
+    const previousLocations = await transaction
+      .select({ label: questLocation.label })
+      .from(questLocation)
+      .where(eq(questLocation.questId, questId));
+    const nextLocations = input.locations.map((location) => ({ label: location.label }));
+    trackEdit('locations', previousLocations, nextLocations);
+
     await transaction.delete(questLocation).where(eq(questLocation.questId, questId));
-    if (input.locations.length > 0) {
+    if (nextLocations.length > 0) {
       await transaction.insert(questLocation).values(
-        input.locations.map((location) => ({ questId, label: location.label })),
+        nextLocations.map((location) => ({ questId, label: location.label })),
       );
     }
   }
@@ -2327,6 +2379,13 @@ const editQuestV2InTransaction = async (
     )
     .returning({ id: quest.id });
   if (!updated) throwEditError('conflict');
+
+  await recordQuestEditHistory(transaction, {
+    questId,
+    entries: historyEntries,
+    editedAt: now,
+    editedByUserId: userId,
+  });
 
   const updatedRow = await selectQuestV2Row(transaction, userId, questId);
   if (!updatedRow) return { outcome: 'idempotency-unavailable' };
