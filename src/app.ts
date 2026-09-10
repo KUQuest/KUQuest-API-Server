@@ -34,6 +34,7 @@ import { profileRoute } from './modules/profile';
 import { workExperienceRoute } from './modules/work-experience';
 import { localFinanceTestRoute } from './modules/local-finance-test';
 import { walletRoute } from './modules/wallet';
+import { payoutDestinationRoute } from './modules/payout-destination';
 import { corsPlugin } from './plugins/cors';
 import { errorHandlerPlugin } from './plugins/error-handler';
 import { openapiPlugin } from './plugins/openapi';
@@ -88,6 +89,7 @@ export const createApp = () => {
     .use(candidateInquiryRoute)
     .use(workChatRoute)
     .use(payoutRoute)
+    .use(payoutDestinationRoute)
     .use(adminPayoutRoute)
     .use(payoutWebhookRoute)
     .use(topUpRoute)

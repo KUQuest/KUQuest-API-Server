@@ -4,8 +4,19 @@ import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
 import { Elysia } from 'elysia';
 
-import { getOwnWallet } from './wallet.controller';
-import { walletResponseSchema } from './wallet.schema';
+import {
+  convertEarningsController,
+  getOwnWallet,
+  getWalletActivitiesController,
+} from './wallet.controller';
+import {
+  earningsConversionCreateSchema,
+  earningsConversionHeadersSchema,
+  earningsConversionResponseSchema,
+  walletActivitiesQuerySchema,
+  walletActivitiesResponseSchema,
+  walletResponseSchema,
+} from './wallet.schema';
 
 export const walletRoute = new Elysia({
   name: 'wallet-route',
@@ -19,6 +30,29 @@ export const walletRoute = new Elysia({
       summary: 'Get own Wallet',
       description: 'Returns the four Wallet compartments for the authenticated Student.',
       operationId: 'getOwnWallet',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/earnings-conversions', convertEarningsController, {
+    body: earningsConversionCreateSchema,
+    headers: earningsConversionHeadersSchema,
+    response: responses(earningsConversionResponseSchema, 400, 401, 404, 409),
+    detail: {
+      tags: ['Wallet'],
+      summary: 'Convert Earnings to Spending',
+      description: 'Converts an integer satang amount from Earnings Balance to Spending Balance fee-free and irreversibly.',
+      operationId: 'convertEarnings',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/activities', getWalletActivitiesController, {
+    query: walletActivitiesQuerySchema,
+    response: responses(walletActivitiesResponseSchema, 400, 401, 409),
+    detail: {
+      tags: ['Wallet'],
+      summary: 'List own Wallet activities',
+      description: 'Returns the ledger-backed activities for the authenticated Student wallet in reverse chronological order.',
+      operationId: 'listWalletActivities',
       security: betterAuthSecurity,
     },
   });
