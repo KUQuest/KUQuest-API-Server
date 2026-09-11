@@ -13,6 +13,11 @@ export {
   approvePayoutInTransaction,
   cancelPayoutInTransaction,
 } from './payout.service';
+export {
+  createPayoutScheduler,
+  startPayoutScheduler,
+} from './payout.scheduler';
+export type { PayoutSchedulerOptions } from './payout.scheduler';
 export type {
   PayoutAdminDecisionInput,
   InitiatePayoutInput,

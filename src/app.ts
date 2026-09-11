@@ -2,7 +2,7 @@ import { questRoute } from '@/modules/quest/quest.route';
 import { adminQuestRoute } from '@/modules/quest/quest-admin.route';
 import { tagRoute } from '@/modules/tag';
 import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
-import { topUpRoute, topUpWebhookRoute } from '@/modules/top-up';
+import { adminTopUpRoute, topUpRoute, topUpWebhookRoute } from '@/modules/top-up';
 import { questAssignmentRoute } from '@/modules/quest/quest-assignment.route';
 import { questCandidateRoute } from '@/modules/quest/quest-candidate.route';
 import { questProofRoute } from '@/modules/quest/quest-proof.route';
@@ -33,7 +33,7 @@ import { portfolioRoute } from './modules/portfolio';
 import { profileRoute } from './modules/profile';
 import { workExperienceRoute } from './modules/work-experience';
 import { localFinanceTestRoute } from './modules/local-finance-test';
-import { walletRoute } from './modules/wallet';
+import { adminWalletRoute, walletRoute } from './modules/wallet';
 import { payoutDestinationRoute } from './modules/payout-destination';
 import { corsPlugin } from './plugins/cors';
 import { errorHandlerPlugin } from './plugins/error-handler';
@@ -93,7 +93,9 @@ export const createApp = () => {
     .use(adminPayoutRoute)
     .use(payoutWebhookRoute)
     .use(topUpRoute)
-    .use(topUpWebhookRoute);
+    .use(topUpWebhookRoute)
+    .use(adminWalletRoute)
+    .use(adminTopUpRoute);
 };
 
 export const app = createApp();

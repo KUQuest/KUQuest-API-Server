@@ -51,6 +51,8 @@ export type {
   WalletOperation,
 } from './wallet.status.service';
 export {
+  createWallet,
+  createWalletInTransaction,
   ensureInitialMoneyPolicy,
   ensureWallet,
   ensureWalletInTransaction,
@@ -64,3 +66,4 @@ export {
   verifyWalletProjection,
 } from './wallet.service';
 export { walletRoute } from './wallet.route';
+export { adminWalletRoute } from './wallet.admin.route';
