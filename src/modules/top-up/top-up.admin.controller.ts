@@ -21,6 +21,8 @@ import type {
   adminTopUpEventParamsSchema,
   adminTopUpParamsSchema,
 } from './top-up.admin.schema';
+import type { AdminTopUpListQuery } from './top-up.admin.schema';
+import { listAdminTopUps } from './top-up.admin.service';
 
 type AdminTopUpParams = Static<typeof adminTopUpParamsSchema>;
 type AdminTopUpEventParams = Static<typeof adminTopUpEventParamsSchema>;
@@ -107,4 +109,11 @@ export const retryTopUpEventAdminController = async ({
   } catch (error) {
     return mapAdminTopUpError(set, error);
   }
+};
+
+export const listAdminTopUpsController = async ({
+  query,
+}: AdminContext & { query: AdminTopUpListQuery }): Promise<ApiResponse> => {
+  const data = await listAdminTopUps(query);
+  return apiSuccess(data);
 };

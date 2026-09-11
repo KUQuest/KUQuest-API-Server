@@ -10,7 +10,7 @@ import { questReviewRoute } from '@/modules/quest/quest-review.route';
 import { questDisputeRoute } from '@/modules/quest/quest-dispute.route';
 import { adminDisputeRoute } from '@/modules/quest/quest-dispute-admin.route';
 import { questSettlementRoute } from '@/modules/quest/quest-settlement.route';
-import { adminActivityLogRoute, adminOverviewRoute } from '@/modules/admin';
+import { adminActivityLogRoute, adminFinanceRoute, adminOverviewRoute } from '@/modules/admin';
 import {
   configureQuestWorkChatMembershipWriter,
   questAssignmentV2Route,
@@ -82,6 +82,7 @@ export const createApp = () => {
     .use(adminQuestRoute)
     .use(adminOverviewRoute)
     .use(adminActivityLogRoute)
+    .use(adminFinanceRoute)
     .use(certificateRoute)
     .use(portfolioRoute)
     .use(workExperienceRoute)

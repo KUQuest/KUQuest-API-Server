@@ -5,12 +5,15 @@ import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { Elysia } from 'elysia';
 
 import {
+  listAdminTopUpsController,
   reconcileTopUpAdminController,
   retryTopUpEventAdminController,
 } from './top-up.admin.controller';
 import {
   adminTopUpEventParamsSchema,
   adminTopUpEventResponseSchema,
+  adminTopUpListQuerySchema,
+  adminTopUpListResponseSchema,
   adminTopUpParamsSchema,
   adminTopUpResponseSchema,
 } from './top-up.admin.schema';
@@ -20,6 +23,17 @@ export const adminTopUpRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/admin/top-ups`,
 })
   .use(enabledAdminGuard)
+  .get('', listAdminTopUpsController, {
+    query: adminTopUpListQuerySchema,
+    response: responses(adminTopUpListResponseSchema, 400, 401, 403),
+    detail: {
+      tags: ['Admin Top-Ups'],
+      summary: 'List and filter Top-Ups for Admin review',
+      description: 'Returns paginated PromptPay Top-Ups with status, amount, and member details.',
+      operationId: 'listAdminTopUps',
+      security: betterAuthSecurity,
+    },
+  })
   .post('/:topUpId/reconcile', reconcileTopUpAdminController, {
     params: adminTopUpParamsSchema,
     response: responses(adminTopUpResponseSchema, 400, 401, 403, 404, 409, 500, 502),
