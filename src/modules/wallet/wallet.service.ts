@@ -589,6 +589,12 @@ export const verifyWalletProjection = async (walletId: string) => {
         projection.wallet.fundingReservedSatang === projection.projectedBalances.fundingReservedSatang &&
         projection.wallet.reservedForPayoutsSatang === projection.projectedBalances.reservedForPayoutsSatang &&
         JSON.stringify(actualActivities) === JSON.stringify(expectedActivities),
+      projected: validateWalletAmounts(projection.wallet),
+      ledger: validateWalletAmounts({
+        ...projection.wallet,
+        ...projection.projectedBalances,
+      }),
+      activityCountMatches: actualActivities.length === expectedActivities.length,
       expected: {
         activities: projection.activities.map(validateActivityAmounts),
         wallet: validateWalletAmounts({

@@ -66,3 +66,4 @@ export {
   verifyWalletProjection,
 } from './wallet.service';
 export { walletRoute } from './wallet.route';
+export { adminWalletRoute } from './wallet.admin.route';
