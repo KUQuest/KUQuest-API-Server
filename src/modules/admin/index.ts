@@ -1,6 +1,7 @@
 export { adminActivityLogRoute } from './admin-activity-log.route';
 export { adminOverviewRoute } from './admin-overview.route';
 export { adminFinanceRoute } from './admin-finance.route';
+export { adminMemberRoute } from './admin-member.route';
 export { createAdminActionService } from './admin-action.service';
 export type {
   AdminActionCommandInput,
