@@ -25,4 +25,15 @@ export const adminActivityLogRoute = new Elysia({
       operationId: 'listAdminActivityLog',
       security: betterAuthSecurity,
     },
+  })
+  .get('/activity-logs', listAdminActivityController, {
+    query: adminActivityListQuerySchema,
+    response: responses(adminActivityListResponseSchema, 400, 401, 403),
+    detail: {
+      tags: ['Admin Activity Log'],
+      summary: 'List the Admin Action Activity Log (Contract Alias)',
+      description: 'Plural alias matching Issue #67 Admin API Contract.',
+      operationId: 'listAdminActivityLogsPlural',
+      security: betterAuthSecurity,
+    },
   });

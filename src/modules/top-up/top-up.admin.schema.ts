@@ -54,3 +54,48 @@ export const adminTopUpEventResponseSchema = t.Object({
 
 export type AdminTopUpParams = typeof adminTopUpParamsSchema.static;
 export type AdminTopUpEventParams = typeof adminTopUpEventParamsSchema.static;
+
+export const adminTopUpListItemSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  userId: t.String({ format: 'uuid' }),
+  member: t.Object({
+    firstName: t.String(),
+    lastName: t.String(),
+    studentId: t.Union([t.String(), t.Null()]),
+  }),
+  topUpStatus: t.String(),
+  creditAmountSatang: t.Integer({ minimum: 1 }),
+  providerFeeSatang: t.Integer({ minimum: 0 }),
+  providerTaxSatang: t.Integer({ minimum: 0 }),
+  paymentTotalSatang: t.Integer({ minimum: 1 }),
+  paymentMethod: t.String(),
+  providerReference: t.Union([t.String(), t.Null()]),
+  expiresAt: dateTime,
+  paidAt: t.Union([dateTime, t.Null()]),
+  createdAt: dateTime,
+});
+
+export const adminTopUpListQuerySchema = t.Object({
+  status: t.Optional(
+    t.Union([
+      t.Literal('PENDING'),
+      t.Literal('PAID'),
+      t.Literal('EXPIRED'),
+      t.Literal('FAILED'),
+    ]),
+  ),
+  userId: t.Optional(t.String({ format: 'uuid' })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: 100 })),
+  cursor: t.Optional(t.String()),
+});
+
+export const adminTopUpListResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    items: t.Array(adminTopUpListItemSchema),
+    nextCursor: t.Union([t.String(), t.Null()]),
+  }),
+});
+
+export type AdminTopUpListQuery = typeof adminTopUpListQuerySchema.static;
+export type AdminTopUpListItem = typeof adminTopUpListItemSchema.static;
