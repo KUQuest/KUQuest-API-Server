@@ -14,6 +14,7 @@ import {
   questV2EditFailureCodes,
   questV2EditRequestStatuses,
   questV2EditResponseDecisions,
+  questV2AssignmentStates,
   questV2States,
 } from './quest-v2.contract';
 
@@ -787,6 +788,29 @@ export const questV2PublicDetailSchema = t.Object({
 export const questV2PublicDetailResponseSchema = t.Object({
   success: t.Literal(true),
   data: questV2PublicDetailSchema,
+});
+
+const questV2AssignmentStateSchema = t.Union(
+  questV2AssignmentStates.map((state) => t.Literal(state)),
+);
+
+// The Participation projection carries the public Quest fields plus the caller's own
+// Assignment. Quest Funding Total, Platform Fee, Money Policy, Wallet, Funding
+// Reservation, hirerId, and the hidden overlay stay out, exactly as in the public one.
+export const questV2ParticipationDetailSchema = t.Object({
+  ...questV2PublicDetailSchema.properties,
+  assignment: t.Object({
+    status: questV2AssignmentStateSchema,
+    startedAt: t.Nullable(t.String({ format: 'date-time' })),
+  }),
+  capabilities: t.Object({
+    canViewOnly: t.Boolean(),
+  }),
+});
+
+export const questV2ParticipationDetailResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: questV2ParticipationDetailSchema,
 });
 
 const questV2EditRequestStatusSchema = t.Union([

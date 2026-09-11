@@ -935,6 +935,68 @@ Error:
 
 - 404 QUEST_NOT_FOUND for missing, hidden, not-open, or unreadable detail.
 
+### 6.3 Read participation Quest detail
+
+Request:
+
+~~~http
+GET /api/v2/quests/:questId/participation
+~~~
+
+The caller must be authenticated and must hold an Assignment on the Quest.
+The caller must not be the owning Hirer.
+This is the Worker lifecycle view that public detail is not: it stays readable
+in every Quest State, including the terminal ones, and while the Quest is
+hidden.
+
+Success status: HTTP 200.
+
+The data value carries every field of section 6.2 with the same meaning, plus
+assignment and capabilities:
+
+~~~json
+{
+  "success": true,
+  "data": {
+    "id": "quest-uuid",
+    "title": "Design a landing page",
+    "state": "QUEST_IN_PROGRESS",
+    "questReward": 980,
+    "headcount": 1,
+    "activeWorkerCount": 1,
+    "assignment": {
+      "status": "ASSIGNMENT_ACTIVE",
+      "startedAt": "2026-09-30T02:00:00.000Z"
+    },
+    "capabilities": {
+      "canViewOnly": false
+    }
+  }
+}
+~~~
+
+assignment.status is ASSIGNMENT_ACTIVE, ASSIGNMENT_COMPLETED,
+ASSIGNMENT_INCOMPLETE, or ASSIGNMENT_CANCELLED.
+Access rests on the Assignment row in any of those states, so the Member keeps
+this view after settlement makes the Assignment terminal.
+assignment.startedAt is null until automatic start sets it.
+It is a UTC instant with a Z suffix. The +07:00 rule in section 2.5 covers
+Quest schedule fields such as startTime and dueAt, not this one.
+
+capabilities.canViewOnly is true in QUEST_COMPLETED, QUEST_CANCELLED, and
+QUEST_FAILED. A terminal Quest is read-only, and the client must not offer a
+command on it.
+
+Quest Hide is discovery isolation only, so the hidden overlay does not take
+this view away from a current Accepted Participant. The response never contains
+the overlay itself, Quest Funding Total, Platform Fee, Money Policy, Wallet,
+Funding Reservation, hirerId, Candidate data, or any Admin action.
+
+Error:
+
+- 404 QUEST_NOT_FOUND for a caller with no Assignment on the Quest, for the
+  owning Hirer, for a v1 Quest, and for a missing Quest.
+
 ## 7. First-come Quest flow
 
 Use this branch only when mode is FIRST_COME_FIRST_SERVED.
@@ -2621,7 +2683,7 @@ EDIT_REQUEST_FAILED.
 
 ## 17. Complete endpoint catalog
 
-The current Quest v2 route set has 44 endpoints:
+The current Quest v2 route set has 45 endpoints:
 
 | # | Method | Path | Main actor |
 | ---: | --- | --- | --- |
@@ -2638,37 +2700,38 @@ The current Quest v2 route set has 44 endpoints:
 | 11 | POST | /api/v2/quests/:questId/cancel | Hirer |
 | 12 | GET | /api/v2/quests/:questId/publish-check | Hirer |
 | 13 | GET | /api/v2/quests/:questId/public | authenticated non-owner |
-| 14 | GET | /api/v2/quests/:questId | owning Hirer |
-| 15 | GET | /api/v2/assignments/mine | Worker |
-| 16 | GET | /api/v2/quests/:questId/assignments | Hirer or active Worker |
-| 17 | POST | /api/v2/quests/:questId/join | Prospective Worker |
-| 18 | GET | /api/v2/quests/:questId/underfilled | Hirer or active Worker |
-| 19 | POST | /api/v2/quests/:questId/underfilled/decision | Hirer |
-| 20 | POST | /api/v2/quests/:questId/underfilled/consent | active Worker |
-| 21 | POST | /api/v2/quests/:questId/applications | Candidate |
-| 22 | GET | /api/v2/quests/:questId/applications | Hirer or Candidate |
-| 23 | GET | /api/v2/quests/:questId/applications/:applicationId | Hirer or Candidate |
-| 24 | POST | /api/v2/quests/:questId/applications/:applicationId/withdraw | Candidate |
-| 25 | POST | /api/v2/quests/:questId/applications/:applicationId/select | Hirer |
-| 26 | POST | /api/v2/quests/:questId/teams | Prospective Worker |
-| 27 | GET | /api/v2/quests/:questId/teams | Hirer or Team member |
-| 28 | GET | /api/v2/quests/:questId/teams/:teamId | Hirer or Team member |
-| 29 | PATCH | /api/v2/quests/:questId/teams/:teamId | Team Leader |
-| 30 | POST | /api/v2/quests/:questId/teams/:teamId/join | Prospective Worker |
-| 31 | POST | /api/v2/quests/:questId/teams/:teamId/leave | Team member |
-| 32 | DELETE | /api/v2/quests/:questId/teams/:teamId/members/:memberId | Team Leader |
-| 33 | POST | /api/v2/quests/:questId/teams/:teamId/join-code | Team Leader |
-| 34 | POST | /api/v2/quests/:questId/teams/:teamId/submit | Team Leader |
-| 35 | POST | /api/v2/quests/:questId/teams/:teamId/select | Hirer |
-| 36 | POST | /api/v2/quests/:questId/proof-submissions | Worker |
-| 37 | PATCH | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId | Proof owner |
-| 38 | DELETE | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId | Proof owner |
-| 39 | POST | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/submit | Proof owner |
-| 40 | POST | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/review | Hirer |
-| 41 | GET | /api/v2/quests/:questId/proof-submissions | permitted participant |
-| 42 | POST | /api/v2/quests/:questId/completion-confirmation | Worker |
-| 43 | POST | /api/v2/quests/:questId/reviews | Hirer or Worker |
-| 44 | PATCH | /api/v2/quests/:questId/reviews/:reviewId | review author |
+| 14 | GET | /api/v2/quests/:questId/participation | Assignment holder |
+| 15 | GET | /api/v2/quests/:questId | owning Hirer |
+| 16 | GET | /api/v2/assignments/mine | Worker |
+| 17 | GET | /api/v2/quests/:questId/assignments | Hirer or active Worker |
+| 18 | POST | /api/v2/quests/:questId/join | Prospective Worker |
+| 19 | GET | /api/v2/quests/:questId/underfilled | Hirer or active Worker |
+| 20 | POST | /api/v2/quests/:questId/underfilled/decision | Hirer |
+| 21 | POST | /api/v2/quests/:questId/underfilled/consent | active Worker |
+| 22 | POST | /api/v2/quests/:questId/applications | Candidate |
+| 23 | GET | /api/v2/quests/:questId/applications | Hirer or Candidate |
+| 24 | GET | /api/v2/quests/:questId/applications/:applicationId | Hirer or Candidate |
+| 25 | POST | /api/v2/quests/:questId/applications/:applicationId/withdraw | Candidate |
+| 26 | POST | /api/v2/quests/:questId/applications/:applicationId/select | Hirer |
+| 27 | POST | /api/v2/quests/:questId/teams | Prospective Worker |
+| 28 | GET | /api/v2/quests/:questId/teams | Hirer or Team member |
+| 29 | GET | /api/v2/quests/:questId/teams/:teamId | Hirer or Team member |
+| 30 | PATCH | /api/v2/quests/:questId/teams/:teamId | Team Leader |
+| 31 | POST | /api/v2/quests/:questId/teams/:teamId/join | Prospective Worker |
+| 32 | POST | /api/v2/quests/:questId/teams/:teamId/leave | Team member |
+| 33 | DELETE | /api/v2/quests/:questId/teams/:teamId/members/:memberId | Team Leader |
+| 34 | POST | /api/v2/quests/:questId/teams/:teamId/join-code | Team Leader |
+| 35 | POST | /api/v2/quests/:questId/teams/:teamId/submit | Team Leader |
+| 36 | POST | /api/v2/quests/:questId/teams/:teamId/select | Hirer |
+| 37 | POST | /api/v2/quests/:questId/proof-submissions | Worker |
+| 38 | PATCH | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId | Proof owner |
+| 39 | DELETE | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId | Proof owner |
+| 40 | POST | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/submit | Proof owner |
+| 41 | POST | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/review | Hirer |
+| 42 | GET | /api/v2/quests/:questId/proof-submissions | permitted participant |
+| 43 | POST | /api/v2/quests/:questId/completion-confirmation | Worker |
+| 44 | POST | /api/v2/quests/:questId/reviews | Hirer or Worker |
+| 45 | PATCH | /api/v2/quests/:questId/reviews/:reviewId | review author |
 
 ## 18. Error handling checklist
 
