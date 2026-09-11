@@ -121,6 +121,14 @@ export const ensureWalletInTransaction = async (transaction: WalletTransaction, 
 
   if (!student) throw new MoneyDomainError('STUDENT_NOT_FOUND', 'Student does not exist.');
 
+  const [existingWallet] = await transaction
+    .select()
+    .from(walletWallet)
+    .where(eq(walletWallet.userId, userId))
+    .limit(1);
+
+  if (existingWallet) return existingWallet;
+
   const [createdWallet] = await transaction
     .insert(walletWallet)
     .values({ userId })
@@ -161,10 +169,14 @@ export const ensureWalletInTransaction = async (transaction: WalletTransaction, 
   return wallet;
 };
 
+export const createWalletInTransaction = ensureWalletInTransaction;
+
 export const ensureWallet = async (userId: string) =>
   validateWalletAmounts(await db.transaction(
     (transaction) => ensureWalletInTransaction(transaction, userId),
   ));
+
+export const createWallet = ensureWallet;
 
 export const getWallet = async (userId: string) => {
   const [wallet] = await db

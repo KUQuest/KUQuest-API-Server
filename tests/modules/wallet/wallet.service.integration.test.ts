@@ -11,6 +11,7 @@ import {
 } from '@/database/schema/wallet.schema';
 import {
   createSealedLedgerTransaction,
+  createWallet,
   ensureInitialMoneyPolicy,
   ensureWallet,
   getEffectiveMoneyPolicy,
@@ -80,6 +81,27 @@ describe('Wallet provisioning service', () => {
     ]);
     expect((await db.select().from(walletStatusHistory).where(eq(walletStatusHistory.walletId, wallets[0].id)))).toHaveLength(1);
   });
+  it('creates or reuses a Wallet via createWallet', async () => {
+    const existing = await createWallet(studentId);
+    expect(existing.userId).toBe(studentId);
+
+    const newStudentId = crypto.randomUUID();
+    await db.insert(authUser).values({
+      id: newStudentId,
+      email: `${newStudentId}@ku.th`,
+      firstName: 'CreateWallet',
+      lastName: 'Test',
+    });
+
+    const created = await createWallet(newStudentId);
+    expect(created.userId).toBe(newStudentId);
+    expect(created.walletStatus).toBe('ACTIVE');
+    expect(Number(created.spendingBalanceSatang)).toBe(0);
+
+    const reused = await createWallet(newStudentId);
+    expect(reused.id).toBe(created.id);
+  });
+
 
   it('reads all four compartments without provisioning a missing Wallet', async () => {
     const wallet = await getWallet(studentId);

@@ -51,6 +51,8 @@ export type {
   WalletOperation,
 } from './wallet.status.service';
 export {
+  createWallet,
+  createWalletInTransaction,
   ensureInitialMoneyPolicy,
   ensureWallet,
   ensureWalletInTransaction,
