@@ -52,6 +52,9 @@ export const quest = pgTable(
   'quest',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name : 'quest_public_sequence'})
+      .unique(),
     hirerId: uuid('hirer_id')
       .notNull()
       .references(() => authUser.id),

@@ -388,6 +388,10 @@ describe('Admin Quest API routes', () => {
     );
     const openBody = (await openOnly.json()) as ListResponse;
     expect(openOnly.status).toBe(200);
+    expect(openBody.data.items).not.toHaveLength(0);
+    expect(openBody.data.items[0]?.displayId).toEqual(
+      expect.stringMatching(/^QST-\d{6,}$/),
+    );
     expect(openBody.data.items.map((item) => item.id)).toEqual(
       expect.arrayContaining([openQuestId, v2QuestId])
     );

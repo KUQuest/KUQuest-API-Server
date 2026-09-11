@@ -64,6 +64,7 @@ const canonicalParticipation = (
 
 export type AdminQuestSummary = {
   id: string;
+  publicSequence: number;
   apiVersion: QuestApiVersion;
   version: number;
   title: string;
@@ -83,8 +84,9 @@ export type AdminQuestSummary = {
 
 export type AdminQuestSummaryResponse = Omit<
   AdminQuestSummary,
-  'startTime' | 'dueAt' | 'hiddenAt' | 'createdAt' | 'updatedAt'
+  'publicSequence' | 'startTime' | 'dueAt' | 'hiddenAt' | 'createdAt' | 'updatedAt'
 > & {
+  displayId: string;
   startTime: string;
   dueAt: string | null;
   hiddenAt: string | null;
@@ -97,6 +99,7 @@ const adminQuestSummaryFromRow = (row: {
   hirer: AdminQuestMember;
 }): AdminQuestSummary => ({
   id: row.quest.id,
+  publicSequence: row.quest.publicSequence,
   apiVersion: row.quest.apiVersion,
   version: row.quest.version,
   title: row.quest.title,
@@ -115,15 +118,20 @@ const adminQuestSummaryFromRow = (row: {
 });
 
 export const serializeAdminQuestSummary = (
-  value: AdminQuestSummary
-): AdminQuestSummaryResponse => ({
-  ...value,
-  startTime: value.startTime.toISOString(),
-  dueAt: value.dueAt ? value.dueAt.toISOString() : null,
-  hiddenAt: value.hiddenAt ? value.hiddenAt.toISOString() : null,
-  createdAt: value.createdAt.toISOString(),
-  updatedAt: value.updatedAt.toISOString(),
-});
+  value: AdminQuestSummary,
+): AdminQuestSummaryResponse => {
+  const { publicSequence, ...summary } = value;
+
+  return {
+    ...summary,
+    displayId: `QST-${publicSequence.toString().padStart(6, '0')}`,
+    startTime: value.startTime.toISOString(),
+    dueAt: value.dueAt ? value.dueAt.toISOString() : null,
+    hiddenAt: value.hiddenAt ? value.hiddenAt.toISOString() : null,
+    createdAt: value.createdAt.toISOString(),
+    updatedAt: value.updatedAt.toISOString(),
+  };
+};
 
 type AdminQuestExecutor = typeof db | QuestTransaction;
 
