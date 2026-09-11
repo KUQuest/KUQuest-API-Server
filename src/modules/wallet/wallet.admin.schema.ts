@@ -2,6 +2,82 @@ import { type Static, t } from 'elysia';
 
 import { walletBalanceSchema } from './wallet.schema';
 
+const dateTime = t.String({ format: 'date-time' });
+const uuid = t.String({ format: 'uuid' });
+
+export const adminWalletListItemSchema = t.Object({
+  id: uuid,
+  userId: uuid,
+  member: t.Object({
+    firstName: t.String(),
+    lastName: t.String(),
+    studentId: t.Union([t.String(), t.Null()]),
+    email: t.String(),
+    telephone: t.Union([t.String(), t.Null()]),
+  }),
+  walletStatus: t.String(),
+  balances: t.Object({
+    spendingBalanceSatang: t.Integer(),
+    earningsBalanceSatang: t.Integer(),
+    fundingReservedSatang: t.Integer(),
+    reservedForPayoutsSatang: t.Integer(),
+    totalBalanceSatang: t.Integer(),
+  }),
+  createdAt: dateTime,
+  updatedAt: dateTime,
+});
+
+export const adminWalletListQuerySchema = t.Object({
+  status: t.Optional(
+    t.Union([
+      t.Literal('ACTIVE'),
+      t.Literal('FROZEN'),
+      t.Literal('SUSPENDED'),
+      t.Literal('CLOSED'),
+    ]),
+  ),
+  userId: t.Optional(uuid),
+  search: t.Optional(t.String()),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: 100 })),
+  cursor: t.Optional(t.String()),
+});
+
+export const adminWalletListResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    items: t.Array(adminWalletListItemSchema),
+    nextCursor: t.Union([t.String(), t.Null()]),
+  }),
+});
+
+export const adminWalletFullDetailResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    wallet: t.Object({
+      id: uuid,
+      userId: uuid,
+      member: t.Object({
+        firstName: t.String(),
+        lastName: t.String(),
+        studentId: t.Union([t.String(), t.Null()]),
+        email: t.String(),
+        telephone: t.Union([t.String(), t.Null()]),
+      }),
+      walletStatus: t.String(),
+      balances: t.Object({
+        spendingBalanceSatang: t.Integer(),
+        earningsBalanceSatang: t.Integer(),
+        fundingReservedSatang: t.Integer(),
+        reservedForPayoutsSatang: t.Integer(),
+        totalBalanceSatang: t.Integer(),
+      }),
+      projectionMatchesLedger: t.Boolean(),
+      createdAt: dateTime,
+      updatedAt: dateTime,
+    }),
+  }),
+});
+
 export const adminWalletParamsSchema = t.Object({
   walletId: t.String({ format: 'uuid' }),
 });
@@ -69,3 +145,7 @@ export type AdminWalletStatusChangeHeaders = Static<typeof adminWalletStatusChan
 export type AdminWalletResponse = Static<typeof adminWalletResponseSchema>;
 export type AdminWalletStatusHistoryResponse = Static<typeof adminWalletStatusHistoryResponseSchema>;
 export type AdminWalletVerificationResponse = Static<typeof adminWalletVerificationResponseSchema>;
+export type AdminWalletListItem = Static<typeof adminWalletListItemSchema>;
+export type AdminWalletListQuery = Static<typeof adminWalletListQuerySchema>;
+export type AdminWalletListResponse = Static<typeof adminWalletListResponseSchema>;
+export type AdminWalletFullDetailResponse = Static<typeof adminWalletFullDetailResponseSchema>;

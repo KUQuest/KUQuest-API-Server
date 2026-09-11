@@ -6,11 +6,16 @@ import { Elysia } from 'elysia';
 
 import {
   changeWalletStatusAdminController,
+  getAdminWalletDetailController,
+  listAdminWalletsController,
   listWalletStatusHistoryAdminController,
   rebuildWalletProjectionAdminController,
   verifyWalletProjectionAdminController,
 } from './wallet.admin.controller';
 import {
+  adminWalletFullDetailResponseSchema,
+  adminWalletListQuerySchema,
+  adminWalletListResponseSchema,
   adminWalletParamsSchema,
   adminWalletResponseSchema,
   adminWalletStatusChangeHeadersSchema,
@@ -24,6 +29,28 @@ export const adminWalletRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/admin/wallets`,
 })
   .use(enabledAdminGuard)
+  .get('', listAdminWalletsController, {
+    query: adminWalletListQuerySchema,
+    response: responses(adminWalletListResponseSchema, 400, 401, 403),
+    detail: {
+      tags: ['Admin Wallets'],
+      summary: 'List and filter all Member Wallets',
+      description: 'Returns all Member Wallets with both Spending and Earnings balances in a single request, with search and status filters.',
+      operationId: 'listAdminWallets',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:walletId', getAdminWalletDetailController, {
+    params: adminWalletParamsSchema,
+    response: responses(adminWalletFullDetailResponseSchema, 400, 401, 403, 404),
+    detail: {
+      tags: ['Admin Wallets'],
+      summary: 'Get Member Wallet Details',
+      description: 'Returns full wallet balance compartments (Spending, Earnings, Holds) and ledger reconciliation status.',
+      operationId: 'getAdminWalletDetail',
+      security: betterAuthSecurity,
+    },
+  })
   .get('/:walletId/status-history', listWalletStatusHistoryAdminController, {
     params: adminWalletParamsSchema,
     response: responses(adminWalletStatusHistoryResponseSchema, 400, 401, 403, 404, 409),

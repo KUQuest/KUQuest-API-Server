@@ -10,6 +10,8 @@ import type {
   AdminWalletStatusChangeHeaders,
   AdminWalletStatusChangeInput,
 } from './wallet.admin.schema';
+import type { AdminWalletListQuery } from './wallet.admin.schema';
+import { getAdminWalletDetail, listAdminWallets } from './wallet.admin.service';
 
 type WalletBalances = {
   spendingBalanceSatang: number;
@@ -149,4 +151,23 @@ export const rebuildWalletProjectionAdminController = async ({
     set.status = mapMoneyDomainErrorStatus(error.code);
     return apiError(error.code, error.message);
   }
+};
+
+export const listAdminWalletsController = async ({
+  query,
+}: AdminContext & { query: AdminWalletListQuery }): Promise<ApiResponse> => {
+  const data = await listAdminWallets(query);
+  return apiSuccess(data);
+};
+
+export const getAdminWalletDetailController = async ({
+  params,
+  set,
+}: AdminContext & { params: AdminWalletParams }): Promise<ApiResponse> => {
+  const wallet = await getAdminWalletDetail(params.walletId);
+  if (!wallet) {
+    set.status = 404;
+    return apiError('WALLET_NOT_FOUND', 'Wallet was not found.');
+  }
+  return apiSuccess({ wallet });
 };
