@@ -122,3 +122,7 @@ Behavioral guidelines to reduce common LLM coding mistakes ([source](https://git
 - Multi-step tasks: state a brief plan, one line per step with its verify check.
 
 These guidelines are working if: fewer unnecessary changes in diffs, fewer rewrites from overcomplication, clarifying questions come before implementation rather than after mistakes.
+
+### Gotchas
+
+Mistakes agents made in this repo and the rules they produced. Read before working; append when a session's failure generalizes. See `docs/agents/gotchas.md`.
