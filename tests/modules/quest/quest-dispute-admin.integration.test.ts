@@ -243,7 +243,7 @@ describe('Admin Dispute API', () => {
       })
     );
     expect(anonymous.status).toBe(401);
-    expect(member.status).toBe(401);
+    expect(member.status).toBe(403);
   });
 
   it('opens an Admin-filed Dispute Case through the production queue route', async () => {

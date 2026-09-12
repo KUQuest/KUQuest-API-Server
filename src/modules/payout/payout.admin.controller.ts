@@ -1,11 +1,15 @@
+import { db } from '@/database/client';
+import { paymentPayouts } from '@/database/schema/payment.schema';
 import { AdminActionError } from '@/modules/admin';
 import type { AdminContext } from '@/modules/auth';
+import { ProviderEventError } from '@/modules/top-up/top-up.provider-event';
 import { MoneyDomainError } from '@/modules/wallet';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import { readResourceVersion } from '@/shared/resource-version';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 
+import { eq } from 'drizzle-orm';
 import type { Static } from 'elysia';
 
 import {
@@ -15,9 +19,17 @@ import {
   listAdminPayoutStatusHistory,
   listAdminPayouts,
 } from './payout.admin.service';
+import { PayoutProviderError } from './payout.provider';
+import {
+  reconcilePayout,
+  retryPayoutProviderEvent,
+  type PayoutProviderEvent,
+} from './payout.provider-event.service';
+import type { Payout } from './payout.service';
 import type {
   adminPayoutApprovalSchema,
   adminPayoutCancellationSchema,
+  adminPayoutEventParamsSchema,
   adminPayoutListQuerySchema,
   adminPayoutParamsSchema,
 } from './payout.admin.schema';
@@ -26,6 +38,23 @@ type AdminPayoutParams = Static<typeof adminPayoutParamsSchema>;
 type AdminPayoutListQuery = Static<typeof adminPayoutListQuerySchema>;
 type AdminPayoutApprovalInput = Static<typeof adminPayoutApprovalSchema>;
 type AdminPayoutCancellationInput = Static<typeof adminPayoutCancellationSchema>;
+type AdminPayoutEventParams = Static<typeof adminPayoutEventParamsSchema>;
+
+const serializeReconciledPayout = (payout: Payout) => ({
+  ...payout,
+  createdAt: payout.createdAt.toISOString(),
+  updatedAt: payout.updatedAt.toISOString(),
+});
+
+const serializePayoutProviderEvent = (event: PayoutProviderEvent) => ({
+  ...event,
+  providerOccurredAt: event.providerOccurredAt.toISOString(),
+  rawPayloadExpiresAt: event.rawPayloadExpiresAt.toISOString(),
+  claimedAt: event.claimedAt?.toISOString() ?? null,
+  processedAt: event.processedAt?.toISOString() ?? null,
+  receivedAt: event.receivedAt.toISOString(),
+  createdAt: event.createdAt.toISOString(),
+});
 
 const serializePayout = (payout: Awaited<ReturnType<typeof getAdminPayout>>) => ({
   ...payout,
@@ -47,6 +76,23 @@ const setAdminActionStatus = (set: AdminContext['set'], code: string) => {
 const mapAdminError = (set: AdminContext['set'], error: unknown) => {
   if (error instanceof CursorInputError) {
     set.status = 400;
+    return apiError(error.code, error.message);
+  }
+  if (error instanceof ProviderEventError) {
+    if (error.code === 'PROVIDER_EVENT_NOT_FOUND') set.status = 404;
+    else if (error.code === 'PROVIDER_EVENT_NOT_RETRYABLE' || error.code === 'PROVIDER_EVENT_CONFLICT') set.status = 409;
+    else if (['PROVIDER_EVENT_KEY_UNAVAILABLE', 'PROVIDER_EVENT_KEY_VERSION_UNKNOWN', 'PROVIDER_EVENT_ENCRYPTION_FAILED'].includes(error.code)) set.status = 500;
+    else set.status = 400;
+    return apiError(error.code, error.message);
+  }
+  if (error instanceof PayoutProviderError) {
+    set.status = 502;
+    return apiError(error.code, error.message);
+  }
+  if (error instanceof MoneyDomainError) {
+    const notFound = ['PAYOUT_NOT_FOUND', 'PAYOUT_QUOTE_NOT_FOUND', 'PAYOUT_DESTINATION_NOT_FOUND', 'MEMBER_NOT_FOUND', 'WALLET_NOT_FOUND'];
+    const badRequest = ['INVALID_LIMIT', 'INVALID_AMOUNT', 'INVALID_CURSOR'];
+    set.status = notFound.includes(error.code) ? 404 : badRequest.includes(error.code) ? 400 : 409;
     return apiError(error.code, error.message);
   }
   if (!(error instanceof Error) || !('code' in error)) throw error;
@@ -188,3 +234,38 @@ export const cancelPayoutController = async ({
   body.reasonCode,
   cancelPayout,
 );
+
+export const reconcilePayoutAdminController = async ({
+  params,
+  set,
+}: AdminContext & { params: AdminPayoutParams }): Promise<ApiResponse> => {
+  try {
+    const [payout] = await db
+      .select({ id: paymentPayouts.id, userId: paymentPayouts.userId })
+      .from(paymentPayouts)
+      .where(eq(paymentPayouts.id, params.payoutId))
+      .limit(1);
+
+    if (!payout) {
+      set.status = 404;
+      return apiError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
+    }
+
+    const result = await reconcilePayout(payout.userId, params.payoutId);
+    return apiSuccess({ payout: serializeReconciledPayout(result) });
+  } catch (error) {
+    return mapAdminError(set, error);
+  }
+};
+
+export const retryPayoutEventAdminController = async ({
+  params,
+  set,
+}: AdminContext & { params: AdminPayoutEventParams }): Promise<ApiResponse> => {
+  try {
+    const result = await retryPayoutProviderEvent(params.eventId);
+    return apiSuccess({ event: serializePayoutProviderEvent(result) });
+  } catch (error) {
+    return mapAdminError(set, error);
+  }
+};

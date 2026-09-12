@@ -167,6 +167,110 @@ test('migration check rejects changes to inherited migration SQL', async () => {
   }
 });
 
+test('migration check accepts an exact approved migration repair', async () => {
+  const fixture = await initializeFixture();
+
+  try {
+    const migrationPath = 'drizzle/0000_initial.sql';
+    await writeFile(join(fixture.directory, migrationPath), 'SELECT 999;\n');
+    await mkdir(join(fixture.directory, 'docs/agents'), { recursive: true });
+
+    const baseBlob = run(
+      ['git', 'rev-parse', `${fixture.base}:${migrationPath}`],
+      fixture.directory,
+    ).stdout.toString().trim();
+    const repairedBlob = run(
+      ['git', 'hash-object', '--', migrationPath],
+      fixture.directory,
+    ).stdout.toString().trim();
+
+    await writeFile(
+      join(fixture.directory, 'docs/agents/migration-repairs.json'),
+      JSON.stringify({
+        repairs: [
+          {
+            baseBlob,
+            path: migrationPath,
+            reason: 'The inherited migration requires a reviewed repair.',
+            repairedBlob,
+          },
+        ],
+      }),
+    );
+
+    const result = run(
+      ['bun', migrationCheckScript, '--base', fixture.base],
+      fixture.directory,
+    );
+
+    expect(result.exitCode).toBe(0);
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('migration check rejects a migration repair with a hash mismatch', async () => {
+  const fixture = await initializeFixture();
+
+  try {
+    const migrationPath = 'drizzle/0000_initial.sql';
+    await writeFile(join(fixture.directory, migrationPath), 'SELECT 999;\n');
+    await mkdir(join(fixture.directory, 'docs/agents'), { recursive: true });
+
+    const baseBlob = run(
+      ['git', 'rev-parse', `${fixture.base}:${migrationPath}`],
+      fixture.directory,
+    ).stdout.toString().trim();
+    await writeFile(
+      join(fixture.directory, 'docs/agents/migration-repairs.json'),
+      JSON.stringify({
+        repairs: [
+          {
+            baseBlob,
+            path: migrationPath,
+            reason: 'The inherited migration requires a reviewed repair.',
+            repairedBlob: 'not-the-current-blob',
+          },
+        ],
+      }),
+    );
+
+    const result = run(
+      ['bun', migrationCheckScript, '--base', fixture.base],
+      fixture.directory,
+    );
+    const output = `${result.stdout.toString()}${result.stderr.toString()}`;
+
+    expect(result.exitCode).toBe(1);
+    expect(output).toContain('Inherited migration SQL is immutable');
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('migration check rejects an invalid migration repair manifest', async () => {
+  const fixture = await initializeFixture();
+
+  try {
+    await mkdir(join(fixture.directory, 'docs/agents'), { recursive: true });
+    await writeFile(
+      join(fixture.directory, 'docs/agents/migration-repairs.json'),
+      JSON.stringify({ repairs: [{ path: 'drizzle/0000_initial.sql' }] }),
+    );
+
+    const result = run(
+      ['bun', migrationCheckScript, '--base', fixture.base],
+      fixture.directory,
+    );
+    const output = `${result.stdout.toString()}${result.stderr.toString()}`;
+
+    expect(result.exitCode).toBe(1);
+    expect(output).toContain('Migration repair manifest has an invalid shape');
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test('migration check rejects reordering inherited migration history', async () => {
   const fixture = await initializeFixture();
 

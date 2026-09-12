@@ -6,12 +6,14 @@ SET quest_status = 'QUEST_FAILED',
     failed_at = COALESCE(failed_at, updated_at)
 WHERE quest_status = 'QUEST_DISPUTED';--> statement-breakpoint
 -- Normalize legacy Proof decisions before tightening the active vocabulary.
+ALTER TABLE "proof_submission" DROP CONSTRAINT "proof_submission_status_check";--> statement-breakpoint
 UPDATE proof_submission
 SET submission_status = 'PROOF_APPROVED'
 WHERE submission_status = 'PROOF_AUTO_APPROVED';--> statement-breakpoint
 UPDATE proof_submission
 SET submission_status = 'PROOF_NOT_APPROVED'
 WHERE submission_status = 'PROOF_REJECTED';--> statement-breakpoint
+ALTER TABLE "proof_submission" ADD CONSTRAINT "proof_submission_status_check" CHECK ("proof_submission"."submission_status" IN ('PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED'));--> statement-breakpoint
 CREATE OR REPLACE FUNCTION wallet_assert_funding_reservation_history(target_reservation_id UUID) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE
   reservation_row RECORD;

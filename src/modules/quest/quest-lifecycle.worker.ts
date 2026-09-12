@@ -11,6 +11,8 @@ import {
 } from '@/database/schema/quest.schema';
 import { walletFundingReservation } from '@/database/schema/wallet.schema';
 import { releaseFundingReservation } from '@/modules/wallet';
+import { purgeExpiredProviderEventPayloads } from '@/modules/top-up';
+import { cleanupExpiredWorkChatAttachments } from '@/modules/work-chat';
 
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 
@@ -77,7 +79,9 @@ export type QuestLifecycleWorkerError = {
     | 'auto-approval'
     | 'due-at-failure'
     | 'quest-image-cleanup'
-    | 'quest-proof-upload-cleanup';
+    | 'quest-proof-upload-cleanup'
+    | 'work-chat-attachment-cleanup'
+    | 'provider-event-payload-purge';
   id?: string;
   cause: unknown;
 };
@@ -542,6 +546,22 @@ export const runQuestLifecycleWorker = async (
     await retryQuestV2ProofUploadCleanup(limit);
   } catch (cause) {
     const error = { operation: 'quest-proof-upload-cleanup' as const, cause };
+    errors.push(error);
+    reportError(options.onError, error);
+  }
+
+  try {
+    await cleanupExpiredWorkChatAttachments(now);
+  } catch (cause) {
+    const error = { operation: 'work-chat-attachment-cleanup' as const, cause };
+    errors.push(error);
+    reportError(options.onError, error);
+  }
+
+  try {
+    await purgeExpiredProviderEventPayloads(now);
+  } catch (cause) {
+    const error = { operation: 'provider-event-payload-purge' as const, cause };
     errors.push(error);
     reportError(options.onError, error);
   }

@@ -58,6 +58,7 @@ const noWalletAuth = createStudentAuth({
   emailAndPasswordEnabled: true,
   allowEmailSignUp: true,
   autoSignIn: false,
+  provisionWalletOnCreate: false,
 });
 
 const getCookieHeader = (response: Response): string =>

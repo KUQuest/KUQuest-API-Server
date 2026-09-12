@@ -78,3 +78,14 @@ export {
   TopUpTestModeError,
 } from './top-up.test-mode.service';
 export type { TopUpTestSimulationResult } from './top-up.test-mode.service';
+export { adminTopUpRoute } from './top-up.admin.route';
+export {
+  adminTopUpEventParamsSchema,
+  adminTopUpEventResponseSchema,
+  adminTopUpParamsSchema,
+  adminTopUpResponseSchema,
+} from './top-up.admin.schema';
+export type {
+  AdminTopUpEventParams,
+  AdminTopUpParams,
+} from './top-up.admin.schema';

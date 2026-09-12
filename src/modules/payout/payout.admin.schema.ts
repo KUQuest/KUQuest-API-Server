@@ -1,9 +1,13 @@
 import { t } from 'elysia';
 
-import { payoutStatusSchema } from './payout.schema';
+import { payoutResponseSchema, payoutStatusSchema } from './payout.schema';
 
 export const adminPayoutParamsSchema = t.Object({
   payoutId: t.String({ format: 'uuid' }),
+});
+
+export const adminPayoutEventParamsSchema = t.Object({
+  eventId: t.String({ format: 'uuid' }),
 });
 
 export const adminPayoutHeadersSchema = t.Object({
@@ -104,7 +108,52 @@ export const adminPayoutHistoryResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Array(adminPayoutHistoryEntrySchema),
 });
+const dateTime = t.String({ format: 'date-time' });
+
+export const adminPayoutReconcileResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    payout: payoutResponseSchema.properties.data,
+  }),
+});
+
+export const adminPayoutEventDataSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  provider: t.String(),
+  providerEventId: t.String(),
+  eventType: t.String(),
+  resourceType: t.String(),
+  internalReference: t.Union([t.String(), t.Null()]),
+  providerReference: t.Union([t.String(), t.Null()]),
+  providerApiVersion: t.Union([t.String(), t.Null()]),
+  providerStatus: t.String(),
+  normalizedStatus: t.String(),
+  providerAmountSatang: t.Union([t.Integer({ minimum: 1 }), t.Null()]),
+  actualFeeSatang: t.Union([t.Integer({ minimum: 0 }), t.Null()]),
+  actualTaxSatang: t.Union([t.Integer({ minimum: 0 }), t.Null()]),
+  actualDebitSatang: t.Union([t.Integer({ minimum: 1 }), t.Null()]),
+  providerChannelCode: t.Union([t.String(), t.Null()]),
+  providerOccurredAt: dateTime,
+  payloadHash: t.String(),
+  rawPayloadAvailable: t.Boolean(),
+  rawPayloadExpiresAt: dateTime,
+  processingStatus: t.String(),
+  attemptCount: t.Integer({ minimum: 0 }),
+  claimedAt: t.Union([dateTime, t.Null()]),
+  processedAt: t.Union([dateTime, t.Null()]),
+  lastError: t.Union([t.String(), t.Null()]),
+  receivedAt: dateTime,
+  createdAt: dateTime,
+});
+
+export const adminPayoutEventResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    event: adminPayoutEventDataSchema,
+  }),
+});
 
 export type AdminPayoutListQuery = typeof adminPayoutListQuerySchema.static;
 export type AdminPayoutApprovalInput = typeof adminPayoutApprovalSchema.static;
 export type AdminPayoutCancellationInput = typeof adminPayoutCancellationSchema.static;
+export type AdminPayoutEventParams = typeof adminPayoutEventParamsSchema.static;

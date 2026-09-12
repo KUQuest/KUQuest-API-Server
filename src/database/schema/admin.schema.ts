@@ -50,6 +50,7 @@ export const adminAction = pgTable(
     ),
     index('admin_action_resource_idx').on(table.resourceType, table.resourceId, table.createdAt),
     index('admin_action_admin_created_idx').on(table.adminId, table.createdAt),
+    index('admin_action_created_idx').on(table.createdAt, table.id),
     check('admin_action_action_check', sql`btrim(${table.action}) <> ''`),
     check('admin_action_resource_type_check', sql`btrim(${table.resourceType}) <> ''`),
     check('admin_action_resource_id_check', sql`btrim(${table.resourceId}) <> ''`),
@@ -114,10 +115,15 @@ export const adminReviewItem = pgTable(
   ],
 );
 
+export const disputeCaseStatus = {
+  pending: 'DISPUTE_CASE_PENDING',
+  dismissed: 'DISPUTE_CASE_DISMISSED',
+  resolved: 'DISPUTE_CASE_RESOLVED',
+} as const;
 export const disputeCaseStatuses = [
-  'DISPUTE_CASE_PENDING',
-  'DISPUTE_CASE_DISMISSED',
-  'DISPUTE_CASE_RESOLVED',
+  disputeCaseStatus.pending,
+  disputeCaseStatus.dismissed,
+  disputeCaseStatus.resolved,
 ] as const;
 export type DisputeCaseStatus = (typeof disputeCaseStatuses)[number];
 

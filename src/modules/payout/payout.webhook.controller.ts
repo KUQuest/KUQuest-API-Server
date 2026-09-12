@@ -3,7 +3,11 @@ import type { ApiResponse } from '@/shared/api-response';
 
 import type { StatusMap } from 'elysia/utils';
 
-import { ProviderEventError, receivePayoutProviderEvent } from './payout.provider-event.service';
+import {
+  processPayoutProviderEvents,
+  ProviderEventError,
+  receivePayoutProviderEvent,
+} from './payout.provider-event.service';
 
 type WebhookContext = {
   request: Request;
@@ -39,6 +43,9 @@ export const receivePayoutWebhookController = async ({
       rawPayload: await request.text(),
       providerEventId: request.headers.get('webhook-id') ?? undefined,
       callbackToken: request.headers.get('x-callback-token') ?? undefined,
+    });
+    queueMicrotask(() => {
+      processPayoutProviderEvents().catch((err) => console.error('Failed to process payout provider events', err));
     });
     set.status = 202;
     return apiSuccess();
