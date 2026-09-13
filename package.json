@@ -30,7 +30,7 @@
     "db:migrate": "bun scripts/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "check": "bun run db:check && bun run lint && bun run typecheck && bun test && bun run build",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "dependencies": {
     "@better-auth/expo": "1.6.23",
