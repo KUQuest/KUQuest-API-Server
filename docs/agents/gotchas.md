@@ -17,6 +17,28 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 **Root cause.** A journal merge orders by migration timestamp, but `bun run db:check` requires the entries inherited from the base branch to stay an exact prefix of the current journal.
 **Rule.** After you merge `develop`, resolve `drizzle/meta/_journal.json` so the inherited entries keep their index and order, and your own migrations follow them. When your migration timestamps are older than an inherited one, rename your migration files to later timestamps, point the first of your snapshots at the inherited head with `prevId`, and copy the inherited schema change into each of your snapshots, so `bun run db:generate` reports no schema change. Renamed files carry new hashes, so every applied database resets: `NODE_ENV=development DEPLOYMENT_ENV=development CONFIRM_LOCAL_DB_RESET="RESET local database" bun run db:reset-local`. Prove the repair with `bun run db:check` and `bun run db:verify-migration-journal`.
 
+**What happened (second case).** A branch merged `develop` and appended its own migration, but its snapshot kept the old `prevId`. Two snapshots then shared one parent snapshot, so the chain stayed forked and `bun run db:generate` failed with a collision error — while `bun run db:check` still exited 0, because `drizzle-kit` prints the collision but exits 0. The proof step above cannot see this failure.
+
+**Rule (added).** After a merge, the snapshot chain stays linear: every snapshot's `prevId` equals the previous snapshot's `id`, and no two snapshots share a parent. For a branch migration that no database has applied, do not repair it by renaming: delete your migration SQL and snapshot, restore `develop`'s `drizzle/meta/_journal.json`, and run `bun run db:generate` from the merged schema.
+
+### 2026-09-13 — Run one integration suite at a time
+
+**What happened.** Two PR worktrees ran `bun check` at once against the shared `kuquest-postgres`. Each suite deleted the other's fixture rows, and both suites failed. Each suite passed when it ran alone.
+**Root cause.** Every worktree uses the same database, and the suites share seed users and tables.
+**Rule.** Lint, format, typecheck, and build may run in parallel. Run `bun test` in one worktree at a time.
+
+### 2026-09-13 — Pass GitHub text through a file
+
+**What happened.** `gh pr comment --body "$text"` held backticks in the text. Bash ran the spans as command substitution: two posted comments lost every code span, and one substitution ran a full `bun test`.
+**Root cause.** Bash runs backticks and `$( )` inside double quotes.
+**Rule.** Write long or marked-up bodies to a file and pass `--body-file`. Never build a shell string that holds Markdown.
+
+### 2026-09-13 — Install after you merge in a worktree
+
+**What happened.** A PR worktree kept the `node_modules` from before its merge of `develop`. `bun run format:check` exited 127 because the merged `package.json` added a dependency whose binary was not on disk.
+**Root cause.** `git merge` changes `package.json` and `bun.lock` but does not touch `node_modules`.
+**Rule.** After a merge that changes `bun.lock`, run `bun install --frozen-lockfile` before you run a gate.
+
 ### 2026-09-13 — A root lifecycle script runs in the production install
 
 **What happened.** `"prepare": "husky"` broke the production image. `Dockerfile` runs `bun install --frozen-lockfile --production`, which omits the devDependencies, so the script exited 127 with `husky: command not found`.
