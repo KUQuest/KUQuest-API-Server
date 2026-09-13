@@ -16,8 +16,11 @@ CONFIRM_LOCAL_DB_RESET='RESET local database' \
 
 The command runs `db:migrate` and verifies every committed migration hash and
 timestamp in `drizzle.__drizzle_migrations`. To load the demo and finance test
-data after the reset, configure the Admin, staging test Student, Payout
-Destination encryption key, and Xendit Development API key, then run:
+data after the reset, configure the Admin, the staging test Student, and the
+Payout Destination encryption key. The seed also refuses any `XENDIT_SECRET_KEY`
+that does not start with `xnd_development_`, which stops a seed run against a
+production provider configuration. The seed makes no provider call, so a
+placeholder such as `xnd_development_local` satisfies that check. Then run:
 
 ```bash
 STAGING_FINANCE_SEED_ENABLED=true bun run db:seed-staging

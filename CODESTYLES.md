@@ -59,3 +59,4 @@ See `src/modules/onboarding/` as the reference shape.
 
 - Integration-first: HTTP integration tests in `tests/modules/<name>/<name>.integration.test.ts` hit the real `app` via `app.handle(new Request(...))`, not mocks. Plain TypeScript application-service tests without an HTTP contract use the same `.integration.test.ts` suffix and execute the public service against real PostgreSQL.
 - Test structure mirrors `src/` — one test dir per module/shared/plugin/database area.
+- Assert the durable outcome, never a state a queued task can overwrite. A controller that answers and then queues work — `payout.webhook.controller.ts` and `top-up.webhook.controller.ts` both call `queueMicrotask` after the insert — promises the row, the attribution, and the ciphertext, not the `RECEIVED` status the claim moves on. A test that reads the transient value passes only while the database holds enough older rows to keep the claim busy.

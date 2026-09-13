@@ -20,6 +20,8 @@ Behavioral guidelines to reduce common LLM coding mistakes ([source](https://git
 - Don't "improve" adjacent code, comments, or formatting. Don't refactor what isn't broken. Match existing style even if you'd do it differently.
 - Unrelated dead code: mention it, don't delete it.
 - Remove imports/variables/functions YOUR changes made unused; don't remove pre-existing dead code unless asked.
+- Deleting an option or a parameter: for each caller you migrate off it, name the guarantee that caller loses, and keep the guarantee locally when it was load-bearing. A caller that compiles can still be broken — a script that used an idempotency key for re-run safety dies on the unique constraint instead of skipping.
+- Deleting a validation or a guard: search the tests for its message first. A refusal with a test pinning it is deliberate, whatever the code around it suggests. `scripts/seed-finance-test.ts` rejects a production Xendit key although the seed calls no provider, and `tests/operations/finance-seed.integration.test.ts` pins that refusal with three siblings. When a guard creates friction, fix the documentation that explains it.
 - Test: every changed line traces directly to the user's request.
 
 **4. Goal-driven execution** — define success criteria, loop until verified.
