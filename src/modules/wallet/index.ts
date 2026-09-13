@@ -8,12 +8,7 @@ export {
   signedSatang,
   toBaht,
 } from './wallet.money';
-export type {
-  MoneyDomainErrorCode,
-  Satang,
-  SatangDelta,
-  SignedSatang,
-} from './wallet.money';
+export type { MoneyDomainErrorCode, Satang, SatangDelta, SignedSatang } from './wallet.money';
 export {
   getEffectiveFundingReservationPolicy,
   increaseFundingReservation,
@@ -30,14 +25,8 @@ export type {
   SettleDisputeCaseResult,
   SettleFundingReservationInput,
 } from './wallet.funding.service';
-export {
-  convertEarnings,
-  earningsConversionScope,
-} from './wallet.service';
-export type {
-  EarningsConversion,
-  EarningsConversionInput,
-} from './wallet.service';
+export { convertEarnings, earningsConversionScope } from './wallet.service';
+export type { EarningsConversion, EarningsConversionInput } from './wallet.service';
 export type { WalletTransaction } from './wallet.service';
 export {
   assertWalletOperationAllowed,
@@ -46,10 +35,7 @@ export {
   listWalletStatusHistory,
   walletOperations,
 } from './wallet.status.service';
-export type {
-  ChangeWalletStatusInput,
-  WalletOperation,
-} from './wallet.status.service';
+export type { ChangeWalletStatusInput, WalletOperation } from './wallet.status.service';
 export {
   createWallet,
   createWalletInTransaction,
