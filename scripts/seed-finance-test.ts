@@ -5,7 +5,7 @@ import { authUser } from '@/database/schema/auth.schema';
 import { paymentPayouts } from '@/database/schema/payment.schema';
 import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletLedgerAccount } from '@/database/schema/wallet.schema';
+import { walletLedgerAccount, walletLedgerTransaction } from '@/database/schema/wallet.schema';
 import {
   createPayoutDestinationEncryption,
   getPayoutDestination,
@@ -200,13 +200,21 @@ const seedBalance = async (
   type: 'spending' | 'earnings',
   amountSatang: number
 ): Promise<void> => {
+  const businessReference = `seed:finance:${userId}:${type}:v1`;
+  const [existing] = await db
+    .select({ id: walletLedgerTransaction.id })
+    .from(walletLedgerTransaction)
+    .where(eq(walletLedgerTransaction.businessReference, businessReference))
+    .limit(1);
+  if (existing) return;
+
   const walletAccountId = await walletAccount(
     userId,
     type.toUpperCase() as 'SPENDING' | 'EARNINGS'
   );
   const suspenseAccountId = await platformSuspenseAccount();
   await createSealedLedgerTransaction({
-    businessReference: `seed:finance:${userId}:${type}:v1`,
+    businessReference,
     eventType: 'ADJUSTMENT',
     createdByUserId: userId,
     description: 'Non-production finance test seed',
@@ -214,13 +222,6 @@ const seedBalance = async (
       { accountId: walletAccountId, amountSatang: signedSatang(amountSatang) },
       { accountId: suspenseAccountId, amountSatang: signedSatang(-amountSatang) },
     ],
-    idempotency: {
-      principalUserId: userId,
-      operationScope: 'seed.finance',
-      key: `v1:${type}`,
-      requestHash: `seed-finance-v1:${type}:${amountSatang}`,
-      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
-    },
   });
 };
 
