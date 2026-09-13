@@ -21,7 +21,13 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 **What happened.** A subagent reported a new `CONTEXT.md` glossary entry as written. `git status --short` in the feature worktree showed no change, so a second run landed the entry there. A different draft of the same entry was later found uncommitted in the main checkout, where the subagent had written it.
 **Root cause.** A subagent inherits a working directory. When a task names a file by repository path, the subagent can edit the copy in another checkout, and its report still says "written".
-**Rule.** Give a subagent the absolute worktree path in its task. After it reports an edit, read `git status --short` in that worktree, and read the changed region. A report is a claim, not evidence. When the change is absent there, read `git worktree list` and check the other checkouts for the stray edit before you re-dispatch.
+**Rule.** Give a subagent the absolute worktree path in its task, and require every path in every tool call to start with it. The rule alone does not hold: it failed twice on the day it was written, because a subagent inherits the session working directory and repository-relative paths resolve there. So both sides verify. The subagent reads `git status --short` in its own worktree and sees its file listed. The dispatcher reads `git status --short` in the main checkout after each report round, and expects no change. A stray edit found there is restored from the pristine copy in the other checkout, then re-applied with absolute paths.
+
+### 2026-09-13 — Copy a path from `git ls-files` before you write it into a ticket
+
+**What happened.** A ticket said the second copy of a protocol lived in `wallet.conversion.service.ts`. That file has never existed: the name came from the test file `wallet.conversion.service.integration.test.ts`. Two subagents were dispatched to one real file, disputed the ownership, and one lost a verified change.
+**Root cause.** A test file name, a sibling module's layout, and a docs reference all look like evidence of a source path, and none of them is.
+**Rule.** Before a path enters a ticket, a plan, or a subagent task, copy it from `git ls-files <directory>`. When a ticket you receive names a file, check it the same way before you edit, and report the ticket as wrong when the file is absent.
 
 ### 2026-09-13 — Take type errors from the worktree, not the language server
 
@@ -74,6 +80,10 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 **What happened.** `bun test tests/modules/wallet tests/modules/quest` reported `0 passed` in the terminal while the log file held 561 passes. `git diff --numstat` returned nothing for a file that was modified. A `prettier --write` call printed a success line that Prettier does not produce.
 **Root cause.** The shell tool summarises and filters command output, so a count or a diff can arrive wrong or empty.
 **Rule.** Take counts, diffs, and gate results from the log file or from an `eval` cell, not from the summarised shell output. A `0 failed` line you did not read in the log is not evidence.
+
+**What happened (second case).** A `cat > /tmp/body.md <<'EOF' … EOF` heredoc followed by `gh issue create --body-file /tmp/body.md` printed a filtered test-result line, wrote no file, and created no Issue. The call looked like it had run.
+
+**Rule (added).** Write a file with the write tool, and keep the shell for one binary or a short pipeline. A heredoc, a multi-line script, or a command substitution can be dropped without an error.
 
 ### 2026-09-13 — An idempotent verb cannot report who did the work
 
