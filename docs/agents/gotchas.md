@@ -11,6 +11,24 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 ## Entries
 
+### 2026-09-13 — Keep the inherited migration journal as a prefix
+
+**What happened.** A merge of `develop` put six branch migrations before the inherited `20260910134802_sour_hiroim`, which moved that entry from index 72 to index 78. CI failed with "Inherited migration journal entries are immutable". Two snapshots then shared one `prevId`, so the snapshot chain was forked.
+**Root cause.** A journal merge orders by migration timestamp, but `bun run db:check` requires the entries inherited from the base branch to stay an exact prefix of the current journal.
+**Rule.** After you merge `develop`, resolve `drizzle/meta/_journal.json` so the inherited entries keep their index and order, and your own migrations follow them. When your migration timestamps are older than an inherited one, rename your migration files to later timestamps, point the first of your snapshots at the inherited head with `prevId`, and copy the inherited schema change into each of your snapshots, so `bun run db:generate` reports no schema change. Renamed files carry new hashes, so every applied database resets: `NODE_ENV=development DEPLOYMENT_ENV=development CONFIRM_LOCAL_DB_RESET="RESET local database" bun run db:reset-local`. Prove the repair with `bun run db:check` and `bun run db:verify-migration-journal`.
+
+### 2026-09-13 — A root lifecycle script runs in the production install
+
+**What happened.** `"prepare": "husky"` broke the production image. `Dockerfile` runs `bun install --frozen-lockfile --production`, which omits the devDependencies, so the script exited 127 with `husky: command not found`.
+**Root cause.** Bun runs the root `prepare` script in every install mode, including the one that installs no devDependency.
+**Rule.** A root lifecycle script tolerates a missing devDependency: `"prepare": "husky || true"`. Before you add one, check it against `bun install --frozen-lockfile --production` in a scratch directory that holds only `package.json` and `bun.lock`.
+
+### 2026-09-13 — Watch a GitHub Actions run, do not poll it
+
+**What happened.** Two `sleep 90; gh pr checks` calls spent about four minutes of wall time, then two more `gh run view --log-failed` calls read the failures.
+**Root cause.** A sleep guesses the run length, and a passing summary line still needs a second call for the failing log.
+**Rule.** Watch a run with the `github` device `run_watch` operation. It follows the run, stops at the first failing job, and saves the full log to an artifact.
+
 ### 2026-09-13 — Audit the index, not the working tree
 
 **What happened.** A cutover was audited with `git diff --numstat`, which showed 10 clean files. The commit landed 515 more changed lines, because other changes were already staged. A later `git add -A` also swept three pre-existing untracked documents into a commit, which needed a `git rm --cached` and an amend.
