@@ -547,6 +547,13 @@
       "when": 1789048442916,
       "tag": "20260910135402_move_candidate_team_submit_select",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1789286654565,
+      "tag": "20260913080414_lucky_sentinel",
+      "breakpoints": true
     }
   ]
 }
