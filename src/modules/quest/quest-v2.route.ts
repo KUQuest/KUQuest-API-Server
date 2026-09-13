@@ -246,7 +246,7 @@ export const questV2Route = new Elysia({
       tags: ['Quests v2'],
       summary: 'Get Participation Quest Detail through the v2 contract',
       description:
-        'Returns the Quest to an authenticated Member who holds an Assignment on it, in every Quest State and while the Quest is hidden, together with that Member\'s own Assignment. Terminal Quests are read-only. Admin actions and Finance internals are excluded.',
+        "Returns the Quest to an authenticated Member who holds an Assignment on it, in every Quest State and while the Quest is hidden, together with that Member's own Assignment. Terminal Quests are read-only. Admin actions and Finance internals are excluded.",
       operationId: 'getQuestV2ParticipationDetail',
       security: betterAuthSecurity,
     },

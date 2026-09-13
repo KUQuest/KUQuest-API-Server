@@ -802,7 +802,7 @@ export const questV2PublicDetailResponseSchema = t.Object({
 });
 
 const questV2AssignmentStateSchema = t.Union(
-  questV2AssignmentStates.map((state) => t.Literal(state)),
+  questV2AssignmentStates.map((state) => t.Literal(state))
 );
 
 // The Participation projection carries the public Quest fields plus the caller's own

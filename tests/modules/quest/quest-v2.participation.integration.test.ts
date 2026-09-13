@@ -29,7 +29,7 @@ const workerAuthApp = new Elysia({ name: 'quest-v2-participation-worker-auth' })
     password: testPassword,
     firstName: 'Participation',
     lastName: 'Worker',
-  }),
+  })
 );
 const outsiderAuthApp = new Elysia({ name: 'quest-v2-participation-outsider-auth' }).use(
   createStagingTestAuthRoute({
@@ -39,13 +39,11 @@ const outsiderAuthApp = new Elysia({ name: 'quest-v2-participation-outsider-auth
     password: testPassword,
     firstName: 'Participation',
     lastName: 'Outsider',
-  }),
+  })
 );
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 const signIn = async (auth: Elysia, email: string) => {
   const response = await auth.handle(
@@ -53,7 +51,7 @@ const signIn = async (auth: Elysia, email: string) => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email, password: testPassword }),
-    }),
+    })
   );
   if (response.status !== 200) throw new Error(`Test authentication failed: ${response.status}`);
   const body = (await response.json()) as { user: { id: string } };
@@ -88,7 +86,7 @@ const createPublishedQuest = async (overrides: Partial<QuestV2CreateInput> = {})
   const result = await createQuestV2(
     ownerId,
     { ...baseInput, ...overrides },
-    `participation-create-${crypto.randomUUID()}`,
+    `participation-create-${crypto.randomUUID()}`
   );
   if (!('quest' in result)) throw new Error(`Create failed: ${result.outcome}`);
   questIds.push(result.quest.id);
@@ -104,19 +102,24 @@ const assign = async (questId: string, status: AssignmentStatus = assignmentStat
 };
 
 const setQuestState = async (questId: string, status: QuestStatus) => {
-  await db.update(quest).set({
-    questStatus: status,
-    // The quest_cancelled_at_check and quest_failed_at_check constraints pair each
-    // terminal state with its timestamp.
-    ...(status === questStatus.cancelled ? { cancelledAt: new Date() } : {}),
-    ...(status === questStatus.failed ? { failedAt: new Date() } : {}),
-  }).where(eq(quest.id, questId));
+  await db
+    .update(quest)
+    .set({
+      questStatus: status,
+      // The quest_cancelled_at_check and quest_failed_at_check constraints pair each
+      // terminal state with its timestamp.
+      ...(status === questStatus.cancelled ? { cancelledAt: new Date() } : {}),
+      ...(status === questStatus.failed ? { failedAt: new Date() } : {}),
+    })
+    .where(eq(quest.id, questId));
 };
 
 const getParticipation = (questId: string, cookie = workerCookie) =>
-  app.handle(new Request(`http://localhost/api/v2/quests/${questId}/participation`, {
-    headers: cookie ? { cookie } : {},
-  }));
+  app.handle(
+    new Request(`http://localhost/api/v2/quests/${questId}/participation`, {
+      headers: cookie ? { cookie } : {},
+    })
+  );
 
 beforeAll(async () => {
   await sql`select 1`;
@@ -149,9 +152,9 @@ beforeEach(async () => {
 
 afterAll(async () => {
   if (questIds.length > 0) await db.delete(quest).where(inArray(quest.id, questIds));
-  await db.delete(walletIdempotencyKey).where(
-    inArray(walletIdempotencyKey.principalUserId, [workerId, ownerId]),
-  );
+  await db
+    .delete(walletIdempotencyKey)
+    .where(inArray(walletIdempotencyKey.principalUserId, [workerId, ownerId]));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(authAdmin).where(eq(authAdmin.id, adminId));
   await db.delete(authUser).where(eq(authUser.id, ownerId));
@@ -199,11 +202,14 @@ describe('Quest v2 Participation Detail', () => {
   it('returns the Quest to a participant while an Admin hides it, without the overlay', async () => {
     const hiddenQuest = await createPublishedQuest();
     await assign(hiddenQuest);
-    await db.update(quest).set({
-      questStatus: questStatus.assigned,
-      hiddenAt: new Date(),
-      hiddenByAdminId: adminId,
-    }).where(eq(quest.id, hiddenQuest));
+    await db
+      .update(quest)
+      .set({
+        questStatus: questStatus.assigned,
+        hiddenAt: new Date(),
+        hiddenByAdminId: adminId,
+      })
+      .where(eq(quest.id, hiddenQuest));
 
     const response = await getParticipation(hiddenQuest);
     expect(response.status).toBe(200);
@@ -236,12 +242,12 @@ describe('Quest v2 Participation Detail', () => {
     const startedQuest = await createPublishedQuest();
     await assign(startedQuest);
     await setQuestState(startedQuest, questStatus.inProgress);
-    await db.update(questAssignment)
+    await db
+      .update(questAssignment)
       .set({ startedAt: new Date('2030-08-26T03:30:00.000Z') })
-      .where(and(
-        eq(questAssignment.questId, startedQuest),
-        eq(questAssignment.workerId, workerId),
-      ));
+      .where(
+        and(eq(questAssignment.questId, startedQuest), eq(questAssignment.workerId, workerId))
+      );
 
     const body = (await (await getParticipation(startedQuest)).json()) as ParticipationBody;
     expect(body.data.assignment.startedAt).toBe('2030-08-26T03:30:00.000Z');
@@ -277,14 +283,17 @@ describe('Quest v2 Participation Detail', () => {
     const result = await createQuestV2(
       workerId,
       baseInput,
-      `participation-owner-${crypto.randomUUID()}`,
+      `participation-owner-${crypto.randomUUID()}`
     );
     if (!('quest' in result)) throw new Error(`Create failed: ${result.outcome}`);
     questIds.push(result.quest.id);
-    await db.update(quest).set({
-      questStatus: questStatus.assigned,
-      rewardSatang: 1234,
-    }).where(eq(quest.id, result.quest.id));
+    await db
+      .update(quest)
+      .set({
+        questStatus: questStatus.assigned,
+        rewardSatang: 1234,
+      })
+      .where(eq(quest.id, result.quest.id));
     await assign(result.quest.id);
 
     expect((await getParticipation(result.quest.id)).status).toBe(404);
@@ -296,7 +305,7 @@ describe('Quest v2 Participation Detail', () => {
     const result = await createQuestV2(
       ownerId,
       baseInput,
-      `participation-draft-${crypto.randomUUID()}`,
+      `participation-draft-${crypto.randomUUID()}`
     );
     if (!('quest' in result)) throw new Error(`Create failed: ${result.outcome}`);
     questIds.push(result.quest.id);

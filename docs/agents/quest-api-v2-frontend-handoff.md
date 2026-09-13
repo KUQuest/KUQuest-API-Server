@@ -922,9 +922,9 @@ Error:
 
 Request:
 
-~~~http
+```http
 GET /api/v2/quests/:questId/participation
-~~~
+```
 
 The caller must be authenticated and must hold an Assignment on the Quest.
 The caller must not be the owning Hirer.
@@ -937,7 +937,7 @@ Success status: HTTP 200.
 The data value carries every field of section 6.2 with the same meaning, plus
 assignment and capabilities:
 
-~~~json
+```json
 {
   "success": true,
   "data": {
@@ -956,7 +956,7 @@ assignment and capabilities:
     }
   }
 }
-~~~
+```
 
 assignment.status is ASSIGNMENT_ACTIVE, ASSIGNMENT_COMPLETED,
 ASSIGNMENT_INCOMPLETE, or ASSIGNMENT_CANCELLED.

@@ -85,8 +85,9 @@ type QuestV2WriteHeaders = Static<typeof questV2WriteHeadersSchema>;
 type QuestV2EditHeaders = Static<typeof questV2EditHeadersSchema>;
 type QuestV2DetailResponse = Static<typeof questV2DetailResponseSchema>['data'];
 type QuestV2PublicDetailResponse = Static<typeof questV2PublicDetailResponseSchema>['data'];
-type QuestV2ParticipationDetailResponse =
-  Static<typeof questV2ParticipationDetailResponseSchema>['data'];
+type QuestV2ParticipationDetailResponse = Static<
+  typeof questV2ParticipationDetailResponseSchema
+>['data'];
 type QuestV2PublishCheckResponse = Static<typeof questV2PublishCheckResponseSchema>['data'];
 type QuestV2PublishResponse = Static<typeof questV2PublishResponseSchema>['data'];
 type QuestV2ImagesResponse = Static<typeof questV2ImagesResponseSchema>['data'];
@@ -690,10 +691,7 @@ export const getQuestV2ParticipationDetailController = async ({
     if (!(error instanceof ImageLinkUnavailableError)) throw error;
 
     set.status = 503;
-    return apiError(
-      'QUEST_IMAGE_STORAGE_UNAVAILABLE',
-      'Quest Image storage is unavailable',
-    );
+    return apiError('QUEST_IMAGE_STORAGE_UNAVAILABLE', 'Quest Image storage is unavailable');
   }
 
   return apiSuccess({ ...questDetail, images });

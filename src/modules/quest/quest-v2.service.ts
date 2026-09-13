@@ -2577,7 +2577,7 @@ export const getPublicQuestV2Detail = async (
 
 export const getQuestV2ParticipationDetail = async (
   userId: string,
-  questId: string,
+  questId: string
 ): Promise<QuestV2ParticipationDetail | undefined> => {
   const [row] = await db
     .select({
@@ -2606,14 +2606,16 @@ export const getQuestV2ParticipationDetail = async (
     // Assignment terminal, and a Member who worked the Quest keeps the right to read it.
     .innerJoin(
       questAssignment,
-      and(eq(questAssignment.questId, quest.id), eq(questAssignment.workerId, userId)),
+      and(eq(questAssignment.questId, quest.id), eq(questAssignment.workerId, userId))
     )
     .leftJoin(tag, eq(quest.tagId, tag.id))
-    .where(and(
-      eq(quest.id, questId),
-      eq(quest.apiVersion, questApiVersion.v2),
-      ne(quest.hirerId, userId),
-    ))
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.apiVersion, questApiVersion.v2),
+        ne(quest.hirerId, userId)
+      )
+    )
     .limit(1);
 
   if (!row) return undefined;
