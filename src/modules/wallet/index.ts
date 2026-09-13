@@ -9,7 +9,11 @@ export {
   toBaht,
 } from './wallet.money';
 export type { MoneyDomainErrorCode, Satang, SatangDelta, SignedSatang } from './wallet.money';
-export { completeMoneyCommand, runMoneyCommand } from './wallet.money-command.service';
+export {
+  completeMoneyCommand,
+  runMoneyCommand,
+  stampMoneyCommandResource,
+} from './wallet.money-command.service';
 export type {
   MoneyCommandHooks,
   MoneyCommandKeyRow,
