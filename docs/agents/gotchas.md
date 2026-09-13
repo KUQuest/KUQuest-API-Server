@@ -39,12 +39,6 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 **Rule (added).** After a merge, the snapshot chain stays linear: every snapshot's `prevId` equals the previous snapshot's `id`, and no two snapshots share a parent. For a branch migration that no database has applied, do not repair it by renaming: delete your migration SQL and snapshot, restore `develop`'s `drizzle/meta/_journal.json`, and run `bun run db:generate` from the merged schema.
 
-### 2026-09-13 — Run one integration suite at a time
-
-**What happened.** Two PR worktrees ran `bun check` at once against the shared `kuquest-postgres`. Each suite deleted the other's fixture rows, and both suites failed. Each suite passed when it ran alone.
-**Root cause.** Every worktree uses the same database, and the suites share seed users and tables.
-**Rule.** Lint, format, typecheck, and build may run in parallel. Run `bun test` in one worktree at a time.
-
 ### 2026-09-13 — Pass GitHub text through a file
 
 **What happened.** `gh pr comment --body "$text"` held backticks in the text. Bash ran the spans as command substitution: two posted comments lost every code span, and one substitution ran a full `bun test`.
