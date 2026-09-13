@@ -11,7 +11,6 @@ import {
 } from '@/database/schema/quest.schema';
 import { file } from '@/database/schema/file.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletWallet } from '@/database/schema/wallet.schema';
 import {
   getEffectiveFundingReservationPolicy,
   MoneyDomainError,
@@ -50,6 +49,7 @@ import {
   type QuestCommandOutcomeCode,
   type QuestCommandWork,
 } from './quest-command.service';
+import { questFundingCapacity } from './quest-escrow.service';
 import { assignmentStatus, questStatus, type QuestStatus } from './quest.contract';
 import { questV2StorageCompatibility } from './quest-storage.adapter';
 import {
@@ -711,8 +711,7 @@ const buildCanonicalQuest = async (
 const buildQuestV2PublishCheckForRow = async (
   database: QuestTransaction,
   userId: string,
-  row: QuestV2Row,
-  lockWallet: boolean
+  row: QuestV2Row
 ): Promise<QuestV2PublishCheck> => {
   if (row.questFundingTotalSatang === null || !row.v2Participation) {
     throw new Error(`Quest ${row.id} has incomplete v2 persistence data`);
@@ -720,17 +719,13 @@ const buildQuestV2PublishCheckForRow = async (
 
   const conditionItems = await selectConditionItems(database, row.id);
   const policy = await getEffectiveFundingReservationPolicy(database);
-  const walletQuery = database
-    .select({
-      spendingBalanceSatang: walletWallet.spendingBalanceSatang,
-      walletStatus: walletWallet.walletStatus,
-    })
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId))
-    .limit(1);
-  const [wallet] = lockWallet ? await walletQuery.for('update') : await walletQuery;
+  const questFundingTotalSatang = satang(row.questFundingTotalSatang);
+  const capacity = await questFundingCapacity(database, {
+    ownerUserId: userId,
+    requiredSatang: satang(questFundingTotalSatang * row.headcount),
+  });
 
-  if (!wallet) {
+  if (capacity.reason === 'WALLET_NOT_FOUND') {
     throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
   }
 
@@ -746,10 +741,10 @@ const buildQuestV2PublishCheckForRow = async (
     startTime: row.startTime,
     dueAt: row.dueAt,
     now: new Date(),
-    questFundingTotalSatang: satang(row.questFundingTotalSatang),
+    questFundingTotalSatang,
     headcount: row.headcount,
-    spendingBalanceSatang: satang(wallet.spendingBalanceSatang),
-    walletStatus: wallet.walletStatus,
+    canReserve: capacity.canReserve,
+    reason: capacity.reason,
     platformFeeBps: policy.platformFeeBps,
     feeRoundingMode: policy.feeRoundingMode as 'UP',
     policyRevisionId: policy.id,
@@ -1938,7 +1933,7 @@ const publishQuestV2InTransaction = async (
       const row = await selectQuestV2Row(transaction, userId, questId);
       if (!row) return { kind: 'rejected', rejection: { outcome: 'not-found' } };
 
-      const check = await buildQuestV2PublishCheckForRow(transaction, userId, row, true);
+      const check = await buildQuestV2PublishCheckForRow(transaction, userId, row);
       if (!check.canPublish) {
         throw new QuestV2PublishBlockedError(check);
       }
@@ -2630,5 +2625,5 @@ export const getQuestV2PublishCheck = async (
     const row = await selectQuestV2Row(transaction, userId, questId);
     if (!row) return undefined;
     if (row.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
-    return buildQuestV2PublishCheckForRow(transaction, userId, row, false);
+    return buildQuestV2PublishCheckForRow(transaction, userId, row);
   });

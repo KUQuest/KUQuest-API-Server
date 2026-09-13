@@ -10,15 +10,21 @@ export {
 } from './wallet.money';
 export type { MoneyDomainErrorCode, Satang, SatangDelta, SignedSatang } from './wallet.money';
 export {
+  fundingCapacityFor,
   getEffectiveFundingReservationPolicy,
   increaseFundingReservation,
+  platformFeeForReservation,
+  readFundingReservation,
   releaseFundingReservation,
   reserveSpending,
   settleDisputeCase,
   settleFundingReservation,
 } from './wallet.funding.service';
 export type {
+  FundingCapacityInput,
   IncreaseFundingReservationInput,
+  PlatformFeeForReservationInput,
+  ReadFundingReservationInput,
   ReleaseFundingReservationInput,
   ReserveSpendingInput,
   SettleDisputeCaseInput,
@@ -32,6 +38,7 @@ export {
   assertWalletOperationAllowed,
   changeWalletStatus,
   changeWalletStatusInTransaction,
+  isWalletOperationAllowed,
   listWalletStatusHistory,
   walletOperations,
 } from './wallet.status.service';

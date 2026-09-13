@@ -296,6 +296,63 @@ describe('Funding Reservation service', () => {
     });
   });
 
+  it('treats a non-active release as a no-op that writes no ledger transaction', async () => {
+    const payerUserId = await createFundedStudent('be111-noop-release-payer', 1_000);
+    const reservation = await db.transaction((transaction) =>
+      reserveSpending(transaction, {
+        ownerUserId: payerUserId,
+        callerScope: 'generic-workflow',
+        callerReference: `noop-release-${crypto.randomUUID()}`,
+        amountSatang: amount(1_000),
+      })
+    );
+    const ledgerTransactionCount = async () =>
+      (
+        await db
+          .select({ id: walletLedgerTransaction.id })
+          .from(walletLedgerTransaction)
+          .where(eq(walletLedgerTransaction.createdByUserId, payerUserId))
+      ).length;
+    const operationCount = async () =>
+      (
+        await db
+          .select({ id: walletFundingReservationOperation.id })
+          .from(walletFundingReservationOperation)
+          .where(eq(walletFundingReservationOperation.reservationId, reservation.id))
+      ).length;
+
+    const released = await db.transaction((transaction) =>
+      releaseFundingReservation(transaction, {
+        ownerUserId: payerUserId,
+        reservationId: reservation.id,
+        operationReference: `noop-release-first-${crypto.randomUUID()}`,
+      })
+    );
+    expect(released).toMatchObject({
+      status: 'RELEASED',
+      remainingSatang: 0,
+      releasedSatang: 1_000,
+    });
+    const transactionsAfterRelease = await ledgerTransactionCount();
+
+    const noOpInput = {
+      ownerUserId: payerUserId,
+      reservationId: reservation.id,
+      operationReference: `noop-release-second-${crypto.randomUUID()}`,
+    };
+    const noOp = await db.transaction((transaction) =>
+      releaseFundingReservation(transaction, noOpInput)
+    );
+    expect(noOp).toEqual({ ...released, releasedSatang: satang(0) });
+    expect(await ledgerTransactionCount()).toBe(transactionsAfterRelease);
+    expect(await operationCount()).toBe(2);
+
+    const noOpReplay = await db.transaction((transaction) =>
+      releaseFundingReservation(transaction, noOpInput)
+    );
+    expect(noOpReplay).toEqual(noOp);
+  });
+
   it('partially settles to recipient Earnings plus a Platform Fee', async () => {
     const reservation = await db.transaction((transaction) =>
       reserveSpending(transaction, {

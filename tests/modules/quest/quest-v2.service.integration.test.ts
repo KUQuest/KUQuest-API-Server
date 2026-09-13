@@ -873,7 +873,7 @@ describe('Quest API v2 publish check', () => {
         expect(body.data.canPublish).toBe(false);
         expect(body.data.blockingReasons).toContainEqual({
           code: 'WALLET_NOT_ACTIVE',
-          message: `Wallet status ${walletStatus} does not permit FUNDING_RESERVATION.`,
+          message: 'Wallet does not permit a Funding Reservation.',
         });
 
         const [afterWallet] = await db

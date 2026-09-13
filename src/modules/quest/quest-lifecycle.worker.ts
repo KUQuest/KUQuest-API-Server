@@ -9,14 +9,13 @@ import {
   questTeam,
   questTeamInvitation,
 } from '@/database/schema/quest.schema';
-import { walletFundingReservation } from '@/database/schema/wallet.schema';
-import { releaseFundingReservation } from '@/modules/wallet';
 import { purgeExpiredProviderEventPayloads } from '@/modules/top-up';
 import { cleanupExpiredWorkChatAttachments } from '@/modules/work-chat';
 
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 
 import { assignmentStatus, questMode, questParticipation, questStatus } from './quest.contract';
+import { readQuestEscrow, releaseQuestEscrow } from './quest-escrow.service';
 import { autoApproveDueProofs } from './quest-proof.service';
 import { cancelUnfilledQuest, failQuestInTransaction } from './quest-settlement.service';
 import { expireQuestEditRequest } from './quest.service';
@@ -392,13 +391,15 @@ const releaseFailedQuestReservation = async (questId: string, now: Date): Promis
       current.failedAt.getTime() > now.getTime() - 7 * 24 * 60 * 60 * 1000
     )
       return false;
-    const [reservation] = await transaction
-      .select({ status: walletFundingReservation.status })
-      .from(walletFundingReservation)
-      .where(eq(walletFundingReservation.id, current.fundingReservationId))
-      .for('update');
-    if (!reservation || reservation.status !== 'ACTIVE') return false;
-    await releaseFundingReservation(transaction, {
+    // The Quest row lock above serializes the worker runs. This status read makes the
+    // worker report each release exactly once, because an idempotent replay of a
+    // completed release returns the same result as the first release.
+    const escrow = await readQuestEscrow(transaction, {
+      ownerUserId: current.hirerId,
+      questId: current.id,
+    });
+    if (escrow?.status !== 'ACTIVE') return false;
+    await releaseQuestEscrow(transaction, {
       ownerUserId: current.hirerId,
       reservationId: current.fundingReservationId,
       operationReference: `quest-failure-hold-release:${current.id}`,

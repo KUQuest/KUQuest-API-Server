@@ -40,11 +40,16 @@ export type ChangeWalletStatusInput = {
   actorAdminId?: string;
 };
 
+export const isWalletOperationAllowed = (
+  walletStatus: WalletStatus,
+  operation: WalletOperation
+): boolean => walletStatus === 'ACTIVE' || !studentInitiatedOperations.has(operation);
+
 export const assertWalletOperationAllowed = (
   walletStatus: WalletStatus,
   operation: WalletOperation
 ) => {
-  if (walletStatus === 'ACTIVE' || !studentInitiatedOperations.has(operation)) return;
+  if (isWalletOperationAllowed(walletStatus, operation)) return;
 
   throw new MoneyDomainError(
     'WALLET_NOT_ACTIVE',

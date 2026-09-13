@@ -1,10 +1,6 @@
 import { db } from '@/database/client';
 import { recordAudit, type AuditActor } from '@/modules/audit/audit.service';
 import {
-  paymentMoneyPolicyRevision,
-  walletFundingReservation,
-} from '@/database/schema/wallet.schema';
-import {
   quest,
   questAssignment,
   questCandidateTeamV2,
@@ -16,15 +12,7 @@ import {
   questTeam,
   questTeamMember,
 } from '@/database/schema/quest.schema';
-import {
-  calculatePlatformFeeSatang,
-  MoneyDomainError,
-  positiveSatang,
-  releaseFundingReservation,
-  satang,
-  settleFundingReservation,
-  type Satang,
-} from '@/modules/wallet';
+import { MoneyDomainError, satang, type Satang } from '@/modules/wallet';
 
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
@@ -32,6 +20,12 @@ import {
   requireQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
 } from './quest-assignment.service';
+import {
+  platformFeeForQuest,
+  readQuestEscrow,
+  releaseQuestEscrow,
+  settleQuestWorkers,
+} from './quest-escrow.service';
 import { assignmentStatus, questStatus, teamStatus, type QuestStatus } from './quest.contract';
 import type { QuestTransaction } from './quest-assignment.service';
 import { hasPendingQuestV2EditRequest } from './quest-v2-edit.service';
@@ -168,32 +162,6 @@ const finishCommand = async (
     .where(eq(questSettlementCommand.commandId, commandId));
 };
 
-const reservationFor = async (
-  tx: QuestTransaction,
-  ownerUserId: string,
-  questId: string,
-  lock = true
-) => {
-  const query = tx
-    .select({
-      id: walletFundingReservation.id,
-      totalReservedSatang: walletFundingReservation.totalReservedSatang,
-      remainingSatang: walletFundingReservation.remainingSatang,
-      policyRevisionId: walletFundingReservation.policyRevisionId,
-      status: walletFundingReservation.status,
-    })
-    .from(walletFundingReservation)
-    .where(
-      and(
-        eq(walletFundingReservation.ownerUserId, ownerUserId),
-        eq(walletFundingReservation.callerScope, 'quest'),
-        eq(walletFundingReservation.callerReference, questId)
-      )
-    )
-    .limit(1);
-  return (lock ? await query.for('update') : await query)[0];
-};
-
 const lockQuest = async (tx: QuestTransaction, questId: string) =>
   (
     await tx
@@ -308,87 +276,11 @@ const inactiveWorkersChat = async (
   }
 };
 
-const policyFee = async (tx: QuestTransaction, policyRevisionId: string, rewardSatang: number) => {
-  const [policy] = await tx
-    .select({ platformFeeBps: paymentMoneyPolicyRevision.platformFeeBps })
-    .from(paymentMoneyPolicyRevision)
-    .where(eq(paymentMoneyPolicyRevision.id, policyRevisionId));
-  if (!policy)
-    throw new MoneyDomainError(
-      'POLICY_NOT_AVAILABLE',
-      'Funding Reservation Money Policy is missing.'
-    );
-  return calculatePlatformFeeSatang(satang(rewardSatang), policy.platformFeeBps);
-};
-
-const feeForQuest = async (
-  tx: QuestTransaction,
-  current: { platformFeePerWorkerSatang: number | null },
-  reservation: { policyRevisionId: string },
-  rewardSatang: number
-) =>
-  current.platformFeePerWorkerSatang === null
-    ? policyFee(tx, reservation.policyRevisionId, rewardSatang)
-    : satang(current.platformFeePerWorkerSatang);
-
 const requireQuestReward = (rewardSatang: number | null): number => {
   if (rewardSatang === null) {
     throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Quest Reward is missing.');
   }
   return rewardSatang;
-};
-
-const settleWorkers = async (
-  tx: QuestTransaction,
-  ownerUserId: string,
-  reservationId: string,
-  workers: { workerId: string; amountSatang: number }[],
-  feeFor: (amount: number, workerId?: string) => Promise<Satang | 0>,
-  reference: string,
-  platformFeeValidation: 'POLICY' | 'QUEST_ESCROW_SNAPSHOT' = 'POLICY'
-) => {
-  let paid = 0;
-  for (const [index, worker] of workers.entries()) {
-    const amount = positiveSatang(worker.amountSatang);
-    const fee = await feeFor(worker.amountSatang, worker.workerId);
-    await settleFundingReservation(tx, {
-      ownerUserId,
-      reservationId,
-      settlementReference: `${reference}:${index}:${worker.workerId}`,
-      recipientUserId: worker.workerId,
-      recipientAmountSatang: amount,
-      platformFeeSatang: fee || undefined,
-      platformFeeValidation,
-    });
-    paid += worker.amountSatang;
-  }
-  return paid;
-};
-
-const releaseRemaining = async (
-  tx: QuestTransaction,
-  ownerUserId: string,
-  reservationId: string,
-  reference: string
-) => {
-  const [before] = await tx
-    .select({ remainingSatang: walletFundingReservation.remainingSatang })
-    .from(walletFundingReservation)
-    .where(eq(walletFundingReservation.id, reservationId))
-    .limit(1)
-    .for('update');
-  if (!before)
-    throw new MoneyDomainError(
-      'FUNDING_RESERVATION_NOT_FOUND',
-      'Funding Reservation does not exist.'
-    );
-  if (before.remainingSatang === 0) return 0;
-  await releaseFundingReservation(tx, {
-    ownerUserId,
-    reservationId,
-    operationReference: reference,
-  });
-  return before.remainingSatang;
 };
 
 const completeInTransaction = async (
@@ -422,7 +314,7 @@ const completeInTransaction = async (
     await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId));
     return { outcome: 'invalid-state' };
   }
-  const reservation = await reservationFor(tx, current.hirerId, questId);
+  const reservation = await readQuestEscrow(tx, { ownerUserId: current.hirerId, questId });
   // Legacy proof fixtures can reach APPROVED without a published Quest Escrow. A
   // published Quest always has this reservation, and cannot complete without it.
   if (!reservation) {
@@ -435,7 +327,7 @@ const completeInTransaction = async (
     return { outcome: 'invalid-state' };
   }
   const rewardSatang = requireQuestReward(current.rewardSatang);
-  const fee = await feeForQuest(tx, current, reservation, rewardSatang);
+  const fee = await platformFeeForQuest(tx, current, reservation, rewardSatang);
   const expectedEscrow =
     current.questEscrowSatang ?? (rewardSatang + Number(fee)) * current.headcount;
   if (reservation.remainingSatang !== expectedEscrow) {
@@ -444,16 +336,16 @@ const completeInTransaction = async (
       'Quest Escrow does not match the published funding terms.'
     );
   }
-  const paid = await settleWorkers(
+  const payoutWorkers = workers.map(({ workerId }) => ({ workerId, amountSatang: rewardSatang }));
+  const remaining = await settleQuestWorkers(
     tx,
     current.hirerId,
-    reservation.id,
-    workers.map(({ workerId }) => ({ workerId, amountSatang: rewardSatang })),
+    reservation.reservationId,
+    payoutWorkers,
     () => Promise.resolve(fee),
     `quest-complete:${commandId}`
   );
-  const remaining =
-    (await reservationFor(tx, current.hirerId, questId, false))?.remainingSatang ?? 0;
+  const paid = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
   if (remaining !== 0)
     throw new MoneyDomainError(
       'FUNDING_SETTLEMENT_FAILED',
@@ -504,7 +396,7 @@ export const settleApprovedLegacyQuestProofAfterFailureInTransaction = async (
     );
   }
 
-  const reservation = await reservationFor(tx, current.hirerId, questId);
+  const reservation = await readQuestEscrow(tx, { ownerUserId: current.hirerId, questId });
   if (!reservation || reservation.status !== 'ACTIVE') {
     throw new MoneyDomainError('FUNDING_RESERVATION_NOT_FOUND', 'Quest Escrow is not active.');
   }
@@ -581,7 +473,7 @@ export const settleApprovedLegacyQuestProofAfterFailureInTransaction = async (
   }
 
   const rewardSatang = requireQuestReward(current.rewardSatang);
-  const fee = await feeForQuest(tx, current, reservation, rewardSatang);
+  const fee = await platformFeeForQuest(tx, current, reservation, rewardSatang);
   const expectedEscrow =
     current.questEscrowSatang ?? (rewardSatang + Number(fee)) * current.headcount;
   if (reservation.remainingSatang > expectedEscrow) {
@@ -607,10 +499,11 @@ export const settleApprovedLegacyQuestProofAfterFailureInTransaction = async (
         amountSatang: rewardSatang,
       }))
     : [{ workerId: submission.workerId!, amountSatang: rewardSatang }];
-  const paidSatang = await settleWorkers(
+  const paidSatang = workers.reduce((total, { amountSatang }) => total + amountSatang, 0);
+  await settleQuestWorkers(
     tx,
     current.hirerId,
-    reservation.id,
+    reservation.reservationId,
     workers,
     () => Promise.resolve(fee),
     `quest-proof-after-failure:${proofSubmissionId}`
@@ -654,7 +547,7 @@ export const settleProofFreeQuestV2InTransaction = async (
       'The v2 Quest is not ready for completion.'
     );
   }
-  const reservation = await reservationFor(tx, current.hirerId, questId);
+  const reservation = await readQuestEscrow(tx, { ownerUserId: current.hirerId, questId });
   if (!reservation || reservation.status !== 'ACTIVE') {
     throw new MoneyDomainError('FUNDING_RESERVATION_NOT_FOUND', 'Quest Escrow is not active.');
   }
@@ -666,7 +559,7 @@ export const settleProofFreeQuestV2InTransaction = async (
     );
   }
   const rewardSatang = requireQuestReward(current.rewardSatang);
-  const fee = await feeForQuest(tx, current, reservation, rewardSatang);
+  const fee = await platformFeeForQuest(tx, current, reservation, rewardSatang);
   const expectedEscrow =
     current.questEscrowSatang ?? (rewardSatang + Number(fee)) * current.headcount;
   if (completedWorkerId === undefined && reservation.remainingSatang !== expectedEscrow) {
@@ -741,15 +634,7 @@ export const settleProofFreeQuestV2InTransaction = async (
   const payoutFee =
     underfilledConsents.length === 0
       ? fee
-      : satang(
-          Math.floor(underfilledFeePoolSatang / underfilledConsents.length) +
-            (underfilledConsents.findIndex(
-              ({ assignmentId }) => assignmentId === partialWorker!.id
-            ) <
-            underfilledFeePoolSatang % underfilledConsents.length
-              ? 1
-              : 0)
-        );
+      : feeShareSatang(underfilledConsents, underfilledFeePoolSatang, partialWorker!.id);
   let payoutWorkers =
     completedWorkerId === undefined
       ? workers.map(({ workerId }) => ({ workerId, amountSatang: rewardSatang }))
@@ -777,17 +662,17 @@ export const settleProofFreeQuestV2InTransaction = async (
       amountSatang: rewardSatang,
     }));
   }
-  const paid = await settleWorkers(
+  const remaining = await settleQuestWorkers(
     tx,
     current.hirerId,
-    reservation.id,
+    reservation.reservationId,
     payoutWorkers,
     () => Promise.resolve(payoutFee),
     completedWorkerId === undefined
       ? `quest-v2-complete:${questId}`
-      : `quest-v2-complete:${questId}:${completedWorkerId}`,
-    underfilledConsents.length === 0 ? 'POLICY' : 'QUEST_ESCROW_SNAPSHOT'
+      : `quest-v2-complete:${questId}:${completedWorkerId}`
   );
+  const paid = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
   if (completedWorkerId !== undefined) {
     const assignment = partialWorker;
     if (!assignment) {
@@ -818,8 +703,6 @@ export const settleProofFreeQuestV2InTransaction = async (
       return undefined;
     }
   }
-  const remaining =
-    (await reservationFor(tx, current.hirerId, questId, false))?.remainingSatang ?? 0;
   if (remaining !== 0) {
     throw new MoneyDomainError(
       'FUNDING_SETTLEMENT_FAILED',
@@ -876,7 +759,7 @@ export const settleApprovedQuestV2ProofInTransaction = async (
     throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The v2 Quest is not reviewable.');
   }
 
-  const reservation = await reservationFor(tx, current.hirerId, questId);
+  const reservation = await readQuestEscrow(tx, { ownerUserId: current.hirerId, questId });
   if (!reservation || reservation.status !== 'ACTIVE') {
     throw new MoneyDomainError('FUNDING_RESERVATION_NOT_FOUND', 'Quest Escrow is not active.');
   }
@@ -912,7 +795,7 @@ export const settleApprovedQuestV2ProofInTransaction = async (
   }
 
   const rewardSatang = requireQuestReward(current.rewardSatang);
-  const fee = await feeForQuest(tx, current, reservation, rewardSatang);
+  const fee = await platformFeeForQuest(tx, current, reservation, rewardSatang);
   const expectedEscrow =
     current.questEscrowSatang ?? (rewardSatang + Number(fee)) * current.headcount;
   if (reservation.remainingSatang > expectedEscrow) {
@@ -927,7 +810,6 @@ export const settleApprovedQuestV2ProofInTransaction = async (
     current.v2Mode === 'FIRST_COME_FIRST_SERVED' && current.v2Participation === 'GROUP';
   let payoutWorkers: { workerId: string; amountSatang: number }[];
   let payoutFee: Satang | 0 = fee;
-  let platformFeeValidation: 'POLICY' | 'QUEST_ESCROW_SNAPSHOT' = 'POLICY';
   let completedAssignmentIds: string[];
 
   if (groupCandidate) {
@@ -1008,29 +890,22 @@ export const settleApprovedQuestV2ProofInTransaction = async (
           );
         }
         payoutRewardSatang = allocation.rewardSatang;
-        payoutFee = satang(
-          Math.floor(feePoolSatang / underfilledConsents.length) +
-            (underfilledConsents.findIndex(({ assignmentId }) => assignmentId === assignment.id) <
-            feePoolSatang % underfilledConsents.length
-              ? 1
-              : 0)
-        );
-        platformFeeValidation = 'QUEST_ESCROW_SNAPSHOT';
+        payoutFee = feeShareSatang(underfilledConsents, feePoolSatang, assignment.id);
       }
     }
     payoutWorkers = [{ workerId: submission.workerId, amountSatang: payoutRewardSatang }];
     completedAssignmentIds = [assignment.id];
   }
 
-  const paidSatang = await settleWorkers(
+  const remaining = await settleQuestWorkers(
     tx,
     current.hirerId,
-    reservation.id,
+    reservation.reservationId,
     payoutWorkers,
     () => Promise.resolve(payoutFee),
-    `quest-v2-proof-approval:${proofSubmissionId}`,
-    platformFeeValidation
+    `quest-v2-proof-approval:${proofSubmissionId}`
   );
+  const paidSatang = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
   await tx
     .update(questAssignment)
     .set({ assignmentStatus: assignmentStatus.completed })
@@ -1045,8 +920,6 @@ export const settleApprovedQuestV2ProofInTransaction = async (
   if (current.questStatus === questStatus.inProgress) {
     const remainingWorkers = await activeAssignments(tx, questId);
     if (remainingWorkers.length === 0) {
-      const remaining =
-        (await reservationFor(tx, current.hirerId, questId, false))?.remainingSatang ?? 0;
       if (remaining !== 0) {
         throw new MoneyDomainError(
           'FUNDING_SETTLEMENT_FAILED',
@@ -1351,33 +1224,47 @@ const v2UnderfilledAllocations = async (
     );
   }
 
-  const baseFeeSatang = Math.floor(feePoolSatang / consents.length);
-  const feeRemainderSatang = feePoolSatang % consents.length;
+  const feeSatangByIndex = remainderSplitSatang(
+    consents.map(() => Math.floor(feePoolSatang / consents.length)),
+    feePoolSatang
+  );
   return consents.map((consent, index) => ({
     assignmentId: consent.assignmentId,
     workerId: consent.workerId,
     rewardSatang: consent.rewardSatang,
-    feeSatang: baseFeeSatang + (index < feeRemainderSatang ? 1 : 0),
+    feeSatang: feeSatangByIndex[index],
   }));
 };
+
+/** Splits a pool over per-item bases, handing the leftover satang one each to the first items. */
+const remainderSplitSatang = (basesSatang: number[], poolSatang: number) => {
+  const remainderSatang = poolSatang - basesSatang.reduce((sum, base) => sum + base, 0);
+  return basesSatang.map((baseSatang, index) => baseSatang + (index < remainderSatang ? 1 : 0));
+};
+
+/** Gives one Accepted Participant its share of an evenly split Platform Fee pool. */
+const feeShareSatang = (
+  consents: { assignmentId: string }[],
+  poolSatang: number,
+  assignmentId: string
+) =>
+  satang(
+    remainderSplitSatang(
+      consents.map(() => Math.floor(poolSatang / consents.length)),
+      poolSatang
+    )[consents.findIndex((consent) => consent.assignmentId === assignmentId)]
+  );
 
 const scaledCancellationAllocations = (
   allocations: Array<{ workerId: string; amountSatang: number }>,
   rewardPoolSatang: number
-) => {
-  const total = Math.floor((rewardPoolSatang * 20) / 100);
-  const payouts = allocations.map(({ workerId, amountSatang }) => ({
-    workerId,
-    amountSatang: Math.floor((amountSatang * 20) / 100),
-  }));
-  let remainder = total - payouts.reduce((sum, payout) => sum + payout.amountSatang, 0);
-  for (const payout of payouts) {
-    if (remainder <= 0) break;
-    payout.amountSatang += 1;
-    remainder -= 1;
-  }
-  return payouts.filter(({ amountSatang }) => amountSatang > 0);
-};
+) =>
+  remainderSplitSatang(
+    allocations.map(({ amountSatang }) => Math.floor((amountSatang * 20) / 100)),
+    Math.floor((rewardPoolSatang * 20) / 100)
+  )
+    .map((amountSatang, index) => ({ workerId: allocations[index].workerId, amountSatang }))
+    .filter(({ amountSatang }) => amountSatang > 0);
 
 const recordV2CancellationAudit = async (
   tx: QuestTransaction,
@@ -1468,16 +1355,20 @@ const applyV2CancellationInTransaction = async (
     return discard('invalid-state');
   }
 
-  const reservation = await reservationFor(tx, current.hirerId, current.id);
+  const reservation = await readQuestEscrow(tx, {
+    ownerUserId: current.hirerId,
+    questId: current.id,
+  });
   if (
     !reservation ||
     reservation.status !== 'ACTIVE' ||
-    (current.fundingReservationId !== null && current.fundingReservationId !== reservation.id)
+    (current.fundingReservationId !== null &&
+      current.fundingReservationId !== reservation.reservationId)
   ) {
     return discard('invalid-state');
   }
   const rewardSatang = requireQuestReward(current.rewardSatang);
-  const fee = await feeForQuest(tx, current, reservation, rewardSatang);
+  const fee = await platformFeeForQuest(tx, current, reservation, rewardSatang);
   const expectedEscrowSatang =
     current.questEscrowSatang ?? (rewardSatang + Number(fee)) * current.headcount;
   if (!Number.isSafeInteger(expectedEscrowSatang) || expectedEscrowSatang <= 0) {
@@ -1493,10 +1384,10 @@ const applyV2CancellationInTransaction = async (
     current.v2Mode === 'FIRST_COME_FIRST_SERVED' && current.v2Participation === 'GROUP';
   let paidSatang = 0;
   let expectedRemainingSatang = expectedEscrowSatang;
+  let remainingBeforeRelease = reservation.remainingSatang;
   let payoutWorkers: Array<{ workerId: string; amountSatang: number }> = [];
   let payoutFee: (amountSatang: number, workerId?: string) => Promise<Satang | 0> = () =>
     Promise.resolve(fee);
-  let platformFeeValidation: 'POLICY' | 'QUEST_ESCROW_SNAPSHOT' = 'POLICY';
 
   if (current.questStatus === questStatus.assigned) {
     if (workers.length === 0) return discard('invalid-state');
@@ -1537,14 +1428,17 @@ const applyV2CancellationInTransaction = async (
       }
       payoutWorkers = scaledCancellationAllocations(allocations, rewardSatang * current.headcount);
     }
-    paidSatang = await settleWorkers(
-      tx,
-      current.hirerId,
-      reservation.id,
-      payoutWorkers,
-      () => Promise.resolve(0),
-      `quest-v2-cancel:${commandId}`
-    );
+    if (payoutWorkers.length > 0) {
+      remainingBeforeRelease = await settleQuestWorkers(
+        tx,
+        current.hirerId,
+        reservation.reservationId,
+        payoutWorkers,
+        () => Promise.resolve(0),
+        `quest-v2-cancel:${commandId}`
+      );
+    }
+    paidSatang = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
     expectedRemainingSatang -= paidSatang;
   } else if (current.questStatus === questStatus.inProgress) {
     if (workers.length === 0) return discard('invalid-state');
@@ -1589,7 +1483,6 @@ const applyV2CancellationInTransaction = async (
         );
         payoutFee = (_amountSatang, workerId) =>
           Promise.resolve(satang(feeByWorker.get(workerId ?? '') ?? 0));
-        platformFeeValidation = 'QUEST_ESCROW_SNAPSHOT';
       }
     }
     if (reservation.remainingSatang !== expectedRemainingSatang) {
@@ -1598,18 +1491,16 @@ const applyV2CancellationInTransaction = async (
         'Quest Escrow does not match the cancellation payout.'
       );
     }
-    paidSatang = await settleWorkers(
+    remainingBeforeRelease = await settleQuestWorkers(
       tx,
       current.hirerId,
-      reservation.id,
+      reservation.reservationId,
       payoutWorkers,
       payoutFee,
-      `quest-v2-cancel:${commandId}`,
-      platformFeeValidation
+      `quest-v2-cancel:${commandId}`
     );
-    const remainingAfterSettlement = (await reservationFor(tx, current.hirerId, current.id, false))
-      ?.remainingSatang;
-    if (remainingAfterSettlement !== 0) {
+    paidSatang = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
+    if (remainingBeforeRelease !== 0) {
       throw new MoneyDomainError(
         'FUNDING_SETTLEMENT_FAILED',
         'Quest Escrow does not match the cancellation payout.'
@@ -1618,20 +1509,17 @@ const applyV2CancellationInTransaction = async (
     expectedRemainingSatang = 0;
   }
 
-  const beforeRelease = (await reservationFor(tx, current.hirerId, current.id, false))
-    ?.remainingSatang;
-  if (beforeRelease !== expectedRemainingSatang) {
+  if (remainingBeforeRelease !== expectedRemainingSatang) {
     throw new MoneyDomainError(
       'FUNDING_SETTLEMENT_FAILED',
       'Quest Escrow does not match the cancellation payout.'
     );
   }
-  const refundedSatang = await releaseRemaining(
-    tx,
-    current.hirerId,
-    reservation.id,
-    `quest-v2-cancel-release:${commandId}`
-  );
+  const { releasedSatang: refundedSatang } = await releaseQuestEscrow(tx, {
+    ownerUserId: current.hirerId,
+    reservationId: reservation.reservationId,
+    operationReference: `quest-v2-cancel-release:${commandId}`,
+  });
   await tx
     .update(questAssignment)
     .set({ assignmentStatus: assignmentStatus.cancelled })
@@ -1773,7 +1661,7 @@ const cancelInTransaction = async (
     )
   )
     return { outcome: 'invalid-state' };
-  const reservation = await reservationFor(tx, current.hirerId, questId);
+  const reservation = await readQuestEscrow(tx, { ownerUserId: current.hirerId, questId });
   if (!reservation || reservation.status !== 'ACTIVE') return { outcome: 'invalid-state' };
   const workers = await activeAssignments(tx, questId);
   const rewardSatang = requireQuestReward(current.rewardSatang);
@@ -1794,45 +1682,46 @@ const cancelInTransaction = async (
     const twentyPercent = Math.floor((pool * 20) / 100);
     const base = leaderId ? 0 : workers.length > 0 ? Math.floor(twentyPercent / workers.length) : 0;
     const remainder = leaderId ? 0 : workers.length > 0 ? twentyPercent % workers.length : 0;
-    paid = await settleWorkers(
-      tx,
-      current.hirerId,
-      reservation.id,
-      (leaderId
+    const payoutWorkers = (
+      leaderId
         ? [{ workerId: leaderId, amountSatang: twentyPercent }]
         : workers.map(({ workerId }, index) => ({
             workerId,
             amountSatang: base + (index < remainder ? 1 : 0),
           }))
-      ).filter(({ amountSatang }) => amountSatang > 0),
+    ).filter(({ amountSatang }) => amountSatang > 0);
+    paid = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
+    await settleQuestWorkers(
+      tx,
+      current.hirerId,
+      reservation.reservationId,
+      payoutWorkers,
       () => Promise.resolve(0),
       `quest-cancel:${commandId}`
     );
   } else if (current.questStatus === questStatus.inProgress) {
-    const fee = await feeForQuest(tx, current, reservation, rewardSatang);
+    const fee = await platformFeeForQuest(tx, current, reservation, rewardSatang);
     const payoutWorkers = leaderId
       ? Array.from({ length: current.headcount }, () => ({
           workerId: leaderId,
           amountSatang: rewardSatang,
         }))
       : workers.map(({ workerId }) => ({ workerId, amountSatang: rewardSatang }));
-    paid = await settleWorkers(
+    paid = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
+    await settleQuestWorkers(
       tx,
       current.hirerId,
-      reservation.id,
+      reservation.reservationId,
       payoutWorkers,
       () => Promise.resolve(fee),
       `quest-cancel:${commandId}`
     );
   }
-  const beforeRelease =
-    (await reservationFor(tx, current.hirerId, questId, false))?.remainingSatang ?? 0;
-  const releasedAmount = await releaseRemaining(
-    tx,
-    current.hirerId,
-    reservation.id,
-    `quest-cancel-release:${commandId}`
-  );
+  const { releasedSatang } = await releaseQuestEscrow(tx, {
+    ownerUserId: current.hirerId,
+    reservationId: reservation.reservationId,
+    operationReference: `quest-cancel-release:${commandId}`,
+  });
   await tx
     .update(questAssignment)
     .set({ assignmentStatus: assignmentStatus.cancelled })
@@ -1859,7 +1748,7 @@ const cancelInTransaction = async (
     questStatus: questStatus.cancelled,
     outcome: 'CANCELLED',
     paidSatang: paid,
-    refundedSatang: beforeRelease || releasedAmount,
+    refundedSatang: releasedSatang,
   };
 };
 
@@ -1972,19 +1861,18 @@ const autoCancelInTransaction = async (
     return { outcome: 'not-due' };
   }
 
-  const reservation = await reservationFor(tx, current.hirerId, questId);
+  const reservation = await readQuestEscrow(tx, { ownerUserId: current.hirerId, questId });
   if (!reservation || reservation.status !== 'ACTIVE') {
     await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId));
     return { outcome: 'not-due' };
   }
 
   const workers = await activeAssignments(tx, questId);
-  const refunded = await releaseRemaining(
-    tx,
-    current.hirerId,
-    reservation.id,
-    `quest-auto-cancel-release:${questId}`
-  );
+  const { releasedSatang: refunded } = await releaseQuestEscrow(tx, {
+    ownerUserId: current.hirerId,
+    reservationId: reservation.reservationId,
+    operationReference: `quest-auto-cancel-release:${questId}`,
+  });
   await tx
     .update(questAssignment)
     .set({ assignmentStatus: assignmentStatus.cancelled })

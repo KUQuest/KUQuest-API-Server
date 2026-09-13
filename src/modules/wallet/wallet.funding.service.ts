@@ -1,4 +1,5 @@
 import {
+  type FundingReservationStatus,
   paymentMoneyPolicyRevision,
   walletActivity,
   walletDisputeSettlement,
@@ -23,7 +24,7 @@ import {
   satang,
   signedSatang,
 } from './wallet.money';
-import { assertWalletOperationAllowed } from './wallet.status.service';
+import { assertWalletOperationAllowed, isWalletOperationAllowed } from './wallet.status.service';
 import {
   createSealedLedgerTransactionInTransaction,
   ensureWalletInTransaction,
@@ -73,6 +74,22 @@ export type SettleDisputeCaseResult = {
   ledgerTransactionId: string;
   recipientAmountSatang: Satang;
   reservationStatus: 'ACTIVE' | 'RELEASED' | 'SETTLED';
+};
+
+export type ReadFundingReservationInput = {
+  ownerUserId: string;
+  callerScope: string;
+  callerReference: string;
+};
+
+export type FundingCapacityInput = {
+  ownerUserId: string;
+  requiredSatang: Satang;
+};
+
+export type PlatformFeeForReservationInput = {
+  reservationId: string;
+  rewardSatang: number;
 };
 
 const requireOpaqueReference = (value: string, field: string) => {
@@ -249,7 +266,7 @@ const replayFundingOperation = async (transaction: WalletTransaction, idempotenc
     );
   }
 
-  return reservation;
+  return { reservation, operation };
 };
 
 const completeFundingOperation = async (
@@ -300,7 +317,10 @@ export const reserveSpending = async (
     input.callerReference,
     requestHash
   );
-  if (idempotency.resourceId) return replayFundingOperation(transaction, idempotency.id);
+  if (idempotency.resourceId) {
+    const { reservation } = await replayFundingOperation(transaction, idempotency.id);
+    return reservation;
+  }
   if (!created) {
     throw new MoneyDomainError(
       'IDEMPOTENCY_IN_PROGRESS',
@@ -446,7 +466,10 @@ export const increaseFundingReservation = async (
     input.operationReference,
     requestHash
   );
-  if (idempotency.resourceId) return replayFundingOperation(transaction, idempotency.id);
+  if (idempotency.resourceId) {
+    const { reservation } = await replayFundingOperation(transaction, idempotency.id);
+    return reservation;
+  }
   if (!created) {
     throw new MoneyDomainError(
       'IDEMPOTENCY_IN_PROGRESS',
@@ -609,8 +632,32 @@ export const releaseFundingReservation = async (
     input.operationReference,
     requestHash
   );
-  if (idempotency.resourceId) return replayFundingOperation(transaction, idempotency.id);
+  if (idempotency.resourceId) {
+    const { reservation, operation } = await replayFundingOperation(transaction, idempotency.id);
+    return {
+      ...reservation,
+      releasedSatang: satang(operation.operationType === 'RELEASE' ? operation.amountSatang : 0),
+    };
+  }
   if (!created) {
+    if (idempotency.processingStatus === 'COMPLETED') {
+      const [released] = await transaction
+        .select()
+        .from(walletFundingReservation)
+        .where(
+          and(
+            eq(walletFundingReservation.id, input.reservationId),
+            eq(walletFundingReservation.ownerUserId, input.ownerUserId)
+          )
+        );
+      if (!released) {
+        throw new MoneyDomainError(
+          'FUNDING_RESERVATION_NOT_FOUND',
+          'Funding Reservation does not exist.'
+        );
+      }
+      return { ...released, releasedSatang: satang(0) };
+    }
     throw new MoneyDomainError(
       'IDEMPOTENCY_IN_PROGRESS',
       'A Funding Reservation operation is still processing.'
@@ -634,10 +681,11 @@ export const releaseFundingReservation = async (
     );
   }
   if (reservation.status !== 'ACTIVE') {
-    throw new MoneyDomainError(
-      'FUNDING_RESERVATION_NOT_ACTIVE',
-      'Funding Reservation is not active.'
-    );
+    await transaction
+      .update(walletIdempotencyKey)
+      .set({ processingStatus: 'COMPLETED', completedAt: new Date() })
+      .where(eq(walletIdempotencyKey.id, idempotency.id));
+    return { ...reservation, releasedSatang: satang(0) };
   }
 
   const [wallet] = await transaction
@@ -735,7 +783,7 @@ export const releaseFundingReservation = async (
     idempotencyKeyId: idempotency.id,
   });
 
-  return updatedReservation;
+  return { ...updatedReservation, releasedSatang: satang(amountSatang) };
 };
 
 export const settleFundingReservation = async (
@@ -844,7 +892,17 @@ export const settleFundingReservation = async (
         'The idempotent settlement record is missing.'
       );
     }
-    return replayed;
+    const [settled] = await transaction
+      .select({ remainingSatang: walletFundingReservation.remainingSatang })
+      .from(walletFundingReservation)
+      .where(eq(walletFundingReservation.id, replayed.reservationId));
+    if (!settled) {
+      throw new MoneyDomainError(
+        'IDEMPOTENCY_UNAVAILABLE',
+        'The idempotent Funding Reservation is missing.'
+      );
+    }
+    return { ...replayed, remainingSatang: satang(settled.remainingSatang) };
   }
   if (!createdIdempotency) {
     throw new MoneyDomainError(
@@ -1073,7 +1131,7 @@ export const settleFundingReservation = async (
     })
     .where(eq(walletIdempotencyKey.id, idempotency.id));
 
-  return settlement;
+  return { ...settlement, remainingSatang: satang(remainingSatang) };
 };
 
 /**
@@ -1435,4 +1493,88 @@ export const settleDisputeCase = async (
     recipientAmountSatang,
     reservationStatus: reservation.status,
   };
+};
+
+export const readFundingReservation = async (
+  transaction: WalletTransaction,
+  input: ReadFundingReservationInput
+): Promise<
+  | {
+      reservationId: string;
+      status: FundingReservationStatus;
+      remainingSatang: Satang;
+    }
+  | undefined
+> => {
+  const [reservation] = await transaction
+    .select({
+      reservationId: walletFundingReservation.id,
+      status: walletFundingReservation.status,
+      remainingSatang: walletFundingReservation.remainingSatang,
+    })
+    .from(walletFundingReservation)
+    .where(
+      and(
+        eq(walletFundingReservation.ownerUserId, input.ownerUserId),
+        eq(walletFundingReservation.callerScope, input.callerScope),
+        eq(walletFundingReservation.callerReference, input.callerReference)
+      )
+    )
+    .limit(1);
+  if (!reservation) return undefined;
+  return { ...reservation, remainingSatang: satang(reservation.remainingSatang) };
+};
+
+export const fundingCapacityFor = async (
+  transaction: WalletTransaction,
+  input: FundingCapacityInput
+): Promise<{
+  canReserve: boolean;
+  spendingBalanceSatang: Satang;
+  reason?: 'WALLET_NOT_FOUND' | 'WALLET_NOT_ACTIVE' | 'INSUFFICIENT_SPENDING_BALANCE';
+}> => {
+  const [wallet] = await transaction
+    .select({
+      spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+      walletStatus: walletWallet.walletStatus,
+    })
+    .from(walletWallet)
+    .where(eq(walletWallet.userId, input.ownerUserId));
+  if (!wallet) {
+    return { canReserve: false, spendingBalanceSatang: satang(0), reason: 'WALLET_NOT_FOUND' };
+  }
+  if (!isWalletOperationAllowed(wallet.walletStatus, 'FUNDING_RESERVATION')) {
+    return {
+      canReserve: false,
+      spendingBalanceSatang: satang(wallet.spendingBalanceSatang),
+      reason: 'WALLET_NOT_ACTIVE',
+    };
+  }
+  if (wallet.spendingBalanceSatang < input.requiredSatang) {
+    return {
+      canReserve: false,
+      spendingBalanceSatang: satang(wallet.spendingBalanceSatang),
+      reason: 'INSUFFICIENT_SPENDING_BALANCE',
+    };
+  }
+  return { canReserve: true, spendingBalanceSatang: satang(wallet.spendingBalanceSatang) };
+};
+
+export const platformFeeForReservation = async (
+  transaction: WalletTransaction,
+  input: PlatformFeeForReservationInput
+): Promise<Satang> => {
+  const [reservation] = await transaction
+    .select({ policyRevisionId: walletFundingReservation.policyRevisionId })
+    .from(walletFundingReservation)
+    .where(eq(walletFundingReservation.id, input.reservationId))
+    .limit(1);
+  if (!reservation) {
+    throw new MoneyDomainError(
+      'FUNDING_RESERVATION_NOT_FOUND',
+      'Funding Reservation does not exist.'
+    );
+  }
+  const policy = await policyRevisionInTransaction(transaction, reservation.policyRevisionId);
+  return calculatePlatformFeeSatang(satang(input.rewardSatang), policy.platformFeeBps);
 };
