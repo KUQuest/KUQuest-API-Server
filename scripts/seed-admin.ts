@@ -30,7 +30,7 @@ const main = async (): Promise<void> => {
 
   if (!isValidAdminPassword(password)) {
     throw new Error(
-      'ADMIN_PASSWORD must be 8-25 characters with uppercase, lowercase, number, and special character, without whitespace',
+      'ADMIN_PASSWORD must be 8-25 characters with uppercase, lowercase, number, and special character, without whitespace'
     );
   }
 
@@ -43,10 +43,7 @@ const main = async (): Promise<void> => {
       hashtextextended(${firstAdminBootstrapLockName}, 0)
     )`;
 
-    const existingAdmin = await db
-      .select({ email: authAdmin.email })
-      .from(authAdmin)
-      .limit(1);
+    const existingAdmin = await db.select({ email: authAdmin.email }).from(authAdmin).limit(1);
 
     if (existingAdmin.length > 0) {
       const errorMessage =

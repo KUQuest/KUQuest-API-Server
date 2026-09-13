@@ -35,7 +35,8 @@ export const adminFinanceRoute = new Elysia({
     detail: {
       tags: ['Admin Finance'],
       summary: 'Get Quest Financial Audit Trail and Ledger Postings',
-      description: 'Returns the complete money flow (A -> B) and underlying double-entry ledger transactions for one Quest.',
+      description:
+        'Returns the complete money flow (A -> B) and underlying double-entry ledger transactions for one Quest.',
       operationId: 'getAdminQuestFinance',
       security: betterAuthSecurity,
     },
@@ -46,7 +47,8 @@ export const adminFinanceRoute = new Elysia({
     detail: {
       tags: ['Admin Finance'],
       summary: 'List and Filter Double-Entry Ledger Transactions',
-      description: 'Returns paginated ledger transactions with zero-sum balanced verification, filtering by event type, user, or date.',
+      description:
+        'Returns paginated ledger transactions with zero-sum balanced verification, filtering by event type, user, or date.',
       operationId: 'listAdminLedgerTransactions',
       security: betterAuthSecurity,
     },
@@ -56,7 +58,8 @@ export const adminFinanceRoute = new Elysia({
     detail: {
       tags: ['Admin Finance'],
       summary: 'Get Platform Financial Overview and Subledger Balance Sheet',
-      description: 'Returns total platform revenue, escrow in transit, circulating member balances, lifetime volume, and subledger zero-sum integrity.',
+      description:
+        'Returns total platform revenue, escrow in transit, circulating member balances, lifetime volume, and subledger zero-sum integrity.',
       operationId: 'getAdminFinanceOverview',
       security: betterAuthSecurity,
     },
@@ -67,7 +70,8 @@ export const adminFinanceRoute = new Elysia({
     detail: {
       tags: ['Admin Finance'],
       summary: 'Get Member Financial Profile and Wallet Audit',
-      description: 'Returns a member wallet balances, projection reconciliation status, lifetime financial statistics, and active reservations.',
+      description:
+        'Returns a member wallet balances, projection reconciliation status, lifetime financial statistics, and active reservations.',
       operationId: 'getAdminMemberFinanceProfile',
       security: betterAuthSecurity,
     },
@@ -77,7 +81,8 @@ export const adminFinanceRoute = new Elysia({
     detail: {
       tags: ['Admin Finance'],
       summary: 'Get Current Effective Money Policy',
-      description: 'Returns the active platform fee, limits, and quote settings for Admin UI policies view.',
+      description:
+        'Returns the active platform fee, limits, and quote settings for Admin UI policies view.',
       operationId: 'getCurrentMoneyPolicy',
       security: betterAuthSecurity,
     },

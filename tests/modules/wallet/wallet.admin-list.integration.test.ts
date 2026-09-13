@@ -24,11 +24,13 @@ const testStudentId = String(Math.floor(1000000000 + Math.random() * 9000000000)
 let testWalletId = '';
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
-const creditBalances = async (userId: string, spendingSatang: number, earningsSatang: number): Promise<void> => {
+const creditBalances = async (
+  userId: string,
+  spendingSatang: number,
+  earningsSatang: number
+): Promise<void> => {
   const accounts = await db
     .select({ id: walletLedgerAccount.id, type: walletLedgerAccount.type })
     .from(walletLedgerAccount)
@@ -100,7 +102,7 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-    }),
+    })
   );
   if (adminLogin.status !== 200) throw new Error('Admin login failed');
   adminCookie = getCookieHeader(adminLogin);
@@ -123,7 +125,7 @@ describe('Admin Wallet Directory Integration Tests', () => {
       const res = await app.handle(
         new Request(`http://localhost/api/v1/admin/wallets?userId=${testUserId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(200);
       const json = await res.json();
@@ -148,7 +150,7 @@ describe('Admin Wallet Directory Integration Tests', () => {
       const res = await app.handle(
         new Request(`http://localhost/api/v1/admin/wallets?search=${testStudentId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(200);
       const json = await res.json();
@@ -161,7 +163,7 @@ describe('Admin Wallet Directory Integration Tests', () => {
       const res = await app.handle(
         new Request('http://localhost/api/v1/admin/wallets?status=ACTIVE&limit=5', {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(200);
       const json = await res.json();
@@ -174,7 +176,9 @@ describe('Admin Wallet Directory Integration Tests', () => {
 
   describe('GET /api/v1/admin/wallets/:walletId', () => {
     it('rejects unauthenticated caller with 401', async () => {
-      const res = await app.handle(new Request(`http://localhost/api/v1/admin/wallets/${testWalletId}`));
+      const res = await app.handle(
+        new Request(`http://localhost/api/v1/admin/wallets/${testWalletId}`)
+      );
       expect(res.status).toBe(401);
     });
 
@@ -183,7 +187,7 @@ describe('Admin Wallet Directory Integration Tests', () => {
       const res = await app.handle(
         new Request(`http://localhost/api/v1/admin/wallets/${nonExistentId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(404);
       const json = await res.json();
@@ -195,7 +199,7 @@ describe('Admin Wallet Directory Integration Tests', () => {
       const res = await app.handle(
         new Request(`http://localhost/api/v1/admin/wallets/${testWalletId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(200);
       const json = await res.json();

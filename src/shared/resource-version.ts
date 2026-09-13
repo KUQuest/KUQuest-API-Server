@@ -1,6 +1,5 @@
 export type ResourceVersion =
-  | { value: number | undefined; invalid: false }
-  | { value: undefined; invalid: true };
+  { value: number | undefined; invalid: false } | { value: undefined; invalid: true };
 
 export const readResourceVersion = (request?: Request): ResourceVersion => {
   const raw = request?.headers.get('if-match') ?? request?.headers.get('x-resource-version');

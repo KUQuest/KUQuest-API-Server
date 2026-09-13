@@ -37,8 +37,13 @@ import { and, eq } from 'drizzle-orm';
 
 const testAmountSatang = positiveSatang(100);
 const waitTimeoutMs = 90_000;
-const webhookBaseUrl = (process.env.XENDIT_TEST_WEBHOOK_BASE_URL ?? 'https://webhook-test.kubits.org').replace(/\/+$/, '');
-const xenditBaseUrl = (process.env.XENDIT_API_BASE_URL ?? 'https://api.xendit.co').replace(/\/+$/, '');
+const webhookBaseUrl = (
+  process.env.XENDIT_TEST_WEBHOOK_BASE_URL ?? 'https://webhook-test.kubits.org'
+).replace(/\/+$/, '');
+const xenditBaseUrl = (process.env.XENDIT_API_BASE_URL ?? 'https://api.xendit.co').replace(
+  /\/+$/,
+  ''
+);
 const xenditPaymentApiVersion = process.env.XENDIT_API_VERSION ?? '2024-11-11';
 const payoutBankCode = process.env.XENDIT_TEST_PAYOUT_BANK_CODE ?? 'SCB';
 const payoutAccountNumber = process.env.XENDIT_TEST_PAYOUT_ACCOUNT_NUMBER ?? '1234567890';
@@ -59,22 +64,28 @@ const errorMessage = (error: unknown): string => {
 const requireSafeTestConfiguration = () => {
   assert(
     process.env.RUN_REAL_XENDIT_TESTS === 'true',
-    'Refusing to run. Set RUN_REAL_XENDIT_TESTS=true for an explicit local Test Mode run.',
+    'Refusing to run. Set RUN_REAL_XENDIT_TESTS=true for an explicit local Test Mode run.'
   );
   assert(
     env.nodeEnv === 'development' && env.deploymentEnv === 'development',
-    'Refusing to run outside NODE_ENV=development and DEPLOYMENT_ENV=development.',
+    'Refusing to run outside NODE_ENV=development and DEPLOYMENT_ENV=development.'
   );
   assert(
     env.xenditSecretKey?.startsWith('xnd_development_'),
-    'Refusing to run because XENDIT_SECRET_KEY is not an Xendit Development API key.',
+    'Refusing to run because XENDIT_SECRET_KEY is not an Xendit Development API key.'
   );
   assert(env.xenditWebhookToken, 'XENDIT_WEBHOOK_TOKEN is required.');
-  assert(env.paymentProviderEventEncryptionKey, 'PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY is required.');
+  assert(
+    env.paymentProviderEventEncryptionKey,
+    'PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY is required.'
+  );
   assert(env.payoutDestinationEncryptionKey, 'PAYOUT_DESTINATION_ENCRYPTION_KEY is required.');
 };
 
-const waitForProviderEvent = async (resourceType: 'TOP_UP' | 'PAYOUT', internalReference: string) => {
+const waitForProviderEvent = async (
+  resourceType: 'TOP_UP' | 'PAYOUT',
+  internalReference: string
+) => {
   const deadline = Date.now() + waitTimeoutMs;
   let nextProgressAt = Date.now() + 10_000;
   while (Date.now() < deadline) {
@@ -83,10 +94,12 @@ const waitForProviderEvent = async (resourceType: 'TOP_UP' | 'PAYOUT', internalR
     const [event] = await db
       .select()
       .from(paymentProviderEventInbox)
-      .where(and(
-        eq(paymentProviderEventInbox.resourceType, resourceType),
-        eq(paymentProviderEventInbox.internalReference, internalReference),
-      ))
+      .where(
+        and(
+          eq(paymentProviderEventInbox.resourceType, resourceType),
+          eq(paymentProviderEventInbox.internalReference, internalReference)
+        )
+      )
       .limit(1);
     if (event) return event;
 
@@ -97,7 +110,9 @@ const waitForProviderEvent = async (resourceType: 'TOP_UP' | 'PAYOUT', internalR
     // eslint-disable-next-line no-await-in-loop
     await Bun.sleep(1_000);
   }
-  throw new Error(`${resourceType} webhook was not stored within ${waitTimeoutMs / 1_000} seconds.`);
+  throw new Error(
+    `${resourceType} webhook was not stored within ${waitTimeoutMs / 1_000} seconds.`
+  );
 };
 
 const providerErrorPayload = async (response: Response) => {
@@ -110,27 +125,33 @@ const providerErrorPayload = async (response: Response) => {
   } catch {
     payload = null;
   }
-  const code = typeof payload?.error_code === 'string'
-    ? payload.error_code
-    : typeof payload?.code === 'string'
-      ? payload.code
-      : undefined;
+  const code =
+    typeof payload?.error_code === 'string'
+      ? payload.error_code
+      : typeof payload?.code === 'string'
+        ? payload.code
+        : undefined;
   const message = typeof payload?.message === 'string' ? payload.message : 'No provider message.';
   return code ? `${code}: ${message}` : message;
 };
 
 const simulatePayment = async (paymentRequestId: string, amountSatang: number) => {
-  const response = await fetch(`${xenditBaseUrl}/v3/payment_requests/${encodeURIComponent(paymentRequestId)}/simulate`, {
-    method: 'POST',
-    headers: {
-      authorization: `Basic ${btoa(`${env.xenditSecretKey}:`)}`,
-      'content-type': 'application/json',
-      'api-version': xenditPaymentApiVersion,
-    },
-    body: JSON.stringify({ amount: amountSatang / 100 }),
-  });
+  const response = await fetch(
+    `${xenditBaseUrl}/v3/payment_requests/${encodeURIComponent(paymentRequestId)}/simulate`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Basic ${btoa(`${env.xenditSecretKey}:`)}`,
+        'content-type': 'application/json',
+        'api-version': xenditPaymentApiVersion,
+      },
+      body: JSON.stringify({ amount: amountSatang / 100 }),
+    }
+  );
   if (!response.ok) {
-    throw new Error(`Xendit payment simulation failed with HTTP ${response.status}: ${await providerErrorPayload(response)}`);
+    throw new Error(
+      `Xendit payment simulation failed with HTTP ${response.status}: ${await providerErrorPayload(response)}`
+    );
   }
 };
 
@@ -183,7 +204,10 @@ const runInternalLedgerTest = async (userId: string, walletId: string, runId: st
 
   const wallet = await getWallet(userId);
   const projection = await verifyWalletProjection(walletId);
-  assert(wallet.earningsBalanceSatang === 10_000, 'Internal Ledger transaction did not update Earnings Balance.');
+  assert(
+    wallet.earningsBalanceSatang === 10_000,
+    'Internal Ledger transaction did not update Earnings Balance.'
+  );
   assert(projection.matches, 'Wallet projection does not match the sealed Ledger.');
   return `sealed ${ledger.id}; Earnings Balance = 10,000 satang`;
 };
@@ -193,11 +217,14 @@ const runPaymentTest = async (userId: string, runId: string) => {
     principalUserId: userId,
     creditSatang: testAmountSatang,
   });
-  const topUp = await initiateTopUp({
-    principalUserId: userId,
-    quoteId: quote.id,
-    idempotency: { key: `local-xendit-payment:${runId}` },
-  }, new XenditPromptPayProvider());
+  const topUp = await initiateTopUp(
+    {
+      principalUserId: userId,
+      quoteId: quote.id,
+      idempotency: { key: `local-xendit-payment:${runId}` },
+    },
+    new XenditPromptPayProvider()
+  );
   assert(topUp.providerReference, 'Xendit did not return a payment request reference.');
 
   await simulatePayment(topUp.providerReference, topUp.paymentTotalSatang);
@@ -208,23 +235,29 @@ const runPaymentTest = async (userId: string, runId: string) => {
   const wallet = await getWallet(userId);
   assert(completed.topUpStatus === 'PAID', `Top-up ended in ${completed.topUpStatus}, not PAID.`);
   assert(completed.creditedLedgerTransactionId, 'Paid Top-up has no credit Ledger transaction.');
-  assert(wallet.spendingBalanceSatang === 100, 'Paid Top-up did not credit 100 satang to Spending Balance.');
+  assert(
+    wallet.spendingBalanceSatang === 100,
+    'Paid Top-up did not credit 100 satang to Spending Balance.'
+  );
   return `Xendit payment ${topUp.providerReference}; Top-up PAID; Spending Balance = 100 satang`;
 };
 
 const runPayoutTest = async (userId: string, adminId: string, runId: string) => {
   const encryption = createPayoutDestinationEncryption();
-  await savePayoutDestination({
-    principalUserId: userId,
-    givenName: 'Local Xendit',
-    surname: 'Test',
-    relationship: 'SELF',
-    bankCode: payoutBankCode,
-    accountNumber: payoutAccountNumber,
-    accountHolderName: 'Local Xendit Test',
-    routingType: 'BANK_ACCOUNT',
-    routingValue: payoutAccountNumber,
-  }, encryption);
+  await savePayoutDestination(
+    {
+      principalUserId: userId,
+      givenName: 'Local Xendit',
+      surname: 'Test',
+      relationship: 'SELF',
+      bankCode: payoutBankCode,
+      accountNumber: payoutAccountNumber,
+      accountHolderName: 'Local Xendit Test',
+      routingType: 'BANK_ACCOUNT',
+      routingValue: payoutAccountNumber,
+    },
+    encryption
+  );
 
   const quote = await quotePayout({
     principalUserId: userId,
@@ -235,7 +268,10 @@ const runPayoutTest = async (userId: string, adminId: string, runId: string) => 
     quoteId: quote.id,
     idempotency: { key: `local-xendit-payout:${runId}` },
   });
-  assert(payout.payoutStatus === 'PENDING_ADMIN_APPROVAL', 'Payout did not enter the Admin approval queue.');
+  assert(
+    payout.payoutStatus === 'PENDING_ADMIN_APPROVAL',
+    'Payout did not enter the Admin approval queue.'
+  );
 
   const approved = await approvePayout({
     adminId,
@@ -244,13 +280,12 @@ const runPayoutTest = async (userId: string, adminId: string, runId: string) => 
     expectedVersion: payout.version,
     reasonCode: 'PAYOUT_POLICY_REVIEW',
   });
-  assert(approved.resourceVersion === payout.version + 1, 'Admin approval did not advance the Payout version.');
-
-  const submitted = await processApprovedPayout(
-    payout.id,
-    new XenditPayoutProvider(),
-    encryption,
+  assert(
+    approved.resourceVersion === payout.version + 1,
+    'Admin approval did not advance the Payout version.'
   );
+
+  const submitted = await processApprovedPayout(payout.id, new XenditPayoutProvider(), encryption);
   assert(submitted.providerReference, 'Xendit did not return a Payout reference.');
 
   const event = await waitForProviderEvent('PAYOUT', payout.internalReference);
@@ -258,9 +293,15 @@ const runPayoutTest = async (userId: string, adminId: string, runId: string) => 
 
   const completed = await getPayout(userId, payout.id);
   const wallet = await getWallet(userId);
-  assert(completed.payoutStatus === 'SUCCEEDED', `Payout ended in ${completed.payoutStatus}, not SUCCEEDED.`);
+  assert(
+    completed.payoutStatus === 'SUCCEEDED',
+    `Payout ended in ${completed.payoutStatus}, not SUCCEEDED.`
+  );
   assert(completed.finalLedgerTransactionId, 'Succeeded Payout has no final Ledger transaction.');
-  assert(wallet.reservedForPayoutsSatang === 0, 'Succeeded Payout did not release the Payout Reserve.');
+  assert(
+    wallet.reservedForPayoutsSatang === 0,
+    'Succeeded Payout did not release the Payout Reserve.'
+  );
   return `Xendit Payout ${completed.providerReference}; Payout SUCCEEDED; Payout Reserve = 0 satang`;
 };
 

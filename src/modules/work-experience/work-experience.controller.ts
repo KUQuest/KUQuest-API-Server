@@ -79,7 +79,7 @@ export const updateOwnWorkExperience = async ({
     session.user.id,
     params.experienceId,
     body,
-    versionHeader.value,
+    versionHeader.value
   );
 
   if (!experience) return notFound(set);
@@ -107,7 +107,7 @@ export const deleteOwnWorkExperience = async ({
   const deleted = await deleteWorkExperience(
     session.user.id,
     params.experienceId,
-    versionHeader.value,
+    versionHeader.value
   );
 
   if (!deleted) return notFound(set);

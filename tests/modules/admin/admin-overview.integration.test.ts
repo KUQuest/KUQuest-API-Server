@@ -1,19 +1,9 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
-import {
-  adminDisputeCase,
-  adminReviewItem,
-} from '@/database/schema/admin.schema';
+import { adminDisputeCase, adminReviewItem } from '@/database/schema/admin.schema';
 import { authAccount, authAdmin, authSession, authUser } from '@/database/schema/auth.schema';
-import {
-  quest,
-  questAssignment,
-  questV2ProofSubmission,
-} from '@/database/schema/quest.schema';
-import {
-  paymentPayoutAccounts,
-  paymentPayouts,
-} from '@/database/schema/payment.schema';
+import { quest, questAssignment, questV2ProofSubmission } from '@/database/schema/quest.schema';
+import { paymentPayoutAccounts, paymentPayouts } from '@/database/schema/payment.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
 import {
@@ -52,7 +42,7 @@ const memberAuthApp = new Elysia({ name: 'admin-overview-member-auth' }).use(
     password: memberPassword,
     firstName: 'Overview',
     lastName: 'Member',
-  }),
+  })
 );
 
 let adminId = '';
@@ -67,19 +57,20 @@ const payoutEncryption = createPayoutDestinationEncryption({
 });
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
-const overviewRequest = (cookie?: string) => app.handle(new Request(
-  'http://localhost/api/v1/admin/overview',
-  cookie ? { headers: { cookie } } : undefined,
-));
+const overviewRequest = (cookie?: string) =>
+  app.handle(
+    new Request(
+      'http://localhost/api/v1/admin/overview',
+      cookie ? { headers: { cookie } } : undefined
+    )
+  );
 
 const readOverview = async (): Promise<AdminOverviewData> => {
   const response = await overviewRequest(adminCookie);
   expect(response.status).toBe(200);
-  return (await response.json() as { data: AdminOverviewData }).data;
+  return ((await response.json()) as { data: AdminOverviewData }).data;
 };
 
 const waitForOverviewQueryToBlock = async (attempt = 0): Promise<void> => {
@@ -147,7 +138,8 @@ const creditEarnings = async (userId: string, amountSatang: number): Promise<str
 };
 
 const seedPayout = async (
-  payoutStatus: 'PENDING_ADMIN_APPROVAL' | 'SUBMITTED_TO_PROVIDER' | 'PROVIDER_PENDING' | 'SUCCEEDED',
+  payoutStatus:
+    'PENDING_ADMIN_APPROVAL' | 'SUBMITTED_TO_PROVIDER' | 'PROVIDER_PENDING' | 'SUCCEEDED'
 ): Promise<void> => {
   const userId = crypto.randomUUID();
   await db.insert(authUser).values({
@@ -157,17 +149,20 @@ const seedPayout = async (
     lastName: 'Member',
   });
   await ensureWallet(userId);
-  await savePayoutDestination({
-    principalUserId: userId,
-    givenName: 'Payout',
-    surname: 'Member',
-    relationship: 'SELF',
-    bankCode: 'SCB',
-    accountNumber: '1234567890',
-    accountHolderName: 'Payout Member',
-    routingType: 'BANK_ACCOUNT',
-    routingValue: '1234567890',
-  }, payoutEncryption);
+  await savePayoutDestination(
+    {
+      principalUserId: userId,
+      givenName: 'Payout',
+      surname: 'Member',
+      relationship: 'SELF',
+      bankCode: 'SCB',
+      accountNumber: '1234567890',
+      accountHolderName: 'Payout Member',
+      routingType: 'BANK_ACCOUNT',
+      routingValue: '1234567890',
+    },
+    payoutEncryption
+  );
   const reserveLedgerTransactionId = await creditEarnings(userId, 10_000);
   const quote = await quotePayout({
     principalUserId: userId,
@@ -247,10 +242,7 @@ const seedPayout = async (
     )
   `;
   if (payoutStatus !== 'PENDING_ADMIN_APPROVAL') {
-    await db
-      .update(paymentPayouts)
-      .set({ payoutStatus })
-      .where(eq(paymentPayouts.id, payoutId));
+    await db.update(paymentPayouts).set({ payoutStatus }).where(eq(paymentPayouts.id, payoutId));
   }
 };
 
@@ -282,25 +274,25 @@ beforeAll(async () => {
   });
   adminId = signUp.user.id;
 
-  const adminLogin = await app.handle(new Request('http://localhost/api/admin/auth/sign-in/email', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-  }));
+  const adminLogin = await app.handle(
+    new Request('http://localhost/api/admin/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail, password: adminPassword }),
+    })
+  );
   if (adminLogin.status !== 200) throw new Error('Overview Admin session was not created.');
   adminCookie = getCookieHeader(adminLogin);
 
-  const memberLogin = await memberAuthApp.handle(new Request(
-    'http://localhost/api/staging/test-auth/sign-in/email',
-    {
+  const memberLogin = await memberAuthApp.handle(
+    new Request('http://localhost/api/staging/test-auth/sign-in/email', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: memberEmail, password: memberPassword }),
-    },
-  ));
+    })
+  );
   if (memberLogin.status !== 200) throw new Error('Overview Member session was not created.');
   memberCookie = getCookieHeader(memberLogin);
-
 });
 
 afterAll(async () => {
@@ -348,14 +340,21 @@ describe('Admin Overview API', () => {
 
   it('publishes the Overview path under the versioned Admin boundary', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
-    const document = await response.json() as {
-      paths: Record<string, Record<string, { operationId?: string; responses?: Record<string, unknown> }> >;
+    const document = (await response.json()) as {
+      paths: Record<
+        string,
+        Record<string, { operationId?: string; responses?: Record<string, unknown> }>
+      >;
     };
 
     expect(response.status).toBe(200);
     expect(document.paths['/api/v1/admin/overview']?.get).toMatchObject({
       operationId: 'getAdminOverview',
-      responses: expect.objectContaining({ '200': expect.anything(), '401': expect.anything(), '403': expect.anything() }),
+      responses: expect.objectContaining({
+        '200': expect.anything(),
+        '401': expect.anything(),
+        '403': expect.anything(),
+      }),
     });
   });
 
@@ -532,11 +531,13 @@ describe('Admin Overview API', () => {
     }
     const duringCommitResponse = await duringCommit;
     expect(duringCommitResponse.status).toBe(200);
-    const duringCommitData = await duringCommitResponse.json() as { data: AdminOverviewData };
+    const duringCommitData = (await duringCommitResponse.json()) as { data: AdminOverviewData };
     await writer;
 
     expect(duringCommitData.data.quests.byState.QUEST_OPEN).toBe(before.quests.byState.QUEST_OPEN);
-    expect(duringCommitData.data.quests.byState.QUEST_CANCELLED).toBe(before.quests.byState.QUEST_CANCELLED);
+    expect(duringCommitData.data.quests.byState.QUEST_CANCELLED).toBe(
+      before.quests.byState.QUEST_CANCELLED
+    );
     expect(duringCommitData.data.members.frozenWallets).toBe(before.members.frozenWallets);
     expect(duringCommitData.data.members.suspendedWallets).toBe(before.members.suspendedWallets);
 

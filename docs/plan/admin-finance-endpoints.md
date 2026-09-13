@@ -31,6 +31,7 @@ This document defines the accepted target endpoints, request/response models, da
 ## 3. Detailed Endpoint Contracts
 
 ### 3.1 `GET /api/v1/admin/finance/quests/:questId`
+
 Audits the complete money flow and ledger transactions for a single Quest.
 
 - **URL Parameters**:
@@ -53,6 +54,7 @@ Audits the complete money flow and ledger transactions for a single Quest.
     - `postings`: `accountId`, `accountType`, `walletId`, `ownerUserId`, `amountSatang`.
 
 ### 3.2 `GET /api/v1/admin/finance/ledger/transactions`
+
 General ledger transaction query and pagination for system auditability.
 
 - **Query Parameters**:
@@ -72,6 +74,7 @@ General ledger transaction query and pagination for system auditability.
   - `nextCursor`: Next pagination cursor or `null`.
 
 ### 3.3 `GET /api/v1/admin/finance/overview`
+
 Platform-level financial metrics and subledger balance sheet.
 
 - **Data Returned**:
@@ -94,6 +97,7 @@ Platform-level financial metrics and subledger balance sheet.
     - `lastAuditedAt`: ISO8601 timestamp.
 
 ### 3.4 `GET /api/v1/admin/finance/members/:userId`
+
 Audits an individual Member's financial positions, lifetime volume, and active holds.
 
 - **URL Parameters**:
@@ -111,6 +115,7 @@ Audits an individual Member's financial positions, lifetime volume, and active h
     - Array of active holds (`id`, `callerReference`, `totalReservedSatang`, `remainingSatang`, `createdAt`).
 
 ### 3.5 `GET /api/v1/admin/top-ups`
+
 Exposes the list of inbound PromptPay top-ups for Admin audit and reconciliation.
 
 - **Query Parameters**:

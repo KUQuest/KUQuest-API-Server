@@ -16,9 +16,12 @@ export const walletResponseSchema = t.Object({
   }),
 });
 
-export const earningsConversionCreateSchema = t.Object({
-  amountSatang: t.Integer({ minimum: 1 }),
-}, { additionalProperties: false });
+export const earningsConversionCreateSchema = t.Object(
+  {
+    amountSatang: t.Integer({ minimum: 1 }),
+  },
+  { additionalProperties: false }
+);
 
 export const earningsConversionHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),

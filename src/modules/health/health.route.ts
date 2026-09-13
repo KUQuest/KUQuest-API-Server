@@ -24,5 +24,5 @@ export const healthRoute = new Elysia({
       operationId: 'getHealth',
     },
     response: responses(healthResponseSchema),
-  },
+  }
 );

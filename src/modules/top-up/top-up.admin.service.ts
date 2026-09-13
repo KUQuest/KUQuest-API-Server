@@ -5,10 +5,7 @@ import { decodeCursor, encodeCursor } from '@/shared/cursor';
 
 import { and, desc, eq, lt, or } from 'drizzle-orm';
 
-import type {
-  AdminTopUpListItem,
-  AdminTopUpListQuery,
-} from './top-up.admin.schema';
+import type { AdminTopUpListItem, AdminTopUpListQuery } from './top-up.admin.schema';
 
 export type AdminTopUpListPage = {
   items: AdminTopUpListItem[];
@@ -16,7 +13,7 @@ export type AdminTopUpListPage = {
 };
 
 export const listAdminTopUps = async (
-  query: AdminTopUpListQuery = {},
+  query: AdminTopUpListQuery = {}
 ): Promise<AdminTopUpListPage> => {
   const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
   const conditions = [];
@@ -35,11 +32,8 @@ export const listAdminTopUps = async (
       conditions.push(
         or(
           lt(paymentTopUps.createdAt, cursorDate),
-          and(
-            eq(paymentTopUps.createdAt, cursorDate),
-            lt(paymentTopUps.id, parsed.id),
-          ),
-        ),
+          and(eq(paymentTopUps.createdAt, cursorDate), lt(paymentTopUps.id, parsed.id))
+        )
       );
     }
   }

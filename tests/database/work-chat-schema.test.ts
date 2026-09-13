@@ -21,8 +21,14 @@ describe('Work Chat database schema', () => {
     expect(columns.candidateWorkerId.name).toBe('candidate_worker_id');
     const config = getTableConfig(chatConversation);
     expect(config.uniqueConstraints).toHaveLength(0);
-    expect(config.indexes.some((index) => index.config.name === 'chat_conversation_work_quest_uidx')).toBe(true);
-    expect(config.indexes.some((index) => index.config.name === 'chat_conversation_candidate_worker_uidx')).toBe(true);
+    expect(
+      config.indexes.some((index) => index.config.name === 'chat_conversation_work_quest_uidx')
+    ).toBe(true);
+    expect(
+      config.indexes.some(
+        (index) => index.config.name === 'chat_conversation_candidate_worker_uidx'
+      )
+    ).toBe(true);
     expect(config.foreignKeys).toHaveLength(2);
   });
 
@@ -34,7 +40,11 @@ describe('Work Chat database schema', () => {
     expect(columns.joinedAt.name).toBe('joined_at');
     expect(columns.leftAt.name).toBe('left_at');
     expect(config.foreignKeys).toHaveLength(3);
-    expect(config.indexes.some((index) => index.config.name === 'chat_membership_one_active_prospective_worker_uidx')).toBe(true);
+    expect(
+      config.indexes.some(
+        (index) => index.config.name === 'chat_membership_one_active_prospective_worker_uidx'
+      )
+    ).toBe(true);
   });
 
   it('keeps System Message event identity and transition command identity durable', () => {

@@ -117,14 +117,14 @@ The handler must retain the exact raw request bytes before JSON parsing.
 
 ### Response policy
 
-| Condition | Response |
-|---|---:|
-| Signature invalid or missing | `401` |
-| Timestamp invalid or outside replay window | `401` |
-| Malformed JSON or unsupported schema | `400` |
-| Verified delivery durably persisted | `200` |
-| Verified duplicate delivery already persisted | `200` |
-| Temporary failure before durable persistence | `500` |
+| Condition                                     | Response |
+| --------------------------------------------- | -------: |
+| Signature invalid or missing                  |    `401` |
+| Timestamp invalid or outside replay window    |    `401` |
+| Malformed JSON or unsupported schema          |    `400` |
+| Verified delivery durably persisted           |    `200` |
+| Verified duplicate delivery already persisted |    `200` |
+| Temporary failure before durable persistence  |    `500` |
 
 The endpoint must not wait for GitHub lookups or Linear issue creation before responding. Those actions belong in a durable asynchronous processor.
 
@@ -311,23 +311,24 @@ Recommended reason codes:
 
 Create the issue in the configured Tester/QA team with:
 
-| Field | Source |
-|---|---|
-| Title | `Verify: <source title>` |
-| Team | Tester/QA UUID from configuration |
-| Initial state | QA team's configured unstarted state |
-| Project | Same project as source issue |
-| Milestone | Same milestone as source issue when supported |
-| Priority | Same priority as source issue |
-| Estimate | None |
-| Labels | `Role/Verification` plus inherited configured `Surface/*` labels; never `QA Policy/*` |
-| Assignee | Unassigned or configured QA routing policy |
-| Due date | Exact copy of source due date |
+| Field         | Source                                                                                |
+| ------------- | ------------------------------------------------------------------------------------- |
+| Title         | `Verify: <source title>`                                                              |
+| Team          | Tester/QA UUID from configuration                                                     |
+| Initial state | QA team's configured unstarted state                                                  |
+| Project       | Same project as source issue                                                          |
+| Milestone     | Same milestone as source issue when supported                                         |
+| Priority      | Same priority as source issue                                                         |
+| Estimate      | None                                                                                  |
+| Labels        | `Role/Verification` plus inherited configured `Surface/*` labels; never `QA Policy/*` |
+| Assignee      | Unassigned or configured QA routing policy                                            |
+| Due date      | Exact copy of source due date                                                         |
 
 The description must include:
 
 ```markdown
 ## Source
+
 - Implementation issue: <identifier and URL>
 - Source UUID: `<uuid>`
 - Pull request: <URL>
@@ -336,15 +337,18 @@ The description must include:
 - Milestone: <milestone>
 
 ## QA Brief
+
 <canonical brief copied verbatim or through a lossless structured rendering>
 
 ## Execution
+
 - Tester:
 - Environment:
 - Started at:
 - Result: Pending
 
 ## Result policy
+
 - Pass: move this round to configured `Passed` Completed-category status.
 - Fail: record evidence and move this round to configured `Failed` Completed-category status.
 - Blocked: move this round to configured active `Blocked` status; do not complete it.

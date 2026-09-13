@@ -3,16 +3,9 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const migrationCheckScript = join(
-  import.meta.dir,
-  '../../scripts/check-migrations.ts',
-);
+const migrationCheckScript = join(import.meta.dir, '../../scripts/check-migrations.ts');
 
-const run = (
-  command: string[],
-  cwd: string,
-  env: Record<string, string> = {},
-) =>
+const run = (command: string[], cwd: string, env: Record<string, string> = {}) =>
   Bun.spawnSync(command, {
     cwd,
     env: { ...process.env, ...env },
@@ -31,7 +24,7 @@ const initializeFixture = async () => {
       scripts: {
         'db:generate': 'bun fixture-generate.ts',
       },
-    }),
+    })
   );
   await writeFile(join(directory, 'fixture-generate.ts'), '');
   await writeFile(join(directory, 'drizzle/0000_initial.sql'), 'SELECT 1;\n');
@@ -43,7 +36,7 @@ const initializeFixture = async () => {
         { idx: 0, tag: '0000_initial' },
         { idx: 1, tag: '0001_second' },
       ],
-    }),
+    })
   );
 
   run(['git', 'init', '--quiet'], directory);
@@ -52,9 +45,7 @@ const initializeFixture = async () => {
   run(['git', 'add', '.'], directory);
   run(['git', 'commit', '--quiet', '-m', 'initial migration'], directory);
 
-  const base = run(['git', 'rev-parse', 'HEAD'], directory)
-    .stdout.toString()
-    .trim();
+  const base = run(['git', 'rev-parse', 'HEAD'], directory).stdout.toString().trim();
 
   return { base, directory };
 };
@@ -63,15 +54,9 @@ test('migration check accepts a new forward migration', async () => {
   const fixture = await initializeFixture();
 
   try {
-    await writeFile(
-      join(fixture.directory, 'drizzle/0002_forward.sql'),
-      'SELECT 3;\n',
-    );
+    await writeFile(join(fixture.directory, 'drizzle/0002_forward.sql'), 'SELECT 3;\n');
 
-    const result = run(
-      ['bun', migrationCheckScript, '--base', fixture.base],
-      fixture.directory,
-    );
+    const result = run(['bun', migrationCheckScript, '--base', fixture.base], fixture.directory);
 
     expect(result.exitCode).toBe(0);
   } finally {
@@ -88,13 +73,10 @@ test('migration check rejects artifacts produced by schema drift', async () => {
       [
         "import { writeFile } from 'node:fs/promises';",
         "await writeFile('drizzle/0002_generated.sql', 'SELECT 3;\\n');",
-      ].join('\n'),
+      ].join('\n')
     );
 
-    const result = run(
-      ['bun', migrationCheckScript, '--base', fixture.base],
-      fixture.directory,
-    );
+    const result = run(['bun', migrationCheckScript, '--base', fixture.base], fixture.directory);
     const output = `${result.stdout.toString()}${result.stderr.toString()}`;
 
     expect(result.exitCode).toBe(1);
@@ -117,7 +99,7 @@ test('migration check detects generated changes to an already modified artifact'
           { idx: 1, tag: '0001_second' },
           { idx: 2, tag: '0002_forward' },
         ],
-      }),
+      })
     );
     await writeFile(
       join(fixture.directory, 'fixture-generate.ts'),
@@ -127,13 +109,10 @@ test('migration check detects generated changes to an already modified artifact'
         'const journal = JSON.parse(await readFile(path, "utf8"));',
         "journal.entries.push({ idx: 3, tag: '0003_generated' });",
         'await writeFile(path, JSON.stringify(journal));',
-      ].join('\n'),
+      ].join('\n')
     );
 
-    const result = run(
-      ['bun', migrationCheckScript, '--base', fixture.base],
-      fixture.directory,
-    );
+    const result = run(['bun', migrationCheckScript, '--base', fixture.base], fixture.directory);
     const output = `${result.stdout.toString()}${result.stderr.toString()}`;
 
     expect(result.exitCode).toBe(1);
@@ -147,15 +126,9 @@ test('migration check rejects changes to inherited migration SQL', async () => {
   const fixture = await initializeFixture();
 
   try {
-    await writeFile(
-      join(fixture.directory, 'drizzle/0000_initial.sql'),
-      'SELECT 999;\n',
-    );
+    await writeFile(join(fixture.directory, 'drizzle/0000_initial.sql'), 'SELECT 999;\n');
 
-    const result = run(
-      ['bun', migrationCheckScript, '--base', fixture.base],
-      fixture.directory,
-    );
+    const result = run(['bun', migrationCheckScript, '--base', fixture.base], fixture.directory);
     const output = `${result.stdout.toString()}${result.stderr.toString()}`;
 
     expect(result.exitCode).toBe(1);
@@ -177,12 +150,13 @@ test('migration check accepts an exact approved migration repair', async () => {
 
     const baseBlob = run(
       ['git', 'rev-parse', `${fixture.base}:${migrationPath}`],
-      fixture.directory,
-    ).stdout.toString().trim();
-    const repairedBlob = run(
-      ['git', 'hash-object', '--', migrationPath],
-      fixture.directory,
-    ).stdout.toString().trim();
+      fixture.directory
+    )
+      .stdout.toString()
+      .trim();
+    const repairedBlob = run(['git', 'hash-object', '--', migrationPath], fixture.directory)
+      .stdout.toString()
+      .trim();
 
     await writeFile(
       join(fixture.directory, 'docs/agents/migration-repairs.json'),
@@ -195,13 +169,10 @@ test('migration check accepts an exact approved migration repair', async () => {
             repairedBlob,
           },
         ],
-      }),
+      })
     );
 
-    const result = run(
-      ['bun', migrationCheckScript, '--base', fixture.base],
-      fixture.directory,
-    );
+    const result = run(['bun', migrationCheckScript, '--base', fixture.base], fixture.directory);
 
     expect(result.exitCode).toBe(0);
   } finally {
@@ -219,8 +190,10 @@ test('migration check rejects a migration repair with a hash mismatch', async ()
 
     const baseBlob = run(
       ['git', 'rev-parse', `${fixture.base}:${migrationPath}`],
-      fixture.directory,
-    ).stdout.toString().trim();
+      fixture.directory
+    )
+      .stdout.toString()
+      .trim();
     await writeFile(
       join(fixture.directory, 'docs/agents/migration-repairs.json'),
       JSON.stringify({
@@ -232,13 +205,10 @@ test('migration check rejects a migration repair with a hash mismatch', async ()
             repairedBlob: 'not-the-current-blob',
           },
         ],
-      }),
+      })
     );
 
-    const result = run(
-      ['bun', migrationCheckScript, '--base', fixture.base],
-      fixture.directory,
-    );
+    const result = run(['bun', migrationCheckScript, '--base', fixture.base], fixture.directory);
     const output = `${result.stdout.toString()}${result.stderr.toString()}`;
 
     expect(result.exitCode).toBe(1);
@@ -255,13 +225,10 @@ test('migration check rejects an invalid migration repair manifest', async () =>
     await mkdir(join(fixture.directory, 'docs/agents'), { recursive: true });
     await writeFile(
       join(fixture.directory, 'docs/agents/migration-repairs.json'),
-      JSON.stringify({ repairs: [{ path: 'drizzle/0000_initial.sql' }] }),
+      JSON.stringify({ repairs: [{ path: 'drizzle/0000_initial.sql' }] })
     );
 
-    const result = run(
-      ['bun', migrationCheckScript, '--base', fixture.base],
-      fixture.directory,
-    );
+    const result = run(['bun', migrationCheckScript, '--base', fixture.base], fixture.directory);
     const output = `${result.stdout.toString()}${result.stderr.toString()}`;
 
     expect(result.exitCode).toBe(1);
@@ -282,13 +249,10 @@ test('migration check rejects reordering inherited migration history', async () 
           { idx: 1, tag: '0001_second' },
           { idx: 0, tag: '0000_initial' },
         ],
-      }),
+      })
     );
 
-    const result = run(
-      ['bun', migrationCheckScript, '--base', fixture.base],
-      fixture.directory,
-    );
+    const result = run(['bun', migrationCheckScript, '--base', fixture.base], fixture.directory);
     const output = `${result.stdout.toString()}${result.stderr.toString()}`;
 
     expect(result.exitCode).toBe(1);

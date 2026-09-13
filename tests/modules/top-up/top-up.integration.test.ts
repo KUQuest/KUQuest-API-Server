@@ -52,7 +52,10 @@ class FakeInboundPaymentProvider implements InboundPaymentProvider {
       });
     }
     if (this.mode === 'uncertain' && this.attempt === 1) {
-      throw new InboundPaymentProviderError('PROVIDER_UNCERTAIN', 'Provider response is uncertain.');
+      throw new InboundPaymentProviderError(
+        'PROVIDER_UNCERTAIN',
+        'Provider response is uncertain.'
+      );
     }
     return {
       providerReference: `${this.referencePrefix}-${this.attempt}`,
@@ -99,17 +102,26 @@ describe('Top-up application services', () => {
     });
     expect(quote.expiresAt.getTime()).toBeGreaterThan(Date.now());
 
-    const first = await initiateTopUp({
+    const first = await initiateTopUp(
+      {
+        principalUserId: userId,
+        quoteId: quote.id,
+        idempotency: { key: 'be113-success-1' },
+      },
+      provider
+    );
+    const secondQuote = await quoteTopUp({
       principalUserId: userId,
-      quoteId: quote.id,
-      idempotency: { key: 'be113-success-1' },
-    }, provider);
-    const secondQuote = await quoteTopUp({ principalUserId: userId, creditSatang: positiveSatang(456) });
-    const second = await initiateTopUp({
-      principalUserId: userId,
-      quoteId: secondQuote.id,
-      idempotency: { key: 'be113-success-2' },
-    }, provider);
+      creditSatang: positiveSatang(456),
+    });
+    const second = await initiateTopUp(
+      {
+        principalUserId: userId,
+        quoteId: secondQuote.id,
+        idempotency: { key: 'be113-success-2' },
+      },
+      provider
+    );
 
     expect(first).toMatchObject({
       principalUserId: userId,
@@ -120,14 +132,19 @@ describe('Top-up application services', () => {
       qrPayload: 'qr-1',
     });
     expect(second.id).not.toBe(first.id);
-    expect(provider.requests.map(({ paymentTotalSatang }) => paymentTotalSatang))
-      .toEqual([positiveSatang(123), positiveSatang(456)]);
+    expect(provider.requests.map(({ paymentTotalSatang }) => paymentTotalSatang)).toEqual([
+      positiveSatang(123),
+      positiveSatang(456),
+    ]);
 
-    const replay = await initiateTopUp({
-      principalUserId: userId,
-      quoteId: quote.id,
-      idempotency: { key: 'be113-success-1' },
-    }, provider);
+    const replay = await initiateTopUp(
+      {
+        principalUserId: userId,
+        quoteId: quote.id,
+        idempotency: { key: 'be113-success-1' },
+      },
+      provider
+    );
     expect(replay).toEqual(first);
     expect(await listTopUps(userId)).toHaveLength(2);
     expect(await getTopUp(userId, first.id)).toEqual(first);
@@ -142,22 +159,35 @@ describe('Top-up application services', () => {
     const quote = await quoteTopUp({ principalUserId: ownerId, creditSatang: positiveSatang(100) });
     const provider = new FakeInboundPaymentProvider();
 
-    await expect(initiateTopUp({
-      principalUserId: otherId,
-      quoteId: quote.id,
-      idempotency: { key: 'be113-wrong-owner' },
-    }, provider)).rejects.toMatchObject({ code: 'TOP_UP_QUOTE_NOT_FOUND' });
+    await expect(
+      initiateTopUp(
+        {
+          principalUserId: otherId,
+          quoteId: quote.id,
+          idempotency: { key: 'be113-wrong-owner' },
+        },
+        provider
+      )
+    ).rejects.toMatchObject({ code: 'TOP_UP_QUOTE_NOT_FOUND' });
 
-    await initiateTopUp({
-      principalUserId: ownerId,
-      quoteId: quote.id,
-      idempotency: { key: 'be113-owner-1' },
-    }, provider);
-    await expect(initiateTopUp({
-      principalUserId: ownerId,
-      quoteId: quote.id,
-      idempotency: { key: 'be113-owner-2' },
-    }, provider)).rejects.toMatchObject({ code: 'TOP_UP_QUOTE_CONSUMED' });
+    await initiateTopUp(
+      {
+        principalUserId: ownerId,
+        quoteId: quote.id,
+        idempotency: { key: 'be113-owner-1' },
+      },
+      provider
+    );
+    await expect(
+      initiateTopUp(
+        {
+          principalUserId: ownerId,
+          quoteId: quote.id,
+          idempotency: { key: 'be113-owner-2' },
+        },
+        provider
+      )
+    ).rejects.toMatchObject({ code: 'TOP_UP_QUOTE_CONSUMED' });
   });
 
   it('retains a rejected provider result without changing Wallet balances', async () => {
@@ -167,11 +197,16 @@ describe('Top-up application services', () => {
     provider.mode = 'rejected';
     const quote = await quoteTopUp({ principalUserId: userId, creditSatang: positiveSatang(100) });
 
-    await expect(initiateTopUp({
-      principalUserId: userId,
-      quoteId: quote.id,
-      idempotency: { key: 'be113-rejected-1' },
-    }, provider)).rejects.toMatchObject({ code: 'PROVIDER_REJECTED' });
+    await expect(
+      initiateTopUp(
+        {
+          principalUserId: userId,
+          quoteId: quote.id,
+          idempotency: { key: 'be113-rejected-1' },
+        },
+        provider
+      )
+    ).rejects.toMatchObject({ code: 'PROVIDER_REJECTED' });
 
     const [topUp] = await db.select().from(paymentTopUp).where(eq(paymentTopUp.quoteId, quote.id));
     expect(topUp).toMatchObject({
@@ -179,11 +214,15 @@ describe('Top-up application services', () => {
       providerStatus: 'TEST_REJECTED',
       providerApiVersion: 'test-v1',
     });
-    expect(await db.select().from(paymentTopUpStatusHistory).where(eq(paymentTopUpStatusHistory.topUpId, topUp.id)))
-      .toMatchObject([
-        { toStatus: 'PENDING', source: 'INITIATION' },
-        { fromStatus: 'PENDING', toStatus: 'FAILED', source: 'PROVIDER' },
-      ]);
+    expect(
+      await db
+        .select()
+        .from(paymentTopUpStatusHistory)
+        .where(eq(paymentTopUpStatusHistory.topUpId, topUp.id))
+    ).toMatchObject([
+      { toStatus: 'PENDING', source: 'INITIATION' },
+      { fromStatus: 'PENDING', toStatus: 'FAILED', source: 'PROVIDER' },
+    ]);
     expect(await getWallet(userId)).toMatchObject({
       spendingBalanceSatang: walletBefore.spendingBalanceSatang,
       earningsBalanceSatang: walletBefore.earningsBalanceSatang,
@@ -198,38 +237,60 @@ describe('Top-up application services', () => {
     const provider = new FakeInboundPaymentProvider();
     const [wallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, userId));
     if (!wallet) throw new Error('Wallet was not provisioned.');
-    const [spendingAccount] = await db.select({ id: walletLedgerAccount.id })
+    const [spendingAccount] = await db
+      .select({ id: walletLedgerAccount.id })
       .from(walletLedgerAccount)
-      .where(and(
-        eq(walletLedgerAccount.walletId, wallet.id),
-        eq(walletLedgerAccount.type, 'SPENDING'),
-      ));
-    const [suspenseAccount] = await db.select({ id: walletLedgerAccount.id })
+      .where(
+        and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, 'SPENDING'))
+      );
+    const [suspenseAccount] = await db
+      .select({ id: walletLedgerAccount.id })
       .from(walletLedgerAccount)
       .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
-    if (!spendingAccount || !suspenseAccount) throw new Error('Wallet accounts were not provisioned.');
+    if (!spendingAccount || !suspenseAccount)
+      throw new Error('Wallet accounts were not provisioned.');
     await createSealedLedgerTransaction({
       businessReference: `be113-capacity-funding-${crypto.randomUUID()}`,
       eventType: 'TOP_UP',
       postings: [
-        { accountId: spendingAccount.id, amountSatang: signedSatang(MAX_WALLET_CAPACITY_SATANG - 100) },
-        { accountId: suspenseAccount.id, amountSatang: signedSatang(-(MAX_WALLET_CAPACITY_SATANG - 100)) },
+        {
+          accountId: spendingAccount.id,
+          amountSatang: signedSatang(MAX_WALLET_CAPACITY_SATANG - 100),
+        },
+        {
+          accountId: suspenseAccount.id,
+          amountSatang: signedSatang(-(MAX_WALLET_CAPACITY_SATANG - 100)),
+        },
       ],
     });
 
-    const firstQuote = await quoteTopUp({ principalUserId: userId, creditSatang: positiveSatang(100) });
-    await initiateTopUp({
+    const firstQuote = await quoteTopUp({
       principalUserId: userId,
-      quoteId: firstQuote.id,
-      idempotency: { key: 'be113-capacity-1' },
-    }, provider);
+      creditSatang: positiveSatang(100),
+    });
+    await initiateTopUp(
+      {
+        principalUserId: userId,
+        quoteId: firstQuote.id,
+        idempotency: { key: 'be113-capacity-1' },
+      },
+      provider
+    );
 
-    const secondQuote = await quoteTopUp({ principalUserId: userId, creditSatang: positiveSatang(100) });
-    await expect(initiateTopUp({
+    const secondQuote = await quoteTopUp({
       principalUserId: userId,
-      quoteId: secondQuote.id,
-      idempotency: { key: 'be113-capacity-2' },
-    }, provider)).rejects.toMatchObject({ code: 'WALLET_CAPACITY_EXCEEDED' });
+      creditSatang: positiveSatang(100),
+    });
+    await expect(
+      initiateTopUp(
+        {
+          principalUserId: userId,
+          quoteId: secondQuote.id,
+          idempotency: { key: 'be113-capacity-2' },
+        },
+        provider
+      )
+    ).rejects.toMatchObject({ code: 'WALLET_CAPACITY_EXCEEDED' });
     expect(provider.requests).toHaveLength(1);
   });
 
@@ -252,16 +313,28 @@ describe('Top-up application services', () => {
       topUpStatus: 'PENDING',
     });
 
-    await expect(initiateTopUp({
-      principalUserId: userId,
-      quoteId: quote.id,
-      idempotency: { key: 'be113-atomicity-1' },
-    }, provider)).rejects.toThrow();
+    await expect(
+      initiateTopUp(
+        {
+          principalUserId: userId,
+          quoteId: quote.id,
+          idempotency: { key: 'be113-atomicity-1' },
+        },
+        provider
+      )
+    ).rejects.toThrow();
 
-    const [unchangedQuote] = await db.select().from(paymentTopUpQuote).where(eq(paymentTopUpQuote.id, quote.id));
+    const [unchangedQuote] = await db
+      .select()
+      .from(paymentTopUpQuote)
+      .where(eq(paymentTopUpQuote.id, quote.id));
     expect(unchangedQuote?.consumedAt).toBeNull();
-    expect(await db.select().from(walletIdempotencyKey).where(eq(walletIdempotencyKey.key, 'be113-atomicity-1')))
-      .toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(walletIdempotencyKey)
+        .where(eq(walletIdempotencyKey.key, 'be113-atomicity-1'))
+    ).toHaveLength(0);
     expect(provider.requests).toHaveLength(0);
   });
 
@@ -269,10 +342,12 @@ describe('Top-up application services', () => {
     const userId = await createMember('be113-retention');
     const quote = await quoteTopUp({ principalUserId: userId, creditSatang: positiveSatang(100) });
 
-    await expect(db.delete(paymentTopUpQuote).where(eq(paymentTopUpQuote.id, quote.id)).execute())
-      .rejects.toThrow();
-    expect(await db.select().from(paymentTopUpQuote).where(eq(paymentTopUpQuote.id, quote.id)))
-      .toHaveLength(1);
+    await expect(
+      db.delete(paymentTopUpQuote).where(eq(paymentTopUpQuote.id, quote.id)).execute()
+    ).rejects.toThrow();
+    expect(
+      await db.select().from(paymentTopUpQuote).where(eq(paymentTopUpQuote.id, quote.id))
+    ).toHaveLength(1);
   });
 
   it('serializes concurrent initiation attempts for one quote', async () => {
@@ -280,22 +355,29 @@ describe('Top-up application services', () => {
     const provider = new FakeInboundPaymentProvider();
     const quote = await quoteTopUp({ principalUserId: userId, creditSatang: positiveSatang(100) });
     const attempts = [
-      initiateTopUp({
-        principalUserId: userId,
-        quoteId: quote.id,
-        idempotency: { key: 'be113-concurrent-1' },
-      }, provider),
-      initiateTopUp({
-        principalUserId: userId,
-        quoteId: quote.id,
-        idempotency: { key: 'be113-concurrent-2' },
-      }, provider),
+      initiateTopUp(
+        {
+          principalUserId: userId,
+          quoteId: quote.id,
+          idempotency: { key: 'be113-concurrent-1' },
+        },
+        provider
+      ),
+      initiateTopUp(
+        {
+          principalUserId: userId,
+          quoteId: quote.id,
+          idempotency: { key: 'be113-concurrent-2' },
+        },
+        provider
+      ),
     ];
 
     const results = await Promise.allSettled(attempts);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    expect(results.filter((result) => result.status === 'rejected'))
-      .toMatchObject([{ reason: { code: 'TOP_UP_QUOTE_CONSUMED' } }]);
+    expect(results.filter((result) => result.status === 'rejected')).toMatchObject([
+      { reason: { code: 'TOP_UP_QUOTE_CONSUMED' } },
+    ]);
     expect(provider.requests).toHaveLength(1);
   });
 
@@ -310,7 +392,9 @@ describe('Top-up application services', () => {
       idempotency: { key: 'be113-uncertain-1' },
     };
 
-    await expect(initiateTopUp(input, provider)).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+    await expect(initiateTopUp(input, provider)).rejects.toMatchObject({
+      code: 'PROVIDER_UNCERTAIN',
+    });
     const retried = await initiateTopUp(input, provider);
 
     expect(provider.requests).toHaveLength(2);
@@ -324,16 +408,24 @@ describe('Top-up application services', () => {
     const quote = await quoteTopUp({ principalUserId: userId, creditSatang: positiveSatang(100) });
     const [wallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, userId));
     if (!wallet) throw new Error('Wallet was not provisioned.');
-    await db.update(walletWallet)
+    await db
+      .update(walletWallet)
       .set({ walletStatus: 'FROZEN' })
       .where(eq(walletWallet.id, wallet.id));
 
-    await expect(initiateTopUp({
-      principalUserId: userId,
-      quoteId: quote.id,
-      idempotency: { key: 'be113-status-1' },
-    }, provider)).rejects.toMatchObject({ code: 'WALLET_NOT_ACTIVE' });
+    await expect(
+      initiateTopUp(
+        {
+          principalUserId: userId,
+          quoteId: quote.id,
+          idempotency: { key: 'be113-status-1' },
+        },
+        provider
+      )
+    ).rejects.toMatchObject({ code: 'WALLET_NOT_ACTIVE' });
     expect(provider.requests).toHaveLength(0);
-    expect(await db.select().from(paymentTopUp).where(eq(paymentTopUp.quoteId, quote.id))).toHaveLength(0);
+    expect(
+      await db.select().from(paymentTopUp).where(eq(paymentTopUp.quoteId, quote.id))
+    ).toHaveLength(0);
   });
 });

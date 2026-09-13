@@ -4,37 +4,41 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 ## Chat Types Overview and Comparison
 
-| Attribute | Candidate Inquiry Conversation | Work Conversation |
-| --- | --- | --- |
-| **Database `type`** | `CONVERSATION_CANDIDATE_INQUIRY` | `CONVERSATION_WORK` |
-| **Purpose** | Pre-assignment Q&A: Prospective Workers clarify unclear Quest details with the Hirer. | Active work coordination between the Hirer and assigned Workers. |
-| **Multiplicity per Quest** | Many (at most one per Prospective Worker). | Exactly one per Quest. |
-| **Participants** | Strictly 2: Hirer + 1 Prospective Worker. | Hirer + all current Active Workers. |
-| **Active Quest State** | Exclusively during `QUEST_OPEN`. | From first `ASSIGNMENT_ACTIVE` through `QUEST_IN_PROGRESS` and terminal states. |
-| **Lifecycle End** | `INQUIRY_CLOSED` &rarr; Disappears completely from Member views upon assignment or quest assignment. | Terminal states (`COMPLETED`/`FAILED`/`CANCELLED`) &rarr; Becomes permanent read-only archive for members. |
-| **History Migration** | Never transferred or copied to Work Conversation. | Preserved in place for current/future accepted participants. |
-| **System Messages (KU bot)** | None. (Human-to-human messages only). | Yes. KU bot posts immutable workflow event messages. |
-| **Push Notifications** | Notifies only the single other participant. | Notifies all other Accepted Participants. |
-| **Moderation (Trust & Safety)** | Covered: reported messages open Report Cases via Evidence References. | Covered: reported messages open Report Cases via Evidence References. |
+| Attribute                       | Candidate Inquiry Conversation                                                                       | Work Conversation                                                                                          |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Database `type`**             | `CONVERSATION_CANDIDATE_INQUIRY`                                                                     | `CONVERSATION_WORK`                                                                                        |
+| **Purpose**                     | Pre-assignment Q&A: Prospective Workers clarify unclear Quest details with the Hirer.                | Active work coordination between the Hirer and assigned Workers.                                           |
+| **Multiplicity per Quest**      | Many (at most one per Prospective Worker).                                                           | Exactly one per Quest.                                                                                     |
+| **Participants**                | Strictly 2: Hirer + 1 Prospective Worker.                                                            | Hirer + all current Active Workers.                                                                        |
+| **Active Quest State**          | Exclusively during `QUEST_OPEN`.                                                                     | From first `ASSIGNMENT_ACTIVE` through `QUEST_IN_PROGRESS` and terminal states.                            |
+| **Lifecycle End**               | `INQUIRY_CLOSED` &rarr; Disappears completely from Member views upon assignment or quest assignment. | Terminal states (`COMPLETED`/`FAILED`/`CANCELLED`) &rarr; Becomes permanent read-only archive for members. |
+| **History Migration**           | Never transferred or copied to Work Conversation.                                                    | Preserved in place for current/future accepted participants.                                               |
+| **System Messages (KU bot)**    | None. (Human-to-human messages only).                                                                | Yes. KU bot posts immutable workflow event messages.                                                       |
+| **Push Notifications**          | Notifies only the single other participant.                                                          | Notifies all other Accepted Participants.                                                                  |
+| **Moderation (Trust & Safety)** | Covered: reported messages open Report Cases via Evidence References.                                | Covered: reported messages open Report Cases via Evidence References.                                      |
 
 ---
 
 ## Subsystem Relationships
 
 ### 1. Relation to Quest Lifecycle & Assignments
+
 - **Opening Work Chat**: Triggered by the creation of the first `ASSIGNMENT_ACTIVE` Assignment in the database transaction.
 - **Closing Inquiries**: Triggered atomically by Assignment creation (for the accepted Worker) and `QUEST_ASSIGNED` transition (for all remaining unselected inquiries).
 - **State Independence**: Messaging in either conversation never directly alters Quest State or Assignment State.
 
 ### 2. Relation to System Messages and KU Bot
+
 - Work Conversations host official KU bot System Messages (e.g. proof submission, edit consensus, deadline alerts, rating review links).
 - Candidate Inquiry Conversations strictly prohibit System Messages to prevent leaking quest state or candidate identities.
 
 ### 3. Relation to Trust & Safety (Admin Moderation)
+
 - Messages in **both** conversation types can be reported for abusive language or harassment (`REPORT_ABUSIVE_OR_HARASSMENT`).
 - Admin access to chat content is strictly gated through Report Case **Evidence References**; Admins cannot browse conversations without an active/historical case.
 
 ---
+
 ## Candidate Inquiry Conversation
 
 A Candidate Inquiry Conversation lets a Prospective Worker ask the Hirer questions to clarify unclear Quest details before becoming a Worker. It is available for every Quest while `QUEST_OPEN`, across all selection modes (`FIRST_COME_FIRST_SERVED` and `CANDIDATE`) and participation shapes (`SINGLE` and `GROUP`). It is private, one-to-one, and separate from the Work Conversation.
@@ -100,6 +104,7 @@ A Work Conversation opens when the first Worker receives an `ASSIGNMENT_ACTIVE` 
 ### Rate limits
 
 Per Member per Quest:
+
 - at most 30 Chat Messages per minute;
 - at most 10 Chat Attachments per minute.
 

@@ -9,9 +9,7 @@ const adminPassword = 'AdminPassword1!';
 let adminCookie = '';
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 beforeAll(async () => {
   await sql`select 1`;
@@ -36,7 +34,7 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-    }),
+    })
   );
   expect(loginResponse.status).toBe(200);
   adminCookie = getCookieHeader(loginResponse);
@@ -48,14 +46,14 @@ describe('Admin Payout Reconciliation API routes', () => {
     const unauthenticatedReconcile = await app.handle(
       new Request(`http://localhost/api/v1/admin/payouts/${fakeId}/reconcile`, {
         method: 'POST',
-      }),
+      })
     );
     expect(unauthenticatedReconcile.status).toBe(401);
 
     const unauthenticatedRetry = await app.handle(
       new Request(`http://localhost/api/v1/admin/payouts/events/${fakeId}/retry`, {
         method: 'POST',
-      }),
+      })
     );
     expect(unauthenticatedRetry.status).toBe(401);
   });
@@ -66,7 +64,7 @@ describe('Admin Payout Reconciliation API routes', () => {
       new Request(`http://localhost/api/v1/admin/payouts/${fakeId}/reconcile`, {
         method: 'POST',
         headers: { cookie: adminCookie },
-      }),
+      })
     );
     expect(response.status).toBe(404);
   });
@@ -77,7 +75,7 @@ describe('Admin Payout Reconciliation API routes', () => {
       new Request(`http://localhost/api/v1/admin/payouts/events/${fakeId}/retry`, {
         method: 'POST',
         headers: { cookie: adminCookie },
-      }),
+      })
     );
     expect(response.status).toBe(404);
   });

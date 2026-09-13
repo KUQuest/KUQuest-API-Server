@@ -60,7 +60,7 @@ export const adminQuestFinanceResponseSchema = t.Object({
         description: t.String(),
         ledgerTransactionId: uuid,
         businessReference: t.String(),
-      }),
+      })
     ),
     ledgerTransactions: t.Array(
       t.Object({
@@ -78,9 +78,9 @@ export const adminQuestFinanceResponseSchema = t.Object({
             walletId: t.Union([uuid, t.Null()]),
             ownerUserId: t.Union([uuid, t.Null()]),
             amountSatang: t.Integer(),
-          }),
+          })
         ),
-      }),
+      })
     ),
   }),
 });
@@ -95,7 +95,7 @@ export const adminLedgerTransactionsQuerySchema = t.Object({
       t.Literal('FUNDING_SETTLEMENT'),
       t.Literal('ADJUSTMENT'),
       t.Literal('EARNINGS_CONVERSION'),
-    ]),
+    ])
   ),
   userId: t.Optional(uuid),
   walletId: t.Optional(uuid),
@@ -136,9 +136,9 @@ export const adminLedgerTransactionsResponseSchema = t.Object({
               }),
               t.Null(),
             ]),
-          }),
+          })
         ),
-      }),
+      })
     ),
     nextCursor: t.Union([t.String(), t.Null()]),
   }),
@@ -211,7 +211,7 @@ export const adminMemberFinanceResponseSchema = t.Object({
         totalReservedSatang: t.Integer(),
         remainingSatang: t.Integer(),
         createdAt: dateTime,
-      }),
+      })
     ),
   }),
 });
@@ -260,7 +260,9 @@ export type AdminMoneyPolicyItem = Static<typeof adminMoneyPolicyItemSchema>;
 export type AdminQuestFinanceParams = Static<typeof adminQuestFinanceParamsSchema>;
 export type AdminQuestFinanceData = Static<typeof adminQuestFinanceResponseSchema>['data'];
 export type AdminLedgerTransactionsQuery = Static<typeof adminLedgerTransactionsQuerySchema>;
-export type AdminLedgerTransactionsData = Static<typeof adminLedgerTransactionsResponseSchema>['data'];
+export type AdminLedgerTransactionsData = Static<
+  typeof adminLedgerTransactionsResponseSchema
+>['data'];
 export type AdminFinanceOverviewData = Static<typeof adminFinanceOverviewResponseSchema>['data'];
 export type AdminMemberFinanceParams = Static<typeof adminMemberFinanceParamsSchema>;
 export type AdminMemberFinanceData = Static<typeof adminMemberFinanceResponseSchema>['data'];

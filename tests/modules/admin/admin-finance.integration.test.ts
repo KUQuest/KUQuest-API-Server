@@ -33,9 +33,7 @@ let testQuestId = '';
 let testReservationId = '';
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 const creditSpending = async (userId: string, amountSatang: number): Promise<string> => {
   const accounts = await db
@@ -110,7 +108,7 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-    }),
+    })
   );
   if (adminLogin.status !== 200) throw new Error('Finance Admin session was not created.');
   adminCookie = getCookieHeader(adminLogin);
@@ -123,7 +121,7 @@ beforeAll(async () => {
       callerScope: 'quest',
       callerReference: testQuestId,
       amountSatang: positiveSatang(30_000),
-    }),
+    })
   );
   testReservationId = reservation.id;
 
@@ -165,7 +163,7 @@ beforeAll(async () => {
       recipientAmountSatang: positiveSatang(20_000),
       platformFeeSatang: positiveSatang(4_000),
       platformFeeValidation: 'QUEST_ESCROW_SNAPSHOT',
-    }),
+    })
   );
 
   // Release remaining 6,000 satang back to hirer
@@ -174,7 +172,7 @@ beforeAll(async () => {
       ownerUserId: hirerId,
       reservationId: testReservationId,
       operationReference: `release:${testQuestId}`,
-    }),
+    })
   );
 });
 
@@ -193,7 +191,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
   describe('GET /api/v1/admin/finance/quests/:questId', () => {
     it('rejects unauthenticated caller with 401', async () => {
       const response = await app.handle(
-        new Request(`http://localhost/api/v1/admin/finance/quests/${testQuestId}`),
+        new Request(`http://localhost/api/v1/admin/finance/quests/${testQuestId}`)
       );
       expect(response.status).toBe(401);
     });
@@ -203,7 +201,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
       const response = await app.handle(
         new Request(`http://localhost/api/v1/admin/finance/quests/${nonExistentId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(response.status).toBe(404);
       const json = await response.json();
@@ -215,7 +213,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
       const response = await app.handle(
         new Request(`http://localhost/api/v1/admin/finance/quests/${testQuestId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(response.status).toBe(200);
       const json = await response.json();
@@ -265,7 +263,10 @@ describe('Admin Finance Endpoints Integration Tests', () => {
       expect(data.ledgerTransactions.length).toBeGreaterThanOrEqual(3);
       for (const tx of data.ledgerTransactions) {
         expect(tx.postings.length).toBeGreaterThanOrEqual(2);
-        const sum = tx.postings.reduce((total: number, p: { amountSatang: number }) => total + p.amountSatang, 0);
+        const sum = tx.postings.reduce(
+          (total: number, p: { amountSatang: number }) => total + p.amountSatang,
+          0
+        );
         expect(sum).toBe(0); // Zero-sum balanced invariant
       }
     });
@@ -274,7 +275,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
   describe('GET /api/v1/admin/finance/ledger/transactions', () => {
     it('rejects unauthenticated caller with 401', async () => {
       const response = await app.handle(
-        new Request('http://localhost/api/v1/admin/finance/ledger/transactions'),
+        new Request('http://localhost/api/v1/admin/finance/ledger/transactions')
       );
       expect(response.status).toBe(401);
     });
@@ -283,7 +284,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
       const response = await app.handle(
         new Request('http://localhost/api/v1/admin/finance/ledger/transactions?limit=10', {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(response.status).toBe(200);
       const json = await response.json();
@@ -299,9 +300,12 @@ describe('Admin Finance Endpoints Integration Tests', () => {
 
     it('filters ledger transactions by eventType', async () => {
       const response = await app.handle(
-        new Request('http://localhost/api/v1/admin/finance/ledger/transactions?eventType=FUNDING_RESERVE', {
-          headers: { cookie: adminCookie },
-        }),
+        new Request(
+          'http://localhost/api/v1/admin/finance/ledger/transactions?eventType=FUNDING_RESERVE',
+          {
+            headers: { cookie: adminCookie },
+          }
+        )
       );
       expect(response.status).toBe(200);
       const json = await response.json();
@@ -315,14 +319,17 @@ describe('Admin Finance Endpoints Integration Tests', () => {
       const response = await app.handle(
         new Request(`http://localhost/api/v1/admin/finance/ledger/transactions?userId=${hirerId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(response.status).toBe(200);
       const json = await response.json();
       expect(json.success).toBe(true);
       for (const tx of json.data.items) {
         expect(tx.isBalanced).toBe(true);
-        const sum = tx.postings.reduce((total: number, p: { amountSatang: number }) => total + p.amountSatang, 0);
+        const sum = tx.postings.reduce(
+          (total: number, p: { amountSatang: number }) => total + p.amountSatang,
+          0
+        );
         expect(sum).toBe(0);
       }
     });
@@ -331,7 +338,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
   describe('GET /api/v1/admin/finance/overview', () => {
     it('rejects unauthenticated caller with 401', async () => {
       const response = await app.handle(
-        new Request('http://localhost/api/v1/admin/finance/overview'),
+        new Request('http://localhost/api/v1/admin/finance/overview')
       );
       expect(response.status).toBe(401);
     });
@@ -340,7 +347,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
       const response = await app.handle(
         new Request('http://localhost/api/v1/admin/finance/overview', {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(response.status).toBe(200);
       const json = await response.json();
@@ -365,7 +372,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
   describe('GET /api/v1/admin/finance/members/:userId', () => {
     it('rejects unauthenticated caller with 401', async () => {
       const response = await app.handle(
-        new Request(`http://localhost/api/v1/admin/finance/members/${hirerId}`),
+        new Request(`http://localhost/api/v1/admin/finance/members/${hirerId}`)
       );
       expect(response.status).toBe(401);
     });
@@ -375,7 +382,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
       const response = await app.handle(
         new Request(`http://localhost/api/v1/admin/finance/members/${nonExistentUserId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(response.status).toBe(404);
       const json = await response.json();
@@ -387,7 +394,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
       const response = await app.handle(
         new Request(`http://localhost/api/v1/admin/finance/members/${hirerId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(response.status).toBe(200);
       const json = await response.json();
@@ -405,9 +412,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
 
   describe('GET /api/v1/admin/top-ups', () => {
     it('rejects unauthenticated caller with 401', async () => {
-      const response = await app.handle(
-        new Request('http://localhost/api/v1/admin/top-ups'),
-      );
+      const response = await app.handle(new Request('http://localhost/api/v1/admin/top-ups'));
       expect(response.status).toBe(401);
     });
 
@@ -415,7 +420,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
       const response = await app.handle(
         new Request('http://localhost/api/v1/admin/top-ups?limit=10', {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(response.status).toBe(200);
       const json = await response.json();
@@ -429,7 +434,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
       const response = await app.handle(
         new Request('http://localhost/api/v1/admin/finance/policies/current', {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(response.status).toBe(200);
       const json = await response.json();
@@ -443,7 +448,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
       const response = await app.handle(
         new Request('http://localhost/api/v1/admin/finance/policies', {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(response.status).toBe(200);
       const json = await response.json();
@@ -458,7 +463,7 @@ describe('Admin Finance Endpoints Integration Tests', () => {
       const response = await app.handle(
         new Request('http://localhost/api/v1/admin/activity-logs?limit=5', {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(response.status).toBe(200);
       const json = await response.json();

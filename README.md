@@ -25,6 +25,7 @@ docs/
 ```
 
 ### 1. 📘 Quest & Work Chat Rulebook
+
 - **Primary Source:** [`docs/rulebook/quest/quest-work-chat-rulebook.md`](docs/rulebook/quest/quest-work-chat-rulebook.md)
 - **Scope & Highlights:**
   - Complete Quest Lifecycle across all 4 Quadrants (`SINGLE`/`GROUP` × `FIRST_COME_FIRST_SERVED`/`CANDIDATE`).
@@ -34,6 +35,7 @@ docs/
   - 10-Minute Quest Edit Window in `QUEST_ASSIGNED` requiring unanimous worker consent.
 
 ### 2. 🛡️ Admin Operations Rulebook
+
 - **Primary Source:** [`docs/rulebook/admin/admin-rulebook.md`](docs/rulebook/admin/admin-rulebook.md)
 - **Scope & Highlights:**
   - Manual Admin verification and approval for Payouts ([ADR 0022](docs/adr/0022-manual-admin-approval-for-payouts.md)).
@@ -43,6 +45,7 @@ docs/
   - Member Penalty Ladders (Misconduct Ladder, Low-Average-Review Ladder, Red Flag, Auto-Freeze).
 
 ### 3. 💰 Finance & Wallets Rulebook
+
 - **Primary Source:** [`docs/rulebook/finance/finance-rulebook.md`](docs/rulebook/finance/finance-rulebook.md)
 - **Scope & Highlights:**
   - Strict Double-Entry General Ledger with integer Satang accounting ([ADR 0005](docs/adr/0005-integer-satang-for-money.md)).
@@ -51,6 +54,7 @@ docs/
   - AES-256-GCM encryption for bank account and payout destination secrets ([ADR 0008](docs/adr/0008-encrypt-payout-destination-secrets.md)).
 
 ### 4. 📖 Ubiquitous Language & Domain Model
+
 - **Primary Source:** [`CONTEXT.md`](CONTEXT.md)
 - Standardized terminology across actors (`Hirer`, `Worker`, `Candidate`), states (`QUEST_OPEN`, `QUEST_ASSIGNED`, `ASSIGNMENT_ACTIVE`, `PROOF_SUBMITTED`), and financial constructs (`Quest Escrow`, `Double-Entry Ledger`, `Remainder Satang`).
 
@@ -60,14 +64,15 @@ docs/
 
 For visualizing end-to-end user journeys, system state machines, double-entry ledger postings, and edge cases:
 
-* **Document File:** [`human-read/quest-scenarios.html`](human-read/quest-scenarios.html) *(or `docs/human-read/quest-scenarios.html`)*
-* **Key Features:**
-  * 🎯 **120 Comprehensive Scenarios:** Real-world campus stories covering standard workflows, disputes, cancellations, penalties, and concurrent race conditions.
-  * 💬 **Interactive Tooltips & Tracing:** Hover over any underlined system code (`QUEST_IN_PROGRESS`, `CONDUCT_OUT_OF_SCOPE`, `PC-11`, `Red Flag`) to view its definition, runtime consequences, and rulebook reference.
-  * 📊 **Sequence Diagrams (Mermaid.js):** Step-by-step visual message sequences, API triggers, and double-entry ledger postings.
-  * 🎛️ **Multi-Facet Filter Hub:** Filter instantly by Quadrant, Nature, Actors, or Outcome.
+- **Document File:** [`human-read/quest-scenarios.html`](human-read/quest-scenarios.html) _(or `docs/human-read/quest-scenarios.html`)_
+- **Key Features:**
+  - 🎯 **120 Comprehensive Scenarios:** Real-world campus stories covering standard workflows, disputes, cancellations, penalties, and concurrent race conditions.
+  - 💬 **Interactive Tooltips & Tracing:** Hover over any underlined system code (`QUEST_IN_PROGRESS`, `CONDUCT_OUT_OF_SCOPE`, `PC-11`, `Red Flag`) to view its definition, runtime consequences, and rulebook reference.
+  - 📊 **Sequence Diagrams (Mermaid.js):** Step-by-step visual message sequences, API triggers, and double-entry ledger postings.
+  - 🎛️ **Multi-Facet Filter Hub:** Filter instantly by Quadrant, Nature, Actors, or Outcome.
 
 Open in your browser:
+
 ```bash
 xdg-open human-read/quest-scenarios.html
 ```

@@ -10,11 +10,11 @@ Part of the [Finance Rulebook](finance-rulebook.md). Defines accepted policy for
 
 ## Reservation lifecycle and statuses
 
-| Status | Invariant Condition | Description |
-| --- | --- | --- |
-| `ACTIVE` | `remainingSatang > 0` | Funds are held in `FUNDING_RESERVED`. Available for settlement or release. |
-| `RELEASED` | `remainingSatang = 0` | All unspent funds have been returned to the owner's `SPENDING` balance. |
-| `SETTLED` | `remainingSatang = 0` | All reserved funds have been completely distributed to recipient `EARNINGS` and `PLATFORM_REVENUE`. |
+| Status     | Invariant Condition   | Description                                                                                         |
+| ---------- | --------------------- | --------------------------------------------------------------------------------------------------- |
+| `ACTIVE`   | `remainingSatang > 0` | Funds are held in `FUNDING_RESERVED`. Available for settlement or release.                          |
+| `RELEASED` | `remainingSatang = 0` | All unspent funds have been returned to the owner's `SPENDING` balance.                             |
+| `SETTLED`  | `remainingSatang = 0` | All reserved funds have been completely distributed to recipient `EARNINGS` and `PLATFORM_REVENUE`. |
 
 ## Operations
 

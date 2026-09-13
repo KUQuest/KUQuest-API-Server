@@ -13,7 +13,7 @@ beforeAll(async () => {
   } catch (cause) {
     throw new Error(
       'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 });

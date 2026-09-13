@@ -5,10 +5,10 @@
 - **ผู้อ่านหลัก:** เจ้าของกระบวนการธุรกิจและเจ้าของผลิตภัณฑ์ ภาคผนวกเทคนิคสำหรับทีม `/quest`
 - **สถานะ:** ตรวจสอบสถานะปัจจุบัน (As-Is) เท่านั้น เอกสารนี้ไม่เสนอการออกแบบ To-Be และไม่ตัดสินใจแทนกระบวนการอนุมัติ
 
-
 > **Historical as-is evidence.** The product source of truth is
 > [`docs/rulebook/quest/quest-work-chat-rulebook.md` §Resolved Quest lifecycle](../rulebook/quest/quest-work-chat-rulebook.md#resolved-quest-lifecycle).
 > This audit does not define new Quest behavior.
+
 ---
 
 ## 1. บทนำ

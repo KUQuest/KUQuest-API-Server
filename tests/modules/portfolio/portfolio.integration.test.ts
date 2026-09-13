@@ -13,7 +13,7 @@ const patchPortfolio = (body: unknown) =>
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
-    }),
+    })
   );
 
 describe('portfolio integration', () => {
@@ -34,7 +34,7 @@ describe('portfolio integration', () => {
     form.set('images', new File(['not-an-image'], 'a.png', { type: 'image/png' }));
 
     const response = await app.handle(
-      new Request(`http://localhost${basePath}`, { method: 'POST', body: form }),
+      new Request(`http://localhost${basePath}`, { method: 'POST', body: form })
     );
     const body = await response.json();
 
@@ -58,7 +58,7 @@ describe('portfolio integration', () => {
 
   it('rejects an unauthenticated delete', async () => {
     const response = await app.handle(
-      new Request(`http://localhost${basePath}/${portfolioId}`, { method: 'DELETE' }),
+      new Request(`http://localhost${basePath}/${portfolioId}`, { method: 'DELETE' })
     );
     const body = await response.json();
 
@@ -71,7 +71,7 @@ describe('portfolio integration', () => {
 
   it('rejects a portfolio id that is not a uuid before authentication runs', async () => {
     const response = await app.handle(
-      new Request(`http://localhost${basePath}/not-a-uuid`, { method: 'DELETE' }),
+      new Request(`http://localhost${basePath}/not-a-uuid`, { method: 'DELETE' })
     );
 
     expect(response.status).toBe(400);
@@ -126,7 +126,7 @@ describe('portfolio integration', () => {
     for (const [description, path] of imagePaths) {
       it(`requires authentication before replacing the ${description} image`, async () => {
         const response = await app.handle(
-          new Request(`http://localhost${path}`, { method: 'POST', body: imageForm() }),
+          new Request(`http://localhost${path}`, { method: 'POST', body: imageForm() })
         );
 
         expect(response.status).toBe(401);
@@ -138,7 +138,7 @@ describe('portfolio integration', () => {
 
       it(`requires authentication before deleting the ${description} image`, async () => {
         const response = await app.handle(
-          new Request(`http://localhost${path}`, { method: 'DELETE' }),
+          new Request(`http://localhost${path}`, { method: 'DELETE' })
         );
 
         expect(response.status).toBe(401);
@@ -151,7 +151,7 @@ describe('portfolio integration', () => {
 
     it('rejects a portfolio id that is not a uuid before authentication runs', async () => {
       const response = await app.handle(
-        new Request(`http://localhost${basePath}/not-a-uuid/image`, { method: 'DELETE' }),
+        new Request(`http://localhost${basePath}/not-a-uuid/image`, { method: 'DELETE' })
       );
 
       expect(response.status).toBe(400);
@@ -162,7 +162,7 @@ describe('portfolio integration', () => {
       const response = await app.handle(
         new Request(`http://localhost${basePath}/${portfolioId}/image/not-a-uuid`, {
           method: 'DELETE',
-        }),
+        })
       );
 
       expect(response.status).toBe(400);
@@ -174,7 +174,7 @@ describe('portfolio integration', () => {
         new Request(`http://localhost${basePath}/${portfolioId}/image`, {
           method: 'POST',
           body: new FormData(),
-        }),
+        })
       );
 
       expect(response.status).toBe(400);
@@ -201,7 +201,8 @@ describe('portfolio integration', () => {
     it('publishes all four portfolio operations', async () => {
       const document = await openapiDocument();
       const collectionPath = document.paths[basePath];
-      const itemPath = document.paths[`${basePath}/:portfolioId`] ?? document.paths[`${basePath}/{portfolioId}`];
+      const itemPath =
+        document.paths[`${basePath}/:portfolioId`] ?? document.paths[`${basePath}/{portfolioId}`];
 
       expect(collectionPath?.get).toBeDefined();
       expect(collectionPath?.post).toBeDefined();
@@ -216,24 +217,35 @@ describe('portfolio integration', () => {
     it('marks every portfolio operation as requiring authentication', async () => {
       const document = await openapiDocument();
       const collectionPath = document.paths[basePath];
-      const itemPath = document.paths[`${basePath}/:portfolioId`] ?? document.paths[`${basePath}/{portfolioId}`];
+      const itemPath =
+        document.paths[`${basePath}/:portfolioId`] ?? document.paths[`${basePath}/{portfolioId}`];
 
       expect(collectionPath?.get?.security).toEqual([{ betterAuthSession: [] }]);
       expect(collectionPath?.post?.security).toEqual([{ betterAuthSession: [] }]);
       expect(itemPath?.patch?.security).toEqual([{ betterAuthSession: [] }]);
       expect(itemPath?.delete?.security).toEqual([{ betterAuthSession: [] }]);
-      expect(document.paths[`${basePath}/{portfolioId}/image`]?.post?.security).toEqual([{ betterAuthSession: [] }]);
-      expect(document.paths[`${basePath}/{portfolioId}/image`]?.delete?.security).toEqual([{ betterAuthSession: [] }]);
-      expect(document.paths[`${basePath}/{portfolioId}/image/{fileId}`]?.post?.security).toEqual([{ betterAuthSession: [] }]);
-      expect(document.paths[`${basePath}/{portfolioId}/image/{fileId}`]?.delete?.security).toEqual([{ betterAuthSession: [] }]);
+      expect(document.paths[`${basePath}/{portfolioId}/image`]?.post?.security).toEqual([
+        { betterAuthSession: [] },
+      ]);
+      expect(document.paths[`${basePath}/{portfolioId}/image`]?.delete?.security).toEqual([
+        { betterAuthSession: [] },
+      ]);
+      expect(document.paths[`${basePath}/{portfolioId}/image/{fileId}`]?.post?.security).toEqual([
+        { betterAuthSession: [] },
+      ]);
+      expect(document.paths[`${basePath}/{portfolioId}/image/{fileId}`]?.delete?.security).toEqual([
+        { betterAuthSession: [] },
+      ]);
     });
 
     it('documents the create endpoint as multipart with optional images', async () => {
       const document = await openapiDocument();
       const operation = document.paths[basePath]?.post;
-      const multipartSchema = operation?.requestBody?.content?.['multipart/form-data'] as {
-        schema?: { required?: string[]; properties?: Record<string, unknown> };
-      } | undefined;
+      const multipartSchema = operation?.requestBody?.content?.['multipart/form-data'] as
+        | {
+            schema?: { required?: string[]; properties?: Record<string, unknown> };
+          }
+        | undefined;
 
       expect(operation).toBeDefined();
       expect(multipartSchema).toBeDefined();
@@ -243,15 +255,17 @@ describe('portfolio integration', () => {
 
     it('documents fileId as required only for targeted image routes', async () => {
       const document = await openapiDocument();
-      const collectionParameters = document.paths[`${basePath}/{portfolioId}/image`]?.post?.parameters;
-      const targetedParameters = document.paths[`${basePath}/{portfolioId}/image/{fileId}`]?.post?.parameters;
+      const collectionParameters =
+        document.paths[`${basePath}/{portfolioId}/image`]?.post?.parameters;
+      const targetedParameters =
+        document.paths[`${basePath}/{portfolioId}/image/{fileId}`]?.post?.parameters;
 
       expect(collectionParameters).toEqual([
         expect.objectContaining({ name: 'portfolioId', required: true }),
       ]);
-      expect(targetedParameters).toEqual(expect.arrayContaining([
-        expect.objectContaining({ name: 'fileId', required: true }),
-      ]));
+      expect(targetedParameters).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: 'fileId', required: true })])
+      );
     });
   });
 });

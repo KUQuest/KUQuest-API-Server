@@ -4,11 +4,7 @@ import type { ApiResponse } from '@/shared/api-response';
 
 import type { Static } from 'elysia';
 
-import {
-  convertEarnings,
-  ensureWallet,
-  getWalletActivities,
-} from './wallet.service';
+import { convertEarnings, ensureWallet, getWalletActivities } from './wallet.service';
 import { MoneyDomainError, positiveSatang, type Satang } from './wallet.money';
 import type {
   earningsConversionCreateSchema,
@@ -34,10 +30,7 @@ const serializeWallet = (wallet: WalletBalances) => ({
   reservedForPayoutsSatang: wallet.reservedForPayoutsSatang,
 });
 
-export const getOwnWallet = async ({
-  session,
-  set,
-}: AuthedContext): Promise<ApiResponse> => {
+export const getOwnWallet = async ({ session, set }: AuthedContext): Promise<ApiResponse> => {
   try {
     return apiSuccess({ wallet: serializeWallet(await ensureWallet(session.user.id)) });
   } catch (error) {

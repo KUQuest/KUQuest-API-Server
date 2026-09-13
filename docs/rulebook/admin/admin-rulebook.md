@@ -39,13 +39,13 @@ Admin encompasses seven core areas of operational responsibility:
 
 Every persisted or API state/status value uses an entity prefix in the form `<ENTITY>_<VALUE>`.
 
-| Object | Field | Allowed values |
-| --- | --- | --- |
-| Dispute Case | status | `DISPUTE_CASE_PENDING`, `DISPUTE_CASE_DISMISSED`, `DISPUTE_CASE_RESOLVED` |
-| Report Case | status | `REPORT_CASE_PENDING`, `REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN`, `REPORT_CASE_RESTORED` |
-| Conduct Report | status | `CONDUCT_REPORT_PENDING`, `CONDUCT_REPORT_UPHELD`, `CONDUCT_REPORT_DISMISSED` |
-| Payout | status | `PENDING_ADMIN_APPROVAL` and provider processing statuses (ADR 0022) |
-| Wallet | status | `ACTIVE`, `FROZEN`, `SUSPENDED`, `CLOSED` |
+| Object         | Field  | Allowed values                                                                               |
+| -------------- | ------ | -------------------------------------------------------------------------------------------- |
+| Dispute Case   | status | `DISPUTE_CASE_PENDING`, `DISPUTE_CASE_DISMISSED`, `DISPUTE_CASE_RESOLVED`                    |
+| Report Case    | status | `REPORT_CASE_PENDING`, `REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN`, `REPORT_CASE_RESTORED` |
+| Conduct Report | status | `CONDUCT_REPORT_PENDING`, `CONDUCT_REPORT_UPHELD`, `CONDUCT_REPORT_DISMISSED`                |
+| Payout         | status | `PENDING_ADMIN_APPROVAL` and provider processing statuses (ADR 0022)                         |
+| Wallet         | status | `ACTIVE`, `FROZEN`, `SUSPENDED`, `CLOSED`                                                    |
 
 Member Ban state is read from the immutable `memberPenaltyRecord` audit table; `bannedUntil` and `redFlagExpiresAt` in `authUser` provide projected values for fast guard checks.
 
@@ -53,15 +53,15 @@ Member Ban state is read from the immutable `memberPenaltyRecord` audit table; `
 
 Follow the context pointer for the Admin branch being planned or implemented:
 
-| Branch / Responsibility | Topic and triggers | Sub-contract file |
-| --- | --- | --- |
-| **Payout Approval** | Manual approval queue under `/api/v1/admin/payouts`, masked destination accounts, idempotent approve/cancel, provider worker hand-off. | [admin-payout-approval-contract.md](admin-payout-approval-contract.md) |
-| **Dispute Cases** | Reversing `QUEST_FAILED` settlement, 1-day self-file window, 5-day Admin window, 7-day money hold in Funding Reservation, Satang redirection. | [admin-dispute-case-contract.md](admin-dispute-case-contract.md) |
-| **Quest Hide & Restore** | Independent `hiddenAt`/`hiddenByAdminId` flags across non-terminal Quests, discovery removal only, Push notifications to Hirer, idempotency. | [admin-quest-hide-contract.md](admin-quest-hide-contract.md) |
-| **Wallet Freeze & Suspend** | Setting `FROZEN`/`SUSPENDED` statuses, blocking new commitments while honoring active obligations, discretionary vs auto-ban freeze. | [admin-wallet-freeze-contract.md](admin-wallet-freeze-contract.md) |
-| **Trust & Safety (Messages)** | Message moderation in Work Chat & Candidate Inquiries, Reporter Entries, Evidence References, hiding messages, strike creation, and retention. | [admin-trust-safety-contract.md](admin-trust-safety-contract.md) |
-| **Member Penalty Ladders** | Misconduct ladder (Red Flag 7d, Temp ban 7d, Permanent ban), Review ladder (<3.0 average), `PC-12`/`PC-13` exemptions, strike reversals. | [admin-member-penalty-contract.md](admin-member-penalty-contract.md) |
-| **Conduct Reports (Quests)** | Quest behavior reports (`CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE`, `CONDUCT_NO_SHOW`), filing windows, Quest record evidence, permanent strikes. | [admin-conduct-report-contract.md](admin-conduct-report-contract.md) |
+| Branch / Responsibility       | Topic and triggers                                                                                                                                 | Sub-contract file                                                      |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Payout Approval**           | Manual approval queue under `/api/v1/admin/payouts`, masked destination accounts, idempotent approve/cancel, provider worker hand-off.             | [admin-payout-approval-contract.md](admin-payout-approval-contract.md) |
+| **Dispute Cases**             | Reversing `QUEST_FAILED` settlement, 1-day self-file window, 5-day Admin window, 7-day money hold in Funding Reservation, Satang redirection.      | [admin-dispute-case-contract.md](admin-dispute-case-contract.md)       |
+| **Quest Hide & Restore**      | Independent `hiddenAt`/`hiddenByAdminId` flags across non-terminal Quests, discovery removal only, Push notifications to Hirer, idempotency.       | [admin-quest-hide-contract.md](admin-quest-hide-contract.md)           |
+| **Wallet Freeze & Suspend**   | Setting `FROZEN`/`SUSPENDED` statuses, blocking new commitments while honoring active obligations, discretionary vs auto-ban freeze.               | [admin-wallet-freeze-contract.md](admin-wallet-freeze-contract.md)     |
+| **Trust & Safety (Messages)** | Message moderation in Work Chat & Candidate Inquiries, Reporter Entries, Evidence References, hiding messages, strike creation, and retention.     | [admin-trust-safety-contract.md](admin-trust-safety-contract.md)       |
+| **Member Penalty Ladders**    | Misconduct ladder (Red Flag 7d, Temp ban 7d, Permanent ban), Review ladder (<3.0 average), `PC-12`/`PC-13` exemptions, strike reversals.           | [admin-member-penalty-contract.md](admin-member-penalty-contract.md)   |
+| **Conduct Reports (Quests)**  | Quest behavior reports (`CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE`, `CONDUCT_NO_SHOW`), filing windows, Quest record evidence, permanent strikes. | [admin-conduct-report-contract.md](admin-conduct-report-contract.md)   |
 
 ## Scope boundaries & deferred capabilities
 

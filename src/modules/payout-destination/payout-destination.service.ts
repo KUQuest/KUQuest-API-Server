@@ -82,7 +82,8 @@ const supportedThaiBankCodes = new Set([
   'UOBT',
 ]);
 
-const requiredText = (value: string | undefined) => typeof value === 'string' && value.trim().length > 0;
+const requiredText = (value: string | undefined) =>
+  typeof value === 'string' && value.trim().length > 0;
 
 const maskLastFour = (value: string) => `****${value.slice(-4)}`;
 
@@ -111,27 +112,23 @@ const normalizeInput = (input: PayoutDestinationInput) => {
   ) {
     throw new PayoutDestinationError(
       'PAYOUT_DESTINATION_INVALID',
-      'Payout Destination data is invalid.',
+      'Payout Destination data is invalid.'
     );
   }
 
   const accountNumber = input.accountNumber.trim();
   const routingValue = input.routingValue.trim();
-  const supportedBank = routingType === 'PROMPTPAY'
-    ? bankCode === 'PROMPTPAY'
-    : supportedThaiBankCodes.has(bankCode);
-  const supportedRoutingValue = routingType === 'PROMPTPAY'
-    ? /^(?:0\d{9}|\d{13})$/.test(routingValue)
-    : /^[A-Za-z0-9._-]{4,64}$/.test(routingValue);
+  const supportedBank =
+    routingType === 'PROMPTPAY' ? bankCode === 'PROMPTPAY' : supportedThaiBankCodes.has(bankCode);
+  const supportedRoutingValue =
+    routingType === 'PROMPTPAY'
+      ? /^(?:0\d{9}|\d{13})$/.test(routingValue)
+      : /^[A-Za-z0-9._-]{4,64}$/.test(routingValue);
 
-  if (
-    !supportedBank ||
-    !/^\d{10,16}$/.test(accountNumber) ||
-    !supportedRoutingValue
-  ) {
+  if (!supportedBank || !/^\d{10,16}$/.test(accountNumber) || !supportedRoutingValue) {
     throw new PayoutDestinationError(
       'PAYOUT_DESTINATION_INVALID',
-      'Payout Destination data is invalid.',
+      'Payout Destination data is invalid.'
     );
   }
 
@@ -153,7 +150,7 @@ const normalizeInput = (input: PayoutDestinationInput) => {
 
 const encryptedDestinationSecrets = (
   accountNumber: PayoutDestinationEncryptedSecret,
-  routingValue: PayoutDestinationEncryptedSecret,
+  routingValue: PayoutDestinationEncryptedSecret
 ) => ({
   accountNumberKeyVersion: accountNumber.keyVersion,
   accountNumberNonce: accountNumber.nonce,
@@ -166,7 +163,7 @@ const encryptedDestinationSecrets = (
 });
 
 export const destinationFromRecord = (
-  record: typeof paymentPayoutAccounts.$inferSelect,
+  record: typeof paymentPayoutAccounts.$inferSelect
 ): PayoutDestination => ({
   id: record.id,
   principalUserId: record.userId,
@@ -192,7 +189,7 @@ const encryptSecret = (encryption: PayoutDestinationEncryption, value: string) =
     if (error instanceof PayoutDestinationEncryptionError) throw error;
     throw new PayoutDestinationEncryptionError(
       'PAYOUT_DESTINATION_ENCRYPTION_FAILED',
-      'Payout Destination encryption failed.',
+      'Payout Destination encryption failed.'
     );
   }
 };
@@ -200,15 +197,18 @@ const encryptSecret = (encryption: PayoutDestinationEncryption, value: string) =
 const activeDestinationWhere = (principalUserId: string, destinationId?: string) =>
   destinationId
     ? and(
-      eq(paymentPayoutAccounts.userId, principalUserId),
-      eq(paymentPayoutAccounts.id, destinationId),
-      isNull(paymentPayoutAccounts.retiredAt),
-    )
-    : and(eq(paymentPayoutAccounts.userId, principalUserId), isNull(paymentPayoutAccounts.retiredAt));
+        eq(paymentPayoutAccounts.userId, principalUserId),
+        eq(paymentPayoutAccounts.id, destinationId),
+        isNull(paymentPayoutAccounts.retiredAt)
+      )
+    : and(
+        eq(paymentPayoutAccounts.userId, principalUserId),
+        isNull(paymentPayoutAccounts.retiredAt)
+      );
 
 export const savePayoutDestination = async (
   input: PayoutDestinationInput,
-  encryption: PayoutDestinationEncryption = createPayoutDestinationEncryption(),
+  encryption: PayoutDestinationEncryption = createPayoutDestinationEncryption()
 ): Promise<PayoutDestination> => {
   const normalized = normalizeInput(input);
   const accountNumberSecret = encryptSecret(encryption, normalized.accountNumber);
@@ -224,7 +224,7 @@ export const savePayoutDestination = async (
       if (!member) {
         throw new PayoutDestinationError(
           'PAYOUT_DESTINATION_MEMBER_NOT_FOUND',
-          'Member does not exist.',
+          'Member does not exist.'
         );
       }
 
@@ -255,41 +255,44 @@ export const savePayoutDestination = async (
         maskedLastFour: normalized.accountNumber.slice(-4),
         maskedRoutingValue: maskLastFour(normalized.routingValue),
       };
-      const [created] = await transaction
-        .insert(paymentPayoutAccounts)
-        .values(values)
-        .returning();
+      const [created] = await transaction.insert(paymentPayoutAccounts).values(values).returning();
       if (!created) {
         throw new PayoutDestinationError(
           'PAYOUT_DESTINATION_PERSISTENCE_FAILED',
-          'Payout Destination could not be saved.',
+          'Payout Destination could not be saved.'
         );
       }
 
       return destinationFromRecord(created);
     });
   } catch (error) {
-    if (error instanceof PayoutDestinationError || error instanceof PayoutDestinationEncryptionError) {
+    if (
+      error instanceof PayoutDestinationError ||
+      error instanceof PayoutDestinationEncryptionError
+    ) {
       throw error;
     }
     throw new PayoutDestinationError(
       'PAYOUT_DESTINATION_PERSISTENCE_FAILED',
-      'Payout Destination could not be saved.',
+      'Payout Destination could not be saved.'
     );
   }
 };
 
 export const getPayoutDestination = async (
   principalUserId: string,
-  destinationId?: string,
+  destinationId?: string
 ): Promise<PayoutDestination | undefined> => {
   const [record] = await db
     .select()
     .from(paymentPayoutAccounts)
     .where(
       destinationId
-        ? and(eq(paymentPayoutAccounts.userId, principalUserId), eq(paymentPayoutAccounts.id, destinationId))
-        : activeDestinationWhere(principalUserId),
+        ? and(
+            eq(paymentPayoutAccounts.userId, principalUserId),
+            eq(paymentPayoutAccounts.id, destinationId)
+          )
+        : activeDestinationWhere(principalUserId)
     )
     .limit(1);
 
@@ -299,26 +302,27 @@ export const getPayoutDestination = async (
 export const getPayoutDestinationForProvider = async (
   principalUserId: string,
   destinationId: string,
-  encryption: PayoutDestinationEncryption = createPayoutDestinationEncryption(),
+  encryption: PayoutDestinationEncryption = createPayoutDestinationEncryption()
 ): Promise<PayoutDestinationForProvider | undefined> => {
   const [record] = await db
     .select()
     .from(paymentPayoutAccounts)
-    .where(and(eq(paymentPayoutAccounts.userId, principalUserId), eq(paymentPayoutAccounts.id, destinationId)))
+    .where(
+      and(
+        eq(paymentPayoutAccounts.userId, principalUserId),
+        eq(paymentPayoutAccounts.id, destinationId)
+      )
+    )
     .limit(1);
 
   return record
-    ? payoutDestinationForProvider(
-      destinationFromRecord(record),
-      record,
-      encryption,
-    )
+    ? payoutDestinationForProvider(destinationFromRecord(record), record, encryption)
     : undefined;
 };
 
 export const retirePayoutDestination = async (
   principalUserId: string,
-  destinationId?: string,
+  destinationId?: string
 ): Promise<PayoutDestination | undefined> => {
   try {
     const [retired] = await db.transaction(async (transaction) => {
@@ -348,7 +352,7 @@ export const retirePayoutDestination = async (
     if (error instanceof PayoutDestinationError) throw error;
     throw new PayoutDestinationError(
       'PAYOUT_DESTINATION_PERSISTENCE_FAILED',
-      'Payout Destination could not be retired.',
+      'Payout Destination could not be retired.'
     );
   }
 };

@@ -65,7 +65,7 @@ beforeAll(async () => {
   } catch (cause) {
     throw new Error(
       'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 
@@ -148,8 +148,8 @@ beforeAll(async () => {
           startTime: new Date('2025-01-01T00:00:00.000Z'),
           dueAt: null,
           proofRequired: true,
-        })),
-      ),
+        }))
+      )
     )
     .returning({ id: quest.id });
   profileQuestIds = createdQuests.map(({ id }) => id);
@@ -159,7 +159,7 @@ beforeAll(async () => {
       questId,
       workerId: studentA,
       assignmentStatus: 'ASSIGNMENT_COMPLETED' as const,
-    })),
+    }))
   );
 });
 
@@ -232,10 +232,7 @@ describe('reading a profile', () => {
   });
 
   it('returns a field that was never filled in as null rather than leaving it out', async () => {
-    await db
-      .update(authUser)
-      .set({ bio: null, telephone: null })
-      .where(eq(authUser.id, studentB));
+    await db.update(authUser).set({ bio: null, telephone: null }).where(eq(authUser.id, studentB));
 
     const profile = await getProfile(studentB);
 
@@ -278,8 +275,8 @@ describe('reading a profile', () => {
       .where(
         and(
           eq(questAssignment.questId, profileQuestIds[3]!),
-          eq(questAssignment.workerId, studentA),
-        ),
+          eq(questAssignment.workerId, studentA)
+        )
       );
     await db.insert(questAssignment).values({
       questId: profileQuestIds[3]!,
@@ -292,7 +289,7 @@ describe('reading a profile', () => {
     expect(tags).toHaveLength(3);
     expect(tags.map(({ id }) => id)).not.toContain(profileTagIds[3]);
     expect(tags.map(({ id }) => id)).toEqual(
-      expect.arrayContaining([profileTagIds[0], profileTagIds[1], profileTagIds[2]]),
+      expect.arrayContaining([profileTagIds[0], profileTagIds[1], profileTagIds[2]])
     );
   });
 });
@@ -328,10 +325,7 @@ describe('reading a public profile', () => {
   });
 
   it('returns a public avatar reference when one is stored', async () => {
-    await db
-      .update(authUser)
-      .set({ imageFileId: avatarFileId })
-      .where(eq(authUser.id, studentA));
+    await db.update(authUser).set({ imageFileId: avatarFileId }).where(eq(authUser.id, studentA));
 
     expect((await getPublicProfile(studentA))?.avatar).toEqual({
       fileId: avatarFileId,
@@ -346,10 +340,7 @@ describe('reading a public profile', () => {
 
 describe('reading the avatar', () => {
   it('returns the stored reference when the student has an avatar', async () => {
-    await db
-      .update(authUser)
-      .set({ imageFileId: avatarFileId })
-      .where(eq(authUser.id, studentA));
+    await db.update(authUser).set({ imageFileId: avatarFileId }).where(eq(authUser.id, studentA));
 
     const profile = await getProfile(studentA);
 
@@ -374,10 +365,7 @@ describe('reading the avatar', () => {
   });
 
   it('never exposes another student avatar', async () => {
-    await db
-      .update(authUser)
-      .set({ imageFileId: avatarFileId })
-      .where(eq(authUser.id, studentA));
+    await db.update(authUser).set({ imageFileId: avatarFileId }).where(eq(authUser.id, studentA));
 
     expect((await getProfile(studentB))?.avatar).toBeNull();
   });
@@ -385,21 +373,12 @@ describe('reading the avatar', () => {
 
 describe('removing the avatar', () => {
   afterEach(async () => {
-    await db
-      .update(authUser)
-      .set({ imageFileId: null })
-      .where(eq(authUser.id, studentA));
-    await db
-      .update(file)
-      .set({ deletedAt: null })
-      .where(eq(file.id, avatarFileId));
+    await db.update(authUser).set({ imageFileId: null }).where(eq(authUser.id, studentA));
+    await db.update(file).set({ deletedAt: null }).where(eq(file.id, avatarFileId));
   });
 
   it('clears the avatar, tombstones its file, and returns object cleanup metadata', async () => {
-    await db
-      .update(authUser)
-      .set({ imageFileId: avatarFileId })
-      .where(eq(authUser.id, studentA));
+    await db.update(authUser).set({ imageFileId: avatarFileId }).where(eq(authUser.id, studentA));
 
     const before = await getProfile(studentA);
     const result = await removeStudentAvatar(studentA);
@@ -439,10 +418,7 @@ describe('updating a profile', () => {
   });
 
   it('leaves the avatar alone', async () => {
-    await db
-      .update(authUser)
-      .set({ imageFileId: avatarFileId })
-      .where(eq(authUser.id, studentA));
+    await db.update(authUser).set({ imageFileId: avatarFileId }).where(eq(authUser.id, studentA));
 
     await updateProfile(studentA, { bio: 'a new bio' });
 
@@ -491,7 +467,7 @@ describe('choosing a department', () => {
     const before = await getProfile(studentA);
 
     expect(await updateProfile(studentA, { bio: 'new', departmentId: randomUUID() })).toBe(
-      'department-not-found',
+      'department-not-found'
     );
     expect(await getProfile(studentA)).toEqual(before!);
   });
@@ -522,10 +498,9 @@ describe('profile avatar persistence', () => {
       insert: mock(() => ({ values: insertValues })),
       update: mock(() => ({ set: updateValues })),
     };
-    spyOn(db, 'transaction').mockImplementation(
-      (async (callback: (value: unknown) => Promise<unknown>) =>
-        callback(transaction)) as never,
-    );
+    spyOn(db, 'transaction').mockImplementation((async (
+      callback: (value: unknown) => Promise<unknown>
+    ) => callback(transaction)) as never);
 
     const result = await replaceStudentAvatar('student-1', {
       bucket: 'kuquest',

@@ -28,18 +28,14 @@ describe('authentication integration', () => {
   });
 
   it('returns no session for an unauthenticated request', async () => {
-    const response = await app.handle(
-      new Request('http://localhost/api/auth/get-session'),
-    );
+    const response = await app.handle(new Request('http://localhost/api/auth/get-session'));
 
     expect(response.status).toBe(200);
     expect(await response.json()).toBeNull();
   });
 
   it('routes the Admin session endpoint to the Admin Better Auth instance', async () => {
-    const response = await app.handle(
-      new Request('http://localhost/api/admin/auth/get-session'),
-    );
+    const response = await app.handle(new Request('http://localhost/api/admin/auth/get-session'));
 
     expect(response.status).toBe(200);
     expect(await response.json()).toBeNull();
@@ -54,7 +50,7 @@ describe('authentication integration', () => {
           provider: 'google',
           idToken: { token: 'not-a-real-google-id-token' },
         }),
-      }),
+      })
     );
     const body = await response.json();
 
@@ -74,7 +70,7 @@ describe('authentication integration', () => {
         method,
         headers: { 'content-type': 'application/json' },
         body: method === 'POST' ? JSON.stringify({ token: 'x' }) : undefined,
-      }),
+      })
     );
     const body = await response.json();
 
@@ -88,9 +84,7 @@ describe('authentication integration', () => {
     '/api/admin/auth/request-password-reset',
     '/api/admin/auth/reset-password',
   ])('does not expose Admin %s', async (path) => {
-    const response = await app.handle(
-      new Request(`http://localhost${path}`, { method: 'POST' }),
-    );
+    const response = await app.handle(new Request(`http://localhost${path}`, { method: 'POST' }));
 
     expect(response.status).toBe(404);
   });
@@ -101,9 +95,7 @@ describe('authentication integration', () => {
     '/api/auth/request-password-reset',
     '/api/auth/reset-password',
   ])('does not expose Student %s', async (path) => {
-    const response = await app.handle(
-      new Request(`http://localhost${path}`, { method: 'POST' }),
-    );
+    const response = await app.handle(new Request(`http://localhost${path}`, { method: 'POST' }));
 
     expect(response.status).toBe(404);
   });
@@ -123,7 +115,7 @@ describe('authentication integration', () => {
         method,
         headers: { 'content-type': 'application/json' },
         body: method === 'POST' ? JSON.stringify({}) : undefined,
-      }),
+      })
     );
 
     expect(response.status).not.toBe(404);

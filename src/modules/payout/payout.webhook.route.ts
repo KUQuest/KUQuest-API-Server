@@ -13,7 +13,8 @@ export const payoutWebhookRoute = new Elysia({
   detail: {
     tags: ['Xendit webhooks'],
     summary: 'Durably receive Xendit Payout events',
-    description: 'Authenticates and stores a Xendit Payout event before acknowledging it. Financial effects are applied by a callable worker.',
+    description:
+      'Authenticates and stores a Xendit Payout event before acknowledging it. Financial effects are applied by a callable worker.',
     operationId: 'receiveXenditPayoutWebhook',
     security: [{ xenditWebhookAuth: [] }],
   },

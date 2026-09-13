@@ -2,14 +2,12 @@ import { expect, test } from 'bun:test';
 
 const resetScript = `${import.meta.dir}/../../scripts/reset-local-database.ts`;
 
-const runReset = (env: Record<string, string>) => Bun.spawnSync(
-  ['bun', resetScript],
-  {
+const runReset = (env: Record<string, string>) =>
+  Bun.spawnSync(['bun', resetScript], {
     env: { ...process.env, ...env },
     stderr: 'pipe',
     stdout: 'pipe',
-  },
-);
+  });
 
 test('local database reset refuses a non-development deployment', () => {
   const result = runReset({

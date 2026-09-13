@@ -47,7 +47,7 @@ describe('certificate integration — authentication', () => {
 
   it('rejects an unauthenticated update', async () => {
     const response = await app.handle(
-      json('PATCH', `${certificatesUrl}/${certificateId}`, { name: 'Renamed' }),
+      json('PATCH', `${certificatesUrl}/${certificateId}`, { name: 'Renamed' })
     );
 
     expect(response.status).toBe(401);
@@ -56,7 +56,7 @@ describe('certificate integration — authentication', () => {
 
   it('rejects an unauthenticated delete', async () => {
     const response = await app.handle(
-      new Request(`${certificatesUrl}/${certificateId}`, { method: 'DELETE' }),
+      new Request(`${certificatesUrl}/${certificateId}`, { method: 'DELETE' })
     );
 
     expect(response.status).toBe(401);
@@ -68,7 +68,7 @@ describe('certificate integration — authentication', () => {
     form.set('image', new File(['not-an-image'], 'image.png', { type: 'image/png' }));
 
     const response = await app.handle(
-      new Request(`${certificatesUrl}/${certificateId}/image`, { method: 'POST', body: form }),
+      new Request(`${certificatesUrl}/${certificateId}/image`, { method: 'POST', body: form })
     );
 
     expect(response.status).toBe(401);
@@ -102,7 +102,7 @@ describe('certificate integration — validation', () => {
 
   it('rejects a malformed issuedAt', async () => {
     await expectValidationError(
-      json('POST', certificatesUrl, { ...validBody, issuedAt: 'last tuesday' }),
+      json('POST', certificatesUrl, { ...validBody, issuedAt: 'last tuesday' })
     );
   });
 
@@ -115,9 +115,7 @@ describe('certificate integration — validation', () => {
   });
 
   it('rejects a non-uuid certificate id on delete', async () => {
-    await expectValidationError(
-      new Request(`${certificatesUrl}/not-a-uuid`, { method: 'DELETE' }),
-    );
+    await expectValidationError(new Request(`${certificatesUrl}/not-a-uuid`, { method: 'DELETE' }));
   });
 
   it('rejects an unknown field on create', async () => {
@@ -126,7 +124,7 @@ describe('certificate integration — validation', () => {
 
   it('rejects an unknown field on update', async () => {
     await expectValidationError(
-      json('PATCH', `${certificatesUrl}/${certificateId}`, { name: 'Renamed', bogus: 'x' }),
+      json('PATCH', `${certificatesUrl}/${certificateId}`, { name: 'Renamed', bogus: 'x' })
     );
   });
 });
@@ -167,7 +165,7 @@ describe('certificate integration — published documentation', () => {
     expect(imagePath?.post?.security).toEqual([{ betterAuthSession: [] }]);
     expect(
       (imagePath?.post as { requestBody?: { content?: Record<string, unknown> } })?.requestBody
-        ?.content?.['multipart/form-data'],
+        ?.content?.['multipart/form-data']
     ).toBeDefined();
     expect(JSON.stringify(document)).not.toContain('verifyUrl');
   });

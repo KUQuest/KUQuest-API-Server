@@ -25,7 +25,7 @@ export type AdminMemberListPage = {
 };
 
 export const listAdminMembers = async (
-  query: AdminMemberListQuery = {},
+  query: AdminMemberListQuery = {}
 ): Promise<AdminMemberListPage> => {
   const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
   const conditions = [];
@@ -40,8 +40,8 @@ export const listAdminMembers = async (
         ilike(authUser.firstName, s),
         ilike(authUser.lastName, s),
         ilike(authUser.studentId, s),
-        ilike(authUser.email, s),
-      ),
+        ilike(authUser.email, s)
+      )
     );
   }
 
@@ -52,11 +52,8 @@ export const listAdminMembers = async (
       conditions.push(
         or(
           lt(authUser.createdAt, cursorDate),
-          and(
-            eq(authUser.createdAt, cursorDate),
-            lt(authUser.id, parsed.id),
-          ),
-        ),
+          and(eq(authUser.createdAt, cursorDate), lt(authUser.id, parsed.id))
+        )
       );
     }
   }
@@ -143,7 +140,7 @@ export const listAdminMembers = async (
 };
 
 export const getAdminMemberDetail = async (
-  userId: string,
+  userId: string
 ): Promise<AdminMemberDetailData | null> => {
   const [memberRow] = await db
     .select({
@@ -171,10 +168,7 @@ export const getAdminMemberDetail = async (
   }
 
   // Fetch wallet
-  const [wallet] = await db
-    .select()
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId));
+  const [wallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, userId));
 
   let walletData: AdminMemberDetailData['wallet'] = null;
   if (wallet) {
@@ -229,8 +223,8 @@ export const getAdminMemberDetail = async (
     .where(
       and(
         eq(questAssignment.workerId, userId),
-        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_COMPLETED'),
-      ),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_COMPLETED')
+      )
     );
 
   const [reviewStats] = await db
@@ -247,12 +241,7 @@ export const getAdminMemberDetail = async (
       totalPaidOut: sql<string>`coalesce(sum(${paymentPayouts.principalSatang}), 0)::text`,
     })
     .from(paymentPayouts)
-    .where(
-      and(
-        eq(paymentPayouts.userId, userId),
-        eq(paymentPayouts.payoutStatus, 'SUCCEEDED'),
-      ),
-    );
+    .where(and(eq(paymentPayouts.userId, userId), eq(paymentPayouts.payoutStatus, 'SUCCEEDED')));
 
   const [earnedStats] = await db
     .select({

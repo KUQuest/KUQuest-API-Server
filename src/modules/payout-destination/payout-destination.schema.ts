@@ -25,19 +25,22 @@ export const payoutDestinationResponseSchema = t.Object({
   data: t.Union([payoutDestinationDataSchema, t.Null()]),
 });
 
-export const payoutDestinationCreateSchema = t.Object({
-  recipientType: t.Optional(t.Literal('SELF')),
-  givenName: t.String({ minLength: 1, maxLength: 100 }),
-  surname: t.String({ minLength: 1, maxLength: 100 }),
-  relationship: t.Optional(t.Literal('SELF')),
-  accountHolderName: t.String({ minLength: 1, maxLength: 200 }),
-  bankCode: t.String({ minLength: 1, maxLength: 20 }),
-  accountNumber: t.String({ minLength: 1, maxLength: 64 }),
-  accountCountry: t.Optional(t.Literal('TH')),
-  accountCurrency: t.Optional(t.Literal('THB')),
-  routingType: t.Optional(t.Union([t.Literal('BANK_ACCOUNT'), t.Literal('PROMPTPAY')])),
-  routingValue: t.Optional(t.String({ minLength: 1, maxLength: 64 })),
-}, { additionalProperties: false });
+export const payoutDestinationCreateSchema = t.Object(
+  {
+    recipientType: t.Optional(t.Literal('SELF')),
+    givenName: t.String({ minLength: 1, maxLength: 100 }),
+    surname: t.String({ minLength: 1, maxLength: 100 }),
+    relationship: t.Optional(t.Literal('SELF')),
+    accountHolderName: t.String({ minLength: 1, maxLength: 200 }),
+    bankCode: t.String({ minLength: 1, maxLength: 20 }),
+    accountNumber: t.String({ minLength: 1, maxLength: 64 }),
+    accountCountry: t.Optional(t.Literal('TH')),
+    accountCurrency: t.Optional(t.Literal('THB')),
+    routingType: t.Optional(t.Union([t.Literal('BANK_ACCOUNT'), t.Literal('PROMPTPAY')])),
+    routingValue: t.Optional(t.String({ minLength: 1, maxLength: 64 })),
+  },
+  { additionalProperties: false }
+);
 
 export const payoutDestinationRetireResponseSchema = t.Object({
   success: t.Literal(true),

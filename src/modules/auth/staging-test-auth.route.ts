@@ -54,7 +54,7 @@ const invalidCredentialsResponse = (): Response =>
     {
       status: 401,
       headers: { 'content-type': 'application/json' },
-    },
+    }
   );
 
 const readSignInBody = async (request: Request): Promise<SignInBody | null> => {
@@ -88,26 +88,26 @@ const validateTestAuthAccount = (label: string, account: StagingTestAuthAccount)
     !account.firstName ||
     !account.lastName
   ) {
-    throw new Error(`${label} requires a valid @ku.th email, a compliant password, and a first and last name`);
+    throw new Error(
+      `${label} requires a valid @ku.th email, a compliant password, and a first and last name`
+    );
   }
 };
 
-export const createStagingTestAuthRoute = (
-  options: StagingTestAuthOptions = {},
-) => {
+export const createStagingTestAuthRoute = (options: StagingTestAuthOptions = {}) => {
   const settings = {
     enabled: options.enabled ?? env.stagingTestAuthEnabled,
     deploymentEnv: options.deploymentEnv ?? env.deploymentEnv,
     account1: {
-      email:
-        options.email?.trim().toLowerCase() ?? env.stagingTestAuthEmail?.trim().toLowerCase(),
+      email: options.email?.trim().toLowerCase() ?? env.stagingTestAuthEmail?.trim().toLowerCase(),
       password: options.password ?? env.stagingTestAuthPassword,
       firstName: options.firstName ?? env.stagingTestAuthFirstName,
       lastName: options.lastName ?? env.stagingTestAuthLastName,
     },
     account2: {
       email:
-        options.account2?.email?.trim().toLowerCase() ?? env.stagingTestAuthAccount2Email?.trim().toLowerCase(),
+        options.account2?.email?.trim().toLowerCase() ??
+        env.stagingTestAuthAccount2Email?.trim().toLowerCase(),
       password: options.account2?.password ?? env.stagingTestAuthAccount2Password,
       firstName: options.account2?.firstName ?? env.stagingTestAuthAccount2FirstName,
       lastName: options.account2?.lastName ?? env.stagingTestAuthAccount2LastName,

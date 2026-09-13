@@ -30,14 +30,19 @@ const legacySecretColumns = async () => sql<{ tableName: string; columnName: str
 
 test('migration backfill failure rolls back encrypted writes and legacy cleanup', async () => {
   const existingLegacyColumns = await legacySecretColumns();
-  const existingColumnNames = new Set(existingLegacyColumns.map(({ tableName, columnName }) => `${tableName}.${columnName}`));
+  const existingColumnNames = new Set(
+    existingLegacyColumns.map(({ tableName, columnName }) => `${tableName}.${columnName}`)
+  );
   const expectedLegacyColumns = [
     'payment_payout_accounts.account_number',
     'payment_payout_accounts.routing_value',
     'payment_payouts.destination_account_number',
     'payment_payouts.destination_routing_value',
   ];
-  if (existingLegacyColumns.length > 0 && expectedLegacyColumns.some((column) => !existingColumnNames.has(column))) {
+  if (
+    existingLegacyColumns.length > 0 &&
+    expectedLegacyColumns.some((column) => !existingColumnNames.has(column))
+  ) {
     throw new Error('Legacy Payout Destination columns are incomplete for the migration test.');
   }
   const addedLegacyColumns = existingLegacyColumns.length === 0;
@@ -49,17 +54,20 @@ test('migration backfill failure rolls back encrypted writes and legacy cleanup'
     firstName: 'Migration',
     lastName: 'Test',
   });
-  const destination = await savePayoutDestination({
-    principalUserId: studentId,
-    givenName: 'Migration',
-    surname: 'Test',
-    relationship: 'SELF',
-    bankCode: 'SCB',
-    accountNumber: '1234567890',
-    accountHolderName: 'Migration Test',
-    routingType: 'BANK_ACCOUNT',
-    routingValue: '1234567890',
-  }, encryption);
+  const destination = await savePayoutDestination(
+    {
+      principalUserId: studentId,
+      givenName: 'Migration',
+      surname: 'Test',
+      relationship: 'SELF',
+      bankCode: 'SCB',
+      accountNumber: '1234567890',
+      accountHolderName: 'Migration Test',
+      routingType: 'BANK_ACCOUNT',
+      routingValue: '1234567890',
+    },
+    encryption
+  );
 
   if (addedLegacyColumns) {
     await sql`ALTER TABLE payment_payout_accounts
@@ -73,18 +81,22 @@ test('migration backfill failure rolls back encrypted writes and legacy cleanup'
     SET account_number = '1234567890', routing_value = '1234567890'
     WHERE id = ${destination.id}`;
 
-  const [before] = Array.from(await sql<{
-    accountNumberKeyVersion: string;
-    accountNumberNonce: string;
-    accountNumberCiphertext: string;
-    accountNumberAuthTag: string;
-  }[]>`SELECT
+  const [before] = Array.from(
+    await sql<
+      {
+        accountNumberKeyVersion: string;
+        accountNumberNonce: string;
+        accountNumberCiphertext: string;
+        accountNumberAuthTag: string;
+      }[]
+    >`SELECT
     account_number_key_version AS "accountNumberKeyVersion",
     account_number_nonce AS "accountNumberNonce",
     account_number_ciphertext AS "accountNumberCiphertext",
     account_number_auth_tag AS "accountNumberAuthTag"
     FROM payment_payout_accounts
-    WHERE id = ${destination.id}`);
+    WHERE id = ${destination.id}`
+  );
 
   await sql`CREATE TABLE be114_migration_backfill_failure_targets (id uuid PRIMARY KEY)`;
   await sql`INSERT INTO be114_migration_backfill_failure_targets (id) VALUES (${destination.id})`;
@@ -117,33 +129,42 @@ test('migration backfill failure rolls back encrypted writes and legacy cleanup'
 
     expect(result.exitCode).toBe(1);
     expect(output).not.toContain('1234567890');
-    expect(Array.from(await sql<{ accountNumber: string }[]>`SELECT account_number AS "accountNumber"
+    expect(
+      Array.from(
+        await sql<{ accountNumber: string }[]>`SELECT account_number AS "accountNumber"
       FROM payment_payout_accounts
-      WHERE id = ${destination.id}`)).toEqual([
-      { accountNumber: '1234567890' },
-    ]);
-    expect(Array.from(await sql<{
-      accountNumberKeyVersion: string;
-      accountNumberNonce: string;
-      accountNumberCiphertext: string;
-      accountNumberAuthTag: string;
-    }[]>`SELECT
+      WHERE id = ${destination.id}`
+      )
+    ).toEqual([{ accountNumber: '1234567890' }]);
+    expect(
+      Array.from(
+        await sql<
+          {
+            accountNumberKeyVersion: string;
+            accountNumberNonce: string;
+            accountNumberCiphertext: string;
+            accountNumberAuthTag: string;
+          }[]
+        >`SELECT
       account_number_key_version AS "accountNumberKeyVersion",
       account_number_nonce AS "accountNumberNonce",
       account_number_ciphertext AS "accountNumberCiphertext",
       account_number_auth_tag AS "accountNumberAuthTag"
       FROM payment_payout_accounts
-      WHERE id = ${destination.id}`)).toEqual([before]);
-    expect(Array.from(await sql<{ column_name: string }[]>`
+      WHERE id = ${destination.id}`
+      )
+    ).toEqual([before]);
+    expect(
+      Array.from(
+        await sql<{ column_name: string }[]>`
       SELECT column_name
       FROM information_schema.columns
       WHERE table_name = 'payment_payout_accounts'
         AND column_name IN ('account_number', 'routing_value')
       ORDER BY column_name
-    `)).toEqual([
-      { column_name: 'account_number' },
-      { column_name: 'routing_value' },
-    ]);
+    `
+      )
+    ).toEqual([{ column_name: 'account_number' }, { column_name: 'routing_value' }]);
   } finally {
     await sql`DROP TRIGGER IF EXISTS be114_migration_backfill_failure_trigger ON payment_payout_accounts`;
     await sql`DROP FUNCTION IF EXISTS be114_migration_backfill_failure()`;

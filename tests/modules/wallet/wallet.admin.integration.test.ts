@@ -14,9 +14,7 @@ const studentId = crypto.randomUUID();
 let studentWalletId = '';
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 beforeAll(async () => {
   await sql`select 1`;
@@ -41,7 +39,7 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-    }),
+    })
   );
   expect(loginResponse.status).toBe(200);
   adminCookie = getCookieHeader(loginResponse);
@@ -60,7 +58,7 @@ beforeAll(async () => {
 describe('Admin Wallet API routes', () => {
   it('requires Admin authentication for all routes', async () => {
     const unauthenticated = await app.handle(
-      new Request(`http://localhost/api/v1/admin/wallets/${studentWalletId}/status-history`),
+      new Request(`http://localhost/api/v1/admin/wallets/${studentWalletId}/status-history`)
     );
     expect(unauthenticated.status).toBe(401);
   });
@@ -69,7 +67,7 @@ describe('Admin Wallet API routes', () => {
     const response = await app.handle(
       new Request(`http://localhost/api/v1/admin/wallets/${studentWalletId}/status-history`, {
         headers: { cookie: adminCookie },
-      }),
+      })
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: { history: unknown[] } };
@@ -89,10 +87,12 @@ describe('Admin Wallet API routes', () => {
           toStatus: 'FROZEN',
           reason: 'Investigation hold',
         }),
-      }),
+      })
     );
     expect(freezeResponse.status).toBe(200);
-    const freezeBody = (await freezeResponse.json()) as { data: { wallet: { walletStatus: string } } };
+    const freezeBody = (await freezeResponse.json()) as {
+      data: { wallet: { walletStatus: string } };
+    };
     expect(freezeBody.data.wallet.walletStatus).toBe('FROZEN');
 
     const walletAfterFreeze = await getWallet(studentId);
@@ -110,10 +110,12 @@ describe('Admin Wallet API routes', () => {
           toStatus: 'ACTIVE',
           reason: 'Investigation cleared',
         }),
-      }),
+      })
     );
     expect(unfreezeResponse.status).toBe(200);
-    const unfreezeBody = (await unfreezeResponse.json()) as { data: { wallet: { walletStatus: string } } };
+    const unfreezeBody = (await unfreezeResponse.json()) as {
+      data: { wallet: { walletStatus: string } };
+    };
     expect(unfreezeBody.data.wallet.walletStatus).toBe('ACTIVE');
 
     const walletAfterRestore = await getWallet(studentId);
@@ -124,7 +126,7 @@ describe('Admin Wallet API routes', () => {
     const response = await app.handle(
       new Request(`http://localhost/api/v1/admin/wallets/${studentWalletId}/verification`, {
         headers: { cookie: adminCookie },
-      }),
+      })
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: { matches: boolean } };
@@ -138,7 +140,7 @@ describe('Admin Wallet API routes', () => {
         headers: {
           cookie: adminCookie,
         },
-      }),
+      })
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: { wallet: { spendingBalanceSatang: number } } };

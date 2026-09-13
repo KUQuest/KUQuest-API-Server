@@ -31,16 +31,13 @@ const studentId = crypto.randomUUID();
 
 const getWalletAccountId = async (
   userId: string,
-  type: 'SPENDING' | 'EARNINGS' | 'FUNDING_RESERVED' | 'RESERVED_FOR_PAYOUTS',
+  type: 'SPENDING' | 'EARNINGS' | 'FUNDING_RESERVED' | 'RESERVED_FOR_PAYOUTS'
 ) => {
   const [account] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
     .innerJoin(walletWallet, eq(walletLedgerAccount.walletId, walletWallet.id))
-    .where(and(
-      eq(walletWallet.userId, userId),
-      eq(walletLedgerAccount.type, type),
-    ));
+    .where(and(eq(walletWallet.userId, userId), eq(walletLedgerAccount.type, type)));
   if (!account) throw new Error(`Missing ${type} test account`);
   return account.id;
 };
@@ -79,7 +76,12 @@ describe('Wallet provisioning service', () => {
       'RESERVED_FOR_PAYOUTS',
       'SPENDING',
     ]);
-    expect((await db.select().from(walletStatusHistory).where(eq(walletStatusHistory.walletId, wallets[0].id)))).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(walletStatusHistory)
+        .where(eq(walletStatusHistory.walletId, wallets[0].id))
+    ).toHaveLength(1);
   });
   it('creates or reuses a Wallet via createWallet', async () => {
     const existing = await createWallet(studentId);
@@ -101,7 +103,6 @@ describe('Wallet provisioning service', () => {
     const reused = await createWallet(newStudentId);
     expect(reused.id).toBe(created.id);
   });
-
 
   it('reads all four compartments without provisioning a missing Wallet', async () => {
     const wallet = await getWallet(studentId);
@@ -171,38 +172,55 @@ describe('Wallet provisioning service', () => {
     const listedActivities = await getWalletActivities(studentId);
     const spendingDelta: SatangDelta = listedActivities[0].spendingDeltaSatang;
     expect(Number(spendingDelta)).toBe(125);
-    expect(await db.select().from(walletWallet).where(eq(walletWallet.userId, studentId))).toMatchObject([
-      { spendingBalanceSatang: 125 },
-    ]);
+    expect(
+      await db.select().from(walletWallet).where(eq(walletWallet.userId, studentId))
+    ).toMatchObject([{ spendingBalanceSatang: 125 }]);
 
     await expect(
-      db.update(walletLedgerTransaction).set({ description: 'mutated' }).where(eq(walletLedgerTransaction.id, transaction!.id)).execute(),
+      db
+        .update(walletLedgerTransaction)
+        .set({ description: 'mutated' })
+        .where(eq(walletLedgerTransaction.id, transaction!.id))
+        .execute()
     ).rejects.toThrow();
     await expect(
-      db.delete(walletLedgerTransaction).where(eq(walletLedgerTransaction.id, transaction!.id)).execute(),
+      db
+        .delete(walletLedgerTransaction)
+        .where(eq(walletLedgerTransaction.id, transaction!.id))
+        .execute()
     ).rejects.toThrow();
     await expect(
-      db.insert(walletLedgerPosting).values({
-        transactionId: transaction!.id,
+      db
+        .insert(walletLedgerPosting)
+        .values({
+          transactionId: transaction!.id,
+          accountId: spendingAccountId,
+          amountSatang: 1,
+        })
+        .execute()
+    ).rejects.toThrow();
+
+    const [unsealedTransaction] = await db
+      .insert(walletLedgerTransaction)
+      .values({
+        businessReference: `be109-unsealed-${crypto.randomUUID()}`,
+        eventType: 'ADJUSTMENT',
+      })
+      .returning();
+    const [unsealedPosting] = await db
+      .insert(walletLedgerPosting)
+      .values({
+        transactionId: unsealedTransaction.id,
         accountId: spendingAccountId,
         amountSatang: 1,
-      }).execute(),
-    ).rejects.toThrow();
-
-    const [unsealedTransaction] = await db.insert(walletLedgerTransaction).values({
-      businessReference: `be109-unsealed-${crypto.randomUUID()}`,
-      eventType: 'ADJUSTMENT',
-    }).returning();
-    const [unsealedPosting] = await db.insert(walletLedgerPosting).values({
-      transactionId: unsealedTransaction.id,
-      accountId: spendingAccountId,
-      amountSatang: 1,
-    }).returning();
+      })
+      .returning();
     await expect(
-      db.update(walletLedgerPosting)
+      db
+        .update(walletLedgerPosting)
         .set({ transactionId: transaction!.id })
         .where(eq(walletLedgerPosting.id, unsealedPosting.id))
-        .execute(),
+        .execute()
     ).rejects.toThrow();
   });
 
@@ -210,10 +228,13 @@ describe('Wallet provisioning service', () => {
     await ensureWallet(studentId);
     const spendingAccountId = await getWalletAccountId(studentId, 'SPENDING');
     const suspenseAccountId = await getPlatformAccountId('PLATFORM_SUSPENSE');
-    const [ledgerTransaction] = await db.insert(walletLedgerTransaction).values({
-      businessReference: `be109-concurrent-seal-${crypto.randomUUID()}`,
-      eventType: 'ADJUSTMENT',
-    }).returning();
+    const [ledgerTransaction] = await db
+      .insert(walletLedgerTransaction)
+      .values({
+        businessReference: `be109-concurrent-seal-${crypto.randomUUID()}`,
+        eventType: 'ADJUSTMENT',
+      })
+      .returning();
     await db.insert(walletLedgerPosting).values([
       {
         transactionId: ledgerTransaction.id,
@@ -247,9 +268,10 @@ describe('Wallet provisioning service', () => {
     await postingInserted;
 
     const sealingTransaction = db.transaction((transaction) =>
-      transaction.update(walletLedgerTransaction)
+      transaction
+        .update(walletLedgerTransaction)
         .set({ sealedAt: new Date() })
-        .where(eq(walletLedgerTransaction.id, ledgerTransaction.id)),
+        .where(eq(walletLedgerTransaction.id, ledgerTransaction.id))
     );
     await Bun.sleep(50);
     releasePostingTransaction();
@@ -282,22 +304,32 @@ describe('Wallet provisioning service', () => {
     const first = await createSealedLedgerTransaction(input);
     const replay = await createSealedLedgerTransaction(input);
     expect(replay?.id).toBe(first?.id);
-    await expect(createSealedLedgerTransaction({
-      ...input,
-      idempotency: { ...input.idempotency, requestHash: 'different-request' },
-    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+    await expect(
+      createSealedLedgerTransaction({
+        ...input,
+        idempotency: { ...input.idempotency, requestHash: 'different-request' },
+      })
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
   });
 
   it('detects and rebuilds balance and activity projections from the ledger', async () => {
     const [wallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, studentId));
-    const [activity] = await db.select().from(walletActivity).where(eq(walletActivity.userId, studentId));
+    const [activity] = await db
+      .select()
+      .from(walletActivity)
+      .where(eq(walletActivity.userId, studentId));
 
-    await expect(db
-      .update(walletWallet)
-      .set({ spendingBalanceSatang: 1 })
-      .where(eq(walletWallet.id, wallet.id))
-      .execute()).rejects.toThrow();
-    await db.update(walletActivity).set({ spendingDeltaSatang: 1 }).where(eq(walletActivity.id, activity.id));
+    await expect(
+      db
+        .update(walletWallet)
+        .set({ spendingBalanceSatang: 1 })
+        .where(eq(walletWallet.id, wallet.id))
+        .execute()
+    ).rejects.toThrow();
+    await db
+      .update(walletActivity)
+      .set({ spendingDeltaSatang: 1 })
+      .where(eq(walletActivity.id, activity.id));
 
     expect((await verifyWalletProjection(wallet.id)).matches).toBe(false);
     expect((await verifyWalletProjection(wallet.id)).matches).toBe(false);
@@ -329,35 +361,50 @@ describe('Wallet provisioning service', () => {
   });
 
   it('rejects pre-sealed unbalanced rows and Money Policy mutation or overlap', async () => {
-    await expect(db.insert(walletLedgerTransaction).values({
-      businessReference: `be109-presealed-${crypto.randomUUID()}`,
-      eventType: 'ADJUSTMENT',
-      sealedAt: new Date(),
-    }).execute()).rejects.toThrow();
+    await expect(
+      db
+        .insert(walletLedgerTransaction)
+        .values({
+          businessReference: `be109-presealed-${crypto.randomUUID()}`,
+          eventType: 'ADJUSTMENT',
+          sealedAt: new Date(),
+        })
+        .execute()
+    ).rejects.toThrow();
 
     const policy = await getEffectiveMoneyPolicy();
     await expect(
-      db.update(paymentMoneyPolicyRevision)
+      db
+        .update(paymentMoneyPolicyRevision)
         .set({ effectiveUntil: new Date('2099-01-01T00:00:00.000Z') })
         .where(eq(paymentMoneyPolicyRevision.id, policy.id))
-        .execute(),
+        .execute()
     ).rejects.toThrow();
     await expect(
-      db.update(paymentMoneyPolicyRevision).set({ platformFeeBps: 201 }).where(eq(paymentMoneyPolicyRevision.id, policy.id)).execute(),
+      db
+        .update(paymentMoneyPolicyRevision)
+        .set({ platformFeeBps: 201 })
+        .where(eq(paymentMoneyPolicyRevision.id, policy.id))
+        .execute()
     ).rejects.toThrow();
-    await expect(db.insert(paymentMoneyPolicyRevision).values({
-      ...policy,
-      id: crypto.randomUUID(),
-      revision: policy.revision + 1,
-      reason: 'overlap test',
-    }).execute()).rejects.toThrow();
+    await expect(
+      db
+        .insert(paymentMoneyPolicyRevision)
+        .values({
+          ...policy,
+          id: crypto.randomUUID(),
+          revision: policy.revision + 1,
+          reason: 'overlap test',
+        })
+        .execute()
+    ).rejects.toThrow();
   });
 
   it('serializes concurrent Money Policy overlap checks', async () => {
     const policy = await getEffectiveMoneyPolicy();
     const revision = Math.floor(Math.random() * 1_000_000) + 10_000;
     const historicWindowStart = new Date(
-      Date.UTC(1900, 0, 1) + Math.floor(Math.random() * 3_000_000_000_000),
+      Date.UTC(1900, 0, 1) + Math.floor(Math.random() * 3_000_000_000_000)
     );
     const historicPolicy = {
       ...policy,
@@ -391,7 +438,7 @@ describe('Wallet provisioning service', () => {
         id: crypto.randomUUID(),
         revision: revision + 1,
         reason: 'concurrent policy B',
-      }),
+      })
     );
     await Bun.sleep(50);
     releaseFirstTransaction();

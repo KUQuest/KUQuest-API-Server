@@ -1,10 +1,5 @@
 import { db, sql } from '@/database/client';
-import {
-  authAccount,
-  authAdmin,
-  authSession,
-  authUser,
-} from '@/database/schema/auth.schema';
+import { authAccount, authAdmin, authSession, authUser } from '@/database/schema/auth.schema';
 
 import { randomUUID } from 'node:crypto';
 
@@ -17,7 +12,7 @@ beforeAll(async () => {
   } catch (cause) {
     throw new Error(
       'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 });
@@ -102,7 +97,9 @@ describe('auth_account ownership and provider constraints (QA-44)', () => {
         .catch((caught) => caught);
 
       expect(error).toBeInstanceOf(Error);
-      expect((error as { cause?: { code?: string; constraint_name?: string } }).cause).toMatchObject({
+      expect(
+        (error as { cause?: { code?: string; constraint_name?: string } }).cause
+      ).toMatchObject({
         code: '23514',
         constraint_name: 'auth_account_check',
       });
@@ -125,7 +122,9 @@ describe('auth_account ownership and provider constraints (QA-44)', () => {
         .catch((caught) => caught);
 
       expect(error).toBeInstanceOf(Error);
-      expect((error as { cause?: { code?: string; constraint_name?: string } }).cause).toMatchObject({
+      expect(
+        (error as { cause?: { code?: string; constraint_name?: string } }).cause
+      ).toMatchObject({
         code: '23514',
         constraint_name: 'auth_account_check1',
       });
@@ -171,7 +170,9 @@ describe('auth_session ownership (QA-36)', () => {
         .catch((caught) => caught);
 
       expect(error).toBeInstanceOf(Error);
-      expect((error as { cause?: { code?: string; constraint_name?: string } }).cause).toMatchObject({
+      expect(
+        (error as { cause?: { code?: string; constraint_name?: string } }).cause
+      ).toMatchObject({
         code: '23514',
         constraint_name: 'auth_session_check',
       });
@@ -189,7 +190,7 @@ describe('student ID uniqueness', () => {
     } catch (cause) {
       throw new Error(
         'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-        { cause },
+        { cause }
       );
     }
 

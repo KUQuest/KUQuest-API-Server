@@ -31,15 +31,13 @@ export type ParsedPayoutProviderEvent = {
   payloadHash: string;
 };
 
-const asObject = (value: unknown): Record<string, unknown> | null => (
+const asObject = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-);
+    ? (value as Record<string, unknown>)
+    : null;
 
-const asText = (value: unknown): string | null => (
-  typeof value === 'string' && value.trim().length > 0 ? value : null
-);
+const asText = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim().length > 0 ? value : null;
 
 const firstText = (...values: unknown[]) => {
   for (const value of values) {
@@ -49,7 +47,8 @@ const firstText = (...values: unknown[]) => {
   return null;
 };
 
-const firstDefined = (...values: unknown[]) => values.find((value) => value !== undefined && value !== null);
+const firstDefined = (...values: unknown[]) =>
+  values.find((value) => value !== undefined && value !== null);
 
 // Xendit Payout amounts are denominated in the declared currency. KUQuest only
 // accepts THB at this provider boundary, so convert each amount to satang here.
@@ -66,19 +65,22 @@ const parseThbAmount = (value: unknown, allowZero = false): Satang => {
     (!allowZero && amount === 0) ||
     amount > MAX_WALLET_CAPACITY_SATANG
   ) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payout amount is out of range.');
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider payout amount is out of range.'
+    );
   }
   return satang(amount);
 };
 
-const parseOptionalThbAmount = (value: unknown, allowZero = true): Satang | null => (
-  value === undefined || value === null ? null : parseThbAmount(value, allowZero)
-);
+const parseOptionalThbAmount = (value: unknown, allowZero = true): Satang | null =>
+  value === undefined || value === null ? null : parseThbAmount(value, allowZero);
 
 const parseProviderDate = (value: unknown, fallback: Date): Date => {
   if (value === undefined || value === null) return fallback;
   const text = asText(value);
-  if (!text) throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payout timestamp is invalid.');
+  if (!text)
+    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payout timestamp is invalid.');
   const date = new Date(text);
   if (Number.isNaN(date.getTime())) {
     throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payout timestamp is invalid.');
@@ -90,16 +92,18 @@ export const normalizePayoutOutcomeStatus = (providerStatus: string): PayoutOutc
   const status = providerStatus.trim().toUpperCase().replaceAll('-', '_').replaceAll(' ', '_');
   if (['SUCCEEDED', 'SUCCESS', 'COMPLETED', 'SETTLED'].includes(status)) return 'SUCCEEDED';
   if (['CANCELLED', 'CANCELED'].includes(status)) return 'CANCELLED';
-  if (['FAILED', 'FAILURE', 'REJECTED', 'EXPIRED', 'REVERSED', 'COMPLIANCE_REJECTED'].includes(status)) return 'FAILED';
+  if (
+    ['FAILED', 'FAILURE', 'REJECTED', 'EXPIRED', 'REVERSED', 'COMPLIANCE_REJECTED'].includes(status)
+  )
+    return 'FAILED';
   return 'PROVIDER_PENDING';
 };
 
-export const isPayoutProviderReversal = (providerStatus: string, eventType?: string): boolean => (
+export const isPayoutProviderReversal = (providerStatus: string, eventType?: string): boolean =>
   eventType?.toLowerCase().endsWith('.reversed') === true ||
   ['REVERSED', 'REFUNDED', 'REFUND'].includes(
-    providerStatus.trim().toUpperCase().replaceAll('-', '_').replaceAll(' ', '_'),
-  )
-);
+    providerStatus.trim().toUpperCase().replaceAll('-', '_').replaceAll(' ', '_')
+  );
 
 const supportedProviderEventTypes = new Set([
   'v3_payout.succeeded',
@@ -120,7 +124,7 @@ const providerAmountValue = (data: Record<string, unknown>): unknown => {
     data.source_amount,
     payoutDetails?.source_amount,
     data.amount,
-    data.payout_amount,
+    data.payout_amount
   );
   return asObject(value)?.amount ?? value;
 };
@@ -133,11 +137,14 @@ const actualAmountValue = (data: Record<string, unknown>, names: string[]): unkn
 export const parsePayoutProviderEvent = (
   rawPayload: string,
   receivedAt = new Date(),
-  providerEventId?: string,
+  providerEventId?: string
 ): ParsedPayoutProviderEvent => {
   const rawPayloadBytes = new TextEncoder().encode(rawPayload).byteLength;
   if (rawPayloadBytes === 0 || rawPayloadBytes > 1_048_576) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payload is empty or too large.');
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider payload is empty or too large.'
+    );
   }
 
   let parsed: unknown;
@@ -148,15 +155,23 @@ export const parsePayoutProviderEvent = (
   }
 
   const payload = asObject(parsed);
-  if (!payload) throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payload must be a JSON object.');
+  if (!payload)
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider payload must be a JSON object.'
+    );
   const payloadData = asObject(payload.data);
   const data = asObject(payloadData?.data) ?? payloadData ?? payload;
   const eventType = firstText(payload.event, payload.event_type, data.event_type);
   if (!eventType || !supportedProviderEventTypes.has(eventType)) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payout event type is not supported.');
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider payout event type is not supported.'
+    );
   }
   const providerStatus = firstText(data.status, payload.status);
-  if (!providerStatus) throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payout status is required.');
+  if (!providerStatus)
+    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payout status is required.');
 
   const metadata = asObject(data.metadata) ?? asObject(payload.metadata);
   const internalReference = firstText(
@@ -164,23 +179,32 @@ export const parsePayoutProviderEvent = (
     data.internal_reference,
     metadata?.kuquest_reference,
     payload.reference_id,
-    payload.internal_reference,
+    payload.internal_reference
   );
   const providerReference = firstText(
     data.payout_id,
     data.id,
     data.processor_reference,
     payload.payout_id,
-    payload.id,
+    payload.id
   );
   if (!internalReference && !providerReference) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payout event has no payout reference.');
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider payout event has no payout reference.'
+    );
   }
 
   const sourceCurrency = firstText(data.source_currency, payload.source_currency);
   const destinationCurrency = firstText(data.destination_currency, payload.destination_currency);
-  if ((sourceCurrency && sourceCurrency !== 'THB') || (destinationCurrency && destinationCurrency !== 'THB')) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payout currency is not supported.');
+  if (
+    (sourceCurrency && sourceCurrency !== 'THB') ||
+    (destinationCurrency && destinationCurrency !== 'THB')
+  ) {
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider payout currency is not supported.'
+    );
   }
   const providerChannelCode = firstText(data.channel_code, payload.channel_code);
   const normalizedStatus = normalizePayoutOutcomeStatus(providerStatus);
@@ -192,42 +216,52 @@ export const parsePayoutProviderEvent = (
   let actualDebitSatang: Satang | null = null;
   if (normalizedStatus === 'SUCCEEDED') {
     if (providerAmountSatang === null) {
-      throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'A succeeded Provider payout must include an amount.');
+      throw new ProviderEventError(
+        'PROVIDER_EVENT_INVALID',
+        'A succeeded Provider payout must include an amount.'
+      );
     }
-    actualFeeSatang = parseOptionalThbAmount(actualAmountValue(data, [
-      'fee',
-      'fee_amount',
-      'payout_fee',
-    ]));
-    actualTaxSatang = parseOptionalThbAmount(actualAmountValue(data, [
-      'tax',
-      'tax_amount',
-      'payout_tax',
-    ]));
-    actualDebitSatang = parseOptionalThbAmount(actualAmountValue(data, [
-      'actual_debit',
-      'total_amount',
-    ]));
+    actualFeeSatang = parseOptionalThbAmount(
+      actualAmountValue(data, ['fee', 'fee_amount', 'payout_fee'])
+    );
+    actualTaxSatang = parseOptionalThbAmount(
+      actualAmountValue(data, ['tax', 'tax_amount', 'payout_tax'])
+    );
+    actualDebitSatang = parseOptionalThbAmount(
+      actualAmountValue(data, ['actual_debit', 'total_amount'])
+    );
     actualFeeSatang ??= satang(0);
     actualTaxSatang ??= satang(0);
     const derivedDebitSatang = providerAmountSatang + actualFeeSatang + actualTaxSatang;
     if (actualDebitSatang !== null && actualDebitSatang !== derivedDebitSatang) {
-      throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payout amounts do not balance.');
+      throw new ProviderEventError(
+        'PROVIDER_EVENT_INVALID',
+        'Provider payout amounts do not balance.'
+      );
     }
     actualDebitSatang ??= positiveSatang(derivedDebitSatang);
   }
 
   const providerApiVersion = firstText(data.api_version, payload.api_version);
   const providerOccurredAt = parseProviderDate(
-    data.updated ?? data.updated_at ?? data.created ?? data.created_at ?? payload.created ?? payload.created_at,
-    receivedAt,
+    data.updated ??
+      data.updated_at ??
+      data.created ??
+      data.created_at ??
+      payload.created ??
+      payload.created_at,
+    receivedAt
   );
-  const resolvedProviderEventId = firstText(providerEventId, payload.event_id, payload.webhook_id, payload.id)
-    ?? (providerReference ?? internalReference
+  const resolvedProviderEventId =
+    firstText(providerEventId, payload.event_id, payload.webhook_id, payload.id) ??
+    ((providerReference ?? internalReference)
       ? `derived:${eventType}:${providerReference ?? internalReference}:${normalizedStatus}`
       : null);
   if (!resolvedProviderEventId) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payout event identifier is required.');
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider payout event identifier is required.'
+    );
   }
 
   return {

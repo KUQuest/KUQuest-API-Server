@@ -25,7 +25,11 @@ import {
   questReviewV2Route,
   questV2Route,
 } from '@/modules/quest';
-import { candidateInquiryRoute, workChatMembershipWriter, workChatRoute } from '@/modules/work-chat';
+import {
+  candidateInquiryRoute,
+  workChatMembershipWriter,
+  workChatRoute,
+} from '@/modules/work-chat';
 
 import { Elysia } from 'elysia';
 

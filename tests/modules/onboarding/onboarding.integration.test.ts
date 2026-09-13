@@ -5,7 +5,7 @@ import { app } from '@/app';
 describe('onboarding integration', () => {
   it('returns the shared error shape for an unauthenticated academic options request', async () => {
     const response = await app.handle(
-      new Request('http://localhost/api/v1/onboarding/academic-options'),
+      new Request('http://localhost/api/v1/onboarding/academic-options')
     );
     const body = await response.json();
 
@@ -17,9 +17,7 @@ describe('onboarding integration', () => {
   });
 
   it('returns the shared error shape for an unauthenticated status request', async () => {
-    const response = await app.handle(
-      new Request('http://localhost/api/v1/onboarding/status'),
-    );
+    const response = await app.handle(new Request('http://localhost/api/v1/onboarding/status'));
     const body = await response.json();
 
     expect(response.status).toBe(401);
@@ -40,7 +38,7 @@ describe('onboarding integration', () => {
           studentId: '6500000000',
           academicYear: 2026,
         }),
-      }),
+      })
     );
     const body = await response.json();
 
@@ -57,7 +55,7 @@ describe('onboarding integration', () => {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({}),
-      }),
+      })
     );
     const body = await response.json();
 
@@ -72,7 +70,7 @@ describe('onboarding integration', () => {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ academicYear: null }),
-      }),
+      })
     );
     const body = await response.json();
 
@@ -87,7 +85,7 @@ describe('onboarding integration', () => {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ academicYear: 2026 }),
-      }),
+      })
     );
 
     expect(response.status).toBe(401);
@@ -102,9 +100,9 @@ describe('onboarding integration', () => {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ academicYear }),
-          }),
-        ),
-      ),
+          })
+        )
+      )
     );
 
     for (const response of responses) {
@@ -120,11 +118,11 @@ describe('onboarding integration', () => {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ academicYear }),
-          }),
+          })
         );
 
         return { body: await validationResponse.json(), validationResponse };
-      }),
+      })
     );
 
     for (const { body, validationResponse } of cases) {
@@ -140,7 +138,7 @@ describe('onboarding integration', () => {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ academicYear: '2026' }),
-      }),
+      })
     );
     const body = await response.json();
 
@@ -157,11 +155,11 @@ describe('onboarding integration', () => {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ telephone }),
-          }),
+          })
         );
 
         return { body: await response.json(), response };
-      }),
+      })
     );
 
     for (const { body, response } of cases) {
@@ -179,11 +177,11 @@ describe('onboarding integration', () => {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ studentId }),
-          }),
+          })
         );
 
         return { body: await response.json(), response };
-      }),
+      })
     );
 
     for (const { body, response } of cases) {
@@ -198,7 +196,7 @@ describe('onboarding integration', () => {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ academicYear: 2026.5 }),
-      }),
+      })
     );
     const body = await response.json();
 
@@ -208,9 +206,7 @@ describe('onboarding integration', () => {
   });
 
   it('returns the shared error shape for an unauthenticated get-data request', async () => {
-    const response = await app.handle(
-      new Request('http://localhost/api/v1/onboarding/get-data'),
-    );
+    const response = await app.handle(new Request('http://localhost/api/v1/onboarding/get-data'));
     const body = await response.json();
 
     expect(response.status).toBe(401);
@@ -223,7 +219,10 @@ describe('onboarding integration', () => {
   describe('published documentation', () => {
     const openapiDocument = async () =>
       (await (await app.handle(new Request('http://localhost/openapi/json'))).json()) as {
-        paths: Record<string, Record<string, { operationId?: string; security?: Array<Record<string, unknown>> }>>;
+        paths: Record<
+          string,
+          Record<string, { operationId?: string; security?: Array<Record<string, unknown>> }>
+        >;
       };
 
     it('publishes the academic options operation as requiring a Session', async () => {

@@ -34,12 +34,7 @@ export const adminMemberListItemSchema = t.Object({
 export const adminMemberListQuerySchema = t.Object({
   search: t.Optional(t.String()),
   walletStatus: t.Optional(
-    t.Union([
-      t.Literal('ACTIVE'),
-      t.Literal('FROZEN'),
-      t.Literal('SUSPENDED'),
-      t.Literal('CLOSED'),
-    ]),
+    t.Union([t.Literal('ACTIVE'), t.Literal('FROZEN'), t.Literal('SUSPENDED'), t.Literal('CLOSED')])
   ),
   limit: t.Optional(t.Integer({ minimum: 1, maximum: 100 })),
   cursor: t.Optional(t.String()),

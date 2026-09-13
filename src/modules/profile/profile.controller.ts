@@ -44,10 +44,7 @@ type StoredProfileAvatar = NonNullable<Awaited<ReturnType<typeof getProfile>>>['
 
 const debugAvatarUpload = createDebugLogger('avatar-upload');
 
-const discardUploadedAvatar = async (
-  bucket: string,
-  objectKey: string,
-): Promise<void> => {
+const discardUploadedAvatar = async (bucket: string, objectKey: string): Promise<void> => {
   try {
     await avatarStorage.delete(bucket, objectKey);
   } catch (error) {
@@ -70,7 +67,6 @@ const publicProfileNotFound = (set: AuthedContext['set']) => {
 
   return apiError('PROFILE_NOT_FOUND', 'Profile not found');
 };
-
 
 const describeAvatar = (avatar: StoredProfileAvatar): Profile['avatar'] => {
   if (!avatar) return null;
@@ -106,12 +102,16 @@ type Reviews = Static<typeof reviewsResponseSchema>['data'];
 
 type ReviewQuery = Static<typeof reviewsQuerySchema>;
 
-const serializeReviews = (rows: Awaited<ReturnType<typeof getProfileReviews>>['rows']): Reviews['items'] =>
+const serializeReviews = (
+  rows: Awaited<ReturnType<typeof getProfileReviews>>['rows']
+): Reviews['items'] =>
   rows.map((row) => {
     let avatar: { url: string } | null = null;
     if (row.avatarBucket && row.avatarObjectKey) {
       try {
-        avatar = { url: avatarStorage.linkFor({ bucket: row.avatarBucket, objectKey: row.avatarObjectKey }) };
+        avatar = {
+          url: avatarStorage.linkFor({ bucket: row.avatarBucket, objectKey: row.avatarObjectKey }),
+        };
       } catch {
         avatar = null;
       }
@@ -126,18 +126,27 @@ const serializeReviews = (rows: Awaited<ReturnType<typeof getProfileReviews>>['r
     };
   });
 
-export const getReviews = async (context?: AuthedContext & { query: ReviewQuery }): Promise<ApiResponse<Reviews>> => {
+export const getReviews = async (
+  context?: AuthedContext & { query: ReviewQuery }
+): Promise<ApiResponse<Reviews>> => {
   if (!context) return apiSuccess({ items: [], total: 0, nextCursor: null });
   const { query, session, set } = context;
   try {
     const limit = parsePageLimit(query.limit);
     const cursor = decodeCursor(query.cursor);
-    const result = await getProfileReviews(session.user.id, { rating: query.rating, limit, cursor });
+    const result = await getProfileReviews(session.user.id, {
+      rating: query.rating,
+      limit,
+      cursor,
+    });
     const last = result.rows[result.rows.length - 1];
     return apiSuccess({
       items: serializeReviews(result.rows),
       total: result.total,
-      nextCursor: result.hasNext && last ? encodeCursor({ startTime: last.createdAt.toISOString(), id: last.id }) : null,
+      nextCursor:
+        result.hasNext && last
+          ? encodeCursor({ startTime: last.createdAt.toISOString(), id: last.id })
+          : null,
     });
   } catch (error) {
     if (!(error instanceof CursorInputError)) throw error;
@@ -150,7 +159,10 @@ export const getPublicReviews = async ({
   params,
   query,
   set,
-}: AuthedContext & { params: Static<typeof publicProfileParamsSchema>; query: ReviewQuery }): Promise<ApiResponse<Reviews>> => {
+}: AuthedContext & {
+  params: Static<typeof publicProfileParamsSchema>;
+  query: ReviewQuery;
+}): Promise<ApiResponse<Reviews>> => {
   try {
     if (!(await getPublicProfileRecord(params.userId))) {
       set.status = 404;
@@ -163,7 +175,10 @@ export const getPublicReviews = async ({
     return apiSuccess({
       items: serializeReviews(result.rows),
       total: result.total,
-      nextCursor: result.hasNext && last ? encodeCursor({ startTime: last.createdAt.toISOString(), id: last.id }) : null,
+      nextCursor:
+        result.hasNext && last
+          ? encodeCursor({ startTime: last.createdAt.toISOString(), id: last.id })
+          : null,
     });
   } catch (error) {
     if (!(error instanceof CursorInputError)) throw error;
@@ -234,7 +249,9 @@ export const updateOwnProfile = async ({
 export const deleteAvatar = async ({
   session,
   set,
-}: AuthedContext): Promise<ApiResponse<{ fileId: string | null; version: number; avatar: null }>> => {
+}: AuthedContext): Promise<
+  ApiResponse<{ fileId: string | null; version: number; avatar: null }>
+> => {
   const result = await removeStudentAvatar(session.user.id);
   if (!result) return userNotFound(set);
 
@@ -301,10 +318,7 @@ export const setAvatar = async ({
 
     if (result.previousFileId) {
       try {
-        const previousFile = await getPreviousAvatarFile(
-          session.user.id,
-          result.previousFileId,
-        );
+        const previousFile = await getPreviousAvatarFile(session.user.id, result.previousFileId);
         if (previousFile) {
           await avatarStorage.delete(previousFile.bucket, previousFile.objectKey);
           await markAvatarDeleted(session.user.id, result.previousFileId);

@@ -50,7 +50,7 @@ describe('errorHandlerPlugin', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: '{not json',
-      }),
+      })
     );
     const body = await res.json();
 
@@ -65,7 +65,7 @@ describe('errorHandlerPlugin', () => {
     const validatedPlugin = new Elysia({ name: 'validated' }).get(
       '/validate',
       ({ query }) => query.required,
-      { query: t.Object({ required: t.String() }) },
+      { query: t.Object({ required: t.String() }) }
     );
 
     const app = new Elysia().use(errorHandlerPlugin).use(validatedPlugin);

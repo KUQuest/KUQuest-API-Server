@@ -42,7 +42,7 @@ type HandlerContext = {
 class LocalFinanceTestError extends Error {
   constructor(
     readonly code: string,
-    message: string,
+    message: string
   ) {
     super(message);
     this.name = 'LocalFinanceTestError';
@@ -58,12 +58,11 @@ export const localFinanceTestIsEnabled = Boolean(
   env.stagingTestAuthEnabled &&
   env.xenditSecretKey?.startsWith('xnd_development_') &&
   testUserEmail &&
-  recipientEmail,
+  recipientEmail
 );
 
-export const isConfiguredLocalFinanceTestUser = (email: string): boolean => (
-  localFinanceTestIsEnabled && email.trim().toLowerCase() === testUserEmail
-);
+export const isConfiguredLocalFinanceTestUser = (email: string): boolean =>
+  localFinanceTestIsEnabled && email.trim().toLowerCase() === testUserEmail;
 
 const errorResponse = (set: HandlerContext['set'], error: unknown): ApiResponse => {
   if (error instanceof TopUpTestModeError) {
@@ -105,21 +104,20 @@ const serializeTopUp = (topUp: Awaited<ReturnType<typeof getTopUp>>) => ({
   topUpStatus: topUp.topUpStatus,
 });
 
-const qrDataUrlFor = async (payload: string | null): Promise<string | null> => (
+const qrDataUrlFor = async (payload: string | null): Promise<string | null> =>
   payload
     ? QRCode.toDataURL(payload, {
-      errorCorrectionLevel: 'M',
-      margin: 2,
-      width: 360,
-    })
-    : null
-);
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        width: 360,
+      })
+    : null;
 
 const ensureRecipient = async (payerId: string) => {
   if (!recipientEmail || recipientEmail === testUserEmail) {
     throw new LocalFinanceTestError(
       'TEST_RECIPIENT_NOT_CONFIGURED',
-      'The local finance test recipient is not configured correctly.',
+      'The local finance test recipient is not configured correctly.'
     );
   }
 
@@ -148,7 +146,10 @@ const ensureRecipient = async (payerId: string) => {
       .limit(1);
   }
   if (!recipient || recipient.id === payerId) {
-    throw new LocalFinanceTestError('TEST_RECIPIENT_NOT_FOUND', 'The local finance test recipient could not be created.');
+    throw new LocalFinanceTestError(
+      'TEST_RECIPIENT_NOT_FOUND',
+      'The local finance test recipient could not be created.'
+    );
   }
   await ensureWallet(recipient.id);
   return recipient;
@@ -161,9 +162,10 @@ export const createLocalTestPayment = async ({
   set,
 }: HandlerContext): Promise<ApiResponse> => {
   try {
-    const creditSatang = positiveSatang('creditSatang' in body ? body.creditSatang ?? 100 : 100);
+    const creditSatang = positiveSatang('creditSatang' in body ? (body.creditSatang ?? 100) : 100);
     const quote = await quoteTopUp({ principalUserId: session.user.id, creditSatang });
-    const idempotencyKey = request.headers.get('idempotency-key')?.trim() || `local-test-payment:${crypto.randomUUID()}`;
+    const idempotencyKey =
+      request.headers.get('idempotency-key')?.trim() || `local-test-payment:${crypto.randomUUID()}`;
     let topUp = await initiateTopUp({
       principalUserId: session.user.id,
       quoteId: quote.id,
@@ -219,23 +221,29 @@ export const createLocalTestTransfer = async ({
   set,
 }: HandlerContext): Promise<ApiResponse> => {
   try {
-    const amountSatang = positiveSatang('amountSatang' in body ? body.amountSatang ?? 100 : 100);
+    const amountSatang = positiveSatang('amountSatang' in body ? (body.amountSatang ?? 100) : 100);
     const recipient = await ensureRecipient(session.user.id);
-    const transferKey = request.headers.get('idempotency-key')?.trim() || `local-test-transfer:${crypto.randomUUID()}`;
-    const reservation = await db.transaction((transaction) => reserveSpending(transaction, {
-      ownerUserId: session.user.id,
-      callerScope: 'local-finance-test',
-      callerReference: transferKey,
-      amountSatang,
-    }));
-    const settlement = await db.transaction((transaction) => settleFundingReservation(transaction, {
-      ownerUserId: session.user.id,
-      reservationId: reservation.id,
-      settlementReference: `${transferKey}:settlement`,
-      recipientUserId: recipient.id,
-      recipientAmountSatang: amountSatang,
-      platformFeeSatang: satang(0),
-    }));
+    const transferKey =
+      request.headers.get('idempotency-key')?.trim() ||
+      `local-test-transfer:${crypto.randomUUID()}`;
+    const reservation = await db.transaction((transaction) =>
+      reserveSpending(transaction, {
+        ownerUserId: session.user.id,
+        callerScope: 'local-finance-test',
+        callerReference: transferKey,
+        amountSatang,
+      })
+    );
+    const settlement = await db.transaction((transaction) =>
+      settleFundingReservation(transaction, {
+        ownerUserId: session.user.id,
+        reservationId: reservation.id,
+        settlementReference: `${transferKey}:settlement`,
+        recipientUserId: recipient.id,
+        recipientAmountSatang: amountSatang,
+        platformFeeSatang: satang(0),
+      })
+    );
 
     return apiSuccess({
       payerEmail: session.user.email,

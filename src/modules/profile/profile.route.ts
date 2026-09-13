@@ -69,7 +69,8 @@ export const profileRoute = new Elysia({
     detail: {
       tags: ['Profile', 'Reviews'],
       summary: 'List another Member’s Reviews',
-      description: 'Returns immediately visible Reviews received by the selected Member, with bounded stable pagination.',
+      description:
+        'Returns immediately visible Reviews received by the selected Member, with bounded stable pagination.',
       operationId: 'listPublicProfileReviews',
       security: betterAuthSecurity,
     },

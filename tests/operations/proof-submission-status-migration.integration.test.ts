@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 const migrationPath = join(
   import.meta.dir,
-  '../../drizzle/20260910014123_validate_dispute_history.sql',
+  '../../drizzle/20260910014123_validate_dispute_history.sql'
 );
 
 test('Proof status migration normalizes legacy rows before applying the canonical constraint', async () => {
@@ -15,9 +15,7 @@ test('Proof status migration normalizes legacy rows before applying the canonica
     .map((statement) => statement.trim())
     .filter(Boolean);
   const normalizationEnd = statements.findIndex((statement) =>
-    statement.includes(
-      'CREATE OR REPLACE FUNCTION wallet_assert_funding_reservation_history',
-    ),
+    statement.includes('CREATE OR REPLACE FUNCTION wallet_assert_funding_reservation_history')
   );
   if (normalizationEnd < 0) {
     throw new Error('Proof status migration normalization statements are missing.');
@@ -59,23 +57,23 @@ test('Proof status migration normalizes legacy rows before applying the canonica
       await transaction.unsafe(statement);
     }
 
-    const proofRows = await transaction.unsafe<{
-      id: number;
-      submissionStatus: string;
-    }[]>(
-      'SELECT id, submission_status AS "submissionStatus" FROM proof_submission ORDER BY id',
-    );
-    const [questRow] = await transaction.unsafe<{
-      failedAt: string | null;
-      questStatus: string;
-    }[]>(
-      'SELECT quest_status AS "questStatus", failed_at AS "failedAt" FROM quest',
-    );
+    const proofRows = await transaction.unsafe<
+      {
+        id: number;
+        submissionStatus: string;
+      }[]
+    >('SELECT id, submission_status AS "submissionStatus" FROM proof_submission ORDER BY id');
+    const [questRow] = await transaction.unsafe<
+      {
+        failedAt: string | null;
+        questStatus: string;
+      }[]
+    >('SELECT quest_status AS "questStatus", failed_at AS "failedAt" FROM quest');
     const [constraint] = await transaction.unsafe<{ definition: string }[]>(
       `SELECT pg_get_constraintdef(oid) AS definition
        FROM pg_constraint
        WHERE conname = 'proof_submission_status_check'
-         AND conrelid = 'proof_submission'::regclass`,
+         AND conrelid = 'proof_submission'::regclass`
     );
 
     expect([...proofRows]).toEqual([

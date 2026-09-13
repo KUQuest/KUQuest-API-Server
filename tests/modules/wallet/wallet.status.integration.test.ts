@@ -83,7 +83,7 @@ describe('Wallet status service', () => {
       for (const status of ['FROZEN', 'SUSPENDED', 'CLOSED'] as const) {
         expectDomainErrorCode(
           () => assertWalletOperationAllowed(status, operation),
-          'WALLET_NOT_ACTIVE',
+          'WALLET_NOT_ACTIVE'
         );
       }
     }
@@ -130,19 +130,23 @@ describe('Wallet status service', () => {
       reason: 'Wallet closed',
     });
 
-    await expect(changeWalletStatus({
-      walletId: wallet.id,
-      toStatus: 'ACTIVE',
-      actorAdminId: adminId,
-      reason: 'Reopen attempt',
-    })).rejects.toMatchObject({ code: 'WALLET_STATUS_CLOSED' });
+    await expect(
+      changeWalletStatus({
+        walletId: wallet.id,
+        toStatus: 'ACTIVE',
+        actorAdminId: adminId,
+        reason: 'Reopen attempt',
+      })
+    ).rejects.toMatchObject({ code: 'WALLET_STATUS_CLOSED' });
 
-    await expect(changeWalletStatus({
-      walletId: wallet.id,
-      toStatus: 'CLOSED',
-      actorAdminId: adminId,
-      reason: 'Duplicate close',
-    })).rejects.toMatchObject({ code: 'WALLET_STATUS_UNCHANGED' });
+    await expect(
+      changeWalletStatus({
+        walletId: wallet.id,
+        toStatus: 'CLOSED',
+        actorAdminId: adminId,
+        reason: 'Duplicate close',
+      })
+    ).rejects.toMatchObject({ code: 'WALLET_STATUS_UNCHANGED' });
   });
 
   it('serializes concurrent changes into one coherent history', async () => {
@@ -175,7 +179,7 @@ describe('Wallet status service', () => {
       history[1]?.toStatus,
     ]);
     expect(new Set(history.slice(1).map(({ toStatus }) => toStatus))).toEqual(
-      new Set<WalletStatus>(['FROZEN', 'SUSPENDED']),
+      new Set<WalletStatus>(['FROZEN', 'SUSPENDED'])
     );
   });
 
@@ -219,12 +223,14 @@ describe('Wallet status service', () => {
     const { wallet } = await createStudentWallet('be112-atomicity');
     const historyBefore = await listWalletStatusHistory(wallet.id);
 
-    await expect(changeWalletStatus({
-      walletId: wallet.id,
-      toStatus: 'FROZEN',
-      actorAdminId: crypto.randomUUID(),
-      reason: 'Invalid actor',
-    })).rejects.toThrow();
+    await expect(
+      changeWalletStatus({
+        walletId: wallet.id,
+        toStatus: 'FROZEN',
+        actorAdminId: crypto.randomUUID(),
+        reason: 'Invalid actor',
+      })
+    ).rejects.toThrow();
 
     const [unchangedWallet] = await db
       .select()
@@ -242,14 +248,15 @@ describe('Wallet status service', () => {
       .where(eq(walletStatusHistory.walletId, wallet.id));
     if (!history) throw new Error('Test status history could not be created.');
 
-    await expect(db
-      .update(walletStatusHistory)
-      .set({ reason: 'Tampered history' })
-      .where(eq(walletStatusHistory.id, history.id))
-      .execute()).rejects.toThrow();
-    await expect(db
-      .delete(walletStatusHistory)
-      .where(eq(walletStatusHistory.id, history.id))
-      .execute()).rejects.toThrow();
+    await expect(
+      db
+        .update(walletStatusHistory)
+        .set({ reason: 'Tampered history' })
+        .where(eq(walletStatusHistory.id, history.id))
+        .execute()
+    ).rejects.toThrow();
+    await expect(
+      db.delete(walletStatusHistory).where(eq(walletStatusHistory.id, history.id)).execute()
+    ).rejects.toThrow();
   });
 });

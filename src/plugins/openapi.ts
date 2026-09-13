@@ -1,8 +1,5 @@
 import { openapi } from '@elysia/openapi';
-import {
-  authOpenAPIComponents,
-  authOpenAPIPaths,
-} from '@/modules/auth/auth.openapi';
+import { authOpenAPIComponents, authOpenAPIPaths } from '@/modules/auth/auth.openapi';
 
 export const openapiPlugin = openapi({
   documentation: {
@@ -41,11 +38,13 @@ export const openapiPlugin = openapi({
       },
       {
         name: 'Portfolio',
-        description: "Authenticated endpoints for managing the current Student's portfolio gallery.",
+        description:
+          "Authenticated endpoints for managing the current Student's portfolio gallery.",
       },
       {
         name: 'Certificates',
-        description: "Authenticated endpoints for managing the current Student's profile certificates.",
+        description:
+          "Authenticated endpoints for managing the current Student's profile certificates.",
       },
       {
         name: 'Tags',

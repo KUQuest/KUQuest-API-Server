@@ -21,7 +21,7 @@ export type AdminWalletListPage = {
 };
 
 export const listAdminWallets = async (
-  query: AdminWalletListQuery = {},
+  query: AdminWalletListQuery = {}
 ): Promise<AdminWalletListPage> => {
   const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
   const conditions = [];
@@ -39,8 +39,8 @@ export const listAdminWallets = async (
         ilike(authUser.firstName, s),
         ilike(authUser.lastName, s),
         ilike(authUser.studentId, s),
-        ilike(authUser.email, s),
-      ),
+        ilike(authUser.email, s)
+      )
     );
   }
 
@@ -51,11 +51,8 @@ export const listAdminWallets = async (
       conditions.push(
         or(
           lt(walletWallet.createdAt, cursorDate),
-          and(
-            eq(walletWallet.createdAt, cursorDate),
-            lt(walletWallet.id, parsed.id),
-          ),
-        ),
+          and(eq(walletWallet.createdAt, cursorDate), lt(walletWallet.id, parsed.id))
+        )
       );
     }
   }
@@ -134,7 +131,7 @@ export const listAdminWallets = async (
 };
 
 export const getAdminWalletDetail = async (
-  walletId: string,
+  walletId: string
 ): Promise<AdminWalletFullDetailResponse['data']['wallet'] | null> => {
   const [row] = await db
     .select({

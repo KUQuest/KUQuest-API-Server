@@ -3,6 +3,7 @@
 ## 1. Context and Problem Analysis
 
 In the KUQuest platform:
+
 - Each Member has one unified Wallet (`wallet_wallets`) containing 4 balance compartments (`spendingBalanceSatang`, `earningsBalanceSatang`, `fundingReservedSatang`, and `reservedForPayoutsSatang`).
 - The Admin Web App (`KUQuest-Admin`) has dedicated views for:
   - **Wallets / Payouts Directory**: Viewing all user wallets with both spending and earnings balances in a single request.
@@ -32,6 +33,7 @@ In the KUQuest platform:
 ## 3. Detailed Endpoint Contracts
 
 ### 3.1 `GET /api/v1/admin/wallets`
+
 Lists all Member Wallets with both Spending and Earnings balances in a single request.
 
 - **Query Parameters**:
@@ -41,6 +43,7 @@ Lists all Member Wallets with both Spending and Earnings balances in a single re
   - `limit` (optional): integer (1–100, default 20)
   - `cursor` (optional): opaque pagination cursor
 - **Response Data Shape**:
+
 ```typescript
 interface AdminWalletListResponse {
   items: Array<{
@@ -69,10 +72,12 @@ interface AdminWalletListResponse {
 ```
 
 ### 3.2 `GET /api/v1/admin/wallets/:walletId`
+
 Retrieves a single wallet and its balance compartments by wallet ID.
 
 - **Parameters**: `walletId` (UUID)
 - **Response Data Shape**:
+
 ```typescript
 interface AdminWalletDetailResponse {
   wallet: {
@@ -101,6 +106,7 @@ interface AdminWalletDetailResponse {
 ```
 
 ### 3.3 `GET /api/v1/admin/members`
+
 Search and list all Members on the platform for the Admin User Directory table.
 
 - **Query Parameters**:
@@ -109,6 +115,7 @@ Search and list all Members on the platform for the Admin User Directory table.
   - `limit` (optional): integer (1–100, default 20)
   - `cursor` (optional): opaque cursor
 - **Response Data Shape**:
+
 ```typescript
 interface AdminMemberListResponse {
   items: Array<{
@@ -136,10 +143,12 @@ interface AdminMemberListResponse {
 ```
 
 ### 3.4 `GET /api/v1/admin/members/:id`
+
 Retrieves comprehensive details for a specific Member, including profile, wallet, and marketplace performance statistics.
 
 - **Parameters**: `id` (UUID)
 - **Response Data Shape**:
+
 ```typescript
 interface AdminMemberDetailResponse {
   member: {

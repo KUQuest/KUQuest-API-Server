@@ -2,9 +2,7 @@ import type { ElysiaOpenAPIConfig } from '@elysia/openapi';
 
 import { ALLOWED_EMAIL_DOMAIN } from './auth.constants';
 
-type OpenAPIDocumentation = NonNullable<
-  ElysiaOpenAPIConfig['documentation']
->;
+type OpenAPIDocumentation = NonNullable<ElysiaOpenAPIConfig['documentation']>;
 type OpenAPIComponents = NonNullable<OpenAPIDocumentation['components']>;
 type OpenAPIPaths = NonNullable<OpenAPIDocumentation['paths']>;
 
@@ -217,10 +215,22 @@ export const authOpenAPIComponents = {
           required: ['token'],
           properties: {
             token: { type: 'string', description: 'ID token issued by Google.' },
-            nonce: { type: 'string', description: 'Nonce used to generate the token, if one was set.' },
-            accessToken: { type: 'string', description: 'Google\'s OAuth access token, stored against the linked account.' },
-            refreshToken: { type: 'string', description: 'Google\'s OAuth refresh token, stored against the linked account.' },
-            expiresAt: { type: 'number', description: 'Unix timestamp the access token expires at.' },
+            nonce: {
+              type: 'string',
+              description: 'Nonce used to generate the token, if one was set.',
+            },
+            accessToken: {
+              type: 'string',
+              description: "Google's OAuth access token, stored against the linked account.",
+            },
+            refreshToken: {
+              type: 'string',
+              description: "Google's OAuth refresh token, stored against the linked account.",
+            },
+            expiresAt: {
+              type: 'number',
+              description: 'Unix timestamp the access token expires at.',
+            },
           },
         },
       },
@@ -254,12 +264,13 @@ export const authOpenAPIComponents = {
         redirect: {
           type: 'boolean',
           enum: [false],
-          description: 'Always false for this flow — the caller already has a session, no authorization URL to follow.',
+          description:
+            'Always false for this flow — the caller already has a session, no authorization URL to follow.',
         },
         token: {
           type: 'string',
           description:
-            'Session token as a flat string — unlike GET /api/auth/get-session\'s nested {session, user} shape. The Better Auth session cookie is also set on this response.',
+            "Session token as a flat string — unlike GET /api/auth/get-session's nested {session, user} shape. The Better Auth session cookie is also set on this response.",
         },
         user: { $ref: '#/components/schemas/AuthUser' },
       },
@@ -322,7 +333,7 @@ export const authOpenAPIPaths = {
         },
         400: errorResponse('Invalid provider, callback URL, or request body.'),
         401: errorResponse(
-          `A native ID token (the mobile sign-in flow) fails Google's own hosted-domain check before this app's own validation ever runs, for e.g. an account outside the ${ALLOWED_EMAIL_DOMAIN} domain. Returns the generic Better Auth shape { code: "INVALID_TOKEN", message: "Invalid token" }, not a domain-specific error.`,
+          `A native ID token (the mobile sign-in flow) fails Google's own hosted-domain check before this app's own validation ever runs, for e.g. an account outside the ${ALLOWED_EMAIL_DOMAIN} domain. Returns the generic Better Auth shape { code: "INVALID_TOKEN", message: "Invalid token" }, not a domain-specific error.`
         ),
         429: errorResponse('Too many authentication requests.'),
         500: errorResponse('The authorization request could not be created.'),
@@ -400,11 +411,11 @@ export const authOpenAPIPaths = {
       ],
       responses: {
         302: {
-          description:
-            `Redirects to the trusted callback URL and sets the Better Auth session cookie after successful authentication. On failure — including an account outside the ${ALLOWED_EMAIL_DOMAIN} domain, which fails Google's own hosted-domain check before this app's own validation ever runs — redirects to the trusted error callback URL instead, with an \`?error=<code>\` query param appended (e.g. \`unable_to_get_user_info\` for a rejected domain) rather than a JSON error body.`,
+          description: `Redirects to the trusted callback URL and sets the Better Auth session cookie after successful authentication. On failure — including an account outside the ${ALLOWED_EMAIL_DOMAIN} domain, which fails Google's own hosted-domain check before this app's own validation ever runs — redirects to the trusted error callback URL instead, with an \`?error=<code>\` query param appended (e.g. \`unable_to_get_user_info\` for a rejected domain) rather than a JSON error body.`,
           headers: {
             Location: {
-              description: 'Trusted frontend or API callback URL, or the error callback URL with an appended `error` query param on failure.',
+              description:
+                'Trusted frontend or API callback URL, or the error callback URL with an appended `error` query param on failure.',
               schema: { type: 'string', format: 'uri' },
             },
           },
@@ -508,7 +519,9 @@ export const authOpenAPIPaths = {
           },
         },
         401: errorResponse('No active session.'),
-        403: errorResponse('The session is valid but not fresh (created more than 24 hours ago); sign in again to refresh it.'),
+        403: errorResponse(
+          'The session is valid but not fresh (created more than 24 hours ago); sign in again to refresh it.'
+        ),
       },
     },
   },
@@ -517,7 +530,7 @@ export const authOpenAPIPaths = {
       tags: ['Auth'],
       summary: 'Revoke a single session',
       description:
-        'Revokes one of the current user\'s own sessions by token. Immediate — sessions are database-backed, no token blocklisting involved.',
+        "Revokes one of the current user's own sessions by token. Immediate — sessions are database-backed, no token blocklisting involved.",
       operationId: 'revokeSession',
       security: [{ betterAuthSession: [] }],
       requestBody: {
@@ -536,7 +549,8 @@ export const authOpenAPIPaths = {
       },
       responses: {
         200: {
-          description: 'Session revoked (or was already gone/not owned by the caller — same response either way).',
+          description:
+            'Session revoked (or was already gone/not owned by the caller — same response either way).',
           content: {
             'application/json': {
               schema: { $ref: '#/components/schemas/RevokeSessionResult' },
@@ -551,7 +565,8 @@ export const authOpenAPIPaths = {
     post: {
       tags: ['Auth'],
       summary: 'Revoke every session',
-      description: 'Revokes every session for the current user, including the one making this request.',
+      description:
+        'Revokes every session for the current user, including the one making this request.',
       operationId: 'revokeSessions',
       security: [{ betterAuthSession: [] }],
       responses: {

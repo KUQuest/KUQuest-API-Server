@@ -16,7 +16,7 @@ const descriptionSchema = t.String({
 });
 
 export const portfolioParamSchema = t.Object({
-  portfolioId: t.String({ format: 'uuid'}),
+  portfolioId: t.String({ format: 'uuid' }),
 });
 
 export const portfolioImageParamSchema = t.Object({
@@ -29,12 +29,11 @@ export const portfolioImageCollectionParamSchema = t.Object({
 });
 
 export type PortfolioImageTarget =
-  | Static<typeof portfolioImageParamSchema>
-  | Static<typeof portfolioImageCollectionParamSchema>;
+  Static<typeof portfolioImageParamSchema> | Static<typeof portfolioImageCollectionParamSchema>;
 
 export const portfolioImageUploadSchema = t.Object(
   { image: t.File() },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const portfolioMutationResponseSchema = t.Object({
@@ -48,7 +47,7 @@ export const portfolioCreateSchema = t.Object(
     description: t.Optional(descriptionSchema),
     images: t.Optional(t.Files({ maxItems: maxPortfolioImages })),
   },
-  { additionalProperties: false},
+  { additionalProperties: false }
 );
 
 export const portfolioUpdateSchema = t.Object(
@@ -56,7 +55,7 @@ export const portfolioUpdateSchema = t.Object(
     title: t.Optional(titleSchema),
     description: t.Optional(descriptionSchema),
   },
-  {additionalProperties: false},
+  { additionalProperties: false }
 );
 
 export const portfolioImageSchema = t.Object({
@@ -74,16 +73,14 @@ export const portfolioItemSchema = t.Object({
   createdAt: t.String({ format: 'date-time' }),
 });
 
-export const portfolioListRespondSchema = 
-t.Object({
+export const portfolioListRespondSchema = t.Object({
   success: t.Literal(true),
   data: t.Array(portfolioItemSchema),
 });
 
-export const portfolioCreateResponseSchema =
-t.Object({
+export const portfolioCreateResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
-    id: t.String({ format: 'uuid'}),
+    id: t.String({ format: 'uuid' }),
   }),
 });

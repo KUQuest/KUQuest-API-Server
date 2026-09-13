@@ -1,11 +1,7 @@
 import { createApp } from '@/app';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import {
-  quest,
-  questApplication,
-  questAssignment,
-} from '@/database/schema/quest.schema';
+import { quest, questApplication, questAssignment } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
   chatConversation,
@@ -19,7 +15,17 @@ import { configureQuestWorkChatMembershipWriter } from '@/modules/quest';
 import { randomUUID } from 'node:crypto';
 
 import { eq, inArray } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test';
 
 const hirerId = randomUUID();
 const workerIds = [randomUUID(), randomUUID()];
@@ -49,27 +55,28 @@ const createQuest = async (mode: 'NO_CANDIDATE' | 'CANDIDATE') => {
   return questId;
 };
 
-const authenticate = () => spyOn(auth.api, 'getSession').mockImplementation((async (
-  { headers }: { headers: Headers },
-) => {
-  const memberId = headers.get('x-member-id') ?? hirerId;
-  return { user: { id: memberId }, session: { userId: memberId } } as never;
-}) as never);
+const authenticate = () =>
+  spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => {
+    const memberId = headers.get('x-member-id') ?? hirerId;
+    return { user: { id: memberId }, session: { userId: memberId } } as never;
+  }) as never);
 
-const post = (path: string, memberId: string, commandId: string) => productionApp.handle(
-  new Request(`http://localhost${path}`, {
-    method: 'POST',
-    headers: {
-      'idempotency-key': commandId,
-      'x-member-id': memberId,
-    },
-  }),
-);
+const post = (path: string, memberId: string, commandId: string) =>
+  productionApp.handle(
+    new Request(`http://localhost${path}`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': commandId,
+        'x-member-id': memberId,
+      },
+    })
+  );
 
 const cleanQuests = async (): Promise<void> => {
   if (!postgresAvailable || questIds.length === 0) return;
   await db.delete(chatTransitionCommand).where(inArray(chatTransitionCommand.questId, questIds));
-  const conversations = await db.select({ id: chatConversation.id })
+  const conversations = await db
+    .select({ id: chatConversation.id })
     .from(chatConversation)
     .where(inArray(chatConversation.questId, questIds));
   const conversationIds = conversations.map(({ id }) => id);
@@ -136,16 +143,25 @@ describe('production Work Conversation composition', () => {
     const selected = await post(
       `/api/v1/quests/${candidateQuestId}/applications/${applicationId}/select`,
       hirerId,
-      commandId,
+      commandId
     );
 
     expect(direct.status).toBe(200);
     expect(selected.status).toBe(200);
-    const conversations = await db.select().from(chatConversation)
+    const conversations = await db
+      .select()
+      .from(chatConversation)
       .where(inArray(chatConversation.questId, [directQuestId, candidateQuestId]));
     expect(conversations).toHaveLength(2);
-    const memberships = await db.select().from(chatMembership)
-      .where(inArray(chatMembership.conversationId, conversations.map(({ id }) => id)));
+    const memberships = await db
+      .select()
+      .from(chatMembership)
+      .where(
+        inArray(
+          chatMembership.conversationId,
+          conversations.map(({ id }) => id)
+        )
+      );
     expect(memberships).toHaveLength(4);
     expect(memberships.filter(({ role }) => role === 'WORKER')).toHaveLength(2);
   });
@@ -170,13 +186,16 @@ describe('production Work Conversation composition', () => {
     const response = await post(
       `/api/v1/quests/${candidateQuestId}/applications/${applicationId}/select`,
       hirerId,
-      'candidate-production-rollback',
+      'candidate-production-rollback'
     );
 
     expect(response.status).toBe(503);
     expect((await response.json()).error.code).toBe('WORK_CHAT_UNAVAILABLE');
-    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, candidateQuestId))).toHaveLength(0);
-    const [currentQuest] = await db.select({ status: quest.questStatus })
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, candidateQuestId))
+    ).toHaveLength(0);
+    const [currentQuest] = await db
+      .select({ status: quest.questStatus })
       .from(quest)
       .where(eq(quest.id, candidateQuestId));
     expect(currentQuest?.status).toBe('QUEST_OPEN');

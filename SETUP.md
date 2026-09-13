@@ -22,6 +22,7 @@ cp .env.example .env
 ```
 
 Key environment variables in `.env`:
+
 - `DATABASE_URL`: Connection string for PostgreSQL (default: `postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest`)
 - `BETTER_AUTH_SECRET`: Secret key (min 32 characters) for Student mobile session authentication
 - `ADMIN_BETTER_AUTH_SECRET`: Secret key (min 32 characters) for Admin web session authentication
@@ -29,6 +30,7 @@ Key environment variables in `.env`:
 - `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`: Object storage configuration (points to local RustFS container)
 
 Generate 32-character secrets with:
+
 ```bash
 openssl rand -base64 32
 ```
@@ -54,7 +56,7 @@ Wait until `kuquest-postgres` and `kuquest-rustfs` become healthy. The `rustfs-i
 bun run db:migrate
 ```
 
-*Tip: Always run `bun run db:migrate` after pulling changes that touch `drizzle/`.*
+_Tip: Always run `bun run db:migrate` after pulling changes that touch `drizzle/`._
 
 ### 5. Start the Development Server
 
@@ -63,6 +65,7 @@ bun run dev
 ```
 
 The API will start with auto-reload:
+
 ```text
 KUQuest API running at http://localhost:5000
 ```
@@ -79,9 +82,10 @@ curl --fail http://localhost:5000/openapi/json
 ```
 
 Key Local URLs:
+
 - **API Test Bench & Simulation UI**: [http://localhost:5000](http://localhost:5000)
 - **Interactive OpenAPI Docs**: [http://localhost:5000/openapi](http://localhost:5000/openapi)
-- **RustFS S3 Console**: [http://localhost:9001](http://localhost:9001) *(login with credentials from `.env`)*
+- **RustFS S3 Console**: [http://localhost:9001](http://localhost:9001) _(login with credentials from `.env`)_
 - **Drizzle Studio**: `bun run db:studio` -> [https://local.drizzle.studio](https://local.drizzle.studio)
 
 ---
@@ -95,6 +99,7 @@ bun run check
 ```
 
 Run specific test subsets:
+
 ```bash
 bun test                      # Run all tests
 bun test tests/modules/auth   # Run auth module tests
@@ -129,6 +134,7 @@ bun run db:seed-finance-test
 ```
 
 ### Migration Guidelines
+
 1. Edit schema files under `src/database/schema/`.
 2. Run `bun run db:generate`.
 3. Inspect the generated SQL in `drizzle/` and journal in `drizzle/meta/`.
@@ -140,6 +146,7 @@ bun run db:seed-finance-test
 ## 🛡️ Authentication & Admin Setup
 
 ### 1. Google OAuth (Student App)
+
 - Configure a Google OAuth 2.0 Web Client with redirect URI:
   ```text
   http://localhost:5000/api/auth/callback/google
@@ -147,7 +154,9 @@ bun run db:seed-finance-test
 - Only Student accounts ending in `@ku.th` are permitted to sign in.
 
 ### 2. Admin Credentials (Admin Web App)
+
 Create `.env.admin` locally (ignored by Git):
+
 ```env
 DATABASE_URL=postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest
 ADMIN_BETTER_AUTH_SECRET=replace-with-a-32-character-secret
@@ -165,6 +174,7 @@ plaintext password is never stored or printed. Keep `.env.admin` outside source
 control and run this command only in the controlled deployment workflow.
 
 Run the seed script:
+
 ```bash
 bun --env-file=.env.admin run db:seed-admin
 ```
@@ -186,6 +196,7 @@ docker compose logs -f cloudflared
 ```
 
 Stop the tunnel:
+
 ```bash
 docker compose --profile tunnel stop cloudflared
 ```

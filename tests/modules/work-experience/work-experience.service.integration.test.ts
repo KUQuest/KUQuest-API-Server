@@ -22,7 +22,7 @@ beforeAll(async () => {
   } catch (cause) {
     throw new Error(
       'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 
@@ -55,10 +55,7 @@ const experience = (overrides: Partial<Parameters<typeof createWorkExperience>[1
   ...overrides,
 });
 
-const createValidExperience = async (
-  userId: string,
-  data = experience(),
-) => {
+const createValidExperience = async (userId: string, data = experience()) => {
   const created = await createWorkExperience(userId, data);
   if ('outcome' in created) throw new Error(`Unexpected outcome: ${created.outcome}`);
   return created;
@@ -80,16 +77,22 @@ describe('work experience persistence', () => {
   });
 
   it('sorts by newest start date, then creation time, then id', async () => {
-    await createValidExperience(studentA, experience({
-      title: 'Older role',
-      startedAt: '2022-01-01',
-      endedAt: null,
-    }));
-    await createValidExperience(studentA, experience({
-      title: 'Newer role',
-      startedAt: '2024-01-01',
-      endedAt: null,
-    }));
+    await createValidExperience(
+      studentA,
+      experience({
+        title: 'Older role',
+        startedAt: '2022-01-01',
+        endedAt: null,
+      })
+    );
+    await createValidExperience(
+      studentA,
+      experience({
+        title: 'Newer role',
+        startedAt: '2024-01-01',
+        endedAt: null,
+      })
+    );
 
     expect((await listWorkExperiences(studentA)).map(({ title }) => title)).toEqual([
       'Newer role',
@@ -110,7 +113,9 @@ describe('work experience persistence', () => {
       organization: 'Tech Startup Inc.',
       endedAt: null,
     });
-    expect(await updateWorkExperience(studentB, created!.id, { title: 'Hijacked' })).toBeUndefined();
+    expect(
+      await updateWorkExperience(studentB, created!.id, { title: 'Hijacked' })
+    ).toBeUndefined();
   });
 
   it('returns the current record unchanged for an empty patch', async () => {
@@ -118,7 +123,11 @@ describe('work experience persistence', () => {
 
     const updated = await updateWorkExperience(studentA, created!.id, {});
 
-    expect(updated).toMatchObject({ id: created!.id, version: created!.version, title: created!.title });
+    expect(updated).toMatchObject({
+      id: created!.id,
+      version: created!.version,
+      title: created!.title,
+    });
   });
 
   it('explicitly clears organization and description when set to null', async () => {
@@ -136,28 +145,42 @@ describe('work experience persistence', () => {
     const created = await createValidExperience(studentA);
 
     expect(await deleteWorkExperience(studentB, created!.id)).toBeUndefined();
-    expect(await deleteWorkExperience(studentA, created!.id)).toEqual({ outcome: 'deleted', id: created!.id, version: 2 });
+    expect(await deleteWorkExperience(studentA, created!.id)).toEqual({
+      outcome: 'deleted',
+      id: created!.id,
+      version: 2,
+    });
     expect(await listWorkExperiences(studentA)).toEqual([]);
   });
 
   it('rejects an ended date earlier than the start date before persistence', async () => {
-    expect(await createWorkExperience(studentA, experience({
-      startedAt: '2024-01-02',
-      endedAt: '2024-01-01',
-    }))).toEqual({ outcome: 'invalid-date-range' });
+    expect(
+      await createWorkExperience(
+        studentA,
+        experience({
+          startedAt: '2024-01-02',
+          endedAt: '2024-01-01',
+        })
+      )
+    ).toEqual({ outcome: 'invalid-date-range' });
     expect(await listWorkExperiences(studentA)).toEqual([]);
   });
 
   it('accepts equal start and end dates and rejects an invalid PATCH range', async () => {
-    const created = await createValidExperience(studentA, experience({
-      startedAt: '2024-01-01',
-      endedAt: '2024-01-01',
-    }));
+    const created = await createValidExperience(
+      studentA,
+      experience({
+        startedAt: '2024-01-01',
+        endedAt: '2024-01-01',
+      })
+    );
 
     expect(created.endedAt).toBe('2024-01-01');
-    expect(await updateWorkExperience(studentA, created.id, {
-      startedAt: '2025-01-02',
-    })).toEqual({ outcome: 'invalid-date-range' });
+    expect(
+      await updateWorkExperience(studentA, created.id, {
+        startedAt: '2025-01-02',
+      })
+    ).toEqual({ outcome: 'invalid-date-range' });
     expect((await listWorkExperiences(studentA))[0]?.startedAt).toBe('2024-01-01');
   });
 });

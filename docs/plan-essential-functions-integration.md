@@ -28,6 +28,7 @@ Connect essential services, lifecycle automation, and administrative capabilitie
 ## Phase 3: Admin Wallet Freeze and Suspend Endpoints
 
 Under `docs/rulebook/admin/admin-wallet-freeze-contract.md` and `docs/reconciliation/admin-reconciliation.md` line 93:
+
 - [ ] **3.1 Schema & Controller**: Define admin wallet status update schema (`FROZEN`, `SUSPENDED`, `ACTIVE`, `CLOSED`, mandatory reason) and controller calling `changeWalletStatus` in `src/modules/wallet/wallet.admin.controller.ts`.
 - [ ] **3.2 Admin Routes**: Mount `POST /api/v1/admin/wallets/:walletId/status` and `GET /api/v1/admin/wallets/:walletId/status-history` protected by `enabledAdminGuard` in `src/modules/wallet/wallet.admin.route.ts` and mount in `src/app.ts`.
 
@@ -36,6 +37,7 @@ Under `docs/rulebook/admin/admin-wallet-freeze-contract.md` and `docs/reconcilia
 ## Phase 4: Admin Payment Reconciliation & Webhook Retry Endpoints
 
 Under `docs/rulebook/finance/finance-rulebook.md`:
+
 - [ ] **4.1 Top-Up Reconciliation & Retry**: Expose `POST /api/v1/admin/top-ups/:topUpId/reconcile` and `POST /api/v1/admin/top-ups/events/:eventId/retry` in `src/modules/top-up/top-up.admin.route.ts` calling `reconcileTopUp` and `retryTopUpProviderEvent`.
 - [ ] **4.2 Payout Reconciliation & Retry**: Expose `POST /api/v1/admin/payouts/:payoutId/reconcile` and `POST /api/v1/admin/payouts/events/:eventId/retry` in `src/modules/payout/payout.admin.route.ts` calling `reconcilePayout` and `retryPayoutProviderEvent`.
 
@@ -44,6 +46,7 @@ Under `docs/rulebook/finance/finance-rulebook.md`:
 ## Phase 5: Wallet Subledger Audit and Health Endpoints
 
 Under `docs/adr/0006-ledger-is-financial-source-of-truth.md` and `docs/adr/0012-wallet-ledger-is-a-subledger.md`:
+
 - [ ] **5.1 Wallet Verification Route**: Expose `GET /api/v1/admin/wallets/:walletId/verification` in `src/modules/wallet/wallet.admin.route.ts` calling `verifyWalletProjection`.
 - [ ] **5.2 Wallet Rebuild Projection Route**: Expose `POST /api/v1/admin/wallets/:walletId/rebuild-projection` in `src/modules/wallet/wallet.admin.route.ts` calling `rebuildWalletProjection`.
 

@@ -25,7 +25,7 @@ export const certificateCreateSchema = t.Object(
       error: 'Issue date must be a calendar date in YYYY-MM-DD format',
     }),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 // Every field optional so a caller may patch a subset; each supplied field is
@@ -60,7 +60,7 @@ export const certificateListResponseSchema = t.Object({
 
 export const certificateImageUploadSchema = t.Object(
   { image: t.File() },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const certificateMutationResponseSchema = t.Object({

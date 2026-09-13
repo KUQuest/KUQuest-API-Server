@@ -1,14 +1,8 @@
 import type { AdminContext } from '@/modules/auth';
 import { apiError, apiSuccess, type ApiResponse } from '@/shared/api-response';
 
-import type {
-  AdminMemberListQuery,
-  AdminMemberParams,
-} from './admin-member.schema';
-import {
-  getAdminMemberDetail,
-  listAdminMembers,
-} from './admin-member.service';
+import type { AdminMemberListQuery, AdminMemberParams } from './admin-member.schema';
+import { getAdminMemberDetail, listAdminMembers } from './admin-member.service';
 
 export const listAdminMembersController = async ({
   query,

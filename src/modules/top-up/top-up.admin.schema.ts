@@ -77,12 +77,7 @@ export const adminTopUpListItemSchema = t.Object({
 
 export const adminTopUpListQuerySchema = t.Object({
   status: t.Optional(
-    t.Union([
-      t.Literal('PENDING'),
-      t.Literal('PAID'),
-      t.Literal('EXPIRED'),
-      t.Literal('FAILED'),
-    ]),
+    t.Union([t.Literal('PENDING'), t.Literal('PAID'), t.Literal('EXPIRED'), t.Literal('FAILED')])
   ),
   userId: t.Optional(t.String({ format: 'uuid' })),
   limit: t.Optional(t.Integer({ minimum: 1, maximum: 100 })),
