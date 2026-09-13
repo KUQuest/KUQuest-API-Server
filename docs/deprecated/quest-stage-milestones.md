@@ -47,19 +47,19 @@ stateDiagram-v2
 
 ## What each milestone means
 
-| Stage | Meaning | Next milestone |
-|---|---|---|
-| `DRAFT` | Hirer prepares the Quest. | Hirer locks the total and publishes it. |
-| `OPEN` | The Quest is available for direct Workers or Candidate selection. | Roster becomes full, or Hirer/Admin cancels or hides it. |
-| `ASSIGNED` | The complete working roster is accepted. | Work starts, or the Hirer cancels. |
-| `IN_PROGRESS` | Workers perform the work. | Workers submit, the Hirer cancels, or a party disputes. |
-| `SUBMITTED` | Work is awaiting Hirer review. | Approve, rework, or dispute. |
-| `REWORK` | Candidate-mode work is being corrected within its declared quota. | Worker resubmits or a party disputes. |
-| `APPROVED` | Submitted work passed review. | Credit Worker earnings and complete the Quest. |
-| `COMPLETED` | Work and payout are complete. Terminal. | No further Quest stage. |
-| `CANCELLED` | The Quest stopped before completion. Terminal. | No further Quest stage. |
-| `DISPUTED` | Admin resolves the payment outcome. | Complete or cancel according to the decision. |
-| `HIDDEN` | Admin moderation temporarily hides an open Quest; its Quest Escrow remains reserved. | Admin restores it to `OPEN` before `startTime`, or it becomes `CANCELLED` after `startTime`. |
+| Stage         | Meaning                                                                              | Next milestone                                                                               |
+| ------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `DRAFT`       | Hirer prepares the Quest.                                                            | Hirer locks the total and publishes it.                                                      |
+| `OPEN`        | The Quest is available for direct Workers or Candidate selection.                    | Roster becomes full, or Hirer/Admin cancels or hides it.                                     |
+| `ASSIGNED`    | The complete working roster is accepted.                                             | Work starts, or the Hirer cancels.                                                           |
+| `IN_PROGRESS` | Workers perform the work.                                                            | Workers submit, the Hirer cancels, or a party disputes.                                      |
+| `SUBMITTED`   | Work is awaiting Hirer review.                                                       | Approve, rework, or dispute.                                                                 |
+| `REWORK`      | Candidate-mode work is being corrected within its declared quota.                    | Worker resubmits or a party disputes.                                                        |
+| `APPROVED`    | Submitted work passed review.                                                        | Credit Worker earnings and complete the Quest.                                               |
+| `COMPLETED`   | Work and payout are complete. Terminal.                                              | No further Quest stage.                                                                      |
+| `CANCELLED`   | The Quest stopped before completion. Terminal.                                       | No further Quest stage.                                                                      |
+| `DISPUTED`    | Admin resolves the payment outcome.                                                  | Complete or cancel according to the decision.                                                |
+| `HIDDEN`      | Admin moderation temporarily hides an open Quest; its Quest Escrow remains reserved. | Admin restores it to `OPEN` before `startTime`, or it becomes `CANCELLED` after `startTime`. |
 
 ## Acceptance and Work Conversation milestones
 
@@ -72,20 +72,20 @@ stateDiagram-v2
 
 ## Ownership transition
 
-| Request | MVP result | Work Conversation consequence |
-|---|---|---|
+| Request                             | MVP result                                         | Work Conversation consequence                                                                                                                       |
+| ----------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Transfer the Quest to another Hirer | Rejected. No ownership-transfer transition exists. | The original Hirer remains the only Hirer in the room. No new Hirer is added, no existing Hirer is removed, and no membership history is rewritten. |
 
 ## Participation and terminal transitions
 
-| Term | Transition | Result |
-|---|---|---|
-| **Accepted** | A direct Worker joins, or the Hirer selects a Candidate or Candidate team. | Quest creates an `ACTIVE` Assignment. A selected team’s Workers become accepted atomically. The first accepted Worker creates the Work Conversation. |
-| **Active** | An accepted Worker has an `ACTIVE` Assignment. | The Worker is a current accepted participant and may use the Work Conversation. |
-| **Departed** | An Assignment ends before completion through an allowed Quest or Admin transition. A Worker cannot voluntarily leave after Assignment creation. | Their Assignment becomes `INCOMPLETE` or `CANCELLED`, the Worker leaves the Work Conversation, and may read only history from before departure. |
-| **Completed** | All required work is approved, or Admin resolves a dispute for completion. | Active Assignments become `COMPLETED`; the Quest becomes `COMPLETED`; its Work Conversation becomes read-only. |
-| **Canceled** | The Hirer cancels at an allowed stage, or an Admin resolves a dispute as a Hirer refund. Workers cannot voluntarily cancel after Assignment creation. | The Quest becomes `CANCELLED`; its Work Conversation becomes read-only and active Assignments become `CANCELLED`. |
-| **Reopened** | No transition exists in MVP. | A `COMPLETED` or `CANCELLED` Quest remains terminal; do not create a new Work Conversation or reactivate past Workers. |
+| Term          | Transition                                                                                                                                            | Result                                                                                                                                               |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Accepted**  | A direct Worker joins, or the Hirer selects a Candidate or Candidate team.                                                                            | Quest creates an `ACTIVE` Assignment. A selected team’s Workers become accepted atomically. The first accepted Worker creates the Work Conversation. |
+| **Active**    | An accepted Worker has an `ACTIVE` Assignment.                                                                                                        | The Worker is a current accepted participant and may use the Work Conversation.                                                                      |
+| **Departed**  | An Assignment ends before completion through an allowed Quest or Admin transition. A Worker cannot voluntarily leave after Assignment creation.       | Their Assignment becomes `INCOMPLETE` or `CANCELLED`, the Worker leaves the Work Conversation, and may read only history from before departure.      |
+| **Completed** | All required work is approved, or Admin resolves a dispute for completion.                                                                            | Active Assignments become `COMPLETED`; the Quest becomes `COMPLETED`; its Work Conversation becomes read-only.                                       |
+| **Canceled**  | The Hirer cancels at an allowed stage, or an Admin resolves a dispute as a Hirer refund. Workers cannot voluntarily cancel after Assignment creation. | The Quest becomes `CANCELLED`; its Work Conversation becomes read-only and active Assignments become `CANCELLED`.                                    |
+| **Reopened**  | No transition exists in MVP.                                                                                                                          | A `COMPLETED` or `CANCELLED` Quest remains terminal; do not create a new Work Conversation or reactivate past Workers.                               |
 
 ## Editing rules
 

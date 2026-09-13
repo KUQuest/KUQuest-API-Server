@@ -46,7 +46,9 @@ export const updateAcademicRegistrationController = async ({
   session,
   set,
   body,
-}: AuthedContext & { body: Static<typeof academicRegistrationUpdateSchema> }): Promise<ApiResponse> => {
+}: AuthedContext & {
+  body: Static<typeof academicRegistrationUpdateSchema>;
+}): Promise<ApiResponse> => {
   const outcome = await updateAcademicRegistration(session.user.id, body);
 
   if (outcome === 'student-not-found') return studentNotFound(set);

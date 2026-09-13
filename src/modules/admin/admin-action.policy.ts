@@ -96,9 +96,7 @@ const invalidCatalog = (message: string): never => {
   throw new AdminActionError('ADMIN_ACTION_INVALID_CATALOG', message);
 };
 
-export const normalizeReasonCatalog = (
-  catalog: unknown,
-): AdminActionReasonCatalog => {
+export const normalizeReasonCatalog = (catalog: unknown): AdminActionReasonCatalog => {
   if (!isPlainObject(catalog)) {
     invalidCatalog('Admin Action reason catalog must be an object.');
   }
@@ -167,7 +165,7 @@ export const normalizeReasonCatalog = (
 export const actionRuleFor = (
   catalog: AdminActionReasonCatalog,
   action: string,
-  kind: AdminActionKind,
+  kind: AdminActionKind
 ): AdminActionReasonRule => {
   const rule = Object.prototype.hasOwnProperty.call(catalog.actions, action)
     ? catalog.actions[action]
@@ -175,13 +173,13 @@ export const actionRuleFor = (
   if (!rule) {
     throw new AdminActionError(
       'ADMIN_ACTION_ACTION_NOT_CATALOGED',
-      `Admin Action ${action} is not in the reason catalog.`,
+      `Admin Action ${action} is not in the reason catalog.`
     );
   }
   if (rule.kind !== kind) {
     throw new AdminActionError(
       'ADMIN_ACTION_ACTION_KIND_INVALID',
-      `Admin Action ${action} is not valid for a ${kind.toLowerCase().replace('_', ' ')} operation.`,
+      `Admin Action ${action} is not valid for a ${kind.toLowerCase().replace('_', ' ')} operation.`
     );
   }
   return rule;
@@ -189,29 +187,26 @@ export const actionRuleFor = (
 
 export const normalizeReasonCode = (
   rule: AdminActionReasonRule,
-  reasonCode: string | undefined,
+  reasonCode: string | undefined
 ): string | undefined => {
   const normalized = reasonCode?.trim() || undefined;
   if (rule.requiresReason && !normalized) {
     throw new AdminActionError(
       'ADMIN_ACTION_REASON_REQUIRED',
-      'Admin Action reason code is required.',
+      'Admin Action reason code is required.'
     );
   }
   if (normalized && !rule.allowedReasonCodes.includes(normalized)) {
     throw new AdminActionError(
       'ADMIN_ACTION_INVALID_REASON_CODE',
-      'Admin Action reason code is not allowed for this operation.',
+      'Admin Action reason code is not allowed for this operation.'
     );
   }
   return normalized;
 };
 
 const unsafeMetadata = (path: string, message: string): never => {
-  throw new AdminActionError(
-    'ADMIN_ACTION_UNSAFE_METADATA',
-    `Admin Action ${message} at ${path}.`,
-  );
+  throw new AdminActionError('ADMIN_ACTION_UNSAFE_METADATA', `Admin Action ${message} at ${path}.`);
 };
 
 const normalizeSafeValue = (value: unknown, path: string): AdminActionSafeValue => {
@@ -244,24 +239,18 @@ const normalizeSafeValue = (value: unknown, path: string): AdminActionSafeValue 
   return normalized;
 };
 
-export const normalizeSafeObject = (
-  value: unknown,
-  field = 'metadata',
-): AdminActionSafeObject => {
+export const normalizeSafeObject = (value: unknown, field = 'metadata'): AdminActionSafeObject => {
   if (value === undefined) return {};
   if (!isPlainObject(value)) unsafeMetadata(field, 'metadata must be an object');
   return normalizeSafeValue(value, field) as AdminActionSafeObject;
 };
 
-export const normalizeIdentifier = (
-  value: string,
-  field: string,
-): string => {
+export const normalizeIdentifier = (value: string, field: string): string => {
   const normalized = value.trim();
   if (!normalized || normalized.length > 100 || !identifierPattern.test(normalized)) {
     throw new AdminActionError(
       'ADMIN_ACTION_INVALID_RESOURCE',
-      `${field} must be a non-empty identifier of at most 100 characters.`,
+      `${field} must be a non-empty identifier of at most 100 characters.`
     );
   }
   return normalized;
@@ -272,7 +261,7 @@ export const normalizeResourceId = (value: string, field = 'resourceId'): string
   if (!normalized || normalized.length > 255) {
     throw new AdminActionError(
       'ADMIN_ACTION_INVALID_RESOURCE',
-      `${field} must be a non-empty resource identifier of at most 255 characters.`,
+      `${field} must be a non-empty resource identifier of at most 255 characters.`
     );
   }
   return normalized;
@@ -283,7 +272,7 @@ export const normalizeRequestKey = (value: string): string => {
   if (!normalized || normalized.length > 200) {
     throw new AdminActionError(
       'ADMIN_ACTION_INVALID_REQUEST_KEY',
-      'Admin Action request key must contain 1 to 200 non-whitespace characters.',
+      'Admin Action request key must contain 1 to 200 non-whitespace characters.'
     );
   }
   return normalized;
@@ -293,7 +282,7 @@ export const assertPositiveVersion = (value: number, field: string): number => {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new AdminActionError(
       'ADMIN_ACTION_INVALID_VERSION',
-      `${field} must be a positive integer.`,
+      `${field} must be a positive integer.`
     );
   }
   return value;
@@ -301,13 +290,16 @@ export const assertPositiveVersion = (value: number, field: string): number => {
 
 export const normalizeRequestValue = (
   value: unknown,
-  path = 'request',
+  path = 'request'
 ): AdminActionSafeValue | null => {
   if (value === undefined) return null;
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return value;
   if (typeof value === 'number') {
     if (!Number.isFinite(value) || !Number.isSafeInteger(value)) {
-      throw new AdminActionError('ADMIN_ACTION_INVALID_REQUEST', `${path} must contain safe JSON values.`);
+      throw new AdminActionError(
+        'ADMIN_ACTION_INVALID_REQUEST',
+        `${path} must contain safe JSON values.`
+      );
     }
     return value;
   }
@@ -321,7 +313,10 @@ export const normalizeRequestValue = (
   const normalized = Object.create(null) as { [key: string]: AdminActionSafeValue };
   for (const [key, child] of Object.entries(value)) {
     if (!key || key.length > 100) {
-      throw new AdminActionError('ADMIN_ACTION_INVALID_REQUEST', `${path} contains an invalid field name.`);
+      throw new AdminActionError(
+        'ADMIN_ACTION_INVALID_REQUEST',
+        `${path} contains an invalid field name.`
+      );
     }
     normalized[key] = normalizeRequestValue(child, `${path}.${key}`);
   }

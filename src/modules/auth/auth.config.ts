@@ -1,6 +1,7 @@
 import { env } from '@/config/env';
 import { db } from '@/database/client';
 import * as schema from '@/database/schema/auth.schema';
+import { createWallet } from '@/modules/wallet/wallet.service';
 
 import { expo } from '@better-auth/expo';
 import { betterAuth } from 'better-auth';
@@ -13,12 +14,12 @@ import {
   getTrustedOrigins,
 } from './auth.config.shared';
 import { assertAllowedEmail } from './auth.policy';
-
 type StudentAuthOptions = {
   basePath?: string;
   emailAndPasswordEnabled?: boolean;
   allowEmailSignUp?: boolean;
   autoSignIn?: boolean;
+  provisionWalletOnCreate?: boolean;
 };
 
 export const createStudentAuth = ({
@@ -26,6 +27,7 @@ export const createStudentAuth = ({
   emailAndPasswordEnabled = false,
   allowEmailSignUp = false,
   autoSignIn = true,
+  provisionWalletOnCreate = true,
 }: StudentAuthOptions = {}) =>
   betterAuth({
     appName: 'KUQuest',
@@ -45,8 +47,7 @@ export const createStudentAuth = ({
     socialProviders: {
       google: {
         clientId: env.googleClientId || configurationPlaceholder('google-client-id'),
-        clientSecret:
-          env.googleClientSecret || configurationPlaceholder('google-client-secret'),
+        clientSecret: env.googleClientSecret || configurationPlaceholder('google-client-secret'),
         hd: ALLOWED_EMAIL_DOMAIN,
         prompt: 'select_account',
         mapProfileToUser: (profile) => {
@@ -92,6 +93,28 @@ export const createStudentAuth = ({
       defaultCookieAttributes,
     },
     trustedOrigins: getTrustedOrigins(true),
+    databaseHooks: provisionWalletOnCreate
+      ? {
+          user: {
+            create: {
+              after: async (user) => {
+                if (user && 'id' in user && typeof user.id === 'string') {
+                  await createWallet(user.id);
+                }
+              },
+            },
+          },
+          session: {
+            create: {
+              after: async (session) => {
+                if (session && 'userId' in session && typeof session.userId === 'string') {
+                  await createWallet(session.userId);
+                }
+              },
+            },
+          },
+        }
+      : undefined,
   });
 
 export const auth = createStudentAuth();

@@ -1,9 +1,4 @@
-import type { WalletStatus } from '@/database/schema/wallet.schema';
-import {
-  calculatePlatformFeeSatang,
-  satang,
-  type Satang,
-} from '@/modules/wallet';
+import { calculatePlatformFeeSatang, satang, type Satang } from '@/modules/wallet';
 
 import {
   isValidQuestV2Headcount,
@@ -44,8 +39,8 @@ export type QuestV2PublishSnapshot = QuestV2FundingQuoteInput & {
   startTime: Date;
   dueAt: Date | null;
   now: Date;
-  spendingBalanceSatang: Satang;
-  walletStatus: WalletStatus;
+  canReserve: boolean;
+  reason?: 'WALLET_NOT_FOUND' | 'WALLET_NOT_ACTIVE' | 'INSUFFICIENT_SPENDING_BALANCE';
   minimumFundingReservationSatang: Satang;
   maximumFundingReservationSatang: Satang;
 };
@@ -78,11 +73,11 @@ const greatestRewardSatang = (questFundingTotalSatang: Satang, platformFeeBps: n
 };
 
 export const calculateQuestV2FundingQuote = (
-  input: QuestV2FundingQuoteInput,
+  input: QuestV2FundingQuoteInput
 ): QuestV2FundingQuote => {
   const questRewardSatang = greatestRewardSatang(
     input.questFundingTotalSatang,
-    input.platformFeeBps,
+    input.platformFeeBps
   );
   const platformFeeSatang = satang(input.questFundingTotalSatang - questRewardSatang);
   const escrowRequirementSatang = satang(input.questFundingTotalSatang * input.headcount);
@@ -100,9 +95,7 @@ export const calculateQuestV2FundingQuote = (
   };
 };
 
-export const buildQuestV2PublishCheck = (
-  snapshot: QuestV2PublishSnapshot,
-): QuestV2PublishCheck => {
+export const buildQuestV2PublishCheck = (snapshot: QuestV2PublishSnapshot): QuestV2PublishCheck => {
   const quote = calculateQuestV2FundingQuote(snapshot);
   const blockingReasons: QuestV2PublishReason[] = [];
 
@@ -154,10 +147,10 @@ export const buildQuestV2PublishCheck = (
     });
   }
 
-  if (snapshot.walletStatus !== 'ACTIVE') {
+  if (snapshot.reason === 'WALLET_NOT_ACTIVE') {
     blockingReasons.push({
       code: 'WALLET_NOT_ACTIVE',
-      message: `Wallet status ${snapshot.walletStatus} does not permit FUNDING_RESERVATION.`,
+      message: 'Wallet does not permit a Funding Reservation.',
     });
   }
 
@@ -171,7 +164,7 @@ export const buildQuestV2PublishCheck = (
     });
   }
 
-  if (snapshot.spendingBalanceSatang < quote.escrowRequirementSatang) {
+  if (snapshot.reason === 'INSUFFICIENT_SPENDING_BALANCE') {
     blockingReasons.push({
       code: 'INSUFFICIENT_SPENDING_BALANCE',
       message: 'Spending Balance is insufficient for Quest Escrow',

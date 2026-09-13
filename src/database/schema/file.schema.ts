@@ -20,7 +20,7 @@ export const file = pgTable(
   (table) => [
     unique('file_bucket_object_key_key').on(table.bucket, table.objectKey),
     index('file_uploaded_by_user_id_idx').on(table.uploadedByUserId),
-  ],
+  ]
 );
 
 export const fileRelations = relations(file, ({ one }) => ({

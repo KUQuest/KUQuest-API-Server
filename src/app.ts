@@ -2,7 +2,7 @@ import { questRoute } from '@/modules/quest/quest.route';
 import { adminQuestRoute } from '@/modules/quest/quest-admin.route';
 import { tagRoute } from '@/modules/tag';
 import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
-import { topUpRoute, topUpWebhookRoute } from '@/modules/top-up';
+import { adminTopUpRoute, topUpRoute, topUpWebhookRoute } from '@/modules/top-up';
 import { questAssignmentRoute } from '@/modules/quest/quest-assignment.route';
 import { questCandidateRoute } from '@/modules/quest/quest-candidate.route';
 import { questProofRoute } from '@/modules/quest/quest-proof.route';
@@ -10,6 +10,12 @@ import { questReviewRoute } from '@/modules/quest/quest-review.route';
 import { questDisputeRoute } from '@/modules/quest/quest-dispute.route';
 import { adminDisputeRoute } from '@/modules/quest/quest-dispute-admin.route';
 import { questSettlementRoute } from '@/modules/quest/quest-settlement.route';
+import {
+  adminActivityLogRoute,
+  adminFinanceRoute,
+  adminMemberRoute,
+  adminOverviewRoute,
+} from '@/modules/admin';
 import {
   configureQuestWorkChatMembershipWriter,
   questAssignmentV2Route,
@@ -19,7 +25,11 @@ import {
   questReviewV2Route,
   questV2Route,
 } from '@/modules/quest';
-import { candidateInquiryRoute, workChatMembershipWriter, workChatRoute } from '@/modules/work-chat';
+import {
+  candidateInquiryRoute,
+  workChatMembershipWriter,
+  workChatRoute,
+} from '@/modules/work-chat';
 
 import { Elysia } from 'elysia';
 
@@ -32,7 +42,8 @@ import { portfolioRoute } from './modules/portfolio';
 import { profileRoute } from './modules/profile';
 import { workExperienceRoute } from './modules/work-experience';
 import { localFinanceTestRoute } from './modules/local-finance-test';
-import { walletRoute } from './modules/wallet';
+import { adminWalletRoute, walletRoute } from './modules/wallet';
+import { payoutDestinationRoute } from './modules/payout-destination';
 import { corsPlugin } from './plugins/cors';
 import { errorHandlerPlugin } from './plugins/error-handler';
 import { openapiPlugin } from './plugins/openapi';
@@ -78,6 +89,10 @@ export const createApp = () => {
     .use(questV2Route)
     .use(questRoute)
     .use(adminQuestRoute)
+    .use(adminOverviewRoute)
+    .use(adminActivityLogRoute)
+    .use(adminFinanceRoute)
+    .use(adminMemberRoute)
     .use(certificateRoute)
     .use(portfolioRoute)
     .use(workExperienceRoute)
@@ -85,10 +100,13 @@ export const createApp = () => {
     .use(candidateInquiryRoute)
     .use(workChatRoute)
     .use(payoutRoute)
+    .use(payoutDestinationRoute)
     .use(adminPayoutRoute)
     .use(payoutWebhookRoute)
     .use(topUpRoute)
-    .use(topUpWebhookRoute);
+    .use(topUpWebhookRoute)
+    .use(adminWalletRoute)
+    .use(adminTopUpRoute);
 };
 
 export const app = createApp();

@@ -7,10 +7,7 @@ import {
   paymentTopUpStatusHistory,
   type ProviderEventProcessingStatus,
 } from '@/database/schema/payment.schema';
-import {
-  walletLedgerAccount,
-  walletLedgerTransaction,
-} from '@/database/schema/wallet.schema';
+import { walletLedgerAccount, walletLedgerTransaction } from '@/database/schema/wallet.schema';
 import {
   createSealedLedgerTransactionInTransaction,
   ensureWalletInTransaction,
@@ -25,18 +22,7 @@ import {
 
 import { timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  inArray,
-  isNull,
-  lte,
-  lt,
-  or,
-  sql,
-} from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lte, lt, or, sql } from 'drizzle-orm';
 
 import { XenditPromptPayProvider } from './top-up.provider';
 import type {
@@ -105,7 +91,7 @@ export type ProviderEventClaimInput = {
 const providerEventSource = 'WEBHOOK';
 
 const providerEventFromRecord = (
-  record: typeof paymentProviderEventInbox.$inferSelect,
+  record: typeof paymentProviderEventInbox.$inferSelect
 ): TopUpProviderEvent => ({
   id: record.id,
   provider: record.provider,
@@ -117,9 +103,8 @@ const providerEventFromRecord = (
   providerApiVersion: record.providerApiVersion,
   providerStatus: record.providerStatus,
   normalizedStatus: record.normalizedStatus as TopUpOutcomeStatus,
-  providerAmountSatang: record.providerAmountSatang === null
-    ? null
-    : positiveSatang(record.providerAmountSatang),
+  providerAmountSatang:
+    record.providerAmountSatang === null ? null : positiveSatang(record.providerAmountSatang),
   providerChannelCode: record.providerChannelCode,
   providerOccurredAt: record.providerOccurredAt,
   payloadHash: record.payloadHash,
@@ -135,18 +120,19 @@ const providerEventFromRecord = (
 });
 
 const assertDate = (value: Date): Date => {
-  if (Number.isNaN(value.getTime())) throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event date is invalid.');
+  if (Number.isNaN(value.getTime()))
+    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event date is invalid.');
   return value;
 };
 
 export const assertXenditWebhookToken = (
   callbackToken: string | undefined,
-  expectedToken = env.xenditWebhookToken,
+  expectedToken = env.xenditWebhookToken
 ): void => {
   if (!callbackToken || !expectedToken) {
     throw new ProviderEventError(
       'PROVIDER_EVENT_AUTHENTICATION_FAILED',
-      'The Xendit webhook token is invalid.',
+      'The Xendit webhook token is invalid.'
     );
   }
   const provided = Buffer.from(callbackToken, 'utf8');
@@ -154,7 +140,7 @@ export const assertXenditWebhookToken = (
   if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
     throw new ProviderEventError(
       'PROVIDER_EVENT_AUTHENTICATION_FAILED',
-      'The Xendit webhook token is invalid.',
+      'The Xendit webhook token is invalid.'
     );
   }
 };
@@ -166,7 +152,7 @@ const insertEventHistory = async (
   toStatus: ProviderEventProcessingStatus,
   source: string,
   reason?: string,
-  error?: string,
+  error?: string
 ) => {
   await transaction.insert(paymentProviderEventHistory).values({
     eventId,
@@ -179,7 +165,7 @@ const insertEventHistory = async (
 };
 
 export const receiveTopUpProviderEvent = async (
-  input: ReceiveTopUpProviderEventInput,
+  input: ReceiveTopUpProviderEventInput
 ): Promise<TopUpProviderEvent> => {
   assertXenditWebhookToken(input.callbackToken, input.webhookToken ?? env.xenditWebhookToken);
   const receivedAt = assertDate(input.receivedAt ?? new Date());
@@ -190,28 +176,32 @@ export const receiveTopUpProviderEvent = async (
     const [existing] = await transaction
       .select()
       .from(paymentProviderEventInbox)
-      .where(and(
-        eq(paymentProviderEventInbox.provider, parsed.provider),
-        eq(paymentProviderEventInbox.providerEventId, parsed.providerEventId),
-      ))
+      .where(
+        and(
+          eq(paymentProviderEventInbox.provider, parsed.provider),
+          eq(paymentProviderEventInbox.providerEventId, parsed.providerEventId)
+        )
+      )
       .for('update');
     if (existing) {
       if (existing.resourceType !== 'TOP_UP') {
         throw new ProviderEventError(
           'PROVIDER_EVENT_CONFLICT',
-          'The Provider event identifier belongs to a different payment resource.',
+          'The Provider event identifier belongs to a different payment resource.'
         );
       }
       if (existing.payloadHash !== parsed.payloadHash) {
         throw new ProviderEventError(
           'PROVIDER_EVENT_CONFLICT',
-          'The Provider event identifier was reused with a different payload.',
+          'The Provider event identifier was reused with a different payload.'
         );
       }
       return providerEventFromRecord(existing);
     }
 
-    const encrypted = (input.encryption ?? createProviderEventEncryption()).encrypt(input.rawPayload);
+    const encrypted = (input.encryption ?? createProviderEventEncryption()).encrypt(
+      input.rawPayload
+    );
     const [created] = await transaction
       .insert(paymentProviderEventInbox)
       .values({
@@ -248,22 +238,25 @@ export const receiveTopUpProviderEvent = async (
     const [raced] = await transaction
       .select()
       .from(paymentProviderEventInbox)
-      .where(and(
-        eq(paymentProviderEventInbox.provider, parsed.provider),
-        eq(paymentProviderEventInbox.providerEventId, parsed.providerEventId),
-      ))
+      .where(
+        and(
+          eq(paymentProviderEventInbox.provider, parsed.provider),
+          eq(paymentProviderEventInbox.providerEventId, parsed.providerEventId)
+        )
+      )
       .for('update');
-    if (!raced) throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event could not be stored.');
+    if (!raced)
+      throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event could not be stored.');
     if (raced.resourceType !== 'TOP_UP') {
       throw new ProviderEventError(
         'PROVIDER_EVENT_CONFLICT',
-        'The Provider event identifier belongs to a different payment resource.',
+        'The Provider event identifier belongs to a different payment resource.'
       );
     }
     if (raced.payloadHash !== parsed.payloadHash) {
       throw new ProviderEventError(
         'PROVIDER_EVENT_CONFLICT',
-        'The Provider event identifier was reused with a different payload.',
+        'The Provider event identifier was reused with a different payload.'
       );
     }
     return providerEventFromRecord(raced);
@@ -277,7 +270,10 @@ const validateClaimInput = (input: ProviderEventClaimInput) => {
   }
   const leaseMs = input.leaseMs ?? providerEventLeaseMs;
   if (!Number.isInteger(leaseMs) || leaseMs < 1) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event lease must be positive.');
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider event lease must be positive.'
+    );
   }
   return { limit, leaseMs, now: assertDate(input.now ?? new Date()) };
 };
@@ -285,7 +281,7 @@ const validateClaimInput = (input: ProviderEventClaimInput) => {
 const claimEvents = async (
   transaction: WalletTransaction,
   input: ProviderEventClaimInput,
-  eventId?: string,
+  eventId?: string
 ): Promise<TopUpProviderEvent[]> => {
   const { limit, leaseMs, now } = validateClaimInput(input);
   const staleBefore = new Date(now.getTime() - leaseMs);
@@ -293,17 +289,18 @@ const claimEvents = async (
     and(
       eq(paymentProviderEventInbox.resourceType, 'TOP_UP'),
       inArray(paymentProviderEventInbox.processingStatus, ['RECEIVED', 'RETRYABLE']),
-      lt(paymentProviderEventInbox.attemptCount, providerEventMaxAttempts),
+      lt(paymentProviderEventInbox.attemptCount, providerEventMaxAttempts)
     ),
     and(
       eq(paymentProviderEventInbox.resourceType, 'TOP_UP'),
       eq(paymentProviderEventInbox.processingStatus, 'PROCESSING'),
-      or(isNull(paymentProviderEventInbox.claimedAt), lt(paymentProviderEventInbox.claimedAt, staleBefore)),
-    ),
+      or(
+        isNull(paymentProviderEventInbox.claimedAt),
+        lt(paymentProviderEventInbox.claimedAt, staleBefore)
+      )
+    )
   );
-  const conditions = eventId
-    ? and(eq(paymentProviderEventInbox.id, eventId), ready)
-    : ready;
+  const conditions = eventId ? and(eq(paymentProviderEventInbox.id, eventId), ready) : ready;
   const candidates = await transaction
     .select()
     .from(paymentProviderEventInbox)
@@ -313,7 +310,10 @@ const claimEvents = async (
     .for('update', { skipLocked: true });
   const claimed: TopUpProviderEvent[] = [];
   for (const candidate of candidates) {
-    if (candidate.processingStatus === 'PROCESSING' && candidate.attemptCount >= providerEventMaxAttempts) {
+    if (
+      candidate.processingStatus === 'PROCESSING' &&
+      candidate.attemptCount >= providerEventMaxAttempts
+    ) {
       // Keep claim updates and their history rows ordered in one transaction.
       // eslint-disable-next-line no-await-in-loop
       const [dead] = await transaction
@@ -327,7 +327,15 @@ const claimEvents = async (
         .returning();
       if (dead) {
         // eslint-disable-next-line no-await-in-loop
-        await insertEventHistory(transaction, dead.id, 'PROCESSING', 'DEAD_LETTER', 'WORKER', 'Maximum Provider event attempts reached.', 'PROVIDER_EVENT_MAX_ATTEMPTS');
+        await insertEventHistory(
+          transaction,
+          dead.id,
+          'PROCESSING',
+          'DEAD_LETTER',
+          'WORKER',
+          'Maximum Provider event attempts reached.',
+          'PROVIDER_EVENT_MAX_ATTEMPTS'
+        );
       }
       continue;
     }
@@ -345,68 +353,119 @@ const claimEvents = async (
       .returning();
     if (!updated) continue;
     // eslint-disable-next-line no-await-in-loop
-    await insertEventHistory(transaction, updated.id, candidate.processingStatus, 'PROCESSING', 'WORKER', 'Provider event claimed.');
+    await insertEventHistory(
+      transaction,
+      updated.id,
+      candidate.processingStatus,
+      'PROCESSING',
+      'WORKER',
+      'Provider event claimed.'
+    );
     claimed.push(providerEventFromRecord(updated));
   }
   return claimed;
 };
 
 export const claimTopUpProviderEvents = async (
-  input: ProviderEventClaimInput = {},
-): Promise<TopUpProviderEvent[]> => db.transaction((transaction) => claimEvents(transaction, input, input.eventId));
+  input: ProviderEventClaimInput = {}
+): Promise<TopUpProviderEvent[]> =>
+  db.transaction((transaction) => claimEvents(transaction, input, input.eventId));
 
 const topUpForEvent = async (
   transaction: WalletTransaction,
-  event: Pick<ParsedTopUpProviderEvent, 'internalReference' | 'providerReference'>,
+  event: Pick<ParsedTopUpProviderEvent, 'internalReference' | 'providerReference'>
 ) => {
   const conditions = [
-    event.internalReference ? eq(paymentTopUp.internalReference, event.internalReference) : undefined,
-    event.providerReference ? eq(paymentTopUp.providerReference, event.providerReference) : undefined,
+    event.internalReference
+      ? eq(paymentTopUp.internalReference, event.internalReference)
+      : undefined,
+    event.providerReference
+      ? eq(paymentTopUp.providerReference, event.providerReference)
+      : undefined,
   ].filter((condition): condition is NonNullable<typeof condition> => Boolean(condition));
-  if (conditions.length === 0) throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event has no Top-up reference.');
+  if (conditions.length === 0)
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_NOT_FOUND',
+      'Provider event has no Top-up reference.'
+    );
   const records = await transaction
     .select()
     .from(paymentTopUp)
     .where(or(...conditions))
     .for('update');
-  if (records.length !== 1) throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event does not match one Top-up.');
+  if (records.length !== 1)
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_NOT_FOUND',
+      'Provider event does not match one Top-up.'
+    );
   const [topUp] = records;
-  if (!topUp) throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event does not match one Top-up.');
+  if (!topUp)
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_NOT_FOUND',
+      'Provider event does not match one Top-up.'
+    );
   if (event.internalReference && event.internalReference !== topUp.internalReference) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event references a different Top-up.');
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider event references a different Top-up.'
+    );
   }
-  if (event.providerReference && topUp.providerReference && event.providerReference !== topUp.providerReference) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event references a different Provider payment.');
+  if (
+    event.providerReference &&
+    topUp.providerReference &&
+    event.providerReference !== topUp.providerReference
+  ) {
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider event references a different Provider payment.'
+    );
   }
   return topUp;
 };
 
-type TopUpOutcomeFacts = Pick<ParsedTopUpProviderEvent, 'eventType' | 'internalReference' | 'providerReference' | 'providerApiVersion' | 'providerStatus' | 'normalizedStatus' | 'providerAmountSatang' | 'providerChannelCode' | 'providerOccurredAt'>;
+type TopUpOutcomeFacts = Pick<
+  ParsedTopUpProviderEvent,
+  | 'eventType'
+  | 'internalReference'
+  | 'providerReference'
+  | 'providerApiVersion'
+  | 'providerStatus'
+  | 'normalizedStatus'
+  | 'providerAmountSatang'
+  | 'providerChannelCode'
+  | 'providerOccurredAt'
+>;
 
 const accountIdsForTopUp = async (transaction: WalletTransaction, walletId: string) => {
   const accounts = await transaction
     .select({ id: walletLedgerAccount.id, type: walletLedgerAccount.type })
     .from(walletLedgerAccount)
-    .where(and(
-      or(
-        eq(walletLedgerAccount.walletId, walletId),
-        eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'),
-      ),
-      inArray(walletLedgerAccount.type, ['SPENDING', 'PLATFORM_SUSPENSE']),
-    ))
+    .where(
+      and(
+        or(
+          eq(walletLedgerAccount.walletId, walletId),
+          eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE')
+        ),
+        inArray(walletLedgerAccount.type, ['SPENDING', 'PLATFORM_SUSPENSE'])
+      )
+    )
     .for('update');
   const spending = accounts.find(({ type }) => type === 'SPENDING');
   const suspense = accounts.find(({ type }) => type === 'PLATFORM_SUSPENSE');
-  if (!spending || !suspense) throw new MoneyDomainError('WALLET_ACCOUNT_NOT_FOUND', 'Top-up Wallet accounts do not exist.');
+  if (!spending || !suspense)
+    throw new MoneyDomainError('WALLET_ACCOUNT_NOT_FOUND', 'Top-up Wallet accounts do not exist.');
   return { spendingId: spending.id, suspenseId: suspense.id };
 };
 
 const reversePaidTopUpInTransaction = async (
   transaction: WalletTransaction,
-  topUp: typeof paymentTopUp.$inferSelect,
+  topUp: typeof paymentTopUp.$inferSelect
 ) => {
   if (!topUp.creditedLedgerTransactionId) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Paid Top-up has no ledger transaction to reverse.');
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Paid Top-up has no ledger transaction to reverse.'
+    );
   }
   const [existingCorrection] = await transaction
     .select({ id: walletLedgerTransaction.id })
@@ -433,19 +492,35 @@ const reversePaidTopUpInTransaction = async (
 const applyTopUpOutcomeInTransaction = async (
   transaction: WalletTransaction,
   facts: TopUpOutcomeFacts,
-  source: string,
+  source: string
 ) => {
   const topUp = await topUpForEvent(transaction, facts);
   if (facts.normalizedStatus === 'PAID' && facts.providerAmountSatang === null) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'A confirmed Provider event must include an amount.');
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'A confirmed Provider event must include an amount.'
+    );
   }
-  if (facts.providerAmountSatang !== null && facts.providerAmountSatang !== topUp.paymentTotalSatang) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider amount does not match the Top-up total.');
+  if (
+    facts.providerAmountSatang !== null &&
+    facts.providerAmountSatang !== topUp.paymentTotalSatang
+  ) {
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider amount does not match the Top-up total.'
+    );
   }
 
   const providerReference = facts.providerReference ?? topUp.providerReference;
-  if (providerReference && topUp.providerReference && providerReference !== topUp.providerReference) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider payment reference does not match the Top-up.');
+  if (
+    providerReference &&
+    topUp.providerReference &&
+    providerReference !== topUp.providerReference
+  ) {
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider payment reference does not match the Top-up.'
+    );
   }
 
   const baseUpdate = {
@@ -457,7 +532,10 @@ const applyTopUpOutcomeInTransaction = async (
     updatedAt: new Date(),
   };
   if (topUp.topUpStatus !== 'PENDING') {
-    if (topUp.topUpStatus === 'PAID' && isTopUpProviderReversal(facts.providerStatus, facts.eventType)) {
+    if (
+      topUp.topUpStatus === 'PAID' &&
+      isTopUpProviderReversal(facts.providerStatus, facts.eventType)
+    ) {
       await reversePaidTopUpInTransaction(transaction, topUp);
     }
     return topUp;
@@ -498,49 +576,80 @@ const applyTopUpOutcomeInTransaction = async (
     })
     .where(eq(paymentTopUp.id, topUp.id))
     .returning();
-  if (!updated) throw new MoneyDomainError('TOP_UP_UPDATE_FAILED', 'Top-up outcome could not be saved.');
+  if (!updated)
+    throw new MoneyDomainError('TOP_UP_UPDATE_FAILED', 'Top-up outcome could not be saved.');
   await transaction.insert(paymentTopUpStatusHistory).values({
     topUpId: topUp.id,
     fromStatus: 'PENDING',
     toStatus: facts.normalizedStatus,
     providerStatus: facts.providerStatus,
     source,
-    reason: facts.normalizedStatus === 'PAID' ? 'Provider confirmed the Top-up.' : 'Provider ended the Top-up without payment.',
+    reason:
+      facts.normalizedStatus === 'PAID'
+        ? 'Provider confirmed the Top-up.'
+        : 'Provider ended the Top-up without payment.',
     occurredAt: facts.providerOccurredAt,
   });
   return updated;
 };
 
-const completeClaimedEvent = async (eventId: string) => db.transaction(async (transaction) => {
-  const [event] = await transaction
-    .select()
-    .from(paymentProviderEventInbox)
-    .where(eq(paymentProviderEventInbox.id, eventId))
-    .for('update');
-  if (!event) throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event does not exist.');
-  if (event.processingStatus === 'PROCESSED') return providerEventFromRecord(event);
-  if (event.processingStatus !== 'PROCESSING') throw new ProviderEventError('PROVIDER_EVENT_NOT_RETRYABLE', 'Provider event is not claimed.');
+const completeClaimedEvent = async (eventId: string) =>
+  db.transaction(async (transaction) => {
+    const [event] = await transaction
+      .select()
+      .from(paymentProviderEventInbox)
+      .where(eq(paymentProviderEventInbox.id, eventId))
+      .for('update');
+    if (!event)
+      throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event does not exist.');
+    if (event.processingStatus === 'PROCESSED') return providerEventFromRecord(event);
+    if (event.processingStatus !== 'PROCESSING')
+      throw new ProviderEventError(
+        'PROVIDER_EVENT_NOT_RETRYABLE',
+        'Provider event is not claimed.'
+      );
 
-  await applyTopUpOutcomeInTransaction(transaction, {
-    internalReference: event.internalReference,
-    providerReference: event.providerReference,
-    eventType: event.eventType,
-    providerApiVersion: event.providerApiVersion,
-    providerStatus: event.providerStatus,
-    normalizedStatus: event.normalizedStatus as TopUpOutcomeStatus,
-    providerAmountSatang: event.providerAmountSatang === null ? null : positiveSatang(event.providerAmountSatang),
-    providerChannelCode: event.providerChannelCode,
-    providerOccurredAt: event.providerOccurredAt,
-  }, providerEventSource);
-  const [processed] = await transaction
-    .update(paymentProviderEventInbox)
-    .set({ processingStatus: 'PROCESSED', processedAt: new Date(), claimedAt: null, lastError: null })
-    .where(eq(paymentProviderEventInbox.id, event.id))
-    .returning();
-  if (!processed) throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider event could not be completed.');
-  await insertEventHistory(transaction, event.id, 'PROCESSING', 'PROCESSED', 'WORKER', 'Provider event applied to the Top-up.');
-  return providerEventFromRecord(processed);
-});
+    await applyTopUpOutcomeInTransaction(
+      transaction,
+      {
+        internalReference: event.internalReference,
+        providerReference: event.providerReference,
+        eventType: event.eventType,
+        providerApiVersion: event.providerApiVersion,
+        providerStatus: event.providerStatus,
+        normalizedStatus: event.normalizedStatus as TopUpOutcomeStatus,
+        providerAmountSatang:
+          event.providerAmountSatang === null ? null : positiveSatang(event.providerAmountSatang),
+        providerChannelCode: event.providerChannelCode,
+        providerOccurredAt: event.providerOccurredAt,
+      },
+      providerEventSource
+    );
+    const [processed] = await transaction
+      .update(paymentProviderEventInbox)
+      .set({
+        processingStatus: 'PROCESSED',
+        processedAt: new Date(),
+        claimedAt: null,
+        lastError: null,
+      })
+      .where(eq(paymentProviderEventInbox.id, event.id))
+      .returning();
+    if (!processed)
+      throw new ProviderEventError(
+        'PROVIDER_EVENT_INVALID',
+        'Provider event could not be completed.'
+      );
+    await insertEventHistory(
+      transaction,
+      event.id,
+      'PROCESSING',
+      'PROCESSED',
+      'WORKER',
+      'Provider event applied to the Top-up.'
+    );
+    return providerEventFromRecord(processed);
+  });
 
 const safeProcessingError = (error: unknown): { code: string; retryable: boolean } => {
   if (error instanceof ProviderEventError) {
@@ -555,36 +664,54 @@ const safeProcessingError = (error: unknown): { code: string; retryable: boolean
   return { code: 'PROVIDER_EVENT_PROCESSING_FAILED', retryable: true };
 };
 
-const failClaimedEvent = async (eventId: string, error: unknown) => db.transaction(async (transaction) => {
-  const [current] = await transaction
-    .select()
-    .from(paymentProviderEventInbox)
-    .where(eq(paymentProviderEventInbox.id, eventId))
-    .for('update');
-  if (!current || current.processingStatus !== 'PROCESSING') return;
-  const failure = safeProcessingError(error);
-  const dead = !failure.retryable || current.attemptCount >= providerEventMaxAttempts;
-  const nextStatus: ProviderEventProcessingStatus = dead ? 'DEAD_LETTER' : 'RETRYABLE';
-  const [updated] = await transaction
-    .update(paymentProviderEventInbox)
-    .set({ processingStatus: nextStatus, claimedAt: null, lastError: failure.code })
-    .where(eq(paymentProviderEventInbox.id, current.id))
-    .returning();
-  if (updated) {
-    await insertEventHistory(transaction, current.id, 'PROCESSING', nextStatus, 'WORKER', 'Provider event processing failed.', failure.code);
-  }
-});
+const failClaimedEvent = async (eventId: string, error: unknown) =>
+  db.transaction(async (transaction) => {
+    const [current] = await transaction
+      .select()
+      .from(paymentProviderEventInbox)
+      .where(eq(paymentProviderEventInbox.id, eventId))
+      .for('update');
+    if (!current || current.processingStatus !== 'PROCESSING') return;
+    const failure = safeProcessingError(error);
+    const dead = !failure.retryable || current.attemptCount >= providerEventMaxAttempts;
+    const nextStatus: ProviderEventProcessingStatus = dead ? 'DEAD_LETTER' : 'RETRYABLE';
+    const [updated] = await transaction
+      .update(paymentProviderEventInbox)
+      .set({ processingStatus: nextStatus, claimedAt: null, lastError: failure.code })
+      .where(eq(paymentProviderEventInbox.id, current.id))
+      .returning();
+    if (updated) {
+      await insertEventHistory(
+        transaction,
+        current.id,
+        'PROCESSING',
+        nextStatus,
+        'WORKER',
+        'Provider event processing failed.',
+        failure.code
+      );
+    }
+  });
 
 export const processTopUpProviderEvent = async (
   eventId: string,
-  now = new Date(),
+  now = new Date()
 ): Promise<TopUpProviderEvent> => {
-  const [claimed] = await db.transaction((transaction) => claimEvents(transaction, { now }, eventId));
+  const [claimed] = await db.transaction((transaction) =>
+    claimEvents(transaction, { now }, eventId)
+  );
   if (!claimed) {
-    const [existing] = await db.select().from(paymentProviderEventInbox).where(eq(paymentProviderEventInbox.id, eventId));
-    if (!existing) throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event does not exist.');
+    const [existing] = await db
+      .select()
+      .from(paymentProviderEventInbox)
+      .where(eq(paymentProviderEventInbox.id, eventId));
+    if (!existing)
+      throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event does not exist.');
     if (existing.processingStatus === 'PROCESSED') return providerEventFromRecord(existing);
-    throw new ProviderEventError('PROVIDER_EVENT_NOT_RETRYABLE', 'Provider event cannot be claimed.');
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_NOT_RETRYABLE',
+      'Provider event cannot be claimed.'
+    );
   }
   try {
     return await completeClaimedEvent(eventId);
@@ -595,7 +722,7 @@ export const processTopUpProviderEvent = async (
 };
 
 export const processTopUpProviderEvents = async (
-  input: ProviderEventClaimInput = {},
+  input: ProviderEventClaimInput = {}
 ): Promise<number> => {
   const claimed = await claimTopUpProviderEvents(input);
   let processed = 0;
@@ -614,31 +741,50 @@ export const processTopUpProviderEvents = async (
   return processed;
 };
 
-export const retryTopUpProviderEvent = async (eventId: string): Promise<TopUpProviderEvent> => db.transaction(async (transaction) => {
-  const [event] = await transaction
-    .select()
-    .from(paymentProviderEventInbox)
-    .where(and(
-      eq(paymentProviderEventInbox.id, eventId),
-      eq(paymentProviderEventInbox.resourceType, 'TOP_UP'),
-    ))
-    .for('update');
-  if (!event) throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event does not exist.');
-  if (event.processingStatus !== 'RETRYABLE') throw new ProviderEventError('PROVIDER_EVENT_NOT_RETRYABLE', 'Provider event is not ready for retry.');
-  const [updated] = await transaction
-    .update(paymentProviderEventInbox)
-    .set({ processingStatus: 'RECEIVED', claimedAt: null, lastError: null })
-    .where(eq(paymentProviderEventInbox.id, event.id))
-    .returning();
-  if (!updated) throw new ProviderEventError('PROVIDER_EVENT_NOT_RETRYABLE', 'Provider event could not be retried.');
-  await insertEventHistory(transaction, event.id, 'RETRYABLE', 'RECEIVED', 'OPERATOR', 'Provider event retry requested.');
-  return providerEventFromRecord(updated);
-});
+export const retryTopUpProviderEvent = async (eventId: string): Promise<TopUpProviderEvent> =>
+  db.transaction(async (transaction) => {
+    const [event] = await transaction
+      .select()
+      .from(paymentProviderEventInbox)
+      .where(
+        and(
+          eq(paymentProviderEventInbox.id, eventId),
+          eq(paymentProviderEventInbox.resourceType, 'TOP_UP')
+        )
+      )
+      .for('update');
+    if (!event)
+      throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event does not exist.');
+    if (event.processingStatus !== 'RETRYABLE')
+      throw new ProviderEventError(
+        'PROVIDER_EVENT_NOT_RETRYABLE',
+        'Provider event is not ready for retry.'
+      );
+    const [updated] = await transaction
+      .update(paymentProviderEventInbox)
+      .set({ processingStatus: 'RECEIVED', claimedAt: null, lastError: null })
+      .where(eq(paymentProviderEventInbox.id, event.id))
+      .returning();
+    if (!updated)
+      throw new ProviderEventError(
+        'PROVIDER_EVENT_NOT_RETRYABLE',
+        'Provider event could not be retried.'
+      );
+    await insertEventHistory(
+      transaction,
+      event.id,
+      'RETRYABLE',
+      'RECEIVED',
+      'OPERATOR',
+      'Provider event retry requested.'
+    );
+    return providerEventFromRecord(updated);
+  });
 
 export const reconcileTopUp = async (
   principalUserId: string,
   topUpId: string,
-  provider: InboundPaymentReconciliationProvider = new XenditPromptPayProvider(),
+  provider: InboundPaymentReconciliationProvider = new XenditPromptPayProvider()
 ) => {
   const [record] = await db
     .select()
@@ -651,19 +797,28 @@ export const reconcileTopUp = async (
     expectedPaymentTotalSatang: positiveSatang(record.paymentTotalSatang),
   });
   if (record.providerReference && outcome.providerReference !== record.providerReference) {
-    throw new ProviderEventError('PROVIDER_EVENT_INVALID', 'Provider reconciliation returned a different payment reference.');
+    throw new ProviderEventError(
+      'PROVIDER_EVENT_INVALID',
+      'Provider reconciliation returned a different payment reference.'
+    );
   }
-  await db.transaction((transaction) => applyTopUpOutcomeInTransaction(transaction, {
-    eventType: 'payment.capture',
-    internalReference: record.internalReference,
-    providerReference: outcome.providerReference,
-    providerApiVersion: outcome.providerApiVersion,
-    providerStatus: outcome.providerStatus,
-    normalizedStatus: outcome.normalizedStatus,
-    providerAmountSatang: outcome.providerAmountSatang,
-    providerChannelCode: outcome.providerChannelCode,
-    providerOccurredAt: outcome.occurredAt,
-  }, 'RECONCILIATION'));
+  await db.transaction((transaction) =>
+    applyTopUpOutcomeInTransaction(
+      transaction,
+      {
+        eventType: 'payment.capture',
+        internalReference: record.internalReference,
+        providerReference: outcome.providerReference,
+        providerApiVersion: outcome.providerApiVersion,
+        providerStatus: outcome.providerStatus,
+        normalizedStatus: outcome.normalizedStatus,
+        providerAmountSatang: outcome.providerAmountSatang,
+        providerChannelCode: outcome.providerChannelCode,
+        providerOccurredAt: outcome.occurredAt,
+      },
+      'RECONCILIATION'
+    )
+  );
   return getTopUp(principalUserId, record.id);
 };
 
@@ -677,10 +832,12 @@ export const purgeExpiredProviderEventPayloads = async (now = new Date()): Promi
       rawPayloadCiphertext: null,
       rawPayloadAuthTag: null,
     })
-    .where(and(
-      lte(paymentProviderEventInbox.rawPayloadExpiresAt, now),
-      sql`${paymentProviderEventInbox.rawPayloadCiphertext} IS NOT NULL`,
-    ))
+    .where(
+      and(
+        lte(paymentProviderEventInbox.rawPayloadExpiresAt, now),
+        sql`${paymentProviderEventInbox.rawPayloadCiphertext} IS NOT NULL`
+      )
+    )
     .returning({ id: paymentProviderEventInbox.id });
   return expired.length;
 };
@@ -702,11 +859,14 @@ export const listTopUpProviderEventHistory = async (eventId: string) => {
   const [event] = await db
     .select({ id: paymentProviderEventInbox.id })
     .from(paymentProviderEventInbox)
-    .where(and(
-      eq(paymentProviderEventInbox.id, eventId),
-      eq(paymentProviderEventInbox.resourceType, 'TOP_UP'),
-    ));
-  if (!event) throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event does not exist.');
+    .where(
+      and(
+        eq(paymentProviderEventInbox.id, eventId),
+        eq(paymentProviderEventInbox.resourceType, 'TOP_UP')
+      )
+    );
+  if (!event)
+    throw new ProviderEventError('PROVIDER_EVENT_NOT_FOUND', 'Provider event does not exist.');
   return db
     .select()
     .from(paymentProviderEventHistory)

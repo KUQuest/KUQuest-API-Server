@@ -1,0 +1,15 @@
+# drizzle-kit owns these; formatting them fights every `bun run db:generate`
+drizzle/meta/
+
+# Vendored agent skills and critique output; their upstream owns the formatting
+.agents/
+.impeccable/
+
+# Generated or hand-authored HTML reports; Prettier rewrites them whole
+docs/diagrams/
+docs/human-read/
+docs/improve-code-arch/
+public/test-bench/
+
+# Lockfile from another package manager
+pnpm-lock.yaml

@@ -28,7 +28,7 @@ const main = async (): Promise<void> => {
     process.env.NODE_ENV === 'production' && process.env.DEPLOYMENT_ENV === 'staging';
   if (!isDevelopmentSeed && !isStagingSeed) {
     throw new Error(
-      'The staging seed is allowed only in development/development or production/staging.',
+      'The staging seed is allowed only in development/development or production/staging.'
     );
   }
 

@@ -57,8 +57,7 @@ export type AdminActionCommandPreparationContext = {
 };
 
 export type AdminActionCommandPreparation<T extends AdminActionSafeObject> =
-  | AdminActionCommandPlan<T>
-  | { outcome: 'conflict' };
+  AdminActionCommandPlan<T> | { outcome: 'conflict' };
 
 export type AdminActionEvidenceContext = {
   requestHash: string;
@@ -80,12 +79,11 @@ export type AdminActionCommandRevision =
   | { expectedVersion: number; expectedTimestamp?: never }
   | { expectedVersion?: never; expectedTimestamp: Date };
 
-export type AdminActionCommandInput<T extends AdminActionSafeObject> =
-  AdminActionBaseInput &
+export type AdminActionCommandInput<T extends AdminActionSafeObject> = AdminActionBaseInput &
   AdminActionCommandRevision & {
     prepare: (
       transaction: AdminActionTransaction,
-      context: AdminActionCommandPreparationContext,
+      context: AdminActionCommandPreparationContext
     ) => Promise<AdminActionCommandPreparation<T>>;
   };
 
@@ -93,27 +91,28 @@ export type AdminActionCommandInput<T extends AdminActionSafeObject> =
  * `read` must authorize the case-scoped read and return only safe summary data.
  * It must not mutate or return message/evidence content.
  */
-export type AdminActionEvidenceAccessInput<T extends AdminActionSafeObject> = AdminActionBaseInput & {
-  read: (
-    transaction: AdminActionTransaction,
-    context: AdminActionEvidenceContext,
-  ) => Promise<AdminActionMutation<T>>;
-};
+export type AdminActionEvidenceAccessInput<T extends AdminActionSafeObject> =
+  AdminActionBaseInput & {
+    read: (
+      transaction: AdminActionTransaction,
+      context: AdminActionEvidenceContext
+    ) => Promise<AdminActionMutation<T>>;
+  };
 
 export type AdminActionService = {
   executeCommand: <T extends AdminActionSafeObject>(
-    input: AdminActionCommandInput<T>,
+    input: AdminActionCommandInput<T>
   ) => Promise<AdminActionResult<T>>;
   executeCommandInTransaction: <T extends AdminActionSafeObject>(
     transaction: AdminActionTransaction,
-    input: AdminActionCommandInput<T>,
+    input: AdminActionCommandInput<T>
   ) => Promise<AdminActionResult<T>>;
   recordEvidenceAccess: <T extends AdminActionSafeObject>(
-    input: AdminActionEvidenceAccessInput<T>,
+    input: AdminActionEvidenceAccessInput<T>
   ) => Promise<AdminActionResult<T>>;
   recordEvidenceAccessInTransaction: <T extends AdminActionSafeObject>(
     transaction: AdminActionTransaction,
-    input: AdminActionEvidenceAccessInput<T>,
+    input: AdminActionEvidenceAccessInput<T>
   ) => Promise<AdminActionResult<T>>;
 };
 
@@ -147,7 +146,7 @@ type InternalActionInput<T extends AdminActionSafeObject> = NormalizedActionInpu
       requestKey: string;
       expectedVersion: number | null;
       expectedTimestamp: Date | null;
-    },
+    }
   ) => Promise<
     | { outcome: 'conflict' }
     | {
@@ -174,7 +173,7 @@ const canonicalJson = (value: AdminActionSafeValue): string => {
 const requestHashFor = async (value: AdminActionSafeValue): Promise<string> => {
   const digest = await crypto.subtle.digest(
     'SHA-256',
-    new TextEncoder().encode(canonicalJson(value)),
+    new TextEncoder().encode(canonicalJson(value))
   );
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
@@ -187,7 +186,7 @@ const normalizeTimestamp = (value: unknown, field: string): Date | null => {
   if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
     throw new AdminActionError(
       'ADMIN_ACTION_INVALID_VERSION',
-      `${field} must be a valid timestamp.`,
+      `${field} must be a valid timestamp.`
     );
   }
   return new Date(value.getTime());
@@ -199,7 +198,7 @@ const normalizeInput = async (
   input: AdminActionBaseInput & {
     expectedVersion?: number;
     expectedTimestamp?: Date;
-  },
+  }
 ): Promise<NormalizedActionInput> => {
   const adminId = normalizeResourceId(input.adminId, 'adminId');
   const action = normalizeIdentifier(input.action, 'action');
@@ -208,20 +207,21 @@ const normalizeInput = async (
   const requestKey = normalizeRequestKey(input.requestKey);
   const rule = actionRuleFor(catalog, action, kind);
   const reasonCode = normalizeReasonCode(rule, input.reasonCode);
-  const expectedVersion = input.expectedVersion === undefined
-    ? null
-    : assertPositiveVersion(input.expectedVersion, 'expectedVersion');
+  const expectedVersion =
+    input.expectedVersion === undefined
+      ? null
+      : assertPositiveVersion(input.expectedVersion, 'expectedVersion');
   const expectedTimestamp = normalizeTimestamp(input.expectedTimestamp, 'expectedTimestamp');
   if (kind === 'COMMAND' && (expectedVersion === null) === (expectedTimestamp === null)) {
     throw new AdminActionError(
       'ADMIN_ACTION_INVALID_VERSION',
-      'A command must provide exactly one expected resource version or timestamp.',
+      'A command must provide exactly one expected resource version or timestamp.'
     );
   }
   if (kind === 'EVIDENCE_ACCESS' && (expectedVersion !== null || expectedTimestamp !== null)) {
     throw new AdminActionError(
       'ADMIN_ACTION_INVALID_VERSION',
-      'Evidence access cannot include an expected resource version or timestamp.',
+      'Evidence access cannot include an expected resource version or timestamp.'
     );
   }
   const metadata = normalizeSafeObject(input.metadata);
@@ -258,22 +258,17 @@ const normalizeInput = async (
 
 const adminExists = async (
   transaction: AdminActionTransaction,
-  adminId: string,
+  adminId: string
 ): Promise<boolean> => {
   const [admin] = await transaction
     .select({ id: authAdmin.id })
     .from(authAdmin)
-    .where(and(
-      eq(authAdmin.id, adminId),
-      isNull(authAdmin.disabledAt),
-    ))
+    .where(and(eq(authAdmin.id, adminId), isNull(authAdmin.disabledAt)))
     .limit(1);
   return Boolean(admin);
 };
 
-const storedResultFrom = (
-  row: typeof adminAction.$inferSelect,
-): StoredActionResult => ({
+const storedResultFrom = (row: typeof adminAction.$inferSelect): StoredActionResult => ({
   resourceSummary: normalizeSafeObject(row.resultData, 'resultData'),
   resourceVersion: row.resultVersion,
   resourceTimestamp: normalizeTimestamp(row.resultTimestamp, 'resultTimestamp'),
@@ -282,16 +277,18 @@ const storedResultFrom = (
 
 const findExistingAction = async (
   transaction: AdminActionTransaction,
-  input: NormalizedActionInput,
+  input: NormalizedActionInput
 ): Promise<typeof adminAction.$inferSelect | undefined> => {
   const [existing] = await transaction
     .select()
     .from(adminAction)
-    .where(and(
-      eq(adminAction.adminId, input.adminId),
-      eq(adminAction.action, input.action),
-      eq(adminAction.requestKey, input.requestKey),
-    ))
+    .where(
+      and(
+        eq(adminAction.adminId, input.adminId),
+        eq(adminAction.action, input.action),
+        eq(adminAction.requestKey, input.requestKey)
+      )
+    )
     .limit(1)
     .for('update');
   return existing;
@@ -299,13 +296,13 @@ const findExistingAction = async (
 
 const replayOrValidateExisting = (
   existing: typeof adminAction.$inferSelect | undefined,
-  input: NormalizedActionInput,
+  input: NormalizedActionInput
 ): StoredActionResult | undefined => {
   if (!existing) return undefined;
   if (existing.requestHash !== input.requestHash) {
     throw new AdminActionError(
       'ADMIN_ACTION_KEY_REUSED',
-      'Admin Action request key was used with a different request.',
+      'Admin Action request key was used with a different request.'
     );
   }
   // `assertResourceRevision` proved the revision when the row was written, and an
@@ -317,7 +314,7 @@ const assertResourceRevision = (
   expectedVersion: number | null,
   expectedTimestamp: Date | null,
   resourceVersion: number | null,
-  resourceTimestamp: Date | null,
+  resourceTimestamp: Date | null
 ): void => {
   if (resourceVersion !== null) assertPositiveVersion(resourceVersion, 'resourceVersion');
   if (resourceTimestamp !== null) normalizeTimestamp(resourceTimestamp, 'resourceTimestamp');
@@ -325,13 +322,13 @@ const assertResourceRevision = (
     if (resourceVersion === null) {
       throw new AdminActionError(
         'ADMIN_ACTION_INVALID_RESULT',
-        'A version-based command must return a resource version.',
+        'A version-based command must return a resource version.'
       );
     }
     if (resourceVersion <= expectedVersion) {
       throw new AdminActionError(
         'ADMIN_ACTION_INVALID_RESULT',
-        'A successful command must return a newer resource version.',
+        'A successful command must return a newer resource version.'
       );
     }
     return;
@@ -340,13 +337,13 @@ const assertResourceRevision = (
   if (resourceTimestamp === null) {
     throw new AdminActionError(
       'ADMIN_ACTION_INVALID_RESULT',
-      'A timestamp-based command must return a resource timestamp.',
+      'A timestamp-based command must return a resource timestamp.'
     );
   }
   if (resourceTimestamp.getTime() < expectedTimestamp.getTime()) {
     throw new AdminActionError(
       'ADMIN_ACTION_INVALID_RESULT',
-      'A successful command must return a current or newer resource timestamp.',
+      'A successful command must return a current or newer resource timestamp.'
     );
   }
 };
@@ -354,23 +351,20 @@ const assertResourceRevision = (
 const runAdminActionInTransaction = async <T extends AdminActionSafeObject>(
   transaction: AdminActionTransaction,
   catalog: AdminActionReasonCatalog,
-  input: InternalActionInput<T>,
+  input: InternalActionInput<T>
 ): Promise<StoredActionResult> => {
   await transaction.execute(
-    drizzleSql`select pg_advisory_xact_lock(hashtextextended(${advisoryLockKeyFor(input)}, 0))`,
+    drizzleSql`select pg_advisory_xact_lock(hashtextextended(${advisoryLockKeyFor(input)}, 0))`
   );
 
   if (!(await adminExists(transaction, input.adminId))) {
     throw new AdminActionError(
       'ADMIN_ACTION_ADMIN_NOT_FOUND',
-      'Enabled Admin account does not exist.',
+      'Enabled Admin account does not exist.'
     );
   }
 
-  const existing = replayOrValidateExisting(
-    await findExistingAction(transaction, input),
-    input,
-  );
+  const existing = replayOrValidateExisting(await findExistingAction(transaction, input), input);
   if (existing) return existing;
 
   const execution = await input.execute(transaction, {
@@ -382,20 +376,17 @@ const runAdminActionInTransaction = async <T extends AdminActionSafeObject>(
   if (execution.outcome === 'conflict') {
     throw new AdminActionError(
       'ADMIN_ACTION_CONFLICT',
-      'Admin Action resource version or timestamp is stale.',
+      'Admin Action resource version or timestamp is stale.'
     );
   }
 
   const resourceVersion = execution.resourceVersion;
-  const resourceTimestamp = normalizeTimestamp(
-    execution.resourceTimestamp,
-    'resourceTimestamp',
-  );
+  const resourceTimestamp = normalizeTimestamp(execution.resourceTimestamp, 'resourceTimestamp');
   assertResourceRevision(
     input.expectedVersion,
     input.expectedTimestamp,
     resourceVersion,
-    resourceTimestamp,
+    resourceTimestamp
   );
   const resourceSummary = normalizeSafeObject(execution.resourceSummary, 'resultData');
   const [created] = await transaction
@@ -419,10 +410,7 @@ const runAdminActionInTransaction = async <T extends AdminActionSafeObject>(
     })
     .returning({ id: adminAction.id });
   if (!created) {
-    throw new AdminActionError(
-      'ADMIN_ACTION_WRITE_FAILED',
-      'Admin Action could not be recorded.',
-    );
+    throw new AdminActionError('ADMIN_ACTION_WRITE_FAILED', 'Admin Action could not be recorded.');
   }
 
   return {
@@ -434,12 +422,12 @@ const runAdminActionInTransaction = async <T extends AdminActionSafeObject>(
 };
 
 const toCommandResult = <T extends AdminActionSafeObject>(
-  result: StoredActionResult,
+  result: StoredActionResult
 ): AdminActionResult<T> => {
   if (result.resourceVersion === null && result.resourceTimestamp === null) {
     throw new AdminActionError(
       'ADMIN_ACTION_INVALID_RESULT',
-      'A command Admin Action is missing its resource revision.',
+      'A command Admin Action is missing its resource revision.'
     );
   }
   return {
@@ -451,7 +439,7 @@ const toCommandResult = <T extends AdminActionSafeObject>(
 };
 
 const toEvidenceResult = <T extends AdminActionSafeObject>(
-  result: StoredActionResult,
+  result: StoredActionResult
 ): AdminActionResult<T> => ({
   resourceSummary: result.resourceSummary as T,
   resourceVersion: result.resourceVersion,
@@ -464,13 +452,13 @@ const toEvidenceResult = <T extends AdminActionSafeObject>(
  * The catalog is not request data and must not come from an Admin client.
  */
 export const createAdminActionService = (
-  rawCatalog: AdminActionReasonCatalog,
+  rawCatalog: AdminActionReasonCatalog
 ): AdminActionService => {
   const catalog = normalizeReasonCatalog(rawCatalog);
 
   const executeCommandInTransaction = async <T extends AdminActionSafeObject>(
     transaction: AdminActionTransaction,
-    input: AdminActionCommandInput<T>,
+    input: AdminActionCommandInput<T>
   ): Promise<AdminActionResult<T>> => {
     const normalized = await normalizeInput(catalog, 'COMMAND', input);
     const result = await runAdminActionInTransaction(transaction, catalog, {
@@ -484,16 +472,16 @@ export const createAdminActionService = (
           requestKey: context.requestKey,
         });
         if (plan.outcome === 'conflict') return plan;
-        const currentVersion = plan.currentVersion === undefined
-          ? null
-          : assertPositiveVersion(plan.currentVersion, 'currentVersion');
+        const currentVersion =
+          plan.currentVersion === undefined
+            ? null
+            : assertPositiveVersion(plan.currentVersion, 'currentVersion');
         const currentTimestamp = normalizeTimestamp(plan.currentTimestamp, 'currentTimestamp');
         if (
           (normalized.expectedVersion !== null && currentVersion !== normalized.expectedVersion) ||
-          (normalized.expectedTimestamp !== null && (
-            currentTimestamp === null ||
-            currentTimestamp.getTime() !== normalized.expectedTimestamp.getTime()
-          ))
+          (normalized.expectedTimestamp !== null &&
+            (currentTimestamp === null ||
+              currentTimestamp.getTime() !== normalized.expectedTimestamp.getTime()))
         ) {
           return { outcome: 'conflict' };
         }
@@ -504,28 +492,29 @@ export const createAdminActionService = (
   };
 
   const executeCommand = async <T extends AdminActionSafeObject>(
-    input: AdminActionCommandInput<T>,
+    input: AdminActionCommandInput<T>
   ): Promise<AdminActionResult<T>> =>
     db.transaction((transaction) => executeCommandInTransaction(transaction, input));
 
   const recordEvidenceAccessInTransaction = async <T extends AdminActionSafeObject>(
     transaction: AdminActionTransaction,
-    input: AdminActionEvidenceAccessInput<T>,
+    input: AdminActionEvidenceAccessInput<T>
   ): Promise<AdminActionResult<T>> => {
     const normalized = await normalizeInput(catalog, 'EVIDENCE_ACCESS', input);
     const result = await runAdminActionInTransaction(transaction, catalog, {
       ...normalized,
       kind: 'EVIDENCE_ACCESS',
-      execute: (currentTransaction, context) => input.read(currentTransaction, {
-        requestHash: context.requestHash,
-        requestKey: context.requestKey,
-      }),
+      execute: (currentTransaction, context) =>
+        input.read(currentTransaction, {
+          requestHash: context.requestHash,
+          requestKey: context.requestKey,
+        }),
     });
     return toEvidenceResult<T>(result);
   };
 
   const recordEvidenceAccess = async <T extends AdminActionSafeObject>(
-    input: AdminActionEvidenceAccessInput<T>,
+    input: AdminActionEvidenceAccessInput<T>
   ): Promise<AdminActionResult<T>> =>
     db.transaction((transaction) => recordEvidenceAccessInTransaction(transaction, input));
 

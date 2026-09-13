@@ -1,0 +1,2204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KUQuest 2x2 Mode x Participation Lifecycle Matrix</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --color-paper: #f5f5f5;
+        --color-paper-card: #ffffff;
+        --color-ink: #2d3142;
+        --color-muted: #4f5d75;
+        --color-soft: #7a8399;
+        --color-accent: #eb6c36;
+        --color-accent-tint: rgba(235, 108, 54, 0.08);
+        --color-rule: rgba(45, 49, 66, 0.12);
+        --font-sans: 'Geist', system-ui, sans-serif;
+        --font-serif: 'Instrument Serif', Georgia, serif;
+        --font-mono: 'Geist Mono', monospace;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        background: var(--color-paper);
+        color: var(--color-ink);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        padding: 3rem 1.5rem;
+      }
+
+      .frame {
+        max-width: 1120px;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 3rem;
+      }
+
+      header {
+        border-bottom: 1px solid var(--color-rule);
+        padding-bottom: 1.5rem;
+      }
+
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        font-weight: 500;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+        margin-bottom: 0.5rem;
+      }
+
+      h1 {
+        font-family: var(--font-serif);
+        font-size: clamp(2.2rem, 3.5vw + 1rem, 3rem);
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        color: var(--color-ink);
+        margin-bottom: 0.75rem;
+      }
+
+      .lead {
+        font-size: 1.0625rem;
+        color: var(--color-muted);
+        line-height: 1.55;
+        max-width: 900px;
+      }
+
+      /* Comparison Matrix Table */
+      .matrix-section {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .matrix-title {
+        font-family: var(--font-sans);
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--color-ink);
+      }
+
+      .table-container {
+        overflow-x: auto;
+        background: var(--color-paper-card);
+        border: 1px solid var(--color-rule);
+        border-radius: 6px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8125rem;
+        text-align: left;
+      }
+
+      th,
+      td {
+        padding: 0.875rem 1rem;
+        border-bottom: 1px solid var(--color-rule);
+        line-height: 1.45;
+      }
+
+      th {
+        background: rgba(79, 93, 117, 0.04);
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--color-ink);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+
+      td.feature-name {
+        font-weight: 600;
+        color: var(--color-ink);
+        white-space: nowrap;
+      }
+
+      /* Quadrant Section */
+      .quadrant-block {
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+        background: var(--color-paper-card);
+        border: 1px solid var(--color-rule);
+        border-radius: 8px;
+        padding: 1.75rem;
+      }
+
+      .quadrant-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        border-bottom: 1px solid var(--color-rule);
+        padding-bottom: 1rem;
+      }
+
+      .quadrant-header-left {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      .quadrant-tag {
+        display: inline-block;
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        padding: 0.2rem 0.5rem;
+        border-radius: 3px;
+        background: rgba(79, 93, 117, 0.1);
+        color: var(--color-muted);
+        width: fit-content;
+      }
+
+      .quadrant-tag.accent {
+        background: var(--color-accent-tint);
+        color: var(--color-accent);
+      }
+
+      .quadrant-title {
+        font-family: var(--font-sans);
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--color-ink);
+      }
+
+      .quadrant-desc {
+        font-size: 0.875rem;
+        color: var(--color-muted);
+        line-height: 1.5;
+      }
+
+      .diagram-container {
+        background: var(--color-paper);
+        overflow-x: auto;
+        border: 1px solid var(--color-rule);
+        border-radius: 6px;
+        padding: 0.5rem 0;
+      }
+
+      svg {
+        width: 100%;
+        min-width: 900px;
+        height: auto;
+        display: block;
+      }
+
+      .cards-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-top: 0.5rem;
+      }
+
+      @media (max-width: 768px) {
+        .cards-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .card-detail {
+        background: var(--color-paper);
+        border: 1px solid var(--color-rule);
+        border-radius: 4px;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .card-detail h4 {
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--color-ink);
+      }
+
+      .card-detail ul {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      .card-detail li {
+        font-size: 0.8125rem;
+        color: var(--color-muted);
+        line-height: 1.4;
+      }
+
+      .card-detail li strong {
+        color: var(--color-ink);
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+      }
+
+      footer {
+        border-top: 1px solid var(--color-rule);
+        padding-top: 1.25rem;
+        display: flex;
+        justify-content: space-between;
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        color: var(--color-soft);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <header>
+        <p class="eyebrow">Protocol Specification · KUQuest API v2</p>
+        <h1>4 Quadrant Mode &times; Participation Matrix</h1>
+        <p class="lead">
+          Complete interaction lifecycle sequence and API endpoint routing across all four
+          combinations of Selection Modes (<span style="font-family: var(--font-mono)"
+            >FIRST_COME_FIRST_SERVED</span
+          >, <span style="font-family: var(--font-mono)">CANDIDATE</span>) and Participation Shapes
+          (<span style="font-family: var(--font-mono)">SINGLE</span>,
+          <span style="font-family: var(--font-mono)">GROUP</span>).
+        </p>
+      </header>
+
+      <!-- Matrix Overview Table -->
+      <section class="matrix-section">
+        <h2 class="matrix-title">Mode &times; Participation 2&times;2 Invariants</h2>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Dimension</th>
+                <th>SINGLE (Headcount = 1)</th>
+                <th>GROUP (Headcount = 2–20)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="feature-name">FIRST_COME_FIRST_SERVED</td>
+                <td>
+                  <strong>Quadrant 1:</strong> Single direct join (<span
+                    style="font-family: var(--font-mono)"
+                    >POST .../join</span
+                  >). Single starter, single submitter, 100% individual reward.
+                </td>
+                <td>
+                  <strong>Quadrant 3:</strong> Slot-by-slot direct join. Work chat opens on 1st
+                  join. Underfilled consensus. Every worker starts and submits. Partial completion
+                  allowed.
+                </td>
+              </tr>
+              <tr>
+                <td class="feature-name">CANDIDATE</td>
+                <td>
+                  <strong>Quadrant 2:</strong> Applications submitted (<span
+                    style="font-family: var(--font-mono)"
+                    >POST .../applications</span
+                  >). Hirer selects 1 candidate, rejecting others. Single starter &amp; submitter.
+                </td>
+                <td>
+                  <strong>Quadrant 4:</strong> Candidate Team with 24h Join Code. Leader-only start
+                  and submit. All-or-nothing team outcome. 100% worker reward pool paid exclusively
+                  to Leader.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ==================== QUADRANT 1 ==================== -->
+      <section class="quadrant-block" id="quadrant-1">
+        <div class="quadrant-header">
+          <div class="quadrant-header-left">
+            <span class="quadrant-tag">QUADRANT 1</span>
+            <h2 class="quadrant-title">SINGLE &times; FIRST_COME_FIRST_SERVED</h2>
+            <p class="quadrant-desc">
+              Instant assignment on first click. Headcount = 1. Fast, frictionless direct worker
+              fulfillment.
+            </p>
+          </div>
+        </div>
+
+        <div class="diagram-container">
+          <svg
+            viewBox="0 0 900 460"
+            xmlns="http://www.w3.org/2000/svg"
+            role="img"
+            aria-labelledby="q1-seq-title q1-seq-desc"
+          >
+            <title id="q1-seq-title">Quadrant 1 Sequence: SINGLE + FCFS</title>
+            <desc id="q1-seq-desc">
+              Sequence diagram for single participant first come first served quest lifecycle from
+              direct join to completion.
+            </desc>
+
+            <defs>
+              <marker id="q1-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="#4f5d75" />
+              </marker>
+              <marker
+                id="q1-arr-coral"
+                markerWidth="8"
+                markerHeight="6"
+                refX="7"
+                refY="3"
+                orient="auto"
+              >
+                <polygon points="0 0, 8 3, 0 6" fill="#eb6c36" />
+              </marker>
+              <marker
+                id="q1-arr-link"
+                markerWidth="8"
+                markerHeight="6"
+                refX="7"
+                refY="3"
+                orient="auto"
+              >
+                <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8" />
+              </marker>
+            </defs>
+
+            <!-- Background -->
+            <rect width="100%" height="100%" fill="#f5f5f5" />
+
+            <!-- Actors -->
+            <rect
+              x="50"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="115"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Hirer
+            </text>
+
+            <rect
+              x="270"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="335"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Worker
+            </text>
+
+            <rect
+              x="490"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="555"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              KUQuest API
+            </text>
+
+            <rect
+              x="710"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="775"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Escrow / Ledger
+            </text>
+
+            <!-- Lifelines -->
+            <line
+              x1="115"
+              y1="64"
+              x2="115"
+              y2="416"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="335"
+              y1="64"
+              x2="335"
+              y2="416"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="555"
+              y1="64"
+              x2="555"
+              y2="416"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="775"
+              y1="64"
+              x2="775"
+              y2="416"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+
+            <!-- 1. Publish & Escrow -->
+            <line
+              x1="115"
+              y1="96"
+              x2="547"
+              y2="96"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q1-arr-link)"
+            />
+            <rect x="250" y="80" width="160" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="330"
+              y="89"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST /api/v2/quests/:id/publish
+            </text>
+
+            <line
+              x1="555"
+              y1="116"
+              x2="767"
+              y2="116"
+              stroke="#4f5d75"
+              stroke-width="1.2"
+              marker-end="url(#q1-arr)"
+            />
+            <rect x="600" y="100" width="120" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="660"
+              y="109"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              reserveSpending()
+            </text>
+
+            <line
+              x1="555"
+              y1="136"
+              x2="123"
+              y2="136"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,3"
+              marker-end="url(#q1-arr)"
+            />
+            <rect x="260" y="120" width="140" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="330"
+              y="129"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              200 OK [QUEST_OPEN]
+            </text>
+
+            <!-- 2. Direct Join -->
+            <line
+              x1="335"
+              y1="172"
+              x2="547"
+              y2="172"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q1-arr-link)"
+            />
+            <rect x="360" y="156" width="160" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="165"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST /api/v2/quests/:id/join
+            </text>
+
+            <line
+              x1="555"
+              y1="192"
+              x2="343"
+              y2="192"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,3"
+              marker-end="url(#q1-arr)"
+            />
+            <rect x="360" y="176" width="160" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="185"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              201 OK [QUEST_ASSIGNED]
+            </text>
+
+            <!-- 3. Start Work -->
+            <line
+              x1="335"
+              y1="228"
+              x2="547"
+              y2="228"
+              stroke="#4f5d75"
+              stroke-width="1.2"
+              marker-end="url(#q1-arr)"
+            />
+            <rect x="350" y="212" width="180" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="221"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              startTime &rarr; QUEST_IN_PROGRESS
+            </text>
+
+            <!-- 4. Proof Submit -->
+            <line
+              x1="335"
+              y1="264"
+              x2="547"
+              y2="264"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q1-arr-link)"
+            />
+            <rect x="340" y="248" width="200" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="257"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../proof-submissions/:id/submit
+            </text>
+
+            <!-- 5. Review & Settle -->
+            <line
+              x1="115"
+              y1="300"
+              x2="547"
+              y2="300"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q1-arr-link)"
+            />
+            <rect x="240" y="284" width="180" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="330"
+              y="293"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../review { PROOF_APPROVED }
+            </text>
+
+            <line
+              x1="555"
+              y1="324"
+              x2="767"
+              y2="324"
+              stroke="#4f5d75"
+              stroke-width="1.2"
+              marker-end="url(#q1-arr)"
+            />
+            <rect x="610" y="308" width="120" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="670"
+              y="317"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              settleReservation()
+            </text>
+
+            <line
+              x1="775"
+              y1="352"
+              x2="343"
+              y2="352"
+              stroke="#eb6c36"
+              stroke-width="1.4"
+              marker-end="url(#q1-arr-coral)"
+            />
+            <rect x="440" y="336" width="220" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="550"
+              y="345"
+              fill="#eb6c36"
+              font-size="7.5"
+              font-weight="600"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              100% REWARD PAID TO WORKER
+            </text>
+
+            <line
+              x1="555"
+              y1="380"
+              x2="123"
+              y2="380"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,3"
+              marker-end="url(#q1-arr)"
+            />
+            <rect x="250" y="364" width="160" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="330"
+              y="373"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              200 OK [QUEST_COMPLETED]
+            </text>
+          </svg>
+        </div>
+
+        <div class="cards-grid">
+          <div class="card-detail">
+            <h4>Key Domain Rules</h4>
+            <ul>
+              <li>
+                <strong>Headcount:</strong> Exactly 1 worker. First valid join wins slot
+                immediately.
+              </li>
+              <li>
+                <strong>Auto-Cancel:</strong> If no worker joins before
+                <span style="font-family: var(--font-mono)">startTime</span>, quest cancels and
+                refund settles.
+              </li>
+              <li>
+                <strong>Start Work:</strong> Single worker must trigger start between
+                <span style="font-family: var(--font-mono)">startTime</span> and
+                <span style="font-family: var(--font-mono)">dueAt</span>.
+              </li>
+              <li>
+                <strong>Proof:</strong> Single proof submission draft sent before
+                <span style="font-family: var(--font-mono)">dueAt</span>.
+              </li>
+            </ul>
+          </div>
+          <div class="card-detail">
+            <h4>Primary Endpoints</h4>
+            <ul>
+              <li>
+                <strong>POST /api/v2/quests/:id/publish:</strong> Publishes draft &amp; reserves
+                escrow.
+              </li>
+              <li><strong>POST /api/v2/quests/:id/join:</strong> Instant direct assignment.</li>
+              <li><strong>POST .../proof-submissions/:id/submit:</strong> Worker submits proof.</li>
+              <li>
+                <strong>POST .../proof-submissions/:id/review:</strong> Hirer approves or rejects.
+              </li>
+              <li><strong>POST /api/v2/quests/:id/reviews:</strong> 1 Hirer-Worker rating pair.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== QUADRANT 2 ==================== -->
+      <section class="quadrant-block" id="quadrant-2">
+        <div class="quadrant-header">
+          <div class="quadrant-header-left">
+            <span class="quadrant-tag">QUADRANT 2</span>
+            <h2 class="quadrant-title">SINGLE &times; CANDIDATE</h2>
+            <p class="quadrant-desc">
+              Vetting flow. Candidates apply individually while open. Hirer reviews and selects
+              exactly one applicant.
+            </p>
+          </div>
+        </div>
+
+        <div class="diagram-container">
+          <svg
+            viewBox="0 0 900 460"
+            xmlns="http://www.w3.org/2000/svg"
+            role="img"
+            aria-labelledby="q2-seq-title q2-seq-desc"
+          >
+            <title id="q2-seq-title">Quadrant 2 Sequence: SINGLE + CANDIDATE</title>
+            <desc id="q2-seq-desc">
+              Sequence diagram for single participant candidate quest lifecycle from application
+              submission to selection and completion.
+            </desc>
+
+            <defs>
+              <marker id="q2-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="#4f5d75" />
+              </marker>
+              <marker
+                id="q2-arr-coral"
+                markerWidth="8"
+                markerHeight="6"
+                refX="7"
+                refY="3"
+                orient="auto"
+              >
+                <polygon points="0 0, 8 3, 0 6" fill="#eb6c36" />
+              </marker>
+              <marker
+                id="q2-arr-link"
+                markerWidth="8"
+                markerHeight="6"
+                refX="7"
+                refY="3"
+                orient="auto"
+              >
+                <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8" />
+              </marker>
+            </defs>
+
+            <!-- Background -->
+            <rect width="100%" height="100%" fill="#f5f5f5" />
+
+            <!-- Actors -->
+            <rect
+              x="50"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="115"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Hirer
+            </text>
+
+            <rect
+              x="270"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="335"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Candidates
+            </text>
+
+            <rect
+              x="490"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="555"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              KUQuest API
+            </text>
+
+            <rect
+              x="710"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="775"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Escrow / Ledger
+            </text>
+
+            <!-- Lifelines -->
+            <line
+              x1="115"
+              y1="64"
+              x2="115"
+              y2="416"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="335"
+              y1="64"
+              x2="335"
+              y2="416"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="555"
+              y1="64"
+              x2="555"
+              y2="416"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="775"
+              y1="64"
+              x2="775"
+              y2="416"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+
+            <!-- 1. Open Quest -->
+            <line
+              x1="115"
+              y1="96"
+              x2="547"
+              y2="96"
+              stroke="#4f5d75"
+              stroke-width="1.2"
+              marker-end="url(#q2-arr)"
+            />
+            <rect x="270" y="80" width="120" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="330"
+              y="89"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              QUEST_OPEN (Published)
+            </text>
+
+            <!-- 2. Candidate Applies -->
+            <line
+              x1="335"
+              y1="132"
+              x2="547"
+              y2="132"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q2-arr-link)"
+            />
+            <rect x="340" y="116" width="200" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="125"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../applications (Apply)
+            </text>
+
+            <!-- 3. Candidate Inquiry (Optional) -->
+            <line
+              x1="335"
+              y1="168"
+              x2="123"
+              y2="168"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,3"
+              marker-end="url(#q2-arr)"
+            />
+            <rect x="150" y="152" width="160" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="230"
+              y="161"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              Candidate Inquiry (1-on-1)
+            </text>
+
+            <!-- 4. Hirer Selects Candidate -->
+            <line
+              x1="115"
+              y1="204"
+              x2="547"
+              y2="204"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q2-arr-link)"
+            />
+            <rect x="230" y="188" width="200" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="330"
+              y="197"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../applications/:id/select
+            </text>
+
+            <line
+              x1="555"
+              y1="232"
+              x2="343"
+              y2="232"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,3"
+              marker-end="url(#q2-arr)"
+            />
+            <rect x="330" y="216" width="220" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="225"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              ASSIGNED (Atomic Rejection of Others)
+            </text>
+
+            <!-- 5. Start Work & Execution -->
+            <line
+              x1="335"
+              y1="268"
+              x2="547"
+              y2="268"
+              stroke="#4f5d75"
+              stroke-width="1.2"
+              marker-end="url(#q2-arr)"
+            />
+            <rect x="350" y="252" width="180" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="261"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              Start Work &rarr; QUEST_IN_PROGRESS
+            </text>
+
+            <!-- 6. Proof Submit & Review -->
+            <line
+              x1="335"
+              y1="304"
+              x2="547"
+              y2="304"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q2-arr-link)"
+            />
+            <rect x="340" y="288" width="200" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="297"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../proof-submissions/:id/submit
+            </text>
+
+            <line
+              x1="115"
+              y1="340"
+              x2="547"
+              y2="340"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q2-arr-link)"
+            />
+            <rect x="240" y="324" width="180" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="330"
+              y="333"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../review { PROOF_APPROVED }
+            </text>
+
+            <!-- 7. Payout Release -->
+            <line
+              x1="775"
+              y1="376"
+              x2="343"
+              y2="376"
+              stroke="#eb6c36"
+              stroke-width="1.4"
+              marker-end="url(#q2-arr-coral)"
+            />
+            <rect x="440" y="360" width="220" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="550"
+              y="369"
+              fill="#eb6c36"
+              font-size="7.5"
+              font-weight="600"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              100% REWARD PAID TO WINNING WORKER
+            </text>
+          </svg>
+        </div>
+
+        <div class="cards-grid">
+          <div class="card-detail">
+            <h4>Key Domain Rules</h4>
+            <ul>
+              <li>
+                <strong>Applications:</strong> Candidates can apply and withdraw while
+                <span style="font-family: var(--font-mono)">QUEST_OPEN</span>.
+              </li>
+              <li>
+                <strong>Candidate Inquiry:</strong> 1-on-1 private chat available per applicant;
+                closes upon assignment.
+              </li>
+              <li>
+                <strong>Atomic Rejection:</strong> Selecting one candidate immediately rejects all
+                other applicants.
+              </li>
+              <li>
+                <strong>Unselected Expiration:</strong> If no candidate is selected by
+                <span style="font-family: var(--font-mono)">startTime</span>, quest auto-cancels.
+              </li>
+            </ul>
+          </div>
+          <div class="card-detail">
+            <h4>Primary Endpoints</h4>
+            <ul>
+              <li>
+                <strong>POST /api/v2/quests/:id/applications:</strong> Candidate applies to quest.
+              </li>
+              <li>
+                <strong>POST .../applications/:id/withdraw:</strong> Candidate withdraws
+                application.
+              </li>
+              <li>
+                <strong>POST .../applications/:id/select:</strong> Hirer selects chosen applicant.
+              </li>
+              <li>
+                <strong>POST .../proof-submissions/:id/review:</strong> Hirer review &amp;
+                settlement.
+              </li>
+              <li><strong>POST /api/v2/quests/:id/reviews:</strong> 1 Hirer-Worker rating pair.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== QUADRANT 3 ==================== -->
+      <section class="quadrant-block" id="quadrant-3">
+        <div class="quadrant-header">
+          <div class="quadrant-header-left">
+            <span class="quadrant-tag accent">QUADRANT 3</span>
+            <h2 class="quadrant-title">GROUP &times; FIRST_COME_FIRST_SERVED</h2>
+            <p class="quadrant-desc">
+              Multi-slot direct join (2–20 workers). Work chat opens on 1st join. Underfilled
+              consensus protocol at start time. Partial success permitted.
+            </p>
+          </div>
+        </div>
+
+        <div class="diagram-container">
+          <svg
+            viewBox="0 0 900 500"
+            xmlns="http://www.w3.org/2000/svg"
+            role="img"
+            aria-labelledby="q3-seq-title q3-seq-desc"
+          >
+            <title id="q3-seq-title">Quadrant 3 Sequence: GROUP + FCFS</title>
+            <desc id="q3-seq-desc">
+              Sequence diagram for group first come first served quest lifecycle with slot-by-slot
+              joins, underfilled consensus, and individual proof reviews.
+            </desc>
+
+            <defs>
+              <marker id="q3-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="#4f5d75" />
+              </marker>
+              <marker
+                id="q3-arr-coral"
+                markerWidth="8"
+                markerHeight="6"
+                refX="7"
+                refY="3"
+                orient="auto"
+              >
+                <polygon points="0 0, 8 3, 0 6" fill="#eb6c36" />
+              </marker>
+              <marker
+                id="q3-arr-link"
+                markerWidth="8"
+                markerHeight="6"
+                refX="7"
+                refY="3"
+                orient="auto"
+              >
+                <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8" />
+              </marker>
+            </defs>
+
+            <!-- Background -->
+            <rect width="100%" height="100%" fill="#f5f5f5" />
+
+            <!-- Actors -->
+            <rect
+              x="50"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="115"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Hirer
+            </text>
+
+            <rect
+              x="270"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="335"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Active Workers (N)
+            </text>
+
+            <rect
+              x="490"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="555"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              KUQuest API
+            </text>
+
+            <rect
+              x="710"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="775"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Escrow / Ledger
+            </text>
+
+            <!-- Lifelines -->
+            <line
+              x1="115"
+              y1="64"
+              x2="115"
+              y2="460"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="335"
+              y1="64"
+              x2="335"
+              y2="460"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="555"
+              y1="64"
+              x2="555"
+              y2="460"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="775"
+              y1="64"
+              x2="775"
+              y2="460"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+
+            <!-- 1. Joins slot-by-slot -->
+            <line
+              x1="335"
+              y1="96"
+              x2="547"
+              y2="96"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q3-arr-link)"
+            />
+            <rect x="360" y="80" width="160" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="89"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../join (Slot 1 Joined)
+            </text>
+
+            <line
+              x1="555"
+              y1="120"
+              x2="343"
+              y2="120"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,3"
+              marker-end="url(#q3-arr)"
+            />
+            <rect x="350" y="104" width="180" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="113"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              WORK CHAT OPENS IMMEDIATELY
+            </text>
+
+            <!-- 2. Underfilled Consensus at startTime -->
+            <rect
+              x="65"
+              y="148"
+              width="760"
+              height="96"
+              rx="4"
+              fill="rgba(45,49,66,0.02)"
+              stroke="rgba(45,49,66,0.22)"
+              stroke-width="1"
+            />
+            <rect
+              x="65"
+              y="148"
+              width="36"
+              height="14"
+              rx="2"
+              fill="#f5f5f5"
+              stroke="rgba(45,49,66,0.22)"
+              stroke-width="0.8"
+            />
+            <text
+              x="83"
+              y="158"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              OPT
+            </text>
+            <text
+              x="110"
+              y="158"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+            >
+              [Underfilled at startTime (Active Workers &lt; Headcount)]
+            </text>
+
+            <line
+              x1="115"
+              y1="180"
+              x2="547"
+              y2="180"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q3-arr-link)"
+            />
+            <rect x="230" y="164" width="200" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="330"
+              y="173"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../underfilled/decision (Proceed, 10m)
+            </text>
+
+            <line
+              x1="335"
+              y1="212"
+              x2="547"
+              y2="212"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q3-arr-link)"
+            />
+            <rect x="340" y="196" width="200" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="205"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../underfilled/consent (All Consent, 10m)
+            </text>
+
+            <!-- 3. All Workers Start Work -->
+            <line
+              x1="335"
+              y1="268"
+              x2="547"
+              y2="268"
+              stroke="#4f5d75"
+              stroke-width="1.2"
+              marker-end="url(#q3-arr)"
+            />
+            <rect x="330" y="252" width="220" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="261"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              EVERY Active Worker Starts &rarr; IN_PROGRESS
+            </text>
+
+            <!-- 4. Individual Proof Submissions -->
+            <line
+              x1="335"
+              y1="304"
+              x2="547"
+              y2="304"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q3-arr-link)"
+            />
+            <rect x="340" y="288" width="200" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="440"
+              y="297"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../proof-submissions (Per-Worker Proof)
+            </text>
+
+            <!-- 5. Individual Review & Partial Payout -->
+            <line
+              x1="115"
+              y1="340"
+              x2="547"
+              y2="340"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q3-arr-link)"
+            />
+            <rect x="230" y="324" width="200" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="330"
+              y="333"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../review (Reviewed Individually)
+            </text>
+
+            <line
+              x1="775"
+              y1="376"
+              x2="343"
+              y2="376"
+              stroke="#eb6c36"
+              stroke-width="1.4"
+              marker-end="url(#q3-arr-coral)"
+            />
+            <rect x="420" y="360" width="260" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="550"
+              y="369"
+              fill="#eb6c36"
+              font-size="7.5"
+              font-weight="600"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              EQUAL SPLIT REWARD TO COMPLETED WORKERS
+            </text>
+
+            <line
+              x1="555"
+              y1="412"
+              x2="123"
+              y2="412"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,3"
+              marker-end="url(#q3-arr)"
+            />
+            <rect x="240" y="396" width="180" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="330"
+              y="405"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              COMPLETED (Or Failed w/ Partial Kept)
+            </text>
+          </svg>
+        </div>
+
+        <div class="cards-grid">
+          <div class="card-detail">
+            <h4>Key Domain Rules</h4>
+            <ul>
+              <li><strong>Work Chat:</strong> Opens immediately upon 1st worker joining slot 1.</li>
+              <li>
+                <strong>Underfilled Protocol:</strong> At
+                <span style="font-family: var(--font-mono)">startTime</span>, Hirer has 10m to
+                proceed/cancel; all workers have 10m to consent. Total pool splits equally among
+                active workers.
+              </li>
+              <li>
+                <strong>Start Duty:</strong>
+                <span style="font-family: var(--font-mono)">EVERY</span> active worker must start
+                work independently.
+              </li>
+              <li>
+                <strong>Partial Success:</strong> One worker failing fails quest, but workers who
+                completed work keep their reward!
+              </li>
+              <li>
+                <strong>Conduct Reports:</strong> Workers can file
+                <span style="font-family: var(--font-mono)">CONDUCT_NO_SHOW</span> against inactive
+                peers.
+              </li>
+            </ul>
+          </div>
+          <div class="card-detail">
+            <h4>Primary Endpoints</h4>
+            <ul>
+              <li><strong>POST /api/v2/quests/:id/join:</strong> Workers join slot-by-slot.</li>
+              <li>
+                <strong>POST .../underfilled/decision:</strong> Hirer decides to proceed
+                underfilled.
+              </li>
+              <li>
+                <strong>POST .../underfilled/consent:</strong> Workers consent to equal split.
+              </li>
+              <li>
+                <strong>POST .../proof-submissions/:id/submit:</strong> Each worker sends proof.
+              </li>
+              <li>
+                <strong>POST .../proof-submissions/:id/review:</strong> Per-worker Hirer decision.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== QUADRANT 4 ==================== -->
+      <section class="quadrant-block" id="quadrant-4">
+        <div class="quadrant-header">
+          <div class="quadrant-header-left">
+            <span class="quadrant-tag accent">QUADRANT 4</span>
+            <h2 class="quadrant-title">GROUP &times; CANDIDATE</h2>
+            <p class="quadrant-desc">
+              Candidate Team formation. Team Leader controls roster via 24h Join Code. Leader-only
+              start &amp; submit. All-or-nothing team outcome; 100% payout to Leader.
+            </p>
+          </div>
+        </div>
+
+        <div class="diagram-container">
+          <svg
+            viewBox="0 0 900 520"
+            xmlns="http://www.w3.org/2000/svg"
+            role="img"
+            aria-labelledby="q4-seq-title q4-seq-desc"
+          >
+            <title id="q4-seq-title">Quadrant 4 Sequence: GROUP + CANDIDATE</title>
+            <desc id="q4-seq-desc">
+              Sequence diagram for group candidate quest lifecycle with team formation, 24h join
+              code, leader-only actions, and single team payout.
+            </desc>
+
+            <defs>
+              <marker id="q4-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="#4f5d75" />
+              </marker>
+              <marker
+                id="q4-arr-coral"
+                markerWidth="8"
+                markerHeight="6"
+                refX="7"
+                refY="3"
+                orient="auto"
+              >
+                <polygon points="0 0, 8 3, 0 6" fill="#eb6c36" />
+              </marker>
+              <marker
+                id="q4-arr-link"
+                markerWidth="8"
+                markerHeight="6"
+                refX="7"
+                refY="3"
+                orient="auto"
+              >
+                <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8" />
+              </marker>
+            </defs>
+
+            <!-- Background -->
+            <rect width="100%" height="100%" fill="#f5f5f5" />
+
+            <!-- Actors -->
+            <rect
+              x="30"
+              y="24"
+              width="110"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="85"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Hirer
+            </text>
+
+            <rect
+              x="200"
+              y="24"
+              width="120"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="260"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Team Leader
+            </text>
+
+            <rect
+              x="380"
+              y="24"
+              width="120"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="440"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Teammates
+            </text>
+
+            <rect
+              x="560"
+              y="24"
+              width="130"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="625"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              KUQuest API
+            </text>
+
+            <rect
+              x="750"
+              y="24"
+              width="120"
+              height="40"
+              rx="4"
+              fill="#ffffff"
+              stroke="#2d3142"
+              stroke-width="1"
+            />
+            <text
+              x="810"
+              y="48"
+              fill="#2d3142"
+              font-size="11"
+              font-weight="600"
+              font-family="'Geist', sans-serif"
+              text-anchor="middle"
+            >
+              Escrow / Ledger
+            </text>
+
+            <!-- Lifelines -->
+            <line
+              x1="85"
+              y1="64"
+              x2="85"
+              y2="480"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="260"
+              y1="64"
+              x2="260"
+              y2="480"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="440"
+              y1="64"
+              x2="440"
+              y2="480"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="625"
+              y1="64"
+              x2="625"
+              y2="480"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+            <line
+              x1="810"
+              y1="64"
+              x2="810"
+              y2="480"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              opacity="0.4"
+            />
+
+            <!-- 1. Leader creates Team & gets Join Code -->
+            <line
+              x1="260"
+              y1="96"
+              x2="617"
+              y2="96"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q4-arr-link)"
+            />
+            <rect x="360" y="80" width="180" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="450"
+              y="89"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../teams (Create Team, 24h Code)
+            </text>
+
+            <!-- 2. Teammates Join with Code -->
+            <line
+              x1="440"
+              y1="132"
+              x2="617"
+              y2="132"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q4-arr-link)"
+            />
+            <rect x="470" y="116" width="120" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="530"
+              y="125"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../teams/:id/join
+            </text>
+
+            <!-- 3. Leader Submits Team -->
+            <line
+              x1="260"
+              y1="168"
+              x2="617"
+              y2="168"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q4-arr-link)"
+            />
+            <rect x="340" y="152" width="220" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="450"
+              y="161"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../teams/:id/submit (Immutable)
+            </text>
+
+            <!-- 4. Hirer Selects Team -->
+            <line
+              x1="85"
+              y1="204"
+              x2="617"
+              y2="204"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q4-arr-link)"
+            />
+            <rect x="270" y="188" width="180" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="360"
+              y="197"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../teams/:id/select
+            </text>
+
+            <line
+              x1="625"
+              y1="232"
+              x2="268"
+              y2="232"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,3"
+              marker-end="url(#q4-arr)"
+            />
+            <rect x="350" y="216" width="200" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="450"
+              y="225"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              ASSIGNED (All Teammates Active)
+            </text>
+
+            <!-- 5. Leader ONLY starts work -->
+            <line
+              x1="260"
+              y1="268"
+              x2="617"
+              y2="268"
+              stroke="#4f5d75"
+              stroke-width="1.2"
+              marker-end="url(#q4-arr)"
+            />
+            <rect x="350" y="252" width="200" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="450"
+              y="261"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              LEADER ONLY Starts &rarr; IN_PROGRESS
+            </text>
+
+            <!-- 6. Leader ONLY submits Proof -->
+            <line
+              x1="260"
+              y1="304"
+              x2="617"
+              y2="304"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q4-arr-link)"
+            />
+            <rect x="350" y="288" width="200" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="450"
+              y="297"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../proof-submissions (Leader Only)
+            </text>
+
+            <!-- 7. Hirer Reviews Single Team Submission -->
+            <line
+              x1="85"
+              y1="340"
+              x2="617"
+              y2="340"
+              stroke="#2e5aa8"
+              stroke-width="1.2"
+              marker-end="url(#q4-arr-link)"
+            />
+            <rect x="270" y="324" width="180" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="360"
+              y="333"
+              fill="#2e5aa8"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              POST .../review { PROOF_APPROVED }
+            </text>
+
+            <!-- 8. Complete Payout Exclusively to Team Leader -->
+            <line
+              x1="810"
+              y1="384"
+              x2="268"
+              y2="384"
+              stroke="#eb6c36"
+              stroke-width="1.4"
+              marker-end="url(#q4-arr-coral)"
+            />
+            <rect x="420" y="368" width="240" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="540"
+              y="377"
+              fill="#eb6c36"
+              font-size="7.5"
+              font-weight="600"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              100% REWARD POOL PAID ONLY TO TEAM LEADER
+            </text>
+
+            <line
+              x1="625"
+              y1="420"
+              x2="93"
+              y2="420"
+              stroke="#4f5d75"
+              stroke-width="1"
+              stroke-dasharray="4,3"
+              marker-end="url(#q4-arr)"
+            />
+            <rect x="250" y="404" width="220" height="12" rx="2" fill="#f5f5f5" />
+            <text
+              x="360"
+              y="413"
+              fill="#4f5d75"
+              font-size="7.5"
+              font-family="'Geist Mono', monospace"
+              text-anchor="middle"
+            >
+              ALL TEAMMATE ASSIGNMENTS COMPLETED
+            </text>
+          </svg>
+        </div>
+
+        <div class="cards-grid">
+          <div class="card-detail">
+            <h4>Key Domain Rules</h4>
+            <ul>
+              <li>
+                <strong>Team Formation:</strong> Leader sets headcount (2..published headcount)
+                &amp; sends 24h Join Code.
+              </li>
+              <li>
+                <strong>Submission Lock:</strong> Leader submits team with text + file; team cannot
+                withdraw.
+              </li>
+              <li>
+                <strong>Leader-Only Duty:</strong> Team Leader is the
+                <span style="font-family: var(--font-mono)">SOLE</span> required starter and proof
+                submitter. Teammates have no individual submission duty.
+              </li>
+              <li>
+                <strong>All-or-Nothing Outcome:</strong> Proof approval completes
+                <span style="font-family: var(--font-mono)">EVERY</span> teammate assignment;
+                rejection fails all.
+              </li>
+              <li>
+                <strong>Reward Distribution:</strong> The entire worker reward pool for all
+                published slots is disbursed
+                <span style="font-family: var(--font-mono)">ONLY</span> to the Team Leader.
+              </li>
+            </ul>
+          </div>
+          <div class="card-detail">
+            <h4>Primary Endpoints</h4>
+            <ul>
+              <li><strong>POST /api/v2/quests/:id/teams:</strong> Leader creates forming team.</li>
+              <li><strong>POST .../teams/:id/join-code:</strong> Regenerate 24h Join Code.</li>
+              <li><strong>POST .../teams/:id/join:</strong> Teammates join with valid code.</li>
+              <li><strong>POST .../teams/:id/submit:</strong> Leader submits immutable roster.</li>
+              <li>
+                <strong>POST .../teams/:id/select:</strong> Hirer selects team &amp; rejects others.
+              </li>
+              <li>
+                <strong>POST .../proof-submissions/:id/submit:</strong> Leader submits team proof.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <span>KUQuest API Server Architecture</span>
+        <span
+          >Quest Domain &middot; Mode &times; Participation Specification &middot; ADR-0029</span
+        >
+      </footer>
+    </div>
+  </body>
+</html>

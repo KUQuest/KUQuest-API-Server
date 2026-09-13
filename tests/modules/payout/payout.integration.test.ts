@@ -105,17 +105,20 @@ const createStudent = async (_prefix: string) => {
     lastName: 'Student',
   });
   await ensureWallet(id);
-  await savePayoutDestination({
-    principalUserId: id,
-    givenName: 'Payout',
-    surname: 'Student',
-    relationship: 'SELF',
-    bankCode: 'SCB',
-    accountNumber: '1234567890',
-    accountHolderName: 'Payout Student',
-    routingType: 'BANK_ACCOUNT',
-    routingValue: '1234567890',
-  }, encryption);
+  await savePayoutDestination(
+    {
+      principalUserId: id,
+      givenName: 'Payout',
+      surname: 'Student',
+      relationship: 'SELF',
+      bankCode: 'SCB',
+      accountNumber: '1234567890',
+      accountHolderName: 'Payout Student',
+      routingType: 'BANK_ACCOUNT',
+      routingValue: '1234567890',
+    },
+    encryption
+  );
   return id;
 };
 
@@ -157,28 +160,30 @@ const approveForTest = (
   payoutId: string,
   idempotencyKey: string,
   expectedVersion = 1,
-  reasonCode = 'PAYOUT_POLICY_REVIEW',
-) => approvePayout({
-  adminId,
-  payoutId,
-  idempotencyKey,
-  expectedVersion,
-  reasonCode,
-});
+  reasonCode = 'PAYOUT_POLICY_REVIEW'
+) =>
+  approvePayout({
+    adminId,
+    payoutId,
+    idempotencyKey,
+    expectedVersion,
+    reasonCode,
+  });
 
 const cancelForTest = (
   adminId: string,
   payoutId: string,
   idempotencyKey: string,
   expectedVersion = 1,
-  reasonCode = 'PAYOUT_INVALID_DESTINATION',
-) => cancelPayout({
-  adminId,
-  payoutId,
-  idempotencyKey,
-  expectedVersion,
-  reasonCode,
-});
+  reasonCode = 'PAYOUT_INVALID_DESTINATION'
+) =>
+  cancelPayout({
+    adminId,
+    payoutId,
+    idempotencyKey,
+    expectedVersion,
+    reasonCode,
+  });
 
 beforeAll(async () => {
   await sql`select 1`;
@@ -190,7 +195,10 @@ describe('Payout application services', () => {
     const studentId = await createStudent('be199-pending-approval');
     await creditEarnings(studentId, 10_000);
     const provider = new FakePayoutProvider();
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(1_234),
+    });
 
     const payout = await initiatePayout({
       principalUserId: studentId,
@@ -216,27 +224,33 @@ describe('Payout application services', () => {
     await creditEarnings(studentId, 10_000);
     const payout = await initiatePayout({
       principalUserId: studentId,
-      quoteId: (await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) })).id,
+      quoteId: (
+        await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) })
+      ).id,
       idempotency: { key: 'be199-approval-submit-1' },
     });
 
-    await expect(approvePayout({
-      adminId,
-      payoutId: payout.id,
-      idempotencyKey: 'be199-approval-invalid-reason-1',
-      expectedVersion: payout.version,
-      reasonCode: 'PAYOUT_INVALID_DESTINATION',
-    })).rejects.toMatchObject({ code: 'ADMIN_ACTION_INVALID_REASON_CODE' });
+    await expect(
+      approvePayout({
+        adminId,
+        payoutId: payout.id,
+        idempotencyKey: 'be199-approval-invalid-reason-1',
+        expectedVersion: payout.version,
+        reasonCode: 'PAYOUT_INVALID_DESTINATION',
+      })
+    ).rejects.toMatchObject({ code: 'ADMIN_ACTION_INVALID_REASON_CODE' });
 
     const approved = await approveForTest(adminId, payout.id, 'be199-approval-decision-1');
     const replay = await approveForTest(adminId, payout.id, 'be199-approval-decision-1');
-    await expect(approvePayout({
-      adminId,
-      payoutId: payout.id,
-      idempotencyKey: 'be199-approval-decision-1',
-      expectedVersion: payout.version,
-      reasonCode: 'PAYOUT_RISK_REVIEW',
-    })).rejects.toMatchObject({ code: 'ADMIN_ACTION_KEY_REUSED' });
+    await expect(
+      approvePayout({
+        adminId,
+        payoutId: payout.id,
+        idempotencyKey: 'be199-approval-decision-1',
+        expectedVersion: payout.version,
+        reasonCode: 'PAYOUT_RISK_REVIEW',
+      })
+    ).rejects.toMatchObject({ code: 'ADMIN_ACTION_KEY_REUSED' });
 
     expect(approved).toMatchObject({
       resourceSummary: {
@@ -252,33 +266,40 @@ describe('Payout application services', () => {
       earningsBalanceSatang: 8_766,
       reservedForPayoutsSatang: 1_234,
     });
-    expect(await listPayoutStatusHistory(studentId, payout.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        fromStatus: 'PENDING_ADMIN_APPROVAL',
-        toStatus: 'SUBMITTED_TO_PROVIDER',
-        actorAdminId: adminId,
-        reason: 'PAYOUT_POLICY_REVIEW',
-      }),
-    ]));
+    expect(await listPayoutStatusHistory(studentId, payout.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fromStatus: 'PENDING_ADMIN_APPROVAL',
+          toStatus: 'SUBMITTED_TO_PROVIDER',
+          actorAdminId: adminId,
+          reason: 'PAYOUT_POLICY_REVIEW',
+        }),
+      ])
+    );
   });
 
   it('allows an Admin to cancel a waiting Payout and release the full Payout Reserve', async () => {
     const studentId = await createStudent('be199-cancellation');
     const adminId = await createAdmin();
     await creditEarnings(studentId, 10_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(1_234),
+    });
     const payout = await initiatePayout({
       principalUserId: studentId,
       quoteId: quote.id,
       idempotency: { key: 'be199-cancellation-submit-1' },
     });
-    await expect(cancelPayout({
-      adminId,
-      payoutId: payout.id,
-      idempotencyKey: 'be199-cancellation-missing-reason',
-      expectedVersion: payout.version,
-      reasonCode: '   ',
-    })).rejects.toMatchObject({ code: 'ADMIN_ACTION_REASON_REQUIRED' });
+    await expect(
+      cancelPayout({
+        adminId,
+        payoutId: payout.id,
+        idempotencyKey: 'be199-cancellation-missing-reason',
+        expectedVersion: payout.version,
+        reasonCode: '   ',
+      })
+    ).rejects.toMatchObject({ code: 'ADMIN_ACTION_REASON_REQUIRED' });
 
     const cancelled = await cancelForTest(adminId, payout.id, 'be199-cancellation-decision-1');
     const replay = await cancelForTest(adminId, payout.id, 'be199-cancellation-decision-1');
@@ -298,17 +319,24 @@ describe('Payout application services', () => {
       earningsBalanceSatang: 10_000,
       reservedForPayoutsSatang: 0,
     });
-    expect(await db.select().from(walletLedgerTransaction).where(
-      eq(walletLedgerTransaction.businessReference, `payout-admin-cancellation:${payout.id}`),
-    )).toHaveLength(1);
-    expect(await listPayoutStatusHistory(studentId, payout.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        fromStatus: 'PENDING_ADMIN_APPROVAL',
-        toStatus: 'CANCELLED',
-        actorAdminId: adminId,
-        reason: 'PAYOUT_INVALID_DESTINATION',
-      }),
-    ]));
+    expect(
+      await db
+        .select()
+        .from(walletLedgerTransaction)
+        .where(
+          eq(walletLedgerTransaction.businessReference, `payout-admin-cancellation:${payout.id}`)
+        )
+    ).toHaveLength(1);
+    expect(await listPayoutStatusHistory(studentId, payout.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fromStatus: 'PENDING_ADMIN_APPROVAL',
+          toStatus: 'CANCELLED',
+          actorAdminId: adminId,
+          reason: 'PAYOUT_INVALID_DESTINATION',
+        }),
+      ])
+    );
   });
 
   it('serializes concurrent Admin approval and cancellation decisions', async () => {
@@ -316,7 +344,10 @@ describe('Payout application services', () => {
     const approveAdminId = await createAdmin();
     const cancelAdminId = await createAdmin();
     await creditEarnings(studentId, 10_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(1_234),
+    });
     const payout = await initiatePayout({
       principalUserId: studentId,
       quoteId: quote.id,
@@ -351,14 +382,13 @@ describe('Payout application services', () => {
     const actions = await db
       .select({ id: adminAction.id, action: adminAction.action })
       .from(adminAction)
-      .where(and(
-        eq(adminAction.resourceType, 'payout'),
-        eq(adminAction.resourceId, payout.id),
-      ));
+      .where(and(eq(adminAction.resourceType, 'payout'), eq(adminAction.resourceId, payout.id)));
     const releaseTransactions = await db
       .select({ id: walletLedgerTransaction.id })
       .from(walletLedgerTransaction)
-      .where(eq(walletLedgerTransaction.businessReference, `payout-admin-cancellation:${payout.id}`));
+      .where(
+        eq(walletLedgerTransaction.businessReference, `payout-admin-cancellation:${payout.id}`)
+      );
 
     expect(storedPayout?.version).toBe(2);
     expect(['SUBMITTED_TO_PROVIDER', 'CANCELLED']).toContain(storedPayout?.payoutStatus);
@@ -371,7 +401,10 @@ describe('Payout application services', () => {
     const studentId = await createStudent('be199-worker');
     const adminId = await createAdmin();
     await creditEarnings(studentId, 10_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(1_234),
+    });
     const provider = new FakePayoutProvider();
     const payout = await initiatePayout({
       principalUserId: studentId,
@@ -395,7 +428,10 @@ describe('Payout application services', () => {
     const studentId = await createStudent('be199-worker-job');
     const adminId = await createAdmin();
     await creditEarnings(studentId, 1_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
     const payout = await initiatePayout({
       principalUserId: studentId,
       quoteId: quote.id,
@@ -406,13 +442,18 @@ describe('Payout application services', () => {
     await approveForTest(adminId, payout.id, 'be199-worker-job-approval-1');
 
     const [job] = await db
-      .select({ payoutId: paymentPayoutSubmissionJobs.payoutId, processedAt: paymentPayoutSubmissionJobs.processedAt })
+      .select({
+        payoutId: paymentPayoutSubmissionJobs.payoutId,
+        processedAt: paymentPayoutSubmissionJobs.processedAt,
+      })
       .from(paymentPayoutSubmissionJobs)
       .where(eq(paymentPayoutSubmissionJobs.payoutId, payout.id));
     expect(job).toMatchObject({ payoutId: payout.id, processedAt: null });
 
     expect(await processApprovedPayouts(20, provider, encryption)).toBeGreaterThanOrEqual(1);
-    expect(provider.requests.some((request) => request.internalReference === payout.internalReference)).toBe(true);
+    expect(
+      provider.requests.some((request) => request.internalReference === payout.internalReference)
+    ).toBe(true);
 
     const [processedJob] = await db
       .select({ processedAt: paymentPayoutSubmissionJobs.processedAt })
@@ -425,7 +466,10 @@ describe('Payout application services', () => {
     const studentId = await createStudent('be199-legacy-cancellation');
     const adminId = await createAdmin();
     await creditEarnings(studentId, 1_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
     const payout = await initiatePayout({
       principalUserId: studentId,
       quoteId: quote.id,
@@ -447,16 +491,21 @@ describe('Payout application services', () => {
     const history = await listAdminPayoutStatusHistory(payout.id);
 
     expect(detail.cancellationReasonCode).toBeNull();
-    expect(history).toEqual(expect.arrayContaining([
-      expect.objectContaining({ source: 'ADMIN_CANCELLATION', reason: null }),
-    ]));
+    expect(history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source: 'ADMIN_CANCELLATION', reason: null }),
+      ])
+    );
   });
 
   it('claims an approved Payout so concurrent Worker retries submit once', async () => {
     const studentId = await createStudent('be199-worker-retry');
     const adminId = await createAdmin();
     await creditEarnings(studentId, 10_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(1_234),
+    });
     const payout = await initiatePayout({
       principalUserId: studentId,
       quoteId: quote.id,
@@ -506,13 +555,17 @@ describe('Payout application services', () => {
   it('does not submit a SUBMITTED_TO_PROVIDER Payout without an Admin approval record', async () => {
     const studentId = await createStudent('be199-worker-unapproved');
     await creditEarnings(studentId, 10_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(1_234),
+    });
     const payout = await initiatePayout({
       principalUserId: studentId,
       quoteId: quote.id,
       idempotency: { key: 'be199-worker-unapproved-submit-1' },
     });
-    await db.update(paymentPayouts)
+    await db
+      .update(paymentPayouts)
       .set({ payoutStatus: 'SUBMITTED_TO_PROVIDER' })
       .where(eq(paymentPayouts.id, payout.id));
     const provider = new FakePayoutProvider();
@@ -524,14 +577,18 @@ describe('Payout application services', () => {
   });
 
   it('returns not found for Admin history of an unknown Payout', async () => {
-    await expect(listAdminPayoutStatusHistory(crypto.randomUUID()))
-      .rejects.toMatchObject({ code: 'PAYOUT_NOT_FOUND' });
+    await expect(listAdminPayoutStatusHistory(crypto.randomUUID())).rejects.toMatchObject({
+      code: 'PAYOUT_NOT_FOUND',
+    });
   });
 
   it('lists waiting Payouts for Admin review with masked destination data', async () => {
     const studentId = await createStudent('be199-admin-read');
     await creditEarnings(studentId, 10_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(1_234),
+    });
     const payout = await initiatePayout({
       principalUserId: studentId,
       quoteId: quote.id,
@@ -560,7 +617,10 @@ describe('Payout application services', () => {
     const studentId = await createStudent('be199-admin-legacy-reason');
     const adminId = await createAdmin();
     await creditEarnings(studentId, 10_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(1_234),
+    });
     const payout = await initiatePayout({
       principalUserId: studentId,
       quoteId: quote.id,
@@ -577,12 +637,14 @@ describe('Payout application services', () => {
 
     const history = await listAdminPayoutStatusHistory(payout.id);
 
-    expect(history).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        source: 'ADMIN_APPROVAL',
-        reason: null,
-      }),
-    ]));
+    expect(history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'ADMIN_APPROVAL',
+          reason: null,
+        }),
+      ])
+    );
     expect(JSON.stringify(history)).not.toContain('old Admin UI');
   });
 
@@ -591,7 +653,10 @@ describe('Payout application services', () => {
     const adminId = await createAdmin();
     await creditEarnings(studentId, 10_000);
     const provider = new FakePayoutProvider();
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(1_234) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(1_234),
+    });
 
     expect(quote).toMatchObject({
       principalUserId: studentId,
@@ -629,16 +694,22 @@ describe('Payout application services', () => {
       earningsBalanceSatang: 8_766,
       reservedForPayoutsSatang: 1_234,
     });
-    expect(await initiatePayout({
-      principalUserId: studentId,
-      quoteId: quote.id,
-      idempotency: { key: 'be115-success-1' },
-    })).toEqual(payout);
+    expect(
+      await initiatePayout({
+        principalUserId: studentId,
+        quoteId: quote.id,
+        idempotency: { key: 'be115-success-1' },
+      })
+    ).toEqual(payout);
     expect(await getPayout(studentId, payout.id)).toEqual(payout);
     expect(await listPayouts(studentId)).toHaveLength(1);
     expect(await listPayoutStatusHistory(studentId, payout.id)).toMatchObject([
       { fromStatus: null, toStatus: 'PENDING_ADMIN_APPROVAL', source: 'INITIATION' },
-      { fromStatus: 'PENDING_ADMIN_APPROVAL', toStatus: 'SUBMITTED_TO_PROVIDER', source: 'ADMIN_APPROVAL' },
+      {
+        fromStatus: 'PENDING_ADMIN_APPROVAL',
+        toStatus: 'SUBMITTED_TO_PROVIDER',
+        source: 'ADMIN_APPROVAL',
+      },
       { fromStatus: 'SUBMITTED_TO_PROVIDER', toStatus: 'PROVIDER_PENDING', source: 'PROVIDER' },
     ]);
   });
@@ -646,32 +717,42 @@ describe('Payout application services', () => {
   it('rejects ownership, inactive destinations, expired quotes, and insufficient Earnings Balance', async () => {
     const ownerId = await createStudent('be115-owner');
     const otherId = await createStudent('be115-other');
-    const quote = await quotePayout({ principalUserId: ownerId, receiptSatang: positiveSatang(100) });
+    const quote = await quotePayout({
+      principalUserId: ownerId,
+      receiptSatang: positiveSatang(100),
+    });
     const provider = new FakePayoutProvider();
 
-    await expect(initiatePayout({
-      principalUserId: otherId,
-      quoteId: quote.id,
-      idempotency: { key: 'be115-owner-wrong' },
-    })).rejects.toMatchObject({ code: 'PAYOUT_QUOTE_NOT_FOUND' });
-    await expect(initiatePayout({
-      principalUserId: ownerId,
-      quoteId: quote.id,
-      idempotency: { key: 'be115-owner-insufficient' },
-    })).rejects.toMatchObject({ code: 'INSUFFICIENT_EARNINGS_BALANCE' });
+    await expect(
+      initiatePayout({
+        principalUserId: otherId,
+        quoteId: quote.id,
+        idempotency: { key: 'be115-owner-wrong' },
+      })
+    ).rejects.toMatchObject({ code: 'PAYOUT_QUOTE_NOT_FOUND' });
+    await expect(
+      initiatePayout({
+        principalUserId: ownerId,
+        quoteId: quote.id,
+        idempotency: { key: 'be115-owner-insufficient' },
+      })
+    ).rejects.toMatchObject({ code: 'INSUFFICIENT_EARNINGS_BALANCE' });
     expect(provider.requests).toHaveLength(0);
 
-    const destination = await savePayoutDestination({
-      principalUserId: ownerId,
-      givenName: 'Payout',
-      surname: 'Student',
-      relationship: 'SELF',
-      bankCode: 'SCB',
-      accountNumber: '1234567891',
-      accountHolderName: 'Payout Student',
-      routingType: 'BANK_ACCOUNT',
-      routingValue: '1234567891',
-    }, encryption);
+    const destination = await savePayoutDestination(
+      {
+        principalUserId: ownerId,
+        givenName: 'Payout',
+        surname: 'Student',
+        relationship: 'SELF',
+        bankCode: 'SCB',
+        accountNumber: '1234567891',
+        accountHolderName: 'Payout Student',
+        routingType: 'BANK_ACCOUNT',
+        routingValue: '1234567891',
+      },
+      encryption
+    );
     expect(destination.retiredAt).toBeNull();
   });
 
@@ -679,7 +760,10 @@ describe('Payout application services', () => {
     const rejectedStudent = await createStudent('be115-rejected');
     const rejectedAdmin = await createAdmin();
     await creditEarnings(rejectedStudent, 1_000);
-    const rejectedQuote = await quotePayout({ principalUserId: rejectedStudent, receiptSatang: positiveSatang(100) });
+    const rejectedQuote = await quotePayout({
+      principalUserId: rejectedStudent,
+      receiptSatang: positiveSatang(100),
+    });
     const rejectedProvider = new FakePayoutProvider();
     rejectedProvider.mode = 'rejected';
 
@@ -689,34 +773,49 @@ describe('Payout application services', () => {
       idempotency: { key: 'be115-rejected-1' },
     });
     await approveForTest(rejectedAdmin, rejectedPayout.id, 'be115-rejected-approval-1');
-    await expect(processApprovedPayout(rejectedPayout.id, rejectedProvider, encryption))
-      .rejects.toMatchObject({ code: 'PROVIDER_REJECTED' });
-    const [failed] = await db.select().from(paymentPayouts).where(eq(paymentPayouts.quoteId, rejectedQuote.id));
+    await expect(
+      processApprovedPayout(rejectedPayout.id, rejectedProvider, encryption)
+    ).rejects.toMatchObject({ code: 'PROVIDER_REJECTED' });
+    const [failed] = await db
+      .select()
+      .from(paymentPayouts)
+      .where(eq(paymentPayouts.quoteId, rejectedQuote.id));
     expect(failed).toMatchObject({ payoutStatus: 'FAILED', actualDebitSatang: null });
     expect(failed?.providerStatus).toBe('400:TEST_REJECTED');
     const rejectedHistory = await listPayoutStatusHistory(rejectedStudent, rejectedPayout.id);
-    expect(rejectedHistory).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        toStatus: 'FAILED',
-        providerStatus: '400:TEST_REJECTED',
-        reason: 'Provider rejected the Payout.',
-      }),
-    ]));
+    expect(rejectedHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toStatus: 'FAILED',
+          providerStatus: '400:TEST_REJECTED',
+          reason: 'Provider rejected the Payout.',
+        }),
+      ])
+    );
     expect(JSON.stringify(rejectedHistory)).not.toContain('Invalid destination account');
     const adminRejectedHistory = await listAdminPayoutStatusHistory(rejectedPayout.id);
-    expect(adminRejectedHistory).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        toStatus: 'FAILED',
-        providerStatus: '400:TEST_REJECTED',
-        reason: 'Provider rejected the Payout. HTTP 400. Code TEST_REJECTED. Message: Invalid destination account <REDACTED>.',
-      }),
-    ]));
-    expect(await getWallet(rejectedStudent)).toMatchObject({ earningsBalanceSatang: 1_000, reservedForPayoutsSatang: 0 });
+    expect(adminRejectedHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toStatus: 'FAILED',
+          providerStatus: '400:TEST_REJECTED',
+          reason:
+            'Provider rejected the Payout. HTTP 400. Code TEST_REJECTED. Message: Invalid destination account <REDACTED>.',
+        }),
+      ])
+    );
+    expect(await getWallet(rejectedStudent)).toMatchObject({
+      earningsBalanceSatang: 1_000,
+      reservedForPayoutsSatang: 0,
+    });
 
     const uncertainStudent = await createStudent('be115-uncertain');
     const uncertainAdmin = await createAdmin();
     await creditEarnings(uncertainStudent, 1_000);
-    const uncertainQuote = await quotePayout({ principalUserId: uncertainStudent, receiptSatang: positiveSatang(100) });
+    const uncertainQuote = await quotePayout({
+      principalUserId: uncertainStudent,
+      receiptSatang: positiveSatang(100),
+    });
     const uncertainProvider = new FakePayoutProvider();
     uncertainProvider.mode = 'uncertain';
     const uncertainInput = {
@@ -726,11 +825,18 @@ describe('Payout application services', () => {
     };
     const uncertainPayout = await initiatePayout(uncertainInput);
     await approveForTest(uncertainAdmin, uncertainPayout.id, 'be115-uncertain-approval-1');
-    await expect(processApprovedPayout(uncertainPayout.id, uncertainProvider, encryption))
-      .rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
-    const [awaiting] = await db.select().from(paymentPayouts).where(eq(paymentPayouts.quoteId, uncertainQuote.id));
+    await expect(
+      processApprovedPayout(uncertainPayout.id, uncertainProvider, encryption)
+    ).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+    const [awaiting] = await db
+      .select()
+      .from(paymentPayouts)
+      .where(eq(paymentPayouts.quoteId, uncertainQuote.id));
     expect(awaiting?.payoutStatus).toBe('PROVIDER_PENDING');
-    expect(await getWallet(uncertainStudent)).toMatchObject({ earningsBalanceSatang: 900, reservedForPayoutsSatang: 100 });
+    expect(await getWallet(uncertainStudent)).toMatchObject({
+      earningsBalanceSatang: 900,
+      reservedForPayoutsSatang: 100,
+    });
     expect(uncertainProvider.requests.map(({ internalReference }) => internalReference)).toEqual([
       uncertainPayout.internalReference,
     ]);
@@ -740,7 +846,10 @@ describe('Payout application services', () => {
     const studentId = await createStudent('be115-decryption-failure');
     const adminId = await createAdmin();
     await creditEarnings(studentId, 1_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
     const provider = new FakePayoutProvider();
     const unavailableKey = createPayoutDestinationEncryption({
       activeKeyVersion: 'v2',
@@ -753,15 +862,19 @@ describe('Payout application services', () => {
       idempotency: { key: 'be115-decryption-failure-1' },
     });
     await approveForTest(adminId, submittedPayout.id, 'be115-decryption-failure-approval-1');
-    await expect(processApprovedPayout(submittedPayout.id, provider, unavailableKey))
-      .rejects.toBeInstanceOf(PayoutDestinationEncryptionError);
+    await expect(
+      processApprovedPayout(submittedPayout.id, provider, unavailableKey)
+    ).rejects.toBeInstanceOf(PayoutDestinationEncryptionError);
 
     expect(provider.requests).toHaveLength(0);
     expect(await getWallet(studentId)).toMatchObject({
       earningsBalanceSatang: 1_000,
       reservedForPayoutsSatang: 0,
     });
-    const [payout] = await db.select().from(paymentPayouts).where(eq(paymentPayouts.quoteId, quote.id));
+    const [payout] = await db
+      .select()
+      .from(paymentPayouts)
+      .where(eq(paymentPayouts.quoteId, quote.id));
     expect(payout).toMatchObject({
       payoutStatus: 'FAILED',
       finalLedgerTransactionId: expect.any(String),
@@ -772,7 +885,10 @@ describe('Payout application services', () => {
     const studentId = await createStudent('be115-provider-configuration');
     const adminId = await createAdmin();
     await creditEarnings(studentId, 1_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
     const provider = new FakePayoutProvider();
     provider.mode = 'configuration';
 
@@ -782,8 +898,9 @@ describe('Payout application services', () => {
       idempotency: { key: 'be115-provider-configuration-1' },
     });
     await approveForTest(adminId, payout.id, 'be115-provider-configuration-approval-1');
-    await expect(processApprovedPayout(payout.id, provider, encryption))
-      .rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION' });
+    await expect(processApprovedPayout(payout.id, provider, encryption)).rejects.toMatchObject({
+      code: 'PROVIDER_CONFIGURATION',
+    });
 
     expect(provider.requests).toHaveLength(0);
     expect(await getWallet(studentId)).toMatchObject({
@@ -796,17 +913,24 @@ describe('Payout application services', () => {
     const studentId = await createStudent('be115-snapshot');
     const adminId = await createAdmin();
     await creditEarnings(studentId, 1_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
     const provider = new FakePayoutProvider();
     const payout = await initiatePayout({
       principalUserId: studentId,
       quoteId: quote.id,
       idempotency: { key: 'be115-snapshot-1' },
     });
-    const [payoutRecord] = await db.select().from(paymentPayouts).where(eq(paymentPayouts.id, payout.id));
+    const [payoutRecord] = await db
+      .select()
+      .from(paymentPayouts)
+      .where(eq(paymentPayouts.id, payout.id));
     if (!payoutRecord) throw new Error('Missing Payout snapshot');
     const replacementSecret = encryption.encrypt('9999999999');
-    await db.update(paymentPayoutAccounts)
+    await db
+      .update(paymentPayoutAccounts)
       .set({
         accountNumberKeyVersion: replacementSecret.keyVersion,
         accountNumberNonce: replacementSecret.nonce,
@@ -826,16 +950,34 @@ describe('Payout application services', () => {
   it('allows at most one active Payout per Student', async () => {
     const studentId = await createStudent('be115-active');
     await creditEarnings(studentId, 1_000);
-    const first = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
-    const second = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
-    await initiatePayout({ principalUserId: studentId, quoteId: first.id, idempotency: { key: 'be115-active-1' } });
-    await expect(initiatePayout({ principalUserId: studentId, quoteId: second.id, idempotency: { key: 'be115-active-2' } }))
-      .rejects.toMatchObject({ code: 'PAYOUT_ACTIVE_EXISTS' });
+    const first = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
+    const second = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
+    await initiatePayout({
+      principalUserId: studentId,
+      quoteId: first.id,
+      idempotency: { key: 'be115-active-1' },
+    });
+    await expect(
+      initiatePayout({
+        principalUserId: studentId,
+        quoteId: second.id,
+        idempotency: { key: 'be115-active-2' },
+      })
+    ).rejects.toMatchObject({ code: 'PAYOUT_ACTIVE_EXISTS' });
   });
 
   it('rejects initiation for a non-active Wallet', async () => {
     const studentId = await createStudent('be115-wallet-status');
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
     const wallet = await getWallet(studentId);
     await changeWalletStatus({
       walletId: wallet.id,
@@ -845,30 +987,39 @@ describe('Payout application services', () => {
     });
     const provider = new FakePayoutProvider();
 
-    await expect(quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) }))
-      .rejects.toMatchObject({ code: 'WALLET_NOT_ACTIVE' });
+    await expect(
+      quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) })
+    ).rejects.toMatchObject({ code: 'WALLET_NOT_ACTIVE' });
 
-    await expect(initiatePayout({
-      principalUserId: studentId,
-      quoteId: quote.id,
-      idempotency: { key: 'be115-wallet-status-1' },
-    })).rejects.toMatchObject({ code: 'WALLET_NOT_ACTIVE' });
+    await expect(
+      initiatePayout({
+        principalUserId: studentId,
+        quoteId: quote.id,
+        idempotency: { key: 'be115-wallet-status-1' },
+      })
+    ).rejects.toMatchObject({ code: 'WALLET_NOT_ACTIVE' });
     expect(provider.requests).toHaveLength(0);
   });
 
   it('rejects an expired Quote before reserving Earnings Balance', async () => {
     const studentId = await createStudent('be115-expired-quote');
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
-    await db.update(paymentPayoutQuotes)
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
+    await db
+      .update(paymentPayoutQuotes)
       .set({ expiresAt: new Date(Date.now() - 1_000) })
       .where(eq(paymentPayoutQuotes.id, quote.id));
     const provider = new FakePayoutProvider();
 
-    await expect(initiatePayout({
-      principalUserId: studentId,
-      quoteId: quote.id,
-      idempotency: { key: 'be115-expired-quote-1' },
-    })).rejects.toMatchObject({ code: 'PAYOUT_QUOTE_EXPIRED' });
+    await expect(
+      initiatePayout({
+        principalUserId: studentId,
+        quoteId: quote.id,
+        idempotency: { key: 'be115-expired-quote-1' },
+      })
+    ).rejects.toMatchObject({ code: 'PAYOUT_QUOTE_EXPIRED' });
     expect(provider.requests).toHaveLength(0);
   });
 
@@ -876,7 +1027,10 @@ describe('Payout application services', () => {
     const studentId = await createStudent('be115-consumed-quote');
     const adminId = await createAdmin();
     await creditEarnings(studentId, 1_000);
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
 
     const payout = await initiatePayout({
       principalUserId: studentId,
@@ -884,38 +1038,69 @@ describe('Payout application services', () => {
       idempotency: { key: 'be115-consumed-quote-1' },
     });
     await cancelForTest(adminId, payout.id, 'be115-consumed-quote-cancellation-1');
-    await expect(initiatePayout({
-      principalUserId: studentId,
-      quoteId: quote.id,
-      idempotency: { key: 'be115-consumed-quote-2' },
-    })).rejects.toMatchObject({ code: 'PAYOUT_QUOTE_CONSUMED' });
+    await expect(
+      initiatePayout({
+        principalUserId: studentId,
+        quoteId: quote.id,
+        idempotency: { key: 'be115-consumed-quote-2' },
+      })
+    ).rejects.toMatchObject({ code: 'PAYOUT_QUOTE_CONSUMED' });
   });
 
   it('serializes concurrent initiation attempts for one Student', async () => {
     const studentId = await createStudent('be115-concurrent');
     await creditEarnings(studentId, 1_000);
-    const first = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
-    const second = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
+    const first = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
+    const second = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
     const provider = new FakePayoutProvider();
     const results = await Promise.allSettled([
-      initiatePayout({ principalUserId: studentId, quoteId: first.id, idempotency: { key: 'be115-concurrent-1' } }),
-      initiatePayout({ principalUserId: studentId, quoteId: second.id, idempotency: { key: 'be115-concurrent-2' } }),
+      initiatePayout({
+        principalUserId: studentId,
+        quoteId: first.id,
+        idempotency: { key: 'be115-concurrent-1' },
+      }),
+      initiatePayout({
+        principalUserId: studentId,
+        quoteId: second.id,
+        idempotency: { key: 'be115-concurrent-2' },
+      }),
     ]);
 
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    expect(results.find((result) => result.status === 'rejected')?.reason)
-      .toMatchObject({ code: 'PAYOUT_ACTIVE_EXISTS' });
+    expect(results.find((result) => result.status === 'rejected')?.reason).toMatchObject({
+      code: 'PAYOUT_ACTIVE_EXISTS',
+    });
     expect(provider.requests).toHaveLength(0);
   });
 
   it('does not leave a Payout row when reserve creation fails', async () => {
     const studentId = await createStudent('be115-atomic');
-    const quote = await quotePayout({ principalUserId: studentId, receiptSatang: positiveSatang(100) });
-    await expect(initiatePayout({ principalUserId: studentId, quoteId: quote.id, idempotency: { key: 'be115-atomic-1' } }))
-      .rejects.toMatchObject({ code: 'INSUFFICIENT_EARNINGS_BALANCE' });
-    expect(await db.select().from(paymentPayouts).where(and(eq(paymentPayouts.userId, studentId), eq(paymentPayouts.quoteId, quote.id))))
-      .toHaveLength(0);
-    expect((await db.select().from(paymentPayoutQuotes).where(eq(paymentPayoutQuotes.id, quote.id)))[0]?.consumedAt)
-      .toBeNull();
+    const quote = await quotePayout({
+      principalUserId: studentId,
+      receiptSatang: positiveSatang(100),
+    });
+    await expect(
+      initiatePayout({
+        principalUserId: studentId,
+        quoteId: quote.id,
+        idempotency: { key: 'be115-atomic-1' },
+      })
+    ).rejects.toMatchObject({ code: 'INSUFFICIENT_EARNINGS_BALANCE' });
+    expect(
+      await db
+        .select()
+        .from(paymentPayouts)
+        .where(and(eq(paymentPayouts.userId, studentId), eq(paymentPayouts.quoteId, quote.id)))
+    ).toHaveLength(0);
+    expect(
+      (await db.select().from(paymentPayoutQuotes).where(eq(paymentPayoutQuotes.id, quote.id)))[0]
+        ?.consumedAt
+    ).toBeNull();
   });
 });

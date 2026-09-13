@@ -35,7 +35,7 @@ const isStudentIdUniquenessViolation = (error: unknown): boolean => {
 
 export const updateAcademicRegistration = async (
   userId: string,
-  data: AcademicRegistrationUpdate,
+  data: AcademicRegistrationUpdate
 ): Promise<AcademicRegistrationUpdateOutcome> => {
   const [student] = await db
     .select({ id: authUser.id })
@@ -120,7 +120,7 @@ export const getAcademicRegistrationStatus = async (userId: string) => {
     fields.departmentId &&
     fields.termsAcceptedAt &&
     fields.termsVersion &&
-    (requiresStudentId ? fields.studentId : true),
+    (requiresStudentId ? fields.studentId : true)
   );
 
   return { ...fields, completed };
@@ -147,11 +147,14 @@ export const getAcademicRegistrationOptions = async () => {
     .leftJoin(department, eq(department.facultyId, faculty.id))
     .orderBy(asc(faculty.name), asc(department.name));
 
-  const faculties = new Map<string, {
-    id: string;
-    name: string;
-    departments: { id: string; name: string }[];
-  }>();
+  const faculties = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      departments: { id: string; name: string }[];
+    }
+  >();
 
   for (const row of facultyRows) {
     const currentFaculty = faculties.get(row.facultyId) ?? {

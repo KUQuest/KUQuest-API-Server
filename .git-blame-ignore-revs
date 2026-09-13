@@ -1,0 +1,5 @@
+# Commits that change formatting only. `git blame` skips them after you run:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: Format the repository with Prettier
+672dca81b8f2f7d1245db9767d97a6a59d2cb9f2

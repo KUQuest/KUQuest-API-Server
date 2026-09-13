@@ -40,7 +40,12 @@ beforeAll(async () => {
     { id: hirerId, email: `${hirerId}@ku.th`, firstName: 'Candidate', lastName: 'Hirer' },
     { id: leaderId, email: `${leaderId}@ku.th`, firstName: 'Team', lastName: 'Leader' },
     { id: memberId, email: `${memberId}@ku.th`, firstName: 'Team', lastName: 'Member' },
-    { id: invitedUserId, email: `${invitedUserId}@ku.th`, firstName: 'Invited', lastName: 'Member' },
+    {
+      id: invitedUserId,
+      email: `${invitedUserId}@ku.th`,
+      firstName: 'Invited',
+      lastName: 'Member',
+    },
   ]);
   await db.insert(tag).values({ id: tagId, name: `Candidate Team test ${tagId}` });
   await db.insert(quest).values({
@@ -80,7 +85,9 @@ beforeAll(async () => {
 afterAll(async () => {
   await db.delete(quest).where(eq(quest.id, questId));
   await db.delete(tag).where(eq(tag.id, tagId));
-  await db.delete(authUser).where(inArray(authUser.id, [hirerId, leaderId, memberId, invitedUserId]));
+  await db
+    .delete(authUser)
+    .where(inArray(authUser.id, [hirerId, leaderId, memberId, invitedUserId]));
 });
 
 describe('Candidate Team authorization persistence', () => {
@@ -101,6 +108,8 @@ describe('Candidate Team authorization persistence', () => {
       outcome: 'not-authorized',
     });
     expect(await listTeamInvitations(memberId, questId, teamId)).toBeUndefined();
-    expect((await listTeamInvitations(leaderId, questId, teamId))?.map(({ id }) => id)).toEqual([invitationId]);
+    expect((await listTeamInvitations(leaderId, questId, teamId))?.map(({ id }) => id)).toEqual([
+      invitationId,
+    ]);
   });
 });

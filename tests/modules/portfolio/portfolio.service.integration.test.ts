@@ -32,7 +32,7 @@ beforeAll(async () => {
   } catch (cause) {
     throw new Error(
       'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 
@@ -45,9 +45,9 @@ beforeAll(async () => {
 afterAll(async () => {
   // Deleting the portfolio items cascades their image junction rows; the file rows
   // they pointed at are only referenced from there, so they can go afterwards.
-  await db.delete(profilePortfolioItem).where(
-    inArray(profilePortfolioItem.userId, [studentA, studentB]),
-  );
+  await db
+    .delete(profilePortfolioItem)
+    .where(inArray(profilePortfolioItem.userId, [studentA, studentB]));
   await db.delete(file).where(inArray(file.uploadedByUserId, [studentA, studentB]));
   await db.delete(authUser).where(inArray(authUser.id, [studentA, studentB]));
 });
@@ -120,9 +120,7 @@ describe('updating a portfolio entry', () => {
       images: [],
     });
 
-    expect(await updatePortfolio(studentA, created.id, { title: 'Updated title' })).toBe(
-      'updated',
-    );
+    expect(await updatePortfolio(studentA, created.id, { title: 'Updated title' })).toBe('updated');
 
     const item = (await listPortfolio(studentA)).find((candidate) => candidate.id === created.id);
     expect(item?.title).toBe('Updated title');
@@ -191,14 +189,23 @@ describe('deleting a portfolio entry', () => {
 describe('changing a portfolio image', () => {
   it('adds the first image when no target file is supplied', async () => {
     const created = await createPortfolio(studentA, { title: 'Image later', images: [] });
-    const result = await replacePortfolioImage(studentA, created.id, storedImage('added'), undefined);
+    const result = await replacePortfolioImage(
+      studentA,
+      created.id,
+      storedImage('added'),
+      undefined
+    );
 
-    expect(result).toEqual(expect.objectContaining({
-      fileId: expect.any(String),
-      previousFileId: null,
-      version: 2,
-    }));
-    expect((await listPortfolio(studentA)).find((item) => item.id === created.id)?.images).toHaveLength(1);
+    expect(result).toEqual(
+      expect.objectContaining({
+        fileId: expect.any(String),
+        previousFileId: null,
+        version: 2,
+      })
+    );
+    expect(
+      (await listPortfolio(studentA)).find((item) => item.id === created.id)?.images
+    ).toHaveLength(1);
   });
 
   it('replaces the first image when no target file is supplied', async () => {
@@ -206,19 +213,34 @@ describe('changing a portfolio image', () => {
       title: 'Replace first',
       images: [storedImage('before')],
     });
-    const before = (await listPortfolio(studentA)).find((item) => item.id === created.id)?.images[0];
-    const result = await replacePortfolioImage(studentA, created.id, storedImage('after'), undefined);
+    const before = (await listPortfolio(studentA)).find((item) => item.id === created.id)
+      ?.images[0];
+    const result = await replacePortfolioImage(
+      studentA,
+      created.id,
+      storedImage('after'),
+      undefined
+    );
 
-    expect(result).toEqual(expect.objectContaining({
-      previousFileId: before?.fileId,
-      version: 2,
-    }));
-    expect((await listPortfolio(studentA)).find((item) => item.id === created.id)?.images[0]?.objectKey).toContain('after');
+    expect(result).toEqual(
+      expect.objectContaining({
+        previousFileId: before?.fileId,
+        version: 2,
+      })
+    );
+    expect(
+      (await listPortfolio(studentA)).find((item) => item.id === created.id)?.images[0]?.objectKey
+    ).toContain('after');
   });
 
   it('reports a missing targeted image without storing a replacement', async () => {
     const created = await createPortfolio(studentA, { title: 'Missing target', images: [] });
-    const result = await replacePortfolioImage(studentA, created.id, storedImage('unused'), randomUUID());
+    const result = await replacePortfolioImage(
+      studentA,
+      created.id,
+      storedImage('unused'),
+      randomUUID()
+    );
 
     expect(result).toEqual({ outcome: 'not-found' });
   });
@@ -241,7 +263,10 @@ describe('marking a portfolio image deleted', () => {
     expect(row?.deletedAt).toBeNull();
 
     await markPortfolioImageDeleted(studentA, image!.fileId);
-    [row] = await db.select({ deletedAt: file.deletedAt }).from(file).where(eq(file.id, image!.fileId));
+    [row] = await db
+      .select({ deletedAt: file.deletedAt })
+      .from(file)
+      .where(eq(file.id, image!.fileId));
     expect(row?.deletedAt).not.toBeNull();
   });
 });

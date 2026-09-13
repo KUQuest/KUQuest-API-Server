@@ -11,13 +11,19 @@ export const payoutStatusSchema = t.Union([
 
 const dateTime = t.String({ format: 'date-time' });
 
-export const payoutQuoteCreateSchema = t.Object({
-  receiptSatang: t.Integer({ minimum: 1 }),
-}, { additionalProperties: false });
+export const payoutQuoteCreateSchema = t.Object(
+  {
+    receiptSatang: t.Integer({ minimum: 1 }),
+  },
+  { additionalProperties: false }
+);
 
-export const payoutCreateSchema = t.Object({
-  quoteId: t.String({ format: 'uuid' }),
-}, { additionalProperties: false });
+export const payoutCreateSchema = t.Object(
+  {
+    quoteId: t.String({ format: 'uuid' }),
+  },
+  { additionalProperties: false }
+);
 
 export const payoutIdempotencyHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
@@ -102,17 +108,19 @@ export const payoutListResponseSchema = t.Object({
 
 export const payoutStatusHistoryResponseSchema = t.Object({
   success: t.Literal(true),
-  data: t.Array(t.Object({
-    id: t.String({ format: 'uuid' }),
-    fromStatus: t.Union([payoutStatusSchema, t.Null()]),
-    toStatus: payoutStatusSchema,
-    providerStatus: t.Union([t.String(), t.Null()]),
-    actorUserId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
-    actorAdminId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
-    source: t.String(),
-    reason: t.Union([t.String(), t.Null()]),
-    occurredAt: dateTime,
-  })),
+  data: t.Array(
+    t.Object({
+      id: t.String({ format: 'uuid' }),
+      fromStatus: t.Union([payoutStatusSchema, t.Null()]),
+      toStatus: payoutStatusSchema,
+      providerStatus: t.Union([t.String(), t.Null()]),
+      actorUserId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
+      actorAdminId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
+      source: t.String(),
+      reason: t.Union([t.String(), t.Null()]),
+      occurredAt: dateTime,
+    })
+  ),
 });
 
 export type PayoutCreateInput = typeof payoutCreateSchema.static;

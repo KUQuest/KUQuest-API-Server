@@ -220,14 +220,12 @@ describe.skipIf(!databaseIsMigrated)('certificate image against the database', (
 
   it('does not attach an image to another Student’s certificate', async () => {
     expect(
-      await replaceCertificateImage(imageOther, certificateId, makeStoredImage()),
+      await replaceCertificateImage(imageOther, certificateId, makeStoredImage())
     ).toBeUndefined();
   });
 
   it('does not attach an image to a certificate that does not exist', async () => {
-    expect(
-      await replaceCertificateImage(imageOwner, missingId, makeStoredImage()),
-    ).toBeUndefined();
+    expect(await replaceCertificateImage(imageOwner, missingId, makeStoredImage())).toBeUndefined();
   });
 
   it('replaces an image, tombstoning the previous file', async () => {

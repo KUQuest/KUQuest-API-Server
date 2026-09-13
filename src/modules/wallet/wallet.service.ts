@@ -59,14 +59,19 @@ const initialPolicy = {
 export type WalletTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const accountCode = (walletId: string, type: string): string => `wallet:${walletId}:${type}`;
-const platformAccountCode = (type: 'PLATFORM_REVENUE' | 'PLATFORM_SUSPENSE'): string => `platform:${type}`;
+const platformAccountCode = (type: 'PLATFORM_REVENUE' | 'PLATFORM_SUSPENSE'): string =>
+  `platform:${type}`;
 
-const validateWalletAmounts = <T extends {
-  spendingBalanceSatang: number;
-  earningsBalanceSatang: number;
-  fundingReservedSatang: number;
-  reservedForPayoutsSatang: number;
-}>(wallet: T) => ({
+const validateWalletAmounts = <
+  T extends {
+    spendingBalanceSatang: number;
+    earningsBalanceSatang: number;
+    fundingReservedSatang: number;
+    reservedForPayoutsSatang: number;
+  },
+>(
+  wallet: T
+) => ({
   ...wallet,
   spendingBalanceSatang: satang(wallet.spendingBalanceSatang),
   earningsBalanceSatang: satang(wallet.earningsBalanceSatang),
@@ -74,18 +79,22 @@ const validateWalletAmounts = <T extends {
   reservedForPayoutsSatang: satang(wallet.reservedForPayoutsSatang),
 });
 
-const validatePolicyAmounts = <T extends {
-  minimumTopUpSatang: number;
-  maximumTopUpSatang: number;
-  minimumFundingReservationSatang: number;
-  maximumFundingReservationSatang: number;
-  minimumEarningsConversionSatang: number;
-  maximumEarningsConversionSatang: number;
-  minimumPayoutSatang: number;
-  maximumPayoutSatang: number;
-  topUpProviderFeeSatang: number;
-  payoutProviderFeeSatang: number;
-}>(policy: T) => ({
+const validatePolicyAmounts = <
+  T extends {
+    minimumTopUpSatang: number;
+    maximumTopUpSatang: number;
+    minimumFundingReservationSatang: number;
+    maximumFundingReservationSatang: number;
+    minimumEarningsConversionSatang: number;
+    maximumEarningsConversionSatang: number;
+    minimumPayoutSatang: number;
+    maximumPayoutSatang: number;
+    topUpProviderFeeSatang: number;
+    payoutProviderFeeSatang: number;
+  },
+>(
+  policy: T
+) => ({
   ...policy,
   minimumTopUpSatang: satang(policy.minimumTopUpSatang),
   maximumTopUpSatang: satang(policy.maximumTopUpSatang),
@@ -99,12 +108,16 @@ const validatePolicyAmounts = <T extends {
   payoutProviderFeeSatang: satang(policy.payoutProviderFeeSatang),
 });
 
-const validateActivityAmounts = <T extends {
-  spendingDeltaSatang: number;
-  earningsDeltaSatang: number;
-  fundingReservedDeltaSatang: number;
-  payoutReservedDeltaSatang: number;
-}>(activity: T) => ({
+const validateActivityAmounts = <
+  T extends {
+    spendingDeltaSatang: number;
+    earningsDeltaSatang: number;
+    fundingReservedDeltaSatang: number;
+    payoutReservedDeltaSatang: number;
+  },
+>(
+  activity: T
+) => ({
   ...activity,
   spendingDeltaSatang: satangDelta(activity.spendingDeltaSatang),
   earningsDeltaSatang: satangDelta(activity.earningsDeltaSatang),
@@ -121,6 +134,14 @@ export const ensureWalletInTransaction = async (transaction: WalletTransaction, 
 
   if (!student) throw new MoneyDomainError('STUDENT_NOT_FOUND', 'Student does not exist.');
 
+  const [existingWallet] = await transaction
+    .select()
+    .from(walletWallet)
+    .where(eq(walletWallet.userId, userId))
+    .limit(1);
+
+  if (existingWallet) return existingWallet;
+
   const [createdWallet] = await transaction
     .insert(walletWallet)
     .values({ userId })
@@ -133,15 +154,18 @@ export const ensureWalletInTransaction = async (transaction: WalletTransaction, 
     .where(eq(walletWallet.userId, userId))
     .limit(1);
 
-  if (!wallet) throw new MoneyDomainError('WALLET_PROVISION_FAILED', 'Wallet could not be provisioned.');
+  if (!wallet)
+    throw new MoneyDomainError('WALLET_PROVISION_FAILED', 'Wallet could not be provisioned.');
 
   await transaction
     .insert(walletLedgerAccount)
-    .values(walletAccountTypes.map((type) => ({
-      code: accountCode(wallet.id, type),
-      type,
-      walletId: wallet.id,
-    })))
+    .values(
+      walletAccountTypes.map((type) => ({
+        code: accountCode(wallet.id, type),
+        type,
+        walletId: wallet.id,
+      }))
+    )
     .onConflictDoNothing({ target: walletLedgerAccount.code });
 
   if (createdWallet) {
@@ -161,10 +185,14 @@ export const ensureWalletInTransaction = async (transaction: WalletTransaction, 
   return wallet;
 };
 
+export const createWalletInTransaction = ensureWalletInTransaction;
+
 export const ensureWallet = async (userId: string) =>
-  validateWalletAmounts(await db.transaction(
-    (transaction) => ensureWalletInTransaction(transaction, userId),
-  ));
+  validateWalletAmounts(
+    await db.transaction((transaction) => ensureWalletInTransaction(transaction, userId))
+  );
+
+export const createWallet = ensureWallet;
 
 export const getWallet = async (userId: string) => {
   const [wallet] = await db
@@ -214,13 +242,14 @@ export const ensureInitialMoneyPolicy = async () => {
     .where(eq(paymentMoneyPolicyRevision.revision, initialPolicy.revision))
     .limit(1);
 
-  if (!raceWinner) throw new MoneyDomainError('POLICY_NOT_AVAILABLE', 'Money Policy could not be initialized.');
+  if (!raceWinner)
+    throw new MoneyDomainError('POLICY_NOT_AVAILABLE', 'Money Policy could not be initialized.');
   return validatePolicyAmounts(raceWinner);
 };
 
 const getEffectiveMoneyPolicyWith = async (
   executor: Pick<WalletTransaction, 'select'>,
-  at = new Date(),
+  at = new Date()
 ) => {
   const policies = await executor
     .select()
@@ -228,8 +257,11 @@ const getEffectiveMoneyPolicyWith = async (
     .where(
       and(
         lte(paymentMoneyPolicyRevision.effectiveFrom, at),
-        or(isNull(paymentMoneyPolicyRevision.effectiveUntil), gt(paymentMoneyPolicyRevision.effectiveUntil, at)),
-      ),
+        or(
+          isNull(paymentMoneyPolicyRevision.effectiveUntil),
+          gt(paymentMoneyPolicyRevision.effectiveUntil, at)
+        )
+      )
     )
     .orderBy(desc(paymentMoneyPolicyRevision.revision))
     .limit(2);
@@ -238,7 +270,10 @@ const getEffectiveMoneyPolicyWith = async (
     throw new MoneyDomainError('POLICY_OVERLAP', 'More than one Money Policy is effective.');
   }
   if (!policies[0]) {
-    throw new MoneyDomainError('POLICY_NOT_AVAILABLE', 'No Money Policy is effective at this time.');
+    throw new MoneyDomainError(
+      'POLICY_NOT_AVAILABLE',
+      'No Money Policy is effective at this time.'
+    );
   }
   return validatePolicyAmounts(policies[0]);
 };
@@ -249,34 +284,53 @@ export const getEffectiveMoneyPolicy = async (at = new Date()) =>
 const deriveWalletProjectionInTransaction = async (
   transaction: WalletTransaction,
   walletId: string,
-  lockWallet: boolean,
+  lockWallet: boolean
 ) => {
   const [wallet] = lockWallet
-    ? await transaction.select().from(walletWallet).where(eq(walletWallet.id, walletId)).for('update')
+    ? await transaction
+        .select()
+        .from(walletWallet)
+        .where(eq(walletWallet.id, walletId))
+        .for('update')
     : await transaction.select().from(walletWallet).where(eq(walletWallet.id, walletId));
   if (!wallet) throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
 
   const accounts = await transaction
     .select({ id: walletLedgerAccount.id, type: walletLedgerAccount.type })
     .from(walletLedgerAccount)
-    .where(and(eq(walletLedgerAccount.walletId, walletId), inArray(walletLedgerAccount.type, walletAccountTypes)));
+    .where(
+      and(
+        eq(walletLedgerAccount.walletId, walletId),
+        inArray(walletLedgerAccount.type, walletAccountTypes)
+      )
+    );
   const accountIds = accounts.map(({ id }) => id);
-  const postings = accountIds.length === 0
-    ? []
-    : await transaction
-      .select({
-        accountId: walletLedgerPosting.accountId,
-        amount: walletLedgerPosting.amountSatang,
-        transactionId: walletLedgerTransaction.id,
-        eventType: walletLedgerTransaction.eventType,
-        occurredAt: walletLedgerTransaction.createdAt,
-      })
-      .from(walletLedgerPosting)
-      .innerJoin(walletLedgerTransaction, eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id))
-      .where(and(inArray(walletLedgerPosting.accountId, accountIds), sql`${walletLedgerTransaction.sealedAt} IS NOT NULL`));
+  const postings =
+    accountIds.length === 0
+      ? []
+      : await transaction
+          .select({
+            accountId: walletLedgerPosting.accountId,
+            amount: walletLedgerPosting.amountSatang,
+            transactionId: walletLedgerTransaction.id,
+            eventType: walletLedgerTransaction.eventType,
+            occurredAt: walletLedgerTransaction.createdAt,
+          })
+          .from(walletLedgerPosting)
+          .innerJoin(
+            walletLedgerTransaction,
+            eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id)
+          )
+          .where(
+            and(
+              inArray(walletLedgerPosting.accountId, accountIds),
+              sql`${walletLedgerTransaction.sealedAt} IS NOT NULL`
+            )
+          );
 
   const totals = new Map<string, number>(walletAccountTypes.map((type) => [type, 0]));
-  for (const posting of postings) totals.set(posting.accountId, (totals.get(posting.accountId) ?? 0) + posting.amount);
+  for (const posting of postings)
+    totals.set(posting.accountId, (totals.get(posting.accountId) ?? 0) + posting.amount);
 
   const balances = new Map<string, number>();
   for (const account of accounts) balances.set(account.type, totals.get(account.id) ?? 0);
@@ -287,18 +341,28 @@ const deriveWalletProjectionInTransaction = async (
     reservedForPayoutsSatang: balances.get('RESERVED_FOR_PAYOUTS') ?? 0,
   };
   const total = Object.values(projectedBalances).reduce((sum, value) => sum + value, 0);
-  if (total < 0 || total > MAX_WALLET_CAPACITY_SATANG || Object.values(projectedBalances).some((value) => value < 0)) {
-    throw new MoneyDomainError('INVALID_LEDGER_BALANCE', 'Ledger projection violates Wallet balance invariants.');
+  if (
+    total < 0 ||
+    total > MAX_WALLET_CAPACITY_SATANG ||
+    Object.values(projectedBalances).some((value) => value < 0)
+  ) {
+    throw new MoneyDomainError(
+      'INVALID_LEDGER_BALANCE',
+      'Ledger projection violates Wallet balance invariants.'
+    );
   }
 
-  const transactionDeltas = new Map<string, {
-    eventType: LedgerEventType;
-    occurredAt: Date;
-    spending: number;
-    earnings: number;
-    fundingReserved: number;
-    payoutReserved: number;
-  }>();
+  const transactionDeltas = new Map<
+    string,
+    {
+      eventType: LedgerEventType;
+      occurredAt: Date;
+      spending: number;
+      earnings: number;
+      fundingReserved: number;
+      payoutReserved: number;
+    }
+  >();
   for (const posting of postings) {
     const account = accounts.find(({ id }) => id === posting.accountId);
     if (!account) continue;
@@ -333,21 +397,24 @@ const deriveWalletProjectionInTransaction = async (
   return { activities, projectedBalances, wallet };
 };
 
-const activityTypeFor = (eventType: LedgerEventType, deltas: {
-  spending: number;
-  earnings: number;
-}) => {
+const activityTypeFor = (
+  eventType: LedgerEventType,
+  deltas: {
+    spending: number;
+    earnings: number;
+  }
+) => {
   if (eventType === 'TOP_UP') return 'TOP_UP' as const;
   if (eventType === 'FUNDING_RESERVE') return 'HOLD' as const;
   if (eventType === 'FUNDING_RELEASE') return 'RELEASE' as const;
   if (eventType === 'PAYOUT') return 'SPEND' as const;
   if (eventType === 'EARNINGS_CONVERSION') return 'CONVERT' as const;
-  return deltas.earnings > 0 ? 'EARN' as const : 'SPEND' as const;
+  return deltas.earnings > 0 ? ('EARN' as const) : ('SPEND' as const);
 };
 
 export const rebuildWalletProjectionInTransaction = async (
   transaction: WalletTransaction,
-  walletId: string,
+  walletId: string
 ) => {
   const projection = await deriveWalletProjectionInTransaction(transaction, walletId, true);
   const [updated] = await transaction
@@ -355,7 +422,9 @@ export const rebuildWalletProjectionInTransaction = async (
     .set(projection.projectedBalances)
     .where(eq(walletWallet.id, walletId))
     .returning();
-  await transaction.delete(walletActivity).where(eq(walletActivity.userId, projection.wallet.userId));
+  await transaction
+    .delete(walletActivity)
+    .where(eq(walletActivity.userId, projection.wallet.userId));
   if (projection.activities.length > 0) {
     await transaction.insert(walletActivity).values(projection.activities);
   }
@@ -363,8 +432,8 @@ export const rebuildWalletProjectionInTransaction = async (
 };
 
 export const rebuildWalletProjection = async (walletId: string) => {
-  const rebuilt = await db.transaction(
-    (transaction) => rebuildWalletProjectionInTransaction(transaction, walletId),
+  const rebuilt = await db.transaction((transaction) =>
+    rebuildWalletProjectionInTransaction(transaction, walletId)
   );
   return {
     activities: rebuilt.activities.map(validateActivityAmounts),
@@ -398,17 +467,21 @@ export type SealedLedgerTransactionInput = {
 
 export const createSealedLedgerTransactionInTransaction = async (
   transaction: WalletTransaction,
-  input: SealedLedgerTransactionInput,
+  input: SealedLedgerTransactionInput
 ) => {
   if (
     input.postings.length < 2 ||
-    input.postings.some(({ amountSatang }) =>
-      !Number.isSafeInteger(amountSatang) ||
-      amountSatang === 0 ||
-      Math.abs(amountSatang) > MAX_WALLET_CAPACITY_SATANG,
+    input.postings.some(
+      ({ amountSatang }) =>
+        !Number.isSafeInteger(amountSatang) ||
+        amountSatang === 0 ||
+        Math.abs(amountSatang) > MAX_WALLET_CAPACITY_SATANG
     )
   ) {
-    throw new MoneyDomainError('INVALID_LEDGER_POSTINGS', 'A ledger transaction needs non-zero integer postings.');
+    throw new MoneyDomainError(
+      'INVALID_LEDGER_POSTINGS',
+      'A ledger transaction needs non-zero integer postings.'
+    );
   }
   if (input.postings.reduce((total, posting) => total + posting.amountSatang, 0) !== 0) {
     throw new MoneyDomainError('UNBALANCED_LEDGER', 'Ledger postings must balance to zero.');
@@ -416,13 +489,13 @@ export const createSealedLedgerTransactionInTransaction = async (
   if (input.correctionMode && !input.correctionOfTransactionId) {
     throw new MoneyDomainError(
       'INVALID_LEDGER_CORRECTION',
-      'A ledger correction mode requires a correction target.',
+      'A ledger correction mode requires a correction target.'
     );
   }
   if (input.correctionMode && input.eventType !== 'ADJUSTMENT') {
     throw new MoneyDomainError(
       'INVALID_LEDGER_CORRECTION',
-      'An account redirection correction must use the ADJUSTMENT event type.',
+      'An account redirection correction must use the ADJUSTMENT event type.'
     );
   }
   if (input.correctionOfTransactionId) {
@@ -434,31 +507,37 @@ export const createSealedLedgerTransactionInTransaction = async (
       .from(walletLedgerTransaction)
       .innerJoin(
         walletLedgerPosting,
-        eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id),
+        eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id)
       )
-      .where(and(
-        eq(walletLedgerTransaction.id, input.correctionOfTransactionId),
-        isNotNull(walletLedgerTransaction.sealedAt),
-      ));
+      .where(
+        and(
+          eq(walletLedgerTransaction.id, input.correctionOfTransactionId),
+          isNotNull(walletLedgerTransaction.sealedAt)
+        )
+      );
     const correctedAccountIds = new Set(correctedPostings.map(({ accountId }) => accountId));
-    const correctionPostings = new Map(input.postings.map(({ accountId, amountSatang }) => [accountId, amountSatang]));
+    const correctionPostings = new Map(
+      input.postings.map(({ accountId, amountSatang }) => [accountId, amountSatang])
+    );
     const reversesSourceAccount = correctedPostings.some(({ accountId, amountSatang }) => {
       const correctionAmount = correctionPostings.get(accountId);
-      return correctionAmount !== undefined && Math.sign(correctionAmount) === -Math.sign(amountSatang);
+      return (
+        correctionAmount !== undefined && Math.sign(correctionAmount) === -Math.sign(amountSatang)
+      );
     });
-    const validAccountRedirection = input.correctionMode === 'ACCOUNT_REDIRECTION' &&
+    const validAccountRedirection =
+      input.correctionMode === 'ACCOUNT_REDIRECTION' &&
       input.eventType === 'ADJUSTMENT' &&
       reversesSourceAccount;
     if (
       correctedAccountIds.size === 0 ||
-      (!validAccountRedirection && (
-        correctedAccountIds.size !== correctionPostings.size ||
-        [...correctedAccountIds].some((accountId) => !correctionPostings.has(accountId))
-      ))
+      (!validAccountRedirection &&
+        (correctedAccountIds.size !== correctionPostings.size ||
+          [...correctedAccountIds].some((accountId) => !correctionPostings.has(accountId))))
     ) {
       throw new MoneyDomainError(
         'INVALID_LEDGER_CORRECTION',
-        'A correction must use the accounts of an existing sealed ledger transaction.',
+        'A correction must use the accounts of an existing sealed ledger transaction.'
       );
     }
   }
@@ -473,17 +552,26 @@ export const createSealedLedgerTransactionInTransaction = async (
     const [keyRecord] = existingOrCreated
       ? [existingOrCreated]
       : await transaction
-        .select()
-        .from(walletIdempotencyKey)
-        .where(and(
-          eq(walletIdempotencyKey.principalUserId, input.idempotency.principalUserId),
-          eq(walletIdempotencyKey.operationScope, input.idempotency.operationScope),
-          eq(walletIdempotencyKey.key, input.idempotency.key),
-        ))
-        .for('update');
-    if (!keyRecord) throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key could not be acquired.');
+          .select()
+          .from(walletIdempotencyKey)
+          .where(
+            and(
+              eq(walletIdempotencyKey.principalUserId, input.idempotency.principalUserId),
+              eq(walletIdempotencyKey.operationScope, input.idempotency.operationScope),
+              eq(walletIdempotencyKey.key, input.idempotency.key)
+            )
+          )
+          .for('update');
+    if (!keyRecord)
+      throw new MoneyDomainError(
+        'IDEMPOTENCY_UNAVAILABLE',
+        'Idempotency key could not be acquired.'
+      );
     if (keyRecord.requestHash !== input.idempotency.requestHash) {
-      throw new MoneyDomainError('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request.');
+      throw new MoneyDomainError(
+        'IDEMPOTENCY_KEY_REUSED',
+        'Idempotency key was used with a different request.'
+      );
     }
     idempotencyKeyId = keyRecord.id;
     if (keyRecord.resourceId) {
@@ -494,7 +582,10 @@ export const createSealedLedgerTransactionInTransaction = async (
       if (replayed) return replayed;
     }
     if (!existingOrCreated) {
-      throw new MoneyDomainError('IDEMPOTENCY_IN_PROGRESS', 'An operation with this idempotency key is still processing.');
+      throw new MoneyDomainError(
+        'IDEMPOTENCY_IN_PROGRESS',
+        'An operation with this idempotency key is still processing.'
+      );
     }
   }
   const [created] = await transaction
@@ -509,7 +600,8 @@ export const createSealedLedgerTransactionInTransaction = async (
     })
     .returning();
 
-  if (!created) throw new MoneyDomainError('LEDGER_CREATE_FAILED', 'Ledger transaction could not be created.');
+  if (!created)
+    throw new MoneyDomainError('LEDGER_CREATE_FAILED', 'Ledger transaction could not be created.');
 
   if (input.idempotency) {
     await transaction
@@ -518,9 +610,9 @@ export const createSealedLedgerTransactionInTransaction = async (
       .where(eq(walletIdempotencyKey.id, idempotencyKeyId!));
   }
 
-  await transaction.insert(walletLedgerPosting).values(
-    input.postings.map((posting) => ({ ...posting, transactionId: created.id })),
-  );
+  await transaction
+    .insert(walletLedgerPosting)
+    .values(input.postings.map((posting) => ({ ...posting, transactionId: created.id })));
   const [sealed] = await transaction
     .update(walletLedgerTransaction)
     .set({ sealedAt: new Date() })
@@ -538,10 +630,15 @@ export const createSealedLedgerTransactionInTransaction = async (
   const walletRows = await transaction
     .select({ walletId: walletLedgerAccount.walletId })
     .from(walletLedgerAccount)
-    .where(and(inArray(walletLedgerAccount.id, accountIds), sql`${walletLedgerAccount.walletId} IS NOT NULL`));
-  const walletIds = [...new Set(
-    walletRows.flatMap(({ walletId }) => walletId ? [walletId] : []),
-  )].sort();
+    .where(
+      and(
+        inArray(walletLedgerAccount.id, accountIds),
+        sql`${walletLedgerAccount.walletId} IS NOT NULL`
+      )
+    );
+  const walletIds = [
+    ...new Set(walletRows.flatMap(({ walletId }) => (walletId ? [walletId] : []))),
+  ].sort();
   for (const walletId of walletIds) {
     // Lock Wallets in stable order to avoid cross-Wallet transaction deadlocks.
     // eslint-disable-next-line no-await-in-loop
@@ -561,22 +658,35 @@ export const verifyWalletProjection = async (walletId: string) => {
       .select()
       .from(walletActivity)
       .where(eq(walletActivity.userId, projection.wallet.userId));
-    const expectedActivities = projection.activities.map(({ userId: _userId, ...activity }) => activity);
-    const actualActivities = storedActivities.map(({
-      id: _id,
-      userId: _userId,
-      ...activity
-    }) => activity);
-    const byTransactionId = (left: { ledgerTransactionId: string }, right: { ledgerTransactionId: string }) =>
-      left.ledgerTransactionId.localeCompare(right.ledgerTransactionId);
+    const expectedActivities = projection.activities.map(
+      ({ userId: _userId, ...activity }) => activity
+    );
+    const actualActivities = storedActivities.map(
+      ({ id: _id, userId: _userId, ...activity }) => activity
+    );
+    const byTransactionId = (
+      left: { ledgerTransactionId: string },
+      right: { ledgerTransactionId: string }
+    ) => left.ledgerTransactionId.localeCompare(right.ledgerTransactionId);
     actualActivities.sort(byTransactionId);
     expectedActivities.sort(byTransactionId);
     return {
-      matches: projection.wallet.spendingBalanceSatang === projection.projectedBalances.spendingBalanceSatang &&
-        projection.wallet.earningsBalanceSatang === projection.projectedBalances.earningsBalanceSatang &&
-        projection.wallet.fundingReservedSatang === projection.projectedBalances.fundingReservedSatang &&
-        projection.wallet.reservedForPayoutsSatang === projection.projectedBalances.reservedForPayoutsSatang &&
+      matches:
+        projection.wallet.spendingBalanceSatang ===
+          projection.projectedBalances.spendingBalanceSatang &&
+        projection.wallet.earningsBalanceSatang ===
+          projection.projectedBalances.earningsBalanceSatang &&
+        projection.wallet.fundingReservedSatang ===
+          projection.projectedBalances.fundingReservedSatang &&
+        projection.wallet.reservedForPayoutsSatang ===
+          projection.projectedBalances.reservedForPayoutsSatang &&
         JSON.stringify(actualActivities) === JSON.stringify(expectedActivities),
+      projected: validateWalletAmounts(projection.wallet),
+      ledger: validateWalletAmounts({
+        ...projection.wallet,
+        ...projection.projectedBalances,
+      }),
+      activityCountMatches: actualActivities.length === expectedActivities.length,
       expected: {
         activities: projection.activities.map(validateActivityAmounts),
         wallet: validateWalletAmounts({
@@ -589,10 +699,17 @@ export const verifyWalletProjection = async (walletId: string) => {
   });
 };
 
-export const validateOperationAmount = (amount: number, minimum: number, maximum: number): Satang => {
+export const validateOperationAmount = (
+  amount: number,
+  minimum: number,
+  maximum: number
+): Satang => {
   const value = positiveSatang(amount);
   if (value < minimum || value > maximum) {
-    throw new MoneyDomainError('AMOUNT_OUT_OF_RANGE', 'Amount is outside the active Money Policy limits.');
+    throw new MoneyDomainError(
+      'AMOUNT_OUT_OF_RANGE',
+      'Amount is outside the active Money Policy limits.'
+    );
   }
   return value;
 };
@@ -632,7 +749,7 @@ const conversionBusinessReference = async (principalUserId: string, key: string)
 const conversionRequestHash = (amountSatang: number) => sha256Json({ amountSatang });
 
 const conversionFromRecord = (
-  record: typeof walletEarningsConversion.$inferSelect,
+  record: typeof walletEarningsConversion.$inferSelect
 ): EarningsConversion => ({
   id: record.id,
   principalUserId: record.principalUserId,
@@ -646,7 +763,7 @@ const acquireEarningsConversionIdempotency = async (
   transaction: WalletTransaction,
   input: EarningsConversionInput,
   operationScope: string,
-  requestHash: string,
+  requestHash: string
 ) => {
   const [created] = await transaction
     .insert(walletIdempotencyKey)
@@ -662,20 +779,25 @@ const acquireEarningsConversionIdempotency = async (
   const [record] = created
     ? [created]
     : await transaction
-      .select()
-      .from(walletIdempotencyKey)
-      .where(and(
-        eq(walletIdempotencyKey.principalUserId, input.principalUserId),
-        eq(walletIdempotencyKey.operationScope, operationScope),
-        eq(walletIdempotencyKey.key, input.idempotency.key),
-      ))
-      .for('update');
+        .select()
+        .from(walletIdempotencyKey)
+        .where(
+          and(
+            eq(walletIdempotencyKey.principalUserId, input.principalUserId),
+            eq(walletIdempotencyKey.operationScope, operationScope),
+            eq(walletIdempotencyKey.key, input.idempotency.key)
+          )
+        )
+        .for('update');
 
   if (!record) {
     throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key could not be acquired.');
   }
   if (record.requestHash !== requestHash) {
-    throw new MoneyDomainError('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request.');
+    throw new MoneyDomainError(
+      'IDEMPOTENCY_KEY_REUSED',
+      'Idempotency key was used with a different request.'
+    );
   }
   if (record.resourceId) {
     const [original] = await transaction
@@ -683,12 +805,18 @@ const acquireEarningsConversionIdempotency = async (
       .from(walletEarningsConversion)
       .where(eq(walletEarningsConversion.id, record.resourceId));
     if (!original) {
-      throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'The idempotent conversion record is missing.');
+      throw new MoneyDomainError(
+        'IDEMPOTENCY_UNAVAILABLE',
+        'The idempotent conversion record is missing.'
+      );
     }
     return { record, conversion: conversionFromRecord(original) };
   }
   if (!created) {
-    throw new MoneyDomainError('IDEMPOTENCY_IN_PROGRESS', 'An operation with this idempotency key is still processing.');
+    throw new MoneyDomainError(
+      'IDEMPOTENCY_IN_PROGRESS',
+      'An operation with this idempotency key is still processing.'
+    );
   }
 
   return { record, conversion: undefined };
@@ -698,10 +826,12 @@ const getEarningsConversionAccounts = async (transaction: WalletTransaction, wal
   const accounts = await transaction
     .select({ id: walletLedgerAccount.id, type: walletLedgerAccount.type })
     .from(walletLedgerAccount)
-    .where(and(
-      eq(walletLedgerAccount.walletId, walletId),
-      inArray(walletLedgerAccount.type, ['SPENDING', 'EARNINGS']),
-    ));
+    .where(
+      and(
+        eq(walletLedgerAccount.walletId, walletId),
+        inArray(walletLedgerAccount.type, ['SPENDING', 'EARNINGS'])
+      )
+    );
   const spending = accounts.find(({ type }) => type === 'SPENDING');
   const earnings = accounts.find(({ type }) => type === 'EARNINGS');
   if (!spending || !earnings) {
@@ -714,7 +844,7 @@ export const convertEarnings = async (input: EarningsConversionInput) => {
   const operationScope = earningsConversionScope;
   const businessReference = await conversionBusinessReference(
     input.principalUserId,
-    input.idempotency.key,
+    input.idempotency.key
   );
   const requestHash = await conversionRequestHash(input.amountSatang);
 
@@ -723,7 +853,7 @@ export const convertEarnings = async (input: EarningsConversionInput) => {
       transaction,
       input,
       operationScope,
-      requestHash,
+      requestHash
     );
     if (idempotency.conversion) return idempotency.conversion;
 
@@ -740,11 +870,14 @@ export const convertEarnings = async (input: EarningsConversionInput) => {
     const amount = validateOperationAmount(
       input.amountSatang,
       Number(policy.minimumEarningsConversionSatang),
-      Number(policy.maximumEarningsConversionSatang),
+      Number(policy.maximumEarningsConversionSatang)
     );
     const earningsBalance = satang(wallet.earningsBalanceSatang);
     if (earningsBalance < amount) {
-      throw new MoneyDomainError('INSUFFICIENT_EARNINGS_BALANCE', 'The Wallet has insufficient Earnings Balance.');
+      throw new MoneyDomainError(
+        'INSUFFICIENT_EARNINGS_BALANCE',
+        'The Wallet has insufficient Earnings Balance.'
+      );
     }
 
     const { spendingId, earningsId } = await getEarningsConversionAccounts(transaction, wallet.id);
@@ -760,7 +893,10 @@ export const convertEarnings = async (input: EarningsConversionInput) => {
       ],
     });
     if (!ledgerTransaction) {
-      throw new MoneyDomainError('LEDGER_CREATE_FAILED', 'Earnings Conversion ledger transaction could not be created.');
+      throw new MoneyDomainError(
+        'LEDGER_CREATE_FAILED',
+        'Earnings Conversion ledger transaction could not be created.'
+      );
     }
 
     const [conversionRecord] = await transaction
@@ -774,7 +910,10 @@ export const convertEarnings = async (input: EarningsConversionInput) => {
       })
       .returning();
     if (!conversionRecord) {
-      throw new MoneyDomainError('LEDGER_CREATE_FAILED', 'Earnings Conversion record could not be created.');
+      throw new MoneyDomainError(
+        'LEDGER_CREATE_FAILED',
+        'Earnings Conversion record could not be created.'
+      );
     }
 
     await transaction

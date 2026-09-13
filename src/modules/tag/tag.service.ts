@@ -9,7 +9,4 @@ export type Tag = {
 };
 
 export const listTags = async (): Promise<Tag[]> =>
-  db
-    .select({ id: tag.id, name: tag.name })
-    .from(tag)
-    .orderBy(asc(tag.name));
+  db.select({ id: tag.id, name: tag.name }).from(tag).orderBy(asc(tag.name));

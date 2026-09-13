@@ -36,11 +36,13 @@ describe('work experience controller', () => {
 
     expect(await listOwnWorkExperiences(context())).toEqual({
       success: true,
-      data: [{
-        ...storedExperience,
-        createdAt: '2026-08-12T00:00:00.000Z',
-        updatedAt: '2026-08-12T00:00:00.000Z',
-      }],
+      data: [
+        {
+          ...storedExperience,
+          createdAt: '2026-08-12T00:00:00.000Z',
+          updatedAt: '2026-08-12T00:00:00.000Z',
+        },
+      ],
     });
   });
 
@@ -50,15 +52,17 @@ describe('work experience controller', () => {
     });
     const set: { status?: number | string } = {};
 
-    expect(await createOwnWorkExperience({
-      ...context(set),
-      body: {
-        title: 'Role',
-        employmentType: 'Internship',
-        startedAt: '2024-02-02',
-        endedAt: '2024-02-01',
-      },
-    } as never)).toEqual({
+    expect(
+      await createOwnWorkExperience({
+        ...context(set),
+        body: {
+          title: 'Role',
+          employmentType: 'Internship',
+          startedAt: '2024-02-02',
+          endedAt: '2024-02-01',
+        },
+      } as never)
+    ).toEqual({
       success: false,
       error: {
         code: 'INVALID_EXPERIENCE_DATES',
@@ -75,18 +79,22 @@ describe('work experience controller', () => {
     const updateSet: { status?: number | string } = {};
     const deleteSet: { status?: number | string } = {};
 
-    expect(await updateOwnWorkExperience({
-      ...context(updateSet),
-      params: { experienceId: storedExperience.id },
-      body: { title: 'Nope' },
-    } as never)).toEqual({
+    expect(
+      await updateOwnWorkExperience({
+        ...context(updateSet),
+        params: { experienceId: storedExperience.id },
+        body: { title: 'Nope' },
+      } as never)
+    ).toEqual({
       success: false,
       error: { code: 'EXPERIENCE_NOT_FOUND', message: 'Work experience not found' },
     });
-    expect(await deleteOwnWorkExperience({
-      ...context(deleteSet),
-      params: { experienceId: storedExperience.id },
-    } as never)).toEqual({
+    expect(
+      await deleteOwnWorkExperience({
+        ...context(deleteSet),
+        params: { experienceId: storedExperience.id },
+      } as never)
+    ).toEqual({
       success: false,
       error: { code: 'EXPERIENCE_NOT_FOUND', message: 'Work experience not found' },
     });
@@ -100,11 +108,13 @@ describe('work experience controller', () => {
     });
     const set: { status?: number | string } = {};
 
-    expect(await updateOwnWorkExperience({
-      ...context(set),
-      params: { experienceId: storedExperience.id },
-      body: { startedAt: '2025-01-02' },
-    } as never)).toEqual({
+    expect(
+      await updateOwnWorkExperience({
+        ...context(set),
+        params: { experienceId: storedExperience.id },
+        body: { startedAt: '2025-01-02' },
+      } as never)
+    ).toEqual({
       success: false,
       error: {
         code: 'INVALID_EXPERIENCE_DATES',

@@ -41,12 +41,14 @@ const candidateInquirySummarySchema = t.Object({
     status: t.String(),
   }),
   participants: t.Array(candidateInquiryParticipantSchema),
-  latestMessage: t.Nullable(t.Object({
-    id: t.String({ format: 'uuid' }),
-    kind: t.Literal('USER'),
-    preview: t.String(),
-    createdAt: t.String({ format: 'date-time' }),
-  })),
+  latestMessage: t.Nullable(
+    t.Object({
+      id: t.String({ format: 'uuid' }),
+      kind: t.Literal('USER'),
+      preview: t.String(),
+      createdAt: t.String({ format: 'date-time' }),
+    })
+  ),
   lastActivityAt: t.Nullable(t.String({ format: 'date-time' })),
   unreadCount: t.Integer({ minimum: 0 }),
 });
@@ -68,12 +70,12 @@ export const candidateInquiryAttachmentParamsSchema = t.Object({
 
 export const candidateInquiryOpenSchema = t.Object(
   { questId: t.String({ format: 'uuid' }) },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const candidateInquiryAttachmentUploadSchema = t.Object(
   { file: t.File() },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const candidateInquiryListQuerySchema = t.Object(
@@ -81,7 +83,7 @@ export const candidateInquiryListQuerySchema = t.Object(
     limit: t.Optional(t.Integer({ minimum: 1, maximum: 20 })),
     cursor: t.Optional(t.String()),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const candidateInquiryMessageListQuerySchema = t.Object(
@@ -90,7 +92,7 @@ export const candidateInquiryMessageListQuerySchema = t.Object(
     before: t.Optional(t.String()),
     after: t.Optional(t.String()),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const candidateInquirySendMessageSchema = t.Object(
@@ -99,12 +101,12 @@ export const candidateInquirySendMessageSchema = t.Object(
     text: t.Optional(t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' })),
     attachmentIds: t.Optional(t.Array(t.String({ format: 'uuid' }), { uniqueItems: true })),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const candidateInquiryReadCursorSchema = t.Object(
   { messageId: t.String({ format: 'uuid' }) },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const candidateInquiryResponseSchema = t.Object({
@@ -167,6 +169,7 @@ export type CandidateInquiryListQuery = typeof candidateInquiryListQuerySchema.s
 export type CandidateInquiryMessageListQuery = typeof candidateInquiryMessageListQuerySchema.static;
 export type CandidateInquiryParams = typeof candidateInquiryParamsSchema.static;
 export type CandidateInquiryAttachmentParams = typeof candidateInquiryAttachmentParamsSchema.static;
-export type CandidateInquiryAttachmentUploadInput = typeof candidateInquiryAttachmentUploadSchema.static;
+export type CandidateInquiryAttachmentUploadInput =
+  typeof candidateInquiryAttachmentUploadSchema.static;
 export type CandidateInquirySendMessageInput = typeof candidateInquirySendMessageSchema.static;
 export type CandidateInquiryReadCursorInput = typeof candidateInquiryReadCursorSchema.static;

@@ -13,6 +13,8 @@ export {
   approvePayoutInTransaction,
   cancelPayoutInTransaction,
 } from './payout.service';
+export { createPayoutScheduler, startPayoutScheduler } from './payout.scheduler';
+export type { PayoutSchedulerOptions } from './payout.scheduler';
 export type {
   PayoutAdminDecisionInput,
   InitiatePayoutInput,
@@ -77,10 +79,7 @@ export {
   parsePayoutProviderEvent,
 } from './payout.provider-event';
 export { ProviderEventError } from '@/modules/top-up/top-up.provider-event';
-export type {
-  ParsedPayoutProviderEvent,
-  PayoutOutcomeStatus,
-} from './payout.provider-event';
+export type { ParsedPayoutProviderEvent, PayoutOutcomeStatus } from './payout.provider-event';
 export { payoutWebhookRoute } from './payout.webhook.route';
 export { payoutRoute } from './payout.route';
 export { adminPayoutRoute } from './payout.admin.route';

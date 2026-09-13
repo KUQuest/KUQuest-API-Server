@@ -7,9 +7,7 @@ export const isAllowedEmail = (email: string | null | undefined): boolean => {
 
   const parts = email.toLowerCase().split('@');
 
-  return (
-    parts.length === 2 && parts[0] !== '' && parts[1] === ALLOWED_EMAIL_DOMAIN
-  );
+  return parts.length === 2 && parts[0] !== '' && parts[1] === ALLOWED_EMAIL_DOMAIN;
 };
 
 export const assertAllowedEmail = (email: string | null | undefined): void => {

@@ -16,10 +16,13 @@ const topUpSchema = t.Object({
   topUpStatus: t.String(),
 });
 
-export const localTestPaymentBodySchema = t.Object({
-  creditSatang: t.Optional(t.Integer({ minimum: 100, maximum: 70_000_000 })),
-  simulate: t.Optional(t.Boolean()),
-}, { additionalProperties: false });
+export const localTestPaymentBodySchema = t.Object(
+  {
+    creditSatang: t.Optional(t.Integer({ minimum: 100, maximum: 70_000_000 })),
+    simulate: t.Optional(t.Boolean()),
+  },
+  { additionalProperties: false }
+);
 
 export const localTestPaymentResponseSchema = t.Object({
   success: t.Literal(true),
@@ -41,9 +44,12 @@ export const localTestWalletResponseSchema = t.Object({
   }),
 });
 
-export const localTestTransferBodySchema = t.Object({
-  amountSatang: t.Optional(t.Integer({ minimum: 100, maximum: 70_000_000 })),
-}, { additionalProperties: false });
+export const localTestTransferBodySchema = t.Object(
+  {
+    amountSatang: t.Optional(t.Integer({ minimum: 100, maximum: 70_000_000 })),
+  },
+  { additionalProperties: false }
+);
 
 export const localTestTransferResponseSchema = t.Object({
   success: t.Literal(true),

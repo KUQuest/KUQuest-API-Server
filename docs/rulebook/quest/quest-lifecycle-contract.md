@@ -4,10 +4,10 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 ## Selection modes
 
-| Mode | Meaning |
-| --- | --- |
-| `FIRST_COME_FIRST_SERVED` (FCFS) | An eligible Worker joins an open Quest directly. |
-| `CANDIDATE` | A Candidate applies, or a Candidate Team forms; the Hirer selects the accepted Worker or Team. |
+| Mode                             | Meaning                                                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `FIRST_COME_FIRST_SERVED` (FCFS) | An eligible Worker joins an open Quest directly.                                               |
+| `CANDIDATE`                      | A Candidate applies, or a Candidate Team forms; the Hirer selects the accepted Worker or Team. |
 
 `NO_CANDIDATE` is a legacy implementation name. It is not a target mode.
 
@@ -29,12 +29,12 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 The required starter can press Start Work only from `startTime` through `dueAt`. A required starter who has not pressed Start Work by `dueAt` fails the Quest. The affected Assignment becomes `ASSIGNMENT_INCOMPLETE`.
 
-| Participation and mode | Required starter | Required work submitter |
-| --- | --- | --- |
-| `SINGLE + FIRST_COME_FIRST_SERVED` | Worker | Worker |
-| `SINGLE + CANDIDATE` | Worker | Worker |
-| `GROUP + FIRST_COME_FIRST_SERVED` | Every Active Worker | Every Active Worker submits that Worker's work. |
-| `GROUP + CANDIDATE` | Team Leader | Team Leader submits or confirms the Team's work. |
+| Participation and mode             | Required starter    | Required work submitter                          |
+| ---------------------------------- | ------------------- | ------------------------------------------------ |
+| `SINGLE + FIRST_COME_FIRST_SERVED` | Worker              | Worker                                           |
+| `SINGLE + CANDIDATE`               | Worker              | Worker                                           |
+| `GROUP + FIRST_COME_FIRST_SERVED`  | Every Active Worker | Every Active Worker submits that Worker's work.  |
+| `GROUP + CANDIDATE`                | Team Leader         | Team Leader submits or confirms the Team's work. |
 
 For a full `GROUP + FIRST_COME_FIRST_SERVED` roster, the Quest changes to `QUEST_IN_PROGRESS` only after every Active Worker has pressed Start Work. Assignment acceptance is the only general pre-start consent.
 
@@ -68,11 +68,11 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 
 ## Cancellation settlement
 
-| Quest State at cancellation | Settlement result |
-| --- | --- |
-| `QUEST_OPEN` | Refund the Hirer 100% of Quest Escrow. |
-| `QUEST_ASSIGNED` | Pay 20% of the Worker Reward pool to Active Workers. For `GROUP + CANDIDATE`, pay the full 20% only to the Team Leader. Return 80% and the Platform Fee to the Hirer. |
-| `QUEST_IN_PROGRESS` | Settle full Worker Rewards and the Platform Fee. For `GROUP + CANDIDATE`, pay the full Worker Reward pool only to the Team Leader. The Hirer receives no refund. |
+| Quest State at cancellation | Settlement result                                                                                                                                                     |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `QUEST_OPEN`                | Refund the Hirer 100% of Quest Escrow.                                                                                                                                |
+| `QUEST_ASSIGNED`            | Pay 20% of the Worker Reward pool to Active Workers. For `GROUP + CANDIDATE`, pay the full 20% only to the Team Leader. Return 80% and the Platform Fee to the Hirer. |
+| `QUEST_IN_PROGRESS`         | Settle full Worker Rewards and the Platform Fee. For `GROUP + CANDIDATE`, pay the full Worker Reward pool only to the Team Leader. The Hirer receives no refund.      |
 
 An Active Worker cannot voluntarily leave or be replaced. The cancellation rules create the allowed departure transition.
 

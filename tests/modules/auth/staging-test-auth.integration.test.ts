@@ -29,7 +29,7 @@ const stagingTestApp = new Elysia({ name: 'staging-test-auth-integration' }).use
       firstName: 'Chat',
       lastName: 'Worker',
     },
-  }),
+  })
 );
 const composedStagingTestApp = new Elysia({
   name: 'staging-test-auth-composition',
@@ -43,7 +43,7 @@ const composedStagingTestApp = new Elysia({
       password: testPassword,
       firstName: 'Staging',
       lastName: 'Test Student',
-    }),
+    })
   );
 
 const disabledStagingTestApp = new Elysia({ name: 'disabled-staging-test-auth' }).use(
@@ -54,30 +54,30 @@ const disabledStagingTestApp = new Elysia({ name: 'disabled-staging-test-auth' }
     password: testPassword,
     firstName: 'Staging',
     lastName: 'Test Student',
-  }),
+  })
 );
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 afterAll(async () => {
-  await Promise.all([testEmail, testAccount2Email].map(async (email) => {
-    const [wallet] = await db
-      .select({ id: walletWallet.id })
-      .from(walletWallet)
-      .innerJoin(authUser, eq(walletWallet.userId, authUser.id))
-      .where(eq(authUser.email, email));
-    // Wallet provisioning retains immutable status history, so keep this fixture after the Wallet exists.
-    if (!wallet) await db.delete(authUser).where(eq(authUser.email, email));
-  }));
+  await Promise.all(
+    [testEmail, testAccount2Email].map(async (email) => {
+      const [wallet] = await db
+        .select({ id: walletWallet.id })
+        .from(walletWallet)
+        .innerJoin(authUser, eq(walletWallet.userId, authUser.id))
+        .where(eq(authUser.email, email));
+      // Wallet provisioning retains immutable status history, so keep this fixture after the Wallet exists.
+      if (!wallet) await db.delete(authUser).where(eq(authUser.email, email));
+    })
+  );
 });
 
 describe('staging test authentication', () => {
   it('is unavailable when the staging flag is off', async () => {
     const response = await disabledStagingTestApp.handle(
-      new Request('http://localhost/api/staging/test-auth/get-session'),
+      new Request('http://localhost/api/staging/test-auth/get-session')
     );
 
     expect(response.status).toBe(404);
@@ -92,10 +92,10 @@ describe('staging test authentication', () => {
         password: testPassword,
         firstName: 'Staging',
         lastName: 'Test Student',
-      }),
+      })
     );
     const response = await productionTestApp.handle(
-      new Request('http://localhost/api/staging/test-auth/get-session'),
+      new Request('http://localhost/api/staging/test-auth/get-session')
     );
 
     expect(response.status).toBe(404);
@@ -110,7 +110,7 @@ describe('staging test authentication', () => {
           email: testEmail,
           password: 'WrongStudent1!',
         }),
-      }),
+      })
     );
 
     expect(response.status).toBe(401);
@@ -122,7 +122,7 @@ describe('staging test authentication', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email: testEmail, password: 'WrongStudent1!' }),
-      }),
+      })
     );
 
     expect(invalidLoginResponse.status).toBe(401);
@@ -132,7 +132,7 @@ describe('staging test authentication', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email: testEmail, password: testPassword }),
-      }),
+      })
     );
 
     expect(loginResponse.status).toBe(200);
@@ -151,7 +151,7 @@ describe('staging test authentication', () => {
     const profileResponse = await app.handle(
       new Request('http://localhost/api/v1/profile', {
         headers: { cookie: getCookieHeader(loginResponse) },
-      }),
+      })
     );
 
     expect(profileResponse.status).toBe(200);
@@ -160,7 +160,7 @@ describe('staging test authentication', () => {
     const walletResponse = await app.handle(
       new Request('http://localhost/api/v1/wallet', {
         headers: { cookie: getCookieHeader(loginResponse) },
-      }),
+      })
     );
 
     expect(walletResponse.status).toBe(200);
@@ -181,7 +181,7 @@ describe('staging test authentication', () => {
     const response = await stagingTestApp.handle(
       new Request('http://localhost/api/staging/test-auth/sign-in/default', {
         method: 'POST',
-      }),
+      })
     );
 
     expect(response.status).toBe(200);
@@ -192,12 +192,12 @@ describe('staging test authentication', () => {
     const account1Response = await stagingTestApp.handle(
       new Request('http://localhost/api/staging/test-auth/sign-in/account-1', {
         method: 'POST',
-      }),
+      })
     );
     const account2Response = await stagingTestApp.handle(
       new Request('http://localhost/api/staging/test-auth/sign-in/account-2', {
         method: 'POST',
-      }),
+      })
     );
 
     expect(account1Response.status).toBe(200);
@@ -209,7 +209,7 @@ describe('staging test authentication', () => {
     const account2SessionResponse = await stagingTestApp.handle(
       new Request('http://localhost/api/staging/test-auth/get-session', {
         headers: { cookie: getCookieHeader(account2Response) },
-      }),
+      })
     );
     expect(account2SessionResponse.status).toBe(200);
     expect((await account2SessionResponse.json()).user.id).toBe(account2Body.user.id);

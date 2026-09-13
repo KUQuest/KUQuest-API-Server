@@ -8,9 +8,12 @@ import {
 import { describe, expect, it } from 'bun:test';
 import sharp from 'sharp';
 
-const validPngBuffer = () => sharp({
-  create: { width: 1, height: 1, channels: 3, background: { r: 255, g: 0, b: 0 } },
-}).png().toBuffer();
+const validPngBuffer = () =>
+  sharp({
+    create: { width: 1, height: 1, channels: 3, background: { r: 255, g: 0, b: 0 } },
+  })
+    .png()
+    .toBuffer();
 
 describe('Work Chat attachment storage', () => {
   it('validates and stores a supported image', async () => {
@@ -31,7 +34,7 @@ describe('Work Chat attachment storage', () => {
 
     const attachment = await storage.upload(
       'member-1',
-      new File([png], '../proof.png', { type: 'image/png' }),
+      new File([png], '../proof.png', { type: 'image/png' })
     );
 
     expect(attachment).toMatchObject({
@@ -50,12 +53,22 @@ describe('Work Chat attachment storage', () => {
       client: { write: async () => 0, delete: async () => {}, presign: () => '' },
     });
 
-    await expect(storage.upload('member-1', new File([new TextEncoder().encode('not a png')], 'fake.png', {
-      type: 'image/png',
-    }))).rejects.toBeInstanceOf(UnsupportedWorkChatAttachmentError);
-    await expect(storage.upload('member-1', new File([await validPngBuffer()], 'mismatch.jpg', {
-      type: 'image/jpeg',
-    }))).rejects.toBeInstanceOf(UnsupportedWorkChatAttachmentError);
+    await expect(
+      storage.upload(
+        'member-1',
+        new File([new TextEncoder().encode('not a png')], 'fake.png', {
+          type: 'image/png',
+        })
+      )
+    ).rejects.toBeInstanceOf(UnsupportedWorkChatAttachmentError);
+    await expect(
+      storage.upload(
+        'member-1',
+        new File([await validPngBuffer()], 'mismatch.jpg', {
+          type: 'image/jpeg',
+        })
+      )
+    ).rejects.toBeInstanceOf(UnsupportedWorkChatAttachmentError);
   });
 
   it('enforces the configured size limit before decoding', async () => {
@@ -66,9 +79,14 @@ describe('Work Chat attachment storage', () => {
       client: { write: async () => 0, delete: async () => {}, presign: () => '' },
     });
 
-    await expect(storage.upload('member-1', new File([new Uint8Array(4)], 'large.png', {
-      type: 'image/png',
-    }))).rejects.toBeInstanceOf(WorkChatAttachmentTooLargeError);
+    await expect(
+      storage.upload(
+        'member-1',
+        new File([new Uint8Array(4)], 'large.png', {
+          type: 'image/png',
+        })
+      )
+    ).rejects.toBeInstanceOf(WorkChatAttachmentTooLargeError);
   });
 
   it('compensates for an object write failure', async () => {
@@ -77,16 +95,22 @@ describe('Work Chat attachment storage', () => {
       keyPrefix: 'test-work-chat',
       bucket: 'kuquest-test',
       client: {
-        write: async () => { throw new Error('write failed'); },
-        delete: async (key) => { deleted.push(key); },
+        write: async () => {
+          throw new Error('write failed');
+        },
+        delete: async (key) => {
+          deleted.push(key);
+        },
         presign: () => '',
       },
     });
 
-    await expect(storage.upload(
-      'member-1',
-      new File([await validPngBuffer()], 'image.png', { type: 'image/png' }),
-    )).rejects.toBeInstanceOf(WorkChatAttachmentUploadError);
+    await expect(
+      storage.upload(
+        'member-1',
+        new File([await validPngBuffer()], 'image.png', { type: 'image/png' })
+      )
+    ).rejects.toBeInstanceOf(WorkChatAttachmentUploadError);
     expect(deleted).toHaveLength(1);
     expect(deleted[0]).toMatch(/^test-work-chat\/member-1\/.+\.png$/);
   });

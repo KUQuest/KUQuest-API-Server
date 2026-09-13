@@ -40,15 +40,20 @@ export type ChangeWalletStatusInput = {
   actorAdminId?: string;
 };
 
+export const isWalletOperationAllowed = (
+  walletStatus: WalletStatus,
+  operation: WalletOperation
+): boolean => walletStatus === 'ACTIVE' || !studentInitiatedOperations.has(operation);
+
 export const assertWalletOperationAllowed = (
   walletStatus: WalletStatus,
-  operation: WalletOperation,
+  operation: WalletOperation
 ) => {
-  if (walletStatus === 'ACTIVE' || !studentInitiatedOperations.has(operation)) return;
+  if (isWalletOperationAllowed(walletStatus, operation)) return;
 
   throw new MoneyDomainError(
     'WALLET_NOT_ACTIVE',
-    `Wallet status ${walletStatus} does not permit ${operation}.`,
+    `Wallet status ${walletStatus} does not permit ${operation}.`
   );
 };
 
@@ -57,18 +62,24 @@ const validateStatusChangeInput = (input: ChangeWalletStatusInput) => {
     throw new MoneyDomainError('INVALID_WALLET_STATUS', 'Wallet status is not supported.');
   }
   if (input.reason.trim().length === 0) {
-    throw new MoneyDomainError('WALLET_STATUS_REASON_REQUIRED', 'Wallet status change reason is required.');
+    throw new MoneyDomainError(
+      'WALLET_STATUS_REASON_REQUIRED',
+      'Wallet status change reason is required.'
+    );
   }
 
   const actors = [input.actorUserId, input.actorAdminId].filter(Boolean);
   if (actors.length !== 1) {
-    throw new MoneyDomainError('INVALID_WALLET_STATUS_ACTOR', 'Exactly one Wallet status actor is required.');
+    throw new MoneyDomainError(
+      'INVALID_WALLET_STATUS_ACTOR',
+      'Exactly one Wallet status actor is required.'
+    );
   }
 };
 
 export const changeWalletStatusInTransaction = async (
   transaction: WalletTransaction,
-  input: ChangeWalletStatusInput,
+  input: ChangeWalletStatusInput
 ) => {
   validateStatusChangeInput(input);
 
@@ -98,7 +109,10 @@ export const changeWalletStatusInTransaction = async (
     })
     .returning();
   if (!history) {
-    throw new MoneyDomainError('WALLET_STATUS_CHANGE_FAILED', 'Wallet status history could not be recorded.');
+    throw new MoneyDomainError(
+      'WALLET_STATUS_CHANGE_FAILED',
+      'Wallet status history could not be recorded.'
+    );
   }
 
   const [updatedWallet] = await transaction
@@ -107,7 +121,10 @@ export const changeWalletStatusInTransaction = async (
     .where(eq(walletWallet.id, wallet.id))
     .returning();
   if (!updatedWallet) {
-    throw new MoneyDomainError('WALLET_STATUS_CHANGE_FAILED', 'Wallet status could not be changed.');
+    throw new MoneyDomainError(
+      'WALLET_STATUS_CHANGE_FAILED',
+      'Wallet status could not be changed.'
+    );
   }
 
   return { wallet: updatedWallet, history };

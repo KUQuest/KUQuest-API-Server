@@ -50,8 +50,12 @@ The `/wayfinder` map is a single GitHub Issue with child Issues as tickets.
   Otherwise, add `Part of #<map>` at the top of its body and keep a task list
   in the map body. Use `wayfinder:<type>` labels for `research`, `prototype`,
   `grilling`, or `task`.
-- **Blocking**: use GitHub native Issue dependencies when available. If they
-  are not available, add `Blocked by: #<n>, #<n>` at the top of the child body.
+- **Blocking**: use GitHub native Issue dependencies when available. Add an
+  edge with the REST API and the numeric Issue id, not the Issue number:
+  `gh api repos/KUQuest/KUQuest-API-Server/issues/<number>/dependencies/blocked_by -X POST -F issue_id=<numeric id>`.
+  Read the numeric id with `gh issue view <number> --json id,number`. The `-F`
+  flag sends a number; `-f` sends a string and returns 422. If native
+  dependencies are not available, add `Blocked by: #<n>, #<n>` at the top of the child body.
 - **Claim**: assign the Issue to the current user with
   `gh issue edit <number> --add-assignee @me`.
 - **Resolve**: comment the answer, close the Issue, and append a context

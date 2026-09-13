@@ -502,6 +502,55 @@
     {
       "idx": 72,
       "version": "7",
+      "when": 1789048082916,
+      "tag": "20260910134802_sour_hiroim",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1789048142916,
+      "tag": "20260910134902_fast_sandman",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1789048202916,
+      "tag": "20260910135002_move_assignment_join_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1789048262916,
+      "tag": "20260910135102_gorgeous_ken_ellis",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789048322916,
+      "tag": "20260910135202_good_guardian",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1789048382916,
+      "tag": "20260910135302_move_quest_v2_core_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1789048442916,
+      "tag": "20260910135402_move_candidate_team_submit_select",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
       "when": 1789017498793,
       "tag": "20260910051818_public_rocket_raccoon",
       "breakpoints": true

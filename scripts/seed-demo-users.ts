@@ -26,22 +26,27 @@ const writeSessionCookieToBruEnvironment = async (name: string, cookie: string):
   const template = (await file.exists())
     ? await file.text()
     : `vars {\n  baseUrl: http://localhost:5000\n  userSessionCookie: \n}\n`;
-  const updated = template.replace(
-    /^( *userSessionCookie:).*$/m,
-    `$1 ${cookie}`,
-  );
+  const updated = template.replace(/^( *userSessionCookie:).*$/m, `$1 ${cookie}`);
   await Bun.write(path, updated);
 };
 
 const DEMO_USERS = [
-  { firstName: 'Nattapong', lastName: 'Srisawat', department: 'Software and Knowledge Engineering' },
+  {
+    firstName: 'Nattapong',
+    lastName: 'Srisawat',
+    department: 'Software and Knowledge Engineering',
+  },
   { firstName: 'Warisara', lastName: 'Boonmee', department: 'Marketing' },
   { firstName: 'Thanakrit', lastName: 'Chaiyasit', department: 'Economics' },
   { firstName: 'Supitcha', lastName: 'Wongsakul', department: 'Bachelor of Accountancy' },
   { firstName: 'Kritchapon', lastName: 'Phromma', department: 'Tropical Agriculture' },
   { firstName: 'Aphinya', lastName: 'Sukjai', department: 'Integrated Tourism Management' },
   { firstName: 'Pattarapon', lastName: 'Ruangrit', department: 'Business Administration' },
-  { firstName: 'Chutimon', lastName: 'Thepsuriya', department: 'Communicative Thai Language for Foreigners' },
+  {
+    firstName: 'Chutimon',
+    lastName: 'Thepsuriya',
+    department: 'Communicative Thai Language for Foreigners',
+  },
   { firstName: 'Ekkapop', lastName: 'Wattana', department: 'Entrepreneurial Economics' },
   { firstName: 'Nichakan', lastName: 'Kaewmanee', department: 'Marketing' },
 ] as const;
@@ -55,8 +60,14 @@ const CERTIFICATES = [
 ];
 
 const PORTFOLIO_ITEMS = [
-  { title: 'Campus Event Booking App', description: 'A React Native app for booking KU campus events.' },
-  { title: 'Data Visualization Dashboard', description: 'Dashboard for analysing student club participation.' },
+  {
+    title: 'Campus Event Booking App',
+    description: 'A React Native app for booking KU campus events.',
+  },
+  {
+    title: 'Data Visualization Dashboard',
+    description: 'Dashboard for analysing student club participation.',
+  },
 ];
 
 const seedAuth = betterAuth({
@@ -82,7 +93,10 @@ const seedAuth = betterAuth({
   plugins: [testUtils()],
 });
 
-const createDemoCookie = async (context: Awaited<typeof seedAuth.$context>, userId: string): Promise<string> => {
+const createDemoCookie = async (
+  context: Awaited<typeof seedAuth.$context>,
+  userId: string
+): Promise<string> => {
   const session = await context.internalAdapter.createSession(userId, false, {
     ipAddress: '127.0.0.1',
     userAgent: 'KUQuest demo seed',
