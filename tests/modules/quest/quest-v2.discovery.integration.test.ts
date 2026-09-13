@@ -458,6 +458,8 @@ describe('Quest API v2 discovery contract', () => {
     expect(body.data).not.toHaveProperty('candidate');
   });
 
+  // Public Quest Detail is not a Worker lifecycle view. An Active Worker reads a hidden
+  // or closed Quest through GET /api/v2/quests/:questId/participation instead.
   it('returns public detail to an active Worker only for a visible open Quest', async () => {
     const openQuest = await createOpenQuest(ownerId, {
       title: `${fixturePrefix} Active Worker Public`,
@@ -572,9 +574,9 @@ describe('Quest API v2 discovery contract', () => {
     ]);
   });
 
-  // Participant access rests on an ACTIVE Assignment, and settlement makes every Active
-  // Assignment terminal, so a settled Quest closes the participant door behind itself.
-  it('stops returning public detail once the Worker Assignment leaves ASSIGNMENT_ACTIVE', async () => {
+  // Public access rests on QUEST_OPEN, so settlement closes this door for a Worker too.
+  // The Participation projection is where a settled Quest stays readable.
+  it('stops returning public detail once a Quest with Workers settles', async () => {
     const cancelledQuest = await createOpenQuest(ownerId, {
       title: `${fixturePrefix} Cancelled Public`,
     });
