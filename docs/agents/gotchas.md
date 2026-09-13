@@ -17,11 +17,11 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 **Root cause.** This installation accepts the flag, drops the assignment, prints no warning, and returns 0.
 **Rule.** Claim an Issue with `gh api repos/KUQuest/KUQuest-API-Server/issues/<number>/assignees -X POST -f "assignees[]=<login>"`, then prove it with `gh issue view <number> --json assignees`. Read your login with `gh api user -q .login`.
 
-### 2026-09-13 — Read the file after a subagent reports an edit
+### 2026-09-13 — Name the worktree when you dispatch a subagent
 
-**What happened.** A subagent reported a new `CONTEXT.md` glossary entry as written. `git status --short` showed no change to `CONTEXT.md`. A second subagent run landed the four lines.
-**Root cause.** A subagent reports its intent. A lost or reverted write leaves no error in that report.
-**Rule.** After a subagent reports an edit, read `git status --short` and the changed region before you run a gate or commit. A report is a claim, not evidence.
+**What happened.** A subagent reported a new `CONTEXT.md` glossary entry as written. `git status --short` in the feature worktree showed no change, so a second run landed the entry there. A different draft of the same entry was later found uncommitted in the main checkout, where the subagent had written it.
+**Root cause.** A subagent inherits a working directory. When a task names a file by repository path, the subagent can edit the copy in another checkout, and its report still says "written".
+**Rule.** Give a subagent the absolute worktree path in its task. After it reports an edit, read `git status --short` in that worktree, and read the changed region. A report is a claim, not evidence. When the change is absent there, read `git worktree list` and check the other checkouts for the stray edit before you re-dispatch.
 
 ### 2026-09-13 — Take type errors from the worktree, not the language server
 
