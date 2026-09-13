@@ -1,6 +1,6 @@
 {
   "id": "6b21de78-be99-423b-9dfb-577f93bb6639",
-  "prevId": "8020b6c5-8429-4ef3-a827-ad11d1d78125",
+  "prevId": "daea68af-23df-4dd3-a0f2-802f3a6a2380",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -280,6 +280,27 @@
             },
             {
               "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "admin_action_created_idx": {
+          "name": "admin_action_created_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

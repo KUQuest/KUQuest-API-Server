@@ -502,50 +502,50 @@
     {
       "idx": 72,
       "version": "7",
-      "when": 1789016002563,
-      "tag": "20260910045322_fast_sandman",
+      "when": 1789048082916,
+      "tag": "20260910134802_sour_hiroim",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1789048142916,
+      "tag": "20260910134902_fast_sandman",
       "breakpoints": true
     },
     {
       "idx": 73,
       "version": "7",
-      "when": 1789016062563,
-      "tag": "20260910050500_move_assignment_join_commands",
+      "when": 1789048202916,
+      "tag": "20260910135002_move_assignment_join_commands",
       "breakpoints": true
     },
     {
       "idx": 74,
       "version": "7",
-      "when": 1789019848546,
-      "tag": "20260910055728_gorgeous_ken_ellis",
+      "when": 1789048262916,
+      "tag": "20260910135102_gorgeous_ken_ellis",
       "breakpoints": true
     },
     {
       "idx": 75,
       "version": "7",
-      "when": 1789022580930,
-      "tag": "20260910064300_good_guardian",
+      "when": 1789048322916,
+      "tag": "20260910135202_good_guardian",
       "breakpoints": true
     },
     {
       "idx": 76,
       "version": "7",
-      "when": 1789022640930,
-      "tag": "20260910072000_move_quest_v2_core_commands",
+      "when": 1789048382916,
+      "tag": "20260910135302_move_quest_v2_core_commands",
       "breakpoints": true
     },
     {
       "idx": 77,
       "version": "7",
-      "when": 1789022700930,
-      "tag": "20260910073500_move_candidate_team_submit_select",
-      "breakpoints": true
-    },
-    {
-      "idx": 78,
-      "version": "7",
-      "when": 1789048082916,
-      "tag": "20260910134802_sour_hiroim",
+      "when": 1789048442916,
+      "tag": "20260910135402_move_candidate_team_submit_select",
       "breakpoints": true
     }
   ]
