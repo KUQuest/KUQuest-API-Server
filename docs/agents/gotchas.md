@@ -11,6 +11,24 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 ## Entries
 
+### 2026-09-13 — Claim an Issue through the REST API
+
+**What happened.** `gh issue edit <number> --add-assignee @me` exited 0 for three tickets and assigned nobody. The claim looked complete, and the Issues stayed unassigned.
+**Root cause.** This installation accepts the flag, drops the assignment, prints no warning, and returns 0.
+**Rule.** Claim an Issue with `gh api repos/KUQuest/KUQuest-API-Server/issues/<number>/assignees -X POST -f "assignees[]=<login>"`, then prove it with `gh issue view <number> --json assignees`. Read your login with `gh api user -q .login`.
+
+### 2026-09-13 — Name the worktree when you dispatch a subagent
+
+**What happened.** A subagent reported a new `CONTEXT.md` glossary entry as written. `git status --short` in the feature worktree showed no change, so a second run landed the entry there. A different draft of the same entry was later found uncommitted in the main checkout, where the subagent had written it.
+**Root cause.** A subagent inherits a working directory. When a task names a file by repository path, the subagent can edit the copy in another checkout, and its report still says "written".
+**Rule.** Give a subagent the absolute worktree path in its task. After it reports an edit, read `git status --short` in that worktree, and read the changed region. A report is a claim, not evidence. When the change is absent there, read `git worktree list` and check the other checkouts for the stray edit before you re-dispatch.
+
+### 2026-09-13 — Take type errors from the worktree, not the language server
+
+**What happened.** `lsp diagnostics` reported `Cannot find module 'drizzle-orm'` for a new file in a second worktree. The package was on disk in that worktree, and `tsc --noEmit` passed.
+**Root cause.** One language server serves every worktree and resolves modules from the checkout it started in.
+**Rule.** In a worktree other than the one the editor opened, prove types with `bun run typecheck` or `bun check`. A language-server error about a missing module in such a worktree is not evidence.
+
 ### 2026-09-13 — Keep the inherited migration journal as a prefix
 
 **What happened.** A merge of `develop` put six branch migrations before the inherited `20260910134802_sour_hiroim`, which moved that entry from index 72 to index 78. CI failed with "Inherited migration journal entries are immutable". Two snapshots then shared one `prevId`, so the snapshot chain was forked.
@@ -33,11 +51,11 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 **Root cause.** Bash runs backticks and `$( )` inside double quotes.
 **Rule.** Write long or marked-up bodies to a file and pass `--body-file`. Never build a shell string that holds Markdown.
 
-### 2026-09-13 — Install after you merge in a worktree
+### 2026-09-13 — Install after `bun.lock` changes in a worktree
 
 **What happened.** A PR worktree kept the `node_modules` from before its merge of `develop`. `bun run format:check` exited 127 because the merged `package.json` added a dependency whose binary was not on disk.
 **Root cause.** `git merge` changes `package.json` and `bun.lock` but does not touch `node_modules`.
-**Rule.** After a merge that changes `bun.lock`, run `bun install --frozen-lockfile` before you run a gate.
+**Rule.** After any operation that changes `bun.lock` — merge, pull, fast-forward, or branch switch — run `bun install --frozen-lockfile` before you run a gate.
 
 ### 2026-09-13 — A root lifecycle script runs in the production install
 
