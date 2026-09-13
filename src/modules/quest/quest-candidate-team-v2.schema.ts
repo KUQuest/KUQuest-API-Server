@@ -6,7 +6,7 @@ const teamState = t.Union(
   questV2TeamStates.map((value) => t.Literal(value)) as [
     ReturnType<typeof t.Literal<string>>,
     ...ReturnType<typeof t.Literal<string>>[],
-  ],
+  ]
 );
 
 const memberSchema = t.Object({
@@ -60,23 +60,35 @@ export const questV2CandidateTeamHeadersSchema = t.Object({
   }),
 });
 
-export const questV2CandidateTeamCreateSchema = t.Object({
-  name: teamNameSchema,
-  headcount: t.Integer({ minimum: 2, maximum: 20 }),
-}, { additionalProperties: false });
+export const questV2CandidateTeamCreateSchema = t.Object(
+  {
+    name: teamNameSchema,
+    headcount: t.Integer({ minimum: 2, maximum: 20 }),
+  },
+  { additionalProperties: false }
+);
 
-export const questV2CandidateTeamUpdateSchema = t.Object({
-  name: teamNameSchema,
-}, { additionalProperties: false });
+export const questV2CandidateTeamUpdateSchema = t.Object(
+  {
+    name: teamNameSchema,
+  },
+  { additionalProperties: false }
+);
 
-export const questV2CandidateTeamJoinSchema = t.Object({
-  joinCode: t.String({ minLength: 1, maxLength: 32, pattern: '\\S' }),
-}, { additionalProperties: false });
+export const questV2CandidateTeamJoinSchema = t.Object(
+  {
+    joinCode: t.String({ minLength: 1, maxLength: 32, pattern: '\\S' }),
+  },
+  { additionalProperties: false }
+);
 
-export const questV2CandidateTeamSubmissionSchema = t.Object({
-  text: t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' }),
-  fileIds: t.Array(t.String({ format: 'uuid' }), { minItems: 1, uniqueItems: true }),
-}, { additionalProperties: false });
+export const questV2CandidateTeamSubmissionSchema = t.Object(
+  {
+    text: t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' }),
+    fileIds: t.Array(t.String({ format: 'uuid' }), { minItems: 1, uniqueItems: true }),
+  },
+  { additionalProperties: false }
+);
 
 export const questV2CandidateTeamResponseSchema = t.Object({
   success: t.Literal(true),
@@ -89,9 +101,15 @@ export const questV2CandidateTeamListResponseSchema = t.Object({
 });
 
 export type QuestV2CandidateTeamParams = Static<typeof questV2CandidateTeamParamsSchema>;
-export type QuestV2CandidateTeamDetailParams = Static<typeof questV2CandidateTeamDetailParamsSchema>;
-export type QuestV2CandidateTeamMemberParams = Static<typeof questV2CandidateTeamMemberParamsSchema>;
+export type QuestV2CandidateTeamDetailParams = Static<
+  typeof questV2CandidateTeamDetailParamsSchema
+>;
+export type QuestV2CandidateTeamMemberParams = Static<
+  typeof questV2CandidateTeamMemberParamsSchema
+>;
 export type QuestV2CandidateTeamCreateInput = Static<typeof questV2CandidateTeamCreateSchema>;
 export type QuestV2CandidateTeamUpdateInput = Static<typeof questV2CandidateTeamUpdateSchema>;
 export type QuestV2CandidateTeamJoinInput = Static<typeof questV2CandidateTeamJoinSchema>;
-export type QuestV2CandidateTeamSubmissionInput = Static<typeof questV2CandidateTeamSubmissionSchema>;
+export type QuestV2CandidateTeamSubmissionInput = Static<
+  typeof questV2CandidateTeamSubmissionSchema
+>;

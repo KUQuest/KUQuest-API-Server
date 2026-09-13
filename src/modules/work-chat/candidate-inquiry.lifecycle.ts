@@ -1,6 +1,4 @@
-import {
-  chatConversation,
-} from '@/database/schema/work-chat.schema';
+import { chatConversation } from '@/database/schema/work-chat.schema';
 import type { QuestTransaction } from '@/modules/quest';
 
 import { and, eq, inArray } from 'drizzle-orm';
@@ -19,7 +17,7 @@ type CandidateInquiryCloseOptions = {
  */
 export const closeCandidateInquiries = async (
   transaction: QuestTransaction,
-  options: CandidateInquiryCloseOptions,
+  options: CandidateInquiryCloseOptions
 ): Promise<number> => {
   const conditions = [
     eq(chatConversation.questId, options.questId),
@@ -46,14 +44,19 @@ export const closeCandidateInquiries = async (
       questStatus: options.questStatus,
       updatedAt: options.closedAt,
     })
-    .where(inArray(chatConversation.id, inquiries.map(({ id }) => id)));
+    .where(
+      inArray(
+        chatConversation.id,
+        inquiries.map(({ id }) => id)
+      )
+    );
 
   return inquiries.length;
 };
 
 export const closeCandidateInquiriesForAcceptedWorkers = async (
   transaction: QuestTransaction,
-  options: CandidateInquiryCloseOptions,
+  options: CandidateInquiryCloseOptions
 ): Promise<number> => {
   if (options.questStatus === 'QUEST_ASSIGNED') {
     return closeCandidateInquiries(transaction, { ...options, workerIds: undefined });

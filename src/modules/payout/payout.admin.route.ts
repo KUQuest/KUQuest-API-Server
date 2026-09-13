@@ -10,17 +10,22 @@ import {
   getAdminPayoutController,
   listAdminPayoutStatusHistoryController,
   listAdminPayoutsController,
+  reconcilePayoutAdminController,
+  retryPayoutEventAdminController,
 } from './payout.admin.controller';
 import {
   adminPayoutApprovalSchema,
   adminPayoutCancellationSchema,
+  adminPayoutCommandResponseSchema,
   adminPayoutDetailResponseSchema,
+  adminPayoutEventParamsSchema,
+  adminPayoutEventResponseSchema,
   adminPayoutHeadersSchema,
   adminPayoutHistoryResponseSchema,
   adminPayoutListQuerySchema,
   adminPayoutListResponseSchema,
   adminPayoutParamsSchema,
-  adminPayoutCommandResponseSchema,
+  adminPayoutReconcileResponseSchema,
 } from './payout.admin.schema';
 
 export const adminPayoutRoute = new Elysia({
@@ -34,7 +39,8 @@ export const adminPayoutRoute = new Elysia({
     detail: {
       tags: ['Admin Payouts'],
       summary: 'List Payouts for Admin review',
-      description: 'Lists waiting Payouts by default. Historical status filters, cursor pagination, and newest or oldest sorting are supported.',
+      description:
+        'Lists waiting Payouts by default. Historical status filters, cursor pagination, and newest or oldest sorting are supported.',
       operationId: 'listAdminPayouts',
       security: betterAuthSecurity,
     },
@@ -67,7 +73,8 @@ export const adminPayoutRoute = new Elysia({
     detail: {
       tags: ['Admin Payouts'],
       summary: 'Approve a waiting Payout',
-      description: 'Records a final Admin approval and hands the Payout to the separate Payout Worker. The Provider is called by the Worker, not this request.',
+      description:
+        'Records a final Admin approval and hands the Payout to the separate Payout Worker. The Provider is called by the Worker, not this request.',
       operationId: 'approvePayout',
       security: betterAuthSecurity,
     },
@@ -80,8 +87,32 @@ export const adminPayoutRoute = new Elysia({
     detail: {
       tags: ['Admin Payouts'],
       summary: 'Cancel a waiting Payout',
-      description: 'Records a final Admin cancellation with a controlled reason code and releases the full Payout Reserve to Earnings Balance.',
+      description:
+        'Records a final Admin cancellation with a controlled reason code and releases the full Payout Reserve to Earnings Balance.',
       operationId: 'cancelPayout',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/:payoutId/reconcile', reconcilePayoutAdminController, {
+    params: adminPayoutParamsSchema,
+    response: responses(adminPayoutReconcileResponseSchema, 400, 401, 403, 404, 409, 500, 502),
+    detail: {
+      tags: ['Admin Payouts'],
+      summary: 'Reconcile a Payout with the Payment Provider',
+      description: 'Reconciles the Payout state against the outbound payment provider status.',
+      operationId: 'reconcilePayout',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/events/:eventId/retry', retryPayoutEventAdminController, {
+    params: adminPayoutEventParamsSchema,
+    response: responses(adminPayoutEventResponseSchema, 400, 401, 403, 404, 409, 500),
+    detail: {
+      tags: ['Admin Payouts'],
+      summary: 'Retry a failed or retryable Payout Provider Event',
+      description:
+        'Resets a retryable Payout provider event back to RECEIVED status so the worker can process it again.',
+      operationId: 'retryPayoutProviderEvent',
       security: betterAuthSecurity,
     },
   });

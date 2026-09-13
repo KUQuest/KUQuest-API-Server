@@ -32,7 +32,12 @@ describe('Payout Destination database schema', () => {
     const quoteColumns = getTableColumns(paymentPayoutQuotes);
     const payoutColumns = getTableColumns(paymentPayouts);
 
-    for (const name of ['receiptSatang', 'maximumFeeSatang', 'maximumTaxSatang', 'maximumDebitSatang']) {
+    for (const name of [
+      'receiptSatang',
+      'maximumFeeSatang',
+      'maximumTaxSatang',
+      'maximumDebitSatang',
+    ]) {
       expect(quoteColumns[name as keyof typeof quoteColumns].dataType).toBe('number');
     }
     for (const name of [
@@ -47,7 +52,11 @@ describe('Payout Destination database schema', () => {
     ]) {
       expect(payoutColumns[name as keyof typeof payoutColumns].dataType).toBe('number');
     }
-    expect(Object.keys(quoteColumns).some((name) => name.toLowerCase().includes('baht'))).toBe(false);
-    expect(Object.keys(payoutColumns).some((name) => name.toLowerCase().includes('baht'))).toBe(false);
+    expect(Object.keys(quoteColumns).some((name) => name.toLowerCase().includes('baht'))).toBe(
+      false
+    );
+    expect(Object.keys(payoutColumns).some((name) => name.toLowerCase().includes('baht'))).toBe(
+      false
+    );
   });
 });

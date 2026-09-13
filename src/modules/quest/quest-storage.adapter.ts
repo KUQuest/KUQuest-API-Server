@@ -9,12 +9,7 @@ export const questV2StorageCompatibility = (input: {
   mode: QuestV2Mode;
   participation: QuestV2Participation;
 }) => ({
-  mode:
-    input.mode === 'FIRST_COME_FIRST_SERVED'
-      ? questMode.noCandidate
-      : questMode.candidate,
+  mode: input.mode === 'FIRST_COME_FIRST_SERVED' ? questMode.noCandidate : questMode.candidate,
   participation:
-    input.participation === 'SINGLE'
-      ? questParticipation.solo
-      : questParticipation.group,
+    input.participation === 'SINGLE' ? questParticipation.solo : questParticipation.group,
 });

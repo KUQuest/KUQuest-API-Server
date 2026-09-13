@@ -42,9 +42,7 @@ export const questAdminActionCatalog: AdminActionReasonCatalog = {
 const adminActionService = createAdminActionService(questAdminActionCatalog);
 
 export type QuestAdminCommandErrorCode =
-  | 'QUEST_NOT_FOUND'
-  | 'QUEST_ACTION_NOT_ALLOWED'
-  | 'QUEST_RESTORE_NOT_ELIGIBLE';
+  'QUEST_NOT_FOUND' | 'QUEST_ACTION_NOT_ALLOWED' | 'QUEST_RESTORE_NOT_ELIGIBLE';
 
 export class QuestAdminCommandError extends Error {
   readonly code: QuestAdminCommandErrorCode;
@@ -89,7 +87,7 @@ type QuestAdminCommandContext = {
 
 const summaryResult = async (
   transaction: QuestTransaction,
-  questId: string,
+  questId: string
 ): Promise<{
   resourceSummary: AdminQuestSummaryResponse;
   resourceVersion: number;
@@ -106,34 +104,41 @@ const summaryResult = async (
 
 const applyHide = async (
   transaction: QuestTransaction,
-  { current, input, expectedVersion, now }: QuestAdminCommandContext,
+  { current, input, expectedVersion, now }: QuestAdminCommandContext
 ) => {
   if (isTerminalQuestStatus(current.questStatus) || current.hiddenAt !== null) {
-    throw new QuestAdminCommandError('QUEST_ACTION_NOT_ALLOWED', 'Quest cannot be hidden in its current state.');
+    throw new QuestAdminCommandError(
+      'QUEST_ACTION_NOT_ALLOWED',
+      'Quest cannot be hidden in its current state.'
+    );
   }
-  await transaction.update(quest).set({
-    hiddenAt: now,
-    hiddenByAdminId: input.adminId,
-    version: sql`${quest.version} + 1`,
-    updatedAt: now,
-  }).where(and(
-    eq(quest.id, input.questId),
-    eq(quest.version, expectedVersion),
-    isNull(quest.hiddenAt),
-  ));
+  await transaction
+    .update(quest)
+    .set({
+      hiddenAt: now,
+      hiddenByAdminId: input.adminId,
+      version: sql`${quest.version} + 1`,
+      updatedAt: now,
+    })
+    .where(
+      and(eq(quest.id, input.questId), eq(quest.version, expectedVersion), isNull(quest.hiddenAt))
+    );
   return summaryResult(transaction, input.questId);
 };
 
 const applyRestore = async (
   transaction: QuestTransaction,
-  { current, input, expectedVersion, now }: QuestAdminCommandContext,
+  { current, input, expectedVersion, now }: QuestAdminCommandContext
 ) => {
   if (
     isTerminalQuestStatus(current.questStatus) ||
     current.hiddenAt === null ||
     current.hiddenByAdminId === null
   ) {
-    throw new QuestAdminCommandError('QUEST_ACTION_NOT_ALLOWED', 'Quest cannot be restored in its current state.');
+    throw new QuestAdminCommandError(
+      'QUEST_ACTION_NOT_ALLOWED',
+      'Quest cannot be restored in its current state.'
+    );
   }
   // Only an OPEN Quest returns to Member discovery, so the start and due gates bind
   // there. Past OPEN the overlay is the only thing restore clears.
@@ -141,43 +146,63 @@ const applyRestore = async (
     current.questStatus === questStatus.open &&
     (current.startTime <= now || (current.dueAt !== null && current.dueAt <= now))
   ) {
-    throw new QuestAdminCommandError('QUEST_RESTORE_NOT_ELIGIBLE', 'Quest cannot be restored after its start or due time.');
+    throw new QuestAdminCommandError(
+      'QUEST_RESTORE_NOT_ELIGIBLE',
+      'Quest cannot be restored after its start or due time.'
+    );
   }
-  await transaction.update(quest).set({
-    hiddenAt: null,
-    hiddenByAdminId: null,
-    version: sql`${quest.version} + 1`,
-    updatedAt: now,
-  }).where(and(
-    eq(quest.id, input.questId),
-    eq(quest.version, expectedVersion),
-    isNotNull(quest.hiddenAt),
-  ));
+  await transaction
+    .update(quest)
+    .set({
+      hiddenAt: null,
+      hiddenByAdminId: null,
+      version: sql`${quest.version} + 1`,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(quest.id, input.questId),
+        eq(quest.version, expectedVersion),
+        isNotNull(quest.hiddenAt)
+      )
+    );
   return summaryResult(transaction, input.questId);
 };
 
 const applyTerminate = async (
   transaction: QuestTransaction,
-  { input, requestKey, now }: QuestAdminCommandContext,
+  { input, requestKey, now }: QuestAdminCommandContext
 ) => {
-  const result = await terminateQuestInTransaction(transaction, input.questId, input.adminId, requestKey, now);
+  const result = await terminateQuestInTransaction(
+    transaction,
+    input.questId,
+    input.adminId,
+    requestKey,
+    now
+  );
   if (result.outcome === 'not-found') {
     throw new QuestAdminCommandError('QUEST_NOT_FOUND', 'Quest not found');
   }
   if (result.outcome !== 'CANCELLED') {
-    throw new QuestAdminCommandError('QUEST_ACTION_NOT_ALLOWED', 'Quest cannot be terminated in its current state.');
+    throw new QuestAdminCommandError(
+      'QUEST_ACTION_NOT_ALLOWED',
+      'Quest cannot be terminated in its current state.'
+    );
   }
   return summaryResult(transaction, input.questId);
 };
 
 const executeQuestAdminCommand = async (
   action: QuestAdminCommandAction,
-  apply: (transaction: QuestTransaction, context: QuestAdminCommandContext) => Promise<{
+  apply: (
+    transaction: QuestTransaction,
+    context: QuestAdminCommandContext
+  ) => Promise<{
     resourceSummary: AdminQuestSummaryResponse;
     resourceVersion: number;
     resourceTimestamp: null;
   }>,
-  input: QuestAdminCommandInput,
+  input: QuestAdminCommandInput
 ): Promise<QuestAdminCommandResult> => {
   const now = input.now ?? new Date();
   return adminActionService.executeCommand({
@@ -191,32 +216,41 @@ const executeQuestAdminCommand = async (
     metadata: {},
     expectedVersion: input.expectedVersion,
     prepare: async (transaction, context) => {
-      const [current] = await transaction.select({
-        questStatus: quest.questStatus,
-        version: quest.version,
-        hiddenAt: quest.hiddenAt,
-        hiddenByAdminId: quest.hiddenByAdminId,
-        startTime: quest.startTime,
-        dueAt: quest.dueAt,
-      }).from(quest).where(eq(quest.id, input.questId)).limit(1).for('update');
+      const [current] = await transaction
+        .select({
+          questStatus: quest.questStatus,
+          version: quest.version,
+          hiddenAt: quest.hiddenAt,
+          hiddenByAdminId: quest.hiddenByAdminId,
+          startTime: quest.startTime,
+          dueAt: quest.dueAt,
+        })
+        .from(quest)
+        .where(eq(quest.id, input.questId))
+        .limit(1)
+        .for('update');
       if (!current) throw new QuestAdminCommandError('QUEST_NOT_FOUND', 'Quest not found');
 
       return {
         currentVersion: current.version,
-        apply: () => apply(transaction, {
-          current,
-          input,
-          expectedVersion: input.expectedVersion,
-          requestKey: context.requestKey,
-          now,
-        }),
+        apply: () =>
+          apply(transaction, {
+            current,
+            input,
+            expectedVersion: input.expectedVersion,
+            requestKey: context.requestKey,
+            now,
+          }),
       };
     },
   });
 };
 
-export const hideQuest = (input: QuestAdminCommandInput) => executeQuestAdminCommand('QUEST_HIDE', applyHide, input);
+export const hideQuest = (input: QuestAdminCommandInput) =>
+  executeQuestAdminCommand('QUEST_HIDE', applyHide, input);
 
-export const restoreQuest = (input: QuestAdminCommandInput) => executeQuestAdminCommand('QUEST_RESTORE', applyRestore, input);
+export const restoreQuest = (input: QuestAdminCommandInput) =>
+  executeQuestAdminCommand('QUEST_RESTORE', applyRestore, input);
 
-export const terminateQuest = (input: QuestAdminCommandInput) => executeQuestAdminCommand('QUEST_TERMINATE', applyTerminate, input);
+export const terminateQuest = (input: QuestAdminCommandInput) =>
+  executeQuestAdminCommand('QUEST_TERMINATE', applyTerminate, input);

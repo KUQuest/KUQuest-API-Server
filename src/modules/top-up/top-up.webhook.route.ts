@@ -13,7 +13,8 @@ export const topUpWebhookRoute = new Elysia({
   detail: {
     tags: ['Xendit webhooks'],
     summary: 'Durably receive Xendit Top-up events',
-    description: 'Authenticates and stores a Xendit Top-up event before acknowledging it. Financial effects are applied by a callable worker.',
+    description:
+      'Authenticates and stores a Xendit Top-up event before acknowledging it. Financial effects are applied by a callable worker.',
     operationId: 'receiveXenditTopUpWebhook',
     security: [{ xenditWebhookAuth: [] }],
   },

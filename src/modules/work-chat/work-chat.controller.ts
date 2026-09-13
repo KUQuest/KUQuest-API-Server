@@ -43,15 +43,22 @@ const serializeMessage = (message: Awaited<ReturnType<typeof sendWorkConversatio
   })),
 });
 
-const serializeAttachment = (attachment: Awaited<ReturnType<typeof uploadWorkConversationAttachment>>) => ({
+const serializeAttachment = (
+  attachment: Awaited<ReturnType<typeof uploadWorkConversationAttachment>>
+) => ({
   ...attachment,
   createdAt: attachment.createdAt.toISOString(),
 });
 
-const serializeConversation = (conversation: Awaited<ReturnType<typeof listWorkConversations>>['items'][number]) => ({
+const serializeConversation = (
+  conversation: Awaited<ReturnType<typeof listWorkConversations>>['items'][number]
+) => ({
   ...conversation,
   latestMessage: conversation.latestMessage
-    ? { ...conversation.latestMessage, createdAt: conversation.latestMessage.createdAt.toISOString() }
+    ? {
+        ...conversation.latestMessage,
+        createdAt: conversation.latestMessage.createdAt.toISOString(),
+      }
     : null,
   lastActivityAt: conversation.lastActivityAt?.toISOString() ?? null,
 });
@@ -62,23 +69,29 @@ const mapWorkChatError = (set: AuthedContext['set'], error: unknown) => {
     return apiError(error.code, error.message);
   }
   if (!(error instanceof WorkChatServiceError)) throw error;
-  if (error.code === 'CONVERSATION_NOT_FOUND' || error.code === 'MESSAGE_NOT_FOUND' || error.code === 'ATTACHMENT_NOT_FOUND') {
+  if (
+    error.code === 'CONVERSATION_NOT_FOUND' ||
+    error.code === 'MESSAGE_NOT_FOUND' ||
+    error.code === 'ATTACHMENT_NOT_FOUND'
+  ) {
     set.status = 404;
   } else if (error.code === 'ATTACHMENT_TOO_LARGE') {
     set.status = 413;
   } else if (error.code === 'ATTACHMENT_UNSUPPORTED') {
     set.status = 415;
-  } else if (error.code === 'ATTACHMENT_UPLOAD_FAILED' || error.code === 'ATTACHMENT_LINK_UNAVAILABLE') {
-    set.status = 502;
   } else if (
-    error.code === 'MESSAGE_CONTENT_REQUIRED' ||
-    error.code === 'MESSAGE_TOO_LONG'
+    error.code === 'ATTACHMENT_UPLOAD_FAILED' ||
+    error.code === 'ATTACHMENT_LINK_UNAVAILABLE'
   ) {
+    set.status = 502;
+  } else if (error.code === 'MESSAGE_CONTENT_REQUIRED' || error.code === 'MESSAGE_TOO_LONG') {
     set.status = 400;
   } else if (error.code === 'RATE_LIMITED') {
     set.status = 429;
     if (error.retryAfterSeconds !== undefined) {
-      (set as unknown as { headers: Record<string, string> }).headers['Retry-After'] = String(error.retryAfterSeconds);
+      (set as unknown as { headers: Record<string, string> }).headers['Retry-After'] = String(
+        error.retryAfterSeconds
+      );
     }
   } else {
     set.status = 409;
@@ -91,9 +104,16 @@ export const uploadWorkConversationAttachmentController = async ({
   params,
   session,
   set,
-}: AuthedContext & { body: AttachmentUploadInput; params: ConversationParams }): Promise<ApiResponse> => {
+}: AuthedContext & {
+  body: AttachmentUploadInput;
+  params: ConversationParams;
+}): Promise<ApiResponse> => {
   try {
-    const attachment = await uploadWorkConversationAttachment(session.user.id, params.conversationId, body.file);
+    const attachment = await uploadWorkConversationAttachment(
+      session.user.id,
+      params.conversationId,
+      body.file
+    );
     return apiSuccess({ attachment: serializeAttachment(attachment) });
   } catch (error) {
     return mapWorkChatError(set, error);
@@ -109,7 +129,7 @@ export const getWorkConversationAttachmentLinkController = async ({
     const link = await getWorkConversationAttachmentLink(
       session.user.id,
       params.conversationId,
-      params.attachmentId,
+      params.attachmentId
     );
     return apiSuccess({ ...link, expiresAt: link.expiresAt.toISOString() });
   } catch (error) {
@@ -123,11 +143,13 @@ export const discardWorkConversationAttachmentController = async ({
   set,
 }: AuthedContext & { params: AttachmentParams }): Promise<ApiResponse> => {
   try {
-    return apiSuccess(await discardWorkConversationAttachment(
-      session.user.id,
-      params.conversationId,
-      params.attachmentId,
-    ));
+    return apiSuccess(
+      await discardWorkConversationAttachment(
+        session.user.id,
+        params.conversationId,
+        params.attachmentId
+      )
+    );
   } catch (error) {
     return mapWorkChatError(set, error);
   }
@@ -157,7 +179,10 @@ export const listWorkConversationMessagesController = async ({
   query,
   session,
   set,
-}: AuthedContext & { params: ConversationParams; query: MessageListQuery }): Promise<ApiResponse> => {
+}: AuthedContext & {
+  params: ConversationParams;
+  query: MessageListQuery;
+}): Promise<ApiResponse> => {
   if (query.before !== undefined && query.after !== undefined) {
     set.status = 400;
     return apiError('VALIDATION', 'before and after cannot be used together');
@@ -184,7 +209,9 @@ export const listWorkConversationParticipantsController = async ({
   set,
 }: AuthedContext & { params: ConversationParams }): Promise<ApiResponse> => {
   try {
-    return apiSuccess({ participants: await listWorkConversationParticipants(session.user.id, params.conversationId) });
+    return apiSuccess({
+      participants: await listWorkConversationParticipants(session.user.id, params.conversationId),
+    });
   } catch (error) {
     return mapWorkChatError(set, error);
   }
@@ -195,7 +222,10 @@ export const sendWorkConversationMessageController = async ({
   params,
   session,
   set,
-}: AuthedContext & { body: SendMessageInput; params: ConversationParams }): Promise<ApiResponse> => {
+}: AuthedContext & {
+  body: SendMessageInput;
+  params: ConversationParams;
+}): Promise<ApiResponse> => {
   try {
     const message = await sendWorkConversationMessage(session.user.id, params.conversationId, body);
     return apiSuccess({ message: serializeMessage(message) });
@@ -211,7 +241,13 @@ export const advanceWorkConversationReadCursorController = async ({
   set,
 }: AuthedContext & { body: ReadCursorInput; params: ConversationParams }): Promise<ApiResponse> => {
   try {
-    return apiSuccess(await advanceWorkConversationReadCursor(session.user.id, params.conversationId, body.messageId));
+    return apiSuccess(
+      await advanceWorkConversationReadCursor(
+        session.user.id,
+        params.conversationId,
+        body.messageId
+      )
+    );
   } catch (error) {
     return mapWorkChatError(set, error);
   }

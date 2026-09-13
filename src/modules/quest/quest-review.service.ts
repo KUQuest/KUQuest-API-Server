@@ -24,7 +24,15 @@ export type ReviewRow = {
 
 export type ReviewOutcome =
   | ReviewRow
-  | { outcome: 'not-found' | 'not-eligible' | 'expired' | 'delete-not-allowed' | 'conflict' | 'already-exists' };
+  | {
+      outcome:
+        | 'not-found'
+        | 'not-eligible'
+        | 'expired'
+        | 'delete-not-allowed'
+        | 'conflict'
+        | 'already-exists';
+    };
 
 const reviewFields = {
   id: review.id,
@@ -45,7 +53,7 @@ const validReviewee = async (
   questId: string,
   hirerId: string,
   reviewerId: string,
-  revieweeId: string,
+  revieweeId: string
 ): Promise<boolean> => {
   if (reviewerId === hirerId) {
     if (revieweeId === hirerId) return false;
@@ -56,8 +64,8 @@ const validReviewee = async (
         and(
           eq(questAssignment.questId, questId),
           eq(questAssignment.workerId, revieweeId),
-          eq(questAssignment.assignmentStatus, assignmentStatus.completed),
-        ),
+          eq(questAssignment.assignmentStatus, assignmentStatus.completed)
+        )
       )
       .limit(1);
     return Boolean(assignment);
@@ -71,8 +79,8 @@ const validReviewee = async (
       and(
         eq(questAssignment.questId, questId),
         eq(questAssignment.workerId, reviewerId),
-        eq(questAssignment.assignmentStatus, assignmentStatus.completed),
-      ),
+        eq(questAssignment.assignmentStatus, assignmentStatus.completed)
+      )
     )
     .limit(1);
   return Boolean(assignment);
@@ -81,7 +89,13 @@ const validReviewee = async (
 const selectReview = async (tx: QuestTransaction, reviewId: string, questId?: string) => {
   const conditions = [eq(review.id, reviewId)];
   if (questId) conditions.push(eq(review.questId, questId));
-  return (await tx.select(reviewFields).from(review).where(and(...conditions)).limit(1))[0];
+  return (
+    await tx
+      .select(reviewFields)
+      .from(review)
+      .where(and(...conditions))
+      .limit(1)
+  )[0];
 };
 
 /** Create a directional Review in the same transaction as its eligibility check. */
@@ -89,12 +103,17 @@ export const createReview = async (
   reviewerId: string,
   questId: string,
   input: ReviewInput,
-  now = new Date(),
+  now = new Date()
 ): Promise<ReviewOutcome> =>
   db.transaction(async (tx) => {
     const current = (
       await tx
-        .select({ id: quest.id, hirerId: quest.hirerId, questStatus: quest.questStatus, updatedAt: quest.updatedAt })
+        .select({
+          id: quest.id,
+          hirerId: quest.hirerId,
+          questStatus: quest.questStatus,
+          updatedAt: quest.updatedAt,
+        })
         .from(quest)
         .where(eq(quest.id, questId))
         .limit(1)
@@ -111,8 +130,8 @@ export const createReview = async (
         and(
           eq(review.questId, questId),
           eq(review.reviewerId, reviewerId),
-          eq(review.revieweeId, revieweeId),
-        ),
+          eq(review.revieweeId, revieweeId)
+        )
       )
       .limit(1)
       .for('update');
@@ -147,8 +166,8 @@ export const createReview = async (
         and(
           eq(review.questId, questId),
           eq(review.reviewerId, reviewerId),
-          eq(review.revieweeId, revieweeId),
-        ),
+          eq(review.revieweeId, revieweeId)
+        )
       )
       .limit(1)
       .for('update');
@@ -160,7 +179,7 @@ export const updateReview = async (
   questId: string,
   reviewId: string,
   input: ReviewUpdate,
-  now = new Date(),
+  now = new Date()
 ): Promise<ReviewOutcome> =>
   db.transaction(async (tx) => {
     const current = (
@@ -171,7 +190,8 @@ export const updateReview = async (
         .limit(1)
         .for('update')
     )[0];
-    if (!current || current.questStatus !== questStatus.completed) return { outcome: 'not-eligible' };
+    if (!current || current.questStatus !== questStatus.completed)
+      return { outcome: 'not-eligible' };
 
     const existing = await selectReview(tx, reviewId, questId);
     if (!existing) return { outcome: 'not-found' };
@@ -202,10 +222,10 @@ const validReviewPredicate = (memberId: string) =>
           .where(
             and(
               eq(questAssignment.questId, review.questId),
-              eq(questAssignment.workerId, review.revieweeId),
-            ),
-          ),
-      ),
+              eq(questAssignment.workerId, review.revieweeId)
+            )
+          )
+      )
     ),
     and(
       eq(review.revieweeId, memberId),
@@ -217,26 +237,32 @@ const validReviewPredicate = (memberId: string) =>
           .where(
             and(
               eq(questAssignment.questId, review.questId),
-              eq(questAssignment.workerId, review.reviewerId),
-            ),
-          ),
-      ),
-    ),
+              eq(questAssignment.workerId, review.reviewerId)
+            )
+          )
+      )
+    )
   );
 
 /** Return only Reviews backed by a terminal Quest and Assignment relationship. */
 export const listReviews = async (
   memberId: string,
-  options: { rating?: number; limit?: number; cursor?: { startTime: string; id: string } } = {},
+  options: { rating?: number; limit?: number; cursor?: { startTime: string; id: string } } = {}
 ) => {
-  const conditions = [inArray(quest.questStatus, terminalQuestStatuses), validReviewPredicate(memberId)];
+  const conditions = [
+    inArray(quest.questStatus, terminalQuestStatuses),
+    validReviewPredicate(memberId),
+  ];
   if (options.rating !== undefined) conditions.push(eq(review.rating, options.rating));
   if (options.cursor) {
     conditions.push(
       or(
         lt(review.createdAt, new Date(options.cursor.startTime)),
-        and(eq(review.createdAt, new Date(options.cursor.startTime)), lt(review.id, options.cursor.id)),
-      )!,
+        and(
+          eq(review.createdAt, new Date(options.cursor.startTime)),
+          lt(review.id, options.cursor.id)
+        )
+      )!
     );
   }
   const limit = options.limit ?? 20;
@@ -266,7 +292,10 @@ export const listReviews = async (
 };
 
 export const countReviews = async (memberId: string, rating?: number) => {
-  const conditions = [inArray(quest.questStatus, terminalQuestStatuses), validReviewPredicate(memberId)];
+  const conditions = [
+    inArray(quest.questStatus, terminalQuestStatuses),
+    validReviewPredicate(memberId),
+  ];
   if (rating !== undefined) conditions.push(eq(review.rating, rating));
   const [row] = await db
     .select({ total: count(review.id) })

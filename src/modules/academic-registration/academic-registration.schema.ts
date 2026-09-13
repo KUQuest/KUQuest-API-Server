@@ -8,15 +8,17 @@ export const academicRegistrationUpdateSchema = t.Object(
     lastName: t.Optional(nameSchema),
     telephone: t.Optional(t.String({ pattern: '^0[0-9]{9}$', example: '0800000000' })),
     occupationId: t.Optional(t.String({ format: 'uuid' })),
-    studentId: t.Optional(t.String({
-      pattern: '^[0-9]{10}$',
-      example: '6500000000',
-      error: 'Student ID must be a 10-digit number',
-    })),
+    studentId: t.Optional(
+      t.String({
+        pattern: '^[0-9]{10}$',
+        example: '6500000000',
+        error: 'Student ID must be a 10-digit number',
+      })
+    ),
     departmentId: t.Optional(t.String({ format: 'uuid' })),
     termsVersion: t.Optional(t.String({ minLength: 1, example: '2026-01-01' })),
   },
-  { additionalProperties: false, minProperties: 1 },
+  { additionalProperties: false, minProperties: 1 }
 );
 
 export const academicRegistrationUpdateResponseSchema = t.Object({
@@ -41,18 +43,24 @@ export const academicRegistrationStatusResponseSchema = t.Object({
 export const academicRegistrationOptionsResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
-    occupations: t.Array(t.Object({
-      id: t.String({ format: 'uuid' }),
-      name: t.String({ example: 'Student' }),
-      requiresStudentId: t.Boolean(),
-    })),
-    faculties: t.Array(t.Object({
-      id: t.String({ format: 'uuid' }),
-      name: t.String({ example: 'Engineering' }),
-      departments: t.Array(t.Object({
+    occupations: t.Array(
+      t.Object({
         id: t.String({ format: 'uuid' }),
-        name: t.String({ example: 'Computer Engineering' }),
-      })),
-    })),
+        name: t.String({ example: 'Student' }),
+        requiresStudentId: t.Boolean(),
+      })
+    ),
+    faculties: t.Array(
+      t.Object({
+        id: t.String({ format: 'uuid' }),
+        name: t.String({ example: 'Engineering' }),
+        departments: t.Array(
+          t.Object({
+            id: t.String({ format: 'uuid' }),
+            name: t.String({ example: 'Computer Engineering' }),
+          })
+        ),
+      })
+    ),
   }),
 });

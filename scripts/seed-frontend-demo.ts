@@ -7,11 +7,7 @@ import {
   profileWorkExperience,
 } from '@/database/schema/profile.schema';
 import { tag } from '@/database/schema/tag.schema';
-import {
-  quest,
-  questAssignment,
-  review,
-} from '@/database/schema/quest.schema';
+import { quest, questAssignment, review } from '@/database/schema/quest.schema';
 import {
   assignmentStatus,
   questMode,
@@ -23,20 +19,28 @@ import { fixedTagNames } from '@/shared/tag';
 import { and, eq, inArray, like } from 'drizzle-orm';
 
 const DEMO_USERS = [
-  { firstName: 'Nattapong', lastName: 'Srisawat', department: 'Software and Knowledge Engineering' },
+  {
+    firstName: 'Nattapong',
+    lastName: 'Srisawat',
+    department: 'Software and Knowledge Engineering',
+  },
   { firstName: 'Warisara', lastName: 'Boonmee', department: 'Marketing' },
   { firstName: 'Thanakrit', lastName: 'Chaiyasit', department: 'Economics' },
   { firstName: 'Supitcha', lastName: 'Wongsakul', department: 'Bachelor of Accountancy' },
   { firstName: 'Kritchapon', lastName: 'Phromma', department: 'Tropical Agriculture' },
   { firstName: 'Aphinya', lastName: 'Sukjai', department: 'Integrated Tourism Management' },
   { firstName: 'Pattarapon', lastName: 'Ruangrit', department: 'Business Administration' },
-  { firstName: 'Chutimon', lastName: 'Thepsuriya', department: 'Communicative Thai Language for Foreigners' },
+  {
+    firstName: 'Chutimon',
+    lastName: 'Thepsuriya',
+    department: 'Communicative Thai Language for Foreigners',
+  },
   { firstName: 'Ekkapop', lastName: 'Wattana', department: 'Entrepreneurial Economics' },
   { firstName: 'Nichakan', lastName: 'Kaewmanee', department: 'Marketing' },
 ] as const;
 
 const demoEmails = DEMO_USERS.map(
-  ({ firstName, lastName }) => `${firstName.toLowerCase()}.${lastName.toLowerCase()}@ku.th`,
+  ({ firstName, lastName }) => `${firstName.toLowerCase()}.${lastName.toLowerCase()}@ku.th`
 );
 
 const getOrCreateTag = async (name: string): Promise<string> => {
@@ -61,7 +65,7 @@ const main = async (): Promise<void> => {
 
   if (users.length !== DEMO_USERS.length) {
     throw new Error(
-      `Expected ${DEMO_USERS.length} demo users. Run db:seed-demo-users first; found ${users.length}.`,
+      `Expected ${DEMO_USERS.length} demo users. Run db:seed-demo-users first; found ${users.length}.`
     );
   }
 
@@ -76,7 +80,9 @@ const main = async (): Promise<void> => {
     )[0]?.id;
   if (!studentOccupation) throw new Error('Student occupation is missing');
 
-  const departments = await db.select({ id: department.id, name: department.name }).from(department);
+  const departments = await db
+    .select({ id: department.id, name: department.name })
+    .from(department);
   const usersByEmail = new Map(users.map((user) => [user.email, user]));
   const orderedUsers = DEMO_USERS.map(({ firstName, lastName }) => {
     const email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}@ku.th`;
@@ -115,12 +121,16 @@ const main = async (): Promise<void> => {
       endedAt: null,
     });
 
-    const portfolioTitle = index % 2 === 0 ? 'Campus Event Booking App' : 'Student Community Dashboard';
+    const portfolioTitle =
+      index % 2 === 0 ? 'Campus Event Booking App' : 'Student Community Dashboard';
     const existingPortfolio = await db
       .select({ id: profilePortfolioItem.id })
       .from(profilePortfolioItem)
       .where(
-        and(eq(profilePortfolioItem.userId, user.id), eq(profilePortfolioItem.title, portfolioTitle)),
+        and(
+          eq(profilePortfolioItem.userId, user.id),
+          eq(profilePortfolioItem.title, portfolioTitle)
+        )
       )
       .limit(1);
     if (existingPortfolio.length === 0) {
@@ -136,7 +146,7 @@ const main = async (): Promise<void> => {
       .select({ id: profileCertificate.id })
       .from(profileCertificate)
       .where(
-        and(eq(profileCertificate.userId, user.id), eq(profileCertificate.name, certificateName)),
+        and(eq(profileCertificate.userId, user.id), eq(profileCertificate.name, certificateName))
       )
       .limit(1);
     if (existingCertificate.length === 0) {
@@ -191,7 +201,7 @@ const main = async (): Promise<void> => {
         startTime: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
         dueAt: new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000),
         proofRequired: true,
-      })),
+      }))
     )
     .returning({ id: quest.id });
 
@@ -224,7 +234,7 @@ const main = async (): Promise<void> => {
         startTime: new Date('2025-06-01T09:00:00.000Z'),
         dueAt: new Date('2025-06-15T18:00:00.000Z'),
         proofRequired: true,
-      })),
+      }))
     )
     .returning({ id: quest.id });
 
@@ -236,9 +246,13 @@ const main = async (): Promise<void> => {
         workerId: orderedUsers[workerIndex]!.id,
         assignmentStatus: assignmentStatus.completed,
         startedAt: new Date('2025-06-02T09:00:00.000Z'),
-      })),
+      }))
     )
-    .returning({ id: questAssignment.id, questId: questAssignment.questId, workerId: questAssignment.workerId });
+    .returning({
+      id: questAssignment.id,
+      questId: questAssignment.questId,
+      workerId: questAssignment.workerId,
+    });
 
   await db.insert(review).values(
     assignments.flatMap((assignment, index) => {
@@ -262,12 +276,16 @@ const main = async (): Promise<void> => {
           comment: 'Clear requirements and helpful feedback throughout the Quest.',
         },
       ];
-    }),
+    })
   );
 
   console.log(`Prepared ${orderedUsers.length} demo Profiles.`);
-  console.log(`Created ${openRows.length} OPEN Quests and ${completedRows.length} COMPLETED Quests.`);
-  console.log(`Created ${assignments.length} completed Worker assignments and ${assignments.length * 2} Reviews.`);
+  console.log(
+    `Created ${openRows.length} OPEN Quests and ${completedRows.length} COMPLETED Quests.`
+  );
+  console.log(
+    `Created ${assignments.length} completed Worker assignments and ${assignments.length * 2} Reviews.`
+  );
 };
 
 try {

@@ -13,6 +13,7 @@ import {
   type QuestV2ReviewOutcome,
   type QuestV2ReviewRow,
 } from './quest-review-v2.service';
+import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 
 const serializeReview = (review: QuestV2ReviewRow) => ({
   id: review.id,
@@ -25,13 +26,6 @@ const serializeReview = (review: QuestV2ReviewRow) => ({
   updatedAt: review.updatedAt.toISOString(),
 });
 
-const requiredCommandId = (request: Request | undefined, set: AuthedContext['set']) => {
-  const commandId = request?.headers.get('idempotency-key');
-  if (commandId?.trim()) return commandId;
-  set.status = 400;
-  return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
-};
-
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 409;
   return apiError(code, message);
@@ -39,7 +33,7 @@ const conflict = (set: AuthedContext['set'], code: string, message: string) => {
 
 const mapReviewError = (
   set: AuthedContext['set'],
-  result: Exclude<QuestV2ReviewOutcome, QuestV2ReviewRow>,
+  result: Exclude<QuestV2ReviewOutcome, QuestV2ReviewRow>
 ) => {
   if (result.outcome === 'not-found') {
     set.status = 404;
@@ -58,23 +52,33 @@ const mapReviewError = (
     return apiError('REVIEWEE_REQUIRED', 'The Hirer must select a Worker to review');
   }
   if (result.outcome === 'not-terminal') {
-    return conflict(set, 'QUEST_NOT_TERMINAL', 'Reviews are available only after a Quest reaches a Terminal State');
+    return conflict(
+      set,
+      'QUEST_NOT_TERMINAL',
+      'Reviews are available only after a Quest reaches a Terminal State'
+    );
   }
   if (result.outcome === 'already-exists') {
-    return conflict(set, 'REVIEW_ALREADY_EXISTS', 'A Review already exists for this Quest and direction');
+    return conflict(
+      set,
+      'REVIEW_ALREADY_EXISTS',
+      'A Review already exists for this Quest and direction'
+    );
   }
   if (result.outcome === 'window-expired') {
-    return conflict(set, 'REVIEW_WINDOW_EXPIRED', 'Reviews can only be created or edited within seven days of the Quest becoming Terminal');
+    return conflict(
+      set,
+      'REVIEW_WINDOW_EXPIRED',
+      'Reviews can only be created or edited within seven days of the Quest becoming Terminal'
+    );
   }
-  if (result.outcome === 'idempotency-key-reused') {
-    return conflict(set, 'IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
-  }
-  if (result.outcome === 'idempotency-in-progress') {
-    return conflict(set, 'IDEMPOTENCY_IN_PROGRESS', 'The Idempotency-Key is still processing');
-  }
-  if (result.outcome === 'idempotency-unavailable') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'The Idempotency-Key result is unavailable');
+  if (
+    result.outcome === 'idempotency-key-reused' ||
+    result.outcome === 'idempotency-in-progress' ||
+    result.outcome === 'idempotency-unavailable' ||
+    result.outcome === 'invalid-idempotency-key'
+  ) {
+    return mapQuestCommandOutcome(set, result.outcome);
   }
   if (result.outcome === 'invalid-rating') {
     set.status = 400;
@@ -83,10 +87,6 @@ const mapReviewError = (
   if (result.outcome === 'invalid-comment') {
     set.status = 400;
     return apiError('INVALID_COMMENT', 'comment must be non-blank and at most 1,000 characters');
-  }
-  if (result.outcome === 'invalid-idempotency-key') {
-    set.status = 400;
-    return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
   }
   set.status = 409;
   return apiError('REVIEW_CONFLICT', 'The Review could not be saved');
@@ -102,7 +102,7 @@ export const createQuestV2ReviewController = async ({
   body: QuestV2ReviewCreateInput;
   params: QuestV2ReviewParams;
 }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
 
   const result = await createQuestV2Review(session.user.id, params.questId, body, commandId);
@@ -120,7 +120,7 @@ export const updateQuestV2ReviewController = async ({
   body: QuestV2ReviewUpdateInput;
   params: QuestV2ReviewDetailParams;
 }) => {
-  const commandId = requiredCommandId(request, set);
+  const commandId = requireQuestCommandId(request, set);
   if (typeof commandId !== 'string') return commandId;
 
   const result = await updateQuestV2Review(
@@ -128,7 +128,7 @@ export const updateQuestV2ReviewController = async ({
     params.questId,
     params.reviewId,
     body,
-    commandId,
+    commandId
   );
   if ('outcome' in result) return mapReviewError(set, result);
   return apiSuccess(serializeReview(result));

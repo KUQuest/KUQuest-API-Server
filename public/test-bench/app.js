@@ -31,6 +31,8 @@ const simpleFlowState = {
   pollTimer: null,
   pollBusy: false,
   lastCheckedAt: null,
+  chatConversationId: null,
+  chatMessages: [],
 };
 
 const questIdElement = document.querySelector('#quest-id');
@@ -79,6 +81,19 @@ const simpleFlowLastChecked = document.querySelector('#simple-flow-last-checked'
 const simpleFlowQuestId = document.querySelector('#simple-flow-quest-id');
 const simpleFlowStateBadge = document.querySelector('#simple-flow-state-badge');
 const simpleFlowActor = document.querySelector('#simple-flow-actor');
+const simpleChatBadge = document.querySelector('#simple-chat-badge');
+const simpleChatMessagesBox = document.querySelector('#simple-flow-messages-box');
+const simpleChatSpeaker = document.querySelector('#simple-chat-speaker');
+const simpleChatInput = document.querySelector('#simple-flow-chat-input');
+const simpleChatSendBtn = document.querySelector('#simple-flow-chat-send');
+const simpleChatForm = document.querySelector('#simple-flow-chat-form');
+const simpleChatAsHirer = document.querySelector('#simple-chat-as-hirer');
+const simpleChatAsWorker = document.querySelector('#simple-chat-as-worker');
+const simpleChatRefreshBtn = document.querySelector('#simple-chat-refresh-btn');
+const simpleFlowFocusChat = document.querySelector('#simple-flow-focus-chat');
+const chatSwitchAccount1 = document.querySelector('#chat-switch-account-1');
+const chatSwitchAccount2 = document.querySelector('#chat-switch-account-2');
+const chatInspectOutput = document.querySelector('#chat-inspect-output');
 
 const renderAdminPaginationControls = () => {
   adminPayoutPrevious.disabled = state.adminPayoutCursorHistory.length === 0;
@@ -272,6 +287,16 @@ const openConversation = async (id) => {
   renderChatMode();
   updateChatCharacterCount();
   await advanceLiveChatReadCursor();
+  if (chatInspectOutput) {
+    chatInspectOutput.textContent = formatValue({
+      conversationId: id,
+      quest: conversation.quest,
+      readOnly: conversation.readOnly,
+      participants: participants.data.participants,
+      messagesCount: messages.data.items.length,
+      latestMessage: messages.data.items.at(-1) || null,
+    });
+  }
   setChatStatus(conversation.readOnly ? 'This Work Conversation is read-only.' : 'Ready. Write a Message below.');
 };
 const loadLiveWorkConversation = async (more = false) => {
@@ -312,6 +337,7 @@ const sendChatMessage = async () => {
   renderChatMessages();
   updateChatCharacterCount();
   setChatStatus('Message sent.', 'success');
+  if (chatInspectOutput) chatInspectOutput.textContent = formatValue(response);
   await advanceLiveChatReadCursor();
 };
 
@@ -707,7 +733,7 @@ const simpleScheduleTime = (minutes) => new Date(Date.now() + (420 + minutes) * 
 const simpleWireTime = (value) => `${value}:00+07:00`;
 
 const resetSimpleFlow = () => {
-  if (simpleFlowState.pollTimer) clearInterval(simpleFlowState.pollTimer);
+  clearInterval(simpleFlowState.pollTimer);
   Object.assign(simpleFlowState, {
     quest: null,
     assignment: null,
@@ -719,9 +745,12 @@ const resetSimpleFlow = () => {
     pollTimer: null,
     pollBusy: false,
     lastCheckedAt: null,
+    chatConversationId: null,
+    chatMessages: [],
   });
   simpleFlowStatus.textContent = 'Start a new test to prepare Account 1.';
   renderSimpleFlow();
+  renderSimpleChatMessages([]);
 };
 
 const startSimpleTest = async () => {
@@ -812,6 +841,7 @@ const refreshSimpleFlow = async ({ silent = false } = {}) => {
     simpleFlowStatus.textContent = `Current Quest State: ${currentState}.`;
   }
   renderSimpleFlow();
+  void refreshSimpleChat();
   return detail;
 };
 
@@ -836,6 +866,7 @@ const joinSimpleQuest = async () => {
   renderSimpleFlow();
   await refreshSimpleFlow();
   if (simpleCurrentState() === 'QUEST_ASSIGNED') startSimplePolling();
+  void refreshSimpleChat();
   return response;
 };
 
@@ -847,6 +878,7 @@ const confirmSimpleCompletion = async () => {
   simpleFlowState.quest = { ...simpleFlowState.quest, state: response?.data?.questStatus ?? 'QUEST_COMPLETED' };
   simpleFlowStatus.textContent = 'Completion is confirmed. The Quest is Terminal. Submit both Rating Reviews.';
   await refreshSimpleFlow();
+  void refreshSimpleChat();
   return response;
 };
 
@@ -864,7 +896,137 @@ const reviewSimpleQuest = async (role) => {
     ? 'The simple Quest flow is finished. Both Rating Reviews were saved.'
     : 'One Rating Review is saved. Submit the other Review.';
   renderSimpleFlow();
+  void refreshSimpleChat();
   return response;
+};
+
+const renderSimpleChatMessages = (messages = []) => {
+  if (!simpleChatMessagesBox) return;
+  simpleChatMessagesBox.replaceChildren();
+  if (!messages.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.id = 'simple-chat-empty-hint';
+    empty.textContent = simpleFlowState.quest
+      ? 'No messages in this Work Conversation yet. Write a message below.'
+      : 'Work Chat opens once Worker joins the Quest. Start the test and join to see messages.';
+    simpleChatMessagesBox.append(empty);
+    return;
+  }
+  messages.forEach((msg) => {
+    const row = document.createElement('div');
+    const isSystem = msg.kind === 'SYSTEM';
+    row.className = `chat-msg-row ${isSystem ? 'chat-msg-row--system' : ''}`;
+    
+    const isHirer = msg.sender?.id === simpleFlowState.hirerId;
+    const isMine = state.session?.user?.id === msg.sender?.id;
+    row.dataset.mine = String(!isSystem && isMine);
+    
+    const bubble = document.createElement('div');
+    bubble.className = `chat-bubble ${isSystem ? '' : isHirer ? 'chat-bubble--hirer' : 'chat-bubble--worker'}`;
+    
+    const sender = document.createElement('span');
+    sender.className = 'chat-message-sender';
+    if (isSystem) {
+      sender.innerHTML = '<span class="role-badge role-badge--system">KU BOT</span> System Event';
+    } else if (isHirer) {
+      sender.innerHTML = `<span class="role-badge role-badge--hirer">HIRER</span> ${msg.sender?.displayName || 'Hirer'}`;
+    } else {
+      sender.innerHTML = `<span class="role-badge role-badge--worker">WORKER</span> ${msg.sender?.displayName || 'Worker'}`;
+    }
+    
+    const text = document.createElement('p');
+    text.className = 'chat-message-text';
+    text.textContent = msg.text || (msg.attachments?.length ? 'Attachment' : '');
+    
+    const time = document.createElement('time');
+    time.className = 'chat-message-time';
+    time.textContent = chatTime(msg.createdAt);
+    
+    bubble.append(sender, text, time);
+    row.append(bubble);
+    simpleChatMessagesBox.append(row);
+  });
+  simpleChatMessagesBox.scrollTop = simpleChatMessagesBox.scrollHeight;
+};
+
+const refreshSimpleChat = async () => {
+  if (!simpleChatMessagesBox) return;
+  const questId = simpleFlowState.quest?.id;
+  if (!questId) {
+    if (simpleChatBadge) simpleChatBadge.textContent = 'No Quest Selected';
+    if (simpleChatInput) simpleChatInput.disabled = true;
+    if (simpleChatSendBtn) simpleChatSendBtn.disabled = true;
+    renderSimpleChatMessages([]);
+    return;
+  }
+  try {
+    const convRes = await request('/api/v1/chat/conversations?limit=20');
+    const convs = convRes?.data?.items ?? [];
+    const currentConv = convs.find((c) => c.quest?.id === questId);
+    if (!currentConv) {
+      if (simpleChatBadge) simpleChatBadge.textContent = 'Chat Provisioning...';
+      if (simpleChatInput) simpleChatInput.disabled = true;
+      if (simpleChatSendBtn) simpleChatSendBtn.disabled = true;
+      return;
+    }
+    simpleFlowState.chatConversationId = currentConv.id;
+    if (simpleChatBadge) {
+      simpleChatBadge.textContent = currentConv.readOnly ? 'Read-Only Chat' : 'Active Work Chat';
+      simpleChatBadge.dataset.state = currentConv.readOnly ? 'pending' : 'success';
+    }
+    if (simpleChatInput) simpleChatInput.disabled = currentConv.readOnly;
+    if (simpleChatSendBtn) simpleChatSendBtn.disabled = currentConv.readOnly || !simpleChatInput.value.trim();
+    
+    const msgRes = await request(`/api/v1/chat/conversations/${encodeURIComponent(currentConv.id)}/messages?limit=50`);
+    simpleFlowState.chatMessages = msgRes?.data?.items ?? [];
+    renderSimpleChatMessages(simpleFlowState.chatMessages);
+    
+    if (simpleChatSpeaker) {
+      const currentSpeakerLabel = state.session?.user?.id === simpleFlowState.hirerId
+        ? 'Account 1 (Hirer)'
+        : state.session?.user?.id === simpleFlowState.workerId
+          ? 'Account 2 (Worker)'
+          : (state.session?.user?.email || '—');
+      simpleChatSpeaker.textContent = `Current session: ${currentSpeakerLabel}`;
+    }
+    
+    if (simpleChatAsHirer) {
+      simpleChatAsHirer.dataset.active = String(state.session?.user?.id === simpleFlowState.hirerId);
+    }
+    if (simpleChatAsWorker) {
+      simpleChatAsWorker.dataset.active = String(state.session?.user?.id === simpleFlowState.workerId);
+    }
+  } catch (err) {
+    debug('refreshSimpleChat error', err);
+  }
+};
+
+const sendSimpleChatMessage = async () => {
+  if (!simpleChatInput) return;
+  const text = simpleChatInput.value.trim();
+  if (!text) return;
+  const convId = simpleFlowState.chatConversationId;
+  if (!convId) throw new Error('No active Work Chat conversation found for this Quest.');
+  
+  await jsonRequest(
+    `/api/v1/chat/conversations/${encodeURIComponent(convId)}/messages`,
+    'POST',
+    {
+      clientMessageId: randomKey('simple-chat'),
+      text,
+    },
+    'Send Work Chat Message',
+  );
+  simpleChatInput.value = '';
+  if (simpleChatSendBtn) simpleChatSendBtn.disabled = true;
+  await refreshSimpleChat();
+};
+
+const switchSimpleChatPersona = async (account) => {
+  await switchTestAccountSession(account);
+  await refreshSimpleChat();
+  renderSimpleFlow();
 };
 
 const syncSimpleFlowControls = () => {
@@ -879,6 +1041,7 @@ const syncSimpleFlowControls = () => {
   document.querySelector('#simple-confirm').disabled = !isWorker || currentState !== 'QUEST_IN_PROGRESS';
   document.querySelector('#simple-review-hirer').disabled = !simpleTerminalStates.includes(currentState) || simpleFlowState.reviews.hirer;
   document.querySelector('#simple-review-worker').disabled = !simpleTerminalStates.includes(currentState) || simpleFlowState.reviews.worker;
+  if (simpleFlowFocusChat) simpleFlowFocusChat.disabled = !simpleFlowState.quest;
 };
 
 
@@ -1624,6 +1787,54 @@ bind('chat-older', chatStatus, loadOlderMessages);
 document.querySelector('#conversation-select').addEventListener('change', (event) => runWithOutput(chatStatus, () => openConversation(event.target.value)));
 chatMessageInput.addEventListener('input', updateChatCharacterCount);
 chatComposer.addEventListener('submit', (event) => { event.preventDefault(); void runWithOutput(chatStatus, sendChatMessage); });
+simpleChatForm?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  void runWithOutput(simpleFlowOutput, sendSimpleChatMessage);
+});
+simpleChatInput?.addEventListener('input', () => {
+  if (simpleChatSendBtn) {
+    simpleChatSendBtn.disabled = !simpleChatInput.value.trim() || Boolean(simpleChatInput.disabled);
+  }
+});
+simpleChatRefreshBtn?.addEventListener('click', () => {
+  void runWithOutput(simpleFlowOutput, refreshSimpleChat);
+});
+simpleChatAsHirer?.addEventListener('click', () => {
+  void runWithOutput(simpleFlowOutput, () => switchSimpleChatPersona('account-1'));
+});
+simpleChatAsWorker?.addEventListener('click', () => {
+  void runWithOutput(simpleFlowOutput, () => switchSimpleChatPersona('account-2'));
+});
+simpleFlowFocusChat?.addEventListener('click', () => {
+  document.querySelector('#simple-flow-chat-section')?.scrollIntoView({ behavior: 'smooth' });
+  simpleChatInput?.focus();
+});
+chatSwitchAccount1?.addEventListener('click', async () => {
+  await switchTestAccountSession('account-1');
+  await loadLiveWorkConversation();
+});
+chatSwitchAccount2?.addEventListener('click', async () => {
+  await switchTestAccountSession('account-2');
+  await loadLiveWorkConversation();
+});
+document.querySelectorAll('.prompt-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    const targetId = chip.dataset.target;
+    const text = chip.dataset.text;
+    if (targetId) {
+      const input = document.getElementById(targetId);
+      if (input) {
+        input.value = text;
+        input.focus();
+        updateChatCharacterCount();
+      }
+    } else if (simpleChatInput) {
+      simpleChatInput.value = text;
+      simpleChatInput.focus();
+      if (simpleChatSendBtn) simpleChatSendBtn.disabled = false;
+    }
+  });
+});
 bind('quote-payout', payoutOutput, quotePayout);
 bind('submit-payout', payoutOutput, submitPayout);
 bind('list-payouts', payoutOutput, listPayouts);

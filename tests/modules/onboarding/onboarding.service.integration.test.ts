@@ -24,7 +24,7 @@ beforeAll(async () => {
   } catch (cause) {
     throw new Error(
       'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 
@@ -59,9 +59,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await db
-    .delete(authUser)
-    .where(inArray(authUser.id, [studentA, studentB, studentC, studentD]));
+  await db.delete(authUser).where(inArray(authUser.id, [studentA, studentB, studentC, studentD]));
 });
 
 describe('onboarding academic options', () => {
@@ -97,7 +95,7 @@ describe('updating onboarding information', () => {
         academicYear: 2026,
         departmentId: departmentId!,
         telephone: '080-000-0000',
-      }),
+      })
     ).toBe('ok');
 
     expect(await getOnboardingData(studentA)).toMatchObject({
@@ -110,7 +108,7 @@ describe('updating onboarding information', () => {
 
   it('rejects a student ID already held by another Student', async () => {
     expect(await updateOnboardingInfo(studentA, { studentId: studentBId })).toBe(
-      'STUDENT_ID_ALREADY_EXISTS',
+      'STUDENT_ID_ALREADY_EXISTS'
     );
   });
 
@@ -124,9 +122,9 @@ describe('updating onboarding information', () => {
   });
 
   it('leaves every omitted field untouched', async () => {
-    const departmentId = (await getAcademicOptions())
-      .find(({ departments }) => departments.length > 0)
-      ?.departments[0]?.id;
+    const departmentId = (await getAcademicOptions()).find(
+      ({ departments }) => departments.length > 0
+    )?.departments[0]?.id;
 
     expect(departmentId).toBeDefined();
     expect(
@@ -134,7 +132,7 @@ describe('updating onboarding information', () => {
         academicYear: 2026,
         departmentId: departmentId!,
         telephone: '080-000-0000',
-      }),
+      })
     ).toBe('ok');
 
     expect(await updateOnboardingInfo(studentA, { academicYear: 2027 })).toBe('ok');
@@ -156,7 +154,7 @@ describe('updating onboarding information', () => {
       await updateOnboardingInfo(studentA, {
         departmentId: replacementDepartmentId!,
         telephone: '090-111-2222',
-      }),
+      })
     ).toBe('ok');
 
     expect(await getOnboardingData(studentA)).toMatchObject({
@@ -167,14 +165,12 @@ describe('updating onboarding information', () => {
 
   it('rejects a department that does not exist', async () => {
     expect(await updateOnboardingInfo(studentA, { departmentId: randomUUID() })).toBe(
-      'DEPARTMENT_NOT_FOUND',
+      'DEPARTMENT_NOT_FOUND'
     );
   });
 
   it('reports a missing Student record rather than creating one', async () => {
-    expect(await updateOnboardingInfo(randomUUID(), { academicYear: 2026 })).toBe(
-      'USER_NOT_FOUND',
-    );
+    expect(await updateOnboardingInfo(randomUUID(), { academicYear: 2026 })).toBe('USER_NOT_FOUND');
   });
 
   // Both claims are issued together, but the pool serialises them, so the pre-check catches
@@ -190,13 +186,10 @@ describe('updating onboarding information', () => {
 
     expect([...results].sort()).toEqual(['STUDENT_ID_ALREADY_EXISTS', 'ok']);
 
-    const stored = await Promise.all([
-      getOnboardingData(studentC),
-      getOnboardingData(studentD),
-    ]);
+    const stored = await Promise.all([getOnboardingData(studentC), getOnboardingData(studentD)]);
 
     expect(new Set(stored.map((student) => student?.studentId))).toEqual(
-      new Set([contestedId, null]),
+      new Set([contestedId, null])
     );
   });
   it('keeps a stored academic year when a later update leaves it out', async () => {

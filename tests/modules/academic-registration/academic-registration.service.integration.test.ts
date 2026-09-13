@@ -22,7 +22,7 @@ beforeAll(async () => {
   } catch (cause) {
     throw new Error(
       'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 
@@ -78,9 +78,7 @@ describe('academic registration options', () => {
   it('groups the seeded Sriracha Engineering programs under their faculty', async () => {
     const options = await getAcademicRegistrationOptions();
 
-    expect(
-      options.faculties.find(({ name }) => name === 'Engineering at Sriracha'),
-    ).toMatchObject({
+    expect(options.faculties.find(({ name }) => name === 'Engineering at Sriracha')).toMatchObject({
       name: 'Engineering at Sriracha',
       departments: [
         { name: 'Automotive Engineering' },
@@ -109,7 +107,7 @@ describe('updating academic registration', () => {
         departmentId: departmentId!,
         occupationId: occupationId!,
         termsVersion: '2026-01-01',
-      }),
+      })
     ).toBe('updated');
 
     const status = await getAcademicRegistrationStatus(studentA);
@@ -136,7 +134,7 @@ describe('updating academic registration', () => {
 
     try {
       expect(
-        await updateAcademicRegistration(member, { firstName: 'After', lastName: 'Changed' }),
+        await updateAcademicRegistration(member, { firstName: 'After', lastName: 'Changed' })
       ).toBe('updated');
 
       const status = await getAcademicRegistrationStatus(member);
@@ -147,9 +145,7 @@ describe('updating academic registration', () => {
   });
 
   it('does not require every field to be set at once', async () => {
-    expect(await updateAcademicRegistration(studentB, { telephone: '0800000001' })).toBe(
-      'updated',
-    );
+    expect(await updateAcademicRegistration(studentB, { telephone: '0800000001' })).toBe('updated');
 
     const status = await getAcademicRegistrationStatus(studentB);
     expect(status).toMatchObject({
@@ -161,27 +157,27 @@ describe('updating academic registration', () => {
   });
 
   it('rejects an unknown department', async () => {
-    expect(
-      await updateAcademicRegistration(studentB, { departmentId: randomUUID() }),
-    ).toBe('department-not-found');
+    expect(await updateAcademicRegistration(studentB, { departmentId: randomUUID() })).toBe(
+      'department-not-found'
+    );
   });
 
   it('rejects an unknown occupation', async () => {
-    expect(
-      await updateAcademicRegistration(studentB, { occupationId: randomUUID() }),
-    ).toBe('occupation-not-found');
+    expect(await updateAcademicRegistration(studentB, { occupationId: randomUUID() })).toBe(
+      'occupation-not-found'
+    );
   });
 
   it('rejects a student ID already held by another Student', async () => {
-    expect(
-      await updateAcademicRegistration(studentB, { studentId: studentAId }),
-    ).toBe('student-id-already-exists');
+    expect(await updateAcademicRegistration(studentB, { studentId: studentAId })).toBe(
+      'student-id-already-exists'
+    );
   });
 
   it('reports not found for a missing Student', async () => {
-    expect(
-      await updateAcademicRegistration(randomUUID(), { telephone: '0800000002' }),
-    ).toBe('student-not-found');
+    expect(await updateAcademicRegistration(randomUUID(), { telephone: '0800000002' })).toBe(
+      'student-not-found'
+    );
   });
 });
 

@@ -45,7 +45,8 @@ export const payoutRoute = new Elysia({
     detail: {
       tags: ['Payouts'],
       summary: 'Submit a Payout for Admin approval',
-      description: 'Reserves the full Payout amount and waits for an Admin decision. The Provider is not called by this request.',
+      description:
+        'Reserves the full Payout amount and waits for an Admin decision. The Provider is not called by this request.',
       operationId: 'createPayout',
       security: betterAuthSecurity,
     },

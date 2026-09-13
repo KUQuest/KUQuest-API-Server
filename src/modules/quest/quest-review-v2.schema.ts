@@ -18,7 +18,7 @@ export const questV2ReviewHeadersSchema = t.Object(
       description: 'Non-blank command identity for replay-safe Rating Review commands',
     }),
   },
-  { additionalProperties: false },
+  { additionalProperties: true }
 );
 
 export const questV2ReviewCreateSchema = t.Object(
@@ -27,7 +27,7 @@ export const questV2ReviewCreateSchema = t.Object(
     rating: t.Integer({ minimum: 1, maximum: 5 }),
     comment: t.Optional(t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' })),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const questV2ReviewUpdateSchema = t.Object(
@@ -35,7 +35,7 @@ export const questV2ReviewUpdateSchema = t.Object(
     rating: t.Optional(t.Integer({ minimum: 1, maximum: 5 })),
     comment: t.Optional(t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' })),
   },
-  { additionalProperties: false, minProperties: 1 },
+  { additionalProperties: false, minProperties: 1 }
 );
 
 export const questV2ReviewResponseSchema = t.Object({

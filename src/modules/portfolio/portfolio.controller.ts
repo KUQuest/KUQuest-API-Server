@@ -2,7 +2,11 @@ import type { AuthedContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import { readResourceVersion } from '@/shared/resource-version';
 import type { ApiResponse } from '@/shared/api-response';
-import { ImageTooLargeError, ImageUploadError, UnsupportedImageTypeError } from '@/shared/image-storage';
+import {
+  ImageTooLargeError,
+  ImageUploadError,
+  UnsupportedImageTypeError,
+} from '@/shared/image-storage';
 
 import type { Static } from 'elysia';
 
@@ -47,7 +51,7 @@ const discardUploadedImages = async (images: StoredPortfolioImage[]): Promise<vo
           objectKey: image.objectKey,
         });
       }
-    }),
+    })
   );
 };
 
@@ -145,7 +149,7 @@ export const updateOwnPortfolio = async ({
     session.user.id,
     params.portfolioId,
     body,
-    versionHeader.value,
+    versionHeader.value
   );
 
   if (outcome === 'not-found') return portfolioNotFound(set);
@@ -196,7 +200,7 @@ export const replaceOwnPortfolioImage = async ({
       params.portfolioId,
       uploaded,
       'fileId' in params ? params.fileId : undefined,
-      versionHeader.value,
+      versionHeader.value
     );
     if ('outcome' in result) {
       await portfolioStorage.delete(uploaded.bucket, uploaded.objectKey);
@@ -242,7 +246,7 @@ export const deleteOwnPortfolioImage = async ({
     session.user.id,
     params.portfolioId,
     'fileId' in params ? params.fileId : undefined,
-    versionHeader.value,
+    versionHeader.value
   );
   if (result.outcome === 'not-found') return portfolioNotFound(set);
   if (result.outcome === 'conflict') {
@@ -258,7 +262,9 @@ export const deleteOwnPortfolio = async ({
   request,
   session,
   set,
-}: AuthedContext & { params: Static<typeof portfolioParamSchema> }): Promise<ApiResponse<{ version: number }>> => {
+}: AuthedContext & { params: Static<typeof portfolioParamSchema> }): Promise<
+  ApiResponse<{ version: number }>
+> => {
   const versionHeader = readResourceVersion(request);
   if (versionHeader.invalid) {
     set.status = 400;
@@ -284,7 +290,7 @@ export const deleteOwnPortfolio = async ({
           fileId: image.fileId,
         });
       }
-    }),
+    })
   );
 
   return apiSuccess({ version: result.version });

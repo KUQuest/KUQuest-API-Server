@@ -50,7 +50,7 @@ describe('Payout Destination encryption', () => {
     };
 
     expect(() => encryption.decrypt(encrypted)).toThrowError(
-      expect.objectContaining({ code: 'PAYOUT_DESTINATION_KEY_VERSION_UNKNOWN' }),
+      expect.objectContaining({ code: 'PAYOUT_DESTINATION_KEY_VERSION_UNKNOWN' })
     );
   });
 
@@ -62,7 +62,7 @@ describe('Payout Destination encryption', () => {
     };
 
     expect(() => encryption.decrypt(tampered)).toThrowError(
-      expect.objectContaining({ code: 'PAYOUT_DESTINATION_AUTHENTICATION_FAILED' }),
+      expect.objectContaining({ code: 'PAYOUT_DESTINATION_AUTHENTICATION_FAILED' })
     );
   });
 
@@ -70,7 +70,7 @@ describe('Payout Destination encryption', () => {
     const unavailable = createPayoutDestinationEncryption({ activeKeyVersion: 'v1', keys: {} });
 
     expect(() => unavailable.encrypt('1234567890')).toThrowError(
-      expect.objectContaining({ code: 'PAYOUT_DESTINATION_KEY_UNAVAILABLE' }),
+      expect.objectContaining({ code: 'PAYOUT_DESTINATION_KEY_UNAVAILABLE' })
     );
   });
 });

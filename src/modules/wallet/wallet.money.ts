@@ -76,14 +76,16 @@ export class MoneyDomainError extends Error {
 
 export const satang = (value: number): Satang => {
   if (!Number.isSafeInteger(value) || value < 0 || value > MAX_WALLET_CAPACITY_SATANG) {
-    throw new MoneyDomainError('INVALID_SATANG', 'Satang must be a non-negative integer within the Wallet capacity.');
+    throw new MoneyDomainError(
+      'INVALID_SATANG',
+      'Satang must be a non-negative integer within the Wallet capacity.'
+    );
   }
 
   return value as Satang;
 };
 
-export const toBaht = (amountSatang: Satang): number =>
-  Number((amountSatang / 100).toFixed(2));
+export const toBaht = (amountSatang: Satang): number => Number((amountSatang / 100).toFixed(2));
 
 export const positiveSatang = (value: number): Satang => {
   const amount = satang(value);
@@ -97,18 +99,14 @@ export const positiveSatang = (value: number): Satang => {
 
 export const calculatePlatformFeeSatang = (
   recipientAmountSatang: Satang,
-  platformFeeBps: number,
-): Satang => satang(Math.ceil(recipientAmountSatang * platformFeeBps / 10_000));
+  platformFeeBps: number
+): Satang => satang(Math.ceil((recipientAmountSatang * platformFeeBps) / 10_000));
 
 export const signedSatang = (value: number): SignedSatang => {
-  if (
-    !Number.isSafeInteger(value) ||
-    value === 0 ||
-    Math.abs(value) > MAX_WALLET_CAPACITY_SATANG
-  ) {
+  if (!Number.isSafeInteger(value) || value === 0 || Math.abs(value) > MAX_WALLET_CAPACITY_SATANG) {
     throw new MoneyDomainError(
       'INVALID_SATANG',
-      'Signed Satang must be a non-zero integer within the Wallet capacity.',
+      'Signed Satang must be a non-zero integer within the Wallet capacity.'
     );
   }
 
@@ -119,7 +117,7 @@ export const satangDelta = (value: number): SatangDelta => {
   if (!Number.isSafeInteger(value) || Math.abs(value) > MAX_WALLET_CAPACITY_SATANG) {
     throw new MoneyDomainError(
       'INVALID_SATANG',
-      'A Satang delta must be an integer within the Wallet capacity.',
+      'A Satang delta must be an integer within the Wallet capacity.'
     );
   }
 

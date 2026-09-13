@@ -62,7 +62,9 @@ export const paymentTopUpQuote = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     feeRoundingMode: text('fee_rounding_mode').default('UP').notNull(),
-    userId: uuid('user_id').notNull().references(() => authUser.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => authUser.id),
     policyRevisionId: uuid('policy_revision_id')
       .notNull()
       .references(() => paymentMoneyPolicyRevision.id),
@@ -80,12 +82,12 @@ export const paymentTopUpQuote = pgTable(
   (table) => [
     check(
       'payment_top_up_quotes_amount_check',
-      sql`${table.creditSatang} > 0 AND ${table.chargedFeeSatang} >= 0 AND ${table.chargedTaxSatang} >= 0 AND ${table.paymentTotalSatang} = ${table.creditSatang} + ${table.chargedFeeSatang} + ${table.chargedTaxSatang} AND ${table.providerFeeSatang} >= 0 AND ${table.providerTaxSatang} >= 0 AND ${table.providerTotalSatang} = ${table.creditSatang} + ${table.providerFeeSatang} + ${table.providerTaxSatang}`,
+      sql`${table.creditSatang} > 0 AND ${table.chargedFeeSatang} >= 0 AND ${table.chargedTaxSatang} >= 0 AND ${table.paymentTotalSatang} = ${table.creditSatang} + ${table.chargedFeeSatang} + ${table.chargedTaxSatang} AND ${table.providerFeeSatang} >= 0 AND ${table.providerTaxSatang} >= 0 AND ${table.providerTotalSatang} = ${table.creditSatang} + ${table.providerFeeSatang} + ${table.providerTaxSatang}`
     ),
     check('payment_top_up_quotes_rounding_check', sql`${table.feeRoundingMode} = 'UP'`),
     unique('payment_top_up_quotes_id_user_key').on(table.id, table.userId),
     index('payment_top_up_quotes_expiry_idx').on(table.expiresAt),
-  ],
+  ]
 );
 
 export const paymentTopUp = pgTable(
@@ -93,8 +95,13 @@ export const paymentTopUp = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     internalReference: text('internal_reference').notNull().unique(),
-    userId: uuid('user_id').notNull().references(() => authUser.id),
-    quoteId: uuid('quote_id').notNull().unique().references(() => paymentTopUpQuote.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => authUser.id),
+    quoteId: uuid('quote_id')
+      .notNull()
+      .unique()
+      .references(() => paymentTopUpQuote.id),
     provider: text('provider').notNull(),
     providerReference: text('provider_reference').unique(),
     providerApiVersion: text('provider_api_version'),
@@ -120,11 +127,11 @@ export const paymentTopUp = pgTable(
   (table) => [
     check(
       'payment_top_ups_status_check',
-      sql`${table.topUpStatus} IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED')`,
+      sql`${table.topUpStatus} IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED')`
     ),
     check(
       'payment_top_ups_amount_check',
-      sql`${table.creditSatang} > 0 AND ${table.chargedFeeSatang} >= 0 AND ${table.chargedTaxSatang} >= 0 AND ${table.paymentTotalSatang} = ${table.creditSatang} + ${table.chargedFeeSatang} + ${table.chargedTaxSatang} AND ${table.providerFeeSatang} >= 0 AND ${table.providerTaxSatang} >= 0 AND ${table.providerTotalSatang} = ${table.creditSatang} + ${table.providerFeeSatang} + ${table.providerTaxSatang} AND (${table.providerAmountSatang} IS NULL OR ${table.providerAmountSatang} = ${table.paymentTotalSatang})`,
+      sql`${table.creditSatang} > 0 AND ${table.chargedFeeSatang} >= 0 AND ${table.chargedTaxSatang} >= 0 AND ${table.paymentTotalSatang} = ${table.creditSatang} + ${table.chargedFeeSatang} + ${table.chargedTaxSatang} AND ${table.providerFeeSatang} >= 0 AND ${table.providerTaxSatang} >= 0 AND ${table.providerTotalSatang} = ${table.creditSatang} + ${table.providerFeeSatang} + ${table.providerTaxSatang} AND (${table.providerAmountSatang} IS NULL OR ${table.providerAmountSatang} = ${table.paymentTotalSatang})`
     ),
     unique('payment_top_ups_id_user_key').on(table.id, table.userId),
     foreignKey({
@@ -133,14 +140,16 @@ export const paymentTopUp = pgTable(
       name: 'payment_top_ups_quote_user_fk',
     }),
     index('payment_top_ups_user_status_idx').on(table.userId, table.topUpStatus),
-  ],
+  ]
 );
 
 export const paymentTopUpStatusHistory = pgTable(
   'payment_top_up_status_history',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    topUpId: uuid('top_up_id').notNull().references(() => paymentTopUp.id),
+    topUpId: uuid('top_up_id')
+      .notNull()
+      .references(() => paymentTopUp.id),
     fromStatus: text('from_status').$type<TopUpStatus>(),
     toStatus: text('to_status').$type<TopUpStatus>().notNull(),
     providerStatus: text('provider_status'),
@@ -153,18 +162,18 @@ export const paymentTopUpStatusHistory = pgTable(
   (table) => [
     check(
       'payment_top_up_status_history_from_status_check',
-      sql`${table.fromStatus} IS NULL OR ${table.fromStatus} IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED')`,
+      sql`${table.fromStatus} IS NULL OR ${table.fromStatus} IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED')`
     ),
     check(
       'payment_top_up_status_history_to_status_check',
-      sql`${table.toStatus} IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED')`,
+      sql`${table.toStatus} IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED')`
     ),
     check(
       'payment_top_up_status_history_actor_check',
-      sql`num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) <= 1`,
+      sql`num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) <= 1`
     ),
     index('payment_top_up_status_history_idx').on(table.topUpId, table.occurredAt),
-  ],
+  ]
 );
 
 export const paymentProviderEventInbox = pgTable(
@@ -206,45 +215,44 @@ export const paymentProviderEventInbox = pgTable(
   (table) => [
     unique('payment_provider_event_inbox_provider_event_key').on(
       table.provider,
-      table.providerEventId,
+      table.providerEventId
     ),
     index('payment_provider_event_inbox_processing_idx').on(
       table.processingStatus,
-      table.receivedAt,
+      table.receivedAt
     ),
     index('payment_provider_event_inbox_expiry_idx').on(table.rawPayloadExpiresAt),
     check(
       'payment_provider_event_inbox_amount_check',
-      sql`${table.providerAmountSatang} IS NULL OR ${table.providerAmountSatang} > 0`,
+      sql`${table.providerAmountSatang} IS NULL OR ${table.providerAmountSatang} > 0`
     ),
-    check(
-      'payment_provider_event_inbox_attempt_check',
-      sql`${table.attemptCount} BETWEEN 0 AND 5`,
-    ),
+    check('payment_provider_event_inbox_attempt_check', sql`${table.attemptCount} BETWEEN 0 AND 5`),
     check(
       'payment_provider_event_inbox_normalized_status_check',
-      sql`${table.normalizedStatus} IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED', 'PROVIDER_PENDING', 'SUCCEEDED', 'CANCELLED')`,
+      sql`${table.normalizedStatus} IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED', 'PROVIDER_PENDING', 'SUCCEEDED', 'CANCELLED')`
     ),
     check(
       'payment_provider_event_inbox_actual_amount_check',
-      sql`num_nonnulls(${table.providerActualFeeSatang}, ${table.providerActualTaxSatang}, ${table.providerActualDebitSatang}) IN (0, 3) AND (${table.providerActualFeeSatang} IS NULL OR (${table.providerActualFeeSatang} >= 0 AND ${table.providerActualTaxSatang} >= 0 AND ${table.providerActualDebitSatang} = ${table.providerAmountSatang} + ${table.providerActualFeeSatang} + ${table.providerActualTaxSatang}))`,
+      sql`num_nonnulls(${table.providerActualFeeSatang}, ${table.providerActualTaxSatang}, ${table.providerActualDebitSatang}) IN (0, 3) AND (${table.providerActualFeeSatang} IS NULL OR (${table.providerActualFeeSatang} >= 0 AND ${table.providerActualTaxSatang} >= 0 AND ${table.providerActualDebitSatang} = ${table.providerAmountSatang} + ${table.providerActualFeeSatang} + ${table.providerActualTaxSatang}))`
     ),
     check(
       'payment_provider_event_inbox_processing_status_check',
-      sql`${table.processingStatus} IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')`,
+      sql`${table.processingStatus} IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')`
     ),
     check(
       'payment_provider_event_inbox_raw_payload_check',
-      sql`num_nonnulls(${table.rawPayloadKeyVersion}, ${table.rawPayloadNonce}, ${table.rawPayloadCiphertext}, ${table.rawPayloadAuthTag}) IN (0, 4)`,
+      sql`num_nonnulls(${table.rawPayloadKeyVersion}, ${table.rawPayloadNonce}, ${table.rawPayloadCiphertext}, ${table.rawPayloadAuthTag}) IN (0, 4)`
     ),
-  ],
+  ]
 );
 
 export const paymentProviderEventHistory = pgTable(
   'payment_provider_event_history',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    eventId: uuid('event_id').notNull().references(() => paymentProviderEventInbox.id),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => paymentProviderEventInbox.id),
     fromStatus: text('from_status').$type<ProviderEventProcessingStatus>(),
     toStatus: text('to_status').$type<ProviderEventProcessingStatus>().notNull(),
     source: text('source').notNull(),
@@ -256,13 +264,13 @@ export const paymentProviderEventHistory = pgTable(
     index('payment_provider_event_history_event_idx').on(table.eventId, table.occurredAt),
     check(
       'payment_provider_event_history_from_status_check',
-      sql`${table.fromStatus} IS NULL OR ${table.fromStatus} IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')`,
+      sql`${table.fromStatus} IS NULL OR ${table.fromStatus} IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')`
     ),
     check(
       'payment_provider_event_history_to_status_check',
-      sql`${table.toStatus} IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')`,
+      sql`${table.toStatus} IN ('RECEIVED', 'PROCESSING', 'RETRYABLE', 'PROCESSED', 'DEAD_LETTER')`
     ),
-  ],
+  ]
 );
 
 export const paymentProviderEvents = paymentProviderEventInbox;
@@ -275,7 +283,9 @@ export const paymentPayoutAccounts = pgTable(
   'payment_payout_accounts',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: uuid('user_id').notNull().references(() => authUser.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => authUser.id),
     recipientType: text('recipient_type').notNull(),
     givenName: text('given_name').notNull(),
     surname: text('surname').notNull(),
@@ -299,23 +309,20 @@ export const paymentPayoutAccounts = pgTable(
     retiredAt: time('retired_at'),
   },
   (table) => [
-    check(
-      'payment_payout_accounts_recipient_type_check',
-      sql`${table.recipientType} = 'SELF'`,
-    ),
+    check('payment_payout_accounts_recipient_type_check', sql`${table.recipientType} = 'SELF'`),
     check(
       'payment_payout_accounts_routing_type_check',
-      sql`${table.routingType} IN ('BANK_ACCOUNT', 'PROMPTPAY')`,
+      sql`${table.routingType} IN ('BANK_ACCOUNT', 'PROMPTPAY')`
     ),
     check(
       'payment_payout_accounts_country_currency_check',
-      sql`${table.accountCountry} = 'TH' AND ${table.accountCurrency} = 'THB'`,
+      sql`${table.accountCountry} = 'TH' AND ${table.accountCurrency} = 'THB'`
     ),
     uniqueIndex('payment_payout_accounts_active_user_uidx')
       .on(table.userId)
       .where(sql`${table.retiredAt} IS NULL`),
     unique('payment_payout_accounts_id_user_key').on(table.id, table.userId),
-  ],
+  ]
 );
 
 export const paymentPayoutQuotes = pgTable(
@@ -323,7 +330,9 @@ export const paymentPayoutQuotes = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     feeRoundingMode: text('fee_rounding_mode').default('UP').notNull(),
-    userId: uuid('user_id').notNull().references(() => authUser.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => authUser.id),
     payoutAccountId: uuid('payout_account_id')
       .notNull()
       .references(() => paymentPayoutAccounts.id),
@@ -341,7 +350,7 @@ export const paymentPayoutQuotes = pgTable(
   (table) => [
     check(
       'payment_payout_quotes_amount_check',
-      sql`${table.receiptSatang} > 0 AND ${table.maximumFeeSatang} >= 0 AND ${table.maximumTaxSatang} >= 0 AND ${table.maximumDebitSatang} = ${table.receiptSatang} + ${table.maximumFeeSatang} + ${table.maximumTaxSatang}`,
+      sql`${table.receiptSatang} > 0 AND ${table.maximumFeeSatang} >= 0 AND ${table.maximumTaxSatang} >= 0 AND ${table.maximumDebitSatang} = ${table.receiptSatang} + ${table.maximumFeeSatang} + ${table.maximumTaxSatang}`
     ),
     check('payment_payout_quotes_rounding_check', sql`${table.feeRoundingMode} = 'UP'`),
     unique('payment_payout_quotes_id_user_key').on(table.id, table.userId),
@@ -351,7 +360,7 @@ export const paymentPayoutQuotes = pgTable(
       name: 'payment_payout_quotes_account_user_fk',
     }),
     index('payment_payout_quotes_expiry_idx').on(table.expiresAt),
-  ],
+  ]
 );
 
 export const paymentPayouts = pgTable(
@@ -359,8 +368,13 @@ export const paymentPayouts = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     internalReference: text('internal_reference').notNull().unique(),
-    userId: uuid('user_id').notNull().references(() => authUser.id),
-    quoteId: uuid('quote_id').notNull().unique().references(() => paymentPayoutQuotes.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => authUser.id),
+    quoteId: uuid('quote_id')
+      .notNull()
+      .unique()
+      .references(() => paymentPayoutQuotes.id),
     payoutAccountId: uuid('payout_account_id')
       .notNull()
       .references(() => paymentPayoutAccounts.id),
@@ -382,7 +396,9 @@ export const paymentPayouts = pgTable(
     destinationRoutingValueNonce: text('destination_routing_value_nonce').notNull(),
     destinationRoutingValueCiphertext: text('destination_routing_value_ciphertext').notNull(),
     destinationRoutingValueAuthTag: text('destination_routing_value_auth_tag').notNull(),
-    destinationMaskedRoutingValue: text('destination_masked_routing_value').default('****').notNull(),
+    destinationMaskedRoutingValue: text('destination_masked_routing_value')
+      .default('****')
+      .notNull(),
     provider: text('provider').notNull(),
     providerReference: text('provider_reference').unique(),
     providerApiVersion: text('provider_api_version'),
@@ -411,27 +427,26 @@ export const paymentPayouts = pgTable(
   (table) => [
     check(
       'payment_payouts_status_check',
-      sql`${table.payoutStatus} IN ('PENDING_ADMIN_APPROVAL', 'SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING', 'SUCCEEDED', 'FAILED', 'CANCELLED')`,
+      sql`${table.payoutStatus} IN ('PENDING_ADMIN_APPROVAL', 'SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING', 'SUCCEEDED', 'FAILED', 'CANCELLED')`
     ),
-    check(
-      'payment_payouts_version_check',
-      sql`${table.version} >= 1`,
-    ),
+    check('payment_payouts_version_check', sql`${table.version} >= 1`),
     check(
       'payment_payouts_amount_check',
-      sql`${table.principalSatang} > 0 AND ${table.maximumFeeSatang} >= 0 AND ${table.maximumTaxSatang} >= 0 AND ${table.maximumDebitSatang} = ${table.principalSatang} + ${table.maximumFeeSatang} + ${table.maximumTaxSatang} AND (${table.providerAmountSatang} IS NULL OR ${table.providerAmountSatang} = ${table.principalSatang})`,
+      sql`${table.principalSatang} > 0 AND ${table.maximumFeeSatang} >= 0 AND ${table.maximumTaxSatang} >= 0 AND ${table.maximumDebitSatang} = ${table.principalSatang} + ${table.maximumFeeSatang} + ${table.maximumTaxSatang} AND (${table.providerAmountSatang} IS NULL OR ${table.providerAmountSatang} = ${table.principalSatang})`
     ),
     check(
       'payment_payouts_actual_amount_check',
-      sql`num_nonnulls(${table.actualFeeSatang}, ${table.actualTaxSatang}, ${table.actualDebitSatang}) IN (0, 3) AND (${table.actualFeeSatang} IS NULL OR (${table.actualFeeSatang} >= 0 AND ${table.actualTaxSatang} >= 0 AND ${table.actualDebitSatang} = ${table.principalSatang} + ${table.actualFeeSatang} + ${table.actualTaxSatang} AND ${table.actualDebitSatang} <= ${table.maximumDebitSatang}))`,
+      sql`num_nonnulls(${table.actualFeeSatang}, ${table.actualTaxSatang}, ${table.actualDebitSatang}) IN (0, 3) AND (${table.actualFeeSatang} IS NULL OR (${table.actualFeeSatang} >= 0 AND ${table.actualTaxSatang} >= 0 AND ${table.actualDebitSatang} = ${table.principalSatang} + ${table.actualFeeSatang} + ${table.actualTaxSatang} AND ${table.actualDebitSatang} <= ${table.maximumDebitSatang}))`
     ),
     check(
       'payment_payouts_destination_currency_check',
-      sql`${table.destinationAccountCountry} = 'TH' AND ${table.destinationAccountCurrency} = 'THB'`,
+      sql`${table.destinationAccountCountry} = 'TH' AND ${table.destinationAccountCurrency} = 'THB'`
     ),
     uniqueIndex('payment_payouts_active_user_uidx')
       .on(table.userId)
-      .where(sql`${table.payoutStatus} IN ('PENDING_ADMIN_APPROVAL', 'SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING')`),
+      .where(
+        sql`${table.payoutStatus} IN ('PENDING_ADMIN_APPROVAL', 'SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING')`
+      ),
     unique('payment_payouts_id_user_key').on(table.id, table.userId),
     foreignKey({
       columns: [table.quoteId, table.userId],
@@ -443,7 +458,7 @@ export const paymentPayouts = pgTable(
       foreignColumns: [paymentPayoutAccounts.id, paymentPayoutAccounts.userId],
       name: 'payment_payouts_account_user_fk',
     }),
-  ],
+  ]
 );
 
 export const paymentPayoutSubmissionJobs = pgTable(
@@ -458,18 +473,17 @@ export const paymentPayoutSubmissionJobs = pgTable(
     createdAt: time('created_at').defaultNow().notNull(),
   },
   (table) => [
-    index('payment_payout_submission_jobs_pending_idx').on(
-      table.processedAt,
-      table.createdAt,
-    ),
-  ],
+    index('payment_payout_submission_jobs_pending_idx').on(table.processedAt, table.createdAt),
+  ]
 );
 
 export const paymentPayoutStatusHistory = pgTable(
   'payment_payout_status_history',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    payoutId: uuid('payout_id').notNull().references(() => paymentPayouts.id),
+    payoutId: uuid('payout_id')
+      .notNull()
+      .references(() => paymentPayouts.id),
     fromStatus: text('from_status').$type<PayoutStatus>(),
     toStatus: text('to_status').$type<PayoutStatus>().notNull(),
     providerStatus: text('provider_status'),
@@ -482,26 +496,30 @@ export const paymentPayoutStatusHistory = pgTable(
   (table) => [
     check(
       'payment_payout_status_history_from_status_check',
-      sql`${table.fromStatus} IS NULL OR ${table.fromStatus} IN ('PENDING_ADMIN_APPROVAL', 'SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING', 'SUCCEEDED', 'FAILED', 'CANCELLED')`,
+      sql`${table.fromStatus} IS NULL OR ${table.fromStatus} IN ('PENDING_ADMIN_APPROVAL', 'SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING', 'SUCCEEDED', 'FAILED', 'CANCELLED')`
     ),
     check(
       'payment_payout_status_history_to_status_check',
-      sql`${table.toStatus} IN ('PENDING_ADMIN_APPROVAL', 'SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING', 'SUCCEEDED', 'FAILED', 'CANCELLED')`,
+      sql`${table.toStatus} IN ('PENDING_ADMIN_APPROVAL', 'SUBMITTED_TO_PROVIDER', 'PROVIDER_PENDING', 'SUCCEEDED', 'FAILED', 'CANCELLED')`
     ),
     check(
       'payment_payout_status_history_actor_check',
-      sql`num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) <= 1`,
+      sql`num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) <= 1`
     ),
     index('payment_payout_status_history_idx').on(table.payoutId, table.occurredAt),
-  ],
+  ]
 );
 
 export const paymentPayoutCancellationAttempts = pgTable(
   'payment_payout_cancellation_attempts',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    payoutId: uuid('payout_id').notNull().references(() => paymentPayouts.id),
-    adminId: uuid('admin_id').notNull().references(() => authAdmin.id),
+    payoutId: uuid('payout_id')
+      .notNull()
+      .references(() => paymentPayouts.id),
+    adminId: uuid('admin_id')
+      .notNull()
+      .references(() => authAdmin.id),
     reason: text('reason').notNull(),
     attemptStatus: text('attempt_status').notNull(),
     providerResponse: jsonb('provider_response'),
@@ -510,11 +528,8 @@ export const paymentPayoutCancellationAttempts = pgTable(
   (table) => [
     check(
       'payment_payout_cancellation_attempts_status_check',
-      sql`${table.attemptStatus} IN ('PENDING', 'SUCCEEDED', 'FAILED')`,
+      sql`${table.attemptStatus} IN ('PENDING', 'SUCCEEDED', 'FAILED')`
     ),
-    index('payment_payout_cancellation_attempts_payout_idx').on(
-      table.payoutId,
-      table.attemptedAt,
-    ),
-  ],
+    index('payment_payout_cancellation_attempts_payout_idx').on(table.payoutId, table.attemptedAt),
+  ]
 );

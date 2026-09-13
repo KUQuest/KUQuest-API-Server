@@ -33,11 +33,13 @@ const proofDraftProperties = {
   description: t.Optional(description),
   fileIds: t.Optional(fileIds),
   files: t.Optional(t.Files({ maxItems: 5 })),
-  retryPosition: t.Optional(t.Integer({
-    minimum: 0,
-    maximum: 4,
-    description: 'Position of the one failed Proof file being retried',
-  })),
+  retryPosition: t.Optional(
+    t.Integer({
+      minimum: 0,
+      maximum: 4,
+      description: 'Position of the one failed Proof file being retried',
+    })
+  ),
 };
 
 export const questV2ProofSubmissionCreateSchema = t.Object(proofDraftProperties, {
@@ -49,21 +51,24 @@ export const questV2ProofSubmissionEditSchema = t.Object(proofDraftProperties, {
   minProperties: 1,
 });
 
-export const questV2ProofSubmissionEmptyBodySchema = t.Object({}, {
-  additionalProperties: false,
-});
+export const questV2ProofSubmissionEmptyBodySchema = t.Object(
+  {},
+  {
+    additionalProperties: false,
+  }
+);
 
-const proofReviewDecision = t.Union([
-  t.Literal('PROOF_APPROVED'),
-  t.Literal('PROOF_NOT_APPROVED'),
-]);
+const proofReviewDecision = t.Union([t.Literal('PROOF_APPROVED'), t.Literal('PROOF_NOT_APPROVED')]);
 
-export const questV2ProofSubmissionReviewSchema = t.Object({
-  decision: proofReviewDecision,
-  reason: t.Optional(t.Nullable(t.String({ maxLength: 1000, pattern: '\\S' }))),
-}, {
-  additionalProperties: false,
-});
+export const questV2ProofSubmissionReviewSchema = t.Object(
+  {
+    decision: proofReviewDecision,
+    reason: t.Optional(t.Nullable(t.String({ maxLength: 1000, pattern: '\\S' }))),
+  },
+  {
+    additionalProperties: false,
+  }
+);
 
 const proofStatusSchema = t.Nullable(proofStatus);
 const visibilitySchema = t.Union([t.Literal('FULL'), t.Literal('SUMMARY')]);
@@ -115,7 +120,7 @@ const questV2State = t.Union(
   questV2States.map((value) => t.Literal(value)) as [
     ReturnType<typeof t.Literal<string>>,
     ...ReturnType<typeof t.Literal<string>>[],
-  ],
+  ]
 );
 
 export const questV2CompletionConfirmationResponseSchema = t.Object({
@@ -136,7 +141,9 @@ export const questV2ProofSubmissionReviewResponseSchema = t.Object({
 });
 
 export type QuestV2ProofSubmissionParams = Static<typeof questV2ProofSubmissionParamsSchema>;
-export type QuestV2ProofSubmissionDetailParams = Static<typeof questV2ProofSubmissionDetailParamsSchema>;
+export type QuestV2ProofSubmissionDetailParams = Static<
+  typeof questV2ProofSubmissionDetailParamsSchema
+>;
 export type QuestV2ProofSubmissionCreateInput = Static<typeof questV2ProofSubmissionCreateSchema>;
 export type QuestV2ProofSubmissionEditInput = Static<typeof questV2ProofSubmissionEditSchema>;
 export type QuestV2ProofSubmissionReviewInput = Static<typeof questV2ProofSubmissionReviewSchema>;

@@ -43,18 +43,19 @@ export type PayoutDestinationEncryptionOptions = {
 };
 
 const keyBytes = (material: PayoutDestinationKeyMaterial): Buffer => {
-  const bytes = material instanceof Uint8Array
-    ? Buffer.from(material)
-    : material.length === 32
-      ? Buffer.from(material, 'utf8')
-      : /^[0-9a-f]{64}$/i.test(material)
-        ? Buffer.from(material, 'hex')
-        : Buffer.from(material, 'base64url');
+  const bytes =
+    material instanceof Uint8Array
+      ? Buffer.from(material)
+      : material.length === 32
+        ? Buffer.from(material, 'utf8')
+        : /^[0-9a-f]{64}$/i.test(material)
+          ? Buffer.from(material, 'hex')
+          : Buffer.from(material, 'base64url');
 
   if (bytes.length !== 32) {
     throw new PayoutDestinationEncryptionError(
       'PAYOUT_DESTINATION_KEY_UNAVAILABLE',
-      'Payout Destination encryption key must contain 32 bytes.',
+      'Payout Destination encryption key must contain 32 bytes.'
     );
   }
 
@@ -63,13 +64,13 @@ const keyBytes = (material: PayoutDestinationKeyMaterial): Buffer => {
 
 const getEncryptionKeyForVersion = (
   keys: ReadonlyMap<string, PayoutDestinationKeyMaterial>,
-  version: string,
+  version: string
 ): Buffer => {
   const material = keys.get(version);
   if (material === undefined) {
     throw new PayoutDestinationEncryptionError(
       'PAYOUT_DESTINATION_KEY_VERSION_UNKNOWN',
-      'Payout Destination encryption key version is not available.',
+      'Payout Destination encryption key version is not available.'
     );
   }
 
@@ -77,10 +78,9 @@ const getEncryptionKeyForVersion = (
 };
 
 export const createPayoutDestinationEncryption = (
-  options: PayoutDestinationEncryptionOptions = {},
+  options: PayoutDestinationEncryptionOptions = {}
 ): PayoutDestinationEncryption => {
-  const activeKeyVersion = options.activeKeyVersion
-    ?? env.payoutDestinationEncryptionKeyVersion;
+  const activeKeyVersion = options.activeKeyVersion ?? env.payoutDestinationEncryptionKeyVersion;
   const keys = new Map<string, PayoutDestinationKeyMaterial>(Object.entries(options.keys ?? {}));
 
   if (options.keys === undefined && env.payoutDestinationEncryptionKey) {
@@ -97,14 +97,14 @@ export const createPayoutDestinationEncryption = (
           if (error.code === 'PAYOUT_DESTINATION_KEY_VERSION_UNKNOWN') {
             throw new PayoutDestinationEncryptionError(
               'PAYOUT_DESTINATION_KEY_UNAVAILABLE',
-              'Payout Destination encryption key is not configured.',
+              'Payout Destination encryption key is not configured.'
             );
           }
           throw error;
         }
         throw new PayoutDestinationEncryptionError(
           'PAYOUT_DESTINATION_KEY_UNAVAILABLE',
-          'Payout Destination encryption key is not configured.',
+          'Payout Destination encryption key is not configured.'
         );
       }
 
@@ -122,7 +122,7 @@ export const createPayoutDestinationEncryption = (
       } catch {
         throw new PayoutDestinationEncryptionError(
           'PAYOUT_DESTINATION_ENCRYPTION_FAILED',
-          'Payout Destination encryption failed.',
+          'Payout Destination encryption failed.'
         );
       }
     },
@@ -148,7 +148,7 @@ export const createPayoutDestinationEncryption = (
       } catch {
         throw new PayoutDestinationEncryptionError(
           'PAYOUT_DESTINATION_AUTHENTICATION_FAILED',
-          'Payout Destination authentication failed.',
+          'Payout Destination authentication failed.'
         );
       }
     },

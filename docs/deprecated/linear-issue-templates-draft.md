@@ -63,13 +63,13 @@ This makes filtering and automation ambiguous. For example, `needs-qa` can mean 
 
 Create each as a **team template**, not a workspace template, because team templates can preset team-specific statuses, labels, estimates and sub-issues. Use form templates only for human-created intake where mandatory fields materially prevent incomplete tickets.
 
-| Team | Template | Default labels | Estimate | QA webhook |
-|---|---|---|---:|---|
-| Frontend | Frontend Implementation | `Role/Implementation`, `Type/Feature`, `Agent State/ready-for-agent`, `QA Policy/Required`, selected `Surface/*` | Required before scheduling | Eligible on `Ready for QA` |
-| Backend | Backend Implementation | `Role/Implementation`, `Type/Feature`, `Agent State/ready-for-agent`, `QA Policy/Required` | Required before scheduling | Eligible on `Ready for QA` |
-| Mobile work in Frontend | Mobile Implementation | `Role/Implementation`, `Type/Feature`, `Agent State/ready-for-agent`, `QA Policy/Required`, `Surface/Mobile` | Required before scheduling | Eligible on `Ready for QA` |
-| QA automation in Tester/QA | QA Design / Automation | `Role/QA Automation`, selected `Test Type/*` only when useful | Required for workload only | Not eligible |
-| Tester/QA | Manual Verification | `Role/Verification`, inherited `Surface/*` | None | Destination only |
+| Team                       | Template                | Default labels                                                                                                   |                   Estimate | QA webhook                 |
+| -------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------: | -------------------------- |
+| Frontend                   | Frontend Implementation | `Role/Implementation`, `Type/Feature`, `Agent State/ready-for-agent`, `QA Policy/Required`, selected `Surface/*` | Required before scheduling | Eligible on `Ready for QA` |
+| Backend                    | Backend Implementation  | `Role/Implementation`, `Type/Feature`, `Agent State/ready-for-agent`, `QA Policy/Required`                       | Required before scheduling | Eligible on `Ready for QA` |
+| Mobile work in Frontend    | Mobile Implementation   | `Role/Implementation`, `Type/Feature`, `Agent State/ready-for-agent`, `QA Policy/Required`, `Surface/Mobile`     | Required before scheduling | Eligible on `Ready for QA` |
+| QA automation in Tester/QA | QA Design / Automation  | `Role/QA Automation`, selected `Test Type/*` only when useful                                                    | Required for workload only | Not eligible               |
+| Tester/QA                  | Manual Verification     | `Role/Verification`, inherited `Surface/*`                                                                       |                       None | Destination only           |
 
 ## Recommended label taxonomy
 
@@ -79,12 +79,12 @@ Linear label groups allow only one child label from a group on an issue. Use a g
 
 Mutually exclusive and required on structured work.
 
-| Label | Meaning | Default teams/templates |
-|---|---|---|
-| `Role/Spec` | PRD, feature map or decision/spec parent; not executable work | Docs or any team creating specs |
-| `Role/Implementation` | Agent/human-sized build slice that can produce a PR | Backend, Frontend, Mobile template |
-| `Role/QA Automation` | Test design, automation or QA infrastructure work | Tester/QA QA template |
-| `Role/Verification` | Manual acceptance execution against an exact build | Tester/QA webhook destination |
+| Label                 | Meaning                                                       | Default teams/templates            |
+| --------------------- | ------------------------------------------------------------- | ---------------------------------- |
+| `Role/Spec`           | PRD, feature map or decision/spec parent; not executable work | Docs or any team creating specs    |
+| `Role/Implementation` | Agent/human-sized build slice that can produce a PR           | Backend, Frontend, Mobile template |
+| `Role/QA Automation`  | Test design, automation or QA infrastructure work             | Tester/QA QA template              |
+| `Role/Verification`   | Manual acceptance execution against an exact build            | Tester/QA webhook destination      |
 
 Why workspace-scoped: the webhook, S-curve and multi-team views need the same meaning across Backend, Frontend and Tester/QA.
 
@@ -94,14 +94,14 @@ Do not add `Role/Defect`. A bug that is ready to be fixed is still `Role/Impleme
 
 Migrate the current flat labels into one mutually exclusive group:
 
-| New label | Existing label | Use |
-|---|---|---|
-| `Type/Feature` | `feature` | New user/domain capability |
-| `Type/Bug` | `bug` | Confirmed incorrect behavior to fix |
-| `Type/Refactor` | `refactor` | Behavior-preserving design improvement |
-| `Type/Docs` | `docs` | Documentation artifact |
-| `Type/Design` | `design` | Product/UI/technical design work |
-| `Type/Infrastructure` | New | CI/CD, environments, storage, observability or developer infrastructure |
+| New label             | Existing label | Use                                                                     |
+| --------------------- | -------------- | ----------------------------------------------------------------------- |
+| `Type/Feature`        | `feature`      | New user/domain capability                                              |
+| `Type/Bug`            | `bug`          | Confirmed incorrect behavior to fix                                     |
+| `Type/Refactor`       | `refactor`     | Behavior-preserving design improvement                                  |
+| `Type/Docs`           | `docs`         | Documentation artifact                                                  |
+| `Type/Design`         | `design`       | Product/UI/technical design work                                        |
+| `Type/Infrastructure` | New            | CI/CD, environments, storage, observability or developer infrastructure |
 
 Add `Type/Infrastructure` because current Backend work includes migrations, CI/CD, local object storage and operational tooling that should not be mislabeled as a product feature or refactor.
 
@@ -111,12 +111,12 @@ Do not add separate `chore`, `task`, `enhancement` or `technical-debt` labels ye
 
 Use this group only for pre-execution routing. Remove the label when the issue begins implementation if the runner does not do this automatically.
 
-| Label | Meaning |
-|---|---|
-| `Agent State/needs-triage` | Raw inbound issue not yet classified |
-| `Agent State/needs-info` | Missing a decision or fact required for implementation |
-| `Agent State/ready-for-agent` | Complete enough for an implementation agent |
-| `Agent State/ready-for-human` | Requires human judgment, access or manual action |
+| Label                         | Meaning                                                |
+| ----------------------------- | ------------------------------------------------------ |
+| `Agent State/needs-triage`    | Raw inbound issue not yet classified                   |
+| `Agent State/needs-info`      | Missing a decision or fact required for implementation |
+| `Agent State/ready-for-agent` | Complete enough for an implementation agent            |
+| `Agent State/ready-for-human` | Requires human judgment, access or manual action       |
 
 These names preserve Matt Pocock's canonical triage roles. If the installed workflow maps roles to different physical label strings, record the mapping in repository agent documentation rather than maintaining two equivalent labels.
 
@@ -126,10 +126,10 @@ Do not use `Agent State` as progress. Status remains the source for Backlog/Todo
 
 Mutually exclusive on implementation issues only.
 
-| Label | Meaning | Webhook behavior |
-|---|---|---|
-| `QA Policy/Required` | Human QA must gate delivery | Create a verification round on eligible `Ready for QA` transition |
-| `QA Policy/Exempt` | Human QA intentionally bypassed | Skip with recorded exemption reason |
+| Label                | Meaning                         | Webhook behavior                                                  |
+| -------------------- | ------------------------------- | ----------------------------------------------------------------- |
+| `QA Policy/Required` | Human QA must gate delivery     | Create a verification round on eligible `Ready for QA` transition |
+| `QA Policy/Exempt`   | Human QA intentionally bypassed | Skip with recorded exemption reason                               |
 
 Migrate `needs-qa` to `QA Policy/Required`. Do not apply this group to the generated Tester issue; `Role/Verification` already identifies its purpose.
 
@@ -139,10 +139,10 @@ Require a reason in the issue or approval comment whenever `QA Policy/Exempt` is
 
 Use on Frontend/Mobile issues and copy it to Tester verification issues. It is optional on Backend issues because the Backend team already supplies the technical ownership dimension.
 
-| Label | Use |
-|---|---|
-| `Surface/Mobile` | Student-facing mobile application |
-| `Surface/Admin Web` | Admin browser application |
+| Label                   | Use                                                                     |
+| ----------------------- | ----------------------------------------------------------------------- |
+| `Surface/Mobile`        | Student-facing mobile application                                       |
+| `Surface/Admin Web`     | Admin browser application                                               |
 | `Surface/Cross-surface` | One approved vertical slice genuinely changes both Mobile and Admin Web |
 
 Do not add `Surface/API`; Backend team membership already represents that ownership, and API behavior can serve multiple product surfaces.
@@ -153,12 +153,12 @@ Why keep an issue-level Surface group even though project labels already have Mo
 
 Do not preload a large testing taxonomy. Start with labels that change assignment, environment or reporting:
 
-| Label | Use |
-|---|---|
-| `Test Type/API` | API/contract verification or automation |
-| `Test Type/Mobile` | Mobile device/build verification |
-| `Test Type/Web` | Browser/admin verification |
-| `Test Type/E2E` | Cross-service/user-journey automation |
+| Label              | Use                                     |
+| ------------------ | --------------------------------------- |
+| `Test Type/API`    | API/contract verification or automation |
+| `Test Type/Mobile` | Mobile device/build verification        |
+| `Test Type/Web`    | Browser/admin verification              |
+| `Test Type/E2E`    | Cross-service/user-journey automation   |
 
 These values are sometimes multi-dimensional—for example a Mobile E2E test. Therefore, do **not** place them in one mutually exclusive Linear label group if the team needs combinations. In that case keep independent team labels named `test:api`, `test:mobile`, `test:web`, and `test:e2e` instead.
 
@@ -166,11 +166,11 @@ Recommendation for the current team: defer these labels until Tester/QA has enou
 
 ## Labels to retire or convert to statuses
 
-| Current label | Recommendation | Reason |
-|---|---|---|
-| `needs-retests` | Replace with immutable `Failed` verification rounds and a new round after the source is fixed | It is a changing workflow state, not stable classification |
-| `bug-found` | Replace with Tester/QA status `Failed` plus linked `Type/Bug` issue | A label does not capture result history or defect relationship |
-| `needs-qa` | Migrate to `QA Policy/Required` on source Dev issue | Removes ambiguity between policy and queue state |
+| Current label   | Recommendation                                                                                | Reason                                                         |
+| --------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `needs-retests` | Replace with immutable `Failed` verification rounds and a new round after the source is fixed | It is a changing workflow state, not stable classification     |
+| `bug-found`     | Replace with Tester/QA status `Failed` plus linked `Type/Bug` issue                           | A label does not capture result history or defect relationship |
+| `needs-qa`      | Migrate to `QA Policy/Required` on source Dev issue                                           | Removes ambiguity between policy and queue state               |
 
 Keep the existing labels temporarily during webhook migration. Backfill relations and update the automation before merging/deleting labels.
 
@@ -182,19 +182,19 @@ Project labels should describe properties shared by the whole project. Do not re
 
 Mutually exclusive and required for every project.
 
-| Label | Migrate from | Projects |
-|---|---|---|
-| `Scope/Product` | `Feature` | Auth & Profile, Admin Infra, Quest Core, Quest Lifecycle, Quest Application & Fulfillment, Wallet & Payments, Trust & Safety, Messaging & Notifications |
-| `Scope/Course` | `Document` | Course Deliverables |
+| Label           | Migrate from | Projects                                                                                                                                                |
+| --------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Scope/Product` | `Feature`    | Auth & Profile, Admin Infra, Quest Core, Quest Lifecycle, Quest Application & Fulfillment, Wallet & Payments, Trust & Safety, Messaging & Notifications |
+| `Scope/Course`  | `Document`   | Course Deliverables                                                                                                                                     |
 
 This group becomes the reliable inclusion rule for the whole-app S-curve. Do not infer application scope from project names or all projects in the workspace.
 
 ### Project surface labels: keep independent
 
-| Label | Projects |
-|---|---|
-| `Mobile` | Auth & Profile, Quest Core, Quest Lifecycle, Quest Application & Fulfillment, Wallet & Payments, Trust & Safety, Messaging & Notifications |
-| `Web` or rename to `Admin Web` | Admin Infra, Wallet & Payments, Trust & Safety |
+| Label                          | Projects                                                                                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Mobile`                       | Auth & Profile, Quest Core, Quest Lifecycle, Quest Application & Fulfillment, Wallet & Payments, Trust & Safety, Messaging & Notifications |
+| `Web` or rename to `Admin Web` | Admin Infra, Wallet & Payments, Trust & Safety                                                                                             |
 
 Do not put Mobile and Web into one mutually exclusive project-label group because Wallet & Payments and Trust & Safety legitimately have both.
 
@@ -210,14 +210,14 @@ Rename `Web` to `Admin Web` only if there is no separate public web product plan
 
 ## Label ownership by scope
 
-| Scope | Labels |
-|---|---|
-| Workspace issue labels | `Role/*`, `Type/*`, `Agent State/*`, `QA Policy/*`, `Surface/*` |
-| Backend team only | No additional labels initially |
-| Frontend team only | No additional labels initially; use workspace `Surface/*` |
-| Tester/QA team only | Optional independent `test:*` labels after demonstrated routing need |
-| Docs team only | No additional labels initially; use `Role/Spec` or `Role/Implementation` with `Type/Docs`/`Type/Design` |
-| Project labels | `Scope/*`, plus independent Mobile and Admin Web surface labels |
+| Scope                  | Labels                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------- |
+| Workspace issue labels | `Role/*`, `Type/*`, `Agent State/*`, `QA Policy/*`, `Surface/*`                                         |
+| Backend team only      | No additional labels initially                                                                          |
+| Frontend team only     | No additional labels initially; use workspace `Surface/*`                                               |
+| Tester/QA team only    | Optional independent `test:*` labels after demonstrated routing need                                    |
+| Docs team only         | No additional labels initially; use `Role/Spec` or `Role/Implementation` with `Type/Docs`/`Type/Design` |
+| Project labels         | `Scope/*`, plus independent Mobile and Admin Web surface labels                                         |
 
 ## Migration order
 
@@ -286,12 +286,12 @@ Planned Value is cumulative baseline points whose resolved planned date is on or
 
 Earned Value is binary per eligible issue:
 
-| Issue policy/role | Earn condition |
-|---|---|
-| `Role/Implementation` + `QA Policy/Required` | Latest verification round is Passed and source issue is Done |
-| `Role/Implementation` + `QA Policy/Exempt` | Source issue is Done and the exemption reason is recorded |
-| `Role/QA Automation` | QA automation issue is Done |
-| `Role/Verification`, `Role/Spec`, QA-failure rework | Never contributes independent EV |
+| Issue policy/role                                   | Earn condition                                               |
+| --------------------------------------------------- | ------------------------------------------------------------ |
+| `Role/Implementation` + `QA Policy/Required`        | Latest verification round is Passed and source issue is Done |
+| `Role/Implementation` + `QA Policy/Exempt`          | Source issue is Done and the exemption reason is recorded    |
+| `Role/QA Automation`                                | QA automation issue is Done                                  |
+| `Role/Verification`, `Role/Spec`, QA-failure rework | Never contributes independent EV                             |
 
 Do not assign partial EV for In Progress, `Ready for QA`, QA in progress, or Failed. Project and workspace progress reach 100% when eligible EV equals eligible current scope.
 
@@ -720,8 +720,8 @@ Template body:
 
 ## Risk assessment
 
-| Risk | Likelihood | Impact | Coverage response |
-|---|---|---|---|
+| Risk          | Likelihood   | Impact       | Coverage response          |
+| ------------- | ------------ | ------------ | -------------------------- |
 | <!-- Risk --> | Low/Med/High | Low/Med/High | <!-- Test/monitor/gate --> |
 
 ## Scope
@@ -746,8 +746,8 @@ Template body:
 ## Coverage matrix
 
 | Requirement/behavior | Positive | Negative | Boundary | Recovery | Automated/manual |
-|---|---:|---:|---:|---:|---|
-| <!-- Behavior --> | Yes/No | Yes/No | Yes/No | Yes/No | <!-- Type --> |
+| -------------------- | -------: | -------: | -------: | -------: | ---------------- |
+| <!-- Behavior -->    |   Yes/No |   Yes/No |   Yes/No |   Yes/No | <!-- Type -->    |
 
 ## Acceptance criteria
 
@@ -997,15 +997,15 @@ Generated defaults:
 
 # Template selection rules
 
-| Situation | Template |
-|---|---|
-| Agent-sized web UI behavior | Frontend Implementation |
-| Agent-sized API/domain behavior | Backend Implementation |
-| Android/iOS journey | Mobile Implementation |
-| Design or implementation of test coverage | QA Design / Test Automation |
-| Execute acceptance against a finished Dev build | Tester Manual Verification |
-| Report a failure found during verification | Bug / Defect |
-| Broad feature decision/spec | None of these; use a spec/PRD template with `Role/Spec` |
+| Situation                                       | Template                                                |
+| ----------------------------------------------- | ------------------------------------------------------- |
+| Agent-sized web UI behavior                     | Frontend Implementation                                 |
+| Agent-sized API/domain behavior                 | Backend Implementation                                  |
+| Android/iOS journey                             | Mobile Implementation                                   |
+| Design or implementation of test coverage       | QA Design / Test Automation                             |
+| Execute acceptance against a finished Dev build | Tester Manual Verification                              |
+| Report a failure found during verification      | Bug / Defect                                            |
+| Broad feature decision/spec                     | None of these; use a spec/PRD template with `Role/Spec` |
 
 # Workflow relationship
 

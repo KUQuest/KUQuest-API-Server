@@ -1,22 +1,25 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import {
-  quest,
-  questAssignment,
-  review,
-} from '@/database/schema/quest.schema';
+import { quest, questAssignment, review } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
-import {
-  createQuestV2Review,
-  updateQuestV2Review,
-} from '@/modules/quest/quest-review-v2.service';
+import { createQuestV2Review, updateQuestV2Review } from '@/modules/quest/quest-review-v2.service';
 
 import { randomUUID } from 'node:crypto';
 
 import { eq, inArray } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test';
 
 const hirer = {
   id: randomUUID(),
@@ -51,54 +54,60 @@ type TestQuestStatus = (typeof terminalStatuses)[number] | 'QUEST_IN_PROGRESS';
 let postgresAvailable = false;
 let reviewSchemaAvailable = false;
 
-const authenticate = () => spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => {
-  const member = members.find(({ id }) => id === headers.get('x-member-id'));
-  if (!member) return null;
-  return { user: member, session: { userId: member.id } } as never;
-}) as never);
+const authenticate = () =>
+  spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => {
+    const member = members.find(({ id }) => id === headers.get('x-member-id'));
+    if (!member) return null;
+    return { user: member, session: { userId: member.id } } as never;
+  }) as never);
 
 const request = (
   method: string,
   path: string,
   memberId: string,
   body?: unknown,
-  headers: HeadersInit = {},
-) => app.handle(new Request(`http://localhost${path}`, {
-  method,
-  headers: {
-    'x-member-id': memberId,
-    ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-    ...headers,
-  },
-  body: body === undefined ? undefined : JSON.stringify(body),
-}));
+  headers: HeadersInit = {}
+) =>
+  app.handle(
+    new Request(`http://localhost${path}`, {
+      method,
+      headers: {
+        'x-member-id': memberId,
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...headers,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  );
 
-const jsonBody = async (response: Response) => await response.json() as {
-  success: boolean;
-  data?: Record<string, unknown>;
-  error?: { code: string; message: string };
-};
+const jsonBody = async (response: Response) =>
+  (await response.json()) as {
+    success: boolean;
+    data?: Record<string, unknown>;
+    error?: { code: string; message: string };
+  };
 
-const commandKey = (name: string, questId: string) => `review-v2-${name}-${questId}-${randomUUID()}`;
+const commandKey = (name: string, questId: string) =>
+  `review-v2-${name}-${questId}-${randomUUID()}`;
 
 const createQuest = async (
   questStatus: TestQuestStatus,
   assignmentWorkerIds = [worker.id],
-  overrides: Partial<typeof quest.$inferInsert> = {},
+  overrides: Partial<typeof quest.$inferInsert> = {}
 ) => {
   const questId = randomUUID();
   questIds.push(questId);
   const group = assignmentWorkerIds.length > 1 || overrides.v2Participation === 'GROUP';
-  const terminalAt = overrides.updatedAt instanceof Date
-    ? overrides.updatedAt
-    : new Date(Date.now() - 1_000);
-  const assignmentStatus = questStatus === 'QUEST_COMPLETED'
-    ? 'ASSIGNMENT_COMPLETED'
-    : questStatus === 'QUEST_FAILED'
-      ? 'ASSIGNMENT_INCOMPLETE'
-      : questStatus === 'QUEST_CANCELLED'
-        ? 'ASSIGNMENT_CANCELLED'
-        : 'ASSIGNMENT_ACTIVE';
+  const terminalAt =
+    overrides.updatedAt instanceof Date ? overrides.updatedAt : new Date(Date.now() - 1_000);
+  const assignmentStatus =
+    questStatus === 'QUEST_COMPLETED'
+      ? 'ASSIGNMENT_COMPLETED'
+      : questStatus === 'QUEST_FAILED'
+        ? 'ASSIGNMENT_INCOMPLETE'
+        : questStatus === 'QUEST_CANCELLED'
+          ? 'ASSIGNMENT_CANCELLED'
+          : 'ASSIGNMENT_ACTIVE';
 
   await db.insert(quest).values({
     id: questId,
@@ -124,17 +133,21 @@ const createQuest = async (
     failedAt: overrides.failedAt ?? (questStatus === 'QUEST_FAILED' ? terminalAt : null),
     cancelledAt: questStatus === 'QUEST_CANCELLED' ? terminalAt : null,
   });
-  await db.insert(questAssignment).values(assignmentWorkerIds.map((workerId) => ({
-    questId,
-    workerId,
-    assignmentStatus,
-    startedAt: new Date(terminalAt.getTime() - 2 * 60 * 60 * 1000),
-    createdAt: new Date(terminalAt.getTime() - 2 * 60 * 60 * 1000),
-  })));
+  await db.insert(questAssignment).values(
+    assignmentWorkerIds.map((workerId) => ({
+      questId,
+      workerId,
+      assignmentStatus,
+      startedAt: new Date(terminalAt.getTime() - 2 * 60 * 60 * 1000),
+      createdAt: new Date(terminalAt.getTime() - 2 * 60 * 60 * 1000),
+    }))
+  );
   return questId;
 };
 
-const terminalStatusRows: Array<[typeof terminalStatuses[number]]> = terminalStatuses.map((status) => [status]);
+const terminalStatusRows: Array<[(typeof terminalStatuses)[number]]> = terminalStatuses.map(
+  (status) => [status]
+);
 
 beforeAll(async () => {
   try {
@@ -143,7 +156,7 @@ beforeAll(async () => {
     const [tables] = await sql<{ review: string | null; command: string | null }[]>`
       select
         to_regclass('public.review') as review,
-        to_regclass('public.quest_v2_review_command') as command
+        to_regclass('public.quest_command') as command
     `;
     reviewSchemaAvailable = tables?.review !== null && tables?.command !== null;
   } catch {
@@ -174,72 +187,129 @@ afterEach(async () => {
 afterAll(async () => {
   if (!postgresAvailable || !reviewSchemaAvailable) return;
   await db.delete(tag).where(eq(tag.id, tagId));
-  await db.delete(authUser).where(inArray(authUser.id, members.map(({ id }) => id)));
+  await db.delete(authUser).where(
+    inArray(
+      authUser.id,
+      members.map(({ id }) => id)
+    )
+  );
 });
 
 describe('Quest Review API v2 behavior', () => {
-  it.each(terminalStatusRows)('accepts a Review after %s and exposes it through Profile reads', async (questStatus) => {
-    if (!postgresAvailable || !reviewSchemaAvailable) return;
-    const questId = await createQuest(questStatus);
+  it.each(terminalStatusRows)(
+    'accepts a Review after %s and exposes it through Profile reads',
+    async (questStatus) => {
+      if (!postgresAvailable || !reviewSchemaAvailable) return;
+      const questId = await createQuest(questStatus);
 
-    const hirerReview = await request(
+      const hirerReview = await request(
+        'POST',
+        `/api/v2/quests/${questId}/reviews`,
+        hirer.id,
+        { revieweeId: worker.id, rating: 5, comment: '  Good work  ' },
+        { 'idempotency-key': commandKey('hirer', questId) }
+      );
+      expect(hirerReview.status).toBe(200);
+      const hirerReviewBody = await jsonBody(hirerReview);
+      expect(hirerReviewBody.data).toMatchObject({
+        questId,
+        reviewerId: hirer.id,
+        revieweeId: worker.id,
+        rating: 5,
+        comment: 'Good work',
+      });
+
+      const workerReview = await request(
+        'POST',
+        `/api/v2/quests/${questId}/reviews`,
+        worker.id,
+        { rating: 4, comment: '  Clear communication  ' },
+        { 'idempotency-key': commandKey('worker', questId) }
+      );
+      expect(workerReview.status).toBe(200);
+      expect((await jsonBody(workerReview)).data).toMatchObject({
+        questId,
+        reviewerId: worker.id,
+        revieweeId: hirer.id,
+        rating: 4,
+        comment: 'Clear communication',
+      });
+
+      const profileReviews = await request('GET', `/api/v1/profile/${worker.id}/reviews`, hirer.id);
+      expect(profileReviews.status).toBe(200);
+      const profileReviewsBody = await jsonBody(profileReviews);
+      expect(profileReviewsBody.data?.items).toEqual([
+        expect.objectContaining({
+          id: hirerReviewBody.data?.id,
+          rating: 5,
+          comment: 'Good work',
+          quest: { id: questId, title: 'Rating Review v2 behavior Quest' },
+        }),
+      ]);
+
+      const reputation = await request('GET', '/api/v1/profile/reputation', worker.id);
+      expect(reputation.status).toBe(200);
+      expect((await jsonBody(reputation)).data).toMatchObject({
+        rating: {
+          average: 5,
+          count: 1,
+          distribution: { '5': 1, '4': 0, '3': 0, '2': 0, '1': 0 },
+        },
+      });
+    }
+  );
+
+  it('allows two Members to use the same Idempotency-Key for their own Reviews', async () => {
+    if (!postgresAvailable || !reviewSchemaAvailable) return;
+    const questId = await createQuest('QUEST_COMPLETED');
+    const key = commandKey('shared-member-key', questId);
+
+    const hirerResponse = await request(
       'POST',
       `/api/v2/quests/${questId}/reviews`,
       hirer.id,
-      { revieweeId: worker.id, rating: 5, comment: '  Good work  ' },
-      { 'idempotency-key': commandKey('hirer', questId) },
+      { revieweeId: worker.id, rating: 5 },
+      { 'idempotency-key': key }
     );
-    expect(hirerReview.status).toBe(200);
-    const hirerReviewBody = await jsonBody(hirerReview);
-    expect(hirerReviewBody.data).toMatchObject({
-      questId,
+    expect(hirerResponse.status).toBe(200);
+    expect((await jsonBody(hirerResponse)).data).toMatchObject({
       reviewerId: hirer.id,
       revieweeId: worker.id,
       rating: 5,
-      comment: 'Good work',
     });
 
-    const workerReview = await request(
+    const workerResponse = await request(
       'POST',
       `/api/v2/quests/${questId}/reviews`,
       worker.id,
-      { rating: 4, comment: '  Clear communication  ' },
-      { 'idempotency-key': commandKey('worker', questId) },
+      { rating: 4 },
+      { 'idempotency-key': key }
     );
-    expect(workerReview.status).toBe(200);
-    expect((await jsonBody(workerReview)).data).toMatchObject({
-      questId,
+    expect(workerResponse.status).toBe(200);
+    expect((await jsonBody(workerResponse)).data).toMatchObject({
       reviewerId: worker.id,
       revieweeId: hirer.id,
       rating: 4,
-      comment: 'Clear communication',
     });
 
-    const profileReviews = await request(
-      'GET',
-      `/api/v1/profile/${worker.id}/reviews`,
+    expect(
+      await db.select({ id: review.id }).from(review).where(eq(review.questId, questId))
+    ).toHaveLength(2);
+  });
+
+  it('rejects an over-length Idempotency-Key through Quest Command validation', async () => {
+    if (!postgresAvailable || !reviewSchemaAvailable) return;
+    const questId = await createQuest('QUEST_COMPLETED');
+    const response = await request(
+      'POST',
+      `/api/v2/quests/${questId}/reviews`,
       hirer.id,
+      { revieweeId: worker.id, rating: 5 },
+      { 'idempotency-key': 'x'.repeat(201) }
     );
-    expect(profileReviews.status).toBe(200);
-    const profileReviewsBody = await jsonBody(profileReviews);
-    expect(profileReviewsBody.data?.items).toEqual([
-      expect.objectContaining({
-        id: hirerReviewBody.data?.id,
-        rating: 5,
-        comment: 'Good work',
-        quest: { id: questId, title: 'Rating Review v2 behavior Quest' },
-      }),
-    ]);
 
-    const reputation = await request('GET', '/api/v1/profile/reputation', worker.id);
-    expect(reputation.status).toBe(200);
-    expect((await jsonBody(reputation)).data).toMatchObject({
-      rating: {
-        average: 5,
-        count: 1,
-        distribution: { '5': 1, '4': 0, '3': 0, '2': 0, '1': 0 },
-      },
-    });
+    expect(response.status).toBe(400);
+    expect((await jsonBody(response)).error?.code).toBe('INVALID_IDEMPOTENCY_KEY');
   });
 
   it('keeps GROUP Reviews pair-scoped and rejects Worker-to-Worker Reviews', async () => {
@@ -255,18 +325,21 @@ describe('Quest Review API v2 behavior', () => {
         `/api/v2/quests/${questId}/reviews`,
         reviewerId,
         { revieweeId, rating: 5 },
-        { 'idempotency-key': commandKey(name, questId) },
+        { 'idempotency-key': commandKey(name, questId) }
       );
       expect(response.status).toBe(200);
     }
 
-    for (const [reviewerId, name] of [[worker.id, 'worker-one'], [secondWorker.id, 'worker-two']] as const) {
+    for (const [reviewerId, name] of [
+      [worker.id, 'worker-one'],
+      [secondWorker.id, 'worker-two'],
+    ] as const) {
       const response = await request(
         'POST',
         `/api/v2/quests/${questId}/reviews`,
         reviewerId,
         { rating: 4 },
-        { 'idempotency-key': commandKey(name, questId) },
+        { 'idempotency-key': commandKey(name, questId) }
       );
       expect(response.status).toBe(200);
     }
@@ -276,12 +349,14 @@ describe('Quest Review API v2 behavior', () => {
       `/api/v2/quests/${questId}/reviews`,
       worker.id,
       { revieweeId: secondWorker.id, rating: 1 },
-      { 'idempotency-key': commandKey('worker-to-worker', questId) },
+      { 'idempotency-key': commandKey('worker-to-worker', questId) }
     );
     expect(workerToWorker.status).toBe(403);
     expect((await jsonBody(workerToWorker)).error?.code).toBe('REVIEW_NOT_ALLOWED');
 
-    expect(await db.select({ id: review.id }).from(review).where(eq(review.questId, questId))).toHaveLength(4);
+    expect(
+      await db.select({ id: review.id }).from(review).where(eq(review.questId, questId))
+    ).toHaveLength(4);
   });
 
   it('does not accept a Review before the Quest reaches a Terminal State', async () => {
@@ -293,11 +368,13 @@ describe('Quest Review API v2 behavior', () => {
       `/api/v2/quests/${questId}/reviews`,
       hirer.id,
       { revieweeId: worker.id, rating: 5 },
-      { 'idempotency-key': commandKey('before-terminal', questId) },
+      { 'idempotency-key': commandKey('before-terminal', questId) }
     );
     expect(response.status).toBe(409);
     expect((await jsonBody(response)).error?.code).toBe('QUEST_NOT_TERMINAL');
-    expect(await db.select({ id: review.id }).from(review).where(eq(review.questId, questId))).toHaveLength(0);
+    expect(
+      await db.select({ id: review.id }).from(review).where(eq(review.questId, questId))
+    ).toHaveLength(0);
   });
 
   it('replays a create, rejects key reuse, and keeps one direction under concurrency', async () => {
@@ -323,7 +400,7 @@ describe('Quest Review API v2 behavior', () => {
       `/api/v2/quests/${questId}/reviews`,
       hirer.id,
       { revieweeId: worker.id, rating: 4, comment: 'Changed' },
-      { 'idempotency-key': key },
+      { 'idempotency-key': key }
     );
     expect(reused.status).toBe(409);
     expect((await jsonBody(reused)).error?.code).toBe('IDEMPOTENCY_KEY_REUSED');
@@ -335,18 +412,20 @@ describe('Quest Review API v2 behavior', () => {
         `/api/v2/quests/${concurrentQuestId}/reviews`,
         hirer.id,
         { revieweeId: worker.id, rating: 5 },
-        { 'idempotency-key': commandKey('concurrent-one', concurrentQuestId) },
+        { 'idempotency-key': commandKey('concurrent-one', concurrentQuestId) }
       ),
       request(
         'POST',
         `/api/v2/quests/${concurrentQuestId}/reviews`,
         hirer.id,
         { revieweeId: worker.id, rating: 4 },
-        { 'idempotency-key': commandKey('concurrent-two', concurrentQuestId) },
+        { 'idempotency-key': commandKey('concurrent-two', concurrentQuestId) }
       ),
     ]);
     expect(concurrentResponses.map(({ status }) => status).sort()).toEqual([200, 409]);
-    expect(await db.select({ id: review.id }).from(review).where(eq(review.questId, concurrentQuestId))).toHaveLength(1);
+    expect(
+      await db.select({ id: review.id }).from(review).where(eq(review.questId, concurrentQuestId))
+    ).toHaveLength(1);
   });
 
   it('allows only the author to edit and recalculates Reputation immediately', async () => {
@@ -357,7 +436,7 @@ describe('Quest Review API v2 behavior', () => {
       `/api/v2/quests/${questId}/reviews`,
       hirer.id,
       { revieweeId: worker.id, rating: 5, comment: 'Initial' },
-      { 'idempotency-key': commandKey('edit-create', questId) },
+      { 'idempotency-key': commandKey('edit-create', questId) }
     );
     const createdBody = await jsonBody(created);
     const reviewId = createdBody.data?.id as string;
@@ -367,7 +446,7 @@ describe('Quest Review API v2 behavior', () => {
       `/api/v2/quests/${questId}/reviews/${reviewId}`,
       worker.id,
       { rating: 1 },
-      { 'idempotency-key': commandKey('edit-not-author', questId) },
+      { 'idempotency-key': commandKey('edit-not-author', questId) }
     );
     expect(nonAuthor.status).toBe(403);
     expect((await jsonBody(nonAuthor)).error?.code).toBe('REVIEW_NOT_ALLOWED');
@@ -377,7 +456,7 @@ describe('Quest Review API v2 behavior', () => {
       `/api/v2/quests/${questId}/reviews/${reviewId}`,
       hirer.id,
       { rating: 2, comment: '  Updated  ' },
-      { 'idempotency-key': commandKey('edit-author', questId) },
+      { 'idempotency-key': commandKey('edit-author', questId) }
     );
     expect(edited.status).toBe(200);
     const editedBody = await jsonBody(edited);
@@ -389,7 +468,7 @@ describe('Quest Review API v2 behavior', () => {
       `/api/v2/quests/${questId}/reviews/${reviewId}`,
       hirer.id,
       { rating: 3 },
-      { 'idempotency-key': editKey },
+      { 'idempotency-key': editKey }
     );
     expect(replayedEdit.status).toBe(200);
     const replayedEditBody = await jsonBody(replayedEdit);
@@ -398,7 +477,7 @@ describe('Quest Review API v2 behavior', () => {
       `/api/v2/quests/${questId}/reviews/${reviewId}`,
       hirer.id,
       { rating: 3 },
-      { 'idempotency-key': editKey },
+      { 'idempotency-key': editKey }
     );
     expect(editReplay.status).toBe(200);
     expect(await jsonBody(editReplay)).toEqual(replayedEditBody);
@@ -408,7 +487,7 @@ describe('Quest Review API v2 behavior', () => {
       `/api/v2/quests/${questId}/reviews/${reviewId}`,
       hirer.id,
       { rating: 4 },
-      { 'idempotency-key': editKey },
+      { 'idempotency-key': editKey }
     );
     expect(editKeyReuse.status).toBe(409);
     expect((await jsonBody(editKeyReuse)).error?.code).toBe('IDEMPOTENCY_KEY_REUSED');
@@ -432,7 +511,7 @@ describe('Quest Review API v2 behavior', () => {
       questId,
       { revieweeId: worker.id, rating: 5 },
       commandKey('boundary-create', questId),
-      new Date('2030-01-02T00:00:00.000Z'),
+      new Date('2030-01-02T00:00:00.000Z')
     );
     expect('outcome' in created).toBe(false);
     if ('outcome' in created) return;
@@ -444,7 +523,7 @@ describe('Quest Review API v2 behavior', () => {
       created.id,
       { rating: 4 },
       commandKey('boundary-allowed', questId),
-      deadline,
+      deadline
     );
     expect(allowed).toMatchObject({ id: created.id, rating: 4 });
 
@@ -454,7 +533,7 @@ describe('Quest Review API v2 behavior', () => {
       created.id,
       { rating: 3 },
       commandKey('boundary-expired', questId),
-      new Date(deadline.getTime() + 1),
+      new Date(deadline.getTime() + 1)
     );
     expect(expired).toEqual({ outcome: 'window-expired' });
   });

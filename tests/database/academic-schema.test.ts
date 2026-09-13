@@ -10,7 +10,7 @@ beforeAll(async () => {
   } catch (cause) {
     throw new Error(
       'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 });
@@ -70,7 +70,7 @@ describe('seeded academic options', () => {
         'Science',
         'Social Sciences',
         'Veterinary Medicine',
-      ]),
+      ])
     );
   });
 
@@ -87,7 +87,7 @@ describe('seeded academic options', () => {
         'Electrical Engineering',
         'Industrial Engineering',
         'Mechanical Engineering',
-      ]),
+      ])
     );
   });
 });

@@ -45,7 +45,12 @@ const serializeQuote = (quote: Awaited<ReturnType<typeof quotePayout>>) => ({
 
 const mapMoneyError = (set: AuthedContext['set'], error: unknown) => {
   if (!(error instanceof MoneyDomainError)) throw error;
-  const notFound = ['PAYOUT_NOT_FOUND', 'PAYOUT_QUOTE_NOT_FOUND', 'PAYOUT_DESTINATION_NOT_FOUND', 'MEMBER_NOT_FOUND'];
+  const notFound = [
+    'PAYOUT_NOT_FOUND',
+    'PAYOUT_QUOTE_NOT_FOUND',
+    'PAYOUT_DESTINATION_NOT_FOUND',
+    'MEMBER_NOT_FOUND',
+  ];
   set.status = notFound.includes(error.code) ? 404 : 409;
   return apiError(error.code, error.message);
 };
@@ -56,10 +61,14 @@ export const createPayoutQuoteController = async ({
   set,
 }: AuthedContext & { body: PayoutQuoteCreateInput }): Promise<ApiResponse> => {
   try {
-    return apiSuccess(serializeQuote(await quotePayout({
-      principalUserId: session.user.id,
-      receiptSatang: positiveSatang(body.receiptSatang),
-    })));
+    return apiSuccess(
+      serializeQuote(
+        await quotePayout({
+          principalUserId: session.user.id,
+          receiptSatang: positiveSatang(body.receiptSatang),
+        })
+      )
+    );
   } catch (error) {
     return mapMoneyError(set, error);
   }
@@ -73,11 +82,15 @@ export const createPayoutController = async ({
 }: AuthedContext & { body: PayoutCreateInput }): Promise<ApiResponse> => {
   try {
     const key = request?.headers.get('idempotency-key') ?? '';
-    return apiSuccess(serializePayout(await initiatePayout({
-      principalUserId: session.user.id,
-      quoteId: body.quoteId,
-      idempotency: { key },
-    })));
+    return apiSuccess(
+      serializePayout(
+        await initiatePayout({
+          principalUserId: session.user.id,
+          quoteId: body.quoteId,
+          idempotency: { key },
+        })
+      )
+    );
   } catch (error) {
     return mapMoneyError(set, error);
   }
@@ -117,10 +130,12 @@ export const listPayoutStatusHistoryController = async ({
 }: AuthedContext & { params: PayoutParams }): Promise<ApiResponse> => {
   try {
     const history = await listPayoutStatusHistory(session.user.id, params.payoutId);
-    return apiSuccess(history.map((entry) => ({
-      ...entry,
-      occurredAt: entry.occurredAt.toISOString(),
-    })));
+    return apiSuccess(
+      history.map((entry) => ({
+        ...entry,
+        occurredAt: entry.occurredAt.toISOString(),
+      }))
+    );
   } catch (error) {
     return mapMoneyError(set, error);
   }

@@ -36,7 +36,7 @@ export class ImageUploadError extends Error {
   constructor(
     message: string,
     options?: ErrorOptions,
-    readonly cleanupObject?: StoredImage,
+    readonly cleanupObject?: StoredImage
   ) {
     super(message, options);
   }
@@ -105,7 +105,7 @@ export const createImageStorage = ({
   const upload = async (
     userId: string,
     image: File,
-    plan?: ImageUploadPlan,
+    plan?: ImageUploadPlan
   ): Promise<StoredImage> => {
     log('Validating file', {
       declaredContentType: image.type,
@@ -160,7 +160,9 @@ export const createImageStorage = ({
       `${keyPrefix}/${userId}/${crypto.randomUUID()}.${extensionByContentType[contentType]}`;
 
     try {
-      const writtenBytes = await s3.write(objectKey, new Blob([bytes], { type: contentType }), { type: contentType });
+      const writtenBytes = await s3.write(objectKey, new Blob([bytes], { type: contentType }), {
+        type: contentType,
+      });
       if (writtenBytes !== bytes.length) {
         throw new Error(`Expected ${bytes.length} bytes but wrote ${writtenBytes}`);
       }
@@ -190,7 +192,10 @@ export const createImageStorage = ({
     await s3.delete(objectKey, { bucket });
   };
 
-  const temporaryLinkFor = ({ bucket, objectKey }: Pick<StoredImage, 'bucket' | 'objectKey'>): ImageLink => {
+  const temporaryLinkFor = ({
+    bucket,
+    objectKey,
+  }: Pick<StoredImage, 'bucket' | 'objectKey'>): ImageLink => {
     if (
       !client &&
       (!env.s3AccessKeyId || !env.s3SecretAccessKey || !env.s3Endpoint || !env.s3Region)

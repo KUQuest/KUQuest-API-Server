@@ -3,7 +3,11 @@ import type { ApiResponse } from '@/shared/api-response';
 
 import type { StatusMap } from 'elysia/utils';
 
-import { ProviderEventError, receivePayoutProviderEvent } from './payout.provider-event.service';
+import {
+  processPayoutProviderEvents,
+  ProviderEventError,
+  receivePayoutProviderEvent,
+} from './payout.provider-event.service';
 
 type WebhookContext = {
   request: Request;
@@ -12,7 +16,7 @@ type WebhookContext = {
 
 const responseForProviderEventError = (
   set: WebhookContext['set'],
-  error: ProviderEventError,
+  error: ProviderEventError
 ): ApiResponse => {
   if (error.code === 'PROVIDER_EVENT_AUTHENTICATION_FAILED') {
     set.status = 401;
@@ -24,7 +28,10 @@ const responseForProviderEventError = (
   }
   if (error.code === 'PROVIDER_EVENT_CONFLICT') {
     set.status = 409;
-    return apiError('PROVIDER_EVENT_CONFLICT', 'The Provider event identifier was reused with a different payload.');
+    return apiError(
+      'PROVIDER_EVENT_CONFLICT',
+      'The Provider event identifier was reused with a different payload.'
+    );
   }
   set.status = 500;
   return apiError('PROVIDER_EVENT_UNAVAILABLE', 'The Provider event could not be stored.');
@@ -39,6 +46,11 @@ export const receivePayoutWebhookController = async ({
       rawPayload: await request.text(),
       providerEventId: request.headers.get('webhook-id') ?? undefined,
       callbackToken: request.headers.get('x-callback-token') ?? undefined,
+    });
+    queueMicrotask(() => {
+      processPayoutProviderEvents().catch((err) =>
+        console.error('Failed to process payout provider events', err)
+      );
     });
     set.status = 202;
     return apiSuccess();

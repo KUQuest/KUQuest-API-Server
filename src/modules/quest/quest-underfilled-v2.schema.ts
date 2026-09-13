@@ -7,12 +7,13 @@ import {
   questV2UnderfilledStates,
 } from './quest-v2.contract';
 
-const unionOfLiterals = (values: readonly string[]) => t.Union(
-  values.map((value) => t.Literal(value)) as [
-    ReturnType<typeof t.Literal<string>>,
-    ...ReturnType<typeof t.Literal<string>>[],
-  ],
-);
+const unionOfLiterals = (values: readonly string[]) =>
+  t.Union(
+    values.map((value) => t.Literal(value)) as [
+      ReturnType<typeof t.Literal<string>>,
+      ...ReturnType<typeof t.Literal<string>>[],
+    ]
+  );
 
 const questStateSchema = unionOfLiterals(questV2States);
 const underfilledStateSchema = unionOfLiterals(questV2UnderfilledStates);
@@ -35,12 +36,12 @@ export const questV2UnderfilledHeadersSchema = t.Object({
 
 export const questV2UnderfilledDecisionInputSchema = t.Object(
   { decision: decisionSchema },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const questV2UnderfilledConsentInputSchema = t.Object(
   { decision: consentDecisionSchema },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 const underfilledWorkerResponseSchema = t.Object({
@@ -88,11 +89,15 @@ const underfilledDataSchema = t.Object({
   decision: underfilledDecisionViewSchema,
   consent: underfilledConsentViewSchema,
   responses: t.Optional(t.Array(underfilledWorkerResponseSchema)),
-  ownResponse: t.Optional(t.Nullable(t.Object({
-    decision: t.Nullable(consentDecisionSchema),
-    questReward: t.Number({ minimum: 0 }),
-    respondedAt: t.Nullable(isoDateTimeSchema),
-  }))),
+  ownResponse: t.Optional(
+    t.Nullable(
+      t.Object({
+        decision: t.Nullable(consentDecisionSchema),
+        questReward: t.Number({ minimum: 0 }),
+        respondedAt: t.Nullable(isoDateTimeSchema),
+      })
+    )
+  ),
 });
 
 export const questV2UnderfilledResponseSchema = t.Object({

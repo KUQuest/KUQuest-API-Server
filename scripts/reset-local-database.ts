@@ -15,13 +15,18 @@ const runCommand = async (command: string): Promise<void> => {
 
 const main = async (): Promise<void> => {
   if (process.env.NODE_ENV !== 'development' || process.env.DEPLOYMENT_ENV !== 'development') {
-    throw new Error('The local database reset requires NODE_ENV=development and DEPLOYMENT_ENV=development.');
+    throw new Error(
+      'The local database reset requires NODE_ENV=development and DEPLOYMENT_ENV=development.'
+    );
   }
   if (process.env.CONFIRM_LOCAL_DB_RESET !== 'RESET local database') {
-    throw new Error('Set CONFIRM_LOCAL_DB_RESET="RESET local database" to reset the local database.');
+    throw new Error(
+      'Set CONFIRM_LOCAL_DB_RESET="RESET local database" to reset the local database.'
+    );
   }
 
-  const databaseUrl = process.env.DATABASE_URL ?? 'postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest';
+  const databaseUrl =
+    process.env.DATABASE_URL ?? 'postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest';
   const parsedUrl = new URL(databaseUrl);
   if (!localDatabaseHosts.has(parsedUrl.hostname)) {
     throw new Error('The local database reset accepts only a localhost DATABASE_URL.');
@@ -43,7 +48,9 @@ const main = async (): Promise<void> => {
   await runCommand('db:migrate');
   await runCommand('db:verify-migration-journal');
   console.log('Local database reset and migration completed.');
-  console.log('Load demo and finance data with STAGING_FINANCE_SEED_ENABLED=true bun run db:seed-staging.');
+  console.log(
+    'Load demo and finance data with STAGING_FINANCE_SEED_ENABLED=true bun run db:seed-staging.'
+  );
 };
 
 try {

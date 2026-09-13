@@ -12,9 +12,7 @@ type OpenAPIDocument = {
 };
 
 const getOpenAPIDocument = async (): Promise<OpenAPIDocument> => {
-  const response = await app.handle(
-    new Request('http://localhost/openapi/json'),
-  );
+  const response = await app.handle(new Request('http://localhost/openapi/json'));
 
   expect(response.status).toBe(200);
 
@@ -44,12 +42,8 @@ describe('authentication OpenAPI documentation', () => {
     const document = await getOpenAPIDocument();
 
     expect(document.tags?.some((tag) => tag.name === 'Auth')).toBe(true);
-    expect(
-      document.components?.securitySchemes?.betterAuthSession,
-    ).toBeDefined();
-    expect(
-      document.components?.securitySchemes?.betterAuthAdminSession,
-    ).toBeDefined();
+    expect(document.components?.securitySchemes?.betterAuthSession).toBeDefined();
+    expect(document.components?.securitySchemes?.betterAuthAdminSession).toBeDefined();
     expect(document.components?.schemas?.AuthUser).toBeDefined();
     expect(document.components?.schemas?.AuthSessionResponse).toBeDefined();
     expect(document.components?.schemas?.AuthError).toBeDefined();

@@ -10,7 +10,7 @@ export const avatarUploadSchema = t.Object(
   },
   {
     additionalProperties: false,
-  },
+  }
 );
 
 const versionSchema = t.Integer({ minimum: 1 });
@@ -59,7 +59,7 @@ export const profileUpdateSchema = t.Object(
     telephone: t.Optional(t.String({ pattern: '^0[0-9]{9}$', example: '0800000000' })),
     departmentId: t.Optional(t.String({ format: 'uuid' })),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const profileResponseSchema = t.Object({
@@ -109,17 +109,24 @@ const reviewSchema = t.Object({
   rating: t.Integer({ minimum: 1, maximum: 5 }),
   comment: t.Nullable(t.String()),
   createdAt: t.String({ format: 'date-time' }),
-  quest: t.Optional(t.Nullable(t.Object({
-    id: t.String({ format: 'uuid' }),
-    title: t.String(),
-  }))),
+  quest: t.Optional(
+    t.Nullable(
+      t.Object({
+        id: t.String({ format: 'uuid' }),
+        title: t.String(),
+      })
+    )
+  ),
 });
 
-export const reviewsQuerySchema = t.Object({
-  rating: t.Optional(t.Integer({ minimum: 1, maximum: 5 })),
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
-  cursor: t.Optional(t.String()),
-}, { additionalProperties: false });
+export const reviewsQuerySchema = t.Object(
+  {
+    rating: t.Optional(t.Integer({ minimum: 1, maximum: 5 })),
+    limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+    cursor: t.Optional(t.String()),
+  },
+  { additionalProperties: false }
+);
 
 export const reviewsResponseSchema = t.Object({
   success: t.Literal(true),

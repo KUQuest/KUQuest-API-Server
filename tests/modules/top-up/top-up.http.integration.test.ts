@@ -30,7 +30,7 @@ describe('Top-up HTTP routes', () => {
 
   it('publishes the Member Top-up and Payout HTTP contracts in OpenAPI', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
-    const document = await response.json() as {
+    const document = (await response.json()) as {
       paths: Record<string, Record<string, { operationId?: string; security?: unknown }>>;
     };
 
@@ -39,8 +39,9 @@ describe('Top-up HTTP routes', () => {
     expect(document.paths['/api/v1/top-ups']?.post?.operationId).toBe('createTopUp');
     expect(document.paths['/api/v1/top-ups']?.get?.operationId).toBe('listTopUps');
     expect(document.paths['/api/v1/top-ups/{topUpId}']?.get?.operationId).toBe('getTopUp');
-    expect(document.paths['/api/v1/top-ups/{topUpId}/status-history']?.get?.operationId)
-      .toBe('listTopUpStatusHistory');
+    expect(document.paths['/api/v1/top-ups/{topUpId}/status-history']?.get?.operationId).toBe(
+      'listTopUpStatusHistory'
+    );
     expect(document.paths['/api/v1/payouts']?.post?.operationId).toBe('createPayout');
   });
 });

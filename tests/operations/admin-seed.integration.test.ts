@@ -15,7 +15,7 @@ test('Admin seed refuses to create a second Admin', async () => {
   } catch (cause) {
     throw new Error(
       'This test needs PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 

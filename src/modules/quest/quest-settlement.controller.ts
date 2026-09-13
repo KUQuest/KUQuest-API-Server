@@ -25,14 +25,20 @@ const errorResponse = (set: AuthedContext['set'], outcome: string) => {
   }
   if (outcome === 'idempotency-key-reused') {
     set.status = 409;
-    return apiError('IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
+    return apiError(
+      'IDEMPOTENCY_KEY_REUSED',
+      'The Idempotency-Key was used for a different request'
+    );
   }
   if (outcome === 'idempotency-unavailable') {
     set.status = 503;
     return apiError('IDEMPOTENCY_UNAVAILABLE', 'The Idempotency-Key result is unavailable');
   }
   set.status = 409;
-  return apiError('QUEST_SETTLEMENT_NOT_ALLOWED', 'The Quest is not in a state that accepts this settlement');
+  return apiError(
+    'QUEST_SETTLEMENT_NOT_ALLOWED',
+    'The Quest is not in a state that accepts this settlement'
+  );
 };
 
 const moneyError = (set: AuthedContext['set'], error: unknown) => {
@@ -48,12 +54,20 @@ const moneyError = (set: AuthedContext['set'], error: unknown) => {
 const v2CancellationErrorResponse = (set: AuthedContext['set'], outcome: string) => {
   if (outcome === 'invalid-idempotency-key') {
     set.status = 400;
-    return apiError('INVALID_IDEMPOTENCY_KEY', 'The Idempotency-Key must be at most 200 characters');
+    return apiError(
+      'INVALID_IDEMPOTENCY_KEY',
+      'The Idempotency-Key must be at most 200 characters'
+    );
   }
   return errorResponse(set, outcome);
 };
 
-export const cancelQuestController = async ({ params, request, session, set }: AuthedContext & { params: Params }): Promise<ApiResponse> => {
+export const cancelQuestController = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & { params: Params }): Promise<ApiResponse> => {
   const commandId = request?.headers.get('idempotency-key') ?? '';
   try {
     const result = await cancelQuest(session.user.id, params.questId, commandId);
@@ -64,7 +78,12 @@ export const cancelQuestController = async ({ params, request, session, set }: A
   }
 };
 
-export const cancelQuestV2Controller = async ({ params, request, session, set }: AuthedContext & { params: Params }): Promise<ApiResponse> => {
+export const cancelQuestV2Controller = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & { params: Params }): Promise<ApiResponse> => {
   const commandId = request?.headers.get('idempotency-key') ?? '';
   try {
     const result = await cancelQuestV2(session.user.id, params.questId, commandId);
