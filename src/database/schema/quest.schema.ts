@@ -418,7 +418,7 @@ export const questEditHistory = pgTable(
     ),
     check(
       'quest_edit_history_edit_request_check',
-      sql`num_nonnulls(${table.editRequestId}, ${table.v2EditRequestId}) <= 1`,
+      sql`num_nonnulls(${table.editRequestId}, ${table.v2EditRequestId}) <= 1`
     ),
     index('quest_edit_history_quest_idx').on(table.questId, table.editedAt),
   ]

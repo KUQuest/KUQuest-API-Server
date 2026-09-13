@@ -389,7 +389,7 @@ describe('Quest Edit v2', () => {
     const responded = await respondToEdit(
       createdBody.data.requestId,
       { decision: 'EDIT_RESPONSE_DECLINED' },
-      worker.cookie,
+      worker.cookie
     );
     expect(responded.status).toBe(200);
     expect((await responded.json()).data.status).toBe('EDIT_REQUEST_FAILED');

@@ -51,10 +51,7 @@ import {
 } from './quest-command.service';
 import { questFundingCapacity } from './quest-escrow.service';
 import { assignmentStatus, questStatus, type QuestStatus } from './quest.contract';
-import {
-  recordQuestEditHistory,
-  type QuestEditHistoryEntry,
-} from './quest-edit-history.service';
+import { recordQuestEditHistory, type QuestEditHistoryEntry } from './quest-edit-history.service';
 import { questV2StorageCompatibility } from './quest-storage.adapter';
 import {
   formatQuestV2ScheduleTime,
@@ -153,9 +150,9 @@ type QuestV2EditOutcomeCode =
 export type QuestV2CreateOutcome =
   | { quest: QuestV2CanonicalQuest }
   | {
-    outcome:
-    QuestV2CreateValidationOutcome | 'idempotency-key-reused' | 'idempotency-in-progress';
-  };
+      outcome:
+        QuestV2CreateValidationOutcome | 'idempotency-key-reused' | 'idempotency-in-progress';
+    };
 
 export type QuestV2EditOutcome =
   { quest: QuestV2CanonicalQuest } | { outcome: QuestV2EditOutcomeCode };
@@ -188,13 +185,13 @@ export type QuestV2PublishOutcome =
   | QuestV2PublishResponse
   | { outcome: 'blocked'; check: QuestV2PublishCheck }
   | {
-    outcome:
-    | 'invalid-idempotency-key'
-    | 'idempotency-key-reused'
-    | 'idempotency-in-progress'
-    | 'idempotency-unavailable'
-    | 'not-draft';
-  };
+      outcome:
+        | 'invalid-idempotency-key'
+        | 'idempotency-key-reused'
+        | 'idempotency-in-progress'
+        | 'idempotency-unavailable'
+        | 'not-draft';
+    };
 
 export type QuestV2ImageReference = {
   imageId: string;
@@ -281,10 +278,10 @@ export type QuestV2ImageUploadPreflight =
 
 export type QuestV2ImageUploadOutcome =
   | {
-    images: QuestV2ImageReference[];
-    response: QuestV2ImageResponse[];
-    replayed?: boolean;
-  }
+      images: QuestV2ImageReference[];
+      response: QuestV2ImageResponse[];
+      replayed?: boolean;
+    }
   | { outcome: QuestV2ImageMutationOutcome };
 
 export type QuestV2ImageRemoveOutcome =
@@ -401,8 +398,8 @@ const normalizeCreateInput = (
 ):
   | NormalizedCreateInput
   | {
-    outcome: Exclude<QuestV2CreateValidationOutcome, 'tag-not-found' | 'idempotency-unavailable'>;
-  } => {
+      outcome: Exclude<QuestV2CreateValidationOutcome, 'tag-not-found' | 'idempotency-unavailable'>;
+    } => {
   const conditionItems = data.condition.items.map((item) => item.trim());
   if (
     conditionItems.length === 0 ||

@@ -28,11 +28,9 @@ export type QuestEditHistoryInput = {
  */
 export const recordQuestEditHistory = async (
   transaction: QuestTransaction,
-  input: QuestEditHistoryInput,
+  input: QuestEditHistoryInput
 ): Promise<void> => {
-  const changed = input.entries.filter(
-    (entry) => !isSameValue(entry.oldValue, entry.newValue),
-  );
+  const changed = input.entries.filter((entry) => !isSameValue(entry.oldValue, entry.newValue));
   if (changed.length === 0) return;
 
   await transaction.insert(questEditHistory).values(
@@ -45,7 +43,7 @@ export const recordQuestEditHistory = async (
       editedAt: input.editedAt,
       editedByUserId: input.editedByUserId ?? null,
       editedByAdminId: input.editedByAdminId ?? null,
-    })),
+    }))
   );
 };
 

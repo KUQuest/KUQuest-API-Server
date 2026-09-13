@@ -347,10 +347,10 @@ const projectRequest = async (
   } else {
     result.ownResponse = ownResponse
       ? {
-        decision: ownResponse.decision,
-        reason: ownResponse.reason,
-        respondedAt: ownResponse.respondedAt?.toISOString() ?? null,
-      }
+          decision: ownResponse.decision,
+          reason: ownResponse.reason,
+          respondedAt: ownResponse.respondedAt?.toISOString() ?? null,
+        }
       : null;
   }
 

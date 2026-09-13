@@ -986,12 +986,7 @@ describe('Quest API v2 Draft editing', () => {
       .from(questEditHistory)
       .where(eq(questEditHistory.questId, created.quest.id));
     const byField = new Map(history.map((row) => [row.fieldName, row]));
-    expect([...byField.keys()].sort()).toEqual([
-      'condition',
-      'description',
-      'locations',
-      'title',
-    ]);
+    expect([...byField.keys()].sort()).toEqual(['condition', 'description', 'locations', 'title']);
     expect(byField.get('title')).toMatchObject({
       oldValue: 'Design a poster',
       newValue: 'Updated poster',
@@ -1027,7 +1022,7 @@ describe('Quest API v2 Draft editing', () => {
     const created = await createQuestV2(
       hirerId,
       baseInput,
-      `v2-edit-unchanged-create-${randomUUID()}`,
+      `v2-edit-unchanged-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
