@@ -1,7 +1,12 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
-import { quest, questApiVersion, questAssignment } from '@/database/schema/quest.schema';
+import {
+  quest,
+  questApiVersion,
+  questAssignment,
+  questCommand,
+} from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
@@ -152,6 +157,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   if (questIds.length > 0) await db.delete(quest).where(inArray(quest.id, questIds));
+  await db.delete(questCommand).where(inArray(questCommand.principalUserId, [workerId, ownerId]));
   await db
     .delete(walletIdempotencyKey)
     .where(inArray(walletIdempotencyKey.principalUserId, [workerId, ownerId]));
