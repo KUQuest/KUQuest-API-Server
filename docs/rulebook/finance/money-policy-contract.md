@@ -9,17 +9,17 @@ Part of the [Finance Rulebook](finance-rulebook.md). Defines accepted policy for
 
 ## Policy fields and default parameters
 
-| Parameter | Type | Default Value | Description |
-| --- | --- | --- | --- |
-| `platformFeeBps` | Basis Points (0–10000) | `200` (2.00%) | Platform Fee percentage taken on completed Quests. |
-| `feeRoundingMode` | Enum (`UP`) | `'UP'` | Always rounds fee fractions up (ceiling) to the nearest Satang. |
-| `minimumTopUpSatang` | Integer Satang | `100` (฿1.00) | Minimum Top-up deposit. |
-| `maximumTopUpSatang` | Integer Satang | `2,000,000,000` (฿20M) | Maximum Top-up deposit. |
-| `minimumPayoutSatang` | Integer Satang | `100` (฿1.00) | Minimum withdrawal request. |
-| `maximumPayoutSatang` | Integer Satang | `2,000,000,000` (฿20M) | Maximum withdrawal request. |
-| `minimumEarningsConversionSatang`| Integer Satang | `100` (฿1.00) | Minimum conversion amount. |
-| `maximumEarningsConversionSatang`| Integer Satang | `2,000,000,000` (฿20M) | Maximum conversion amount. |
-| `quoteLifetimeSeconds` | Seconds | `300` (5 minutes) | Expiry window for Top-up and Payout Provider Quotes before Member confirmation. |
+| Parameter                         | Type                   | Default Value          | Description                                                                     |
+| --------------------------------- | ---------------------- | ---------------------- | ------------------------------------------------------------------------------- |
+| `platformFeeBps`                  | Basis Points (0–10000) | `200` (2.00%)          | Platform Fee percentage taken on completed Quests.                              |
+| `feeRoundingMode`                 | Enum (`UP`)            | `'UP'`                 | Always rounds fee fractions up (ceiling) to the nearest Satang.                 |
+| `minimumTopUpSatang`              | Integer Satang         | `100` (฿1.00)          | Minimum Top-up deposit.                                                         |
+| `maximumTopUpSatang`              | Integer Satang         | `2,000,000,000` (฿20M) | Maximum Top-up deposit.                                                         |
+| `minimumPayoutSatang`             | Integer Satang         | `100` (฿1.00)          | Minimum withdrawal request.                                                     |
+| `maximumPayoutSatang`             | Integer Satang         | `2,000,000,000` (฿20M) | Maximum withdrawal request.                                                     |
+| `minimumEarningsConversionSatang` | Integer Satang         | `100` (฿1.00)          | Minimum conversion amount.                                                      |
+| `maximumEarningsConversionSatang` | Integer Satang         | `2,000,000,000` (฿20M) | Maximum conversion amount.                                                      |
+| `quoteLifetimeSeconds`            | Seconds                | `300` (5 minutes)      | Expiry window for Top-up and Payout Provider Quotes before Member confirmation. |
 
 ## Provider fee boundary
 

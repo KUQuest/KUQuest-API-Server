@@ -1,23 +1,12 @@
 import { expect, test } from 'bun:test';
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const stagingOperationsScript = join(
-  import.meta.dir,
-  '../../scripts/staging-operations.sh',
-);
+const stagingOperationsScript = join(import.meta.dir, '../../scripts/staging-operations.sh');
 const stagingBootstrapVerificationScript = join(
   import.meta.dir,
-  '../../scripts/verify-staging-bootstrap.sh',
+  '../../scripts/verify-staging-bootstrap.sh'
 );
 
 test('staging bootstrap verification reads credentials from its environment', async () => {
@@ -41,7 +30,7 @@ const createFixture = async () => {
   await mkdir(backupDirectory);
   await writeFile(
     join(directory, '.env'),
-    'DEPLOYMENT_ENV=staging\nDATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\n',
+    'DEPLOYMENT_ENV=staging\nDATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\n'
   );
   await writeFile(
     join(binaryDirectory, 'docker'),
@@ -96,7 +85,7 @@ fi
 if [[ "$*" == *"compose run --rm --no-deps api bun run db:seed-staging"* && "\${MOCK_SEED_FAILURE:-}" == "1" ]]; then
   exit 1
 fi
-`,
+`
   );
   await chmod(join(binaryDirectory, 'docker'), 0o755);
 
@@ -116,7 +105,7 @@ const runStagingOperation = (
   options: {
     env?: Record<string, string>;
     input?: string;
-  } = {},
+  } = {}
 ) =>
   Bun.spawnSync(['bash', stagingOperationsScript, operation], {
     cwd: fixture.directory,
@@ -132,9 +121,7 @@ const runStagingOperation = (
       STAGING_NETWORK: 'kuquest-staging_default',
       ...options.env,
     },
-    stdin: options.input
-      ? new TextEncoder().encode(options.input)
-      : undefined,
+    stdin: options.input ? new TextEncoder().encode(options.input) : undefined,
     stderr: 'pipe',
     stdout: 'pipe',
   });
@@ -148,16 +135,12 @@ test('staging deploy backs up and migrates before replacing the API', async () =
 
     const pull = commands.findIndex((line) => line === 'compose pull api');
     const backup = commands.findIndex((line) => line.includes('pg_dump'));
-    const verifyBackup = commands.findIndex((line) =>
-      line.includes('pg_restore'),
-    );
+    const verifyBackup = commands.findIndex((line) => line.includes('pg_restore'));
     const migrate = commands.findIndex((line) =>
-      line.includes('compose run --rm --no-deps api bun run db:migrate'),
+      line.includes('compose run --rm --no-deps api bun run db:migrate')
     );
     const rollout = commands.findIndex((line) =>
-      line.includes(
-        'compose up -d --no-deps --remove-orphans --wait --wait-timeout 60 api',
-      ),
+      line.includes('compose up -d --no-deps --remove-orphans --wait --wait-timeout 60 api')
     );
 
     expect(result.exitCode).toBe(0);
@@ -180,14 +163,12 @@ test('staging deploy retains only the two newest valid backups', async () => {
         'kuquest-20260101T000000Z.dump',
         'kuquest-20260201T000000Z.dump',
         'kuquest-20260301T000000Z.dump',
-      ].map((name) =>
-        writeFile(join(fixture.backupDirectory, name), 'valid backup\n'),
-      ),
+      ].map((name) => writeFile(join(fixture.backupDirectory, name), 'valid backup\n'))
     );
 
     const result = runStagingOperation(fixture, 'deploy');
     const backups = (await readdir(fixture.backupDirectory)).filter((name) =>
-      name.endsWith('.dump'),
+      name.endsWith('.dump')
     );
 
     expect(result.exitCode).toBe(0);
@@ -204,10 +185,7 @@ test('staging deploy discards corrupt backups before retention', async () => {
     const corruptBackup = 'kuquest-99991231T000000Z-corrupt.dump';
     const validBackup = 'kuquest-20260301T000000Z.dump';
     await Promise.all([
-      writeFile(
-        join(fixture.backupDirectory, corruptBackup),
-        'corrupt backup\n',
-      ),
+      writeFile(join(fixture.backupDirectory, corruptBackup), 'corrupt backup\n'),
       writeFile(join(fixture.backupDirectory, validBackup), 'valid backup\n'),
     ]);
 
@@ -232,14 +210,12 @@ test('staging deploy restores the previous image after failed readiness', async 
     });
     const output = `${result.stdout.toString()}${result.stderr.toString()}`;
     const commands = await readFile(fixture.dockerLog, 'utf8');
-    const rolloutAttempts = commands
-      .split('\n')
-      .filter((line) => line.startsWith('compose up '));
+    const rolloutAttempts = commands.split('\n').filter((line) => line.startsWith('compose up '));
 
     expect(result.exitCode).toBe(1);
     expect(rolloutAttempts).toHaveLength(2);
     expect(output).toContain(
-      'Previous API image restored: ghcr.io/kuquest/kuquest-api-server:previous',
+      'Previous API image restored: ghcr.io/kuquest/kuquest-api-server:previous'
     );
     expect(commands).not.toContain('down');
   } finally {
@@ -258,9 +234,7 @@ test('migration failure leaves the current API running', async () => {
     const commands = await readFile(fixture.dockerLog, 'utf8');
 
     expect(result.exitCode).toBe(1);
-    expect(output).toContain(
-      'Deployment stopped during migration; current API was not replaced',
-    );
+    expect(output).toContain('Deployment stopped during migration; current API was not replaced');
     expect(commands).not.toContain('compose up');
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
@@ -279,9 +253,7 @@ test('backup failure stops before migration or API replacement', async () => {
     const backups = await readdir(fixture.backupDirectory);
 
     expect(result.exitCode).toBe(1);
-    expect(output).toContain(
-      'Deployment stopped during backup; current API was not replaced',
-    );
+    expect(output).toContain('Deployment stopped during backup; current API was not replaced');
     expect(commands).not.toContain('db:migrate');
     expect(commands).not.toContain('compose up');
     expect(backups).toHaveLength(0);
@@ -338,9 +310,7 @@ test('failed readiness without a previous image remains failed', async () => {
     });
     const output = `${result.stdout.toString()}${result.stderr.toString()}`;
     const commands = await readFile(fixture.dockerLog, 'utf8');
-    const rolloutAttempts = commands
-      .split('\n')
-      .filter((line) => line.startsWith('compose up '));
+    const rolloutAttempts = commands.split('\n').filter((line) => line.startsWith('compose up '));
 
     expect(result.exitCode).toBe(1);
     expect(rolloutAttempts).toHaveLength(1);
@@ -380,31 +350,31 @@ test('bootstrap backs up, resets only public, migrates, and verifies', async () 
     const commands = (await readFile(fixture.dockerLog, 'utf8')).split('\n');
     const backup = commands.findIndex((line) => line.includes('pg_dump'));
     const reset = commands.findIndex((line) =>
-      line.includes('DROP SCHEMA public CASCADE; CREATE SCHEMA public;'),
+      line.includes('DROP SCHEMA public CASCADE; CREATE SCHEMA public;')
     );
     const journalReset = commands.findIndex((line) =>
-      line.includes('TRUNCATE TABLE drizzle.__drizzle_migrations'),
+      line.includes('TRUNCATE TABLE drizzle.__drizzle_migrations')
     );
     const migrate = commands.findIndex((line) =>
-      line.includes('compose run --rm --no-deps api bun run db:migrate'),
+      line.includes('compose run --rm --no-deps api bun run db:migrate')
     );
     const verify = commands.findIndex((line) =>
-      line.includes("to_regclass('drizzle.__drizzle_migrations')"),
+      line.includes("to_regclass('drizzle.__drizzle_migrations')")
     );
     const expectedJournalCount = commands.findIndex((line) =>
-      line.includes('drizzle/meta/_journal.json'),
+      line.includes('drizzle/meta/_journal.json')
     );
     const appliedJournalCount = commands.findIndex((line) =>
-      line.includes('SELECT count(*) FROM drizzle.__drizzle_migrations'),
+      line.includes('SELECT count(*) FROM drizzle.__drizzle_migrations')
     );
     const exactMigrationVerification = commands.findIndex((line) =>
-      line.includes('compose run --rm --no-deps api bun run db:verify-migration-journal'),
+      line.includes('compose run --rm --no-deps api bun run db:verify-migration-journal')
     );
     const seed = commands.findIndex((line) =>
-      line.includes('compose run --rm --no-deps api bun run db:seed-staging'),
+      line.includes('compose run --rm --no-deps api bun run db:seed-staging')
     );
     const seedVerification = commands.findIndex((line) =>
-      line.includes('compose run --rm --no-deps api bun run db:verify-staging-seed'),
+      line.includes('compose run --rm --no-deps api bun run db:verify-staging-seed')
     );
 
     expect(result.exitCode).toBe(0);
@@ -446,7 +416,7 @@ test('staging operations refuse a non-staging environment file', async () => {
   try {
     await writeFile(
       join(fixture.directory, '.env'),
-      'DEPLOYMENT_ENV=production\nDATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\n',
+      'DEPLOYMENT_ENV=production\nDATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\n'
     );
     const result = runStagingOperation(fixture, 'bootstrap', {
       input: 'RESET staging public schema\n',

@@ -50,7 +50,10 @@ export const candidateInquiryRoute = new Elysia({
     params: candidateInquiryParamsSchema,
     async open(ws) {
       const memberId = ws.data.session.user.id;
-      const allowed = await isCurrentCandidateInquiryMember(memberId, ws.data.params.conversationId);
+      const allowed = await isCurrentCandidateInquiryMember(
+        memberId,
+        ws.data.params.conversationId
+      );
       if (!allowed) {
         ws.close(4403, 'Conversation not found');
         return;
@@ -60,7 +63,7 @@ export const candidateInquiryRoute = new Elysia({
         async (event) => {
           ws.send(JSON.stringify({ type: 'CANDIDATE_INQUIRY_MESSAGE', message: event.message }));
         },
-        ws.data.params.conversationId,
+        ws.data.params.conversationId
       );
       webSocketUnsubscribers.set(ws, unsubscribe);
     },
@@ -74,7 +77,8 @@ export const candidateInquiryRoute = new Elysia({
     detail: {
       tags: ['Candidate Inquiry'],
       summary: 'Subscribe to Candidate Inquiry Events',
-      description: 'Subscribes a current Candidate Inquiry participant to committed Message Events. REST remains authoritative and this channel is read-only.',
+      description:
+        'Subscribes a current Candidate Inquiry participant to committed Message Events. REST remains authoritative and this channel is read-only.',
       operationId: 'subscribeCandidateInquiryEvents',
       security: betterAuthSecurity,
     },
@@ -86,7 +90,8 @@ export const candidateInquiryRoute = new Elysia({
     detail: {
       tags: ['Candidate Inquiry'],
       summary: 'Open a Candidate Inquiry Conversation',
-      description: 'Opens or returns the authenticated Prospective Worker Candidate Inquiry with a Hirer for an open Quest.',
+      description:
+        'Opens or returns the authenticated Prospective Worker Candidate Inquiry with a Hirer for an open Quest.',
       operationId: 'openCandidateInquiry',
       security: betterAuthSecurity,
     },
@@ -97,7 +102,8 @@ export const candidateInquiryRoute = new Elysia({
     detail: {
       tags: ['Candidate Inquiry'],
       summary: 'List Candidate Inquiry Conversations',
-      description: 'Lists open Candidate Inquiry Conversations visible to the authenticated Member.',
+      description:
+        'Lists open Candidate Inquiry Conversations visible to the authenticated Member.',
       operationId: 'listCandidateInquiries',
       security: betterAuthSecurity,
     },
@@ -108,7 +114,8 @@ export const candidateInquiryRoute = new Elysia({
     detail: {
       tags: ['Candidate Inquiry'],
       summary: 'Get a Candidate Inquiry Conversation',
-      description: 'Returns an open Candidate Inquiry Conversation visible to the authenticated participant.',
+      description:
+        'Returns an open Candidate Inquiry Conversation visible to the authenticated participant.',
       operationId: 'getCandidateInquiry',
       security: betterAuthSecurity,
     },
@@ -119,7 +126,8 @@ export const candidateInquiryRoute = new Elysia({
     detail: {
       tags: ['Candidate Inquiry'],
       summary: 'List Candidate Inquiry Participants',
-      description: 'Lists the Hirer and Prospective Worker in an open Candidate Inquiry Conversation.',
+      description:
+        'Lists the Hirer and Prospective Worker in an open Candidate Inquiry Conversation.',
       operationId: 'listCandidateInquiryParticipants',
       security: betterAuthSecurity,
     },
@@ -132,33 +140,44 @@ export const candidateInquiryRoute = new Elysia({
     detail: {
       tags: ['Candidate Inquiry'],
       summary: 'Upload a Candidate Inquiry Attachment',
-      description: 'Uploads an image, PDF, or video up to 10 MB for the authenticated participant to attach to a Message.',
+      description:
+        'Uploads an image, PDF, or video up to 10 MB for the authenticated participant to attach to a Message.',
       operationId: 'uploadCandidateInquiryAttachment',
       security: betterAuthSecurity,
     },
   })
-  .get('/:conversationId/attachments/:attachmentId/link', getCandidateInquiryAttachmentLinkController, {
-    params: candidateInquiryAttachmentParamsSchema,
-    response: responses(candidateInquiryAttachmentLinkResponseSchema, 401, 404, 502),
-    detail: {
-      tags: ['Candidate Inquiry'],
-      summary: 'Get a Candidate Inquiry Attachment Link',
-      description: 'Returns a short-lived link for an attachment in a visible Candidate Inquiry Message.',
-      operationId: 'getCandidateInquiryAttachmentLink',
-      security: betterAuthSecurity,
-    },
-  })
-  .delete('/:conversationId/attachments/:attachmentId', discardCandidateInquiryAttachmentController, {
-    params: candidateInquiryAttachmentParamsSchema,
-    response: responses(candidateInquiryAttachmentDiscardResponseSchema, 401, 404, 409),
-    detail: {
-      tags: ['Candidate Inquiry'],
-      summary: 'Discard a Candidate Inquiry Attachment',
-      description: 'Discards the authenticated participant attachment while it remains in the composer.',
-      operationId: 'discardCandidateInquiryAttachment',
-      security: betterAuthSecurity,
-    },
-  })
+  .get(
+    '/:conversationId/attachments/:attachmentId/link',
+    getCandidateInquiryAttachmentLinkController,
+    {
+      params: candidateInquiryAttachmentParamsSchema,
+      response: responses(candidateInquiryAttachmentLinkResponseSchema, 401, 404, 502),
+      detail: {
+        tags: ['Candidate Inquiry'],
+        summary: 'Get a Candidate Inquiry Attachment Link',
+        description:
+          'Returns a short-lived link for an attachment in a visible Candidate Inquiry Message.',
+        operationId: 'getCandidateInquiryAttachmentLink',
+        security: betterAuthSecurity,
+      },
+    }
+  )
+  .delete(
+    '/:conversationId/attachments/:attachmentId',
+    discardCandidateInquiryAttachmentController,
+    {
+      params: candidateInquiryAttachmentParamsSchema,
+      response: responses(candidateInquiryAttachmentDiscardResponseSchema, 401, 404, 409),
+      detail: {
+        tags: ['Candidate Inquiry'],
+        summary: 'Discard a Candidate Inquiry Attachment',
+        description:
+          'Discards the authenticated participant attachment while it remains in the composer.',
+        operationId: 'discardCandidateInquiryAttachment',
+        security: betterAuthSecurity,
+      },
+    }
+  )
   .get('/:conversationId/messages', listCandidateInquiryMessagesController, {
     params: candidateInquiryParamsSchema,
     query: candidateInquiryMessageListQuerySchema,
@@ -179,7 +198,8 @@ export const candidateInquiryRoute = new Elysia({
     detail: {
       tags: ['Candidate Inquiry'],
       summary: 'Send a Candidate Inquiry Message',
-      description: 'Creates one immutable Message for a current Candidate Inquiry participant. The clientMessageId makes retries idempotent.',
+      description:
+        'Creates one immutable Message for a current Candidate Inquiry participant. The clientMessageId makes retries idempotent.',
       operationId: 'sendCandidateInquiryMessage',
       security: betterAuthSecurity,
     },
@@ -192,7 +212,8 @@ export const candidateInquiryRoute = new Elysia({
     detail: {
       tags: ['Candidate Inquiry'],
       summary: 'Advance a Candidate Inquiry Read Cursor',
-      description: 'Advances the authenticated participant private Read Cursor to a visible Message.',
+      description:
+        'Advances the authenticated participant private Read Cursor to a visible Message.',
       operationId: 'advanceCandidateInquiryReadCursor',
       security: betterAuthSecurity,
     },

@@ -26,7 +26,8 @@ export const adminMemberRoute = new Elysia({
     detail: {
       tags: ['Admin Members'],
       summary: 'Search and List University Members',
-      description: 'Lists students and staff with academic affiliation, status, and wallet summary.',
+      description:
+        'Lists students and staff with academic affiliation, status, and wallet summary.',
       operationId: 'listAdminMembers',
       security: betterAuthSecurity,
     },
@@ -37,7 +38,8 @@ export const adminMemberRoute = new Elysia({
     detail: {
       tags: ['Admin Members'],
       summary: 'Get Member Detail and Marketplace Performance Statistics',
-      description: 'Returns member profile, academic details, wallet compartments, and quest/review stats.',
+      description:
+        'Returns member profile, academic details, wallet compartments, and quest/review stats.',
       operationId: 'getAdminMemberDetail',
       security: betterAuthSecurity,
     },

@@ -22,9 +22,7 @@ const memberId = crypto.randomUUID();
 const memberStudentId = String(Math.floor(1000000000 + Math.random() * 9000000000));
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 beforeAll(async () => {
   await sql`select 1`;
@@ -86,7 +84,7 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-    }),
+    })
   );
   if (adminLogin.status !== 200) throw new Error('Admin login failed');
   adminCookie = getCookieHeader(adminLogin);
@@ -116,7 +114,7 @@ describe('Admin Members Endpoints Integration Tests', () => {
       const res = await app.handle(
         new Request(`http://localhost/api/v1/admin/members?search=${memberStudentId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(200);
       const json = await res.json();
@@ -137,7 +135,9 @@ describe('Admin Members Endpoints Integration Tests', () => {
 
   describe('GET /api/v1/admin/members/:id', () => {
     it('rejects unauthenticated caller with 401', async () => {
-      const res = await app.handle(new Request(`http://localhost/api/v1/admin/members/${memberId}`));
+      const res = await app.handle(
+        new Request(`http://localhost/api/v1/admin/members/${memberId}`)
+      );
       expect(res.status).toBe(401);
     });
 
@@ -146,7 +146,7 @@ describe('Admin Members Endpoints Integration Tests', () => {
       const res = await app.handle(
         new Request(`http://localhost/api/v1/admin/members/${nonExistentId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(404);
       const json = await res.json();
@@ -158,7 +158,7 @@ describe('Admin Members Endpoints Integration Tests', () => {
       const res = await app.handle(
         new Request(`http://localhost/api/v1/admin/members/${memberId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(200);
       const json = await res.json();

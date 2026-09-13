@@ -17,7 +17,8 @@ export const adminOverviewRoute = new Elysia({
     detail: {
       tags: ['Admin Overview'],
       summary: 'Read Admin operational counters',
-      description: 'Counts Quest States, the Hidden Quest overlay, Dispute Cases, Payout queues, and Wallet holds. The Report counter is absent because Report Case persistence is unavailable.',
+      description:
+        'Counts Quest States, the Hidden Quest overlay, Dispute Cases, Payout queues, and Wallet holds. The Report counter is absent because Report Case persistence is unavailable.',
       operationId: 'getAdminOverview',
       security: betterAuthSecurity,
     },

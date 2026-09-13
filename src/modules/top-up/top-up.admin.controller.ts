@@ -17,25 +17,21 @@ import {
   type TopUpProviderEvent,
 } from './top-up.provider-event.service';
 import type { TopUp } from './top-up.service';
-import type {
-  adminTopUpEventParamsSchema,
-  adminTopUpParamsSchema,
-} from './top-up.admin.schema';
+import type { adminTopUpEventParamsSchema, adminTopUpParamsSchema } from './top-up.admin.schema';
 import type { AdminTopUpListQuery } from './top-up.admin.schema';
 import { listAdminTopUps } from './top-up.admin.service';
 
 type AdminTopUpParams = Static<typeof adminTopUpParamsSchema>;
 type AdminTopUpEventParams = Static<typeof adminTopUpEventParamsSchema>;
 
-const qrDataUrlFor = async (payload: string | null): Promise<string | null> => (
+const qrDataUrlFor = async (payload: string | null): Promise<string | null> =>
   payload
     ? QRCode.toDataURL(payload, {
-      errorCorrectionLevel: 'M',
-      margin: 2,
-      width: 360,
-    })
-    : null
-);
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        width: 360,
+      })
+    : null;
 
 export const serializeTopUp = async (topUp: TopUp) => ({
   ...topUp,
@@ -58,13 +54,29 @@ const serializeTopUpProviderEvent = (event: TopUpProviderEvent) => ({
 const mapAdminTopUpError = (set: AdminContext['set'], error: unknown) => {
   if (error instanceof ProviderEventError) {
     if (error.code === 'PROVIDER_EVENT_NOT_FOUND') set.status = 404;
-    else if (error.code === 'PROVIDER_EVENT_NOT_RETRYABLE' || error.code === 'PROVIDER_EVENT_CONFLICT') set.status = 409;
-    else if (['PROVIDER_EVENT_KEY_UNAVAILABLE', 'PROVIDER_EVENT_KEY_VERSION_UNKNOWN', 'PROVIDER_EVENT_ENCRYPTION_FAILED'].includes(error.code)) set.status = 500;
+    else if (
+      error.code === 'PROVIDER_EVENT_NOT_RETRYABLE' ||
+      error.code === 'PROVIDER_EVENT_CONFLICT'
+    )
+      set.status = 409;
+    else if (
+      [
+        'PROVIDER_EVENT_KEY_UNAVAILABLE',
+        'PROVIDER_EVENT_KEY_VERSION_UNKNOWN',
+        'PROVIDER_EVENT_ENCRYPTION_FAILED',
+      ].includes(error.code)
+    )
+      set.status = 500;
     else set.status = 400;
     return apiError(error.code, error.message);
   }
   if (error instanceof MoneyDomainError) {
-    const notFound = ['TOP_UP_NOT_FOUND', 'TOP_UP_QUOTE_NOT_FOUND', 'MEMBER_NOT_FOUND', 'WALLET_NOT_FOUND'];
+    const notFound = [
+      'TOP_UP_NOT_FOUND',
+      'TOP_UP_QUOTE_NOT_FOUND',
+      'MEMBER_NOT_FOUND',
+      'WALLET_NOT_FOUND',
+    ];
     const badRequest = ['INVALID_LIMIT', 'INVALID_AMOUNT', 'INVALID_CURSOR'];
     set.status = notFound.includes(error.code) ? 404 : badRequest.includes(error.code) ? 400 : 409;
     return apiError(error.code, error.message);

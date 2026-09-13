@@ -3,11 +3,7 @@ import { enabledAdminGuard } from '@/modules/auth/admin-auth.guard';
 import { authGuard } from '@/modules/auth/auth.guard';
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
-import {
-  authAccount,
-  authAdmin,
-  authSession,
-} from '@/database/schema/auth.schema';
+import { authAccount, authAdmin, authSession } from '@/database/schema/auth.schema';
 
 import { randomUUID } from 'node:crypto';
 
@@ -32,13 +28,11 @@ const requestAdminLogin = (password: string) =>
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: adminEmail, password }),
-    }),
+    })
   );
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 beforeAll(async () => {
   try {
@@ -46,7 +40,7 @@ beforeAll(async () => {
   } catch (cause) {
     throw new Error(
       'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 
@@ -133,7 +127,7 @@ describe('Admin authentication with PostgreSQL', () => {
     const response = await protectedAdminApp.handle(
       new Request('http://localhost/admin-only', {
         headers: { cookie },
-      }),
+      })
     );
 
     expect(response.status).toBe(200);
@@ -144,7 +138,7 @@ describe('Admin authentication with PostgreSQL', () => {
     const response = await protectedAdminApp.handle(
       new Request('http://localhost/admin-only', {
         headers: { cookie: '__Secure-better-auth.session_token=student-session' },
-      }),
+      })
     );
 
     expect(response.status).toBe(401);
@@ -161,24 +155,21 @@ describe('Admin authentication with PostgreSQL', () => {
     const response = await protectedStudentApp.handle(
       new Request('http://localhost/student-only', {
         headers: { cookie },
-      }),
+      })
     );
 
     expect(response.status).toBe(401);
   });
 
   it('rejects a disabled Admin with the disabled error', async () => {
-    await db
-      .update(authAdmin)
-      .set({ disabledAt: new Date() })
-      .where(eq(authAdmin.id, adminId));
+    await db.update(authAdmin).set({ disabledAt: new Date() }).where(eq(authAdmin.id, adminId));
 
     const loginResponse = await requestAdminLogin(adminPassword);
     const cookie = getCookieHeader(loginResponse);
     const response = await protectedAdminApp.handle(
       new Request('http://localhost/admin-only', {
         headers: { cookie },
-      }),
+      })
     );
 
     expect(response.status).toBe(403);

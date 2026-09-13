@@ -16,7 +16,7 @@ beforeAll(async () => {
   } catch (cause) {
     throw new Error(
       'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 });
@@ -39,7 +39,7 @@ describe('Tag persistence', () => {
     const rows = await listTags();
 
     expect(rows.filter(({ id }) => tagIds.includes(id))).toEqual(
-      [...created].sort((left, right) => left.name.localeCompare(right.name)),
+      [...created].sort((left, right) => left.name.localeCompare(right.name))
     );
   });
 });

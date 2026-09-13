@@ -2,11 +2,7 @@ import { app } from '@/app';
 import { db } from '@/database/client';
 import { createStagingTestAuthRoute } from '@/modules/auth/staging-test-auth.route';
 import { walletLedgerAccount } from '@/database/schema/wallet.schema';
-import {
-  createSealedLedgerTransaction,
-  ensureWallet,
-  signedSatang,
-} from '@/modules/wallet';
+import { createSealedLedgerTransaction, ensureWallet, signedSatang } from '@/modules/wallet';
 
 import { Elysia } from 'elysia';
 import { describe, expect, it } from 'bun:test';
@@ -26,19 +22,19 @@ const testAuthApp = new Elysia({ name: 'wallet-http-test-auth' }).use(
       firstName: 'Wallet2',
       lastName: 'Tester2',
     },
-  }),
+  })
 );
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
-const signInTestMember = async (accountPath = 'account-1'): Promise<{ cookie: string; userId: string }> => {
+const signInTestMember = async (
+  accountPath = 'account-1'
+): Promise<{ cookie: string; userId: string }> => {
   const loginResponse = await testAuthApp.handle(
     new Request(`http://localhost/api/staging/test-auth/sign-in/${accountPath}`, {
       method: 'POST',
-    }),
+    })
   );
   expect(loginResponse.status).toBe(200);
   const cookie = getCookieHeader(loginResponse);
@@ -49,9 +45,7 @@ const signInTestMember = async (accountPath = 'account-1'): Promise<{ cookie: st
 
 describe('Wallet HTTP routes', () => {
   it('requires Member authentication for all Wallet endpoints', async () => {
-    const unauthenticatedWallet = await app.handle(
-      new Request('http://localhost/api/v1/wallet'),
-    );
+    const unauthenticatedWallet = await app.handle(new Request('http://localhost/api/v1/wallet'));
     const unauthenticatedConversion = await app.handle(
       new Request('http://localhost/api/v1/wallet/earnings-conversions', {
         method: 'POST',
@@ -60,10 +54,10 @@ describe('Wallet HTTP routes', () => {
           'idempotency-key': 'auth-check',
         },
         body: JSON.stringify({ amountSatang: 100 }),
-      }),
+      })
     );
     const unauthenticatedActivities = await app.handle(
-      new Request('http://localhost/api/v1/wallet/activities'),
+      new Request('http://localhost/api/v1/wallet/activities')
     );
 
     expect(unauthenticatedWallet.status).toBe(401);
@@ -80,10 +74,10 @@ describe('Wallet HTTP routes', () => {
     expect(response.status).toBe(200);
     expect(document.paths['/api/v1/wallet']?.get?.operationId).toBe('getOwnWallet');
     expect(document.paths['/api/v1/wallet/earnings-conversions']?.post?.operationId).toBe(
-      'convertEarnings',
+      'convertEarnings'
     );
     expect(document.paths['/api/v1/wallet/activities']?.get?.operationId).toBe(
-      'listWalletActivities',
+      'listWalletActivities'
     );
   });
 
@@ -93,7 +87,7 @@ describe('Wallet HTTP routes', () => {
     const response = await app.handle(
       new Request('http://localhost/api/v1/wallet', {
         headers: { cookie },
-      }),
+      })
     );
 
     expect(response.status).toBe(200);
@@ -124,7 +118,9 @@ describe('Wallet HTTP routes', () => {
     const [earningsAcc] = await db
       .select({ id: walletLedgerAccount.id })
       .from(walletLedgerAccount)
-      .where(and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, 'EARNINGS')));
+      .where(
+        and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, 'EARNINGS'))
+      );
     const [suspenseAcc] = await db
       .select({ id: walletLedgerAccount.id })
       .from(walletLedgerAccount)
@@ -146,7 +142,7 @@ describe('Wallet HTTP routes', () => {
     const activitiesResponse = await app.handle(
       new Request('http://localhost/api/v1/wallet/activities?limit=10', {
         headers: { cookie },
-      }),
+      })
     );
     expect(activitiesResponse.status).toBe(200);
     const activitiesData = (await activitiesResponse.json()) as {
@@ -175,7 +171,7 @@ describe('Wallet HTTP routes', () => {
           'idempotency-key': idempotencyKey,
         },
         body: JSON.stringify({ amountSatang: 2_500 }),
-      }),
+      })
     );
 
     expect(conversionResponse.status).toBe(200);
@@ -204,7 +200,7 @@ describe('Wallet HTTP routes', () => {
           'idempotency-key': idempotencyKey,
         },
         body: JSON.stringify({ amountSatang: 2_500 }),
-      }),
+      })
     );
     expect(replayResponse.status).toBe(200);
     const replayData = (await replayResponse.json()) as typeof conversionData;
@@ -221,7 +217,7 @@ describe('Wallet HTTP routes', () => {
           'idempotency-key': idempotencyKey,
         },
         body: JSON.stringify({ amountSatang: 1_000 }),
-      }),
+      })
     );
     expect(conflictResponse.status).toBe(409);
   });
@@ -238,7 +234,7 @@ describe('Wallet HTTP routes', () => {
           'content-type': 'application/json',
         },
         body: JSON.stringify({ amountSatang: 100 }),
-      }),
+      })
     );
     expect(missingKey.status).toBe(400);
 
@@ -252,7 +248,7 @@ describe('Wallet HTTP routes', () => {
           'idempotency-key': 'key-zero',
         },
         body: JSON.stringify({ amountSatang: 0 }),
-      }),
+      })
     );
     expect(zeroAmount.status).toBe(400);
 
@@ -260,7 +256,7 @@ describe('Wallet HTTP routes', () => {
     const invalidLimit = await app.handle(
       new Request('http://localhost/api/v1/wallet/activities?limit=101', {
         headers: { cookie },
-      }),
+      })
     );
     expect(invalidLimit.status).toBe(400);
   });

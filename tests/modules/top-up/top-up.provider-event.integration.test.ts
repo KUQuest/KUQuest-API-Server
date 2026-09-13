@@ -6,10 +6,7 @@ import {
   paymentTopUp,
   paymentTopUpStatusHistory,
 } from '@/database/schema/payment.schema';
-import {
-  walletLedgerTransaction,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
+import { walletLedgerTransaction, walletWallet } from '@/database/schema/wallet.schema';
 import {
   createProviderEventEncryption,
   getTopUp,
@@ -73,11 +70,14 @@ const createPendingTopUp = async (prefix: string) => {
     principalUserId: userId,
     creditSatang: positiveSatang(100),
   });
-  const topUp = await initiateTopUp({
-    principalUserId: userId,
-    quoteId: quote.id,
-    idempotency: { key: `${prefix}-${crypto.randomUUID()}` },
-  }, new FakeInboundPaymentProvider());
+  const topUp = await initiateTopUp(
+    {
+      principalUserId: userId,
+      quoteId: quote.id,
+      idempotency: { key: `${prefix}-${crypto.randomUUID()}` },
+    },
+    new FakeInboundPaymentProvider()
+  );
   return { userId, topUp };
 };
 
@@ -89,26 +89,28 @@ const eventPayload = (input: {
   amount?: number;
   event?: string;
   updatedAt?: string;
-}) => JSON.stringify({
-  event_id: input.eventId,
-  event: input.event ?? (input.status === 'FAILED' ? 'payment.failure' : 'payment.capture'),
-  data: {
-    reference_id: input.internalReference,
-    payment_request_id: input.providerReference,
-    status: input.status,
-    ...(input.amount === undefined ? {} : { request_amount: input.amount }),
-    channel_code: 'QRPROMPTPAY',
-    updated: input.updatedAt ?? '2026-08-27T00:00:00.000Z',
-  },
-});
+}) =>
+  JSON.stringify({
+    event_id: input.eventId,
+    event: input.event ?? (input.status === 'FAILED' ? 'payment.failure' : 'payment.capture'),
+    data: {
+      reference_id: input.internalReference,
+      payment_request_id: input.providerReference,
+      status: input.status,
+      ...(input.amount === undefined ? {} : { request_amount: input.amount }),
+      channel_code: 'QRPROMPTPAY',
+      updated: input.updatedAt ?? '2026-08-27T00:00:00.000Z',
+    },
+  });
 
-const receive = (rawPayload: string, receivedAt?: Date) => receiveTopUpProviderEvent({
-  rawPayload,
-  callbackToken: 'be116-test-token',
-  webhookToken: 'be116-test-token',
-  receivedAt,
-  encryption,
-});
+const receive = (rawPayload: string, receivedAt?: Date) =>
+  receiveTopUpProviderEvent({
+    rawPayload,
+    callbackToken: 'be116-test-token',
+    webhookToken: 'be116-test-token',
+    receivedAt,
+    encryption,
+  });
 
 beforeAll(async () => {
   await sql`select 1`;
@@ -126,10 +128,7 @@ describe('Top-up Provider event application services', () => {
       amount: topUp.paymentTotalSatang / 100,
     });
 
-    const [received, duplicate] = await Promise.all([
-      receive(rawPayload),
-      receive(rawPayload),
-    ]);
+    const [received, duplicate] = await Promise.all([receive(rawPayload), receive(rawPayload)]);
     expect(duplicate.id).toBe(received.id);
     await expect(receive(rawPayload.replace('SUCCEEDED', 'PAID'))).rejects.toMatchObject({
       code: 'PROVIDER_EVENT_CONFLICT',
@@ -148,9 +147,12 @@ describe('Top-up Provider event application services', () => {
     expect(await getWallet(userId)).toMatchObject({
       spendingBalanceSatang: topUp.creditSatang,
     });
-    expect(await db.select().from(walletLedgerTransaction).where(
-      eq(walletLedgerTransaction.businessReference, `top-up-credit:${topUp.id}`),
-    )).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(walletLedgerTransaction)
+        .where(eq(walletLedgerTransaction.businessReference, `top-up-credit:${topUp.id}`))
+    ).toHaveLength(1);
     expect(await listTopUpProviderEventHistory(received.id)).toMatchObject([
       { fromStatus: null, toStatus: 'RECEIVED' },
       { fromStatus: 'RECEIVED', toStatus: 'PROCESSING' },
@@ -160,13 +162,15 @@ describe('Top-up Provider event application services', () => {
 
   it('does not duplicate a ledger credit when workers process one event concurrently', async () => {
     const { userId, topUp } = await createPendingTopUp('be116-concurrent-process');
-    const event = await receive(eventPayload({
-      eventId: `be116-concurrent-${crypto.randomUUID()}`,
-      internalReference: topUp.internalReference,
-      providerReference: topUp.providerReference!,
-      status: 'SUCCEEDED',
-      amount: topUp.paymentTotalSatang / 100,
-    }));
+    const event = await receive(
+      eventPayload({
+        eventId: `be116-concurrent-${crypto.randomUUID()}`,
+        internalReference: topUp.internalReference,
+        providerReference: topUp.providerReference!,
+        status: 'SUCCEEDED',
+        amount: topUp.paymentTotalSatang / 100,
+      })
+    );
 
     const results = await Promise.allSettled([
       processTopUpProviderEvent(event.id),
@@ -175,88 +179,115 @@ describe('Top-up Provider event application services', () => {
 
     expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
     expect(await getTopUp(userId, topUp.id)).toMatchObject({ topUpStatus: 'PAID' });
-    expect(await db.select().from(walletLedgerTransaction).where(
-      eq(walletLedgerTransaction.businessReference, `top-up-credit:${topUp.id}`),
-    )).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(walletLedgerTransaction)
+        .where(eq(walletLedgerTransaction.businessReference, `top-up-credit:${topUp.id}`))
+    ).toHaveLength(1);
   });
 
   it('does not regress a terminal Top-up when events arrive out of order', async () => {
     const { userId, topUp } = await createPendingTopUp('be116-order');
-    const failed = await receive(eventPayload({
-      eventId: `be116-failed-${crypto.randomUUID()}`,
-      internalReference: topUp.internalReference,
-      providerReference: topUp.providerReference!,
-      status: 'FAILED',
-    }));
-    const paid = await receive(eventPayload({
-      eventId: `be116-paid-${crypto.randomUUID()}`,
-      internalReference: topUp.internalReference,
-      providerReference: topUp.providerReference!,
-      status: 'SUCCEEDED',
-      amount: topUp.paymentTotalSatang / 100,
-    }));
+    const failed = await receive(
+      eventPayload({
+        eventId: `be116-failed-${crypto.randomUUID()}`,
+        internalReference: topUp.internalReference,
+        providerReference: topUp.providerReference!,
+        status: 'FAILED',
+      })
+    );
+    const paid = await receive(
+      eventPayload({
+        eventId: `be116-paid-${crypto.randomUUID()}`,
+        internalReference: topUp.internalReference,
+        providerReference: topUp.providerReference!,
+        status: 'SUCCEEDED',
+        amount: topUp.paymentTotalSatang / 100,
+      })
+    );
 
     await processTopUpProviderEvent(failed.id);
     await processTopUpProviderEvent(paid.id);
 
     expect(await getTopUp(userId, topUp.id)).toMatchObject({ topUpStatus: 'FAILED' });
     expect(await getWallet(userId)).toMatchObject({ spendingBalanceSatang: 0 });
-    const history = await db.select().from(paymentTopUpStatusHistory).where(
-      eq(paymentTopUpStatusHistory.topUpId, topUp.id),
-    );
+    const history = await db
+      .select()
+      .from(paymentTopUpStatusHistory)
+      .where(eq(paymentTopUpStatusHistory.topUpId, topUp.id));
     expect(history).toHaveLength(2);
-    expect(history).toContainEqual(expect.objectContaining({ fromStatus: null, toStatus: 'PENDING' }));
-    expect(history).toContainEqual(expect.objectContaining({ fromStatus: 'PENDING', toStatus: 'FAILED' }));
+    expect(history).toContainEqual(
+      expect.objectContaining({ fromStatus: null, toStatus: 'PENDING' })
+    );
+    expect(history).toContainEqual(
+      expect.objectContaining({ fromStatus: 'PENDING', toStatus: 'FAILED' })
+    );
   });
 
   it('records a Provider reversal as a linked ledger correction', async () => {
     const { userId, topUp } = await createPendingTopUp('be116-correction');
-    const paid = await receive(eventPayload({
-      eventId: `be116-paid-${crypto.randomUUID()}`,
-      internalReference: topUp.internalReference,
-      providerReference: topUp.providerReference!,
-      status: 'SUCCEEDED',
-      amount: topUp.paymentTotalSatang / 100,
-    }));
-    await processTopUpProviderEvent(paid.id);
-    const [credit] = await db.select().from(walletLedgerTransaction).where(
-      eq(walletLedgerTransaction.businessReference, `top-up-credit:${topUp.id}`),
+    const paid = await receive(
+      eventPayload({
+        eventId: `be116-paid-${crypto.randomUUID()}`,
+        internalReference: topUp.internalReference,
+        providerReference: topUp.providerReference!,
+        status: 'SUCCEEDED',
+        amount: topUp.paymentTotalSatang / 100,
+      })
     );
+    await processTopUpProviderEvent(paid.id);
+    const [credit] = await db
+      .select()
+      .from(walletLedgerTransaction)
+      .where(eq(walletLedgerTransaction.businessReference, `top-up-credit:${topUp.id}`));
     if (!credit) throw new Error('Top-up credit ledger transaction was not created.');
 
-    const reversed = await receive(eventPayload({
-      eventId: `be116-reversed-${crypto.randomUUID()}`,
-      internalReference: topUp.internalReference,
-      providerReference: topUp.providerReference!,
-      event: 'refund.succeeded',
-      status: 'SUCCEEDED',
-      amount: topUp.paymentTotalSatang / 100,
-    }));
+    const reversed = await receive(
+      eventPayload({
+        eventId: `be116-reversed-${crypto.randomUUID()}`,
+        internalReference: topUp.internalReference,
+        providerReference: topUp.providerReference!,
+        event: 'refund.succeeded',
+        status: 'SUCCEEDED',
+        amount: topUp.paymentTotalSatang / 100,
+      })
+    );
     await processTopUpProviderEvent(reversed.id);
 
     expect(await getTopUp(userId, topUp.id)).toMatchObject({ topUpStatus: 'PAID' });
     expect(await getWallet(userId)).toMatchObject({ spendingBalanceSatang: 0 });
-    expect(await db.select().from(walletLedgerTransaction).where(and(
-      eq(walletLedgerTransaction.correctionOfTransactionId, credit.id),
-      eq(walletLedgerTransaction.businessReference, `top-up-reversal:${topUp.id}`),
-    ))).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(walletLedgerTransaction)
+        .where(
+          and(
+            eq(walletLedgerTransaction.correctionOfTransactionId, credit.id),
+            eq(walletLedgerTransaction.businessReference, `top-up-reversal:${topUp.id}`)
+          )
+        )
+    ).toHaveLength(1);
   });
 
   it('credits a confirmed Top-up while the Wallet is not Active', async () => {
     const { userId, topUp } = await createPendingTopUp('be116-wallet-state');
     const [wallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, userId));
     if (!wallet) throw new Error('Wallet was not provisioned.');
-    await db.update(walletWallet)
+    await db
+      .update(walletWallet)
       .set({ walletStatus: 'FROZEN' })
       .where(eq(walletWallet.id, wallet.id));
 
-    const event = await receive(eventPayload({
-      eventId: `be116-frozen-${crypto.randomUUID()}`,
-      internalReference: topUp.internalReference,
-      providerReference: topUp.providerReference!,
-      status: 'SUCCEEDED',
-      amount: topUp.paymentTotalSatang / 100,
-    }));
+    const event = await receive(
+      eventPayload({
+        eventId: `be116-frozen-${crypto.randomUUID()}`,
+        internalReference: topUp.internalReference,
+        providerReference: topUp.providerReference!,
+        status: 'SUCCEEDED',
+        amount: topUp.paymentTotalSatang / 100,
+      })
+    );
     await processTopUpProviderEvent(event.id);
 
     expect(await getTopUp(userId, topUp.id)).toMatchObject({ topUpStatus: 'PAID' });
@@ -280,7 +311,9 @@ describe('Top-up Provider event application services', () => {
     await expect(processTopUpProviderEvent(event.id)).rejects.toMatchObject({
       code: 'PROVIDER_EVENT_NOT_FOUND',
     });
-    const [retryable] = await db.select().from(paymentProviderEventInbox)
+    const [retryable] = await db
+      .select()
+      .from(paymentProviderEventInbox)
       .where(eq(paymentProviderEventInbox.id, event.id));
     expect(retryable).toMatchObject({ processingStatus: 'RETRYABLE', attemptCount: 1 });
     await expect(retryTopUpProviderEvent(event.id)).resolves.toMatchObject({
@@ -290,16 +323,20 @@ describe('Top-up Provider event application services', () => {
       code: 'PROVIDER_EVENT_NOT_FOUND',
     });
 
-    const [stored] = await db.select().from(paymentProviderEventInbox)
+    const [stored] = await db
+      .select()
+      .from(paymentProviderEventInbox)
       .where(eq(paymentProviderEventInbox.id, event.id));
     expect(stored?.payloadHash).toHaveLength(64);
     expect(stored?.rawPayloadCiphertext).not.toBe(rawPayload);
     expect(stored?.rawPayloadCiphertext).toBeTruthy();
 
-    expect(await purgeExpiredProviderEventPayloads(
-      new Date('2026-01-31T00:00:00.000Z'),
-    )).toBeGreaterThanOrEqual(1);
-    const [purged] = await db.select().from(paymentProviderEventInbox)
+    expect(
+      await purgeExpiredProviderEventPayloads(new Date('2026-01-31T00:00:00.000Z'))
+    ).toBeGreaterThanOrEqual(1);
+    const [purged] = await db
+      .select()
+      .from(paymentProviderEventInbox)
       .where(eq(paymentProviderEventInbox.id, event.id));
     expect(purged).toMatchObject({
       rawPayloadKeyVersion: null,
@@ -307,46 +344,63 @@ describe('Top-up Provider event application services', () => {
       rawPayloadCiphertext: null,
       rawPayloadAuthTag: null,
     });
-    await expect(db.delete(paymentProviderEventInbox).where(eq(paymentProviderEventInbox.id, event.id)).execute())
-      .rejects.toThrow();
-    expect(await db.select().from(paymentProviderEventHistory).where(
-      eq(paymentProviderEventHistory.eventId, event.id),
-    )).toHaveLength(6);
+    await expect(
+      db
+        .delete(paymentProviderEventInbox)
+        .where(eq(paymentProviderEventInbox.id, event.id))
+        .execute()
+    ).rejects.toThrow();
+    expect(
+      await db
+        .select()
+        .from(paymentProviderEventHistory)
+        .where(eq(paymentProviderEventHistory.eventId, event.id))
+    ).toHaveLength(6);
   });
 
   it('recovers stale claims and moves exhausted events to the dead-letter state', async () => {
     const now = new Date('2026-08-27T00:10:00.000Z');
     const staleClaimedAt = new Date('2026-08-27T00:00:00.000Z');
-    const staleEvent = await receive(eventPayload({
-      eventId: `be116-stale-${crypto.randomUUID()}`,
-      internalReference: `missing-${crypto.randomUUID()}`,
-      providerReference: `missing-provider-${crypto.randomUUID()}`,
-      status: 'REQUIRES_ACTION',
-    }));
+    const staleEvent = await receive(
+      eventPayload({
+        eventId: `be116-stale-${crypto.randomUUID()}`,
+        internalReference: `missing-${crypto.randomUUID()}`,
+        providerReference: `missing-provider-${crypto.randomUUID()}`,
+        status: 'REQUIRES_ACTION',
+      })
+    );
 
-    await db.update(paymentProviderEventInbox)
+    await db
+      .update(paymentProviderEventInbox)
       .set({ processingStatus: 'PROCESSING', attemptCount: 1, claimedAt: staleClaimedAt })
       .where(eq(paymentProviderEventInbox.id, staleEvent.id));
 
     await expect(processTopUpProviderEvent(staleEvent.id, now)).rejects.toMatchObject({
       code: 'PROVIDER_EVENT_NOT_FOUND',
     });
-    const [recovered] = await db.select().from(paymentProviderEventInbox)
+    const [recovered] = await db
+      .select()
+      .from(paymentProviderEventInbox)
       .where(eq(paymentProviderEventInbox.id, staleEvent.id));
     expect(recovered).toMatchObject({ processingStatus: 'RETRYABLE', attemptCount: 2 });
 
-    const deadEvent = await receive(eventPayload({
-      eventId: `be116-dead-${crypto.randomUUID()}`,
-      internalReference: `missing-${crypto.randomUUID()}`,
-      providerReference: `missing-provider-${crypto.randomUUID()}`,
-      status: 'REQUIRES_ACTION',
-    }));
-    await db.update(paymentProviderEventInbox)
+    const deadEvent = await receive(
+      eventPayload({
+        eventId: `be116-dead-${crypto.randomUUID()}`,
+        internalReference: `missing-${crypto.randomUUID()}`,
+        providerReference: `missing-provider-${crypto.randomUUID()}`,
+        status: 'REQUIRES_ACTION',
+      })
+    );
+    await db
+      .update(paymentProviderEventInbox)
       .set({ processingStatus: 'PROCESSING', attemptCount: 5, claimedAt: staleClaimedAt })
       .where(eq(paymentProviderEventInbox.id, deadEvent.id));
 
     await expect(claimTopUpProviderEvents({ now, eventId: deadEvent.id })).resolves.toEqual([]);
-    const [dead] = await db.select().from(paymentProviderEventInbox)
+    const [dead] = await db
+      .select()
+      .from(paymentProviderEventInbox)
       .where(eq(paymentProviderEventInbox.id, deadEvent.id));
     expect(dead).toMatchObject({
       processingStatus: 'DEAD_LETTER',
@@ -395,7 +449,8 @@ describe('Top-up Provider event application services', () => {
   it('reconciles an uncertain Top-up by internal reference when Provider reference is missing', async () => {
     const { userId, topUp } = await createPendingTopUp('be116-reconcile-by-internal-reference');
     const recoveredProviderReference = `be116-recovered-${crypto.randomUUID()}`;
-    await db.update(paymentTopUp)
+    await db
+      .update(paymentTopUp)
       .set({ providerReference: null })
       .where(eq(paymentTopUp.id, topUp.id));
     let request: InboundPaymentStatusRequest | undefined;

@@ -99,7 +99,7 @@ describe('createImageStorage upload plans', () => {
     const stored = await plannedStorage.upload(
       'user-1',
       new File([bytes], 'image.png', { type: 'image/png' }),
-      plan,
+      plan
     );
 
     expect(writtenObjectKey).toBe(plan.objectKey);

@@ -35,7 +35,8 @@ export const adminWalletRoute = new Elysia({
     detail: {
       tags: ['Admin Wallets'],
       summary: 'List and filter all Member Wallets',
-      description: 'Returns all Member Wallets with both Spending and Earnings balances in a single request, with search and status filters.',
+      description:
+        'Returns all Member Wallets with both Spending and Earnings balances in a single request, with search and status filters.',
       operationId: 'listAdminWallets',
       security: betterAuthSecurity,
     },
@@ -46,7 +47,8 @@ export const adminWalletRoute = new Elysia({
     detail: {
       tags: ['Admin Wallets'],
       summary: 'Get Member Wallet Details',
-      description: 'Returns full wallet balance compartments (Spending, Earnings, Holds) and ledger reconciliation status.',
+      description:
+        'Returns full wallet balance compartments (Spending, Earnings, Holds) and ledger reconciliation status.',
       operationId: 'getAdminWalletDetail',
       security: betterAuthSecurity,
     },
@@ -70,7 +72,8 @@ export const adminWalletRoute = new Elysia({
     detail: {
       tags: ['Admin Wallets'],
       summary: 'Change Wallet status',
-      description: 'Changes Wallet status to ACTIVE, FROZEN, SUSPENDED, or CLOSED with mandatory reason and Idempotency-Key.',
+      description:
+        'Changes Wallet status to ACTIVE, FROZEN, SUSPENDED, or CLOSED with mandatory reason and Idempotency-Key.',
       operationId: 'changeAdminWalletStatus',
       security: betterAuthSecurity,
     },
@@ -81,7 +84,8 @@ export const adminWalletRoute = new Elysia({
     detail: {
       tags: ['Admin Wallets'],
       summary: 'Verify Wallet projection against Ledger source of truth',
-      description: 'Compares the stored Wallet balances and activity projection against the sealed double-entry Ledger.',
+      description:
+        'Compares the stored Wallet balances and activity projection against the sealed double-entry Ledger.',
       operationId: 'verifyAdminWalletProjection',
       security: betterAuthSecurity,
     },
@@ -92,7 +96,8 @@ export const adminWalletRoute = new Elysia({
     detail: {
       tags: ['Admin Wallets'],
       summary: 'Rebuild Wallet projection from Ledger source of truth',
-      description: 'Reconstructs the Wallet balances and activities from the sealed double-entry Ledger source of truth.',
+      description:
+        'Reconstructs the Wallet balances and activities from the sealed double-entry Ledger source of truth.',
       operationId: 'rebuildAdminWalletProjection',
       security: betterAuthSecurity,
     },

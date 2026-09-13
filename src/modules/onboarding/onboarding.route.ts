@@ -5,62 +5,62 @@ import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { Elysia } from 'elysia';
 
 import {
-    getAcademicOptionsController,
-    getOnboardingStatus,
-    updateOnboarding,
-    getOnboardingInfo,
+  getAcademicOptionsController,
+  getOnboardingStatus,
+  updateOnboarding,
+  getOnboardingInfo,
 } from './onboarding.controller';
 import {
-    academicOptionsResponseSchema,
-    onboardingDataResponseSchema,
-    onboardingResponseSchema,
-    onboardingSchema,
-    onboardingUpdateSchema,
+  academicOptionsResponseSchema,
+  onboardingDataResponseSchema,
+  onboardingResponseSchema,
+  onboardingSchema,
+  onboardingUpdateSchema,
 } from './onboarding.schema';
 
 export const onboardingRoute = new Elysia({
-    name: 'onboarding-route',
-    prefix: `${API_V1_PREFIX}/onboarding`,
+  name: 'onboarding-route',
+  prefix: `${API_V1_PREFIX}/onboarding`,
 })
-    .use(authGuard)
-    .get('/academic-options', getAcademicOptionsController, {
-        response: responses(academicOptionsResponseSchema, 401),
-        detail: {
-            tags: ['Onboarding'],
-            summary: 'List faculty and department options',
-            description: 'Lists the seeded faculties and their departments for the onboarding form',
-            operationId: 'getOnboardingAcademicOptions',
-            security: betterAuthSecurity,
-        },
-    })
-    .get('/status', getOnboardingStatus, {
-        response: responses(onboardingResponseSchema, 401, 404),
-        detail: {
-            tags: ['Onboarding'],
-            summary: 'Get onboarding status',
-            description: 'Get the onboarding status of the current user',
-            operationId: 'getOnboardingStatus',
-            security: betterAuthSecurity,
-        },
-    })
-    .patch('/update', updateOnboarding, {
-        body: onboardingSchema,
-        response: responses(onboardingUpdateSchema, 401, 400, 404, 409),
-        detail: {
-            tags: ['Onboarding'],
-            summary: 'Update onboarding information',
-            description: 'Update the onboarding information of the current user',
-            operationId: 'updateOnboardingInfo',
-            security: betterAuthSecurity,
-        },
-    })
-    .get('/get-data', getOnboardingInfo, {
-        response: responses(onboardingDataResponseSchema, 401, 404),
-        detail: {
-            tags: ['Onboarding'],
-            summary: 'Get onboarding information',
-            description: 'Get the onboarding information of the current user',
-            operationId: 'getOnboardingData',
-            security: betterAuthSecurity,
-        },
-    });
+  .use(authGuard)
+  .get('/academic-options', getAcademicOptionsController, {
+    response: responses(academicOptionsResponseSchema, 401),
+    detail: {
+      tags: ['Onboarding'],
+      summary: 'List faculty and department options',
+      description: 'Lists the seeded faculties and their departments for the onboarding form',
+      operationId: 'getOnboardingAcademicOptions',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/status', getOnboardingStatus, {
+    response: responses(onboardingResponseSchema, 401, 404),
+    detail: {
+      tags: ['Onboarding'],
+      summary: 'Get onboarding status',
+      description: 'Get the onboarding status of the current user',
+      operationId: 'getOnboardingStatus',
+      security: betterAuthSecurity,
+    },
+  })
+  .patch('/update', updateOnboarding, {
+    body: onboardingSchema,
+    response: responses(onboardingUpdateSchema, 401, 400, 404, 409),
+    detail: {
+      tags: ['Onboarding'],
+      summary: 'Update onboarding information',
+      description: 'Update the onboarding information of the current user',
+      operationId: 'updateOnboardingInfo',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/get-data', getOnboardingInfo, {
+    response: responses(onboardingDataResponseSchema, 401, 404),
+    detail: {
+      tags: ['Onboarding'],
+      summary: 'Get onboarding information',
+      description: 'Get the onboarding information of the current user',
+      operationId: 'getOnboardingData',
+      security: betterAuthSecurity,
+    },
+  });

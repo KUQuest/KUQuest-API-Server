@@ -5,8 +5,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
 const connectionString =
-  process.env.DATABASE_URL ||
-  'postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest';
+  process.env.DATABASE_URL || 'postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest';
 
 const sql = postgres(connectionString, { prepare: false });
 const db = drizzle(sql);
@@ -50,7 +49,7 @@ const readLegacySchemaState = async (): Promise<LegacySchemaState> => {
   if (
     (accountColumns.length > 0 && !hasExpectedColumns(accountColumns, accountLegacyColumns)) ||
     (payoutColumns.length > 0 && !hasExpectedColumns(payoutColumns, payoutLegacyColumns)) ||
-    (accountColumns.length > 0) !== (payoutColumns.length > 0)
+    accountColumns.length > 0 !== payoutColumns.length > 0
   ) {
     throw new Error('Legacy Payout Destination schema is incomplete.');
   }
@@ -137,9 +136,8 @@ const finalizeLegacySecrets = async (): Promise<void> => {
       WHERE destination_account_number IS NOT NULL
         AND destination_routing_value IS NOT NULL
     `;
-    const encryption = accounts.length > 0 || payouts.length > 0
-      ? createPayoutDestinationEncryption()
-      : undefined;
+    const encryption =
+      accounts.length > 0 || payouts.length > 0 ? createPayoutDestinationEncryption() : undefined;
 
     if (encryption) {
       const encryptedAccounts = accounts.map((row) => ({
@@ -153,7 +151,9 @@ const finalizeLegacySecrets = async (): Promise<void> => {
         routingValue: encryption.encrypt(row.routingValue),
       }));
 
-      await Promise.all(encryptedAccounts.map((row) => transaction`
+      await Promise.all(
+        encryptedAccounts.map(
+          (row) => transaction`
         UPDATE payment_payout_accounts
         SET
           account_number_key_version = ${row.accountNumber.keyVersion},
@@ -165,8 +165,12 @@ const finalizeLegacySecrets = async (): Promise<void> => {
           routing_value_ciphertext = ${row.routingValue.ciphertext},
           routing_value_auth_tag = ${row.routingValue.authTag}
         WHERE id = ${row.id}
-      `));
-      await Promise.all(encryptedPayouts.map((row) => transaction`
+      `
+        )
+      );
+      await Promise.all(
+        encryptedPayouts.map(
+          (row) => transaction`
         UPDATE payment_payouts
         SET
           destination_account_number_key_version = ${row.accountNumber.keyVersion},
@@ -178,7 +182,9 @@ const finalizeLegacySecrets = async (): Promise<void> => {
           destination_routing_value_ciphertext = ${row.routingValue.ciphertext},
           destination_routing_value_auth_tag = ${row.routingValue.authTag}
         WHERE id = ${row.id}
-      `));
+      `
+        )
+      );
     }
 
     await transaction`
@@ -249,7 +255,9 @@ try {
   if (error instanceof Error && error.message.includes('Payout Destination encryption key')) {
     console.error('Payout Destination migration failed: encryption key is unavailable.');
   } else {
-    console.error('Payout Destination migration did not complete. Sensitive values were not written to output.');
+    console.error(
+      'Payout Destination migration did not complete. Sensitive values were not written to output.'
+    );
     if (error instanceof Error) console.error(`Migration failure: ${error.message}`);
   }
   process.exitCode = 1;

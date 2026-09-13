@@ -8,12 +8,14 @@ const conversationSchema = t.Object({
     title: t.String(),
     status: t.String(),
   }),
-  latestMessage: t.Nullable(t.Object({
-    id: t.String({ format: 'uuid' }),
-    kind: t.Union([t.Literal('USER'), t.Literal('SYSTEM')]),
-    preview: t.String(),
-    createdAt: t.String({ format: 'date-time' }),
-  })),
+  latestMessage: t.Nullable(
+    t.Object({
+      id: t.String({ format: 'uuid' }),
+      kind: t.Union([t.Literal('USER'), t.Literal('SYSTEM')]),
+      preview: t.String(),
+      createdAt: t.String({ format: 'date-time' }),
+    })
+  ),
   lastActivityAt: t.Nullable(t.String({ format: 'date-time' })),
   archived: t.Boolean(),
   readOnly: t.Boolean(),
@@ -39,10 +41,12 @@ const messageSchema = t.Object({
   conversationId: t.String({ format: 'uuid' }),
   sequence: t.Integer({ minimum: 1 }),
   kind: t.Union([t.Literal('USER'), t.Literal('SYSTEM')]),
-  sender: t.Nullable(t.Object({
-    id: t.Nullable(t.String({ format: 'uuid' })),
-    displayName: t.String(),
-  })),
+  sender: t.Nullable(
+    t.Object({
+      id: t.Nullable(t.String({ format: 'uuid' })),
+      displayName: t.String(),
+    })
+  ),
   text: t.Nullable(t.String()),
   attachments: t.Array(attachmentSchema),
   systemType: t.Nullable(t.String()),
@@ -68,7 +72,7 @@ export const workChatAttachmentParamsSchema = t.Object({
 
 export const workChatAttachmentUploadSchema = t.Object(
   { file: t.File() },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const workChatConversationListQuerySchema = t.Object(
@@ -76,7 +80,7 @@ export const workChatConversationListQuerySchema = t.Object(
     limit: t.Optional(t.Integer({ minimum: 1, maximum: 20 })),
     cursor: t.Optional(t.String()),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const workChatMessageListQuerySchema = t.Object(
@@ -85,7 +89,7 @@ export const workChatMessageListQuerySchema = t.Object(
     before: t.Optional(t.String()),
     after: t.Optional(t.String()),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const workChatSendMessageSchema = t.Object(
@@ -94,14 +98,14 @@ export const workChatSendMessageSchema = t.Object(
     text: t.Optional(t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' })),
     attachmentIds: t.Optional(t.Array(t.String({ format: 'uuid' }), { uniqueItems: true })),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const workChatReadCursorSchema = t.Object(
   {
     messageId: t.String({ format: 'uuid' }),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const workChatConversationListResponseSchema = t.Object({

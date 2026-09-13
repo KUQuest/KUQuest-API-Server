@@ -18,13 +18,17 @@ const main = async (): Promise<void> => {
 
   if (appliedMigrations.length !== expectedMigrations.length) {
     throw new Error(
-      `Migration journal has ${appliedMigrations.length} entries; expected ${expectedMigrations.length}.`,
+      `Migration journal has ${appliedMigrations.length} entries; expected ${expectedMigrations.length}.`
     );
   }
 
   const mismatch = expectedMigrations.find((migration, index) => {
     const applied = appliedMigrations[index];
-    return !applied || applied.hash !== migration.hash || Number(applied.createdAt) !== migration.folderMillis;
+    return (
+      !applied ||
+      applied.hash !== migration.hash ||
+      Number(applied.createdAt) !== migration.folderMillis
+    );
   });
 
   if (mismatch) {

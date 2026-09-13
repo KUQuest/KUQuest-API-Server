@@ -87,7 +87,9 @@ describe('getCertificate', () => {
 
     expect(result).toEqual({
       success: true,
-      data: { certificate: { ...serialized, image: { fileId, url: 'https://storage.test/signed-link' } } },
+      data: {
+        certificate: { ...serialized, image: { fileId, url: 'https://storage.test/signed-link' } },
+      },
     });
   });
 
@@ -249,7 +251,7 @@ describe('setCertificateImage', () => {
     spyOn(certificateStorage, 'linkFor').mockReturnValue('https://storage.test/signed-link');
 
     const { result, set } = invokeSetCertificateImage(
-      new File(['image-content'], 'image.png', { type: 'image/png' }),
+      new File(['image-content'], 'image.png', { type: 'image/png' })
     );
 
     expect(await result).toEqual({
@@ -261,7 +263,7 @@ describe('setCertificateImage', () => {
     expect(certificateService.replaceCertificateImage).toHaveBeenCalledWith(
       studentAuthId,
       certificateId,
-      storedImage,
+      storedImage
     );
   });
 
@@ -282,13 +284,13 @@ describe('setCertificateImage', () => {
       objectKey: `certificates/${studentAuthId}/old.png`,
     });
     const markDeleted = spyOn(certificateService, 'markCertificateImageDeleted').mockResolvedValue(
-      undefined,
+      undefined
     );
     const deleteObject = spyOn(certificateStorage, 'delete').mockResolvedValue();
     spyOn(certificateStorage, 'linkFor').mockReturnValue('https://storage.test/signed-link');
 
     const { result } = invokeSetCertificateImage(
-      new File(['image-content'], 'image.png', { type: 'image/png' }),
+      new File(['image-content'], 'image.png', { type: 'image/png' })
     );
 
     expect(await result).toEqual({
@@ -297,11 +299,11 @@ describe('setCertificateImage', () => {
     });
     expect(certificateStorage.delete).toHaveBeenCalledWith(
       'old-bucket',
-      `certificates/${studentAuthId}/old.png`,
+      `certificates/${studentAuthId}/old.png`
     );
     expect(markDeleted).toHaveBeenCalledTimes(1);
     expect(deleteObject.mock.invocationCallOrder[0]).toBeLessThan(
-      markDeleted.mock.invocationCallOrder[0],
+      markDeleted.mock.invocationCallOrder[0]
     );
   });
 
@@ -317,7 +319,7 @@ describe('setCertificateImage', () => {
     const deleteObject = spyOn(certificateStorage, 'delete').mockResolvedValue();
 
     const { result, set } = invokeSetCertificateImage(
-      new File(['image-content'], 'image.png', { type: 'image/png' }),
+      new File(['image-content'], 'image.png', { type: 'image/png' })
     );
 
     expect(await result).toEqual({
@@ -349,7 +351,7 @@ describe('setCertificateImage', () => {
     const truncatedPng = new File(
       [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
       'image.png',
-      { type: 'image/png' },
+      { type: 'image/png' }
     );
 
     const { result, set } = invokeSetCertificateImage(truncatedPng);
@@ -366,11 +368,11 @@ describe('setCertificateImage', () => {
 
   it('returns a safe error when object storage rejects the upload', async () => {
     spyOn(certificateStorage, 'upload').mockRejectedValue(
-      new ImageUploadError('secret RustFS detail'),
+      new ImageUploadError('secret RustFS detail')
     );
 
     const { result, set } = invokeSetCertificateImage(
-      new File(['image-content'], 'image.png', { type: 'image/png' }),
+      new File(['image-content'], 'image.png', { type: 'image/png' })
     );
     const body = await result;
 

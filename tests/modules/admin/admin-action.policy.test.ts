@@ -29,26 +29,30 @@ describe('Admin Action policy', () => {
 
   it('rejects an unversioned or unusable reason catalog', () => {
     expect(() => normalizeReasonCatalog(null)).toThrowError(AdminActionError);
-    expect(() => normalizeReasonCatalog({
-      version: 0,
-      actions: {
-        MEMBER_FREEZE: {
-          kind: 'COMMAND',
-          requiresReason: true,
-          allowedReasonCodes: ['POLICY_REVIEW'],
+    expect(() =>
+      normalizeReasonCatalog({
+        version: 0,
+        actions: {
+          MEMBER_FREEZE: {
+            kind: 'COMMAND',
+            requiresReason: true,
+            allowedReasonCodes: ['POLICY_REVIEW'],
+          },
         },
-      },
-    })).toThrowError(AdminActionError);
-    expect(() => normalizeReasonCatalog({
-      version: 1,
-      actions: {
-        MEMBER_FREEZE: {
-          kind: 'COMMAND',
-          requiresReason: true,
-          allowedReasonCodes: [],
+      })
+    ).toThrowError(AdminActionError);
+    expect(() =>
+      normalizeReasonCatalog({
+        version: 1,
+        actions: {
+          MEMBER_FREEZE: {
+            kind: 'COMMAND',
+            requiresReason: true,
+            allowedReasonCodes: [],
+          },
         },
-      },
-    })).toThrowError(AdminActionError);
+      })
+    ).toThrowError(AdminActionError);
   });
 
   it('requires controlled reason codes and rejects free-form values', () => {
@@ -64,15 +68,17 @@ describe('Admin Action policy', () => {
   });
 
   it('accepts safe structured metadata and rejects sensitive fields or links', () => {
-    expect(normalizeSafeObject({
-      previousStatus: 'ACTIVE',
-      nextStatus: 'FROZEN',
-      status: 'ASSIGNED',
-      sequence: 2,
-      flags: [true, null],
-      reasonCode: 'POLICY_REVIEW',
-      cancellationReasonCode: 'PAYOUT_INVALID_DESTINATION',
-    })).toEqual({
+    expect(
+      normalizeSafeObject({
+        previousStatus: 'ACTIVE',
+        nextStatus: 'FROZEN',
+        status: 'ASSIGNED',
+        sequence: 2,
+        flags: [true, null],
+        reasonCode: 'POLICY_REVIEW',
+        cancellationReasonCode: 'PAYOUT_INVALID_DESTINATION',
+      })
+    ).toEqual({
       previousStatus: 'ACTIVE',
       nextStatus: 'FROZEN',
       status: 'ASSIGNED',
@@ -84,7 +90,11 @@ describe('Admin Action policy', () => {
     expect(() => normalizeSafeObject({ text: 'private message' })).toThrowError(AdminActionError);
     expect(() => normalizeSafeObject({ credentials: 'private' })).toThrowError(AdminActionError);
     expect(() => normalizeSafeObject({ messageText: 'private' })).toThrowError(AdminActionError);
-    expect(() => normalizeSafeObject({ reason: 'free form reason' })).toThrowError(AdminActionError);
-    expect(() => normalizeSafeObject({ downloadLink: 'https://example.com/signed' })).toThrowError(AdminActionError);
+    expect(() => normalizeSafeObject({ reason: 'free form reason' })).toThrowError(
+      AdminActionError
+    );
+    expect(() => normalizeSafeObject({ downloadLink: 'https://example.com/signed' })).toThrowError(
+      AdminActionError
+    );
   });
 });

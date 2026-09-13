@@ -84,7 +84,9 @@ describe('setAvatar', () => {
       sizeBytes: 12,
     };
     spyOn(avatarStorage, 'upload').mockResolvedValue(storedAvatar);
-    spyOn(avatarStorage, 'linkFor').mockReturnValue('http://localhost:9000/kuquest/avatars/student-1/current.png');
+    spyOn(avatarStorage, 'linkFor').mockReturnValue(
+      'http://localhost:9000/kuquest/avatars/student-1/current.png'
+    );
     spyOn(db, 'transaction').mockResolvedValue({
       fileId,
       previousFileId: null,
@@ -92,7 +94,7 @@ describe('setAvatar', () => {
     });
 
     const { result, set } = invokeSetAvatar(
-      new File(['image-content'], 'avatar.png', { type: 'image/png' }),
+      new File(['image-content'], 'avatar.png', { type: 'image/png' })
     );
 
     expect(await result).toMatchObject({
@@ -100,10 +102,7 @@ describe('setAvatar', () => {
       data: { fileId, version: 2, avatar: expect.any(Object) },
     });
     expect(set.status).toBeUndefined();
-    expect(avatarStorage.upload).toHaveBeenCalledWith(
-      studentAuthId,
-      expect.any(File),
-    );
+    expect(avatarStorage.upload).toHaveBeenCalledWith(studentAuthId, expect.any(File));
   });
 
   it('removes the previous avatar only after storing its replacement', async () => {
@@ -113,16 +112,20 @@ describe('setAvatar', () => {
       contentType: 'image/png',
       sizeBytes: 12,
     });
-    spyOn(avatarStorage, 'linkFor').mockReturnValue('http://localhost:9000/kuquest/avatars/student-1/current.png');
+    spyOn(avatarStorage, 'linkFor').mockReturnValue(
+      'http://localhost:9000/kuquest/avatars/student-1/current.png'
+    );
     spyOn(db, 'transaction').mockResolvedValue({
       fileId,
       previousFileId,
       version: 2,
     });
-    const limit = mock(async () => [{
-      bucket: 'old-avatar-bucket',
-      objectKey: `avatars/${studentAuthId}/old.png`,
-    }]);
+    const limit = mock(async () => [
+      {
+        bucket: 'old-avatar-bucket',
+        objectKey: `avatars/${studentAuthId}/old.png`,
+      },
+    ]);
     spyOn(db, 'select').mockReturnValue({
       from: mock(() => ({
         where: mock(() => ({ limit })),
@@ -135,7 +138,7 @@ describe('setAvatar', () => {
     const deleteObject = spyOn(avatarStorage, 'delete').mockResolvedValue();
 
     const { result } = invokeSetAvatar(
-      new File(['image-content'], 'avatar.png', { type: 'image/png' }),
+      new File(['image-content'], 'avatar.png', { type: 'image/png' })
     );
 
     expect(await result).toMatchObject({
@@ -145,20 +148,18 @@ describe('setAvatar', () => {
     expect(limit).toHaveBeenCalledTimes(1);
     expect(avatarStorage.delete).toHaveBeenCalledWith(
       'old-avatar-bucket',
-      `avatars/${studentAuthId}/old.png`,
+      `avatars/${studentAuthId}/old.png`
     );
     expect(markDeleted).toHaveBeenCalledTimes(1);
     expect(deleteObject.mock.invocationCallOrder[0]).toBeLessThan(
-      markDeleted.mock.invocationCallOrder[0],
+      markDeleted.mock.invocationCallOrder[0]
     );
   });
 
   it('rejects an avatar larger than 5 MB', async () => {
-    const avatar = new File(
-      [new Uint8Array(5 * 1024 * 1024 + 1)],
-      'avatar.png',
-      { type: 'image/png' },
-    );
+    const avatar = new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'avatar.png', {
+      type: 'image/png',
+    });
 
     const { result, set } = invokeSetAvatar(avatar);
 
@@ -176,7 +177,7 @@ describe('setAvatar', () => {
     const truncatedPng = new File(
       [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
       'avatar.png',
-      { type: 'image/png' },
+      { type: 'image/png' }
     );
 
     const { result, set } = invokeSetAvatar(truncatedPng);
@@ -192,12 +193,10 @@ describe('setAvatar', () => {
   });
 
   it('returns a safe error when object storage rejects the upload', async () => {
-    spyOn(avatarStorage, 'upload').mockRejectedValue(
-      new ImageUploadError('secret RustFS detail'),
-    );
+    spyOn(avatarStorage, 'upload').mockRejectedValue(new ImageUploadError('secret RustFS detail'));
 
     const { result, set } = invokeSetAvatar(
-      new File(['image-content'], 'avatar.png', { type: 'image/png' }),
+      new File(['image-content'], 'avatar.png', { type: 'image/png' })
     );
     const body = await result;
 
@@ -476,7 +475,9 @@ describe('getPublicReviews pagination', () => {
     const { result } = invokeGetPublicReviews('student-2', { limit: 2 });
     const body = (await result) as { data: { nextCursor: string } };
 
-    expect(JSON.parse(atob(body.data.nextCursor.replaceAll('-', '+').replaceAll('_', '/')))).toEqual({
+    expect(
+      JSON.parse(atob(body.data.nextCursor.replaceAll('-', '+').replaceAll('_', '/')))
+    ).toEqual({
       v: 1,
       startTime: '2025-01-05T00:00:00.000Z',
       id: reviewTwo,
@@ -791,9 +792,13 @@ describe('updateOwnProfile', () => {
 
     expect(await result).toEqual({ success: true, data: storedProfile });
     expect(set.status).toBeUndefined();
-    expect(profileService.updateProfile).toHaveBeenCalledWith(studentAuthId, {
-      bio: 'a new bio',
-    }, undefined);
+    expect(profileService.updateProfile).toHaveBeenCalledWith(
+      studentAuthId,
+      {
+        bio: 'a new bio',
+      },
+      undefined
+    );
   });
 
   it('reports a missing student as not found', async () => {

@@ -1,7 +1,4 @@
-import {
-  InboundPaymentProviderError,
-  XenditPromptPayProvider,
-} from '@/modules/top-up';
+import { InboundPaymentProviderError, XenditPromptPayProvider } from '@/modules/top-up';
 import { positiveSatang } from '@/modules/wallet';
 
 import { describe, expect, it } from 'bun:test';
@@ -16,17 +13,20 @@ describe('Xendit PromptPay provider', () => {
       fetcher: async (input, init) => {
         requestUrl = input.toString();
         requestInit = init;
-        return new Response(JSON.stringify({
-          payment_request_id: 'pr-test-request',
-          reference_id: 'top-up:test-reference',
-          request_amount: 1.23,
-          status: 'REQUIRES_ACTION',
-          country: 'TH',
-          currency: 'THB',
-          channel_code: 'PROMPTPAY',
-          channel_properties: { expires_at: '2026-08-26T10:05:00.000Z' },
-          actions: [{ descriptor: 'QR_STRING', value: 'promptpay-qr' }],
-        }), { status: 201 });
+        return new Response(
+          JSON.stringify({
+            payment_request_id: 'pr-test-request',
+            reference_id: 'top-up:test-reference',
+            request_amount: 1.23,
+            status: 'REQUIRES_ACTION',
+            country: 'TH',
+            currency: 'THB',
+            channel_code: 'PROMPTPAY',
+            channel_properties: { expires_at: '2026-08-26T10:05:00.000Z' },
+            actions: [{ descriptor: 'QR_STRING', value: 'promptpay-qr' }],
+          }),
+          { status: 201 }
+        );
       },
     });
 
@@ -68,17 +68,23 @@ describe('Xendit PromptPay provider', () => {
   it('maps a provider rejection to a typed error', async () => {
     const provider = new XenditPromptPayProvider({
       secretKey: 'test-secret',
-      fetcher: async () => new Response(JSON.stringify({
-        error_code: 'CHANNEL_NOT_AVAILABLE',
-        message: 'PromptPay is unavailable',
-      }), { status: 422 }),
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({
+            error_code: 'CHANNEL_NOT_AVAILABLE',
+            message: 'PromptPay is unavailable',
+          }),
+          { status: 422 }
+        ),
     });
 
-    await expect(provider.createPayment({
-      internalReference: 'top-up:rejected',
-      paymentTotalSatang: positiveSatang(100),
-      expiresAt: new Date('2026-08-26T10:05:00.000Z'),
-    })).rejects.toMatchObject({
+    await expect(
+      provider.createPayment({
+        internalReference: 'top-up:rejected',
+        paymentTotalSatang: positiveSatang(100),
+        expiresAt: new Date('2026-08-26T10:05:00.000Z'),
+      })
+    ).rejects.toMatchObject({
       code: 'PROVIDER_REJECTED',
       providerCode: 'CHANNEL_NOT_AVAILABLE',
     });
@@ -93,14 +99,17 @@ describe('Xendit PromptPay provider', () => {
       fetcher: async (input, init) => {
         requestUrl = input.toString();
         requestInit = init;
-        return new Response(JSON.stringify({
-          payment_request_id: 'pr-test-request',
-          reference_id: 'top-up:test-reference',
-          request_amount: 1.23,
-          status: 'SUCCEEDED',
-          channel_code: 'PROMPTPAY',
-          updated: '2026-08-27T00:00:00.000Z',
-        }), { status: 200 });
+        return new Response(
+          JSON.stringify({
+            payment_request_id: 'pr-test-request',
+            reference_id: 'top-up:test-reference',
+            request_amount: 1.23,
+            status: 'SUCCEEDED',
+            channel_code: 'PROMPTPAY',
+            updated: '2026-08-27T00:00:00.000Z',
+          }),
+          { status: 200 }
+        );
       },
     });
 
@@ -131,16 +140,21 @@ describe('Xendit PromptPay provider', () => {
       baseUrl: 'https://xendit.test',
       fetcher: async (input) => {
         requestUrl = input.toString();
-        return new Response(JSON.stringify({
-          data: [{
-            payment_request_id: 'pr-recovered-request',
-            reference_id: 'top-up:recovered-reference',
-            request_amount: 1.23,
-            status: 'SUCCEEDED',
-            channel_code: 'PROMPTPAY',
-            updated: '2026-08-27T00:00:00.000Z',
-          }],
-        }), { status: 200 });
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                payment_request_id: 'pr-recovered-request',
+                reference_id: 'top-up:recovered-reference',
+                request_amount: 1.23,
+                status: 'SUCCEEDED',
+                channel_code: 'PROMPTPAY',
+                updated: '2026-08-27T00:00:00.000Z',
+              },
+            ],
+          }),
+          { status: 200 }
+        );
       },
     });
 
@@ -150,7 +164,9 @@ describe('Xendit PromptPay provider', () => {
       expectedPaymentTotalSatang: positiveSatang(123),
     });
 
-    expect(requestUrl).toBe('https://xendit.test/v3/payment_requests?reference_id=top-up%3Arecovered-reference&limit=2');
+    expect(requestUrl).toBe(
+      'https://xendit.test/v3/payment_requests?reference_id=top-up%3Arecovered-reference&limit=2'
+    );
     expect(result).toMatchObject({
       providerReference: 'pr-recovered-request',
       providerStatus: 'SUCCEEDED',
@@ -162,78 +178,103 @@ describe('Xendit PromptPay provider', () => {
   it('maps a successful response without a provider amount to an uncertain result', async () => {
     const provider = new XenditPromptPayProvider({
       secretKey: 'test-secret',
-      fetcher: async () => new Response(JSON.stringify({
-        payment_request_id: 'pr-incomplete-response',
-        reference_id: 'top-up:incomplete-response',
-        status: 'REQUIRES_ACTION',
-        country: 'TH',
-        currency: 'THB',
-        channel_code: 'PROMPTPAY',
-        actions: [{ descriptor: 'QR_STRING', value: 'promptpay-qr' }],
-      }), { status: 201 }),
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({
+            payment_request_id: 'pr-incomplete-response',
+            reference_id: 'top-up:incomplete-response',
+            status: 'REQUIRES_ACTION',
+            country: 'TH',
+            currency: 'THB',
+            channel_code: 'PROMPTPAY',
+            actions: [{ descriptor: 'QR_STRING', value: 'promptpay-qr' }],
+          }),
+          { status: 201 }
+        ),
     });
 
-    await expect(provider.createPayment({
-      internalReference: 'top-up:incomplete-response',
-      paymentTotalSatang: positiveSatang(100),
-      expiresAt: new Date('2026-08-26T10:05:00.000Z'),
-    })).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+    await expect(
+      provider.createPayment({
+        internalReference: 'top-up:incomplete-response',
+        paymentTotalSatang: positiveSatang(100),
+        expiresAt: new Date('2026-08-26T10:05:00.000Z'),
+      })
+    ).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
   });
 
   it('does not reconcile a confirmed payment without an exact amount', async () => {
     const provider = new XenditPromptPayProvider({
       secretKey: 'test-secret',
-      fetcher: async () => new Response(JSON.stringify({
-        payment_request_id: 'pr-no-amount',
-        reference_id: 'top-up:no-amount',
-        status: 'SUCCEEDED',
-      }), { status: 200 }),
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({
+            payment_request_id: 'pr-no-amount',
+            reference_id: 'top-up:no-amount',
+            status: 'SUCCEEDED',
+          }),
+          { status: 200 }
+        ),
     });
 
-    await expect(provider.getPaymentStatus({
-      providerReference: 'pr-no-amount',
-      internalReference: 'top-up:no-amount',
-      expectedPaymentTotalSatang: positiveSatang(100),
-    })).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+    await expect(
+      provider.getPaymentStatus({
+        providerReference: 'pr-no-amount',
+        internalReference: 'top-up:no-amount',
+        expectedPaymentTotalSatang: positiveSatang(100),
+      })
+    ).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
   });
 
   it('does not reconcile a partial capture as the full Payment Request amount', async () => {
     const provider = new XenditPromptPayProvider({
       secretKey: 'test-secret',
-      fetcher: async () => new Response(JSON.stringify({
-        payment_request_id: 'pr-partial-capture',
-        reference_id: 'top-up:partial-capture',
-        request_amount: 10,
-        status: 'SUCCEEDED',
-        captures: [{ capture_id: 'cap-partial-capture', capture_amount: 1 }],
-      }), { status: 200 }),
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({
+            payment_request_id: 'pr-partial-capture',
+            reference_id: 'top-up:partial-capture',
+            request_amount: 10,
+            status: 'SUCCEEDED',
+            captures: [{ capture_id: 'cap-partial-capture', capture_amount: 1 }],
+          }),
+          { status: 200 }
+        ),
     });
 
-    await expect(provider.getPaymentStatus({
-      providerReference: 'pr-partial-capture',
-      internalReference: 'top-up:partial-capture',
-      expectedPaymentTotalSatang: positiveSatang(1_000),
-    })).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+    await expect(
+      provider.getPaymentStatus({
+        providerReference: 'pr-partial-capture',
+        internalReference: 'top-up:partial-capture',
+        expectedPaymentTotalSatang: positiveSatang(1_000),
+      })
+    ).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
   });
 
   it('maps a timeout to an uncertain provider result', async () => {
     const provider = new XenditPromptPayProvider({
       secretKey: 'test-secret',
       timeoutMs: 1,
-      fetcher: (_input, init) => new Promise((_, reject) => {
-        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
-      }),
+      fetcher: (_input, init) =>
+        new Promise((_, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('Aborted', 'AbortError'))
+          );
+        }),
     });
 
-    await expect(provider.createPayment({
-      internalReference: 'top-up:timeout',
-      paymentTotalSatang: positiveSatang(100),
-      expiresAt: new Date('2026-08-26T10:05:00.000Z'),
-    })).rejects.toBeInstanceOf(InboundPaymentProviderError);
-    await expect(provider.createPayment({
-      internalReference: 'top-up:timeout-again',
-      paymentTotalSatang: positiveSatang(100),
-      expiresAt: new Date('2026-08-26T10:05:00.000Z'),
-    })).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+    await expect(
+      provider.createPayment({
+        internalReference: 'top-up:timeout',
+        paymentTotalSatang: positiveSatang(100),
+        expiresAt: new Date('2026-08-26T10:05:00.000Z'),
+      })
+    ).rejects.toBeInstanceOf(InboundPaymentProviderError);
+    await expect(
+      provider.createPayment({
+        internalReference: 'top-up:timeout-again',
+        paymentTotalSatang: positiveSatang(100),
+        expiresAt: new Date('2026-08-26T10:05:00.000Z'),
+      })
+    ).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
   });
 });

@@ -45,7 +45,8 @@ export const topUpRoute = new Elysia({
     detail: {
       tags: ['Top-ups'],
       summary: 'Create a PromptPay Top-up Payment Request',
-      description: 'Confirms a binding Provider Quote and returns the Xendit PromptPay QR. Set simulate=true only in a staging or development test runtime with an Xendit Development key.',
+      description:
+        'Confirms a binding Provider Quote and returns the Xendit PromptPay QR. Set simulate=true only in a staging or development test runtime with an Xendit Development key.',
       operationId: 'createTopUp',
       security: betterAuthSecurity,
     },

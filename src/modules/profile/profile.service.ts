@@ -3,7 +3,11 @@ import { department, faculty, occupation } from '@/database/schema/academic.sche
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment } from '@/database/schema/quest.schema';
-import { countReviews, getReceivedRatings, listReviews } from '@/modules/quest/quest-review.service';
+import {
+  countReviews,
+  getReceivedRatings,
+  listReviews,
+} from '@/modules/quest/quest-review.service';
 import { tag } from '@/database/schema/tag.schema';
 
 import type { Static } from 'elysia';
@@ -15,10 +19,7 @@ import type { StoredAvatar } from './profile.storage';
 type ProfileUpdate = Static<typeof profileUpdateSchema>;
 
 export type ProfileUpdateOutcome =
-  | 'updated'
-  | 'student-not-found'
-  | 'department-not-found'
-  | 'conflict';
+  'updated' | 'student-not-found' | 'department-not-found' | 'conflict';
 
 const foreignKeyViolation = '23503';
 const occupationNames = ['Staff', 'Lecturer', 'Student'] as const;
@@ -55,8 +56,8 @@ export const getProfileTags = async (userId: string) =>
       and(
         eq(questAssignment.workerId, userId),
         eq(questAssignment.assignmentStatus, 'ASSIGNMENT_COMPLETED'),
-        eq(quest.questStatus, 'QUEST_COMPLETED'),
-      ),
+        eq(quest.questStatus, 'QUEST_COMPLETED')
+      )
     )
     .groupBy(tag.id, tag.name)
     .orderBy(desc(count(questAssignment.id)), asc(tag.id))
@@ -71,8 +72,8 @@ export const getProfileReputation = async (userId: string) => {
       and(
         eq(questAssignment.workerId, userId),
         eq(questAssignment.assignmentStatus, 'ASSIGNMENT_COMPLETED'),
-        eq(quest.questStatus, 'QUEST_COMPLETED'),
-      ),
+        eq(quest.questStatus, 'QUEST_COMPLETED')
+      )
     );
 
   const ratings = await getReceivedRatings(userId);
@@ -80,7 +81,8 @@ export const getProfileReputation = async (userId: string) => {
   for (const rating of ratings) distribution[String(rating) as keyof typeof distribution] += 1;
 
   const validCount = ratings.length;
-  const average = validCount === 0 ? null : ratings.reduce((sum, rating) => sum + rating, 0) / validCount;
+  const average =
+    validCount === 0 ? null : ratings.reduce((sum, rating) => sum + rating, 0) / validCount;
   return {
     totalQuests: Number(completed?.totalQuests ?? 0),
     rating: { average, count: validCount, distribution },
@@ -89,7 +91,7 @@ export const getProfileReputation = async (userId: string) => {
 
 export const getProfileReviews = async (
   userId: string,
-  options: { rating?: number; limit?: number; cursor?: { startTime: string; id: string } } = {},
+  options: { rating?: number; limit?: number; cursor?: { startTime: string; id: string } } = {}
 ) => {
   const result = await listReviews(userId, options);
   return { ...result, total: await countReviews(userId, options.rating) };
@@ -98,7 +100,7 @@ export const getProfileReviews = async (
 export const updateProfile = async (
   userId: string,
   data: ProfileUpdate,
-  expectedVersion?: number,
+  expectedVersion?: number
 ): Promise<ProfileUpdateOutcome> => {
   if (Object.keys(data).length === 0) {
     if (!(await studentExists(userId))) return 'student-not-found';
@@ -123,7 +125,7 @@ export const updateProfile = async (
       .where(
         expectedVersion === undefined
           ? eq(authUser.id, userId)
-          : and(eq(authUser.id, userId), eq(authUser.version, expectedVersion)),
+          : and(eq(authUser.id, userId), eq(authUser.version, expectedVersion))
       )
       .returning({ id: authUser.id });
 
@@ -256,7 +258,7 @@ export const getPublicProfile = async (userId: string) => {
 
 export const replaceStudentAvatar = async (
   userId: string,
-  storedAvatar: StoredAvatar,
+  storedAvatar: StoredAvatar
 ): Promise<{ fileId: string; previousFileId: string | null; version: number } | undefined> =>
   db.transaction(async (transaction) => {
     const [student] = await transaction
@@ -293,7 +295,7 @@ export const replaceStudentAvatar = async (
   });
 
 export const removeStudentAvatar = async (
-  userId: string,
+  userId: string
 ): Promise<{ bucket: string | null; objectKey: string | null; version: number } | undefined> =>
   db.transaction(async (transaction) => {
     const [student] = await transaction
@@ -317,17 +319,24 @@ export const removeStudentAvatar = async (
       .where(eq(authUser.id, userId));
 
     if (student.fileId) {
-      await transaction.update(file).set({ deletedAt: new Date() }).where(eq(file.id, student.fileId));
+      await transaction
+        .update(file)
+        .set({ deletedAt: new Date() })
+        .where(eq(file.id, student.fileId));
     }
 
     return student.bucket && student.objectKey
-      ? { bucket: student.bucket, objectKey: student.objectKey, version: (student.version ?? 1) + 1 }
+      ? {
+          bucket: student.bucket,
+          objectKey: student.objectKey,
+          version: (student.version ?? 1) + 1,
+        }
       : { bucket: null, objectKey: null, version: (student.version ?? 1) + 1 };
   });
 
 export const getPreviousAvatarFile = async (
   userId: string,
-  fileId: string,
+  fileId: string
 ): Promise<{ bucket: string; objectKey: string } | undefined> => {
   const [previousFile] = await db
     .select({
@@ -335,29 +344,15 @@ export const getPreviousAvatarFile = async (
       objectKey: file.objectKey,
     })
     .from(file)
-    .where(
-      and(
-        eq(file.id, fileId),
-        eq(file.uploadedByUserId, userId),
-        isNull(file.deletedAt),
-      ),
-    )
+    .where(and(eq(file.id, fileId), eq(file.uploadedByUserId, userId), isNull(file.deletedAt)))
     .limit(1);
 
   return previousFile;
 };
 
-export const markAvatarDeleted = async (
-  userId: string,
-  fileId: string,
-): Promise<void> => {
+export const markAvatarDeleted = async (userId: string, fileId: string): Promise<void> => {
   await db
     .update(file)
     .set({ deletedAt: new Date() })
-    .where(
-      and(
-        eq(file.id, fileId),
-        eq(file.uploadedByUserId, userId),
-      ),
-    );
+    .where(and(eq(file.id, fileId), eq(file.uploadedByUserId, userId)));
 };

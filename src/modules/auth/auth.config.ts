@@ -47,8 +47,7 @@ export const createStudentAuth = ({
     socialProviders: {
       google: {
         clientId: env.googleClientId || configurationPlaceholder('google-client-id'),
-        clientSecret:
-          env.googleClientSecret || configurationPlaceholder('google-client-secret'),
+        clientSecret: env.googleClientSecret || configurationPlaceholder('google-client-secret'),
         hd: ALLOWED_EMAIL_DOMAIN,
         prompt: 'select_account',
         mapProfileToUser: (profile) => {

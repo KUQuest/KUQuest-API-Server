@@ -28,13 +28,19 @@ const adminPayoutReasonCodeSchema = t.String({
   pattern: '^[A-Z][A-Z0-9_.-]*$',
 });
 
-export const adminPayoutApprovalSchema = t.Object({
-  reasonCode: adminPayoutReasonCodeSchema,
-}, { additionalProperties: false });
+export const adminPayoutApprovalSchema = t.Object(
+  {
+    reasonCode: adminPayoutReasonCodeSchema,
+  },
+  { additionalProperties: false }
+);
 
-export const adminPayoutCancellationSchema = t.Object({
-  reasonCode: adminPayoutReasonCodeSchema,
-}, { additionalProperties: false });
+export const adminPayoutCancellationSchema = t.Object(
+  {
+    reasonCode: adminPayoutReasonCodeSchema,
+  },
+  { additionalProperties: false }
+);
 
 const adminPayoutDataSchema = t.Object({
   id: t.String({ format: 'uuid' }),

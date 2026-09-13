@@ -23,7 +23,9 @@ const DEMO_EMAILS = [
   'nichakan.kaewmanee@ku.th',
 ] as const;
 
-const downloadImage = async (url: string): Promise<{ bytes: Uint8Array; contentType: 'image/jpeg' }> => {
+const downloadImage = async (
+  url: string
+): Promise<{ bytes: Uint8Array; contentType: 'image/jpeg' }> => {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Image download failed with HTTP ${response.status}: ${url}`);
 
@@ -46,7 +48,7 @@ const s3 = new Bun.S3Client({
 const storeImage = async (
   userId: string,
   objectKey: string,
-  image: { bytes: Uint8Array; contentType: 'image/jpeg' },
+  image: { bytes: Uint8Array; contentType: 'image/jpeg' }
 ): Promise<string> => {
   const fileBytes = new ArrayBuffer(image.bytes.byteLength);
   new Uint8Array(fileBytes).set(image.bytes);
@@ -55,7 +57,7 @@ const storeImage = async (
     new File([fileBytes], objectKey.split('/').pop() ?? 'demo.jpg', {
       type: image.contentType,
     }),
-    { type: image.contentType },
+    { type: image.contentType }
   );
   if (writtenBytes !== image.bytes.length) {
     throw new Error(`Image upload wrote ${writtenBytes} bytes instead of ${image.bytes.length}`);
@@ -87,7 +89,13 @@ const storeImage = async (
 };
 
 const main = async (): Promise<void> => {
-  if (!env.s3Bucket || !env.s3Endpoint || !env.s3AccessKeyId || !env.s3SecretAccessKey || !env.s3Region) {
+  if (
+    !env.s3Bucket ||
+    !env.s3Endpoint ||
+    !env.s3AccessKeyId ||
+    !env.s3SecretAccessKey ||
+    !env.s3Region
+  ) {
     throw new Error('S3 storage configuration is incomplete');
   }
 
@@ -105,11 +113,7 @@ const main = async (): Promise<void> => {
 
   for (const [index, user] of demoUsers.entries()) {
     const avatar = await downloadImage(`https://i.pravatar.cc/512?img=${(index % 70) + 1}`);
-    const avatarFileId = await storeImage(
-      user.id,
-      `avatars/${user.id}/demo-avatar.jpg`,
-      avatar,
-    );
+    const avatarFileId = await storeImage(user.id, `avatars/${user.id}/demo-avatar.jpg`, avatar);
     await db.update(authUser).set({ imageFileId: avatarFileId }).where(eq(authUser.id, user.id));
     avatarCount += 1;
 
@@ -120,14 +124,16 @@ const main = async (): Promise<void> => {
       .limit(1);
     if (portfolio) {
       const image = await downloadImage(
-        `https://picsum.photos/seed/kuquest-portfolio-${index}/1200/800`,
+        `https://picsum.photos/seed/kuquest-portfolio-${index}/1200/800`
       );
       const imageFileId = await storeImage(
         user.id,
         `portfolio/${user.id}/demo-portfolio.jpg`,
-        image,
+        image
       );
-      await db.delete(profilePortfolioItemImage).where(eq(profilePortfolioItemImage.portfolioItemId, portfolio.id));
+      await db
+        .delete(profilePortfolioItemImage)
+        .where(eq(profilePortfolioItemImage.portfolioItemId, portfolio.id));
       await db.insert(profilePortfolioItemImage).values({
         portfolioItemId: portfolio.id,
         fileId: imageFileId,
@@ -142,12 +148,12 @@ const main = async (): Promise<void> => {
       .where(eq(profileCertificate.userId, user.id));
     for (const [certificateIndex, certificate] of certificates.entries()) {
       const image = await downloadImage(
-        `https://picsum.photos/seed/kuquest-certificate-${index}-${certificateIndex}/1200/800`,
+        `https://picsum.photos/seed/kuquest-certificate-${index}-${certificateIndex}/1200/800`
       );
       const imageFileId = await storeImage(
         user.id,
         `certificates/${user.id}/demo-certificate-${certificateIndex}.jpg`,
-        image,
+        image
       );
       await db
         .update(profileCertificate)

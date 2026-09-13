@@ -17,8 +17,7 @@ export class CursorInputError extends Error {
   }
 }
 
-const uuidPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const parsePageLimit = (value: unknown): number => {
   if (value === undefined) return DEFAULT_PAGE_LIMIT;
@@ -31,7 +30,7 @@ export const parsePageLimit = (value: unknown): number => {
   ) {
     throw new CursorInputError(
       'INVALID_LIMIT',
-      `limit must be an integer between 1 and ${MAX_PAGE_LIMIT}`,
+      `limit must be an integer between 1 and ${MAX_PAGE_LIMIT}`
     );
   }
 
@@ -44,7 +43,8 @@ const toBase64Url = (value: string): string =>
 const fromBase64Url = (value: string): string => {
   if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('invalid base64url');
 
-  const padded = value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - (value.length % 4)) % 4);
+  const padded =
+    value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - (value.length % 4)) % 4);
   return atob(padded);
 };
 
@@ -54,9 +54,7 @@ export const encodeCursor = (payload: Omit<CursorPayload, 'v'>): string => {
     throw new CursorInputError('INVALID_CURSOR', 'Cannot encode an invalid cursor');
   }
 
-  return toBase64Url(
-    JSON.stringify({ v: 1, startTime: startTime.toISOString(), id: payload.id }),
-  );
+  return toBase64Url(JSON.stringify({ v: 1, startTime: startTime.toISOString(), id: payload.id }));
 };
 
 export const decodeCursor = (value: unknown): CursorPayload | undefined => {

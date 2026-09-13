@@ -20,19 +20,22 @@ describe('Top-up Provider event parsing', () => {
 
   it('extracts permanent Xendit facts and preserves satang exactly', () => {
     const receivedAt = new Date('2026-08-27T00:00:00.000Z');
-    const event = parseTopUpProviderEvent(JSON.stringify({
-      id: 'xnd-event-1',
-      event: 'payment.capture',
-      api_version: '2024-11-11',
-      data: {
-        payment_request_id: 'pr-1',
-        reference_id: 'top-up:top-up-1',
-        status: 'SUCCEEDED',
-        request_amount: 123.45,
-        channel_code: 'PROMPTPAY',
-        updated: '2026-08-27T00:01:00.000Z',
-      },
-    }), receivedAt);
+    const event = parseTopUpProviderEvent(
+      JSON.stringify({
+        id: 'xnd-event-1',
+        event: 'payment.capture',
+        api_version: '2024-11-11',
+        data: {
+          payment_request_id: 'pr-1',
+          reference_id: 'top-up:top-up-1',
+          status: 'SUCCEEDED',
+          request_amount: 123.45,
+          channel_code: 'PROMPTPAY',
+          updated: '2026-08-27T00:01:00.000Z',
+        },
+      }),
+      receivedAt
+    );
 
     expect(event).toMatchObject({
       providerEventId: 'xnd-event-1',
@@ -48,61 +51,71 @@ describe('Top-up Provider event parsing', () => {
   });
 
   it('rejects a paid event without an amount', () => {
-    expect(() => parseTopUpProviderEvent(JSON.stringify({
-      id: 'xnd-event-2',
-      data: {
-        payment_request_id: 'pr-2',
-        status: 'SUCCEEDED',
-      },
-    }))).toThrow(ProviderEventError);
+    expect(() =>
+      parseTopUpProviderEvent(
+        JSON.stringify({
+          id: 'xnd-event-2',
+          data: {
+            payment_request_id: 'pr-2',
+            status: 'SUCCEEDED',
+          },
+        })
+      )
+    ).toThrow(ProviderEventError);
   });
 
   it('derives a stable event identifier from a Xendit payment callback', () => {
-    const event = parseTopUpProviderEvent(JSON.stringify({
-      event: 'payment.capture',
-      created: '2026-08-27T00:00:00.000Z',
-      data: {
-        payment_id: 'py-3',
-        payment_request_id: 'pr-3',
-        reference_id: 'top-up:top-up-3',
-        status: 'SUCCEEDED',
-        request_amount: 1,
-        updated: '2026-08-27T00:00:00.000Z',
-      },
-    }));
+    const event = parseTopUpProviderEvent(
+      JSON.stringify({
+        event: 'payment.capture',
+        created: '2026-08-27T00:00:00.000Z',
+        data: {
+          payment_id: 'py-3',
+          payment_request_id: 'pr-3',
+          reference_id: 'top-up:top-up-3',
+          status: 'SUCCEEDED',
+          request_amount: 1,
+          updated: '2026-08-27T00:00:00.000Z',
+        },
+      })
+    );
 
     expect(event.providerEventId).toBe('derived:payment.capture:py-3:PAID');
   });
 
   it('uses captured amount instead of the requested amount', () => {
-    const event = parseTopUpProviderEvent(JSON.stringify({
-      event: 'payment.capture',
-      data: {
-        payment_id: 'py-partial',
-        payment_request_id: 'pr-partial',
-        reference_id: 'top-up:partial',
-        status: 'SUCCEEDED',
-        request_amount: 10,
-        captures: [{ capture_id: 'cap-partial', capture_amount: 1 }],
-      },
-    }));
+    const event = parseTopUpProviderEvent(
+      JSON.stringify({
+        event: 'payment.capture',
+        data: {
+          payment_id: 'py-partial',
+          payment_request_id: 'pr-partial',
+          reference_id: 'top-up:partial',
+          status: 'SUCCEEDED',
+          request_amount: 10,
+          captures: [{ capture_id: 'cap-partial', capture_amount: 1 }],
+        },
+      })
+    );
 
     expect(event.providerAmountSatang).toBe(positiveSatang(100));
   });
 
   it('maps a successful refund webhook to a reversal without crediting a Top-up', () => {
-    const event = parseTopUpProviderEvent(JSON.stringify({
-      event: 'refund.succeeded',
-      data: {
+    const event = parseTopUpProviderEvent(
+      JSON.stringify({
         event: 'refund.succeeded',
         data: {
-          payment_request_id: 'pr-refund',
-          reference_id: 'top-up:refund',
-          status: 'SUCCEEDED',
-          amount: 1,
+          event: 'refund.succeeded',
+          data: {
+            payment_request_id: 'pr-refund',
+            reference_id: 'top-up:refund',
+            status: 'SUCCEEDED',
+            amount: 1,
+          },
         },
-      },
-    }));
+      })
+    );
 
     expect(event).toMatchObject({
       eventType: 'refund.succeeded',
@@ -114,26 +127,34 @@ describe('Top-up Provider event parsing', () => {
   });
 
   it('rejects unsupported Provider event types and currencies', () => {
-    expect(() => parseTopUpProviderEvent(JSON.stringify({
-      event: 'payment.refund',
-      data: {
-        payment_request_id: 'pr-refund',
-        reference_id: 'top-up:refund',
-        status: 'SUCCEEDED',
-        request_amount: 1,
-      },
-    }))).toThrow('Provider event type is not supported.');
+    expect(() =>
+      parseTopUpProviderEvent(
+        JSON.stringify({
+          event: 'payment.refund',
+          data: {
+            payment_request_id: 'pr-refund',
+            reference_id: 'top-up:refund',
+            status: 'SUCCEEDED',
+            request_amount: 1,
+          },
+        })
+      )
+    ).toThrow('Provider event type is not supported.');
 
-    expect(() => parseTopUpProviderEvent(JSON.stringify({
-      event: 'payment.capture',
-      data: {
-        payment_request_id: 'pr-currency',
-        reference_id: 'top-up:currency',
-        status: 'SUCCEEDED',
-        request_amount: 1,
-        currency: 'IDR',
-      },
-    }))).toThrow('Provider event currency is not supported.');
+    expect(() =>
+      parseTopUpProviderEvent(
+        JSON.stringify({
+          event: 'payment.capture',
+          data: {
+            payment_request_id: 'pr-currency',
+            reference_id: 'top-up:currency',
+            status: 'SUCCEEDED',
+            request_amount: 1,
+            currency: 'IDR',
+          },
+        })
+      )
+    ).toThrow('Provider event currency is not supported.');
   });
 });
 

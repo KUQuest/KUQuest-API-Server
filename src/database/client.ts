@@ -29,8 +29,7 @@ const schema = {
 };
 
 const connectionString =
-  env.databaseUrl ||
-  'postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest';
+  env.databaseUrl || 'postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest';
 
 export const sql = postgres(connectionString, {
   max: 10,

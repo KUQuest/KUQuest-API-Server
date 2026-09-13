@@ -17,10 +17,7 @@ import type { CursorPayload } from '@/shared/cursor';
 
 import { and, asc, desc, eq, gt, lt, or } from 'drizzle-orm';
 
-import {
-  approvePayoutInTransaction,
-  cancelPayoutInTransaction,
-} from './payout.service';
+import { approvePayoutInTransaction, cancelPayoutInTransaction } from './payout.service';
 
 export const payoutAdminReasonCodes = [
   'PAYOUT_POLICY_REVIEW',
@@ -28,10 +25,7 @@ export const payoutAdminReasonCodes = [
   'PAYOUT_INVALID_DESTINATION',
 ] as const;
 
-const payoutApprovalReasonCodes = [
-  'PAYOUT_POLICY_REVIEW',
-  'PAYOUT_RISK_REVIEW',
-] as const;
+const payoutApprovalReasonCodes = ['PAYOUT_POLICY_REVIEW', 'PAYOUT_RISK_REVIEW'] as const;
 
 const payoutCancellationReasonCodes = payoutAdminReasonCodes;
 const payoutApprovalReasonCodeSet = new Set<string>(payoutApprovalReasonCodes);
@@ -39,11 +33,10 @@ const payoutCancellationReasonCodeSet = new Set<string>(payoutCancellationReason
 
 const safePayoutReasonCode = (
   reason: string | null,
-  action: 'PAYOUT_APPROVE' | 'PAYOUT_CANCEL',
+  action: 'PAYOUT_APPROVE' | 'PAYOUT_CANCEL'
 ) => {
-  const allowedReasonCodes = action === 'PAYOUT_APPROVE'
-    ? payoutApprovalReasonCodeSet
-    : payoutCancellationReasonCodeSet;
+  const allowedReasonCodes =
+    action === 'PAYOUT_APPROVE' ? payoutApprovalReasonCodeSet : payoutCancellationReasonCodeSet;
   return reason && allowedReasonCodes.has(reason) ? reason : null;
 };
 
@@ -196,7 +189,7 @@ type SafePayoutRecord = {
 const adminPayoutFromRecord = (
   record: SafePayoutRecord,
   student: AdminPayout['student'],
-  cancellationReasonCode: string | null,
+  cancellationReasonCode: string | null
 ): AdminPayout => ({
   id: record.id,
   student,
@@ -212,9 +205,10 @@ const adminPayoutFromRecord = (
   bankCode: record.destinationBankCode,
   bankName: bankNames[record.destinationBankCode] ?? record.destinationBankCode,
   destinationType: record.destinationRoutingType,
-  maskedDestinationValue: record.destinationRoutingType === 'PROMPTPAY'
-    ? record.destinationMaskedRoutingValue
-    : `****${record.destinationMaskedLastFour.slice(-4)}`,
+  maskedDestinationValue:
+    record.destinationRoutingType === 'PROMPTPAY'
+      ? record.destinationMaskedRoutingValue
+      : `****${record.destinationMaskedLastFour.slice(-4)}`,
   maskedRoutingValue: record.destinationMaskedRoutingValue,
   providerReference: record.providerReference,
   providerStatus: record.providerStatus,
@@ -227,45 +221,47 @@ const adminPayoutFromRecord = (
 
 const cancellationReasonCodeFor = async (
   payoutId: string,
-  transaction: typeof db | AdminActionTransaction = db,
+  transaction: typeof db | AdminActionTransaction = db
 ) => {
   const [entry] = await transaction
     .select({ reason: paymentPayoutStatusHistory.reason })
     .from(paymentPayoutStatusHistory)
-    .where(and(
-      eq(paymentPayoutStatusHistory.payoutId, payoutId),
-      eq(paymentPayoutStatusHistory.source, 'ADMIN_CANCELLATION'),
-    ))
+    .where(
+      and(
+        eq(paymentPayoutStatusHistory.payoutId, payoutId),
+        eq(paymentPayoutStatusHistory.source, 'ADMIN_CANCELLATION')
+      )
+    )
     .orderBy(desc(paymentPayoutStatusHistory.occurredAt), desc(paymentPayoutStatusHistory.id))
     .limit(1);
   return safePayoutReasonCode(entry?.reason ?? null, 'PAYOUT_CANCEL');
 };
 
-const adminPayoutRows = (executor: typeof db | AdminActionTransaction) => executor
-  .select({
-    payout: safePayoutColumns,
-    student: {
-      id: authUser.id,
-      email: authUser.email,
-      firstName: authUser.firstName,
-      lastName: authUser.lastName,
-    },
-  })
-  .from(paymentPayouts)
-  .innerJoin(authUser, eq(authUser.id, paymentPayouts.userId))
-  .innerJoin(paymentPayoutQuotes, eq(paymentPayoutQuotes.id, paymentPayouts.quoteId));
+const adminPayoutRows = (executor: typeof db | AdminActionTransaction) =>
+  executor
+    .select({
+      payout: safePayoutColumns,
+      student: {
+        id: authUser.id,
+        email: authUser.email,
+        firstName: authUser.firstName,
+        lastName: authUser.lastName,
+      },
+    })
+    .from(paymentPayouts)
+    .innerJoin(authUser, eq(authUser.id, paymentPayouts.userId))
+    .innerJoin(paymentPayoutQuotes, eq(paymentPayoutQuotes.id, paymentPayouts.quoteId));
 
 const getAdminPayoutInTransaction = async (
   transaction: typeof db | AdminActionTransaction,
-  payoutId: string,
+  payoutId: string
 ): Promise<AdminPayout> => {
-  const [row] = await adminPayoutRows(transaction)
-    .where(eq(paymentPayouts.id, payoutId));
+  const [row] = await adminPayoutRows(transaction).where(eq(paymentPayouts.id, payoutId));
   if (!row) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
   return adminPayoutFromRecord(
     row.payout as SafePayoutRecord,
     row.student,
-    await cancellationReasonCodeFor(payoutId, transaction),
+    await cancellationReasonCodeFor(payoutId, transaction)
   );
 };
 
@@ -277,48 +273,49 @@ const adminPayoutCommandSummary = (payout: AdminPayout): AdminPayoutCommandSumma
 
 const executePayoutAdminCommand = async (
   action: 'PAYOUT_APPROVE' | 'PAYOUT_CANCEL',
-  input: AdminPayoutDecisionInput,
-): Promise<AdminPayoutCommandResult> => adminActionService.executeCommand({
-  adminId: input.adminId,
-  action,
-  resourceType: 'payout',
-  resourceId: input.payoutId,
-  requestKey: input.idempotencyKey,
-  reasonCode: input.reasonCode,
-  request: {},
-  metadata: {},
-  expectedVersion: input.expectedVersion,
-  prepare: async (transaction, _context) => {
-    const decision = {
-      payoutId: input.payoutId,
-      adminId: input.adminId,
-      reasonCode: input.reasonCode,
-    };
-    const [current] = await transaction
-      .select({ version: paymentPayouts.version })
-      .from(paymentPayouts)
-      .where(eq(paymentPayouts.id, input.payoutId))
-      .for('update');
-    if (!current) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
+  input: AdminPayoutDecisionInput
+): Promise<AdminPayoutCommandResult> =>
+  adminActionService.executeCommand({
+    adminId: input.adminId,
+    action,
+    resourceType: 'payout',
+    resourceId: input.payoutId,
+    requestKey: input.idempotencyKey,
+    reasonCode: input.reasonCode,
+    request: {},
+    metadata: {},
+    expectedVersion: input.expectedVersion,
+    prepare: async (transaction, _context) => {
+      const decision = {
+        payoutId: input.payoutId,
+        adminId: input.adminId,
+        reasonCode: input.reasonCode,
+      };
+      const [current] = await transaction
+        .select({ version: paymentPayouts.version })
+        .from(paymentPayouts)
+        .where(eq(paymentPayouts.id, input.payoutId))
+        .for('update');
+      if (!current) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
 
-    return {
-      currentVersion: current.version,
-      apply: async () => {
-        if (action === 'PAYOUT_APPROVE') {
-          await approvePayoutInTransaction(transaction, decision);
-        } else {
-          await cancelPayoutInTransaction(transaction, decision);
-        }
-        const payout = await getAdminPayoutInTransaction(transaction, input.payoutId);
-        return {
-          resourceSummary: adminPayoutCommandSummary(payout),
-          resourceVersion: payout.version,
-          resourceTimestamp: null,
-        };
-      },
-    };
-  },
-});
+      return {
+        currentVersion: current.version,
+        apply: async () => {
+          if (action === 'PAYOUT_APPROVE') {
+            await approvePayoutInTransaction(transaction, decision);
+          } else {
+            await cancelPayoutInTransaction(transaction, decision);
+          }
+          const payout = await getAdminPayoutInTransaction(transaction, input.payoutId);
+          return {
+            resourceSummary: adminPayoutCommandSummary(payout),
+            resourceVersion: payout.version,
+            resourceTimestamp: null,
+          };
+        },
+      };
+    },
+  });
 
 export const approvePayout = (input: AdminPayoutDecisionInput) =>
   executePayoutAdminCommand('PAYOUT_APPROVE', input);
@@ -361,13 +358,12 @@ const adminPayoutHistory = async (payoutId: string): Promise<AdminPayoutStatusHi
 };
 
 export const getAdminPayout = async (payoutId: string): Promise<AdminPayout> => {
-  const [row] = await adminPayoutRows(db)
-    .where(eq(paymentPayouts.id, payoutId));
+  const [row] = await adminPayoutRows(db).where(eq(paymentPayouts.id, payoutId));
   if (!row) throw new MoneyDomainError('PAYOUT_NOT_FOUND', 'Payout does not exist.');
   return adminPayoutFromRecord(
     row.payout as SafePayoutRecord,
     row.student,
-    await cancellationReasonCodeFor(payoutId),
+    await cancellationReasonCodeFor(payoutId)
   );
 };
 
@@ -393,42 +389,42 @@ export const listAdminPayouts = async ({
   if (cursorDate && Number.isNaN(cursorDate.getTime())) {
     throw new MoneyDomainError('INVALID_LIMIT', 'Admin Payout cursor is invalid.');
   }
-  const cursorCondition = cursor && cursorDate
-    ? sort === 'oldest'
-      ? or(
-        gt(paymentPayouts.createdAt, cursorDate),
-        and(eq(paymentPayouts.createdAt, cursorDate), gt(paymentPayouts.id, cursor.id)),
-      )
-      : or(
-        lt(paymentPayouts.createdAt, cursorDate),
-        and(eq(paymentPayouts.createdAt, cursorDate), lt(paymentPayouts.id, cursor.id)),
-      )
-    : undefined;
+  const cursorCondition =
+    cursor && cursorDate
+      ? sort === 'oldest'
+        ? or(
+            gt(paymentPayouts.createdAt, cursorDate),
+            and(eq(paymentPayouts.createdAt, cursorDate), gt(paymentPayouts.id, cursor.id))
+          )
+        : or(
+            lt(paymentPayouts.createdAt, cursorDate),
+            and(eq(paymentPayouts.createdAt, cursorDate), lt(paymentPayouts.id, cursor.id))
+          )
+      : undefined;
   const rows = await adminPayoutRows(db)
-    .where(and(
-      eq(paymentPayouts.payoutStatus, status),
-      cursorCondition,
-    ))
+    .where(and(eq(paymentPayouts.payoutStatus, status), cursorCondition))
     .orderBy(
       sort === 'oldest' ? asc(paymentPayouts.createdAt) : desc(paymentPayouts.createdAt),
-      sort === 'oldest' ? asc(paymentPayouts.id) : desc(paymentPayouts.id),
+      sort === 'oldest' ? asc(paymentPayouts.id) : desc(paymentPayouts.id)
     )
     .limit(limit + 1);
   const hasNext = rows.length > limit;
   const page = rows.slice(0, limit);
-  const items = await Promise.all(page.map(async (row: {
-    payout: SafePayoutRecord;
-    student: AdminPayout['student'];
-  }) => adminPayoutFromRecord(
-    row.payout as SafePayoutRecord,
-    row.student,
-    await cancellationReasonCodeFor(row.payout.id),
-  )));
+  const items = await Promise.all(
+    page.map(async (row: { payout: SafePayoutRecord; student: AdminPayout['student'] }) =>
+      adminPayoutFromRecord(
+        row.payout as SafePayoutRecord,
+        row.student,
+        await cancellationReasonCodeFor(row.payout.id)
+      )
+    )
+  );
   const last = page[page.length - 1];
   return {
     items,
-    nextCursor: hasNext && last
-      ? { startTime: last.payout.createdAt.toISOString(), id: last.payout.id }
-      : null,
+    nextCursor:
+      hasNext && last
+        ? { startTime: last.payout.createdAt.toISOString(), id: last.payout.id }
+        : null,
   };
 };

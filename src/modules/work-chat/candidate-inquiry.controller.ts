@@ -47,7 +47,9 @@ const serializeMessage = (message: Awaited<ReturnType<typeof sendCandidateInquir
   })),
 });
 
-const serializeAttachment = (attachment: Awaited<ReturnType<typeof uploadCandidateInquiryAttachment>>) => ({
+const serializeAttachment = (
+  attachment: Awaited<ReturnType<typeof uploadCandidateInquiryAttachment>>
+) => ({
   ...attachment,
   createdAt: attachment.createdAt.toISOString(),
 });
@@ -77,7 +79,10 @@ const mapCandidateInquiryError = (set: AuthedContext['set'], error: unknown) => 
     set.status = 413;
   } else if (error.code === 'ATTACHMENT_UNSUPPORTED') {
     set.status = 415;
-  } else if (error.code === 'ATTACHMENT_UPLOAD_FAILED' || error.code === 'ATTACHMENT_LINK_UNAVAILABLE') {
+  } else if (
+    error.code === 'ATTACHMENT_UPLOAD_FAILED' ||
+    error.code === 'ATTACHMENT_LINK_UNAVAILABLE'
+  ) {
     set.status = 502;
   } else if (
     error.code === 'MESSAGE_CONTENT_REQUIRED' ||
@@ -88,7 +93,9 @@ const mapCandidateInquiryError = (set: AuthedContext['set'], error: unknown) => 
   } else if (error.code === 'RATE_LIMITED') {
     set.status = 429;
     if (error.retryAfterSeconds !== undefined) {
-      (set as unknown as { headers: Record<string, string> }).headers['Retry-After'] = String(error.retryAfterSeconds);
+      (set as unknown as { headers: Record<string, string> }).headers['Retry-After'] = String(
+        error.retryAfterSeconds
+      );
     }
   } else {
     set.status = 409;
@@ -102,7 +109,9 @@ export const openCandidateInquiryController = async ({
   set,
 }: AuthedContext & { body: OpenInput }): Promise<ApiResponse> => {
   try {
-    return apiSuccess({ inquiry: serializeInquiry(await openCandidateInquiry(session.user.id, body.questId)) });
+    return apiSuccess({
+      inquiry: serializeInquiry(await openCandidateInquiry(session.user.id, body.questId)),
+    });
   } catch (error) {
     return mapCandidateInquiryError(set, error);
   }
@@ -133,7 +142,9 @@ export const getCandidateInquiryController = async ({
   set,
 }: AuthedContext & { params: InquiryParams }): Promise<ApiResponse> => {
   try {
-    return apiSuccess({ inquiry: serializeInquiry(await getCandidateInquiry(session.user.id, params.conversationId)) });
+    return apiSuccess({
+      inquiry: serializeInquiry(await getCandidateInquiry(session.user.id, params.conversationId)),
+    });
   } catch (error) {
     return mapCandidateInquiryError(set, error);
   }
@@ -200,11 +211,13 @@ export const advanceCandidateInquiryReadCursorController = async ({
   set,
 }: AuthedContext & { body: ReadCursorInput; params: InquiryParams }): Promise<ApiResponse> => {
   try {
-    return apiSuccess(await advanceCandidateInquiryReadCursor(
-      session.user.id,
-      params.conversationId,
-      body.messageId,
-    ));
+    return apiSuccess(
+      await advanceCandidateInquiryReadCursor(
+        session.user.id,
+        params.conversationId,
+        body.messageId
+      )
+    );
   } catch (error) {
     return mapCandidateInquiryError(set, error);
   }
@@ -215,9 +228,16 @@ export const uploadCandidateInquiryAttachmentController = async ({
   params,
   session,
   set,
-}: AuthedContext & { body: AttachmentUploadInput; params: InquiryParams }): Promise<ApiResponse> => {
+}: AuthedContext & {
+  body: AttachmentUploadInput;
+  params: InquiryParams;
+}): Promise<ApiResponse> => {
   try {
-    const attachment = await uploadCandidateInquiryAttachment(session.user.id, params.conversationId, body.file);
+    const attachment = await uploadCandidateInquiryAttachment(
+      session.user.id,
+      params.conversationId,
+      body.file
+    );
     return apiSuccess({ attachment: serializeAttachment(attachment) });
   } catch (error) {
     return mapCandidateInquiryError(set, error);
@@ -233,7 +253,7 @@ export const getCandidateInquiryAttachmentLinkController = async ({
     const link = await getCandidateInquiryAttachmentLink(
       session.user.id,
       params.conversationId,
-      params.attachmentId,
+      params.attachmentId
     );
     return apiSuccess({ ...link, expiresAt: link.expiresAt.toISOString() });
   } catch (error) {
@@ -247,11 +267,13 @@ export const discardCandidateInquiryAttachmentController = async ({
   set,
 }: AuthedContext & { params: AttachmentParams }): Promise<ApiResponse> => {
   try {
-    return apiSuccess(await discardCandidateInquiryAttachment(
-      session.user.id,
-      params.conversationId,
-      params.attachmentId,
-    ));
+    return apiSuccess(
+      await discardCandidateInquiryAttachment(
+        session.user.id,
+        params.conversationId,
+        params.attachmentId
+      )
+    );
   } catch (error) {
     return mapCandidateInquiryError(set, error);
   }

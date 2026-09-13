@@ -24,7 +24,7 @@ const requiredValue = (name: string, value: string | undefined): string => {
 };
 
 const readCount = async (
-  query: PromiseLike<readonly { count?: number | string }[]>,
+  query: PromiseLike<readonly { count?: number | string }[]>
 ): Promise<number> => {
   const [row] = await query;
   return Number(row?.count ?? 0);
@@ -36,10 +36,13 @@ const assertAtLeast = (label: string, actual: number, expected: number): void =>
 
 const main = async (): Promise<void> => {
   const adminEmail = requiredValue('ADMIN_EMAIL', process.env.ADMIN_EMAIL).toLowerCase();
-  const financeEmail = requiredValue('STAGING_TEST_AUTH_EMAIL', env.stagingTestAuthEmail).toLowerCase();
+  const financeEmail = requiredValue(
+    'STAGING_TEST_AUTH_EMAIL',
+    env.stagingTestAuthEmail
+  ).toLowerCase();
   const recipientEmail = requiredValue(
     'LOCAL_FINANCE_TEST_RECIPIENT_EMAIL',
-    env.localFinanceTestRecipientEmail,
+    env.localFinanceTestRecipientEmail
   ).toLowerCase();
 
   const adminCount = await readCount(sql`
@@ -139,7 +142,9 @@ const main = async (): Promise<void> => {
   `);
   assertAtLeast('Finance Quest Escrow draft', financeDraftCount, 1);
 
-  console.log('Verified Admin, demo Quest, Assignment, Review, Wallet, Payout Destination, pending Payout, and finance draft seeds.');
+  console.log(
+    'Verified Admin, demo Quest, Assignment, Review, Wallet, Payout Destination, pending Payout, and finance draft seeds.'
+  );
 };
 
 try {

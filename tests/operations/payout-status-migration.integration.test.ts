@@ -3,10 +3,7 @@ import { sql } from '@/database/client';
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
 
-const migrationPath = join(
-  import.meta.dir,
-  '../../drizzle/20260908060829_faulty_giant_girl.sql',
-);
+const migrationPath = join(import.meta.dir, '../../drizzle/20260908060829_faulty_giant_girl.sql');
 
 test('Payout status migration rewrites existing immutable history safely', async () => {
   const migration = await Bun.file(migrationPath).text();
@@ -91,31 +88,37 @@ test('Payout status migration rewrites existing immutable history safely', async
       await transaction.unsafe(statement);
     }
 
-    const [payout] = await transaction.unsafe<{
-      payoutStatus: string;
-      version: number;
-    }[]>(
-      'SELECT payout_status AS "payoutStatus", version FROM "payment_payouts" WHERE id = 1',
+    const [payout] = await transaction.unsafe<
+      {
+        payoutStatus: string;
+        version: number;
+      }[]
+    >('SELECT payout_status AS "payoutStatus", version FROM "payment_payouts" WHERE id = 1');
+    const [history] = await transaction.unsafe<
+      {
+        fromStatus: string;
+        toStatus: string;
+        source: string;
+      }[]
+    >(
+      'SELECT from_status AS "fromStatus", to_status AS "toStatus", source FROM "payment_payout_status_history" WHERE id = 1'
     );
-    const [history] = await transaction.unsafe<{
-      fromStatus: string;
-      toStatus: string;
-      source: string;
-    }[]>(
-      'SELECT from_status AS "fromStatus", to_status AS "toStatus", source FROM "payment_payout_status_history" WHERE id = 1',
+    const [providerEvent] = await transaction.unsafe<
+      {
+        normalizedStatus: string;
+      }[]
+    >(
+      'SELECT normalized_status AS "normalizedStatus" FROM "payment_provider_event_inbox" WHERE id = 1'
     );
-    const [providerEvent] = await transaction.unsafe<{
-      normalizedStatus: string;
-    }[]>(
-      'SELECT normalized_status AS "normalizedStatus" FROM "payment_provider_event_inbox" WHERE id = 1',
-    );
-    const [trigger] = await transaction.unsafe<{
-      enabled: string;
-    }[]>(
+    const [trigger] = await transaction.unsafe<
+      {
+        enabled: string;
+      }[]
+    >(
       `SELECT tgenabled AS enabled
        FROM pg_trigger
        WHERE tgname = 'payment_payout_status_history_immutable'
-         AND tgrelid = 'payment_payout_status_history'::regclass`,
+         AND tgrelid = 'payment_payout_status_history'::regclass`
     );
 
     expect(payout).toEqual({ payoutStatus: 'SUBMITTED_TO_PROVIDER', version: 1 });

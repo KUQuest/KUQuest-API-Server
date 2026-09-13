@@ -33,7 +33,11 @@ type Subscriber = {
 };
 
 export type WorkChatDelivery = {
-  subscribe(memberId: string, deliver: WorkChatDeliverySubscriber, conversationId?: string): () => void;
+  subscribe(
+    memberId: string,
+    deliver: WorkChatDeliverySubscriber,
+    conversationId?: string
+  ): () => void;
   publish(event: WorkChatCommittedEvent): Promise<void>;
 };
 
@@ -54,24 +58,28 @@ export const createWorkChatDelivery = (): WorkChatDelivery => {
     async publish(event) {
       const recipientMemberIds = new Set(event.recipientMemberIds);
       const eventId = event.message.eventId ?? event.message.id;
-      await Promise.all([...subscribers.entries()].map(async ([subscriberId, subscriber]) => {
-        if (
-          !recipientMemberIds.has(subscriber.memberId)
-          || (subscriber.conversationId !== undefined && subscriber.conversationId !== event.message.conversationId)
-          || subscriber.deliveredEventIds.has(eventId)
-        ) return;
-        try {
-          await subscriber.deliver(event);
-          subscriber.deliveredEventIds.add(eventId);
-        } catch (error) {
-          console.error('[work-chat-delivery] Delivery failed', {
-            conversationId: event.message.conversationId,
-            messageId: event.message.id,
-            subscriberId,
-            error,
-          });
-        }
-      }));
+      await Promise.all(
+        [...subscribers.entries()].map(async ([subscriberId, subscriber]) => {
+          if (
+            !recipientMemberIds.has(subscriber.memberId) ||
+            (subscriber.conversationId !== undefined &&
+              subscriber.conversationId !== event.message.conversationId) ||
+            subscriber.deliveredEventIds.has(eventId)
+          )
+            return;
+          try {
+            await subscriber.deliver(event);
+            subscriber.deliveredEventIds.add(eventId);
+          } catch (error) {
+            console.error('[work-chat-delivery] Delivery failed', {
+              conversationId: event.message.conversationId,
+              messageId: event.message.id,
+              subscriberId,
+              error,
+            });
+          }
+        })
+      );
     },
   };
 };

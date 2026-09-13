@@ -4,9 +4,7 @@ import { app } from '@/app';
 
 describe('health integration: GET /health', () => {
   it('returns service health status', async () => {
-    const response = await app.handle(
-      new Request('http://localhost/health'),
-    );
+    const response = await app.handle(new Request('http://localhost/health'));
 
     const body = await response.json();
 

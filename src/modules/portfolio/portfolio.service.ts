@@ -1,9 +1,6 @@
 import { db } from '@/database/client';
 import { file } from '@/database/schema/file.schema';
-import {
-  profilePortfolioItem,
-  profilePortfolioItemImage,
-} from '@/database/schema/profile.schema';
+import { profilePortfolioItem, profilePortfolioItemImage } from '@/database/schema/profile.schema';
 
 import { and, asc, eq, sql } from 'drizzle-orm';
 
@@ -44,7 +41,7 @@ export const listPortfolio = async (userId: string): Promise<PortfolioItem[]> =>
     .from(profilePortfolioItem)
     .leftJoin(
       profilePortfolioItemImage,
-      eq(profilePortfolioItemImage.portfolioItemId, profilePortfolioItem.id),
+      eq(profilePortfolioItemImage.portfolioItemId, profilePortfolioItem.id)
     )
     .leftJoin(file, eq(profilePortfolioItemImage.fileId, file.id))
     .where(eq(profilePortfolioItem.userId, userId))
@@ -81,7 +78,7 @@ export const listPortfolio = async (userId: string): Promise<PortfolioItem[]> =>
 
 export const createPortfolio = async (
   userId: string,
-  data: { title: string; description?: string; images?: StoredPortfolioImage[] },
+  data: { title: string; description?: string; images?: StoredPortfolioImage[] }
 ): Promise<{ id: string }> =>
   db.transaction(async (transaction) => {
     const [item] = await transaction
@@ -101,7 +98,7 @@ export const createPortfolio = async (
           fileId: createdFile.id,
           position,
         });
-      }),
+      })
     );
 
     return { id: item.id };
@@ -113,7 +110,7 @@ export const updatePortfolio = async (
   userId: string,
   portfolioId: string,
   data: { title?: string; description?: string },
-  expectedVersion?: number,
+  expectedVersion?: number
 ): Promise<PortfolioUpdateOutcome> => {
   const current = await db
     .select({ version: profilePortfolioItem.version })
@@ -131,7 +128,7 @@ export const updatePortfolio = async (
     .where(
       expectedVersion === undefined
         ? ownedBy(userId, portfolioId)
-        : and(ownedBy(userId, portfolioId), eq(profilePortfolioItem.version, expectedVersion)),
+        : and(ownedBy(userId, portfolioId), eq(profilePortfolioItem.version, expectedVersion))
     )
     .returning({ id: profilePortfolioItem.id });
 
@@ -139,14 +136,18 @@ export const updatePortfolio = async (
 };
 
 export type PortfolioDeleteOutcome =
-  | { outcome: 'deleted'; images: Array<{ fileId: string; bucket: string; objectKey: string }>; version: number }
+  | {
+      outcome: 'deleted';
+      images: Array<{ fileId: string; bucket: string; objectKey: string }>;
+      version: number;
+    }
   | { outcome: 'not-found' }
   | { outcome: 'conflict' };
 
 export const deletePortfolio = async (
   userId: string,
   portfolioId: string,
-  expectedVersion?: number,
+  expectedVersion?: number
 ): Promise<PortfolioDeleteOutcome> =>
   db.transaction(async (transaction) => {
     const [current] = await transaction
@@ -166,7 +167,7 @@ export const deletePortfolio = async (
       .from(profilePortfolioItem)
       .innerJoin(
         profilePortfolioItemImage,
-        eq(profilePortfolioItemImage.portfolioItemId, profilePortfolioItem.id),
+        eq(profilePortfolioItemImage.portfolioItemId, profilePortfolioItem.id)
       )
       .innerJoin(file, eq(profilePortfolioItemImage.fileId, file.id))
       .where(ownedBy(userId, portfolioId))
@@ -187,7 +188,7 @@ export const replacePortfolioImage = async (
   portfolioId: string,
   fileData: StoredPortfolioImage,
   targetFileId: string | undefined,
-  expectedVersion?: number,
+  expectedVersion?: number
 ): Promise<
   | {
       fileId: string;
@@ -225,9 +226,9 @@ export const replacePortfolioImage = async (
         targetFileId
           ? and(
               eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
-              eq(profilePortfolioItemImage.fileId, targetFileId),
+              eq(profilePortfolioItemImage.fileId, targetFileId)
             )
-          : eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
+          : eq(profilePortfolioItemImage.portfolioItemId, portfolioId)
       )
       .orderBy(asc(profilePortfolioItemImage.position))
       .limit(1);
@@ -246,8 +247,8 @@ export const replacePortfolioImage = async (
         .where(
           and(
             eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
-            eq(profilePortfolioItemImage.fileId, oldImage.fileId),
-          ),
+            eq(profilePortfolioItemImage.fileId, oldImage.fileId)
+          )
         );
     } else {
       await transaction.insert(profilePortfolioItemImage).values({
@@ -275,8 +276,12 @@ export const deletePortfolioImage = async (
   userId: string,
   portfolioId: string,
   fileId: string | undefined,
-  expectedVersion?: number,
-): Promise<{ outcome: 'deleted'; bucket: string; objectKey: string; version: number } | { outcome: 'not-found' } | { outcome: 'conflict' }> =>
+  expectedVersion?: number
+): Promise<
+  | { outcome: 'deleted'; bucket: string; objectKey: string; version: number }
+  | { outcome: 'not-found' }
+  | { outcome: 'conflict' }
+> =>
   db.transaction(async (transaction) => {
     const [item] = await transaction
       .select({ version: profilePortfolioItem.version })
@@ -285,7 +290,8 @@ export const deletePortfolioImage = async (
       .limit(1)
       .for('update');
     if (!item) return { outcome: 'not-found' };
-    if (expectedVersion !== undefined && item.version !== expectedVersion) return { outcome: 'conflict' };
+    if (expectedVersion !== undefined && item.version !== expectedVersion)
+      return { outcome: 'conflict' };
 
     const [image] = await transaction
       .select({ fileId: file.id, bucket: file.bucket, objectKey: file.objectKey })
@@ -295,9 +301,9 @@ export const deletePortfolioImage = async (
         fileId
           ? and(
               eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
-              eq(profilePortfolioItemImage.fileId, fileId),
+              eq(profilePortfolioItemImage.fileId, fileId)
             )
-          : eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
+          : eq(profilePortfolioItemImage.portfolioItemId, portfolioId)
       )
       .orderBy(asc(profilePortfolioItemImage.position))
       .limit(1);
@@ -308,13 +314,10 @@ export const deletePortfolioImage = async (
       .where(
         and(
           eq(profilePortfolioItemImage.portfolioItemId, portfolioId),
-          eq(profilePortfolioItemImage.fileId, image.fileId),
-        ),
+          eq(profilePortfolioItemImage.fileId, image.fileId)
+        )
       );
-    await transaction
-      .update(file)
-      .set({ deletedAt: new Date() })
-      .where(eq(file.id, image.fileId));
+    await transaction.update(file).set({ deletedAt: new Date() }).where(eq(file.id, image.fileId));
     await transaction
       .update(profilePortfolioItem)
       .set({ version: sql`${profilePortfolioItem.version} + 1`, updatedAt: new Date() })
@@ -323,10 +326,7 @@ export const deletePortfolioImage = async (
     return { outcome: 'deleted', ...image, version: item.version + 1 };
   });
 
-export const markPortfolioImageDeleted = async (
-  userId: string,
-  fileId: string,
-): Promise<void> => {
+export const markPortfolioImageDeleted = async (userId: string, fileId: string): Promise<void> => {
   await db
     .update(file)
     .set({ deletedAt: new Date() })

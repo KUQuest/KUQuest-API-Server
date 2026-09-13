@@ -29,7 +29,7 @@ type ExtendedAdminContext = AdminContext & {
 };
 
 const serializeWallet = (
-  wallet: WalletBalances | { wallet: WalletBalances },
+  wallet: WalletBalances | { wallet: WalletBalances }
 ): WalletBalances & { walletStatus: string } => {
   const target = 'wallet' in wallet && wallet.wallet ? wallet.wallet : (wallet as WalletBalances);
   return {
@@ -71,10 +71,7 @@ export const changeWalletStatusAdminController = async ({
   params: AdminWalletParams;
 }): Promise<ApiResponse> => {
   try {
-    const actorAdminId =
-      adminSession?.admin?.id ??
-      admin?.id ??
-      adminSession?.user?.id;
+    const actorAdminId = adminSession?.admin?.id ?? admin?.id ?? adminSession?.user?.id;
 
     const { wallet: updatedWallet } = await changeWalletStatus({
       walletId: params.walletId,

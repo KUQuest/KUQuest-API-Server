@@ -29,7 +29,7 @@
     "db:reset-local": "bun scripts/reset-local-database.ts",
     "db:migrate": "bun scripts/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "check": "bun run db:check && bun run lint && bun run typecheck && bun test && bun run build",
+    "check": "bun run db:check && bun run lint && bun run format:check && bun run typecheck && bun test && bun run build",
     "prepare": "husky || true"
   },
   "dependencies": {

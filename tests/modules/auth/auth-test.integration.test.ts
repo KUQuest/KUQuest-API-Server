@@ -11,12 +11,19 @@ describe('API Test Bench assets', () => {
     expect(page.status).toBe(200);
     expect(page.headers.get('content-type')).toContain('text/html');
     const html = await page.text();
-    const assets = [...html.matchAll(/(?:src|href)="(\/test-bench\/[^"]+)"/g)].map((match) => match[1]!);
+    const assets = [...html.matchAll(/(?:src|href)="(\/test-bench\/[^"]+)"/g)].map(
+      (match) => match[1]!
+    );
     expect(assets).toHaveLength(2);
-    const responses = await Promise.all(assets.map((path) => app.handle(new Request(`http://localhost${path}`))));
+    const responses = await Promise.all(
+      assets.map((path) => app.handle(new Request(`http://localhost${path}`)))
+    );
     expect(responses.every((response) => response.status === 200)).toBe(true);
     expect(responses.map((response) => response.headers.get('content-type'))).toEqual(
-      expect.arrayContaining([expect.stringContaining('text/css'), expect.stringContaining('javascript')]),
+      expect.arrayContaining([
+        expect.stringContaining('text/css'),
+        expect.stringContaining('javascript'),
+      ])
     );
   });
 

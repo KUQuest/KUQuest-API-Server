@@ -29,7 +29,7 @@ import type {
 } from './admin-finance.schema';
 
 export const getAdminQuestFinance = async (
-  questId: string,
+  questId: string
 ): Promise<AdminQuestFinanceData | null> => {
   const [questRow] = await db
     .select({
@@ -297,7 +297,7 @@ export const getAdminQuestFinance = async (
 };
 
 export const listAdminLedgerTransactions = async (
-  query: AdminLedgerTransactionsQuery,
+  query: AdminLedgerTransactionsQuery
 ): Promise<AdminLedgerTransactionsData> => {
   const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
   const conditions = [];
@@ -306,7 +306,9 @@ export const listAdminLedgerTransactions = async (
     conditions.push(eq(walletLedgerTransaction.eventType, query.eventType));
   }
   if (query.businessReference) {
-    conditions.push(ilike(walletLedgerTransaction.businessReference, `%${query.businessReference}%`));
+    conditions.push(
+      ilike(walletLedgerTransaction.businessReference, `%${query.businessReference}%`)
+    );
   }
   if (query.from) {
     conditions.push(gte(walletLedgerTransaction.createdAt, new Date(query.from)));
@@ -345,9 +347,9 @@ export const listAdminLedgerTransactions = async (
           lt(walletLedgerTransaction.createdAt, cursorDate),
           and(
             eq(walletLedgerTransaction.createdAt, cursorDate),
-            lt(walletLedgerTransaction.id, parsed.id),
-          ),
-        ),
+            lt(walletLedgerTransaction.id, parsed.id)
+          )
+        )
       );
     }
   }
@@ -509,7 +511,8 @@ export const getAdminFinanceOverview = async (): Promise<AdminFinanceOverviewDat
       totalEarningsSatang: earningsSatang,
       totalFundingReservedSatang: fundingReservedSatang,
       totalPayoutReservedSatang: payoutReservedSatang,
-      totalCirculatingSatang: spendingSatang + earningsSatang + fundingReservedSatang + payoutReservedSatang,
+      totalCirculatingSatang:
+        spendingSatang + earningsSatang + fundingReservedSatang + payoutReservedSatang,
     },
     volumeLifetime: {
       totalTopUpDepositedSatang: Number(topUpRow?.totalSatang ?? 0),
@@ -525,7 +528,7 @@ export const getAdminFinanceOverview = async (): Promise<AdminFinanceOverviewDat
 };
 
 export const getAdminMemberFinanceProfile = async (
-  userId: string,
+  userId: string
 ): Promise<AdminMemberFinanceData | null> => {
   const [member] = await db
     .select({
@@ -542,10 +545,7 @@ export const getAdminMemberFinanceProfile = async (
     return null;
   }
 
-  const [wallet] = await db
-    .select()
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId));
+  const [wallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, userId));
 
   let walletData: AdminMemberFinanceData['wallet'] = null;
 
@@ -620,7 +620,7 @@ export const getAdminMemberFinanceProfile = async (
     .from(walletFundingReservationSettlement)
     .innerJoin(
       walletFundingReservation,
-      eq(walletFundingReservationSettlement.reservationId, walletFundingReservation.id),
+      eq(walletFundingReservationSettlement.reservationId, walletFundingReservation.id)
     )
     .where(eq(walletFundingReservation.ownerUserId, userId));
 
@@ -637,8 +637,8 @@ export const getAdminMemberFinanceProfile = async (
     .where(
       and(
         eq(walletFundingReservation.ownerUserId, userId),
-        eq(walletFundingReservation.status, 'ACTIVE'),
-      ),
+        eq(walletFundingReservation.status, 'ACTIVE')
+      )
     );
 
   return {
@@ -677,9 +677,9 @@ export const getCurrentMoneyPolicy = async (): Promise<AdminMoneyPolicyItem | nu
         lte(paymentMoneyPolicyRevision.effectiveFrom, now),
         or(
           isNull(paymentMoneyPolicyRevision.effectiveUntil),
-          gte(paymentMoneyPolicyRevision.effectiveUntil, now),
-        ),
-      ),
+          gte(paymentMoneyPolicyRevision.effectiveUntil, now)
+        )
+      )
     )
     .orderBy(desc(paymentMoneyPolicyRevision.revision))
     .limit(1);

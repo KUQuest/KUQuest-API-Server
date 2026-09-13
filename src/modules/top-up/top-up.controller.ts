@@ -30,15 +30,14 @@ type TopUpQuoteCreateInput = Static<typeof topUpQuoteCreateSchema>;
 
 const serializeDate = (value: Date | null) => value?.toISOString() ?? null;
 
-const qrDataUrlFor = async (payload: string | null): Promise<string | null> => (
+const qrDataUrlFor = async (payload: string | null): Promise<string | null> =>
   payload
     ? QRCode.toDataURL(payload, {
-      errorCorrectionLevel: 'M',
-      margin: 2,
-      width: 360,
-    })
-    : null
-);
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        width: 360,
+      })
+    : null;
 
 const serializeTopUp = async (topUp: Awaited<ReturnType<typeof getTopUp>>) => ({
   ...topUp,
@@ -82,10 +81,14 @@ export const createTopUpQuoteController = async ({
   set,
 }: AuthedContext & { body: TopUpQuoteCreateInput }): Promise<ApiResponse> => {
   try {
-    return apiSuccess(serializeQuote(await quoteTopUp({
-      principalUserId: session.user.id,
-      creditSatang: positiveSatang(body.creditSatang),
-    })));
+    return apiSuccess(
+      serializeQuote(
+        await quoteTopUp({
+          principalUserId: session.user.id,
+          creditSatang: positiveSatang(body.creditSatang),
+        })
+      )
+    );
   } catch (error) {
     return mapFinanceError(set, error);
   }
@@ -110,11 +113,13 @@ export const createTopUpController = async ({
     if (simulation) topUp = simulation.topUp;
     return apiSuccess({
       ...(await serializeTopUp(topUp)),
-      ...(simulation ? {
-        simulated: true,
-        callbackReceived: simulation.callbackReceived,
-        reconciliationUsed: simulation.reconciliationUsed,
-      } : {}),
+      ...(simulation
+        ? {
+            simulated: true,
+            callbackReceived: simulation.callbackReceived,
+            reconciliationUsed: simulation.reconciliationUsed,
+          }
+        : {}),
     });
   } catch (error) {
     return mapFinanceError(set, error);
@@ -128,7 +133,9 @@ export const listTopUpsController = async ({
 }: AuthedContext & { query: TopUpListQuery }): Promise<ApiResponse> => {
   try {
     return apiSuccess({
-      items: await Promise.all((await listTopUps(session.user.id, query.limit)).map(serializeTopUp)),
+      items: await Promise.all(
+        (await listTopUps(session.user.id, query.limit)).map(serializeTopUp)
+      ),
       nextCursor: null,
     });
   } catch (error) {
@@ -155,10 +162,12 @@ export const listTopUpStatusHistoryController = async ({
 }: AuthedContext & { params: TopUpParams }): Promise<ApiResponse> => {
   try {
     const history = await listTopUpStatusHistory(session.user.id, params.topUpId);
-    return apiSuccess(history.map((entry) => ({
-      ...entry,
-      occurredAt: entry.occurredAt.toISOString(),
-    })));
+    return apiSuccess(
+      history.map((entry) => ({
+        ...entry,
+        occurredAt: entry.occurredAt.toISOString(),
+      }))
+    );
   } catch (error) {
     return mapFinanceError(set, error);
   }

@@ -1,12 +1,4 @@
-import {
-  check,
-  index,
-  jsonb,
-  pgTable,
-  timestamp,
-  varchar,
-  uuid,
-} from 'drizzle-orm/pg-core';
+import { check, index, jsonb, pgTable, timestamp, varchar, uuid } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 import { authAdmin, authUser } from './auth.schema';
@@ -31,24 +23,24 @@ export const auditRecord = pgTable(
   (table) => [
     check(
       'audit_record_actor_check',
-      sql`(${table.actorType} = 'SYSTEM' AND num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) = 0) OR (${table.actorType} = 'MEMBER' AND ${table.actorUserId} IS NOT NULL AND ${table.actorAdminId} IS NULL) OR (${table.actorType} = 'ADMIN' AND ${table.actorUserId} IS NULL AND ${table.actorAdminId} IS NOT NULL)`,
+      sql`(${table.actorType} = 'SYSTEM' AND num_nonnulls(${table.actorUserId}, ${table.actorAdminId}) = 0) OR (${table.actorType} = 'MEMBER' AND ${table.actorUserId} IS NOT NULL AND ${table.actorAdminId} IS NULL) OR (${table.actorType} = 'ADMIN' AND ${table.actorUserId} IS NULL AND ${table.actorAdminId} IS NOT NULL)`
     ),
     check('audit_record_action_check', sql`btrim(${table.action}) <> ''`),
     check('audit_record_resource_type_check', sql`btrim(${table.resourceType}) <> ''`),
     check('audit_record_resource_id_check', sql`btrim(${table.resourceId}) <> ''`),
     check(
       'audit_record_reason_check',
-      sql`${table.reason} IS NULL OR btrim(${table.reason}) <> ''`,
+      sql`${table.reason} IS NULL OR btrim(${table.reason}) <> ''`
     ),
     check(
       'audit_record_old_value_check',
-      sql`${table.oldValue} IS NULL OR jsonb_typeof(${table.oldValue}) = 'object'`,
+      sql`${table.oldValue} IS NULL OR jsonb_typeof(${table.oldValue}) = 'object'`
     ),
     check(
       'audit_record_new_value_check',
-      sql`${table.newValue} IS NULL OR jsonb_typeof(${table.newValue}) = 'object'`,
+      sql`${table.newValue} IS NULL OR jsonb_typeof(${table.newValue}) = 'object'`
     ),
     index('audit_record_resource_idx').on(table.resourceType, table.resourceId, table.createdAt),
     index('audit_record_created_idx').on(table.createdAt),
-  ],
+  ]
 );

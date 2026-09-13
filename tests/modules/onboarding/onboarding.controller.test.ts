@@ -31,7 +31,7 @@ beforeAll(async () => {
   } catch (cause) {
     throw new Error(
       'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 
@@ -95,9 +95,9 @@ describe('updateOnboarding', () => {
   });
 
   it('accepts a department that exists', async () => {
-    const departmentId = (await getAcademicOptions())
-      .find(({ departments }) => departments.length > 0)
-      ?.departments[0]?.id;
+    const departmentId = (await getAcademicOptions()).find(
+      ({ departments }) => departments.length > 0
+    )?.departments[0]?.id;
 
     expect(departmentId).toBeDefined();
 

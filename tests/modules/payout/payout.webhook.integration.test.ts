@@ -17,7 +17,7 @@ describe('Xendit Payout webhook route', () => {
         method: 'POST',
         headers: { 'x-callback-token': 'invalid' },
         body: '{}',
-      }),
+      })
     );
 
     expect(response.status).toBe(401);
@@ -62,7 +62,7 @@ describe('Xendit Payout webhook route', () => {
             'webhook-id': eventId,
           },
           body: rawPayload,
-        }),
+        })
       );
     } finally {
       Object.assign(env, previousConfig);
@@ -70,9 +70,10 @@ describe('Xendit Payout webhook route', () => {
 
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ success: true });
-    const [stored] = await db.select().from(paymentProviderEventInbox).where(
-      eq(paymentProviderEventInbox.providerEventId, eventId),
-    );
+    const [stored] = await db
+      .select()
+      .from(paymentProviderEventInbox)
+      .where(eq(paymentProviderEventInbox.providerEventId, eventId));
     expect(stored).toMatchObject({
       providerEventId: eventId,
       resourceType: 'PAYOUT',
@@ -82,9 +83,7 @@ describe('Xendit Payout webhook route', () => {
   });
 
   it('documents the accepted response and authentication scheme', async () => {
-    const response = await app.handle(
-      new Request('http://localhost/openapi/json'),
-    );
+    const response = await app.handle(new Request('http://localhost/openapi/json'));
     const document = await response.json();
     const operation = document.paths['/api/v1/webhooks/xendit/payouts'].post;
 

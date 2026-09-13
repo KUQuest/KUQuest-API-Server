@@ -40,13 +40,13 @@ The Finance domain covers seven functional areas:
 
 Every financial status adheres to the entity-prefix and canonical naming conventions:
 
-| Object | Field | Allowed values |
-| --- | --- | --- |
-| Wallet | `walletStatus` | `ACTIVE`, `FROZEN`, `SUSPENDED`, `CLOSED` |
-| Ledger Account | `type` | `SPENDING`, `EARNINGS`, `FUNDING_RESERVED`, `RESERVED_FOR_PAYOUTS`, `PLATFORM_REVENUE`, `PLATFORM_SUSPENSE` |
-| Ledger Transaction | `eventType` | `TOP_UP`, `PAYOUT`, `FUNDING_RESERVE`, `FUNDING_RELEASE`, `FUNDING_SETTLEMENT`, `ADJUSTMENT`, `EARNINGS_CONVERSION` |
-| Funding Reservation | `status` | `ACTIVE`, `RELEASED`, `SETTLED` |
-| Payout | `status` | `PENDING_ADMIN_APPROVAL`, `SUBMITTED_TO_PROVIDER`, `PROVIDER_PENDING`, `SUCCEEDED`, `FAILED`, `CANCELLED` |
+| Object              | Field          | Allowed values                                                                                                      |
+| ------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Wallet              | `walletStatus` | `ACTIVE`, `FROZEN`, `SUSPENDED`, `CLOSED`                                                                           |
+| Ledger Account      | `type`         | `SPENDING`, `EARNINGS`, `FUNDING_RESERVED`, `RESERVED_FOR_PAYOUTS`, `PLATFORM_REVENUE`, `PLATFORM_SUSPENSE`         |
+| Ledger Transaction  | `eventType`    | `TOP_UP`, `PAYOUT`, `FUNDING_RESERVE`, `FUNDING_RELEASE`, `FUNDING_SETTLEMENT`, `ADJUSTMENT`, `EARNINGS_CONVERSION` |
+| Funding Reservation | `status`       | `ACTIVE`, `RELEASED`, `SETTLED`                                                                                     |
+| Payout              | `status`       | `PENDING_ADMIN_APPROVAL`, `SUBMITTED_TO_PROVIDER`, `PROVIDER_PENDING`, `SUCCEEDED`, `FAILED`, `CANCELLED`           |
 
 ## Provider Quote and external provider rules
 
@@ -63,14 +63,14 @@ Every financial status adheres to the entity-prefix and canonical naming convent
 
 Follow the context pointer for the finance branch being planned or implemented:
 
-| Branch / Area | Topic and triggers | Sub-contract file |
-| --- | --- | --- |
-| **Wallet Compartments & Limits** | 4 balance compartments, integer Satang representation, 2B Satang capacity cap, `ACTIVE`/`FROZEN`/`SUSPENDED`/`CLOSED` status permissions. | [wallet-compartment-contract.md](wallet-compartment-contract.md) |
-| **Double-Entry Ledger** | Authoritative balanced double-entry subledger, zero-sum posting invariant, 6 account types, sealed transactions, reversing transactions. | [double-entry-ledger-contract.md](double-entry-ledger-contract.md) |
-| **Funding Reservations** | Generic caller-scoped reservations, atomic publish Escrow lock, per-slot settlement, release, 7-day failure money hold. | [funding-reservation-contract.md](funding-reservation-contract.md) |
-| **Top-up & Conversion** | Binding Provider Quotes, PromptPay payment requests, exact-amount webhook clearing, instant fee-free Earnings to Spending conversions, and idempotency. | [topup-and-conversion-contract.md](topup-and-conversion-contract.md) |
-| **Payouts & Destinations** | Thai bank account destinations, AES-256-GCM encryption, masked display, binding Provider Quotes, manual Admin approval queue (`PENDING_ADMIN_APPROVAL`), and provider worker hand-off. | [payout-contract.md](payout-contract.md) |
-| **Money Policy** | Versioned policy revisions, Platform Fee calculation (`platformFeeBps`), ceiling rounding (`feeRoundingMode = 'UP'`), min/max transaction amounts, and Quote lifetime. | [money-policy-contract.md](money-policy-contract.md) |
+| Branch / Area                    | Topic and triggers                                                                                                                                                                     | Sub-contract file                                                    |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| **Wallet Compartments & Limits** | 4 balance compartments, integer Satang representation, 2B Satang capacity cap, `ACTIVE`/`FROZEN`/`SUSPENDED`/`CLOSED` status permissions.                                              | [wallet-compartment-contract.md](wallet-compartment-contract.md)     |
+| **Double-Entry Ledger**          | Authoritative balanced double-entry subledger, zero-sum posting invariant, 6 account types, sealed transactions, reversing transactions.                                               | [double-entry-ledger-contract.md](double-entry-ledger-contract.md)   |
+| **Funding Reservations**         | Generic caller-scoped reservations, atomic publish Escrow lock, per-slot settlement, release, 7-day failure money hold.                                                                | [funding-reservation-contract.md](funding-reservation-contract.md)   |
+| **Top-up & Conversion**          | Binding Provider Quotes, PromptPay payment requests, exact-amount webhook clearing, instant fee-free Earnings to Spending conversions, and idempotency.                                | [topup-and-conversion-contract.md](topup-and-conversion-contract.md) |
+| **Payouts & Destinations**       | Thai bank account destinations, AES-256-GCM encryption, masked display, binding Provider Quotes, manual Admin approval queue (`PENDING_ADMIN_APPROVAL`), and provider worker hand-off. | [payout-contract.md](payout-contract.md)                             |
+| **Money Policy**                 | Versioned policy revisions, Platform Fee calculation (`platformFeeBps`), ceiling rounding (`feeRoundingMode = 'UP'`), min/max transaction amounts, and Quote lifetime.                 | [money-policy-contract.md](money-policy-contract.md)                 |
 
 ## Scope boundaries & deferred capabilities
 

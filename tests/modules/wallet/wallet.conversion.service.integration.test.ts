@@ -35,19 +35,18 @@ const createStudent = async (_prefix: string) => {
   return { id, wallet };
 };
 
-const accountId = async (
-  walletId: string,
-  type: 'SPENDING' | 'EARNINGS' | 'PLATFORM_SUSPENSE',
-) => {
+const accountId = async (walletId: string, type: 'SPENDING' | 'EARNINGS' | 'PLATFORM_SUSPENSE') => {
   const [account] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
-    .where(and(
-      type === 'EARNINGS' || type === 'SPENDING'
-        ? eq(walletLedgerAccount.walletId, walletId)
-        : eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'),
-      eq(walletLedgerAccount.type, type),
-    ));
+    .where(
+      and(
+        type === 'EARNINGS' || type === 'SPENDING'
+          ? eq(walletLedgerAccount.walletId, walletId)
+          : eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'),
+        eq(walletLedgerAccount.type, type)
+      )
+    );
   if (!account) throw new Error(`Missing ${type} account`);
   return account.id;
 };
@@ -65,7 +64,11 @@ const creditEarnings = async (walletId: string, amountSatang: number, reference:
   });
 };
 
-const earningsConversionInput = (principalUserId: string, amountSatang: number, key: string = crypto.randomUUID()) => ({
+const earningsConversionInput = (
+  principalUserId: string,
+  amountSatang: number,
+  key: string = crypto.randomUUID()
+) => ({
   principalUserId,
   amountSatang: amountSatang as Satang,
   idempotency: {
@@ -91,7 +94,10 @@ describe('Earnings Conversion service', () => {
       businessReference: expect.stringContaining('wallet.earnings-conversion'),
     });
 
-    const [updatedWallet] = await db.select().from(walletWallet).where(eq(walletWallet.id, wallet.id));
+    const [updatedWallet] = await db
+      .select()
+      .from(walletWallet)
+      .where(eq(walletWallet.id, wallet.id));
     expect(updatedWallet).toMatchObject({
       spendingBalanceSatang: 125,
       earningsBalanceSatang: 375,
@@ -134,7 +140,10 @@ describe('Earnings Conversion service', () => {
 
     await convertEarnings(earningsConversionInput(id, 70_000_000));
 
-    const [updatedWallet] = await db.select().from(walletWallet).where(eq(walletWallet.id, wallet.id));
+    const [updatedWallet] = await db
+      .select()
+      .from(walletWallet)
+      .where(eq(walletWallet.id, wallet.id));
     expect(updatedWallet).toMatchObject({
       spendingBalanceSatang: 70_000_000,
       earningsBalanceSatang: 1_930_000_000,
@@ -164,18 +173,22 @@ describe('Earnings Conversion service', () => {
       reason: 'Resume Wallet after retry test',
     });
 
-    await expect(convertEarnings({
-      ...input,
-      amountSatang: 126 as Satang,
-    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+    await expect(
+      convertEarnings({
+        ...input,
+        amountSatang: 126 as Satang,
+      })
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
 
     const conversions = await db
       .select({ id: walletLedgerTransaction.id })
       .from(walletLedgerTransaction)
-      .where(and(
-        eq(walletLedgerTransaction.eventType, 'EARNINGS_CONVERSION'),
-        eq(walletLedgerTransaction.createdByUserId, id),
-      ));
+      .where(
+        and(
+          eq(walletLedgerTransaction.eventType, 'EARNINGS_CONVERSION'),
+          eq(walletLedgerTransaction.createdByUserId, id)
+        )
+      );
     expect(conversions).toHaveLength(1);
   });
 
@@ -184,10 +197,7 @@ describe('Earnings Conversion service', () => {
     await creditEarnings(wallet.id, 500, `be110-credit-${crypto.randomUUID()}`);
     const input = earningsConversionInput(id, 125, `be110-key-${crypto.randomUUID()}`);
 
-    const [first, replay] = await Promise.all([
-      convertEarnings(input),
-      convertEarnings(input),
-    ]);
+    const [first, replay] = await Promise.all([convertEarnings(input), convertEarnings(input)]);
 
     expect(replay).toEqual(first);
     const conversions = await db
@@ -202,8 +212,18 @@ describe('Earnings Conversion service', () => {
     const firstId = crypto.randomUUID();
     const secondId = crypto.randomUUID();
     await db.insert(authUser).values([
-      { id: firstId, email: `be110-reference-a-${suffix}@ku.th`, firstName: 'First', lastName: 'Reference' },
-      { id: secondId, email: `be110-reference-b-${suffix}@ku.th`, firstName: 'Second', lastName: 'Reference' },
+      {
+        id: firstId,
+        email: `be110-reference-a-${suffix}@ku.th`,
+        firstName: 'First',
+        lastName: 'Reference',
+      },
+      {
+        id: secondId,
+        email: `be110-reference-b-${suffix}@ku.th`,
+        firstName: 'Second',
+        lastName: 'Reference',
+      },
     ]);
     const firstWallet = await ensureWallet(firstId);
     const secondWallet = await ensureWallet(secondId);
@@ -242,7 +262,10 @@ describe('Earnings Conversion service', () => {
       sealedAt: expect.any(Date),
     });
     expect(correction.id).not.toBe(conversion.ledgerTransactionId);
-    const [updatedWallet] = await db.select().from(walletWallet).where(eq(walletWallet.id, wallet.id));
+    const [updatedWallet] = await db
+      .select()
+      .from(walletWallet)
+      .where(eq(walletWallet.id, wallet.id));
     expect(updatedWallet).toMatchObject({
       spendingBalanceSatang: 0,
       earningsBalanceSatang: 500,
@@ -253,21 +276,26 @@ describe('Earnings Conversion service', () => {
     const { id, wallet } = await createStudent('be110-unsealed-correction');
     const spendingId = await accountId(wallet.id, 'SPENDING');
     const earningsId = await accountId(wallet.id, 'EARNINGS');
-    const [unsealed] = await db.insert(walletLedgerTransaction).values({
-      businessReference: `be110-unsealed-${crypto.randomUUID()}`,
-      eventType: 'ADJUSTMENT',
-    }).returning();
+    const [unsealed] = await db
+      .insert(walletLedgerTransaction)
+      .values({
+        businessReference: `be110-unsealed-${crypto.randomUUID()}`,
+        eventType: 'ADJUSTMENT',
+      })
+      .returning();
 
-    await expect(createSealedLedgerTransaction({
-      businessReference: `be110-invalid-correction-${crypto.randomUUID()}`,
-      eventType: 'ADJUSTMENT',
-      correctionOfTransactionId: unsealed.id,
-      createdByUserId: id,
-      postings: [
-        { accountId: spendingId, amountSatang: signedSatang(-125) },
-        { accountId: earningsId, amountSatang: signedSatang(125) },
-      ],
-    })).rejects.toMatchObject({ code: 'INVALID_LEDGER_CORRECTION' });
+    await expect(
+      createSealedLedgerTransaction({
+        businessReference: `be110-invalid-correction-${crypto.randomUUID()}`,
+        eventType: 'ADJUSTMENT',
+        correctionOfTransactionId: unsealed.id,
+        createdByUserId: id,
+        postings: [
+          { accountId: spendingId, amountSatang: signedSatang(-125) },
+          { accountId: earningsId, amountSatang: signedSatang(125) },
+        ],
+      })
+    ).rejects.toMatchObject({ code: 'INVALID_LEDGER_CORRECTION' });
   });
 
   it('rejects a correction whose postings belong to a different Wallet', async () => {
@@ -280,16 +308,18 @@ describe('Earnings Conversion service', () => {
     const secondSpendingId = await accountId(second.wallet.id, 'SPENDING');
     const secondEarningsId = await accountId(second.wallet.id, 'EARNINGS');
 
-    await expect(createSealedLedgerTransaction({
-      businessReference: `be110-cross-wallet-correction-${crypto.randomUUID()}`,
-      eventType: 'ADJUSTMENT',
-      correctionOfTransactionId: firstConversion.ledgerTransactionId,
-      createdByUserId: first.id,
-      postings: [
-        { accountId: secondSpendingId, amountSatang: signedSatang(-125) },
-        { accountId: secondEarningsId, amountSatang: signedSatang(125) },
-      ],
-    })).rejects.toMatchObject({ code: 'INVALID_LEDGER_CORRECTION' });
+    await expect(
+      createSealedLedgerTransaction({
+        businessReference: `be110-cross-wallet-correction-${crypto.randomUUID()}`,
+        eventType: 'ADJUSTMENT',
+        correctionOfTransactionId: firstConversion.ledgerTransactionId,
+        createdByUserId: first.id,
+        postings: [
+          { accountId: secondSpendingId, amountSatang: signedSatang(-125) },
+          { accountId: secondEarningsId, amountSatang: signedSatang(125) },
+        ],
+      })
+    ).rejects.toMatchObject({ code: 'INVALID_LEDGER_CORRECTION' });
   });
 
   it('fails without a partial effect for invalid, out-of-policy, and insufficient amounts', async () => {
@@ -297,20 +327,30 @@ describe('Earnings Conversion service', () => {
     await creditEarnings(wallet.id, 500, `be110-credit-${crypto.randomUUID()}`);
     const before = await db.select().from(walletWallet).where(eq(walletWallet.id, wallet.id));
 
-    await expect(convertEarnings(earningsConversionInput(id, 1.5))).rejects.toMatchObject({ code: 'INVALID_SATANG' });
-    await expect(convertEarnings(earningsConversionInput(id, 99))).rejects.toMatchObject({ code: 'AMOUNT_OUT_OF_RANGE' });
-    await expect(convertEarnings(earningsConversionInput(id, 70_000_001))).rejects.toMatchObject({ code: 'AMOUNT_OUT_OF_RANGE' });
-    await expect(convertEarnings(earningsConversionInput(id, 501))).rejects.toMatchObject({ code: 'INSUFFICIENT_EARNINGS_BALANCE' });
+    await expect(convertEarnings(earningsConversionInput(id, 1.5))).rejects.toMatchObject({
+      code: 'INVALID_SATANG',
+    });
+    await expect(convertEarnings(earningsConversionInput(id, 99))).rejects.toMatchObject({
+      code: 'AMOUNT_OUT_OF_RANGE',
+    });
+    await expect(convertEarnings(earningsConversionInput(id, 70_000_001))).rejects.toMatchObject({
+      code: 'AMOUNT_OUT_OF_RANGE',
+    });
+    await expect(convertEarnings(earningsConversionInput(id, 501))).rejects.toMatchObject({
+      code: 'INSUFFICIENT_EARNINGS_BALANCE',
+    });
 
     const after = await db.select().from(walletWallet).where(eq(walletWallet.id, wallet.id));
     expect(after).toEqual(before);
     const conversions = await db
       .select()
       .from(walletLedgerTransaction)
-      .where(and(
-        eq(walletLedgerTransaction.eventType, 'EARNINGS_CONVERSION'),
-        eq(walletLedgerTransaction.createdByUserId, id),
-      ));
+      .where(
+        and(
+          eq(walletLedgerTransaction.eventType, 'EARNINGS_CONVERSION'),
+          eq(walletLedgerTransaction.createdByUserId, id)
+        )
+      );
     expect(conversions).toHaveLength(0);
     const conversionRecords = await db
       .select()
@@ -355,9 +395,14 @@ describe('Earnings Conversion service', () => {
     expect(outcomes.filter(({ status }) => status === 'rejected')).toHaveLength(1);
     const rejected = outcomes.find(({ status }) => status === 'rejected');
     expect(rejected?.status === 'rejected' && rejected.reason).toBeInstanceOf(MoneyDomainError);
-    expect(rejected?.status === 'rejected' && rejected.reason.code).toBe('INSUFFICIENT_EARNINGS_BALANCE');
+    expect(rejected?.status === 'rejected' && rejected.reason.code).toBe(
+      'INSUFFICIENT_EARNINGS_BALANCE'
+    );
 
-    const [updatedWallet] = await db.select().from(walletWallet).where(eq(walletWallet.id, wallet.id));
+    const [updatedWallet] = await db
+      .select()
+      .from(walletWallet)
+      .where(eq(walletWallet.id, wallet.id));
     expect(updatedWallet).toMatchObject({ spendingBalanceSatang: 300, earningsBalanceSatang: 200 });
   });
 });

@@ -10,7 +10,7 @@ const patchProfile = (body: unknown) =>
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
-    }),
+    })
   );
 
 describe('profile integration', () => {
@@ -27,7 +27,7 @@ describe('profile integration', () => {
 
   it('rejects an unauthenticated public profile read', async () => {
     const response = await app.handle(
-      new Request(`http://localhost/api/v1/profile/${randomUUID()}`),
+      new Request(`http://localhost/api/v1/profile/${randomUUID()}`)
     );
     const body = await response.json();
 
@@ -41,18 +41,16 @@ describe('profile integration', () => {
   it.each(['reputation', 'reviews'])(
     'requires authentication for the %s endpoint',
     async (resource) => {
-      const response = await app.handle(
-        new Request(`http://localhost/api/v1/profile/${resource}`),
-      );
+      const response = await app.handle(new Request(`http://localhost/api/v1/profile/${resource}`));
 
       expect(response.status).toBe(401);
       expect((await response.json()).error.code).toBe('UNAUTHORIZED');
-    },
+    }
   );
 
   it('requires authentication for another member’s reviews endpoint', async () => {
     const response = await app.handle(
-      new Request(`http://localhost/api/v1/profile/${randomUUID()}/reviews`),
+      new Request(`http://localhost/api/v1/profile/${randomUUID()}/reviews`)
     );
 
     expect(response.status).toBe(401);
@@ -61,7 +59,7 @@ describe('profile integration', () => {
 
   it('rejects a non-UUID id on another member’s reviews endpoint before authentication runs', async () => {
     const response = await app.handle(
-      new Request('http://localhost/api/v1/profile/not-a-uuid/reviews'),
+      new Request('http://localhost/api/v1/profile/not-a-uuid/reviews')
     );
 
     expect(response.status).toBe(400);
@@ -69,9 +67,7 @@ describe('profile integration', () => {
   });
 
   it('rejects a non-UUID public profile id before authentication runs', async () => {
-    const response = await app.handle(
-      new Request('http://localhost/api/v1/profile/not-a-uuid'),
-    );
+    const response = await app.handle(new Request('http://localhost/api/v1/profile/not-a-uuid'));
 
     expect(response.status).toBe(400);
     expect((await response.json()).error.code).toBe('VALIDATION');
@@ -96,7 +92,7 @@ describe('profile integration', () => {
       new Request('http://localhost/api/v1/profile/avatar', {
         method: 'POST',
         body: form,
-      }),
+      })
     );
     const body = await response.json();
 
@@ -157,7 +153,7 @@ describe('profile integration', () => {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: '{not json',
-      }),
+      })
     );
 
     expect(response.status).toBe(400);
@@ -173,7 +169,7 @@ describe('profile integration', () => {
         method: 'PATCH',
         headers: { 'content-type': 'text/plain' },
         body: 'hello',
-      }),
+      })
     );
 
     expect(response.status).toBe(400);
@@ -198,9 +194,12 @@ describe('profile integration', () => {
               operationId?: string;
               parameters?: Array<Record<string, unknown>>;
               requestBody?: { content?: Record<string, unknown> };
-              responses?: Record<string, {
-                content?: Record<string, { schema?: Record<string, unknown> }>;
-              }>;
+              responses?: Record<
+                string,
+                {
+                  content?: Record<string, { schema?: Record<string, unknown> }>;
+                }
+              >;
               security?: Array<Record<string, unknown>>;
             }
           >
@@ -247,10 +246,11 @@ describe('profile integration', () => {
       expect(operation?.parameters).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ name: 'userId', in: 'path', required: true }),
-        ]),
+        ])
       );
 
-      const responseSchema = operation?.responses?.['200']?.content?.['application/json']?.schema as {
+      const responseSchema = operation?.responses?.['200']?.content?.['application/json']
+        ?.schema as {
         properties?: Record<string, unknown>;
       };
       const responseProperties = responseSchema.properties ?? {};

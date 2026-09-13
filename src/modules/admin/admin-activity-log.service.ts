@@ -93,16 +93,18 @@ export const listAdminActivity = async ({
     })
     .from(adminAction)
     .innerJoin(authAdmin, eq(authAdmin.id, adminAction.adminId))
-    .where(and(
-      action ? eq(adminAction.action, action) : undefined,
-      resourceType ? eq(adminAction.resourceType, resourceType) : undefined,
-      resourceId ? eq(adminAction.resourceId, resourceId) : undefined,
-      adminId ? eq(adminAction.adminId, adminId) : undefined,
-      cursorCondition,
-    ))
+    .where(
+      and(
+        action ? eq(adminAction.action, action) : undefined,
+        resourceType ? eq(adminAction.resourceType, resourceType) : undefined,
+        resourceId ? eq(adminAction.resourceId, resourceId) : undefined,
+        adminId ? eq(adminAction.adminId, adminId) : undefined,
+        cursorCondition
+      )
+    )
     .orderBy(
       sort === 'oldest' ? asc(adminAction.createdAt) : desc(adminAction.createdAt),
-      sort === 'oldest' ? asc(adminAction.id) : desc(adminAction.id),
+      sort === 'oldest' ? asc(adminAction.id) : desc(adminAction.id)
     )
     .limit(limit + 1);
 
@@ -112,9 +114,7 @@ export const listAdminActivity = async ({
 
   return {
     items,
-    nextCursor: hasNext && last
-      ? { startTime: last.createdAt.toISOString(), id: last.id }
-      : null,
+    nextCursor: hasNext && last ? { startTime: last.createdAt.toISOString(), id: last.id } : null,
   };
 };
 
