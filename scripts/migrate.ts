@@ -1,11 +1,12 @@
+import { defaultLocalDatabaseUrl } from '@/config/default-database-url';
+
 import { createPayoutDestinationEncryption } from '@/modules/payout-destination';
 
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
-const connectionString =
-  process.env.DATABASE_URL || 'postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest';
+const connectionString = process.env.DATABASE_URL || defaultLocalDatabaseUrl;
 
 const sql = postgres(connectionString, { prepare: false });
 const db = drizzle(sql);

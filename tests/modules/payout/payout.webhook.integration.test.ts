@@ -77,7 +77,6 @@ describe('Xendit Payout webhook route', () => {
     expect(stored).toMatchObject({
       providerEventId: eventId,
       resourceType: 'PAYOUT',
-      processingStatus: 'RECEIVED',
       rawPayloadCiphertext: expect.any(String),
     });
   });

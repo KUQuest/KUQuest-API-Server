@@ -1,3 +1,4 @@
+import { defaultLocalDatabaseUrl } from '@/config/default-database-url';
 import { sql } from '@/database/client';
 
 const localDatabaseHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
@@ -25,8 +26,7 @@ const main = async (): Promise<void> => {
     );
   }
 
-  const databaseUrl =
-    process.env.DATABASE_URL ?? 'postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest';
+  const databaseUrl = process.env.DATABASE_URL ?? defaultLocalDatabaseUrl;
   const parsedUrl = new URL(databaseUrl);
   if (!localDatabaseHosts.has(parsedUrl.hostname)) {
     throw new Error('The local database reset accepts only a localhost DATABASE_URL.');
