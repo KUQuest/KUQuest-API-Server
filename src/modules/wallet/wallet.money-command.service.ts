@@ -87,7 +87,7 @@ export const runMoneyCommand = async <R>(
 export const completeMoneyCommand = async (
   transaction: WalletTransaction,
   keyId: string,
-  resourceType: string,
+  resourceType: string | null,
   resourceId: string | null
 ): Promise<void> => {
   await transaction
