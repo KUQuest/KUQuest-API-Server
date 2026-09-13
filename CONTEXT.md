@@ -138,6 +138,10 @@ _Avoid_: provider approval, automatic timeout, releasing funds without an Admin 
 The Member's own Thai bank account to which a Payout is sent. PromptPay is a Top-up payment method, not a Payout Destination. A Member has at most one active destination; replacing or removing it retires the old destination without erasing its historical association with prior Payouts.
 _Avoid_: Wallet, bank account stored as disposable profile data.
 
+**Money Command**:
+One acquire-or-replay unit over `wallet_idempotency_keys`, identified by the principal, the operation scope, and the Idempotency-Key, holding the request hash and the pointer to the resource whose result a retry replays.
+_Avoid_: Quest Command (that is the separate `quest_command` protocol per ADR-0029), conflating the two command storages.
+
 **Money Policy**:
 A versioned set of financial amount limits and rates used to quote and commit money operations. Quest timing and dispute-approval rules belong to their own domains rather than Money Policy.
 _Avoid_: treating all configurable product rules as financial policy.
