@@ -281,37 +281,6 @@ describe('Wallet provisioning service', () => {
     expect(outcomes.filter(({ status }) => status === 'rejected')).toHaveLength(1);
   });
 
-  it('replays matching idempotent work and rejects a changed request hash', async () => {
-    const spendingAccountId = await getWalletAccountId(studentId, 'SPENDING');
-    const suspenseAccountId = await getPlatformAccountId('PLATFORM_SUSPENSE');
-    const key = crypto.randomUUID();
-    const input = {
-      businessReference: `be109-idempotent-${crypto.randomUUID()}`,
-      eventType: 'TOP_UP' as const,
-      postings: [
-        { accountId: spendingAccountId, amountSatang: signedSatang(25) },
-        { accountId: suspenseAccountId, amountSatang: signedSatang(-25) },
-      ],
-      idempotency: {
-        principalUserId: studentId,
-        operationScope: 'wallet.test',
-        key,
-        requestHash: 'same-request',
-        expiresAt: new Date(Date.now() + 60_000),
-      },
-    };
-
-    const first = await createSealedLedgerTransaction(input);
-    const replay = await createSealedLedgerTransaction(input);
-    expect(replay?.id).toBe(first?.id);
-    await expect(
-      createSealedLedgerTransaction({
-        ...input,
-        idempotency: { ...input.idempotency, requestHash: 'different-request' },
-      })
-    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
-  });
-
   it('detects and rebuilds balance and activity projections from the ledger', async () => {
     const [wallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, studentId));
     const [activity] = await db
