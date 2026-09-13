@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -258,6 +258,44 @@ test('migration check rejects reordering inherited migration history', async () 
     expect(result.exitCode).toBe(1);
     expect(output).toContain('Inherited migration journal entries are immutable');
     expect(output).toContain('new forward migration');
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('migration check rejects a forked snapshot chain', async () => {
+  const fixture = await initializeFixture();
+
+  try {
+    const directory = fixture.directory;
+    const firstId = '11111111-1111-4111-8111-111111111111';
+    const secondId = '22222222-2222-4222-8222-222222222222';
+
+    await writeFile(
+      join(directory, 'drizzle/meta/0000_initial_snapshot.json'),
+      JSON.stringify({ id: firstId, prevId: '00000000-0000-0000-0000-000000000000' })
+    );
+    await writeFile(
+      join(directory, 'drizzle/meta/0001_second_snapshot.json'),
+      JSON.stringify({ id: secondId, prevId: firstId })
+    );
+
+    const journalPath = join(directory, 'drizzle/meta/_journal.json');
+    const journal = JSON.parse(await readFile(journalPath, 'utf8'));
+    journal.entries.push({ idx: 2, tag: '0002_forked' });
+    await writeFile(journalPath, JSON.stringify(journal));
+    await writeFile(join(directory, 'drizzle/0002_forked.sql'), 'SELECT 3;\n');
+    await writeFile(
+      join(directory, 'drizzle/meta/0002_forked_snapshot.json'),
+      JSON.stringify({ id: '33333333-3333-4333-8333-333333333333', prevId: firstId })
+    );
+
+    const result = run(['bun', migrationCheckScript, '--base', fixture.base], directory);
+    const output = `${result.stdout.toString()}${result.stderr.toString()}`;
+
+    expect(result.exitCode).toBe(1);
+    expect(output).toContain('The migration snapshot chain forks at');
+    expect(output).toContain('0002_forked_snapshot.json');
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }

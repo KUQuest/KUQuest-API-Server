@@ -94,6 +94,69 @@ const migrationArtifactSnapshot = (): string => {
   });
 };
 
+// A journal merge can satisfy the prefix rule while two snapshots keep the
+// same parent. `drizzle-kit generate` reports that collision but exits 0, so
+// the generation step below passes. Walk the chain here and fail loudly.
+const snapshotChainError = async (): Promise<string | undefined> => {
+  const entries = parseJournalEntries(await Bun.file('drizzle/meta/_journal.json').text());
+  const snapshots: Array<{ path: string; id: string; prevId: string }> = [];
+
+  for (const entry of entries) {
+    const tag = isRecord(entry) && typeof entry.tag === 'string' ? entry.tag : undefined;
+    if (tag === undefined) {
+      return 'Drizzle migration journal entry has no tag.';
+    }
+
+    const path = `drizzle/meta/${tag}_snapshot.json`;
+    const file = Bun.file(path);
+    if (!(await file.exists())) {
+      // The journal carries no snapshot for this entry, so there is no chain
+      // to validate (synthetic fixtures and snapshot-less setups).
+      return undefined;
+    }
+
+    let snapshot: unknown;
+    try {
+      snapshot = JSON.parse(await file.text());
+    } catch {
+      return `Migration snapshot ${path} is not valid JSON.`;
+    }
+
+    if (
+      !isRecord(snapshot) ||
+      typeof snapshot.id !== 'string' ||
+      typeof snapshot.prevId !== 'string'
+    ) {
+      return `Migration snapshot ${path} has no id or prevId.`;
+    }
+
+    snapshots.push({ path, id: snapshot.id, prevId: snapshot.prevId });
+  }
+
+  const pathById = new Map<string, string>();
+  for (const snapshot of snapshots) {
+    const existingPath = pathById.get(snapshot.id);
+    if (existingPath !== undefined) {
+      return `Migration snapshots ${existingPath} and ${snapshot.path} declare the same id ${snapshot.id}.`;
+    }
+    pathById.set(snapshot.id, snapshot.path);
+  }
+
+  for (let index = 1; index < snapshots.length; index += 1) {
+    const parent = snapshots[index - 1];
+    const child = snapshots[index];
+    if (child.prevId !== parent.id) {
+      return [
+        `The migration snapshot chain forks at ${child.path}: its prevId does not equal the id of ${parent.path}.`,
+        "Each snapshot's prevId must equal the previous snapshot's id.",
+        "Restore the chain, or regenerate the newest migration with 'bun run db:generate'.",
+      ].join('\n');
+    }
+  }
+
+  return undefined;
+};
+
 // CI passes the pull request base. A local run falls back to the merge-base with
 // the integration branch, so the inherited-migration rules below hold before a push.
 const integrationMergeBase = (): string | undefined => {
@@ -208,6 +271,12 @@ if (baseReference) {
       process.exit(1);
     }
   }
+}
+
+const chainError = await snapshotChainError();
+if (chainError !== undefined) {
+  console.error(chainError);
+  process.exit(1);
 }
 
 const beforeGeneration = migrationArtifactSnapshot();
