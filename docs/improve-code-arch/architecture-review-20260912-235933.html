@@ -1,0 +1,1664 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review for KUQuest-API-Server</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'loose' });
+    </script>
+    <style>
+      .seam {
+        stroke-dasharray: 4 4;
+      }
+      .deep {
+        background: linear-gradient(135deg, #0f172a, #1e293b);
+      }
+      .hatch {
+        background-image: repeating-linear-gradient(45deg, #fecaca 0 6px, #fee2e2 6px 12px);
+      }
+      .mermaid {
+        font-size: 13px;
+      }
+      .lbl {
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans antialiased">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+      <header class="border-b border-slate-300 pb-6">
+        <h1 class="font-serif text-4xl tracking-tight">Architecture review — KUQuest-API-Server</h1>
+        <p class="mt-1 text-sm text-slate-500 font-mono">
+          branch develop · HEAD 4ec1a6d · 2026-09-13 · refresh of
+          <span class="text-slate-800">architecture-review-20260912-235933</span>
+        </p>
+
+        <div class="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div class="flex items-center gap-2">
+            <span class="inline-block w-8 h-5 border-2 border-slate-400 bg-white"></span
+            ><span class="text-slate-600">module</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <svg width="32" height="20">
+              <line
+                class="seam"
+                x1="0"
+                y1="10"
+                x2="32"
+                y2="10"
+                stroke="#64748b"
+                stroke-width="2"
+              /></svg
+            ><span class="text-slate-600">seam</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <svg width="32" height="20">
+              <line x1="0" y1="10" x2="26" y2="10" stroke="#dc2626" stroke-width="2" />
+              <path d="M26 5 L32 10 L26 15Z" fill="#dc2626" /></svg
+            ><span class="text-slate-600">leakage</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="inline-block w-8 h-5 deep border-2 border-slate-900"></span
+            ><span class="text-slate-600">deep module</span>
+          </div>
+        </div>
+
+        <div class="mt-6 rounded border border-slate-300 bg-white px-4 py-3 text-xs text-slate-600">
+          <span class="lbl text-slate-400">hot spot</span>
+          <span class="font-mono">app.ts</span> 31 commits ·
+          <span class="font-mono">quest.schema.ts</span> 22 ·
+          <span class="font-mono">quest/index.ts</span> 19 ·
+          <span class="font-mono">quest-v2.service.ts</span> 18 ·
+          <span class="font-mono">quest-settlement.service.ts</span> 17
+          <span class="text-slate-400">(since 2026-08-20)</span>
+        </div>
+
+        <div class="mt-3 rounded border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm">
+          <span class="lbl text-emerald-700">since the last review</span>
+          <ul class="mt-1 space-y-0.5 text-slate-700">
+            <li>
+              Candidate 2 shipped: PR #475 landed the Quest Escrow seam (ADR-0030).
+              <span class="font-mono text-xs">quest-escrow.service.ts</span> owns the five verbs,
+              no file under <span class="font-mono text-xs">src/modules/quest/**</span> imports
+              wallet schema, and settlement shed about 100 lines.
+            </li>
+            <li>
+              Candidate 3 lost its Wallet-side duplication: the worker and settlement both release
+              through <span class="font-mono text-xs">releaseQuestEscrow</span> now. The transition
+              scatter remains.
+            </li>
+            <li>
+              The v2 read tail grew again: the participation projection (ADR-0031) landed in
+              <span class="font-mono text-xs">quest-v2.service.ts</span> and
+              <span class="font-mono text-xs">quest-v2.controller.ts</span>, and the Quest Edit
+              history writer is in flight on PR #469.
+            </li>
+            <li>
+              The Prettier baseline (PR #499) moved lines in 255 files. This refresh re-verified
+              the counts it names; ranges it did not re-walk are approximate.
+            </li>
+            <li>
+              Candidate 1's residue shrank to one test file, and the top recommendation moves to
+              candidate <a href="#c11" class="underline">11</a>.
+            </li>
+          </ul>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-14">
+        <!-- ============================= 1 ============================= -->
+        <article id="c1" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">
+            1 · Collapse the write-command idempotency machinery
+            <span class="text-slate-400">— Quest half</span>
+          </h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-emerald-700 text-white font-medium">shipped</span>
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">verify only</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>src/modules/quest/quest-command.service.ts (300) — runQuestCommand, sha256Json</li>
+            <li>
+              14 Quest write commands import it: quest-v2 · v2-edit · assignment-v2 · candidate-v2 ·
+              candidate-team-v2 · underfilled-v2 · proof-v2 · review-v2
+            </li>
+            <li>src/modules/quest/quest-idempotency.guard.ts — deleted</li>
+            <li>docs/adr/0029-quest-owns-its-command-records.md — quest_command, Quest v2 only</li>
+          </ul>
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">then — 12 copies, one behaviour</p>
+              <div class="grid grid-cols-4 gap-1.5" style="height: 150px">
+                <div class="border-2 border-red-300 hatch"></div>
+                <div class="border-2 border-red-300 hatch"></div>
+                <div class="border-2 border-red-300 hatch"></div>
+                <div class="border-2 border-red-300 hatch"></div>
+                <div class="border-2 border-red-300 hatch"></div>
+                <div class="border-2 border-red-300 hatch"></div>
+                <div class="border-2 border-amber-400 bg-amber-50"></div>
+                <div class="border-2 border-red-300 hatch"></div>
+                <div class="border-2 border-red-300 hatch"></div>
+                <div class="border-2 border-red-300 hatch"></div>
+                <div class="border-2 border-red-300 hatch"></div>
+                <div class="border-2 border-red-300 hatch"></div>
+              </div>
+              <p class="mt-2 text-[11px] text-slate-500">
+                8 Quest copies (red) · 4 Finance copies (red) · 1 private table (amber)
+              </p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">now — one interface for Quest</p>
+              <div style="height: 150px" class="flex flex-col">
+                <div class="border-2 border-slate-900 bg-white px-3 py-2 font-mono text-xs">
+                  runQuestCommand(tx, scope, key, hash, work)
+                </div>
+                <div
+                  class="deep border-2 border-t-0 border-slate-900 flex-1 p-3 text-[11px] text-slate-300 space-y-0.5 font-mono"
+                >
+                  <p>· request digest · row lock · replay snapshot</p>
+                  <p>· recorded rejection · expiry</p>
+                </div>
+              </div>
+              <p class="mt-2 text-[11px] text-slate-500">
+                Finance still holds 6 private implementations → candidate
+                <a href="#c11" class="underline">11</a>.
+              </p>
+            </div>
+          </div>
+          <p class="mt-3 text-sm">
+            <span class="lbl text-slate-400">residue</span> one Quest integration test still
+            reads <span class="font-mono text-xs">questCommand</span> rows directly (<span
+              class="font-mono text-xs"
+              >quest-candidate-team-v2.integration.test.ts:532-537</span
+            >, with a cleanup delete at :284): it reaches past the interface. The candidate-v2
+            test named by the last review now goes through
+            <span class="font-mono text-xs">runQuestCommand</span>.
+          </p>
+        </article>
+
+        <!-- ============================= 2 ============================= -->
+        <article id="c2" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">2 · Stop Quest reading Wallet tables</h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-emerald-700 text-white font-medium">shipped</span>
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">verify only</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>
+              src/modules/quest/quest-escrow.service.ts — readQuestEscrow · settleQuestWorkers ·
+              releaseQuestEscrow · questFundingCapacity · platformFeeForQuest (ADR-0030)
+            </li>
+            <li>
+              callers: quest-settlement.service.ts (1913 · was 2025) ·
+              quest-lifecycle.worker.ts:18,402 · quest-v2.service.ts — all through the interface
+            </li>
+            <li>
+              quest-v2.publish.policy.ts:1 imports the Wallet interface
+              (calculatePlatformFeeSatang), not wallet schema
+            </li>
+            <li>git grep finds zero wallet.schema imports under src/modules/quest/**</li>
+          </ul>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-2">then — 5 leak sites, 3 tables</p>
+              <pre class="mermaid">
+flowchart LR
+  S["quest-settlement"] --> V["wallet verbs"]
+  W["quest-lifecycle.worker"] --> V
+  Q["quest-v2.service"] --> V
+  S -.->|"lock ×2"| T[("walletFundingReservation")]
+  S -.->|"platformFeeBps"| M[("paymentMoneyPolicyRevision")]
+  W -.->|"lock status"| T
+  Q -.->|"read + lock"| B[("walletWallet")]
+  P["quest-v2.publish.policy"] -.->|"WalletStatus"| B
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+  class T,B,M leak
+  linkStyle 3,4,5,6,7 stroke:#dc2626,stroke-width:2px;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-2">now — one Quest Escrow interface, shipped</p>
+              <pre class="mermaid">
+flowchart LR
+  S["quest-settlement"] --> D["Quest Escrow module"]
+  W["quest-lifecycle.worker"] --> D
+  Q["quest-v2.service"] --> D
+  P["quest-v2.publish.policy"] --> D
+  D --> V["generic Wallet verbs"]
+  V --> T[("wallet tables")]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class D deep
+              </pre>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2 text-sm">
+            <div>
+              <dt class="lbl text-slate-400">problem</dt>
+              <dd>
+                Quest locks Funding Reservation rows, reads Money Policy to recompute the Platform
+                Fee, and gates publish on Wallet Status before it calls a Wallet verb, so Quest
+                Escrow invariants and money arithmetic live on both sides of the seam.
+              </dd>
+            </div>
+            <div>
+              <dt class="lbl text-slate-400">solution</dt>
+              <dd>
+                One Quest Escrow module taking identifiers and returning outcomes —
+                <span class="font-mono text-xs"
+                  >escrowStatus · settleWorkers · releaseRemaining · feeForRevision ·
+                  publishGate</span
+                >
+                — and Quest imports no wallet schema.
+              </dd>
+            </div>
+          </dl>
+          <ul class="mt-3 text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6 list-disc list-inside">
+            <li>locality: money invariants one module</li>
+            <li>leverage: five leak sites, one interface</li>
+            <li>interface shrinks to identifiers</li>
+            <li>row locking stops being duplicated</li>
+            <li>Quest stops reading Money Policy</li>
+          </ul>
+          <div class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+            <span class="font-medium">ADR-0009 posed the question; ADR-0030 answered it.</span>
+            The fork stands as recorded: generic lock and read verbs on the Wallet side, Quest
+            Escrow composition on the Quest side —
+            <span class="font-mono text-xs">quest-escrow.service.ts</span> re-exports
+            <span class="font-mono text-xs">releaseFundingReservation</span> and
+            <span class="font-mono text-xs">fundingCapacityFor</span> and wraps the rest. No
+            Rulebook changed.
+          </div>
+          <p class="mt-2 text-sm">
+            <span class="lbl text-slate-400">deletion test</span> concentrates — callers already
+            hold only identifiers, so nothing shifts outward.
+          </p>
+          <p class="mt-1 text-sm">
+            <span class="lbl text-slate-400">test surface</span> twelve Quest integration tests
+            still seed and assert wallet rows directly; the file inventory and the six missing
+            fixture helpers are named in issue 497, with the decision in issue 489. The interface
+            exists; the tests have not moved to it.
+          </p>
+        </article>
+
+        <!-- ============================= 3 ============================= -->
+        <article id="c3" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">3 · One module owns a Quest State transition</h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 font-medium"
+              >Worth exploring</span
+            >
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">in-process</span>
+            <span class="px-2 py-1 rounded bg-slate-800 text-white">partially shipped</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>
+              quest-settlement.service.ts (1913 · was 2025) — the escrow half moved behind the
+              Quest Escrow interface; 10 State writes remain, each paired with chat + settle or
+              release: the de facto transition module
+            </li>
+            <li>
+              quest-lifecycle.worker.ts:18,402 (684) — releases through releaseQuestEscrow, so the
+              Wallet-side duplicate is gone; start still assembles its transition alone
+            </li>
+            <li>
+              quest.service.ts ×10 · quest-proof.service.ts ×5 · quest-v2.service.ts ·
+              candidate-v2 · team-v2 · underfilled-v2 · assignment-v2
+            </li>
+            <li>
+              no longer callers: quest-proof-v2.service.ts and quest-admin.command.service.ts
+              delegate to settlement
+            </li>
+          </ul>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-2">before — 11 files, ~33 State writes</p>
+              <pre class="mermaid">
+flowchart TB
+  PUB["publish · quest.service, quest-v2"] -.-> DB[("quest.questStatus")]
+  SEL["selection · candidate-v2, team-v2"] -.-> DB
+  ASG["join · assignment-v2, v1"] -.-> DB
+  UND["underfilled-v2"] -.-> DB
+  STW["start · lifecycle.worker"] -.-> DB
+  ST["quest-settlement · 10 writes"] --> DB
+  ST --> V["wallet verbs"]
+  ST --> CH["work chat writer"]
+  SEL --> CH
+  ASG --> CH
+  UND --> CH
+  PUB --> V
+  STW -.->|"own lock + release"| V
+  linkStyle 0,1,2,3,4,12 stroke:#dc2626,stroke-width:2px;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-2">after — callers name the transition</p>
+              <pre class="mermaid">
+flowchart TB
+  PUB["publish"] --> L["applyQuestTransition"]
+  SEL["selection"] --> L
+  ASG["join"] --> L
+  UND["underfilled-v2"] --> L
+  STW["start"] --> L
+  L --> DB[("quest")]
+  L --> V["wallet verbs"]
+  L --> CH["work chat writer"]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class L deep
+              </pre>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2 text-sm">
+            <div>
+              <dt class="lbl text-slate-400">problem</dt>
+              <dd>
+                Terminal transitions are already centralized in settlement, but publish, selection,
+                join and Start Work each re-assemble check → State write → Quest Escrow reserve,
+                settle or release → Work Conversation membership by hand, and each skips a different
+                step.
+              </dd>
+            </div>
+            <div>
+              <dt class="lbl text-slate-400">solution</dt>
+              <dd>
+                Extend settlement's existing transition verbs into one Quest lifecycle module that
+                performs all four steps atomically for every transition, not only the terminal ones.
+              </dd>
+            </div>
+          </dl>
+          <ul class="mt-3 text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6 list-disc list-inside">
+            <li>locality: transitions in one module</li>
+            <li>partial transitions become impossible</li>
+            <li>worker's duplicate release disappears</li>
+            <li>tests drive transitions, not rows</li>
+          </ul>
+          <div class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+            <span class="font-medium">Rescored, and the old count was wrong.</span> The five-caller
+            claim is refuted in its specifics: proof-v2 and admin.command delegate fully now, so the
+            remaining prize is the non-terminal scatter. Its per-caller guards (headcount, pending
+            Quest Edit, hiddenAt) would move inside as transition-specific input — concentration at
+            the cost of a wider interface. ADR-0019 is reinforced, not reopened.
+          </div>
+          <p class="mt-2 text-sm">
+            <span class="lbl text-slate-400">deletion test</span> concentrates for the worker's
+            private release, borderline for publish and selection.
+          </p>
+          <p class="mt-1 text-sm">
+            <span class="lbl text-slate-400">test surface</span>
+            <span class="font-mono text-xs">quest-lifecycle.worker.integration.test.ts:33-47</span>
+            hand-sets <span class="font-mono text-xs">startTime</span> and
+            <span class="font-mono text-xs">questStatus</span> and advances a fake clock; no
+            transition is reachable through an interface.
+          </p>
+        </article>
+
+        <!-- ============================= 4 ============================= -->
+        <article id="c4" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">4 · Pull object storage out of the controllers</h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 font-medium"
+              >Strong</span
+            >
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">local-substitutable</span>
+            <span class="px-2 py-1 rounded bg-slate-800 text-white">live · grew</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>
+              quest-v2.controller.ts (848 · was 818) — compensateQuestV2ImageUpload,
+              mapQuestV2ImageStorageError, byte-wise hash, upload loop
+            </li>
+            <li>
+              quest-proof-v2.controller.ts:153-252,342-477 (601 · was 539) — fingerprintFor,
+              uploadFiles, cleanupUploadedFiles, failureCodeFor, mapUploadError
+            </li>
+            <li>
+              quest-image.service.ts (44) · quest.storage.ts (14) · quest-proof-v2.storage.ts (13)
+            </li>
+          </ul>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">before — the controller owns the failure path</p>
+              <div class="space-y-1" style="height: 250px">
+                <div
+                  class="h-9 border-l-4 border-red-500 bg-red-50 px-3 flex items-center text-xs font-mono"
+                >
+                  controller · SHA-256 fingerprint per file
+                </div>
+                <div
+                  class="h-9 border-l-4 border-red-500 bg-red-50 px-3 flex items-center text-xs font-mono"
+                >
+                  controller · sequential upload loop
+                </div>
+                <div
+                  class="h-9 border-l-4 border-red-500 bg-red-50 px-3 flex items-center text-xs font-mono"
+                >
+                  controller · classify storage failure → 413/415/503
+                </div>
+                <div
+                  class="h-9 border-l-4 border-red-500 bg-red-50 px-3 flex items-center text-xs font-mono"
+                >
+                  controller · compensating object delete
+                </div>
+                <div
+                  class="h-9 border-l-4 border-red-500 bg-red-50 px-3 flex items-center text-xs font-mono"
+                >
+                  controller · cleanup tombstones + retry
+                </div>
+                <div
+                  class="h-9 border-l-4 border-red-500 bg-red-50 px-3 flex items-center text-xs font-mono"
+                >
+                  controller · release the upload command row
+                </div>
+                <div
+                  class="h-9 border-l-4 border-slate-400 bg-slate-100 px-3 flex items-center text-xs font-mono"
+                >
+                  service · persist rows
+                </div>
+                <div
+                  class="h-9 border-l-4 border-slate-400 bg-slate-100 px-3 flex items-center text-xs font-mono"
+                >
+                  storage · 13-line instance
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">after</p>
+              <div class="space-y-1" style="height: 250px">
+                <div
+                  class="h-9 border-l-4 border-slate-400 bg-slate-100 px-3 flex items-center text-xs font-mono"
+                >
+                  controller · parse, authorize, respond
+                </div>
+                <div
+                  class="deep border-l-4 border-emerald-400 px-3 flex flex-col justify-center text-xs font-mono text-slate-300"
+                  style="height: 205px"
+                >
+                  <p class="text-white">submitProof(files) / attachQuestImages(files)</p>
+                  <p class="mt-2 text-slate-500 lbl">absorbs</p>
+                  <p>fingerprint · upload · classify</p>
+                  <p>compensate · tombstone · release</p>
+                  <p>persist</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2 text-sm">
+            <div>
+              <dt class="lbl text-slate-400">problem</dt>
+              <dd>
+                The Quest Image and Proof Submission modules are shallow: each controller hashes
+                bytes, uploads objects, classifies failures and runs the compensating delete, so the
+                failure path is correct only if that controller remembers it.
+              </dd>
+            </div>
+            <div>
+              <dt class="lbl text-slate-400">solution</dt>
+              <dd>
+                Move the seam to the module interface: it accepts raw files and owns upload,
+                rollback, tombstones and persistence.
+              </dd>
+            </div>
+          </dl>
+          <ul class="mt-3 text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6 list-disc list-inside">
+            <li>locality: compensation written once</li>
+            <li>interface shrinks to files in</li>
+            <li>orphaned objects stop being a caller duty</li>
+            <li>proof controller stops growing</li>
+            <li>tests stop spying on storage</li>
+          </ul>
+          <div class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+            <span class="font-medium">ADR-0025</span> keeps all-or-nothing Quest Image writes and
+            cleanup inside Quest; this deepening reinforces it. One prior claim is corrected: no
+            controller touches a Funding Reservation — the release is the image upload's own Quest
+            Command row (<span class="font-mono text-xs">quest-v2.service.ts:1282</span>).
+          </div>
+          <p class="mt-2 text-sm">
+            <span class="lbl text-slate-400">deletion test</span> concentrates — delete the helpers
+            and the failure path has nowhere to live but the module.
+          </p>
+          <p class="mt-1 text-sm">
+            <span class="lbl text-slate-400">test surface</span>
+            <span class="font-mono text-xs">quest-proof-v2.behavior.integration.test.ts</span> spies
+            <span class="font-mono text-xs">upload</span>/<span class="font-mono text-xs"
+              >remove</span
+            >
+            at seven places and imports Work Chat error classes; it must, because the interface does
+            not own storage.
+          </p>
+        </article>
+
+        <!-- ============================= 5 ============================= -->
+        <article id="c5" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">
+            5 · Move the Work Chat membership seam off process-global state
+          </h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 font-medium"
+              >Worth exploring</span
+            >
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">ports &amp; adapters</span>
+            <span class="px-2 py-1 rounded bg-slate-800 text-white">live · grew</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>quest-work-chat.port.ts:9 (39) — let configuredWorkChatWriter</li>
+            <li>src/app.ts:48 — configureQuestWorkChatMembershipWriter at composition</li>
+            <li>
+              8 call sites, 3 conventions: require (assignment-v2:323, settlement:263,289,
+              underfilled-v2:742) · get-then-throw (candidate-v2:587, team-v2:1452) · parameter with
+              fallback (assignment.service:229, candidate.service:1048)
+            </li>
+            <li>39 install and teardown calls across 12 test files</li>
+          </ul>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">
+                before — the adapter is fetched from a mutable slot
+              </p>
+              <div class="relative" style="height: 250px">
+                <div
+                  class="absolute left-0 top-0 w-40 border-2 border-slate-400 bg-white px-2 py-1 text-xs font-mono"
+                >
+                  app.ts
+                </div>
+                <div
+                  class="absolute left-0 top-24 w-40 border-2 border-slate-400 bg-white px-2 py-1 text-xs font-mono"
+                >
+                  12 test files · 39 calls
+                </div>
+                <div
+                  class="absolute left-52 top-11 w-44 border-2 border-red-500 bg-red-50 px-2 py-2 text-xs font-mono text-red-800"
+                >
+                  let configuredWorkChatWriter<br /><span class="text-[10px]"
+                    >module-global, mutable</span
+                  >
+                </div>
+                <div
+                  class="absolute left-0 top-48 w-40 border-2 border-slate-400 bg-white px-2 py-1 text-xs font-mono"
+                >
+                  7 quest modules
+                </div>
+                <svg class="absolute inset-0 w-full h-full pointer-events-none">
+                  <line x1="160" y1="14" x2="204" y2="52" stroke="#dc2626" stroke-width="2" />
+                  <line x1="160" y1="104" x2="204" y2="66" stroke="#dc2626" stroke-width="2" />
+                  <line
+                    x1="160"
+                    y1="200"
+                    x2="204"
+                    y2="80"
+                    stroke="#64748b"
+                    stroke-width="2"
+                    class="seam"
+                  />
+                </svg>
+                <p class="absolute right-0 bottom-0 text-[11px] text-slate-500 w-48">
+                  callers reach out and take it mid-transaction
+                </p>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">after — the adapter arrives as an argument</p>
+              <div class="relative" style="height: 250px">
+                <div
+                  class="absolute left-0 top-16 w-44 border-2 border-slate-400 bg-white px-2 py-1 text-xs font-mono"
+                >
+                  app.ts / test
+                </div>
+                <div
+                  class="absolute right-0 top-4 w-44 deep border-2 border-slate-900 px-2 py-2 text-xs font-mono text-slate-200"
+                >
+                  quest lifecycle module<br /><span class="text-[10px] text-slate-400"
+                    >writer is a parameter</span
+                  >
+                </div>
+                <div
+                  class="absolute right-0 top-40 w-44 border-2 border-slate-400 bg-white px-2 py-1 text-xs font-mono"
+                >
+                  work-chat writer
+                </div>
+                <svg class="absolute inset-0 w-full h-full pointer-events-none">
+                  <line x1="176" y1="74" x2="290" y2="40" stroke="#0f172a" stroke-width="2" />
+                  <line
+                    x1="360"
+                    y1="76"
+                    x2="360"
+                    y2="156"
+                    stroke="#64748b"
+                    stroke-width="2"
+                    class="seam"
+                  />
+                </svg>
+                <p class="absolute left-0 bottom-4 text-[11px] text-slate-500 w-44">
+                  no beforeEach wiring; two adapters still satisfy the seam
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2 text-sm">
+            <div>
+              <dt class="lbl text-slate-400">problem</dt>
+              <dd>
+                The seam is real — a production writer and test fakes both satisfy it — but it sits
+                in a mutable module variable, so every test file installs and removes an adapter and
+                a forgotten teardown leaks into the next file.
+              </dd>
+            </div>
+            <div>
+              <dt class="lbl text-slate-400">solution</dt>
+              <dd>
+                Keep the interface, move the seam to the call: the adapter is passed with the
+                transaction, as
+                <span class="font-mono text-xs">quest-assignment.service.ts:229</span> and
+                <span class="font-mono text-xs">quest-candidate.service.ts:1048</span> already do
+                optionally.
+              </dd>
+            </div>
+          </dl>
+          <ul class="mt-3 text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6 list-disc list-inside">
+            <li>removes mutable process state</li>
+            <li>locality: adapter chosen at the call</li>
+            <li>deletes 39 test wiring calls</li>
+            <li>one convention, not three</li>
+          </ul>
+          <div class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+            <span class="font-medium">ADR-0005</span> gives Quest ownership of Work Conversation
+            membership inside its own transaction. Passing the adapter satisfies that; the registry
+            is not required by the ADR. Best done with candidate
+            <a href="#c3" class="underline">3</a>, which decides who holds the transaction.
+          </div>
+          <p class="mt-2 text-sm">
+            <span class="lbl text-slate-400">deletion test</span> the registry just moves complexity
+            into composition — the interface itself earns its keep.
+          </p>
+        </article>
+
+        <!-- ============================= 6 ============================= -->
+        <article id="c6" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">6 · Retire the legacy v1 module as an import hub</h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 font-medium"
+              >Strong</span
+            >
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">in-process</span>
+            <span class="px-2 py-1 rounded bg-slate-800 text-white">live · mechanical</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>
+              quest-assignment.service.ts:330-336 (336) — re-exports the port and QuestTransaction
+            </li>
+            <li>
+              importers through v1: quest-settlement.service.ts:32-36 ·
+              quest-admin.command.service.ts:16 · quest-admin.service.ts:35 ·
+              quest-admin.controller.ts:11 · quest-review.service.ts:9 ·
+              quest-settlement.controller.ts:7
+            </li>
+            <li>
+              6 test files: quest-admin-moderation:28 · quest-assignment-v2:14 · quest-assignment:8
+              · quest-lifecycle.worker:13 · quest-settlement:17 · quest-underfilled-v2:28
+            </li>
+            <li>
+              src/modules/quest/index.ts:1-7 — already re-exports the same four names from the port
+            </li>
+          </ul>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-2">before</p>
+              <pre class="mermaid">
+flowchart LR
+  ST["quest-settlement v2"] -.-> LEG["quest-assignment.service v1"]
+  AD["quest-admin v2"] -.-> LEG
+  T1["6 v2 test files"] -.-> LEG
+  LEG --> P["quest-work-chat.port"]
+  R["v1 route"] --> LEG
+  linkStyle 0,1,2 stroke:#dc2626,stroke-width:2px;
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+  class LEG leak
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-2">after</p>
+              <pre class="mermaid">
+flowchart LR
+  ST["quest-settlement v2"] --> P["quest-work-chat.port"]
+  AD["quest-admin v2"] --> P
+  T1["6 v2 test files"] --> P
+  R["v1 route"] --> LEG["quest-assignment.service v1"]
+  LEG --> P
+              </pre>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2 text-sm">
+            <div>
+              <dt class="lbl text-slate-400">problem</dt>
+              <dd>
+                Deprecated v1 code is load-bearing for v2: settlement, the Admin commands and six v2
+                test files import the Work Chat port and
+                <span class="font-mono text-xs">QuestTransaction</span> through it, so v1 cannot be
+                deleted.
+              </dd>
+            </div>
+            <div>
+              <dt class="lbl text-slate-400">solution</dt>
+              <dd>
+                Import the port from the port. The re-export block disappears and v1 becomes
+                deletable on its own schedule.
+              </dd>
+            </div>
+          </dl>
+          <ul class="mt-3 text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6 list-disc list-inside">
+            <li>v2 stops depending on v1</li>
+            <li>locality: port types live in the port</li>
+            <li>mechanical, no behaviour change</li>
+          </ul>
+          <div class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+            <span class="font-medium">ADR-0028</span> keeps Quest v1 out of v2 — this is the code
+            catching up with the decision. Upgraded to Strong: the cost is a find-and-replace, and
+            it unblocks deleting a 336-line module.
+          </div>
+          <p class="mt-2 text-sm">
+            <span class="lbl text-slate-400">deletion test</span> the re-export just moves imports;
+            delete it.
+          </p>
+        </article>
+
+        <!-- ============================= 7 ============================= -->
+        <article id="c7" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">
+            7 · One selection module for Candidate and Candidate Team
+          </h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 font-medium"
+              >Strong</span
+            >
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">in-process</span>
+            <span class="px-2 py-1 rounded bg-slate-800 text-white">live · drifting</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>quest-candidate-v2.service.ts:480-620 (690) — selectQuestV2CandidateApplication</li>
+            <li>
+              quest-candidate-team-v2.service.ts:1323-1482 (1482) — selectQuestV2CandidateTeam
+            </li>
+            <li>
+              duplicated helpers: lockQuest · assignmentFields · toSelectionAssignment ·
+              selectionSnapshotFor · selectionTransitionFor
+            </li>
+          </ul>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">before — same 12 steps, two modules</p>
+              <div class="text-[10px] font-mono" style="height: 250px">
+                <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 text-slate-500 mb-1">
+                  <span>step</span><span>SINGLE</span><span>GROUP</span>
+                </div>
+                <div class="space-y-[2px]">
+                  <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-red-50 px-1">
+                    <span>lock Quest</span><span>490</span><span>1340</span>
+                  </div>
+                  <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-red-50 px-1">
+                    <span>Quest Command scope + hash</span><span>493</span><span>1330</span>
+                  </div>
+                  <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-amber-50 px-1">
+                    <span>Hirer check</span><span>516</span><span>1354</span>
+                  </div>
+                  <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-amber-50 px-1">
+                    <span>mode + participation gate</span><span>517</span><span>1355</span>
+                  </div>
+                  <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-amber-50 px-1">
+                    <span>QUEST_OPEN + start gate</span><span>523</span><span>1361</span>
+                  </div>
+                  <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-slate-100 px-1">
+                    <span>lock selected resource</span><span>530</span><span>1364</span>
+                  </div>
+                  <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-red-50 px-1">
+                    <span>duplicate rejection</span><span>546</span><span>1385</span>
+                  </div>
+                  <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-slate-100 px-1">
+                    <span>candidate record flips</span><span>555</span><span>1395</span>
+                  </div>
+                  <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-red-50 px-1">
+                    <span>Assignment insert</span><span>570</span><span>1424</span>
+                  </div>
+                  <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-red-50 px-1">
+                    <span>Quest State QUEST_ASSIGNED</span><span>581</span><span>1447</span>
+                  </div>
+                  <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-red-50 px-1">
+                    <span>Work Conversation entry</span><span>594</span><span>1458</span>
+                  </div>
+                  <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-red-50 px-1">
+                    <span>snapshot replay</span><span>613</span><span>1474</span>
+                  </div>
+                </div>
+                <p class="mt-2 text-[10px] text-slate-500">
+                  red = identical · amber = drifted codes · slate = genuinely GROUP-shaped
+                </p>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">after — formation stays, selection merges</p>
+              <div class="flex gap-4 items-end" style="height: 250px">
+                <div class="flex-1">
+                  <div
+                    class="border-2 border-slate-900 bg-white text-[10px] font-mono px-2 py-1 text-center"
+                    style="height: 34px"
+                  >
+                    select(candidate | team)
+                  </div>
+                  <div
+                    class="deep border-2 border-t-0 border-slate-900 text-[10px] font-mono px-2 py-2 text-center text-slate-300"
+                    style="height: 180px"
+                  >
+                    Hirer + mode gate<br />duplicate rejection<br />Assignment creation<br />Work
+                    Conversation entry<br />headcount and Quest State<br />replay
+                  </div>
+                  <p class="mt-1 text-[10px] text-center text-slate-500 font-mono">
+                    quest selection
+                  </p>
+                </div>
+                <div class="w-24">
+                  <div
+                    class="border-2 border-slate-400 bg-white text-[10px] font-mono px-1 py-1 text-center"
+                    style="height: 34px"
+                  >
+                    formation
+                  </div>
+                  <div
+                    class="border-2 border-t-0 border-slate-400 bg-slate-100 text-[10px] font-mono px-1 py-1 text-center"
+                    style="height: 110px"
+                  >
+                    Join Code<br />Team Leader<br />submit
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2 text-sm">
+            <div>
+              <dt class="lbl text-slate-400">problem</dt>
+              <dd>
+                Selecting one Candidate and selecting one Candidate Team run the same rules in two
+                modules, and they have already drifted: the same Hirer mismatch answers
+                <span class="font-mono text-xs">not-allowed</span> in SINGLE and
+                <span class="font-mono text-xs">not-authorized</span> in GROUP.
+              </dd>
+            </div>
+            <div>
+              <dt class="lbl text-slate-400">solution</dt>
+              <dd>
+                One selection module taking one Candidate or one Candidate Team, with the GROUP
+                resource work as parameterization; Candidate Team formation stays where it is.
+              </dd>
+            </div>
+          </dl>
+          <ul class="mt-3 text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6 list-disc list-inside">
+            <li>locality: Assignment rules in one module</li>
+            <li>SINGLE and GROUP cannot drift</li>
+            <li>interface shrinks to one verb</li>
+            <li>tests hit one selection seam</li>
+          </ul>
+          <div class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+            <span class="font-medium">ADR-0029</span> already gives both paths a Quest Command, so a
+            merged selection module keeps the replay seam for free. Join Code and Team Leader never
+            appear in the select path — the honest limit of the overlap is the GROUP resource lock
+            (members, submission files, headcount).
+          </div>
+          <p class="mt-2 text-sm">
+            <span class="lbl text-slate-400">deletion test</span> concentrates — delete either body
+            and Assignment creation, duplicate rejection and Work Conversation entry must re-derive.
+          </p>
+        </article>
+
+        <!-- ============================= 8 ============================= -->
+        <article id="c8" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">8 · Make the Admin Action record impossible to forget</h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 font-medium"
+              >Worth exploring</span
+            >
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">in-process</span>
+            <span class="px-2 py-1 rounded bg-slate-800 text-white">mostly shipped</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>
+              admin-action.service.ts:354-434 (541) — runAdminActionInTransaction: advisory lock,
+              replay, insert(adminAction); admin-action.policy.ts (329, new)
+            </li>
+            <li>
+              through the executor: quest-admin.command.service.ts:208 ·
+              quest-dispute-admin.service.ts:521,602 · payout.admin.service.ts:281 — 8 action kinds
+            </li>
+            <li>
+              still outside: wallet.status.service.ts:69 (walletStatusHistory only) ·
+              payout.provider-event.service.ts:799 reconcile · retry · dispute open
+              (quest-dispute-admin.route.ts:34)
+            </li>
+          </ul>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-2">
+                now — the executor exists, four writes bypass it
+              </p>
+              <pre class="mermaid">
+flowchart TB
+  H["hide · restore · terminate"] --> EX["runAdminActionInTransaction"]
+  DR["dispute resolve · dismiss · evidence"] --> EX
+  PA["payout approve · cancel"] --> EX
+  EX --> AA[("adminAction")]
+  WS["wallet status change"] -.-> WSH[("walletStatusHistory")]
+  RC["payout reconcile · event retry"] -.-> PE[("payout event")]
+  DO["admin opens Dispute Case"] -.-> DC[("disputeCase")]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class EX deep
+  linkStyle 4,5,6 stroke:#dc2626,stroke-width:2px;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-2">after</p>
+              <pre class="mermaid">
+flowchart TB
+  H["hide · restore · terminate"] --> EX["runAdminActionInTransaction"]
+  DR["dispute resolve · dismiss · evidence · open"] --> EX
+  PA["payout approve · cancel · reconcile · retry"] --> EX
+  WS["wallet status change"] --> EX
+  EX --> AA[("adminAction")]
+  EX --> D[("domain rows")]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class EX deep
+              </pre>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2 text-sm">
+            <div>
+              <dt class="lbl text-slate-400">problem</dt>
+              <dd>
+                Stale: the four commands the prior report named all run through the executor now.
+                What remains is four Admin-triggered writes outside it, one of which re-derives
+                actor, reason and idempotency bookkeeping in its own history table.
+              </dd>
+            </div>
+            <div>
+              <dt class="lbl text-slate-400">solution</dt>
+              <dd>
+                Route the remaining Admin-triggered writes through the executor, or record an
+                explicit exemption, so an unaudited Admin command stops being expressible.
+              </dd>
+            </div>
+          </dl>
+          <ul class="mt-3 text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6 list-disc list-inside">
+            <li>locality: audit rules one module</li>
+            <li>leverage: executor already serves eight</li>
+            <li>unaudited Admin writes impossible</li>
+            <li>one audit convention, not two</li>
+          </ul>
+          <div class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+            <span class="font-medium">Rescored down.</span> The new Admin finance, overview,
+            activity-log and member endpoints are all reads, so the candidate shrank rather than
+            grew. The Wallet Status write passes the deletion test; payout reconcile and retry
+            arguably just move, since their history belongs to the Payout status record. ADR-0022 is
+            already satisfied.
+          </div>
+          <p class="mt-2 text-sm">
+            <span class="lbl text-slate-400">test surface</span>
+            <span class="font-mono text-xs">wallet.admin.integration.test.ts:86-110</span> drives
+            the freeze route with an Idempotency-Key and asserts no Admin Action — it reaches past
+            the executor because the route never enters it.
+          </p>
+        </article>
+
+        <!-- ============================= 9 ============================= -->
+        <article id="c9" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">9 · One file storage module behind one interface</h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 font-medium"
+              >Worth exploring</span
+            >
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">local-substitutable</span>
+            <span class="px-2 py-1 rounded bg-slate-800 text-white">live</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>
+              src/shared/image-storage.ts:70-225 (225) — S3 wiring, 5 MB gate, sharp inspection,
+              write-verify-compensate, 15-minute presign
+            </li>
+            <li>
+              work-chat/work-chat.storage.ts:96-162 (167) — same skeleton, 10 MB gate, hand-rolled
+              magic-byte inspection (isPng/isJpeg/isWebp)
+            </li>
+            <li>
+              quest/quest-proof-v2.storage.ts:1-4,11 (13) — cross-imports the Work Chat factory
+            </li>
+            <li>quest/quest-storage.adapter.ts (15) — misnamed: maps legacy mode columns only</li>
+          </ul>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">before — two implementations, eight instances</p>
+              <div class="relative" style="height: 250px">
+                <div
+                  class="absolute left-0 top-0 w-36 border-2 border-slate-400 bg-white text-[10px] font-mono px-2 py-1"
+                >
+                  quest.storage ×2
+                </div>
+                <div
+                  class="absolute left-0 top-14 w-36 border-2 border-slate-400 bg-white text-[10px] font-mono px-2 py-1"
+                >
+                  profile · portfolio · certificate
+                </div>
+                <div
+                  class="absolute left-0 top-28 w-36 border-2 border-red-400 bg-red-50 text-[10px] font-mono px-2 py-1"
+                >
+                  proof-v2.storage
+                </div>
+                <div
+                  class="absolute left-0 top-44 w-36 border-2 border-slate-400 bg-white text-[10px] font-mono px-2 py-1"
+                >
+                  work-chat · candidate-inquiry
+                </div>
+                <div
+                  class="absolute right-0 top-2 w-44 border-2 border-slate-400 bg-white text-[10px] font-mono px-2 py-2"
+                >
+                  image-storage 225<br /><span class="text-[9px] text-slate-500"
+                    >S3 · sharp · 5 MB · 15 min</span
+                  >
+                </div>
+                <div
+                  class="absolute right-0 top-32 w-44 border-2 border-slate-400 bg-white text-[10px] font-mono px-2 py-2"
+                >
+                  work-chat.storage 167<br /><span class="text-[9px] text-slate-500"
+                    >S3 · magic bytes · 10 MB · 15 min</span
+                  >
+                </div>
+                <svg class="absolute inset-0 w-full h-full pointer-events-none">
+                  <line x1="146" y1="12" x2="250" y2="22" stroke="#64748b" stroke-width="2" />
+                  <line x1="146" y1="68" x2="250" y2="30" stroke="#64748b" stroke-width="2" />
+                  <line x1="146" y1="124" x2="250" y2="150" stroke="#dc2626" stroke-width="2" />
+                  <line x1="146" y1="188" x2="250" y2="158" stroke="#64748b" stroke-width="2" />
+                </svg>
+                <p class="absolute left-0 bottom-1 text-[11px] text-red-700 w-44">
+                  Proof Submission borrows Work Chat's factory and error classes
+                </p>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">after — policy becomes data</p>
+              <div class="relative" style="height: 250px">
+                <div
+                  class="absolute left-0 top-0 w-32 border-2 border-slate-400 bg-white text-[10px] font-mono px-2 py-1"
+                >
+                  quest images
+                </div>
+                <div
+                  class="absolute left-0 top-16 w-32 border-2 border-slate-400 bg-white text-[10px] font-mono px-2 py-1"
+                >
+                  proof files
+                </div>
+                <div
+                  class="absolute left-0 top-32 w-32 border-2 border-slate-400 bg-white text-[10px] font-mono px-2 py-1"
+                >
+                  chat attachments
+                </div>
+                <div
+                  class="absolute left-0 top-48 w-32 border-2 border-slate-400 bg-white text-[10px] font-mono px-2 py-1"
+                >
+                  profile · portfolio
+                </div>
+                <div
+                  class="absolute right-0 top-8 w-44 deep border-2 border-slate-900 text-[10px] font-mono px-2 py-3 text-slate-300"
+                >
+                  file storage<br /><span class="text-[9px] text-slate-500"
+                    >per bucket:<br />mime · max bytes · expiry · filename</span
+                  >
+                </div>
+                <svg class="absolute inset-0 w-full h-full pointer-events-none">
+                  <line x1="130" y1="12" x2="255" y2="52" stroke="#0f172a" stroke-width="2" />
+                  <line x1="130" y1="72" x2="255" y2="58" stroke="#0f172a" stroke-width="2" />
+                  <line x1="130" y1="136" x2="255" y2="64" stroke="#0f172a" stroke-width="2" />
+                  <line x1="130" y1="196" x2="255" y2="70" stroke="#0f172a" stroke-width="2" />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2 text-sm">
+            <div>
+              <dt class="lbl text-slate-400">problem</dt>
+              <dd>
+                Two near-twin factories duplicate S3 wiring, size policy, content inspection,
+                write-verify-compensate and 15-minute presigning, and the Proof Submission storage
+                reaches into the Work Chat module for the file types it needs.
+              </dd>
+            </div>
+            <div>
+              <dt class="lbl text-slate-400">solution</dt>
+              <dd>
+                One storage module configured per bucket with a content policy; Quest stops
+                importing Work Chat internals.
+              </dd>
+            </div>
+          </dl>
+          <ul class="mt-3 text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6 list-disc list-inside">
+            <li>locality: signing and mime rules once</li>
+            <li>leverage: eight buckets, one module</li>
+            <li>ends cross-module borrowing</li>
+            <li>duplicate policy test suite deleted</li>
+          </ul>
+          <div class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+            No ADR owns a storage seam; ADR-0014 (private objects, short-lived links) and ADR-0025
+            (5 MB, 15-minute Quest Image links) both survive as per-bucket policy. The two
+            inspection regimes — sharp full decode vs magic bytes — make this a design step, not a
+            mechanical delete. Best done after candidate <a href="#c4" class="underline">4</a>,
+            which decides who calls storage.
+          </div>
+          <p class="mt-2 text-sm">
+            <span class="lbl text-slate-400">test surface</span> the duplication is paid twice:
+            <span class="font-mono text-xs">tests/shared/image-storage.test.ts</span> and
+            <span class="font-mono text-xs">tests/modules/work-chat/work-chat.storage.test.ts</span>
+            assert the same policy against two implementations.
+          </p>
+        </article>
+
+        <!-- ============================= 10 ============================= -->
+        <article id="c10" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">10 · Split Quest Board reads out of the write module</h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700 font-medium"
+              >Speculative</span
+            >
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">in-process</span>
+            <span class="px-2 py-1 rounded bg-slate-800 text-white">confirmed weak</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>
+              quest-v2.service.ts (2727 · was 2634) — board cursor, Board Card, Public Quest
+              Detail, and now the participation read (ADR-0031)
+            </li>
+            <li>
+              quest-v2.controller.ts (848 · was 818) — the participation controller joined the
+              read tail
+            </li>
+          </ul>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">before</p>
+              <div class="space-y-1" style="height: 230px">
+                <div
+                  class="h-14 border-l-4 border-slate-500 bg-slate-100 px-3 flex items-center text-xs font-mono"
+                >
+                  quest-v2.service — create, edit, publish
+                </div>
+                <div
+                  class="h-14 border-l-4 border-slate-500 bg-slate-100 px-3 flex items-center text-xs font-mono"
+                >
+                  quest-v2.service — Quest Image commands
+                </div>
+                <div
+                  class="h-14 border-l-4 border-slate-500 bg-slate-100 px-3 flex items-center text-xs font-mono"
+                >
+                  quest-v2.service — Quest Command wiring
+                </div>
+                <div
+                  class="h-14 border-l-4 border-amber-500 bg-amber-50 px-3 flex items-center text-xs font-mono"
+                >
+                  quest-v2.service — Board Card, cursors, Public Quest Detail
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">after</p>
+              <div class="space-y-1" style="height: 230px">
+                <div
+                  class="h-24 border-l-4 border-slate-900 bg-white px-3 flex items-center text-xs font-mono"
+                >
+                  quest-v2.service — writes only
+                </div>
+                <div
+                  class="h-24 border-l-4 border-slate-900 bg-white px-3 flex items-center text-xs font-mono"
+                >
+                  quest read module — Board Card, cursors, Public Quest Detail
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2 text-sm">
+            <div>
+              <dt class="lbl text-slate-400">problem</dt>
+              <dd>
+                Board Card and Public Quest Detail projections share a module with the Quest Draft
+                write commands — a size observation, not a depth problem.
+              </dd>
+            </div>
+            <div>
+              <dt class="lbl text-slate-400">solution</dt>
+              <dd>Separate read projections from write commands.</dd>
+            </div>
+          </dl>
+          <p class="mt-3 text-sm">
+            <span class="lbl text-slate-400">deletion test</span> just moves — the read tail is
+            plain selects that never touch <span class="font-mono text-xs">runQuestCommand</span>,
+            Quest Escrow or command records, so callers learn a second import and nothing shrinks.
+            Candidate 1 already took the file from 2736 to 2634 lines, weakening even the size
+            motivation. ADR-0027 already separates the two contracts.
+          </p>
+        </article>
+
+        <!-- ============================= 11 ============================= -->
+        <article id="c11" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">
+            11 · Collapse the idempotency machinery on the Finance side
+          </h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 font-medium"
+              >Strong</span
+            >
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">in-process</span>
+            <span class="px-2 py-1 rounded bg-indigo-100 text-indigo-800">new</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>
+              wallet.funding.service.ts (1580 · was 1230) — acquireIdempotency plus a second
+              inline acquire
+            </li>
+            <li>
+              wallet.service.ts (931 · was 810) · payout.service.ts (1172 · was 1050) ·
+              top-up.service.ts (561 · was 518)
+            </li>
+            <li>
+              digest helper ×4 (funding:84 · wallet:641 · payout:118 · top-up:92) · expiry helper ×4
+            </li>
+            <li>
+              reference implementation: quest/quest-command.service.ts:105-173 (300); storage
+              wallet_idempotency_keys vs quest_command
+            </li>
+          </ul>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">before — 6 acquire copies, 8 helper copies</p>
+              <div class="space-y-1.5" style="height: 250px">
+                <div class="grid grid-cols-2 gap-1.5">
+                  <div class="border-2 border-red-300 hatch p-1 text-[9px] font-mono leading-tight">
+                    wallet.funding<br /><span class="text-red-700"
+                      >acquire :171<br />acquire :698<br />digest · expiry</span
+                    >
+                  </div>
+                  <div class="border-2 border-red-300 hatch p-1 text-[9px] font-mono leading-tight">
+                    wallet.service<br /><span class="text-red-700"
+                      >acquire :478<br />acquire :663<br />digest · expiry</span
+                    >
+                  </div>
+                  <div class="border-2 border-red-300 hatch p-1 text-[9px] font-mono leading-tight">
+                    payout.service<br /><span class="text-red-700"
+                      >acquire :279<br />digest · expiry</span
+                    >
+                  </div>
+                  <div class="border-2 border-red-300 hatch p-1 text-[9px] font-mono leading-tight">
+                    top-up.service<br /><span class="text-red-700"
+                      >acquire :224<br />digest · expiry</span
+                    >
+                  </div>
+                </div>
+                <div
+                  class="border-2 border-dashed border-red-400 p-1 text-[10px] font-mono text-red-700"
+                >
+                  already disagreeing: insert-then-lock vs onConflictDoNothing · replay-by-pointer
+                  vs replay-by-read
+                </div>
+                <div
+                  class="border-2 border-slate-900 bg-white p-1 text-[10px] font-mono text-slate-700"
+                >
+                  quest-command.service — one implementation, 14 Quest commands
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">after — two owners, one protocol each</p>
+              <div style="height: 250px" class="flex flex-col gap-2">
+                <div class="border-2 border-slate-900 bg-white px-3 py-2 font-mono text-xs">
+                  runMoneyCommand(tx, scope, key, hash, replayHook)
+                </div>
+                <div
+                  class="deep border-2 border-slate-900 flex-1 p-3 text-[11px] text-slate-300 space-y-0.5 font-mono"
+                >
+                  <p class="text-slate-500 lbl">implementation absorbs</p>
+                  <p>· insert on conflict · row lock</p>
+                  <p>· request digest compare</p>
+                  <p>· in-progress and reuse answers</p>
+                  <p>· replay by resource pointer</p>
+                  <p>· expiry</p>
+                </div>
+                <p class="text-[11px] text-slate-500">
+                  5 Finance callers pass their transaction and their own replay read.
+                  <span class="font-mono">quest_command</span> is untouched.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2 text-sm">
+            <div>
+              <dt class="lbl text-slate-400">problem</dt>
+              <dd>
+                Finance hand-rolls the insert-on-conflict → row-lock → digest-compare →
+                replay-or-in-progress state machine six times, plus four copies each of the digest
+                and expiry helpers, in the paths that move money.
+              </dd>
+            </div>
+            <div>
+              <dt class="lbl text-slate-400">solution</dt>
+              <dd>
+                One Finance-owned acquire-or-replay module over
+                <span class="font-mono text-xs">wallet_idempotency_keys</span>, taking the caller's
+                transaction and a per-call replay read.
+              </dd>
+            </div>
+          </dl>
+          <ul class="mt-3 text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6 list-disc list-inside">
+            <li>locality: one acquire protocol</li>
+            <li>leverage: five money callers</li>
+            <li>concurrency fixes land once</li>
+            <li>transaction seam stays at the caller</li>
+            <li>deletes 8 helper copies</li>
+          </ul>
+          <div class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+            <span class="font-medium">ADR-0029</span> scopes
+            <span class="font-mono text-xs">quest_command</span> to Quest v2 and keeps the money
+            subsystem on its own command records, so merging the two tables is out; ADR-0009 agrees
+            — the shared thing is the mechanics, never the storage. Export the new module through
+            <span class="font-mono text-xs">src/modules/wallet/index.ts</span>: payout and top-up
+            currently import the deep path
+            <span class="font-mono text-xs">@/modules/wallet/wallet.service</span>.
+          </div>
+          <p class="mt-2 text-sm">
+            <span class="lbl text-slate-400">deletion test</span> concentrates — only the replay
+            read differs per operation, and that is per-call data.
+          </p>
+        </article>
+
+        <!-- ============================= 12 ============================= -->
+        <article id="c12" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">12 · One keyset read behind the Admin list reads</h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 font-medium"
+              >Strong</span
+            >
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">in-process</span>
+            <span class="px-2 py-1 rounded bg-indigo-100 text-indigo-800">new</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>admin-member.service.ts:48-105 (290) · wallet.admin.service.ts:47-98 (214)</li>
+            <li>admin-finance.service.ts:339-383 (745) · top-up.admin.service.ts:31-83 (109)</li>
+            <li>
+              variants: payout.admin.service.ts:383-433 (434, MoneyDomainError) ·
+              admin-activity-log.service.ts:37-119 (125, CursorInputError)
+            </li>
+            <li>bypassed: src/shared/cursor.ts:23-39,51-60 (105) — parsePageLimit caps at 50</li>
+          </ul>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">before — the same 5 steps, six times</p>
+              <div style="height: 250px" class="flex gap-1.5">
+                <div class="flex-1 space-y-1">
+                  <div
+                    class="h-8 border-l-4 border-red-500 bg-red-50 px-2 flex items-center text-[10px] font-mono"
+                  >
+                    decode cursor
+                  </div>
+                  <div
+                    class="h-8 border-l-4 border-red-500 bg-red-50 px-2 flex items-center text-[10px] font-mono"
+                  >
+                    (createdAt, id) condition
+                  </div>
+                  <div
+                    class="h-8 border-l-4 border-red-500 bg-red-50 px-2 flex items-center text-[10px] font-mono"
+                  >
+                    limit + 1 probe
+                  </div>
+                  <div
+                    class="h-8 border-l-4 border-red-500 bg-red-50 px-2 flex items-center text-[10px] font-mono"
+                  >
+                    hasNext trim
+                  </div>
+                  <div
+                    class="h-8 border-l-4 border-red-500 bg-red-50 px-2 flex items-center text-[10px] font-mono"
+                  >
+                    encode nextCursor
+                  </div>
+                  <div
+                    class="mt-2 border-2 border-dashed border-red-400 px-2 py-1 text-[10px] font-mono text-red-700"
+                  >
+                    drift: clamp 100 ×4 vs primitive 50; three error conventions
+                  </div>
+                </div>
+                <div
+                  class="w-6 flex flex-col items-center justify-center text-[10px] font-mono text-slate-400"
+                >
+                  ×6
+                </div>
+                <div
+                  class="w-24 border-2 border-slate-300 bg-slate-50 px-2 py-1 text-[10px] font-mono text-slate-500"
+                >
+                  shared/cursor<br />encode<br />decode<br />parseLimit
+                  <p class="mt-2 text-[9px] text-slate-400">used for 3 of the 5 steps at best</p>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-3">after</p>
+              <div style="height: 250px" class="flex flex-col gap-2">
+                <div class="border-2 border-slate-900 bg-white px-3 py-2 font-mono text-xs">
+                  keysetPage(table, cursorColumns, conditions, limit, sort)
+                </div>
+                <div
+                  class="deep border-2 border-slate-900 flex-1 p-3 text-[11px] text-slate-300 space-y-0.5 font-mono"
+                >
+                  <p class="text-slate-500 lbl">implementation absorbs</p>
+                  <p>· decode and validate cursor</p>
+                  <p>· tuple condition and sort</p>
+                  <p>· limit clamp, probe, trim</p>
+                  <p>· encode nextCursor</p>
+                </div>
+                <p class="text-[11px] text-slate-500">six Admin list reads shrink to filters.</p>
+              </div>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2 text-sm">
+            <div>
+              <dt class="lbl text-slate-400">problem</dt>
+              <dd>
+                Every new Admin list re-implements the keyset mechanics and invents its own limit
+                clamp and error mapping instead of calling the shared primitive, which is why four
+                new reads cap at 100 while the primitive caps at 50.
+              </dd>
+            </div>
+            <div>
+              <dt class="lbl text-slate-400">solution</dt>
+              <dd>
+                One keyset-page read beside
+                <span class="font-mono text-xs">src/shared/cursor.ts</span>
+                that takes the table, cursor columns, conditions, limit and sort, and returns rows
+                plus the encoded cursor.
+              </dd>
+            </div>
+          </dl>
+          <ul class="mt-3 text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6 list-disc list-inside">
+            <li>locality: cursor math one implementation</li>
+            <li>leverage: six list reads</li>
+            <li>limit rules stop drifting</li>
+            <li>call sites shrink to filters</li>
+          </ul>
+          <p class="mt-3 text-sm">
+            <span class="lbl text-slate-400">deletion test</span> concentrates — the observed drift
+            is the proof that this is shared knowledge that leaked, not per-list logic.
+          </p>
+          <p class="mt-1 text-sm">
+            <span class="lbl text-slate-400">test surface</span> four of the six copies never assert
+            <span class="font-mono text-xs">nextCursor</span> at all (<span
+              class="font-mono text-xs"
+              >admin-member</span
+            >, <span class="font-mono text-xs">wallet.admin-list</span>,
+            <span class="font-mono text-xs">admin-finance</span>,
+            <span class="font-mono text-xs">top-up.admin</span>): the copied mechanics are untested
+            exactly where they were copied.
+          </p>
+        </article>
+
+        <!-- ============================= 13 ============================= -->
+        <article id="c13" class="scroll-mt-6">
+          <h2 class="font-serif text-2xl">
+            13 · The ledger reconciliation read belongs to the Wallet ledger owner
+          </h2>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 font-medium"
+              >Worth exploring</span
+            >
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">in-process</span>
+            <span class="px-2 py-1 rounded bg-indigo-100 text-indigo-800">new</span>
+          </div>
+          <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
+            <li>
+              wallet.admin.service.ts:165-190 (214) · admin-member.service.ts:181-206 (290) ·
+              admin-finance.service.ts:554-573 (745) — identical balance SQL ×3
+            </li>
+            <li>
+              admin-finance.service.ts:494-521 — platform zero-sum re-derived ·
+              admin-finance.service.ts:670-685 — effective Money Policy interval re-derived
+            </li>
+            <li>
+              already deep and exported: wallet.service.ts:261-346 derivation, :569-608
+              verifyWalletProjection, :233-259 getEffectiveMoneyPolicy
+            </li>
+            <li>
+              leaked vocabulary: account-type literals at admin-member:197-200,
+              admin-finance:470-475, wallet.admin:181-184
+            </li>
+          </ul>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-2">before</p>
+              <pre class="mermaid">
+flowchart LR
+  A1["AdminMemberDetail"] -.-> L[("ledger tables")]
+  A2["AdminMemberFinanceProfile"] -.-> L
+  A3["AdminWalletDetail"] -.-> L
+  A4["AdminFinanceOverview"] -.->|"zero-sum SQL"| L
+  A5["AdminFinancePolicy"] -.->|"interval SQL"| M[("paymentMoneyPolicyRevision")]
+  W["Wallet ledger owner"] --> L
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+  class L,M leak
+  linkStyle 0,1,2,3,4 stroke:#dc2626,stroke-width:2px;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-400 mb-2">after</p>
+              <pre class="mermaid">
+flowchart LR
+  A1["AdminMemberDetail"] --> D["walletLedgerBalances"]
+  A2["AdminMemberFinanceProfile"] --> D
+  A3["AdminWalletDetail"] --> D
+  A4["AdminFinanceOverview"] --> D
+  A5["AdminFinancePolicy"] --> P["getEffectiveMoneyPolicy"]
+  D --> L[("ledger tables")]
+  P --> M[("paymentMoneyPolicyRevision")]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class D deep
+              </pre>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2 text-sm">
+            <div>
+              <dt class="lbl text-slate-400">problem</dt>
+              <dd>
+                Three Admin reads re-derive the projection-versus-ledger balance check with
+                identical SQL and the same four account-type literals, and Admin also re-derives the
+                platform zero-sum check and the effective Money Policy interval, although Wallet
+                owns and exports that knowledge.
+              </dd>
+            </div>
+            <div>
+              <dt class="lbl text-slate-400">solution</dt>
+              <dd>
+                One narrow Wallet read for per-Wallet ledger balances plus the platform zero-sum
+                total, reusing the existing derivation, and route the policy read through the
+                exported resolver.
+              </dd>
+            </div>
+          </dl>
+          <ul class="mt-3 text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6 list-disc list-inside">
+            <li>locality: invariant lives with the ledger</li>
+            <li>account vocabulary stops leaking</li>
+            <li>deep Wallet read, shallow Admin reads</li>
+            <li>subledger checks stop forking</li>
+          </ul>
+          <div class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+            <span class="font-medium">ADR-0006 and ADR-0012</span> make subledger reconciliation the
+            ledger owner's knowledge. Scope discipline: the wider move — forcing every cross-domain
+            Admin projection behind its owner's interface — fails the deletion test and would add
+            shallow pass-through reads. Only the ledger invariant and Money Policy qualify.
+          </div>
+          <p class="mt-2 text-sm">
+            <span class="lbl text-slate-400">test surface</span>
+            <span class="font-mono text-xs">wallet.service.integration.test.ts:301-328</span>
+            already defends the derivation positively and negatively; the three Admin copies are
+            pinned only loosely.
+          </p>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="border-t border-slate-300 pt-10">
+        <h2 class="font-serif text-3xl">Top recommendation</h2>
+        <div class="mt-4 rounded-xl border-2 border-slate-900 bg-white p-6">
+          <p class="lbl text-emerald-600 font-medium">candidate 2 shipped · next</p>
+          <a
+            href="#c11"
+            class="font-serif text-2xl underline decoration-emerald-500 decoration-2 underline-offset-4"
+            >11 · Collapse the idempotency machinery on the Finance side</a
+          >
+          <p class="mt-3 text-sm text-slate-700">
+            The Quest half of this collapse shipped with ADR-0029, and the Finance side kept
+            growing while it waited:
+            <span class="font-mono text-xs">wallet.funding.service.ts</span> is at 1580 lines (was
+            1230) and <span class="font-mono text-xs">payout.service.ts</span> at 1172, with six
+            acquire-or-replay copies in the paths that move money. The mechanics are proven:
+            <span class="font-mono text-xs">runQuestCommand</span> already serves 14 Quest
+            commands, and ADR-0029 keeps the money subsystem on its own storage.
+          </p>
+          <p class="mt-3 text-sm text-slate-500">
+            Smaller starts, zero overlap:
+            <a href="#c6" class="underline">6 · retire the v1 import hub</a> is a mechanical
+            find-and-replace, and issue 497 moves candidate 2's twelve test files onto the fixture
+            seam.
+          </p>
+        </div>
+      </section>
+
+      <footer class="pt-6 text-xs text-slate-400 font-mono">
+        Facts verified against develop at 4ec1a6d, 2026-09-13. Line counts from wc -l; call sites
+        from symbol search at this HEAD; churn from git log since 2026-08-20. Sections 4, 5, 7, 8,
+        9, 12 and 13 keep their 2026-09-12 line ranges; the format baseline moved those lines and
+        they were not re-walked.
+      </footer>
+    </main>
+  </body>
+</html>
