@@ -4,7 +4,8 @@ import type { ApiResponse } from '@/shared/api-response';
 
 import type { Static } from 'elysia';
 
-import { convertEarnings, ensureWallet, getWalletActivities } from './wallet.service';
+import { convertEarnings } from './wallet.conversion.service';
+import { ensureWallet, getWalletActivities } from './wallet.service';
 import { MoneyDomainError, positiveSatang, type Satang } from './wallet.money';
 import type {
   earningsConversionCreateSchema,
