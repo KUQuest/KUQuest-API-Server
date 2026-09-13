@@ -70,21 +70,8 @@ const gitOutput = (arguments_: string[]): string => {
 };
 
 const migrationArtifactSnapshot = (): string => {
-  const workingTreeDiff = gitOutput([
-    'diff',
-    '--binary',
-    '--no-ext-diff',
-    '--',
-    'drizzle',
-  ]);
-  const stagedDiff = gitOutput([
-    'diff',
-    '--cached',
-    '--binary',
-    '--no-ext-diff',
-    '--',
-    'drizzle',
-  ]);
+  const workingTreeDiff = gitOutput(['diff', '--binary', '--no-ext-diff', '--', 'drizzle']);
+  const stagedDiff = gitOutput(['diff', '--cached', '--binary', '--no-ext-diff', '--', 'drizzle']);
   const untrackedPaths = gitOutput([
     'ls-files',
     '--others',
@@ -107,10 +94,24 @@ const migrationArtifactSnapshot = (): string => {
   });
 };
 
+// CI passes the pull request base. A local run falls back to the merge-base with
+// the integration branch, so the inherited-migration rules below hold before a push.
+const integrationMergeBase = (): string | undefined => {
+  const result = Bun.spawnSync(['git', 'merge-base', 'HEAD', 'origin/develop'], {
+    stderr: 'pipe',
+    stdout: 'pipe',
+  });
+
+  if (result.exitCode !== 0) return undefined;
+
+  return result.stdout.toString().trim() || undefined;
+};
+
 const baseArgumentIndex = process.argv.indexOf('--base');
 const baseReference =
   (baseArgumentIndex >= 0 ? process.argv[baseArgumentIndex + 1] : undefined) ??
-  process.env.MIGRATION_BASE_REF;
+  process.env.MIGRATION_BASE_REF ??
+  integrationMergeBase();
 
 if (baseArgumentIndex >= 0 && !baseReference) {
   console.error('The `--base` option requires a git revision.');
@@ -119,25 +120,15 @@ if (baseArgumentIndex >= 0 && !baseReference) {
 
 if (baseReference) {
   const inheritedFilesResult = Bun.spawnSync(
-    [
-      'git',
-      'ls-tree',
-      '-r',
-      '--name-only',
-      baseReference,
-      '--',
-      'drizzle',
-    ],
+    ['git', 'ls-tree', '-r', '--name-only', baseReference, '--', 'drizzle'],
     {
       stderr: 'pipe',
       stdout: 'pipe',
-    },
+    }
   );
 
   if (inheritedFilesResult.exitCode !== 0) {
-    console.error(
-      `Unable to inspect migration history at base revision ${baseReference}.`,
-    );
+    console.error(`Unable to inspect migration history at base revision ${baseReference}.`);
     console.error(inheritedFilesResult.stderr.toString().trim());
     process.exit(1);
   }
@@ -147,25 +138,19 @@ if (baseReference) {
     .split('\n')
     .filter((path) => path.endsWith('.sql'));
   const changedSqlFiles = inheritedSqlFiles.filter((path) => {
-    const comparison = Bun.spawnSync(
-      ['git', 'diff', '--quiet', baseReference, '--', path],
-      {
-        stderr: 'inherit',
-        stdout: 'inherit',
-      },
-    );
+    const comparison = Bun.spawnSync(['git', 'diff', '--quiet', baseReference, '--', path], {
+      stderr: 'inherit',
+      stdout: 'inherit',
+    });
 
     return comparison.exitCode !== 0;
   });
 
   const migrationRepairs = await readMigrationRepairs();
-  const repairByPath = new Map(
-    migrationRepairs.map((repair) => [repair.path, repair]),
-  );
+  const repairByPath = new Map(migrationRepairs.map((repair) => [repair.path, repair]));
   const inheritedSqlFileSet = new Set(inheritedSqlFiles);
   const changedSqlFileSet = new Set(changedSqlFiles);
-  const hasDuplicateRepairPath =
-    repairByPath.size !== migrationRepairs.length;
+  const hasDuplicateRepairPath = repairByPath.size !== migrationRepairs.length;
   const hasInvalidRepair = migrationRepairs.some((repair) => {
     if (!repair.reason.trim() || !inheritedSqlFileSet.has(repair.path)) {
       return true;
@@ -173,35 +158,20 @@ if (baseReference) {
 
     if (!changedSqlFileSet.has(repair.path)) return false;
 
-    const baseBlob = gitOutput([
-      'rev-parse',
-      `${baseReference}:${repair.path}`,
-    ]).trim();
-    const repairedBlob = gitOutput([
-      'hash-object',
-      '--',
-      repair.path,
-    ]).trim();
+    const baseBlob = gitOutput(['rev-parse', `${baseReference}:${repair.path}`]).trim();
+    const repairedBlob = gitOutput(['hash-object', '--', repair.path]).trim();
 
-    return (
-      repair.baseBlob !== baseBlob || repair.repairedBlob !== repairedBlob
-    );
+    return repair.baseBlob !== baseBlob || repair.repairedBlob !== repairedBlob;
   });
-  const unapprovedChangedSqlFiles = changedSqlFiles.filter(
-    (path) => !repairByPath.has(path),
-  );
+  const unapprovedChangedSqlFiles = changedSqlFiles.filter((path) => !repairByPath.has(path));
 
-  if (
-    hasDuplicateRepairPath ||
-    hasInvalidRepair ||
-    unapprovedChangedSqlFiles.length > 0
-  ) {
+  if (hasDuplicateRepairPath || hasInvalidRepair || unapprovedChangedSqlFiles.length > 0) {
     console.error('Inherited migration SQL is immutable:');
     for (const path of unapprovedChangedSqlFiles) {
       console.error(`- ${path}`);
     }
     console.error(
-      'Restore the inherited SQL and represent the correction in a new forward migration, or record an exact approved repair in docs/agents/migration-repairs.json.',
+      'Restore the inherited SQL and represent the correction in a new forward migration, or record an exact approved repair in docs/agents/migration-repairs.json.'
     );
     process.exit(1);
   }
@@ -211,7 +181,7 @@ if (baseReference) {
     {
       stderr: 'pipe',
       stdout: 'pipe',
-    },
+    }
   );
 
   if (inheritedJournalResult.exitCode === 0) {
@@ -219,12 +189,8 @@ if (baseReference) {
     let currentEntries: unknown[];
 
     try {
-      inheritedEntries = parseJournalEntries(
-        inheritedJournalResult.stdout.toString(),
-      );
-      currentEntries = parseJournalEntries(
-        await Bun.file('drizzle/meta/_journal.json').text(),
-      );
+      inheritedEntries = parseJournalEntries(inheritedJournalResult.stdout.toString());
+      currentEntries = parseJournalEntries(await Bun.file('drizzle/meta/_journal.json').text());
     } catch {
       console.error('Unable to read the Drizzle migration journal.');
       process.exit(1);
@@ -233,15 +199,12 @@ if (baseReference) {
     const inheritedJournalChanged =
       currentEntries.length < inheritedEntries.length ||
       inheritedEntries.some(
-        (entry, index) =>
-          JSON.stringify(currentEntries[index]) !== JSON.stringify(entry),
+        (entry, index) => JSON.stringify(currentEntries[index]) !== JSON.stringify(entry)
       );
 
     if (inheritedJournalChanged) {
       console.error('Inherited migration journal entries are immutable.');
-      console.error(
-        'Restore the inherited journal order and create a new forward migration.',
-      );
+      console.error('Restore the inherited journal order and create a new forward migration.');
       process.exit(1);
     }
   }
@@ -265,7 +228,7 @@ if (beforeGeneration !== afterGeneration) {
       'Migration artifacts are out of date.',
       'Run `bun run db:generate`, inspect the generated SQL, and commit the',
       'schema, SQL migration, and Drizzle metadata together.',
-    ].join('\n'),
+    ].join('\n')
   );
   process.exit(1);
 }

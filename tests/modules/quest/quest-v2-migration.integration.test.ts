@@ -10,6 +10,7 @@ import {
   questCandidateApplicationV2,
   questCandidateTeamV2,
   questCandidateTeamV2Member,
+  questCommand,
   questV2ProofSubmission,
   review as questReview,
 } from '@/database/schema/quest.schema';
@@ -18,7 +19,6 @@ import {
   walletFundingReservation,
   walletFundingReservationOperation,
   walletFundingReservationSettlement,
-  walletIdempotencyKey,
   walletLedgerAccount,
   walletLedgerPosting,
   walletLedgerTransaction,
@@ -53,7 +53,17 @@ import { randomUUID } from 'node:crypto';
 
 import { and, eq, inArray } from 'drizzle-orm';
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test';
 
 const hirer = {
   id: randomUUID(),
@@ -119,9 +129,12 @@ type OpenApiOperation = {
   operationId?: string;
   parameters?: OpenApiParameter[];
   requestBody?: { content?: Record<string, { schema?: JsonSchema }>; required?: boolean };
-  responses?: Record<string, {
-    content?: Record<string, { schema?: JsonSchema }>;
-  }>;
+  responses?: Record<
+    string,
+    {
+      content?: Record<string, { schema?: JsonSchema }>;
+    }
+  >;
   security?: unknown;
 };
 
@@ -400,16 +413,21 @@ const documentedSchemaConstants = (value: unknown): string[] => {
   const record = value as Record<string, unknown>;
   const constants = [
     ...(typeof record.const === 'string' ? [record.const] : []),
-    ...(Array.isArray(record.enum) ? record.enum.filter((entry): entry is string => typeof entry === 'string') : []),
+    ...(Array.isArray(record.enum)
+      ? record.enum.filter((entry): entry is string => typeof entry === 'string')
+      : []),
   ];
   return [...constants, ...Object.values(record).flatMap(documentedSchemaConstants)];
 };
 
-const expectedV2OperationContracts: Record<string, {
-  bodyProperties?: string[];
-  requiredBodyProperties?: string[];
-  responseStatuses: string[];
-}> = {
+const expectedV2OperationContracts: Record<
+  string,
+  {
+    bodyProperties?: string[];
+    requiredBodyProperties?: string[];
+    responseStatuses: string[];
+  }
+> = {
   cancelQuestV2: {
     responseStatuses: ['200', '400', '401', '403', '404', '409', '503'],
   },
@@ -483,10 +501,7 @@ const getDocument = async (): Promise<OpenApiDocument> => {
 const targetsFor = (row: MigrationRow): V2Target[] =>
   row.v2 ? (Array.isArray(row.v2) ? row.v2 : [row.v2]) : [];
 
-const assertDocumentedOperation = (
-  document: OpenApiDocument,
-  target: V2Target,
-) => {
+const assertDocumentedOperation = (document: OpenApiDocument, target: V2Target) => {
   const operation = document.paths[target.path]?.[target.method];
   expect(operation).toBeDefined();
   expect(operation?.operationId).toBe(target.operationId);
@@ -496,33 +511,39 @@ const assertDocumentedOperation = (
   expect(contract).toBeDefined();
 
   for (const parameterName of [...target.path.matchAll(/\{([^}]+)\}/g)].map(([, name]) => name)) {
-    expect(operation?.parameters).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        in: 'path',
-        name: parameterName,
-        required: true,
-        schema: expect.objectContaining({ format: 'uuid', type: 'string' }),
-      }),
-    ]));
+    expect(operation?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          in: 'path',
+          name: parameterName,
+          required: true,
+          schema: expect.objectContaining({ format: 'uuid', type: 'string' }),
+        }),
+      ])
+    );
   }
 
   if (stateChangingMethods.has(target.method)) {
-    expect(operation?.parameters).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        in: 'header',
-        name: 'idempotency-key',
-        required: true,
-        schema: expect.objectContaining({
-          maxLength: 200,
-          minLength: 1,
-          pattern: '\\S',
-          type: 'string',
+    expect(operation?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          in: 'header',
+          name: 'idempotency-key',
+          required: true,
+          schema: expect.objectContaining({
+            maxLength: 200,
+            minLength: 1,
+            pattern: '\\S',
+            type: 'string',
+          }),
         }),
-      }),
-    ]));
+      ])
+    );
   }
 
-  expect(Object.keys(operation?.responses ?? {}).sort()).toEqual([...contract!.responseStatuses].sort());
+  expect(Object.keys(operation?.responses ?? {}).sort()).toEqual(
+    [...contract!.responseStatuses].sort()
+  );
   for (const [status, response] of Object.entries(operation?.responses ?? {})) {
     const schema = response.content?.['application/json']?.schema;
     expect(schema).toBeDefined();
@@ -555,7 +576,9 @@ const assertDocumentedOperation = (
     expect(body?.required).toBe(true);
     expect(schema).toMatchObject({
       additionalProperties: false,
-      properties: Object.fromEntries(bodyProperties.map((property) => [property, expect.any(Object)])),
+      properties: Object.fromEntries(
+        bodyProperties.map((property) => [property, expect.any(Object)])
+      ),
       type: 'object',
     });
     expect(schema?.required ?? []).toEqual(contract!.requiredBodyProperties ?? []);
@@ -581,40 +604,45 @@ const successfulWriter = {
   },
 };
 
-const authenticate = () => spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => {
-  const memberId = headers.get('x-member-id') ?? worker.id;
-  const member = members.find(({ id }) => id === memberId) ?? worker;
-  return { user: member, session: { userId: member.id } } as never;
-}) as never);
+const authenticate = () =>
+  spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => {
+    const memberId = headers.get('x-member-id') ?? worker.id;
+    const member = members.find(({ id }) => id === memberId) ?? worker;
+    return { user: member, session: { userId: member.id } } as never;
+  }) as never);
 
 const request = (
   path: string,
   method = 'GET',
   memberId: string = worker.id,
   headers: HeadersInit = {},
-  body?: BodyInit,
-) => app.handle(new Request(`http://localhost${path}`, {
-  method,
-  headers: { 'x-member-id': memberId, ...headers },
-  body,
-}));
+  body?: BodyInit
+) =>
+  app.handle(
+    new Request(`http://localhost${path}`, {
+      method,
+      headers: { 'x-member-id': memberId, ...headers },
+      body,
+    })
+  );
 
 const jsonRequest = (
   path: string,
   method: 'POST' | 'PATCH' | 'DELETE',
   memberId: string,
   body: unknown,
-  idempotencyKey: string,
-) => request(
-  path,
-  method,
-  memberId,
-  { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
-  JSON.stringify(body),
-);
+  idempotencyKey: string
+) =>
+  request(
+    path,
+    method,
+    memberId,
+    { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
+    JSON.stringify(body)
+  );
 
 const createOpenGroupCandidateQuest = async (
-  overrides: Partial<typeof quest.$inferInsert> = {},
+  overrides: Partial<typeof quest.$inferInsert> = {}
 ) => {
   const id = randomUUID();
   questIds.push(id);
@@ -673,14 +701,14 @@ const createTeam = async (
   leaderId: string,
   headcount: number,
   key: string,
-  name = 'Migration Team',
+  name = 'Migration Team'
 ) => {
   const response = await jsonRequest(
     `/api/v2/quests/${questId}/teams`,
     'POST',
     leaderId,
     { name, headcount },
-    key,
+    key
   );
   expect(response.status).toBe(201);
   return (await response.json()).data as CandidateTeam;
@@ -692,14 +720,8 @@ const joinTeam = (
   memberId: string,
   joinCode: string,
   key: string,
-  body: Record<string, unknown> = { joinCode },
-) => jsonRequest(
-  `/api/v2/quests/${questId}/teams/${teamId}/join`,
-  'POST',
-  memberId,
-  body,
-  key,
-);
+  body: Record<string, unknown> = { joinCode }
+) => jsonRequest(`/api/v2/quests/${questId}/teams/${teamId}/join`, 'POST', memberId, body, key);
 
 const createFile = async (uploadedByUserId: string) => {
   const id = randomUUID();
@@ -715,18 +737,14 @@ const createFile = async (uploadedByUserId: string) => {
   return id;
 };
 
-const createAndSendProof = async (
-  questId: string,
-  workerId: string,
-  keyPrefix: string,
-) => {
+const createAndSendProof = async (questId: string, workerId: string, keyPrefix: string) => {
   const proofFileId = await createFile(workerId);
   const created = await jsonRequest(
     `/api/v2/quests/${questId}/proof-submissions`,
     'POST',
     workerId,
     { description: 'Migration verification Proof', fileIds: [proofFileId] },
-    `${keyPrefix}-create`,
+    `${keyPrefix}-create`
   );
   expect(created.status).toBe(201);
   const proofSubmissionId = (await created.json()).data.id as string;
@@ -734,7 +752,7 @@ const createAndSendProof = async (
     `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/submit`,
     'POST',
     workerId,
-    { 'idempotency-key': `${keyPrefix}-submit` },
+    { 'idempotency-key': `${keyPrefix}-submit` }
   );
   expect(sent.status).toBe(200);
   expect((await sent.json()).data.status).toBe('PROOF_PENDING');
@@ -749,7 +767,9 @@ const fundHirer = async (amountSatang: number) => {
   const [spending] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
-    .where(and(eq(walletLedgerAccount.walletId, wallet!.id), eq(walletLedgerAccount.type, 'SPENDING')));
+    .where(
+      and(eq(walletLedgerAccount.walletId, wallet!.id), eq(walletLedgerAccount.type, 'SPENDING'))
+    );
   const [suspense] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
@@ -767,25 +787,35 @@ const fundHirer = async (amountSatang: number) => {
 };
 
 const reserveQuest = async (questId: string, amountSatang: number) => {
-  await db.transaction((transaction) => reserveSpending(transaction, {
-    ownerUserId: hirer.id,
-    callerScope: 'quest',
-    callerReference: questId,
-    amountSatang: positiveSatang(amountSatang),
-  }));
+  await db.transaction((transaction) =>
+    reserveSpending(transaction, {
+      ownerUserId: hirer.id,
+      callerScope: 'quest',
+      callerReference: questId,
+      amountSatang: positiveSatang(amountSatang),
+    })
+  );
   const [reservation] = await db
-    .select({ id: walletFundingReservation.id, policyRevisionId: walletFundingReservation.policyRevisionId })
+    .select({
+      id: walletFundingReservation.id,
+      policyRevisionId: walletFundingReservation.policyRevisionId,
+    })
     .from(walletFundingReservation)
-    .where(and(
-      eq(walletFundingReservation.ownerUserId, hirer.id),
-      eq(walletFundingReservation.callerScope, 'quest'),
-      eq(walletFundingReservation.callerReference, questId),
-    ));
+    .where(
+      and(
+        eq(walletFundingReservation.ownerUserId, hirer.id),
+        eq(walletFundingReservation.callerScope, 'quest'),
+        eq(walletFundingReservation.callerReference, questId)
+      )
+    );
   if (!reservation) throw new Error('Migration verification Funding Reservation was not created');
-  await db.update(quest).set({
-    fundingReservationId: reservation.id,
-    policyRevisionId: reservation.policyRevisionId,
-  }).where(eq(quest.id, questId));
+  await db
+    .update(quest)
+    .set({
+      fundingReservationId: reservation.id,
+      policyRevisionId: reservation.policyRevisionId,
+    })
+    .where(eq(quest.id, questId));
   return reservation.id;
 };
 
@@ -856,52 +886,54 @@ const createInProgressQuest = async (input: {
     dueAt: new Date('2030-01-01T11:00:00.000Z'),
     proofRequired: input.proofRequired,
   });
-  await db.insert(questAssignment).values(assignmentIds.map((id, index) => ({
-    id,
-    questId,
-    workerId: input.workerIds[index]!,
-    assignmentStatus: 'ASSIGNMENT_ACTIVE' as const,
-  })));
+  await db.insert(questAssignment).values(
+    assignmentIds.map((id, index) => ({
+      id,
+      questId,
+      workerId: input.workerIds[index]!,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE' as const,
+    }))
+  );
   return { questId, assignmentIds };
 };
 
 const createWorkConversationForAssignments = async (
   questId: string,
-  assignments: Array<{ assignmentId: string; workerId: string }>,
+  assignments: Array<{ assignmentId: string; workerId: string }>
 ) => {
   const productionWriter = createWorkChatMembershipWriter();
   const acceptedAt = new Date();
   if (assignments.length === 0) throw new Error('A Work Conversation needs an accepted Worker');
   const firstAssignment = assignments[0]!;
-  await db.transaction((transaction) => productionWriter.applyQuestTransition(transaction, {
-    producer: 'QUEST_ASSIGNMENT_V2',
-    type: 'workersAccepted',
-    commandId: `quest-migration-verification-accepted-${questId}`,
-    eventId: `quest-migration-verification-accepted-event-${questId}`,
-    questId,
-    actorId: hirer.id,
-    occurredAt: acceptedAt.toISOString(),
-    hirerId: hirer.id,
-    workers: [
-      {
-        workerId: firstAssignment.workerId,
-        assignmentId: firstAssignment.assignmentId,
-        joinedAt: acceptedAt.toISOString(),
-      },
-      ...assignments.slice(1).map(({ assignmentId, workerId }) => ({
-        workerId,
-        assignmentId,
-        joinedAt: acceptedAt.toISOString(),
-      })),
-    ],
-  }));
+  await db.transaction((transaction) =>
+    productionWriter.applyQuestTransition(transaction, {
+      producer: 'QUEST_ASSIGNMENT_V2',
+      type: 'workersAccepted',
+      commandId: `quest-migration-verification-accepted-${questId}`,
+      eventId: `quest-migration-verification-accepted-event-${questId}`,
+      questId,
+      actorId: hirer.id,
+      occurredAt: acceptedAt.toISOString(),
+      hirerId: hirer.id,
+      workers: [
+        {
+          workerId: firstAssignment.workerId,
+          assignmentId: firstAssignment.assignmentId,
+          joinedAt: acceptedAt.toISOString(),
+        },
+        ...assignments.slice(1).map(({ assignmentId, workerId }) => ({
+          workerId,
+          assignmentId,
+          joinedAt: acceptedAt.toISOString(),
+        })),
+      ],
+    })
+  );
   configureQuestWorkChatMembershipWriter(productionWriter);
 };
 
-const createWorkConversation = (questId: string, assignmentId: string) => createWorkConversationForAssignments(
-  questId,
-  [{ workerId: worker.id, assignmentId }],
-);
+const createWorkConversation = (questId: string, assignmentId: string) =>
+  createWorkConversationForAssignments(questId, [{ workerId: worker.id, assignmentId }]);
 
 const deleteWorkChatForQuests = async (ids: string[]) => {
   if (ids.length === 0) return;
@@ -922,19 +954,25 @@ const releaseActiveReservations = async (ids: string[]) => {
   const reservations = await db
     .select({ id: walletFundingReservation.id, ownerUserId: walletFundingReservation.ownerUserId })
     .from(walletFundingReservation)
-    .where(and(
-      eq(walletFundingReservation.ownerUserId, hirer.id),
-      eq(walletFundingReservation.callerScope, 'quest'),
-      inArray(walletFundingReservation.callerReference, ids),
-      eq(walletFundingReservation.status, 'ACTIVE'),
-    ));
-  await Promise.all(reservations.map((reservation) => db.transaction((transaction) =>
-    releaseFundingReservation(transaction, {
-      ownerUserId: reservation.ownerUserId,
-      reservationId: reservation.id,
-      operationReference: `quest-migration-verification-cleanup-${randomUUID()}`,
-    }),
-  )));
+    .where(
+      and(
+        eq(walletFundingReservation.ownerUserId, hirer.id),
+        eq(walletFundingReservation.callerScope, 'quest'),
+        inArray(walletFundingReservation.callerReference, ids),
+        eq(walletFundingReservation.status, 'ACTIVE')
+      )
+    );
+  await Promise.all(
+    reservations.map((reservation) =>
+      db.transaction((transaction) =>
+        releaseFundingReservation(transaction, {
+          ownerUserId: reservation.ownerUserId,
+          reservationId: reservation.id,
+          operationReference: `quest-migration-verification-cleanup-${randomUUID()}`,
+        })
+      )
+    )
+  );
 };
 
 beforeAll(async () => {
@@ -977,7 +1015,9 @@ describe('Quest API v1 to v2 migration verification', () => {
     const document = await getDocument();
 
     expect(migrationRows).toHaveLength(19);
-    expect(new Set(migrationRows.map(({ legacy }) => `${legacy.method} ${legacy.path}`))).toHaveLength(18);
+    expect(
+      new Set(migrationRows.map(({ legacy }) => `${legacy.method} ${legacy.path}`))
+    ).toHaveLength(18);
     expect(migrationRows.filter(({ disposition }) => disposition === 'REPLACED')).toHaveLength(7);
 
     for (const row of migrationRows) {
@@ -988,17 +1028,21 @@ describe('Quest API v1 to v2 migration verification', () => {
     }
 
     const candidateTeamResponse = JSON.stringify(
-      document.paths['/api/v2/quests/{questId}/teams/{teamId}']?.get?.responses,
+      document.paths['/api/v2/quests/{questId}/teams/{teamId}']?.get?.responses
     );
     expect(candidateTeamResponse).toContain('members');
     expect(candidateTeamResponse).toContain('name');
     expect(document.paths['/api/v2/quests/{questId}/teams/{teamId}/members']?.get).toBeUndefined();
 
-    const candidateTeamUpdateSchema = document.paths['/api/v2/quests/{questId}/teams/{teamId}']
-      ?.patch?.requestBody?.content?.['application/json']?.schema;
-    expect(migrationRows
-      .filter(({ legacy }) => legacy.operationId === 'updateQuestTeam')
-      .map(({ legacy }) => legacy.field)).toEqual(['name', 'reworkLimit']);
+    const candidateTeamUpdateSchema =
+      document.paths['/api/v2/quests/{questId}/teams/{teamId}']?.patch?.requestBody?.content?.[
+        'application/json'
+      ]?.schema;
+    expect(
+      migrationRows
+        .filter(({ legacy }) => legacy.operationId === 'updateQuestTeam')
+        .map(({ legacy }) => legacy.field)
+    ).toEqual(['name', 'reworkLimit']);
     expect(candidateTeamUpdateSchema).toMatchObject({
       additionalProperties: false,
       required: ['name'],
@@ -1011,32 +1055,42 @@ describe('Quest API v1 to v2 migration verification', () => {
     const document = await getDocument();
     const paths = Object.keys(document.paths);
 
-    expect(paths.some((path) => path.startsWith('/api/v2/') && path.includes('/invitations'))).toBe(false);
+    expect(paths.some((path) => path.startsWith('/api/v2/') && path.includes('/invitations'))).toBe(
+      false
+    );
     expect(document.paths['/api/v2/quests/invitations']?.get).toBeUndefined();
     expect(document.paths['/api/v2/quests/invitations/{invitationId}']?.get).toBeUndefined();
     expect(document.paths['/api/v2/quests/{questId}/reviews/{reviewId}']?.delete).toBeUndefined();
-    expect(JSON.stringify(Object.fromEntries(
-      Object.entries(document.paths).filter(([path]) => path.startsWith('/api/v2/')),
-    ))).not.toContain('invitationId');
+    expect(
+      JSON.stringify(
+        Object.fromEntries(
+          Object.entries(document.paths).filter(([path]) => path.startsWith('/api/v2/'))
+        )
+      )
+    ).not.toContain('invitationId');
 
     expect(document.paths['/api/v2/quests/{questId}/teams']?.post?.operationId).toBe(
-      'createQuestCandidateTeamV2',
+      'createQuestCandidateTeamV2'
     );
     expect(document.paths['/api/v2/quests/{questId}/teams/{teamId}/join']?.post?.operationId).toBe(
-      'joinQuestCandidateTeamV2',
+      'joinQuestCandidateTeamV2'
     );
-    expect(document.paths['/api/v2/quests/{questId}/teams/{teamId}/join-code']?.post?.operationId).toBe(
-      'regenerateQuestCandidateTeamJoinCodeV2',
-    );
+    expect(
+      document.paths['/api/v2/quests/{questId}/teams/{teamId}/join-code']?.post?.operationId
+    ).toBe('regenerateQuestCandidateTeamJoinCodeV2');
   });
 
   it('documents only canonical v2 vocabulary and requires Idempotency-Key on every v2 write', async () => {
     const document = await getDocument();
-    const v2Document = Object.fromEntries(Object.entries(document.paths).filter(([path]) => path.startsWith('/api/v2/')));
+    const v2Document = Object.fromEntries(
+      Object.entries(document.paths).filter(([path]) => path.startsWith('/api/v2/'))
+    );
     const v2Text = JSON.stringify(v2Document);
     const v2SchemaConstants = new Set(documentedSchemaConstants(v2Document));
 
-    expect(v2Text).not.toMatch(/NO_CANDIDATE|SOLO|QUEST_REWORK|PROOF_REJECTED|PROOF_AUTO_APPROVED|reworkLimit|INVITATION_/);
+    expect(v2Text).not.toMatch(
+      /NO_CANDIDATE|SOLO|QUEST_REWORK|PROOF_REJECTED|PROOF_AUTO_APPROVED|reworkLimit|INVITATION_/
+    );
     for (const value of requiredV2CanonicalValues) {
       expect(v2Text).toContain(value);
       expect(v2SchemaConstants).toContain(value);
@@ -1046,9 +1100,11 @@ describe('Quest API v1 to v2 migration verification', () => {
       if (!path.startsWith('/api/v2/')) continue;
       for (const [method, operation] of Object.entries(methods)) {
         if (!stateChangingMethods.has(method)) continue;
-        expect(operation.parameters).toEqual(expect.arrayContaining([
-          expect.objectContaining({ in: 'header', name: 'idempotency-key', required: true }),
-        ]));
+        expect(operation.parameters).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ in: 'header', name: 'idempotency-key', required: true }),
+          ])
+        );
         expect(operation.security).toEqual([{ betterAuthSession: [] }]);
       }
     }
@@ -1067,66 +1123,80 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       worker.id,
       { name: 'Legacy field attempt', headcount: 3, reworkLimit: 1 },
-      'quest-migration-field-split-create',
+      'quest-migration-field-split-create'
     );
     expect(oldField.status).toBe(400);
     expect((await oldField.json()).error.code).toBe('VALIDATION');
-    expect(await db.select().from(questCandidateTeamV2).where(eq(questCandidateTeamV2.questId, questId))).toHaveLength(0);
+    expect(
+      await db.select().from(questCandidateTeamV2).where(eq(questCandidateTeamV2.questId, questId))
+    ).toHaveLength(0);
 
     const team = await createTeam(questId, worker.id, 3, 'quest-migration-join-code-create');
-    expect(new Date(team.joinCodeExpiresAt).getTime() - Date.now()).toBeGreaterThan(23 * 60 * 60 * 1_000);
-    expect(new Date(team.joinCodeExpiresAt).getTime() - Date.now()).toBeLessThan(25 * 60 * 60 * 1_000);
+    expect(new Date(team.joinCodeExpiresAt).getTime() - Date.now()).toBeGreaterThan(
+      23 * 60 * 60 * 1_000
+    );
+    expect(new Date(team.joinCodeExpiresAt).getTime() - Date.now()).toBeLessThan(
+      25 * 60 * 60 * 1_000
+    );
 
     const createCommand = and(
-      eq(walletIdempotencyKey.principalUserId, worker.id),
-      eq(walletIdempotencyKey.operationScope, 'quest.v2.candidate-team.create'),
-      eq(walletIdempotencyKey.key, 'quest-migration-join-code-create'),
+      eq(questCommand.principalUserId, worker.id),
+      eq(questCommand.operationScope, 'quest.v2.candidate-team.create'),
+      eq(questCommand.key, 'quest-migration-join-code-create')
     );
-    await db.update(walletIdempotencyKey).set({
-      processingStatus: 'PROCESSING',
-      completedAt: null,
-      resourceId: null,
-      resultData: null,
-    }).where(createCommand);
+    await db
+      .update(questCommand)
+      .set({
+        processingStatus: 'PROCESSING',
+        completedAt: null,
+        resourceId: null,
+        resultData: null,
+      })
+      .where(createCommand);
     const inProgress = await jsonRequest(
       `/api/v2/quests/${questId}/teams`,
       'POST',
       worker.id,
       { name: 'Migration Team', headcount: 3 },
-      'quest-migration-join-code-create',
+      'quest-migration-join-code-create'
     );
     expect(inProgress.status).toBe(409);
     expect((await inProgress.json()).error.code).toBe('IDEMPOTENCY_IN_PROGRESS');
 
-    await db.update(walletIdempotencyKey).set({
-      processingStatus: 'COMPLETED',
-      completedAt: new Date(),
-      resultData: null,
-    }).where(createCommand);
+    await db
+      .update(questCommand)
+      .set({
+        processingStatus: 'COMPLETED',
+        completedAt: new Date(),
+        resultData: null,
+      })
+      .where(createCommand);
     const unavailable = await jsonRequest(
       `/api/v2/quests/${questId}/teams`,
       'POST',
       worker.id,
       { name: 'Migration Team', headcount: 3 },
-      'quest-migration-join-code-create',
+      'quest-migration-join-code-create'
     );
     expect(unavailable.status).toBe(503);
     expect((await unavailable.json()).error.code).toBe('IDEMPOTENCY_UNAVAILABLE');
-    await db.delete(walletIdempotencyKey).where(createCommand);
+    await db.delete(questCommand).where(createCommand);
 
     const oldFieldUpdate = await jsonRequest(
       `/api/v2/quests/${questId}/teams/${team.id}`,
       'PATCH',
       worker.id,
       { name: 'Updated Team', reworkLimit: 1 },
-      'quest-migration-field-split-update',
+      'quest-migration-field-split-update'
     );
     expect(oldFieldUpdate.status).toBe(400);
     expect((await oldFieldUpdate.json()).error.code).toBe('VALIDATION');
-    expect(await db.select({ name: questCandidateTeamV2.name })
-      .from(questCandidateTeamV2).where(eq(questCandidateTeamV2.id, team.id))).toEqual([
-      { name: 'Migration Team' },
-    ]);
+    expect(
+      await db
+        .select({ name: questCandidateTeamV2.name })
+        .from(questCandidateTeamV2)
+        .where(eq(questCandidateTeamV2.id, team.id))
+    ).toEqual([{ name: 'Migration Team' }]);
 
     const oldInvitationField = await joinTeam(
       questId,
@@ -1134,17 +1204,22 @@ describe('Quest API v1 to v2 migration verification', () => {
       secondWorker.id,
       team.joinCode,
       'quest-migration-invitation-field',
-      { joinCode: team.joinCode, invitationId: randomUUID() },
+      { joinCode: team.joinCode, invitationId: randomUUID() }
     );
     expect(oldInvitationField.status).toBe(400);
-    expect(await db.select().from(questCandidateTeamV2Member).where(eq(questCandidateTeamV2Member.teamId, team.id))).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(questCandidateTeamV2Member)
+        .where(eq(questCandidateTeamV2Member.teamId, team.id))
+    ).toHaveLength(1);
 
     const joined = await joinTeam(
       questId,
       team.id,
       secondWorker.id,
       team.joinCode,
-      'quest-migration-join-code-member',
+      'quest-migration-join-code-member'
     );
     expect(joined.status).toBe(200);
 
@@ -1152,7 +1227,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       `/api/v2/quests/${questId}/teams/${team.id}/join-code`,
       'POST',
       worker.id,
-      { 'idempotency-key': 'quest-migration-join-code-regenerate' },
+      { 'idempotency-key': 'quest-migration-join-code-regenerate' }
     );
     expect(regenerated.status).toBe(200);
     const regeneratedBody = (await regenerated.json()).data as {
@@ -1160,20 +1235,25 @@ describe('Quest API v1 to v2 migration verification', () => {
       joinCodeExpiresAt: string;
     };
     expect(regeneratedBody.joinCode).not.toBe(team.joinCode);
-    expect(new Date(regeneratedBody.joinCodeExpiresAt).getTime() - Date.now()).toBeGreaterThan(23 * 60 * 60 * 1_000);
-    expect(new Date(regeneratedBody.joinCodeExpiresAt).getTime() - Date.now()).toBeLessThan(25 * 60 * 60 * 1_000);
+    expect(new Date(regeneratedBody.joinCodeExpiresAt).getTime() - Date.now()).toBeGreaterThan(
+      23 * 60 * 60 * 1_000
+    );
+    expect(new Date(regeneratedBody.joinCodeExpiresAt).getTime() - Date.now()).toBeLessThan(
+      25 * 60 * 60 * 1_000
+    );
 
     const staleCode = await joinTeam(
       questId,
       team.id,
       thirdWorker.id,
       team.joinCode,
-      'quest-migration-stale-join-code',
+      'quest-migration-stale-join-code'
     );
     expect(staleCode.status).toBe(409);
     expect((await staleCode.json()).error.code).toBe('JOIN_CODE_INVALID');
 
-    await db.update(questCandidateTeamV2)
+    await db
+      .update(questCandidateTeamV2)
       .set({ joinCodeExpiresAt: new Date('2020-01-01T00:00:00.000Z') })
       .where(eq(questCandidateTeamV2.id, team.id));
     const expiredCode = await joinTeam(
@@ -1181,35 +1261,49 @@ describe('Quest API v1 to v2 migration verification', () => {
       team.id,
       thirdWorker.id,
       regeneratedBody.joinCode,
-      'quest-migration-expired-join-code',
+      'quest-migration-expired-join-code'
     );
     expect(expiredCode.status).toBe(409);
     expect((await expiredCode.json()).error.code).toBe('JOIN_CODE_EXPIRED');
-    expect(await db.select().from(questCandidateTeamV2Member).where(eq(questCandidateTeamV2Member.teamId, team.id))).toHaveLength(2);
+    expect(
+      await db
+        .select()
+        .from(questCandidateTeamV2Member)
+        .where(eq(questCandidateTeamV2Member.teamId, team.id))
+    ).toHaveLength(2);
 
     const refreshed = await request(
       `/api/v2/quests/${questId}/teams/${team.id}/join-code`,
       'POST',
       worker.id,
-      { 'idempotency-key': 'quest-migration-join-code-refresh-after-expiry' },
+      { 'idempotency-key': 'quest-migration-join-code-refresh-after-expiry' }
     );
     expect(refreshed.status).toBe(200);
     const refreshedBody = (await refreshed.json()).data as {
       joinCode: string;
       joinCodeExpiresAt: string;
     };
-    expect(new Date(refreshedBody.joinCodeExpiresAt).getTime() - Date.now()).toBeGreaterThan(23 * 60 * 60 * 1_000);
-    expect(new Date(refreshedBody.joinCodeExpiresAt).getTime() - Date.now()).toBeLessThan(25 * 60 * 60 * 1_000);
+    expect(new Date(refreshedBody.joinCodeExpiresAt).getTime() - Date.now()).toBeGreaterThan(
+      23 * 60 * 60 * 1_000
+    );
+    expect(new Date(refreshedBody.joinCodeExpiresAt).getTime() - Date.now()).toBeLessThan(
+      25 * 60 * 60 * 1_000
+    );
 
     const currentCode = await joinTeam(
       questId,
       team.id,
       thirdWorker.id,
       refreshedBody.joinCode,
-      'quest-migration-current-join-code',
+      'quest-migration-current-join-code'
     );
     expect(currentCode.status).toBe(200);
-    expect(await db.select().from(questCandidateTeamV2Member).where(eq(questCandidateTeamV2Member.teamId, team.id))).toHaveLength(3);
+    expect(
+      await db
+        .select()
+        .from(questCandidateTeamV2Member)
+        .where(eq(questCandidateTeamV2Member.teamId, team.id))
+    ).toHaveLength(3);
   });
 
   it('covers all v2 mode and participation quadrants at the HTTP seam', async () => {
@@ -1229,7 +1323,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       `/api/v2/quests/${singleFcfsQuestId}/join`,
       'POST',
       worker.id,
-      { 'idempotency-key': 'quest-migration-matrix-single-fcfs-join' },
+      { 'idempotency-key': 'quest-migration-matrix-single-fcfs-join' }
     );
     expect(singleFcfsJoin.status).toBe(200);
     expect((await singleFcfsJoin.json()).data).toMatchObject({
@@ -1251,31 +1345,41 @@ describe('Quest API v1 to v2 migration verification', () => {
       `/api/v2/quests/${singleCandidateQuestId}/applications`,
       'POST',
       worker.id,
-      { 'idempotency-key': 'quest-migration-matrix-single-candidate-apply-one' },
+      { 'idempotency-key': 'quest-migration-matrix-single-candidate-apply-one' }
     );
     const firstApplicationId = (await firstApplication.json()).data.id as string;
     const secondApplication = await request(
       `/api/v2/quests/${singleCandidateQuestId}/applications`,
       'POST',
       secondWorker.id,
-      { 'idempotency-key': 'quest-migration-matrix-single-candidate-apply-two' },
+      { 'idempotency-key': 'quest-migration-matrix-single-candidate-apply-two' }
     );
     const secondApplicationId = (await secondApplication.json()).data.id as string;
     const singleCandidateSelection = await request(
       `/api/v2/quests/${singleCandidateQuestId}/applications/${firstApplicationId}/select`,
       'POST',
       hirer.id,
-      { 'idempotency-key': 'quest-migration-matrix-single-candidate-select' },
+      { 'idempotency-key': 'quest-migration-matrix-single-candidate-select' }
     );
     expect(singleCandidateSelection.status).toBe(200);
-    expect(await db.select({ memberId: questCandidateApplicationV2.memberId, state: questCandidateApplicationV2.state })
-      .from(questCandidateApplicationV2).where(eq(questCandidateApplicationV2.questId, singleCandidateQuestId))).toEqual([
+    expect(
+      await db
+        .select({
+          memberId: questCandidateApplicationV2.memberId,
+          state: questCandidateApplicationV2.state,
+        })
+        .from(questCandidateApplicationV2)
+        .where(eq(questCandidateApplicationV2.questId, singleCandidateQuestId))
+    ).toEqual([
       { memberId: worker.id, state: 'APPLICATION_SELECTED' },
       { memberId: secondWorker.id, state: 'APPLICATION_REJECTED' },
     ]);
-    expect(await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, singleCandidateQuestId))).toEqual([
-      { status: 'QUEST_ASSIGNED' },
-    ]);
+    expect(
+      await db
+        .select({ status: quest.questStatus })
+        .from(quest)
+        .where(eq(quest.id, singleCandidateQuestId))
+    ).toEqual([{ status: 'QUEST_ASSIGNED' }]);
     expect(secondApplicationId).not.toBe(firstApplicationId);
 
     const groupFcfsQuestId = await createOpenGroupCandidateQuest({
@@ -1288,40 +1392,49 @@ describe('Quest API v1 to v2 migration verification', () => {
       `/api/v2/quests/${groupFcfsQuestId}/join`,
       'POST',
       thirdWorker.id,
-      { 'idempotency-key': 'quest-migration-matrix-group-fcfs-join-one' },
+      { 'idempotency-key': 'quest-migration-matrix-group-fcfs-join-one' }
     );
     const groupFcfsSecondJoin = await request(
       `/api/v2/quests/${groupFcfsQuestId}/join`,
       'POST',
       fourthWorker.id,
-      { 'idempotency-key': 'quest-migration-matrix-group-fcfs-join-two' },
+      { 'idempotency-key': 'quest-migration-matrix-group-fcfs-join-two' }
     );
     expect([groupFcfsFirstJoin.status, groupFcfsSecondJoin.status]).toEqual([200, 200]);
-    expect(await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, groupFcfsQuestId))).toEqual([
-      { status: 'QUEST_ASSIGNED' },
-    ]);
-    expect(await db.select({ workerId: questAssignment.workerId }).from(questAssignment)
-      .where(eq(questAssignment.questId, groupFcfsQuestId))).toHaveLength(2);
+    expect(
+      await db
+        .select({ status: quest.questStatus })
+        .from(quest)
+        .where(eq(quest.id, groupFcfsQuestId))
+    ).toEqual([{ status: 'QUEST_ASSIGNED' }]);
+    expect(
+      await db
+        .select({ workerId: questAssignment.workerId })
+        .from(questAssignment)
+        .where(eq(questAssignment.questId, groupFcfsQuestId))
+    ).toHaveLength(2);
 
     const groupCandidateQuestId = await createOpenGroupCandidateQuest();
     const groupCandidateTeam = await createTeam(
       groupCandidateQuestId,
       worker.id,
       2,
-      'quest-migration-matrix-group-candidate-create',
+      'quest-migration-matrix-group-candidate-create'
     );
     const groupCandidateJoin = await joinTeam(
       groupCandidateQuestId,
       groupCandidateTeam.id,
       secondWorker.id,
       groupCandidateTeam.joinCode,
-      'quest-migration-matrix-group-candidate-join',
+      'quest-migration-matrix-group-candidate-join'
     );
     expect(groupCandidateJoin.status).toBe(200);
-    expect(await db.select({ state: questCandidateTeamV2.state }).from(questCandidateTeamV2)
-      .where(eq(questCandidateTeamV2.id, groupCandidateTeam.id))).toEqual([
-      { state: 'TEAM_FORMING' },
-    ]);
+    expect(
+      await db
+        .select({ state: questCandidateTeamV2.state })
+        .from(questCandidateTeamV2)
+        .where(eq(questCandidateTeamV2.id, groupCandidateTeam.id))
+    ).toEqual([{ state: 'TEAM_FORMING' }]);
   });
 
   it('enforces actor, visibility, mode, participation, state, timing, and missing-resource boundaries', async () => {
@@ -1332,14 +1445,14 @@ describe('Quest API v1 to v2 migration verification', () => {
     const outsiderRead = await request(
       `/api/v2/quests/${questId}/teams/${team.id}`,
       'GET',
-      thirdWorker.id,
+      thirdWorker.id
     );
     expect(outsiderRead.status).toBe(404);
     expect((await outsiderRead.json()).error.code).toBe('TEAM_NOT_FOUND');
     const missingTeamRead = await request(
       `/api/v2/quests/${questId}/teams/${randomUUID()}`,
       'GET',
-      worker.id,
+      worker.id
     );
     expect(missingTeamRead.status).toBe(404);
     expect((await missingTeamRead.json()).error.code).toBe('TEAM_NOT_FOUND');
@@ -1352,14 +1465,14 @@ describe('Quest API v1 to v2 migration verification', () => {
       team.id,
       secondWorker.id,
       team.joinCode,
-      'quest-migration-boundary-team-join',
+      'quest-migration-boundary-team-join'
     );
     const nonLeaderUpdate = await jsonRequest(
       `/api/v2/quests/${questId}/teams/${team.id}`,
       'PATCH',
       secondWorker.id,
       { name: 'Unauthorized Team Name' },
-      'quest-migration-boundary-non-leader-update',
+      'quest-migration-boundary-non-leader-update'
     );
     expect(nonLeaderUpdate.status).toBe(409);
     expect((await nonLeaderUpdate.json()).error.code).toBe('TEAM_LEADER_REQUIRED');
@@ -1367,7 +1480,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       `/api/v2/quests/${questId}/teams/${team.id}/select`,
       'POST',
       worker.id,
-      { 'idempotency-key': 'quest-migration-boundary-worker-selection' },
+      { 'idempotency-key': 'quest-migration-boundary-worker-selection' }
     );
     expect(workerSelection.status).toBe(409);
     expect((await workerSelection.json()).error.code).toBe('CANDIDATE_SELECTION_NOT_ALLOWED');
@@ -1383,7 +1496,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       thirdWorker.id,
       { name: 'Wrong Mode Team', headcount: 2 },
-      'quest-migration-boundary-wrong-mode',
+      'quest-migration-boundary-wrong-mode'
     );
     expect(wrongModeTeam.status).toBe(409);
     expect((await wrongModeTeam.json()).error.code).toBe('QUEST_MODE_NOT_ALLOWED');
@@ -1402,10 +1515,12 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       thirdWorker.id,
       { name: 'Wrong Shape Team', headcount: 2 },
-      'quest-migration-boundary-wrong-participation',
+      'quest-migration-boundary-wrong-participation'
     );
     expect(wrongParticipationTeam.status).toBe(409);
-    expect((await wrongParticipationTeam.json()).error.code).toBe('QUEST_PARTICIPATION_NOT_ALLOWED');
+    expect((await wrongParticipationTeam.json()).error.code).toBe(
+      'QUEST_PARTICIPATION_NOT_ALLOWED'
+    );
 
     const closedQuestId = await createOpenGroupCandidateQuest({ questStatus: 'QUEST_ASSIGNED' });
     const closedTeam = await jsonRequest(
@@ -1413,7 +1528,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       fourthWorker.id,
       { name: 'Closed Quest Team', headcount: 2 },
-      'quest-migration-boundary-closed-state',
+      'quest-migration-boundary-closed-state'
     );
     expect(closedTeam.status).toBe(409);
     expect((await closedTeam.json()).error.code).toBe('QUEST_NOT_OPEN');
@@ -1426,7 +1541,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       fourthWorker.id,
       { name: 'Started Quest Team', headcount: 2 },
-      'quest-migration-boundary-start-time',
+      'quest-migration-boundary-start-time'
     );
     expect(startedTeam.status).toBe(409);
     expect((await startedTeam.json()).error.code).toBe('QUEST_NOT_OPEN');
@@ -1435,21 +1550,31 @@ describe('Quest API v1 to v2 migration verification', () => {
   it('verifies real PostgreSQL effects across Candidate Team, Assignment, Work Conversation, Proof, Reward, and Reputation', async () => {
     authenticate();
     const questId = await createOpenGroupCandidateQuest();
-    const firstTeam = await createTeam(questId, worker.id, 2, 'quest-migration-concurrent-team-one');
+    const firstTeam = await createTeam(
+      questId,
+      worker.id,
+      2,
+      'quest-migration-concurrent-team-one'
+    );
     await joinTeam(
       questId,
       firstTeam.id,
       secondWorker.id,
       firstTeam.joinCode,
-      'quest-migration-concurrent-team-one-join',
+      'quest-migration-concurrent-team-one-join'
     );
-    const secondTeam = await createTeam(questId, thirdWorker.id, 2, 'quest-migration-concurrent-team-two');
+    const secondTeam = await createTeam(
+      questId,
+      thirdWorker.id,
+      2,
+      'quest-migration-concurrent-team-two'
+    );
     await joinTeam(
       questId,
       secondTeam.id,
       fourthWorker.id,
       secondTeam.joinCode,
-      'quest-migration-concurrent-team-two-join',
+      'quest-migration-concurrent-team-two-join'
     );
 
     const firstFileId = await createFile(worker.id);
@@ -1459,14 +1584,14 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       worker.id,
       { text: 'First team work', fileIds: [firstFileId] },
-      'quest-migration-concurrent-team-one-submit',
+      'quest-migration-concurrent-team-one-submit'
     );
     const secondSubmit = await jsonRequest(
       `/api/v2/quests/${questId}/teams/${secondTeam.id}/submit`,
       'POST',
       thirdWorker.id,
       { text: 'Second team work', fileIds: [secondFileId] },
-      'quest-migration-concurrent-team-two-submit',
+      'quest-migration-concurrent-team-two-submit'
     );
     expect(firstSubmit.status).toBe(200);
     expect(secondSubmit.status).toBe(200);
@@ -1477,18 +1602,12 @@ describe('Quest API v1 to v2 migration verification', () => {
       'quest-migration-concurrent-team-two-select',
     ];
     const selectionResponses = await Promise.all([
-      request(
-        `/api/v2/quests/${questId}/teams/${firstTeam.id}/select`,
-        'POST',
-        hirer.id,
-        { 'idempotency-key': selectionKeys[0] },
-      ),
-      request(
-        `/api/v2/quests/${questId}/teams/${secondTeam.id}/select`,
-        'POST',
-        hirer.id,
-        { 'idempotency-key': selectionKeys[1] },
-      ),
+      request(`/api/v2/quests/${questId}/teams/${firstTeam.id}/select`, 'POST', hirer.id, {
+        'idempotency-key': selectionKeys[0],
+      }),
+      request(`/api/v2/quests/${questId}/teams/${secondTeam.id}/select`, 'POST', hirer.id, {
+        'idempotency-key': selectionKeys[1],
+      }),
     ]);
     expect(selectionResponses.map(({ status }) => status).sort()).toEqual([200, 409]);
     const winnerIndex = selectionResponses.findIndex(({ status }) => status === 200);
@@ -1503,13 +1622,17 @@ describe('Quest API v1 to v2 migration verification', () => {
       `/api/v2/quests/${questId}/teams/${winningTeam.id}/select`,
       'POST',
       hirer.id,
-      { 'idempotency-key': selectionKeys[winnerIndex] },
+      { 'idempotency-key': selectionKeys[winnerIndex] }
     );
     expect(selectionReplay.status).toBe(200);
     expect(await selectionReplay.json()).toEqual(winningSelectionBody);
 
     const [conversation] = await db
-      .select({ id: chatConversation.id, questStatus: chatConversation.questStatus, readOnlyAt: chatConversation.readOnlyAt })
+      .select({
+        id: chatConversation.id,
+        questStatus: chatConversation.questStatus,
+        readOnlyAt: chatConversation.readOnlyAt,
+      })
       .from(chatConversation)
       .where(eq(chatConversation.questId, questId));
     expect(conversation).toMatchObject({ questStatus: 'QUEST_ASSIGNED', readOnlyAt: null });
@@ -1517,17 +1640,25 @@ describe('Quest API v1 to v2 migration verification', () => {
       .select({ memberId: chatMembership.memberId, role: chatMembership.role })
       .from(chatMembership)
       .where(eq(chatMembership.conversationId, conversation!.id));
-    expect(memberships).toEqual(expect.arrayContaining([
-      { memberId: hirer.id, role: 'HIRER' },
-      { memberId: winningTeam.leaderId, role: 'WORKER' },
-    ]));
+    expect(memberships).toEqual(
+      expect.arrayContaining([
+        { memberId: hirer.id, role: 'HIRER' },
+        { memberId: winningTeam.leaderId, role: 'WORKER' },
+      ])
+    );
     expect(memberships).toHaveLength(3);
-    expect(await db.select({ kind: chatMessage.kind }).from(chatMessage)
-      .where(eq(chatMessage.conversationId, conversation!.id))).toHaveLength(3);
-    expect(await db.select({ processingStatus: chatTransitionCommand.processingStatus })
-      .from(chatTransitionCommand).where(eq(chatTransitionCommand.questId, questId))).toEqual([
-      { processingStatus: 'COMPLETED' },
-    ]);
+    expect(
+      await db
+        .select({ kind: chatMessage.kind })
+        .from(chatMessage)
+        .where(eq(chatMessage.conversationId, conversation!.id))
+    ).toHaveLength(3);
+    expect(
+      await db
+        .select({ processingStatus: chatTransitionCommand.processingStatus })
+        .from(chatTransitionCommand)
+        .where(eq(chatTransitionCommand.questId, questId))
+    ).toEqual([{ processingStatus: 'COMPLETED' }]);
 
     await db.update(quest).set({ questStatus: 'QUEST_IN_PROGRESS' }).where(eq(quest.id, questId));
     await reserveQuest(questId, 2_040);
@@ -1537,7 +1668,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       winningTeam.leaderId,
       { description: 'Final team proof', fileIds: [proofFileId] },
-      'quest-migration-proof-create',
+      'quest-migration-proof-create'
     );
     expect(proofCreated.status).toBe(201);
     const proofSubmissionId = (await proofCreated.json()).data.id as string;
@@ -1545,7 +1676,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/submit`,
       'POST',
       winningTeam.leaderId,
-      { 'idempotency-key': 'quest-migration-proof-submit' },
+      { 'idempotency-key': 'quest-migration-proof-submit' }
     );
     expect(proofSent.status).toBe(200);
     expect((await proofSent.json()).data.status).toBe('PROOF_PENDING');
@@ -1555,7 +1686,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       hirer.id,
       { decision: 'PROOF_APPROVED' },
-      'quest-migration-proof-review',
+      'quest-migration-proof-review'
     );
     expect(approved.status).toBe(200);
     const approvedBody = await approved.json();
@@ -1568,29 +1699,39 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       hirer.id,
       { decision: 'PROOF_APPROVED' },
-      'quest-migration-proof-review',
+      'quest-migration-proof-review'
     );
     expect(approvedReplay.status).toBe(200);
     expect(await approvedReplay.json()).toEqual(approvedBody);
 
-    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status)
-      .toBe('QUEST_COMPLETED');
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_COMPLETED');
     const assignments = await db
       .select({ workerId: questAssignment.workerId, status: questAssignment.assignmentStatus })
       .from(questAssignment)
       .where(eq(questAssignment.questId, questId));
     expect(assignments).toHaveLength(2);
     expect(assignments.every(({ status }) => status === 'ASSIGNMENT_COMPLETED')).toBe(true);
-    expect(await db.select({ state: questCandidateTeamV2.state })
-      .from(questCandidateTeamV2).where(eq(questCandidateTeamV2.id, winningTeam.id))).toEqual([
-      { state: 'TEAM_SELECTED' },
-    ]);
-    expect(await db.select({ memberId: questCandidateTeamV2Member.memberId })
-      .from(questCandidateTeamV2Member).where(eq(questCandidateTeamV2Member.teamId, winningTeam.id))).toHaveLength(2);
-    expect(await db.select({ status: questV2ProofSubmission.submissionStatus })
-      .from(questV2ProofSubmission).where(eq(questV2ProofSubmission.id, proofSubmissionId))).toEqual([
-      { status: 'PROOF_APPROVED' },
-    ]);
+    expect(
+      await db
+        .select({ state: questCandidateTeamV2.state })
+        .from(questCandidateTeamV2)
+        .where(eq(questCandidateTeamV2.id, winningTeam.id))
+    ).toEqual([{ state: 'TEAM_SELECTED' }]);
+    expect(
+      await db
+        .select({ memberId: questCandidateTeamV2Member.memberId })
+        .from(questCandidateTeamV2Member)
+        .where(eq(questCandidateTeamV2Member.teamId, winningTeam.id))
+    ).toHaveLength(2);
+    expect(
+      await db
+        .select({ status: questV2ProofSubmission.submissionStatus })
+        .from(questV2ProofSubmission)
+        .where(eq(questV2ProofSubmission.id, proofSubmissionId))
+    ).toEqual([{ status: 'PROOF_APPROVED' }]);
 
     const [reservation] = await db
       .select({
@@ -1602,8 +1743,10 @@ describe('Quest API v1 to v2 migration verification', () => {
       .from(walletFundingReservation)
       .where(eq(walletFundingReservation.callerReference, questId));
     expect(reservation).toMatchObject({ status: 'SETTLED', remainingSatang: 0 });
-    const [reserveLedger] = await db.select({ eventType: walletLedgerTransaction.eventType })
-      .from(walletLedgerTransaction).where(eq(walletLedgerTransaction.id, reservation!.createdLedgerTransactionId));
+    const [reserveLedger] = await db
+      .select({ eventType: walletLedgerTransaction.eventType })
+      .from(walletLedgerTransaction)
+      .where(eq(walletLedgerTransaction.id, reservation!.createdLedgerTransactionId));
     expect(reserveLedger?.eventType).toBe('FUNDING_RESERVE');
     const settlements = await db
       .select({
@@ -1615,31 +1758,50 @@ describe('Quest API v1 to v2 migration verification', () => {
       .from(walletFundingReservationSettlement)
       .where(eq(walletFundingReservationSettlement.reservationId, reservation!.id));
     expect(settlements).toHaveLength(2);
-    expect(settlements.every(({ recipientUserId }) => recipientUserId === winningTeam.leaderId)).toBe(true);
-    expect(settlements.reduce((total, settlement) => total + settlement.recipientAmountSatang, 0)).toBe(2_000);
-    expect(settlements.reduce((total, settlement) => total + settlement.platformFeeSatang, 0)).toBe(40);
+    expect(
+      settlements.every(({ recipientUserId }) => recipientUserId === winningTeam.leaderId)
+    ).toBe(true);
+    expect(
+      settlements.reduce((total, settlement) => total + settlement.recipientAmountSatang, 0)
+    ).toBe(2_000);
+    expect(settlements.reduce((total, settlement) => total + settlement.platformFeeSatang, 0)).toBe(
+      40
+    );
     const settlementLedgerIds = settlements.map(({ ledgerTransactionId }) => ledgerTransactionId);
-    const settlementLedgers = await db.select({
-      id: walletLedgerTransaction.id,
-      eventType: walletLedgerTransaction.eventType,
-    }).from(walletLedgerTransaction).where(inArray(walletLedgerTransaction.id, settlementLedgerIds));
+    const settlementLedgers = await db
+      .select({
+        id: walletLedgerTransaction.id,
+        eventType: walletLedgerTransaction.eventType,
+      })
+      .from(walletLedgerTransaction)
+      .where(inArray(walletLedgerTransaction.id, settlementLedgerIds));
     expect(settlementLedgers).toHaveLength(2);
-    expect(settlementLedgers.every(({ eventType }) => eventType === 'FUNDING_SETTLEMENT')).toBe(true);
-    const postings = await db.select({
-      transactionId: walletLedgerPosting.transactionId,
-      amountSatang: walletLedgerPosting.amountSatang,
-    }).from(walletLedgerPosting).where(inArray(walletLedgerPosting.transactionId, settlementLedgerIds));
+    expect(settlementLedgers.every(({ eventType }) => eventType === 'FUNDING_SETTLEMENT')).toBe(
+      true
+    );
+    const postings = await db
+      .select({
+        transactionId: walletLedgerPosting.transactionId,
+        amountSatang: walletLedgerPosting.amountSatang,
+      })
+      .from(walletLedgerPosting)
+      .where(inArray(walletLedgerPosting.transactionId, settlementLedgerIds));
     expect(postings).toHaveLength(6);
-    expect(settlementLedgerIds.every((transactionId) => postings
-      .filter((posting) => posting.transactionId === transactionId)
-      .reduce((total, { amountSatang }) => total + amountSatang, 0) === 0)).toBe(true);
+    expect(
+      settlementLedgerIds.every(
+        (transactionId) =>
+          postings
+            .filter((posting) => posting.transactionId === transactionId)
+            .reduce((total, { amountSatang }) => total + amountSatang, 0) === 0
+      )
+    ).toBe(true);
 
     const reviewResponse = await jsonRequest(
       `/api/v2/quests/${questId}/reviews`,
       'POST',
       hirer.id,
       { revieweeId: winningTeam.leaderId, rating: 5 },
-      'quest-migration-review-create',
+      'quest-migration-review-create'
     );
     expect(reviewResponse.status).toBe(200);
     const reviewBody = await reviewResponse.json();
@@ -1649,22 +1811,27 @@ describe('Quest API v1 to v2 migration verification', () => {
         'POST',
         hirer.id,
         { revieweeId: winningTeam.leaderId, rating: 5 },
-        'quest-migration-review-create',
+        'quest-migration-review-create'
       ),
       jsonRequest(
         `/api/v2/quests/${questId}/reviews`,
         'POST',
         hirer.id,
         { revieweeId: winningTeam.leaderId, rating: 5 },
-        'quest-migration-review-create',
+        'quest-migration-review-create'
       ),
     ]);
     expect(reviewReplays.map(({ status }) => status)).toEqual([200, 200]);
-    expect(await Promise.all(reviewReplays.map((response) => response.json()))).toEqual([reviewBody, reviewBody]);
-    expect(await db.select({ reviewerId: questReview.reviewerId, revieweeId: questReview.revieweeId })
-      .from(questReview).where(eq(questReview.questId, questId))).toEqual([
-      { reviewerId: hirer.id, revieweeId: winningTeam.leaderId },
+    expect(await Promise.all(reviewReplays.map((response) => response.json()))).toEqual([
+      reviewBody,
+      reviewBody,
     ]);
+    expect(
+      await db
+        .select({ reviewerId: questReview.reviewerId, revieweeId: questReview.revieweeId })
+        .from(questReview)
+        .where(eq(questReview.questId, questId))
+    ).toEqual([{ reviewerId: hirer.id, revieweeId: winningTeam.leaderId }]);
     const reputation = await request('/api/v1/profile/reputation', 'GET', winningTeam.leaderId);
     expect(reputation.status).toBe(200);
     expect((await reputation.json()).data).toMatchObject({
@@ -1674,8 +1841,10 @@ describe('Quest API v1 to v2 migration verification', () => {
     const v1Read = await request(`/api/v1/quests/${questId}`, 'GET', hirer.id);
     expect(v1Read.status).toBe(404);
     expect((await v1Read.json()).error.code).toBe('QUEST_NOT_FOUND');
-    const [completedConversation] = await db.select({ readOnlyAt: chatConversation.readOnlyAt })
-      .from(chatConversation).where(eq(chatConversation.questId, questId));
+    const [completedConversation] = await db
+      .select({ readOnlyAt: chatConversation.readOnlyAt })
+      .from(chatConversation)
+      .where(eq(chatConversation.questId, questId));
     expect(completedConversation?.readOnlyAt).toBeInstanceOf(Date);
   });
 
@@ -1688,16 +1857,18 @@ describe('Quest API v1 to v2 migration verification', () => {
       proofRequired: false,
       workerIds: [worker.id],
     });
-    await createWorkConversationForAssignments(proofFree.questId, [{
-      assignmentId: proofFree.assignmentIds[0]!,
-      workerId: worker.id,
-    }]);
+    await createWorkConversationForAssignments(proofFree.questId, [
+      {
+        assignmentId: proofFree.assignmentIds[0]!,
+        workerId: worker.id,
+      },
+    ]);
     await reserveQuest(proofFree.questId, 1_020);
     const confirmed = await request(
       `/api/v2/quests/${proofFree.questId}/completion-confirmation`,
       'POST',
       worker.id,
-      { 'idempotency-key': 'quest-migration-proof-free-confirm' },
+      { 'idempotency-key': 'quest-migration-proof-free-confirm' }
     );
     expect(confirmed.status).toBe(200);
     expect((await confirmed.json()).data).toMatchObject({
@@ -1711,24 +1882,38 @@ describe('Quest API v1 to v2 migration verification', () => {
       proofRequired: true,
       workerIds: [secondWorker.id, thirdWorker.id],
     });
-    await createWorkConversationForAssignments(groupFcfs.questId, groupFcfs.assignmentIds.map((assignmentId, index) => ({
-      assignmentId,
-      workerId: [secondWorker.id, thirdWorker.id][index]!,
-    })));
+    await createWorkConversationForAssignments(
+      groupFcfs.questId,
+      groupFcfs.assignmentIds.map((assignmentId, index) => ({
+        assignmentId,
+        workerId: [secondWorker.id, thirdWorker.id][index]!,
+      }))
+    );
     await reserveQuest(groupFcfs.questId, 2_040);
-    const firstGroupProof = await createAndSendProof(groupFcfs.questId, secondWorker.id, 'quest-migration-group-fcfs-proof-one');
-    const secondGroupProof = await createAndSendProof(groupFcfs.questId, thirdWorker.id, 'quest-migration-group-fcfs-proof-two');
-    expect(await db.select({ workerId: questV2ProofSubmission.workerId }).from(questV2ProofSubmission)
-      .where(eq(questV2ProofSubmission.questId, groupFcfs.questId))).toEqual(expect.arrayContaining([
-      { workerId: secondWorker.id },
-      { workerId: thirdWorker.id },
-    ]));
+    const firstGroupProof = await createAndSendProof(
+      groupFcfs.questId,
+      secondWorker.id,
+      'quest-migration-group-fcfs-proof-one'
+    );
+    const secondGroupProof = await createAndSendProof(
+      groupFcfs.questId,
+      thirdWorker.id,
+      'quest-migration-group-fcfs-proof-two'
+    );
+    expect(
+      await db
+        .select({ workerId: questV2ProofSubmission.workerId })
+        .from(questV2ProofSubmission)
+        .where(eq(questV2ProofSubmission.questId, groupFcfs.questId))
+    ).toEqual(
+      expect.arrayContaining([{ workerId: secondWorker.id }, { workerId: thirdWorker.id }])
+    );
     const firstGroupReview = await jsonRequest(
       `/api/v2/quests/${groupFcfs.questId}/proof-submissions/${firstGroupProof.proofSubmissionId}/review`,
       'POST',
       hirer.id,
       { decision: 'PROOF_APPROVED' },
-      'quest-migration-group-fcfs-proof-one-review',
+      'quest-migration-group-fcfs-proof-one-review'
     );
     expect(firstGroupReview.status).toBe(200);
     expect((await firstGroupReview.json()).data).toMatchObject({
@@ -1740,7 +1925,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       hirer.id,
       { decision: 'PROOF_APPROVED' },
-      'quest-migration-group-fcfs-proof-two-review',
+      'quest-migration-group-fcfs-proof-two-review'
     );
     expect(secondGroupReview.status).toBe(200);
     expect((await secondGroupReview.json()).data).toMatchObject({
@@ -1754,18 +1939,24 @@ describe('Quest API v1 to v2 migration verification', () => {
       proofRequired: true,
       workerIds: [fourthWorker.id],
     });
-    await createWorkConversationForAssignments(singleCandidate.questId, [{
-      assignmentId: singleCandidate.assignmentIds[0]!,
-      workerId: fourthWorker.id,
-    }]);
+    await createWorkConversationForAssignments(singleCandidate.questId, [
+      {
+        assignmentId: singleCandidate.assignmentIds[0]!,
+        workerId: fourthWorker.id,
+      },
+    ]);
     await reserveQuest(singleCandidate.questId, 1_020);
-    const candidateProof = await createAndSendProof(singleCandidate.questId, fourthWorker.id, 'quest-migration-single-candidate-proof');
+    const candidateProof = await createAndSendProof(
+      singleCandidate.questId,
+      fourthWorker.id,
+      'quest-migration-single-candidate-proof'
+    );
     const candidateReview = await jsonRequest(
       `/api/v2/quests/${singleCandidate.questId}/proof-submissions/${candidateProof.proofSubmissionId}/review`,
       'POST',
       hirer.id,
       { decision: 'PROOF_APPROVED' },
-      'quest-migration-single-candidate-proof-review',
+      'quest-migration-single-candidate-proof-review'
     );
     expect(candidateReview.status).toBe(200);
     expect((await candidateReview.json()).data).toMatchObject({
@@ -1779,37 +1970,58 @@ describe('Quest API v1 to v2 migration verification', () => {
       proofRequired: true,
       workerIds: [worker.id, secondWorker.id],
     });
-    await createWorkConversationForAssignments(failedQuest.questId, failedQuest.assignmentIds.map((assignmentId, index) => ({
-      assignmentId,
-      workerId: [worker.id, secondWorker.id][index]!,
-    })));
+    await createWorkConversationForAssignments(
+      failedQuest.questId,
+      failedQuest.assignmentIds.map((assignmentId, index) => ({
+        assignmentId,
+        workerId: [worker.id, secondWorker.id][index]!,
+      }))
+    );
     await reserveQuest(failedQuest.questId, 2_040);
-    const pendingProof = await createAndSendProof(failedQuest.questId, worker.id, 'quest-migration-failed-proof-pending');
-    const rejectedProof = await createAndSendProof(failedQuest.questId, secondWorker.id, 'quest-migration-failed-proof-rejected');
+    const pendingProof = await createAndSendProof(
+      failedQuest.questId,
+      worker.id,
+      'quest-migration-failed-proof-pending'
+    );
+    const rejectedProof = await createAndSendProof(
+      failedQuest.questId,
+      secondWorker.id,
+      'quest-migration-failed-proof-rejected'
+    );
     const rejectedReview = await jsonRequest(
       `/api/v2/quests/${failedQuest.questId}/proof-submissions/${rejectedProof.proofSubmissionId}/review`,
       'POST',
       hirer.id,
       { decision: 'PROOF_NOT_APPROVED', reason: 'The submitted work is incomplete' },
-      'quest-migration-failed-proof-review',
+      'quest-migration-failed-proof-review'
     );
     expect(rejectedReview.status).toBe(200);
     expect((await rejectedReview.json()).data).toMatchObject({
       proof: { status: 'PROOF_NOT_APPROVED' },
       questStatus: 'QUEST_FAILED',
     });
-    expect((await db.select({ status: questV2ProofSubmission.submissionStatus })
-      .from(questV2ProofSubmission).where(eq(questV2ProofSubmission.id, pendingProof.proofSubmissionId)))[0]?.status)
-      .toBe('PROOF_PENDING');
-    expect((await db.select({ status: walletFundingReservation.status })
-      .from(walletFundingReservation).where(eq(walletFundingReservation.callerReference, failedQuest.questId)))[0]?.status)
-      .toBe('ACTIVE');
+    expect(
+      (
+        await db
+          .select({ status: questV2ProofSubmission.submissionStatus })
+          .from(questV2ProofSubmission)
+          .where(eq(questV2ProofSubmission.id, pendingProof.proofSubmissionId))
+      )[0]?.status
+    ).toBe('PROOF_PENDING');
+    expect(
+      (
+        await db
+          .select({ status: walletFundingReservation.status })
+          .from(walletFundingReservation)
+          .where(eq(walletFundingReservation.callerReference, failedQuest.questId))
+      )[0]?.status
+    ).toBe('ACTIVE');
     const pendingReview = await jsonRequest(
       `/api/v2/quests/${failedQuest.questId}/proof-submissions/${pendingProof.proofSubmissionId}/review`,
       'POST',
       hirer.id,
       { decision: 'PROOF_APPROVED' },
-      'quest-migration-failed-proof-pending-review',
+      'quest-migration-failed-proof-pending-review'
     );
     expect(pendingReview.status).toBe(200);
     expect((await pendingReview.json()).data).toMatchObject({
@@ -1823,29 +2035,49 @@ describe('Quest API v1 to v2 migration verification', () => {
       proofRequired: true,
       workerIds: [thirdWorker.id],
     });
-    await createWorkConversationForAssignments(autoQuest.questId, [{
-      assignmentId: autoQuest.assignmentIds[0]!,
-      workerId: thirdWorker.id,
-    }]);
+    await createWorkConversationForAssignments(autoQuest.questId, [
+      {
+        assignmentId: autoQuest.assignmentIds[0]!,
+        workerId: thirdWorker.id,
+      },
+    ]);
     await reserveQuest(autoQuest.questId, 1_020);
-    const autoProof = await createAndSendProof(autoQuest.questId, thirdWorker.id, 'quest-migration-auto-proof');
+    const autoProof = await createAndSendProof(
+      autoQuest.questId,
+      thirdWorker.id,
+      'quest-migration-auto-proof'
+    );
     const sentAt = new Date(Date.now() - 24 * 60 * 60 * 1_000);
-    await db.update(questV2ProofSubmission).set({ sentAt }).where(eq(questV2ProofSubmission.id, autoProof.proofSubmissionId));
+    await db
+      .update(questV2ProofSubmission)
+      .set({ sentAt })
+      .where(eq(questV2ProofSubmission.id, autoProof.proofSubmissionId));
     const beforeAutoApproval = await autoApproveDueQuestV2Proofs(
       new Date(sentAt.getTime() + 24 * 60 * 60 * 1_000 - 1),
-      10,
+      10
     );
     expect(beforeAutoApproval).not.toContain(autoProof.proofSubmissionId);
     const autoApproved = await autoApproveDueQuestV2Proofs(
       new Date(sentAt.getTime() + 24 * 60 * 60 * 1_000),
-      10,
+      10
     );
     expect(autoApproved).toContain(autoProof.proofSubmissionId);
-    expect((await db.select({ status: questV2ProofSubmission.submissionStatus })
-      .from(questV2ProofSubmission).where(eq(questV2ProofSubmission.id, autoProof.proofSubmissionId)))[0]?.status)
-      .toBe('PROOF_APPROVED');
-    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, autoQuest.questId)))[0]?.status)
-      .toBe('QUEST_COMPLETED');
+    expect(
+      (
+        await db
+          .select({ status: questV2ProofSubmission.submissionStatus })
+          .from(questV2ProofSubmission)
+          .where(eq(questV2ProofSubmission.id, autoProof.proofSubmissionId))
+      )[0]?.status
+    ).toBe('PROOF_APPROVED');
+    expect(
+      (
+        await db
+          .select({ status: quest.questStatus })
+          .from(quest)
+          .where(eq(quest.id, autoQuest.questId))
+      )[0]?.status
+    ).toBe('QUEST_COMPLETED');
   });
 
   it('rolls back Candidate Team selection atomically and retries the same command after Work Chat failure', async () => {
@@ -1857,7 +2089,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       team.id,
       secondWorker.id,
       team.joinCode,
-      'quest-migration-rollback-team-join',
+      'quest-migration-rollback-team-join'
     );
     const submissionFileId = await createFile(worker.id);
     const submitted = await jsonRequest(
@@ -1865,7 +2097,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       worker.id,
       { text: 'Rollback team work', fileIds: [submissionFileId] },
-      'quest-migration-rollback-team-submit',
+      'quest-migration-rollback-team-submit'
     );
     expect(submitted.status).toBe(200);
 
@@ -1875,17 +2107,28 @@ describe('Quest API v1 to v2 migration verification', () => {
       `/api/v2/quests/${questId}/teams/${team.id}/select`,
       'POST',
       hirer.id,
-      { 'idempotency-key': key },
+      { 'idempotency-key': key }
     );
     expect(failed.status).toBe(503);
     expect((await failed.json()).error.code).toBe('WORK_CHAT_UNAVAILABLE');
-    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status)
-      .toBe('QUEST_OPEN');
-    expect((await db.select({ state: questCandidateTeamV2.state })
-      .from(questCandidateTeamV2).where(eq(questCandidateTeamV2.id, team.id)))[0]?.state)
-      .toBe('TEAM_SUBMITTED');
-    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(0);
-    expect(await db.select().from(chatConversation).where(eq(chatConversation.questId, questId))).toHaveLength(0);
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_OPEN');
+    expect(
+      (
+        await db
+          .select({ state: questCandidateTeamV2.state })
+          .from(questCandidateTeamV2)
+          .where(eq(questCandidateTeamV2.id, team.id))
+      )[0]?.state
+    ).toBe('TEAM_SUBMITTED');
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
+    ).toHaveLength(0);
+    expect(
+      await db.select().from(chatConversation).where(eq(chatConversation.questId, questId))
+    ).toHaveLength(0);
 
     writerFailure = undefined;
     configureQuestWorkChatMembershipWriter(createWorkChatMembershipWriter());
@@ -1893,28 +2136,29 @@ describe('Quest API v1 to v2 migration verification', () => {
       `/api/v2/quests/${questId}/teams/${team.id}/select`,
       'POST',
       hirer.id,
-      { 'idempotency-key': key },
+      { 'idempotency-key': key }
     );
     expect(retry.status).toBe(200);
     const retryBody = await retry.json();
     const concurrentReplays = await Promise.all([
-      request(
-        `/api/v2/quests/${questId}/teams/${team.id}/select`,
-        'POST',
-        hirer.id,
-        { 'idempotency-key': key },
-      ),
-      request(
-        `/api/v2/quests/${questId}/teams/${team.id}/select`,
-        'POST',
-        hirer.id,
-        { 'idempotency-key': key },
-      ),
+      request(`/api/v2/quests/${questId}/teams/${team.id}/select`, 'POST', hirer.id, {
+        'idempotency-key': key,
+      }),
+      request(`/api/v2/quests/${questId}/teams/${team.id}/select`, 'POST', hirer.id, {
+        'idempotency-key': key,
+      }),
     ]);
     expect(concurrentReplays.map(({ status }) => status)).toEqual([200, 200]);
-    expect(await Promise.all(concurrentReplays.map((response) => response.json()))).toEqual([retryBody, retryBody]);
-    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(2);
-    expect(await db.select().from(chatConversation).where(eq(chatConversation.questId, questId))).toHaveLength(1);
+    expect(await Promise.all(concurrentReplays.map((response) => response.json()))).toEqual([
+      retryBody,
+      retryBody,
+    ]);
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
+    ).toHaveLength(2);
+    expect(
+      await db.select().from(chatConversation).where(eq(chatConversation.questId, questId))
+    ).toHaveLength(1);
   });
 
   it('rolls back Funding Reservation, Ledger Transaction, Reward, and Quest effects when settlement fails', async () => {
@@ -1936,29 +2180,45 @@ describe('Quest API v1 to v2 migration verification', () => {
       assignmentStatus: 'ASSIGNMENT_ACTIVE',
     });
     const reservationId = await reserveQuest(questId, 1_020);
-    spyOn(walletModule, 'settleFundingReservation').mockRejectedValue(new Error('Ledger unavailable'));
-
-    const response = await request(
-      `/api/v2/quests/${questId}/cancel`,
-      'POST',
-      hirer.id,
-      { 'idempotency-key': 'quest-migration-settlement-failure' },
+    spyOn(walletModule, 'settleFundingReservation').mockRejectedValue(
+      new Error('Ledger unavailable')
     );
+
+    const response = await request(`/api/v2/quests/${questId}/cancel`, 'POST', hirer.id, {
+      'idempotency-key': 'quest-migration-settlement-failure',
+    });
     expect(response.status).toBe(500);
     expect((await response.json()).error.code).toBe('INTERNAL_ERROR');
-    expect(await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId))).toEqual([
-      { status: 'QUEST_ASSIGNED' },
-    ]);
-    expect(await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
-      .from(walletFundingReservation).where(eq(walletFundingReservation.id, reservationId))).toEqual([
-      { status: 'ACTIVE', remainingSatang: 1_020 },
-    ]);
-    expect(await db.select().from(walletFundingReservationSettlement)
-      .where(eq(walletFundingReservationSettlement.reservationId, reservationId))).toHaveLength(0);
-    expect(await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment)
-      .where(eq(questAssignment.questId, questId))).toEqual([{ status: 'ASSIGNMENT_ACTIVE' }]);
-    expect(await db.select({ action: auditRecord.action }).from(auditRecord)
-      .where(eq(auditRecord.resourceId, questId))).toEqual([]);
+    expect(
+      await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId))
+    ).toEqual([{ status: 'QUEST_ASSIGNED' }]);
+    expect(
+      await db
+        .select({
+          status: walletFundingReservation.status,
+          remainingSatang: walletFundingReservation.remainingSatang,
+        })
+        .from(walletFundingReservation)
+        .where(eq(walletFundingReservation.id, reservationId))
+    ).toEqual([{ status: 'ACTIVE', remainingSatang: 1_020 }]);
+    expect(
+      await db
+        .select()
+        .from(walletFundingReservationSettlement)
+        .where(eq(walletFundingReservationSettlement.reservationId, reservationId))
+    ).toHaveLength(0);
+    expect(
+      await db
+        .select({ status: questAssignment.assignmentStatus })
+        .from(questAssignment)
+        .where(eq(questAssignment.questId, questId))
+    ).toEqual([{ status: 'ASSIGNMENT_ACTIVE' }]);
+    expect(
+      await db
+        .select({ action: auditRecord.action })
+        .from(auditRecord)
+        .where(eq(auditRecord.resourceId, questId))
+    ).toEqual([]);
   });
 
   it('rolls back the cancellation when the audit effect fails after money work', async () => {
@@ -1967,25 +2227,35 @@ describe('Quest API v1 to v2 migration verification', () => {
     const reservationId = await reserveQuest(questId, 2_040);
     spyOn(auditService, 'recordAudit').mockRejectedValue(new Error('Audit unavailable'));
 
-    const response = await request(
-      `/api/v2/quests/${questId}/cancel`,
-      'POST',
-      hirer.id,
-      { 'idempotency-key': 'quest-migration-audit-failure' },
-    );
+    const response = await request(`/api/v2/quests/${questId}/cancel`, 'POST', hirer.id, {
+      'idempotency-key': 'quest-migration-audit-failure',
+    });
     expect(response.status).toBe(500);
     expect((await response.json()).error.code).toBe('INTERNAL_ERROR');
-    expect(await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId))).toEqual([
-      { status: 'QUEST_OPEN' },
-    ]);
-    expect(await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
-      .from(walletFundingReservation).where(eq(walletFundingReservation.id, reservationId))).toEqual([
-      { status: 'ACTIVE', remainingSatang: 2_040 },
-    ]);
-    expect(await db.select().from(walletFundingReservationSettlement)
-      .where(eq(walletFundingReservationSettlement.reservationId, reservationId))).toHaveLength(0);
-    expect(await db.select({ action: auditRecord.action }).from(auditRecord)
-      .where(eq(auditRecord.resourceId, questId))).toEqual([]);
+    expect(
+      await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId))
+    ).toEqual([{ status: 'QUEST_OPEN' }]);
+    expect(
+      await db
+        .select({
+          status: walletFundingReservation.status,
+          remainingSatang: walletFundingReservation.remainingSatang,
+        })
+        .from(walletFundingReservation)
+        .where(eq(walletFundingReservation.id, reservationId))
+    ).toEqual([{ status: 'ACTIVE', remainingSatang: 2_040 }]);
+    expect(
+      await db
+        .select()
+        .from(walletFundingReservationSettlement)
+        .where(eq(walletFundingReservationSettlement.reservationId, reservationId))
+    ).toHaveLength(0);
+    expect(
+      await db
+        .select({ action: auditRecord.action })
+        .from(auditRecord)
+        .where(eq(auditRecord.resourceId, questId))
+    ).toEqual([]);
   });
 
   it('records one Admin Review Item for a real non-approved Proof and keeps the Funding Reservation active', async () => {
@@ -1999,7 +2269,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       worker.id,
       { description: 'Incomplete proof', fileIds: [proofFileId] },
-      'quest-migration-failed-proof-create',
+      'quest-migration-failed-proof-create'
     );
     expect(proofCreated.status).toBe(201);
     const proofSubmissionId = (await proofCreated.json()).data.id as string;
@@ -2007,7 +2277,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/submit`,
       'POST',
       worker.id,
-      { 'idempotency-key': 'quest-migration-failed-proof-submit' },
+      { 'idempotency-key': 'quest-migration-failed-proof-submit' }
     );
     expect(sent.status).toBe(200);
 
@@ -2018,7 +2288,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       hirer.id,
       decision,
-      key,
+      key
     );
     expect(first.status).toBe(200);
     const firstBody = await first.json();
@@ -2031,7 +2301,7 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       hirer.id,
       decision,
-      key,
+      key
     );
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(firstBody);
@@ -2041,29 +2311,56 @@ describe('Quest API v1 to v2 migration verification', () => {
       'POST',
       hirer.id,
       { decision: 'PROOF_NOT_APPROVED', reason: 'Changed reason' },
-      key,
+      key
     );
     expect(changed.status).toBe(409);
     expect((await changed.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
-    expect(await db.select({ status: questV2ProofSubmission.submissionStatus })
-      .from(questV2ProofSubmission).where(eq(questV2ProofSubmission.id, proofSubmissionId))).toEqual([
-      { status: 'PROOF_NOT_APPROVED' },
-    ]);
-    expect(await db.select({ status: questAssignment.assignmentStatus })
-      .from(questAssignment).where(eq(questAssignment.id, assignmentId))).toEqual([
-      { status: 'ASSIGNMENT_INCOMPLETE' },
-    ]);
-    expect(await db.select({ reason: adminReviewItem.reason, evidenceReferences: adminReviewItem.evidenceReferences })
-      .from(adminReviewItem).where(eq(adminReviewItem.proofSubmissionId, proofSubmissionId))).toEqual([
-      { reason: 'The submitted work is incomplete', evidenceReferences: [proofFileId] },
-    ]);
-    expect(await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
-      .from(walletFundingReservation).where(eq(walletFundingReservation.callerReference, questId))).toEqual([
-      { status: 'ACTIVE', remainingSatang: 1_020 },
-    ]);
-    expect(await db.select().from(walletFundingReservationSettlement)
-      .where(eq(walletFundingReservationSettlement.reservationId, (await db.select({ id: walletFundingReservation.id })
-        .from(walletFundingReservation).where(eq(walletFundingReservation.callerReference, questId)))[0]!.id))).toHaveLength(0);
+    expect(
+      await db
+        .select({ status: questV2ProofSubmission.submissionStatus })
+        .from(questV2ProofSubmission)
+        .where(eq(questV2ProofSubmission.id, proofSubmissionId))
+    ).toEqual([{ status: 'PROOF_NOT_APPROVED' }]);
+    expect(
+      await db
+        .select({ status: questAssignment.assignmentStatus })
+        .from(questAssignment)
+        .where(eq(questAssignment.id, assignmentId))
+    ).toEqual([{ status: 'ASSIGNMENT_INCOMPLETE' }]);
+    expect(
+      await db
+        .select({
+          reason: adminReviewItem.reason,
+          evidenceReferences: adminReviewItem.evidenceReferences,
+        })
+        .from(adminReviewItem)
+        .where(eq(adminReviewItem.proofSubmissionId, proofSubmissionId))
+    ).toEqual([{ reason: 'The submitted work is incomplete', evidenceReferences: [proofFileId] }]);
+    expect(
+      await db
+        .select({
+          status: walletFundingReservation.status,
+          remainingSatang: walletFundingReservation.remainingSatang,
+        })
+        .from(walletFundingReservation)
+        .where(eq(walletFundingReservation.callerReference, questId))
+    ).toEqual([{ status: 'ACTIVE', remainingSatang: 1_020 }]);
+    expect(
+      await db
+        .select()
+        .from(walletFundingReservationSettlement)
+        .where(
+          eq(
+            walletFundingReservationSettlement.reservationId,
+            (
+              await db
+                .select({ id: walletFundingReservation.id })
+                .from(walletFundingReservation)
+                .where(eq(walletFundingReservation.callerReference, questId))
+            )[0]!.id
+          )
+        )
+    ).toHaveLength(0);
   });
 
   it('keeps the v2 cancellation settlement matrix isolated from v1', async () => {
@@ -2071,12 +2368,9 @@ describe('Quest API v1 to v2 migration verification', () => {
     const questId = await createOpenGroupCandidateQuest();
     const reservationId = await reserveQuest(questId, 2_040);
     const key = 'quest-migration-cancel-open';
-    const first = await request(
-      `/api/v2/quests/${questId}/cancel`,
-      'POST',
-      hirer.id,
-      { 'idempotency-key': key },
-    );
+    const first = await request(`/api/v2/quests/${questId}/cancel`, 'POST', hirer.id, {
+      'idempotency-key': key,
+    });
     expect(first.status).toBe(200);
     const firstBody = await first.json();
     expect(firstBody.data).toEqual({
@@ -2085,30 +2379,40 @@ describe('Quest API v1 to v2 migration verification', () => {
       paidSatang: 0,
       refundedSatang: 2_040,
     });
-    const replay = await request(
-      `/api/v2/quests/${questId}/cancel`,
-      'POST',
-      hirer.id,
-      { 'idempotency-key': key },
-    );
+    const replay = await request(`/api/v2/quests/${questId}/cancel`, 'POST', hirer.id, {
+      'idempotency-key': key,
+    });
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(firstBody);
-    expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status)
-      .toBe('QUEST_CANCELLED');
-    expect(await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
-      .from(walletFundingReservation).where(eq(walletFundingReservation.id, reservationId))).toEqual([
-      { status: 'RELEASED', remainingSatang: 0 },
-    ]);
-    const [release] = await db.select({ ledgerTransactionId: walletFundingReservationOperation.ledgerTransactionId })
-      .from(walletFundingReservationOperation).where(and(
-        eq(walletFundingReservationOperation.reservationId, reservationId),
-        eq(walletFundingReservationOperation.operationType, 'RELEASE'),
-      ));
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_CANCELLED');
+    expect(
+      await db
+        .select({
+          status: walletFundingReservation.status,
+          remainingSatang: walletFundingReservation.remainingSatang,
+        })
+        .from(walletFundingReservation)
+        .where(eq(walletFundingReservation.id, reservationId))
+    ).toEqual([{ status: 'RELEASED', remainingSatang: 0 }]);
+    const [release] = await db
+      .select({ ledgerTransactionId: walletFundingReservationOperation.ledgerTransactionId })
+      .from(walletFundingReservationOperation)
+      .where(
+        and(
+          eq(walletFundingReservationOperation.reservationId, reservationId),
+          eq(walletFundingReservationOperation.operationType, 'RELEASE')
+        )
+      );
     expect(release).toBeDefined();
-    expect(await db.select({ eventType: walletLedgerTransaction.eventType })
-      .from(walletLedgerTransaction).where(eq(walletLedgerTransaction.id, release!.ledgerTransactionId))).toEqual([
-      { eventType: 'FUNDING_RELEASE' },
-    ]);
+    expect(
+      await db
+        .select({ eventType: walletLedgerTransaction.eventType })
+        .from(walletLedgerTransaction)
+        .where(eq(walletLedgerTransaction.id, release!.ledgerTransactionId))
+    ).toEqual([{ eventType: 'FUNDING_RELEASE' }]);
     const v1Read = await request(`/api/v1/quests/${questId}`, 'GET', hirer.id);
     expect(v1Read.status).toBe(404);
   });
@@ -2116,12 +2420,9 @@ describe('Quest API v1 to v2 migration verification', () => {
   it('cancels a Draft without money and rejects terminal Quest States', async () => {
     authenticate();
     const draftQuestId = await createDraftQuest();
-    const draftResponse = await request(
-      `/api/v2/quests/${draftQuestId}/cancel`,
-      'POST',
-      hirer.id,
-      { 'idempotency-key': 'quest-migration-cancel-draft' },
-    );
+    const draftResponse = await request(`/api/v2/quests/${draftQuestId}/cancel`, 'POST', hirer.id, {
+      'idempotency-key': 'quest-migration-cancel-draft',
+    });
     expect(draftResponse.status).toBe(200);
     expect((await draftResponse.json()).data).toEqual({
       questStatus: 'QUEST_CANCELLED',
@@ -2129,24 +2430,27 @@ describe('Quest API v1 to v2 migration verification', () => {
       paidSatang: 0,
       refundedSatang: 0,
     });
-    expect(await db.select({ id: walletFundingReservation.id }).from(walletFundingReservation)
-      .where(eq(walletFundingReservation.callerReference, draftQuestId))).toHaveLength(0);
+    expect(
+      await db
+        .select({ id: walletFundingReservation.id })
+        .from(walletFundingReservation)
+        .where(eq(walletFundingReservation.callerReference, draftQuestId))
+    ).toHaveLength(0);
 
     for (const [status, key] of [
       ['QUEST_COMPLETED', 'quest-migration-cancel-completed'],
       ['QUEST_FAILED', 'quest-migration-cancel-failed'],
     ] as const) {
       const questId = await createOpenGroupCandidateQuest({ questStatus: status });
-      const response = await request(
-        `/api/v2/quests/${questId}/cancel`,
-        'POST',
-        hirer.id,
-        { 'idempotency-key': key },
-      );
+      const response = await request(`/api/v2/quests/${questId}/cancel`, 'POST', hirer.id, {
+        'idempotency-key': key,
+      });
       expect(response.status).toBe(409);
       expect((await response.json()).error.code).toBe('QUEST_SETTLEMENT_NOT_ALLOWED');
-      expect((await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.status)
-        .toBe(status);
+      expect(
+        (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+          ?.status
+      ).toBe(status);
     }
   });
 
@@ -2207,16 +2511,19 @@ describe('Quest API v1 to v2 migration verification', () => {
         workerId,
         assignmentStatus: 'ASSIGNMENT_ACTIVE' as const,
       }));
-      await db.insert(questAssignment).values(assignments.map(({ id, workerId, assignmentStatus }) => ({
-        id,
-        questId,
-        workerId,
-        assignmentStatus,
-      })));
+      await db.insert(questAssignment).values(
+        assignments.map(({ id, workerId, assignmentStatus }) => ({
+          id,
+          questId,
+          workerId,
+          assignmentStatus,
+        }))
+      );
 
-      const leaderId = testCase.mode === 'CANDIDATE' && testCase.participation === 'GROUP'
-        ? testCase.workerIds[0]!
-        : undefined;
+      const leaderId =
+        testCase.mode === 'CANDIDATE' && testCase.participation === 'GROUP'
+          ? testCase.workerIds[0]!
+          : undefined;
       if (leaderId) {
         const teamId = randomUUID();
         await db.insert(questCandidateTeamV2).values({
@@ -2227,83 +2534,107 @@ describe('Quest API v1 to v2 migration verification', () => {
           headcount: testCase.headcount,
           state: 'TEAM_SELECTED',
         });
-        await db.insert(questCandidateTeamV2Member).values(testCase.workerIds.map((memberId) => ({
-          teamId,
-          memberId,
-        })));
+        await db.insert(questCandidateTeamV2Member).values(
+          testCase.workerIds.map((memberId) => ({
+            teamId,
+            memberId,
+          }))
+        );
       }
-      await createWorkConversationForAssignments(questId, assignments.map(({ id, workerId }) => ({
-        assignmentId: id,
-        workerId,
-      })));
-      const reservationId = await reserveQuest(questId, escrowSatang);
-      const response = await request(
-        `/api/v2/quests/${questId}/cancel`,
-        'POST',
-        hirer.id,
-        { 'idempotency-key': `quest-migration-cancel-matrix-${testCase.name}` },
+      await createWorkConversationForAssignments(
+        questId,
+        assignments.map(({ id, workerId }) => ({
+          assignmentId: id,
+          workerId,
+        }))
       );
+      const reservationId = await reserveQuest(questId, escrowSatang);
+      const response = await request(`/api/v2/quests/${questId}/cancel`, 'POST', hirer.id, {
+        'idempotency-key': `quest-migration-cancel-matrix-${testCase.name}`,
+      });
       expect(response.status).toBe(200);
       const body = await response.json();
-      const expectedPaid = testCase.status === 'QUEST_ASSIGNED'
-        ? rewardSatang * testCase.headcount * 20 / 100
-        : rewardSatang * testCase.headcount;
+      const expectedPaid =
+        testCase.status === 'QUEST_ASSIGNED'
+          ? (rewardSatang * testCase.headcount * 20) / 100
+          : rewardSatang * testCase.headcount;
       expect(body.data).toMatchObject({
         questStatus: 'QUEST_CANCELLED',
         paidSatang: expectedPaid,
         refundedSatang: testCase.status === 'QUEST_ASSIGNED' ? escrowSatang - expectedPaid : 0,
       });
 
-      const [storedReservation] = await db.select({
-        status: walletFundingReservation.status,
-        remainingSatang: walletFundingReservation.remainingSatang,
-      }).from(walletFundingReservation).where(eq(walletFundingReservation.id, reservationId));
+      const [storedReservation] = await db
+        .select({
+          status: walletFundingReservation.status,
+          remainingSatang: walletFundingReservation.remainingSatang,
+        })
+        .from(walletFundingReservation)
+        .where(eq(walletFundingReservation.id, reservationId));
       expect(storedReservation).toEqual({
         status: testCase.status === 'QUEST_IN_PROGRESS' ? 'SETTLED' : 'RELEASED',
         remainingSatang: 0,
       });
-      const settlements = await db.select({
-        recipientUserId: walletFundingReservationSettlement.recipientUserId,
-        recipientAmountSatang: walletFundingReservationSettlement.recipientAmountSatang,
-        platformFeeSatang: walletFundingReservationSettlement.platformFeeSatang,
-      }).from(walletFundingReservationSettlement)
+      const settlements = await db
+        .select({
+          recipientUserId: walletFundingReservationSettlement.recipientUserId,
+          recipientAmountSatang: walletFundingReservationSettlement.recipientAmountSatang,
+          platformFeeSatang: walletFundingReservationSettlement.platformFeeSatang,
+        })
+        .from(walletFundingReservationSettlement)
         .where(eq(walletFundingReservationSettlement.reservationId, reservationId));
-      expect(settlements.reduce((total, settlement) => total + settlement.recipientAmountSatang, 0)).toBe(expectedPaid);
-      expect(settlements.reduce((total, settlement) => total + settlement.platformFeeSatang, 0)).toBe(
-        testCase.status === 'QUEST_IN_PROGRESS' ? platformFeeSatang * testCase.headcount : 0,
-      );
+      expect(
+        settlements.reduce((total, settlement) => total + settlement.recipientAmountSatang, 0)
+      ).toBe(expectedPaid);
+      expect(
+        settlements.reduce((total, settlement) => total + settlement.platformFeeSatang, 0)
+      ).toBe(testCase.status === 'QUEST_IN_PROGRESS' ? platformFeeSatang * testCase.headcount : 0);
       if (leaderId) {
         expect(settlements.every(({ recipientUserId }) => recipientUserId === leaderId)).toBe(true);
       }
-      expect(await db.select({ action: auditRecord.action }).from(auditRecord)
-        .where(eq(auditRecord.resourceId, questId))).toEqual(expect.arrayContaining([
-        { action: 'QUEST_STATE_CHANGED' },
-      ]));
-      expect(await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment)
-        .where(eq(questAssignment.questId, questId))).toEqual(
-        testCase.workerIds.map(() => ({ status: 'ASSIGNMENT_CANCELLED' })),
-      );
+      expect(
+        await db
+          .select({ action: auditRecord.action })
+          .from(auditRecord)
+          .where(eq(auditRecord.resourceId, questId))
+      ).toEqual(expect.arrayContaining([{ action: 'QUEST_STATE_CHANGED' }]));
+      expect(
+        await db
+          .select({ status: questAssignment.assignmentStatus })
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, questId))
+      ).toEqual(testCase.workerIds.map(() => ({ status: 'ASSIGNMENT_CANCELLED' })));
 
-      const [conversation] = await db.select({
-        id: chatConversation.id,
-        questStatus: chatConversation.questStatus,
-        readOnlyAt: chatConversation.readOnlyAt,
-      }).from(chatConversation).where(eq(chatConversation.questId, questId));
+      const [conversation] = await db
+        .select({
+          id: chatConversation.id,
+          questStatus: chatConversation.questStatus,
+          readOnlyAt: chatConversation.readOnlyAt,
+        })
+        .from(chatConversation)
+        .where(eq(chatConversation.questId, questId));
       expect(conversation?.questStatus).toBe('QUEST_CANCELLED');
       expect(conversation?.readOnlyAt).toBeInstanceOf(Date);
-      if (!conversation) throw new Error('Migration cancellation Work Conversation was not created');
-      const memberships = await db.select({
-        memberId: chatMembership.memberId,
-        leftAt: chatMembership.leftAt,
-      }).from(chatMembership).where(and(
-        eq(chatMembership.conversationId, conversation.id),
-        eq(chatMembership.role, 'WORKER'),
-      ));
+      if (!conversation)
+        throw new Error('Migration cancellation Work Conversation was not created');
+      const memberships = await db
+        .select({
+          memberId: chatMembership.memberId,
+          leftAt: chatMembership.leftAt,
+        })
+        .from(chatMembership)
+        .where(
+          and(eq(chatMembership.conversationId, conversation.id), eq(chatMembership.role, 'WORKER'))
+        );
       expect(memberships).toHaveLength(testCase.workerIds.length);
-      expect(memberships).toEqual(expect.arrayContaining(testCase.workerIds.map((workerId) => ({
-        memberId: workerId,
-        leftAt: expect.any(Date),
-      }))));
+      expect(memberships).toEqual(
+        expect.arrayContaining(
+          testCase.workerIds.map((workerId) => ({
+            memberId: workerId,
+            leftAt: expect.any(Date),
+          }))
+        )
+      );
     }
   });
 });

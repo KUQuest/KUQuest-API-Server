@@ -1,9 +1,8 @@
 import { app } from '@/app';
 import { db, sql as postgresSql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { quest, questAssignment } from '@/database/schema/quest.schema';
+import { quest, questAssignment, questCommand } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import {
   chatConversation,
   chatMembership,
@@ -21,7 +20,17 @@ import { createWorkChatMembershipWriter } from '@/modules/work-chat';
 import { randomUUID } from 'node:crypto';
 
 import { eq, inArray, sql } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test';
 
 const hirer = {
   id: randomUUID(),
@@ -57,7 +66,7 @@ let writerFailure: Error | undefined;
 const successfulWriter = {
   applyQuestTransition: async (
     _transaction: QuestTransaction,
-    transition: QuestWorkChatMembershipTransition,
+    transition: QuestWorkChatMembershipTransition
   ) => {
     transitions.push(transition);
     if (writerFailure) throw writerFailure;
@@ -65,21 +74,21 @@ const successfulWriter = {
   },
 };
 
-const authenticate = () => spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => {
-  const memberId = headers.get('x-member-id') ?? worker.id;
-  const member = [hirer, worker, secondWorker, thirdWorker].find(({ id }) => id === memberId) ?? worker;
-  return { user: member, session: { userId: member.id } } as never;
-}) as never);
+const authenticate = () =>
+  spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => {
+    const memberId = headers.get('x-member-id') ?? worker.id;
+    const member =
+      [hirer, worker, secondWorker, thirdWorker].find(({ id }) => id === memberId) ?? worker;
+    return { user: member, session: { userId: member.id } } as never;
+  }) as never);
 
-const request = (
-  path: string,
-  method = 'GET',
-  memberId = worker.id,
-  headers: HeadersInit = {},
-) => app.handle(new Request(`http://localhost${path}`, {
-  method,
-  headers: { ...headers, 'x-member-id': memberId },
-}));
+const request = (path: string, method = 'GET', memberId = worker.id, headers: HeadersInit = {}) =>
+  app.handle(
+    new Request(`http://localhost${path}`, {
+      method,
+      headers: { ...headers, 'x-member-id': memberId },
+    })
+  );
 
 const createOpenQuest = async (overrides: Partial<typeof quest.$inferInsert> = {}) => {
   const id = randomUUID();
@@ -105,20 +114,22 @@ const createOpenQuest = async (overrides: Partial<typeof quest.$inferInsert> = {
   return id;
 };
 
-const createOpenSingleFcfsQuest = (overrides: Partial<typeof quest.$inferInsert> = {}) => createOpenQuest(overrides);
+const createOpenSingleFcfsQuest = (overrides: Partial<typeof quest.$inferInsert> = {}) =>
+  createOpenQuest(overrides);
 
-const createOpenGroupFcfsQuest = (overrides: Partial<typeof quest.$inferInsert> = {}) => createOpenQuest({
-  participation: 'GROUP',
-  v2Participation: 'GROUP',
-  headcount: 2,
-  questFundingTotalSatang: 4000,
-  ...overrides,
-});
+const createOpenGroupFcfsQuest = (overrides: Partial<typeof quest.$inferInsert> = {}) =>
+  createOpenQuest({
+    participation: 'GROUP',
+    v2Participation: 'GROUP',
+    headcount: 2,
+    questFundingTotalSatang: 4000,
+    ...overrides,
+  });
 
 const hashRequest = async (value: object) => {
   const digest = await crypto.subtle.digest(
     'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value)),
+    new TextEncoder().encode(JSON.stringify(value))
   );
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
@@ -153,29 +164,39 @@ afterEach(async () => {
     const conversationIds = conversations.map(({ id }) => id);
     if (conversationIds.length > 0) {
       await db.delete(chatMessage).where(inArray(chatMessage.conversationId, conversationIds));
-      await db.delete(chatMembership).where(inArray(chatMembership.conversationId, conversationIds));
-      await db.delete(chatTransitionCommand).where(inArray(chatTransitionCommand.questId, questIds));
+      await db
+        .delete(chatMembership)
+        .where(inArray(chatMembership.conversationId, conversationIds));
+      await db
+        .delete(chatTransitionCommand)
+        .where(inArray(chatTransitionCommand.questId, questIds));
       await db.delete(chatConversation).where(inArray(chatConversation.id, conversationIds));
     }
     await db.delete(quest).where(inArray(quest.id, questIds));
     questIds.splice(0, questIds.length);
   }
-  await db.delete(walletIdempotencyKey).where(
-    inArray(walletIdempotencyKey.principalUserId, [hirer.id, worker.id, secondWorker.id, thirdWorker.id]),
-  );
+  await db
+    .delete(questCommand)
+    .where(
+      inArray(questCommand.principalUserId, [hirer.id, worker.id, secondWorker.id, thirdWorker.id])
+    );
 });
 
 afterAll(async () => {
   if (!postgresAvailable) return;
   await db.delete(tag).where(eq(tag.id, tagId));
-  await db.delete(authUser).where(inArray(authUser.id, [hirer.id, worker.id, secondWorker.id, thirdWorker.id]));
+  await db
+    .delete(authUser)
+    .where(inArray(authUser.id, [hirer.id, worker.id, secondWorker.id, thirdWorker.id]));
 });
 
 describe('Quest Assignment API v2', () => {
   it('validates the Quest id before authentication', async () => {
-    const response = await app.handle(new Request('http://localhost/api/v2/quests/not-a-uuid/join', {
-      method: 'POST',
-    }));
+    const response = await app.handle(
+      new Request('http://localhost/api/v2/quests/not-a-uuid/join', {
+        method: 'POST',
+      })
+    );
     expect(response.status).toBe(400);
     expect((await response.json()).error.code).toBe('VALIDATION');
   });
@@ -183,16 +204,26 @@ describe('Quest Assignment API v2', () => {
   it('requires authentication and publishes the three first-slice operations', async () => {
     if (!postgresAvailable) return;
 
-    const unauthenticated = await app.handle(new Request('http://localhost/api/v2/assignments/mine'));
+    const unauthenticated = await app.handle(
+      new Request('http://localhost/api/v2/assignments/mine')
+    );
     expect(unauthenticated.status).toBe(401);
 
-    const document = await (await app.handle(new Request('http://localhost/openapi/json'))).json() as {
+    const document = (await (
+      await app.handle(new Request('http://localhost/openapi/json'))
+    ).json()) as {
       paths: Record<string, Record<string, { operationId?: string; security?: unknown }>>;
     };
-    expect(document.paths['/api/v2/assignments/mine']?.get?.operationId).toBe('listMyQuestAssignmentsV2');
-    expect(document.paths['/api/v2/quests/{questId}/assignments']?.get?.operationId).toBe('listQuestAssignmentsV2');
+    expect(document.paths['/api/v2/assignments/mine']?.get?.operationId).toBe(
+      'listMyQuestAssignmentsV2'
+    );
+    expect(document.paths['/api/v2/quests/{questId}/assignments']?.get?.operationId).toBe(
+      'listQuestAssignmentsV2'
+    );
     expect(document.paths['/api/v2/quests/{questId}/join']?.post?.operationId).toBe('joinQuestV2');
-    expect(document.paths['/api/v2/quests/{questId}/join']?.post?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(document.paths['/api/v2/quests/{questId}/join']?.post?.security).toEqual([
+      { betterAuthSession: [] },
+    ]);
   });
 
   it('creates one active Assignment, moves a SINGLE Quest to assigned, and replays the command', async () => {
@@ -200,14 +231,11 @@ describe('Quest Assignment API v2', () => {
     const questId = await createOpenSingleFcfsQuest();
     authenticate();
 
-    const first = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-command-1' },
-    );
+    const first = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-command-1',
+    });
     expect(first.status).toBe(200);
-    const firstBody = await first.json() as {
+    const firstBody = (await first.json()) as {
       data: {
         id: string;
         questId: string;
@@ -223,17 +251,20 @@ describe('Quest Assignment API v2', () => {
       questState: 'QUEST_ASSIGNED',
     });
 
-    const replay = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-command-1' },
-    );
+    const replay = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-command-1',
+    });
     expect(replay.status).toBe(200);
     expect((await replay.json()).data.id).toBe(firstBody.data.id);
 
-    const [currentQuest] = await db.select({ state: quest.questStatus }).from(quest).where(eq(quest.id, questId));
-    const assignments = await db.select().from(questAssignment).where(eq(questAssignment.questId, questId));
+    const [currentQuest] = await db
+      .select({ state: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, questId));
+    const assignments = await db
+      .select()
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, questId));
     expect(currentQuest?.state).toBe('QUEST_ASSIGNED');
     expect(assignments).toHaveLength(1);
     expect(assignments[0]?.id).toBe(firstBody.data.id);
@@ -248,16 +279,18 @@ describe('Quest Assignment API v2', () => {
     });
     authenticate();
 
-    const response = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-single-after-start' },
-    );
+    const response = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-single-after-start',
+    });
     expect(response.status).toBe(409);
     expect((await response.json()).error.code).toBe('QUEST_NOT_OPEN');
-    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(0);
-    expect((await db.select({ state: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]?.state).toBe('QUEST_OPEN');
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
+    ).toHaveLength(0);
+    expect(
+      (await db.select({ state: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.state
+    ).toBe('QUEST_OPEN');
   });
 
   it('allows the Hirer to read all active Assignments and a Worker to read only their own Assignment', async () => {
@@ -265,12 +298,9 @@ describe('Quest Assignment API v2', () => {
     const questId = await createOpenSingleFcfsQuest();
     authenticate();
 
-    const join = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-read-command' },
-    );
+    const join = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-read-command',
+    });
     expect(join.status).toBe(200);
 
     const workerRead = await request(`/api/v2/quests/${questId}/assignments`, 'GET', worker.id);
@@ -285,12 +315,20 @@ describe('Quest Assignment API v2', () => {
     expect(mine.status).toBe(200);
     expect((await mine.json()).data.items).toHaveLength(1);
 
-    const unrelated = await request(`/api/v2/quests/${questId}/assignments`, 'GET', secondWorker.id);
+    const unrelated = await request(
+      `/api/v2/quests/${questId}/assignments`,
+      'GET',
+      secondWorker.id
+    );
     expect(unrelated.status).toBe(404);
     expect((await unrelated.json()).error.code).toBe('QUEST_NOT_FOUND');
 
     await createOpenSingleFcfsQuest({ hirerId: secondWorker.id });
-    const otherHirer = await request(`/api/v2/quests/${questId}/assignments`, 'GET', secondWorker.id);
+    const otherHirer = await request(
+      `/api/v2/quests/${questId}/assignments`,
+      'GET',
+      secondWorker.id
+    );
     expect(otherHirer.status).toBe(404);
     expect((await otherHirer.json()).error.code).toBe('QUEST_NOT_FOUND');
   });
@@ -300,42 +338,52 @@ describe('Quest Assignment API v2', () => {
     const questId = await createOpenGroupFcfsQuest();
     authenticate();
 
-    const first = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-group-first' },
-    );
+    const first = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-group-first',
+    });
     expect(first.status).toBe(200);
-    const firstBody = await first.json() as { data: { id: string; questState: string; workerId: string } };
+    const firstBody = (await first.json()) as {
+      data: { id: string; questState: string; workerId: string };
+    };
     expect(firstBody.data).toMatchObject({
       questState: 'QUEST_OPEN',
       workerId: worker.id,
     });
 
-    const [openQuest] = await db.select({ state: quest.questStatus }).from(quest).where(eq(quest.id, questId));
+    const [openQuest] = await db
+      .select({ state: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, questId));
     expect(openQuest?.state).toBe('QUEST_OPEN');
-    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(1);
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
+    ).toHaveLength(1);
 
-    const second = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      secondWorker.id,
-      { 'idempotency-key': 'assignment-v2-group-second' },
-    );
+    const second = await request(`/api/v2/quests/${questId}/join`, 'POST', secondWorker.id, {
+      'idempotency-key': 'assignment-v2-group-second',
+    });
     expect(second.status).toBe(200);
-    const secondBody = await second.json() as { data: { id: string; questState: string; workerId: string } };
+    const secondBody = (await second.json()) as {
+      data: { id: string; questState: string; workerId: string };
+    };
     expect(secondBody.data).toMatchObject({
       questState: 'QUEST_ASSIGNED',
       workerId: secondWorker.id,
     });
 
-    const [assignedQuest] = await db.select({ state: quest.questStatus }).from(quest).where(eq(quest.id, questId));
+    const [assignedQuest] = await db
+      .select({ state: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, questId));
     expect(assignedQuest?.state).toBe('QUEST_ASSIGNED');
-    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(2);
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
+    ).toHaveLength(2);
     const acceptedTransitions = transitions.filter(
-      (transition): transition is Extract<QuestWorkChatMembershipTransition, { type: 'workersAccepted' }> =>
-        transition.type === 'workersAccepted',
+      (
+        transition
+      ): transition is Extract<QuestWorkChatMembershipTransition, { type: 'workersAccepted' }> =>
+        transition.type === 'workersAccepted'
     );
     expect(acceptedTransitions).toHaveLength(2);
     expect(acceptedTransitions.map((transition) => transition.workers[0]?.workerId)).toEqual([
@@ -351,8 +399,12 @@ describe('Quest Assignment API v2', () => {
     authenticate();
 
     const responses = await Promise.all([
-      request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, { 'idempotency-key': 'same-group-key' }),
-      request(`/api/v2/quests/${questId}/join`, 'POST', secondWorker.id, { 'idempotency-key': 'same-group-key' }),
+      request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+        'idempotency-key': 'same-group-key',
+      }),
+      request(`/api/v2/quests/${questId}/join`, 'POST', secondWorker.id, {
+        'idempotency-key': 'same-group-key',
+      }),
     ]);
 
     expect(responses.map((response) => response.status).sort()).toEqual([200, 200]);
@@ -380,39 +432,29 @@ describe('Quest Assignment API v2', () => {
     const questId = await createOpenGroupFcfsQuest();
     authenticate();
 
-    const first = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-group-replay-first' },
-    );
+    const first = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-group-replay-first',
+    });
     const firstId = (await first.json()).data.id as string;
-    const firstReplay = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-group-replay-first' },
-    );
+    const firstReplay = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-group-replay-first',
+    });
     expect(firstReplay.status).toBe(200);
     expect((await firstReplay.json()).data.id).toBe(firstId);
 
-    const second = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      secondWorker.id,
-      { 'idempotency-key': 'assignment-v2-group-replay-second' },
-    );
+    const second = await request(`/api/v2/quests/${questId}/join`, 'POST', secondWorker.id, {
+      'idempotency-key': 'assignment-v2-group-replay-second',
+    });
     const secondId = (await second.json()).data.id as string;
-    const secondReplay = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      secondWorker.id,
-      { 'idempotency-key': 'assignment-v2-group-replay-second' },
-    );
+    const secondReplay = await request(`/api/v2/quests/${questId}/join`, 'POST', secondWorker.id, {
+      'idempotency-key': 'assignment-v2-group-replay-second',
+    });
     expect(secondReplay.status).toBe(200);
     expect((await secondReplay.json()).data.id).toBe(secondId);
 
-    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(2);
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
+    ).toHaveLength(2);
     expect(transitions).toHaveLength(2);
   });
 
@@ -421,37 +463,35 @@ describe('Quest Assignment API v2', () => {
     const questId = await createOpenGroupFcfsQuest();
     authenticate();
 
-    expect((await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-group-full-first' },
-    )).status).toBe(200);
-    expect((await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      secondWorker.id,
-      { 'idempotency-key': 'assignment-v2-group-full-second' },
-    )).status).toBe(200);
+    expect(
+      (
+        await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+          'idempotency-key': 'assignment-v2-group-full-first',
+        })
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await request(`/api/v2/quests/${questId}/join`, 'POST', secondWorker.id, {
+          'idempotency-key': 'assignment-v2-group-full-second',
+        })
+      ).status
+    ).toBe(200);
 
-    const duplicate = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-group-duplicate' },
-    );
+    const duplicate = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-group-duplicate',
+    });
     expect(duplicate.status).toBe(409);
     expect((await duplicate.json()).error.code).toBe('ASSIGNMENT_ALREADY_EXISTS');
 
-    const overCapacity = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      thirdWorker.id,
-      { 'idempotency-key': 'assignment-v2-group-over-capacity' },
-    );
+    const overCapacity = await request(`/api/v2/quests/${questId}/join`, 'POST', thirdWorker.id, {
+      'idempotency-key': 'assignment-v2-group-over-capacity',
+    });
     expect(overCapacity.status).toBe(409);
     expect((await overCapacity.json()).error.code).toBe('QUEST_NOT_OPEN');
-    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(2);
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
+    ).toHaveLength(2);
     expect(transitions).toHaveLength(2);
   });
 
@@ -460,18 +500,12 @@ describe('Quest Assignment API v2', () => {
     const questId = await createOpenGroupFcfsQuest();
     authenticate();
 
-    await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-group-read-first' },
-    );
-    await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      secondWorker.id,
-      { 'idempotency-key': 'assignment-v2-group-read-second' },
-    );
+    await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-group-read-first',
+    });
+    await request(`/api/v2/quests/${questId}/join`, 'POST', secondWorker.id, {
+      'idempotency-key': 'assignment-v2-group-read-second',
+    });
 
     const hirerRead = await request(`/api/v2/quests/${questId}/assignments`, 'GET', hirer.id);
     expect(hirerRead.status).toBe(200);
@@ -481,11 +515,21 @@ describe('Quest Assignment API v2', () => {
     expect(workerRead.status).toBe(200);
     expect((await workerRead.json()).data.items).toMatchObject([{ workerId: worker.id }]);
 
-    const secondWorkerRead = await request(`/api/v2/quests/${questId}/assignments`, 'GET', secondWorker.id);
+    const secondWorkerRead = await request(
+      `/api/v2/quests/${questId}/assignments`,
+      'GET',
+      secondWorker.id
+    );
     expect(secondWorkerRead.status).toBe(200);
-    expect((await secondWorkerRead.json()).data.items).toMatchObject([{ workerId: secondWorker.id }]);
+    expect((await secondWorkerRead.json()).data.items).toMatchObject([
+      { workerId: secondWorker.id },
+    ]);
 
-    const unrelatedRead = await request(`/api/v2/quests/${questId}/assignments`, 'GET', thirdWorker.id);
+    const unrelatedRead = await request(
+      `/api/v2/quests/${questId}/assignments`,
+      'GET',
+      thirdWorker.id
+    );
     expect(unrelatedRead.status).toBe(404);
     expect((await unrelatedRead.json()).error.code).toBe('QUEST_NOT_FOUND');
   });
@@ -496,16 +540,27 @@ describe('Quest Assignment API v2', () => {
     authenticate();
 
     const responses = await Promise.all([
-      request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, { 'idempotency-key': 'assignment-v2-group-concurrent-1' }),
-      request(`/api/v2/quests/${questId}/join`, 'POST', secondWorker.id, { 'idempotency-key': 'assignment-v2-group-concurrent-2' }),
-      request(`/api/v2/quests/${questId}/join`, 'POST', thirdWorker.id, { 'idempotency-key': 'assignment-v2-group-concurrent-3' }),
+      request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+        'idempotency-key': 'assignment-v2-group-concurrent-1',
+      }),
+      request(`/api/v2/quests/${questId}/join`, 'POST', secondWorker.id, {
+        'idempotency-key': 'assignment-v2-group-concurrent-2',
+      }),
+      request(`/api/v2/quests/${questId}/join`, 'POST', thirdWorker.id, {
+        'idempotency-key': 'assignment-v2-group-concurrent-3',
+      }),
     ]);
 
     expect(responses.filter((response) => response.status === 200)).toHaveLength(2);
     expect(responses.filter((response) => response.status === 409)).toHaveLength(1);
-    const [currentQuest] = await db.select({ state: quest.questStatus }).from(quest).where(eq(quest.id, questId));
+    const [currentQuest] = await db
+      .select({ state: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, questId));
     expect(currentQuest?.state).toBe('QUEST_ASSIGNED');
-    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(2);
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
+    ).toHaveLength(2);
     expect(transitions).toHaveLength(2);
   });
 
@@ -528,12 +583,9 @@ describe('Quest Assignment API v2', () => {
     });
     authenticate();
 
-    const response = await request(
-      `/api/v2/quests/${id}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-v1-boundary' },
-    );
+    const response = await request(`/api/v2/quests/${id}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-v1-boundary',
+    });
     expect(response.status).toBe(404);
     expect((await response.json()).error.code).toBe('QUEST_NOT_FOUND');
   });
@@ -544,16 +596,16 @@ describe('Quest Assignment API v2', () => {
     writerFailure = new Error('chat unavailable');
     authenticate();
 
-    const response = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-chat-failure' },
-    );
+    const response = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-chat-failure',
+    });
     expect(response.status).toBe(503);
     expect((await response.json()).error.code).toBe('WORK_CHAT_UNAVAILABLE');
 
-    const [currentQuest] = await db.select({ state: quest.questStatus }).from(quest).where(eq(quest.id, questId));
+    const [currentQuest] = await db
+      .select({ state: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, questId));
     const [assignmentCount] = await db
       .select({ count: sql<number>`count(*)` })
       .from(questAssignment)
@@ -567,22 +619,16 @@ describe('Quest Assignment API v2', () => {
     const questId = await createOpenSingleFcfsQuest();
     authenticate();
 
-    const hirerResponse = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      hirer.id,
-      { 'idempotency-key': 'assignment-v2-hirer' },
-    );
+    const hirerResponse = await request(`/api/v2/quests/${questId}/join`, 'POST', hirer.id, {
+      'idempotency-key': 'assignment-v2-hirer',
+    });
     expect(hirerResponse.status).toBe(409);
     expect((await hirerResponse.json()).error.code).toBe('HIRER_CANNOT_JOIN');
 
     await db.update(quest).set({ v2Mode: 'CANDIDATE' }).where(eq(quest.id, questId));
-    const candidateResponse = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-candidate' },
-    );
+    const candidateResponse = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-candidate',
+    });
     expect(candidateResponse.status).toBe(409);
     expect((await candidateResponse.json()).error.code).toBe('QUEST_MODE_NOT_ALLOWED');
   });
@@ -592,34 +638,27 @@ describe('Quest Assignment API v2', () => {
     const questId = await createOpenSingleFcfsQuest();
     authenticate();
 
-    const first = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-duplicate-first' },
-    );
+    const first = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-duplicate-first',
+    });
     expect(first.status).toBe(200);
 
-    const duplicate = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-duplicate-second' },
-    );
+    const duplicate = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-duplicate-second',
+    });
     expect(duplicate.status).toBe(409);
     expect((await duplicate.json()).error.code).toBe('ASSIGNMENT_ALREADY_EXISTS');
 
     const closedQuestId = await createOpenSingleFcfsQuest();
-    await db.update(quest).set({ questStatus: 'QUEST_ASSIGNED' }).where(eq(quest.id, closedQuestId));
-    const closed = await request(
-      `/api/v2/quests/${closedQuestId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-closed' },
-    );
+    await db
+      .update(quest)
+      .set({ questStatus: 'QUEST_ASSIGNED' })
+      .where(eq(quest.id, closedQuestId));
+    const closed = await request(`/api/v2/quests/${closedQuestId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-closed',
+    });
     expect(closed.status).toBe(409);
     expect((await closed.json()).error.code).toBe('QUEST_NOT_OPEN');
-
   });
 
   it('returns IDEMPOTENCY_KEY_REUSED when another request uses the same key', async () => {
@@ -627,12 +666,9 @@ describe('Quest Assignment API v2', () => {
     const questId = await createOpenSingleFcfsQuest();
     authenticate();
 
-    const first = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': 'assignment-v2-reused-key' },
-    );
+    const first = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-reused-key',
+    });
     expect(first.status).toBe(200);
 
     const anotherQuestId = await createOpenSingleFcfsQuest();
@@ -640,7 +676,7 @@ describe('Quest Assignment API v2', () => {
       `/api/v2/quests/${anotherQuestId}/join`,
       'POST',
       worker.id,
-      { 'idempotency-key': 'assignment-v2-reused-key' },
+      { 'idempotency-key': 'assignment-v2-reused-key' }
     );
     expect(changedRequest.status).toBe(409);
     expect((await changedRequest.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
@@ -650,7 +686,8 @@ describe('Quest Assignment API v2', () => {
     if (!postgresAvailable) return;
     const questId = await createOpenSingleFcfsQuest();
     const key = 'assignment-v2-in-progress';
-    await db.insert(walletIdempotencyKey).values({
+    await db.insert(questCommand).values({
+      questId,
       principalUserId: worker.id,
       operationScope: 'quest.v2.assignment.join',
       key,
@@ -665,14 +702,48 @@ describe('Quest Assignment API v2', () => {
     });
     authenticate();
 
-    const response = await request(
-      `/api/v2/quests/${questId}/join`,
-      'POST',
-      worker.id,
-      { 'idempotency-key': key },
-    );
+    const response = await request(`/api/v2/quests/${questId}/join`, 'POST', worker.id, {
+      'idempotency-key': key,
+    });
     expect(response.status).toBe(409);
     expect((await response.json()).error.code).toBe('IDEMPOTENCY_IN_PROGRESS');
-    expect(await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))).toHaveLength(0);
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
+    ).toHaveLength(0);
+  });
+
+  it('replays the same rejection when a full-Quest Join is retried with the same Idempotency-Key', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupFcfsQuest();
+    await db.insert(questAssignment).values([
+      {
+        questId,
+        workerId: worker.id,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE',
+        createdAt: new Date(),
+      },
+      {
+        questId,
+        workerId: secondWorker.id,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE',
+        createdAt: new Date(),
+      },
+    ]);
+    authenticate();
+
+    const refused = await request(`/api/v2/quests/${questId}/join`, 'POST', thirdWorker.id, {
+      'idempotency-key': 'assignment-v2-full-replay-refused',
+    });
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error.code).toBe('QUEST_FULL');
+
+    const retry = await request(`/api/v2/quests/${questId}/join`, 'POST', thirdWorker.id, {
+      'idempotency-key': 'assignment-v2-full-replay-refused',
+    });
+    expect(retry.status).toBe(409);
+    expect((await retry.json()).error.code).toBe('QUEST_FULL');
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
+    ).toHaveLength(2);
   });
 });

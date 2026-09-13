@@ -13,7 +13,7 @@ const policy = {
   policyRevisionId: '018f47a7-1c7d-7c98-9a11-690d7e834303',
   minimumFundingReservationSatang: satang(100),
   maximumFundingReservationSatang: satang(70_000_000),
-  walletStatus: 'ACTIVE' as const,
+  canReserve: true,
 };
 
 describe('Quest v2 publish policy', () => {
@@ -37,22 +37,26 @@ describe('Quest v2 publish policy', () => {
   });
 
   it('keeps the one-satang rounding remainder in the Platform Fee', () => {
-    expect(calculateQuestV2FundingQuote({
-      questFundingTotalSatang: positiveSatang(103),
-      headcount: 1,
-      ...policy,
-    })).toMatchObject({
+    expect(
+      calculateQuestV2FundingQuote({
+        questFundingTotalSatang: positiveSatang(103),
+        headcount: 1,
+        ...policy,
+      })
+    ).toMatchObject({
       questRewardSatang: 100,
       platformFeeSatang: 3,
     });
   });
 
   it('multiplies the exact per-slot total by headcount', () => {
-    expect(calculateQuestV2FundingQuote({
-      questFundingTotalSatang: positiveSatang(103),
-      headcount: 3,
-      ...policy,
-    })).toMatchObject({
+    expect(
+      calculateQuestV2FundingQuote({
+        questFundingTotalSatang: positiveSatang(103),
+        headcount: 3,
+        ...policy,
+      })
+    ).toMatchObject({
       questRewardSatang: 100,
       platformFeeSatang: 3,
       escrowRequirementSatang: 309,
@@ -70,7 +74,6 @@ describe('Quest v2 publish policy', () => {
       now: new Date('2026-08-31T08:00:00.000Z'),
       questFundingTotalSatang: positiveSatang(103),
       headcount: 1,
-      spendingBalanceSatang: positiveSatang(2_000),
     });
 
     expect(check.blockingReasons).toContainEqual({
@@ -91,17 +94,26 @@ describe('Quest v2 publish policy', () => {
       now: new Date('2026-08-31T00:00:00.000Z'),
       questFundingTotalSatang: positiveSatang(103),
       headcount: 1,
-      spendingBalanceSatang: positiveSatang(1),
+      canReserve: false,
+      reason: 'INSUFFICIENT_SPENDING_BALANCE',
     });
 
     expect(check.canPublish).toBe(false);
-    expect(check.blockingReasons).toEqual(expect.arrayContaining([
-      { code: 'QUEST_TAG_REQUIRED', message: 'Quest requires a Tag' },
-      { code: 'QUEST_CONDITION_REQUIRED', message: 'Quest requires at least one Condition Item' },
-      { code: 'QUEST_DUE_AT_REQUIRED', message: 'Quest requires a dueAt' },
-      { code: 'QUEST_START_TIME_NOT_IN_FUTURE', message: 'Quest startTime must be in the future' },
-      { code: 'INSUFFICIENT_SPENDING_BALANCE', message: 'Spending Balance is insufficient for Quest Escrow' },
-    ]));
+    expect(check.blockingReasons).toEqual(
+      expect.arrayContaining([
+        { code: 'QUEST_TAG_REQUIRED', message: 'Quest requires a Tag' },
+        { code: 'QUEST_CONDITION_REQUIRED', message: 'Quest requires at least one Condition Item' },
+        { code: 'QUEST_DUE_AT_REQUIRED', message: 'Quest requires a dueAt' },
+        {
+          code: 'QUEST_START_TIME_NOT_IN_FUTURE',
+          message: 'Quest startTime must be in the future',
+        },
+        {
+          code: 'INSUFFICIENT_SPENDING_BALANCE',
+          message: 'Spending Balance is insufficient for Quest Escrow',
+        },
+      ])
+    );
     expect(check.warnings).toEqual([]);
     expect(Number(check.questRewardSatang)).toBe(100);
   });
@@ -117,7 +129,6 @@ describe('Quest v2 publish policy', () => {
       now: new Date('2026-08-31T08:00:00.000Z'),
       questFundingTotalSatang: positiveSatang(2_000),
       headcount: 1,
-      spendingBalanceSatang: positiveSatang(2_000),
       minimumFundingReservationSatang: satang(100),
       maximumFundingReservationSatang: satang(70_000_000),
     });
@@ -146,7 +157,6 @@ describe('Quest v2 publish policy', () => {
       now: new Date('2026-08-31T08:00:00.000Z'),
       questFundingTotalSatang: positiveSatang(103),
       headcount: 1,
-      spendingBalanceSatang: positiveSatang(2_000),
     });
 
     expect(check.blockingReasons).toContainEqual({
@@ -156,15 +166,12 @@ describe('Quest v2 publish policy', () => {
     expect(check.canPublish).toBe(false);
   });
 
-  it.each([
-    ['FROZEN', 'FROZEN'],
-    ['SUSPENDED', 'SUSPENDED'],
-    ['CLOSED', 'CLOSED'],
-  ] as const)('blocks a %s Wallet from publish readiness', (_, walletStatus) => {
+  it('blocks publish readiness when the Wallet does not permit a Funding Reservation', () => {
     const check = buildQuestV2PublishCheck({
       ...policy,
       participation: 'SINGLE',
-      walletStatus,
+      canReserve: false,
+      reason: 'WALLET_NOT_ACTIVE',
       tagId: 'tag-1',
       conditionValid: true,
       startTime: new Date('2026-09-01T10:00:00.000Z'),
@@ -172,12 +179,11 @@ describe('Quest v2 publish policy', () => {
       now: new Date('2026-08-31T08:00:00.000Z'),
       questFundingTotalSatang: positiveSatang(2_000),
       headcount: 1,
-      spendingBalanceSatang: positiveSatang(2_000),
     });
 
     expect(check.blockingReasons).toContainEqual({
       code: 'WALLET_NOT_ACTIVE',
-      message: `Wallet status ${walletStatus} does not permit FUNDING_RESERVATION.`,
+      message: 'Wallet does not permit a Funding Reservation.',
     });
     expect(check.canPublish).toBe(false);
   });
@@ -193,7 +199,6 @@ describe('Quest v2 publish policy', () => {
       now: new Date('2026-08-31T08:00:00.000Z'),
       questFundingTotalSatang: positiveSatang(2_000),
       headcount: 1,
-      spendingBalanceSatang: positiveSatang(2_000),
     });
 
     expect(check.blockingReasons).toEqual([

@@ -10,6 +10,8 @@
     "worker:payout": "bun scripts/payout-worker.ts",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:watch": "bun test --watch",
@@ -27,7 +29,8 @@
     "db:reset-local": "bun scripts/reset-local-database.ts",
     "db:migrate": "bun scripts/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "check": "bun run db:check && bun run lint && bun run typecheck && bun test && bun run build"
+    "check": "bun run db:check && bun run lint && bun run typecheck && bun test && bun run build",
+    "prepare": "husky || true"
   },
   "dependencies": {
     "@better-auth/expo": "1.6.23",
@@ -44,8 +47,11 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/qrcode": "1.5.6",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.5.0",
     "oxlint": "^1.73.0",
     "oxlint-tsgolint": "^0.24.0",
+    "prettier": "^3.9.6",
     "typescript": "latest"
   }
 }

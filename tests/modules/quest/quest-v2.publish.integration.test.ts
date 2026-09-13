@@ -10,11 +10,7 @@ import {
   walletWallet,
 } from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
-import {
-  createQuestV2,
-  publishQuestV2,
-  type QuestV2CreateInput,
-} from '@/modules/quest';
+import { createQuestV2, publishQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import {
   createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
@@ -39,7 +35,7 @@ const authTestApp = new Elysia({ name: 'quest-v2-publish-test-auth' }).use(
     password: testPassword,
     firstName: 'Publish',
     lastName: 'Hirer',
-  }),
+  })
 );
 
 let hirerId = '';
@@ -64,19 +60,16 @@ const baseInput: QuestV2CreateInput = {
 };
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 const fundHirer = async (userId: string, amountSatang: number) => {
   const wallet = await ensureWallet(userId);
   const [spendingAccount] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
-    .where(and(
-      eq(walletLedgerAccount.walletId, wallet.id),
-      eq(walletLedgerAccount.type, 'SPENDING'),
-    ));
+    .where(
+      and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, 'SPENDING'))
+    );
   const [suspenseAccount] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
@@ -101,7 +94,7 @@ const postPublish = (questId: string, key = `quest-v2-publish-http-${randomUUID(
         'idempotency-key': key,
         cookie: sessionCookie,
       },
-    }),
+    })
   );
 
 beforeAll(async () => {
@@ -112,7 +105,7 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: testEmail, password: testPassword }),
-    }),
+    })
   );
   if (loginResponse.status !== 200) {
     throw new Error(`Quest v2 publish test authentication failed: ${loginResponse.status}`);
@@ -136,19 +129,25 @@ afterAll(async () => {
   const reservations = await db
     .select({ id: walletFundingReservation.id, ownerUserId: walletFundingReservation.ownerUserId })
     .from(walletFundingReservation)
-    .where(and(
-      inArray(walletFundingReservation.ownerUserId, userIds),
-      eq(walletFundingReservation.status, 'ACTIVE'),
-    ));
+    .where(
+      and(
+        inArray(walletFundingReservation.ownerUserId, userIds),
+        eq(walletFundingReservation.status, 'ACTIVE')
+      )
+    );
   // Funding Reservation and ledger rows are immutable audit facts. Release
   // active test holds so teardown leaves no live Quest Escrow commitment.
-  await Promise.all(reservations.map((reservation) =>
-    db.transaction((transaction) => releaseFundingReservation(transaction, {
-      ownerUserId: reservation.ownerUserId,
-      reservationId: reservation.id,
-      operationReference: `quest-v2-publish-test-cleanup-${randomUUID()}`,
-    })),
-  ));
+  await Promise.all(
+    reservations.map((reservation) =>
+      db.transaction((transaction) =>
+        releaseFundingReservation(transaction, {
+          ownerUserId: reservation.ownerUserId,
+          reservationId: reservation.id,
+          operationReference: `quest-v2-publish-test-cleanup-${randomUUID()}`,
+        })
+      )
+    )
+  );
   await db.delete(questLocation).where(inArray(questLocation.questId, questIds));
   await db.delete(tag).where(eq(tag.id, tagId));
 });
@@ -159,7 +158,7 @@ describe('Quest API v2 publish', () => {
     const created = await createQuestV2(
       hirerId,
       baseInput,
-      `quest-v2-publish-create-${randomUUID()}`,
+      `quest-v2-publish-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -214,11 +213,13 @@ describe('Quest API v2 publish', () => {
     const [reservation] = await db
       .select()
       .from(walletFundingReservation)
-      .where(and(
-        eq(walletFundingReservation.ownerUserId, hirerId),
-        eq(walletFundingReservation.callerScope, 'quest'),
-        eq(walletFundingReservation.callerReference, created.quest.id),
-      ));
+      .where(
+        and(
+          eq(walletFundingReservation.ownerUserId, hirerId),
+          eq(walletFundingReservation.callerScope, 'quest'),
+          eq(walletFundingReservation.callerReference, created.quest.id)
+        )
+      );
     expect(reservation).toMatchObject({
       totalReservedSatang: 103,
       remainingSatang: 103,
@@ -257,7 +258,7 @@ describe('Quest API v2 publish', () => {
     const created = await createQuestV2(
       hirerId,
       baseInput,
-      `quest-v2-publish-http-create-${randomUUID()}`,
+      `quest-v2-publish-http-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -294,7 +295,7 @@ describe('Quest API v2 publish', () => {
     const created = await createQuestV2(
       hirerId,
       { ...baseInput, participation: 'GROUP', headcount: 3 },
-      `quest-v2-publish-group-create-${randomUUID()}`,
+      `quest-v2-publish-group-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -302,7 +303,7 @@ describe('Quest API v2 publish', () => {
     const published = await publishQuestV2(
       hirerId,
       created.quest.id,
-      `quest-v2-publish-group-${randomUUID()}`,
+      `quest-v2-publish-group-${randomUUID()}`
     );
     expect(published).toMatchObject({
       quest: { id: created.quest.id, state: 'QUEST_OPEN', participation: 'GROUP', headcount: 3 },
@@ -315,18 +316,22 @@ describe('Quest API v2 publish', () => {
       },
     });
     if (!published || 'outcome' in published) throw new Error('Quest was not published');
-    expect(
-      Number(published.questEscrow.escrowRequirementSatang),
-    ).toBe((Number(published.questEscrow.questRewardSatang) + Number(published.questEscrow.platformFeeSatang)) * 3);
+    expect(Number(published.questEscrow.escrowRequirementSatang)).toBe(
+      (Number(published.questEscrow.questRewardSatang) +
+        Number(published.questEscrow.platformFeeSatang)) *
+        3
+    );
 
     const [reservation] = await db
       .select({ totalReservedSatang: walletFundingReservation.totalReservedSatang })
       .from(walletFundingReservation)
-      .where(and(
-        eq(walletFundingReservation.ownerUserId, hirerId),
-        eq(walletFundingReservation.callerScope, 'quest'),
-        eq(walletFundingReservation.callerReference, created.quest.id),
-      ));
+      .where(
+        and(
+          eq(walletFundingReservation.ownerUserId, hirerId),
+          eq(walletFundingReservation.callerScope, 'quest'),
+          eq(walletFundingReservation.callerReference, created.quest.id)
+        )
+      );
     expect(reservation).toEqual({ totalReservedSatang: 309 });
   });
 
@@ -335,7 +340,7 @@ describe('Quest API v2 publish', () => {
     const created = await createQuestV2(
       blockedHirerId,
       baseInput,
-      `quest-v2-publish-blocked-create-${randomUUID()}`,
+      `quest-v2-publish-blocked-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -348,17 +353,19 @@ describe('Quest API v2 publish', () => {
     });
     if (!blocked || !('check' in blocked)) throw new Error('Expected a publish blocker');
     expect(blocked.check.blockingReasons).toContainEqual(
-      expect.objectContaining({ code: 'INSUFFICIENT_SPENDING_BALANCE' }),
+      expect.objectContaining({ code: 'INSUFFICIENT_SPENDING_BALANCE' })
     );
 
     const [idempotency] = await db
       .select({ id: walletIdempotencyKey.id })
       .from(walletIdempotencyKey)
-      .where(and(
-        eq(walletIdempotencyKey.principalUserId, blockedHirerId),
-        eq(walletIdempotencyKey.operationScope, 'quest.v2.publish'),
-        eq(walletIdempotencyKey.key, key),
-      ));
+      .where(
+        and(
+          eq(walletIdempotencyKey.principalUserId, blockedHirerId),
+          eq(walletIdempotencyKey.operationScope, 'quest.v2.publish'),
+          eq(walletIdempotencyKey.key, key)
+        )
+      );
     expect(idempotency).toBeUndefined();
 
     await fundHirer(blockedHirerId, 103);
@@ -374,7 +381,7 @@ describe('Quest API v2 publish', () => {
     const created = await createQuestV2(
       hirerId,
       baseInput,
-      `quest-v2-publish-post-reservation-create-${randomUUID()}`,
+      `quest-v2-publish-post-reservation-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -390,7 +397,7 @@ describe('Quest API v2 publish', () => {
     const key = `quest-v2-publish-post-reservation-${randomUUID()}`;
 
     await expect(publishQuestV2(hirerId, created.quest.id, key)).rejects.toThrow(
-      'has an invalid location label',
+      'has an invalid location label'
     );
 
     const [storedQuest] = await db
@@ -421,22 +428,30 @@ describe('Quest API v2 publish', () => {
       .from(walletWallet)
       .where(eq(walletWallet.userId, hirerId));
     expect(afterWallet).toEqual(beforeWallet);
-    expect(await db
-      .select({ id: walletFundingReservation.id })
-      .from(walletFundingReservation)
-      .where(and(
-        eq(walletFundingReservation.ownerUserId, hirerId),
-        eq(walletFundingReservation.callerScope, 'quest'),
-        eq(walletFundingReservation.callerReference, created.quest.id),
-      ))).toEqual([]);
-    expect(await db
-      .select({ id: walletIdempotencyKey.id })
-      .from(walletIdempotencyKey)
-      .where(and(
-        eq(walletIdempotencyKey.principalUserId, hirerId),
-        eq(walletIdempotencyKey.operationScope, 'quest.v2.publish'),
-        eq(walletIdempotencyKey.key, key),
-      ))).toEqual([]);
+    expect(
+      await db
+        .select({ id: walletFundingReservation.id })
+        .from(walletFundingReservation)
+        .where(
+          and(
+            eq(walletFundingReservation.ownerUserId, hirerId),
+            eq(walletFundingReservation.callerScope, 'quest'),
+            eq(walletFundingReservation.callerReference, created.quest.id)
+          )
+        )
+    ).toEqual([]);
+    expect(
+      await db
+        .select({ id: walletIdempotencyKey.id })
+        .from(walletIdempotencyKey)
+        .where(
+          and(
+            eq(walletIdempotencyKey.principalUserId, hirerId),
+            eq(walletIdempotencyKey.operationScope, 'quest.v2.publish'),
+            eq(walletIdempotencyKey.key, key)
+          )
+        )
+    ).toEqual([]);
   });
 
   it('rejects a changed request that reuses a completed publish key', async () => {
@@ -444,12 +459,12 @@ describe('Quest API v2 publish', () => {
     const first = await createQuestV2(
       hirerId,
       baseInput,
-      `quest-v2-publish-key-first-${randomUUID()}`,
+      `quest-v2-publish-key-first-${randomUUID()}`
     );
     const second = await createQuestV2(
       hirerId,
       baseInput,
-      `quest-v2-publish-key-second-${randomUUID()}`,
+      `quest-v2-publish-key-second-${randomUUID()}`
     );
     if (!('quest' in first) || !('quest' in second)) throw new Error('Quest creation failed');
     questIds.push(first.quest.id, second.quest.id);
@@ -468,7 +483,7 @@ describe('Quest API v2 publish', () => {
     const created = await createQuestV2(
       hirerId,
       baseInput,
-      `quest-v2-publish-concurrent-create-${randomUUID()}`,
+      `quest-v2-publish-concurrent-create-${randomUUID()}`
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -479,17 +494,19 @@ describe('Quest API v2 publish', () => {
     ]);
     expect(results.filter((result) => result && !('outcome' in result))).toHaveLength(1);
     expect(
-      results.filter((result) => result && 'outcome' in result && result.outcome === 'not-draft'),
+      results.filter((result) => result && 'outcome' in result && result.outcome === 'not-draft')
     ).toHaveLength(1);
 
     const reservations = await db
       .select({ id: walletFundingReservation.id })
       .from(walletFundingReservation)
-      .where(and(
-        eq(walletFundingReservation.ownerUserId, hirerId),
-        eq(walletFundingReservation.callerScope, 'quest'),
-        eq(walletFundingReservation.callerReference, created.quest.id),
-      ));
+      .where(
+        and(
+          eq(walletFundingReservation.ownerUserId, hirerId),
+          eq(walletFundingReservation.callerScope, 'quest'),
+          eq(walletFundingReservation.callerReference, created.quest.id)
+        )
+      );
     expect(reservations).toHaveLength(1);
   });
 });

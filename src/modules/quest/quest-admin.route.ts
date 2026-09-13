@@ -34,7 +34,8 @@ export const adminQuestRoute = new Elysia({
     detail: {
       tags: ['Admin Quests'],
       summary: 'List Quests for Admin review',
-      description: 'Lists Quests across every state, mode, and participation shape, including hidden Quests, using bounded cursor pagination, safe filters, and a title and description search.',
+      description:
+        'Lists Quests across every state, mode, and participation shape, including hidden Quests, using bounded cursor pagination, safe filters, and a title and description search.',
       operationId: 'listAdminQuests',
       security: betterAuthSecurity,
     },
@@ -45,7 +46,8 @@ export const adminQuestRoute = new Elysia({
     detail: {
       tags: ['Admin Quests'],
       summary: 'Get Quest detail for Admin review',
-      description: 'Reads Quest facts, Hirer, Candidates, Workers, Assignments, proof and file references, financial facts, edit history, and Admin Action history without secrets or unrelated Member data.',
+      description:
+        'Reads Quest facts, Hirer, Candidates, Workers, Assignments, proof and file references, financial facts, edit history, and Admin Action history without secrets or unrelated Member data.',
       operationId: 'getAdminQuestDetail',
       security: betterAuthSecurity,
     },
@@ -58,7 +60,8 @@ export const adminQuestRoute = new Elysia({
     detail: {
       tags: ['Admin Quests'],
       summary: 'Hide a Quest from Member discovery',
-      description: 'Applies an Admin visibility overlay without changing Quest State, Assignment, Quest Escrow, or Work Conversation membership.',
+      description:
+        'Applies an Admin visibility overlay without changing Quest State, Assignment, Quest Escrow, or Work Conversation membership.',
       operationId: 'hideAdminQuest',
       security: betterAuthSecurity,
     },
@@ -71,7 +74,8 @@ export const adminQuestRoute = new Elysia({
     detail: {
       tags: ['Admin Quests'],
       summary: 'Restore a hidden Quest to discovery',
-      description: 'Clears the Admin visibility overlay only when the Quest remains eligible for its OPEN lifecycle state.',
+      description:
+        'Clears the Admin visibility overlay only when the Quest remains eligible for its OPEN lifecycle state.',
       operationId: 'restoreAdminQuest',
       security: betterAuthSecurity,
     },
@@ -84,7 +88,8 @@ export const adminQuestRoute = new Elysia({
     detail: {
       tags: ['Admin Quests'],
       summary: 'Terminate a Quest under Admin policy',
-      description: 'Runs the Quest-owned cancellation settlement and closes Assignments and Work Conversation membership atomically with the Admin Action.',
+      description:
+        'Runs the Quest-owned cancellation settlement and closes Assignments and Work Conversation membership atomically with the Admin Action.',
       operationId: 'terminateAdminQuest',
       security: betterAuthSecurity,
     },

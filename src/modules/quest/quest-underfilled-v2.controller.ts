@@ -12,6 +12,7 @@ import type {
   QuestV2UnderfilledDecisionInput,
   QuestV2UnderfilledParams,
 } from './quest-underfilled-v2.schema';
+import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 import { WorkChatTransitionError } from './quest-work-chat.port';
 
 type UnderfilledData = Extract<QuestV2UnderfilledOutcome, { underfilled: unknown }>['underfilled'];
@@ -28,38 +29,34 @@ const mapOutcome = (set: AuthedContext['set'], result: UnderfilledError) => {
     return apiError('QUEST_UNDERFILLED_NOT_FOUND', 'The underfilled Quest process was not found');
   }
   if (result.outcome === 'not-underfilled') {
-    return conflict(set, 'QUEST_NOT_UNDERFILLED', 'The Quest is not an underfilled GROUP + FIRST_COME_FIRST_SERVED Quest');
+    return conflict(
+      set,
+      'QUEST_NOT_UNDERFILLED',
+      'The Quest is not an underfilled GROUP + FIRST_COME_FIRST_SERVED Quest'
+    );
   }
   if (result.outcome === 'not-pending') {
-    return conflict(set, 'QUEST_UNDERFILLED_NOT_PENDING', 'The underfilled decision or consent window is not pending');
+    return conflict(
+      set,
+      'QUEST_UNDERFILLED_NOT_PENDING',
+      'The underfilled decision or consent window is not pending'
+    );
   }
   if (result.outcome === 'already-responded') {
-    return conflict(set, 'QUEST_UNDERFILLED_ALREADY_RESPONDED', 'The Worker already responded to this consent window');
+    return conflict(
+      set,
+      'QUEST_UNDERFILLED_ALREADY_RESPONDED',
+      'The Worker already responded to this consent window'
+    );
   }
   if (result.outcome === 'expired') {
-    return conflict(set, 'QUEST_UNDERFILLED_EXPIRED', 'The underfilled decision or consent window has expired');
+    return conflict(
+      set,
+      'QUEST_UNDERFILLED_EXPIRED',
+      'The underfilled decision or consent window has expired'
+    );
   }
-  if (result.outcome === 'idempotency-key-reused') {
-    return conflict(set, 'IDEMPOTENCY_KEY_REUSED', 'The Idempotency-Key was used for a different request');
-  }
-  if (result.outcome === 'idempotency-in-progress') {
-    return conflict(set, 'IDEMPOTENCY_IN_PROGRESS', 'The Idempotency-Key is still processing');
-  }
-  if (result.outcome === 'idempotency-unavailable' || result.outcome === 'invalid-funding') {
-    set.status = 503;
-    return apiError('IDEMPOTENCY_UNAVAILABLE', 'The underfilled command result is unavailable');
-  }
-  set.status = 400;
-  return apiError('INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must not be empty');
-};
-
-const commandId = (request: Request | undefined) => request?.headers.get('idempotency-key');
-
-const requireCommandId = (set: AuthedContext['set'], request: Request | undefined) => {
-  const value = commandId(request);
-  if (value?.trim()) return value;
-  set.status = 400;
-  return apiError('IDEMPOTENCY_KEY_REQUIRED', 'The Idempotency-Key header is required');
+  return mapQuestCommandOutcome(set, result.outcome);
 };
 
 const handleWorkChatError = (set: AuthedContext['set'], error: unknown) => {
@@ -94,10 +91,16 @@ export const decideQuestUnderfilledV2Controller = async ({
   params: QuestV2UnderfilledParams;
   body: QuestV2UnderfilledDecisionInput;
 }) => {
-  const key = requireCommandId(set, request);
+  const key = requireQuestCommandId(request, set);
   if (typeof key !== 'string') return key;
   try {
-    const result = await decideQuestV2Underfilled(session.user.id, params.questId, body, key);
+    const result = await decideQuestV2Underfilled(
+      session.user.id,
+      params.questId,
+      body,
+      key,
+      new Date()
+    );
     if ('outcome' in result) return mapOutcome(set, result);
     return apiSuccess(result.underfilled as UnderfilledData);
   } catch (error) {
@@ -117,10 +120,16 @@ export const respondToQuestUnderfilledV2Controller = async ({
   params: QuestV2UnderfilledParams;
   body: QuestV2UnderfilledConsentInput;
 }) => {
-  const key = requireCommandId(set, request);
+  const key = requireQuestCommandId(request, set);
   if (typeof key !== 'string') return key;
   try {
-    const result = await respondToQuestV2Underfilled(session.user.id, params.questId, body, key);
+    const result = await respondToQuestV2Underfilled(
+      session.user.id,
+      params.questId,
+      body,
+      key,
+      new Date()
+    );
     if ('outcome' in result) return mapOutcome(set, result);
     return apiSuccess(result.underfilled as UnderfilledData);
   } catch (error) {

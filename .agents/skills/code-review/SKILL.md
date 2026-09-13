@@ -22,6 +22,8 @@ Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so th
 
 Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, not inside two parallel sub-agents.
 
+Sub-agents often have no shell: they read, glob, and grep only. Stage the material before you spawn, rather than passing a command they cannot run. Write the commit list and the full diff to `local://review-diff.md`. A sub-agent that has to run `git` stalls, then spends a round trip asking you for the diff.
+
 ### 2. Identify the spec source
 
 Look for the originating spec, in this order:
@@ -30,6 +32,8 @@ Look for the originating spec, in this order:
 2. A path the user passed as an argument.
 3. A spec file under `docs/`, `specs/`, or `.scratch/` matching the branch name or feature.
 4. If nothing is found, ask the user where the spec is. If they say there isn't one, the **Spec** sub-agent will skip and report "no spec available".
+
+Stage the fetched spec to `local://review-spec.md` as well, including the issue comments that carry the decisions. The sub-agent may have no `gh`.
 
 ### 3. Identify the standards sources
 
@@ -57,16 +61,17 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 
 ### 4. Spawn both sub-agents in parallel
 
+Both briefs carry the **verify-before-claim** rule: a convention claim ("this breaks the file's pattern") is checked against the whole file, and a blast-radius claim ("this leaves rows retried forever") is checked against the query or the caller it names. Cite what you read. The diff alone shows neither, and an unverified claim reaches the user as a wrong finding.
+
 **Standards sub-agent prompt** should include:
 
-- The full diff command and commit list.
+- `local://review-diff.md`, which holds the commit list and the full diff.
 - The list of standards-source files you found in step 3, **plus the smell baseline from step 3** pasted in full (the sub-agent has no other access to it).
 - The brief: "Report, per file/hunk where relevant, (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls: documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
 
 **Spec sub-agent prompt** should include:
 
-- The diff command and commit list.
-- The path or fetched contents of the spec.
+- `local://review-diff.md` and `local://review-spec.md`.
 - The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. Quote the spec line for each finding. Under 400 words."
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report.

@@ -112,7 +112,11 @@ describe('Quest controllers', () => {
 
     expect(result).toEqual({
       success: true,
-      data: { requestId: questId, status: 'EDIT_REQUEST_PENDING', expiresAt: expiresAt.toISOString() },
+      data: {
+        requestId: questId,
+        status: 'EDIT_REQUEST_PENDING',
+        expiresAt: expiresAt.toISOString(),
+      },
     });
   });
 

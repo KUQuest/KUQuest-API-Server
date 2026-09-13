@@ -1,22 +1,19 @@
 import { t, type Static } from 'elysia';
 
-import {
-  questV2AssignmentStates,
-  questV2States,
-} from './quest-v2.contract';
+import { questV2AssignmentStates, questV2States } from './quest-v2.contract';
 
 const state = t.Union(
   questV2AssignmentStates.map((value) => t.Literal(value)) as [
     ReturnType<typeof t.Literal<string>>,
     ...ReturnType<typeof t.Literal<string>>[],
-  ],
+  ]
 );
 
 const questState = t.Union(
   questV2States.map((value) => t.Literal(value)) as [
     ReturnType<typeof t.Literal<string>>,
     ...ReturnType<typeof t.Literal<string>>[],
-  ],
+  ]
 );
 
 export const questV2AssignmentParamsSchema = t.Object({

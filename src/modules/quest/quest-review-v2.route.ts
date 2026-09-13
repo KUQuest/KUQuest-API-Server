@@ -9,7 +9,6 @@ import {
   createQuestV2ReviewController,
   updateQuestV2ReviewController,
 } from './quest-review-v2.controller';
-import { createQuestIdempotencyKeyGuard } from './quest-idempotency.guard';
 import {
   questV2ReviewCreateSchema,
   questV2ReviewDetailParamsSchema,
@@ -23,7 +22,6 @@ export const questReviewV2Route = new Elysia({
   name: 'quest-review-v2-route',
   prefix: `${API_V2_PREFIX}/quests`,
 })
-  .use(createQuestIdempotencyKeyGuard('rating-review-v2'))
   .use(authGuard)
   .post('/:questId/reviews', createQuestV2ReviewController, {
     params: questV2ReviewParamsSchema,

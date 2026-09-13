@@ -1,6 +1,13 @@
 import { db } from '@/database/client';
 import { adminDisputeCase, disputeCaseStatuses } from '@/database/schema/admin.schema';
-import { proofSubmission, proofSubmissionImage, quest, questAssignment, questV2ProofSubmission, questV2ProofSubmissionFile } from '@/database/schema/quest.schema';
+import {
+  proofSubmission,
+  proofSubmissionImage,
+  quest,
+  questAssignment,
+  questV2ProofSubmission,
+  questV2ProofSubmissionFile,
+} from '@/database/schema/quest.schema';
 import { file } from '@/database/schema/file.schema';
 import {
   createAdminActionService,
@@ -62,10 +69,7 @@ export class AdminDisputeCaseError extends Error {
     | 'DISPUTE_CASE_AMOUNT_REQUIRED'
     | 'DISPUTE_CASE_WINDOW_EXPIRED';
 
-  constructor(
-    code: AdminDisputeCaseError['code'],
-    message: string,
-  ) {
+  constructor(code: AdminDisputeCaseError['code'], message: string) {
     super(message);
     this.name = 'AdminDisputeCaseError';
     this.code = code;
@@ -166,7 +170,7 @@ export type ResolveAdminDisputeCaseResult = AdminActionResult<AdminDisputeCaseSu
 const serializeDate = (value: Date | null): string | null => value?.toISOString() ?? null;
 
 export const summaryFromRecord = (
-  record: typeof adminDisputeCase.$inferSelect,
+  record: typeof adminDisputeCase.$inferSelect
 ): AdminDisputeCaseSummary => ({
   id: record.id,
   questId: record.questId,
@@ -185,7 +189,7 @@ export const summaryFromRecord = (
 const caseByIdInTransaction = async (
   transaction: WalletTransaction,
   disputeCaseId: string,
-  lock = false,
+  lock = false
 ) => {
   const query = transaction
     .select()
@@ -195,10 +199,7 @@ const caseByIdInTransaction = async (
   return record;
 };
 
-const listCursorCondition = (
-  cursor: CursorPayload | undefined,
-  sort: 'newest' | 'oldest',
-) => {
+const listCursorCondition = (cursor: CursorPayload | undefined, sort: 'newest' | 'oldest') => {
   if (!cursor) return undefined;
   const cursorDate = new Date(cursor.startTime);
   if (Number.isNaN(cursorDate.getTime())) {
@@ -206,28 +207,30 @@ const listCursorCondition = (
   }
   return sort === 'oldest'
     ? or(
-      gt(adminDisputeCase.createdAt, cursorDate),
-      and(eq(adminDisputeCase.createdAt, cursorDate), gt(adminDisputeCase.id, cursor.id)),
-    )
+        gt(adminDisputeCase.createdAt, cursorDate),
+        and(eq(adminDisputeCase.createdAt, cursorDate), gt(adminDisputeCase.id, cursor.id))
+      )
     : or(
-      lt(adminDisputeCase.createdAt, cursorDate),
-      and(eq(adminDisputeCase.createdAt, cursorDate), lt(adminDisputeCase.id, cursor.id)),
-    );
+        lt(adminDisputeCase.createdAt, cursorDate),
+        and(eq(adminDisputeCase.createdAt, cursorDate), lt(adminDisputeCase.id, cursor.id))
+      );
 };
 
 /** Create the queue record after a filing adapter has authenticated its actor. */
 export const createAdminDisputeCaseInTransaction = async (
   transaction: WalletTransaction,
-  input: CreateAdminDisputeCaseInput,
+  input: CreateAdminDisputeCaseInput
 ) => {
   const now = input.now ?? new Date();
   const [existing] = await transaction
     .select()
     .from(adminDisputeCase)
-    .where(and(
-      eq(adminDisputeCase.questId, input.questId),
-      eq(adminDisputeCase.filerUserId, input.filerUserId),
-    ))
+    .where(
+      and(
+        eq(adminDisputeCase.questId, input.questId),
+        eq(adminDisputeCase.filerUserId, input.filerUserId)
+      )
+    )
     .limit(1);
   if (existing) return existing;
 
@@ -243,28 +246,42 @@ export const createAdminDisputeCaseInTransaction = async (
     .where(eq(quest.id, input.questId))
     .for('update');
   if (!currentQuest || currentQuest.questStatus !== 'QUEST_FAILED') {
-    throw new AdminDisputeCaseError('DISPUTE_CASE_QUEST_NOT_FAILED', 'Only a failed Quest can receive a Dispute Case.');
+    throw new AdminDisputeCaseError(
+      'DISPUTE_CASE_QUEST_NOT_FAILED',
+      'Only a failed Quest can receive a Dispute Case.'
+    );
   }
 
   const filingWindow = input.openedByAdminId ? 5 : 1;
   const failedAt = currentQuest.failedAt ?? currentQuest.updatedAt;
   if (now.getTime() > failedAt.getTime() + filingWindow * 24 * 60 * 60 * 1000) {
-    throw new AdminDisputeCaseError('DISPUTE_CASE_WINDOW_EXPIRED', 'The Dispute Case filing window has expired.');
+    throw new AdminDisputeCaseError(
+      'DISPUTE_CASE_WINDOW_EXPIRED',
+      'The Dispute Case filing window has expired.'
+    );
   }
   if (input.openedByAdminId && input.filerUserId === currentQuest.hirerId) {
-    throw new AdminDisputeCaseError('DISPUTE_CASE_WORKER_NOT_ASSIGNED', 'An Admin may open a Dispute Case only on behalf of a Worker.');
+    throw new AdminDisputeCaseError(
+      'DISPUTE_CASE_WORKER_NOT_ASSIGNED',
+      'An Admin may open a Dispute Case only on behalf of a Worker.'
+    );
   }
   if (input.filerUserId !== currentQuest.hirerId) {
     const [assignment] = await transaction
       .select({ id: questAssignment.id })
       .from(questAssignment)
-      .where(and(
-        eq(questAssignment.questId, input.questId),
-        eq(questAssignment.workerId, input.filerUserId),
-      ))
+      .where(
+        and(
+          eq(questAssignment.questId, input.questId),
+          eq(questAssignment.workerId, input.filerUserId)
+        )
+      )
       .limit(1);
     if (!assignment) {
-      throw new AdminDisputeCaseError('DISPUTE_CASE_WORKER_NOT_ASSIGNED', 'The filer did not hold an Assignment on this Quest.');
+      throw new AdminDisputeCaseError(
+        'DISPUTE_CASE_WORKER_NOT_ASSIGNED',
+        'The filer did not hold an Assignment on this Quest.'
+      );
     }
   }
 
@@ -285,12 +302,15 @@ export const createAdminDisputeCaseInTransaction = async (
   const [concurrent] = await transaction
     .select()
     .from(adminDisputeCase)
-    .where(and(
-      eq(adminDisputeCase.questId, input.questId),
-      eq(adminDisputeCase.filerUserId, input.filerUserId),
-    ))
+    .where(
+      and(
+        eq(adminDisputeCase.questId, input.questId),
+        eq(adminDisputeCase.filerUserId, input.filerUserId)
+      )
+    )
     .limit(1);
-  if (!concurrent) throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case could not be created.');
+  if (!concurrent)
+    throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case could not be created.');
   return concurrent;
 };
 
@@ -309,27 +329,23 @@ export const listAdminDisputeCases = async ({
   const rows = await db
     .select()
     .from(adminDisputeCase)
-    .where(and(
-      eq(adminDisputeCase.status, status),
-      listCursorCondition(cursor, sort),
-    ))
+    .where(and(eq(adminDisputeCase.status, status), listCursorCondition(cursor, sort)))
     .orderBy(
       sort === 'oldest' ? asc(adminDisputeCase.createdAt) : desc(adminDisputeCase.createdAt),
-      sort === 'oldest' ? asc(adminDisputeCase.id) : desc(adminDisputeCase.id),
+      sort === 'oldest' ? asc(adminDisputeCase.id) : desc(adminDisputeCase.id)
     )
     .limit(limit + 1);
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   return {
     items: page.map(summaryFromRecord),
-    nextCursor: rows.length > limit && last
-      ? { startTime: last.createdAt.toISOString(), id: last.id }
-      : null,
+    nextCursor:
+      rows.length > limit && last ? { startTime: last.createdAt.toISOString(), id: last.id } : null,
   };
 };
 
 export const getAdminDisputeCase = async (
-  disputeCaseId: string,
+  disputeCaseId: string
 ): Promise<AdminDisputeCaseDetail> => {
   const [row] = await db
     .select({
@@ -348,7 +364,8 @@ export const getAdminDisputeCase = async (
     .innerJoin(quest, eq(quest.id, adminDisputeCase.questId))
     .where(eq(adminDisputeCase.id, disputeCaseId))
     .limit(1);
-  if (!row) throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
+  if (!row)
+    throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
   return {
     ...summaryFromRecord(row.disputeCase),
     quest: {
@@ -360,7 +377,7 @@ export const getAdminDisputeCase = async (
 
 const evidenceForCaseInTransaction = async (
   transaction: WalletTransaction,
-  disputeCaseId: string,
+  disputeCaseId: string
 ): Promise<AdminDisputeEvidence> => {
   const [caseRow] = await transaction
     .select({
@@ -370,7 +387,8 @@ const evidenceForCaseInTransaction = async (
     .from(adminDisputeCase)
     .where(eq(adminDisputeCase.id, disputeCaseId))
     .limit(1);
-  if (!caseRow) throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
+  if (!caseRow)
+    throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
 
   const [questRow] = await transaction
     .select({
@@ -383,7 +401,8 @@ const evidenceForCaseInTransaction = async (
     .from(quest)
     .where(eq(quest.id, caseRow.questId))
     .limit(1);
-  if (!questRow) throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Quest does not exist.');
+  if (!questRow)
+    throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Quest does not exist.');
 
   const assignments = await transaction
     .select({
@@ -416,7 +435,11 @@ const evidenceForCaseInTransaction = async (
     .leftJoin(proofSubmissionImage, eq(proofSubmissionImage.proofSubmissionId, proofSubmission.id))
     .leftJoin(file, eq(file.id, proofSubmissionImage.fileId))
     .where(eq(proofSubmission.questId, caseRow.questId))
-    .orderBy(asc(proofSubmission.submittedAt), asc(proofSubmission.id), asc(proofSubmissionImage.position))
+    .orderBy(
+      asc(proofSubmission.submittedAt),
+      asc(proofSubmission.id),
+      asc(proofSubmissionImage.position)
+    )
     .limit(maxDisputeEvidenceProofSubmissions + 1);
   const v2ProofRows = await transaction
     .select({
@@ -432,10 +455,17 @@ const evidenceForCaseInTransaction = async (
       position: questV2ProofSubmissionFile.position,
     })
     .from(questV2ProofSubmission)
-    .leftJoin(questV2ProofSubmissionFile, eq(questV2ProofSubmissionFile.proofSubmissionId, questV2ProofSubmission.id))
+    .leftJoin(
+      questV2ProofSubmissionFile,
+      eq(questV2ProofSubmissionFile.proofSubmissionId, questV2ProofSubmission.id)
+    )
     .leftJoin(file, eq(file.id, questV2ProofSubmissionFile.fileId))
     .where(eq(questV2ProofSubmission.questId, caseRow.questId))
-    .orderBy(asc(questV2ProofSubmission.sentAt), asc(questV2ProofSubmission.id), asc(questV2ProofSubmissionFile.position))
+    .orderBy(
+      asc(questV2ProofSubmission.sentAt),
+      asc(questV2ProofSubmission.id),
+      asc(questV2ProofSubmissionFile.position)
+    )
     .limit(maxDisputeEvidenceProofSubmissions + 1);
 
   const proofSubmissions = new Map<string, AdminDisputeEvidence['proofSubmissions'][number]>();
@@ -460,7 +490,8 @@ const evidenceForCaseInTransaction = async (
     proofSubmissions.set(row.id, proof);
   }
   const proofItems = [...proofSubmissions.values()];
-  const proofSubmissionsTruncated = legacyProofRows.length > maxDisputeEvidenceProofSubmissions ||
+  const proofSubmissionsTruncated =
+    legacyProofRows.length > maxDisputeEvidenceProofSubmissions ||
     v2ProofRows.length > maxDisputeEvidenceProofSubmissions ||
     proofItems.length > maxDisputeEvidenceProofSubmissions;
   let filesTruncated = false;
@@ -490,7 +521,7 @@ const evidenceForCaseInTransaction = async (
 export const getAdminDisputeEvidence = async (
   adminId: string,
   disputeCaseId: string,
-  requestKey: string,
+  requestKey: string
 ) => {
   const result = await adminActionService.recordEvidenceAccess({
     adminId,
@@ -514,14 +545,15 @@ export const getAdminDisputeEvidence = async (
 
 const summaryResultInTransaction = async (
   transaction: WalletTransaction,
-  disputeCaseId: string,
+  disputeCaseId: string
 ): Promise<{
   resourceSummary: AdminDisputeCaseSummary;
   resourceVersion: number;
   resourceTimestamp: null;
 }> => {
   const current = await caseByIdInTransaction(transaction, disputeCaseId);
-  if (!current) throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
+  if (!current)
+    throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
   return {
     resourceSummary: summaryFromRecord(current),
     resourceVersion: current.version,
@@ -534,19 +566,28 @@ const assertResolutionInput = (input: ResolveAdminDisputeCaseInput) => {
     if (input.workerId !== undefined || input.amountSatang !== undefined) {
       throw new AdminDisputeCaseError(
         'DISPUTE_CASE_OUTCOME_INVALID',
-        'Dismissed Dispute Cases cannot include a Worker or an amount.',
+        'Dismissed Dispute Cases cannot include a Worker or an amount.'
       );
     }
     return;
   }
   if (input.outcome !== 'DISPUTE_CASE_RESOLVED') {
-    throw new AdminDisputeCaseError('DISPUTE_CASE_OUTCOME_INVALID', 'Unsupported Dispute Case outcome.');
+    throw new AdminDisputeCaseError(
+      'DISPUTE_CASE_OUTCOME_INVALID',
+      'Unsupported Dispute Case outcome.'
+    );
   }
   if (!input.workerId) {
-    throw new AdminDisputeCaseError('DISPUTE_CASE_WORKER_NOT_ASSIGNED', 'A resolved Dispute Case must name a Worker.');
+    throw new AdminDisputeCaseError(
+      'DISPUTE_CASE_WORKER_NOT_ASSIGNED',
+      'A resolved Dispute Case must name a Worker.'
+    );
   }
   if (input.amountSatang === undefined) {
-    throw new AdminDisputeCaseError('DISPUTE_CASE_AMOUNT_REQUIRED', 'A resolved Dispute Case must include a positive Satang amount.');
+    throw new AdminDisputeCaseError(
+      'DISPUTE_CASE_AMOUNT_REQUIRED',
+      'A resolved Dispute Case must include a positive Satang amount.'
+    );
   }
   try {
     positiveSatang(input.amountSatang);
@@ -559,13 +600,12 @@ const assertResolutionInput = (input: ResolveAdminDisputeCaseInput) => {
 };
 
 export const resolveAdminDisputeCase = async (
-  input: ResolveAdminDisputeCaseInput,
+  input: ResolveAdminDisputeCaseInput
 ): Promise<ResolveAdminDisputeCaseResult> => {
   assertResolutionInput(input);
   const now = input.now ?? new Date();
-  const action = input.outcome === 'DISPUTE_CASE_DISMISSED'
-    ? 'DISPUTE_CASE_DISMISS'
-    : 'DISPUTE_CASE_RESOLVE';
+  const action =
+    input.outcome === 'DISPUTE_CASE_DISMISSED' ? 'DISPUTE_CASE_DISMISS' : 'DISPUTE_CASE_RESOLVE';
   const result = await adminActionService.executeCommand<AdminDisputeCaseSummary>({
     adminId: input.adminId,
     action,
@@ -582,13 +622,17 @@ export const resolveAdminDisputeCase = async (
     expectedVersion: input.expectedVersion,
     prepare: async (transaction) => {
       const current = await caseByIdInTransaction(transaction, input.disputeCaseId, true);
-      if (!current) throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
+      if (!current)
+        throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
 
       return {
         currentVersion: current.version,
         apply: async () => {
           if (current.status !== 'DISPUTE_CASE_PENDING') {
-            throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_PENDING', 'Dispute Case has already reached a terminal status.');
+            throw new AdminDisputeCaseError(
+              'DISPUTE_CASE_NOT_PENDING',
+              'Dispute Case has already reached a terminal status.'
+            );
           }
           const [currentQuest] = await transaction
             .select({
@@ -603,12 +647,21 @@ export const resolveAdminDisputeCase = async (
             .where(eq(quest.id, current.questId))
             .for('update');
           if (!currentQuest || currentQuest.questStatus !== 'QUEST_FAILED') {
-            throw new AdminDisputeCaseError('DISPUTE_CASE_QUEST_NOT_FAILED', 'Only a failed Quest can have a Dispute Case resolved.');
+            throw new AdminDisputeCaseError(
+              'DISPUTE_CASE_QUEST_NOT_FAILED',
+              'Only a failed Quest can have a Dispute Case resolved.'
+            );
           }
           const failedAt = currentQuest.failedAt ?? currentQuest.updatedAt;
           const filingWindow = current.openedByAdminId ? 5 : 1;
-          if (current.createdAt.getTime() > failedAt.getTime() + filingWindow * 24 * 60 * 60 * 1000) {
-            throw new AdminDisputeCaseError('DISPUTE_CASE_WINDOW_EXPIRED', 'Dispute Case was opened after its allowed filing window.');
+          if (
+            current.createdAt.getTime() >
+            failedAt.getTime() + filingWindow * 24 * 60 * 60 * 1000
+          ) {
+            throw new AdminDisputeCaseError(
+              'DISPUTE_CASE_WINDOW_EXPIRED',
+              'Dispute Case was opened after its allowed filing window.'
+            );
           }
 
           if (input.outcome === 'DISPUTE_CASE_DISMISSED') {
@@ -621,29 +674,43 @@ export const resolveAdminDisputeCase = async (
                 version: sql`${adminDisputeCase.version} + 1`,
                 updatedAt: now,
               })
-              .where(and(
-                eq(adminDisputeCase.id, current.id),
-                eq(adminDisputeCase.version, input.expectedVersion),
-                eq(adminDisputeCase.status, 'DISPUTE_CASE_PENDING'),
-              ))
+              .where(
+                and(
+                  eq(adminDisputeCase.id, current.id),
+                  eq(adminDisputeCase.version, input.expectedVersion),
+                  eq(adminDisputeCase.status, 'DISPUTE_CASE_PENDING')
+                )
+              )
               .returning();
-            if (!updated) throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_PENDING', 'Dispute Case changed before dismissal.');
+            if (!updated)
+              throw new AdminDisputeCaseError(
+                'DISPUTE_CASE_NOT_PENDING',
+                'Dispute Case changed before dismissal.'
+              );
             return summaryResultInTransaction(transaction, updated.id);
           }
 
           const [assignment] = await transaction
             .select({ id: questAssignment.id })
             .from(questAssignment)
-            .where(and(
-              eq(questAssignment.questId, current.questId),
-              eq(questAssignment.workerId, input.workerId!),
-            ))
+            .where(
+              and(
+                eq(questAssignment.questId, current.questId),
+                eq(questAssignment.workerId, input.workerId!)
+              )
+            )
             .limit(1);
           if (!assignment) {
-            throw new AdminDisputeCaseError('DISPUTE_CASE_WORKER_NOT_ASSIGNED', 'The named Worker did not hold an Assignment on this Quest.');
+            throw new AdminDisputeCaseError(
+              'DISPUTE_CASE_WORKER_NOT_ASSIGNED',
+              'The named Worker did not hold an Assignment on this Quest.'
+            );
           }
           if (!currentQuest.fundingReservationId) {
-            throw new AdminDisputeCaseError('DISPUTE_CASE_RESERVATION_NOT_FOUND', 'The failed Quest has no Funding Reservation.');
+            throw new AdminDisputeCaseError(
+              'DISPUTE_CASE_RESERVATION_NOT_FOUND',
+              'The failed Quest has no Funding Reservation.'
+            );
           }
 
           const settlement = await settleDisputeCase(transaction, {
@@ -664,13 +731,19 @@ export const resolveAdminDisputeCase = async (
               version: sql`${adminDisputeCase.version} + 1`,
               updatedAt: now,
             })
-            .where(and(
-              eq(adminDisputeCase.id, current.id),
-              eq(adminDisputeCase.version, input.expectedVersion),
-              eq(adminDisputeCase.status, 'DISPUTE_CASE_PENDING'),
-            ))
+            .where(
+              and(
+                eq(adminDisputeCase.id, current.id),
+                eq(adminDisputeCase.version, input.expectedVersion),
+                eq(adminDisputeCase.status, 'DISPUTE_CASE_PENDING')
+              )
+            )
             .returning();
-          if (!updated) throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_PENDING', 'Dispute Case changed before resolution.');
+          if (!updated)
+            throw new AdminDisputeCaseError(
+              'DISPUTE_CASE_NOT_PENDING',
+              'Dispute Case changed before resolution.'
+            );
           return summaryResultInTransaction(transaction, updated.id);
         },
       };
