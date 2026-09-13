@@ -1042,6 +1042,32 @@ describe('Quest API v2 Draft editing', () => {
     expect(history).toHaveLength(0);
   });
 
+  it('writes no locations history row when the Hirer resends the same Quest Locations', async () => {
+    const created = await createQuestV2(
+      hirerId,
+      { ...baseInput, locations: [{ label: 'Bangkok' }, { label: 'Chiang Mai' }] },
+      `v2-edit-locations-order-create-${randomUUID()}`
+    );
+    if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
+    questIds.push(created.quest.id);
+
+    const response = await patchQuest(
+      created.quest.id,
+      {
+        title: 'Resent Quest Locations in another order',
+        locations: [{ label: 'Chiang Mai' }, { label: 'Bangkok' }],
+      },
+      1
+    );
+    expect(response.status).toBe(200);
+
+    const history = await db
+      .select()
+      .from(questEditHistory)
+      .where(eq(questEditHistory.questId, created.quest.id));
+    expect(history.map((row) => row.fieldName)).toEqual(['title']);
+  });
+
   it.each(['FIRST_COME_FIRST_SERVED', 'CANDIDATE'] as const)(
     'rejects a GROUP Draft edit below two Workers for %s mode',
     async (mode) => {

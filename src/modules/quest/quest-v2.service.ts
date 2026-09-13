@@ -2272,11 +2272,22 @@ const editQuestV2InTransaction = async (
       }
 
       if (input.locations !== undefined) {
-        const previousLocations = await transaction
-          .select({ label: questLocation.label })
-          .from(questLocation)
-          .where(eq(questLocation.questId, questId));
-        const nextLocations = input.locations.map((location) => ({ label: location.label }));
+        // Quest Edit history values mirror the Admin Quest projection shapes in
+        // quest-admin.service.ts: `condition` is `{ items: [{ position, text }] }`
+        // and `locations` is `[{ label }]`. Both lists are compared in one
+        // deterministic order, so an unchanged set writes no row.
+        const byLabel = (a: { label: string | null }, b: { label: string | null }): number =>
+          (a.label ?? '') < (b.label ?? '') ? -1 : (a.label ?? '') > (b.label ?? '') ? 1 : 0;
+        const previousLocations = (
+          await transaction
+            .select({ label: questLocation.label })
+            .from(questLocation)
+            .where(eq(questLocation.questId, questId))
+            .orderBy(asc(questLocation.id))
+        ).sort(byLabel);
+        const nextLocations = input.locations
+          .map((location) => ({ label: location.label }))
+          .sort(byLabel);
         trackEdit('locations', previousLocations, nextLocations);
 
         await transaction.delete(questLocation).where(eq(questLocation.questId, questId));
