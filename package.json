@@ -10,6 +10,8 @@
     "worker:payout": "bun scripts/payout-worker.ts",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:watch": "bun test --watch",
