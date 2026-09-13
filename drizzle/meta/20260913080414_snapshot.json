@@ -1,6 +1,6 @@
 {
-  "id": "e1106a01-63da-44a1-a2e5-1e646e69eec6",
-  "prevId": "8020b6c5-8429-4ef3-a827-ad11d1d78125",
+  "id": "c950f3de-c14e-4370-b35f-151d0e3e64da",
+  "prevId": "96ebb0b7-e91a-4360-b734-15fb918907b4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -280,6 +280,27 @@
             },
             {
               "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "admin_action_created_idx": {
+          "name": "admin_action_created_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -6299,6 +6320,204 @@
       },
       "isRLSEnabled": false
     },
+    "public.quest_command": {
+      "name": "quest_command",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "quest_id": {
+          "name": "quest_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "principal_user_id": {
+          "name": "principal_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operation_scope": {
+          "name": "operation_scope",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource_type": {
+          "name": "resource_type",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resource_id": {
+          "name": "resource_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result_data": {
+          "name": "result_data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "processing_status": {
+          "name": "processing_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PROCESSING'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "quest_command_quest_idx": {
+          "name": "quest_command_quest_idx",
+          "columns": [
+            {
+              "expression": "quest_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "quest_command_principal_idx": {
+          "name": "quest_command_principal_idx",
+          "columns": [
+            {
+              "expression": "principal_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "quest_command_expiry_idx": {
+          "name": "quest_command_expiry_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "quest_command_quest_id_quest_id_fk": {
+          "name": "quest_command_quest_id_quest_id_fk",
+          "tableFrom": "quest_command",
+          "tableTo": "quest",
+          "columnsFrom": [
+            "quest_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "quest_command_principal_user_id_auth_user_id_fk": {
+          "name": "quest_command_principal_user_id_auth_user_id_fk",
+          "tableFrom": "quest_command",
+          "tableTo": "auth_user",
+          "columnsFrom": [
+            "principal_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "quest_command_principal_user_id_operation_scope_key_key": {
+          "name": "quest_command_principal_user_id_operation_scope_key_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "principal_user_id",
+            "operation_scope",
+            "key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "quest_command_key_check": {
+          "name": "quest_command_key_check",
+          "value": "btrim(\"quest_command\".\"key\") <> ''"
+        },
+        "quest_command_operation_scope_check": {
+          "name": "quest_command_operation_scope_check",
+          "value": "btrim(\"quest_command\".\"operation_scope\") <> ''"
+        },
+        "quest_command_hash_check": {
+          "name": "quest_command_hash_check",
+          "value": "\"quest_command\".\"request_hash\" ~ '^[0-9a-f]{64}$'"
+        },
+        "quest_command_status_check": {
+          "name": "quest_command_status_check",
+          "value": "\"quest_command\".\"processing_status\" IN ('PROCESSING', 'COMPLETED')"
+        },
+        "quest_command_completion_check": {
+          "name": "quest_command_completion_check",
+          "value": "(\"quest_command\".\"processing_status\" = 'COMPLETED') = (\"quest_command\".\"completed_at\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.quest_completion_confirmation": {
       "name": "quest_completion_confirmation",
       "schema": "",
@@ -8251,202 +8470,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.quest_v2_proof_command": {
-      "name": "quest_v2_proof_command",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "key": {
-          "name": "key",
-          "type": "varchar(200)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "quest_id": {
-          "name": "quest_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "principal_user_id": {
-          "name": "principal_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "operation": {
-          "name": "operation",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_hash": {
-          "name": "request_hash",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "resource_type": {
-          "name": "resource_type",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resource_id": {
-          "name": "resource_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "result_data": {
-          "name": "result_data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "processing_status": {
-          "name": "processing_status",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'PROCESSING'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "quest_v2_proof_command_quest_idx": {
-          "name": "quest_v2_proof_command_quest_idx",
-          "columns": [
-            {
-              "expression": "quest_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "quest_v2_proof_command_principal_idx": {
-          "name": "quest_v2_proof_command_principal_idx",
-          "columns": [
-            {
-              "expression": "principal_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "quest_v2_proof_command_expiry_idx": {
-          "name": "quest_v2_proof_command_expiry_idx",
-          "columns": [
-            {
-              "expression": "expires_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "quest_v2_proof_command_quest_id_quest_id_fk": {
-          "name": "quest_v2_proof_command_quest_id_quest_id_fk",
-          "tableFrom": "quest_v2_proof_command",
-          "tableTo": "quest",
-          "columnsFrom": [
-            "quest_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "quest_v2_proof_command_principal_user_id_auth_user_id_fk": {
-          "name": "quest_v2_proof_command_principal_user_id_auth_user_id_fk",
-          "tableFrom": "quest_v2_proof_command",
-          "tableTo": "auth_user",
-          "columnsFrom": [
-            "principal_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "quest_v2_proof_command_key_unique": {
-          "name": "quest_v2_proof_command_key_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "quest_v2_proof_command_key_check": {
-          "name": "quest_v2_proof_command_key_check",
-          "value": "btrim(\"quest_v2_proof_command\".\"key\") <> ''"
-        },
-        "quest_v2_proof_command_operation_check": {
-          "name": "quest_v2_proof_command_operation_check",
-          "value": "btrim(\"quest_v2_proof_command\".\"operation\") <> ''"
-        },
-        "quest_v2_proof_command_hash_check": {
-          "name": "quest_v2_proof_command_hash_check",
-          "value": "\"quest_v2_proof_command\".\"request_hash\" ~ '^[0-9a-f]{64}$'"
-        },
-        "quest_v2_proof_command_status_check": {
-          "name": "quest_v2_proof_command_status_check",
-          "value": "\"quest_v2_proof_command\".\"processing_status\" IN ('PROCESSING', 'COMPLETED')"
-        },
-        "quest_v2_proof_command_completion_check": {
-          "name": "quest_v2_proof_command_completion_check",
-          "value": "(\"quest_v2_proof_command\".\"processing_status\" = 'COMPLETED') = (\"quest_v2_proof_command\".\"completed_at\" IS NOT NULL)"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.quest_v2_proof_submission": {
       "name": "quest_v2_proof_submission",
       "schema": "",
@@ -8824,196 +8847,6 @@
         "quest_v2_proof_submission_file_failure_code_check": {
           "name": "quest_v2_proof_submission_file_failure_code_check",
           "value": "\"quest_v2_proof_submission_file\".\"failure_code\" IS NULL OR btrim(\"quest_v2_proof_submission_file\".\"failure_code\") <> ''"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.quest_v2_review_command": {
-      "name": "quest_v2_review_command",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "key": {
-          "name": "key",
-          "type": "varchar(200)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "quest_id": {
-          "name": "quest_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "principal_user_id": {
-          "name": "principal_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "operation": {
-          "name": "operation",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_hash": {
-          "name": "request_hash",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "resource_id": {
-          "name": "resource_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "result_data": {
-          "name": "result_data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "processing_status": {
-          "name": "processing_status",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'PROCESSING'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "quest_v2_review_command_quest_idx": {
-          "name": "quest_v2_review_command_quest_idx",
-          "columns": [
-            {
-              "expression": "quest_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "quest_v2_review_command_principal_idx": {
-          "name": "quest_v2_review_command_principal_idx",
-          "columns": [
-            {
-              "expression": "principal_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "quest_v2_review_command_expiry_idx": {
-          "name": "quest_v2_review_command_expiry_idx",
-          "columns": [
-            {
-              "expression": "expires_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "quest_v2_review_command_quest_id_quest_id_fk": {
-          "name": "quest_v2_review_command_quest_id_quest_id_fk",
-          "tableFrom": "quest_v2_review_command",
-          "tableTo": "quest",
-          "columnsFrom": [
-            "quest_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "quest_v2_review_command_principal_user_id_auth_user_id_fk": {
-          "name": "quest_v2_review_command_principal_user_id_auth_user_id_fk",
-          "tableFrom": "quest_v2_review_command",
-          "tableTo": "auth_user",
-          "columnsFrom": [
-            "principal_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "quest_v2_review_command_key_unique": {
-          "name": "quest_v2_review_command_key_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "quest_v2_review_command_key_check": {
-          "name": "quest_v2_review_command_key_check",
-          "value": "btrim(\"quest_v2_review_command\".\"key\") <> ''"
-        },
-        "quest_v2_review_command_operation_check": {
-          "name": "quest_v2_review_command_operation_check",
-          "value": "btrim(\"quest_v2_review_command\".\"operation\") <> ''"
-        },
-        "quest_v2_review_command_hash_check": {
-          "name": "quest_v2_review_command_hash_check",
-          "value": "\"quest_v2_review_command\".\"request_hash\" ~ '^[0-9a-f]{64}$'"
-        },
-        "quest_v2_review_command_status_check": {
-          "name": "quest_v2_review_command_status_check",
-          "value": "\"quest_v2_review_command\".\"processing_status\" IN ('PROCESSING', 'COMPLETED')"
-        },
-        "quest_v2_review_command_completion_check": {
-          "name": "quest_v2_review_command_completion_check",
-          "value": "(\"quest_v2_review_command\".\"processing_status\" = 'COMPLETED') = (\"quest_v2_review_command\".\"completed_at\" IS NOT NULL)"
         }
       },
       "isRLSEnabled": false
