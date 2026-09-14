@@ -45,7 +45,7 @@ export type {
 } from './wallet.funding.service';
 export { convertEarnings, earningsConversionScope } from './wallet.conversion.service';
 export type { EarningsConversion, EarningsConversionInput } from './wallet.conversion.service';
-export type { WalletTransaction } from './wallet.service';
+export type { WalletLedgerBalances, WalletTransaction } from './wallet.service';
 export {
   assertWalletOperationAllowed,
   changeWalletStatus,
@@ -58,6 +58,7 @@ export type { ChangeWalletStatusInput, WalletOperation } from './wallet.status.s
 export {
   createWallet,
   createWalletInTransaction,
+  effectiveMoneyPolicyAt,
   ensureInitialMoneyPolicy,
   ensureWallet,
   ensureWalletInTransaction,
@@ -68,6 +69,8 @@ export {
   getWalletActivities,
   rebuildWalletProjection,
   validateOperationAmount,
+  walletLedgerPostingDiscrepancySatang,
+  walletProjectionMatchesLedger,
   verifyWalletProjection,
 } from './wallet.service';
 export { walletRoute } from './wallet.route';

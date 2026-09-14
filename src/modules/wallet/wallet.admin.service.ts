@@ -1,15 +1,12 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import {
-  walletLedgerAccount,
-  walletLedgerPosting,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
+import { walletWallet } from '@/database/schema/wallet.schema';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, eq, ilike, or } from 'drizzle-orm';
 
+import { walletProjectionMatchesLedger } from './wallet.service';
 import type {
   AdminWalletFullDetailResponse,
   AdminWalletListItem,
@@ -137,26 +134,12 @@ export const getAdminWalletDetail = async (
   }
 
   // Check projection reconciliation against ledger accounts
-  const accountRows = await db
-    .select({
-      type: walletLedgerAccount.type,
-      balanceSatang: sql<string>`coalesce(sum(${walletLedgerPosting.amountSatang}), 0)::text`,
-    })
-    .from(walletLedgerAccount)
-    .leftJoin(walletLedgerPosting, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
-    .where(eq(walletLedgerAccount.walletId, walletId))
-    .groupBy(walletLedgerAccount.type);
-
-  const ledgerBalances = new Map<string, number>();
-  for (const a of accountRows) {
-    ledgerBalances.set(a.type, Number(a.balanceSatang));
-  }
-
-  const matches =
-    row.spendingBalanceSatang === (ledgerBalances.get('SPENDING') ?? 0) &&
-    row.earningsBalanceSatang === (ledgerBalances.get('EARNINGS') ?? 0) &&
-    row.fundingReservedSatang === (ledgerBalances.get('FUNDING_RESERVED') ?? 0) &&
-    row.reservedForPayoutsSatang === (ledgerBalances.get('RESERVED_FOR_PAYOUTS') ?? 0);
+  const matches = await walletProjectionMatchesLedger(walletId, {
+    spendingBalanceSatang: row.spendingBalanceSatang,
+    earningsBalanceSatang: row.earningsBalanceSatang,
+    fundingReservedSatang: row.fundingReservedSatang,
+    reservedForPayoutsSatang: row.reservedForPayoutsSatang,
+  });
 
   const totalBalanceSatang =
     row.spendingBalanceSatang +
