@@ -40,7 +40,8 @@ export const walletRoute = new Elysia({
     detail: {
       tags: ['Wallet'],
       summary: 'Convert Earnings to Spending',
-      description: 'Converts an integer satang amount from Earnings Balance to Spending Balance fee-free and irreversibly.',
+      description:
+        'Converts an integer satang amount from Earnings Balance to Spending Balance fee-free and irreversibly.',
       operationId: 'convertEarnings',
       security: betterAuthSecurity,
     },
@@ -51,7 +52,8 @@ export const walletRoute = new Elysia({
     detail: {
       tags: ['Wallet'],
       summary: 'List own Wallet activities',
-      description: 'Returns the ledger-backed activities for the authenticated Student wallet in reverse chronological order.',
+      description:
+        'Returns the ledger-backed activities for the authenticated Student wallet in reverse chronological order.',
       operationId: 'listWalletActivities',
       security: betterAuthSecurity,
     },

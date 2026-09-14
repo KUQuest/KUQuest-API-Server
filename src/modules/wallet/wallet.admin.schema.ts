@@ -1,5 +1,7 @@
 import { type Static, t } from 'elysia';
 
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
+
 import { walletBalanceSchema } from './wallet.schema';
 
 const dateTime = t.String({ format: 'date-time' });
@@ -29,16 +31,11 @@ export const adminWalletListItemSchema = t.Object({
 
 export const adminWalletListQuerySchema = t.Object({
   status: t.Optional(
-    t.Union([
-      t.Literal('ACTIVE'),
-      t.Literal('FROZEN'),
-      t.Literal('SUSPENDED'),
-      t.Literal('CLOSED'),
-    ]),
+    t.Union([t.Literal('ACTIVE'), t.Literal('FROZEN'), t.Literal('SUSPENDED'), t.Literal('CLOSED')])
   ),
   userId: t.Optional(uuid),
   search: t.Optional(t.String()),
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 100 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
 });
 
@@ -143,7 +140,9 @@ export type AdminWalletParams = Static<typeof adminWalletParamsSchema>;
 export type AdminWalletStatusChangeInput = Static<typeof adminWalletStatusChangeSchema>;
 export type AdminWalletStatusChangeHeaders = Static<typeof adminWalletStatusChangeHeadersSchema>;
 export type AdminWalletResponse = Static<typeof adminWalletResponseSchema>;
-export type AdminWalletStatusHistoryResponse = Static<typeof adminWalletStatusHistoryResponseSchema>;
+export type AdminWalletStatusHistoryResponse = Static<
+  typeof adminWalletStatusHistoryResponseSchema
+>;
 export type AdminWalletVerificationResponse = Static<typeof adminWalletVerificationResponseSchema>;
 export type AdminWalletListItem = Static<typeof adminWalletListItemSchema>;
 export type AdminWalletListQuery = Static<typeof adminWalletListQuerySchema>;

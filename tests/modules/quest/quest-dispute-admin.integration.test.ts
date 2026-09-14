@@ -2,44 +2,42 @@ import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { adminAction, adminDisputeCase } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
-import {
-  quest,
-  questAssignment,
-  proofSubmission,
-} from '@/database/schema/quest.schema';
+import { quest, questAssignment, proofSubmission } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import {
-  walletFundingReservation,
-  walletFundingReservationOperation,
-  walletFundingReservationSettlement,
-  walletDisputeSettlement,
-  walletLedgerAccount,
-  walletLedgerPosting,
-  walletLedgerTransaction,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import { autoApproveDueProofs, reviewProof } from '@/modules/quest/quest-proof.service';
 import { createAdminDisputeCaseInTransaction } from '@/modules/quest/quest-dispute-admin.service';
 import {
-  createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
   ensureWallet,
   positiveSatang,
   releaseFundingReservation,
   reserveSpending,
-  signedSatang,
 } from '@/modules/wallet';
+import { encodeCursor } from '@/shared/cursor';
 
-import { beforeAll, describe, expect, it } from 'bun:test';
-import { and, eq, inArray } from 'drizzle-orm';
+import {
+  fundTestWallet,
+  listTestDisputeSettlements,
+  listTestLedgerPostings,
+  listTestLedgerTransactions,
+  listTestQuestEscrowOperations,
+  listTestQuestEscrowSettlements,
+  readTestQuestEscrow,
+  readTestWallet,
+} from '../wallet/wallet-test-fixtures';
+
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { and, count, eq, inArray } from 'drizzle-orm';
 import { Elysia } from 'elysia';
 
 let postgresAvailable = false;
 let adminCookie = '';
 let memberCookie = '';
+/** Fixture Quests whose seeded queue rows must leave the shared queue. */
+const queueWalkQuestIds: string[] = [];
 const adminEmail = `dispute-admin-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';
 const memberEmail = `dispute-member-${crypto.randomUUID()}@ku.th`;
@@ -52,13 +50,11 @@ const memberAuthApp = new Elysia({ name: 'dispute-admin-member-auth' }).use(
     password: memberPassword,
     firstName: 'Dispute',
     lastName: 'Member',
-  }),
+  })
 );
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 const createMember = async (label: string) => {
   const id = crypto.randomUUID();
@@ -72,30 +68,6 @@ const createMember = async (label: string) => {
   return id;
 };
 
-const creditSpending = async (userId: string, amountSatang: number) => {
-  const [wallet] = await db.select({ id: walletWallet.id })
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId));
-  const accounts = wallet
-    ? await db.select({ id: walletLedgerAccount.id, type: walletLedgerAccount.type })
-      .from(walletLedgerAccount)
-      .where(eq(walletLedgerAccount.walletId, wallet.id))
-    : [];
-  const [suspense] = await db.select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
-  const spending = accounts.find((account) => account.type === 'SPENDING');
-  if (!spending || !suspense) throw new Error('Wallet accounts were not provisioned.');
-  await createSealedLedgerTransaction({
-    businessReference: `test-dispute-credit:${crypto.randomUUID()}`,
-    eventType: 'ADJUSTMENT',
-    postings: [
-      { accountId: spending.id, amountSatang: signedSatang(amountSatang) },
-      { accountId: suspense.id, amountSatang: signedSatang(-amountSatang) },
-    ],
-  });
-};
-
 type DisputeFixture = {
   disputeCaseId: string;
   questId: string;
@@ -104,18 +76,22 @@ type DisputeFixture = {
   reservationId: string;
 };
 
-const createDisputeFixture = async (status: 'QUEST_FAILED' | 'QUEST_CANCELLED' = 'QUEST_FAILED') => {
+const createDisputeFixture = async (
+  status: 'QUEST_FAILED' | 'QUEST_CANCELLED' = 'QUEST_FAILED'
+) => {
   const hirerId = await createMember('Hirer');
   const workerId = await createMember('Worker');
-  await creditSpending(hirerId, 5_000);
+  await fundTestWallet(hirerId, 5_000);
 
   const questId = crypto.randomUUID();
-  const reservation = await db.transaction((transaction) => reserveSpending(transaction, {
-    ownerUserId: hirerId,
-    callerScope: 'quest',
-    callerReference: questId,
-    amountSatang: positiveSatang(1_000),
-  }));
+  const reservation = await db.transaction((transaction) =>
+    reserveSpending(transaction, {
+      ownerUserId: hirerId,
+      callerScope: 'quest',
+      callerReference: questId,
+      amountSatang: positiveSatang(1_000),
+    })
+  );
   const tagId = crypto.randomUUID();
   await db.insert(tag).values({ id: tagId, name: `Dispute tag ${tagId}` });
   const failedAt = status === 'QUEST_FAILED' ? new Date() : null;
@@ -154,12 +130,17 @@ const createDisputeFixture = async (status: 'QUEST_FAILED' | 'QUEST_CANCELLED' =
     workerId,
     assignmentStatus: 'ASSIGNMENT_INCOMPLETE',
   });
-  const createdCase = status === 'QUEST_FAILED'
-    ? await db.transaction((transaction) => createAdminDisputeCaseInTransaction(transaction, {
-      questId,
-      filerUserId: workerId,
-    }))
-    : (await db.insert(adminDisputeCase).values({ questId, filerUserId: workerId }).returning())[0];
+  const createdCase =
+    status === 'QUEST_FAILED'
+      ? await db.transaction((transaction) =>
+          createAdminDisputeCaseInTransaction(transaction, {
+            questId,
+            filerUserId: workerId,
+          })
+        )
+      : (
+          await db.insert(adminDisputeCase).values({ questId, filerUserId: workerId }).returning()
+        )[0];
   if (!createdCase) throw new Error('Dispute Case was not created.');
   return {
     disputeCaseId: createdCase.id,
@@ -170,16 +151,33 @@ const createDisputeFixture = async (status: 'QUEST_FAILED' | 'QUEST_CANCELLED' =
   } satisfies DisputeFixture;
 };
 
-const adminRequest = (path: string, init: RequestInit = {}) => app.handle(new Request(
-  `http://localhost${path}`,
-  {
-    ...init,
-    headers: {
-      cookie: adminCookie,
-      ...(init.headers ?? {}),
-    },
-  },
-));
+/** Seed a queue row directly so created_at keeps its microsecond precision. */
+const seedDisputeCase = async (input: {
+  questId: string;
+  filerUserId: string;
+  createdAt: string;
+}): Promise<string> => {
+  const id = crypto.randomUUID();
+  await sql`
+    insert into admin_dispute_cases
+      (id, quest_id, filer_user_id, status, version, created_at, updated_at)
+    values
+      (${id}, ${input.questId}, ${input.filerUserId}, 'DISPUTE_CASE_PENDING', 1,
+       ${input.createdAt}::timestamptz, ${input.createdAt}::timestamptz)
+  `;
+  return id;
+};
+
+const adminRequest = (path: string, init: RequestInit = {}) =>
+  app.handle(
+    new Request(`http://localhost${path}`, {
+      ...init,
+      headers: {
+        cookie: adminCookie,
+        ...(init.headers ?? {}),
+      },
+    })
+  );
 
 beforeAll(async () => {
   try {
@@ -205,31 +203,44 @@ beforeAll(async () => {
   });
   const createdAdminId = adminSignUp.user?.id;
   if (!createdAdminId) throw new Error('Dispute Admin was not created.');
-  const adminLogin = await app.handle(new Request('http://localhost/api/admin/auth/sign-in/email', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-  }));
+  const adminLogin = await app.handle(
+    new Request('http://localhost/api/admin/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail, password: adminPassword }),
+    })
+  );
   if (adminLogin.status !== 200) throw new Error('Dispute Admin session was not created.');
   adminCookie = getCookieHeader(adminLogin);
 
-  const memberLogin = await memberAuthApp.handle(new Request('http://localhost/api/staging/test-auth/sign-in/email', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: memberEmail, password: memberPassword }),
-  }));
+  const memberLogin = await memberAuthApp.handle(
+    new Request('http://localhost/api/staging/test-auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: memberEmail, password: memberPassword }),
+    })
+  );
   if (memberLogin.status !== 200) throw new Error('Dispute Member session was not created.');
   memberCookie = getCookieHeader(memberLogin);
+
   await db.select({ id: authAdmin.id }).from(authAdmin).where(eq(authAdmin.id, createdAdminId));
+});
+afterAll(async () => {
+  if (!postgresAvailable || queueWalkQuestIds.length === 0) return;
+  // Dispute Cases cascade from their Quest, so deleting the Quest clears the
+  // microsecond rows this file seeded into the shared queue.
+  await db.delete(quest).where(inArray(quest.id, queueWalkQuestIds));
 });
 
 describe('Admin Dispute API', () => {
   it('requires an Admin Session and rejects a Member Session', async () => {
     if (!postgresAvailable) return;
     const anonymous = await app.handle(new Request('http://localhost/api/v1/admin/disputes'));
-    const member = await app.handle(new Request('http://localhost/api/v1/admin/disputes', {
-      headers: { cookie: memberCookie },
-    }));
+    const member = await app.handle(
+      new Request('http://localhost/api/v1/admin/disputes', {
+        headers: { cookie: memberCookie },
+      })
+    );
     expect(anonymous.status).toBe(401);
     expect(member.status).toBe(403);
   });
@@ -244,7 +255,9 @@ describe('Admin Dispute API', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ workerId: fixture.workerId }),
     });
-    const body = await response.json() as { data: { id: string; questId: string; filerUserId: string; openedByAdminId: string | null } };
+    const body = (await response.json()) as {
+      data: { id: string; questId: string; filerUserId: string; openedByAdminId: string | null };
+    };
     expect(response.status).toBe(200);
     expect(body.data).toMatchObject({
       questId: fixture.questId,
@@ -263,7 +276,7 @@ describe('Admin Dispute API', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ workerId: fixture.hirerId }),
     });
-    const body = await response.json() as { error: { code: string } };
+    const body = (await response.json()) as { error: { code: string } };
     expect(response.status).toBe(409);
     expect(body.error.code).toBe('DISPUTE_CASE_WORKER_NOT_ASSIGNED');
   });
@@ -272,12 +285,16 @@ describe('Admin Dispute API', () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
     const queue = await adminRequest('/api/v1/admin/disputes?limit=1&sort=newest');
-    const queueBody = await queue.json() as { data: { items: Array<{ id: string }>; nextCursor: string | null } };
+    const queueBody = (await queue.json()) as {
+      data: { items: Array<{ id: string }>; nextCursor: string | null };
+    };
     expect(queue.status).toBe(200);
-    expect(queueBody.data.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: fixture.disputeCaseId })]));
+    expect(queueBody.data.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: fixture.disputeCaseId })])
+    );
 
     const detail = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}`);
-    const detailBody = await detail.json() as { data: Record<string, unknown> };
+    const detailBody = (await detail.json()) as { data: Record<string, unknown> };
     expect(detail.status).toBe(200);
     expect(detailBody.data).toMatchObject({
       id: fixture.disputeCaseId,
@@ -287,10 +304,13 @@ describe('Admin Dispute API', () => {
     });
     expect(JSON.stringify(detailBody)).not.toContain(`${fixture.hirerId}@ku.th`);
 
-    const evidence = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}/evidence`, {
-      headers: { 'idempotency-key': `dispute-evidence-${fixture.disputeCaseId}` },
-    });
-    const evidenceBody = await evidence.json() as { data: Record<string, unknown> };
+    const evidence = await adminRequest(
+      `/api/v1/admin/disputes/${fixture.disputeCaseId}/evidence`,
+      {
+        headers: { 'idempotency-key': `dispute-evidence-${fixture.disputeCaseId}` },
+      }
+    );
+    const evidenceBody = (await evidence.json()) as { data: Record<string, unknown> };
     expect(evidence.status).toBe(200);
     expect(evidenceBody.data).toMatchObject({
       caseId: fixture.disputeCaseId,
@@ -299,31 +319,144 @@ describe('Admin Dispute API', () => {
       assignments: [expect.objectContaining({ workerId: fixture.workerId })],
     });
     expect(evidenceBody.data).not.toHaveProperty('messages');
-    const [evidenceAction] = await db.select({ action: adminAction.action, resourceId: adminAction.resourceId })
+    const [evidenceAction] = await db
+      .select({ action: adminAction.action, resourceId: adminAction.resourceId })
       .from(adminAction)
-      .where(and(
-        eq(adminAction.resourceId, fixture.disputeCaseId),
-        eq(adminAction.action, 'DISPUTE_CASE_EVIDENCE_ACCESS'),
-      ));
-    expect(evidenceAction).toEqual({ action: 'DISPUTE_CASE_EVIDENCE_ACCESS', resourceId: fixture.disputeCaseId });
+      .where(
+        and(
+          eq(adminAction.resourceId, fixture.disputeCaseId),
+          eq(adminAction.action, 'DISPUTE_CASE_EVIDENCE_ACCESS')
+        )
+      );
+    expect(evidenceAction).toEqual({
+      action: 'DISPUTE_CASE_EVIDENCE_ACCESS',
+      resourceId: fixture.disputeCaseId,
+    });
+  });
+
+  it('walks every seeded queue row once per sort across a microsecond tie and rejects stale and malformed cursors', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    await db.delete(adminDisputeCase).where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+    queueWalkQuestIds.push(fixture.questId);
+    const filerIds = await Promise.all(
+      (['First', 'TieFirst', 'TieSecond', 'Last'] as const).map((label) =>
+        createMember(`Queue${label}`)
+      )
+    );
+    const first = await seedDisputeCase({
+      questId: fixture.questId,
+      filerUserId: filerIds[0],
+      createdAt: '2030-08-05T00:00:00.090100Z',
+    });
+    const tieFirst = await seedDisputeCase({
+      questId: fixture.questId,
+      filerUserId: filerIds[1],
+      createdAt: '2030-08-05T00:00:00.100200Z',
+    });
+    const tieSecond = await seedDisputeCase({
+      questId: fixture.questId,
+      filerUserId: filerIds[2],
+      createdAt: '2030-08-05T00:00:00.100800Z',
+    });
+    const last = await seedDisputeCase({
+      questId: fixture.questId,
+      filerUserId: filerIds[3],
+      createdAt: '2030-08-05T00:00:00.110500Z',
+    });
+    const seeded = [first, tieFirst, tieSecond, last];
+
+    type QueueResponse = {
+      success: boolean;
+      data?: { items: Array<{ id: string }>; nextCursor: string | null };
+      error?: { code: string; message: string };
+    };
+    // The queue is shared with the other tests in this file, so the walk
+    // asserts only that the seeded rows are visited once, in order, and that
+    // the walk still terminates.
+    const assertSeededWalk = (visited: string[], expectedOrder: string[]) => {
+      for (const id of seeded) {
+        expect(visited.filter((row) => row === id)).toHaveLength(1);
+      }
+      expect(visited.filter((row) => seeded.includes(row))).toEqual(expectedOrder);
+    };
+    const readEveryPage = async (sort: 'newest' | 'oldest'): Promise<string[]> => {
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      // The queue holds every PENDING row this file left behind, so the page
+      // cap must come from the live count, not a constant.
+      const [pending] = await db
+        .select({ total: count() })
+        .from(adminDisputeCase)
+        .where(eq(adminDisputeCase.status, 'DISPUTE_CASE_PENDING'));
+      const pageCap = (pending?.total ?? 0) + 10;
+      for (let page = 0; page < pageCap; page += 1) {
+        const params = new URLSearchParams({ sort, limit: '1' });
+        if (cursor) params.set('cursor', cursor);
+        // Each page cursor comes from the previous response, so these requests
+        // must remain sequential.
+        // eslint-disable-next-line no-await-in-loop
+        const response = await adminRequest(`/api/v1/admin/disputes?${params.toString()}`);
+        expect(response.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const body = (await response.json()) as QueueResponse;
+        expect(body.success).toBe(true);
+        ids.push(...body.data!.items.map((item) => item.id));
+        cursor = body.data!.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      return ids;
+    };
+
+    assertSeededWalk(await readEveryPage('oldest'), [first, tieFirst, tieSecond, last]);
+    assertSeededWalk(await readEveryPage('newest'), [last, tieSecond, tieFirst, first]);
+
+    const goneId = await seedDisputeCase({
+      questId: fixture.questId,
+      filerUserId: await createMember('QueueGone'),
+      createdAt: '2030-08-05T00:00:00.120600Z',
+    });
+    const staleCursor = encodeCursor({ id: goneId, startTime: '2030-08-05T00:00:00.120Z' });
+    await db.delete(adminDisputeCase).where(eq(adminDisputeCase.id, goneId));
+    const stale = await adminRequest(
+      `/api/v1/admin/disputes?${new URLSearchParams({
+        sort: 'newest',
+        limit: '1',
+        cursor: staleCursor,
+      }).toString()}`
+    );
+    expect(stale.status).toBe(400);
+    const staleBody = (await stale.json()) as QueueResponse;
+    expect(staleBody.success).toBe(false);
+    expect(staleBody.error?.code).toBe('INVALID_CURSOR');
+
+    const malformed = await adminRequest(
+      '/api/v1/admin/disputes?sort=newest&limit=1&cursor=not-a-cursor'
+    );
+    expect(malformed.status).toBe(400);
+    const malformedBody = (await malformed.json()) as QueueResponse;
+    expect(malformedBody.success).toBe(false);
+    expect(malformedBody.error?.code).toBe('INVALID_CURSOR');
   });
 
   it('dismisses a Case without money movement and replays the command', async () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
     const requestKey = `dispute-dismiss-${fixture.disputeCaseId}`;
-    const request = () => adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'idempotency-key': requestKey,
-        'if-match': '1',
-      },
-      body: JSON.stringify({
-        outcome: 'DISPUTE_CASE_DISMISSED',
-        reasonCode: 'DISPUTE_POLICY_REVIEW',
-      }),
-    });
+    const request = () =>
+      adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': requestKey,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'DISPUTE_CASE_DISMISSED',
+          reasonCode: 'DISPUTE_POLICY_REVIEW',
+        }),
+      });
     const first = await request();
     const firstBody = await first.json();
     const replay = await request();
@@ -331,21 +464,23 @@ describe('Admin Dispute API', () => {
     expect(first.status).toBe(200);
     expect(firstBody).toMatchObject({
       data: {
-        resourceSummary: { id: fixture.disputeCaseId, status: 'DISPUTE_CASE_DISMISSED', version: 2 },
+        resourceSummary: {
+          id: fixture.disputeCaseId,
+          status: 'DISPUTE_CASE_DISMISSED',
+          version: 2,
+        },
         resourceVersion: 2,
         adminActionId: expect.any(String),
       },
     });
     expect(replay.status).toBe(200);
     expect(replayBody).toEqual(firstBody);
-    expect(await db.select().from(walletFundingReservationSettlement).where(eq(
-      walletFundingReservationSettlement.reservationId,
-      fixture.reservationId,
-    ))).toHaveLength(0);
-    const [reservation] = await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
-      .from(walletFundingReservation)
-      .where(eq(walletFundingReservation.id, fixture.reservationId));
-    expect(reservation).toEqual({ status: 'ACTIVE', remainingSatang: 1_000 });
+    expect(await listTestQuestEscrowSettlements(fixture.reservationId)).toHaveLength(0);
+    const escrow = await readTestQuestEscrow({
+      ownerUserId: fixture.hirerId,
+      questId: fixture.questId,
+    });
+    expect(escrow).toMatchObject({ status: 'ACTIVE', remainingSatang: 1_000 });
   });
 
   it('resolves a Case through Wallet with balanced postings and keeps the Quest failed', async () => {
@@ -365,7 +500,7 @@ describe('Admin Dispute API', () => {
         amountSatang: 300,
       }),
     });
-    const body = await response.json() as { data: { resourceSummary: Record<string, unknown> } };
+    const body = (await response.json()) as { data: { resourceSummary: Record<string, unknown> } };
     expect(response.status).toBe(200);
     expect(body.data.resourceSummary).toMatchObject({
       id: fixture.disputeCaseId,
@@ -375,31 +510,36 @@ describe('Admin Dispute API', () => {
       resolvedAmountSatang: 300,
     });
 
-    const [storedQuest] = await db.select({ status: quest.questStatus, version: quest.version })
-      .from(quest).where(eq(quest.id, fixture.questId));
+    const [storedQuest] = await db
+      .select({ status: quest.questStatus, version: quest.version })
+      .from(quest)
+      .where(eq(quest.id, fixture.questId));
     expect(storedQuest).toEqual({ status: 'QUEST_FAILED', version: 1 });
-    const [reservation] = await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
-      .from(walletFundingReservation).where(eq(walletFundingReservation.id, fixture.reservationId));
-    expect(reservation).toEqual({ status: 'ACTIVE', remainingSatang: 700 });
-    const [settlement] = await db.select({ ledgerTransactionId: walletDisputeSettlement.ledgerTransactionId, amountSatang: walletDisputeSettlement.amountSatang })
-      .from(walletDisputeSettlement).where(eq(walletDisputeSettlement.reservationId, fixture.reservationId));
-    expect(settlement).toEqual({ amountSatang: 300, ledgerTransactionId: expect.any(String) });
-    const [reservationLedger] = await db.select({ createdLedgerTransactionId: walletFundingReservation.createdLedgerTransactionId })
-      .from(walletFundingReservation).where(eq(walletFundingReservation.id, fixture.reservationId));
-    const [ledger] = await db.select({
-      eventType: walletLedgerTransaction.eventType,
-      correctionOfTransactionId: walletLedgerTransaction.correctionOfTransactionId,
-    }).from(walletLedgerTransaction).where(eq(walletLedgerTransaction.id, settlement!.ledgerTransactionId));
-    expect(ledger).toEqual({
-      eventType: 'ADJUSTMENT',
-      correctionOfTransactionId: reservationLedger?.createdLedgerTransactionId,
+    const escrow = await readTestQuestEscrow({
+      ownerUserId: fixture.hirerId,
+      questId: fixture.questId,
     });
-    const postings = await db.select({ amountSatang: walletLedgerPosting.amountSatang })
-      .from(walletLedgerPosting).where(eq(walletLedgerPosting.transactionId, settlement!.ledgerTransactionId));
+    expect(escrow).toMatchObject({ status: 'ACTIVE', remainingSatang: 700 });
+    if (!escrow) throw new Error('Quest Escrow was not created');
+    const [settlement] = await listTestDisputeSettlements(fixture.reservationId);
+    expect(
+      settlement && {
+        amountSatang: settlement.amountSatang,
+        ledgerTransactionId: settlement.ledgerTransactionId,
+      }
+    ).toEqual({ amountSatang: 300, ledgerTransactionId: expect.any(String) });
+    const [ledger] = await listTestLedgerTransactions([settlement!.ledgerTransactionId]);
+    expect({
+      eventType: ledger?.eventType,
+      correctionOfTransactionId: ledger?.correctionOfTransactionId,
+    }).toEqual({
+      eventType: 'ADJUSTMENT',
+      correctionOfTransactionId: escrow.createdLedgerTransactionId,
+    });
+    const postings = await listTestLedgerPostings([settlement!.ledgerTransactionId]);
     expect(postings.reduce((total, posting) => total + posting.amountSatang, 0)).toBe(0);
-    const [workerWallet] = await db.select({ earningsBalanceSatang: walletWallet.earningsBalanceSatang })
-      .from(walletWallet).where(eq(walletWallet.userId, fixture.workerId));
-    expect(workerWallet?.earningsBalanceSatang).toBe(300);
+    const workerWallet = await readTestWallet(fixture.workerId);
+    expect(workerWallet.earningsBalanceSatang).toBe(300);
   });
 
   it('settles a pending legacy Proof approved after failure from the held Quest Escrow', async () => {
@@ -421,22 +561,32 @@ describe('Admin Dispute API', () => {
       proofId,
       'PROOF_APPROVED',
       null,
-      new Date(),
+      new Date()
     );
     expect(reviewed).toMatchObject({
       questStatus: 'QUEST_FAILED',
       proof: { id: proofId, submissionStatus: 'PROOF_APPROVED' },
     });
-    expect(await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, fixture.questId)))
-      .toEqual([{ status: 'QUEST_FAILED' }]);
-    expect(await db.select({ status: questAssignment.assignmentStatus }).from(questAssignment).where(eq(questAssignment.questId, fixture.questId)))
-      .toEqual([{ status: 'ASSIGNMENT_COMPLETED' }]);
-    expect(await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
-      .from(walletFundingReservation).where(eq(walletFundingReservation.id, fixture.reservationId)))
-      .toEqual([{ status: 'SETTLED', remainingSatang: 0 }]);
-    const [workerWallet] = await db.select({ earningsBalanceSatang: walletWallet.earningsBalanceSatang })
-      .from(walletWallet).where(eq(walletWallet.userId, fixture.workerId));
-    expect(workerWallet?.earningsBalanceSatang).toBe(1_000);
+    expect(
+      await db
+        .select({ status: quest.questStatus })
+        .from(quest)
+        .where(eq(quest.id, fixture.questId))
+    ).toEqual([{ status: 'QUEST_FAILED' }]);
+    expect(
+      await db
+        .select({ status: questAssignment.assignmentStatus })
+        .from(questAssignment)
+        .where(eq(questAssignment.questId, fixture.questId))
+    ).toEqual([{ status: 'ASSIGNMENT_COMPLETED' }]);
+    expect(
+      await readTestQuestEscrow({
+        ownerUserId: fixture.hirerId,
+        questId: fixture.questId,
+      })
+    ).toMatchObject({ status: 'SETTLED', remainingSatang: 0 });
+    const workerWallet = await readTestWallet(fixture.workerId);
+    expect(workerWallet.earningsBalanceSatang).toBe(1_000);
   });
 
   it('auto-approves a pending legacy Proof after failure and settles its Reward', async () => {
@@ -453,58 +603,64 @@ describe('Admin Dispute API', () => {
     });
 
     expect(await autoApproveDueProofs(new Date())).toContain(proofId);
-    expect(await db.select({ status: proofSubmission.submissionStatus }).from(proofSubmission).where(eq(proofSubmission.id, proofId)))
-      .toEqual([{ status: 'PROOF_APPROVED' }]);
-    expect(await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
-      .from(walletFundingReservation).where(eq(walletFundingReservation.id, fixture.reservationId)))
-      .toEqual([{ status: 'SETTLED', remainingSatang: 0 }]);
+    expect(
+      await db
+        .select({ status: proofSubmission.submissionStatus })
+        .from(proofSubmission)
+        .where(eq(proofSubmission.id, proofId))
+    ).toEqual([{ status: 'PROOF_APPROVED' }]);
+    expect(
+      await readTestQuestEscrow({
+        ownerUserId: fixture.hirerId,
+        questId: fixture.questId,
+      })
+    ).toMatchObject({ status: 'SETTLED', remainingSatang: 0 });
   });
 
   it('serializes concurrent resolutions so one current Case version wins', async () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
-    const resolve = (requestKey: string) => adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'idempotency-key': requestKey,
-        'if-match': '1',
-      },
-      body: JSON.stringify({
-        outcome: 'DISPUTE_CASE_RESOLVED',
-        reasonCode: 'DISPUTE_EVIDENCE_REVIEW',
-        workerId: fixture.workerId,
-        amountSatang: 300,
-      }),
-    });
+    const resolve = (requestKey: string) =>
+      adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': requestKey,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'DISPUTE_CASE_RESOLVED',
+          reasonCode: 'DISPUTE_EVIDENCE_REVIEW',
+          workerId: fixture.workerId,
+          amountSatang: 300,
+        }),
+      });
     const [first, second] = await Promise.all([
       resolve(`dispute-concurrent-a-${fixture.disputeCaseId}`),
       resolve(`dispute-concurrent-b-${fixture.disputeCaseId}`),
     ]);
     expect([first.status, second.status].sort()).toEqual([200, 409]);
-    expect(await db.select().from(walletDisputeSettlement).where(eq(
-      walletDisputeSettlement.reservationId,
-      fixture.reservationId,
-    ))).toHaveLength(1);
-    const [caseRow] = await db.select({ status: adminDisputeCase.status, version: adminDisputeCase.version })
-      .from(adminDisputeCase).where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+    expect(await listTestDisputeSettlements(fixture.reservationId)).toHaveLength(1);
+    const [caseRow] = await db
+      .select({ status: adminDisputeCase.status, version: adminDisputeCase.version })
+      .from(adminDisputeCase)
+      .where(eq(adminDisputeCase.id, fixture.disputeCaseId));
     expect(caseRow).toEqual({ status: 'DISPUTE_CASE_RESOLVED', version: 2 });
   });
 
   it('uses Hirer Spending Balance after the seven-day Funding hold releases', async () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
-    await db.transaction((transaction) => releaseFundingReservation(transaction, {
-      ownerUserId: fixture.hirerId,
-      reservationId: fixture.reservationId,
-      operationReference: `dispute-hold-release-${fixture.disputeCaseId}`,
-    }));
-    const [releaseOperation] = await db.select({ ledgerTransactionId: walletFundingReservationOperation.ledgerTransactionId })
-      .from(walletFundingReservationOperation)
-      .where(and(
-        eq(walletFundingReservationOperation.reservationId, fixture.reservationId),
-        eq(walletFundingReservationOperation.operationType, 'RELEASE'),
-      ));
+    await db.transaction((transaction) =>
+      releaseFundingReservation(transaction, {
+        ownerUserId: fixture.hirerId,
+        reservationId: fixture.reservationId,
+        operationReference: `dispute-hold-release-${fixture.disputeCaseId}`,
+      })
+    );
+    const releaseOperation = (await listTestQuestEscrowOperations(fixture.reservationId)).find(
+      (operation) => operation.operationType === 'RELEASE'
+    );
     expect(releaseOperation).toBeDefined();
     const response = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`, {
       method: 'POST',
@@ -521,23 +677,29 @@ describe('Admin Dispute API', () => {
       }),
     });
     expect(response.status).toBe(200);
-    const [reservation] = await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
-      .from(walletFundingReservation).where(eq(walletFundingReservation.id, fixture.reservationId));
-    expect(reservation).toEqual({ status: 'RELEASED', remainingSatang: 0 });
-    const wallets = await db.select({ userId: walletWallet.userId, spending: walletWallet.spendingBalanceSatang, earnings: walletWallet.earningsBalanceSatang })
-      .from(walletWallet).where(inArray(walletWallet.userId, [fixture.hirerId, fixture.workerId]));
-    expect(wallets).toEqual(expect.arrayContaining([
-      { userId: fixture.hirerId, spending: 4_750, earnings: 0 },
-      { userId: fixture.workerId, spending: 0, earnings: 250 },
-    ]));
-    const [ledger] = await db.select({
-      eventType: walletLedgerTransaction.eventType,
-      correctionOfTransactionId: walletLedgerTransaction.correctionOfTransactionId,
-    })
-      .from(walletLedgerTransaction)
-      .innerJoin(walletDisputeSettlement, eq(walletDisputeSettlement.ledgerTransactionId, walletLedgerTransaction.id))
-      .where(eq(walletDisputeSettlement.reservationId, fixture.reservationId));
-    expect(ledger).toEqual({
+    expect(
+      await readTestQuestEscrow({
+        ownerUserId: fixture.hirerId,
+        questId: fixture.questId,
+      })
+    ).toMatchObject({ status: 'RELEASED', remainingSatang: 0 });
+    const [hirerWallet, workerWallet] = await Promise.all([
+      readTestWallet(fixture.hirerId),
+      readTestWallet(fixture.workerId),
+    ]);
+    expect(hirerWallet.spendingBalanceSatang).toBe(4_750);
+    expect(hirerWallet.earningsBalanceSatang).toBe(0);
+    expect(workerWallet.spendingBalanceSatang).toBe(0);
+    expect(workerWallet.earningsBalanceSatang).toBe(250);
+    const [settlementLedger] = await listTestLedgerTransactions(
+      (await listTestDisputeSettlements(fixture.reservationId)).map(
+        ({ ledgerTransactionId }) => ledgerTransactionId
+      )
+    );
+    expect({
+      eventType: settlementLedger?.eventType,
+      correctionOfTransactionId: settlementLedger?.correctionOfTransactionId,
+    }).toEqual({
       eventType: 'ADJUSTMENT',
       correctionOfTransactionId: releaseOperation!.ledgerTransactionId,
     });
@@ -547,7 +709,8 @@ describe('Admin Dispute API', () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
     const failedAt = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    await db.update(quest)
+    await db
+      .update(quest)
       .set({ failedAt, updatedAt: failedAt })
       .where(eq(quest.id, fixture.questId));
     const clock = { now: () => new Date(failedAt.getTime() + 7 * 24 * 60 * 60 * 1000) };
@@ -556,77 +719,112 @@ describe('Admin Dispute API', () => {
       runQuestLifecycleWorker(options),
       runQuestLifecycleWorker(options),
     ]);
-    expect(first.releasedFailedQuestIds.concat(second.releasedFailedQuestIds).filter((id) => id === fixture.questId)).toHaveLength(1);
-    const [reservation] = await db.select({ status: walletFundingReservation.status, remainingSatang: walletFundingReservation.remainingSatang })
-      .from(walletFundingReservation).where(eq(walletFundingReservation.id, fixture.reservationId));
-    expect(reservation).toEqual({ status: 'RELEASED', remainingSatang: 0 });
+    expect(
+      first.releasedFailedQuestIds
+        .concat(second.releasedFailedQuestIds)
+        .filter((id) => id === fixture.questId)
+    ).toHaveLength(1);
+    expect(
+      await readTestQuestEscrow({
+        ownerUserId: fixture.hirerId,
+        questId: fixture.questId,
+      })
+    ).toMatchObject({ status: 'RELEASED', remainingSatang: 0 });
   });
 
   it('rejects stale commands, unsupported outcomes, and non-failed Quest states without side effects', async () => {
     if (!postgresAvailable) return;
     const staleFixture = await createDisputeFixture();
-    const stale = await adminRequest(`/api/v1/admin/disputes/${staleFixture.disputeCaseId}/resolve`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'idempotency-key': `dispute-stale-${staleFixture.disputeCaseId}`,
-        'if-match': '2',
-      },
-      body: JSON.stringify({ outcome: 'DISPUTE_CASE_DISMISSED', reasonCode: 'DISPUTE_POLICY_REVIEW' }),
-    });
+    const stale = await adminRequest(
+      `/api/v1/admin/disputes/${staleFixture.disputeCaseId}/resolve`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': `dispute-stale-${staleFixture.disputeCaseId}`,
+          'if-match': '2',
+        },
+        body: JSON.stringify({
+          outcome: 'DISPUTE_CASE_DISMISSED',
+          reasonCode: 'DISPUTE_POLICY_REVIEW',
+        }),
+      }
+    );
     expect(stale.status).toBe(409);
     expect((await stale.json()).error.code).toBe('ADMIN_ACTION_CONFLICT');
-    expect(await db.select().from(adminAction).where(eq(adminAction.requestKey, `dispute-stale-${staleFixture.disputeCaseId}`))).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, `dispute-stale-${staleFixture.disputeCaseId}`))
+    ).toHaveLength(0);
 
-    const invalid = await adminRequest(`/api/v1/admin/disputes/${staleFixture.disputeCaseId}/resolve`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'idempotency-key': `dispute-invalid-${staleFixture.disputeCaseId}`,
-        'if-match': '1',
-      },
-      body: JSON.stringify({ outcome: 'DISPUTE_CASE_DISMISSED', reasonCode: 'DISPUTE_POLICY_REVIEW', amountSatang: 2 }),
-    });
+    const invalid = await adminRequest(
+      `/api/v1/admin/disputes/${staleFixture.disputeCaseId}/resolve`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': `dispute-invalid-${staleFixture.disputeCaseId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'DISPUTE_CASE_DISMISSED',
+          reasonCode: 'DISPUTE_POLICY_REVIEW',
+          amountSatang: 2,
+        }),
+      }
+    );
     expect(invalid.status).toBe(400);
 
-    const overCap = await adminRequest(`/api/v1/admin/disputes/${staleFixture.disputeCaseId}/resolve`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'idempotency-key': `dispute-over-cap-${staleFixture.disputeCaseId}`,
-        'if-match': '1',
-      },
-      body: JSON.stringify({
-        outcome: 'DISPUTE_CASE_RESOLVED',
-        reasonCode: 'DISPUTE_EVIDENCE_REVIEW',
-        workerId: staleFixture.workerId,
-        amountSatang: 2_000,
-      }),
-    });
+    const overCap = await adminRequest(
+      `/api/v1/admin/disputes/${staleFixture.disputeCaseId}/resolve`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': `dispute-over-cap-${staleFixture.disputeCaseId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'DISPUTE_CASE_RESOLVED',
+          reasonCode: 'DISPUTE_EVIDENCE_REVIEW',
+          workerId: staleFixture.workerId,
+          amountSatang: 2_000,
+        }),
+      }
+    );
     expect(overCap.status).toBe(409);
-    expect(await db.select().from(walletFundingReservationSettlement).where(eq(
-      walletFundingReservationSettlement.reservationId,
-      staleFixture.reservationId,
-    ))).toHaveLength(0);
-    expect(await db.select().from(adminAction).where(eq(
-      adminAction.requestKey,
-      `dispute-over-cap-${staleFixture.disputeCaseId}`,
-    ))).toHaveLength(0);
+    expect(await listTestQuestEscrowSettlements(staleFixture.reservationId)).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, `dispute-over-cap-${staleFixture.disputeCaseId}`))
+    ).toHaveLength(0);
 
     const cancelled = await createDisputeFixture('QUEST_CANCELLED');
-    const terminal = await adminRequest(`/api/v1/admin/disputes/${cancelled.disputeCaseId}/resolve`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'idempotency-key': `dispute-terminal-${cancelled.disputeCaseId}`,
-        'if-match': '1',
-      },
-      body: JSON.stringify({ outcome: 'DISPUTE_CASE_DISMISSED', reasonCode: 'DISPUTE_POLICY_REVIEW' }),
-    });
+    const terminal = await adminRequest(
+      `/api/v1/admin/disputes/${cancelled.disputeCaseId}/resolve`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': `dispute-terminal-${cancelled.disputeCaseId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'DISPUTE_CASE_DISMISSED',
+          reasonCode: 'DISPUTE_POLICY_REVIEW',
+        }),
+      }
+    );
     expect(terminal.status).toBe(409);
     expect((await terminal.json()).error.code).toBe('DISPUTE_CASE_QUEST_NOT_FAILED');
-    const [caseRow] = await db.select({ status: adminDisputeCase.status, version: adminDisputeCase.version })
-      .from(adminDisputeCase).where(eq(adminDisputeCase.id, cancelled.disputeCaseId));
+    const [caseRow] = await db
+      .select({ status: adminDisputeCase.status, version: adminDisputeCase.version })
+      .from(adminDisputeCase)
+      .where(eq(adminDisputeCase.id, cancelled.disputeCaseId));
     expect(caseRow).toEqual({ status: 'DISPUTE_CASE_PENDING', version: 1 });
   });
 });

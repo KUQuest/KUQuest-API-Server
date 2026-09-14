@@ -1,4 +1,5 @@
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import type { TSchema } from '@sinclair/typebox';
 import { TypeCompiler } from '@sinclair/typebox/compiler';
@@ -14,15 +15,13 @@ import {
   questV2EditFailureCodes,
   questV2EditRequestStatuses,
   questV2EditResponseDecisions,
+  questV2AssignmentStates,
   questV2States,
 } from './quest-v2.contract';
 
 export const maxQuestV2Images = 3;
 
-const questV2ModeSchema = t.Union([
-  t.Literal(questV2Modes[0]),
-  t.Literal(questV2Modes[1]),
-]);
+const questV2ModeSchema = t.Union([t.Literal(questV2Modes[0]), t.Literal(questV2Modes[1])]);
 
 const questV2ParticipationSchema = t.Union([
   t.Literal(questV2Participations[0]),
@@ -50,20 +49,16 @@ const isoDateTimeWithBangkokTimezoneOpenApiSchema = t.String({
 });
 const titleSchema = t.String({ minLength: 1, maxLength: 120, pattern: '\\S' });
 const descriptionSchema = t.Nullable(t.String({ maxLength: 1000, pattern: '\\S' }));
-const conditionItemsSchema = t.Array(
-  t.String({ minLength: 1, maxLength: 255, pattern: '\\S' }),
-  { minItems: 1 },
-);
+const conditionItemsSchema = t.Array(t.String({ minLength: 1, maxLength: 255, pattern: '\\S' }), {
+  minItems: 1,
+});
 const locationSchema = t.Object(
   {
     label: t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
-const conditionSchema = t.Object(
-  { items: conditionItemsSchema },
-  { additionalProperties: false },
-);
+const conditionSchema = t.Object({ items: conditionItemsSchema }, { additionalProperties: false });
 const locationsSchema = t.Array(locationSchema, { maxItems: 10 });
 const questFundingTotalSchema = t.Number({
   minimum: 1,
@@ -111,10 +106,9 @@ const questV2CreateProperties = {
   locations: t.Optional(locationsSchema),
 };
 
-export const questV2CreateSchema = t.Object(
-  questV2CreateProperties,
-  { additionalProperties: false },
-);
+export const questV2CreateSchema = t.Object(questV2CreateProperties, {
+  additionalProperties: false,
+});
 
 export type QuestV2CreateInput = Static<typeof questV2CreateSchema>;
 
@@ -157,7 +151,7 @@ const questV2CreateOpenApiSchema = t.Union([
       participation: t.Literal('SINGLE'),
       headcount: questV2SingleHeadcountOpenApiSchema,
     },
-    { additionalProperties: false },
+    { additionalProperties: false }
   ),
   t.Object(
     {
@@ -165,7 +159,7 @@ const questV2CreateOpenApiSchema = t.Union([
       participation: t.Literal('GROUP'),
       headcount: questV2GroupHeadcountOpenApiSchema,
     },
-    { additionalProperties: false },
+    { additionalProperties: false }
   ),
 ]);
 const questV2EditOpenApiCommonProperties = {
@@ -181,7 +175,7 @@ const questV2EditOpenApiSchema = t.Union([
       participation: t.Literal('SINGLE'),
       headcount: t.Optional(questV2SingleHeadcountOpenApiSchema),
     },
-    { additionalProperties: false, minProperties: 1 },
+    { additionalProperties: false, minProperties: 1 }
   ),
   t.Object(
     {
@@ -189,14 +183,14 @@ const questV2EditOpenApiSchema = t.Union([
       participation: t.Literal('GROUP'),
       headcount: t.Optional(questV2GroupHeadcountOpenApiSchema),
     },
-    { additionalProperties: false, minProperties: 1 },
+    { additionalProperties: false, minProperties: 1 }
   ),
   t.Object(
     {
       ...questV2EditOpenApiCommonProperties,
       headcount: t.Optional(questV2HeadcountSchema),
     },
-    { additionalProperties: false, minProperties: 1 },
+    { additionalProperties: false, minProperties: 1 }
   ),
 ]);
 
@@ -210,16 +204,13 @@ const hasExactSatangPrecision = (value: unknown): value is number => {
   return fractionalPart === undefined || /^\d{1,2}$/.test(fractionalPart);
 };
 
-type QuestV2CreateHttpSchema = StandardSchemaV1Like<
-  QuestV2CreateInput,
-  QuestV2CreateInput
-> & {
+type QuestV2CreateHttpSchema = StandardSchemaV1Like<QuestV2CreateInput, QuestV2CreateInput> & {
   readonly '~standard': {
     readonly version: 1;
     readonly vendor: 'elysia';
-    readonly validate: (value: unknown) =>
-      | { value: QuestV2CreateInput; issues?: never }
-      | { value?: never; issues: unknown[] };
+    readonly validate: (
+      value: unknown
+    ) => { value: QuestV2CreateInput; issues?: never } | { value?: never; issues: unknown[] };
     readonly jsonSchema: {
       readonly input: () => typeof questV2CreateOpenApiSchema;
     };
@@ -262,9 +253,9 @@ type QuestV2EditHttpSchema = StandardSchemaV1Like<QuestV2EditInput, QuestV2EditI
   readonly '~standard': {
     readonly version: 1;
     readonly vendor: 'elysia';
-    readonly validate: (value: unknown) =>
-      | { value: QuestV2EditInput; issues?: never }
-      | { value?: never; issues: unknown[] };
+    readonly validate: (
+      value: unknown
+    ) => { value: QuestV2EditInput; issues?: never } | { value?: never; issues: unknown[] };
     readonly jsonSchema: {
       readonly input: () => typeof questV2EditOpenApiSchema;
     };
@@ -286,10 +277,7 @@ export const questV2EditHttpSchema = {
         return { issues: [...questV2EditValidator.Errors(value)] };
       }
 
-      if (
-        'questFundingTotal' in value &&
-        !hasExactSatangPrecision(value.questFundingTotal)
-      ) {
+      if ('questFundingTotal' in value && !hasExactSatangPrecision(value.questFundingTotal)) {
         return {
           issues: [
             {
@@ -320,7 +308,7 @@ export const normalizeQuestV2CreateBody = ({ body }: { body: unknown }) => {
     const condition = payload.condition as Record<string, unknown>;
     if (Array.isArray(condition.items)) {
       condition.items = condition.items.map((item) =>
-        typeof item === 'string' ? item.trim() : item,
+        typeof item === 'string' ? item.trim() : item
       );
     }
   }
@@ -350,7 +338,7 @@ export const normalizeQuestV2EditBody = ({ body }: { body: unknown }) => {
     const condition = payload.condition as Record<string, unknown>;
     if (Array.isArray(condition.items)) {
       condition.items = condition.items.map((item) =>
-        typeof item === 'string' ? item.trim() : item,
+        typeof item === 'string' ? item.trim() : item
       );
     }
   }
@@ -377,7 +365,7 @@ export const normalizeQuestV2EditRequestCreateBody = ({ body }: { body: unknown 
   const condition = payload.condition as Record<string, unknown>;
   if (Array.isArray(condition.items)) {
     condition.items = condition.items.map((item) =>
-      typeof item === 'string' ? item.trim() : item,
+      typeof item === 'string' ? item.trim() : item
     );
   }
 };
@@ -392,10 +380,10 @@ export const normalizeQuestV2EditRequestResponseBody = ({ body }: { body: unknow
 
 export const questV2MineQuerySchema = t.Object(
   {
-    limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+    limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
     cursor: t.Optional(t.String()),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 const questV2BoardQueryProperties = {
@@ -406,40 +394,47 @@ const questV2BoardQueryProperties = {
   minQuestReward: t.Optional(t.Number({ minimum: 0, maximum: 700000 })),
   maxQuestReward: t.Optional(t.Number({ minimum: 0, maximum: 700000 })),
   maxDurationMinutes: t.Optional(t.Integer({ minimum: 1 })),
-  startFrom: t.Optional(t.String({
-    format: 'date-time',
-    pattern: questV2ScheduleTimePattern.source,
-  })),
-  startTo: t.Optional(t.String({
-    format: 'date-time',
-    pattern: questV2ScheduleTimePattern.source,
-  })),
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+  startFrom: t.Optional(
+    t.String({
+      format: 'date-time',
+      pattern: questV2ScheduleTimePattern.source,
+    })
+  ),
+  startTo: t.Optional(
+    t.String({
+      format: 'date-time',
+      pattern: questV2ScheduleTimePattern.source,
+    })
+  ),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
 };
 
-export const questV2BoardQuerySchema = t.Object(
-  questV2BoardQueryProperties,
-  { additionalProperties: false },
-);
+export const questV2BoardQuerySchema = t.Object(questV2BoardQueryProperties, {
+  additionalProperties: false,
+});
 
 const questV2BoardQueryOpenApiSchema = t.Object(
   {
     ...questV2BoardQueryProperties,
-    minQuestReward: t.Optional(t.Number({
-      minimum: 0,
-      maximum: 700000,
-      multipleOf: 0.01,
-      description: 'Minimum inclusive Quest Reward in Baht with at most two decimal places.',
-    })),
-    maxQuestReward: t.Optional(t.Number({
-      minimum: 0,
-      maximum: 700000,
-      multipleOf: 0.01,
-      description: 'Maximum inclusive Quest Reward in Baht with at most two decimal places.',
-    })),
+    minQuestReward: t.Optional(
+      t.Number({
+        minimum: 0,
+        maximum: 700000,
+        multipleOf: 0.01,
+        description: 'Minimum inclusive Quest Reward in Baht with at most two decimal places.',
+      })
+    ),
+    maxQuestReward: t.Optional(
+      t.Number({
+        minimum: 0,
+        maximum: 700000,
+        multipleOf: 0.01,
+        description: 'Maximum inclusive Quest Reward in Baht with at most two decimal places.',
+      })
+    ),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 const questV2BoardQueryValidator = TypeCompiler.Compile(questV2BoardQuerySchema);
@@ -451,7 +446,9 @@ type QuestV2BoardQueryHttpSchema = StandardSchemaV1Like<
   readonly '~standard': {
     readonly version: 1;
     readonly vendor: 'elysia';
-    readonly validate: (value: unknown) =>
+    readonly validate: (
+      value: unknown
+    ) =>
       | { value: Static<typeof questV2BoardQuerySchema>; issues?: never }
       | { value?: never; issues: unknown[] };
     readonly jsonSchema: {
@@ -510,7 +507,12 @@ export const questV2BoardQueryHttpSchema = {
         ] as const) {
           if (amount !== undefined && !hasAtMostTwoBahtDecimals(amount)) {
             return {
-              issues: [{ path: [field], message: 'Expected Baht amount to use at most two decimal places' }],
+              issues: [
+                {
+                  path: [field],
+                  message: 'Expected Baht amount to use at most two decimal places',
+                },
+              ],
             };
           }
         }
@@ -528,7 +530,9 @@ export const questV2BoardQueryHttpSchema = {
       ] as const) {
         if (amount !== undefined && !hasExactBahtPrecision(amount)) {
           return {
-            issues: [{ path: [field], message: 'Expected Baht amount to use at most two decimal places' }],
+            issues: [
+              { path: [field], message: 'Expected Baht amount to use at most two decimal places' },
+            ],
           };
         }
       }
@@ -577,7 +581,7 @@ export const questV2ImagesUploadSchema = t.Object(
         'One to three Quest Image files in request order. Each file must be a decoded JPEG, PNG, or WebP of at most 5 MB.',
     }),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 const questV2TagSchema = t.Object({
@@ -621,12 +625,16 @@ export const questV2CanonicalQuestSchema = t.Object({
     format: 'date-time',
     pattern: questV2CanonicalScheduleTimePattern.source,
   }),
-  dueAt: t.Nullable(t.String({
-    format: 'date-time',
-    pattern: questV2CanonicalScheduleTimePattern.source,
-  })),
+  dueAt: t.Nullable(
+    t.String({
+      format: 'date-time',
+      pattern: questV2CanonicalScheduleTimePattern.source,
+    })
+  ),
   proofRequired: t.Boolean(),
-  locations: t.Array(t.Object({ label: t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }) })),
+  locations: t.Array(
+    t.Object({ label: t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }) })
+  ),
   createdAt: t.String({ format: 'date-time' }),
   updatedAt: t.String({ format: 'date-time' }),
 });
@@ -666,9 +674,9 @@ type QuestV2HttpResponseSchema<
   readonly '~standard': {
     readonly version: 1;
     readonly vendor: 'elysia';
-    readonly validate: (value: unknown) =>
-      | { value: Static<RuntimeSchema>; issues?: never }
-      | { value?: never; issues: unknown[] };
+    readonly validate: (
+      value: unknown
+    ) => { value: Static<RuntimeSchema>; issues?: never } | { value?: never; issues: unknown[] };
     readonly jsonSchema: {
       readonly input: () => OpenApiSchema;
       readonly output: () => OpenApiSchema;
@@ -679,7 +687,10 @@ type QuestV2HttpResponseSchema<
 const createQuestV2HttpResponseSchema = <
   RuntimeSchema extends TSchema,
   OpenApiSchema extends TSchema,
->(runtimeSchema: RuntimeSchema, openApiSchema: OpenApiSchema) => {
+>(
+  runtimeSchema: RuntimeSchema,
+  openApiSchema: OpenApiSchema
+) => {
   const validator = TypeCompiler.Compile(runtimeSchema);
 
   return {
@@ -712,7 +723,7 @@ export const questV2CreateResponseSchema = t.Object({
 
 export const questV2CreateHttpResponseSchema = createQuestV2HttpResponseSchema(
   questV2CreateResponseSchema,
-  questV2CreateResponseOpenApiSchema,
+  questV2CreateResponseOpenApiSchema
 );
 
 export const questV2MineResponseSchema = t.Object({
@@ -725,7 +736,7 @@ export const questV2MineResponseSchema = t.Object({
 
 export const questV2MineHttpResponseSchema = createQuestV2HttpResponseSchema(
   questV2MineResponseSchema,
-  questV2MineResponseOpenApiSchema,
+  questV2MineResponseOpenApiSchema
 );
 
 const questV2RewardSchema = t.Number({ minimum: 0, maximum: 700000 });
@@ -780,13 +791,38 @@ export const questV2PublicDetailSchema = t.Object({
   dueAt: questV2CanonicalScheduleSchema,
   proofRequired: t.Boolean(),
   hirerName: t.String(),
-  locations: t.Array(t.Object({ label: t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }) })),
+  locations: t.Array(
+    t.Object({ label: t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }) })
+  ),
   images: t.Array(questV2PublicImageSchema),
 });
 
 export const questV2PublicDetailResponseSchema = t.Object({
   success: t.Literal(true),
   data: questV2PublicDetailSchema,
+});
+
+const questV2AssignmentStateSchema = t.Union(
+  questV2AssignmentStates.map((state) => t.Literal(state))
+);
+
+// The Participation projection carries the public Quest fields plus the caller's own
+// Assignment. Quest Funding Total, Platform Fee, Money Policy, Wallet, Funding
+// Reservation, hirerId, and the hidden overlay stay out, exactly as in the public one.
+export const questV2ParticipationDetailSchema = t.Object({
+  ...questV2PublicDetailSchema.properties,
+  assignment: t.Object({
+    status: questV2AssignmentStateSchema,
+    startedAt: t.Nullable(t.String({ format: 'date-time' })),
+  }),
+  capabilities: t.Object({
+    canViewOnly: t.Boolean(),
+  }),
+});
+
+export const questV2ParticipationDetailResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: questV2ParticipationDetailSchema,
 });
 
 const questV2EditRequestStatusSchema = t.Union([
@@ -830,12 +866,9 @@ const questV2EditWorkerResponseSchema = t.Object({
 
 export const questV2EditRequestCreateSchema = t.Object(
   {
-    condition: t.Object(
-      { items: conditionItemsSchema },
-      { additionalProperties: false },
-    ),
+    condition: t.Object({ items: conditionItemsSchema }, { additionalProperties: false }),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const questV2EditRequestResponseInputSchema = t.Object(
@@ -843,7 +876,7 @@ export const questV2EditRequestResponseInputSchema = t.Object(
     decision: questV2EditResponseDecisionSchema,
     reason: t.Optional(t.String({ maxLength: 255, pattern: '\\S' })),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const questV2EditRequestParamsSchema = t.Object({
@@ -888,7 +921,7 @@ export const questV2DetailResponseSchema = t.Object({
 
 export const questV2DetailHttpResponseSchema = createQuestV2HttpResponseSchema(
   questV2DetailResponseSchema,
-  questV2DetailResponseOpenApiSchema,
+  questV2DetailResponseOpenApiSchema
 );
 
 export const questV2EditResponseSchema = questV2CreateResponseSchema;
@@ -910,8 +943,7 @@ const questV2FundingQuoteAmountSchema = t.Number({ minimum: 0 });
 const questV2FundingQuoteAmountOpenApiSchema = t.Number({
   minimum: 0,
   multipleOf: 0.01,
-  description:
-    'Baht amount with exact satang precision (at most two decimal places).',
+  description: 'Baht amount with exact satang precision (at most two decimal places).',
 });
 
 const questV2PublishCheckResponseProperties = {
@@ -952,7 +984,7 @@ export const questV2PublishCheckResponseSchema = t.Object({
 });
 
 const questV2PublishCheckResponseValidator = TypeCompiler.Compile(
-  questV2PublishCheckResponseSchema,
+  questV2PublishCheckResponseSchema
 );
 
 type QuestV2PublishCheckHttpResponseSchema = StandardSchemaV1Like<
@@ -962,7 +994,9 @@ type QuestV2PublishCheckHttpResponseSchema = StandardSchemaV1Like<
   readonly '~standard': {
     readonly version: 1;
     readonly vendor: 'elysia';
-    readonly validate: (value: unknown) =>
+    readonly validate: (
+      value: unknown
+    ) =>
       | { value: Static<typeof questV2PublishCheckResponseSchema>; issues?: never }
       | { value?: never; issues: unknown[] };
     readonly jsonSchema: {
@@ -1048,7 +1082,9 @@ type QuestV2PublishHttpResponseSchema = StandardSchemaV1Like<
   readonly '~standard': {
     readonly version: 1;
     readonly vendor: 'elysia';
-    readonly validate: (value: unknown) =>
+    readonly validate: (
+      value: unknown
+    ) =>
       | { value: Static<typeof questV2PublishResponseSchema>; issues?: never }
       | { value?: never; issues: unknown[] };
     readonly jsonSchema: {
@@ -1093,7 +1129,7 @@ export const questV2EditHeadersSchema = t.Object(
     'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
     'if-match': t.String({ minLength: 1, pattern: '\\S' }),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export type QuestV2MineQuery = Static<typeof questV2MineQuerySchema>;

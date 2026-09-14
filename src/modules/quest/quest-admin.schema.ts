@@ -1,15 +1,17 @@
 import { t } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import { questStatuses } from './quest.contract';
 import { questV2Modes, questV2Participations } from './quest-v2.contract';
 
 // Generic in the member type, so the schema keeps the literal union the controllers read.
-const literalUnion = <T extends string>(values: readonly T[]) => t.Union(
-  values.map((value) => t.Literal(value)) as [
-    ReturnType<typeof t.Literal<T>>,
-    ...ReturnType<typeof t.Literal<T>>[],
-  ],
-);
+const literalUnion = <T extends string>(values: readonly T[]) =>
+  t.Union(
+    values.map((value) => t.Literal(value)) as [
+      ReturnType<typeof t.Literal<T>>,
+      ...ReturnType<typeof t.Literal<T>>[],
+    ]
+  );
 
 const adminQuestStatusSchema = literalUnion(questStatuses);
 const adminQuestModeSchema = literalUnion(questV2Modes);
@@ -36,17 +38,26 @@ const adminQuestReasonCodeSchema = t.String({
   pattern: '^[A-Z][A-Z0-9_.-]*$',
 });
 
-export const adminQuestHideBodySchema = t.Object({
-  reasonCode: adminQuestReasonCodeSchema,
-}, { additionalProperties: false });
+export const adminQuestHideBodySchema = t.Object(
+  {
+    reasonCode: adminQuestReasonCodeSchema,
+  },
+  { additionalProperties: false }
+);
 
-export const adminQuestRestoreBodySchema = t.Object({
-  reasonCode: t.Optional(adminQuestReasonCodeSchema),
-}, { additionalProperties: false });
+export const adminQuestRestoreBodySchema = t.Object(
+  {
+    reasonCode: t.Optional(adminQuestReasonCodeSchema),
+  },
+  { additionalProperties: false }
+);
 
-export const adminQuestTerminateBodySchema = t.Object({
-  reasonCode: adminQuestReasonCodeSchema,
-}, { additionalProperties: false });
+export const adminQuestTerminateBodySchema = t.Object(
+  {
+    reasonCode: adminQuestReasonCodeSchema,
+  },
+  { additionalProperties: false }
+);
 
 export const adminQuestListQuerySchema = t.Object({
   q: t.Optional(t.String({ maxLength: 200 })),
@@ -54,7 +65,7 @@ export const adminQuestListQuerySchema = t.Object({
   mode: t.Optional(adminQuestModeSchema),
   participation: t.Optional(adminQuestParticipationSchema),
   hidden: t.Optional(t.Boolean()),
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
   sort: t.Optional(t.Union([t.Literal('newest'), t.Literal('oldest')])),
 });
@@ -93,7 +104,6 @@ export const adminQuestCommandResponseSchema = t.Object({
   }),
 });
 export const adminQuestListResponseSchema = t.Object({
-
   success: t.Literal(true),
   data: t.Object({
     items: t.Array(adminQuestSummarySchema),
@@ -126,7 +136,7 @@ const adminQuestTeamSchema = t.Object({
   leaderId: t.String({ format: 'uuid' }),
   createdAt: t.String({ format: 'date-time' }),
   members: t.Array(
-    t.Object({ member: adminQuestMemberSchema, joinedAt: t.String({ format: 'date-time' }) }),
+    t.Object({ member: adminQuestMemberSchema, joinedAt: t.String({ format: 'date-time' }) })
   ),
 });
 
@@ -148,12 +158,14 @@ const adminQuestProofSchema = t.Object({
   reviewNote: t.Nullable(t.String()),
   submittedAt: t.String({ format: 'date-time' }),
   reviewedAt: t.Nullable(t.String({ format: 'date-time' })),
-  files: t.Array(t.Object({
-    fileId: t.String({ format: 'uuid' }),
-    contentType: t.String(),
-    sizeBytes: t.Integer({ minimum: 0 }),
-    position: t.Integer({ minimum: 0 }),
-  })),
+  files: t.Array(
+    t.Object({
+      fileId: t.String({ format: 'uuid' }),
+      contentType: t.String(),
+      sizeBytes: t.Integer({ minimum: 0 }),
+      position: t.Integer({ minimum: 0 }),
+    })
+  ),
 });
 
 const adminQuestFieldEditSchema = t.Object({
@@ -178,12 +190,14 @@ const adminQuestEditRequestSchema = t.Object({
   createdAt: t.String({ format: 'date-time' }),
   expiresAt: t.Nullable(t.String({ format: 'date-time' })),
   resolvedAt: t.Nullable(t.String({ format: 'date-time' })),
-  responses: t.Array(t.Object({
-    workerId: t.String({ format: 'uuid' }),
-    decision: t.Nullable(t.String()),
-    reason: t.Nullable(t.String()),
-    respondedAt: t.Nullable(t.String({ format: 'date-time' })),
-  })),
+  responses: t.Array(
+    t.Object({
+      workerId: t.String({ format: 'uuid' }),
+      decision: t.Nullable(t.String()),
+      reason: t.Nullable(t.String()),
+      respondedAt: t.Nullable(t.String({ format: 'date-time' })),
+    })
+  ),
 });
 
 const adminQuestEditHistoryEntrySchema = t.Union([

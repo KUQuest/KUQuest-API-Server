@@ -11,16 +11,17 @@ Member penalties operate through two independent ladders. A Member's strike coun
 ## 1. Misconduct ladder
 
 Triggered when an Admin confirms a violation:
+
 - a `REPORT_CASE_HIDDEN` Moderation Decision on a sent Message; or
 - a `CONDUCT_REPORT_UPHELD` decision on a Quest Conduct Report.
 
 ### Penalty tiers
 
-| Confirmed-violation count | Result | Duration |
-| --- | --- | --- |
-| 1st strike | Red Flag | 7 days (`PC-09`) |
-| 2nd strike | Temporary ban + Wallet Auto-Freeze | 7 days (`PC-11`) |
-| 3rd strike | Permanent ban | Permanent |
+| Confirmed-violation count | Result                             | Duration         |
+| ------------------------- | ---------------------------------- | ---------------- |
+| 1st strike                | Red Flag                           | 7 days (`PC-09`) |
+| 2nd strike                | Temporary ban + Wallet Auto-Freeze | 7 days (`PC-11`) |
+| 3rd strike                | Permanent ban                      | Permanent        |
 
 ### Rules and exemptions
 
@@ -40,11 +41,11 @@ Triggered when an Admin confirms a violation:
 
 Fully automatic system evaluation (not Admin-triggered):
 
-| Downward crossing count | Result | Duration |
-| --- | --- | --- |
-| 1st strike | Temporary ban | 7 days |
-| 2nd strike | Temporary ban | 1 month |
-| 3rd strike | Permanent ban | Permanent |
+| Downward crossing count | Result        | Duration  |
+| ----------------------- | ------------- | --------- |
+| 1st strike              | Temporary ban | 7 days    |
+| 2nd strike              | Temporary ban | 1 month   |
+| 3rd strike              | Permanent ban | Permanent |
 
 ### Rules
 

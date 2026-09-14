@@ -23,7 +23,7 @@ type PayoutDestinationEncryptedSecrets = {
 export const payoutDestinationForProvider = (
   destination: PayoutDestination,
   secrets: PayoutDestinationEncryptedSecrets,
-  encryption: PayoutDestinationEncryption,
+  encryption: PayoutDestinationEncryption
 ): PayoutDestinationForProvider => ({
   ...destination,
   accountNumber: encryption.decrypt({

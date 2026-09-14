@@ -26,8 +26,7 @@ export const createAdminAuth = ({
     appName: 'KUQuest Admin',
     baseURL: env.betterAuthUrl || 'http://localhost:5000',
     basePath: '/api/admin/auth',
-    secret:
-      env.adminBetterAuthSecret || configurationPlaceholder('admin-auth-secret'),
+    secret: env.adminBetterAuthSecret || configurationPlaceholder('admin-auth-secret'),
     database: drizzleAdapter(db, {
       provider: 'pg',
       schema,

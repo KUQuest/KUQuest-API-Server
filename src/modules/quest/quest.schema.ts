@@ -1,17 +1,11 @@
 import { t } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
-import {
-  questMode,
-  questParticipation,
-  questStatuses,
-} from './quest.contract';
+import { questMode, questParticipation, questStatuses } from './quest.contract';
 
 export const maxQuestImages = 3;
 
-const questModeSchema = t.Union([
-  t.Literal(questMode.noCandidate),
-  t.Literal(questMode.candidate),
-]);
+const questModeSchema = t.Union([t.Literal(questMode.noCandidate), t.Literal(questMode.candidate)]);
 
 const questParticipationSchema = t.Union([
   t.Literal(questParticipation.solo),
@@ -35,7 +29,7 @@ const locationInputSchema = t.Object(
   {
     label: t.Optional(t.Nullable(t.String({ maxLength: 100, pattern: '\\S' }))),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 const titleSchema = t.String({ minLength: 1, maxLength: 120, pattern: '\\S' });
@@ -61,7 +55,7 @@ export const questCreateSchema = t.Object(
     proofRequired: t.Optional(t.Boolean()),
     locations: t.Optional(locationsSchema),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 const questImageIdsSchema = t.Array(t.String({ format: 'uuid' }), {
@@ -79,7 +73,7 @@ export const questDirectEditSchema = t.Object(
     tagId: t.Optional(tagIdSchema),
     locations: t.Optional(locationsSchema),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const questEditSchema = t.Object(
@@ -98,7 +92,7 @@ export const questEditSchema = t.Object(
     headcount: t.Optional(t.Integer({ minimum: 1, maximum: 20 })),
     tagId: t.Optional(tagIdSchema),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const questParamsSchema = t.Object({
@@ -118,7 +112,7 @@ export const questImagesUploadSchema = t.Object(
   {
     images: t.Files({ minItems: 1, maxItems: maxQuestImages }),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const questListQuerySchema = t.Object(
@@ -132,18 +126,18 @@ export const questListQuerySchema = t.Object(
     maxReward: t.Optional(t.Integer({ minimum: 1, maximum: 700000 })),
     startFrom: t.Optional(t.String({ format: 'date-time' })),
     startTo: t.Optional(t.String({ format: 'date-time' })),
-    limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+    limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
     cursor: t.Optional(t.String()),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const questMineQuerySchema = t.Object(
   {
-    limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+    limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
     cursor: t.Optional(t.String()),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 const tagSchema = t.Object({
@@ -175,10 +169,7 @@ const questSummarySchema = t.Object({
   location: t.Nullable(locationSchema),
 });
 
-export const questCardSchema = t.Composite([
-  questSummarySchema,
-  t.Object({ tag: tagSchema }),
-]);
+export const questCardSchema = t.Composite([questSummarySchema, t.Object({ tag: tagSchema })]);
 
 export const questListItemSchema = t.Composite([
   questSummarySchema,
@@ -249,7 +240,7 @@ export const questEditRequestSchema = t.Object({
       userId: t.String({ format: 'uuid' }),
       decision: t.Nullable(t.String()),
       respondedAt: t.Nullable(t.String({ format: 'date-time' })),
-    }),
+    })
   ),
 });
 
@@ -277,7 +268,7 @@ export const questEditResponseSchema = t.Object({
 
 export const questEditDecisionSchema = t.Object(
   { decision: t.Union([t.Literal('EDIT_RESPONSE_APPROVED'), t.Literal('EDIT_RESPONSE_REJECTED')]) },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const questImagesUploadResponseSchema = t.Object({

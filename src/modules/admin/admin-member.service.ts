@@ -9,9 +9,10 @@ import {
   walletLedgerPosting,
   walletWallet,
 } from '@/database/schema/wallet.schema';
-import { decodeCursor, encodeCursor } from '@/shared/cursor';
+import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, avg, count, desc, eq, ilike, lt, or, sql } from 'drizzle-orm';
+import { and, avg, count, eq, ilike, or, sql } from 'drizzle-orm';
 
 import type {
   AdminMemberDetailData,
@@ -25,9 +26,10 @@ export type AdminMemberListPage = {
 };
 
 export const listAdminMembers = async (
-  query: AdminMemberListQuery = {},
+  query: AdminMemberListQuery = {}
 ): Promise<AdminMemberListPage> => {
-  const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
+  const cursor = decodeCursor(query.cursor);
+  const limit = parsePageLimit(query.limit);
   const conditions = [];
 
   if (query.walletStatus) {
@@ -40,71 +42,50 @@ export const listAdminMembers = async (
         ilike(authUser.firstName, s),
         ilike(authUser.lastName, s),
         ilike(authUser.studentId, s),
-        ilike(authUser.email, s),
-      ),
+        ilike(authUser.email, s)
+      )
     );
   }
 
-  if (query.cursor) {
-    const parsed = decodeCursor(query.cursor);
-    if (parsed) {
-      const cursorDate = new Date(parsed.startTime);
-      conditions.push(
-        or(
-          lt(authUser.createdAt, cursorDate),
-          and(
-            eq(authUser.createdAt, cursorDate),
-            lt(authUser.id, parsed.id),
-          ),
-        ),
-      );
-    }
-  }
+  const page = await readKeysetPage({
+    anchor: { time: authUser.createdAt, id: authUser.id },
+    cursor,
+    limit,
+    where: and(...conditions),
+    read: ({ where, orderBy, limit: probe }) =>
+      db
+        .select({
+          id: authUser.id,
+          email: authUser.email,
+          firstName: authUser.firstName,
+          lastName: authUser.lastName,
+          studentId: authUser.studentId,
+          telephone: authUser.telephone,
+          academicYear: authUser.academicYear,
+          createdAt: authUser.createdAt,
+          departmentName: department.name,
+          facultyName: faculty.name,
+          occupationName: occupation.name,
+          walletId: walletWallet.id,
+          walletStatus: walletWallet.walletStatus,
+          spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+          earningsBalanceSatang: walletWallet.earningsBalanceSatang,
+          fundingReservedSatang: walletWallet.fundingReservedSatang,
+          reservedForPayoutsSatang: walletWallet.reservedForPayoutsSatang,
+        })
+        .from(authUser)
+        .leftJoin(department, eq(authUser.departmentId, department.id))
+        .leftJoin(faculty, eq(department.facultyId, faculty.id))
+        .leftJoin(occupation, eq(authUser.occupationId, occupation.id))
+        .leftJoin(walletWallet, eq(authUser.id, walletWallet.userId))
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a Member'),
+  });
 
-  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-
-  const rows = await db
-    .select({
-      id: authUser.id,
-      email: authUser.email,
-      firstName: authUser.firstName,
-      lastName: authUser.lastName,
-      studentId: authUser.studentId,
-      telephone: authUser.telephone,
-      academicYear: authUser.academicYear,
-      createdAt: authUser.createdAt,
-      departmentName: department.name,
-      facultyName: faculty.name,
-      occupationName: occupation.name,
-      walletId: walletWallet.id,
-      walletStatus: walletWallet.walletStatus,
-      spendingBalanceSatang: walletWallet.spendingBalanceSatang,
-      earningsBalanceSatang: walletWallet.earningsBalanceSatang,
-      fundingReservedSatang: walletWallet.fundingReservedSatang,
-      reservedForPayoutsSatang: walletWallet.reservedForPayoutsSatang,
-    })
-    .from(authUser)
-    .leftJoin(department, eq(authUser.departmentId, department.id))
-    .leftJoin(faculty, eq(department.facultyId, faculty.id))
-    .leftJoin(occupation, eq(authUser.occupationId, occupation.id))
-    .leftJoin(walletWallet, eq(authUser.id, walletWallet.userId))
-    .where(whereClause)
-    .orderBy(desc(authUser.createdAt), desc(authUser.id))
-    .limit(limit + 1);
-
-  const hasNextPage = rows.length > limit;
-  const pageRows = hasNextPage ? rows.slice(0, limit) : rows;
-
-  let nextCursor: string | null = null;
-  if (hasNextPage && pageRows.length > 0) {
-    const last = pageRows[pageRows.length - 1];
-    nextCursor = encodeCursor({
-      id: last.id,
-      startTime: last.createdAt.toISOString(),
-    });
-  }
-
-  const items: AdminMemberListItem[] = pageRows.map((r) => {
+  const items: AdminMemberListItem[] = page.rows.map((r) => {
     let wallet: AdminMemberListItem['wallet'] = null;
     if (r.walletId && r.walletStatus) {
       const spending = r.spendingBalanceSatang ?? 0;
@@ -138,12 +119,12 @@ export const listAdminMembers = async (
 
   return {
     items,
-    nextCursor,
+    nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
   };
 };
 
 export const getAdminMemberDetail = async (
-  userId: string,
+  userId: string
 ): Promise<AdminMemberDetailData | null> => {
   const [memberRow] = await db
     .select({
@@ -171,10 +152,7 @@ export const getAdminMemberDetail = async (
   }
 
   // Fetch wallet
-  const [wallet] = await db
-    .select()
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId));
+  const [wallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, userId));
 
   let walletData: AdminMemberDetailData['wallet'] = null;
   if (wallet) {
@@ -229,8 +207,8 @@ export const getAdminMemberDetail = async (
     .where(
       and(
         eq(questAssignment.workerId, userId),
-        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_COMPLETED'),
-      ),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_COMPLETED')
+      )
     );
 
   const [reviewStats] = await db
@@ -247,12 +225,7 @@ export const getAdminMemberDetail = async (
       totalPaidOut: sql<string>`coalesce(sum(${paymentPayouts.principalSatang}), 0)::text`,
     })
     .from(paymentPayouts)
-    .where(
-      and(
-        eq(paymentPayouts.userId, userId),
-        eq(paymentPayouts.payoutStatus, 'SUCCEEDED'),
-      ),
-    );
+    .where(and(eq(paymentPayouts.userId, userId), eq(paymentPayouts.payoutStatus, 'SUCCEEDED')));
 
   const [earnedStats] = await db
     .select({

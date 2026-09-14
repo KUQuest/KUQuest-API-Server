@@ -13,19 +13,17 @@ const testAuthApp = new Elysia({ name: 'payout-destination-test-auth' }).use(
     password: 'TestStudent1!',
     firstName: 'Payout',
     lastName: 'Tester',
-  }),
+  })
 );
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 const signInTestMember = async (): Promise<string> => {
   const loginResponse = await testAuthApp.handle(
     new Request('http://localhost/api/staging/test-auth/sign-in/default', {
       method: 'POST',
-    }),
+    })
   );
   expect(loginResponse.status).toBe(200);
   const cookie = getCookieHeader(loginResponse);
@@ -42,7 +40,7 @@ beforeAll(() => {
 describe('Payout Destination HTTP routes', () => {
   it('requires Member authentication for all Payout Destination operations', async () => {
     const unauthenticatedGet = await app.handle(
-      new Request('http://localhost/api/v1/payout-destinations'),
+      new Request('http://localhost/api/v1/payout-destinations')
     );
     const unauthenticatedPost = await app.handle(
       new Request('http://localhost/api/v1/payout-destinations', {
@@ -55,12 +53,12 @@ describe('Payout Destination HTTP routes', () => {
           bankCode: 'KBANK',
           accountNumber: '1234567890',
         }),
-      }),
+      })
     );
     const unauthenticatedDelete = await app.handle(
       new Request('http://localhost/api/v1/payout-destinations', {
         method: 'DELETE',
-      }),
+      })
     );
 
     expect(unauthenticatedGet.status).toBe(401);
@@ -76,13 +74,13 @@ describe('Payout Destination HTTP routes', () => {
 
     expect(response.status).toBe(200);
     expect(document.paths['/api/v1/payout-destinations']?.get?.operationId).toBe(
-      'getActivePayoutDestination',
+      'getActivePayoutDestination'
     );
     expect(document.paths['/api/v1/payout-destinations']?.post?.operationId).toBe(
-      'saveActivePayoutDestination',
+      'saveActivePayoutDestination'
     );
     expect(document.paths['/api/v1/payout-destinations']?.delete?.operationId).toBe(
-      'retireActivePayoutDestination',
+      'retireActivePayoutDestination'
     );
   });
 
@@ -94,14 +92,14 @@ describe('Payout Destination HTTP routes', () => {
       new Request('http://localhost/api/v1/payout-destinations', {
         method: 'DELETE',
         headers: { cookie },
-      }),
+      })
     );
 
     // Initial read should return null
     const initialGet = await app.handle(
       new Request('http://localhost/api/v1/payout-destinations', {
         headers: { cookie },
-      }),
+      })
     );
     expect(initialGet.status).toBe(200);
     const initialData = (await initialGet.json()) as { success: boolean; data: unknown };
@@ -124,7 +122,7 @@ describe('Payout Destination HTTP routes', () => {
           accountNumber: '9876543210',
           routingType: 'BANK_ACCOUNT',
         }),
-      }),
+      })
     );
     expect(saveResponse.status).toBe(200);
     const saveData = (await saveResponse.json()) as {
@@ -153,7 +151,7 @@ describe('Payout Destination HTTP routes', () => {
     const getResponse = await app.handle(
       new Request('http://localhost/api/v1/payout-destinations', {
         headers: { cookie },
-      }),
+      })
     );
     expect(getResponse.status).toBe(200);
     const getData = (await getResponse.json()) as typeof saveData;
@@ -166,10 +164,13 @@ describe('Payout Destination HTTP routes', () => {
       new Request('http://localhost/api/v1/payout-destinations', {
         method: 'DELETE',
         headers: { cookie },
-      }),
+      })
     );
     expect(deleteResponse.status).toBe(200);
-    const deleteData = (await deleteResponse.json()) as { success: boolean; data: { retired: boolean } };
+    const deleteData = (await deleteResponse.json()) as {
+      success: boolean;
+      data: { retired: boolean };
+    };
     expect(deleteData.success).toBe(true);
     expect(deleteData.data.retired).toBe(true);
 
@@ -177,7 +178,7 @@ describe('Payout Destination HTTP routes', () => {
     const afterDeleteGet = await app.handle(
       new Request('http://localhost/api/v1/payout-destinations', {
         headers: { cookie },
-      }),
+      })
     );
     expect(afterDeleteGet.status).toBe(200);
     const afterDeleteData = (await afterDeleteGet.json()) as { success: boolean; data: unknown };
@@ -201,7 +202,7 @@ describe('Payout Destination HTTP routes', () => {
           bankCode: 'NOT_A_BANK',
           accountNumber: '1234567890',
         }),
-      }),
+      })
     );
 
     expect(invalidBank.status).toBe(400);

@@ -42,9 +42,7 @@ const baseInput: QuestCreateInput = {
   locations: [],
 };
 
-const createFixture = async (
-  input: Partial<QuestCreateInput> = {},
-) => {
+const createFixture = async (input: Partial<QuestCreateInput> = {}) => {
   const result = await createQuest(hirerId, { ...baseInput, ...input });
   if ('outcome' in result) throw new Error(`Fixture creation failed: ${result.outcome}`);
 
@@ -53,10 +51,7 @@ const createFixture = async (
 };
 
 const openQuest = async (questId: string) => {
-  await db
-    .update(quest)
-    .set({ questStatus: 'QUEST_OPEN', tagId })
-    .where(eq(quest.id, questId));
+  await db.update(quest).set({ questStatus: 'QUEST_OPEN', tagId }).where(eq(quest.id, questId));
 };
 
 beforeAll(async () => {
@@ -141,10 +136,13 @@ describe('Quest persistence', () => {
   it('marks a hidden Quest in Hirer views without exposing it to other Members', async () => {
     const questId = await createFixture();
     await openQuest(questId);
-    await db.update(quest).set({
-      hiddenAt: new Date(),
-      hiddenByAdminId: adminId,
-    }).where(eq(quest.id, questId));
+    await db
+      .update(quest)
+      .set({
+        hiddenAt: new Date(),
+        hiddenByAdminId: adminId,
+      })
+      .where(eq(quest.id, questId));
 
     const detail = await getQuestDetail(hirerId, questId);
     expect(detail?.hiddenAt).toEqual(expect.any(String));
@@ -402,7 +400,7 @@ describe('Quest persistence', () => {
       await db
         .select({ id: questEditHistory.id })
         .from(questEditHistory)
-        .where(eq(questEditHistory.questId, questId)),
+        .where(eq(questEditHistory.questId, questId))
     ).toHaveLength(0);
   });
 
@@ -423,13 +421,13 @@ describe('Quest persistence', () => {
             label: 'Stored place',
           },
         ],
-      }),
+      })
     ).toEqual({ id: questId });
     expect(
       await db
         .select({ id: questEditHistory.id })
         .from(questEditHistory)
-        .where(eq(questEditHistory.questId, questId)),
+        .where(eq(questEditHistory.questId, questId))
     ).toHaveLength(0);
   });
 
@@ -478,14 +476,14 @@ describe('Quest persistence', () => {
       await editQuest(hirerId, questId, {
         title: 'Should not persist',
         tagId: randomUUID(),
-      }),
+      })
     ).toEqual({ outcome: 'forbidden-fields' });
     expect((await getQuestDetail(hirerId, questId))?.title).toBe('Original title');
     expect(
       await db
         .select({ id: questEditHistory.id })
         .from(questEditHistory)
-        .where(eq(questEditHistory.questId, questId)),
+        .where(eq(questEditHistory.questId, questId))
     ).toHaveLength(0);
   });
 
@@ -493,9 +491,9 @@ describe('Quest persistence', () => {
     const questId = await createFixture();
     await openQuest(questId);
 
-    expect(
-      await editQuest(hirerId, questId, { startTime: '2026-08-26T13:00:00.000Z' }),
-    ).toEqual({ outcome: 'invalid-dates' });
+    expect(await editQuest(hirerId, questId, { startTime: '2026-08-26T13:00:00.000Z' })).toEqual({
+      outcome: 'invalid-dates',
+    });
   });
 
   it('rejects an edit with a missing Tag', async () => {

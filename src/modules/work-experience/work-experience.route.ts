@@ -30,7 +30,8 @@ export const workExperienceRoute = new Elysia({
     detail: {
       tags: ['Profile'],
       summary: 'List own work experience',
-      description: 'Returns the authenticated Student work experience ordered by newest start date.',
+      description:
+        'Returns the authenticated Student work experience ordered by newest start date.',
       operationId: 'listOwnWorkExperience',
       security: betterAuthSecurity,
     },

@@ -8,11 +8,11 @@ A **Conduct Report** evaluates how a Member behaved on a Quest, supported by the
 
 ## Allowed reasons and relationships
 
-| Filer &rarr; Reported | Reason | When allowed |
-| --- | --- | --- |
-| Hirer &rarr; Worker | `CONDUCT_ABANDONED` | In `SINGLE` and `GROUP + FCFS`, against a Worker who sent no Proof Submission and made no proof-free confirmation. In `GROUP + CANDIDATE`, against the **Team Leader only**, and only when no Team Proof Submission or confirmation was sent. |
-| Worker &rarr; Hirer | `CONDUCT_OUT_OF_SCOPE` | Demanded work beyond Quest Condition, or commissioned dishonest/unlawful work. Allowed from `QUEST_ASSIGNED` through terminal completion. |
-| Worker &rarr; Worker on same Quest | `CONDUCT_NO_SHOW` | `GROUP + FIRST_COME_FIRST_SERVED` only, against a Worker who sent no Proof Submission and made no confirmation. |
+| Filer &rarr; Reported              | Reason                 | When allowed                                                                                                                                                                                                                                  |
+| ---------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hirer &rarr; Worker                | `CONDUCT_ABANDONED`    | In `SINGLE` and `GROUP + FCFS`, against a Worker who sent no Proof Submission and made no proof-free confirmation. In `GROUP + CANDIDATE`, against the **Team Leader only**, and only when no Team Proof Submission or confirmation was sent. |
+| Worker &rarr; Hirer                | `CONDUCT_OUT_OF_SCOPE` | Demanded work beyond Quest Condition, or commissioned dishonest/unlawful work. Allowed from `QUEST_ASSIGNED` through terminal completion.                                                                                                     |
+| Worker &rarr; Worker on same Quest | `CONDUCT_NO_SHOW`      | `GROUP + FIRST_COME_FIRST_SERVED` only, against a Worker who sent no Proof Submission and made no confirmation.                                                                                                                               |
 
 - Missing work at `dueAt` is `CONDUCT_ABANDONED`; late delivery does not exist because the Server rejects late submissions.
 - Abusive language or harassment in Chat must be reported as a Report Case, not a Conduct Report.

@@ -4,10 +4,7 @@ import {
   XENDIT_PAYOUT_API_VERSION,
 } from '@/modules/payout';
 import { positiveSatang, satang } from '@/modules/wallet';
-import type {
-  Fetcher,
-  OutboundPayoutRequest,
-} from '@/modules/payout';
+import type { Fetcher, OutboundPayoutRequest } from '@/modules/payout';
 
 import { describe, expect, it } from 'bun:test';
 
@@ -40,10 +37,11 @@ const request: OutboundPayoutRequest = {
   destination,
 };
 
-const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
-  status,
-  headers: { 'content-type': 'application/json' },
-});
+const response = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
 
 describe('Xendit Payout provider', () => {
   it('fetches and normalizes the current Payout state for reconciliation', async () => {
@@ -88,21 +86,24 @@ describe('Xendit Payout provider', () => {
   it('keeps a Provider failure as a normal reconciliation result', async () => {
     const provider = new XenditPayoutProvider({
       secretKey: 'xnd_test_secret',
-      fetcher: async () => response({
-        payout_id: 'po-reconcile-failed',
-        reference_id: request.internalReference,
-        status: 'FAILED',
-        source_currency: 'THB',
-        source_amount: 123.45,
-      }),
+      fetcher: async () =>
+        response({
+          payout_id: 'po-reconcile-failed',
+          reference_id: request.internalReference,
+          status: 'FAILED',
+          source_currency: 'THB',
+          source_amount: 123.45,
+        }),
     });
 
-    await expect(provider.getPayoutStatus({
-      providerReference: 'po-reconcile-failed',
-      internalReference: request.internalReference,
-      expectedPrincipalSatang: positiveSatang(12_345),
-      maximumDebitSatang: positiveSatang(12_345),
-    })).resolves.toMatchObject({ normalizedStatus: 'FAILED' });
+    await expect(
+      provider.getPayoutStatus({
+        providerReference: 'po-reconcile-failed',
+        internalReference: request.internalReference,
+        expectedPrincipalSatang: positiveSatang(12_345),
+        maximumDebitSatang: positiveSatang(12_345),
+      })
+    ).resolves.toMatchObject({ normalizedStatus: 'FAILED' });
   });
 
   it('sends the exact staging-compatible V2 SCB request with stable idempotency', async () => {
@@ -129,10 +130,14 @@ describe('Xendit Payout provider', () => {
 
     expect(called?.url).toBe('https://xendit.test/v2/payouts');
     expect(called?.init?.method).toBe('POST');
-    expect(new Headers(called?.init?.headers).get('authorization')).toBe('Basic eG5kX3Rlc3Rfc2VjcmV0Og==');
+    expect(new Headers(called?.init?.headers).get('authorization')).toBe(
+      'Basic eG5kX3Rlc3Rfc2VjcmV0Og=='
+    );
     expect(XENDIT_PAYOUT_API_VERSION).toBe('2020-02-01');
     expect(new Headers(called?.init?.headers).get('api-version')).toBe(XENDIT_PAYOUT_API_VERSION);
-    expect(new Headers(called?.init?.headers).get('idempotency-key')).toBe(request.internalReference);
+    expect(new Headers(called?.init?.headers).get('idempotency-key')).toBe(
+      request.internalReference
+    );
     expect(body).toEqual({
       reference_id: request.internalReference,
       channel_code: 'TH_SCB',
@@ -159,16 +164,17 @@ describe('Xendit Payout provider', () => {
   it('accepts explicit zero Provider fee and tax values', async () => {
     const provider = new XenditPayoutProvider({
       secretKey: 'xnd_test_secret',
-      fetcher: async () => response({
-        id: 'xnd-payout-zero-fees',
-        reference_id: request.internalReference,
-        status: 'ACCEPTED',
-        amount: 123.45,
-        fee: 0,
-        tax: 0,
-        currency: 'THB',
-        channel_code: 'TH_SCB',
-      }),
+      fetcher: async () =>
+        response({
+          id: 'xnd-payout-zero-fees',
+          reference_id: request.internalReference,
+          status: 'ACCEPTED',
+          amount: 123.45,
+          fee: 0,
+          tax: 0,
+          currency: 'THB',
+          channel_code: 'TH_SCB',
+        }),
     });
 
     await expect(provider.createPayout(request)).resolves.toMatchObject({
@@ -181,11 +187,12 @@ describe('Xendit Payout provider', () => {
   it('detects a confirmed failed Payout in a successful Xendit response', async () => {
     const provider = new XenditPayoutProvider({
       secretKey: 'xnd_test_secret',
-      fetcher: async () => response({
-        id: 'xnd-payout-failed',
-        reference_id: request.internalReference,
-        status: 'FAILED',
-      }),
+      fetcher: async () =>
+        response({
+          id: 'xnd-payout-failed',
+          reference_id: request.internalReference,
+          status: 'FAILED',
+        }),
     });
 
     await expect(provider.createPayout(request)).rejects.toMatchObject({
@@ -196,11 +203,12 @@ describe('Xendit Payout provider', () => {
   it('treats a reversed Payout as a confirmed Provider failure', async () => {
     const provider = new XenditPayoutProvider({
       secretKey: 'xnd_test_secret',
-      fetcher: async () => response({
-        id: 'xnd-payout-reversed',
-        reference_id: request.internalReference,
-        status: 'REVERSED',
-      }),
+      fetcher: async () =>
+        response({
+          id: 'xnd-payout-reversed',
+          reference_id: request.internalReference,
+          status: 'REVERSED',
+        }),
     });
 
     await expect(provider.createPayout(request)).rejects.toMatchObject({
@@ -212,14 +220,15 @@ describe('Xendit Payout provider', () => {
   it('does not treat a terminal success status as an in-flight response', async () => {
     const provider = new XenditPayoutProvider({
       secretKey: 'xnd_test_secret',
-      fetcher: async () => response({
-        id: 'xnd-payout-succeeded',
-        reference_id: request.internalReference,
-        status: 'SUCCEEDED',
-        amount: 123.45,
-        currency: 'THB',
-        channel_code: 'TH_SCB',
-      }),
+      fetcher: async () =>
+        response({
+          id: 'xnd-payout-succeeded',
+          reference_id: request.internalReference,
+          status: 'SUCCEEDED',
+          amount: 123.45,
+          currency: 'THB',
+          channel_code: 'TH_SCB',
+        }),
     });
 
     await expect(provider.createPayout(request)).rejects.toMatchObject({
@@ -308,14 +317,20 @@ describe('Xendit Payout provider', () => {
 
     const unsafeDiagnostic = new XenditPayoutProvider({
       secretKey: 'secret',
-      fetcher: async () => response({
-        error_code: 'API_VALIDATION_ERROR',
-        message: 'Invalid destination 1234567890 using xnd_development_providersecret.',
-        errors: [{
-          field: 'channel_properties.account_number',
-          messages: ['Account 1234567890 is invalid.'],
-        }],
-      }, 400),
+      fetcher: async () =>
+        response(
+          {
+            error_code: 'API_VALIDATION_ERROR',
+            message: 'Invalid destination 1234567890 using xnd_development_providersecret.',
+            errors: [
+              {
+                field: 'channel_properties.account_number',
+                messages: ['Account 1234567890 is invalid.'],
+              },
+            ],
+          },
+          400
+        ),
     });
     let diagnosticError: PayoutProviderError | undefined;
     try {
@@ -344,23 +359,31 @@ describe('Xendit Payout provider', () => {
     const timedOut = new XenditPayoutProvider({
       secretKey: 'secret',
       timeoutMs: 1,
-      fetcher: (_url, init) => new Promise((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
-      }),
+      fetcher: (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
     });
-    await expect(timedOut.createPayout(request)).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+    await expect(timedOut.createPayout(request)).rejects.toMatchObject({
+      code: 'PROVIDER_UNCERTAIN',
+    });
 
     const mismatch = new XenditPayoutProvider({
       secretKey: 'secret',
-      fetcher: async () => response({ id: 'xnd-mismatch', status: 'ACCEPTED', amount: 123.46, currency: 'THB' }),
+      fetcher: async () =>
+        response({ id: 'xnd-mismatch', status: 'ACCEPTED', amount: 123.46, currency: 'THB' }),
     });
-    await expect(mismatch.createPayout(request)).rejects.toMatchObject({ code: 'PROVIDER_UNCERTAIN' });
+    await expect(mismatch.createPayout(request)).rejects.toMatchObject({
+      code: 'PROVIDER_UNCERTAIN',
+    });
   });
 
   it('does not call Xendit without configuration', async () => {
     const provider = new XenditPayoutProvider({ secretKey: '', fetcher: async () => response({}) });
 
     await expect(provider.createPayout(request)).rejects.toBeInstanceOf(PayoutProviderError);
-    await expect(provider.createPayout(request)).rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION' });
+    await expect(provider.createPayout(request)).rejects.toMatchObject({
+      code: 'PROVIDER_CONFIGURATION',
+    });
   });
 });

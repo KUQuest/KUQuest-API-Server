@@ -43,7 +43,7 @@ export class CandidateInquiryServiceError extends Error {
       | 'MESSAGE_TOO_LONG'
       | 'RATE_LIMITED',
     message: string,
-    readonly retryAfterSeconds?: number,
+    readonly retryAfterSeconds?: number
   ) {
     super(message);
     this.name = 'CandidateInquiryServiceError';
@@ -55,15 +55,13 @@ const maxAttachmentsPerMinute = 10;
 const rateLimitWindowMs = 60_000;
 const preparedAttachmentLifetimeMs = 24 * 60 * 60 * 1000;
 
-const retryAfterSeconds = (createdAt: Date, now = Date.now()): number => Math.max(
-  1,
-  Math.ceil((createdAt.getTime() + rateLimitWindowMs - now) / 1000),
-);
+const retryAfterSeconds = (createdAt: Date, now = Date.now()): number =>
+  Math.max(1, Math.ceil((createdAt.getTime() + rateLimitWindowMs - now) / 1000));
 
 const getCandidateInquiryMembership = async (
   database: CandidateInquiryDatabase,
   userId: string,
-  conversationId: string,
+  conversationId: string
 ) => {
   const rows = await database
     .select({
@@ -83,20 +81,25 @@ const getCandidateInquiryMembership = async (
     .from(chatConversation)
     .innerJoin(quest, eq(quest.id, chatConversation.questId))
     .innerJoin(chatMembership, eq(chatMembership.conversationId, chatConversation.id))
-    .where(and(
-      eq(chatConversation.id, conversationId),
-      eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
-      eq(chatConversation.state, 'INQUIRY_OPEN'),
-      isNull(chatConversation.deletedAt),
-      eq(quest.questStatus, 'QUEST_OPEN'),
-      isNull(quest.hiddenAt),
-      eq(chatMembership.memberId, userId),
-      or(
-        and(eq(chatMembership.role, 'HIRER'), eq(chatMembership.memberId, quest.hirerId)),
-        and(eq(chatMembership.role, 'PROSPECTIVE_WORKER'), eq(chatMembership.memberId, chatConversation.candidateWorkerId)),
-      ),
-      isNull(chatMembership.leftAt),
-    ))
+    .where(
+      and(
+        eq(chatConversation.id, conversationId),
+        eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
+        eq(chatConversation.state, 'INQUIRY_OPEN'),
+        isNull(chatConversation.deletedAt),
+        eq(quest.questStatus, 'QUEST_OPEN'),
+        isNull(quest.hiddenAt),
+        eq(chatMembership.memberId, userId),
+        or(
+          and(eq(chatMembership.role, 'HIRER'), eq(chatMembership.memberId, quest.hirerId)),
+          and(
+            eq(chatMembership.role, 'PROSPECTIVE_WORKER'),
+            eq(chatMembership.memberId, chatConversation.candidateWorkerId)
+          )
+        ),
+        isNull(chatMembership.leftAt)
+      )
+    )
     .limit(1);
   return rows[0];
 };
@@ -117,7 +120,7 @@ const messageFields = {
 const loadCandidateMessageRows = async (
   database: CandidateInquiryDatabase,
   conversationId: string,
-  options: { limit: number; before?: MessageCursor; after?: MessageCursor },
+  options: { limit: number; before?: MessageCursor; after?: MessageCursor }
 ): Promise<MessageRow[]> => {
   const conditions = [
     eq(chatMessage.conversationId, conversationId),
@@ -145,7 +148,8 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const decodeMessageCursor = (value: string): MessageCursor => {
   try {
     if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('invalid cursor');
-    const padded = value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - (value.length % 4)) % 4);
+    const padded =
+      value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - (value.length % 4)) % 4);
     const parsed = JSON.parse(atob(padded)) as Record<string, unknown>;
     if (
       Object.keys(parsed).length !== 3 ||
@@ -155,7 +159,8 @@ const decodeMessageCursor = (value: string): MessageCursor => {
       parsed.sequence < 1 ||
       typeof parsed.id !== 'string' ||
       !uuidPattern.test(parsed.id)
-    ) throw new Error('invalid cursor');
+    )
+      throw new Error('invalid cursor');
     return { sequence: parsed.sequence, id: parsed.id };
   } catch {
     throw new CursorInputError('INVALID_CURSOR', 'cursor is invalid');
@@ -165,17 +170,19 @@ const decodeMessageCursor = (value: string): MessageCursor => {
 const validateMessageCursor = async (
   database: CandidateInquiryDatabase,
   conversationId: string,
-  cursor: MessageCursor,
+  cursor: MessageCursor
 ): Promise<void> => {
   const [message] = await database
     .select({ id: chatMessage.id })
     .from(chatMessage)
-    .where(and(
-      eq(chatMessage.id, cursor.id),
-      eq(chatMessage.conversationId, conversationId),
-      eq(chatMessage.sequence, cursor.sequence),
-      isNull(chatMessage.deletedAt),
-    ))
+    .where(
+      and(
+        eq(chatMessage.id, cursor.id),
+        eq(chatMessage.conversationId, conversationId),
+        eq(chatMessage.sequence, cursor.sequence),
+        isNull(chatMessage.deletedAt)
+      )
+    )
     .limit(1);
   if (!message) throw new CursorInputError('INVALID_CURSOR', 'cursor is invalid');
 };
@@ -188,7 +195,7 @@ export type CandidateInquiryParticipant = {
 
 const loadCandidateParticipants = async (
   database: CandidateInquiryDatabase,
-  conversationId: string,
+  conversationId: string
 ): Promise<CandidateInquiryParticipant[]> => {
   const rows = await database
     .select({
@@ -199,11 +206,13 @@ const loadCandidateParticipants = async (
     })
     .from(chatMembership)
     .leftJoin(authUser, eq(authUser.id, chatMembership.memberId))
-    .where(and(
-      eq(chatMembership.conversationId, conversationId),
-      inArray(chatMembership.role, ['HIRER', 'PROSPECTIVE_WORKER']),
-      isNull(chatMembership.leftAt),
-    ))
+    .where(
+      and(
+        eq(chatMembership.conversationId, conversationId),
+        inArray(chatMembership.role, ['HIRER', 'PROSPECTIVE_WORKER']),
+        isNull(chatMembership.leftAt)
+      )
+    )
     .orderBy(asc(chatMembership.role), asc(chatMembership.joinedAt), asc(chatMembership.id));
 
   return rows.map((row) => ({
@@ -231,26 +240,30 @@ export type CandidateInquiry = {
 
 const loadCandidateSummary = async (
   database: CandidateInquiryDatabase,
-  conversation: NonNullable<Awaited<ReturnType<typeof getCandidateInquiryMembership>>>,
+  conversation: NonNullable<Awaited<ReturnType<typeof getCandidateInquiryMembership>>>
 ): Promise<CandidateInquiry> => {
   const [latestRow] = await loadCandidateMessageRows(database, conversation.id, { limit: 1 });
   const latest = latestRow ? (await loadMessageDetails(database, [latestRow]))[0] : undefined;
   const [readCursor] = await database
     .select({ lastReadSequence: chatReadCursor.lastReadSequence })
     .from(chatReadCursor)
-    .where(and(
-      eq(chatReadCursor.conversationId, conversation.id),
-      eq(chatReadCursor.membershipId, conversation.membershipId),
-    ))
+    .where(
+      and(
+        eq(chatReadCursor.conversationId, conversation.id),
+        eq(chatReadCursor.membershipId, conversation.membershipId)
+      )
+    )
     .limit(1);
   const [unread] = await database
     .select({ count: sql<number>`count(*)` })
     .from(chatMessage)
-    .where(and(
-      eq(chatMessage.conversationId, conversation.id),
-      isNull(chatMessage.deletedAt),
-      gt(chatMessage.sequence, readCursor?.lastReadSequence ?? 0),
-    ));
+    .where(
+      and(
+        eq(chatMessage.conversationId, conversation.id),
+        isNull(chatMessage.deletedAt),
+        gt(chatMessage.sequence, readCursor?.lastReadSequence ?? 0)
+      )
+    );
 
   return {
     id: conversation.id,
@@ -280,144 +293,178 @@ const inquiryUnavailable = (): CandidateInquiryServiceError =>
 
 export const openCandidateInquiry = async (
   userId: string,
-  questId: string,
-): Promise<CandidateInquiry> => db.transaction(async (transaction) => {
-  const [current] = await transaction
-    .select({
-      id: quest.id,
-      hirerId: quest.hirerId,
-      title: quest.title,
-      questStatus: quest.questStatus,
-      hiddenAt: quest.hiddenAt,
-    })
-    .from(quest)
-    .where(eq(quest.id, questId))
-    .limit(1)
-    .for('update');
-  if (!current || current.hirerId === userId || current.questStatus !== 'QUEST_OPEN' || current.hiddenAt) {
-    throw inquiryUnavailable();
-  }
+  questId: string
+): Promise<CandidateInquiry> =>
+  db.transaction(async (transaction) => {
+    const [current] = await transaction
+      .select({
+        id: quest.id,
+        hirerId: quest.hirerId,
+        title: quest.title,
+        questStatus: quest.questStatus,
+        hiddenAt: quest.hiddenAt,
+      })
+      .from(quest)
+      .where(eq(quest.id, questId))
+      .limit(1)
+      .for('update');
+    if (
+      !current ||
+      current.hirerId === userId ||
+      current.questStatus !== 'QUEST_OPEN' ||
+      current.hiddenAt
+    ) {
+      throw inquiryUnavailable();
+    }
 
-  const [member] = await transaction
-    .select({ id: authUser.id })
-    .from(authUser)
-    .where(eq(authUser.id, userId))
-    .limit(1);
-  if (!member) throw inquiryUnavailable();
+    const [member] = await transaction
+      .select({ id: authUser.id })
+      .from(authUser)
+      .where(eq(authUser.id, userId))
+      .limit(1);
+    if (!member) throw inquiryUnavailable();
 
-  const [activeAssignment] = await transaction
-    .select({ id: questAssignment.id })
-    .from(questAssignment)
-    .where(and(
-      eq(questAssignment.questId, questId),
-      eq(questAssignment.workerId, userId),
-      eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
-    ))
-    .limit(1);
-  if (activeAssignment) throw inquiryUnavailable();
+    const [activeAssignment] = await transaction
+      .select({ id: questAssignment.id })
+      .from(questAssignment)
+      .where(
+        and(
+          eq(questAssignment.questId, questId),
+          eq(questAssignment.workerId, userId),
+          eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+        )
+      )
+      .limit(1);
+    if (activeAssignment) throw inquiryUnavailable();
 
-  const [existing] = await transaction
-    .select({
-      id: chatConversation.id,
-      state: chatConversation.state,
-    })
-    .from(chatConversation)
-    .where(and(
-      eq(chatConversation.questId, questId),
-      eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
-      eq(chatConversation.candidateWorkerId, userId),
-    ))
-    .limit(1)
-    .for('update');
-  if (existing?.state === 'INQUIRY_CLOSED') {
-    throw new CandidateInquiryServiceError('INQUIRY_CLOSED', 'Candidate Inquiry is closed');
-  }
+    const [existing] = await transaction
+      .select({
+        id: chatConversation.id,
+        state: chatConversation.state,
+      })
+      .from(chatConversation)
+      .where(
+        and(
+          eq(chatConversation.questId, questId),
+          eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
+          eq(chatConversation.candidateWorkerId, userId)
+        )
+      )
+      .limit(1)
+      .for('update');
+    if (existing?.state === 'INQUIRY_CLOSED') {
+      throw new CandidateInquiryServiceError('INQUIRY_CLOSED', 'Candidate Inquiry is closed');
+    }
 
-  const conversationId = existing?.id ?? crypto.randomUUID();
-  if (!existing) {
-    await transaction.insert(chatConversation).values({
-      id: conversationId,
-      questId: current.id,
-      type: 'CONVERSATION_CANDIDATE_INQUIRY',
-      state: 'INQUIRY_OPEN',
-      candidateWorkerId: userId,
-      questTitle: current.title,
-      questStatus: current.questStatus,
-    });
-    const now = new Date();
-    await transaction.insert(chatMembership).values([
-      {
-        conversationId,
-        memberId: current.hirerId,
-        role: 'HIRER',
-        joinedAt: now,
-        createdAt: now,
-      },
-      {
-        conversationId,
-        memberId: userId,
-        role: 'PROSPECTIVE_WORKER',
-        joinedAt: now,
-        createdAt: now,
-      },
-    ]);
-  }
+    const conversationId = existing?.id ?? crypto.randomUUID();
+    if (!existing) {
+      await transaction.insert(chatConversation).values({
+        id: conversationId,
+        questId: current.id,
+        type: 'CONVERSATION_CANDIDATE_INQUIRY',
+        state: 'INQUIRY_OPEN',
+        candidateWorkerId: userId,
+        questTitle: current.title,
+        questStatus: current.questStatus,
+      });
+      const now = new Date();
+      await transaction.insert(chatMembership).values([
+        {
+          conversationId,
+          memberId: current.hirerId,
+          role: 'HIRER',
+          joinedAt: now,
+          createdAt: now,
+        },
+        {
+          conversationId,
+          memberId: userId,
+          role: 'PROSPECTIVE_WORKER',
+          joinedAt: now,
+          createdAt: now,
+        },
+      ]);
+    }
 
-  const membership = await getCandidateInquiryMembership(transaction, userId, conversationId);
-  if (!membership) throw new Error('Candidate Inquiry membership could not be created');
-  return loadCandidateSummary(transaction, membership);
-});
+    const membership = await getCandidateInquiryMembership(transaction, userId, conversationId);
+    if (!membership) throw new Error('Candidate Inquiry membership could not be created');
+    return loadCandidateSummary(transaction, membership);
+  });
 
 export const getCandidateInquiry = async (
   userId: string,
-  conversationId: string,
+  conversationId: string
 ): Promise<CandidateInquiry> => {
   const membership = await getCandidateInquiryMembership(db, userId, conversationId);
-  if (!membership) throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+  if (!membership)
+    throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
   return loadCandidateSummary(db, membership);
 };
 
 export const isCurrentCandidateInquiryMember = async (
   userId: string,
-  conversationId: string,
+  conversationId: string
 ): Promise<boolean> => Boolean(await getCandidateInquiryMembership(db, userId, conversationId));
 
 export const listCandidateInquiries = async (
   userId: string,
-  options: { limit: number; cursor?: CursorPayload },
+  options: { limit: number; cursor?: CursorPayload }
 ) => {
   const lastActivityAt = sql`coalesce(max(${chatMessage.createdAt}), timestamp 'epoch')`;
   const cursor = options.cursor;
+  if (cursor) {
+    // The cursor anchors to a Conversation the caller once listed. When the
+    // Chat Membership is gone the anchor is unresolvable, so reject the cursor
+    // instead of paging from a stale boundary.
+    const [membership] = await db
+      .select({ id: chatMembership.id })
+      .from(chatMembership)
+      .where(and(eq(chatMembership.conversationId, cursor.id), eq(chatMembership.memberId, userId)))
+      .limit(1);
+    if (!membership)
+      throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Conversation');
+  }
+  // PostgreSQL stores timestamps at microsecond precision, while the shared
+  // cursor carries a JavaScript Date at millisecond precision. Compare row-wise
+  // against a subquery that recomputes the anchor's activity so the database
+  // keeps the exact boundary. A new Message legitimately advances the
+  // aggregate, so the anchor check asserts membership only, never the time.
+  const cursorAnchor = cursor
+    ? sql`(select ${lastActivityAt}, ${cursor.id}::uuid from ${chatMessage} where ${chatMessage.conversationId} = ${cursor.id} and ${chatMessage.deletedAt} is null)`
+    : undefined;
   const candidates = await db
     .select({ conversationId: chatMembership.conversationId })
     .from(chatMembership)
     .innerJoin(chatConversation, eq(chatConversation.id, chatMembership.conversationId))
-    .leftJoin(chatMessage, and(
-      eq(chatMessage.conversationId, chatConversation.id),
-      isNull(chatMessage.deletedAt),
-    ))
-    .where(and(
-      eq(chatMembership.memberId, userId),
-      isNull(chatMembership.leftAt),
-      eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
-      eq(chatConversation.state, 'INQUIRY_OPEN'),
-      isNull(chatConversation.deletedAt),
-    ))
+    .leftJoin(
+      chatMessage,
+      and(eq(chatMessage.conversationId, chatConversation.id), isNull(chatMessage.deletedAt))
+    )
+    .where(
+      and(
+        eq(chatMembership.memberId, userId),
+        isNull(chatMembership.leftAt),
+        eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
+        eq(chatConversation.state, 'INQUIRY_OPEN'),
+        isNull(chatConversation.deletedAt)
+      )
+    )
     .groupBy(chatMembership.conversationId)
-    .having(cursor
-      ? or(
-          lt(lastActivityAt, new Date(cursor.startTime)),
-          and(eq(lastActivityAt, new Date(cursor.startTime)), lt(chatMembership.conversationId, cursor.id)),
-        )
-      : undefined)
+    .having(
+      cursorAnchor
+        ? sql`(${lastActivityAt}, ${chatMembership.conversationId}) < ${cursorAnchor}`
+        : undefined
+    )
     .orderBy(desc(lastActivityAt), desc(chatMembership.conversationId))
     .limit(options.limit + 1);
 
   const pageIds = candidates.slice(0, options.limit);
-  const conversations = await Promise.all(pageIds.map(async ({ conversationId }) => {
-    const membership = await getCandidateInquiryMembership(db, userId, conversationId);
-    return membership ? loadCandidateSummary(db, membership) : null;
-  }));
+  const conversations = await Promise.all(
+    pageIds.map(async ({ conversationId }) => {
+      const membership = await getCandidateInquiryMembership(db, userId, conversationId);
+      return membership ? loadCandidateSummary(db, membership) : null;
+    })
+  );
   const page = conversations
     .filter((conversation): conversation is CandidateInquiry => conversation !== null)
     .sort((left, right) => {
@@ -429,34 +476,41 @@ export const listCandidateInquiries = async (
   const last = page[page.length - 1];
   return {
     items: page,
-    nextCursor: candidates.length > page.length && last
-      ? { startTime: (last.lastActivityAt ?? new Date(0)).toISOString(), id: last.id }
-      : null,
+    nextCursor:
+      candidates.length > page.length && last
+        ? { startTime: (last.lastActivityAt ?? new Date(0)).toISOString(), id: last.id }
+        : null,
   };
 };
 
 export const listCandidateInquiryParticipants = async (
   userId: string,
-  conversationId: string,
+  conversationId: string
 ): Promise<CandidateInquiryParticipant[]> => {
   const membership = await getCandidateInquiryMembership(db, userId, conversationId);
-  if (!membership) throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+  if (!membership)
+    throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
   return loadCandidateParticipants(db, conversationId);
 };
 
 export const listCandidateInquiryMessages = async (
   userId: string,
   conversationId: string,
-  options: { limit: number; before?: string; after?: string },
+  options: { limit: number; before?: string; after?: string }
 ) => {
   const membership = await getCandidateInquiryMembership(db, userId, conversationId);
-  if (!membership) throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+  if (!membership)
+    throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
   const before = options.before ? decodeMessageCursor(options.before) : undefined;
   const after = options.after ? decodeMessageCursor(options.after) : undefined;
   if (before) await validateMessageCursor(db, conversationId, before);
   if (after) await validateMessageCursor(db, conversationId, after);
 
-  const rows = await loadCandidateMessageRows(db, conversationId, { limit: options.limit, before, after });
+  const rows = await loadCandidateMessageRows(db, conversationId, {
+    limit: options.limit,
+    before,
+    after,
+  });
   const hasMore = rows.length > options.limit;
   const selectedRows = rows.slice(0, options.limit);
   if (!after) selectedRows.reverse();
@@ -465,9 +519,10 @@ export const listCandidateInquiryMessages = async (
   return {
     items,
     hasMore,
-    nextCursor: hasMore && cursorMessage
-      ? encodeMessageCursor({ id: cursorMessage.id, sequence: cursorMessage.sequence })
-      : null,
+    nextCursor:
+      hasMore && cursorMessage
+        ? encodeMessageCursor({ id: cursorMessage.id, sequence: cursorMessage.sequence })
+        : null,
   };
 };
 
@@ -475,7 +530,7 @@ const enforceCandidateInquiryRateLimit = async (
   database: CandidateInquiryDatabase,
   userId: string,
   questId: string,
-  requestedAttachmentCount: number,
+  requestedAttachmentCount: number
 ): Promise<void> => {
   const windowStart = new Date(Date.now() - rateLimitWindowMs);
   const recentMessages = await database
@@ -483,12 +538,14 @@ const enforceCandidateInquiryRateLimit = async (
     .from(chatMessage)
     .innerJoin(chatConversation, eq(chatConversation.id, chatMessage.conversationId))
     .innerJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId!))
-    .where(and(
-      eq(chatConversation.questId, questId),
-      eq(chatMessage.kind, 'USER'),
-      eq(chatMembership.memberId, userId),
-      gte(chatMessage.createdAt, windowStart),
-    ))
+    .where(
+      and(
+        eq(chatConversation.questId, questId),
+        eq(chatMessage.kind, 'USER'),
+        eq(chatMembership.memberId, userId),
+        gte(chatMessage.createdAt, windowStart)
+      )
+    )
     .orderBy(asc(chatMessage.createdAt));
   const recentAttachments = await database
     .select({ createdAt: chatMessage.createdAt })
@@ -496,12 +553,14 @@ const enforceCandidateInquiryRateLimit = async (
     .innerJoin(chatMessage, eq(chatMessage.id, chatMessageAttachment.messageId))
     .innerJoin(chatConversation, eq(chatConversation.id, chatMessage.conversationId))
     .innerJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId!))
-    .where(and(
-      eq(chatConversation.questId, questId),
-      eq(chatMessage.kind, 'USER'),
-      eq(chatMembership.memberId, userId),
-      gte(chatMessage.createdAt, windowStart),
-    ))
+    .where(
+      and(
+        eq(chatConversation.questId, questId),
+        eq(chatMessage.kind, 'USER'),
+        eq(chatMembership.memberId, userId),
+        gte(chatMessage.createdAt, windowStart)
+      )
+    )
     .orderBy(asc(chatMessage.createdAt));
 
   const retryTimes: number[] = [];
@@ -510,7 +569,7 @@ const enforceCandidateInquiryRateLimit = async (
   }
   const attachmentsToExpire = Math.max(
     0,
-    recentAttachments.length + requestedAttachmentCount - maxAttachmentsPerMinute,
+    recentAttachments.length + requestedAttachmentCount - maxAttachmentsPerMinute
   );
   if (attachmentsToExpire > 0 && recentAttachments[attachmentsToExpire - 1]) {
     retryTimes.push(retryAfterSeconds(recentAttachments[attachmentsToExpire - 1].createdAt));
@@ -519,24 +578,24 @@ const enforceCandidateInquiryRateLimit = async (
     throw new CandidateInquiryServiceError(
       'RATE_LIMITED',
       'Chat rate limit exceeded',
-      Math.max(...retryTimes),
+      Math.max(...retryTimes)
     );
   }
 };
 
-const attachmentIdsForMessage = async (
-  database: CandidateInquiryDatabase,
-  messageId: string,
-) => (await database
-  .select({ id: chatMessageAttachment.attachmentId })
-  .from(chatMessageAttachment)
-  .where(eq(chatMessageAttachment.messageId, messageId))
-  .orderBy(asc(chatMessageAttachment.position))).map(({ id }) => id);
+const attachmentIdsForMessage = async (database: CandidateInquiryDatabase, messageId: string) =>
+  (
+    await database
+      .select({ id: chatMessageAttachment.attachmentId })
+      .from(chatMessageAttachment)
+      .where(eq(chatMessageAttachment.messageId, messageId))
+      .orderBy(asc(chatMessageAttachment.position))
+  ).map(({ id }) => id);
 
 export const sendCandidateInquiryMessage = async (
   userId: string,
   conversationId: string,
-  input: { clientMessageId: string; text?: string; attachmentIds?: string[] },
+  input: { clientMessageId: string; text?: string; attachmentIds?: string[] }
 ) => {
   const result = await db.transaction(async (transaction) => {
     const [lockedConversation] = await transaction
@@ -547,64 +606,92 @@ export const sendCandidateInquiryMessage = async (
         state: chatConversation.state,
       })
       .from(chatConversation)
-      .where(and(
-        eq(chatConversation.id, conversationId),
-        eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
-        isNull(chatConversation.deletedAt),
-      ))
+      .where(
+        and(
+          eq(chatConversation.id, conversationId),
+          eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
+          isNull(chatConversation.deletedAt)
+        )
+      )
       .limit(1)
       .for('update');
     if (!lockedConversation || lockedConversation.state !== 'INQUIRY_OPEN') {
       throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
     }
     const membership = await getCandidateInquiryMembership(transaction, userId, conversationId);
-    if (!membership) throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+    if (!membership)
+      throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
 
     const text = input.text?.trim();
     const attachmentIds = input.attachmentIds ?? [];
     if (!text && attachmentIds.length === 0) {
-      throw new CandidateInquiryServiceError('MESSAGE_CONTENT_REQUIRED', 'Message text or an Attachment is required');
+      throw new CandidateInquiryServiceError(
+        'MESSAGE_CONTENT_REQUIRED',
+        'Message text or an Attachment is required'
+      );
     }
     if (text && text.length > 1000) {
-      throw new CandidateInquiryServiceError('MESSAGE_TOO_LONG', 'Message text must be 1,000 characters or fewer');
+      throw new CandidateInquiryServiceError(
+        'MESSAGE_TOO_LONG',
+        'Message text must be 1,000 characters or fewer'
+      );
     }
     if (new Set(attachmentIds).size !== attachmentIds.length) {
-      throw new CandidateInquiryServiceError('ATTACHMENT_IDS_DUPLICATE', 'Attachment identifiers must be unique');
+      throw new CandidateInquiryServiceError(
+        'ATTACHMENT_IDS_DUPLICATE',
+        'Attachment identifiers must be unique'
+      );
     }
 
     const [existing] = await transaction
       .select(messageFields)
       .from(chatMessage)
-      .where(and(
-        eq(chatMessage.conversationId, conversationId),
-        eq(chatMessage.kind, 'USER'),
-        eq(chatMessage.clientMessageId, input.clientMessageId),
-        eq(chatMessage.senderMembershipId, membership.membershipId),
-      ))
+      .where(
+        and(
+          eq(chatMessage.conversationId, conversationId),
+          eq(chatMessage.kind, 'USER'),
+          eq(chatMessage.clientMessageId, input.clientMessageId),
+          eq(chatMessage.senderMembershipId, membership.membershipId)
+        )
+      )
       .limit(1)
       .for('update');
     if (existing) {
       const existingAttachmentIds = await attachmentIdsForMessage(transaction, existing.id);
-      if (existing.contentText !== (text ?? null) || existingAttachmentIds.join(',') !== attachmentIds.join(',')) {
-        throw new CandidateInquiryServiceError('CLIENT_MESSAGE_ID_REUSED', 'The client Message identifier was used for different content');
+      if (
+        existing.contentText !== (text ?? null) ||
+        existingAttachmentIds.join(',') !== attachmentIds.join(',')
+      ) {
+        throw new CandidateInquiryServiceError(
+          'CLIENT_MESSAGE_ID_REUSED',
+          'The client Message identifier was used for different content'
+        );
       }
       return { message: (await loadMessageDetails(transaction, [existing]))[0]!, created: false };
     }
 
-    await enforceCandidateInquiryRateLimit(transaction, userId, lockedConversation.questId, attachmentIds.length);
+    await enforceCandidateInquiryRateLimit(
+      transaction,
+      userId,
+      lockedConversation.questId,
+      attachmentIds.length
+    );
 
-    const attachments = attachmentIds.length === 0
-      ? []
-      : await transaction
-        .select({ id: chatAttachment.id })
-        .from(chatAttachment)
-        .where(and(
-          inArray(chatAttachment.id, attachmentIds),
-          eq(chatAttachment.conversationId, conversationId),
-          eq(chatAttachment.uploadedByMemberId, membership.membershipId),
-          eq(chatAttachment.status, 'VALIDATED'),
-        ))
-        .for('update');
+    const attachments =
+      attachmentIds.length === 0
+        ? []
+        : await transaction
+            .select({ id: chatAttachment.id })
+            .from(chatAttachment)
+            .where(
+              and(
+                inArray(chatAttachment.id, attachmentIds),
+                eq(chatAttachment.conversationId, conversationId),
+                eq(chatAttachment.uploadedByMemberId, membership.membershipId),
+                eq(chatAttachment.status, 'VALIDATED')
+              )
+            )
+            .for('update');
     if (attachments.length !== attachmentIds.length) {
       throw new CandidateInquiryServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
     }
@@ -626,10 +713,13 @@ export const sendCandidateInquiryMessage = async (
 
     if (attachments.length > 0) {
       const selectedById = new Map(attachments.map((attachment) => [attachment.id, attachment]));
-      await transaction.insert(chatMessageAttachment).values(attachmentIds.map((attachmentId, index) => {
-        if (!selectedById.has(attachmentId)) throw new CandidateInquiryServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
-        return { messageId: message.id, attachmentId, position: index + 1 };
-      }));
+      await transaction.insert(chatMessageAttachment).values(
+        attachmentIds.map((attachmentId, index) => {
+          if (!selectedById.has(attachmentId))
+            throw new CandidateInquiryServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
+          return { messageId: message.id, attachmentId, position: index + 1 };
+        })
+      );
       await transaction
         .update(chatAttachment)
         .set({ status: 'CONSUMED', consumedAt: createdAt, expiresAt: null, updatedAt: createdAt })
@@ -649,11 +739,13 @@ export const sendCandidateInquiryMessage = async (
         .select({ memberId: chatMembership.memberId })
         .from(chatMembership)
         .innerJoin(chatConversation, eq(chatConversation.id, chatMembership.conversationId))
-        .where(and(
-          eq(chatMembership.conversationId, conversationId),
-          isNull(chatMembership.leftAt),
-          eq(chatConversation.state, 'INQUIRY_OPEN'),
-        ));
+        .where(
+          and(
+            eq(chatMembership.conversationId, conversationId),
+            isNull(chatMembership.leftAt),
+            eq(chatConversation.state, 'INQUIRY_OPEN')
+          )
+        );
       await workChatDelivery.publish({
         message: result.message,
         recipientMemberIds: recipients
@@ -692,10 +784,11 @@ const mapAttachmentStorageError = (error: unknown): CandidateInquiryServiceError
 export const uploadCandidateInquiryAttachment = async (
   userId: string,
   conversationId: string,
-  upload: File,
+  upload: File
 ): Promise<CandidateInquiryAttachment> => {
   const visibleConversation = await getCandidateInquiryMembership(db, userId, conversationId);
-  if (!visibleConversation) throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+  if (!visibleConversation)
+    throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
 
   let stored: Awaited<ReturnType<typeof workChatStorage.upload>>;
   try {
@@ -709,18 +802,21 @@ export const uploadCandidateInquiryAttachment = async (
       const [lockedConversation] = await transaction
         .select({ id: chatConversation.id, state: chatConversation.state })
         .from(chatConversation)
-        .where(and(
-          eq(chatConversation.id, conversationId),
-          eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
-          isNull(chatConversation.deletedAt),
-        ))
+        .where(
+          and(
+            eq(chatConversation.id, conversationId),
+            eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
+            isNull(chatConversation.deletedAt)
+          )
+        )
         .limit(1)
         .for('update');
       if (!lockedConversation || lockedConversation.state !== 'INQUIRY_OPEN') {
         throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
       }
       const membership = await getCandidateInquiryMembership(transaction, userId, conversationId);
-      if (!membership) throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+      if (!membership)
+        throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
 
       const windowStart = new Date(Date.now() - rateLimitWindowMs);
       const recent = await transaction
@@ -728,17 +824,19 @@ export const uploadCandidateInquiryAttachment = async (
         .from(chatAttachment)
         .innerJoin(chatMembership, eq(chatMembership.id, chatAttachment.uploadedByMemberId!))
         .innerJoin(chatConversation, eq(chatConversation.id, chatAttachment.conversationId))
-        .where(and(
-          eq(chatConversation.questId, membership.questId),
-          eq(chatMembership.memberId, userId),
-          gte(chatAttachment.createdAt, windowStart),
-        ))
+        .where(
+          and(
+            eq(chatConversation.questId, membership.questId),
+            eq(chatMembership.memberId, userId),
+            gte(chatAttachment.createdAt, windowStart)
+          )
+        )
         .orderBy(asc(chatAttachment.createdAt));
       if (recent.length >= maxAttachmentsPerMinute && recent[0]) {
         throw new CandidateInquiryServiceError(
           'RATE_LIMITED',
           'Chat rate limit exceeded',
-          retryAfterSeconds(recent[0].createdAt),
+          retryAfterSeconds(recent[0].createdAt)
         );
       }
 
@@ -797,17 +895,20 @@ export const uploadCandidateInquiryAttachment = async (
 type CandidateInquiryAttachmentObject = { id: string; bucket: string; objectKey: string };
 
 const deleteCandidateInquiryAttachmentObject = async (
-  attachment: CandidateInquiryAttachmentObject,
+  attachment: CandidateInquiryAttachmentObject
 ): Promise<void> => {
   try {
     await workChatStorage.remove(attachment);
-    await db.update(chatAttachment)
+    await db
+      .update(chatAttachment)
       .set({ objectDeletedAt: new Date(), updatedAt: new Date() })
-      .where(and(
-        eq(chatAttachment.id, attachment.id),
-        eq(chatAttachment.status, 'EXPIRED'),
-        isNull(chatAttachment.objectDeletedAt),
-      ));
+      .where(
+        and(
+          eq(chatAttachment.id, attachment.id),
+          eq(chatAttachment.status, 'EXPIRED'),
+          isNull(chatAttachment.objectDeletedAt)
+        )
+      );
   } catch (error) {
     console.error('[candidate-inquiry-attachment-cleanup] Object deletion failed', {
       attachmentId: attachment.id,
@@ -821,11 +922,12 @@ const deleteCandidateInquiryAttachmentObject = async (
 export const discardCandidateInquiryAttachment = async (
   userId: string,
   conversationId: string,
-  attachmentId: string,
+  attachmentId: string
 ): Promise<{ attachmentId: string }> => {
   const attachment = await db.transaction(async (transaction) => {
     const membership = await getCandidateInquiryMembership(transaction, userId, conversationId);
-    if (!membership) throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+    if (!membership)
+      throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
     const [storedAttachment] = await transaction
       .select({
         id: chatAttachment.id,
@@ -835,25 +937,30 @@ export const discardCandidateInquiryAttachment = async (
       })
       .from(chatAttachment)
       .innerJoin(file, eq(file.id, chatAttachment.fileId))
-      .where(and(
-        eq(chatAttachment.id, attachmentId),
-        eq(chatAttachment.conversationId, conversationId),
-        eq(chatAttachment.uploadedByMemberId, membership.membershipId),
-        eq(chatAttachment.status, 'VALIDATED'),
-        isNull(chatAttachment.deletedAt),
-      ))
+      .where(
+        and(
+          eq(chatAttachment.id, attachmentId),
+          eq(chatAttachment.conversationId, conversationId),
+          eq(chatAttachment.uploadedByMemberId, membership.membershipId),
+          eq(chatAttachment.status, 'VALIDATED'),
+          isNull(chatAttachment.deletedAt)
+        )
+      )
       .limit(1)
       .for('update');
-    if (!storedAttachment) throw new CandidateInquiryServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
+    if (!storedAttachment)
+      throw new CandidateInquiryServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
     const [consumed] = await transaction
       .select({ attachmentId: chatMessageAttachment.attachmentId })
       .from(chatMessageAttachment)
       .where(eq(chatMessageAttachment.attachmentId, attachmentId))
       .limit(1);
-    if (consumed) throw new CandidateInquiryServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
+    if (consumed)
+      throw new CandidateInquiryServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
 
     const deletedAt = new Date();
-    await transaction.update(chatAttachment)
+    await transaction
+      .update(chatAttachment)
       .set({ status: 'EXPIRED', deletedAt, expiresAt: deletedAt, updatedAt: deletedAt })
       .where(eq(chatAttachment.id, attachmentId));
     await transaction.update(file).set({ deletedAt }).where(eq(file.id, storedAttachment.fileId!));
@@ -867,76 +974,97 @@ export const discardCandidateInquiryAttachment = async (
 export const getCandidateInquiryAttachmentLink = async (
   userId: string,
   conversationId: string,
-  attachmentId: string,
+  attachmentId: string
 ) => {
   const membership = await getCandidateInquiryMembership(db, userId, conversationId);
-  if (!membership) throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+  if (!membership)
+    throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
   const [attachment] = await db
     .select({ id: chatAttachment.id, bucket: file.bucket, objectKey: file.objectKey })
     .from(chatAttachment)
     .innerJoin(file, eq(file.id, chatAttachment.fileId))
     .innerJoin(chatMessageAttachment, eq(chatMessageAttachment.attachmentId, chatAttachment.id))
     .innerJoin(chatMessage, eq(chatMessage.id, chatMessageAttachment.messageId))
-    .where(and(
-      eq(chatAttachment.id, attachmentId),
-      eq(chatAttachment.conversationId, conversationId),
-      eq(chatAttachment.status, 'CONSUMED'),
-      isNull(chatAttachment.deletedAt),
-      isNull(chatMessage.deletedAt),
-    ))
+    .where(
+      and(
+        eq(chatAttachment.id, attachmentId),
+        eq(chatAttachment.conversationId, conversationId),
+        eq(chatAttachment.status, 'CONSUMED'),
+        isNull(chatAttachment.deletedAt),
+        isNull(chatMessage.deletedAt)
+      )
+    )
     .limit(1);
-  if (!attachment) throw new CandidateInquiryServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
+  if (!attachment)
+    throw new CandidateInquiryServiceError('ATTACHMENT_NOT_FOUND', 'Attachment not found');
   try {
     return { attachmentId: attachment.id, ...workChatStorage.linkFor(attachment) };
   } catch {
-    throw new CandidateInquiryServiceError('ATTACHMENT_LINK_UNAVAILABLE', 'Attachment link is unavailable');
+    throw new CandidateInquiryServiceError(
+      'ATTACHMENT_LINK_UNAVAILABLE',
+      'Attachment link is unavailable'
+    );
   }
 };
 
 export const advanceCandidateInquiryReadCursor = async (
   userId: string,
   conversationId: string,
-  messageId: string,
-) => db.transaction(async (transaction) => {
-  const membership = await getCandidateInquiryMembership(transaction, userId, conversationId);
-  if (!membership) throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
-  const [message] = await transaction
-    .select({ id: chatMessage.id, sequence: chatMessage.sequence })
-    .from(chatMessage)
-    .where(and(
-      eq(chatMessage.id, messageId),
-      eq(chatMessage.conversationId, conversationId),
-      isNull(chatMessage.deletedAt),
-    ))
-    .limit(1);
-  if (!message) throw new CandidateInquiryServiceError('MESSAGE_NOT_FOUND', 'Message not found');
+  messageId: string
+) =>
+  db.transaction(async (transaction) => {
+    const membership = await getCandidateInquiryMembership(transaction, userId, conversationId);
+    if (!membership)
+      throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+    const [message] = await transaction
+      .select({ id: chatMessage.id, sequence: chatMessage.sequence })
+      .from(chatMessage)
+      .where(
+        and(
+          eq(chatMessage.id, messageId),
+          eq(chatMessage.conversationId, conversationId),
+          isNull(chatMessage.deletedAt)
+        )
+      )
+      .limit(1);
+    if (!message) throw new CandidateInquiryServiceError('MESSAGE_NOT_FOUND', 'Message not found');
 
-  await transaction.insert(chatReadCursor)
-    .values({ conversationId, membershipId: membership.membershipId, lastReadSequence: message.sequence })
-    .onConflictDoUpdate({
-      target: [chatReadCursor.conversationId, chatReadCursor.membershipId],
-      set: {
-        lastReadSequence: sql`GREATEST(${chatReadCursor.lastReadSequence}, ${message.sequence})`,
-        updatedAt: new Date(),
-      },
-    });
-  const [storedCursor] = await transaction
-    .select({ lastReadSequence: chatReadCursor.lastReadSequence })
-    .from(chatReadCursor)
-    .where(and(
-      eq(chatReadCursor.conversationId, conversationId),
-      eq(chatReadCursor.membershipId, membership.membershipId),
-    ))
-    .limit(1);
-  const [storedMessage] = await transaction
-    .select({ id: chatMessage.id })
-    .from(chatMessage)
-    .where(and(
-      eq(chatMessage.conversationId, conversationId),
-      eq(chatMessage.sequence, storedCursor?.lastReadSequence ?? message.sequence),
-      isNull(chatMessage.deletedAt),
-    ))
-    .limit(1);
-  if (!storedMessage) throw new CandidateInquiryServiceError('MESSAGE_NOT_FOUND', 'Message not found');
-  return { conversationId, messageId: storedMessage.id };
-});
+    await transaction
+      .insert(chatReadCursor)
+      .values({
+        conversationId,
+        membershipId: membership.membershipId,
+        lastReadSequence: message.sequence,
+      })
+      .onConflictDoUpdate({
+        target: [chatReadCursor.conversationId, chatReadCursor.membershipId],
+        set: {
+          lastReadSequence: sql`GREATEST(${chatReadCursor.lastReadSequence}, ${message.sequence})`,
+          updatedAt: new Date(),
+        },
+      });
+    const [storedCursor] = await transaction
+      .select({ lastReadSequence: chatReadCursor.lastReadSequence })
+      .from(chatReadCursor)
+      .where(
+        and(
+          eq(chatReadCursor.conversationId, conversationId),
+          eq(chatReadCursor.membershipId, membership.membershipId)
+        )
+      )
+      .limit(1);
+    const [storedMessage] = await transaction
+      .select({ id: chatMessage.id })
+      .from(chatMessage)
+      .where(
+        and(
+          eq(chatMessage.conversationId, conversationId),
+          eq(chatMessage.sequence, storedCursor?.lastReadSequence ?? message.sequence),
+          isNull(chatMessage.deletedAt)
+        )
+      )
+      .limit(1);
+    if (!storedMessage)
+      throw new CandidateInquiryServiceError('MESSAGE_NOT_FOUND', 'Message not found');
+    return { conversationId, messageId: storedMessage.id };
+  });

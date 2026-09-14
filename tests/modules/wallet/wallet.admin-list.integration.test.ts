@@ -9,6 +9,7 @@ import {
   ensureWallet,
   signedSatang,
 } from '@/modules/wallet';
+import { encodeCursor } from '@/shared/cursor';
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -24,11 +25,13 @@ const testStudentId = String(Math.floor(1000000000 + Math.random() * 9000000000)
 let testWalletId = '';
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
-const creditBalances = async (userId: string, spendingSatang: number, earningsSatang: number): Promise<void> => {
+const creditBalances = async (
+  userId: string,
+  spendingSatang: number,
+  earningsSatang: number
+): Promise<void> => {
   const accounts = await db
     .select({ id: walletLedgerAccount.id, type: walletLedgerAccount.type })
     .from(walletLedgerAccount)
@@ -60,6 +63,45 @@ const creditBalances = async (userId: string, spendingSatang: number, earningsSa
       { accountId: suspense.id, amountSatang: signedSatang(-earningsSatang) },
     ],
   });
+};
+
+type AdminWalletListResponse = {
+  success: boolean;
+  data?: { items: { id: string }[]; nextCursor: string | null };
+  error?: { code: string; message: string };
+};
+
+const listWallets = (params: URLSearchParams): Promise<Response> =>
+  app.handle(
+    new Request(`http://localhost/api/v1/admin/wallets?${params}`, {
+      headers: { cookie: adminCookie },
+    })
+  );
+
+const seedDatedWallet = async (lastName: string, createdAt: string): Promise<string> => {
+  const userId = crypto.randomUUID();
+  await db.insert(authUser).values({
+    id: userId,
+    email: `${userId}@ku.th`,
+    firstName: 'CursorWalk',
+    lastName,
+  });
+  const wallet = await ensureWallet(userId);
+  await sql`update wallet_wallets set created_at = ${createdAt}::timestamptz where id = ${wallet.id}`;
+  return wallet.id;
+};
+
+// Four wallets inside two adjacent milliseconds: two rows with distinct
+// microseconds inside one millisecond and an exact timestamp tie, so a
+// millisecond-granular cursor drops rows while paging.
+const seedTieSpacedWallets = async (
+  lastName: string
+): Promise<{ first: string; within: string; ties: [string, string] }> => {
+  const first = await seedDatedWallet(lastName, '2030-08-05T00:00:00.100200Z');
+  const within = await seedDatedWallet(lastName, '2030-08-05T00:00:00.100800Z');
+  const tieLow = await seedDatedWallet(lastName, '2030-08-05T00:00:00.101300Z');
+  const tieHigh = await seedDatedWallet(lastName, '2030-08-05T00:00:00.101300Z');
+  return { first, within, ties: [tieLow, tieHigh] };
 };
 
 beforeAll(async () => {
@@ -100,7 +142,7 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-    }),
+    })
   );
   if (adminLogin.status !== 200) throw new Error('Admin login failed');
   adminCookie = getCookieHeader(adminLogin);
@@ -123,7 +165,7 @@ describe('Admin Wallet Directory Integration Tests', () => {
       const res = await app.handle(
         new Request(`http://localhost/api/v1/admin/wallets?userId=${testUserId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(200);
       const json = await res.json();
@@ -148,7 +190,7 @@ describe('Admin Wallet Directory Integration Tests', () => {
       const res = await app.handle(
         new Request(`http://localhost/api/v1/admin/wallets?search=${testStudentId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(200);
       const json = await res.json();
@@ -161,7 +203,7 @@ describe('Admin Wallet Directory Integration Tests', () => {
       const res = await app.handle(
         new Request('http://localhost/api/v1/admin/wallets?status=ACTIVE&limit=5', {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(200);
       const json = await res.json();
@@ -170,11 +212,67 @@ describe('Admin Wallet Directory Integration Tests', () => {
         expect(item.walletStatus).toBe('ACTIVE');
       }
     });
+
+    it('pages newest-first through every Wallet without dropping rows that share the anchor millisecond', async () => {
+      const walkLastName = `CursorWalk-${crypto.randomUUID()}`;
+      const seeded = await seedTieSpacedWallets(walkLastName);
+
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 8; page += 1) {
+        const params = new URLSearchParams({ search: walkLastName, limit: '1' });
+        if (cursor) params.set('cursor', cursor);
+        // Each page cursor comes from the previous response, so these requests
+        // must remain sequential.
+        // eslint-disable-next-line no-await-in-loop
+        const response = await listWallets(params);
+        expect(response.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const body = (await response.json()) as AdminWalletListResponse;
+        expect(body.success).toBe(true);
+        ids.push(...body.data!.items.map((item) => item.id));
+        cursor = body.data!.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+
+      const tieDescending = [...seeded.ties]
+        .sort((left, right) => (left < right ? -1 : 1))
+        .reverse();
+      expect(ids).toEqual([...tieDescending, seeded.within, seeded.first]);
+    });
+
+    it('rejects a cursor that names no Wallet with the invalid-cursor error envelope', async () => {
+      const ghostCursor = encodeCursor({
+        id: crypto.randomUUID(),
+        startTime: '2030-08-05T00:00:00.100Z',
+      });
+
+      const response = await listWallets(new URLSearchParams({ limit: '1', cursor: ghostCursor }));
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as AdminWalletListResponse;
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('INVALID_CURSOR');
+      expect(body.error?.message).toBe('cursor does not match a Wallet');
+    });
+
+    it('rejects a malformed cursor with the invalid-cursor error envelope', async () => {
+      const response = await listWallets(
+        new URLSearchParams({ limit: '1', cursor: 'not-valid-base64url!!' })
+      );
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as AdminWalletListResponse;
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('INVALID_CURSOR');
+      expect(body.error?.message).toBe('cursor is invalid');
+    });
   });
 
   describe('GET /api/v1/admin/wallets/:walletId', () => {
     it('rejects unauthenticated caller with 401', async () => {
-      const res = await app.handle(new Request(`http://localhost/api/v1/admin/wallets/${testWalletId}`));
+      const res = await app.handle(
+        new Request(`http://localhost/api/v1/admin/wallets/${testWalletId}`)
+      );
       expect(res.status).toBe(401);
     });
 
@@ -183,7 +281,7 @@ describe('Admin Wallet Directory Integration Tests', () => {
       const res = await app.handle(
         new Request(`http://localhost/api/v1/admin/wallets/${nonExistentId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(404);
       const json = await res.json();
@@ -195,7 +293,7 @@ describe('Admin Wallet Directory Integration Tests', () => {
       const res = await app.handle(
         new Request(`http://localhost/api/v1/admin/wallets/${testWalletId}`, {
           headers: { cookie: adminCookie },
-        }),
+        })
       );
       expect(res.status).toBe(200);
       const json = await res.json();

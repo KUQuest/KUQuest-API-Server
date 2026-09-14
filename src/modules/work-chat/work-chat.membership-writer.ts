@@ -16,7 +16,10 @@ import type {
 
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
-import { closeCandidateInquiries, closeCandidateInquiriesForAcceptedWorkers } from './candidate-inquiry.lifecycle';
+import {
+  closeCandidateInquiries,
+  closeCandidateInquiriesForAcceptedWorkers,
+} from './candidate-inquiry.lifecycle';
 
 const systemTypes = {
   acceptedParticipantJoined: 'ACCEPTED_PARTICIPANT_JOINED',
@@ -47,12 +50,9 @@ const transitionType = (transition: QuestWorkChatMembershipTransition): string =
 const hashIdentity = async (value: unknown): Promise<string> => {
   const digest = await crypto.subtle.digest(
     'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value)),
+    new TextEncoder().encode(JSON.stringify(value))
   );
-  return Array.from(
-    new Uint8Array(digest),
-    (byte) => byte.toString(16).padStart(2, '0'),
-  ).join('');
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
 const requestIdentity = (transition: QuestWorkChatMembershipTransition): Promise<string> =>
@@ -60,20 +60,22 @@ const requestIdentity = (transition: QuestWorkChatMembershipTransition): Promise
 
 const eventIdentity = (
   transition: QuestWorkChatMembershipTransition,
-  component: string,
-): Promise<string> => hashIdentity({
-  producer,
-  transitionProducer: transition.producer,
-  transitionType: transition.type,
-  eventId: transition.eventId,
-  component,
-});
+  component: string
+): Promise<string> =>
+  hashIdentity({
+    producer,
+    transitionProducer: transition.producer,
+    transitionType: transition.type,
+    eventId: transition.eventId,
+    component,
+  });
 
-const commandScope = (transition: QuestWorkChatMembershipTransition) => and(
-  eq(chatTransitionCommand.producer, transition.producer),
-  eq(chatTransitionCommand.transitionType, transition.type),
-  eq(chatTransitionCommand.commandId, transition.commandId),
-);
+const commandScope = (transition: QuestWorkChatMembershipTransition) =>
+  and(
+    eq(chatTransitionCommand.producer, transition.producer),
+    eq(chatTransitionCommand.transitionType, transition.type),
+    eq(chatTransitionCommand.commandId, transition.commandId)
+  );
 
 const transitionCommandFields = {
   id: chatTransitionCommand.id,
@@ -88,7 +90,7 @@ const transitionCommandFields = {
 const validateReplay = (
   command: StoredTransitionCommand,
   transition: QuestWorkChatMembershipTransition,
-  identity: string,
+  identity: string
 ): void => {
   if (
     command.questId !== transition.questId ||
@@ -101,7 +103,7 @@ const validateReplay = (
 
 const claimTransition = async (
   transaction: QuestTransaction,
-  transition: QuestWorkChatMembershipTransition,
+  transition: QuestWorkChatMembershipTransition
 ): Promise<{ command: StoredTransitionCommand; alreadyApplied: boolean }> => {
   const identity = await requestIdentity(transition);
   const [existing] = await transaction
@@ -159,7 +161,7 @@ const completeTransition = async (
   transaction: QuestTransaction,
   transition: QuestWorkChatMembershipTransition,
   conversationId: string | null,
-  completedAt: Date,
+  completedAt: Date
 ): Promise<void> => {
   await transaction
     .update(chatTransitionCommand)
@@ -182,10 +184,9 @@ const findConversation = async (transaction: QuestTransaction, questId: string) 
       readOnlyAt: chatConversation.readOnlyAt,
     })
     .from(chatConversation)
-    .where(and(
-      eq(chatConversation.questId, questId),
-      eq(chatConversation.type, 'CONVERSATION_WORK'),
-    ))
+    .where(
+      and(eq(chatConversation.questId, questId), eq(chatConversation.type, 'CONVERSATION_WORK'))
+    )
     .limit(1)
     .for('update');
 
@@ -224,7 +225,10 @@ const ensureConversation = async (transaction: QuestTransaction, questId: string
   return created;
 };
 
-const reserveSequence = async (transaction: QuestTransaction, conversationId: string): Promise<number> => {
+const reserveSequence = async (
+  transaction: QuestTransaction,
+  conversationId: string
+): Promise<number> => {
   const [conversation] = await transaction
     .select({ nextSequence: chatConversation.nextSequence })
     .from(chatConversation)
@@ -251,7 +255,7 @@ const appendSystemMessage = async (
   systemType: string,
   contentText: string,
   systemPayload: Record<string, unknown>,
-  createdAt: Date,
+  createdAt: Date
 ): Promise<boolean> => {
   const [existing] = await transaction
     .select({ id: chatMessage.id, conversationId: chatMessage.conversationId })
@@ -270,10 +274,10 @@ const appendSystemMessage = async (
   const memberId = typeof systemPayload.memberId === 'string' ? systemPayload.memberId : undefined;
   const [affectedMember] = memberId
     ? await transaction
-      .select({ firstName: authUser.firstName, lastName: authUser.lastName })
-      .from(authUser)
-      .where(eq(authUser.id, memberId))
-      .limit(1)
+        .select({ firstName: authUser.firstName, lastName: authUser.lastName })
+        .from(authUser)
+        .where(eq(authUser.id, memberId))
+        .limit(1)
     : [];
   const memberDisplayName = affectedMember
     ? `${affectedMember.firstName ?? ''} ${affectedMember.lastName ?? ''}`.trim() || 'Former member'
@@ -313,14 +317,14 @@ const appendSystemMessage = async (
 
 const eventForWorker = (
   transition: QuestWorkChatMembershipTransition,
-  worker: AcceptedWorker,
+  worker: AcceptedWorker
 ): Promise<string> => eventIdentity(transition, `worker:${worker.assignmentId}`);
 
 const ensureHirerMembership = async (
   transaction: QuestTransaction,
   conversationId: string,
   hirerId: string,
-  occurredAt: Date,
+  occurredAt: Date
 ): Promise<boolean> => {
   const [existing] = await transaction
     .select({
@@ -329,12 +333,7 @@ const ensureHirerMembership = async (
       leftAt: chatMembership.leftAt,
     })
     .from(chatMembership)
-    .where(
-      and(
-        eq(chatMembership.conversationId, conversationId),
-        eq(chatMembership.role, 'HIRER'),
-      ),
-    )
+    .where(and(eq(chatMembership.conversationId, conversationId), eq(chatMembership.role, 'HIRER')))
     .limit(1)
     .for('update');
 
@@ -356,7 +355,7 @@ const ensureHirerMembership = async (
 
 const validateAcceptedAssignments = async (
   transaction: QuestTransaction,
-  transition: Extract<QuestWorkChatMembershipTransition, { type: 'workersAccepted' }>,
+  transition: Extract<QuestWorkChatMembershipTransition, { type: 'workersAccepted' }>
 ): Promise<void> => {
   const assignmentIds = [...new Set(transition.workers.map(({ assignmentId }) => assignmentId))];
   const assignments = await transaction
@@ -385,7 +384,7 @@ const validateAcceptedAssignments = async (
 
 const applyWorkersAccepted = async (
   transaction: QuestTransaction,
-  transition: Extract<QuestWorkChatMembershipTransition, { type: 'workersAccepted' }>,
+  transition: Extract<QuestWorkChatMembershipTransition, { type: 'workersAccepted' }>
 ): Promise<ApplyQuestWorkChatMembershipResult> => {
   const occurredAt = parseTime(transition.occurredAt);
   await validateAcceptedAssignments(transaction, transition);
@@ -412,7 +411,7 @@ const applyWorkersAccepted = async (
       systemTypes.acceptedParticipantJoined,
       'The Hirer joined the Work Conversation.',
       { role: 'HIRER', memberId: transition.hirerId, joinedAt: occurredAt.toISOString() },
-      occurredAt,
+      occurredAt
     );
   }
 
@@ -427,8 +426,8 @@ const applyWorkersAccepted = async (
       .where(
         and(
           eq(chatMembership.conversationId, conversation.id),
-          eq(chatMembership.assignmentId, worker.assignmentId),
-        ),
+          eq(chatMembership.assignmentId, worker.assignmentId)
+        )
       )
       .limit(1)
       .for('update');
@@ -461,7 +460,7 @@ const applyWorkersAccepted = async (
         assignmentId: worker.assignmentId,
         joinedAt: joinedAt.toISOString(),
       },
-      joinedAt,
+      joinedAt
     );
   }
 
@@ -475,7 +474,7 @@ const applyWorkersAccepted = async (
 
 const applyWorkerBecameInactive = async (
   transaction: QuestTransaction,
-  transition: Extract<QuestWorkChatMembershipTransition, { type: 'workerBecameInactive' }>,
+  transition: Extract<QuestWorkChatMembershipTransition, { type: 'workerBecameInactive' }>
 ): Promise<ApplyQuestWorkChatMembershipResult> => {
   const leftAt = parseTime(transition.leftAt);
   const conversation = await findConversation(transaction, transition.questId);
@@ -510,8 +509,8 @@ const applyWorkerBecameInactive = async (
     .where(
       and(
         eq(chatMembership.conversationId, conversation.id),
-        eq(chatMembership.assignmentId, transition.assignmentId),
-      ),
+        eq(chatMembership.assignmentId, transition.assignmentId)
+      )
     )
     .limit(1)
     .for('update');
@@ -540,7 +539,7 @@ const applyWorkerBecameInactive = async (
       assignmentStatus: transition.assignmentStatus,
       leftAt: leftAt.toISOString(),
     },
-    leftAt,
+    leftAt
   );
   await transaction
     .update(chatConversation)
@@ -552,7 +551,7 @@ const applyWorkerBecameInactive = async (
 
 const applyQuestBecameReadOnly = async (
   transaction: QuestTransaction,
-  transition: Extract<QuestWorkChatMembershipTransition, { type: 'questBecameReadOnly' }>,
+  transition: Extract<QuestWorkChatMembershipTransition, { type: 'questBecameReadOnly' }>
 ): Promise<ApplyQuestWorkChatMembershipResult> => {
   const readOnlyAt = parseTime(transition.readOnlyAt);
   await closeCandidateInquiries(transaction, {
@@ -585,7 +584,7 @@ const applyQuestBecameReadOnly = async (
     systemTypes.conversationReadOnly,
     'The Work Conversation is now read-only.',
     { questStatus: transition.questStatus, readOnlyAt: readOnlyAt.toISOString() },
-    readOnlyAt,
+    readOnlyAt
   );
 
   return { conversationId: conversation.id, outcome: 'APPLIED' };
@@ -593,7 +592,7 @@ const applyQuestBecameReadOnly = async (
 
 const applyQuestBecameAssigned = async (
   transaction: QuestTransaction,
-  transition: Extract<QuestWorkChatMembershipTransition, { type: 'questBecameAssigned' }>,
+  transition: Extract<QuestWorkChatMembershipTransition, { type: 'questBecameAssigned' }>
 ): Promise<ApplyQuestWorkChatMembershipResult> => {
   const assignedAt = parseTime(transition.assignedAt);
   await closeCandidateInquiries(transaction, {
@@ -613,7 +612,7 @@ const applyQuestBecameAssigned = async (
 
 const applyTransition = async (
   transaction: QuestTransaction,
-  transition: QuestWorkChatMembershipTransition,
+  transition: QuestWorkChatMembershipTransition
 ): Promise<ApplyQuestWorkChatMembershipResult> => {
   const claimed = await claimTransition(transaction, transition);
   if (claimed.alreadyApplied) {
@@ -639,12 +638,10 @@ const applyTransition = async (
       transaction,
       transition,
       result.conversationId,
-      parseTime(transition.occurredAt),
+      parseTime(transition.occurredAt)
     );
   } else {
-    await transaction
-      .delete(chatTransitionCommand)
-      .where(commandScope(transition));
+    await transaction.delete(chatTransitionCommand).where(commandScope(transition));
   }
   return result;
 };

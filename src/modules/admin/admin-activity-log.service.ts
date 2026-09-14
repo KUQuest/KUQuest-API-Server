@@ -3,8 +3,9 @@ import { adminAction } from '@/database/schema/admin.schema';
 import { authAdmin } from '@/database/schema/auth.schema';
 import { CursorInputError } from '@/shared/cursor';
 import type { CursorPayload } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, asc, desc, eq, sql as drizzleSql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 export type AdminActivityEntry = {
   id: string;
@@ -34,19 +35,6 @@ export type AdminActivityPage = {
   nextCursor: Omit<CursorPayload, 'v'> | null;
 };
 
-const assertCursorAnchor = async (cursor: CursorPayload | undefined): Promise<void> => {
-  if (!cursor) return;
-
-  const [anchor] = await db
-    .select({ id: adminAction.id, createdAt: adminAction.createdAt })
-    .from(adminAction)
-    .where(eq(adminAction.id, cursor.id));
-  const cursorTime = new Date(cursor.startTime);
-  if (!anchor || anchor.createdAt.getTime() !== cursorTime.getTime()) {
-    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match an Admin Action');
-  }
-};
-
 /**
  * Lists the safe columns of immutable Admin Actions. Evidence and request
  * data are intentionally not selected from the database.
@@ -60,62 +48,46 @@ export const listAdminActivity = async ({
   cursor,
   sort = 'newest',
 }: ListAdminActivityInput = {}): Promise<AdminActivityPage> => {
-  await assertCursorAnchor(cursor);
-
-  // PostgreSQL stores timestamps with microsecond precision, while the shared
-  // cursor serializes a JavaScript Date at millisecond precision. Read the
-  // cursor row inside the comparison so the database keeps the exact boundary.
-  const cursorAnchor = cursor
-    ? drizzleSql`(select ${adminAction.createdAt}, ${adminAction.id} from ${adminAction} where ${adminAction.id} = ${cursor.id})`
-    : undefined;
-  const cursorCondition = cursorAnchor
-    ? sort === 'oldest'
-      ? drizzleSql`(${adminAction.createdAt}, ${adminAction.id}) > ${cursorAnchor}`
-      : drizzleSql`(${adminAction.createdAt}, ${adminAction.id}) < ${cursorAnchor}`
-    : undefined;
-
-  const rows = await db
-    .select({
-      id: adminAction.id,
-      admin: {
-        id: authAdmin.id,
-        firstName: authAdmin.firstName,
-        lastName: authAdmin.lastName,
-      },
-      action: adminAction.action,
-      resourceType: adminAction.resourceType,
-      resourceId: adminAction.resourceId,
-      reasonCode: adminAction.reasonCode,
-      reasonCatalogVersion: adminAction.reasonCatalogVersion,
-      resultVersion: adminAction.resultVersion,
-      resultTimestamp: adminAction.resultTimestamp,
-      createdAt: adminAction.createdAt,
-    })
-    .from(adminAction)
-    .innerJoin(authAdmin, eq(authAdmin.id, adminAction.adminId))
-    .where(and(
+  const page = await readKeysetPage({
+    anchor: { time: adminAction.createdAt, id: adminAction.id },
+    cursor,
+    limit,
+    sort,
+    where: and(
       action ? eq(adminAction.action, action) : undefined,
       resourceType ? eq(adminAction.resourceType, resourceType) : undefined,
       resourceId ? eq(adminAction.resourceId, resourceId) : undefined,
-      adminId ? eq(adminAction.adminId, adminId) : undefined,
-      cursorCondition,
-    ))
-    .orderBy(
-      sort === 'oldest' ? asc(adminAction.createdAt) : desc(adminAction.createdAt),
-      sort === 'oldest' ? asc(adminAction.id) : desc(adminAction.id),
-    )
-    .limit(limit + 1);
+      adminId ? eq(adminAction.adminId, adminId) : undefined
+    ),
+    read: ({ where, orderBy, limit: probe }) =>
+      db
+        .select({
+          id: adminAction.id,
+          admin: {
+            id: authAdmin.id,
+            firstName: authAdmin.firstName,
+            lastName: authAdmin.lastName,
+          },
+          action: adminAction.action,
+          resourceType: adminAction.resourceType,
+          resourceId: adminAction.resourceId,
+          reasonCode: adminAction.reasonCode,
+          reasonCatalogVersion: adminAction.reasonCatalogVersion,
+          resultVersion: adminAction.resultVersion,
+          resultTimestamp: adminAction.resultTimestamp,
+          createdAt: adminAction.createdAt,
+        })
+        .from(adminAction)
+        .innerJoin(authAdmin, eq(authAdmin.id, adminAction.adminId))
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+    invalidCursor: () =>
+      new CursorInputError('INVALID_CURSOR', 'cursor does not match an Admin Action'),
+  });
 
-  const hasNext = rows.length > limit;
-  const items = rows.slice(0, limit);
-  const last = items[items.length - 1];
-
-  return {
-    items,
-    nextCursor: hasNext && last
-      ? { startTime: last.createdAt.toISOString(), id: last.id }
-      : null,
-  };
+  return { items: page.rows, nextCursor: page.nextCursor };
 };
 
 export const serializeAdminActivityEntry = (entry: AdminActivityEntry) => ({

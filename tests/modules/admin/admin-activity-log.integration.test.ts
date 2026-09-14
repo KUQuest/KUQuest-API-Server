@@ -42,7 +42,7 @@ const memberAuthApp = new Elysia({ name: 'admin-activity-log-member-auth' }).use
     password: memberPassword,
     firstName: 'Activity',
     lastName: 'Member',
-  }),
+  })
 );
 
 let adminId = '';
@@ -50,24 +50,25 @@ let adminCookie = '';
 let memberCookie = '';
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
-const activityRequest = (query = '', cookie = adminCookie) => app.handle(new Request(
-  `http://localhost/api/v1/admin/activity-log${query ? `?${query}` : ''}`,
-  cookie ? { headers: { cookie } } : undefined,
-));
+const activityRequest = (query = '', cookie = adminCookie) =>
+  app.handle(
+    new Request(
+      `http://localhost/api/v1/admin/activity-log${query ? `?${query}` : ''}`,
+      cookie ? { headers: { cookie } } : undefined
+    )
+  );
 
 const query = (values: Record<string, string | number>): string =>
   new URLSearchParams(
-    Object.entries(values).map(([key, value]) => [key, String(value)]),
+    Object.entries(values).map(([key, value]) => [key, String(value)])
   ).toString();
 
 const readActivity = async (values: Record<string, string | number> = {}) => {
   const response = await activityRequest(query(values));
   expect(response.status).toBe(200);
-  const body = await response.json() as ActivityResponse;
+  const body = (await response.json()) as ActivityResponse;
   expect(body.success).toBe(true);
   return body.data!;
 };
@@ -116,7 +117,11 @@ beforeAll(async () => {
     lastName: 'Admin',
   });
 
-  const seedAuth = createAdminAuth({ allowSignUp: true, autoSignIn: false, markEmailVerified: true });
+  const seedAuth = createAdminAuth({
+    allowSignUp: true,
+    autoSignIn: false,
+    markEmailVerified: true,
+  });
   await seedAuth.api.signUpEmail({
     body: {
       email: adminEmail,
@@ -127,15 +132,21 @@ beforeAll(async () => {
     },
   });
 
-  const loginResponse = await app.handle(new Request('http://localhost/api/admin/auth/sign-in/email', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-  }));
-  if (loginResponse.status !== 200) throw new Error(`Admin authentication failed: ${loginResponse.status}`);
+  const loginResponse = await app.handle(
+    new Request('http://localhost/api/admin/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail, password: adminPassword }),
+    })
+  );
+  if (loginResponse.status !== 200)
+    throw new Error(`Admin authentication failed: ${loginResponse.status}`);
   adminCookie = getCookieHeader(loginResponse);
 
-  const [admin] = await db.select({ id: authAdmin.id }).from(authAdmin).where(eq(authAdmin.email, adminEmail));
+  const [admin] = await db
+    .select({ id: authAdmin.id })
+    .from(authAdmin)
+    .where(eq(authAdmin.email, adminEmail));
   if (!admin) throw new Error('Activity Log Admin fixture was not created.');
   adminId = admin.id;
 
@@ -144,9 +155,10 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: memberEmail, password: memberPassword }),
-    }),
+    })
   );
-  if (memberLogin.status !== 200) throw new Error(`Member authentication failed: ${memberLogin.status}`);
+  if (memberLogin.status !== 200)
+    throw new Error(`Member authentication failed: ${memberLogin.status}`);
   memberCookie = getCookieHeader(memberLogin);
 });
 
@@ -183,7 +195,7 @@ describe('Admin Activity Log API', () => {
 
     const enabledAdmin = await activityRequest(query({ resourceId }));
     expect(enabledAdmin.status).toBe(200);
-    const enabledBody = await enabledAdmin.json() as ActivityResponse;
+    const enabledBody = (await enabledAdmin.json()) as ActivityResponse;
     expect(enabledBody.data?.items[0]?.admin.id).toBe(secondAdminId);
 
     await db.update(authAdmin).set({ disabledAt: new Date() }).where(eq(authAdmin.id, adminId));
@@ -201,8 +213,11 @@ describe('Admin Activity Log API', () => {
 
   it('publishes the versioned Activity Log route and response errors in OpenAPI', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
-    const document = await response.json() as {
-      paths: Record<string, Record<string, { operationId?: string; responses?: Record<string, unknown> }>>;
+    const document = (await response.json()) as {
+      paths: Record<
+        string,
+        Record<string, { operationId?: string; responses?: Record<string, unknown> }>
+      >;
     };
     const operation = document.paths['/api/v1/admin/activity-log']?.get;
 
@@ -258,10 +273,21 @@ describe('Admin Activity Log API', () => {
       createdAt: '2030-08-01T00:00:00.000Z',
     });
 
-    expect((await readActivity({ action })).items.map((item) => item.id)).toEqual([actionMatch, main]);
-    expect((await readActivity({ resourceType })).items.map((item) => item.id)).toEqual([typeMatch, main]);
-    expect((await readActivity({ resourceId })).items.map((item) => item.id)).toEqual([main, resourceMatch]);
-    expect((await readActivity({ adminId: secondAdminId })).items.map((item) => item.id)).toContain(main);
+    expect((await readActivity({ action })).items.map((item) => item.id)).toEqual([
+      actionMatch,
+      main,
+    ]);
+    expect((await readActivity({ resourceType })).items.map((item) => item.id)).toEqual([
+      typeMatch,
+      main,
+    ]);
+    expect((await readActivity({ resourceId })).items.map((item) => item.id)).toEqual([
+      main,
+      resourceMatch,
+    ]);
+    expect((await readActivity({ adminId: secondAdminId })).items.map((item) => item.id)).toContain(
+      main
+    );
 
     const entry = (await readActivity({ resourceId })).items[0]!;
     expect(Object.keys(entry).sort()).toEqual([
@@ -318,7 +344,7 @@ describe('Admin Activity Log API', () => {
       resourceId,
       createdAt: '2030-08-05T00:00:00.102400Z',
     });
-    const tieAscending = [tieFirst, tieSecond].sort((left, right) => left < right ? -1 : 1);
+    const tieAscending = [tieFirst, tieSecond].sort((left, right) => (left < right ? -1 : 1));
 
     const readEveryPage = async (sort: 'newest' | 'oldest'): Promise<string[]> => {
       const ids: string[] = [];
@@ -332,7 +358,7 @@ describe('Admin Activity Log API', () => {
         const response = await activityRequest(query(values));
         expect(response.status).toBe(200);
         // eslint-disable-next-line no-await-in-loop
-        const body = await response.json() as ActivityResponse;
+        const body = (await response.json()) as ActivityResponse;
         expect(body.success).toBe(true);
         ids.push(...body.data!.items.map((item) => item.id));
         cursor = body.data!.nextCursor;
@@ -349,7 +375,7 @@ describe('Admin Activity Log API', () => {
   it('rejects invalid cursors and invalid query values with the shared error envelope', async () => {
     const expectBadRequest = async (response: Response, code: string) => {
       expect(response.status).toBe(400);
-      const body = await response.json() as ActivityResponse;
+      const body = (await response.json()) as ActivityResponse;
       expect(body.success).toBe(false);
       expect(body.error?.code).toBe(code);
       expect(body.error?.message).toBeString();
@@ -357,16 +383,18 @@ describe('Admin Activity Log API', () => {
 
     await expectBadRequest(
       await activityRequest(query({ cursor: 'not-valid-base64url!!' })),
-      'INVALID_CURSOR',
+      'INVALID_CURSOR'
     );
     await expectBadRequest(
-      await activityRequest(query({
-        cursor: encodeCursor({
-          id: crypto.randomUUID(),
-          startTime: '2030-08-10T00:00:00.000Z',
-        }),
-      })),
-      'INVALID_CURSOR',
+      await activityRequest(
+        query({
+          cursor: encodeCursor({
+            id: crypto.randomUUID(),
+            startTime: '2030-08-10T00:00:00.000Z',
+          }),
+        })
+      ),
+      'INVALID_CURSOR'
     );
     await expectBadRequest(await activityRequest(query({ limit: 51 })), 'VALIDATION');
     await expectBadRequest(await activityRequest(query({ sort: 'sideways' })), 'VALIDATION');

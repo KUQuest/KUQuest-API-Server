@@ -19,7 +19,17 @@ import { createWorkChatMembershipWriter, workChatStorage } from '@/modules/work-
 import { randomUUID } from 'node:crypto';
 
 import { and, eq, inArray } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test';
 
 const hirerId = randomUUID();
 const workerId = randomUUID();
@@ -31,26 +41,28 @@ const fixtureFileIds: string[] = [];
 let postgresAvailable = false;
 let candidateInquiryApp: { handle: (request: Request) => Promise<Response> };
 
-const authenticate = () => spyOn(auth.api, 'getSession').mockImplementation((async (
-  { headers }: { headers: Headers },
-) => {
-  const memberId = headers.get('x-member-id') ?? hirerId;
-  return { user: { id: memberId }, session: { userId: memberId } } as never;
-}) as never);
+const authenticate = () =>
+  spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => {
+    const memberId = headers.get('x-member-id') ?? hirerId;
+    return { user: { id: memberId }, session: { userId: memberId } } as never;
+  }) as never);
 
 const requestJson = (
   method: string,
   path: string,
   body: Record<string, unknown>,
-  memberId: string,
-) => candidateInquiryApp.handle(new Request(`http://localhost${path}`, {
-  method,
-  headers: {
-    'content-type': 'application/json',
-    'x-member-id': memberId,
-  },
-  body: JSON.stringify(body),
-}));
+  memberId: string
+) =>
+  candidateInquiryApp.handle(
+    new Request(`http://localhost${path}`, {
+      method,
+      headers: {
+        'content-type': 'application/json',
+        'x-member-id': memberId,
+      },
+      body: JSON.stringify(body),
+    })
+  );
 
 const createOpenQuest = async () => {
   const questId = randomUUID();
@@ -71,75 +83,137 @@ const createOpenQuest = async () => {
   return questId;
 };
 
+const seedConversationMessage = async (
+  conversationId: string,
+  sequence: number,
+  createdAt: string
+): Promise<void> => {
+  // Raw sql keeps microsecond precision. A JavaScript Date value truncates to
+  // milliseconds, and a whole-second seed would hide the cursor defect.
+  const [membership] = await db
+    .select({ id: chatMembership.id })
+    .from(chatMembership)
+    .where(
+      and(eq(chatMembership.conversationId, conversationId), eq(chatMembership.memberId, workerId))
+    )
+    .limit(1);
+  if (!membership) throw new Error('Candidate Inquiry Membership fixture not found');
+  await sql`
+    insert into chat_message
+      (conversation_id, sequence, kind, sender_membership_id, client_message_id, content_text, created_at)
+    values
+      (${conversationId}, ${sequence}, 'USER', ${membership.id},
+       ${`seed-${conversationId}-${sequence}`}, 'Seed message', ${createdAt}::timestamptz)
+  `;
+};
+
+const openInquiryConversation = async (questId: string): Promise<string> => {
+  const opened = await requestJson(
+    'POST',
+    '/api/v1/chat/candidate-inquiries',
+    { questId },
+    workerId
+  );
+  expect(opened.status).toBe(200);
+  return ((await opened.json()) as { data: { inquiry: { id: string } } }).data.inquiry.id;
+};
+
 const createPreparedAttachments = async (
   conversationId: string,
   memberId: string,
   count: number,
-  discarded = false,
+  discarded = false
 ) => {
   const [membership] = await db
     .select({ id: chatMembership.id })
     .from(chatMembership)
-    .where(and(
-      eq(chatMembership.conversationId, conversationId),
-      eq(chatMembership.memberId, memberId),
-    ));
+    .where(
+      and(eq(chatMembership.conversationId, conversationId), eq(chatMembership.memberId, memberId))
+    );
   if (!membership) throw new Error('Candidate Inquiry Membership fixture not found');
 
   const createdAt = new Date();
-  const files = await db.insert(file).values(Array.from({ length: count }, (_, index) => ({
-    bucket: 'test-candidate-inquiry',
-    objectKey: `candidate-inquiry/${conversationId}/prepared-${randomUUID()}-${index}.png`,
-    contentType: 'image/png',
-    sizeBytes: 3,
-    uploadedByUserId: memberId,
-    createdAt,
-    ...(discarded ? { deletedAt: createdAt } : {}),
-  }))).returning({ id: file.id });
+  const files = await db
+    .insert(file)
+    .values(
+      Array.from({ length: count }, (_, index) => ({
+        bucket: 'test-candidate-inquiry',
+        objectKey: `candidate-inquiry/${conversationId}/prepared-${randomUUID()}-${index}.png`,
+        contentType: 'image/png',
+        sizeBytes: 3,
+        uploadedByUserId: memberId,
+        createdAt,
+        ...(discarded ? { deletedAt: createdAt } : {}),
+      }))
+    )
+    .returning({ id: file.id });
   fixtureFileIds.push(...files.map(({ id }) => id));
 
-  return db.insert(chatAttachment).values(files.map(({ id }, index) => ({
-    conversationId,
-    uploadedByMemberId: membership.id,
-    fileId: id,
-    status: discarded ? 'EXPIRED' as const : 'VALIDATED' as const,
-    originalFilename: `prepared-${index}.png`,
-    mimeType: 'image/png',
-    sizeBytes: 3,
-    validatedAt: createdAt,
-    createdAt,
-    updatedAt: createdAt,
-    ...(discarded ? { deletedAt: createdAt, expiresAt: createdAt } : {}),
-  }))).returning({ id: chatAttachment.id });
+  return db
+    .insert(chatAttachment)
+    .values(
+      files.map(({ id }, index) => ({
+        conversationId,
+        uploadedByMemberId: membership.id,
+        fileId: id,
+        status: discarded ? ('EXPIRED' as const) : ('VALIDATED' as const),
+        originalFilename: `prepared-${index}.png`,
+        mimeType: 'image/png',
+        sizeBytes: 3,
+        validatedAt: createdAt,
+        createdAt,
+        updatedAt: createdAt,
+        ...(discarded ? { deletedAt: createdAt, expiresAt: createdAt } : {}),
+      }))
+    )
+    .returning({ id: chatAttachment.id });
 };
 
 const cleanFixtures = async (): Promise<void> => {
   if (!postgresAvailable || fixtureQuestIds.length === 0) return;
 
   await db.transaction(async (transaction) => {
-    await transaction.delete(chatTransitionCommand).where(inArray(chatTransitionCommand.questId, fixtureQuestIds));
-    const conversations = await transaction.select({ id: chatConversation.id })
+    await transaction
+      .delete(chatTransitionCommand)
+      .where(inArray(chatTransitionCommand.questId, fixtureQuestIds));
+    const conversations = await transaction
+      .select({ id: chatConversation.id })
       .from(chatConversation)
       .where(inArray(chatConversation.questId, fixtureQuestIds));
     const conversationIds = conversations.map(({ id }) => id);
     if (conversationIds.length > 0) {
-      await transaction.delete(chatReadCursor).where(inArray(chatReadCursor.conversationId, conversationIds));
-      const messages = await transaction.select({ id: chatMessage.id })
+      await transaction
+        .delete(chatReadCursor)
+        .where(inArray(chatReadCursor.conversationId, conversationIds));
+      const messages = await transaction
+        .select({ id: chatMessage.id })
         .from(chatMessage)
         .where(inArray(chatMessage.conversationId, conversationIds));
       const messageIds = messages.map(({ id }) => id);
       if (messageIds.length > 0) {
-        await transaction.delete(chatMessageAttachment).where(inArray(chatMessageAttachment.messageId, messageIds));
+        await transaction
+          .delete(chatMessageAttachment)
+          .where(inArray(chatMessageAttachment.messageId, messageIds));
       }
-      await transaction.delete(chatMessage).where(inArray(chatMessage.conversationId, conversationIds));
-      await transaction.delete(chatAttachment).where(inArray(chatAttachment.conversationId, conversationIds));
-      await transaction.delete(chatMembership).where(inArray(chatMembership.conversationId, conversationIds));
-      await transaction.delete(chatConversation).where(inArray(chatConversation.id, conversationIds));
+      await transaction
+        .delete(chatMessage)
+        .where(inArray(chatMessage.conversationId, conversationIds));
+      await transaction
+        .delete(chatAttachment)
+        .where(inArray(chatAttachment.conversationId, conversationIds));
+      await transaction
+        .delete(chatMembership)
+        .where(inArray(chatMembership.conversationId, conversationIds));
+      await transaction
+        .delete(chatConversation)
+        .where(inArray(chatConversation.id, conversationIds));
     }
     if (fixtureFileIds.length > 0) {
       await transaction.delete(file).where(inArray(file.id, fixtureFileIds));
     }
-    await transaction.delete(questAssignment).where(inArray(questAssignment.questId, fixtureQuestIds));
+    await transaction
+      .delete(questAssignment)
+      .where(inArray(questAssignment.questId, fixtureQuestIds));
     await transaction.delete(quest).where(inArray(quest.id, fixtureQuestIds));
   });
   fixtureQuestIds.length = 0;
@@ -177,26 +251,56 @@ afterEach(async () => {
 afterAll(async () => {
   if (!postgresAvailable) return;
   await db.delete(tag).where(eq(tag.id, tagId));
-  await db.delete(authUser).where(inArray(authUser.id, [hirerId, workerId, otherWorkerId, outsiderId]));
+  await db
+    .delete(authUser)
+    .where(inArray(authUser.id, [hirerId, workerId, otherWorkerId, outsiderId]));
 });
 
 describe('Candidate Inquiry Conversation API', () => {
   it('publishes the Candidate Inquiry REST operations with Member security', async () => {
     const response = await candidateInquiryApp.handle(new Request('http://localhost/openapi/json'));
-    const document = await response.json() as {
+    const document = (await response.json()) as {
       paths: Record<string, Record<string, { operationId?: string; security?: unknown }>>;
     };
     const operations = [
       ['/api/v1/chat/candidate-inquiries', 'post', 'openCandidateInquiry'],
       ['/api/v1/chat/candidate-inquiries', 'get', 'listCandidateInquiries'],
       ['/api/v1/chat/candidate-inquiries/{conversationId}', 'get', 'getCandidateInquiry'],
-      ['/api/v1/chat/candidate-inquiries/{conversationId}/participants', 'get', 'listCandidateInquiryParticipants'],
-      ['/api/v1/chat/candidate-inquiries/{conversationId}/attachments', 'post', 'uploadCandidateInquiryAttachment'],
-      ['/api/v1/chat/candidate-inquiries/{conversationId}/attachments/{attachmentId}/link', 'get', 'getCandidateInquiryAttachmentLink'],
-      ['/api/v1/chat/candidate-inquiries/{conversationId}/attachments/{attachmentId}', 'delete', 'discardCandidateInquiryAttachment'],
-      ['/api/v1/chat/candidate-inquiries/{conversationId}/messages', 'get', 'listCandidateInquiryMessages'],
-      ['/api/v1/chat/candidate-inquiries/{conversationId}/messages', 'post', 'sendCandidateInquiryMessage'],
-      ['/api/v1/chat/candidate-inquiries/{conversationId}/read', 'post', 'advanceCandidateInquiryReadCursor'],
+      [
+        '/api/v1/chat/candidate-inquiries/{conversationId}/participants',
+        'get',
+        'listCandidateInquiryParticipants',
+      ],
+      [
+        '/api/v1/chat/candidate-inquiries/{conversationId}/attachments',
+        'post',
+        'uploadCandidateInquiryAttachment',
+      ],
+      [
+        '/api/v1/chat/candidate-inquiries/{conversationId}/attachments/{attachmentId}/link',
+        'get',
+        'getCandidateInquiryAttachmentLink',
+      ],
+      [
+        '/api/v1/chat/candidate-inquiries/{conversationId}/attachments/{attachmentId}',
+        'delete',
+        'discardCandidateInquiryAttachment',
+      ],
+      [
+        '/api/v1/chat/candidate-inquiries/{conversationId}/messages',
+        'get',
+        'listCandidateInquiryMessages',
+      ],
+      [
+        '/api/v1/chat/candidate-inquiries/{conversationId}/messages',
+        'post',
+        'sendCandidateInquiryMessage',
+      ],
+      [
+        '/api/v1/chat/candidate-inquiries/{conversationId}/read',
+        'post',
+        'advanceCandidateInquiryReadCursor',
+      ],
     ] as const;
     for (const [path, method, operationId] of operations) {
       expect(document.paths[path]?.[method]?.operationId).toBe(operationId);
@@ -209,9 +313,14 @@ describe('Candidate Inquiry Conversation API', () => {
     authenticate();
     const questId = await createOpenQuest();
 
-    const opened = await requestJson('POST', '/api/v1/chat/candidate-inquiries', { questId }, workerId);
+    const opened = await requestJson(
+      'POST',
+      '/api/v1/chat/candidate-inquiries',
+      { questId },
+      workerId
+    );
     expect(opened.status).toBe(200);
-    const openedBody = await opened.json() as {
+    const openedBody = (await opened.json()) as {
       data: {
         inquiry: {
           id: string;
@@ -229,7 +338,12 @@ describe('Candidate Inquiry Conversation API', () => {
       { id: workerId, role: 'PROSPECTIVE_WORKER', displayName: 'Inquiry Worker' },
     ]);
 
-    const replay = await requestJson('POST', '/api/v1/chat/candidate-inquiries', { questId }, workerId);
+    const replay = await requestJson(
+      'POST',
+      '/api/v1/chat/candidate-inquiries',
+      { questId },
+      workerId
+    );
     expect(replay.status).toBe(200);
     expect((await replay.json()).data.inquiry.id).toBe(conversationId);
 
@@ -237,39 +351,50 @@ describe('Candidate Inquiry Conversation API', () => {
       'POST',
       `/api/v1/chat/candidate-inquiries/${conversationId}/messages`,
       { clientMessageId: 'inquiry-worker-1', text: 'Can I ask a question?' },
-      workerId,
+      workerId
     );
     expect(workerMessage.status).toBe(200);
-    const workerMessageBody = await workerMessage.json() as { data: { message: { id: string; kind: string } } };
+    const workerMessageBody = (await workerMessage.json()) as {
+      data: { message: { id: string; kind: string } };
+    };
     expect(workerMessageBody.data.message.kind).toBe('USER');
 
-    const hirerHistory = await candidateInquiryApp.handle(new Request(
-      `http://localhost/api/v1/chat/candidate-inquiries/${conversationId}/messages`,
-      { headers: { 'x-member-id': hirerId } },
-    ));
+    const hirerHistory = await candidateInquiryApp.handle(
+      new Request(`http://localhost/api/v1/chat/candidate-inquiries/${conversationId}/messages`, {
+        headers: { 'x-member-id': hirerId },
+      })
+    );
     expect(hirerHistory.status).toBe(200);
-    const historyBody = await hirerHistory.json() as { data: { items: Array<{ id: string; systemType: string | null }> } };
+    const historyBody = (await hirerHistory.json()) as {
+      data: { items: Array<{ id: string; systemType: string | null }> };
+    };
     expect(historyBody.data.items).toHaveLength(1);
-    expect(historyBody.data.items[0]).toMatchObject({ id: workerMessageBody.data.message.id, systemType: null });
+    expect(historyBody.data.items[0]).toMatchObject({
+      id: workerMessageBody.data.message.id,
+      systemType: null,
+    });
 
-    const workList = await candidateInquiryApp.handle(new Request(
-      'http://localhost/api/v1/chat/conversations',
-      { headers: { 'x-member-id': workerId } },
-    ));
+    const workList = await candidateInquiryApp.handle(
+      new Request('http://localhost/api/v1/chat/conversations', {
+        headers: { 'x-member-id': workerId },
+      })
+    );
     expect(workList.status).toBe(200);
     expect((await workList.json()).data.items).toHaveLength(0);
 
-    const workHistory = await candidateInquiryApp.handle(new Request(
-      `http://localhost/api/v1/chat/conversations/${conversationId}/messages`,
-      { headers: { 'x-member-id': workerId } },
-    ));
+    const workHistory = await candidateInquiryApp.handle(
+      new Request(`http://localhost/api/v1/chat/conversations/${conversationId}/messages`, {
+        headers: { 'x-member-id': workerId },
+      })
+    );
     expect(workHistory.status).toBe(404);
     expect((await workHistory.json()).error.code).toBe('CONVERSATION_NOT_FOUND');
 
-    const outsider = await candidateInquiryApp.handle(new Request(
-      `http://localhost/api/v1/chat/candidate-inquiries/${conversationId}`,
-      { headers: { 'x-member-id': outsiderId } },
-    ));
+    const outsider = await candidateInquiryApp.handle(
+      new Request(`http://localhost/api/v1/chat/candidate-inquiries/${conversationId}`, {
+        headers: { 'x-member-id': outsiderId },
+      })
+    );
     expect(outsider.status).toBe(404);
     expect((await outsider.json()).error.code).toBe('CONVERSATION_NOT_FOUND');
   });
@@ -278,7 +403,12 @@ describe('Candidate Inquiry Conversation API', () => {
     if (!postgresAvailable) return;
     authenticate();
     const questId = await createOpenQuest();
-    const opened = await requestJson('POST', '/api/v1/chat/candidate-inquiries', { questId }, workerId);
+    const opened = await requestJson(
+      'POST',
+      '/api/v1/chat/candidate-inquiries',
+      { questId },
+      workerId
+    );
     const conversationId = (await opened.json()).data.inquiry.id as string;
     const storedObject = {
       bucket: 'test-candidate-inquiry',
@@ -294,30 +424,47 @@ describe('Candidate Inquiry Conversation API', () => {
       expiresAt: new Date('2030-01-01T11:15:00.000Z'),
     });
     const form = new FormData();
-    form.set('file', new File([new Uint8Array([1, 2, 3])], 'attachment.png', { type: 'image/png' }));
-    const uploaded = await candidateInquiryApp.handle(new Request(
-      `http://localhost/api/v1/chat/candidate-inquiries/${conversationId}/attachments`,
-      { method: 'POST', headers: { 'x-member-id': workerId }, body: form },
-    ));
+    form.set(
+      'file',
+      new File([new Uint8Array([1, 2, 3])], 'attachment.png', { type: 'image/png' })
+    );
+    const uploaded = await candidateInquiryApp.handle(
+      new Request(
+        `http://localhost/api/v1/chat/candidate-inquiries/${conversationId}/attachments`,
+        { method: 'POST', headers: { 'x-member-id': workerId }, body: form }
+      )
+    );
     expect(uploaded.status).toBe(200);
-    const uploadedBody = await uploaded.json() as { data: { attachment: { id: string } } };
-    const [storedFile] = await db.select({ id: file.id }).from(file).where(eq(file.objectKey, storedObject.objectKey));
+    const uploadedBody = (await uploaded.json()) as { data: { attachment: { id: string } } };
+    const [storedFile] = await db
+      .select({ id: file.id })
+      .from(file)
+      .where(eq(file.objectKey, storedObject.objectKey));
     if (storedFile) fixtureFileIds.push(storedFile.id);
 
     const sent = await requestJson(
       'POST',
       `/api/v1/chat/candidate-inquiries/${conversationId}/messages`,
-      { clientMessageId: 'inquiry-attachment-only', attachmentIds: [uploadedBody.data.attachment.id] },
-      workerId,
+      {
+        clientMessageId: 'inquiry-attachment-only',
+        attachmentIds: [uploadedBody.data.attachment.id],
+      },
+      workerId
     );
     expect(sent.status).toBe(200);
-    const sentBody = await sent.json() as { data: { message: { id: string; attachments: Array<{ id: string }> } } };
-    expect(sentBody.data.message.attachments.map(({ id }) => id)).toEqual([uploadedBody.data.attachment.id]);
+    const sentBody = (await sent.json()) as {
+      data: { message: { id: string; attachments: Array<{ id: string }> } };
+    };
+    expect(sentBody.data.message.attachments.map(({ id }) => id)).toEqual([
+      uploadedBody.data.attachment.id,
+    ]);
 
-    const link = await candidateInquiryApp.handle(new Request(
-      `http://localhost/api/v1/chat/candidate-inquiries/${conversationId}/attachments/${uploadedBody.data.attachment.id}/link`,
-      { headers: { 'x-member-id': hirerId } },
-    ));
+    const link = await candidateInquiryApp.handle(
+      new Request(
+        `http://localhost/api/v1/chat/candidate-inquiries/${conversationId}/attachments/${uploadedBody.data.attachment.id}/link`,
+        { headers: { 'x-member-id': hirerId } }
+      )
+    );
     expect(link.status).toBe(200);
     expect((await link.json()).data.url).toBe('https://storage.test/candidate-inquiry-link');
 
@@ -325,7 +472,7 @@ describe('Candidate Inquiry Conversation API', () => {
       'POST',
       `/api/v1/chat/candidate-inquiries/${conversationId}/read`,
       { messageId: sentBody.data.message.id },
-      hirerId,
+      hirerId
     );
     expect(read.status).toBe(200);
     expect((await read.json()).data.messageId).toBe(sentBody.data.message.id);
@@ -335,7 +482,12 @@ describe('Candidate Inquiry Conversation API', () => {
     if (!postgresAvailable) return;
     authenticate();
     const questId = await createOpenQuest();
-    const opened = await requestJson('POST', '/api/v1/chat/candidate-inquiries', { questId }, workerId);
+    const opened = await requestJson(
+      'POST',
+      '/api/v1/chat/candidate-inquiries',
+      { questId },
+      workerId
+    );
     const conversationId = (await opened.json()).data.inquiry.id as string;
     const attachments = await createPreparedAttachments(conversationId, workerId, 6);
 
@@ -346,7 +498,7 @@ describe('Candidate Inquiry Conversation API', () => {
         clientMessageId: 'inquiry-six-attachments',
         attachmentIds: attachments.map(({ id }) => id),
       },
-      workerId,
+      workerId
     );
 
     expect(sent.status).toBe(200);
@@ -357,7 +509,12 @@ describe('Candidate Inquiry Conversation API', () => {
     if (!postgresAvailable) return;
     authenticate();
     const questId = await createOpenQuest();
-    const opened = await requestJson('POST', '/api/v1/chat/candidate-inquiries', { questId }, workerId);
+    const opened = await requestJson(
+      'POST',
+      '/api/v1/chat/candidate-inquiries',
+      { questId },
+      workerId
+    );
     const conversationId = (await opened.json()).data.inquiry.id as string;
     await createPreparedAttachments(conversationId, workerId, 10, true);
 
@@ -371,12 +528,17 @@ describe('Candidate Inquiry Conversation API', () => {
     spyOn(workChatStorage, 'upload').mockResolvedValue(storedObject);
     spyOn(workChatStorage, 'remove').mockResolvedValue(undefined);
     const form = new FormData();
-    form.set('file', new File([new Uint8Array([1, 2, 3])], 'rate-limit.png', { type: 'image/png' }));
+    form.set(
+      'file',
+      new File([new Uint8Array([1, 2, 3])], 'rate-limit.png', { type: 'image/png' })
+    );
 
-    const upload = await candidateInquiryApp.handle(new Request(
-      `http://localhost/api/v1/chat/candidate-inquiries/${conversationId}/attachments`,
-      { method: 'POST', headers: { 'x-member-id': workerId }, body: form },
-    ));
+    const upload = await candidateInquiryApp.handle(
+      new Request(
+        `http://localhost/api/v1/chat/candidate-inquiries/${conversationId}/attachments`,
+        { method: 'POST', headers: { 'x-member-id': workerId }, body: form }
+      )
+    );
     const [storedFile] = await db
       .select({ id: file.id })
       .from(file)
@@ -390,30 +552,51 @@ describe('Candidate Inquiry Conversation API', () => {
     if (!postgresAvailable) return;
     authenticate();
     const questId = await createOpenQuest();
-    const opened = await requestJson('POST', '/api/v1/chat/candidate-inquiries', { questId }, workerId);
+    const opened = await requestJson(
+      'POST',
+      '/api/v1/chat/candidate-inquiries',
+      { questId },
+      workerId
+    );
     const conversationId = (await opened.json()).data.inquiry.id as string;
-    const [membership] = await db.select({ id: chatMembership.id })
+    const [membership] = await db
+      .select({ id: chatMembership.id })
       .from(chatMembership)
       .where(eq(chatMembership.conversationId, conversationId));
     if (!membership) throw new Error('Candidate Inquiry Membership fixture not found');
 
-    await expect(db.insert(chatMessage).values({
-      conversationId,
-      sequence: 1,
-      kind: 'USER',
-      senderMembershipId: membership.id,
-      clientMessageId: 'invalid-empty-direct-message',
-      contentText: null,
-    }).execute()).rejects.toThrow();
+    await expect(
+      db
+        .insert(chatMessage)
+        .values({
+          conversationId,
+          sequence: 1,
+          kind: 'USER',
+          senderMembershipId: membership.id,
+          clientMessageId: 'invalid-empty-direct-message',
+          contentText: null,
+        })
+        .execute()
+    ).rejects.toThrow();
   });
 
   it('closes the inquiry when the Prospective Worker receives an Assignment', async () => {
     if (!postgresAvailable) return;
     authenticate();
     const questId = await createOpenQuest();
-    const opened = await requestJson('POST', '/api/v1/chat/candidate-inquiries', { questId }, workerId);
+    const opened = await requestJson(
+      'POST',
+      '/api/v1/chat/candidate-inquiries',
+      { questId },
+      workerId
+    );
     const conversationId = (await opened.json()).data.inquiry.id as string;
-    const otherOpened = await requestJson('POST', '/api/v1/chat/candidate-inquiries', { questId }, otherWorkerId);
+    const otherOpened = await requestJson(
+      'POST',
+      '/api/v1/chat/candidate-inquiries',
+      { questId },
+      otherWorkerId
+    );
     const otherConversationId = (await otherOpened.json()).data.inquiry.id as string;
     const assignmentId = randomUUID();
 
@@ -426,7 +609,10 @@ describe('Candidate Inquiry Conversation API', () => {
         assignmentStatus: 'ASSIGNMENT_ACTIVE',
         createdAt: now,
       });
-      await transaction.update(quest).set({ questStatus: 'QUEST_ASSIGNED', updatedAt: now }).where(eq(quest.id, questId));
+      await transaction
+        .update(quest)
+        .set({ questStatus: 'QUEST_ASSIGNED', updatedAt: now })
+        .where(eq(quest.id, questId));
       await createWorkChatMembershipWriter().applyQuestTransition(transaction, {
         producer: 'QUEST_DIRECT_JOIN',
         type: 'workersAccepted',
@@ -440,29 +626,33 @@ describe('Candidate Inquiry Conversation API', () => {
       });
     });
 
-    const closedRead = await candidateInquiryApp.handle(new Request(
-      `http://localhost/api/v1/chat/candidate-inquiries/${conversationId}`,
-      { headers: { 'x-member-id': workerId } },
-    ));
+    const closedRead = await candidateInquiryApp.handle(
+      new Request(`http://localhost/api/v1/chat/candidate-inquiries/${conversationId}`, {
+        headers: { 'x-member-id': workerId },
+      })
+    );
     expect(closedRead.status).toBe(404);
     expect((await closedRead.json()).error.code).toBe('CONVERSATION_NOT_FOUND');
 
-    const [closed] = await db.select({ state: chatConversation.state, closedAt: chatConversation.closedAt })
+    const [closed] = await db
+      .select({ state: chatConversation.state, closedAt: chatConversation.closedAt })
       .from(chatConversation)
       .where(eq(chatConversation.id, conversationId));
     expect(closed?.state).toBe('INQUIRY_CLOSED');
     expect(closed?.closedAt).toBeDate();
 
-    const otherClosedRead = await candidateInquiryApp.handle(new Request(
-      `http://localhost/api/v1/chat/candidate-inquiries/${otherConversationId}`,
-      { headers: { 'x-member-id': otherWorkerId } },
-    ));
+    const otherClosedRead = await candidateInquiryApp.handle(
+      new Request(`http://localhost/api/v1/chat/candidate-inquiries/${otherConversationId}`, {
+        headers: { 'x-member-id': otherWorkerId },
+      })
+    );
     expect(otherClosedRead.status).toBe(404);
 
-    const workList = await candidateInquiryApp.handle(new Request(
-      'http://localhost/api/v1/chat/conversations',
-      { headers: { 'x-member-id': workerId } },
-    ));
+    const workList = await candidateInquiryApp.handle(
+      new Request('http://localhost/api/v1/chat/conversations', {
+        headers: { 'x-member-id': workerId },
+      })
+    );
     expect(workList.status).toBe(200);
     expect((await workList.json()).data.items).toHaveLength(1);
   });
@@ -471,12 +661,20 @@ describe('Candidate Inquiry Conversation API', () => {
     if (!postgresAvailable) return;
     authenticate();
     const questId = await createOpenQuest();
-    const opened = await requestJson('POST', '/api/v1/chat/candidate-inquiries', { questId }, otherWorkerId);
+    const opened = await requestJson(
+      'POST',
+      '/api/v1/chat/candidate-inquiries',
+      { questId },
+      otherWorkerId
+    );
     const conversationId = (await opened.json()).data.inquiry.id as string;
 
     await db.transaction(async (transaction) => {
       const now = new Date('2030-01-01T10:00:00.000Z');
-      await transaction.update(quest).set({ questStatus: 'QUEST_CANCELLED', cancelledAt: now, updatedAt: now }).where(eq(quest.id, questId));
+      await transaction
+        .update(quest)
+        .set({ questStatus: 'QUEST_CANCELLED', cancelledAt: now, updatedAt: now })
+        .where(eq(quest.id, questId));
       await createWorkChatMembershipWriter().applyQuestTransition(transaction, {
         producer: 'QUEST_SETTLEMENT',
         type: 'questBecameReadOnly',
@@ -490,14 +688,93 @@ describe('Candidate Inquiry Conversation API', () => {
       });
     });
 
-    const listed = await candidateInquiryApp.handle(new Request(
-      'http://localhost/api/v1/chat/candidate-inquiries',
-      { headers: { 'x-member-id': otherWorkerId } },
-    ));
+    const listed = await candidateInquiryApp.handle(
+      new Request('http://localhost/api/v1/chat/candidate-inquiries', {
+        headers: { 'x-member-id': otherWorkerId },
+      })
+    );
     expect(listed.status).toBe(200);
     expect((await listed.json()).data.items).toHaveLength(0);
-    const [closed] = await db.select({ state: chatConversation.state }).from(chatConversation)
+    const [closed] = await db
+      .select({ state: chatConversation.state })
+      .from(chatConversation)
       .where(eq(chatConversation.id, conversationId));
     expect(closed?.state).toBe('INQUIRY_CLOSED');
+  });
+
+  it('pages Candidate Inquiries through microsecond activity without skipping or repeating rows', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const tieFirstId = await openInquiryConversation(await createOpenQuest());
+    const tieSecondId = await openInquiryConversation(await createOpenQuest());
+    const olderId = await openInquiryConversation(await createOpenQuest());
+    const silentId = await openInquiryConversation(await createOpenQuest());
+    await seedConversationMessage(tieFirstId, 1, '2030-08-05T00:00:00.100200Z');
+    await seedConversationMessage(tieSecondId, 1, '2030-08-05T00:00:00.100800Z');
+    await seedConversationMessage(olderId, 1, '2030-08-05T00:00:00.090100Z');
+
+    const expected = [tieSecondId, tieFirstId, olderId, silentId];
+
+    const ids: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 8; page += 1) {
+      const query = new URLSearchParams({ limit: '1' });
+      if (cursor) query.set('cursor', cursor);
+      // Each page cursor comes from the previous response, so these requests
+      // must remain sequential.
+      // eslint-disable-next-line no-await-in-loop
+      const response = await candidateInquiryApp.handle(
+        new Request(`http://localhost/api/v1/chat/candidate-inquiries?${query}`, {
+          headers: { 'x-member-id': workerId },
+        })
+      );
+      expect(response.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const body = (await response.json()) as {
+        data: { items: Array<{ id: string }>; nextCursor: string | null };
+      };
+      ids.push(...body.data.items.map((item) => item.id));
+      cursor = body.data.nextCursor;
+      if (!cursor) break;
+    }
+    expect(cursor).toBeNull();
+    expect(ids).toEqual(expected);
+  });
+
+  it('rejects a cursor whose Conversation the caller no longer belongs to', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const newerId = await openInquiryConversation(await createOpenQuest());
+    await openInquiryConversation(await createOpenQuest());
+    await seedConversationMessage(newerId, 1, '2030-08-05T00:00:00.100200Z');
+
+    const list = async (cursor?: string) => {
+      const query = new URLSearchParams({ limit: '1' });
+      if (cursor) query.set('cursor', cursor);
+      return candidateInquiryApp.handle(
+        new Request(`http://localhost/api/v1/chat/candidate-inquiries?${query}`, {
+          headers: { 'x-member-id': workerId },
+        })
+      );
+    };
+
+    const firstPage = await list();
+    const firstBody = (await firstPage.json()) as {
+      data: { items: Array<{ id: string }>; nextCursor: string };
+    };
+    expect(firstBody.data.items.map(({ id }) => id)).toEqual([newerId]);
+    expect(firstBody.data.nextCursor).toBeString();
+
+    await db.delete(chatMessage).where(eq(chatMessage.conversationId, newerId));
+    await db
+      .delete(chatMembership)
+      .where(
+        and(eq(chatMembership.conversationId, newerId), eq(chatMembership.memberId, workerId))
+      );
+
+    const secondPage = await list(firstBody.data.nextCursor);
+    expect(secondPage.status).toBe(400);
+    const secondBody = (await secondPage.json()) as { error?: { code: string } };
+    expect(secondBody.error?.code).toBe('INVALID_CURSOR');
   });
 });

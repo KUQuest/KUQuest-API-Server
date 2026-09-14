@@ -5,7 +5,7 @@ import { authUser } from '@/database/schema/auth.schema';
 import { paymentPayouts } from '@/database/schema/payment.schema';
 import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletLedgerAccount } from '@/database/schema/wallet.schema';
+import { walletLedgerAccount, walletLedgerTransaction } from '@/database/schema/wallet.schema';
 import {
   createPayoutDestinationEncryption,
   getPayoutDestination,
@@ -21,11 +21,7 @@ import {
   positiveSatang,
   signedSatang,
 } from '@/modules/wallet';
-import {
-  questMode,
-  questParticipation,
-  questStatus,
-} from '@/modules/quest/quest.contract';
+import { questMode, questParticipation, questStatus } from '@/modules/quest/quest.contract';
 
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 
@@ -52,12 +48,11 @@ const assertFinanceSeedEnvironment = (): {
     throw new Error('Set STAGING_FINANCE_SEED_ENABLED=true to run the finance seed.');
   }
 
-  const isDevelopmentSeed =
-    env.nodeEnv === 'development' && env.deploymentEnv === 'development';
+  const isDevelopmentSeed = env.nodeEnv === 'development' && env.deploymentEnv === 'development';
   const isStagingSeed = env.nodeEnv === 'production' && env.deploymentEnv === 'staging';
   if (!isDevelopmentSeed && !isStagingSeed) {
     throw new Error(
-      'The finance seed is allowed only in development/development or production/staging.',
+      'The finance seed is allowed only in development/development or production/staging.'
     );
   }
 
@@ -76,7 +71,7 @@ const assertFinanceSeedEnvironment = (): {
 
   const recipientEmail = requireValue(
     'LOCAL_FINANCE_TEST_RECIPIENT_EMAIL',
-    env.localFinanceTestRecipientEmail,
+    env.localFinanceTestRecipientEmail
   ).toLowerCase();
   if (!/^[^\s@]+@ku\.th$/.test(recipientEmail) || recipientEmail === email) {
     throw new Error('LOCAL_FINANCE_TEST_RECIPIENT_EMAIL must be a different @ku.th email.');
@@ -90,11 +85,11 @@ const assertFinanceSeedEnvironment = (): {
     recipientEmail,
     recipientFirstName: requireValue(
       'LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME',
-      env.localFinanceTestRecipientFirstName,
+      env.localFinanceTestRecipientFirstName
     ),
     recipientLastName: requireValue(
       'LOCAL_FINANCE_TEST_RECIPIENT_LAST_NAME',
-      env.localFinanceTestRecipientLastName,
+      env.localFinanceTestRecipientLastName
     ),
   };
 };
@@ -153,7 +148,9 @@ const ensureFinanceStudent = async (settings: ReturnType<typeof assertFinanceSee
   return student.id;
 };
 
-const ensureFinanceRecipient = async (settings: ReturnType<typeof assertFinanceSeedEnvironment>) => {
+const ensureFinanceRecipient = async (
+  settings: ReturnType<typeof assertFinanceSeedEnvironment>
+) => {
   const [existing] = await db
     .select({ id: authUser.id })
     .from(authUser)
@@ -190,10 +187,9 @@ const platformSuspenseAccount = async (): Promise<string> => {
   const [account] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
-    .where(and(
-      eq(walletLedgerAccount.type, 'PLATFORM_SUSPENSE'),
-      isNull(walletLedgerAccount.walletId),
-    ))
+    .where(
+      and(eq(walletLedgerAccount.type, 'PLATFORM_SUSPENSE'), isNull(walletLedgerAccount.walletId))
+    )
     .limit(1);
   if (!account) throw new Error('The platform suspense Ledger Account is missing.');
   return account.id;
@@ -202,12 +198,23 @@ const platformSuspenseAccount = async (): Promise<string> => {
 const seedBalance = async (
   userId: string,
   type: 'spending' | 'earnings',
-  amountSatang: number,
+  amountSatang: number
 ): Promise<void> => {
-  const walletAccountId = await walletAccount(userId, type.toUpperCase() as 'SPENDING' | 'EARNINGS');
+  const businessReference = `seed:finance:${userId}:${type}:v1`;
+  const [existing] = await db
+    .select({ id: walletLedgerTransaction.id })
+    .from(walletLedgerTransaction)
+    .where(eq(walletLedgerTransaction.businessReference, businessReference))
+    .limit(1);
+  if (existing) return;
+
+  const walletAccountId = await walletAccount(
+    userId,
+    type.toUpperCase() as 'SPENDING' | 'EARNINGS'
+  );
   const suspenseAccountId = await platformSuspenseAccount();
   await createSealedLedgerTransaction({
-    businessReference: `seed:finance:${userId}:${type}:v1`,
+    businessReference,
     eventType: 'ADJUSTMENT',
     createdByUserId: userId,
     description: 'Non-production finance test seed',
@@ -215,17 +222,13 @@ const seedBalance = async (
       { accountId: walletAccountId, amountSatang: signedSatang(amountSatang) },
       { accountId: suspenseAccountId, amountSatang: signedSatang(-amountSatang) },
     ],
-    idempotency: {
-      principalUserId: userId,
-      operationScope: 'seed.finance',
-      key: `v1:${type}`,
-      requestHash: `seed-finance-v1:${type}:${amountSatang}`,
-      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
-    },
   });
 };
 
-const ensurePayoutDestination = async (userId: string, settings: ReturnType<typeof assertFinanceSeedEnvironment>) => {
+const ensurePayoutDestination = async (
+  userId: string,
+  settings: ReturnType<typeof assertFinanceSeedEnvironment>
+) => {
   const existing = await getPayoutDestination(userId);
   if (existing) return existing;
 
@@ -241,22 +244,26 @@ const ensurePayoutDestination = async (userId: string, settings: ReturnType<type
       routingType: 'PROMPTPAY',
       routingValue: '0812345678',
     },
-    createPayoutDestinationEncryption(),
+    createPayoutDestinationEncryption()
   );
 };
 
-const ensurePendingPayout = async (userId: string): Promise<{ id: string; payoutStatus: string }> => {
+const ensurePendingPayout = async (
+  userId: string
+): Promise<{ id: string; payoutStatus: string }> => {
   const [existing] = await db
     .select({ id: paymentPayouts.id, payoutStatus: paymentPayouts.payoutStatus })
     .from(paymentPayouts)
-    .where(and(
-      eq(paymentPayouts.userId, userId),
-      inArray(paymentPayouts.payoutStatus, [
-        'PENDING_ADMIN_APPROVAL',
-        'SUBMITTED_TO_PROVIDER',
-        'PROVIDER_PENDING',
-      ]),
-    ))
+    .where(
+      and(
+        eq(paymentPayouts.userId, userId),
+        inArray(paymentPayouts.payoutStatus, [
+          'PENDING_ADMIN_APPROVAL',
+          'SUBMITTED_TO_PROVIDER',
+          'PROVIDER_PENDING',
+        ])
+      )
+    )
     .limit(1);
   if (existing) return existing;
 
@@ -330,7 +337,7 @@ const main = async (): Promise<void> => {
   console.log(`Prepared Payout ${payout.id} with status ${payout.payoutStatus}.`);
   console.log(`Prepared Quest Escrow draft ${questId}.`);
   console.log(
-    `Seeded Wallet balances: Spending ${wallet.spendingBalanceSatang} satang, Earnings ${wallet.earningsBalanceSatang} satang.`,
+    `Seeded Wallet balances: Spending ${wallet.spendingBalanceSatang} satang, Earnings ${wallet.earningsBalanceSatang} satang.`
   );
   console.log('No provider call was made by the finance seed.');
 };

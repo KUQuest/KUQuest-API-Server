@@ -19,7 +19,7 @@ export const workExperienceCreateSchema = t.Object(
     startedAt: dateSchema,
     endedAt: t.Optional(t.Nullable(dateSchema)),
   },
-  { additionalProperties: false },
+  { additionalProperties: false }
 );
 
 export const workExperienceUpdateSchema = t.Partial(workExperienceCreateSchema);

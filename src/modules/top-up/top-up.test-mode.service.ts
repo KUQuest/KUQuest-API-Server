@@ -9,31 +9,24 @@ import {
   type InboundPaymentReconciliationProvider,
   XenditPromptPayProvider,
 } from './top-up.provider';
-import {
-  getTopUp,
-  type TopUp,
-} from './top-up.service';
-import {
-  processTopUpProviderEvent,
-  reconcileTopUp,
-} from './top-up.provider-event.service';
+import { getTopUp, type TopUp } from './top-up.service';
+import { processTopUpProviderEvent, reconcileTopUp } from './top-up.provider-event.service';
 
 const callbackWaitMs = 30_000;
 
 export class TopUpTestModeError extends Error {
   constructor(
     readonly code: string,
-    message: string,
+    message: string
   ) {
     super(message);
     this.name = 'TopUpTestModeError';
   }
 }
 
-export const topUpTestSimulationIsEnabled = (): boolean => (
-  isFinanceTestRuntime(env.nodeEnv, env.deploymentEnv)
-  && env.xenditSecretKey?.startsWith('xnd_development_') === true
-);
+export const topUpTestSimulationIsEnabled = (): boolean =>
+  isFinanceTestRuntime(env.nodeEnv, env.deploymentEnv) &&
+  env.xenditSecretKey?.startsWith('xnd_development_') === true;
 
 const providerErrorPayload = async (response: Response): Promise<string> => {
   let payload: Record<string, unknown> | null = null;
@@ -52,22 +45,28 @@ const providerErrorPayload = async (response: Response): Promise<string> => {
 
 const simulatePayment = async (paymentRequestId: string, amountSatang: number): Promise<void> => {
   if (!env.xenditSecretKey) {
-    throw new TopUpTestModeError('TEST_PAYMENT_SIMULATION_UNAVAILABLE', 'Xendit is not configured.');
+    throw new TopUpTestModeError(
+      'TEST_PAYMENT_SIMULATION_UNAVAILABLE',
+      'Xendit is not configured.'
+    );
   }
   const baseUrl = (process.env.XENDIT_API_BASE_URL ?? 'https://api.xendit.co').replace(/\/+$/, '');
-  const response = await fetch(`${baseUrl}/v3/payment_requests/${encodeURIComponent(paymentRequestId)}/simulate`, {
-    method: 'POST',
-    headers: {
-      authorization: `Basic ${btoa(`${env.xenditSecretKey}:`)}`,
-      'content-type': 'application/json',
-      'api-version': process.env.XENDIT_API_VERSION ?? XENDIT_PAYMENT_REQUESTS_API_VERSION,
-    },
-    body: JSON.stringify({ amount: amountSatang / 100 }),
-  });
+  const response = await fetch(
+    `${baseUrl}/v3/payment_requests/${encodeURIComponent(paymentRequestId)}/simulate`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Basic ${btoa(`${env.xenditSecretKey}:`)}`,
+        'content-type': 'application/json',
+        'api-version': process.env.XENDIT_API_VERSION ?? XENDIT_PAYMENT_REQUESTS_API_VERSION,
+      },
+      body: JSON.stringify({ amount: amountSatang / 100 }),
+    }
+  );
   if (!response.ok) {
     throw new TopUpTestModeError(
       'TEST_PAYMENT_SIMULATION_FAILED',
-      `Xendit payment simulation failed: ${await providerErrorPayload(response)}`,
+      `Xendit payment simulation failed: ${await providerErrorPayload(response)}`
     );
   }
 };
@@ -80,10 +79,12 @@ const waitForPaymentEvent = async (internalReference: string) => {
     const [event] = await db
       .select()
       .from(paymentProviderEventInbox)
-      .where(and(
-        eq(paymentProviderEventInbox.resourceType, 'TOP_UP'),
-        eq(paymentProviderEventInbox.internalReference, internalReference),
-      ))
+      .where(
+        and(
+          eq(paymentProviderEventInbox.resourceType, 'TOP_UP'),
+          eq(paymentProviderEventInbox.internalReference, internalReference)
+        )
+      )
       .limit(1);
     if (event) return event;
     // Poll sequentially so the database is checked at fixed intervals.
@@ -92,7 +93,7 @@ const waitForPaymentEvent = async (internalReference: string) => {
   }
   throw new TopUpTestModeError(
     'TEST_PAYMENT_CALLBACK_TIMEOUT',
-    'The Xendit callback was not stored within 30 seconds.',
+    'The Xendit callback was not stored within 30 seconds.'
   );
 };
 
@@ -105,12 +106,12 @@ export type TopUpTestSimulationResult = {
 export const simulateTopUpPayment = async (
   principalUserId: string,
   topUpId: string,
-  reconciliationProvider: InboundPaymentReconciliationProvider = new XenditPromptPayProvider(),
+  reconciliationProvider: InboundPaymentReconciliationProvider = new XenditPromptPayProvider()
 ): Promise<TopUpTestSimulationResult> => {
   if (!topUpTestSimulationIsEnabled()) {
     throw new TopUpTestModeError(
       'TEST_PAYMENT_SIMULATION_UNAVAILABLE',
-      'Automatic Xendit payment simulation is available only with an Xendit Development key in a test runtime.',
+      'Automatic Xendit payment simulation is available only with an Xendit Development key in a test runtime.'
     );
   }
 
@@ -121,7 +122,7 @@ export const simulateTopUpPayment = async (
   if (!topUp.providerReference) {
     throw new TopUpTestModeError(
       'TEST_PAYMENT_REFERENCE_MISSING',
-      'Xendit returned no Payment Request reference.',
+      'Xendit returned no Payment Request reference.'
     );
   }
 
@@ -134,7 +135,8 @@ export const simulateTopUpPayment = async (
     callbackReceived = true;
     topUp = await getTopUp(principalUserId, topUp.id);
   } catch (error: unknown) {
-    if (!(error instanceof TopUpTestModeError) || error.code !== 'TEST_PAYMENT_CALLBACK_TIMEOUT') throw error;
+    if (!(error instanceof TopUpTestModeError) || error.code !== 'TEST_PAYMENT_CALLBACK_TIMEOUT')
+      throw error;
     topUp = await reconcileTopUp(principalUserId, topUp.id, reconciliationProvider);
     reconciliationUsed = true;
   }

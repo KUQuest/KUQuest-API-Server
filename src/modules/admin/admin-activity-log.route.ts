@@ -21,7 +21,8 @@ export const adminActivityLogRoute = new Elysia({
     detail: {
       tags: ['Admin Activity Log'],
       summary: 'List the Admin Action Activity Log',
-      description: 'Lists immutable Admin Actions with bounded cursor pagination. Evidence, credentials, tokens, signed URLs, and request data stay out of the projection.',
+      description:
+        'Lists immutable Admin Actions with bounded cursor pagination. Evidence, credentials, tokens, signed URLs, and request data stay out of the projection.',
       operationId: 'listAdminActivityLog',
       security: betterAuthSecurity,
     },

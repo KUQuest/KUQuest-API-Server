@@ -1,3 +1,4 @@
+import { defaultLocalDatabaseUrl } from '@/config/default-database-url';
 import { env } from '@/config/env';
 import * as academicSchema from '@/database/schema/academic.schema';
 import * as adminSchema from '@/database/schema/admin.schema';
@@ -28,9 +29,7 @@ const schema = {
   ...workChatSchema,
 };
 
-const connectionString =
-  env.databaseUrl ||
-  'postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest';
+const connectionString = env.databaseUrl || defaultLocalDatabaseUrl;
 
 export const sql = postgres(connectionString, {
   max: 10,

@@ -30,25 +30,25 @@ The Miro board contains two diagram types:
 - **Quest condition:** The explicit pass/fail criteria for the final work. The Hirer uses this criteria to review Final Proof.
 - **Work Conversation:** The one working Conversation for a Quest. It contains the Hirer and accepted Workers, not Candidates.
 - **Draft:** Work-in-progress content sent as a Message with an Attachment in the Work Conversation before final submission. A Draft is not a Proof Submission.
-**Final Proof:** The final work submission sent through the Work Conversation for Hirer review.
+  **Final Proof:** The final work submission sent through the Work Conversation for Hirer review.
 - **Report Case:** A Trust & Safety record for a Work Conversation Message. Its relation to a Quest payment or performance Dispute remains open.
 - **Review:** A rating and optional comment exchanged by the Hirer and Worker after the Quest is Completed. Each direction is allowed once within seven days.
 - **FCFS:** First Come, First Served. In this specification it is the business name for `NO_CANDIDATE`.
 - **Candidate mode:** A mode where the Hirer selects an application or a complete team.
 - **SOLO / เดี่ยว:** The Quest needs one Worker.
 - **GROUP / ทีม:** The Quest needs the exact configured headcount of Workers.
-**Rework:** The BPMN branch, current process rule, and API/schema do not agree. This comparison keeps the target unresolved. A Worker may revise Draft work in the Work Conversation before sending Final Proof; no Rework rule is assumed.
+  **Rework:** The BPMN branch, current process rule, and API/schema do not agree. This comparison keeps the target unresolved. A Worker may revise Draft work in the Work Conversation before sending Final Proof; no Rework rule is assumed.
 
 ## 3. Quest modes
 
 There are two independent dimensions:
 
-| Selection mode | Participation | Meaning |
-|---|---|---|
-| FCFS (`NO_CANDIDATE`) | SOLO | The first eligible Worker is accepted. |
-| FCFS (`NO_CANDIDATE`) | GROUP | Eligible Workers join until the exact headcount is reached. |
-| Candidate | SOLO | Workers apply. The Hirer selects one application. |
-| Candidate | GROUP | A Team Leader forms a Team. The Hirer selects one complete Team. |
+| Selection mode        | Participation | Meaning                                                          |
+| --------------------- | ------------- | ---------------------------------------------------------------- |
+| FCFS (`NO_CANDIDATE`) | SOLO          | The first eligible Worker is accepted.                           |
+| FCFS (`NO_CANDIDATE`) | GROUP         | Eligible Workers join until the exact headcount is reached.      |
+| Candidate             | SOLO          | Workers apply. The Hirer selects one application.                |
+| Candidate             | GROUP         | A Team Leader forms a Team. The Hirer selects one complete Team. |
 
 ## 4. Lifecycle
 
@@ -281,12 +281,12 @@ A revised Ultimate BPMN is acceptable when:
 
 ## 16. Known conflicts to resolve
 
-| Conflict | Evidence | Required decision |
-|---|---|---|
-| Rework removed from business process, but DB still contains `QUEST_REWORK` and `rework_limit` | `src/database/schema/quest.schema.ts`, `docs/db/edr/05-quest.sql`, `docs/deprecated/quest-stage-milestones.md` | Mark DB fields as legacy or plan a later DB change. |
-| Candidate + GROUP is Team Leader-only for Final Proof, but the current service allows any selected Team Member to submit | `src/modules/quest/quest-proof.service.ts` | Enforce the Team Leader-only target rule or record a new domain decision. |
-| Target behavior uses Join Code, but the current database schema contains Team Invitation and no Join Code field | `src/database/schema/quest.schema.ts`, `docs/db/edr/05-quest.sql` | Implement the Join Code target or record a new target decision. |
-| Pre-start Consent is different from the current DB meaning of `QUEST_AWAITING_CONSENT` | `docs/db/edr/05-quest.sql` | Define a separate state or update the state contract. |
+| Conflict                                                                                                                 | Evidence                                                                                                       | Required decision                                                         |
+| ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Rework removed from business process, but DB still contains `QUEST_REWORK` and `rework_limit`                            | `src/database/schema/quest.schema.ts`, `docs/db/edr/05-quest.sql`, `docs/deprecated/quest-stage-milestones.md` | Mark DB fields as legacy or plan a later DB change.                       |
+| Candidate + GROUP is Team Leader-only for Final Proof, but the current service allows any selected Team Member to submit | `src/modules/quest/quest-proof.service.ts`                                                                     | Enforce the Team Leader-only target rule or record a new domain decision. |
+| Target behavior uses Join Code, but the current database schema contains Team Invitation and no Join Code field          | `src/database/schema/quest.schema.ts`, `docs/db/edr/05-quest.sql`                                              | Implement the Join Code target or record a new target decision.           |
+| Pre-start Consent is different from the current DB meaning of `QUEST_AWAITING_CONSENT`                                   | `docs/db/edr/05-quest.sql`                                                                                     | Define a separate state or update the state contract.                     |
 
 ## 17. Open decisions
 

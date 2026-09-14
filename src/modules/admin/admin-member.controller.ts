@@ -1,22 +1,26 @@
 import type { AdminContext } from '@/modules/auth';
 import { apiError, apiSuccess, type ApiResponse } from '@/shared/api-response';
+import { CursorInputError } from '@/shared/cursor';
 
-import type {
-  AdminMemberListQuery,
-  AdminMemberParams,
-} from './admin-member.schema';
-import {
-  getAdminMemberDetail,
-  listAdminMembers,
-} from './admin-member.service';
+import type { AdminMemberListQuery, AdminMemberParams } from './admin-member.schema';
+import { getAdminMemberDetail, listAdminMembers } from './admin-member.service';
 
 export const listAdminMembersController = async ({
   query,
+  set,
 }: AdminContext & {
   query: AdminMemberListQuery;
 }): Promise<ApiResponse> => {
-  const data = await listAdminMembers(query);
-  return apiSuccess(data);
+  try {
+    const data = await listAdminMembers(query);
+    return apiSuccess(data);
+  } catch (error) {
+    if (error instanceof CursorInputError) {
+      set.status = 400;
+      return apiError(error.code, error.message);
+    }
+    throw error;
+  }
 };
 
 export const getAdminMemberDetailController = async ({

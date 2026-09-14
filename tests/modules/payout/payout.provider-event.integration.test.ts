@@ -96,7 +96,7 @@ const creditEarnings = async (studentId: string, amountSatang: number) => {
 const createPendingPayout = async (
   prefix: string,
   provider = new FakePayoutProvider(),
-  approve = true,
+  approve = true
 ) => {
   const userId = crypto.randomUUID();
   const adminId = crypto.randomUUID();
@@ -113,17 +113,20 @@ const createPendingPayout = async (
     lastName: 'Event',
   });
   await ensureWallet(userId);
-  await savePayoutDestination({
-    principalUserId: userId,
-    givenName: 'Payout',
-    surname: 'Event',
-    relationship: 'SELF',
-    bankCode: 'SCB',
-    accountNumber: '1234567890',
-    accountHolderName: 'Payout Event',
-    routingType: 'BANK_ACCOUNT',
-    routingValue: '1234567890',
-  }, encryption);
+  await savePayoutDestination(
+    {
+      principalUserId: userId,
+      givenName: 'Payout',
+      surname: 'Event',
+      relationship: 'SELF',
+      bankCode: 'SCB',
+      accountNumber: '1234567890',
+      accountHolderName: 'Payout Event',
+      routingType: 'BANK_ACCOUNT',
+      routingValue: '1234567890',
+    },
+    encryption
+  );
   await creditEarnings(userId, 1_000);
   const quote = await quotePayout({
     principalUserId: userId,
@@ -160,26 +163,28 @@ const eventPayload = (input: {
   status: string;
   amount?: number;
   event?: string;
-}) => JSON.stringify({
-  event_id: input.eventId,
-  event: input.event ?? `v3_payout.${input.status.toLowerCase()}`,
-  data: {
-    payout_id: input.providerReference,
-    reference_id: input.internalReference,
-    status: input.status,
-    ...(input.amount === undefined ? {} : { source_amount: input.amount / 100 }),
-    source_currency: 'THB',
-    destination_currency: 'THB',
-    updated: '2026-08-27T00:00:00.000Z',
-  },
-});
+}) =>
+  JSON.stringify({
+    event_id: input.eventId,
+    event: input.event ?? `v3_payout.${input.status.toLowerCase()}`,
+    data: {
+      payout_id: input.providerReference,
+      reference_id: input.internalReference,
+      status: input.status,
+      ...(input.amount === undefined ? {} : { source_amount: input.amount / 100 }),
+      source_currency: 'THB',
+      destination_currency: 'THB',
+      updated: '2026-08-27T00:00:00.000Z',
+    },
+  });
 
-const receive = (rawPayload: string) => receivePayoutProviderEvent({
-  rawPayload,
-  callbackToken: 'be117-test-token',
-  webhookToken: 'be117-test-token',
-  encryption,
-});
+const receive = (rawPayload: string) =>
+  receivePayoutProviderEvent({
+    rawPayload,
+    callbackToken: 'be117-test-token',
+    webhookToken: 'be117-test-token',
+    encryption,
+  });
 
 beforeAll(async () => {
   await sql`select 1`;
@@ -188,13 +193,19 @@ beforeAll(async () => {
 
 describe('Payout Provider event application services', () => {
   it('does not apply a Provider outcome before Admin approval', async () => {
-    const { userId, payout } = await createPendingPayout('be117-before-approval', new FakePayoutProvider(), false);
-    const event = await receive(eventPayload({
-      eventId: `be117-before-approval-${crypto.randomUUID()}`,
-      internalReference: payout.internalReference,
-      providerReference: 'not-submitted',
-      status: 'FAILED',
-    }));
+    const { userId, payout } = await createPendingPayout(
+      'be117-before-approval',
+      new FakePayoutProvider(),
+      false
+    );
+    const event = await receive(
+      eventPayload({
+        eventId: `be117-before-approval-${crypto.randomUUID()}`,
+        internalReference: payout.internalReference,
+        providerReference: 'not-submitted',
+        status: 'FAILED',
+      })
+    );
 
     await expect(processPayoutProviderEvent(event.id)).rejects.toMatchObject({
       code: 'PROVIDER_EVENT_NOT_RETRYABLE',
@@ -205,10 +216,16 @@ describe('Payout Provider event application services', () => {
   });
 
   it('does not reconcile a Payout before Admin approval', async () => {
-    const { userId, payout } = await createPendingPayout('be117-reconcile-before-approval', new FakePayoutProvider(), false);
+    const { userId, payout } = await createPendingPayout(
+      'be117-reconcile-before-approval',
+      new FakePayoutProvider(),
+      false
+    );
     let calls = 0;
     const provider = {
-      getPayoutStatus: async (_input: OutboundPayoutStatusRequest): Promise<OutboundPayoutStatusResponse> => {
+      getPayoutStatus: async (
+        _input: OutboundPayoutStatusRequest
+      ): Promise<OutboundPayoutStatusResponse> => {
         calls += 1;
         throw new Error('The Provider must not be called before approval.');
       },
@@ -248,26 +265,33 @@ describe('Payout Provider event application services', () => {
       earningsBalanceSatang: 900,
       reservedForPayoutsSatang: 0,
     });
-    expect(await db.select().from(walletLedgerTransaction).where(
-      eq(walletLedgerTransaction.businessReference, `payout-settle:${payout.id}`),
-    )).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(walletLedgerTransaction)
+        .where(eq(walletLedgerTransaction.businessReference, `payout-settle:${payout.id}`))
+    ).toHaveLength(1);
   });
 
   it('releases the full reserve for failure and does not regress terminal state', async () => {
     const { userId, payout } = await createPendingPayout('be117-failure');
-    const failed = await receive(eventPayload({
-      eventId: `be117-failed-${crypto.randomUUID()}`,
-      internalReference: payout.internalReference,
-      providerReference: payout.providerReference!,
-      status: 'FAILED',
-    }));
-    const lateSuccess = await receive(eventPayload({
-      eventId: `be117-late-success-${crypto.randomUUID()}`,
-      internalReference: payout.internalReference,
-      providerReference: payout.providerReference!,
-      status: 'SUCCEEDED',
-      amount: payout.principalSatang,
-    }));
+    const failed = await receive(
+      eventPayload({
+        eventId: `be117-failed-${crypto.randomUUID()}`,
+        internalReference: payout.internalReference,
+        providerReference: payout.providerReference!,
+        status: 'FAILED',
+      })
+    );
+    const lateSuccess = await receive(
+      eventPayload({
+        eventId: `be117-late-success-${crypto.randomUUID()}`,
+        internalReference: payout.internalReference,
+        providerReference: payout.providerReference!,
+        status: 'SUCCEEDED',
+        amount: payout.principalSatang,
+      })
+    );
 
     await processPayoutProviderEvent(failed.id);
     await processPayoutProviderEvent(lateSuccess.id);
@@ -277,20 +301,27 @@ describe('Payout Provider event application services', () => {
       earningsBalanceSatang: 1_000,
       reservedForPayoutsSatang: 0,
     });
-    expect(await db.select().from(paymentPayoutStatusHistory).where(
-      eq(paymentPayoutStatusHistory.payoutId, payout.id),
-    )).toContainEqual(expect.objectContaining({ fromStatus: 'PROVIDER_PENDING', toStatus: 'FAILED' }));
+    expect(
+      await db
+        .select()
+        .from(paymentPayoutStatusHistory)
+        .where(eq(paymentPayoutStatusHistory.payoutId, payout.id))
+    ).toContainEqual(
+      expect.objectContaining({ fromStatus: 'PROVIDER_PENDING', toStatus: 'FAILED' })
+    );
   });
 
   it('releases the full reserve for a confirmed cancellation', async () => {
     const { userId, payout } = await createPendingPayout('be117-cancelled');
-    const cancelled = await receive(eventPayload({
-      eventId: `be117-cancelled-${crypto.randomUUID()}`,
-      internalReference: payout.internalReference,
-      providerReference: payout.providerReference!,
-      event: 'v3_payout.failed',
-      status: 'CANCELLED',
-    }));
+    const cancelled = await receive(
+      eventPayload({
+        eventId: `be117-cancelled-${crypto.randomUUID()}`,
+        internalReference: payout.internalReference,
+        providerReference: payout.providerReference!,
+        event: 'v3_payout.failed',
+        status: 'CANCELLED',
+      })
+    );
 
     await processPayoutProviderEvent(cancelled.id);
 
@@ -303,13 +334,15 @@ describe('Payout Provider event application services', () => {
 
   it('does not settle a Payout twice when workers process one event concurrently', async () => {
     const { userId, payout } = await createPendingPayout('be117-concurrent-process');
-    const event = await receive(eventPayload({
-      eventId: `be117-concurrent-${crypto.randomUUID()}`,
-      internalReference: payout.internalReference,
-      providerReference: payout.providerReference!,
-      status: 'SUCCEEDED',
-      amount: payout.principalSatang,
-    }));
+    const event = await receive(
+      eventPayload({
+        eventId: `be117-concurrent-${crypto.randomUUID()}`,
+        internalReference: payout.internalReference,
+        providerReference: payout.providerReference!,
+        status: 'SUCCEEDED',
+        amount: payout.principalSatang,
+      })
+    );
 
     const results = await Promise.allSettled([
       processPayoutProviderEvent(event.id),
@@ -318,23 +351,31 @@ describe('Payout Provider event application services', () => {
 
     expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
     expect(await getPayout(userId, payout.id)).toMatchObject({ payoutStatus: 'SUCCEEDED' });
-    expect(await db.select().from(walletLedgerTransaction).where(
-      eq(walletLedgerTransaction.businessReference, `payout-settle:${payout.id}`),
-    )).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(walletLedgerTransaction)
+        .where(eq(walletLedgerTransaction.businessReference, `payout-settle:${payout.id}`))
+    ).toHaveLength(1);
   });
 
   it('processes a Payout event while its Wallet is Frozen', async () => {
     const { userId, payout } = await createPendingPayout('be117-frozen');
     const [wallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, userId));
     if (!wallet) throw new Error('Wallet was not provisioned.');
-    await db.update(walletWallet).set({ walletStatus: 'FROZEN' }).where(eq(walletWallet.id, wallet.id));
-    await receive(eventPayload({
-      eventId: `be117-frozen-${crypto.randomUUID()}`,
-      internalReference: payout.internalReference,
-      providerReference: payout.providerReference!,
-      status: 'SUCCEEDED',
-      amount: payout.principalSatang,
-    }));
+    await db
+      .update(walletWallet)
+      .set({ walletStatus: 'FROZEN' })
+      .where(eq(walletWallet.id, wallet.id));
+    await receive(
+      eventPayload({
+        eventId: `be117-frozen-${crypto.randomUUID()}`,
+        internalReference: payout.internalReference,
+        providerReference: payout.providerReference!,
+        status: 'SUCCEEDED',
+        amount: payout.principalSatang,
+      })
+    );
 
     expect(await processPayoutProviderEvents()).toBeGreaterThanOrEqual(1);
     expect(await getPayout(userId, payout.id)).toMatchObject({ payoutStatus: 'SUCCEEDED' });
@@ -347,11 +388,13 @@ describe('Payout Provider event application services', () => {
   it('reconciles an uncertain Payout through the provider status adapter', async () => {
     const { userId, payout } = await createPendingPayout(
       'be117-reconcile',
-      new FakePayoutProvider(true),
+      new FakePayoutProvider(true)
     );
     let request: OutboundPayoutStatusRequest | undefined;
     const provider = {
-      getPayoutStatus: async (input: OutboundPayoutStatusRequest): Promise<OutboundPayoutStatusResponse> => {
+      getPayoutStatus: async (
+        input: OutboundPayoutStatusRequest
+      ): Promise<OutboundPayoutStatusResponse> => {
         request = input;
         return {
           providerReference: payout.providerReference!,
@@ -396,15 +439,19 @@ describe('Payout Provider event application services', () => {
 
   it('retains payout facts after the raw event payload is purged', async () => {
     const { payout } = await createPendingPayout('be117-retention');
-    const event = await receive(eventPayload({
-      eventId: `be117-retention-${crypto.randomUUID()}`,
-      internalReference: payout.internalReference,
-      providerReference: payout.providerReference!,
-      status: 'SUCCEEDED',
-      amount: payout.principalSatang,
-    }));
+    const event = await receive(
+      eventPayload({
+        eventId: `be117-retention-${crypto.randomUUID()}`,
+        internalReference: payout.internalReference,
+        providerReference: payout.providerReference!,
+        status: 'SUCCEEDED',
+        amount: payout.principalSatang,
+      })
+    );
     await processPayoutProviderEvent(event.id);
-    const [stored] = await db.select().from(paymentProviderEventInbox)
+    const [stored] = await db
+      .select()
+      .from(paymentProviderEventInbox)
       .where(eq(paymentProviderEventInbox.id, event.id));
     expect(stored).toMatchObject({
       resourceType: 'PAYOUT',
@@ -415,9 +462,12 @@ describe('Payout Provider event application services', () => {
       providerActualDebitSatang: payout.principalSatang,
       rawPayloadCiphertext: expect.any(String),
     });
-    await expect(purgeExpiredProviderEventPayloads(new Date(Date.now() + (31 * 24 * 60 * 60 * 1000))))
-      .resolves.toBeGreaterThanOrEqual(1);
-    const [purged] = await db.select().from(paymentProviderEventInbox)
+    await expect(
+      purgeExpiredProviderEventPayloads(new Date(Date.now() + 31 * 24 * 60 * 60 * 1000))
+    ).resolves.toBeGreaterThanOrEqual(1);
+    const [purged] = await db
+      .select()
+      .from(paymentProviderEventInbox)
       .where(eq(paymentProviderEventInbox.id, event.id));
     expect(purged).toMatchObject({
       providerAmountSatang: payout.principalSatang,

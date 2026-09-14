@@ -25,7 +25,8 @@ export const payoutDestinationRoute = new Elysia({
     detail: {
       tags: ['Payout Destinations'],
       summary: 'Get active Payout Destination',
-      description: 'Returns the authenticated Student active Thai bank account destination with masked account number.',
+      description:
+        'Returns the authenticated Student active Thai bank account destination with masked account number.',
       operationId: 'getActivePayoutDestination',
       security: betterAuthSecurity,
     },
@@ -36,7 +37,8 @@ export const payoutDestinationRoute = new Elysia({
     detail: {
       tags: ['Payout Destinations'],
       summary: 'Save active Payout Destination',
-      description: 'Saves or replaces the active Thai bank account destination for the authenticated Student with application-layer encryption.',
+      description:
+        'Saves or replaces the active Thai bank account destination for the authenticated Student with application-layer encryption.',
       operationId: 'saveActivePayoutDestination',
       security: betterAuthSecurity,
     },
@@ -46,7 +48,8 @@ export const payoutDestinationRoute = new Elysia({
     detail: {
       tags: ['Payout Destinations'],
       summary: 'Retire active Payout Destination',
-      description: 'Retires the active Thai bank account destination for the authenticated Student.',
+      description:
+        'Retires the active Thai bank account destination for the authenticated Student.',
       operationId: 'retireActivePayoutDestination',
       security: betterAuthSecurity,
     },

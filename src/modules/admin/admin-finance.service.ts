@@ -15,9 +15,10 @@ import {
   walletLedgerTransaction,
   walletWallet,
 } from '@/database/schema/wallet.schema';
-import { decodeCursor, encodeCursor } from '@/shared/cursor';
+import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, desc, eq, gte, ilike, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 
 import type {
   AdminFinanceOverviewData,
@@ -29,7 +30,7 @@ import type {
 } from './admin-finance.schema';
 
 export const getAdminQuestFinance = async (
-  questId: string,
+  questId: string
 ): Promise<AdminQuestFinanceData | null> => {
   const [questRow] = await db
     .select({
@@ -297,16 +298,19 @@ export const getAdminQuestFinance = async (
 };
 
 export const listAdminLedgerTransactions = async (
-  query: AdminLedgerTransactionsQuery,
+  query: AdminLedgerTransactionsQuery
 ): Promise<AdminLedgerTransactionsData> => {
-  const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
+  const cursor = decodeCursor(query.cursor);
+  const limit = parsePageLimit(query.limit);
   const conditions = [];
 
   if (query.eventType) {
     conditions.push(eq(walletLedgerTransaction.eventType, query.eventType));
   }
   if (query.businessReference) {
-    conditions.push(ilike(walletLedgerTransaction.businessReference, `%${query.businessReference}%`));
+    conditions.push(
+      ilike(walletLedgerTransaction.businessReference, `%${query.businessReference}%`)
+    );
   }
   if (query.from) {
     conditions.push(gte(walletLedgerTransaction.createdAt, new Date(query.from)));
@@ -335,54 +339,33 @@ export const listAdminLedgerTransactions = async (
     conditions.push(inArray(walletLedgerTransaction.id, walletTxIds));
   }
 
-  // Cursor handling
-  if (query.cursor) {
-    const parsed = decodeCursor(query.cursor);
-    if (parsed) {
-      const cursorDate = new Date(parsed.startTime);
-      conditions.push(
-        or(
-          lt(walletLedgerTransaction.createdAt, cursorDate),
-          and(
-            eq(walletLedgerTransaction.createdAt, cursorDate),
-            lt(walletLedgerTransaction.id, parsed.id),
-          ),
-        ),
-      );
-    }
-  }
+  const page = await readKeysetPage({
+    anchor: { time: walletLedgerTransaction.createdAt, id: walletLedgerTransaction.id },
+    cursor,
+    limit,
+    where: conditions.length > 0 ? and(...conditions) : undefined,
+    read: ({ where, orderBy, limit: probe }) =>
+      db
+        .select({
+          id: walletLedgerTransaction.id,
+          businessReference: walletLedgerTransaction.businessReference,
+          eventType: walletLedgerTransaction.eventType,
+          description: walletLedgerTransaction.description,
+          createdByUserId: walletLedgerTransaction.createdByUserId,
+          correctionOfTransactionId: walletLedgerTransaction.correctionOfTransactionId,
+          createdAt: walletLedgerTransaction.createdAt,
+          sealedAt: walletLedgerTransaction.sealedAt,
+        })
+        .from(walletLedgerTransaction)
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+    invalidCursor: () =>
+      new CursorInputError('INVALID_CURSOR', 'cursor does not match a Ledger Transaction'),
+  });
 
-  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-
-  const txRows = await db
-    .select({
-      id: walletLedgerTransaction.id,
-      businessReference: walletLedgerTransaction.businessReference,
-      eventType: walletLedgerTransaction.eventType,
-      description: walletLedgerTransaction.description,
-      createdByUserId: walletLedgerTransaction.createdByUserId,
-      correctionOfTransactionId: walletLedgerTransaction.correctionOfTransactionId,
-      createdAt: walletLedgerTransaction.createdAt,
-      sealedAt: walletLedgerTransaction.sealedAt,
-    })
-    .from(walletLedgerTransaction)
-    .where(whereClause)
-    .orderBy(desc(walletLedgerTransaction.createdAt), desc(walletLedgerTransaction.id))
-    .limit(limit + 1);
-
-  const hasNextPage = txRows.length > limit;
-  const pageRows = hasNextPage ? txRows.slice(0, limit) : txRows;
-
-  let nextCursor: string | null = null;
-  if (hasNextPage && pageRows.length > 0) {
-    const last = pageRows[pageRows.length - 1];
-    nextCursor = encodeCursor({
-      id: last.id,
-      startTime: last.createdAt.toISOString(),
-    });
-  }
-
-  const txIds = pageRows.map((r) => r.id);
+  const txIds = page.rows.map((r) => r.id);
   const items: AdminLedgerTransactionsData['items'] = [];
 
   if (txIds.length > 0) {
@@ -412,7 +395,7 @@ export const listAdminLedgerTransactions = async (
       postingsByTx.set(p.transactionId, list);
     }
 
-    for (const tx of pageRows) {
+    for (const tx of page.rows) {
       const txPostings = postingsByTx.get(tx.id) ?? [];
       const sum = txPostings.reduce((total, p) => total + p.amountSatang, 0);
 
@@ -447,7 +430,7 @@ export const listAdminLedgerTransactions = async (
 
   return {
     items,
-    nextCursor,
+    nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
   };
 };
 
@@ -509,7 +492,8 @@ export const getAdminFinanceOverview = async (): Promise<AdminFinanceOverviewDat
       totalEarningsSatang: earningsSatang,
       totalFundingReservedSatang: fundingReservedSatang,
       totalPayoutReservedSatang: payoutReservedSatang,
-      totalCirculatingSatang: spendingSatang + earningsSatang + fundingReservedSatang + payoutReservedSatang,
+      totalCirculatingSatang:
+        spendingSatang + earningsSatang + fundingReservedSatang + payoutReservedSatang,
     },
     volumeLifetime: {
       totalTopUpDepositedSatang: Number(topUpRow?.totalSatang ?? 0),
@@ -525,7 +509,7 @@ export const getAdminFinanceOverview = async (): Promise<AdminFinanceOverviewDat
 };
 
 export const getAdminMemberFinanceProfile = async (
-  userId: string,
+  userId: string
 ): Promise<AdminMemberFinanceData | null> => {
   const [member] = await db
     .select({
@@ -542,10 +526,7 @@ export const getAdminMemberFinanceProfile = async (
     return null;
   }
 
-  const [wallet] = await db
-    .select()
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId));
+  const [wallet] = await db.select().from(walletWallet).where(eq(walletWallet.userId, userId));
 
   let walletData: AdminMemberFinanceData['wallet'] = null;
 
@@ -620,7 +601,7 @@ export const getAdminMemberFinanceProfile = async (
     .from(walletFundingReservationSettlement)
     .innerJoin(
       walletFundingReservation,
-      eq(walletFundingReservationSettlement.reservationId, walletFundingReservation.id),
+      eq(walletFundingReservationSettlement.reservationId, walletFundingReservation.id)
     )
     .where(eq(walletFundingReservation.ownerUserId, userId));
 
@@ -637,8 +618,8 @@ export const getAdminMemberFinanceProfile = async (
     .where(
       and(
         eq(walletFundingReservation.ownerUserId, userId),
-        eq(walletFundingReservation.status, 'ACTIVE'),
-      ),
+        eq(walletFundingReservation.status, 'ACTIVE')
+      )
     );
 
   return {
@@ -677,9 +658,9 @@ export const getCurrentMoneyPolicy = async (): Promise<AdminMoneyPolicyItem | nu
         lte(paymentMoneyPolicyRevision.effectiveFrom, now),
         or(
           isNull(paymentMoneyPolicyRevision.effectiveUntil),
-          gte(paymentMoneyPolicyRevision.effectiveUntil, now),
-        ),
-      ),
+          gte(paymentMoneyPolicyRevision.effectiveUntil, now)
+        )
+      )
     )
     .orderBy(desc(paymentMoneyPolicyRevision.revision))
     .limit(1);

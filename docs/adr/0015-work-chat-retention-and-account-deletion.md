@@ -10,9 +10,9 @@ their Evidence References. One Message can carry more than one Report Case
 most recently closed one, and a Message with any open case has no `eligibleAt`
 yet. After a case closes:
 
-~~~text
+```text
 eligibleAt = max(latestTerminalAt + 1 year, caseClosedAt + 90 days)
-~~~
+```
 
 Without a Report Case, `eligibleAt` is `latestTerminalAt + 1 year`. Member
 deletion anonymizes the sender while retaining the minimum identity linkage

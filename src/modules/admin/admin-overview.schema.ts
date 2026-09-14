@@ -8,7 +8,7 @@ const adminQuestStateCountsSchema = t.Object(
   Object.fromEntries(adminOverviewQuestStates.map((status) => [status, counterSchema])) as Record<
     (typeof adminOverviewQuestStates)[number],
     typeof counterSchema
-  >,
+  >
 );
 
 export const adminOverviewResponseSchema = t.Object({

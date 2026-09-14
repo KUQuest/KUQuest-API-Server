@@ -30,23 +30,43 @@ export const questProofRoute = new Elysia({ name: 'quest-proof-route', prefix: '
     type: 'multipart/form-data',
     transform: rejectUnknownFields(proofSubmitSchema),
     response: responses(proofResponseSchema, 400, 401, 404, 409, 413, 415, 502),
-    detail: { tags: ['Quest Proof'], summary: 'Submit Quest proof', operationId: 'submitQuestProof', security: betterAuthSecurity },
+    detail: {
+      tags: ['Quest Proof'],
+      summary: 'Submit Quest proof',
+      operationId: 'submitQuestProof',
+      security: betterAuthSecurity,
+    },
   })
   .get('/:questId/proof', listProofsController, {
     params: proofParamsSchema,
     response: responses(proofListResponseSchema, 401, 404),
-    detail: { tags: ['Quest Proof'], summary: 'List Quest Proof Submissions', operationId: 'listQuestProofs', security: betterAuthSecurity },
+    detail: {
+      tags: ['Quest Proof'],
+      summary: 'List Quest Proof Submissions',
+      operationId: 'listQuestProofs',
+      security: betterAuthSecurity,
+    },
   })
   .post('/:questId/proof/confirm', confirmProofFreeWorkController, {
     params: proofParamsSchema,
     body: proofConfirmationSchema,
     transform: rejectUnknownFields(proofConfirmationSchema),
     response: responses(proofConfirmationResponseSchema, 401, 404, 409),
-    detail: { tags: ['Quest Proof'], summary: 'Confirm proof-free Quest work', operationId: 'confirmQuestWork', security: betterAuthSecurity },
+    detail: {
+      tags: ['Quest Proof'],
+      summary: 'Confirm proof-free Quest work',
+      operationId: 'confirmQuestWork',
+      security: betterAuthSecurity,
+    },
   })
   .post('/:questId/proof/:proofId/review', reviewProofController, {
     params: proofDetailParamsSchema,
     body: proofReviewSchema,
     response: responses(proofReviewResponseSchema, 400, 401, 404, 409, 503),
-    detail: { tags: ['Quest Proof'], summary: 'Review a Quest Proof Submission', operationId: 'reviewQuestProof', security: betterAuthSecurity },
+    detail: {
+      tags: ['Quest Proof'],
+      summary: 'Review a Quest Proof Submission',
+      operationId: 'reviewQuestProof',
+      security: betterAuthSecurity,
+    },
   });

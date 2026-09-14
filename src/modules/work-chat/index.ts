@@ -7,7 +7,4 @@ export { candidateInquiryRoute } from './candidate-inquiry.route';
 export { workChatStorage } from './work-chat.storage';
 export { cleanupExpiredWorkChatAttachments } from './work-chat.service';
 export { isCurrentWorkConversationMember } from './work-chat.service';
-export {
-  createWorkChatDelivery,
-  workChatDelivery,
-} from './work-chat.delivery';
+export { createWorkChatDelivery, workChatDelivery } from './work-chat.delivery';

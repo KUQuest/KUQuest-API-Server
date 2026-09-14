@@ -28,10 +28,7 @@ const selectCertificates = () =>
   db
     .select(certificateColumns)
     .from(profileCertificate)
-    .leftJoin(
-      file,
-      and(eq(profileCertificate.imageFileId, file.id), isNull(file.deletedAt)),
-    );
+    .leftJoin(file, and(eq(profileCertificate.imageFileId, file.id), isNull(file.deletedAt)));
 
 // Derived from the request schema so the accepted fields cannot drift from what
 // the route validates.
@@ -70,25 +67,26 @@ export const createCertificate = async (userId: string, data: CertificateInput) 
 export function updateCertificate(
   userId: string,
   certificateId: string,
-  data: Partial<CertificateInput>,
+  data: Partial<CertificateInput>
 ): Promise<Certificate | undefined>;
 export function updateCertificate(
   userId: string,
   certificateId: string,
   data: Partial<CertificateInput>,
-  expectedVersion: number,
+  expectedVersion: number
 ): Promise<Certificate | { outcome: 'conflict' } | undefined>;
 export async function updateCertificate(
   userId: string,
   certificateId: string,
   data: Partial<CertificateInput>,
-  expectedVersion?: number,
+  expectedVersion?: number
 ): Promise<Certificate | { outcome: 'conflict' } | undefined> {
   // Drizzle rejects an empty `set`, and an empty patch has nothing to write —
   // fall back to a plain read so the caller still gets the current record.
   if (Object.keys(data).length === 0) {
     const current = await findCertificate(userId, certificateId);
-    if (!current || expectedVersion === undefined || current.version === expectedVersion) return current;
+    if (!current || expectedVersion === undefined || current.version === expectedVersion)
+      return current;
     return { outcome: 'conflict' };
   }
 
@@ -98,28 +96,28 @@ export async function updateCertificate(
     .where(
       expectedVersion === undefined
         ? ownedBy(userId, certificateId)
-        : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion)),
+        : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion))
     )
     .returning({ id: profileCertificate.id });
 
   if (!updated) return expectedVersion === undefined ? undefined : { outcome: 'conflict' as const };
 
   return findCertificate(userId, updated.id);
-};
+}
 
 export function deleteCertificate(
   userId: string,
-  certificateId: string,
+  certificateId: string
 ): Promise<{ id: string } | undefined>;
 export function deleteCertificate(
   userId: string,
   certificateId: string,
-  expectedVersion: number,
+  expectedVersion: number
 ): Promise<{ id: string; version?: number } | { outcome: 'conflict' } | undefined>;
 export async function deleteCertificate(
   userId: string,
   certificateId: string,
-  expectedVersion?: number,
+  expectedVersion?: number
 ): Promise<{ id: string; version?: number } | { outcome: 'conflict' } | undefined> {
   const [current] = await db
     .select({ version: profileCertificate.version })
@@ -136,23 +134,25 @@ export async function deleteCertificate(
     .where(
       expectedVersion === undefined
         ? ownedBy(userId, certificateId)
-        : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion)),
+        : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion))
     )
     .returning({ id: profileCertificate.id });
 
-  return certificate ? { id: certificate.id, version: current.version + 1 } : { outcome: 'conflict' as const };
-};
+  return certificate
+    ? { id: certificate.id, version: current.version + 1 }
+    : { outcome: 'conflict' as const };
+}
 
 export function replaceCertificateImage(
   userId: string,
   certificateId: string,
-  storedImage: StoredCertificateImage,
+  storedImage: StoredCertificateImage
 ): Promise<{ fileId: string; previousFileId: string | null } | undefined>;
 export function replaceCertificateImage(
   userId: string,
   certificateId: string,
   storedImage: StoredCertificateImage,
-  expectedVersion: number,
+  expectedVersion: number
 ): Promise<
   | { fileId: string; previousFileId: string | null; version: number }
   | { outcome: 'conflict' }
@@ -162,7 +162,7 @@ export async function replaceCertificateImage(
   userId: string,
   certificateId: string,
   storedImage: StoredCertificateImage,
-  expectedVersion?: number,
+  expectedVersion?: number
 ): Promise<
   | { fileId: string; previousFileId: string | null }
   | { fileId: string; previousFileId: string | null; version: number }
@@ -204,7 +204,7 @@ export async function replaceCertificateImage(
       .where(
         expectedVersion === undefined
           ? ownedBy(userId, certificateId)
-          : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion)),
+          : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion))
       );
 
     return {
@@ -217,7 +217,7 @@ export async function replaceCertificateImage(
 
 export const getPreviousCertificateImageFile = async (
   userId: string,
-  fileId: string,
+  fileId: string
 ): Promise<{ bucket: string; objectKey: string } | undefined> => {
   const [previousFile] = await db
     .select({
@@ -225,13 +225,7 @@ export const getPreviousCertificateImageFile = async (
       objectKey: file.objectKey,
     })
     .from(file)
-    .where(
-      and(
-        eq(file.id, fileId),
-        eq(file.uploadedByUserId, userId),
-        isNull(file.deletedAt),
-      ),
-    )
+    .where(and(eq(file.id, fileId), eq(file.uploadedByUserId, userId), isNull(file.deletedAt)))
     .limit(1);
 
   return previousFile;
@@ -240,7 +234,7 @@ export const getPreviousCertificateImageFile = async (
 export const deleteCertificateImage = async (
   userId: string,
   certificateId: string,
-  expectedVersion?: number,
+  expectedVersion?: number
 ): Promise<
   | { version: number; bucket: string; objectKey: string }
   | { outcome: 'not-found' }
@@ -269,28 +263,34 @@ export const deleteCertificateImage = async (
 
     await transaction
       .update(profileCertificate)
-      .set({ imageFileId: null, version: sql`${profileCertificate.version} + 1`, updatedAt: new Date() })
+      .set({
+        imageFileId: null,
+        version: sql`${profileCertificate.version} + 1`,
+        updatedAt: new Date(),
+      })
       .where(
         expectedVersion === undefined
           ? ownedBy(userId, certificateId)
-          : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion)),
+          : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion))
       );
-    await transaction.update(file).set({ deletedAt: new Date() }).where(eq(file.id, certificate.fileId));
+    await transaction
+      .update(file)
+      .set({ deletedAt: new Date() })
+      .where(eq(file.id, certificate.fileId));
 
-    return { version: certificate.version + 1, bucket: certificate.bucket, objectKey: certificate.objectKey };
+    return {
+      version: certificate.version + 1,
+      bucket: certificate.bucket,
+      objectKey: certificate.objectKey,
+    };
   });
 
 export const markCertificateImageDeleted = async (
   userId: string,
-  fileId: string,
+  fileId: string
 ): Promise<void> => {
   await db
     .update(file)
     .set({ deletedAt: new Date() })
-    .where(
-      and(
-        eq(file.id, fileId),
-        eq(file.uploadedByUserId, userId),
-      ),
-    );
+    .where(and(eq(file.id, fileId), eq(file.uploadedByUserId, userId)));
 };

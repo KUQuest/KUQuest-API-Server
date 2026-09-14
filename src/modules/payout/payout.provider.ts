@@ -18,9 +18,7 @@ import {
 export const XENDIT_PAYOUT_API_VERSION = '2020-02-01';
 
 export type PayoutProviderErrorCode =
-  | 'PROVIDER_CONFIGURATION'
-  | 'PROVIDER_REJECTED'
-  | 'PROVIDER_UNCERTAIN';
+  'PROVIDER_CONFIGURATION' | 'PROVIDER_REJECTED' | 'PROVIDER_UNCERTAIN';
 
 type PayoutProviderErrorDetails = {
   providerCode?: string;
@@ -31,17 +29,18 @@ type PayoutProviderErrorDetails = {
 
 const providerDiagnosticMaxLength = 500;
 
-export const sanitizePayoutProviderDiagnostic = (value: string) => value
-  .replace(/[\r\n\t]+/g, ' ')
-  .replace(/\b(?:xnd|sk|pk)_[A-Za-z0-9_-]+\b/gi, '<REDACTED>')
-  .replace(/\b(?:bearer|basic)\s+[A-Za-z0-9+/=_-]+/gi, '<REDACTED>')
-  .replace(/\b(?:api[-_ ]?key|secret|token|password)\s*[:=]\s*\S+/gi, '<REDACTED>')
-  .replace(/\b\d[\d\s().-]{3,}\d\b/g, '<REDACTED>')
-  .replace(/\b\d{4,}\b/g, '<REDACTED>')
-  .replace(/\b[A-Za-z0-9_-]{24,}\b/g, '<REDACTED>')
-  .replace(/[^\x20-\x7E]/g, '?')
-  .trim()
-  .slice(0, providerDiagnosticMaxLength);
+export const sanitizePayoutProviderDiagnostic = (value: string) =>
+  value
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\b(?:xnd|sk|pk)_[A-Za-z0-9_-]+\b/gi, '<REDACTED>')
+    .replace(/\b(?:bearer|basic)\s+[A-Za-z0-9+/=_-]+/gi, '<REDACTED>')
+    .replace(/\b(?:api[-_ ]?key|secret|token|password)\s*[:=]\s*\S+/gi, '<REDACTED>')
+    .replace(/\b\d[\d\s().-]{3,}\d\b/g, '<REDACTED>')
+    .replace(/\b\d{4,}\b/g, '<REDACTED>')
+    .replace(/\b[A-Za-z0-9_-]{24,}\b/g, '<REDACTED>')
+    .replace(/[^\x20-\x7E]/g, '?')
+    .trim()
+    .slice(0, providerDiagnosticMaxLength);
 
 export class PayoutProviderError extends Error {
   readonly code: PayoutProviderErrorCode;
@@ -53,7 +52,7 @@ export class PayoutProviderError extends Error {
   constructor(
     code: PayoutProviderErrorCode,
     message: string,
-    details: PayoutProviderErrorDetails = {},
+    details: PayoutProviderErrorDetails = {}
   ) {
     super(message);
     this.name = 'PayoutProviderError';
@@ -125,22 +124,23 @@ export type XenditPayoutProviderOptions = {
 
 type JsonObject = Record<string, unknown>;
 
-const asObject = (value: unknown): JsonObject | null => (
+const asObject = (value: unknown): JsonObject | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as JsonObject
-    : null
-);
+    ? (value as JsonObject)
+    : null;
 
-const asText = (value: unknown): string | null => (
-  typeof value === 'string' && value.length > 0 ? value : null
-);
+const asText = (value: unknown): string | null =>
+  typeof value === 'string' && value.length > 0 ? value : null;
 
 const toThb = (amountSatang: Satang): number => Number((amountSatang / 100).toFixed(2));
 
 const fromThb = (value: unknown, allowZero = false): Satang => {
   const text = typeof value === 'number' ? String(value) : value;
   if (typeof text !== 'string' || !/^\d+(?:\.\d{1,2})?$/.test(text)) {
-    throw new PayoutProviderError('PROVIDER_UNCERTAIN', 'Xendit returned an invalid Payout amount.');
+    throw new PayoutProviderError(
+      'PROVIDER_UNCERTAIN',
+      'Xendit returned an invalid Payout amount.'
+    );
   }
   const [baht, satangPart = ''] = text.split('.');
   const amount = Number(baht) * 100 + Number(satangPart.padEnd(2, '0') || 0);
@@ -150,33 +150,50 @@ const fromThb = (value: unknown, allowZero = false): Satang => {
     (!allowZero && amount === 0) ||
     amount > MAX_WALLET_CAPACITY_SATANG
   ) {
-    throw new PayoutProviderError('PROVIDER_UNCERTAIN', 'Xendit returned an out-of-range Payout amount.');
+    throw new PayoutProviderError(
+      'PROVIDER_UNCERTAIN',
+      'Xendit returned an out-of-range Payout amount.'
+    );
   }
   return allowZero ? satang(amount) : positiveSatang(amount);
 };
 
 const providerValidationSummary = (value: unknown) => {
   if (!Array.isArray(value)) return null;
-  const entries = value.slice(0, 5).map(asObject).filter((entry): entry is JsonObject => entry !== null);
-  const summary = entries.map((entry) => {
-    const field = asText(entry.field);
-    const messages = [
-      ...(Array.isArray(entry.messages) ? entry.messages.map(asText).filter((message): message is string => message !== null) : []),
-      asText(entry.message),
-    ].filter((message): message is string => message !== null);
-    return [field, messages.join(', ')].filter((part): part is string => part !== null && part.length > 0).join(': ');
-  }).filter((entry) => entry.length > 0);
+  const entries = value
+    .slice(0, 5)
+    .map(asObject)
+    .filter((entry): entry is JsonObject => entry !== null);
+  const summary = entries
+    .map((entry) => {
+      const field = asText(entry.field);
+      const messages = [
+        ...(Array.isArray(entry.messages)
+          ? entry.messages.map(asText).filter((message): message is string => message !== null)
+          : []),
+        asText(entry.message),
+      ].filter((message): message is string => message !== null);
+      return [field, messages.join(', ')]
+        .filter((part): part is string => part !== null && part.length > 0)
+        .join(': ');
+    })
+    .filter((entry) => entry.length > 0);
   return summary.length > 0 ? summary.join('; ') : null;
 };
 
 const providerErrorDetails = (payload: JsonObject | null) => {
-  const providerCode = [asText(payload?.error_code), asText(payload?.code)]
-    .find((value): value is string => value !== null && /^[A-Z][A-Z_]{0,63}$/.test(value));
-  const providerMessage = sanitizePayoutProviderDiagnostic([
-    asText(payload?.message),
-    asText(payload?.error_message),
-    providerValidationSummary(payload?.errors),
-  ].filter((value): value is string => value !== null).join(' '));
+  const providerCode = [asText(payload?.error_code), asText(payload?.code)].find(
+    (value): value is string => value !== null && /^[A-Z][A-Z_]{0,63}$/.test(value)
+  );
+  const providerMessage = sanitizePayoutProviderDiagnostic(
+    [
+      asText(payload?.message),
+      asText(payload?.error_message),
+      providerValidationSummary(payload?.errors),
+    ]
+      .filter((value): value is string => value !== null)
+      .join(' ')
+  );
   return {
     providerCode,
     providerMessage: providerMessage || undefined,
@@ -230,7 +247,10 @@ const xenditChannelCodeByBankCode: Record<string, string> = {
 const xenditChannelCode = (destination: PayoutDestinationForProvider): string => {
   const channelCode = xenditChannelCodeByBankCode[destination.bankCode];
   if (!channelCode) {
-    throw new PayoutProviderError('PROVIDER_CONFIGURATION', 'Payout Destination bank is not configured.');
+    throw new PayoutProviderError(
+      'PROVIDER_CONFIGURATION',
+      'Payout Destination bank is not configured.'
+    );
   }
   return channelCode;
 };
@@ -244,8 +264,13 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
 
   constructor(options: XenditPayoutProviderOptions = {}) {
     this.secretKey = options.secretKey ?? env.xenditSecretKey;
-    this.baseUrl = (options.baseUrl ?? process.env.XENDIT_API_BASE_URL ?? 'https://api.xendit.co').replace(/\/+$/, '');
-    this.apiVersion = options.apiVersion ?? process.env.XENDIT_PAYOUT_API_VERSION ?? XENDIT_PAYOUT_API_VERSION;
+    this.baseUrl = (
+      options.baseUrl ??
+      process.env.XENDIT_API_BASE_URL ??
+      'https://api.xendit.co'
+    ).replace(/\/+$/, '');
+    this.apiVersion =
+      options.apiVersion ?? process.env.XENDIT_PAYOUT_API_VERSION ?? XENDIT_PAYOUT_API_VERSION;
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.fetcher = options.fetcher ?? globalThis.fetch;
   }
@@ -253,7 +278,7 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
   private error(
     code: PayoutProviderErrorCode,
     message: string,
-    details: Omit<PayoutProviderErrorDetails, 'providerApiVersion'> = {},
+    details: Omit<PayoutProviderErrorDetails, 'providerApiVersion'> = {}
   ) {
     return new PayoutProviderError(code, message, {
       ...details,
@@ -272,9 +297,10 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
     let response: Response;
     try {
       const channelCode = xenditChannelCode(input.destination);
-      const destinationValue = input.destination.routingType === 'PROMPTPAY'
-        ? input.destination.routingValue
-        : input.destination.accountNumber;
+      const destinationValue =
+        input.destination.routingType === 'PROMPTPAY'
+          ? input.destination.routingValue
+          : input.destination.accountNumber;
       response = await this.fetcher(`${this.baseUrl}/v2/payouts`, {
         method: 'POST',
         headers: {
@@ -311,11 +337,15 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
     }
     if (!response.ok) {
       const details = providerErrorDetails(payload);
-      const uncertain = response.status >= 500 || response.status === 408 || response.status === 409 || response.status === 429;
+      const uncertain =
+        response.status >= 500 ||
+        response.status === 408 ||
+        response.status === 409 ||
+        response.status === 429;
       throw this.error(
         uncertain ? 'PROVIDER_UNCERTAIN' : 'PROVIDER_REJECTED',
         uncertain ? 'Xendit Payout response is uncertain.' : 'Xendit rejected the Payout.',
-        { ...details, providerStatus: response.status },
+        { ...details, providerStatus: response.status }
       );
     }
     if (!payload) throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an invalid response.');
@@ -361,12 +391,18 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
         providerStatus: response.status,
       });
     }
-    if (!payload) throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an invalid Payout status.');
+    if (!payload)
+      throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an invalid Payout status.');
 
     if (!input.providerReference && Array.isArray(payload.data)) {
-      const matches = payload.data.map(asObject).filter((value): value is JsonObject => value !== null);
+      const matches = payload.data
+        .map(asObject)
+        .filter((value): value is JsonObject => value !== null);
       if (matches.length !== 1) {
-        throw this.error('PROVIDER_UNCERTAIN', 'Xendit did not return one Payout for the internal reference.');
+        throw this.error(
+          'PROVIDER_UNCERTAIN',
+          'Xendit did not return one Payout for the internal reference.'
+        );
       }
       return matches[0]!;
     }
@@ -394,10 +430,7 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different Payout currency.');
     }
     const channelCode = xenditChannelCode(input.destination);
-    if (
-      payload.channel_code !== undefined
-      && payload.channel_code !== channelCode
-    ) {
+    if (payload.channel_code !== undefined && payload.channel_code !== channelCode) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different Payout channel.');
     }
 
@@ -414,14 +447,19 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different Payout amount.');
     }
 
-    const actualFeeSatang = payload.fee === undefined && payload.fee_amount === undefined
-      ? satang(0)
-      : fromThb(amountValue(payload.fee ?? payload.fee_amount), true);
-    const actualTaxSatang = payload.tax === undefined && payload.tax_amount === undefined
-      ? satang(0)
-      : fromThb(amountValue(payload.tax ?? payload.tax_amount), true);
+    const actualFeeSatang =
+      payload.fee === undefined && payload.fee_amount === undefined
+        ? satang(0)
+        : fromThb(amountValue(payload.fee ?? payload.fee_amount), true);
+    const actualTaxSatang =
+      payload.tax === undefined && payload.tax_amount === undefined
+        ? satang(0)
+        : fromThb(amountValue(payload.tax ?? payload.tax_amount), true);
     const actualDebitSatang = providerAmountSatang + actualFeeSatang + actualTaxSatang;
-    if (!Number.isSafeInteger(actualDebitSatang) || actualDebitSatang > MAX_WALLET_CAPACITY_SATANG) {
+    if (
+      !Number.isSafeInteger(actualDebitSatang) ||
+      actualDebitSatang > MAX_WALLET_CAPACITY_SATANG
+    ) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an out-of-range Payout debit.');
     }
 
@@ -436,27 +474,29 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
     };
   }
 
-  async getPayoutStatus(
-    input: OutboundPayoutStatusRequest,
-  ): Promise<OutboundPayoutStatusResponse> {
+  async getPayoutStatus(input: OutboundPayoutStatusRequest): Promise<OutboundPayoutStatusResponse> {
     const payload = await this.requestStatus(input);
     const providerStatus = asText(payload.status);
-    if (!providerStatus) throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an incomplete Payout status.');
+    if (!providerStatus)
+      throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned an incomplete Payout status.');
     const normalizedStatus = normalizePayoutOutcomeStatus(providerStatus);
-    const eventType = normalizedStatus === 'SUCCEEDED'
-      ? 'v3_payout.succeeded'
-      : normalizedStatus === 'CANCELLED'
-        ? 'v3_payout.failed'
-        : normalizedStatus === 'FAILED'
+    const eventType =
+      normalizedStatus === 'SUCCEEDED'
+        ? 'v3_payout.succeeded'
+        : normalizedStatus === 'CANCELLED'
           ? 'v3_payout.failed'
-          : 'v3_payout.pending_compliance';
+          : normalizedStatus === 'FAILED'
+            ? 'v3_payout.failed'
+            : 'v3_payout.pending_compliance';
     let parsed;
     try {
-      parsed = parsePayoutProviderEvent(JSON.stringify({
-        ...payload,
-        event: eventType,
-        api_version: payload.api_version ?? this.apiVersion,
-      }));
+      parsed = parsePayoutProviderEvent(
+        JSON.stringify({
+          ...payload,
+          event: eventType,
+          api_version: payload.api_version ?? this.apiVersion,
+        })
+      );
     } catch (reason: unknown) {
       if (reason instanceof Error) {
         throw this.error('PROVIDER_UNCERTAIN', reason.message);
@@ -472,7 +512,10 @@ export class XenditPayoutProvider implements OutboundPayoutProvider {
     if (parsed.internalReference && parsed.internalReference !== input.internalReference) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different internal reference.');
     }
-    if (parsed.providerAmountSatang !== null && parsed.providerAmountSatang !== input.expectedPrincipalSatang) {
+    if (
+      parsed.providerAmountSatang !== null &&
+      parsed.providerAmountSatang !== input.expectedPrincipalSatang
+    ) {
       throw this.error('PROVIDER_UNCERTAIN', 'Xendit returned a different Payout amount.');
     }
     if (parsed.actualDebitSatang !== null && parsed.actualDebitSatang > input.maximumDebitSatang) {

@@ -1,3 +1,4 @@
+import { defaultLocalDatabaseUrl } from '@/config/default-database-url';
 import { db, sql } from '@/database/client';
 import { authAdmin } from '@/database/schema/auth.schema';
 
@@ -15,7 +16,7 @@ test('Admin seed refuses to create a second Admin', async () => {
   } catch (cause) {
     throw new Error(
       'This test needs PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 
@@ -39,9 +40,7 @@ test('Admin seed refuses to create a second Admin', async () => {
         ADMIN_FIRST_NAME: 'Candidate',
         ADMIN_LAST_NAME: 'Admin',
         ADMIN_PASSWORD: 'AdminPass1!',
-        DATABASE_URL:
-          process.env.DATABASE_URL ??
-          'postgresql://kuquest:kuquest-local-only@localhost:5432/kuquest',
+        DATABASE_URL: process.env.DATABASE_URL ?? defaultLocalDatabaseUrl,
       },
       stderr: 'pipe',
       stdout: 'pipe',

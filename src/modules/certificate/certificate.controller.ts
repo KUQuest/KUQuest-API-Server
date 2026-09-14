@@ -132,8 +132,7 @@ export const patchCertificate = async ({
   body,
   request,
   set,
-}: AuthedContext &
-  CertificateParams & { body: Static<typeof certificateUpdateSchema> }): Promise<
+}: AuthedContext & CertificateParams & { body: Static<typeof certificateUpdateSchema> }): Promise<
   ApiResponse<{ certificate: ReturnType<typeof serializeCertificate> }>
 > => {
   const versionHeader = readResourceVersion(request);
@@ -203,7 +202,7 @@ export const deleteCertificateImageController = async ({
   const result = await deleteCertificateImage(
     session.user.id,
     params.certificateId,
-    versionHeader.value,
+    versionHeader.value
   );
   if ('outcome' in result) {
     if (result.outcome === 'conflict') {
@@ -266,14 +265,16 @@ export const setCertificateImage = async ({
       return apiError('INVALID_VERSION', 'Resource version must be a positive integer');
     }
     const expectedVersion = versionHeader.value;
-    const result = (expectedVersion === undefined
-      ? await replaceCertificateImage(session.user.id, params.certificateId, storedImage)
-      : await replaceCertificateImage(
-          session.user.id,
-          params.certificateId,
-          storedImage,
-          expectedVersion,
-        )) as
+    const result = (
+      expectedVersion === undefined
+        ? await replaceCertificateImage(session.user.id, params.certificateId, storedImage)
+        : await replaceCertificateImage(
+            session.user.id,
+            params.certificateId,
+            storedImage,
+            expectedVersion
+          )
+    ) as
       | { fileId: string; previousFileId: string | null; version?: number }
       | { outcome: 'conflict' }
       | undefined;
@@ -304,7 +305,7 @@ export const setCertificateImage = async ({
       try {
         const previousFile = await getPreviousCertificateImageFile(
           session.user.id,
-          result.previousFileId,
+          result.previousFileId
         );
         if (previousFile) {
           await certificateStorage.delete(previousFile.bucket, previousFile.objectKey);

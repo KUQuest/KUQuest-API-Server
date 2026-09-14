@@ -1,5 +1,7 @@
 import { t } from 'elysia';
 
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
+
 import { topUpDataSchema } from './top-up.schema';
 
 const dateTime = t.String({ format: 'date-time' });
@@ -77,15 +79,10 @@ export const adminTopUpListItemSchema = t.Object({
 
 export const adminTopUpListQuerySchema = t.Object({
   status: t.Optional(
-    t.Union([
-      t.Literal('PENDING'),
-      t.Literal('PAID'),
-      t.Literal('EXPIRED'),
-      t.Literal('FAILED'),
-    ]),
+    t.Union([t.Literal('PENDING'), t.Literal('PAID'), t.Literal('EXPIRED'), t.Literal('FAILED')])
   ),
   userId: t.Optional(t.String({ format: 'uuid' })),
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 100 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
 });
 

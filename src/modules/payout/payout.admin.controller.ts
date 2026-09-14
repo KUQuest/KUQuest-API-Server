@@ -66,11 +66,14 @@ const serializeHistory = (history: Awaited<ReturnType<typeof listAdminPayoutStat
   history.map((entry) => ({ ...entry, occurredAt: entry.occurredAt.toISOString() }));
 
 const setAdminActionStatus = (set: AdminContext['set'], code: string) => {
-  set.status = code === 'ADMIN_ACTION_ADMIN_NOT_FOUND'
-    ? 403
-    : ['ADMIN_ACTION_KEY_REUSED', 'ADMIN_ACTION_CONFLICT', 'ADMIN_ACTION_WRITE_FAILED'].includes(code)
-      ? 409
-      : 400;
+  set.status =
+    code === 'ADMIN_ACTION_ADMIN_NOT_FOUND'
+      ? 403
+      : ['ADMIN_ACTION_KEY_REUSED', 'ADMIN_ACTION_CONFLICT', 'ADMIN_ACTION_WRITE_FAILED'].includes(
+            code
+          )
+        ? 409
+        : 400;
 };
 
 const mapAdminError = (set: AdminContext['set'], error: unknown) => {
@@ -80,8 +83,19 @@ const mapAdminError = (set: AdminContext['set'], error: unknown) => {
   }
   if (error instanceof ProviderEventError) {
     if (error.code === 'PROVIDER_EVENT_NOT_FOUND') set.status = 404;
-    else if (error.code === 'PROVIDER_EVENT_NOT_RETRYABLE' || error.code === 'PROVIDER_EVENT_CONFLICT') set.status = 409;
-    else if (['PROVIDER_EVENT_KEY_UNAVAILABLE', 'PROVIDER_EVENT_KEY_VERSION_UNKNOWN', 'PROVIDER_EVENT_ENCRYPTION_FAILED'].includes(error.code)) set.status = 500;
+    else if (
+      error.code === 'PROVIDER_EVENT_NOT_RETRYABLE' ||
+      error.code === 'PROVIDER_EVENT_CONFLICT'
+    )
+      set.status = 409;
+    else if (
+      [
+        'PROVIDER_EVENT_KEY_UNAVAILABLE',
+        'PROVIDER_EVENT_KEY_VERSION_UNKNOWN',
+        'PROVIDER_EVENT_ENCRYPTION_FAILED',
+      ].includes(error.code)
+    )
+      set.status = 500;
     else set.status = 400;
     return apiError(error.code, error.message);
   }
@@ -90,7 +104,13 @@ const mapAdminError = (set: AdminContext['set'], error: unknown) => {
     return apiError(error.code, error.message);
   }
   if (error instanceof MoneyDomainError) {
-    const notFound = ['PAYOUT_NOT_FOUND', 'PAYOUT_QUOTE_NOT_FOUND', 'PAYOUT_DESTINATION_NOT_FOUND', 'MEMBER_NOT_FOUND', 'WALLET_NOT_FOUND'];
+    const notFound = [
+      'PAYOUT_NOT_FOUND',
+      'PAYOUT_QUOTE_NOT_FOUND',
+      'PAYOUT_DESTINATION_NOT_FOUND',
+      'MEMBER_NOT_FOUND',
+      'WALLET_NOT_FOUND',
+    ];
     const badRequest = ['INVALID_LIMIT', 'INVALID_AMOUNT', 'INVALID_CURSOR'];
     set.status = notFound.includes(error.code) ? 404 : badRequest.includes(error.code) ? 400 : 409;
     return apiError(error.code, error.message);
@@ -128,7 +148,7 @@ const runAdminPayoutCommand = async (
     idempotencyKey: string;
     expectedVersion: number;
     reasonCode: string;
-  }) => ReturnType<typeof approvePayout>,
+  }) => ReturnType<typeof approvePayout>
 ): Promise<ApiResponse> => {
   const revision = readResourceVersion(request);
   if (revision.invalid || revision.value === undefined) {
@@ -145,7 +165,10 @@ const runAdminPayoutCommand = async (
     });
     if (result.resourceVersion === null) {
       set.status = 500;
-      return apiError('ADMIN_ACTION_INVALID_RESULT', 'Admin Action did not return a Payout version.');
+      return apiError(
+        'ADMIN_ACTION_INVALID_RESULT',
+        'Admin Action did not return a Payout version.'
+      );
     }
     return apiSuccess({
       resourceSummary: result.resourceSummary,
@@ -170,9 +193,7 @@ export const listAdminPayoutsController = async ({
     });
     return apiSuccess({
       items: result.items.map(serializePayout),
-      nextCursor: result.nextCursor
-        ? encodeCursor(result.nextCursor)
-        : null,
+      nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null,
     });
   } catch (error) {
     return mapAdminError(set, error);
@@ -209,14 +230,18 @@ export const approvePayoutController = async ({
   request,
   admin,
   set,
-}: AdminContext & { body: AdminPayoutApprovalInput; params: AdminPayoutParams; request: Request }): Promise<ApiResponse> => {
+}: AdminContext & {
+  body: AdminPayoutApprovalInput;
+  params: AdminPayoutParams;
+  request: Request;
+}): Promise<ApiResponse> => {
   return runAdminPayoutCommand(
     set,
     request,
     admin.id,
     params.payoutId,
     body.reasonCode,
-    approvePayout,
+    approvePayout
   );
 };
 
@@ -226,14 +251,12 @@ export const cancelPayoutController = async ({
   request,
   admin,
   set,
-}: AdminContext & { body: AdminPayoutCancellationInput; params: AdminPayoutParams; request: Request }): Promise<ApiResponse> => runAdminPayoutCommand(
-  set,
-  request,
-  admin.id,
-  params.payoutId,
-  body.reasonCode,
-  cancelPayout,
-);
+}: AdminContext & {
+  body: AdminPayoutCancellationInput;
+  params: AdminPayoutParams;
+  request: Request;
+}): Promise<ApiResponse> =>
+  runAdminPayoutCommand(set, request, admin.id, params.payoutId, body.reasonCode, cancelPayout);
 
 export const reconcilePayoutAdminController = async ({
   params,

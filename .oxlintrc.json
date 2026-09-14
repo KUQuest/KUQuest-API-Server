@@ -12,11 +12,7 @@
   "options": {
     "typeAware": true
   },
-  "ignorePatterns": [
-    "dist/**",
-    "coverage/**",
-    "node_modules/**"
-  ],
+  "ignorePatterns": ["dist/**", "coverage/**", "node_modules/**"],
   "overrides": [
     {
       "files": ["drizzle.config.ts"],

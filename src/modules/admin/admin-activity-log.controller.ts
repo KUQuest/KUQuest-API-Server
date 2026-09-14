@@ -3,13 +3,18 @@ import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 
-import type { AdminActivityListQuery, AdminActivityListResponse } from './admin-activity-log.schema';
+import type {
+  AdminActivityListQuery,
+  AdminActivityListResponse,
+} from './admin-activity-log.schema';
 import { listAdminActivity, serializeAdminActivityEntry } from './admin-activity-log.service';
 
 export const listAdminActivityController = async ({
   query,
   set,
-}: AdminContext & { query: AdminActivityListQuery }): Promise<ApiResponse<AdminActivityListResponse>> => {
+}: AdminContext & { query: AdminActivityListQuery }): Promise<
+  ApiResponse<AdminActivityListResponse>
+> => {
   try {
     const result = await listAdminActivity({
       action: query.action,

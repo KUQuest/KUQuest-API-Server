@@ -36,7 +36,7 @@ export const env = {
   adminBetterAuthSecret: process.env.ADMIN_BETTER_AUTH_SECRET,
   stagingTestAuthEnabled: parseBoolean(
     'STAGING_TEST_AUTH_ENABLED',
-    process.env.STAGING_TEST_AUTH_ENABLED,
+    process.env.STAGING_TEST_AUTH_ENABLED
   ),
   stagingTestAuthEmail: process.env.STAGING_TEST_AUTH_EMAIL,
   stagingTestAuthPassword: process.env.STAGING_TEST_AUTH_PASSWORD,
@@ -48,7 +48,7 @@ export const env = {
   stagingTestAuthAccount2LastName: process.env.STAGING_TEST_AUTH_ACCOUNT_2_LAST_NAME,
   localFinanceTestEnabled: parseBoolean(
     'LOCAL_FINANCE_TEST_ENABLED',
-    process.env.LOCAL_FINANCE_TEST_ENABLED,
+    process.env.LOCAL_FINANCE_TEST_ENABLED
   ),
   localFinanceTestRecipientEmail: process.env.LOCAL_FINANCE_TEST_RECIPIENT_EMAIL,
   localFinanceTestRecipientFirstName: process.env.LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME,
@@ -126,7 +126,7 @@ export const validateRuntimeEnv = (): void => {
 
     if (missingTestAuthVariables.length > 0) {
       throw new Error(
-        `Missing required staging test auth variables: ${missingTestAuthVariables.join(', ')}`,
+        `Missing required staging test auth variables: ${missingTestAuthVariables.join(', ')}`
       );
     }
 
@@ -143,7 +143,7 @@ export const validateRuntimeEnv = (): void => {
         .map(([name]) => name);
       if (missingAccount2Variables.length > 0) {
         throw new Error(
-          `Missing required staging Account 2 auth variables: ${missingAccount2Variables.join(', ')}`,
+          `Missing required staging Account 2 auth variables: ${missingAccount2Variables.join(', ')}`
         );
       }
     }
@@ -152,7 +152,7 @@ export const validateRuntimeEnv = (): void => {
   if (env.localFinanceTestEnabled) {
     if (!isFinanceTestRuntime(env.nodeEnv, env.deploymentEnv)) {
       throw new Error(
-        'LOCAL_FINANCE_TEST_ENABLED requires a development runtime or a staging runtime',
+        'LOCAL_FINANCE_TEST_ENABLED requires a development runtime or a staging runtime'
       );
     }
     if (!env.stagingTestAuthEnabled) {
@@ -170,7 +170,7 @@ export const validateRuntimeEnv = (): void => {
       .map(([name]) => name);
     if (missingFinanceTestVariables.length > 0) {
       throw new Error(
-        `Missing required local finance test variables: ${missingFinanceTestVariables.join(', ')}`,
+        `Missing required local finance test variables: ${missingFinanceTestVariables.join(', ')}`
       );
     }
   }

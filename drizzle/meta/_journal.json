@@ -507,10 +507,59 @@
       "breakpoints": true
     },
     {
+      "idx": 72,
+      "version": "7",
+      "when": 1789048142916,
+      "tag": "20260910134902_fast_sandman",
+      "breakpoints": true
+    },
+    {
       "idx": 73,
       "version": "7",
-      "when": 1789369355685,
-      "tag": "20260914070235_square_gamma_corps",
+      "when": 1789048202916,
+      "tag": "20260910135002_move_assignment_join_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1789048262916,
+      "tag": "20260910135102_gorgeous_ken_ellis",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789048322916,
+      "tag": "20260910135202_good_guardian",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1789048382916,
+      "tag": "20260910135302_move_quest_v2_core_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1789048442916,
+      "tag": "20260910135402_move_candidate_team_submit_select",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1789286654565,
+      "tag": "20260913080414_lucky_sentinel",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1789406276131,
+      "tag": "20260914171756_worried_naoko",
       "breakpoints": true
     }
   ]

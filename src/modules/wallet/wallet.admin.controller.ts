@@ -1,6 +1,7 @@
 import type { AdminContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
+import { CursorInputError } from '@/shared/cursor';
 
 import { MoneyDomainError } from './wallet.money';
 import { changeWalletStatus, listWalletStatusHistory } from './wallet.status.service';
@@ -29,7 +30,7 @@ type ExtendedAdminContext = AdminContext & {
 };
 
 const serializeWallet = (
-  wallet: WalletBalances | { wallet: WalletBalances },
+  wallet: WalletBalances | { wallet: WalletBalances }
 ): WalletBalances & { walletStatus: string } => {
   const target = 'wallet' in wallet && wallet.wallet ? wallet.wallet : (wallet as WalletBalances);
   return {
@@ -71,10 +72,7 @@ export const changeWalletStatusAdminController = async ({
   params: AdminWalletParams;
 }): Promise<ApiResponse> => {
   try {
-    const actorAdminId =
-      adminSession?.admin?.id ??
-      admin?.id ??
-      adminSession?.user?.id;
+    const actorAdminId = adminSession?.admin?.id ?? admin?.id ?? adminSession?.user?.id;
 
     const { wallet: updatedWallet } = await changeWalletStatus({
       walletId: params.walletId,
@@ -155,9 +153,16 @@ export const rebuildWalletProjectionAdminController = async ({
 
 export const listAdminWalletsController = async ({
   query,
+  set,
 }: AdminContext & { query: AdminWalletListQuery }): Promise<ApiResponse> => {
-  const data = await listAdminWallets(query);
-  return apiSuccess(data);
+  try {
+    const data = await listAdminWallets(query);
+    return apiSuccess(data);
+  } catch (error) {
+    if (!(error instanceof CursorInputError)) throw error;
+    set.status = 400;
+    return apiError(error.code, error.message);
+  }
 };
 
 export const getAdminWalletDetailController = async ({

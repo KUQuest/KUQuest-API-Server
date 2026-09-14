@@ -43,7 +43,7 @@ that could introduce a duplicate-account bug; the dedup happens entirely inside 
 So: **signing up with an existing account cannot create a duplicate** (it always resolves to the
 same user row via `findOAuthUser`), and **"signing in" with a not-yet-seen `@ku.th` account
 creates it** by design — because there is no separate registration step for SSO-only auth. That is
-almost certainly the intended behavior for a Google-Workspace-restricted app: first sign-in *is*
+almost certainly the intended behavior for a Google-Workspace-restricted app: first sign-in _is_
 sign-up. Nothing in `auth.config.ts` sets `disableImplicitSignUp` on the google provider, so this
 default (auto-create-on-first-sign-in) is active.
 
@@ -54,7 +54,7 @@ Only partially, and only for one of the two flows:
 - **Redirect/web flow**: `callback.mjs:170-176` redirects to `newUserURL || callbackURL` — i.e.
   `result.isRegister` picks between the `newUserCallbackURL` and `callbackURL` request params.
   This is documented: `SocialSignInRequest.newUserCallbackURL` in
-  `src/modules/auth/auth.openapi.ts:202-206`. A client using this flow *can* tell new vs. existing
+  `src/modules/auth/auth.openapi.ts:202-206`. A client using this flow _can_ tell new vs. existing
   by which URL it lands on.
 - **Native `idToken` flow**: `sign-in.mjs:189-195` returns
   `{ redirect: false, token: session.token, url: undefined, user }` — **`isRegister` is computed
@@ -129,7 +129,7 @@ sign-in). The only way it would actually fire is an edge case where Google's `hd
 - The same account hitting the **redirect flow** gets redirected with error code
   `unable_to_get_user_info` — again not `EMAIL_DOMAIN_NOT_ALLOWED`.
 - `src/modules/auth/auth.openapi.ts:276` (`403: errorResponse('The Google account is not in the
-  ${ALLOWED_EMAIL_DOMAIN} domain.')`) and the `AuthError` example at `auth.openapi.ts:44`
+${ALLOWED_EMAIL_DOMAIN} domain.')`) and the `AuthError` example at `auth.openapi.ts:44`
   (`EMAIL_DOMAIN_NOT_ALLOWED`) describe a response shape a client is unlikely to ever actually see
   from `/api/auth/sign-in/social`.
 - No test in `tests/modules/auth/**` exercises this end to end. `tests/modules/auth/auth.policy.test.ts:1-14`
@@ -137,7 +137,7 @@ sign-in). The only way it would actually fire is an edge case where Google's `hd
   never drives a non-`ku.th` Google login through either flow. So this mismatch between documented
   and actual behavior has no test coverage either way.
 
-**Judgment**: domain restriction *is* enforced end-to-end — a non-`@ku.th` account cannot get a
+**Judgment**: domain restriction _is_ enforced end-to-end — a non-`@ku.th` account cannot get a
 session, on either flow. So this is **not a functional blocker**: mobile can build a working
 "reject and show an error" flow. But if FE-19/20 built any client-side logic keyed to the
 documented `EMAIL_DOMAIN_NOT_ALLOWED` code (e.g., a specific "please use your KU account" message
@@ -215,13 +215,13 @@ from typed routes) — not re-litigating that shape difference, just cataloguing
   `APIError.from("UNAUTHORIZED", ...)`.
 - **From this app's own guarded routes** (not the raw-mounted auth handler): `authGuard`
   (`src/modules/auth/auth.guard.ts:13-14`) returns `status(401, apiError('UNAUTHORIZED',
-  'Unauthorized'))` — the app's envelope shape, for any typed route (onboarding, profile, etc.)
+'Unauthorized'))` — the app's envelope shape, for any typed route (onboarding, profile, etc.)
   called without a valid session. `adminAuthenticationGuard`
   (`src/modules/auth/admin-auth.guard.ts:23-27`) does the same for admin routes, plus a 403
   `ADMIN_DISABLED` (`admin-auth.guard.ts:50-54`) for disabled admin accounts — admin-only, not
   relevant to the mobile student flow.
 
-**Judgment**: functionally complete — every unauthorized path returns 401 with *some* code, no
+**Judgment**: functionally complete — every unauthorized path returns 401 with _some_ code, no
 request silently succeeds without a session. The gap is purely that the **specific codes a mobile
 client will see for domain rejection** (`INVALID_TOKEN` for the flow it likely uses) diverge from
 what's documented (`EMAIL_DOMAIN_NOT_ALLOWED`), covered above. Not a blocker; worth a doc fix and,
@@ -233,17 +233,17 @@ source, not by anything asserted in this repo.
 
 ## Summary table
 
-| Question | Exists? | Where | Gap? | Blocker for FE-19/20/21? |
-|---|---|---|---|---|
-| Sign-up doesn't duplicate an existing account | Yes | `link-account.mjs:9-16` (`findOAuthUser`) | No | No |
-| Sign-in doesn't silently create an unwanted account | By design, auto-creates on first sign-in (no `disableImplicitSignUp` set) | `auth.config.ts:29-44` | Design choice, not a bug, given SSO-only auth | No |
-| New-vs-existing signal in native `idToken` sign-in response | No | `sign-in.mjs:189-195` omits `isRegister` | Yes | No, if onboarding routing uses profile state instead — confirm with FE-19 |
-| OpenAPI documents the `idToken` flow mobile likely uses | No | `auth.openapi.ts:183-235` only covers redirect flow | Yes | No (doc-only; `@better-auth/expo` client isn't OpenAPI-driven) |
-| `@ku.th` domain enforced | Yes, twice (Google `hd` check pre-empts app check) | `google.mjs:94-112`, `auth.policy.ts:15-22` | `assertAllowedEmail`/`EMAIL_DOMAIN_NOT_ALLOWED` effectively unreachable; docs describe wrong code | No (rejection works), but confirm client doesn't branch on the undocumented-to-not-fire code |
-| Session shape documented | Partially | `auth.openapi.ts:105-140` (get-session) vs. undocumented `sign-in.mjs:190-195` shape | Yes | No |
-| Expiry/refresh behavior | Yes, library default, rolling | `create-context.mjs:146-148`, `session.mjs:205-239` | Undocumented/untested in-repo, but correct | No |
-| Revocation | Yes, library default | `session.mjs:405-505` | Undocumented/untested in-repo, not exposed in OpenAPI | No |
-| Unauthorized error codes | Yes, two surfaces (better-auth native vs. app envelope) | see above | Divergence between documented and actual domain-rejection code | No, but recommend confirming with FE-19 |
+| Question                                                    | Exists?                                                                   | Where                                                                                | Gap?                                                                                              | Blocker for FE-19/20/21?                                                                     |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Sign-up doesn't duplicate an existing account               | Yes                                                                       | `link-account.mjs:9-16` (`findOAuthUser`)                                            | No                                                                                                | No                                                                                           |
+| Sign-in doesn't silently create an unwanted account         | By design, auto-creates on first sign-in (no `disableImplicitSignUp` set) | `auth.config.ts:29-44`                                                               | Design choice, not a bug, given SSO-only auth                                                     | No                                                                                           |
+| New-vs-existing signal in native `idToken` sign-in response | No                                                                        | `sign-in.mjs:189-195` omits `isRegister`                                             | Yes                                                                                               | No, if onboarding routing uses profile state instead — confirm with FE-19                    |
+| OpenAPI documents the `idToken` flow mobile likely uses     | No                                                                        | `auth.openapi.ts:183-235` only covers redirect flow                                  | Yes                                                                                               | No (doc-only; `@better-auth/expo` client isn't OpenAPI-driven)                               |
+| `@ku.th` domain enforced                                    | Yes, twice (Google `hd` check pre-empts app check)                        | `google.mjs:94-112`, `auth.policy.ts:15-22`                                          | `assertAllowedEmail`/`EMAIL_DOMAIN_NOT_ALLOWED` effectively unreachable; docs describe wrong code | No (rejection works), but confirm client doesn't branch on the undocumented-to-not-fire code |
+| Session shape documented                                    | Partially                                                                 | `auth.openapi.ts:105-140` (get-session) vs. undocumented `sign-in.mjs:190-195` shape | Yes                                                                                               | No                                                                                           |
+| Expiry/refresh behavior                                     | Yes, library default, rolling                                             | `create-context.mjs:146-148`, `session.mjs:205-239`                                  | Undocumented/untested in-repo, but correct                                                        | No                                                                                           |
+| Revocation                                                  | Yes, library default                                                      | `session.mjs:405-505`                                                                | Undocumented/untested in-repo, not exposed in OpenAPI                                             | No                                                                                           |
+| Unauthorized error codes                                    | Yes, two surfaces (better-auth native vs. app envelope)                   | see above                                                                            | Divergence between documented and actual domain-rejection code                                    | No, but recommend confirming with FE-19                                                      |
 
 **Overall**: no functional blockers found for FE-19/20/21 to build a working Google sign-in +
 session flow against today's `src/modules/auth/**`. The gaps found are documentation/test-coverage

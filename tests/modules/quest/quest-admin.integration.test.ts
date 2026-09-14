@@ -21,6 +21,7 @@ import { tag } from '@/database/schema/tag.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
+import { encodeCursor } from '@/shared/cursor';
 
 import { randomUUID } from 'node:crypto';
 
@@ -43,7 +44,7 @@ const memberAuthApp = new Elysia({ name: 'quest-admin-member-test-auth' }).use(
     password: memberPassword,
     firstName: 'Quest',
     lastName: 'Member',
-  }),
+  })
 );
 let memberCookie = '';
 
@@ -65,13 +66,14 @@ let editRequestId = '';
 let teamId = '';
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
-const adminRequest = (path: string) => app.handle(new Request(`http://localhost${path}`, {
-  headers: { cookie: adminCookie },
-}));
+const adminRequest = (path: string) =>
+  app.handle(
+    new Request(`http://localhost${path}`, {
+      headers: { cookie: adminCookie },
+    })
+  );
 
 beforeAll(async () => {
   await sql`select 1`;
@@ -79,11 +81,20 @@ beforeAll(async () => {
 
   await db.insert(authUser).values([
     { id: hirerId, email: `${hirerId}@ku.th`, firstName: 'Admin', lastName: 'Hirer' },
-    ...workerIds.map((id, index) => ({ id, email: `${id}@ku.th`, firstName: 'Admin', lastName: `Worker ${index}` })),
+    ...workerIds.map((id, index) => ({
+      id,
+      email: `${id}@ku.th`,
+      firstName: 'Admin',
+      lastName: `Worker ${index}`,
+    })),
   ]);
   await db.insert(tag).values({ id: tagId, name: `Admin quest test ${tagId}` });
 
-  const seedAuth = createAdminAuth({ allowSignUp: true, autoSignIn: false, markEmailVerified: true });
+  const seedAuth = createAdminAuth({
+    allowSignUp: true,
+    autoSignIn: false,
+    markEmailVerified: true,
+  });
   await seedAuth.api.signUpEmail({
     body: {
       email: adminEmail,
@@ -93,14 +104,19 @@ beforeAll(async () => {
       lastName: 'Admin',
     },
   });
-  const loginResponse = await app.handle(new Request('http://localhost/api/admin/auth/sign-in/email', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-  }));
+  const loginResponse = await app.handle(
+    new Request('http://localhost/api/admin/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail, password: adminPassword }),
+    })
+  );
   if (loginResponse.status !== 200) throw new Error('Admin test session could not be created.');
   adminCookie = getCookieHeader(loginResponse);
-  const [admin] = await db.select({ id: authAdmin.id }).from(authAdmin).where(eq(authAdmin.email, adminEmail));
+  const [admin] = await db
+    .select({ id: authAdmin.id })
+    .from(authAdmin)
+    .where(eq(authAdmin.email, adminEmail));
   adminId = admin!.id;
 
   const memberLogin = await memberAuthApp.handle(
@@ -108,9 +124,10 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: memberEmail, password: memberPassword }),
-    }),
+    })
   );
-  if (memberLogin.status !== 200) throw new Error(`Member authentication failed: ${memberLogin.status}`);
+  if (memberLogin.status !== 200)
+    throw new Error(`Member authentication failed: ${memberLogin.status}`);
   memberCookie = getCookieHeader(memberLogin);
 
   openQuestId = randomUUID();
@@ -304,16 +321,20 @@ afterAll(async () => {
 describe('Admin Quest API routes', () => {
   it('requires Admin authentication for Admin Quest endpoints', async () => {
     const list = await app.handle(new Request('http://localhost/api/v1/admin/quests'));
-    const detail = await app.handle(new Request(`http://localhost/api/v1/admin/quests/${randomUUID()}`));
-    const command = await app.handle(new Request(`http://localhost/api/v1/admin/quests/${randomUUID()}/hide`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'idempotency-key': 'admin-auth-check',
-        'if-match': '1',
-      },
-      body: JSON.stringify({ reasonCode: 'POLICY_REVIEW' }),
-    }));
+    const detail = await app.handle(
+      new Request(`http://localhost/api/v1/admin/quests/${randomUUID()}`)
+    );
+    const command = await app.handle(
+      new Request(`http://localhost/api/v1/admin/quests/${randomUUID()}/hide`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'admin-auth-check',
+          'if-match': '1',
+        },
+        body: JSON.stringify({ reasonCode: 'POLICY_REVIEW' }),
+      })
+    );
 
     expect(list.status).toBe(401);
     expect(detail.status).toBe(401);
@@ -321,12 +342,16 @@ describe('Admin Quest API routes', () => {
   });
 
   it('rejects a Member Session on Admin Quest endpoints', async () => {
-    const list = await app.handle(new Request('http://localhost/api/v1/admin/quests', {
-      headers: { cookie: memberCookie },
-    }));
-    const detail = await app.handle(new Request(`http://localhost/api/v1/admin/quests/${openQuestId}`, {
-      headers: { cookie: memberCookie },
-    }));
+    const list = await app.handle(
+      new Request('http://localhost/api/v1/admin/quests', {
+        headers: { cookie: memberCookie },
+      })
+    );
+    const detail = await app.handle(
+      new Request(`http://localhost/api/v1/admin/quests/${openQuestId}`, {
+        headers: { cookie: memberCookie },
+      })
+    );
 
     expect(list.status).toBe(403);
     expect(detail.status).toBe(403);
@@ -334,89 +359,179 @@ describe('Admin Quest API routes', () => {
 
   it('publishes the Admin Quest contract in OpenAPI', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
-    const document = await response.json() as {
+    const document = (await response.json()) as {
       paths: Record<string, Record<string, { operationId?: string; security?: unknown }>>;
     };
 
     expect(response.status).toBe(200);
     expect(document.paths['/api/v1/admin/quests']?.get?.operationId).toBe('listAdminQuests');
-    expect(document.paths['/api/v1/admin/quests/{questId}']?.get?.operationId).toBe('getAdminQuestDetail');
+    expect(document.paths['/api/v1/admin/quests/{questId}']?.get?.operationId).toBe(
+      'getAdminQuestDetail'
+    );
   });
 
   it('returns 404 for a Quest that does not exist', async () => {
     const response = await adminRequest(`/api/v1/admin/quests/${randomUUID()}`);
-    const body = await response.json() as { error: { code: string } };
+    const body = (await response.json()) as { error: { code: string } };
 
     expect(response.status).toBe(404);
     expect(body.error.code).toBe('QUEST_NOT_FOUND');
   });
 
   it('lists Quests across states with filters, hidden visibility, and cursor pagination', async () => {
-    type ListResponse = { data: { items: Array<Record<string, unknown>>; nextCursor: string | null } };
+    type ListResponse = {
+      data: { items: Array<Record<string, unknown>>; nextCursor: string | null };
+    };
 
-    const openOnly = await adminRequest('/api/v1/admin/quests?status=QUEST_OPEN&hidden=false&limit=50');
-    const openBody = await openOnly.json() as ListResponse;
+    const openOnly = await adminRequest(
+      '/api/v1/admin/quests?status=QUEST_OPEN&hidden=false&limit=50'
+    );
+    const openBody = (await openOnly.json()) as ListResponse;
     expect(openOnly.status).toBe(200);
     expect(openBody.data.items.map((item) => item.id)).toEqual(
-      expect.arrayContaining([openQuestId, v2QuestId]),
+      expect.arrayContaining([openQuestId, v2QuestId])
     );
     expect(openBody.data.items.every((item) => item.questStatus === 'QUEST_OPEN')).toBe(true);
 
     const hiddenOnly = await adminRequest('/api/v1/admin/quests?hidden=true&limit=50');
-    const hiddenBody = await hiddenOnly.json() as ListResponse;
+    const hiddenBody = (await hiddenOnly.json()) as ListResponse;
     expect(hiddenOnly.status).toBe(200);
     expect(hiddenBody.data.items.map((item) => item.id)).toContain(hiddenQuestId);
     expect(hiddenBody.data.items.every((item) => item.hiddenAt !== null)).toBe(true);
 
-    const firstPage = await adminRequest('/api/v1/admin/quests?status=QUEST_OPEN&hidden=false&limit=1&sort=newest');
-    const firstPageBody = await firstPage.json() as ListResponse;
+    const firstPage = await adminRequest(
+      '/api/v1/admin/quests?status=QUEST_OPEN&hidden=false&limit=1&sort=newest'
+    );
+    const firstPageBody = (await firstPage.json()) as ListResponse;
     expect(firstPage.status).toBe(200);
     expect(firstPageBody.data.items).toHaveLength(1);
     expect(firstPageBody.data.nextCursor).toBeString();
 
     const secondPage = await adminRequest(
-      `/api/v1/admin/quests?status=QUEST_OPEN&hidden=false&limit=1&sort=newest&cursor=${encodeURIComponent(firstPageBody.data.nextCursor!)}`,
+      `/api/v1/admin/quests?status=QUEST_OPEN&hidden=false&limit=1&sort=newest&cursor=${encodeURIComponent(firstPageBody.data.nextCursor!)}`
     );
-    const secondPageBody = await secondPage.json() as ListResponse;
+    const secondPageBody = (await secondPage.json()) as ListResponse;
     expect(secondPage.status).toBe(200);
     expect(secondPageBody.data.items).toHaveLength(1);
     expect(new Set([openQuestId, v2QuestId])).toEqual(
-      new Set([firstPageBody.data.items[0]?.id as string, secondPageBody.data.items[0]?.id as string]),
+      new Set([
+        firstPageBody.data.items[0]?.id as string,
+        secondPageBody.data.items[0]?.id as string,
+      ])
     );
 
     const invalidCursor = await adminRequest('/api/v1/admin/quests?cursor=not-valid-base64url!!');
     expect(invalidCursor.status).toBe(400);
   });
 
+  it('traverses microsecond-tied Quests exactly once in both sort directions and rejects a deleted cursor anchor', async () => {
+    type ListResponse = {
+      success: boolean;
+      data: { items: Array<{ id: string }>; nextCursor: string | null };
+    };
+
+    const token = `cursor-ms-${randomUUID()}`;
+    const seedQuestAt = async (createdAt: string): Promise<string> => {
+      const id = randomUUID();
+      questIds.push(id);
+      await sql`
+        insert into quest
+          (id, hirer_id, title, "condition", mode, participation, quest_status,
+           reward_satang, tag_id, start_time, created_at)
+        values (
+          ${id}, ${hirerId}, ${`Microsecond cursor quest ${token}`}, ${'Do the work'},
+          'NO_CANDIDATE', 'SOLO', 'QUEST_OPEN', 1000, ${tagId},
+          '2030-09-01T00:00:00Z', ${createdAt}::timestamptz
+        )
+      `;
+      return id;
+    };
+
+    const first = await seedQuestAt('2030-09-01T00:00:00.100200Z');
+    const tieFirst = await seedQuestAt('2030-09-01T00:00:00.100800Z');
+    const tieSecond = await seedQuestAt('2030-09-01T00:00:00.100800Z');
+    const last = await seedQuestAt('2030-09-01T00:00:00.101400Z');
+    const tieAscending = [tieFirst, tieSecond].sort((left, right) => (left < right ? -1 : 1));
+
+    const readEveryPage = async (sort: 'newest' | 'oldest'): Promise<string[]> => {
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 8; page += 1) {
+        const params = new URLSearchParams({ q: token, sort, limit: '1' });
+        if (cursor) params.set('cursor', cursor);
+        // Each page cursor comes from the previous response, so these requests
+        // must remain sequential.
+        // eslint-disable-next-line no-await-in-loop
+        const response = await adminRequest(`/api/v1/admin/quests?${params.toString()}`);
+        expect(response.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const body = (await response.json()) as ListResponse;
+        expect(body.success).toBe(true);
+        ids.push(...body.data.items.map((item) => item.id));
+        cursor = body.data.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      return ids;
+    };
+
+    expect(await readEveryPage('oldest')).toEqual([first, ...tieAscending, last]);
+    expect(await readEveryPage('newest')).toEqual([last, ...tieAscending.reverse(), first]);
+
+    // A Quest can be deleted while a client still holds its cursor. The list
+    // must reject the stale anchor instead of returning a silent empty page.
+    await db.delete(quest).where(eq(quest.id, first));
+    const staleCursor = encodeCursor({
+      id: first,
+      startTime: '2030-09-01T00:00:00.100200Z',
+    });
+    const staleResponse = await adminRequest(
+      `/api/v1/admin/quests?cursor=${encodeURIComponent(staleCursor)}`
+    );
+    const staleBody = (await staleResponse.json()) as {
+      success: boolean;
+      error?: { code: string; message: string };
+    };
+    expect(staleResponse.status).toBe(400);
+    expect(staleBody.success).toBe(false);
+    expect(staleBody.error?.code).toBe('INVALID_CURSOR');
+  });
+
   it('searches Quest title and description within the Admin filter scope', async () => {
-    type ListResponse = { data: { items: Array<Record<string, unknown>>; nextCursor: string | null } };
+    type ListResponse = {
+      data: { items: Array<Record<string, unknown>>; nextCursor: string | null };
+    };
 
     const byTitle = await adminRequest('/api/v1/admin/quests?q=Hidden%20list%20quest&limit=50');
-    const byTitleBody = await byTitle.json() as ListResponse;
+    const byTitleBody = (await byTitle.json()) as ListResponse;
     expect(byTitle.status).toBe(200);
     expect(byTitleBody.data.items.map((item) => item.id)).toContain(hiddenQuestId);
     expect(byTitleBody.data.items.map((item) => item.id)).not.toContain(openQuestId);
 
-    const byDescription = await adminRequest('/api/v1/admin/quests?q=Full%20facet%20quest&limit=50');
-    const byDescriptionBody = await byDescription.json() as ListResponse;
+    const byDescription = await adminRequest(
+      '/api/v1/admin/quests?q=Full%20facet%20quest&limit=50'
+    );
+    const byDescriptionBody = (await byDescription.json()) as ListResponse;
     expect(byDescription.status).toBe(200);
     expect(byDescriptionBody.data.items.map((item) => item.id)).toContain(detailQuestId);
 
-    const withFilter = await adminRequest('/api/v1/admin/quests?q=list%20quest&hidden=false&limit=50');
-    const withFilterBody = await withFilter.json() as ListResponse;
+    const withFilter = await adminRequest(
+      '/api/v1/admin/quests?q=list%20quest&hidden=false&limit=50'
+    );
+    const withFilterBody = (await withFilter.json()) as ListResponse;
     expect(withFilter.status).toBe(200);
     expect(withFilterBody.data.items.map((item) => item.id)).toContain(openQuestId);
     expect(withFilterBody.data.items.map((item) => item.id)).not.toContain(hiddenQuestId);
 
     const wildcard = await adminRequest('/api/v1/admin/quests?q=%25&limit=50');
-    const wildcardBody = await wildcard.json() as ListResponse;
+    const wildcardBody = (await wildcard.json()) as ListResponse;
     expect(wildcard.status).toBe(200);
     expect(wildcardBody.data.items.map((item) => item.id)).not.toContain(openQuestId);
   });
 
   it('reads full Quest detail facets for Admin review', async () => {
     const response = await adminRequest(`/api/v1/admin/quests/${detailQuestId}`);
-    const body = await response.json() as { data: Record<string, any> };
+    const body = (await response.json()) as { data: Record<string, any> };
 
     expect(response.status).toBe(200);
     expect(body.data).toMatchObject({
@@ -448,16 +563,24 @@ describe('Admin Quest API routes', () => {
         files: [expect.objectContaining({ fileId, contentType: 'image/png', sizeBytes: 2048 })],
       }),
     ]);
-    expect(body.data.editHistory).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'FIELD_EDIT', fieldName: 'description', editedByUserId: hirerId }),
-      expect.objectContaining({
-        kind: 'EDIT_REQUEST',
-        id: editRequestId,
-        apiVersion: 'v1',
-        requestStatus: 'EDIT_REQUEST_APPROVED',
-        responses: [expect.objectContaining({ workerId: workerIds[0], decision: 'EDIT_RESPONSE_APPROVED' })],
-      }),
-    ]));
+    expect(body.data.editHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'FIELD_EDIT',
+          fieldName: 'description',
+          editedByUserId: hirerId,
+        }),
+        expect.objectContaining({
+          kind: 'EDIT_REQUEST',
+          id: editRequestId,
+          apiVersion: 'v1',
+          requestStatus: 'EDIT_REQUEST_APPROVED',
+          responses: [
+            expect.objectContaining({ workerId: workerIds[0], decision: 'EDIT_RESPONSE_APPROVED' }),
+          ],
+        }),
+      ])
+    );
     expect(body.data.adminActions).toEqual([
       expect.objectContaining({
         action: 'QUEST_REVIEW_NOTE',
@@ -469,7 +592,7 @@ describe('Admin Quest API routes', () => {
 
   it('reads team candidates for a Group Quest', async () => {
     const response = await adminRequest(`/api/v1/admin/quests/${teamQuestId}`);
-    const body = await response.json() as { data: Record<string, any> };
+    const body = (await response.json()) as { data: Record<string, any> };
 
     expect(response.status).toBe(200);
     expect(body.data.candidates.teams).toEqual([
@@ -488,7 +611,7 @@ describe('Admin Quest API routes', () => {
 
   it('reads v2 edit requests in edit history', async () => {
     const response = await adminRequest(`/api/v1/admin/quests/${v2QuestId}`);
-    const body = await response.json() as { data: Record<string, any> };
+    const body = (await response.json()) as { data: Record<string, any> };
 
     expect(response.status).toBe(200);
     expect(body.data.editHistory).toEqual([

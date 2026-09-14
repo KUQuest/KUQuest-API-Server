@@ -65,7 +65,7 @@ type MemberCommandOptions = {
 };
 
 const memberCommand = (
-  options: MemberCommandOptions,
+  options: MemberCommandOptions
 ): AdminActionCommandInput<AdminActionSafeObject> => {
   const revision: AdminActionCommandRevision = options.expectedTimestamp
     ? { expectedTimestamp: options.expectedTimestamp }
@@ -111,7 +111,8 @@ const memberCommand = (
             });
           if (!updated) throw new Error('Test Member update failed.');
           options.onApply?.();
-          if (options.failAfterUpdate) throw new Error('Test command failed after resource update.');
+          if (options.failAfterUpdate)
+            throw new Error('Test command failed after resource update.');
 
           return {
             resourceVersion: context.expectedTimestamp === null ? updated.version : null,
@@ -144,10 +145,7 @@ const rejectionMessage = async (operation: Promise<unknown>): Promise<string> =>
   return '';
 };
 
-const expectAdminActionError = async (
-  operation: Promise<unknown>,
-  code: AdminActionErrorCode,
-) => {
+const expectAdminActionError = async (operation: Promise<unknown>, code: AdminActionErrorCode) => {
   let actual: string | undefined;
   try {
     await operation;
@@ -163,7 +161,7 @@ beforeAll(async () => {
   } catch (cause) {
     throw new Error(
       'These tests need PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause },
+      { cause }
     );
   }
 });
@@ -174,11 +172,13 @@ describe('Admin Action service', () => {
     const memberId = await createMember();
     const requestKey = crypto.randomUUID();
 
-    const result = await adminActionService.executeCommand(memberCommand({
-      adminId,
-      memberId,
-      requestKey,
-    }));
+    const result = await adminActionService.executeCommand(
+      memberCommand({
+        adminId,
+        memberId,
+        requestKey,
+      })
+    );
 
     expect(result).toMatchObject({
       resourceSummary: { id: memberId, version: 2, status: 'FROZEN' },
@@ -218,12 +218,14 @@ describe('Admin Action service', () => {
     if (!current) throw new Error('Test Member timestamp was not found.');
     const expectedTimestamp = current.updatedAt;
 
-    const result = await adminActionService.executeCommand(memberCommand({
-      adminId,
-      memberId,
-      requestKey,
-      expectedTimestamp,
-    }));
+    const result = await adminActionService.executeCommand(
+      memberCommand({
+        adminId,
+        memberId,
+        requestKey,
+        expectedTimestamp,
+      })
+    );
 
     expect(result.resourceVersion).toBeNull();
     expect(result.resourceTimestamp).toBeInstanceOf(Date);
@@ -260,13 +262,15 @@ describe('Admin Action service', () => {
     expect(applyCount).toBe(1);
 
     await expectAdminActionError(
-      adminActionService.executeCommand(memberCommand({
-        adminId,
-        memberId,
-        requestKey,
-        request: { targetStatus: 'SUSPENDED' },
-      })),
-      'ADMIN_ACTION_KEY_REUSED',
+      adminActionService.executeCommand(
+        memberCommand({
+          adminId,
+          memberId,
+          requestKey,
+          request: { targetStatus: 'SUSPENDED' },
+        })
+      ),
+      'ADMIN_ACTION_KEY_REUSED'
     );
     expect(applyCount).toBe(1);
   });
@@ -292,7 +296,9 @@ describe('Admin Action service', () => {
 
     expect(results[0]).toEqual(results[1]);
     expect(applyCount).toBe(1);
-    expect(await db.select().from(adminAction).where(eq(adminAction.requestKey, requestKey))).toHaveLength(1);
+    expect(
+      await db.select().from(adminAction).where(eq(adminAction.requestKey, requestKey))
+    ).toHaveLength(1);
   });
 
   it('rejects a stale command before applying or auditing it', async () => {
@@ -306,16 +312,18 @@ describe('Admin Action service', () => {
     let applyCount = 0;
 
     await expectAdminActionError(
-      adminActionService.executeCommand(memberCommand({
-        adminId,
-        memberId,
-        requestKey,
-        expectedVersion: 1,
-        onApply: () => {
-          applyCount += 1;
-        },
-      })),
-      'ADMIN_ACTION_CONFLICT',
+      adminActionService.executeCommand(
+        memberCommand({
+          adminId,
+          memberId,
+          requestKey,
+          expectedVersion: 1,
+          onApply: () => {
+            applyCount += 1;
+          },
+        })
+      ),
+      'ADMIN_ACTION_CONFLICT'
     );
 
     const [member] = await db
@@ -324,7 +332,9 @@ describe('Admin Action service', () => {
       .where(eq(authUser.id, memberId));
     expect(member?.version).toBe(2);
     expect(applyCount).toBe(0);
-    expect(await db.select().from(adminAction).where(eq(adminAction.requestKey, requestKey))).toHaveLength(0);
+    expect(
+      await db.select().from(adminAction).where(eq(adminAction.requestKey, requestKey))
+    ).toHaveLength(0);
   });
 
   it('rolls back the resource update and Admin Action together', async () => {
@@ -333,12 +343,14 @@ describe('Admin Action service', () => {
     const requestKey = crypto.randomUUID();
 
     await expect(
-      adminActionService.executeCommand(memberCommand({
-        adminId,
-        memberId,
-        requestKey,
-        failAfterUpdate: true,
-      })),
+      adminActionService.executeCommand(
+        memberCommand({
+          adminId,
+          memberId,
+          requestKey,
+          failAfterUpdate: true,
+        })
+      )
     ).rejects.toThrow('Test command failed after resource update.');
 
     const [member] = await db
@@ -346,7 +358,9 @@ describe('Admin Action service', () => {
       .from(authUser)
       .where(eq(authUser.id, memberId));
     expect(member?.version).toBe(1);
-    expect(await db.select().from(adminAction).where(eq(adminAction.requestKey, requestKey))).toHaveLength(0);
+    expect(
+      await db.select().from(adminAction).where(eq(adminAction.requestKey, requestKey))
+    ).toHaveLength(0);
   });
 
   it('honors the caller transaction boundary on rollback', async () => {
@@ -359,7 +373,7 @@ describe('Admin Action service', () => {
       db.transaction(async (transaction) => {
         await adminActionService.executeCommandInTransaction(transaction, input);
         throw new Error('Caller transaction rolled back.');
-      }),
+      })
     ).rejects.toThrow('Caller transaction rolled back.');
 
     const [member] = await db
@@ -367,7 +381,9 @@ describe('Admin Action service', () => {
       .from(authUser)
       .where(eq(authUser.id, memberId));
     expect(member?.version).toBe(1);
-    expect(await db.select().from(adminAction).where(eq(adminAction.requestKey, requestKey))).toHaveLength(0);
+    expect(
+      await db.select().from(adminAction).where(eq(adminAction.requestKey, requestKey))
+    ).toHaveLength(0);
   });
 
   it('rejects free-form reasons and unsafe metadata before writing', async () => {
@@ -375,31 +391,39 @@ describe('Admin Action service', () => {
     const memberId = await createMember();
 
     await expectAdminActionError(
-      adminActionService.executeCommand(memberCommand({
-        adminId,
-        memberId,
-        reasonCode: 'free form reason',
-      })),
-      'ADMIN_ACTION_INVALID_REASON_CODE',
+      adminActionService.executeCommand(
+        memberCommand({
+          adminId,
+          memberId,
+          reasonCode: 'free form reason',
+        })
+      ),
+      'ADMIN_ACTION_INVALID_REASON_CODE'
     );
     await expectAdminActionError(
-      adminActionService.executeCommand(memberCommand({
-        adminId,
-        memberId,
-        metadata: { messageText: 'private message' },
-      })),
-      'ADMIN_ACTION_UNSAFE_METADATA',
+      adminActionService.executeCommand(
+        memberCommand({
+          adminId,
+          memberId,
+          metadata: { messageText: 'private message' },
+        })
+      ),
+      'ADMIN_ACTION_UNSAFE_METADATA'
     );
     await expectAdminActionError(
-      adminActionService.executeCommand(memberCommand({
-        adminId,
-        memberId,
-        summary: { evidence: 'raw evidence' },
-      })),
-      'ADMIN_ACTION_UNSAFE_METADATA',
+      adminActionService.executeCommand(
+        memberCommand({
+          adminId,
+          memberId,
+          summary: { evidence: 'raw evidence' },
+        })
+      ),
+      'ADMIN_ACTION_UNSAFE_METADATA'
     );
 
-    expect(await db.select().from(adminAction).where(eq(adminAction.resourceId, memberId))).toHaveLength(0);
+    expect(
+      await db.select().from(adminAction).where(eq(adminAction.resourceId, memberId))
+    ).toHaveLength(0);
   });
 
   it('rejects a missing reason and a Student identity as the Admin actor', async () => {
@@ -407,19 +431,23 @@ describe('Admin Action service', () => {
     const memberId = await createMember();
 
     await expectAdminActionError(
-      adminActionService.executeCommand(memberCommand({
-        adminId,
-        memberId,
-        reasonCode: undefined,
-      })),
-      'ADMIN_ACTION_REASON_REQUIRED',
+      adminActionService.executeCommand(
+        memberCommand({
+          adminId,
+          memberId,
+          reasonCode: undefined,
+        })
+      ),
+      'ADMIN_ACTION_REASON_REQUIRED'
     );
     await expectAdminActionError(
-      adminActionService.executeCommand(memberCommand({
-        adminId: memberId,
-        memberId,
-      })),
-      'ADMIN_ACTION_ADMIN_NOT_FOUND',
+      adminActionService.executeCommand(
+        memberCommand({
+          adminId: memberId,
+          memberId,
+        })
+      ),
+      'ADMIN_ACTION_ADMIN_NOT_FOUND'
     );
   });
 
@@ -469,15 +497,19 @@ describe('Admin Action service', () => {
     const memberId = await createMember();
     const result = await adminActionService.executeCommand(memberCommand({ adminId, memberId }));
 
-    expect(await rejectionMessage(
-      db
-        .update(adminAction)
-        .set({ reasonCode: 'SAFETY_REVIEW' })
-        .where(eq(adminAction.id, result.adminActionId))
-        .execute(),
-    )).toContain('Admin Action is immutable');
-    expect(await rejectionMessage(
-      db.delete(adminAction).where(eq(adminAction.id, result.adminActionId)).execute(),
-    )).toContain('Admin Action is immutable');
+    expect(
+      await rejectionMessage(
+        db
+          .update(adminAction)
+          .set({ reasonCode: 'SAFETY_REVIEW' })
+          .where(eq(adminAction.id, result.adminActionId))
+          .execute()
+      )
+    ).toContain('Admin Action is immutable');
+    expect(
+      await rejectionMessage(
+        db.delete(adminAction).where(eq(adminAction.id, result.adminActionId)).execute()
+      )
+    ).toContain('Admin Action is immutable');
   });
 });

@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 export const payoutStatusSchema = t.Union([
   t.Literal('PENDING_ADMIN_APPROVAL'),
@@ -11,13 +12,19 @@ export const payoutStatusSchema = t.Union([
 
 const dateTime = t.String({ format: 'date-time' });
 
-export const payoutQuoteCreateSchema = t.Object({
-  receiptSatang: t.Integer({ minimum: 1 }),
-}, { additionalProperties: false });
+export const payoutQuoteCreateSchema = t.Object(
+  {
+    receiptSatang: t.Integer({ minimum: 1 }),
+  },
+  { additionalProperties: false }
+);
 
-export const payoutCreateSchema = t.Object({
-  quoteId: t.String({ format: 'uuid' }),
-}, { additionalProperties: false });
+export const payoutCreateSchema = t.Object(
+  {
+    quoteId: t.String({ format: 'uuid' }),
+  },
+  { additionalProperties: false }
+);
 
 export const payoutIdempotencyHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
@@ -28,7 +35,7 @@ export const payoutParamsSchema = t.Object({
 });
 
 export const payoutListQuerySchema = t.Object({
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
 });
 
 export const payoutQuoteResponseSchema = t.Object({
@@ -102,17 +109,19 @@ export const payoutListResponseSchema = t.Object({
 
 export const payoutStatusHistoryResponseSchema = t.Object({
   success: t.Literal(true),
-  data: t.Array(t.Object({
-    id: t.String({ format: 'uuid' }),
-    fromStatus: t.Union([payoutStatusSchema, t.Null()]),
-    toStatus: payoutStatusSchema,
-    providerStatus: t.Union([t.String(), t.Null()]),
-    actorUserId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
-    actorAdminId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
-    source: t.String(),
-    reason: t.Union([t.String(), t.Null()]),
-    occurredAt: dateTime,
-  })),
+  data: t.Array(
+    t.Object({
+      id: t.String({ format: 'uuid' }),
+      fromStatus: t.Union([payoutStatusSchema, t.Null()]),
+      toStatus: payoutStatusSchema,
+      providerStatus: t.Union([t.String(), t.Null()]),
+      actorUserId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
+      actorAdminId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
+      source: t.String(),
+      reason: t.Union([t.String(), t.Null()]),
+      occurredAt: dateTime,
+    })
+  ),
 });
 
 export type PayoutCreateInput = typeof payoutCreateSchema.static;

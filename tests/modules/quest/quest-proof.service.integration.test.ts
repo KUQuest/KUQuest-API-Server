@@ -17,7 +17,9 @@ const now = new Date('2026-08-27T12:00:00.000Z');
 const questIds: string[] = [];
 const proofIds: string[] = [];
 
-const createFixture = async (status: 'QUEST_IN_PROGRESS' | 'QUEST_SUBMITTED' | 'QUEST_COMPLETED') => {
+const createFixture = async (
+  status: 'QUEST_IN_PROGRESS' | 'QUEST_SUBMITTED' | 'QUEST_COMPLETED'
+) => {
   const questId = randomUUID();
   const proofId = randomUUID();
   questIds.push(questId);
@@ -34,8 +36,17 @@ const createFixture = async (status: 'QUEST_IN_PROGRESS' | 'QUEST_SUBMITTED' | '
     tagId,
     startTime: new Date('2026-08-27T08:00:00.000Z'),
   });
-  await db.insert(questAssignment).values({ questId, workerId, assignmentStatus: 'ASSIGNMENT_ACTIVE' });
-  await db.insert(proofSubmission).values({ id: proofId, questId, workerId, submittedByUserId: workerId, content: 'Done', submittedAt: new Date(now.getTime() - 25 * 60 * 60 * 1000) });
+  await db
+    .insert(questAssignment)
+    .values({ questId, workerId, assignmentStatus: 'ASSIGNMENT_ACTIVE' });
+  await db.insert(proofSubmission).values({
+    id: proofId,
+    questId,
+    workerId,
+    submittedByUserId: workerId,
+    content: 'Done',
+    submittedAt: new Date(now.getTime() - 25 * 60 * 60 * 1000),
+  });
   return { questId, proofId };
 };
 
@@ -48,7 +59,12 @@ beforeAll(async () => {
   await db.insert(authUser).values([
     { id: hirerId, email: `${hirerId}@ku.th`, firstName: 'Hirer', lastName: 'Test' },
     { id: workerId, email: `${workerId}@ku.th`, firstName: 'Worker', lastName: 'Test' },
-    { id: secondWorkerId, email: `${secondWorkerId}@ku.th`, firstName: 'Second', lastName: 'Worker' },
+    {
+      id: secondWorkerId,
+      email: `${secondWorkerId}@ku.th`,
+      firstName: 'Second',
+      lastName: 'Worker',
+    },
   ]);
   await db.insert(tag).values({ id: tagId, name: `Proof test ${tagId}` });
 });
@@ -63,9 +79,23 @@ describe('Quest Proof lifecycle gates', () => {
   it('does not review a pending proof while the Quest is in progress or terminal', async () => {
     const inProgress = await createFixture('QUEST_IN_PROGRESS');
     const terminal = await createFixture('QUEST_COMPLETED');
-    expect((await reviewProof(hirerId, inProgress.questId, inProgress.proofId, 'PROOF_APPROVED', null, now))).toEqual({ outcome: 'invalid-review-state' });
-    expect((await reviewProof(hirerId, terminal.questId, terminal.proofId, 'PROOF_APPROVED', null, now))).toEqual({ outcome: 'invalid-review-state' });
-    const rows = await db.select({ status: proofSubmission.submissionStatus }).from(proofSubmission).where(inArray(proofSubmission.id, [inProgress.proofId, terminal.proofId]));
+    expect(
+      await reviewProof(
+        hirerId,
+        inProgress.questId,
+        inProgress.proofId,
+        'PROOF_APPROVED',
+        null,
+        now
+      )
+    ).toEqual({ outcome: 'invalid-review-state' });
+    expect(
+      await reviewProof(hirerId, terminal.questId, terminal.proofId, 'PROOF_APPROVED', null, now)
+    ).toEqual({ outcome: 'invalid-review-state' });
+    const rows = await db
+      .select({ status: proofSubmission.submissionStatus })
+      .from(proofSubmission)
+      .where(inArray(proofSubmission.id, [inProgress.proofId, terminal.proofId]));
     expect(rows.every(({ status }) => status === 'PROOF_PENDING')).toBe(true);
   });
 
@@ -77,9 +107,18 @@ describe('Quest Proof lifecycle gates', () => {
     expect(approved).toContain(submitted.proofId);
     expect(approved).not.toContain(inProgress.proofId);
     expect(approved).not.toContain(terminal.proofId);
-    const rows = await db.select({ id: proofSubmission.id, status: proofSubmission.submissionStatus }).from(proofSubmission).where(inArray(proofSubmission.id, [submitted.proofId, inProgress.proofId, terminal.proofId]));
+    const rows = await db
+      .select({ id: proofSubmission.id, status: proofSubmission.submissionStatus })
+      .from(proofSubmission)
+      .where(
+        inArray(proofSubmission.id, [submitted.proofId, inProgress.proofId, terminal.proofId])
+      );
     expect(rows.find(({ id }) => id === submitted.proofId)?.status).toBe('PROOF_APPROVED');
-    expect(rows.filter(({ id }) => id !== submitted.proofId).every(({ status }) => status === 'PROOF_PENDING')).toBe(true);
+    expect(
+      rows
+        .filter(({ id }) => id !== submitted.proofId)
+        .every(({ status }) => status === 'PROOF_PENDING')
+    ).toBe(true);
   });
 
   it('uses 24 hours for a Candidate proof review window', async () => {
@@ -102,7 +141,11 @@ describe('Quest Proof lifecycle gates', () => {
     });
     await db.insert(questAssignment).values([
       { questId: candidateQuestId, workerId, assignmentStatus: 'ASSIGNMENT_ACTIVE' },
-      { questId: candidateQuestId, workerId: secondWorkerId, assignmentStatus: 'ASSIGNMENT_ACTIVE' },
+      {
+        questId: candidateQuestId,
+        workerId: secondWorkerId,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE',
+      },
     ]);
     await db.insert(proofSubmission).values({
       id: candidateProofId,

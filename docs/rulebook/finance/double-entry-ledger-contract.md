@@ -12,12 +12,14 @@ Part of the [Finance Rulebook](finance-rulebook.md). Defines accepted policy for
 There are six canonical account types (`wallet_ledger_accounts.type`):
 
 ### Student Wallet Accounts (Scoped per Wallet)
+
 1. **`SPENDING`**: Holds uncommitted funds for Top-ups, Quest publication, and Earnings conversions.
 2. **`EARNINGS`**: Holds net Quest Rewards earned from completed Assignments.
 3. **`FUNDING_RESERVED`**: Holds committed Quest Escrow funding reservations.
 4. **`RESERVED_FOR_PAYOUTS`**: Holds funds committed to pending Payout requests.
 
 ### Platform Accounts (Global / No Wallet ID)
+
 5. **`PLATFORM_REVENUE`**: Accumulates realized Platform Fees upon successful Quest completion.
 6. **`PLATFORM_SUSPENSE`**: Temporary clearing account for external payment provider settlement.
 
@@ -35,15 +37,15 @@ $$\sum \text{amountSatang} = 0$$
 
 There are seven canonical ledger event types:
 
-| Event Type | Typical Postings |
-| --- | --- |
-| `TOP_UP` | `PLATFORM_SUSPENSE` (credit -) &rarr; Student `SPENDING` (debit +) |
-| `PAYOUT` | Student `RESERVED_FOR_PAYOUTS` (credit -) &rarr; `PLATFORM_SUSPENSE` (debit +) |
-| `FUNDING_RESERVE` | Student `SPENDING` (credit -) &rarr; Student `FUNDING_RESERVED` (debit +) |
-| `FUNDING_RELEASE` | Student `FUNDING_RESERVED` (credit -) &rarr; Student `SPENDING` (debit +) |
-| `FUNDING_SETTLEMENT` | Hirer `FUNDING_RESERVED` (credit -) &rarr; Worker `EARNINGS` (debit +) & `PLATFORM_REVENUE` (debit +) |
-| `EARNINGS_CONVERSION` | Student `EARNINGS` (credit -) &rarr; Student `SPENDING` (debit +) |
-| `ADJUSTMENT` | Direct correction postings between accounts via reversing transaction |
+| Event Type            | Typical Postings                                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------------------------- |
+| `TOP_UP`              | `PLATFORM_SUSPENSE` (credit -) &rarr; Student `SPENDING` (debit +)                                    |
+| `PAYOUT`              | Student `RESERVED_FOR_PAYOUTS` (credit -) &rarr; `PLATFORM_SUSPENSE` (debit +)                        |
+| `FUNDING_RESERVE`     | Student `SPENDING` (credit -) &rarr; Student `FUNDING_RESERVED` (debit +)                             |
+| `FUNDING_RELEASE`     | Student `FUNDING_RESERVED` (credit -) &rarr; Student `SPENDING` (debit +)                             |
+| `FUNDING_SETTLEMENT`  | Hirer `FUNDING_RESERVED` (credit -) &rarr; Worker `EARNINGS` (debit +) & `PLATFORM_REVENUE` (debit +) |
+| `EARNINGS_CONVERSION` | Student `EARNINGS` (credit -) &rarr; Student `SPENDING` (debit +)                                     |
+| `ADJUSTMENT`          | Direct correction postings between accounts via reversing transaction                                 |
 
 ## Immutability and corrections (ADR 0010)
 

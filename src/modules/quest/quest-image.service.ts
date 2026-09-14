@@ -16,7 +16,7 @@ export type SoftDeleteQuestImageInput = {
 
 export const softDeleteQuestImageAndRepack = async (
   transaction: QuestImageTransaction,
-  input: SoftDeleteQuestImageInput,
+  input: SoftDeleteQuestImageInput
 ): Promise<void> => {
   await transaction.delete(questImage).where(eq(questImage.id, input.questImageId));
   await transaction

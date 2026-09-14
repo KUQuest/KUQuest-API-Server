@@ -8,7 +8,11 @@ import {
 } from '@/modules/portfolio/portfolio.controller';
 import * as portfolioService from '@/modules/portfolio/portfolio.service';
 import { portfolioStorage } from '@/modules/portfolio/portfolio.storage';
-import { ImageTooLargeError, ImageUploadError, UnsupportedImageTypeError } from '@/shared/image-storage';
+import {
+  ImageTooLargeError,
+  ImageUploadError,
+  UnsupportedImageTypeError,
+} from '@/shared/image-storage';
 
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
@@ -139,7 +143,7 @@ describe('createOwnPortfolio', () => {
     const upload = spyOn(portfolioStorage, 'upload')
       .mockResolvedValueOnce(uploadedA)
       .mockRejectedValueOnce(
-        new UnsupportedImageTypeError('Image must be a valid JPEG, PNG, or WebP file'),
+        new UnsupportedImageTypeError('Image must be a valid JPEG, PNG, or WebP file')
       );
     const deleteObject = spyOn(portfolioStorage, 'delete').mockResolvedValue();
 
@@ -176,7 +180,7 @@ describe('createOwnPortfolio', () => {
 
   it('returns a safe error when object storage rejects the upload', async () => {
     spyOn(portfolioStorage, 'upload').mockRejectedValue(
-      new ImageUploadError('secret storage detail'),
+      new ImageUploadError('secret storage detail')
     );
 
     const { result, set } = invokeCreate([png('a.png')]);
@@ -213,9 +217,14 @@ describe('updateOwnPortfolio', () => {
 
     expect(await result).toEqual({ success: true });
     expect(set.status).toBeUndefined();
-    expect(portfolioService.updatePortfolio).toHaveBeenCalledWith(studentAuthId, portfolioId, {
-      title: 'Updated',
-    }, undefined);
+    expect(portfolioService.updatePortfolio).toHaveBeenCalledWith(
+      studentAuthId,
+      portfolioId,
+      {
+        title: 'Updated',
+      },
+      undefined
+    );
   });
 
   it('reports a missing or unowned entry as not found', async () => {
@@ -298,7 +307,7 @@ const storedImage = {
 
 const invokeReplaceImage = (
   params: { portfolioId: string; fileId?: string },
-  request?: Request,
+  request?: Request
 ) => {
   const set: { status?: number | string } = {};
 
@@ -334,7 +343,7 @@ describe('replaceOwnPortfolioImage', () => {
       portfolioId,
       storedImage,
       undefined,
-      undefined,
+      undefined
     );
   });
 
@@ -359,7 +368,7 @@ describe('replaceOwnPortfolioImage', () => {
       portfolioId,
       storedImage,
       fileIdOne,
-      undefined,
+      undefined
     );
     expect(deleteObject).toHaveBeenCalledWith('kuquest', 'portfolio/a.png');
     expect(markDeleted).toHaveBeenCalledWith(studentAuthId, fileIdOne);
@@ -428,7 +437,7 @@ describe('deleteOwnPortfolioImage', () => {
       studentAuthId,
       portfolioId,
       fileIdOne,
-      undefined,
+      undefined
     );
   });
 
@@ -494,13 +503,13 @@ describe('replaceOwnPortfolioImage version and failure handling', () => {
       portfolioId,
       storedImage,
       undefined,
-      3,
+      3
     );
   });
 
   it('maps an oversized image to 413 without touching the entry', async () => {
     spyOn(portfolioStorage, 'upload').mockRejectedValue(
-      new ImageTooLargeError('Image must be 5 MB or smaller'),
+      new ImageTooLargeError('Image must be 5 MB or smaller')
     );
     const replace = spyOn(portfolioService, 'replacePortfolioImage');
 
@@ -516,7 +525,7 @@ describe('replaceOwnPortfolioImage version and failure handling', () => {
 
   it('hides the storage detail behind IMAGE_UPLOAD_FAILED', async () => {
     spyOn(portfolioStorage, 'upload').mockRejectedValue(
-      new ImageUploadError('secret storage detail'),
+      new ImageUploadError('secret storage detail')
     );
 
     const { result, set } = invokeReplaceImage({ portfolioId });
@@ -563,7 +572,7 @@ describe('replaceOwnPortfolioImage version and failure handling', () => {
 
 const invokeDeleteImageWith = (
   params: { portfolioId: string; fileId?: string },
-  request?: Request,
+  request?: Request
 ) => {
   const set: { status?: number | string } = {};
 
@@ -595,7 +604,7 @@ describe('deleteOwnPortfolioImage version and failure handling', () => {
       studentAuthId,
       portfolioId,
       fileIdOne,
-      4,
+      4
     );
   });
 

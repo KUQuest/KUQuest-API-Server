@@ -19,7 +19,7 @@ const request = (path: string, method = 'GET', body?: unknown) =>
       method,
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
-    }),
+    })
   );
 
 describe('work experience integration', () => {
@@ -31,7 +31,7 @@ describe('work experience integration', () => {
       [`/api/v1/profile/experience/${randomUUID()}`, 'DELETE'],
     ];
     const responses = await Promise.all(
-      cases.map(([path, method, body]) => request(path, method, body)),
+      cases.map(([path, method, body]) => request(path, method, body))
     );
 
     const bodies = await Promise.all(responses.map((response) => response.json()));
@@ -120,7 +120,8 @@ describe('work experience integration', () => {
     });
 
     expect(response.status).toBe(400);
-    expect((await response.json()).error.code).toBe('VALIDATION');  });
+    expect((await response.json()).error.code).toBe('VALIDATION');
+  });
 
   it('publishes the CRUD operations with authentication and the documented response shapes', async () => {
     const document = (await (

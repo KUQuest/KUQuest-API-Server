@@ -1,9 +1,5 @@
 import { db } from '@/database/client';
-import {
-  quest,
-  questAssignment,
-  questDirectJoinCommand,
-} from '@/database/schema/quest.schema';
+import { quest, questAssignment, questDirectJoinCommand } from '@/database/schema/quest.schema';
 
 import { and, eq, sql } from 'drizzle-orm';
 
@@ -56,9 +52,7 @@ type DirectJoinOutcomeCode =
   | 'idempotency-key-required'
   | 'idempotency-unavailable';
 
-export type DirectJoinOutcome =
-  | AssignmentRow
-  | { outcome: DirectJoinOutcomeCode };
+export type DirectJoinOutcome = AssignmentRow | { outcome: DirectJoinOutcomeCode };
 
 const assignmentFields = {
   id: questAssignment.id,
@@ -103,17 +97,19 @@ type DirectJoinCommand = {
 };
 
 type CommandAcquireResult =
-  | { outcome: DirectJoinOutcomeCode }
-  | { replay: AssignmentRow }
-  | { created: true };
+  { outcome: DirectJoinOutcomeCode } | { replay: AssignmentRow } | { created: true };
 
 const replayOrConflict = async (
   command: DirectJoinCommand,
   workerId: string,
   questId: string,
-  requestHash: string,
+  requestHash: string
 ): Promise<Exclude<CommandAcquireResult, { created: true }>> => {
-  if (command.workerId !== workerId || command.questId !== questId || command.requestHash !== requestHash) {
+  if (
+    command.workerId !== workerId ||
+    command.questId !== questId ||
+    command.requestHash !== requestHash
+  ) {
     return { outcome: 'idempotency-key-reused' as const };
   }
   if (
@@ -144,7 +140,7 @@ const acquireDirectJoinCommand = async (
   workerId: string,
   questId: string,
   requestHash: string,
-  now: Date,
+  now: Date
 ): Promise<CommandAcquireResult> => {
   const [existing] = await transaction
     .select(commandFields)
@@ -197,7 +193,7 @@ const transitionFor = (
   assignmentId: string,
   hirerId: string,
   now: Date,
-  commandId: string,
+  commandId: string
 ): QuestWorkChatMembershipTransition => ({
   producer: 'QUEST_DIRECT_JOIN',
   type: 'workersAccepted',
@@ -225,7 +221,7 @@ const transitionFor = (
 export const joinNoCandidateQuest = async (
   workerId: string,
   questId: string,
-  options: DirectJoinOptions,
+  options: DirectJoinOptions
 ): Promise<DirectJoinOutcome> => {
   const now = options.now ?? new Date();
   const commandId = options.commandId.trim();
@@ -243,7 +239,7 @@ export const joinNoCandidateQuest = async (
       workerId,
       questId,
       requestHash,
-      now,
+      now
     );
     if ('outcome' in command) return command;
     if ('replay' in command) return command.replay;
@@ -275,8 +271,8 @@ export const joinNoCandidateQuest = async (
       .where(
         and(
           eq(questAssignment.questId, questId),
-          eq(questAssignment.assignmentStatus, assignmentStatus.active),
-        ),
+          eq(questAssignment.assignmentStatus, assignmentStatus.active)
+        )
       );
     const joinedCount = Number(activeCount?.count ?? 0);
     if (joinedCount >= current.headcount) return discardCommand('full');
@@ -291,9 +287,10 @@ export const joinNoCandidateQuest = async (
       })
       .returning(assignmentFields);
 
-    const nextStatus = current.participation === questParticipation.solo || joinedCount + 1 === current.headcount
-      ? questStatus.assigned
-      : questStatus.open;
+    const nextStatus =
+      current.participation === questParticipation.solo || joinedCount + 1 === current.headcount
+        ? questStatus.assigned
+        : questStatus.open;
     await transaction
       .update(quest)
       .set({ questStatus: nextStatus, version: sql`${quest.version} + 1`, updatedAt: now })
@@ -305,7 +302,7 @@ export const joinNoCandidateQuest = async (
       assignment.id,
       current.hirerId,
       now,
-      commandId,
+      commandId
     );
     try {
       await writer.applyQuestTransition(transaction, transition);

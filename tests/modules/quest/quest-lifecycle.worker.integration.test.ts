@@ -5,11 +5,11 @@ import {
   proofSubmission,
   quest,
   questAssignment,
+  questCommand,
   questTeam,
   questTeamInvitation,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import { questV2Storage } from '@/modules/quest/quest.storage';
@@ -49,7 +49,9 @@ const createQuest = async (input: Partial<typeof quest.$inferInsert> = {}) => {
 };
 
 const addAssignment = async (questId: string) => {
-  await db.insert(questAssignment).values({ questId, workerId, assignmentStatus: 'ASSIGNMENT_ACTIVE' });
+  await db
+    .insert(questAssignment)
+    .values({ questId, workerId, assignmentStatus: 'ASSIGNMENT_ACTIVE' });
 };
 
 beforeAll(async () => {
@@ -64,13 +66,16 @@ beforeAll(async () => {
   ]);
   await db.insert(tag).values({ id: tagId, name: `Lifecycle ${tagId}` });
   configureQuestWorkChatMembershipWriter({
-    applyQuestTransition: async () => ({ conversationId: 'lifecycle-test-conversation', outcome: 'APPLIED' }),
+    applyQuestTransition: async () => ({
+      conversationId: 'lifecycle-test-conversation',
+      outcome: 'APPLIED',
+    }),
   });
 });
 
 afterAll(async () => {
   configureQuestWorkChatMembershipWriter(undefined);
-  await db.delete(walletIdempotencyKey).where(eq(walletIdempotencyKey.principalUserId, hirerId));
+  await db.delete(questCommand).where(eq(questCommand.principalUserId, hirerId));
   await db.delete(file).where(inArray(file.id, cleanupFileIds));
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(questTeam).where(inArray(questTeam.id, teamIds));
@@ -102,8 +107,10 @@ describe('Quest lifecycle worker', () => {
     });
 
     expect(result.startedQuestIds).toContain(dueId);
-    const rows = await db.select({ id: quest.id, status: quest.questStatus, startedAt: questAssignment.startedAt })
-      .from(quest).leftJoin(questAssignment, eq(questAssignment.questId, quest.id))
+    const rows = await db
+      .select({ id: quest.id, status: quest.questStatus, startedAt: questAssignment.startedAt })
+      .from(quest)
+      .leftJoin(questAssignment, eq(questAssignment.questId, quest.id))
       .where(inArray(quest.id, [dueId, futureId]));
     expect(rows.find((row) => row.id === dueId)?.status).toBe('QUEST_IN_PROGRESS');
     expect(rows.find((row) => row.id === dueId)?.startedAt?.getTime()).toBe(testNow.getTime());
@@ -111,21 +118,38 @@ describe('Quest lifecycle worker', () => {
   });
 
   it('is safe to retry and run concurrently', async () => {
-    const questId = await createQuest({ questStatus: 'QUEST_ASSIGNED', startTime: new Date(testNow.getTime() - 1) });
+    const questId = await createQuest({
+      questStatus: 'QUEST_ASSIGNED',
+      startTime: new Date(testNow.getTime() - 1),
+    });
     await addAssignment(questId);
     const options = { clock: { now: () => testNow }, autoApprove: async () => [] };
-    const [first, second] = await Promise.all([runQuestLifecycleWorker(options), runQuestLifecycleWorker(options)]);
-    expect(first.startedQuestIds.concat(second.startedQuestIds).filter((id) => id === questId).length).toBe(1);
-    const [row] = await db.select({ status: quest.questStatus, startedAt: questAssignment.startedAt })
-      .from(quest).innerJoin(questAssignment, eq(questAssignment.questId, quest.id)).where(eq(quest.id, questId));
+    const [first, second] = await Promise.all([
+      runQuestLifecycleWorker(options),
+      runQuestLifecycleWorker(options),
+    ]);
+    expect(
+      first.startedQuestIds.concat(second.startedQuestIds).filter((id) => id === questId).length
+    ).toBe(1);
+    const [row] = await db
+      .select({ status: quest.questStatus, startedAt: questAssignment.startedAt })
+      .from(quest)
+      .innerJoin(questAssignment, eq(questAssignment.questId, quest.id))
+      .where(eq(quest.id, questId));
     expect(row?.status).toBe('QUEST_IN_PROGRESS');
     expect(row?.startedAt?.getTime()).toBe(testNow.getTime());
   });
 
   it('fails due Quests with missing Proof or confirmation, but keeps a submitted Proof path', async () => {
     const missingProofId = await createQuest({ dueAt: new Date(testNow.getTime() - 1) });
-    const missingConfirmationId = await createQuest({ proofRequired: false, dueAt: new Date(testNow.getTime() - 1) });
-    const submittedId = await createQuest({ questStatus: 'QUEST_SUBMITTED', dueAt: new Date(testNow.getTime() - 1) });
+    const missingConfirmationId = await createQuest({
+      proofRequired: false,
+      dueAt: new Date(testNow.getTime() - 1),
+    });
+    const submittedId = await createQuest({
+      questStatus: 'QUEST_SUBMITTED',
+      dueAt: new Date(testNow.getTime() - 1),
+    });
     await addAssignment(missingProofId);
     await addAssignment(missingConfirmationId);
     await addAssignment(submittedId);
@@ -138,20 +162,37 @@ describe('Quest lifecycle worker', () => {
       submittedAt: new Date(testNow.getTime() - 2 * 60 * 60 * 1000),
     });
 
-    const result = await runQuestLifecycleWorker({ clock: { now: () => testNow }, autoApprove: async () => [] });
-    expect(result.failedQuestIds).toEqual(expect.arrayContaining([missingProofId, missingConfirmationId]));
-    const rows = await db.select({ id: quest.id, status: quest.questStatus, failedAt: quest.failedAt }).from(quest).where(inArray(quest.id, [missingProofId, missingConfirmationId, submittedId]));
+    const result = await runQuestLifecycleWorker({
+      clock: { now: () => testNow },
+      autoApprove: async () => [],
+    });
+    expect(result.failedQuestIds).toEqual(
+      expect.arrayContaining([missingProofId, missingConfirmationId])
+    );
+    const rows = await db
+      .select({ id: quest.id, status: quest.questStatus, failedAt: quest.failedAt })
+      .from(quest)
+      .where(inArray(quest.id, [missingProofId, missingConfirmationId, submittedId]));
     expect(rows.find((row) => row.id === missingProofId)?.status).toBe('QUEST_FAILED');
-    expect(rows.find((row) => row.id === missingProofId)?.failedAt?.getTime()).toBe(testNow.getTime());
+    expect(rows.find((row) => row.id === missingProofId)?.failedAt?.getTime()).toBe(
+      testNow.getTime()
+    );
     expect(rows.find((row) => row.id === missingConfirmationId)?.status).toBe('QUEST_FAILED');
     expect(rows.find((row) => row.id === submittedId)?.status).toBe('QUEST_SUBMITTED');
   });
 
   it('expires only pending invitations and delegates proof auto-approval to its seam', async () => {
-    const questId = await createQuest({ mode: 'CANDIDATE', participation: 'GROUP', questStatus: 'QUEST_OPEN', headcount: 1 });
+    const questId = await createQuest({
+      mode: 'CANDIDATE',
+      participation: 'GROUP',
+      questStatus: 'QUEST_OPEN',
+      headcount: 1,
+    });
     const teamId = crypto.randomUUID();
     teamIds.push(teamId);
-    await db.insert(questTeam).values({ id: teamId, questId, leaderId: workerId, name: 'Lifecycle team' });
+    await db
+      .insert(questTeam)
+      .values({ id: teamId, questId, leaderId: workerId, name: 'Lifecycle team' });
     const invitationId = crypto.randomUUID();
     invitationIds.push(invitationId);
     await db.insert(questTeamInvitation).values({
@@ -166,12 +207,25 @@ describe('Quest lifecycle worker', () => {
     let receivedNow: Date | undefined;
     const result = await runQuestLifecycleWorker({
       clock: { now: () => testNow },
-      autoApprove: async (now) => { receivedNow = now; return ['proof-id']; },
+      autoApprove: async (now) => {
+        receivedNow = now;
+        return ['proof-id'];
+      },
     });
     expect(receivedNow?.getTime()).toBe(testNow.getTime());
     expect(result.autoApprovedProofIds).toEqual(['proof-id']);
-    const [invitation] = await db.select({ status: questTeamInvitation.invitationStatus, respondedAt: questTeamInvitation.respondedAt })
-      .from(questTeamInvitation).where(and(eq(questTeamInvitation.id, invitationId), eq(questTeamInvitation.invitationStatus, 'INVITATION_EXPIRED')));
+    const [invitation] = await db
+      .select({
+        status: questTeamInvitation.invitationStatus,
+        respondedAt: questTeamInvitation.respondedAt,
+      })
+      .from(questTeamInvitation)
+      .where(
+        and(
+          eq(questTeamInvitation.id, invitationId),
+          eq(questTeamInvitation.invitationStatus, 'INVITATION_EXPIRED')
+        )
+      );
     expect(invitation?.respondedAt?.getTime()).toBe(testNow.getTime());
   });
 
@@ -181,12 +235,13 @@ describe('Quest lifecycle worker', () => {
       bucket: 'test-bucket',
       objectKey: `quests/v2/${hirerId}/lifecycle-crashed-upload`,
     };
-    await db.insert(walletIdempotencyKey).values({
+    await db.insert(questCommand).values({
       principalUserId: hirerId,
       operationScope: questV2ImageUploadOperationScope,
       key,
-      requestHash: 'lifecycle-crashed-upload-request',
+      requestHash: 'c'.repeat(64),
       resultData: { upload: { objects: [object] } },
+      processingStatus: 'PROCESSING',
       expiresAt: new Date(testNow.getTime() - 1),
     });
     const deleteObject = spyOn(questV2Storage, 'delete').mockResolvedValue();
@@ -200,10 +255,10 @@ describe('Quest lifecycle worker', () => {
     expect(deleteObject).toHaveBeenCalledWith(object.bucket, object.objectKey);
     expect(
       await db
-        .select({ id: walletIdempotencyKey.id })
-        .from(walletIdempotencyKey)
-        .where(eq(walletIdempotencyKey.key, key)),
-    ).toEqual([]);
+        .select({ status: questCommand.processingStatus })
+        .from(questCommand)
+        .where(eq(questCommand.key, key))
+    ).toEqual([{ status: 'COMPLETED' }]);
   });
 
   it('reports image cleanup errors and continues lifecycle processing', async () => {

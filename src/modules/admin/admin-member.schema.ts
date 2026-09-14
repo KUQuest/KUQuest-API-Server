@@ -1,3 +1,5 @@
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
+
 import { t, type Static } from 'elysia';
 
 const dateTime = t.String({ format: 'date-time' });
@@ -34,14 +36,9 @@ export const adminMemberListItemSchema = t.Object({
 export const adminMemberListQuerySchema = t.Object({
   search: t.Optional(t.String()),
   walletStatus: t.Optional(
-    t.Union([
-      t.Literal('ACTIVE'),
-      t.Literal('FROZEN'),
-      t.Literal('SUSPENDED'),
-      t.Literal('CLOSED'),
-    ]),
+    t.Union([t.Literal('ACTIVE'), t.Literal('FROZEN'), t.Literal('SUSPENDED'), t.Literal('CLOSED')])
   ),
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 100 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
 });
 

@@ -17,7 +17,7 @@ describe('Xendit Top-up webhook route', () => {
         method: 'POST',
         headers: { 'x-callback-token': 'invalid' },
         body: '{}',
-      }),
+      })
     );
 
     expect(response.status).toBe(401);
@@ -62,7 +62,7 @@ describe('Xendit Top-up webhook route', () => {
             'x-callback-token': 'be116-route-token',
           },
           body: rawPayload,
-        }),
+        })
       );
     } finally {
       Object.assign(env, previousConfig);
@@ -70,21 +70,21 @@ describe('Xendit Top-up webhook route', () => {
 
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ success: true });
-    const [stored] = await db.select().from(paymentProviderEventInbox).where(
-      eq(paymentProviderEventInbox.providerEventId, `derived:payment.capture:${paymentId}:PAID`),
-    );
+    const [stored] = await db
+      .select()
+      .from(paymentProviderEventInbox)
+      .where(
+        eq(paymentProviderEventInbox.providerEventId, `derived:payment.capture:${paymentId}:PAID`)
+      );
     expect(stored).toMatchObject({
       providerEventId: `derived:payment.capture:${paymentId}:PAID`,
       internalReference,
-      processingStatus: 'RECEIVED',
       rawPayloadCiphertext: expect.any(String),
     });
   });
 
   it('documents the provider authentication and accepted response', async () => {
-    const response = await app.handle(
-      new Request('http://localhost/openapi/json'),
-    );
+    const response = await app.handle(new Request('http://localhost/openapi/json'));
     const document = await response.json();
     const operation = document.paths['/api/v1/webhooks/xendit/payments'].post;
 

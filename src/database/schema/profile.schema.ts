@@ -29,7 +29,7 @@ export const profileCertificate = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index('profile_certificate_user_idx').on(table.userId)],
+  (table) => [index('profile_certificate_user_idx').on(table.userId)]
 );
 
 export const profilePortfolioItem = pgTable(
@@ -45,7 +45,7 @@ export const profilePortfolioItem = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index('profile_portfolio_item_user_idx').on(table.userId)],
+  (table) => [index('profile_portfolio_item_user_idx').on(table.userId)]
 );
 
 export const profilePortfolioItemImage = pgTable(
@@ -63,10 +63,10 @@ export const profilePortfolioItemImage = pgTable(
   (table) => [
     unique('profile_portfolio_item_image_portfolio_item_id_position_key').on(
       table.portfolioItemId,
-      table.position,
+      table.position
     ),
     index('profile_portfolio_item_image_item_idx').on(table.portfolioItemId),
-  ],
+  ]
 );
 
 export const profileWorkExperience = pgTable(
@@ -89,10 +89,10 @@ export const profileWorkExperience = pgTable(
   (table) => [
     check(
       'profile_work_experience_check',
-      sql`${table.endedAt} IS NULL OR ${table.endedAt} >= ${table.startedAt}`,
+      sql`${table.endedAt} IS NULL OR ${table.endedAt} >= ${table.startedAt}`
     ),
     index('profile_work_experience_user_idx').on(table.userId),
-  ],
+  ]
 );
 
 export const profileCertificateRelations = relations(profileCertificate, ({ one }) => ({
@@ -114,16 +114,19 @@ export const profilePortfolioItemRelations = relations(profilePortfolioItem, ({ 
   images: many(profilePortfolioItemImage),
 }));
 
-export const profilePortfolioItemImageRelations = relations(profilePortfolioItemImage, ({ one }) => ({
-  portfolioItem: one(profilePortfolioItem, {
-    fields: [profilePortfolioItemImage.portfolioItemId],
-    references: [profilePortfolioItem.id],
-  }),
-  file: one(file, {
-    fields: [profilePortfolioItemImage.fileId],
-    references: [file.id],
-  }),
-}));
+export const profilePortfolioItemImageRelations = relations(
+  profilePortfolioItemImage,
+  ({ one }) => ({
+    portfolioItem: one(profilePortfolioItem, {
+      fields: [profilePortfolioItemImage.portfolioItemId],
+      references: [profilePortfolioItem.id],
+    }),
+    file: one(file, {
+      fields: [profilePortfolioItemImage.fileId],
+      references: [file.id],
+    }),
+  })
+);
 
 export const profileWorkExperienceRelations = relations(profileWorkExperience, ({ one }) => ({
   user: one(authUser, {

@@ -5,15 +5,15 @@ stores the backup on the separate PVE host `192.168.1.100`.
 
 ## Policy and timing
 
-| Item | Configuration |
-| --- | --- |
-| Backup type | Full PostgreSQL backup; no incremental backup |
-| Database | `kuquest` in Docker container `postgres-db` |
-| Backup times | `00:00` and `12:00`, `Asia/Bangkok` |
-| Retention | 7 × 24 hours on PVE |
-| RPO | 12 hours, when both scheduled jobs succeed |
-| RTO | 4 hours or less; measured by the restore test |
-| Backup storage | `/mnt/manga-storage/dump/kuquest-db` on PVE |
+| Item           | Configuration                                 |
+| -------------- | --------------------------------------------- |
+| Backup type    | Full PostgreSQL backup; no incremental backup |
+| Database       | `kuquest` in Docker container `postgres-db`   |
+| Backup times   | `00:00` and `12:00`, `Asia/Bangkok`           |
+| Retention      | 7 × 24 hours on PVE                           |
+| RPO            | 12 hours, when both scheduled jobs succeed    |
+| RTO            | 4 hours or less; measured by the restore test |
+| Backup storage | `/mnt/manga-storage/dump/kuquest-db` on PVE   |
 
 The database host uses UTC. The cron file sets `CRON_TZ=Asia/Bangkok`, so the
 schedule uses Bangkok time.

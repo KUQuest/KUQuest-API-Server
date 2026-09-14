@@ -1,4 +1,5 @@
 import { t, type Static } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 const actionFilterSchema = t.String({
   minLength: 1,
@@ -16,7 +17,7 @@ export const adminActivityListQuerySchema = t.Object({
   resourceType: t.Optional(actionFilterSchema),
   resourceId: t.Optional(resourceIdFilterSchema),
   adminId: t.Optional(t.String({ format: 'uuid' })),
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
   sort: t.Optional(t.Union([t.Literal('newest'), t.Literal('oldest')])),
 });

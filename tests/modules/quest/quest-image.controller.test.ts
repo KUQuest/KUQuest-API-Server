@@ -40,9 +40,7 @@ describe('addQuestImagesController', () => {
 
   beforeEach(() => {
     uploadCheckOutcome = undefined;
-    spyOn(questService, 'checkQuestImageUpload').mockImplementation(
-      async () => uploadCheckOutcome,
-    );
+    spyOn(questService, 'checkQuestImageUpload').mockImplementation(async () => uploadCheckOutcome);
   });
 
   it('returns the complete ordered image list with expiring links', async () => {
@@ -84,20 +82,16 @@ describe('addQuestImagesController', () => {
         ],
       },
     });
-    expect(questService.addQuestImages).toHaveBeenCalledWith(
-      hirerId,
-      questId,
-      [
-        expect.objectContaining({
-          bucket: storedImage.bucket,
-          objectKey: storedImage.objectKey,
-        }),
-        expect.objectContaining({
-          bucket: secondStoredImage.bucket,
-          objectKey: secondStoredImage.objectKey,
-        }),
-      ],
-    );
+    expect(questService.addQuestImages).toHaveBeenCalledWith(hirerId, questId, [
+      expect.objectContaining({
+        bucket: storedImage.bucket,
+        objectKey: storedImage.objectKey,
+      }),
+      expect.objectContaining({
+        bucket: secondStoredImage.bucket,
+        objectKey: secondStoredImage.objectKey,
+      }),
+    ]);
   });
 
   it('fails the response when a Quest Image link cannot be built', async () => {

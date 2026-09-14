@@ -6,5 +6,5 @@ export const tag = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     name: varchar('name', { length: 100 }).notNull(),
   },
-  (table) => [unique('tag_name_key').on(table.name)],
+  (table) => [unique('tag_name_key').on(table.name)]
 );

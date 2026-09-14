@@ -24,48 +24,7 @@ Single-context repository: read root `CONTEXT.md` and relevant ADRs under `docs/
 
 ### Clarifying domain context
 
-When a request involves a Quest, Work Chat, Candidate Inquiry Conversation, or
-pre-assignment question, identify the active branch before planning or coding.
-Read the domain docs first. If the context is still missing, ask for these
-facts in this order:
-
-1. The actor: `Hirer`, `Worker`, `Candidate`, `Prospective Worker`, or another
-   `Accepted Participant`.
-2. The Quest State or Status, using the prefixed values in
-   `docs/rulebook/quest/quest-work-chat-rulebook.md`, such as
-   `QUEST_ASSIGNED` or `QUEST_IN_PROGRESS`.
-3. The Quest mode. Ask for the exact mode from the current contract, for example
-   `FIRST_COME_FIRST_SERVED` or `CANDIDATE`. Older documents may call the first
-   mode `NO_CANDIDATE`; flag that conflict instead of choosing silently.
-4. The participation shape, `SINGLE` or `GROUP`, when completion, proof,
-   review, due time, or Reward behavior can differ.
-5. `proofRequired` and `dueAt` when the request concerns Sent Work, Proof
-   Submission, review, deadline, failure, or Reward settlement.
-
-Ask one missing fact at a time when the user is being interviewed. State the
-known context before the question. Do not ask a generic “please give more
-context” question.
-
-Example clarification sequence for “แก้ flow ส่งงาน”:
-
-1. “ตอนนี้หมายถึง `Hirer` ที่ตรวจงาน หรือ `Worker` ที่ส่งงาน?”
-2. “Quest อยู่ใน State ไหน เช่น `QUEST_ASSIGNED` หรือ
-   `QUEST_IN_PROGRESS`?”
-3. “Quest mode เป็น `CANDIDATE` หรือ `FIRST_COME_FIRST_SERVED`?”
-4. “Quest เป็น `SINGLE` หรือ `GROUP` และ `proofRequired` เป็นค่าใด?”
-
-Use the answers to choose the branch. For example, `Hirer` +
-`QUEST_ASSIGNED` points to Quest Edit, while `Worker` +
-`QUEST_IN_PROGRESS` points to Sent Work. A `GROUP` Quest can have
-partial completion and different failure or Reward results, so do not apply a
-`SINGLE` rule without checking the mode and participation shape.
-For a `Prospective Worker` + `QUEST_OPEN` request, use the Candidate Inquiry
-Conversation contract. Do not treat that Member as a Worker or grant Work
-Conversation membership before an `ASSIGNMENT_ACTIVE` Assignment exists.
-
-The clarification is complete only when the relevant actor, Quest State or
-Status, mode, and participation shape are known, or the docs prove that a fact
-does not affect this request.
+For a Quest, Work Chat, Candidate Inquiry Conversation, or pre-assignment request, identify the active branch before planning or coding. When the actor, Quest State, mode, or participation shape stays unknown after the domain docs, follow the clarification ladder in `docs/agents/routing.md` §4 and ask for one missing fact at a time.
 
 ### Code style
 
@@ -92,33 +51,8 @@ Typical chain: `grilling`/`grill-with-docs` → `to-spec`/`to-tickets` → `tria
 
 ### Coding guidelines
 
-Behavioral guidelines to reduce common LLM coding mistakes ([source](https://github.com/multica-ai/andrej-karpathy-skills)). Bias toward caution over speed; use judgment on trivial tasks.
+Behavioral rules that reduce common LLM coding mistakes: hidden assumptions, speculative abstraction, collateral edits, and unverified work. Read before implementing. See `docs/agents/coding-guidelines.md`.
 
-**1. Think before coding** — don't assume, don't hide confusion, surface tradeoffs.
+### Gotchas
 
-- State assumptions explicitly; if uncertain, ask.
-- If multiple interpretations exist, present them — don't pick silently.
-- If a simpler approach exists, say so; push back when warranted.
-- If something is unclear, stop, name what's confusing, ask.
-
-**2. Simplicity first** — minimum code that solves the problem, nothing speculative.
-
-- No features beyond what was asked. No abstractions for single-use code. No unrequested "flexibility". No error handling for impossible scenarios.
-- 200 lines that could be 50 → rewrite it.
-- Ask: "Would a senior engineer call this overcomplicated?" If yes, simplify.
-
-**3. Surgical changes** — touch only what you must, clean up only your own mess.
-
-- Don't "improve" adjacent code, comments, or formatting. Don't refactor what isn't broken. Match existing style even if you'd do it differently.
-- Unrelated dead code: mention it, don't delete it.
-- Remove imports/variables/functions YOUR changes made unused; don't remove pre-existing dead code unless asked.
-- Test: every changed line traces directly to the user's request.
-
-**4. Goal-driven execution** — define success criteria, loop until verified.
-
-- "Add validation" → write tests for invalid inputs, then make them pass.
-- "Fix the bug" → write a test that reproduces it, then make it pass.
-- "Refactor X" → ensure tests pass before and after.
-- Multi-step tasks: state a brief plan, one line per step with its verify check.
-
-These guidelines are working if: fewer unnecessary changes in diffs, fewer rewrites from overcomplication, clarifying questions come before implementation rather than after mistakes.
+Mistakes agents made in this repo and the rules they produced. Read before working; append when a session's failure generalizes. See `docs/agents/gotchas.md`.

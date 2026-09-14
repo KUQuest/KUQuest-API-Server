@@ -29,26 +29,26 @@ export type ProviderEventEncryptionOptions = {
 };
 
 const keyBytes = (material: ProviderEventKeyMaterial): Buffer => {
-  const bytes = material instanceof Uint8Array
-    ? Buffer.from(material)
-    : material.length === 32
-      ? Buffer.from(material, 'utf8')
-      : /^[0-9a-f]{64}$/i.test(material)
-        ? Buffer.from(material, 'hex')
-        : Buffer.from(material, 'base64url');
+  const bytes =
+    material instanceof Uint8Array
+      ? Buffer.from(material)
+      : material.length === 32
+        ? Buffer.from(material, 'utf8')
+        : /^[0-9a-f]{64}$/i.test(material)
+          ? Buffer.from(material, 'hex')
+          : Buffer.from(material, 'base64url');
 
   if (bytes.length !== 32) {
     throw new ProviderEventError(
       'PROVIDER_EVENT_KEY_UNAVAILABLE',
-      'Provider event encryption key must contain 32 bytes.',
+      'Provider event encryption key must contain 32 bytes.'
     );
   }
   return bytes;
 };
 
 const createKeys = (options: ProviderEventEncryptionOptions) => {
-  const activeKeyVersion = options.activeKeyVersion
-    ?? env.paymentProviderEventEncryptionKeyVersion;
+  const activeKeyVersion = options.activeKeyVersion ?? env.paymentProviderEventEncryptionKeyVersion;
   const keys = new Map<string, ProviderEventKeyMaterial>(Object.entries(options.keys ?? {}));
   if (options.keys === undefined && env.paymentProviderEventEncryptionKey) {
     keys.set(activeKeyVersion, env.paymentProviderEventEncryptionKey);
@@ -57,7 +57,7 @@ const createKeys = (options: ProviderEventEncryptionOptions) => {
 };
 
 export const createProviderEventEncryption = (
-  options: ProviderEventEncryptionOptions = {},
+  options: ProviderEventEncryptionOptions = {}
 ): ProviderEventEncryption => {
   const { activeKeyVersion, keys } = createKeys(options);
   const getKey = (version: string) => {
@@ -65,7 +65,7 @@ export const createProviderEventEncryption = (
     if (material === undefined) {
       throw new ProviderEventError(
         'PROVIDER_EVENT_KEY_VERSION_UNKNOWN',
-        'Provider event encryption key version is not available.',
+        'Provider event encryption key version is not available.'
       );
     }
     return keyBytes(material);
@@ -77,10 +77,13 @@ export const createProviderEventEncryption = (
       try {
         key = getKey(activeKeyVersion);
       } catch (error) {
-        if (error instanceof ProviderEventError && error.code === 'PROVIDER_EVENT_KEY_VERSION_UNKNOWN') {
+        if (
+          error instanceof ProviderEventError &&
+          error.code === 'PROVIDER_EVENT_KEY_VERSION_UNKNOWN'
+        ) {
           throw new ProviderEventError(
             'PROVIDER_EVENT_KEY_UNAVAILABLE',
-            'Provider event encryption key is not configured.',
+            'Provider event encryption key is not configured.'
           );
         }
         throw error;
@@ -99,7 +102,7 @@ export const createProviderEventEncryption = (
       } catch {
         throw new ProviderEventError(
           'PROVIDER_EVENT_ENCRYPTION_FAILED',
-          'Provider event encryption failed.',
+          'Provider event encryption failed.'
         );
       }
     },
@@ -109,7 +112,11 @@ export const createProviderEventEncryption = (
         const nonce = Buffer.from(encrypted.nonce, 'base64url');
         const ciphertext = Buffer.from(encrypted.ciphertext, 'base64url');
         const authTag = Buffer.from(encrypted.authTag, 'base64url');
-        if (nonce.length !== nonceBytes || ciphertext.length === 0 || authTag.length !== authTagBytes) {
+        if (
+          nonce.length !== nonceBytes ||
+          ciphertext.length === 0 ||
+          authTag.length !== authTagBytes
+        ) {
           throw new Error('Invalid encrypted provider payload.');
         }
         const decipher = createDecipheriv(aesAlgorithm, key, nonce);
@@ -118,7 +125,7 @@ export const createProviderEventEncryption = (
       } catch {
         throw new ProviderEventError(
           'PROVIDER_EVENT_AUTHENTICATION_FAILED_PAYLOAD',
-          'Provider event payload authentication failed.',
+          'Provider event payload authentication failed.'
         );
       }
     },

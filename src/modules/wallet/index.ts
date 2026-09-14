@@ -8,48 +8,51 @@ export {
   signedSatang,
   toBaht,
 } from './wallet.money';
-export type {
-  MoneyDomainErrorCode,
-  Satang,
-  SatangDelta,
-  SignedSatang,
-} from './wallet.money';
+export type { MoneyDomainErrorCode, Satang, SatangDelta, SignedSatang } from './wallet.money';
 export {
+  completeMoneyCommand,
+  runMoneyCommand,
+  stampMoneyCommandResource,
+} from './wallet.money-command.service';
+export type {
+  MoneyCommandHooks,
+  MoneyCommandKeyRow,
+  MoneyCommandRef,
+} from './wallet.money-command.service';
+export {
+  fundingCapacityFor,
   getEffectiveFundingReservationPolicy,
   increaseFundingReservation,
+  platformFeeForReservation,
+  readFundingReservation,
   releaseFundingReservation,
   reserveSpending,
   settleDisputeCase,
   settleFundingReservation,
 } from './wallet.funding.service';
 export type {
+  FundingCapacityInput,
   IncreaseFundingReservationInput,
+  PlatformFeeForReservationInput,
+  ReadFundingReservationInput,
   ReleaseFundingReservationInput,
   ReserveSpendingInput,
   SettleDisputeCaseInput,
   SettleDisputeCaseResult,
   SettleFundingReservationInput,
 } from './wallet.funding.service';
-export {
-  convertEarnings,
-  earningsConversionScope,
-} from './wallet.service';
-export type {
-  EarningsConversion,
-  EarningsConversionInput,
-} from './wallet.service';
+export { convertEarnings, earningsConversionScope } from './wallet.conversion.service';
+export type { EarningsConversion, EarningsConversionInput } from './wallet.conversion.service';
 export type { WalletTransaction } from './wallet.service';
 export {
   assertWalletOperationAllowed,
   changeWalletStatus,
   changeWalletStatusInTransaction,
+  isWalletOperationAllowed,
   listWalletStatusHistory,
   walletOperations,
 } from './wallet.status.service';
-export type {
-  ChangeWalletStatusInput,
-  WalletOperation,
-} from './wallet.status.service';
+export type { ChangeWalletStatusInput, WalletOperation } from './wallet.status.service';
 export {
   createWallet,
   createWalletInTransaction,

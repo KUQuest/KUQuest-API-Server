@@ -1,8 +1,7 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { file } from '@/database/schema/file.schema';
-import { quest, questImage } from '@/database/schema/quest.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
+import { quest, questCommand, questImage } from '@/database/schema/quest.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import {
   checkQuestV2ImageUpload,
@@ -53,7 +52,7 @@ const authTestApp = new Elysia({ name: 'quest-v2-image-test-auth' }).use(
     password,
     firstName: 'Quest Image',
     lastName: 'Hirer',
-  }),
+  })
 );
 const otherAuthTestApp = new Elysia({ name: 'quest-v2-image-test-other-auth' }).use(
   createStagingTestAuthRoute({
@@ -63,13 +62,11 @@ const otherAuthTestApp = new Elysia({ name: 'quest-v2-image-test-other-auth' }).
     password,
     firstName: 'Other',
     lastName: 'Member',
-  }),
+  })
 );
 
 const getCookieHeader = (response: Response): string =>
-  (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';', 1)[0])
-    .join('; ');
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 let hirerId = '';
 let sessionCookie = '';
@@ -120,7 +117,7 @@ const postImages = (questId: string, key: string, files: File[], cookie = sessio
       method: 'POST',
       headers: { cookie, 'idempotency-key': key },
       body: form,
-    }),
+    })
   );
 };
 
@@ -133,7 +130,7 @@ const postLegacyImages = (questId: string, files: File[], cookie = sessionCookie
       method: 'POST',
       headers: { cookie },
       body: form,
-    }),
+    })
   );
 };
 
@@ -150,17 +147,12 @@ const validatingStorage = createImageStorage({
   },
 });
 
-const deleteImage = (
-  questId: string,
-  imageId: string,
-  key: string,
-  cookie = sessionCookie,
-) =>
+const deleteImage = (questId: string, imageId: string, key: string, cookie = sessionCookie) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/${questId}/images/${imageId}`, {
       method: 'DELETE',
       headers: { cookie, 'idempotency-key': key },
-    }),
+    })
   );
 
 const deleteLegacyImage = (questId: string, fileId: string, cookie = sessionCookie) =>
@@ -168,7 +160,7 @@ const deleteLegacyImage = (questId: string, fileId: string, cookie = sessionCook
     new Request(`http://localhost/api/v1/quests/${questId}/images/${fileId}`, {
       method: 'DELETE',
       headers: { cookie },
-    }),
+    })
   );
 
 type OpenApiImageSchema = {
@@ -193,7 +185,7 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: hirerEmail, password }),
-    }),
+    })
   );
   if (response.status !== 200) throw new Error(`Test authentication failed: ${response.status}`);
 
@@ -205,7 +197,7 @@ beforeAll(async () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: otherMemberEmail, password }),
-    }),
+    })
   );
   if (otherResponse.status !== 200) {
     throw new Error(`Other Member authentication failed: ${otherResponse.status}`);
@@ -214,9 +206,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.delete(walletIdempotencyKey).where(
-    eq(walletIdempotencyKey.principalUserId, hirerId),
-  );
+  await db.delete(questCommand).where(eq(questCommand.principalUserId, hirerId));
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(file).where(eq(file.uploadedByUserId, hirerId));
   questIds.splice(0, questIds.length);
@@ -228,9 +218,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  await db.delete(walletIdempotencyKey).where(
-    eq(walletIdempotencyKey.principalUserId, hirerId),
-  );
+  await db.delete(questCommand).where(eq(questCommand.principalUserId, hirerId));
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(file).where(eq(file.uploadedByUserId, hirerId));
 });
@@ -248,10 +236,12 @@ describe('Quest API v2 Quest Image integration', () => {
       contentType: 'image/png',
       sizeBytes: image.size,
     }));
-    const linkForWithExpiry = spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation((image) => ({
-      url: `https://storage.test/${image.objectKey}`,
-      expiresAt: new Date('2030-08-26T10:15:00.000Z'),
-    }));
+    const linkForWithExpiry = spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation(
+      (image) => ({
+        url: `https://storage.test/${image.objectKey}`,
+        expiresAt: new Date('2030-08-26T10:15:00.000Z'),
+      })
+    );
 
     const response = await postImages(draft.id, 'image-upload-1', [first, second]);
     expect(response.status).toBe(200);
@@ -305,13 +295,13 @@ describe('Quest API v2 Quest Image integration', () => {
 
     const detail = await getQuestV2Detail(hirerId, draft.id);
     expect(detail?.images.map((image) => image.imageId)).toEqual(
-      body.data.images.map((image) => image.imageId),
+      body.data.images.map((image) => image.imageId)
     );
 
     const detailResponse = await app.handle(
       new Request(`http://localhost/api/v2/quests/${draft.id}`, {
         headers: { cookie: sessionCookie },
-      }),
+      })
     );
     expect(detailResponse.status).toBe(200);
     expect((await detailResponse.json()).data.images).toEqual(body.data.images);
@@ -346,22 +336,22 @@ describe('Quest API v2 Quest Image integration', () => {
     const firstRequest = postImages(draft.id, 'image-concurrent-1', [makeImageFile('first.png')]);
     await firstUploadStarted;
     const [reservation] = await db
-      .select({ resultData: walletIdempotencyKey.resultData })
-      .from(walletIdempotencyKey)
-      .where(eq(walletIdempotencyKey.key, 'image-concurrent-1'));
+      .select({ resultData: questCommand.resultData })
+      .from(questCommand)
+      .where(eq(questCommand.key, 'image-concurrent-1'));
     expect(reservation?.resultData).toMatchObject({
       upload: {
-        objects: [{
-          bucket: expect.any(String),
-          objectKey: expect.stringContaining(`quests/v2/${hirerId}/`),
-        }],
+        objects: [
+          {
+            bucket: expect.any(String),
+            objectKey: expect.stringContaining(`quests/v2/${hirerId}/`),
+          },
+        ],
       },
     });
-    const secondResponse = await postImages(
-      draft.id,
-      'image-concurrent-1',
-      [makeImageFile('first.png')],
-    );
+    const secondResponse = await postImages(draft.id, 'image-concurrent-1', [
+      makeImageFile('first.png'),
+    ]);
     releaseUpload();
     const firstResponse = await firstRequest;
 
@@ -399,10 +389,13 @@ describe('Quest API v2 Quest Image integration', () => {
     });
     expect(deleteObject).toHaveBeenCalledWith(uploaded.bucket, uploaded.objectKey);
     expect(
-      await db.select({ id: questImage.id }).from(questImage).where(eq(questImage.questId, draft.id)),
+      await db
+        .select({ id: questImage.id })
+        .from(questImage)
+        .where(eq(questImage.questId, draft.id))
     ).toEqual([]);
     expect(
-      await db.select({ id: file.id }).from(file).where(eq(file.objectKey, uploaded.objectKey)),
+      await db.select({ id: file.id }).from(file).where(eq(file.objectKey, uploaded.objectKey))
     ).toEqual([]);
   });
 
@@ -411,7 +404,8 @@ describe('Quest API v2 Quest Image integration', () => {
     const image = makeImageFile('expired-reservation.png');
     const key = 'image-expired-reservation';
     const requestHash = await questV2ImageUploadRequestHash(hirerId, draft.id, [image]);
-    await db.insert(walletIdempotencyKey).values({
+    await db.insert(questCommand).values({
+      questId: draft.id,
       principalUserId: hirerId,
       operationScope: questV2ImageUploadOperationScope,
       key,
@@ -434,18 +428,17 @@ describe('Quest API v2 Quest Image integration', () => {
     expect(response.status).toBe(200);
     expect((await response.json()).data.images).toHaveLength(1);
   });
-
-  it('recovers an expired upload manifest before releasing its idempotency reservation', async () => {
+  it('recovers an expired upload manifest before completing its idempotency command', async () => {
     const key = 'image-expired-upload-manifest';
     const object = {
       bucket: 'test-bucket',
       objectKey: `quests/v2/${hirerId}/crashed-upload`,
     };
-    await db.insert(walletIdempotencyKey).values({
+    await db.insert(questCommand).values({
       principalUserId: hirerId,
       operationScope: questV2ImageUploadOperationScope,
       key,
-      requestHash: 'crashed-upload-request',
+      requestHash: 'a'.repeat(64),
       resultData: { upload: { objects: [object] } },
       expiresAt: new Date(Date.now() - 1),
     });
@@ -453,12 +446,18 @@ describe('Quest API v2 Quest Image integration', () => {
 
     expect(await recoverQuestV2ImageUploadManifests()).toBe(1);
     expect(deleteObject).toHaveBeenCalledWith(object.bucket, object.objectKey);
-    expect(
-      await db
-        .select({ id: walletIdempotencyKey.id })
-        .from(walletIdempotencyKey)
-        .where(eq(walletIdempotencyKey.key, key)),
-    ).toEqual([]);
+    const [command] = await db
+      .select({
+        processingStatus: questCommand.processingStatus,
+        resultData: questCommand.resultData,
+      })
+      .from(questCommand)
+      .where(eq(questCommand.key, key));
+    expect(command?.processingStatus).toBe('COMPLETED');
+    expect(command?.resultData).toEqual({
+      kind: 'rejected',
+      rejection: 'idempotency-unavailable',
+    });
   });
 
   it('removes one image, repacks positions, soft-deletes its file, and retries cleanup', async () => {
@@ -469,19 +468,21 @@ describe('Quest API v2 Quest Image integration', () => {
       contentType: 'image/png',
       sizeBytes: image.size,
     }));
-    const linkForWithExpiry = spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation((image) => ({
-      url: `https://storage.test/${image.objectKey}`,
-      expiresAt: new Date('2030-08-26T10:15:00.000Z'),
-    }));
+    const linkForWithExpiry = spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation(
+      (image) => ({
+        url: `https://storage.test/${image.objectKey}`,
+        expiresAt: new Date('2030-08-26T10:15:00.000Z'),
+      })
+    );
     const deleteObject = spyOn(questV2Storage, 'delete')
       .mockRejectedValueOnce(new Error('temporary storage failure'))
       .mockResolvedValue();
 
-    const uploadResponse = await postImages(
-      draft.id,
-      'image-remove-upload',
-      [makeImageFile('first.png'), makeImageFile('second.png'), makeImageFile('third.png')],
-    );
+    const uploadResponse = await postImages(draft.id, 'image-remove-upload', [
+      makeImageFile('first.png'),
+      makeImageFile('second.png'),
+      makeImageFile('third.png'),
+    ]);
     const uploadedBody = (await uploadResponse.json()) as {
       data: { images: Array<{ imageId: string; fileId: string; position: number }> };
     };
@@ -519,7 +520,7 @@ describe('Quest API v2 Quest Image integration', () => {
     expect(deleteObject).toHaveBeenCalledTimes(1);
 
     const cleanupCount = await cleanupQuestV2ImageObjects(
-      new Date(deletedFile!.deletedAt!.getTime() + 1),
+      new Date(deletedFile!.deletedAt!.getTime() + 1)
     );
     expect(cleanupCount).toBeGreaterThanOrEqual(1);
     expect(deleteObject).toHaveBeenCalledTimes(2);
@@ -550,14 +551,10 @@ describe('Quest API v2 Quest Image integration', () => {
       expiresAt: new Date('2030-08-26T10:15:00.000Z'),
     });
 
-    const uploadResponse = await postImages(
-      draft.id,
-      'image-delete-presign-upload',
-      [
-        makeImageFile('delete-presign-failure.png'),
-        makeImageFile('delete-presign-survivor.png'),
-      ],
-    );
+    const uploadResponse = await postImages(draft.id, 'image-delete-presign-upload', [
+      makeImageFile('delete-presign-failure.png'),
+      makeImageFile('delete-presign-survivor.png'),
+    ]);
     const uploadedBody = (await uploadResponse.json()) as {
       data: { images: Array<{ imageId: string; fileId: string; position: number }> };
     };
@@ -570,7 +567,7 @@ describe('Quest API v2 Quest Image integration', () => {
     const response = await deleteImage(
       draft.id,
       targetImage.imageId,
-      'image-delete-presign-failure',
+      'image-delete-presign-failure'
     );
 
     expect(response.status).toBe(503);
@@ -584,21 +581,25 @@ describe('Quest API v2 Quest Image integration', () => {
     expect(deleteObject).not.toHaveBeenCalled();
     expect(
       await db
-        .select({ imageId: questImage.id, fileId: questImage.fileId, position: questImage.position })
+        .select({
+          imageId: questImage.id,
+          fileId: questImage.fileId,
+          position: questImage.position,
+        })
         .from(questImage)
-        .where(eq(questImage.questId, draft.id)),
+        .where(eq(questImage.questId, draft.id))
     ).toEqual(
       uploadedBody.data.images.map(({ imageId, fileId, position }) => ({
         imageId,
         fileId,
         position,
-      })),
+      }))
     );
     expect(
       await db
         .select({ deletedAt: file.deletedAt, objectDeletedAt: file.objectDeletedAt })
         .from(file)
-        .where(eq(file.id, targetImage.fileId)),
+        .where(eq(file.id, targetImage.fileId))
     ).toEqual([{ deletedAt: null, objectDeletedAt: null }]);
   });
 
@@ -616,13 +617,17 @@ describe('Quest API v2 Quest Image integration', () => {
     }));
 
     expect(
-      (await postImages(
-        draft.id,
-        'image-limit-upload',
-        [makeImageFile('first.png'), makeImageFile('second.png'), makeImageFile('third.png')],
-      )).status,
+      (
+        await postImages(draft.id, 'image-limit-upload', [
+          makeImageFile('first.png'),
+          makeImageFile('second.png'),
+          makeImageFile('third.png'),
+        ])
+      ).status
     ).toBe(200);
-    const response = await postImages(draft.id, 'image-limit-overflow', [makeImageFile('fourth.png')]);
+    const response = await postImages(draft.id, 'image-limit-overflow', [
+      makeImageFile('fourth.png'),
+    ]);
     expect(response.status).toBe(409);
     expect((await response.json()).error.code).toBe('QUEST_IMAGE_LIMIT_REACHED');
     expect(upload).toHaveBeenCalledTimes(3);
@@ -636,16 +641,15 @@ describe('Quest API v2 Quest Image integration', () => {
       contentType: 'image/png' as const,
       sizeBytes: 3,
     };
-    spyOn(questV2Storage, 'upload').mockResolvedValueOnce(first).mockRejectedValueOnce(
-      new ImageUploadError('storage detail'),
-    );
+    spyOn(questV2Storage, 'upload')
+      .mockResolvedValueOnce(first)
+      .mockRejectedValueOnce(new ImageUploadError('storage detail'));
     const deleteObject = spyOn(questV2Storage, 'delete').mockResolvedValue();
 
-    const response = await postImages(
-      draft.id,
-      'image-storage-failure',
-      [makeImageFile('first.png'), makeImageFile('second.png')],
-    );
+    const response = await postImages(draft.id, 'image-storage-failure', [
+      makeImageFile('first.png'),
+      makeImageFile('second.png'),
+    ]);
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       success: false,
@@ -656,10 +660,13 @@ describe('Quest API v2 Quest Image integration', () => {
     });
     expect(deleteObject).toHaveBeenCalledWith(first.bucket, first.objectKey);
     expect(
-      await db.select({ id: questImage.id }).from(questImage).where(eq(questImage.questId, draft.id)),
+      await db
+        .select({ id: questImage.id })
+        .from(questImage)
+        .where(eq(questImage.questId, draft.id))
     ).toEqual([]);
     expect(
-      await db.select({ id: file.id }).from(file).where(eq(file.uploadedByUserId, hirerId)),
+      await db.select({ id: file.id }).from(file).where(eq(file.uploadedByUserId, hirerId))
     ).toEqual([]);
   });
 
@@ -671,18 +678,17 @@ describe('Quest API v2 Quest Image integration', () => {
       contentType: 'image/png' as const,
       sizeBytes: 3,
     };
-    spyOn(questV2Storage, 'upload').mockResolvedValueOnce(first).mockRejectedValueOnce(
-      new ImageUploadError('storage detail'),
-    );
+    spyOn(questV2Storage, 'upload')
+      .mockResolvedValueOnce(first)
+      .mockRejectedValueOnce(new ImageUploadError('storage detail'));
     const deleteObject = spyOn(questV2Storage, 'delete')
       .mockRejectedValueOnce(new Error('temporary cleanup failure'))
       .mockResolvedValue();
 
-    const response = await postImages(
-      draft.id,
-      'image-storage-cleanup-failure',
-      [makeImageFile('orphan.png'), makeImageFile('failed.png')],
-    );
+    const response = await postImages(draft.id, 'image-storage-cleanup-failure', [
+      makeImageFile('orphan.png'),
+      makeImageFile('failed.png'),
+    ]);
     expect(response.status).toBe(503);
 
     const [tombstone] = await db
@@ -693,7 +699,7 @@ describe('Quest API v2 Quest Image integration', () => {
     expect(tombstone?.objectDeletedAt).toBeNull();
 
     const cleanupCount = await cleanupQuestV2ImageObjects(
-      new Date(tombstone!.deletedAt!.getTime() + 1),
+      new Date(tombstone!.deletedAt!.getTime() + 1)
     );
     expect(cleanupCount).toBe(1);
     expect(deleteObject).toHaveBeenCalledTimes(2);
@@ -712,36 +718,50 @@ describe('Quest API v2 Quest Image integration', () => {
       contentType: 'image/png' as const,
       sizeBytes: 3,
     };
-    spyOn(questV2Storage, 'upload').mockResolvedValueOnce(first).mockRejectedValueOnce(
-      new ImageUploadError('storage detail'),
-    );
+    spyOn(questV2Storage, 'upload')
+      .mockResolvedValueOnce(first)
+      .mockRejectedValueOnce(new ImageUploadError('storage detail'));
     const deleteObject = spyOn(questV2Storage, 'delete')
       .mockRejectedValueOnce(new Error('temporary cleanup failure'))
       .mockResolvedValue();
     spyOn(questV2Service, 'recordQuestV2ImageCleanupTombstones').mockRejectedValueOnce(
-      new Error('database unavailable'),
+      new Error('database unavailable')
     );
 
-    const response = await postImages(
-      draft.id,
-      'image-cleanup-manifest',
-      [makeImageFile('manifest.png'), makeImageFile('failed.png')],
-    );
+    const response = await postImages(draft.id, 'image-cleanup-manifest', [
+      makeImageFile('manifest.png'),
+      makeImageFile('failed.png'),
+    ]);
     expect(response.status).toBe(503);
 
     const [reservation] = await db
-      .select({ processingStatus: walletIdempotencyKey.processingStatus, resultData: walletIdempotencyKey.resultData })
-      .from(walletIdempotencyKey)
-      .where(eq(walletIdempotencyKey.key, 'image-cleanup-manifest'));
+      .select({
+        processingStatus: questCommand.processingStatus,
+        resultData: questCommand.resultData,
+      })
+      .from(questCommand)
+      .where(eq(questCommand.key, 'image-cleanup-manifest'));
     expect(reservation?.processingStatus).toBe('PROCESSING');
     expect(reservation?.resultData).toMatchObject({
       cleanup: { images: [{ objectKey: first.objectKey }] },
     });
     expect(
-      await db.select({ id: file.id }).from(file).where(eq(file.objectKey, first.objectKey)),
+      await db.select({ id: file.id }).from(file).where(eq(file.objectKey, first.objectKey))
     ).toEqual([]);
 
     expect(await retryQuestV2ImageCleanupManifests()).toBe(1);
+    const [completed] = await db
+      .select({
+        processingStatus: questCommand.processingStatus,
+        resultData: questCommand.resultData,
+      })
+      .from(questCommand)
+      .where(eq(questCommand.key, 'image-cleanup-manifest'));
+    expect(completed?.processingStatus).toBe('COMPLETED');
+    expect(completed?.resultData).toEqual({
+      kind: 'rejected',
+      rejection: 'idempotency-unavailable',
+    });
     const [tombstone] = await db
       .select({ deletedAt: file.deletedAt, objectDeletedAt: file.objectDeletedAt })
       .from(file)
@@ -750,7 +770,7 @@ describe('Quest API v2 Quest Image integration', () => {
     expect(tombstone?.objectDeletedAt).toBeNull();
 
     const cleanupCount = await cleanupQuestV2ImageObjects(
-      new Date(tombstone!.deletedAt!.getTime() + 1),
+      new Date(tombstone!.deletedAt!.getTime() + 1)
     );
     expect(cleanupCount).toBe(1);
     expect(deleteObject).toHaveBeenCalledTimes(2);
@@ -779,7 +799,7 @@ describe('Quest API v2 Quest Image integration', () => {
   it('enforces decoded content type and actual byte size at the HTTP boundary', async () => {
     const draft = await createDraft();
     const upload = spyOn(questV2Storage, 'upload').mockImplementation((userId, image) =>
-      validatingStorage.upload(userId, image),
+      validatingStorage.upload(userId, image)
     );
     const validPng = await sharp({
       create: { width: 1, height: 1, channels: 3, background: { r: 255, g: 0, b: 0 } },
@@ -787,27 +807,21 @@ describe('Quest API v2 Quest Image integration', () => {
       .png()
       .toBuffer();
 
-    const invalidContent = await postImages(
-      draft.id,
-      'image-http-invalid-content',
-      [makeImageFile('invalid.png')],
-    );
+    const invalidContent = await postImages(draft.id, 'image-http-invalid-content', [
+      makeImageFile('invalid.png'),
+    ]);
     expect(invalidContent.status).toBe(415);
     expect((await invalidContent.json()).error.code).toBe('UNSUPPORTED_IMAGE_TYPE');
 
-    const mismatchedType = await postImages(
-      draft.id,
-      'image-http-mismatched-type',
-      [new File([validPng], 'mismatch.jpg', { type: 'image/jpeg' })],
-    );
+    const mismatchedType = await postImages(draft.id, 'image-http-mismatched-type', [
+      new File([validPng], 'mismatch.jpg', { type: 'image/jpeg' }),
+    ]);
     expect(mismatchedType.status).toBe(415);
     expect((await mismatchedType.json()).error.code).toBe('UNSUPPORTED_IMAGE_TYPE');
 
-    const oversized = await postImages(
-      draft.id,
-      'image-http-actual-size',
-      [new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'oversized.png', { type: 'image/png' })],
-    );
+    const oversized = await postImages(draft.id, 'image-http-actual-size', [
+      new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'oversized.png', { type: 'image/png' }),
+    ]);
     expect(oversized.status).toBe(413);
     expect((await oversized.json()).error.code).toBe('IMAGE_TOO_LARGE');
     expect(upload).toHaveBeenCalledTimes(3);
@@ -816,7 +830,7 @@ describe('Quest API v2 Quest Image integration', () => {
   it('accepts valid decoded JPEG, PNG, and WebP files', async () => {
     const draft = await createDraft();
     const upload = spyOn(questV2Storage, 'upload').mockImplementation((userId, image) =>
-      validatingStorage.upload(userId, image),
+      validatingStorage.upload(userId, image)
     );
     spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation((image) => ({
       url: `https://storage.test/${image.objectKey}`,
@@ -870,8 +884,8 @@ describe('Quest API v2 Quest Image integration', () => {
           requestHash: otherHash,
         },
         1,
-        [{ bucket: 'test-bucket', objectKey: `quests/v2/${otherMemberId}/ownership.png` }],
-      ),
+        [{ bucket: 'test-bucket', objectKey: `quests/v2/${otherMemberId}/ownership.png` }]
+      )
     ).toEqual({ outcome: 'not-found' });
 
     await db
@@ -893,8 +907,8 @@ describe('Quest API v2 Quest Image integration', () => {
           requestHash: ownerHash,
         },
         1,
-        [{ bucket: 'test-bucket', objectKey: `quests/v2/${hirerId}/open.png` }],
-      ),
+        [{ bucket: 'test-bucket', objectKey: `quests/v2/${hirerId}/open.png` }]
+      )
     ).toEqual({ outcome: 'not-draft' });
   });
 
@@ -915,17 +929,15 @@ describe('Quest API v2 Quest Image integration', () => {
       draft.id,
       'image-http-other-owner-upload',
       [makeImageFile('other-owner.png')],
-      otherSessionCookie,
+      otherSessionCookie
     );
     expect(otherUpload.status).toBe(404);
     expect((await otherUpload.json()).error.code).toBe('QUEST_NOT_FOUND');
     expect(upload).not.toHaveBeenCalled();
 
-    const ownerUpload = await postImages(
-      draft.id,
-      'image-http-owner-upload',
-      [makeImageFile('owner.png')],
-    );
+    const ownerUpload = await postImages(draft.id, 'image-http-owner-upload', [
+      makeImageFile('owner.png'),
+    ]);
     expect(ownerUpload.status).toBe(200);
     const uploadedImage = (await ownerUpload.json()).data.images[0] as {
       imageId: string;
@@ -934,7 +946,7 @@ describe('Quest API v2 Quest Image integration', () => {
     const otherDetail = await app.handle(
       new Request(`http://localhost/api/v2/quests/${draft.id}`, {
         headers: { cookie: otherSessionCookie },
-      }),
+      })
     );
     expect(otherDetail.status).toBe(404);
 
@@ -942,7 +954,7 @@ describe('Quest API v2 Quest Image integration', () => {
       draft.id,
       uploadedImage.imageId,
       'image-http-other-owner-delete',
-      otherSessionCookie,
+      otherSessionCookie
     );
     expect(otherDelete.status).toBe(404);
     expect((await otherDelete.json()).error.code).toBe('QUEST_NOT_FOUND');
@@ -957,18 +969,16 @@ describe('Quest API v2 Quest Image integration', () => {
       })
       .where(eq(quest.id, draft.id));
 
-    const nonDraftUpload = await postImages(
-      draft.id,
-      'image-http-non-draft-upload',
-      [makeImageFile('non-draft.png')],
-    );
+    const nonDraftUpload = await postImages(draft.id, 'image-http-non-draft-upload', [
+      makeImageFile('non-draft.png'),
+    ]);
     expect(nonDraftUpload.status).toBe(409);
     expect((await nonDraftUpload.json()).error.code).toBe('QUEST_NOT_DRAFT');
 
     const nonDraftDelete = await deleteImage(
       draft.id,
       uploadedImage.imageId,
-      'image-http-non-draft-delete',
+      'image-http-non-draft-delete'
     );
     expect(nonDraftDelete.status).toBe(409);
     expect((await nonDraftDelete.json()).error.code).toBe('QUEST_NOT_DRAFT');
@@ -979,10 +989,10 @@ describe('Quest API v2 Quest Image integration', () => {
     form.set('images', new File(['not-an-image'], 'quest.png', { type: 'image/png' }));
 
     const upload = await app.handle(
-      new Request(
-        'http://localhost/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/images',
-        { method: 'POST', body: form },
-      ),
+      new Request('http://localhost/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/images', {
+        method: 'POST',
+        body: form,
+      })
     );
     expect(upload.status).toBe(400);
     expect((await upload.json()).error.code).toBe('VALIDATION');
@@ -990,8 +1000,8 @@ describe('Quest API v2 Quest Image integration', () => {
     const remove = await app.handle(
       new Request(
         'http://localhost/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/images/018f47a7-1c7d-7c98-9a11-690d7e834301',
-        { method: 'DELETE' },
-      ),
+        { method: 'DELETE' }
+      )
     );
     expect(remove.status).toBe(400);
     expect((await remove.json()).error.code).toBe('VALIDATION');
@@ -1057,21 +1067,15 @@ describe('Quest API v2 Quest Image integration', () => {
         data: { images: Array<{ fileId: string }> };
       };
       const v1FileId = v1Body.data.images[0]!.fileId;
-      const v2Response = await postImages(
-        v2Draft.id,
-        'image-v2-isolation-upload',
-        [makeImageFile('v2-isolation.png')],
-      );
+      const v2Response = await postImages(v2Draft.id, 'image-v2-isolation-upload', [
+        makeImageFile('v2-isolation.png'),
+      ]);
       const v2Body = (await v2Response.json()) as {
         data: { images: Array<{ fileId: string; imageId: string }> };
       };
       const v2Image = v2Body.data.images[0]!;
 
-      const v2OnV1 = await postImages(
-        v1DraftId,
-        'image-v2-on-v1',
-        [makeImageFile('v2-on-v1.png')],
-      );
+      const v2OnV1 = await postImages(v1DraftId, 'image-v2-on-v1', [makeImageFile('v2-on-v1.png')]);
       expect(v2OnV1.status).toBe(404);
       expect((await v2OnV1.json()).error.code).toBe('QUEST_NOT_FOUND');
 
@@ -1092,10 +1096,16 @@ describe('Quest API v2 Quest Image integration', () => {
       expect(v1Delete).not.toHaveBeenCalled();
       expect(v2Delete).not.toHaveBeenCalled();
       expect(
-        await db.select({ id: questImage.id }).from(questImage).where(eq(questImage.questId, v1DraftId)),
+        await db
+          .select({ id: questImage.id })
+          .from(questImage)
+          .where(eq(questImage.questId, v1DraftId))
       ).toHaveLength(1);
       expect(
-        await db.select({ id: questImage.id }).from(questImage).where(eq(questImage.questId, v2Draft.id)),
+        await db
+          .select({ id: questImage.id })
+          .from(questImage)
+          .where(eq(questImage.questId, v2Draft.id))
       ).toHaveLength(1);
     });
   });
@@ -1107,17 +1117,17 @@ describe('Quest API v2 Quest Image integration', () => {
     };
 
     expect(document.paths['/api/v2/quests/{questId}/images']?.post?.operationId).toBe(
-      'addQuestImagesV2',
+      'addQuestImagesV2'
     );
     expect(document.paths['/api/v2/quests/{questId}/images/{imageId}']?.delete?.operationId).toBe(
-      'deleteQuestImageV2',
+      'deleteQuestImageV2'
     );
     expect(document.paths['/api/v2/quests/{questId}/images']?.post?.security).toEqual([
       { betterAuthSession: [] },
     ]);
-    expect(
-      document.paths['/api/v2/quests/{questId}/images/{imageId}']?.delete?.security,
-    ).toEqual([{ betterAuthSession: [] }]);
+    expect(document.paths['/api/v2/quests/{questId}/images/{imageId}']?.delete?.security).toEqual([
+      { betterAuthSession: [] },
+    ]);
 
     const uploadOperation = document.paths['/api/v2/quests/{questId}/images']?.post;
     const multipartSchema = uploadOperation?.requestBody?.content?.['multipart/form-data']?.schema;
@@ -1125,14 +1135,9 @@ describe('Quest API v2 Quest Image integration', () => {
     expect(multipartSchema?.properties?.images?.items?.format).toBe('binary');
     expect(uploadOperation?.description).toContain('5 MB');
 
-    const imageSchema = uploadOperation?.responses?.['200']?.content?.['application/json']
-      ?.schema?.properties?.data?.properties?.images?.items;
-    expect(imageSchema?.required).toEqual([
-      'imageId',
-      'fileId',
-      'position',
-      'url',
-      'urlExpiresAt',
-    ]);
+    const imageSchema =
+      uploadOperation?.responses?.['200']?.content?.['application/json']?.schema?.properties?.data
+        ?.properties?.images?.items;
+    expect(imageSchema?.required).toEqual(['imageId', 'fileId', 'position', 'url', 'urlExpiresAt']);
   });
 });

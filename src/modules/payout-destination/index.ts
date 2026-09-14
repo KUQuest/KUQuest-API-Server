@@ -21,10 +21,6 @@ export type {
   PayoutDestinationErrorCode,
   PayoutDestinationInput,
 } from './payout-destination.service';
-export {
-  payoutDestinationForProvider,
-} from './payout-destination.provider-boundary';
-export type {
-  PayoutDestinationForProvider,
-} from './payout-destination.provider-boundary';
+export { payoutDestinationForProvider } from './payout-destination.provider-boundary';
+export type { PayoutDestinationForProvider } from './payout-destination.provider-boundary';
 export { payoutDestinationRoute } from './payout-destination.route';

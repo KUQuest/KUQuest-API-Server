@@ -51,7 +51,8 @@ export const adminTopUpRoute = new Elysia({
     detail: {
       tags: ['Admin Top-Ups'],
       summary: 'Retry a failed or retryable Top-Up Provider Event',
-      description: 'Resets a retryable Top-Up provider event back to RECEIVED status so the worker can process it again.',
+      description:
+        'Resets a retryable Top-Up provider event back to RECEIVED status so the worker can process it again.',
       operationId: 'retryTopUpProviderEvent',
       security: betterAuthSecurity,
     },

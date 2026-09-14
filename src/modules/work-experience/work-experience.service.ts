@@ -52,12 +52,12 @@ export const listWorkExperiences = async (userId: string): Promise<WorkExperienc
     .orderBy(
       desc(profileWorkExperience.startedAt),
       desc(profileWorkExperience.createdAt),
-      asc(profileWorkExperience.id),
+      asc(profileWorkExperience.id)
     );
 
 export const findWorkExperience = async (
   userId: string,
-  experienceId: string,
+  experienceId: string
 ): Promise<WorkExperience | undefined> => {
   const [experience] = await db
     .select(workExperienceColumns)
@@ -72,7 +72,7 @@ export type CreateWorkExperienceOutcome = WorkExperience | { outcome: 'invalid-d
 
 export const createWorkExperience = async (
   userId: string,
-  data: WorkExperienceInput,
+  data: WorkExperienceInput
 ): Promise<CreateWorkExperienceOutcome> => {
   if (!hasValidDateRange(data.startedAt, data.endedAt)) {
     return { outcome: 'invalid-date-range' };
@@ -95,16 +95,13 @@ export const createWorkExperience = async (
 };
 
 export type UpdateWorkExperienceOutcome =
-  | WorkExperience
-  | { outcome: 'invalid-date-range' }
-  | { outcome: 'conflict' }
-  | undefined;
+  WorkExperience | { outcome: 'invalid-date-range' } | { outcome: 'conflict' } | undefined;
 
 export const updateWorkExperience = async (
   userId: string,
   experienceId: string,
   data: WorkExperienceUpdate,
-  expectedVersion?: number,
+  expectedVersion?: number
 ): Promise<UpdateWorkExperienceOutcome> => {
   const current = await findWorkExperience(userId, experienceId);
   if (!current) return undefined;
@@ -134,7 +131,7 @@ export const updateWorkExperience = async (
     .where(
       expectedVersion === undefined
         ? ownedBy(userId, experienceId)
-        : and(ownedBy(userId, experienceId), eq(profileWorkExperience.version, expectedVersion)),
+        : and(ownedBy(userId, experienceId), eq(profileWorkExperience.version, expectedVersion))
     )
     .returning({ id: profileWorkExperience.id });
 
@@ -152,7 +149,7 @@ export type DeleteWorkExperienceOutcome =
 export const deleteWorkExperience = async (
   userId: string,
   experienceId: string,
-  expectedVersion?: number,
+  expectedVersion?: number
 ): Promise<DeleteWorkExperienceOutcome> => {
   const current = await findWorkExperience(userId, experienceId);
   if (!current) return undefined;
@@ -165,7 +162,7 @@ export const deleteWorkExperience = async (
     .where(
       expectedVersion === undefined
         ? ownedBy(userId, experienceId)
-        : and(ownedBy(userId, experienceId), eq(profileWorkExperience.version, expectedVersion)),
+        : and(ownedBy(userId, experienceId), eq(profileWorkExperience.version, expectedVersion))
     )
     .returning({ id: profileWorkExperience.id });
 

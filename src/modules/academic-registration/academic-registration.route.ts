@@ -26,7 +26,8 @@ export const academicRegistrationRoute = new Elysia({
     detail: {
       tags: ['Academic Registration'],
       summary: 'List Occupation and Faculty/Department options',
-      description: 'Lists the seeded Occupations and Faculty/Department hierarchy for the Academic Registration form.',
+      description:
+        'Lists the seeded Occupations and Faculty/Department hierarchy for the Academic Registration form.',
       operationId: 'getAcademicRegistrationOptions',
       security: betterAuthSecurity,
     },
@@ -36,7 +37,8 @@ export const academicRegistrationRoute = new Elysia({
     detail: {
       tags: ['Academic Registration'],
       summary: 'Get Academic Registration status',
-      description: 'Returns the current field values for pre-filling the form, plus a computed completed flag.',
+      description:
+        'Returns the current field values for pre-filling the form, plus a computed completed flag.',
       operationId: 'getAcademicRegistrationStatus',
       security: betterAuthSecurity,
     },

@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 export const topUpStatusSchema = t.Union([
   t.Literal('PENDING'),
@@ -9,14 +10,20 @@ export const topUpStatusSchema = t.Union([
 
 const dateTime = t.String({ format: 'date-time' });
 
-export const topUpQuoteCreateSchema = t.Object({
-  creditSatang: t.Integer({ minimum: 1 }),
-}, { additionalProperties: false });
+export const topUpQuoteCreateSchema = t.Object(
+  {
+    creditSatang: t.Integer({ minimum: 1 }),
+  },
+  { additionalProperties: false }
+);
 
-export const topUpCreateSchema = t.Object({
-  quoteId: t.String({ format: 'uuid' }),
-  simulate: t.Optional(t.Boolean()),
-}, { additionalProperties: false });
+export const topUpCreateSchema = t.Object(
+  {
+    quoteId: t.String({ format: 'uuid' }),
+    simulate: t.Optional(t.Boolean()),
+  },
+  { additionalProperties: false }
+);
 
 export const topUpIdempotencyHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
@@ -27,7 +34,7 @@ export const topUpParamsSchema = t.Object({
 });
 
 export const topUpListQuerySchema = t.Object({
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
 });
 
 export const topUpQuoteResponseSchema = t.Object({
@@ -95,17 +102,19 @@ export const topUpListResponseSchema = t.Object({
 
 export const topUpStatusHistoryResponseSchema = t.Object({
   success: t.Literal(true),
-  data: t.Array(t.Object({
-    id: t.String({ format: 'uuid' }),
-    fromStatus: t.Union([topUpStatusSchema, t.Null()]),
-    toStatus: topUpStatusSchema,
-    providerStatus: t.Union([t.String(), t.Null()]),
-    actorUserId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
-    actorAdminId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
-    source: t.String(),
-    reason: t.Union([t.String(), t.Null()]),
-    occurredAt: dateTime,
-  })),
+  data: t.Array(
+    t.Object({
+      id: t.String({ format: 'uuid' }),
+      fromStatus: t.Union([topUpStatusSchema, t.Null()]),
+      toStatus: topUpStatusSchema,
+      providerStatus: t.Union([t.String(), t.Null()]),
+      actorUserId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
+      actorAdminId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
+      source: t.String(),
+      reason: t.Union([t.String(), t.Null()]),
+      occurredAt: dateTime,
+    })
+  ),
 });
 
 export type TopUpCreateInput = typeof topUpCreateSchema.static;
