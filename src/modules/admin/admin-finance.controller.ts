@@ -1,5 +1,6 @@
 import type { AdminContext } from '@/modules/auth';
 import { apiError, apiSuccess, type ApiResponse } from '@/shared/api-response';
+import { CursorInputError } from '@/shared/cursor';
 
 import type {
   AdminLedgerTransactionsQuery,
@@ -31,11 +32,20 @@ export const getAdminQuestFinanceController = async ({
 
 export const listAdminLedgerTransactionsController = async ({
   query,
+  set,
 }: AdminContext & {
   query: AdminLedgerTransactionsQuery;
 }): Promise<ApiResponse> => {
-  const data = await listAdminLedgerTransactions(query);
-  return apiSuccess(data);
+  try {
+    const data = await listAdminLedgerTransactions(query);
+    return apiSuccess(data);
+  } catch (error) {
+    if (error instanceof CursorInputError) {
+      set.status = 400;
+      return apiError(error.code, error.message);
+    }
+    throw error;
+  }
 };
 
 export const getAdminFinanceOverviewController = async (): Promise<ApiResponse> => {

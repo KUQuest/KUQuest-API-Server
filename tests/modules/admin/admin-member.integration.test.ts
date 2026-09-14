@@ -24,6 +24,17 @@ const memberStudentId = String(Math.floor(1000000000 + Math.random() * 900000000
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
+type IdRow = { id: string };
+
+type MemberListPage = {
+  data?: { items: { id: string }[]; nextCursor: string | null };
+};
+
+type MemberErrorBody = {
+  success: boolean;
+  error?: { code: string; message: string };
+};
+
 beforeAll(async () => {
   await sql`select 1`;
   await ensureInitialMoneyPolicy();
@@ -130,6 +141,105 @@ describe('Admin Members Endpoints Integration Tests', () => {
       expect(m.occupation).toContain('Student');
       expect(m.wallet).not.toBeNull();
       expect(m.wallet.walletStatus).toBe('ACTIVE');
+    });
+
+    const memberListRequest = (params: URLSearchParams) =>
+      app.handle(
+        new Request(`http://localhost/api/v1/admin/members?${params}`, {
+          headers: { cookie: adminCookie },
+        })
+      );
+
+    const expectInvalidCursor = async (response: Response, message: string) => {
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as MemberErrorBody;
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('INVALID_CURSOR');
+      expect(body.error?.message).toBe(message);
+    };
+
+    const seedCursorMember = async (marker: string, createdAt: string): Promise<string> => {
+      // Raw SQL seeding keeps microsecond precision; a JavaScript Date and the
+      // query builder truncate timestamps to milliseconds.
+      const id = crypto.randomUUID();
+      const [row] = (await sql`
+        insert into auth_user (id, email, first_name, last_name, created_at)
+        values (${id}, ${`${id}@ku.th`}, 'Cursor', ${marker}, ${createdAt}::timestamptz)
+        returning id
+      `) as IdRow[];
+      if (!row) throw new Error('Member fixture was not created.');
+      return row.id;
+    };
+
+    it('pages every member exactly once across a shared millisecond at limit 1', async () => {
+      const marker = `member-cursor-${crypto.randomUUID()}`;
+      const createdAtValues = [
+        '2030-08-05T00:00:00.100200Z',
+        '2030-08-05T00:00:00.100800Z',
+        '2030-08-05T00:00:00.101300Z',
+        '2030-08-05T00:00:00.205700Z',
+      ];
+      const seededIds: string[] = [];
+      try {
+        for (const createdAt of createdAtValues) {
+          // eslint-disable-next-line no-await-in-loop
+          seededIds.push(await seedCursorMember(marker, createdAt));
+        }
+
+        const ids: string[] = [];
+        let cursor: string | null = null;
+        for (let page = 0; page < 8; page += 1) {
+          const params = new URLSearchParams({ search: marker, limit: '1' });
+          if (cursor) params.set('cursor', cursor);
+          // Each page cursor comes from the previous response, so these
+          // requests must remain sequential.
+          // eslint-disable-next-line no-await-in-loop
+          const response = await memberListRequest(params);
+          expect(response.status).toBe(200);
+          // eslint-disable-next-line no-await-in-loop
+          const body = (await response.json()) as MemberListPage;
+          expect(body.data).toBeDefined();
+          ids.push(...body.data!.items.map((item) => item.id));
+          cursor = body.data!.nextCursor;
+          if (!cursor) break;
+        }
+        expect(cursor).toBeNull();
+        expect(ids).toEqual([...seededIds].reverse());
+      } finally {
+        await db.delete(authUser).where(eq(authUser.lastName, marker));
+      }
+    });
+
+    it('rejects a deleted cursor anchor and a malformed cursor with the shared error envelope', async () => {
+      const marker = `member-cursor-${crypto.randomUUID()}`;
+      const newestId = await seedCursorMember(marker, '2030-08-05T00:00:00.200900Z');
+      await seedCursorMember(marker, '2030-08-05T00:00:00.100200Z');
+      try {
+        const page = await memberListRequest(new URLSearchParams({ search: marker, limit: '1' }));
+        expect(page.status).toBe(200);
+        const pageBody = (await page.json()) as MemberListPage;
+        expect(pageBody.data?.nextCursor).toBeString();
+
+        await db.delete(authUser).where(eq(authUser.id, newestId));
+        await expectInvalidCursor(
+          await memberListRequest(
+            new URLSearchParams({
+              search: marker,
+              limit: '1',
+              cursor: pageBody.data!.nextCursor!,
+            })
+          ),
+          'cursor does not match a Member'
+        );
+        await expectInvalidCursor(
+          await memberListRequest(
+            new URLSearchParams({ search: marker, cursor: 'not-valid-base64url!!' })
+          ),
+          'cursor is invalid'
+        );
+      } finally {
+        await db.delete(authUser).where(eq(authUser.lastName, marker));
+      }
     });
   });
 

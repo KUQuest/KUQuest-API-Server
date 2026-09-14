@@ -22,7 +22,7 @@ import {
 } from '@/modules/wallet';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 
-import { and, asc, desc, eq, gt, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 
 export type DisputeCaseStatus = (typeof disputeCaseStatuses)[number];
 export type DisputeCaseOutcome = 'DISPUTE_CASE_DISMISSED' | 'DISPUTE_CASE_RESOLVED';
@@ -199,21 +199,17 @@ const caseByIdInTransaction = async (
   return record;
 };
 
-const listCursorCondition = (cursor: CursorPayload | undefined, sort: 'newest' | 'oldest') => {
-  if (!cursor) return undefined;
-  const cursorDate = new Date(cursor.startTime);
-  if (Number.isNaN(cursorDate.getTime())) {
+const assertCursorAnchor = async (cursor: CursorPayload | undefined): Promise<void> => {
+  if (!cursor) return;
+
+  const [anchor] = await db
+    .select({ id: adminDisputeCase.id, createdAt: adminDisputeCase.createdAt })
+    .from(adminDisputeCase)
+    .where(eq(adminDisputeCase.id, cursor.id));
+  const cursorTime = new Date(cursor.startTime);
+  if (!anchor || anchor.createdAt.getTime() !== cursorTime.getTime()) {
     throw new CursorInputError('INVALID_CURSOR', 'Dispute cursor is invalid.');
   }
-  return sort === 'oldest'
-    ? or(
-        gt(adminDisputeCase.createdAt, cursorDate),
-        and(eq(adminDisputeCase.createdAt, cursorDate), gt(adminDisputeCase.id, cursor.id))
-      )
-    : or(
-        lt(adminDisputeCase.createdAt, cursorDate),
-        and(eq(adminDisputeCase.createdAt, cursorDate), lt(adminDisputeCase.id, cursor.id))
-      );
 };
 
 /** Create the queue record after a filing adapter has authenticated its actor. */
@@ -326,10 +322,23 @@ export const listAdminDisputeCases = async ({
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     throw new CursorInputError('INVALID_LIMIT', 'Dispute Case limit must be between 1 and 50.');
   }
+  await assertCursorAnchor(cursor);
+
+  // PostgreSQL stores timestamps with microsecond precision, while the shared
+  // cursor serializes a JavaScript Date at millisecond precision. Read the
+  // cursor row inside the comparison so the database keeps the exact boundary.
+  const cursorAnchor = cursor
+    ? sql`(select ${adminDisputeCase.createdAt}, ${adminDisputeCase.id} from ${adminDisputeCase} where ${adminDisputeCase.id} = ${cursor.id})`
+    : undefined;
+  const cursorCondition = cursorAnchor
+    ? sort === 'oldest'
+      ? sql`(${adminDisputeCase.createdAt}, ${adminDisputeCase.id}) > ${cursorAnchor}`
+      : sql`(${adminDisputeCase.createdAt}, ${adminDisputeCase.id}) < ${cursorAnchor}`
+    : undefined;
   const rows = await db
     .select()
     .from(adminDisputeCase)
-    .where(and(eq(adminDisputeCase.status, status), listCursorCondition(cursor, sort)))
+    .where(and(eq(adminDisputeCase.status, status), cursorCondition))
     .orderBy(
       sort === 'oldest' ? asc(adminDisputeCase.createdAt) : desc(adminDisputeCase.createdAt),
       sort === 'oldest' ? asc(adminDisputeCase.id) : desc(adminDisputeCase.id)

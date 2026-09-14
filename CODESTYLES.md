@@ -55,9 +55,13 @@ See `src/modules/onboarding/` as the reference shape.
 - Exports: named exports only, no default exports.
 - Types: `PascalCase`; values/functions: `camelCase`; constants: `camelCase` unless truly global config (`API_V1_PREFIX`, `ALLOWED_EMAIL_DOMAIN` are `SCREAMING_SNAKE_CASE`).
 
+## Cursor paging
+
+- A timestamp cursor compares row-wise against the anchor row read back from the database, never against a millisecond value from the cursor text — `defaultNow()` writes microseconds. A cursor whose anchor row is gone rejects with the module's invalid-cursor error (pattern: `src/modules/admin/admin-activity-log.service.ts`, guarded by `tests/shared/cursor.guard.test.ts`).
+
 ## Testing
 
 - Integration-first: HTTP integration tests in `tests/modules/<name>/<name>.integration.test.ts` hit the real `app` via `app.handle(new Request(...))`, not mocks. Plain TypeScript application-service tests without an HTTP contract use the same `.integration.test.ts` suffix and execute the public service against real PostgreSQL.
 - Test structure mirrors `src/` — one test dir per module/shared/plugin/database area.
-- A test that needs a funded Wallet, a balance, a Funding Reservation, or a Ledger Transaction calls `tests/modules/wallet/wallet-test-fixtures.ts`, not the table. The Wallet module and the schema tests own the direct reads; `tests/modules/quest/quest.money-seam.guard.test.ts` holds the rule for Quest.
+- Every cursor list carries a page-walk test at `limit=1` with rows seeded inside one millisecond, in each sort the endpoint offers.
 - Assert the durable outcome, never a state a queued task can overwrite. A controller that answers and then queues work — `payout.webhook.controller.ts` and `top-up.webhook.controller.ts` both call `queueMicrotask` after the insert — promises the row, the attribution, and the ciphertext, not the `RECEIVED` status the claim moves on. A test that reads the transient value passes only while the database holds enough older rows to keep the claim busy.

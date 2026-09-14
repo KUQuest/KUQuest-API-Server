@@ -1,9 +1,10 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { paymentTopUps } from '@/database/schema/payment.schema';
-import { decodeCursor, encodeCursor } from '@/shared/cursor';
+import { CursorInputError, decodeCursor, encodeCursor } from '@/shared/cursor';
+import type { CursorPayload } from '@/shared/cursor';
 
-import { and, desc, eq, lt, or } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 
 import type { AdminTopUpListItem, AdminTopUpListQuery } from './top-up.admin.schema';
 
@@ -12,30 +13,45 @@ export type AdminTopUpListPage = {
   nextCursor: string | null;
 };
 
+const assertCursorAnchor = async (cursor: CursorPayload | undefined): Promise<void> => {
+  if (!cursor) return;
+
+  const [anchor] = await db
+    .select({ id: paymentTopUps.id, createdAt: paymentTopUps.createdAt })
+    .from(paymentTopUps)
+    .where(eq(paymentTopUps.id, cursor.id));
+  const cursorTime = new Date(cursor.startTime);
+  if (!anchor || anchor.createdAt.getTime() !== cursorTime.getTime()) {
+    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Top-Up');
+  }
+};
+
 export const listAdminTopUps = async (
   query: AdminTopUpListQuery = {}
 ): Promise<AdminTopUpListPage> => {
   const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
-  const conditions = [];
+  const parsed = query.cursor ? decodeCursor(query.cursor) : undefined;
+  await assertCursorAnchor(parsed);
 
+  // PostgreSQL stores timestamps with microsecond precision, while the shared
+  // cursor serializes a JavaScript Date at millisecond precision. Read the
+  // cursor row inside the comparison so the database keeps the exact boundary.
+  const cursorAnchor = parsed
+    ? sql`(select ${paymentTopUps.createdAt}, ${paymentTopUps.id} from ${paymentTopUps} where ${paymentTopUps.id} = ${parsed.id})`
+    : undefined;
+  const cursorCondition = cursorAnchor
+    ? sql`(${paymentTopUps.createdAt}, ${paymentTopUps.id}) < ${cursorAnchor}`
+    : undefined;
+
+  const conditions = [];
+  if (cursorCondition) {
+    conditions.push(cursorCondition);
+  }
   if (query.status) {
     conditions.push(eq(paymentTopUps.topUpStatus, query.status));
   }
   if (query.userId) {
     conditions.push(eq(paymentTopUps.userId, query.userId));
-  }
-
-  if (query.cursor) {
-    const parsed = decodeCursor(query.cursor);
-    if (parsed) {
-      const cursorDate = new Date(parsed.startTime);
-      conditions.push(
-        or(
-          lt(paymentTopUps.createdAt, cursorDate),
-          and(eq(paymentTopUps.createdAt, cursorDate), lt(paymentTopUps.id, parsed.id))
-        )
-      );
-    }
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

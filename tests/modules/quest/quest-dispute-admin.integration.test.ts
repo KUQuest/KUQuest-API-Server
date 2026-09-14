@@ -16,6 +16,8 @@ import {
   releaseFundingReservation,
   reserveSpending,
 } from '@/modules/wallet';
+import { encodeCursor } from '@/shared/cursor';
+
 import {
   fundTestWallet,
   listTestDisputeSettlements,
@@ -27,13 +29,15 @@ import {
   readTestWallet,
 } from '../wallet/wallet-test-fixtures';
 
-import { beforeAll, describe, expect, it } from 'bun:test';
-import { and, eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { and, count, eq, inArray } from 'drizzle-orm';
 import { Elysia } from 'elysia';
 
 let postgresAvailable = false;
 let adminCookie = '';
 let memberCookie = '';
+/** Fixture Quests whose seeded queue rows must leave the shared queue. */
+const queueWalkQuestIds: string[] = [];
 const adminEmail = `dispute-admin-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';
 const memberEmail = `dispute-member-${crypto.randomUUID()}@ku.th`;
@@ -147,6 +151,23 @@ const createDisputeFixture = async (
   } satisfies DisputeFixture;
 };
 
+/** Seed a queue row directly so created_at keeps its microsecond precision. */
+const seedDisputeCase = async (input: {
+  questId: string;
+  filerUserId: string;
+  createdAt: string;
+}): Promise<string> => {
+  const id = crypto.randomUUID();
+  await sql`
+    insert into admin_dispute_cases
+      (id, quest_id, filer_user_id, status, version, created_at, updated_at)
+    values
+      (${id}, ${input.questId}, ${input.filerUserId}, 'DISPUTE_CASE_PENDING', 1,
+       ${input.createdAt}::timestamptz, ${input.createdAt}::timestamptz)
+  `;
+  return id;
+};
+
 const adminRequest = (path: string, init: RequestInit = {}) =>
   app.handle(
     new Request(`http://localhost${path}`, {
@@ -201,7 +222,14 @@ beforeAll(async () => {
   );
   if (memberLogin.status !== 200) throw new Error('Dispute Member session was not created.');
   memberCookie = getCookieHeader(memberLogin);
+
   await db.select({ id: authAdmin.id }).from(authAdmin).where(eq(authAdmin.id, createdAdminId));
+});
+afterAll(async () => {
+  if (!postgresAvailable || queueWalkQuestIds.length === 0) return;
+  // Dispute Cases cascade from their Quest, so deleting the Quest clears the
+  // microsecond rows this file seeded into the shared queue.
+  await db.delete(quest).where(inArray(quest.id, queueWalkQuestIds));
 });
 
 describe('Admin Dispute API', () => {
@@ -304,6 +332,112 @@ describe('Admin Dispute API', () => {
       action: 'DISPUTE_CASE_EVIDENCE_ACCESS',
       resourceId: fixture.disputeCaseId,
     });
+  });
+
+  it('walks every seeded queue row once per sort across a microsecond tie and rejects stale and malformed cursors', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    await db.delete(adminDisputeCase).where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+    queueWalkQuestIds.push(fixture.questId);
+    const filerIds = await Promise.all(
+      (['First', 'TieFirst', 'TieSecond', 'Last'] as const).map((label) =>
+        createMember(`Queue${label}`)
+      )
+    );
+    const first = await seedDisputeCase({
+      questId: fixture.questId,
+      filerUserId: filerIds[0],
+      createdAt: '2030-08-05T00:00:00.090100Z',
+    });
+    const tieFirst = await seedDisputeCase({
+      questId: fixture.questId,
+      filerUserId: filerIds[1],
+      createdAt: '2030-08-05T00:00:00.100200Z',
+    });
+    const tieSecond = await seedDisputeCase({
+      questId: fixture.questId,
+      filerUserId: filerIds[2],
+      createdAt: '2030-08-05T00:00:00.100800Z',
+    });
+    const last = await seedDisputeCase({
+      questId: fixture.questId,
+      filerUserId: filerIds[3],
+      createdAt: '2030-08-05T00:00:00.110500Z',
+    });
+    const seeded = [first, tieFirst, tieSecond, last];
+
+    type QueueResponse = {
+      success: boolean;
+      data?: { items: Array<{ id: string }>; nextCursor: string | null };
+      error?: { code: string; message: string };
+    };
+    // The queue is shared with the other tests in this file, so the walk
+    // asserts only that the seeded rows are visited once, in order, and that
+    // the walk still terminates.
+    const assertSeededWalk = (visited: string[], expectedOrder: string[]) => {
+      for (const id of seeded) {
+        expect(visited.filter((row) => row === id)).toHaveLength(1);
+      }
+      expect(visited.filter((row) => seeded.includes(row))).toEqual(expectedOrder);
+    };
+    const readEveryPage = async (sort: 'newest' | 'oldest'): Promise<string[]> => {
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      // The queue holds every PENDING row this file left behind, so the page
+      // cap must come from the live count, not a constant.
+      const [pending] = await db
+        .select({ total: count() })
+        .from(adminDisputeCase)
+        .where(eq(adminDisputeCase.status, 'DISPUTE_CASE_PENDING'));
+      const pageCap = (pending?.total ?? 0) + 10;
+      for (let page = 0; page < pageCap; page += 1) {
+        const params = new URLSearchParams({ sort, limit: '1' });
+        if (cursor) params.set('cursor', cursor);
+        // Each page cursor comes from the previous response, so these requests
+        // must remain sequential.
+        // eslint-disable-next-line no-await-in-loop
+        const response = await adminRequest(`/api/v1/admin/disputes?${params.toString()}`);
+        expect(response.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const body = (await response.json()) as QueueResponse;
+        expect(body.success).toBe(true);
+        ids.push(...body.data!.items.map((item) => item.id));
+        cursor = body.data!.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      return ids;
+    };
+
+    assertSeededWalk(await readEveryPage('oldest'), [first, tieFirst, tieSecond, last]);
+    assertSeededWalk(await readEveryPage('newest'), [last, tieSecond, tieFirst, first]);
+
+    const goneId = await seedDisputeCase({
+      questId: fixture.questId,
+      filerUserId: await createMember('QueueGone'),
+      createdAt: '2030-08-05T00:00:00.120600Z',
+    });
+    const staleCursor = encodeCursor({ id: goneId, startTime: '2030-08-05T00:00:00.120Z' });
+    await db.delete(adminDisputeCase).where(eq(adminDisputeCase.id, goneId));
+    const stale = await adminRequest(
+      `/api/v1/admin/disputes?${new URLSearchParams({
+        sort: 'newest',
+        limit: '1',
+        cursor: staleCursor,
+      }).toString()}`
+    );
+    expect(stale.status).toBe(400);
+    const staleBody = (await stale.json()) as QueueResponse;
+    expect(staleBody.success).toBe(false);
+    expect(staleBody.error?.code).toBe('INVALID_CURSOR');
+
+    const malformed = await adminRequest(
+      '/api/v1/admin/disputes?sort=newest&limit=1&cursor=not-a-cursor'
+    );
+    expect(malformed.status).toBe(400);
+    const malformedBody = (await malformed.json()) as QueueResponse;
+    expect(malformedBody.success).toBe(false);
+    expect(malformedBody.error?.code).toBe('INVALID_CURSOR');
   });
 
   it('dismisses a Case without money movement and replays the command', async () => {

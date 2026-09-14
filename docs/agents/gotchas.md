@@ -11,6 +11,24 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 ## Entries
 
+### 2026-09-14 — A ticket's file list is not the scope of a defect
+
+**What happened.** #438 fixed one list endpoint that compared a millisecond cursor against a microsecond `created_at`. #446 then fixed five more. A retrospective search for the pattern, instead of a ticket's file list, found five more live sites (Admin Finance, Admin Member, Admin Top-up, Admin Wallet, Admin Dispute queue), which became #537. Three tickets, one bug class, and the class stayed open through two of them.
+**Root cause.** Each ticket named files, so each run took the file list as the scope and never asked how many other sites held the same pattern.
+**Rule.** When a defect comes from a pattern rather than from one call site, search the repository for the pattern before you plan, and list every site in the ticket. Then close the class with a guard test that fails when a new site appears, on the `tests/modules/wallet/wallet.money-command.guard.test.ts` pattern: a `Bun.Glob` scan, a path allow-list with a reason per entry, and one `expect(offenders, report).toEqual([])`. A fix without a guard leaves the next site to a future retrospective.
+
+### 2026-09-14 — A green test run does not prove the types compile
+
+**What happened.** A batch contract told four subagents to read Wallet balances through the `getWallet` verb. Each ran its own test files green and reported success. `bun check` then failed with 24 `TS2769` errors across seven files: `getWallet` brands each balance as `Satang` (`number & { __brand: 'Satang' }`), and `expect(balance).toBe(before + 400)` cannot compile against a branded type. The repair was a new fixture plus a mechanical pass over seven files.
+**Root cause.** A brand is erased at runtime, so the behaviour a test asserts passes while the type fails. The subagents ran only `bun test`, and a language-server check reported clean on a stale buffer.
+**Rule.** A subagent that changes code runs `bun run typecheck` before it reports, not only its own test files: the whole-repository check costs about 10 seconds. Prove a shared contract with one compiling call site before you dispatch agents onto it. A domain verb is the first choice for a test to call, and a branded return type is the reason it can lose to a fixture that returns plain numbers.
+
+### 2026-09-14 — Dispatch subagents into the checkout they already inhabit
+
+**What happened.** Four subagents were dispatched to a separate worktree, with the absolute path in every task and a self-audit in the acceptance criteria. Five partial drafts still landed in the main checkout, and two subagents reported that the edit tool resolved a repository-relative path against their session directory. The next batch of four ran on a branch created in the session checkout itself and produced no stray edit.
+**Root cause.** A subagent inherits the session working directory. Path discipline in the task text cannot beat a tool that resolves a relative path against that directory.
+**Rule.** Create the branch in the checkout the subagents inherit, and keep a separate worktree for work the dispatcher does alone. When a batch must run in another worktree, the dispatcher reads `git status --short` in the session checkout after every report round and restores the strays from the authoritative copy.
+
 ### 2026-09-14 — Copy `.env` into a new worktree
 
 **What happened.** `bun check` in a second worktree failed one image test with a 503 on a tree that scored 1254 pass / 0 fail in the main checkout. The failure was read as test-data bloat, and the worktree test database was dropped for nothing. The worktree held no `.env`, so `S3_*` carried no value, the presign path threw `ImageLinkUnavailableError`, and the controller answered 503. `cp .env` moved `tests/modules/quest/` from 507 to 508 pass.
@@ -33,7 +51,7 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 **What happened.** A subagent reported a new `CONTEXT.md` glossary entry as written. `git status --short` in the feature worktree showed no change, so a second run landed the entry there. A different draft of the same entry was later found uncommitted in the main checkout, where the subagent had written it.
 **Root cause.** A subagent inherits a working directory. When a task names a file by repository path, the subagent can edit the copy in another checkout, and its report still says "written".
-**Rule.** Give a subagent the absolute worktree path in its task, and require every path in every tool call to start with it. The rule alone does not hold: it failed twice on the day it was written, because a subagent inherits the session working directory and repository-relative paths resolve there. So both sides verify. The subagent reads `git status --short` in its own worktree and sees its file listed. The dispatcher reads `git status --short` in the main checkout after each report round, and expects no change. A stray edit found there is restored from the pristine copy in the other checkout, then re-applied with absolute paths.
+**Rule.** Give a subagent the absolute worktree path in its task, and require every path in every tool call to start with it. The rule alone does not hold: it failed three times, because a subagent inherits the session working directory and repository-relative paths resolve there. So both sides verify. The subagent reads `git status --short` in its own worktree and sees its file listed. The dispatcher reads `git status --short` in the main checkout after each report round, and expects no change. A stray edit found there is restored from the pristine copy in the other checkout, then re-applied with absolute paths. Prefer the arrangement that removes the trap: see "Dispatch subagents into the checkout they already inhabit".
 
 ### 2026-09-13 — Copy a path from `git ls-files` before you write it into a ticket
 
