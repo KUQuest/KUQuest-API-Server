@@ -81,14 +81,34 @@ export const runMoneyCommand = async <R>(
 };
 
 /**
- * Stamps the resource pointer and completes the key row. The caller calls
- * this in the same transaction as `execute`, or in a later one.
+ * Stamps the resource pointer on a key row that stays in progress. The caller
+ * calls this in the same transaction as `execute`; a later transaction
+ * completes the row with `completeMoneyCommand` without pointer arguments.
+ */
+export const stampMoneyCommandResource = async (
+  transaction: WalletTransaction,
+  keyId: string,
+  resourceType: string,
+  resourceId: string
+): Promise<void> => {
+  await transaction
+    .update(walletIdempotencyKey)
+    .set({ resourceType, resourceId })
+    .where(eq(walletIdempotencyKey.id, keyId));
+};
+
+/**
+ * Completes the key row. With pointer arguments, it stamps the pointer and
+ * completes the row in one write; an explicit `null` pair writes a null
+ * pointer, the no-op release shape. Without pointer arguments, it completes
+ * the row and leaves a stored pointer untouched. Absent (`undefined`)
+ * arguments leave the pointer columns as they are; `null` writes NULL.
  */
 export const completeMoneyCommand = async (
   transaction: WalletTransaction,
   keyId: string,
-  resourceType: string | null,
-  resourceId: string | null
+  resourceType?: string | null,
+  resourceId?: string | null
 ): Promise<void> => {
   await transaction
     .update(walletIdempotencyKey)
