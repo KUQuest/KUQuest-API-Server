@@ -23,17 +23,15 @@ import {
   type ProviderEventEncryption,
 } from '@/modules/top-up/top-up.provider-event.crypto';
 import {
+  createSealedLedgerTransactionInTransaction,
+  ensureWalletInTransaction,
   MoneyDomainError,
   positiveSatang,
   satang,
   signedSatang,
   type Satang,
-} from '@/modules/wallet/wallet.money';
-import {
-  createSealedLedgerTransactionInTransaction,
-  ensureWalletInTransaction,
   type WalletTransaction,
-} from '@/modules/wallet/wallet.service';
+} from '@/modules/wallet';
 
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 
