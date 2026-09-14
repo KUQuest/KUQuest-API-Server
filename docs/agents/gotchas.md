@@ -11,6 +11,18 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 ## Entries
 
+### 2026-09-14 — Copy `.env` into a new worktree
+
+**What happened.** `bun check` in a second worktree failed one image test with a 503 on a tree that scored 1254 pass / 0 fail in the main checkout. The failure was read as test-data bloat, and the worktree test database was dropped for nothing. The worktree held no `.env`, so `S3_*` carried no value, the presign path threw `ImageLinkUnavailableError`, and the controller answered 503. `cp .env` moved `tests/modules/quest/` from 507 to 508 pass.
+**Root cause.** `git worktree add` copies no ignored file, and the image tests only reach the presign path when an earlier file in the same run leaves image rows. So the failure looks like a regression, and it hides when the file runs alone.
+**Rule.** After `git worktree add`, copy `.env` from the main checkout and run `bun install --frozen-lockfile`. A gate failure that appears in one worktree and passes in another on the same tree is an environment gap: prove the tree with `git diff --stat <branch-commit> <other-commit>` and re-run the gate in the second checkout before you touch the change. `tests/preload.ts` now names the missing variables, so this failure states its own cause.
+
+### 2026-09-14 — A decision that names two callers holds two claims
+
+**What happened.** ADR-0032 and a map Issue said the Payout path split its idempotency completion across two transactions, like the Top-up path. The Payout code completed in one write at prepare, and the two later writes were dead, because the caller passed `idempotencyKeyId: null`. The wrong half cost two scout dispatches and a re-derived ticket shape before the cutover could start.
+**Root cause.** One sentence covered two callers. The Top-up half was true, so the sentence read as verified.
+**Rule.** When a decision names more than one caller, verify each caller against code and cite `file:line` for each. A cutover that changes a module also corrects the ADR line that describes it, in the same pull request.
+
 ### 2026-09-13 — Claim an Issue through the REST API
 
 **What happened.** `gh issue edit <number> --add-assignee @me` exited 0 for three tickets and assigned nobody. The claim looked complete, and the Issues stayed unassigned.
@@ -84,6 +96,8 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 **What happened (second case).** A `cat > /tmp/body.md <<'EOF' … EOF` heredoc followed by `gh issue create --body-file /tmp/body.md` printed a filtered test-result line, wrote no file, and created no Issue. The call looked like it had run.
 
 **Rule (added).** Write a file with the write tool, and keep the shell for one binary or a short pipeline. A heredoc, a multi-line script, or a command substitution can be dropped without an error.
+
+**Rule (added).** `bun check` writes about 60 KB: 130 ESLint warnings and the whole drizzle table dump sit before the verdict. The shell tool truncates that and can replace it with a summary of its own, so read the verdict from the artifact tail (`read artifact://<id>:-30`) or from an `eval` cell that keeps the last lines of the process output.
 
 ### 2026-09-13 — An idempotent verb cannot report who did the work
 

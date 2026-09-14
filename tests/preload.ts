@@ -5,6 +5,23 @@ import { basename } from 'node:path';
 
 import postgres from 'postgres';
 
+// The image tests presign links with these five values. A worktree holds no
+// `.env`, because git does not track it, so an unset value turns every image
+// response into a 503 and the cause stays hidden in a long test log.
+const storageKeys = [
+  'S3_ACCESS_KEY_ID',
+  'S3_BUCKET',
+  'S3_ENDPOINT',
+  'S3_REGION',
+  'S3_SECRET_ACCESS_KEY',
+];
+const missingStorageKeys = storageKeys.filter((key) => !process.env[key]);
+if (missingStorageKeys.length > 0) {
+  throw new Error(
+    `These tests need object storage. Set these variables: ${missingStorageKeys.join(', ')}. Copy the \`.env\` file of the main checkout into this worktree, then run the tests again.`
+  );
+}
+
 // Worktree directory names may hold characters a PostgreSQL identifier cannot
 // (CI checks out KUQuest-API-Server), so sanitize; fall back when nothing survives.
 const worktreeName =
