@@ -41,8 +41,8 @@ export type {
   SettleDisputeCaseResult,
   SettleFundingReservationInput,
 } from './wallet.funding.service';
-export { convertEarnings, earningsConversionScope } from './wallet.service';
-export type { EarningsConversion, EarningsConversionInput } from './wallet.service';
+export { convertEarnings, earningsConversionScope } from './wallet.conversion.service';
+export type { EarningsConversion, EarningsConversionInput } from './wallet.conversion.service';
 export type { WalletTransaction } from './wallet.service';
 export {
   assertWalletOperationAllowed,
