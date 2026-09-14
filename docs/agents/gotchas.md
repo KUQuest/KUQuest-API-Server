@@ -11,6 +11,18 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 ## Entries
 
+### 2026-09-15 — One edit call, two hunks: the second renumbers
+
+**What happened.** Two `CUT` operations in a single edit call against this ledger used ranges numbered on the snapshot the call received. The first cut shifted the file, so the second clipped the neighbouring entry's **Rule** line and left two stale lines dangling mid-entry. Only a `git diff` read before staging caught it; typecheck and the test suite cannot see prose.
+**Root cause.** In a multi-operation edit, each range resolves against the file as the previous operation left it, not as the call received it.
+**Rule.** Number each later hunk in one edit call against the file after the earlier hunks — or spend one call per hunk. After any multi-hunk edit to prose, read `git diff` before staging.
+
+### 2026-09-15 — Never precompute an Issue number
+
+**What happened.** The branch was named `refactor/545-*` and the claim API pointed at Issue 545 before the Issue existed; `gh issue create` returned #546. The cost was a branch rename and an assign call against a number that did not exist.
+**Root cause.** The next issue number was guessed from memory instead of read from the tool that mints it.
+**Rule.** Create the Issue first, read its number from the tool response, then claim it and name the branch from that response.
+
 ### 2026-09-14 — A raw `sql` template cannot bind a `Date`
 
 **What happened.** The first draft of `readKeysetPage` compared `date_trunc('milliseconds', ${anchor.time.column}) = ${new Date(cursor.startTime)}` inside a raw `sql` template. TypeScript accepted it, and the first test run died inside postgres.js with `ERR_INVALID_ARG_TYPE ... Received an instance of Date`, wrapped in a `DrizzleQueryError` that printed the SQL but not the cause.
@@ -27,7 +39,7 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 **What happened.** #438 fixed one list endpoint that compared a millisecond cursor against a microsecond `created_at`. #446 then fixed five more. A retrospective search for the pattern, instead of a ticket's file list, found five more live sites (Admin Finance, Admin Member, Admin Top-up, Admin Wallet, Admin Dispute queue), which became #537. Three tickets, one bug class, and the class stayed open through two of them.
 **Root cause.** Each ticket named files, so each run took the file list as the scope and never asked how many other sites held the same pattern.
-**Rule.** When a defect comes from a pattern rather than from one call site, search the repository for the pattern before you plan, and list every site in the ticket. Then close the class with a guard test that fails when a new site appears, on the `tests/modules/wallet/wallet.money-command.guard.test.ts` pattern: a `Bun.Glob` scan, a path allow-list with a reason per entry, and one `expect(offenders, report).toEqual([])`. A fix without a guard leaves the next site to a future retrospective.
+**Rule.** When a defect comes from a pattern rather than from one call site, search the repository for the pattern before you plan, and list every site in the ticket. The search includes a module's own internal consumers, not only the files the ticket blames — the import-hub review named twelve importers of the Work Chat port and the repo-wide search found sixteen, four of them v1's own siblings (#546). Then close the class with a guard test that fails when a new site appears, on the `tests/modules/wallet/wallet.money-command.guard.test.ts` pattern: a `Bun.Glob` scan, a path allow-list with a reason per entry, and one `expect(offenders, report).toEqual([])`. A fix without a guard leaves the next site to a future retrospective.
 
 ### 2026-09-14 — A green test run does not prove the types compile
 
