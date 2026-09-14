@@ -20,7 +20,7 @@ import {
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
+import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-work-chat.port';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import {
   decideQuestV2Underfilled,

@@ -20,7 +20,7 @@ import {
 import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { editQuestV2 } from '@/modules/quest';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
+import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-work-chat.port';
 import type { QuestStatus } from '@/modules/quest/quest.contract';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 import {

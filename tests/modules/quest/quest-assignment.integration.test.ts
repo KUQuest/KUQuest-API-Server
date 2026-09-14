@@ -7,7 +7,7 @@ import { auth } from '@/modules/auth';
 import {
   configureQuestWorkChatMembershipWriter,
   type QuestTransaction,
-} from '@/modules/quest/quest-assignment.service';
+} from '@/modules/quest/quest-work-chat.port';
 
 import { randomUUID } from 'node:crypto';
 

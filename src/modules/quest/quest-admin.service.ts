@@ -33,7 +33,7 @@ import {
   type QuestV2Mode,
   type QuestV2Participation,
 } from './quest-v2.contract';
-import type { QuestTransaction } from './quest-assignment.service';
+import type { QuestTransaction } from './quest-work-chat.port';
 
 export type AdminQuestSort = 'newest' | 'oldest';
 
