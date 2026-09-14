@@ -349,7 +349,7 @@ const readLedgerBalances = async (
 };
 
 /** Reads the ledger balances for one Wallet. Sealed transactions only. */
-export const walletLedgerBalances = async (walletId: string): Promise<WalletLedgerBalances> =>
+const walletLedgerBalances = async (walletId: string): Promise<WalletLedgerBalances> =>
   (await readLedgerBalances(db, walletId)).projectedBalances;
 
 /** True when the Wallet projection passed in equals the ledger; the four account types stay inside Wallet. */
