@@ -15,9 +15,10 @@ import {
   walletLedgerTransaction,
   walletWallet,
 } from '@/database/schema/wallet.schema';
-import { decodeCursor, encodeCursor } from '@/shared/cursor';
+import { CursorInputError, decodeCursor, encodeCursor } from '@/shared/cursor';
+import type { CursorPayload } from '@/shared/cursor';
 
-import { and, desc, eq, gte, ilike, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 
 import type {
   AdminFinanceOverviewData,
@@ -296,9 +297,32 @@ export const getAdminQuestFinance = async (
   };
 };
 
+const assertCursorAnchor = async (
+  cursor: string | undefined
+): Promise<CursorPayload | undefined> => {
+  if (!cursor) return undefined;
+
+  const parsed = decodeCursor(cursor);
+  if (!parsed) {
+    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Ledger Transaction');
+  }
+
+  const [anchor] = await db
+    .select({ id: walletLedgerTransaction.id, createdAt: walletLedgerTransaction.createdAt })
+    .from(walletLedgerTransaction)
+    .where(eq(walletLedgerTransaction.id, parsed.id));
+  const cursorTime = new Date(parsed.startTime);
+  if (!anchor || anchor.createdAt.getTime() !== cursorTime.getTime()) {
+    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Ledger Transaction');
+  }
+
+  return parsed;
+};
+
 export const listAdminLedgerTransactions = async (
   query: AdminLedgerTransactionsQuery
 ): Promise<AdminLedgerTransactionsData> => {
+  const cursor = await assertCursorAnchor(query.cursor);
   const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
   const conditions = [];
 
@@ -337,21 +361,17 @@ export const listAdminLedgerTransactions = async (
     conditions.push(inArray(walletLedgerTransaction.id, walletTxIds));
   }
 
-  // Cursor handling
-  if (query.cursor) {
-    const parsed = decodeCursor(query.cursor);
-    if (parsed) {
-      const cursorDate = new Date(parsed.startTime);
-      conditions.push(
-        or(
-          lt(walletLedgerTransaction.createdAt, cursorDate),
-          and(
-            eq(walletLedgerTransaction.createdAt, cursorDate),
-            lt(walletLedgerTransaction.id, parsed.id)
-          )
-        )
-      );
-    }
+  // PostgreSQL stores timestamps with microsecond precision, while the shared
+  // cursor serializes a JavaScript Date at millisecond precision. Read the
+  // cursor row inside the comparison so the database keeps the exact boundary.
+  const cursorAnchor = cursor
+    ? sql`(select ${walletLedgerTransaction.createdAt}, ${walletLedgerTransaction.id} from ${walletLedgerTransaction} where ${walletLedgerTransaction.id} = ${cursor.id})`
+    : undefined;
+  const cursorCondition = cursorAnchor
+    ? sql`(${walletLedgerTransaction.createdAt}, ${walletLedgerTransaction.id}) < ${cursorAnchor}`
+    : undefined;
+  if (cursorCondition) {
+    conditions.push(cursorCondition);
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

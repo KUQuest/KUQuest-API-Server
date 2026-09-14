@@ -5,6 +5,7 @@ import { quest, questAssignment } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
+import { encodeCursor } from '@/shared/cursor';
 import {
   createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
@@ -34,6 +35,17 @@ let testReservationId = '';
 
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
+
+type IdRow = { id: string };
+
+type LedgerTransactionPage = {
+  data?: { items: { id: string }[]; nextCursor: string | null };
+};
+
+type LedgerErrorBody = {
+  success: boolean;
+  error?: { code: string; message: string };
+};
 
 const creditSpending = async (userId: string, amountSatang: number): Promise<string> => {
   const accounts = await db
@@ -332,6 +344,97 @@ describe('Admin Finance Endpoints Integration Tests', () => {
         );
         expect(sum).toBe(0);
       }
+    });
+
+    const ledgerListRequest = (params: URLSearchParams) =>
+      app.handle(
+        new Request(`http://localhost/api/v1/admin/finance/ledger/transactions?${params}`, {
+          headers: { cookie: adminCookie },
+        })
+      );
+
+    const expectInvalidCursor = async (response: Response, message: string) => {
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as LedgerErrorBody;
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('INVALID_CURSOR');
+      expect(body.error?.message).toBe(message);
+    };
+    const seedLedgerTransaction = async (marker: string, createdAt: string): Promise<string> => {
+      // Raw SQL seeding keeps microsecond precision; a JavaScript Date and the
+      // query builder truncate timestamps to milliseconds. The business
+      // reference is unique, so each row carries its own uuid suffix while the
+      // list filter still matches the shared marker substring.
+      const [row] = (await sql`
+        insert into wallet_ledger_transactions (id, business_reference, event_type, created_at)
+        values (
+          ${crypto.randomUUID()},
+          ${`${marker}-${crypto.randomUUID()}`},
+          'ADJUSTMENT',
+          ${createdAt}::timestamptz
+        )
+        returning id
+      `) as IdRow[];
+      if (!row) throw new Error('Ledger Transaction fixture was not created.');
+      return row.id;
+    };
+
+    it('pages every transaction exactly once across a shared millisecond at limit 1', async () => {
+      const marker = `ledger-cursor-${crypto.randomUUID()}`;
+      // The sealed-ledger trigger rejects row deletion, so fixture rows stay
+      // behind; the uuid marker keeps every run isolated.
+      const createdAtValues = [
+        '2030-08-05T00:00:00.100200Z',
+        '2030-08-05T00:00:00.100800Z',
+        '2030-08-05T00:00:00.101300Z',
+        '2030-08-05T00:00:00.205700Z',
+      ];
+      const seededIds: string[] = [];
+      for (const createdAt of createdAtValues) {
+        // eslint-disable-next-line no-await-in-loop
+        seededIds.push(await seedLedgerTransaction(marker, createdAt));
+      }
+
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 8; page += 1) {
+        const params = new URLSearchParams({ businessReference: marker, limit: '1' });
+        if (cursor) params.set('cursor', cursor);
+        // Each page cursor comes from the previous response, so these
+        // requests must remain sequential.
+        // eslint-disable-next-line no-await-in-loop
+        const response = await ledgerListRequest(params);
+        expect(response.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const body = (await response.json()) as LedgerTransactionPage;
+        expect(body.data).toBeDefined();
+        ids.push(...body.data!.items.map((item) => item.id));
+        cursor = body.data!.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      expect(ids).toEqual([...seededIds].reverse());
+    });
+
+    it('rejects a cursor whose anchor row is gone and a malformed cursor with the shared error envelope', async () => {
+      // The sealed-ledger trigger rejects row deletion, so a well-formed
+      // cursor for an id that does not exist stands in for a deleted anchor.
+      // Both requests take the same missing-anchor rejection path.
+      await expectInvalidCursor(
+        await ledgerListRequest(
+          new URLSearchParams({
+            cursor: encodeCursor({
+              id: crypto.randomUUID(),
+              startTime: '2030-08-05T00:00:00.000Z',
+            }),
+          })
+        ),
+        'cursor does not match a Ledger Transaction'
+      );
+      await expectInvalidCursor(
+        await ledgerListRequest(new URLSearchParams({ cursor: 'not-valid-base64url!!' })),
+        'cursor is invalid'
+      );
     });
   });
 

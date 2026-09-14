@@ -4,6 +4,7 @@ import type { AdminContext } from '@/modules/auth';
 import { MoneyDomainError } from '@/modules/wallet';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
+import { CursorInputError } from '@/shared/cursor';
 
 import { eq } from 'drizzle-orm';
 import type { Static } from 'elysia';
@@ -52,6 +53,10 @@ const serializeTopUpProviderEvent = (event: TopUpProviderEvent) => ({
 });
 
 const mapAdminTopUpError = (set: AdminContext['set'], error: unknown) => {
+  if (error instanceof CursorInputError) {
+    set.status = 400;
+    return apiError(error.code, error.message);
+  }
   if (error instanceof ProviderEventError) {
     if (error.code === 'PROVIDER_EVENT_NOT_FOUND') set.status = 404;
     else if (
@@ -125,7 +130,12 @@ export const retryTopUpEventAdminController = async ({
 
 export const listAdminTopUpsController = async ({
   query,
+  set,
 }: AdminContext & { query: AdminTopUpListQuery }): Promise<ApiResponse> => {
-  const data = await listAdminTopUps(query);
-  return apiSuccess(data);
+  try {
+    const data = await listAdminTopUps(query);
+    return apiSuccess(data);
+  } catch (error) {
+    return mapAdminTopUpError(set, error);
+  }
 };

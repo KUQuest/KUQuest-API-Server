@@ -5,9 +5,10 @@ import {
   walletLedgerPosting,
   walletWallet,
 } from '@/database/schema/wallet.schema';
-import { decodeCursor, encodeCursor } from '@/shared/cursor';
+import { CursorInputError, decodeCursor, encodeCursor } from '@/shared/cursor';
+import type { CursorPayload } from '@/shared/cursor';
 
-import { and, desc, eq, ilike, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
 
 import type {
   AdminWalletFullDetailResponse,
@@ -20,12 +21,40 @@ export type AdminWalletListPage = {
   nextCursor: string | null;
 };
 
+const assertCursorAnchor = async (cursor: CursorPayload | undefined): Promise<void> => {
+  if (!cursor) return;
+
+  const [anchor] = await db
+    .select({ id: walletWallet.id, createdAt: walletWallet.createdAt })
+    .from(walletWallet)
+    .where(eq(walletWallet.id, cursor.id));
+  const cursorTime = new Date(cursor.startTime);
+  if (!anchor || anchor.createdAt.getTime() !== cursorTime.getTime()) {
+    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Wallet');
+  }
+};
+
 export const listAdminWallets = async (
   query: AdminWalletListQuery = {}
 ): Promise<AdminWalletListPage> => {
   const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
-  const conditions = [];
+  const parsed = query.cursor ? decodeCursor(query.cursor) : undefined;
+  await assertCursorAnchor(parsed);
 
+  // PostgreSQL stores timestamps with microsecond precision, while the shared
+  // cursor serializes a JavaScript Date at millisecond precision. Read the
+  // cursor row inside the comparison so the database keeps the exact boundary.
+  const cursorAnchor = parsed
+    ? sql`(select ${walletWallet.createdAt}, ${walletWallet.id} from ${walletWallet} where ${walletWallet.id} = ${parsed.id})`
+    : undefined;
+  const cursorCondition = cursorAnchor
+    ? sql`(${walletWallet.createdAt}, ${walletWallet.id}) < ${cursorAnchor}`
+    : undefined;
+
+  const conditions = [];
+  if (cursorCondition) {
+    conditions.push(cursorCondition);
+  }
   if (query.status) {
     conditions.push(eq(walletWallet.walletStatus, query.status));
   }
@@ -42,19 +71,6 @@ export const listAdminWallets = async (
         ilike(authUser.email, s)
       )
     );
-  }
-
-  if (query.cursor) {
-    const parsed = decodeCursor(query.cursor);
-    if (parsed) {
-      const cursorDate = new Date(parsed.startTime);
-      conditions.push(
-        or(
-          lt(walletWallet.createdAt, cursorDate),
-          and(eq(walletWallet.createdAt, cursorDate), lt(walletWallet.id, parsed.id))
-        )
-      );
-    }
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
