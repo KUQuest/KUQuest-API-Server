@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import { questMode, questParticipation, questStatuses } from './quest.contract';
 
@@ -125,7 +126,7 @@ export const questListQuerySchema = t.Object(
     maxReward: t.Optional(t.Integer({ minimum: 1, maximum: 700000 })),
     startFrom: t.Optional(t.String({ format: 'date-time' })),
     startTo: t.Optional(t.String({ format: 'date-time' })),
-    limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+    limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
     cursor: t.Optional(t.String()),
   },
   { additionalProperties: false }
@@ -133,7 +134,7 @@ export const questListQuerySchema = t.Object(
 
 export const questMineQuerySchema = t.Object(
   {
-    limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+    limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
     cursor: t.Optional(t.String()),
   },
   { additionalProperties: false }

@@ -20,6 +20,19 @@ const comparesRowWise = /\.id\}\)\s*[<>]/;
 const buildsAnchorSubSelect = /\(select \$\{[^}]+\}, \$\{[^}]+\} from \$\{/;
 const keysetReader = 'src/shared/keyset-page.ts';
 
+/**
+ * One page-limit rule holds for the whole API (CODESTYLES.md §Cursor paging, Issue #543): a query
+ * schema caps `limit` at `MAX_PAGE_LIMIT` from `src/shared/cursor.ts`, never at a number of its
+ * own. A literal in a schema is a second copy of the rule that drifts the next time the maximum
+ * moves — one list shipped a cap of 100 beside thirteen caps of 50.
+ */
+const limitWithNumericMaximum = /limit:\s*t\.Optional\(t\.Integer\(\{[^}]*maximum:\s*(\d+)/g;
+const allowedLimitMaximums: Record<string, string> = {
+  'src/modules/work-chat/work-chat.schema.ts:20': 'Conversation list pages at DEFAULT_PAGE_LIMIT.',
+  'src/modules/work-chat/candidate-inquiry.schema.ts:20':
+    'Conversation list pages at DEFAULT_PAGE_LIMIT.',
+};
+
 /** Lists that page on `quest.start_time`, which a Hirer supplies at millisecond precision. */
 const allowedFiles: Record<string, true> = {
   'src/modules/quest/quest-v2.service.ts': true,
@@ -42,7 +55,7 @@ describe('Cursor paging guard', () => {
     const report = offenders
       .map(
         (file) =>
-          `${file} builds a page boundary from a millisecond cursor timestamp. Compare row-wise against the anchor row read inside SQL; see src/modules/admin/admin-activity-log.service.ts:37-75 and Issue #537.`
+          `${file} builds a page boundary from a millisecond cursor timestamp. Compare row-wise against the anchor row read inside SQL; see src/shared/keyset-page.ts and Issue #537.`
       )
       .join('\n');
 
@@ -63,6 +76,28 @@ describe('Cursor paging guard', () => {
       .map(
         (file) =>
           `${file} builds its own keyset anchor sub-select. Page it through readKeysetPage in ${keysetReader}; see Issue #541.`
+      )
+      .join('\n');
+
+    expect(offenders, report).toEqual([]);
+  });
+
+  it('caps every query-schema limit at MAX_PAGE_LIMIT', async () => {
+    const offenders: string[] = [];
+    const sources = [
+      ...new Bun.Glob('src/**/*.schema.ts').scanSync({ cwd: repoRoot, onlyFiles: true }),
+    ].sort();
+    for (const file of sources) {
+      const source = await Bun.file(resolve(repoRoot, file)).text();
+      for (const match of source.matchAll(limitWithNumericMaximum)) {
+        if (allowedLimitMaximums[`${file}:${match[1]}`]) continue;
+        offenders.push(`${file} caps limit at ${match[1]}`);
+      }
+    }
+    const report = offenders
+      .map(
+        (line) =>
+          `${line}. A query schema caps limit at MAX_PAGE_LIMIT from src/shared/cursor.ts; see CODESTYLES.md §Cursor paging and Issue #543.`
       )
       .join('\n');
 

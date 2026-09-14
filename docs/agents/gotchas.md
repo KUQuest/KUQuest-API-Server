@@ -11,6 +11,18 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 ## Entries
 
+### 2026-09-14 — A raw `sql` template cannot bind a `Date`
+
+**What happened.** The first draft of `readKeysetPage` compared `date_trunc('milliseconds', ${anchor.time.column}) = ${new Date(cursor.startTime)}` inside a raw `sql` template. TypeScript accepted it, and the first test run died inside postgres.js with `ERR_INVALID_ARG_TYPE ... Received an instance of Date`, wrapped in a `DrizzleQueryError` that printed the SQL but not the cause.
+**Root cause.** Drizzle applies a column's driver mapper to column references and inserted values, never to a raw template parameter. The raw parameter reaches postgres.js as the JavaScript value, and postgres.js cannot serialise a `Date` where it needs a string.
+**Rule.** Bind a timestamp into a raw `sql` template as ISO text with an explicit cast: `${cursor.startTime}::timestamptz`. A green typecheck proves nothing here — a template parameter is `unknown`. See `src/shared/keyset-page.ts`.
+
+### 2026-09-14 — Widening a parameter type means walking the whole caller chain
+
+**What happened.** `listReviews`'s `cursor` parameter widened to `CursorPayload`. The controller that calls the service directly was checked, and the subagent task said no controller edit was needed. `bun run typecheck` then stayed red across two subagent reports until the intermediary — `getProfileReviews` in `src/modules/profile/profile.service.ts`, which forwards to the service and re-declared the old narrow type — was fixed.
+**Root cause.** A service can forward another service's call and re-declare the parameter type, so a one-hop check sees the endpoint and misses the middle.
+**Rule.** Before widening or narrowing an exported parameter type, run `lsp references` on the symbol and name every caller in the plan or ticket before you dispatch.
+
 ### 2026-09-14 — A ticket's file list is not the scope of a defect
 
 **What happened.** #438 fixed one list endpoint that compared a millisecond cursor against a microsecond `created_at`. #446 then fixed five more. A retrospective search for the pattern, instead of a ticket's file list, found five more live sites (Admin Finance, Admin Member, Admin Top-up, Admin Wallet, Admin Dispute queue), which became #537. Three tickets, one bug class, and the class stayed open through two of them.
@@ -46,12 +58,6 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 **What happened.** `gh issue edit <number> --add-assignee @me` exited 0 for three tickets and assigned nobody. The claim looked complete, and the Issues stayed unassigned.
 **Root cause.** This installation accepts the flag, drops the assignment, prints no warning, and returns 0.
 **Rule.** Claim an Issue with `gh api repos/KUQuest/KUQuest-API-Server/issues/<number>/assignees -X POST -f "assignees[]=<login>"`, then prove it with `gh issue view <number> --json assignees`. Read your login with `gh api user -q .login`.
-
-### 2026-09-13 — Name the worktree when you dispatch a subagent
-
-**What happened.** A subagent reported a new `CONTEXT.md` glossary entry as written. `git status --short` in the feature worktree showed no change, so a second run landed the entry there. A different draft of the same entry was later found uncommitted in the main checkout, where the subagent had written it.
-**Root cause.** A subagent inherits a working directory. When a task names a file by repository path, the subagent can edit the copy in another checkout, and its report still says "written".
-**Rule.** Give a subagent the absolute worktree path in its task, and require every path in every tool call to start with it. The rule alone does not hold: it failed three times, because a subagent inherits the session working directory and repository-relative paths resolve there. So both sides verify. The subagent reads `git status --short` in its own worktree and sees its file listed. The dispatcher reads `git status --short` in the main checkout after each report round, and expects no change. A stray edit found there is restored from the pristine copy in the other checkout, then re-applied with absolute paths. Prefer the arrangement that removes the trap: see "Dispatch subagents into the checkout they already inhabit".
 
 ### 2026-09-13 — Copy a path from `git ls-files` before you write it into a ticket
 
@@ -122,9 +128,3 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 **What happened.** `releaseFundingReservation` became idempotent, so the release pre-check in `quest-lifecycle.worker.ts` looked redundant and was deleted. `tests/modules/quest/quest-dispute-admin.integration.test.ts` then failed: two concurrent worker runs both reported the same released Quest.
 **Root cause.** The idempotency contract requires a replay to return the same result as the first operation, so the result cannot say whether this run did the work or replayed it.
 **Rule.** Before you delete a pre-check that an idempotent verb makes redundant, find every caller that reads the result as a "this run did the work" signal. Such a caller keeps a state read, or gets a separate signal.
-
-### 2026-09-13 — Start PostgreSQL before the test suite
-
-**What happened.** `bun test` failed deep in a log with a PostgreSQL connection error, because the database container was not running.
-**Root cause.** The integration tests need a live PostgreSQL. No check states this prerequisite.
-**Rule.** Start the database before a test run, then apply migrations: `podman start kuquest-postgres` (or `podman compose up -d`), then `bun run db:migrate`. This machine has `podman`, not `docker`.

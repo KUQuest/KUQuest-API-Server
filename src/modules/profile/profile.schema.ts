@@ -1,6 +1,7 @@
 import { certificateSchema } from '@/modules/certificate/certificate.schema';
 import { portfolioItemSchema } from '@/modules/portfolio/portfolio.schema';
 import { workExperienceSchema } from '@/modules/work-experience/work-experience.schema';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import { t } from 'elysia';
 
@@ -122,7 +123,7 @@ const reviewSchema = t.Object({
 export const reviewsQuerySchema = t.Object(
   {
     rating: t.Optional(t.Integer({ minimum: 1, maximum: 5 })),
-    limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+    limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
     cursor: t.Optional(t.String()),
   },
   { additionalProperties: false }

@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 const disputeCaseStatusSchema = t.Union([
   t.Literal('DISPUTE_CASE_PENDING'),
@@ -29,7 +30,7 @@ export const adminDisputeOpenBodySchema = t.Object(
 
 export const adminDisputeListQuerySchema = t.Object({
   status: t.Optional(disputeCaseStatusSchema),
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
   sort: t.Optional(t.Union([t.Literal('newest'), t.Literal('oldest')])),
 });

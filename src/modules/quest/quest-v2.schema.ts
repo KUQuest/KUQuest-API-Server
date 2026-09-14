@@ -1,4 +1,5 @@
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import type { TSchema } from '@sinclair/typebox';
 import { TypeCompiler } from '@sinclair/typebox/compiler';
@@ -379,7 +380,7 @@ export const normalizeQuestV2EditRequestResponseBody = ({ body }: { body: unknow
 
 export const questV2MineQuerySchema = t.Object(
   {
-    limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+    limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
     cursor: t.Optional(t.String()),
   },
   { additionalProperties: false }
@@ -405,7 +406,7 @@ const questV2BoardQueryProperties = {
       pattern: questV2ScheduleTimePattern.source,
     })
   ),
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
 };
 
