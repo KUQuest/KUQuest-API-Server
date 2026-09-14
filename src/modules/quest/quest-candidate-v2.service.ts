@@ -326,18 +326,14 @@ export const withdrawQuestV2CandidateApplication = async (
     return { outcome: command.rejection };
   });
 
-export type QuestV2CandidateSelectionAssignmentRow = SelectionAssignmentRow;
-
 type QuestV2CandidateSelectionBusinessOutcomeCode =
   'already-assigned' | 'application-not-found' | 'not-allowed' | 'not-open' | 'not-selectable';
 
 type QuestV2CandidateSelectionOutcomeCode =
   QuestV2CandidateSelectionBusinessOutcomeCode | 'not-found' | QuestCommandOutcomeCode;
 
-export type QuestV2CandidateSelectionSuccess = SelectionSuccess;
-
 export type QuestV2CandidateSelectionOutcome =
-  QuestV2CandidateSelectionSuccess | { outcome: QuestV2CandidateSelectionOutcomeCode };
+  SelectionSuccess | { outcome: QuestV2CandidateSelectionOutcomeCode };
 
 const selectionTransitionFor = ({
   questId,
