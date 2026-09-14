@@ -9,9 +9,10 @@ import {
   walletLedgerPosting,
   walletWallet,
 } from '@/database/schema/wallet.schema';
-import { decodeCursor, encodeCursor } from '@/shared/cursor';
+import { CursorInputError, decodeCursor, encodeCursor } from '@/shared/cursor';
+import type { CursorPayload } from '@/shared/cursor';
 
-import { and, avg, count, desc, eq, ilike, lt, or, sql } from 'drizzle-orm';
+import { and, avg, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
 
 import type {
   AdminMemberDetailData,
@@ -24,9 +25,32 @@ export type AdminMemberListPage = {
   nextCursor: string | null;
 };
 
+const assertCursorAnchor = async (
+  cursor: string | undefined
+): Promise<CursorPayload | undefined> => {
+  if (!cursor) return undefined;
+
+  const parsed = decodeCursor(cursor);
+  if (!parsed) {
+    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Member');
+  }
+
+  const [anchor] = await db
+    .select({ id: authUser.id, createdAt: authUser.createdAt })
+    .from(authUser)
+    .where(eq(authUser.id, parsed.id));
+  const cursorTime = new Date(parsed.startTime);
+  if (!anchor || anchor.createdAt.getTime() !== cursorTime.getTime()) {
+    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Member');
+  }
+
+  return parsed;
+};
+
 export const listAdminMembers = async (
   query: AdminMemberListQuery = {}
 ): Promise<AdminMemberListPage> => {
+  const cursor = await assertCursorAnchor(query.cursor);
   const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
   const conditions = [];
 
@@ -45,17 +69,17 @@ export const listAdminMembers = async (
     );
   }
 
-  if (query.cursor) {
-    const parsed = decodeCursor(query.cursor);
-    if (parsed) {
-      const cursorDate = new Date(parsed.startTime);
-      conditions.push(
-        or(
-          lt(authUser.createdAt, cursorDate),
-          and(eq(authUser.createdAt, cursorDate), lt(authUser.id, parsed.id))
-        )
-      );
-    }
+  // PostgreSQL stores timestamps with microsecond precision, while the shared
+  // cursor serializes a JavaScript Date at millisecond precision. Read the
+  // cursor row inside the comparison so the database keeps the exact boundary.
+  const cursorAnchor = cursor
+    ? sql`(select ${authUser.createdAt}, ${authUser.id} from ${authUser} where ${authUser.id} = ${cursor.id})`
+    : undefined;
+  const cursorCondition = cursorAnchor
+    ? sql`(${authUser.createdAt}, ${authUser.id}) < ${cursorAnchor}`
+    : undefined;
+  if (cursorCondition) {
+    conditions.push(cursorCondition);
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
