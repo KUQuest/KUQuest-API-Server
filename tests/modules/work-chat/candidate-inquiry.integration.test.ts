@@ -83,6 +83,41 @@ const createOpenQuest = async () => {
   return questId;
 };
 
+const seedConversationMessage = async (
+  conversationId: string,
+  sequence: number,
+  createdAt: string
+): Promise<void> => {
+  // Raw sql keeps microsecond precision. A JavaScript Date value truncates to
+  // milliseconds, and a whole-second seed would hide the cursor defect.
+  const [membership] = await db
+    .select({ id: chatMembership.id })
+    .from(chatMembership)
+    .where(
+      and(eq(chatMembership.conversationId, conversationId), eq(chatMembership.memberId, workerId))
+    )
+    .limit(1);
+  if (!membership) throw new Error('Candidate Inquiry Membership fixture not found');
+  await sql`
+    insert into chat_message
+      (conversation_id, sequence, kind, sender_membership_id, client_message_id, content_text, created_at)
+    values
+      (${conversationId}, ${sequence}, 'USER', ${membership.id},
+       ${`seed-${conversationId}-${sequence}`}, 'Seed message', ${createdAt}::timestamptz)
+  `;
+};
+
+const openInquiryConversation = async (questId: string): Promise<string> => {
+  const opened = await requestJson(
+    'POST',
+    '/api/v1/chat/candidate-inquiries',
+    { questId },
+    workerId
+  );
+  expect(opened.status).toBe(200);
+  return ((await opened.json()) as { data: { inquiry: { id: string } } }).data.inquiry.id;
+};
+
 const createPreparedAttachments = async (
   conversationId: string,
   memberId: string,
@@ -665,5 +700,81 @@ describe('Candidate Inquiry Conversation API', () => {
       .from(chatConversation)
       .where(eq(chatConversation.id, conversationId));
     expect(closed?.state).toBe('INQUIRY_CLOSED');
+  });
+
+  it('pages Candidate Inquiries through microsecond activity without skipping or repeating rows', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const tieFirstId = await openInquiryConversation(await createOpenQuest());
+    const tieSecondId = await openInquiryConversation(await createOpenQuest());
+    const olderId = await openInquiryConversation(await createOpenQuest());
+    const silentId = await openInquiryConversation(await createOpenQuest());
+    await seedConversationMessage(tieFirstId, 1, '2030-08-05T00:00:00.100200Z');
+    await seedConversationMessage(tieSecondId, 1, '2030-08-05T00:00:00.100800Z');
+    await seedConversationMessage(olderId, 1, '2030-08-05T00:00:00.090100Z');
+
+    const expected = [tieSecondId, tieFirstId, olderId, silentId];
+
+    const ids: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 8; page += 1) {
+      const query = new URLSearchParams({ limit: '1' });
+      if (cursor) query.set('cursor', cursor);
+      // Each page cursor comes from the previous response, so these requests
+      // must remain sequential.
+      // eslint-disable-next-line no-await-in-loop
+      const response = await candidateInquiryApp.handle(
+        new Request(`http://localhost/api/v1/chat/candidate-inquiries?${query}`, {
+          headers: { 'x-member-id': workerId },
+        })
+      );
+      expect(response.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const body = (await response.json()) as {
+        data: { items: Array<{ id: string }>; nextCursor: string | null };
+      };
+      ids.push(...body.data.items.map((item) => item.id));
+      cursor = body.data.nextCursor;
+      if (!cursor) break;
+    }
+    expect(cursor).toBeNull();
+    expect(ids).toEqual(expected);
+  });
+
+  it('rejects a cursor whose Conversation the caller no longer belongs to', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const newerId = await openInquiryConversation(await createOpenQuest());
+    await openInquiryConversation(await createOpenQuest());
+    await seedConversationMessage(newerId, 1, '2030-08-05T00:00:00.100200Z');
+
+    const list = async (cursor?: string) => {
+      const query = new URLSearchParams({ limit: '1' });
+      if (cursor) query.set('cursor', cursor);
+      return candidateInquiryApp.handle(
+        new Request(`http://localhost/api/v1/chat/candidate-inquiries?${query}`, {
+          headers: { 'x-member-id': workerId },
+        })
+      );
+    };
+
+    const firstPage = await list();
+    const firstBody = (await firstPage.json()) as {
+      data: { items: Array<{ id: string }>; nextCursor: string };
+    };
+    expect(firstBody.data.items.map(({ id }) => id)).toEqual([newerId]);
+    expect(firstBody.data.nextCursor).toBeString();
+
+    await db.delete(chatMessage).where(eq(chatMessage.conversationId, newerId));
+    await db
+      .delete(chatMembership)
+      .where(
+        and(eq(chatMembership.conversationId, newerId), eq(chatMembership.memberId, workerId))
+      );
+
+    const secondPage = await list(firstBody.data.nextCursor);
+    expect(secondPage.status).toBe(400);
+    const secondBody = (await secondPage.json()) as { error?: { code: string } };
+    expect(secondBody.error?.code).toBe('INVALID_CURSOR');
   });
 });

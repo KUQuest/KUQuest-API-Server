@@ -18,10 +18,11 @@ import {
   signedSatang,
 } from '@/modules/wallet';
 import { initiatePayout, quotePayout } from '@/modules/payout';
+import { encodeCursor } from '@/shared/cursor';
 
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { Elysia } from 'elysia';
-import { eq } from 'drizzle-orm';
+import { and, eq, gt, inArray } from 'drizzle-orm';
 
 const adminEmail = `payout-admin-route-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';
@@ -107,6 +108,17 @@ const createPendingPayout = async () => {
 beforeAll(async () => {
   await sql`select 1`;
   await ensureInitialMoneyPolicy();
+  // This file seeds future-dated Payouts; heal any row an interrupted run
+  // left at the head of the shared Admin queue before the queue tests run.
+  await db
+    .update(paymentPayouts)
+    .set({ createdAt: new Date() })
+    .where(
+      and(
+        gt(paymentPayouts.createdAt, new Date('2030-01-01T00:00:00Z')),
+        eq(paymentPayouts.payoutStatus, 'PENDING_ADMIN_APPROVAL')
+      )
+    );
   const seedAuth = createAdminAuth({
     allowSignUp: true,
     autoSignIn: false,
@@ -410,5 +422,87 @@ describe('Payout API routes', () => {
 
     expect(invalidLimit.status).toBe(400);
     expect(invalidCursor.status).toBe(400);
+  });
+
+  it('walks every pending Payout exactly once across microsecond boundaries', async () => {
+    const seedCreatedAt = async (payoutId: string, createdAt: string) => {
+      await sql`update payment_payouts set created_at = ${createdAt}::timestamptz where id = ${payoutId}`;
+    };
+    const first = await createPendingPayout();
+    const tieFirst = await createPendingPayout();
+    const tieSecond = await createPendingPayout();
+    const last = await createPendingPayout();
+    await seedCreatedAt(first.id, '2031-01-05T00:00:00.100200Z');
+    await seedCreatedAt(tieFirst.id, '2031-01-05T00:00:00.101300Z');
+    await seedCreatedAt(tieSecond.id, '2031-01-05T00:00:00.101300Z');
+    await seedCreatedAt(last.id, '2031-01-05T00:00:00.102400Z');
+    const seededIds = [first.id, tieFirst.id, tieSecond.id, last.id];
+    const tieAscending = [tieFirst.id, tieSecond.id].sort((left, right) => (left < right ? -1 : 1));
+    const clusterOldest = [first.id, ...tieAscending, last.id];
+    const clusterNewest = [last.id, ...[...tieAscending].reverse(), first.id];
+    type PayoutPage = { data: { items: Array<{ id: string }>; nextCursor: string | null } };
+
+    // Pages must be requested sequentially: each cursor comes from the
+    // previous response. The page cap only guards against the pre-fix
+    // defect, where a millisecond-truncated cursor repeats its anchor row
+    // forever; the walk must otherwise reach the end of the whole queue.
+    const readEveryPage = async (sort: 'newest' | 'oldest'): Promise<string[]> => {
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 1000; page += 1) {
+        const params = new URLSearchParams({ limit: '1', sort });
+        if (cursor) params.set('cursor', cursor);
+        // eslint-disable-next-line no-await-in-loop
+        const response = await app.handle(
+          new Request(`http://localhost/api/v1/admin/payouts?${params}`, {
+            headers: { cookie: adminCookie },
+          })
+        );
+        expect(response.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const body = (await response.json()) as PayoutPage;
+        ids.push(...body.data.items.map((item) => item.id));
+        cursor = body.data.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      for (const id of seededIds) {
+        expect(ids.filter((row) => row === id)).toHaveLength(1);
+      }
+      return ids;
+    };
+
+    try {
+      // Other pending Payouts from the rest of the suite stay in the queue,
+      // so the seeded cluster is asserted as an ordered, once-only
+      // subsequence of the full walk.
+      const newestIds = await readEveryPage('newest');
+      expect(newestIds.filter((id) => seededIds.includes(id))).toEqual(clusterNewest);
+      const oldestIds = await readEveryPage('oldest');
+      expect(oldestIds.filter((id) => seededIds.includes(id))).toEqual(clusterOldest);
+    } finally {
+      // Hand the seeds back to the present so they cannot head the shared
+      // queue for later tests or later runs.
+      await db
+        .update(paymentPayouts)
+        .set({ createdAt: new Date() })
+        .where(inArray(paymentPayouts.id, seededIds));
+    }
+  }, 60_000);
+
+  it('rejects a cursor whose Payout no longer exists', async () => {
+    const cursor = encodeCursor({
+      startTime: '2031-01-05T00:00:00.100200Z',
+      id: crypto.randomUUID(),
+    });
+    const response = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts?cursor=${encodeURIComponent(cursor)}`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('INVALID_LIMIT');
   });
 });

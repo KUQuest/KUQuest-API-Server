@@ -123,6 +123,22 @@ const createWorkConversation = async (): Promise<{
   return { questId, assignmentId, conversationId: result.conversationId! };
 };
 
+const seedConversationMessage = async (
+  conversationId: string,
+  sequence: number,
+  createdAt: string
+): Promise<void> => {
+  // Raw sql keeps microsecond precision. A JavaScript Date value truncates to
+  // milliseconds, and a whole-second seed would hide the cursor defect.
+  await sql`
+    insert into chat_message
+      (conversation_id, sequence, kind, event_id, system_type, system_payload, created_at)
+    values
+      (${conversationId}, ${sequence}, 'SYSTEM', ${`seed-${conversationId}-${sequence}`},
+       'TEST_SEED', '{}'::jsonb, ${createdAt}::timestamptz)
+  `;
+};
+
 const createValidatedAttachments = async (
   conversationId: string,
   memberId: string,
@@ -965,5 +981,92 @@ describe('Work Chat Member API', () => {
       .where(eq(chatAttachment.id, uploadedBody.data.attachment.id));
     expect(storedAttachment?.status).toBe('EXPIRED');
     expect(storedAttachment?.deletedAt).toBeDate();
+  });
+
+  it('pages Work Conversations through microsecond activity without skipping or repeating rows', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const tieFirst = await createWorkConversation();
+    const tieSecond = await createWorkConversation();
+    const older = await createWorkConversation();
+    const silent = await createWorkConversation();
+    await seedConversationMessage(tieFirst.conversationId, 1000, '2030-08-05T00:00:00.100200Z');
+    await seedConversationMessage(tieSecond.conversationId, 1000, '2030-08-05T00:00:00.100800Z');
+    await seedConversationMessage(older.conversationId, 1000, '2030-08-05T00:00:00.090100Z');
+    // The membership writer seeds a system Message in every new Conversation.
+    // Drop it so the silent Conversation stays in its timestamp 'epoch' slot.
+    await db.delete(chatMessage).where(eq(chatMessage.conversationId, silent.conversationId));
+
+    const expected = [
+      tieSecond.conversationId,
+      tieFirst.conversationId,
+      older.conversationId,
+      silent.conversationId,
+    ];
+
+    const ids: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 8; page += 1) {
+      const query = new URLSearchParams({ limit: '1' });
+      if (cursor) query.set('cursor', cursor);
+      // Each page cursor comes from the previous response, so these requests
+      // must remain sequential.
+      // eslint-disable-next-line no-await-in-loop
+      const response = await workChatApp.handle(
+        new Request(`http://localhost/api/v1/chat/conversations?${query}`, {
+          headers: { 'x-member-id': hirerId },
+        })
+      );
+      expect(response.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const body = (await response.json()) as {
+        data: { items: Array<{ id: string }>; nextCursor: string | null };
+      };
+      ids.push(...body.data.items.map((item) => item.id));
+      cursor = body.data.nextCursor;
+      if (!cursor) break;
+    }
+    expect(cursor).toBeNull();
+    expect(ids).toEqual(expected);
+  });
+
+  it('rejects a cursor whose Conversation the caller no longer belongs to', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const newer = await createWorkConversation();
+    const older = await createWorkConversation();
+    await seedConversationMessage(newer.conversationId, 1000, '2030-08-05T00:00:00.100200Z');
+    await seedConversationMessage(older.conversationId, 1000, '2030-08-05T00:00:00.090100Z');
+
+    const list = async (cursor?: string) => {
+      const query = new URLSearchParams({ limit: '1' });
+      if (cursor) query.set('cursor', cursor);
+      return workChatApp.handle(
+        new Request(`http://localhost/api/v1/chat/conversations?${query}`, {
+          headers: { 'x-member-id': hirerId },
+        })
+      );
+    };
+
+    const firstPage = await list();
+    const firstBody = (await firstPage.json()) as {
+      data: { items: Array<{ id: string }>; nextCursor: string };
+    };
+    expect(firstBody.data.items.map(({ id }) => id)).toEqual([newer.conversationId]);
+    expect(firstBody.data.nextCursor).toBeString();
+
+    await db
+      .delete(chatMembership)
+      .where(
+        and(
+          eq(chatMembership.conversationId, newer.conversationId),
+          eq(chatMembership.memberId, hirerId)
+        )
+      );
+
+    const secondPage = await list(firstBody.data.nextCursor);
+    expect(secondPage.status).toBe(400);
+    const secondBody = (await secondPage.json()) as { error?: { code: string } };
+    expect(secondBody.error?.code).toBe('INVALID_CURSOR');
   });
 });

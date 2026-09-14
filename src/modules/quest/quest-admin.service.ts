@@ -20,9 +20,9 @@ import {
   questV2EditRequestResponse,
   type QuestApiVersion,
 } from '@/database/schema/quest.schema';
-import type { CursorPayload } from '@/shared/cursor';
+import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 
-import { and, asc, desc, eq, gt, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
 
 import { questMode, questParticipation, type QuestStatus } from './quest.contract';
 import { escapeLike } from './quest.service';
@@ -163,6 +163,19 @@ export type ListAdminQuestsInput = {
   sort?: AdminQuestSort;
 };
 
+const assertCursorAnchor = async (cursor: CursorPayload | undefined): Promise<void> => {
+  if (!cursor) return;
+
+  const [anchor] = await db
+    .select({ id: quest.id, createdAt: quest.createdAt })
+    .from(quest)
+    .where(eq(quest.id, cursor.id));
+  const cursorTime = new Date(cursor.startTime);
+  if (!anchor || anchor.createdAt.getTime() !== cursorTime.getTime()) {
+    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Quest');
+  }
+};
+
 export const listAdminQuests = async ({
   q,
   status,
@@ -173,19 +186,19 @@ export const listAdminQuests = async ({
   cursor,
   sort = 'newest',
 }: ListAdminQuestsInput = {}) => {
-  const cursorDate = cursor ? new Date(cursor.startTime) : undefined;
-  const cursorCondition =
-    cursor && cursorDate
-      ? sort === 'oldest'
-        ? or(
-            gt(quest.createdAt, cursorDate),
-            and(eq(quest.createdAt, cursorDate), gt(quest.id, cursor.id))
-          )
-        : or(
-            lt(quest.createdAt, cursorDate),
-            and(eq(quest.createdAt, cursorDate), lt(quest.id, cursor.id))
-          )
-      : undefined;
+  await assertCursorAnchor(cursor);
+
+  // PostgreSQL stores timestamps with microsecond precision, while the shared
+  // cursor serializes a JavaScript Date at millisecond precision. Read the
+  // cursor row inside the comparison so the database keeps the exact boundary.
+  const cursorAnchor = cursor
+    ? sql`(select ${quest.createdAt}, ${quest.id} from ${quest} where ${quest.id} = ${cursor.id})`
+    : undefined;
+  const cursorCondition = cursorAnchor
+    ? sort === 'oldest'
+      ? sql`(${quest.createdAt}, ${quest.id}) > ${cursorAnchor}`
+      : sql`(${quest.createdAt}, ${quest.id}) < ${cursorAnchor}`
+    : undefined;
 
   const searchTerm = q?.trim();
   const searchPattern = searchTerm ? `%${escapeLike(searchTerm)}%` : undefined;

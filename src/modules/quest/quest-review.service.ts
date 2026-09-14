@@ -3,7 +3,9 @@ import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment, review } from '@/database/schema/quest.schema';
 
-import { and, count, desc, eq, exists, inArray, lt, or, sql } from 'drizzle-orm';
+import { CursorInputError } from '@/shared/cursor';
+
+import { and, count, desc, eq, exists, inArray, or, sql } from 'drizzle-orm';
 
 import { assignmentStatus, questStatus, terminalQuestStatuses } from './quest.contract';
 import type { QuestTransaction } from './quest-assignment.service';
@@ -244,26 +246,43 @@ const validReviewPredicate = (memberId: string) =>
     )
   );
 
+/**
+ * The cursor carries a millisecond timestamp while PostgreSQL keeps
+ * microseconds, so page boundaries compare row-wise against the anchor row
+ * read from the database. A Review can be deleted; a cursor naming a missing
+ * Review, or one whose created_at no longer matches, is rejected.
+ */
+const assertCursorAnchor = async (
+  cursor: { startTime: string; id: string } | undefined
+): Promise<void> => {
+  if (!cursor) return;
+
+  const [anchor] = await db
+    .select({ id: review.id, createdAt: review.createdAt })
+    .from(review)
+    .where(eq(review.id, cursor.id));
+  if (!anchor || anchor.createdAt.getTime() !== new Date(cursor.startTime).getTime()) {
+    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Review');
+  }
+};
+
 /** Return only Reviews backed by a terminal Quest and Assignment relationship. */
 export const listReviews = async (
   memberId: string,
   options: { rating?: number; limit?: number; cursor?: { startTime: string; id: string } } = {}
 ) => {
+  await assertCursorAnchor(options.cursor);
+
   const conditions = [
     inArray(quest.questStatus, terminalQuestStatuses),
     validReviewPredicate(memberId),
   ];
   if (options.rating !== undefined) conditions.push(eq(review.rating, options.rating));
-  if (options.cursor) {
-    conditions.push(
-      or(
-        lt(review.createdAt, new Date(options.cursor.startTime)),
-        and(
-          eq(review.createdAt, new Date(options.cursor.startTime)),
-          lt(review.id, options.cursor.id)
-        )
-      )!
-    );
+  const cursorAnchor = options.cursor
+    ? sql`(select ${review.createdAt}, ${review.id} from ${review} where ${review.id} = ${options.cursor.id})`
+    : undefined;
+  if (cursorAnchor) {
+    conditions.push(sql`(${review.createdAt}, ${review.id}) < ${cursorAnchor}`);
   }
   const limit = options.limit ?? 20;
   const rows = await db

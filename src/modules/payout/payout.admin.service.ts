@@ -15,7 +15,7 @@ import {
 import { MoneyDomainError } from '@/modules/wallet';
 import type { CursorPayload } from '@/shared/cursor';
 
-import { and, asc, desc, eq, gt, lt, or } from 'drizzle-orm';
+import { and, asc, desc, eq, sql as drizzleSql } from 'drizzle-orm';
 
 import { approvePayoutInTransaction, cancelPayoutInTransaction } from './payout.service';
 
@@ -385,22 +385,33 @@ export const listAdminPayouts = async ({
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     throw new MoneyDomainError('INVALID_LIMIT', 'Admin Payout limit must be between 1 and 50.');
   }
-  const cursorDate = cursor ? new Date(cursor.startTime) : undefined;
-  if (cursorDate && Number.isNaN(cursorDate.getTime())) {
+  const cursorTime = cursor ? new Date(cursor.startTime) : undefined;
+  if (cursorTime && Number.isNaN(cursorTime.getTime())) {
     throw new MoneyDomainError('INVALID_LIMIT', 'Admin Payout cursor is invalid.');
   }
-  const cursorCondition =
-    cursor && cursorDate
-      ? sort === 'oldest'
-        ? or(
-            gt(paymentPayouts.createdAt, cursorDate),
-            and(eq(paymentPayouts.createdAt, cursorDate), gt(paymentPayouts.id, cursor.id))
-          )
-        : or(
-            lt(paymentPayouts.createdAt, cursorDate),
-            and(eq(paymentPayouts.createdAt, cursorDate), lt(paymentPayouts.id, cursor.id))
-          )
-      : undefined;
+  const [cursorAnchorRow] = cursor
+    ? await db
+        .select({ id: paymentPayouts.id, createdAt: paymentPayouts.createdAt })
+        .from(paymentPayouts)
+        .where(eq(paymentPayouts.id, cursor.id))
+    : [];
+  if (
+    cursor &&
+    (!cursorAnchorRow || cursorAnchorRow.createdAt.getTime() !== cursorTime?.getTime())
+  ) {
+    throw new MoneyDomainError('INVALID_LIMIT', 'Admin Payout cursor is invalid.');
+  }
+  // PostgreSQL stores timestamps with microsecond precision, while the shared
+  // cursor serializes a JavaScript Date at millisecond precision. Read the
+  // cursor row inside the comparison so the database keeps the exact boundary.
+  const cursorAnchor = cursor
+    ? drizzleSql`(select ${paymentPayouts.createdAt}, ${paymentPayouts.id} from ${paymentPayouts} where ${paymentPayouts.id} = ${cursor.id})`
+    : undefined;
+  const cursorCondition = cursorAnchor
+    ? sort === 'oldest'
+      ? drizzleSql`(${paymentPayouts.createdAt}, ${paymentPayouts.id}) > ${cursorAnchor}`
+      : drizzleSql`(${paymentPayouts.createdAt}, ${paymentPayouts.id}) < ${cursorAnchor}`
+    : undefined;
   const rows = await adminPayoutRows(db)
     .where(and(eq(paymentPayouts.payoutStatus, status), cursorCondition))
     .orderBy(
