@@ -1,6 +1,7 @@
 export {
   addSatang,
   calculatePlatformFeeSatang,
+  MAX_WALLET_CAPACITY_SATANG,
   MoneyDomainError,
   positiveSatang,
   satang,
@@ -12,6 +13,7 @@ export type { MoneyDomainErrorCode, Satang, SatangDelta, SignedSatang } from './
 export {
   completeMoneyCommand,
   runMoneyCommand,
+  sha256Json,
   stampMoneyCommandResource,
 } from './wallet.money-command.service';
 export type {

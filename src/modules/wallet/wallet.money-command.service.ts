@@ -7,6 +7,13 @@ import type { WalletTransaction } from './wallet.service';
 
 const idempotencyExpiry = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
 
+/** Shared Finance request-digest helper: JSON.stringify, then SHA-256 as lowercase hex. */
+export const sha256Json = async (value: object) => {
+  const payload = JSON.stringify(value);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
 export type MoneyCommandKeyRow = typeof walletIdempotencyKey.$inferSelect;
 
 export type MoneyCommandRef = {

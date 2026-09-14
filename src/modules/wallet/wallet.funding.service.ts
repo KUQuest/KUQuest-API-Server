@@ -23,7 +23,7 @@ import {
   satang,
   signedSatang,
 } from './wallet.money';
-import { completeMoneyCommand, runMoneyCommand } from './wallet.money-command.service';
+import { completeMoneyCommand, runMoneyCommand, sha256Json } from './wallet.money-command.service';
 import { assertWalletOperationAllowed, isWalletOperationAllowed } from './wallet.status.service';
 import {
   createSealedLedgerTransactionInTransaction,
@@ -96,12 +96,6 @@ const requireOpaqueReference = (value: string, field: string) => {
   if (value.trim().length === 0) {
     throw new MoneyDomainError('INVALID_CALLER_REFERENCE', `${field} must not be empty.`);
   }
-};
-
-const sha256Json = async (value: object) => {
-  const payload = JSON.stringify(value);
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
 const effectivePolicyInTransaction = async (transaction: WalletTransaction, at = new Date()) => {
