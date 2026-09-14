@@ -537,4 +537,80 @@ describe('Quest Review API v2 behavior', () => {
     );
     expect(expired).toEqual({ outcome: 'window-expired' });
   });
+
+  /** Seeds a Review whose created_at carries microseconds through raw SQL. */
+  const seedCursorReview = async (createdAt: string): Promise<string> => {
+    const questId = await createQuest('QUEST_COMPLETED');
+    const [row] = await sql`
+      insert into review (quest_id, reviewer_id, reviewee_id, rating, comment, created_at, updated_at)
+      values (
+        ${questId}, ${hirer.id}, ${worker.id}, 5, 'Cursor walk',
+        ${createdAt}::timestamptz, ${createdAt}::timestamptz
+      )
+      returning id
+    `;
+    return (row as { id: string }).id;
+  };
+
+  const readReviewPages = async (path: string, memberId: string): Promise<string[]> => {
+    const ids: string[] = [];
+    let cursor: string | undefined;
+    let next: unknown;
+    for (let page = 0; page < 8; page += 1) {
+      const target = `${path}?limit=1${cursor ? `&cursor=${cursor}` : ''}`;
+      // Each page cursor comes from the previous response, so these requests
+      // must remain sequential.
+      // eslint-disable-next-line no-await-in-loop
+      const body = await jsonBody(await request('GET', target, memberId));
+      const items = body.data?.items;
+      if (!Array.isArray(items)) throw new Error('Review page did not return items');
+      ids.push(
+        ...items.flatMap((item) =>
+          item && typeof item === 'object' && 'id' in item && typeof item.id === 'string'
+            ? [item.id]
+            : []
+        )
+      );
+      next = body.data?.nextCursor;
+      if (typeof next !== 'string') break;
+      cursor = next;
+    }
+    expect(next).toBeNull();
+    return ids;
+  };
+
+  it('traverses Profile Review pages at limit=1 without skipping or repeating microsecond rows', async () => {
+    if (!postgresAvailable || !reviewSchemaAvailable) return;
+    const first = await seedCursorReview('2030-08-05T00:00:00.100200Z');
+    const tieFirst = await seedCursorReview('2030-08-05T00:00:00.100800Z');
+    const tieSecond = await seedCursorReview('2030-08-05T00:00:00.100800Z');
+    const last = await seedCursorReview('2030-08-05T00:00:00.102400Z');
+    const tieAscending = [tieFirst, tieSecond].sort((left, right) => (left < right ? -1 : 1));
+
+    const newestFirst = [last, ...tieAscending.slice().reverse(), first];
+    expect(await readReviewPages('/api/v1/profile/reviews', worker.id)).toEqual(newestFirst);
+    expect(await readReviewPages(`/api/v1/profile/${worker.id}/reviews`, hirer.id)).toEqual(
+      newestFirst
+    );
+  });
+
+  it('rejects a cursor whose Review was deleted instead of returning a short page', async () => {
+    if (!postgresAvailable || !reviewSchemaAvailable) return;
+    const anchor = await seedCursorReview('2030-08-05T00:00:00.100800Z');
+    await seedCursorReview('2030-08-05T00:00:00.100200Z');
+
+    const page = await jsonBody(await request('GET', '/api/v1/profile/reviews?limit=1', worker.id));
+    const next = page.data?.nextCursor;
+    if (typeof next !== 'string') throw new Error('the first page did not hand back a cursor');
+
+    await db.delete(review).where(eq(review.id, anchor));
+
+    const rejected = await request(
+      'GET',
+      `/api/v1/profile/reviews?limit=1&cursor=${next}`,
+      worker.id
+    );
+    expect(rejected.status).toBe(400);
+    expect((await jsonBody(rejected)).error?.code).toBe('INVALID_CURSOR');
+  });
 });

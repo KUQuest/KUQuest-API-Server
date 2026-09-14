@@ -442,6 +442,26 @@ export const listWorkConversations = async (
   // by the requested page instead of loading every Conversation before slicing it.
   const lastActivityAt = sql`coalesce(max(${chatMessage.createdAt}), timestamp 'epoch')`;
   const cursor = options.cursor;
+  if (cursor) {
+    // The cursor anchors to a Conversation the caller once listed. When the
+    // Chat Membership is gone the anchor is unresolvable, so reject the cursor
+    // instead of paging from a stale boundary.
+    const [membership] = await db
+      .select({ id: chatMembership.id })
+      .from(chatMembership)
+      .where(and(eq(chatMembership.conversationId, cursor.id), eq(chatMembership.memberId, userId)))
+      .limit(1);
+    if (!membership)
+      throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Conversation');
+  }
+  // PostgreSQL stores timestamps at microsecond precision, while the shared
+  // cursor carries a JavaScript Date at millisecond precision. Compare row-wise
+  // against a subquery that recomputes the anchor's caller-visible activity so
+  // the database keeps the exact boundary. A new Message legitimately advances
+  // the aggregate, so the anchor check asserts membership only, never the time.
+  const cursorAnchor = cursor
+    ? sql`(select ${lastActivityAt}, ${cursor.id}::uuid from ${chatMessage} where ${chatMessage.conversationId} = ${cursor.id} and ${chatMessage.deletedAt} is null and ${memberCanSeeMessage(db, userId)})`
+    : undefined;
   const candidates = await db
     .select({ conversationId: chatMembership.conversationId })
     .from(chatMembership)
@@ -464,14 +484,8 @@ export const listWorkConversations = async (
     )
     .groupBy(chatMembership.conversationId)
     .having(
-      cursor
-        ? or(
-            lt(lastActivityAt, new Date(cursor.startTime)),
-            and(
-              eq(lastActivityAt, new Date(cursor.startTime)),
-              lt(chatMembership.conversationId, cursor.id)
-            )
-          )
+      cursorAnchor
+        ? sql`(${lastActivityAt}, ${chatMembership.conversationId}) < ${cursorAnchor}`
         : undefined
     )
     .orderBy(desc(lastActivityAt), desc(chatMembership.conversationId))
