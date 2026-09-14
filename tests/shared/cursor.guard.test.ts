@@ -12,6 +12,14 @@ import { describe, expect, it } from 'bun:test';
 const readsCursorTimestamp = /new Date\((?:cursor|parsed)\.startTime\)/;
 const comparesRowWise = /\.id\}\)\s*[<>]/;
 
+/**
+ * The keyset mechanics live once, in `src/shared/keyset-page.ts` (Issue #541). A list that builds
+ * its own anchor sub-select carries a second copy of the boundary, the probe, and the trim, which
+ * is how one defect came to need five fixes (#438, #446, #537).
+ */
+const buildsAnchorSubSelect = /\(select \$\{[^}]+\}, \$\{[^}]+\} from \$\{/;
+const keysetReader = 'src/shared/keyset-page.ts';
+
 /** Lists that page on `quest.start_time`, which a Hirer supplies at millisecond precision. */
 const allowedFiles: Record<string, true> = {
   'src/modules/quest/quest-v2.service.ts': true,
@@ -35,6 +43,26 @@ describe('Cursor paging guard', () => {
       .map(
         (file) =>
           `${file} builds a page boundary from a millisecond cursor timestamp. Compare row-wise against the anchor row read inside SQL; see src/modules/admin/admin-activity-log.service.ts:37-75 and Issue #537.`
+      )
+      .join('\n');
+
+    expect(offenders, report).toEqual([]);
+  });
+
+  it('keeps the keyset anchor sub-select in the shared reader alone', async () => {
+    const offenders: string[] = [];
+    const sources = [
+      ...new Bun.Glob('src/**/*.ts').scanSync({ cwd: repoRoot, onlyFiles: true }),
+    ].sort();
+    for (const file of sources) {
+      if (file === keysetReader) continue;
+      const source = await Bun.file(resolve(repoRoot, file)).text();
+      if (buildsAnchorSubSelect.test(source)) offenders.push(file);
+    }
+    const report = offenders
+      .map(
+        (file) =>
+          `${file} builds its own keyset anchor sub-select. Page it through readKeysetPage in ${keysetReader}; see Issue #541.`
       )
       .join('\n');
 

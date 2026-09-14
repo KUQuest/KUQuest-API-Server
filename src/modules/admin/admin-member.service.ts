@@ -9,10 +9,10 @@ import {
   walletLedgerPosting,
   walletWallet,
 } from '@/database/schema/wallet.schema';
-import { CursorInputError, decodeCursor, encodeCursor } from '@/shared/cursor';
-import type { CursorPayload } from '@/shared/cursor';
+import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, avg, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, avg, count, eq, ilike, or, sql } from 'drizzle-orm';
 
 import type {
   AdminMemberDetailData,
@@ -25,33 +25,11 @@ export type AdminMemberListPage = {
   nextCursor: string | null;
 };
 
-const assertCursorAnchor = async (
-  cursor: string | undefined
-): Promise<CursorPayload | undefined> => {
-  if (!cursor) return undefined;
-
-  const parsed = decodeCursor(cursor);
-  if (!parsed) {
-    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Member');
-  }
-
-  const [anchor] = await db
-    .select({ id: authUser.id, createdAt: authUser.createdAt })
-    .from(authUser)
-    .where(eq(authUser.id, parsed.id));
-  const cursorTime = new Date(parsed.startTime);
-  if (!anchor || anchor.createdAt.getTime() !== cursorTime.getTime()) {
-    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Member');
-  }
-
-  return parsed;
-};
-
 export const listAdminMembers = async (
   query: AdminMemberListQuery = {}
 ): Promise<AdminMemberListPage> => {
-  const cursor = await assertCursorAnchor(query.cursor);
-  const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
+  const cursor = decodeCursor(query.cursor);
+  const limit = parsePageLimit(query.limit);
   const conditions = [];
 
   if (query.walletStatus) {
@@ -69,63 +47,45 @@ export const listAdminMembers = async (
     );
   }
 
-  // PostgreSQL stores timestamps with microsecond precision, while the shared
-  // cursor serializes a JavaScript Date at millisecond precision. Read the
-  // cursor row inside the comparison so the database keeps the exact boundary.
-  const cursorAnchor = cursor
-    ? sql`(select ${authUser.createdAt}, ${authUser.id} from ${authUser} where ${authUser.id} = ${cursor.id})`
-    : undefined;
-  const cursorCondition = cursorAnchor
-    ? sql`(${authUser.createdAt}, ${authUser.id}) < ${cursorAnchor}`
-    : undefined;
-  if (cursorCondition) {
-    conditions.push(cursorCondition);
-  }
+  const page = await readKeysetPage({
+    anchor: { time: authUser.createdAt, id: authUser.id },
+    cursor,
+    limit,
+    where: and(...conditions),
+    read: ({ where, orderBy, limit: probe }) =>
+      db
+        .select({
+          id: authUser.id,
+          email: authUser.email,
+          firstName: authUser.firstName,
+          lastName: authUser.lastName,
+          studentId: authUser.studentId,
+          telephone: authUser.telephone,
+          academicYear: authUser.academicYear,
+          createdAt: authUser.createdAt,
+          departmentName: department.name,
+          facultyName: faculty.name,
+          occupationName: occupation.name,
+          walletId: walletWallet.id,
+          walletStatus: walletWallet.walletStatus,
+          spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+          earningsBalanceSatang: walletWallet.earningsBalanceSatang,
+          fundingReservedSatang: walletWallet.fundingReservedSatang,
+          reservedForPayoutsSatang: walletWallet.reservedForPayoutsSatang,
+        })
+        .from(authUser)
+        .leftJoin(department, eq(authUser.departmentId, department.id))
+        .leftJoin(faculty, eq(department.facultyId, faculty.id))
+        .leftJoin(occupation, eq(authUser.occupationId, occupation.id))
+        .leftJoin(walletWallet, eq(authUser.id, walletWallet.userId))
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a Member'),
+  });
 
-  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-
-  const rows = await db
-    .select({
-      id: authUser.id,
-      email: authUser.email,
-      firstName: authUser.firstName,
-      lastName: authUser.lastName,
-      studentId: authUser.studentId,
-      telephone: authUser.telephone,
-      academicYear: authUser.academicYear,
-      createdAt: authUser.createdAt,
-      departmentName: department.name,
-      facultyName: faculty.name,
-      occupationName: occupation.name,
-      walletId: walletWallet.id,
-      walletStatus: walletWallet.walletStatus,
-      spendingBalanceSatang: walletWallet.spendingBalanceSatang,
-      earningsBalanceSatang: walletWallet.earningsBalanceSatang,
-      fundingReservedSatang: walletWallet.fundingReservedSatang,
-      reservedForPayoutsSatang: walletWallet.reservedForPayoutsSatang,
-    })
-    .from(authUser)
-    .leftJoin(department, eq(authUser.departmentId, department.id))
-    .leftJoin(faculty, eq(department.facultyId, faculty.id))
-    .leftJoin(occupation, eq(authUser.occupationId, occupation.id))
-    .leftJoin(walletWallet, eq(authUser.id, walletWallet.userId))
-    .where(whereClause)
-    .orderBy(desc(authUser.createdAt), desc(authUser.id))
-    .limit(limit + 1);
-
-  const hasNextPage = rows.length > limit;
-  const pageRows = hasNextPage ? rows.slice(0, limit) : rows;
-
-  let nextCursor: string | null = null;
-  if (hasNextPage && pageRows.length > 0) {
-    const last = pageRows[pageRows.length - 1];
-    nextCursor = encodeCursor({
-      id: last.id,
-      startTime: last.createdAt.toISOString(),
-    });
-  }
-
-  const items: AdminMemberListItem[] = pageRows.map((r) => {
+  const items: AdminMemberListItem[] = page.rows.map((r) => {
     let wallet: AdminMemberListItem['wallet'] = null;
     if (r.walletId && r.walletStatus) {
       const spending = r.spendingBalanceSatang ?? 0;
@@ -159,7 +119,7 @@ export const listAdminMembers = async (
 
   return {
     items,
-    nextCursor,
+    nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
   };
 };
 

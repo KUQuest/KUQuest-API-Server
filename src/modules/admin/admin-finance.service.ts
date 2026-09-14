@@ -15,8 +15,8 @@ import {
   walletLedgerTransaction,
   walletWallet,
 } from '@/database/schema/wallet.schema';
-import { CursorInputError, decodeCursor, encodeCursor } from '@/shared/cursor';
-import type { CursorPayload } from '@/shared/cursor';
+import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
 
 import { and, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 
@@ -297,33 +297,11 @@ export const getAdminQuestFinance = async (
   };
 };
 
-const assertCursorAnchor = async (
-  cursor: string | undefined
-): Promise<CursorPayload | undefined> => {
-  if (!cursor) return undefined;
-
-  const parsed = decodeCursor(cursor);
-  if (!parsed) {
-    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Ledger Transaction');
-  }
-
-  const [anchor] = await db
-    .select({ id: walletLedgerTransaction.id, createdAt: walletLedgerTransaction.createdAt })
-    .from(walletLedgerTransaction)
-    .where(eq(walletLedgerTransaction.id, parsed.id));
-  const cursorTime = new Date(parsed.startTime);
-  if (!anchor || anchor.createdAt.getTime() !== cursorTime.getTime()) {
-    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Ledger Transaction');
-  }
-
-  return parsed;
-};
-
 export const listAdminLedgerTransactions = async (
   query: AdminLedgerTransactionsQuery
 ): Promise<AdminLedgerTransactionsData> => {
-  const cursor = await assertCursorAnchor(query.cursor);
-  const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
+  const cursor = decodeCursor(query.cursor);
+  const limit = parsePageLimit(query.limit);
   const conditions = [];
 
   if (query.eventType) {
@@ -361,50 +339,33 @@ export const listAdminLedgerTransactions = async (
     conditions.push(inArray(walletLedgerTransaction.id, walletTxIds));
   }
 
-  // PostgreSQL stores timestamps with microsecond precision, while the shared
-  // cursor serializes a JavaScript Date at millisecond precision. Read the
-  // cursor row inside the comparison so the database keeps the exact boundary.
-  const cursorAnchor = cursor
-    ? sql`(select ${walletLedgerTransaction.createdAt}, ${walletLedgerTransaction.id} from ${walletLedgerTransaction} where ${walletLedgerTransaction.id} = ${cursor.id})`
-    : undefined;
-  const cursorCondition = cursorAnchor
-    ? sql`(${walletLedgerTransaction.createdAt}, ${walletLedgerTransaction.id}) < ${cursorAnchor}`
-    : undefined;
-  if (cursorCondition) {
-    conditions.push(cursorCondition);
-  }
+  const page = await readKeysetPage({
+    anchor: { time: walletLedgerTransaction.createdAt, id: walletLedgerTransaction.id },
+    cursor,
+    limit,
+    where: conditions.length > 0 ? and(...conditions) : undefined,
+    read: ({ where, orderBy, limit: probe }) =>
+      db
+        .select({
+          id: walletLedgerTransaction.id,
+          businessReference: walletLedgerTransaction.businessReference,
+          eventType: walletLedgerTransaction.eventType,
+          description: walletLedgerTransaction.description,
+          createdByUserId: walletLedgerTransaction.createdByUserId,
+          correctionOfTransactionId: walletLedgerTransaction.correctionOfTransactionId,
+          createdAt: walletLedgerTransaction.createdAt,
+          sealedAt: walletLedgerTransaction.sealedAt,
+        })
+        .from(walletLedgerTransaction)
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+    invalidCursor: () =>
+      new CursorInputError('INVALID_CURSOR', 'cursor does not match a Ledger Transaction'),
+  });
 
-  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-
-  const txRows = await db
-    .select({
-      id: walletLedgerTransaction.id,
-      businessReference: walletLedgerTransaction.businessReference,
-      eventType: walletLedgerTransaction.eventType,
-      description: walletLedgerTransaction.description,
-      createdByUserId: walletLedgerTransaction.createdByUserId,
-      correctionOfTransactionId: walletLedgerTransaction.correctionOfTransactionId,
-      createdAt: walletLedgerTransaction.createdAt,
-      sealedAt: walletLedgerTransaction.sealedAt,
-    })
-    .from(walletLedgerTransaction)
-    .where(whereClause)
-    .orderBy(desc(walletLedgerTransaction.createdAt), desc(walletLedgerTransaction.id))
-    .limit(limit + 1);
-
-  const hasNextPage = txRows.length > limit;
-  const pageRows = hasNextPage ? txRows.slice(0, limit) : txRows;
-
-  let nextCursor: string | null = null;
-  if (hasNextPage && pageRows.length > 0) {
-    const last = pageRows[pageRows.length - 1];
-    nextCursor = encodeCursor({
-      id: last.id,
-      startTime: last.createdAt.toISOString(),
-    });
-  }
-
-  const txIds = pageRows.map((r) => r.id);
+  const txIds = page.rows.map((r) => r.id);
   const items: AdminLedgerTransactionsData['items'] = [];
 
   if (txIds.length > 0) {
@@ -434,7 +395,7 @@ export const listAdminLedgerTransactions = async (
       postingsByTx.set(p.transactionId, list);
     }
 
-    for (const tx of pageRows) {
+    for (const tx of page.rows) {
       const txPostings = postingsByTx.get(tx.id) ?? [];
       const sum = txPostings.reduce((total, p) => total + p.amountSatang, 0);
 
@@ -469,7 +430,7 @@ export const listAdminLedgerTransactions = async (
 
   return {
     items,
-    nextCursor,
+    nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
   };
 };
 

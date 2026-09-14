@@ -14,8 +14,9 @@ import {
 } from '@/modules/admin';
 import { MoneyDomainError } from '@/modules/wallet';
 import type { CursorPayload } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, asc, desc, eq, sql as drizzleSql } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 
 import { approvePayoutInTransaction, cancelPayoutInTransaction } from './payout.service';
 
@@ -385,44 +386,22 @@ export const listAdminPayouts = async ({
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     throw new MoneyDomainError('INVALID_LIMIT', 'Admin Payout limit must be between 1 and 50.');
   }
-  const cursorTime = cursor ? new Date(cursor.startTime) : undefined;
-  if (cursorTime && Number.isNaN(cursorTime.getTime())) {
-    throw new MoneyDomainError('INVALID_LIMIT', 'Admin Payout cursor is invalid.');
-  }
-  const [cursorAnchorRow] = cursor
-    ? await db
-        .select({ id: paymentPayouts.id, createdAt: paymentPayouts.createdAt })
-        .from(paymentPayouts)
-        .where(eq(paymentPayouts.id, cursor.id))
-    : [];
-  if (
-    cursor &&
-    (!cursorAnchorRow || cursorAnchorRow.createdAt.getTime() !== cursorTime?.getTime())
-  ) {
-    throw new MoneyDomainError('INVALID_LIMIT', 'Admin Payout cursor is invalid.');
-  }
-  // PostgreSQL stores timestamps with microsecond precision, while the shared
-  // cursor serializes a JavaScript Date at millisecond precision. Read the
-  // cursor row inside the comparison so the database keeps the exact boundary.
-  const cursorAnchor = cursor
-    ? drizzleSql`(select ${paymentPayouts.createdAt}, ${paymentPayouts.id} from ${paymentPayouts} where ${paymentPayouts.id} = ${cursor.id})`
-    : undefined;
-  const cursorCondition = cursorAnchor
-    ? sort === 'oldest'
-      ? drizzleSql`(${paymentPayouts.createdAt}, ${paymentPayouts.id}) > ${cursorAnchor}`
-      : drizzleSql`(${paymentPayouts.createdAt}, ${paymentPayouts.id}) < ${cursorAnchor}`
-    : undefined;
-  const rows = await adminPayoutRows(db)
-    .where(and(eq(paymentPayouts.payoutStatus, status), cursorCondition))
-    .orderBy(
-      sort === 'oldest' ? asc(paymentPayouts.createdAt) : desc(paymentPayouts.createdAt),
-      sort === 'oldest' ? asc(paymentPayouts.id) : desc(paymentPayouts.id)
-    )
-    .limit(limit + 1);
-  const hasNext = rows.length > limit;
-  const page = rows.slice(0, limit);
+  const page = await readKeysetPage({
+    anchor: { time: paymentPayouts.createdAt, id: paymentPayouts.id },
+    cursor,
+    limit,
+    sort,
+    where: eq(paymentPayouts.payoutStatus, status),
+    read: ({ where, orderBy, limit: probe }) =>
+      adminPayoutRows(db)
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({ startTime: row.payout.createdAt, id: row.payout.id }),
+    invalidCursor: () => new MoneyDomainError('INVALID_LIMIT', 'Admin Payout cursor is invalid.'),
+  });
   const items = await Promise.all(
-    page.map(async (row: { payout: SafePayoutRecord; student: AdminPayout['student'] }) =>
+    page.rows.map(async (row: { payout: SafePayoutRecord; student: AdminPayout['student'] }) =>
       adminPayoutFromRecord(
         row.payout as SafePayoutRecord,
         row.student,
@@ -430,12 +409,5 @@ export const listAdminPayouts = async ({
       )
     )
   );
-  const last = page[page.length - 1];
-  return {
-    items,
-    nextCursor:
-      hasNext && last
-        ? { startTime: last.payout.createdAt.toISOString(), id: last.payout.id }
-        : null,
-  };
+  return { items, nextCursor: page.nextCursor };
 };
