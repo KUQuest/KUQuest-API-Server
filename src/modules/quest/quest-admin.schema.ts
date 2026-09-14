@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import { questStatuses } from './quest.contract';
 import { questV2Modes, questV2Participations } from './quest-v2.contract';
@@ -64,7 +65,7 @@ export const adminQuestListQuerySchema = t.Object({
   mode: t.Optional(adminQuestModeSchema),
   participation: t.Optional(adminQuestParticipationSchema),
   hidden: t.Optional(t.Boolean()),
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
   sort: t.Optional(t.Union([t.Literal('newest'), t.Literal('oldest')])),
 });

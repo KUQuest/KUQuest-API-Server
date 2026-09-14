@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 export const payoutStatusSchema = t.Union([
   t.Literal('PENDING_ADMIN_APPROVAL'),
@@ -34,7 +35,7 @@ export const payoutParamsSchema = t.Object({
 });
 
 export const payoutListQuerySchema = t.Object({
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
 });
 
 export const payoutQuoteResponseSchema = t.Object({

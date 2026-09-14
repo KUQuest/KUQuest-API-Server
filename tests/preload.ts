@@ -47,7 +47,18 @@ try {
   const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : null;
   const isDuplicate =
     code === '42P04' || (error instanceof Error && error.message.includes('already exists'));
-  if (!isDuplicate) throw error;
+  if (!isDuplicate) {
+    const isConnectionFailure =
+      (typeof code === 'string' && (code.startsWith('08') || code.startsWith('E'))) ||
+      (error instanceof Error && /connect/i.test(error.message));
+    if (isConnectionFailure) {
+      throw new Error(
+        `These tests need PostgreSQL and could not connect to ${serverUrl.host}. Start it with \`podman start kuquest-postgres\` (or \`podman compose up -d\`), then run \`bun run db:migrate\`.`,
+        { cause: error }
+      );
+    }
+    throw error;
+  }
 } finally {
   await server.end();
 }

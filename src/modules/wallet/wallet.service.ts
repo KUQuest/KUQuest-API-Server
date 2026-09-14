@@ -12,6 +12,7 @@ import {
 } from '@/database/schema/wallet.schema';
 
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import {
   MAX_OPERATION_SATANG,
@@ -201,9 +202,12 @@ export const getWallet = async (userId: string) => {
   return validateWalletAmounts(wallet);
 };
 
-export const getWalletActivities = async (userId: string, limit = 50) => {
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
-    throw new MoneyDomainError('INVALID_LIMIT', 'Activity limit must be between 1 and 100.');
+export const getWalletActivities = async (userId: string, limit = MAX_PAGE_LIMIT) => {
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_LIMIT) {
+    throw new MoneyDomainError(
+      'INVALID_LIMIT',
+      `Activity limit must be between 1 and ${MAX_PAGE_LIMIT}.`
+    );
   }
 
   const activities = await db

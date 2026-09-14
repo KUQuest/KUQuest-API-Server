@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 const dateTime = t.String({ format: 'date-time' });
 
@@ -40,7 +41,7 @@ export const earningsConversionResponseSchema = t.Object({
 });
 
 export const walletActivitiesQuerySchema = t.Object({
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 100 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
 });
 
 export const walletActivitySchema = t.Object({

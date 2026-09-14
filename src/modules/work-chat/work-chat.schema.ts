@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 const conversationSchema = t.Object({
   id: t.String({ format: 'uuid' }),
@@ -85,7 +86,7 @@ export const workChatConversationListQuerySchema = t.Object(
 
 export const workChatMessageListQuerySchema = t.Object(
   {
-    limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+    limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
     before: t.Optional(t.String()),
     after: t.Optional(t.String()),
   },

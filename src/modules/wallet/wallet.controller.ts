@@ -2,6 +2,7 @@ import type { AuthedContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 import type { Static } from 'elysia';
 
 import { convertEarnings } from './wallet.conversion.service';
@@ -86,7 +87,7 @@ export const getWalletActivitiesController = async ({
   query: WalletActivitiesQuery;
 }): Promise<ApiResponse> => {
   try {
-    const activities = await getWalletActivities(session.user.id, query?.limit ?? 50);
+    const activities = await getWalletActivities(session.user.id, query?.limit ?? MAX_PAGE_LIMIT);
     return apiSuccess({
       activities: activities.map((activity) => ({
         id: activity.id,
