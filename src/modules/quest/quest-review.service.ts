@@ -3,9 +3,10 @@ import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment, review } from '@/database/schema/quest.schema';
 
-import { CursorInputError } from '@/shared/cursor';
+import { CursorInputError, type CursorPayload } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, count, desc, eq, exists, inArray, or, sql } from 'drizzle-orm';
+import { and, count, eq, exists, inArray, or, sql } from 'drizzle-orm';
 
 import { assignmentStatus, questStatus, terminalQuestStatuses } from './quest.contract';
 import type { QuestTransaction } from './quest-assignment.service';
@@ -246,68 +247,47 @@ const validReviewPredicate = (memberId: string) =>
     )
   );
 
-/**
- * The cursor carries a millisecond timestamp while PostgreSQL keeps
- * microseconds, so page boundaries compare row-wise against the anchor row
- * read from the database. A Review can be deleted; a cursor naming a missing
- * Review, or one whose created_at no longer matches, is rejected.
- */
-const assertCursorAnchor = async (
-  cursor: { startTime: string; id: string } | undefined
-): Promise<void> => {
-  if (!cursor) return;
-
-  const [anchor] = await db
-    .select({ id: review.id, createdAt: review.createdAt })
-    .from(review)
-    .where(eq(review.id, cursor.id));
-  if (!anchor || anchor.createdAt.getTime() !== new Date(cursor.startTime).getTime()) {
-    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Review');
-  }
-};
-
 /** Return only Reviews backed by a terminal Quest and Assignment relationship. */
 export const listReviews = async (
   memberId: string,
-  options: { rating?: number; limit?: number; cursor?: { startTime: string; id: string } } = {}
+  options: { rating?: number; limit?: number; cursor?: CursorPayload } = {}
 ) => {
-  await assertCursorAnchor(options.cursor);
-
   const conditions = [
     inArray(quest.questStatus, terminalQuestStatuses),
     validReviewPredicate(memberId),
   ];
   if (options.rating !== undefined) conditions.push(eq(review.rating, options.rating));
-  const cursorAnchor = options.cursor
-    ? sql`(select ${review.createdAt}, ${review.id} from ${review} where ${review.id} = ${options.cursor.id})`
-    : undefined;
-  if (cursorAnchor) {
-    conditions.push(sql`(${review.createdAt}, ${review.id}) < ${cursorAnchor}`);
-  }
-  const limit = options.limit ?? 20;
-  const rows = await db
-    .select({
-      id: review.id,
-      questId: review.questId,
-      rating: review.rating,
-      comment: review.comment,
-      createdAt: review.createdAt,
-      updatedAt: review.updatedAt,
-      questTitle: quest.title,
-      reviewerFirstName: authUser.firstName,
-      reviewerLastName: authUser.lastName,
-      avatarBucket: file.bucket,
-      avatarObjectKey: file.objectKey,
-    })
-    .from(review)
-    .innerJoin(quest, eq(review.questId, quest.id))
-    .innerJoin(authUser, eq(review.reviewerId, authUser.id))
-    .leftJoin(file, and(eq(authUser.imageFileId, file.id), sql`${file.deletedAt} IS NULL`))
-    .where(and(...conditions))
-    .orderBy(desc(review.createdAt), desc(review.id))
-    .limit(limit + 1);
-  const hasNext = rows.length > limit;
-  return { rows: rows.slice(0, limit), hasNext };
+  const page = await readKeysetPage({
+    anchor: { time: review.createdAt, id: review.id },
+    cursor: options.cursor,
+    limit: options.limit ?? 20,
+    where: and(...conditions),
+    read: ({ where, orderBy, limit: probe }) =>
+      db
+        .select({
+          id: review.id,
+          questId: review.questId,
+          rating: review.rating,
+          comment: review.comment,
+          createdAt: review.createdAt,
+          updatedAt: review.updatedAt,
+          questTitle: quest.title,
+          reviewerFirstName: authUser.firstName,
+          reviewerLastName: authUser.lastName,
+          avatarBucket: file.bucket,
+          avatarObjectKey: file.objectKey,
+        })
+        .from(review)
+        .innerJoin(quest, eq(review.questId, quest.id))
+        .innerJoin(authUser, eq(review.reviewerId, authUser.id))
+        .leftJoin(file, and(eq(authUser.imageFileId, file.id), sql`${file.deletedAt} IS NULL`))
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a Review'),
+  });
+  return { rows: page.rows, hasNext: page.hasNext };
 };
 
 export const countReviews = async (memberId: string, rating?: number) => {

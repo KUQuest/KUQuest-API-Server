@@ -21,8 +21,9 @@ import {
   type QuestApiVersion,
 } from '@/database/schema/quest.schema';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, asc, desc, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
 
 import { questMode, questParticipation, type QuestStatus } from './quest.contract';
 import { escapeLike } from './quest.service';
@@ -163,19 +164,6 @@ export type ListAdminQuestsInput = {
   sort?: AdminQuestSort;
 };
 
-const assertCursorAnchor = async (cursor: CursorPayload | undefined): Promise<void> => {
-  if (!cursor) return;
-
-  const [anchor] = await db
-    .select({ id: quest.id, createdAt: quest.createdAt })
-    .from(quest)
-    .where(eq(quest.id, cursor.id));
-  const cursorTime = new Date(cursor.startTime);
-  if (!anchor || anchor.createdAt.getTime() !== cursorTime.getTime()) {
-    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Quest');
-  }
-};
-
 export const listAdminQuests = async ({
   q,
   status,
@@ -186,67 +174,45 @@ export const listAdminQuests = async ({
   cursor,
   sort = 'newest',
 }: ListAdminQuestsInput = {}) => {
-  await assertCursorAnchor(cursor);
-
-  // PostgreSQL stores timestamps with microsecond precision, while the shared
-  // cursor serializes a JavaScript Date at millisecond precision. Read the
-  // cursor row inside the comparison so the database keeps the exact boundary.
-  const cursorAnchor = cursor
-    ? sql`(select ${quest.createdAt}, ${quest.id} from ${quest} where ${quest.id} = ${cursor.id})`
-    : undefined;
-  const cursorCondition = cursorAnchor
-    ? sort === 'oldest'
-      ? sql`(${quest.createdAt}, ${quest.id}) > ${cursorAnchor}`
-      : sql`(${quest.createdAt}, ${quest.id}) < ${cursorAnchor}`
-    : undefined;
-
   const searchTerm = q?.trim();
   const searchPattern = searchTerm ? `%${escapeLike(searchTerm)}%` : undefined;
 
-  const rows = await adminQuestRows(db)
-    .where(
-      and(
-        searchPattern
-          ? sql`(${quest.title} ILIKE ${searchPattern} ESCAPE ${'\\'} OR ${quest.description} ILIKE ${searchPattern} ESCAPE ${'\\'})`
-          : undefined,
-        status ? eq(quest.questStatus, status) : undefined,
-        mode
-          ? eq(
-              quest.mode,
-              mode === questV2Mode.firstComeFirstServed
-                ? questMode.noCandidate
-                : questMode.candidate
-            )
-          : undefined,
-        participation
-          ? eq(
-              quest.participation,
-              participation === questV2Participation.single
-                ? questParticipation.solo
-                : questParticipation.group
-            )
-          : undefined,
-        hidden === undefined
-          ? undefined
-          : hidden
-            ? isNotNull(quest.hiddenAt)
-            : isNull(quest.hiddenAt),
-        cursorCondition
-      )
-    )
-    .orderBy(
-      sort === 'oldest' ? asc(quest.createdAt) : desc(quest.createdAt),
-      sort === 'oldest' ? asc(quest.id) : desc(quest.id)
-    )
-    .limit(limit + 1);
+  const page = await readKeysetPage({
+    anchor: { time: quest.createdAt, id: quest.id },
+    cursor,
+    limit,
+    sort,
+    where: and(
+      searchPattern
+        ? sql`(${quest.title} ILIKE ${searchPattern} ESCAPE ${'\\'} OR ${quest.description} ILIKE ${searchPattern} ESCAPE ${'\\'})`
+        : undefined,
+      status ? eq(quest.questStatus, status) : undefined,
+      mode
+        ? eq(
+            quest.mode,
+            mode === questV2Mode.firstComeFirstServed ? questMode.noCandidate : questMode.candidate
+          )
+        : undefined,
+      participation
+        ? eq(
+            quest.participation,
+            participation === questV2Participation.single
+              ? questParticipation.solo
+              : questParticipation.group
+          )
+        : undefined,
+      hidden === undefined ? undefined : hidden ? isNotNull(quest.hiddenAt) : isNull(quest.hiddenAt)
+    ),
+    read: ({ where, orderBy, limit: probe }) =>
+      adminQuestRows(db)
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({ startTime: row.quest.createdAt, id: row.quest.id }),
+    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a Quest'),
+  });
 
-  const hasNext = rows.length > limit;
-  const items = rows.slice(0, limit).map(adminQuestSummaryFromRow);
-  const last = items[items.length - 1];
-  return {
-    items,
-    nextCursor: hasNext && last ? { startTime: last.createdAt.toISOString(), id: last.id } : null,
-  };
+  return { items: page.rows.map(adminQuestSummaryFromRow), nextCursor: page.nextCursor };
 };
 export type AdminQuestApplication = {
   id: string;

@@ -5,10 +5,10 @@ import {
   walletLedgerPosting,
   walletWallet,
 } from '@/database/schema/wallet.schema';
-import { CursorInputError, decodeCursor, encodeCursor } from '@/shared/cursor';
-import type { CursorPayload } from '@/shared/cursor';
+import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, eq, ilike, or, sql } from 'drizzle-orm';
 
 import type {
   AdminWalletFullDetailResponse,
@@ -21,96 +21,58 @@ export type AdminWalletListPage = {
   nextCursor: string | null;
 };
 
-const assertCursorAnchor = async (cursor: CursorPayload | undefined): Promise<void> => {
-  if (!cursor) return;
-
-  const [anchor] = await db
-    .select({ id: walletWallet.id, createdAt: walletWallet.createdAt })
-    .from(walletWallet)
-    .where(eq(walletWallet.id, cursor.id));
-  const cursorTime = new Date(cursor.startTime);
-  if (!anchor || anchor.createdAt.getTime() !== cursorTime.getTime()) {
-    throw new CursorInputError('INVALID_CURSOR', 'cursor does not match a Wallet');
-  }
-};
-
 export const listAdminWallets = async (
   query: AdminWalletListQuery = {}
 ): Promise<AdminWalletListPage> => {
-  const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
-  const parsed = query.cursor ? decodeCursor(query.cursor) : undefined;
-  await assertCursorAnchor(parsed);
+  const limit = parsePageLimit(query.limit);
+  const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
 
-  // PostgreSQL stores timestamps with microsecond precision, while the shared
-  // cursor serializes a JavaScript Date at millisecond precision. Read the
-  // cursor row inside the comparison so the database keeps the exact boundary.
-  const cursorAnchor = parsed
-    ? sql`(select ${walletWallet.createdAt}, ${walletWallet.id} from ${walletWallet} where ${walletWallet.id} = ${parsed.id})`
-    : undefined;
-  const cursorCondition = cursorAnchor
-    ? sql`(${walletWallet.createdAt}, ${walletWallet.id}) < ${cursorAnchor}`
-    : undefined;
+  const page = await readKeysetPage({
+    anchor: { time: walletWallet.createdAt, id: walletWallet.id },
+    cursor,
+    limit,
+    where: and(
+      query.status ? eq(walletWallet.walletStatus, query.status) : undefined,
+      query.userId ? eq(walletWallet.userId, query.userId) : undefined,
+      query.search
+        ? or(
+            ilike(authUser.firstName, `%${query.search}%`),
+            ilike(authUser.lastName, `%${query.search}%`),
+            ilike(authUser.studentId, `%${query.search}%`),
+            ilike(authUser.email, `%${query.search}%`)
+          )
+        : undefined
+    ),
+    read: ({ where, orderBy, limit: probe }) =>
+      db
+        .select({
+          id: walletWallet.id,
+          userId: walletWallet.userId,
+          walletStatus: walletWallet.walletStatus,
+          spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+          earningsBalanceSatang: walletWallet.earningsBalanceSatang,
+          fundingReservedSatang: walletWallet.fundingReservedSatang,
+          reservedForPayoutsSatang: walletWallet.reservedForPayoutsSatang,
+          createdAt: walletWallet.createdAt,
+          updatedAt: walletWallet.updatedAt,
+          firstName: authUser.firstName,
+          lastName: authUser.lastName,
+          studentId: authUser.studentId,
+          email: authUser.email,
+          telephone: authUser.telephone,
+        })
+        .from(walletWallet)
+        .innerJoin(authUser, eq(walletWallet.userId, authUser.id))
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a Wallet'),
+  });
 
-  const conditions = [];
-  if (cursorCondition) {
-    conditions.push(cursorCondition);
-  }
-  if (query.status) {
-    conditions.push(eq(walletWallet.walletStatus, query.status));
-  }
-  if (query.userId) {
-    conditions.push(eq(walletWallet.userId, query.userId));
-  }
-  if (query.search) {
-    const s = `%${query.search}%`;
-    conditions.push(
-      or(
-        ilike(authUser.firstName, s),
-        ilike(authUser.lastName, s),
-        ilike(authUser.studentId, s),
-        ilike(authUser.email, s)
-      )
-    );
-  }
+  const nextCursor = page.nextCursor ? encodeCursor(page.nextCursor) : null;
 
-  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-
-  const rows = await db
-    .select({
-      id: walletWallet.id,
-      userId: walletWallet.userId,
-      walletStatus: walletWallet.walletStatus,
-      spendingBalanceSatang: walletWallet.spendingBalanceSatang,
-      earningsBalanceSatang: walletWallet.earningsBalanceSatang,
-      fundingReservedSatang: walletWallet.fundingReservedSatang,
-      reservedForPayoutsSatang: walletWallet.reservedForPayoutsSatang,
-      createdAt: walletWallet.createdAt,
-      updatedAt: walletWallet.updatedAt,
-      firstName: authUser.firstName,
-      lastName: authUser.lastName,
-      studentId: authUser.studentId,
-      email: authUser.email,
-      telephone: authUser.telephone,
-    })
-    .from(walletWallet)
-    .innerJoin(authUser, eq(walletWallet.userId, authUser.id))
-    .where(whereClause)
-    .orderBy(desc(walletWallet.createdAt), desc(walletWallet.id))
-    .limit(limit + 1);
-
-  const hasNextPage = rows.length > limit;
-  const pageRows = hasNextPage ? rows.slice(0, limit) : rows;
-
-  let nextCursor: string | null = null;
-  if (hasNextPage && pageRows.length > 0) {
-    const last = pageRows[pageRows.length - 1];
-    nextCursor = encodeCursor({
-      id: last.id,
-      startTime: last.createdAt.toISOString(),
-    });
-  }
-
-  const items: AdminWalletListItem[] = pageRows.map((r) => {
+  const items: AdminWalletListItem[] = page.rows.map((r) => {
     const totalBalanceSatang =
       r.spendingBalanceSatang +
       r.earningsBalanceSatang +

@@ -9,6 +9,7 @@ import {
   listReviews,
 } from '@/modules/quest/quest-review.service';
 import { tag } from '@/database/schema/tag.schema';
+import type { CursorPayload } from '@/shared/cursor';
 
 import type { Static } from 'elysia';
 import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
@@ -91,7 +92,7 @@ export const getProfileReputation = async (userId: string) => {
 
 export const getProfileReviews = async (
   userId: string,
-  options: { rating?: number; limit?: number; cursor?: { startTime: string; id: string } } = {}
+  options: { rating?: number; limit?: number; cursor?: CursorPayload } = {}
 ) => {
   const result = await listReviews(userId, options);
   return { ...result, total: await countReviews(userId, options.rating) };
