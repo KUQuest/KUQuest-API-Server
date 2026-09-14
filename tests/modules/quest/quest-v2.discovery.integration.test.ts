@@ -4,10 +4,10 @@ import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment, questImage, questLocation } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletIdempotencyKey } from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import { questStatus } from '@/modules/quest/quest.contract';
+import { deleteTestIdempotencyKeys } from '../wallet/wallet-test-fixtures';
 
 import { Elysia } from 'elysia';
 import { asc, eq, inArray } from 'drizzle-orm';
@@ -147,9 +147,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   if (questIds.length > 0) await db.delete(quest).where(inArray(quest.id, questIds));
-  await db
-    .delete(walletIdempotencyKey)
-    .where(inArray(walletIdempotencyKey.principalUserId, [memberId, ownerId, ...workerIds]));
+  await deleteTestIdempotencyKeys({ principalUserIds: [memberId, ownerId, ...workerIds] });
   if (fileIds.length > 0) await db.delete(file).where(inArray(file.id, fileIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(tag).where(eq(tag.id, otherTagId));

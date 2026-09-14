@@ -18,14 +18,6 @@ import {
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import {
-  walletFundingReservation,
-  walletFundingReservationSettlement,
-  walletLedgerAccount,
-  walletLedgerPosting,
-  walletLedgerTransaction,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
 import { auth } from '@/modules/auth';
 import {
   autoApproveDueQuestV2Proofs,
@@ -44,13 +36,17 @@ import {
 } from '@/modules/work-chat/work-chat.storage';
 import { createWorkChatMembershipWriter } from '@/modules/work-chat';
 import {
-  createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
   ensureWallet,
   positiveSatang,
   reserveSpending,
-  signedSatang,
 } from '@/modules/wallet';
+import {
+  fundTestWallet,
+  listTestLedgerPostings,
+  listTestQuestEscrowSettlements,
+  readTestQuestEscrow,
+} from '../wallet/wallet-test-fixtures';
 
 import { randomUUID } from 'node:crypto';
 
@@ -197,34 +193,6 @@ const createFile = async (uploadedByUserId: string, contentType = 'application/p
   return id;
 };
 
-const account = async (userId: string, type: 'SPENDING' | 'EARNINGS' | 'FUNDING_RESERVED') => {
-  const [wallet] = await db
-    .select({ id: walletWallet.id })
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId));
-  const [ledgerAccount] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, type)));
-  return ledgerAccount.id;
-};
-
-const fundHirer = async (amountSatang: number) => {
-  const spending = await account(hirer.id, 'SPENDING');
-  const [suspense] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
-  await createSealedLedgerTransaction({
-    businessReference: `proof-v2-behavior-top-up-${randomUUID()}`,
-    eventType: 'TOP_UP',
-    postings: [
-      { accountId: spending, amountSatang: signedSatang(amountSatang) },
-      { accountId: suspense.id, amountSatang: signedSatang(-amountSatang) },
-    ],
-  });
-};
-
 const reserveQuest = async (questId: string, amountSatang: number) => {
   await db.transaction((transaction) =>
     reserveSpending(transaction, {
@@ -329,7 +297,7 @@ beforeAll(async () => {
   await db.insert(authUser).values(members);
   await db.insert(tag).values({ id: tagId, name: `Proof v2 behavior test tag ${tagId}` });
   for (const member of members) await ensureWallet(member.id);
-  await fundHirer(100_000);
+  await fundTestWallet(hirer.id, 100_000);
 });
 
 beforeEach(() => {
@@ -588,29 +556,16 @@ describe('Quest Proof Submission v2 behavior', () => {
           .where(eq(questAssignment.questId, questId))
       )[0]?.status
     ).toBe('ASSIGNMENT_COMPLETED');
-    const [reservation] = await db
-      .select({
-        id: walletFundingReservation.id,
-        status: walletFundingReservation.status,
-        remainingSatang: walletFundingReservation.remainingSatang,
-      })
-      .from(walletFundingReservation)
-      .where(
-        and(
-          eq(walletFundingReservation.ownerUserId, hirer.id),
-          eq(walletFundingReservation.callerReference, questId)
-        )
-      );
+    const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
     expect(reservation).toMatchObject({ status: 'SETTLED', remainingSatang: 0 });
     expect(
-      await db
-        .select({
-          recipientUserId: walletFundingReservationSettlement.recipientUserId,
-          recipientAmountSatang: walletFundingReservationSettlement.recipientAmountSatang,
-          platformFeeSatang: walletFundingReservationSettlement.platformFeeSatang,
+      (await listTestQuestEscrowSettlements(reservation!.id)).map(
+        ({ recipientUserId, recipientAmountSatang, platformFeeSatang }) => ({
+          recipientUserId,
+          recipientAmountSatang,
+          platformFeeSatang,
         })
-        .from(walletFundingReservationSettlement)
-        .where(eq(walletFundingReservationSettlement.reservationId, reservation!.id))
+      )
     ).toEqual([
       { recipientUserId: worker.id, recipientAmountSatang: 1_000, platformFeeSatang: 20 },
     ]);
@@ -701,17 +656,10 @@ describe('Quest Proof Submission v2 behavior', () => {
         evidenceReferences: [proofFileId],
       },
     ]);
-    expect(
-      (
-        await db
-          .select({
-            status: walletFundingReservation.status,
-            remainingSatang: walletFundingReservation.remainingSatang,
-          })
-          .from(walletFundingReservation)
-          .where(eq(walletFundingReservation.callerReference, questId))
-      )[0]
-    ).toEqual({ status: 'ACTIVE', remainingSatang: 1_020 });
+    expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
+      status: 'ACTIVE',
+      remainingSatang: 1_020,
+    });
   });
 
   it('requires a reason for a not-approved decision without changing the pending Proof', async () => {
@@ -848,17 +796,10 @@ describe('Quest Proof Submission v2 behavior', () => {
         { workerId: secondWorker.id, status: 'ASSIGNMENT_INCOMPLETE' },
       ])
     );
-    expect(
-      (
-        await db
-          .select({
-            status: walletFundingReservation.status,
-            remainingSatang: walletFundingReservation.remainingSatang,
-          })
-          .from(walletFundingReservation)
-          .where(eq(walletFundingReservation.callerReference, questId))
-      )[0]
-    ).toEqual({ status: 'ACTIVE', remainingSatang: 1_020 });
+    expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
+      status: 'ACTIVE',
+      remainingSatang: 1_020,
+    });
   });
 
   it('rolls back Proof review effects when the Work Conversation transition fails', async () => {
@@ -1096,10 +1037,7 @@ describe('Quest Proof Submission v2 behavior', () => {
       questEscrowSatang: 2_040,
     });
     await reserveQuest(questId, 2_040);
-    const [reservation] = await db
-      .select({ id: walletFundingReservation.id })
-      .from(walletFundingReservation)
-      .where(eq(walletFundingReservation.callerReference, questId));
+    const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
     if (!reservation) throw new Error('Proof-free GROUP fixture reservation was not created');
 
     const first = await request(
@@ -1123,19 +1061,13 @@ describe('Quest Proof Submission v2 behavior', () => {
       ])
     );
     expect(
-      await db
-        .select({
-          recipientUserId: walletFundingReservationSettlement.recipientUserId,
-          recipientAmountSatang: walletFundingReservationSettlement.recipientAmountSatang,
-          platformFeeSatang: walletFundingReservationSettlement.platformFeeSatang,
-        })
-        .from(walletFundingReservationSettlement)
-        .where(
-          and(
-            eq(walletFundingReservationSettlement.reservationId, reservation.id),
-            eq(walletFundingReservationSettlement.recipientUserId, worker.id)
-          )
-        )
+      (await listTestQuestEscrowSettlements(reservation.id))
+        .filter(({ recipientUserId }) => recipientUserId === worker.id)
+        .map(({ recipientUserId, recipientAmountSatang, platformFeeSatang }) => ({
+          recipientUserId,
+          recipientAmountSatang,
+          platformFeeSatang,
+        }))
     ).toEqual([
       { recipientUserId: worker.id, recipientAmountSatang: 1_000, platformFeeSatang: 20 },
     ]);
@@ -1195,24 +1127,10 @@ describe('Quest Proof Submission v2 behavior', () => {
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
     ).toBe('QUEST_COMPLETED');
-    const [reservation] = await db
-      .select({ id: walletFundingReservation.id })
-      .from(walletFundingReservation)
-      .where(
-        and(
-          eq(walletFundingReservation.ownerUserId, hirer.id),
-          eq(walletFundingReservation.callerScope, 'quest'),
-          eq(walletFundingReservation.callerReference, questId)
-        )
-      );
+    const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
     if (!reservation)
       throw new Error('Concurrent confirmation fixture reservation was not created');
-    expect(
-      await db
-        .select()
-        .from(walletFundingReservationSettlement)
-        .where(eq(walletFundingReservationSettlement.reservationId, reservation.id))
-    ).toHaveLength(2);
+    expect(await listTestQuestEscrowSettlements(reservation.id)).toHaveLength(2);
   });
 
   it('settles an underfilled 3-of-4 GROUP FCFS Quest against the fixed Escrow fee pool', async () => {
@@ -1282,36 +1200,10 @@ describe('Quest Proof Submission v2 behavior', () => {
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
     ).toBe('QUEST_COMPLETED');
-    const [reservation] = await db
-      .select({ id: walletFundingReservation.id })
-      .from(walletFundingReservation)
-      .where(
-        and(
-          eq(walletFundingReservation.ownerUserId, hirer.id),
-          eq(walletFundingReservation.callerScope, 'quest'),
-          eq(walletFundingReservation.callerReference, questId)
-        )
-      );
+    const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
     if (!reservation) throw new Error('Underfilled behavior fixture reservation was not created');
 
-    const settlements = await db
-      .select({
-        recipientUserId: walletFundingReservationSettlement.recipientUserId,
-        recipientAmountSatang: walletFundingReservationSettlement.recipientAmountSatang,
-        platformFeeSatang: walletFundingReservationSettlement.platformFeeSatang,
-        ledgerTransactionId: walletFundingReservationSettlement.ledgerTransactionId,
-      })
-      .from(walletFundingReservationSettlement)
-      .where(
-        and(
-          eq(walletFundingReservationSettlement.reservationId, reservation.id),
-          inArray(walletFundingReservationSettlement.recipientUserId, [
-            worker.id,
-            secondWorker.id,
-            unrelated.id,
-          ])
-        )
-      );
+    const settlements = await listTestQuestEscrowSettlements(reservation.id);
     expect(settlements).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1339,36 +1231,24 @@ describe('Quest Proof Submission v2 behavior', () => {
     );
 
     const ledgerTransactionIds = settlements.map(({ ledgerTransactionId }) => ledgerTransactionId);
-    const ledgerTransactions = await db
-      .select({
-        id: walletLedgerTransaction.id,
-        eventType: walletLedgerTransaction.eventType,
-        sealedAt: walletLedgerTransaction.sealedAt,
-      })
-      .from(walletLedgerTransaction)
-      .where(inArray(walletLedgerTransaction.id, ledgerTransactionIds));
-    expect(ledgerTransactions).toHaveLength(3);
-    expect(
-      ledgerTransactions.every(
-        ({ eventType, sealedAt }) => eventType === 'FUNDING_SETTLEMENT' && sealedAt instanceof Date
-      )
-    ).toBe(true);
-
-    const earningsAccountIds = await Promise.all(
-      [worker.id, secondWorker.id, unrelated.id].map((workerId) => account(workerId, 'EARNINGS'))
-    );
-    const ledgerPostings = await db
-      .select({
-        accountId: walletLedgerPosting.accountId,
-        amountSatang: walletLedgerPosting.amountSatang,
-      })
-      .from(walletLedgerPosting)
-      .where(inArray(walletLedgerPosting.transactionId, ledgerTransactionIds));
+    const ledgerPostings = await listTestLedgerPostings(ledgerTransactionIds);
     expect(ledgerPostings).toEqual(
       expect.arrayContaining([
-        { accountId: earningsAccountIds[0], amountSatang: 1_334 },
-        { accountId: earningsAccountIds[1], amountSatang: 1_333 },
-        { accountId: earningsAccountIds[2], amountSatang: 1_333 },
+        expect.objectContaining({
+          accountType: 'EARNINGS',
+          ownerUserId: worker.id,
+          amountSatang: 1_334,
+        }),
+        expect.objectContaining({
+          accountType: 'EARNINGS',
+          ownerUserId: secondWorker.id,
+          amountSatang: 1_333,
+        }),
+        expect.objectContaining({
+          accountType: 'EARNINGS',
+          ownerUserId: unrelated.id,
+          amountSatang: 1_333,
+        }),
       ])
     );
     expect(ledgerPostings.reduce((total, posting) => total + posting.amountSatang, 0)).toBe(0);
