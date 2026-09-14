@@ -29,64 +29,58 @@ const boundaryAllowedFiles: Record<string, true> = {
 
 const repoRoot = resolve(import.meta.dir, '..', '..', '..');
 
+/**
+ * Scans every source file the guard covers and collects the ones that offend, with the
+ * report line each offender earns. `skip` drops a file before it is read at all.
+ */
+const scanSources = async (
+  offends: (source: string) => boolean,
+  reportFor: (file: string) => string,
+  skip: (file: string) => boolean
+) => {
+  const offenders: string[] = [];
+  const sources = [
+    ...new Bun.Glob('src/**/*.ts').scanSync({ cwd: repoRoot, onlyFiles: true }),
+  ].sort();
+  for (const file of sources) {
+    if (skip(file)) continue;
+    const source = await Bun.file(resolve(repoRoot, file)).text();
+    if (offends(source)) offenders.push(file);
+  }
+  return { offenders, report: offenders.map(reportFor).join('\n') };
+};
+
 describe('Money Command guard', () => {
   it('names walletIdempotencyKey only in the protocol and schema files', async () => {
-    const offenders: string[] = [];
-    const sources = [
-      ...new Bun.Glob('src/**/*.ts').scanSync({ cwd: repoRoot, onlyFiles: true }),
-    ].sort();
-    for (const file of sources) {
-      if (allowedFiles[file]) continue;
-      const source = await Bun.file(resolve(repoRoot, file)).text();
-      if (source.includes('walletIdempotencyKey')) offenders.push(file);
-    }
-    const report = offenders
-      .map(
-        (file) =>
-          `${file} uses walletIdempotencyKey directly. Route the money command through runMoneyCommand in src/modules/wallet/wallet.money-command.service.ts; see docs/adr/0032-unified-money-command-protocol.md.`
-      )
-      .join('\n');
+    const { offenders, report } = await scanSources(
+      (source) => source.includes('walletIdempotencyKey'),
+      (file) =>
+        `${file} uses walletIdempotencyKey directly. Route the money command through runMoneyCommand in src/modules/wallet/wallet.money-command.service.ts; see docs/adr/0032-unified-money-command-protocol.md.`,
+      (file) => allowedFiles[file] === true
+    );
 
     expect(offenders, report).toEqual([]);
   });
 
   it('defines sha256Json only in the money command module', async () => {
-    const offenders: string[] = [];
-    const sources = [
-      ...new Bun.Glob('src/**/*.ts').scanSync({ cwd: repoRoot, onlyFiles: true }),
-    ].sort();
-    for (const file of sources) {
-      if (digestAllowedFiles[file]) continue;
-      const source = await Bun.file(resolve(repoRoot, file)).text();
-      if (source.includes('const sha256Json')) offenders.push(file);
-    }
-    const report = offenders
-      .map(
-        (file) =>
-          `${file} defines its own sha256Json. Import the shared sha256Json from '@/modules/wallet' (or from './wallet.money-command.service' inside the Wallet module); see docs/adr/0032-unified-money-command-protocol.md.`
-      )
-      .join('\n');
+    const { offenders, report } = await scanSources(
+      (source) => source.includes('const sha256Json'),
+      (file) =>
+        `${file} defines its own sha256Json. Import the shared sha256Json from '@/modules/wallet' (or from './wallet.money-command.service' inside the Wallet module); see docs/adr/0032-unified-money-command-protocol.md.`,
+      (file) => digestAllowedFiles[file] === true
+    );
 
     expect(offenders, report).toEqual([]);
   });
 
   it('imports the Wallet module only through its boundary', async () => {
-    const offenders: string[] = [];
-    const sources = [
-      ...new Bun.Glob('src/**/*.ts').scanSync({ cwd: repoRoot, onlyFiles: true }),
-    ].sort();
-    for (const file of sources) {
-      if (file.startsWith('src/modules/wallet/')) continue; // Wallet's own files legitimately use relative imports
-      if (boundaryAllowedFiles[file]) continue;
-      const source = await Bun.file(resolve(repoRoot, file)).text();
-      if (source.includes('@/modules/wallet/')) offenders.push(file);
-    }
-    const report = offenders
-      .map(
-        (file) =>
-          `${file} reaches into the Wallet module by deep path. Import from the '@/modules/wallet' boundary instead.`
-      )
-      .join('\n');
+    const { offenders, report } = await scanSources(
+      (source) => source.includes('@/modules/wallet/'),
+      (file) =>
+        `${file} reaches into the Wallet module by deep path. Import from the '@/modules/wallet' boundary instead.`,
+      // Wallet's own files legitimately use relative imports.
+      (file) => file.startsWith('src/modules/wallet/') || boundaryAllowedFiles[file] === true
+    );
 
     expect(offenders, report).toEqual([]);
   });
