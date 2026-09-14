@@ -9,7 +9,7 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
+import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-work-chat.port';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import type { QuestWorkChatMembershipTransition } from '@/modules/quest';
 import {

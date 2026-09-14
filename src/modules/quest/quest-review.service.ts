@@ -9,7 +9,7 @@ import { readKeysetPage } from '@/shared/keyset-page';
 import { and, count, eq, exists, inArray, or, sql } from 'drizzle-orm';
 
 import { assignmentStatus, questStatus, terminalQuestStatuses } from './quest.contract';
-import type { QuestTransaction } from './quest-assignment.service';
+import type { QuestTransaction } from './quest-work-chat.port';
 
 type ReviewInput = { revieweeId?: string; rating: number; comment?: string };
 type ReviewUpdate = { rating?: number; comment?: string };

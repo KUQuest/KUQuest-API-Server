@@ -16,8 +16,6 @@ import type {
   QuestWorkChatMembershipTransition,
 } from './quest-work-chat.contract';
 import {
-  configureQuestWorkChatMembershipWriter,
-  getQuestWorkChatMembershipWriter,
   requireQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
 } from './quest-work-chat.port';
@@ -326,11 +324,3 @@ export const joinNoCandidateQuest = async (
     return { ...assignment, questStatus: nextStatus };
   });
 };
-
-export {
-  configureQuestWorkChatMembershipWriter,
-  getQuestWorkChatMembershipWriter,
-  requireQuestWorkChatMembershipWriter,
-  WorkChatTransitionError,
-};
-export type { QuestTransaction } from './quest-work-chat.port';

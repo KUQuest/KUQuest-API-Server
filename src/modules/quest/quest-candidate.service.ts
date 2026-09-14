@@ -17,7 +17,7 @@ import {
   getQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
   type QuestTransaction,
-} from './quest-assignment.service';
+} from './quest-work-chat.port';
 import type {
   AcceptedWorker,
   WorkChatMembershipWriter,

@@ -19,7 +19,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import {
   requireQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
-} from './quest-assignment.service';
+} from './quest-work-chat.port';
 import {
   platformFeeForQuest,
   readQuestEscrow,
@@ -27,7 +27,7 @@ import {
   settleQuestWorkers,
 } from './quest-escrow.service';
 import { assignmentStatus, questStatus, teamStatus, type QuestStatus } from './quest.contract';
-import type { QuestTransaction } from './quest-assignment.service';
+import type { QuestTransaction } from './quest-work-chat.port';
 import { hasPendingQuestV2EditRequest } from './quest-v2-edit.service';
 import type { InactiveAssignmentStatus } from './quest-work-chat.contract';
 
