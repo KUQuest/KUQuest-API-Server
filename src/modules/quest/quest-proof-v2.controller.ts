@@ -18,26 +18,19 @@ import type {
 } from './quest-proof-v2.schema';
 import {
   confirmQuestV2Completion,
-  createQuestV2ProofSubmission,
+  createQuestV2ProofSubmissionWithFiles,
   deleteQuestV2ProofSubmission,
-  editQuestV2ProofSubmission,
+  editQuestV2ProofSubmissionWithFiles,
   listQuestV2ProofSubmissions,
   reviewQuestV2ProofSubmission,
   submitQuestV2ProofSubmission,
   type QuestV2CompletionConfirmationOutcome,
-  type QuestV2ProofDraftInput,
-  type QuestV2ProofFailedFile,
   type QuestV2ProofSubmission,
   type ProofCommandOutcomeCode,
-  recordQuestV2ProofUploadCleanup,
   type QuestV2ProofSubmissionListOutcome,
   type QuestV2ProofSubmissionOutcome,
-  type StoredQuestV2ProofFileInput,
 } from './quest-proof-v2.service';
-import { questV2ProofStorage, type StoredQuestV2ProofFile } from './quest-proof-v2.storage';
 import { WorkChatTransitionError } from './quest-work-chat.port';
-
-type DraftBody = QuestV2ProofSubmissionCreateInput | QuestV2ProofSubmissionEditInput;
 
 const serializeSubmission = (submission: QuestV2ProofSubmission) => ({
   id: submission.id,
@@ -150,88 +143,6 @@ const mapCommandError = (set: AuthedContext['set'], outcome: ProofCommandOutcome
   return mapQuestCommandOutcome(set, outcome as QuestCommandOutcomeCode);
 };
 
-const fingerprintFor = async (input: File, position: number): Promise<string> => {
-  const digest = await crypto.subtle.digest('SHA-256', await input.arrayBuffer());
-  const contentHash = Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, '0')
-  ).join('');
-  const requestDigest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(
-      JSON.stringify({
-        contentHash,
-        position,
-        contentType: input.type,
-        fileName: input.name,
-        size: input.size,
-      })
-    )
-  );
-  return Array.from(new Uint8Array(requestDigest), (byte) =>
-    byte.toString(16).padStart(2, '0')
-  ).join('');
-};
-
-const failureCodeFor = (error: unknown): string => {
-  if (error instanceof WorkChatAttachmentTooLargeError) return 'PROOF_FILE_TOO_LARGE';
-  if (error instanceof UnsupportedWorkChatAttachmentError) return 'PROOF_FILE_TYPE_NOT_SUPPORTED';
-  if (error instanceof WorkChatAttachmentUploadError) return 'PROOF_FILE_UPLOAD_FAILED';
-  return 'PROOF_FILE_UPLOAD_FAILED';
-};
-
-const uploadFiles = async (
-  memberId: string,
-  files: File[] = [],
-  retryPosition?: number
-): Promise<{
-  uploaded: StoredQuestV2ProofFileInput[];
-  failed: QuestV2ProofFailedFile[];
-  fingerprints: string[];
-  error?: unknown;
-}> => {
-  const uploaded: StoredQuestV2ProofFileInput[] = [];
-  const failed: QuestV2ProofFailedFile[] = [];
-  const fingerprints: string[] = [];
-  let firstError: unknown;
-  for (const [position, input] of files.entries()) {
-    const targetPosition = retryPosition ?? position;
-    fingerprints.push(await fingerprintFor(input, targetPosition));
-    try {
-      uploaded.push({
-        ...(await questV2ProofStorage.upload(memberId, input)),
-        position: targetPosition,
-      });
-    } catch (error) {
-      failed.push({ position: targetPosition, failureCode: failureCodeFor(error) });
-      firstError ??= error;
-    }
-  }
-  return { uploaded, failed, fingerprints, error: firstError };
-};
-
-const cleanupUploadedFiles = async (
-  memberId: string,
-  questId: string,
-  files: StoredQuestV2ProofFile[]
-) => {
-  const failed: StoredQuestV2ProofFile[] = [];
-  await Promise.all(
-    files.map(async (file) => {
-      try {
-        await questV2ProofStorage.remove(file);
-      } catch (error) {
-        failed.push(file);
-        console.error('[quest-proof-upload-cleanup] Immediate object deletion failed', {
-          error,
-          bucket: file.bucket,
-          objectKey: file.objectKey,
-        });
-      }
-    })
-  );
-  if (failed.length > 0) await recordQuestV2ProofUploadCleanup(memberId, questId, failed);
-};
-
 const mapUploadError = (set: AuthedContext['set'], error: unknown) => {
   if (error instanceof WorkChatAttachmentTooLargeError) {
     set.status = 413;
@@ -249,26 +160,6 @@ const mapUploadError = (set: AuthedContext['set'], error: unknown) => {
     );
   }
   throw error;
-};
-
-const serviceInputFor = (
-  body: DraftBody,
-  upload: {
-    uploaded: StoredQuestV2ProofFileInput[];
-    failed: QuestV2ProofFailedFile[];
-    fingerprints: string[];
-  }
-): QuestV2ProofDraftInput => {
-  const input: QuestV2ProofDraftInput = {
-    storedFiles: upload.uploaded,
-    failedFiles: upload.failed,
-    fileFingerprints: upload.fingerprints,
-  };
-  if (Object.prototype.hasOwnProperty.call(body, 'description'))
-    input.description = body.description;
-  if (Object.prototype.hasOwnProperty.call(body, 'fileIds')) input.fileIds = body.fileIds;
-  if (body.retryPosition !== undefined) input.retryPosition = body.retryPosition;
-  return input;
 };
 
 const commandResult = (set: AuthedContext['set'], result: QuestV2ProofSubmissionOutcome) => {
@@ -363,45 +254,16 @@ export const createQuestV2ProofSubmissionController = async ({
     );
   }
 
-  const upload = await uploadFiles(session.user.id, body.files);
-  if (upload.error) {
-    let persisted = false;
-    if (upload.uploaded.length + upload.failed.length > 0) {
-      try {
-        const partial = await createQuestV2ProofSubmission(
-          session.user.id,
-          params.questId,
-          serviceInputFor(body, upload),
-          commandId
-        );
-        persisted = !('outcome' in partial) && partial.replayed !== true;
-      } catch (error) {
-        await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
-        throw error;
-      }
-    }
-    if (!persisted) await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
-    return mapUploadError(set, upload.error);
-  }
-
-  let result: QuestV2ProofSubmissionOutcome;
-  try {
-    result = await createQuestV2ProofSubmission(
-      session.user.id,
-      params.questId,
-      serviceInputFor(body, upload),
-      commandId
-    );
-  } catch (error) {
-    await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
-    throw error;
-  }
-  if ('outcome' in result || result.replayed === true) {
-    await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
-  }
-  if ('outcome' in result) return mapCommandError(set, result.outcome);
+  const saved = await createQuestV2ProofSubmissionWithFiles(
+    session.user.id,
+    params.questId,
+    body,
+    commandId
+  );
+  if ('uploadError' in saved) return mapUploadError(set, saved.uploadError);
+  if ('outcome' in saved) return mapCommandError(set, saved.outcome);
   set.status = 201;
-  return apiSuccess(serializeSubmission(result));
+  return apiSuccess(serializeSubmission(saved));
 };
 
 export const editQuestV2ProofSubmissionController = async ({
@@ -434,46 +296,15 @@ export const editQuestV2ProofSubmissionController = async ({
       'retryPosition cannot be combined with existing file IDs'
     );
   }
-  const upload = await uploadFiles(session.user.id, body.files, body.retryPosition);
-  const input = serviceInputFor(body, upload);
-  if (upload.error) {
-    let persisted = false;
-    if (upload.uploaded.length + upload.failed.length > 0) {
-      try {
-        const partial = await editQuestV2ProofSubmission(
-          session.user.id,
-          params.questId,
-          params.proofSubmissionId,
-          input,
-          commandId
-        );
-        persisted = !('outcome' in partial) && partial.replayed !== true;
-      } catch (error) {
-        await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
-        throw error;
-      }
-    }
-    if (!persisted) await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
-    return mapUploadError(set, upload.error);
-  }
-
-  let result: QuestV2ProofSubmissionOutcome;
-  try {
-    result = await editQuestV2ProofSubmission(
-      session.user.id,
-      params.questId,
-      params.proofSubmissionId,
-      input,
-      commandId
-    );
-  } catch (error) {
-    await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
-    throw error;
-  }
-  if ('outcome' in result || result.replayed === true) {
-    await cleanupUploadedFiles(session.user.id, params.questId, upload.uploaded);
-  }
-  return commandResult(set, result);
+  const saved = await editQuestV2ProofSubmissionWithFiles(
+    session.user.id,
+    params.questId,
+    params.proofSubmissionId,
+    body,
+    commandId
+  );
+  if ('uploadError' in saved) return mapUploadError(set, saved.uploadError);
+  return commandResult(set, saved);
 };
 
 export const deleteQuestV2ProofSubmissionController = async ({
