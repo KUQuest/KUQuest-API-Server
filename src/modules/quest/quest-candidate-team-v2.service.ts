@@ -12,24 +12,24 @@ import {
 
 import { and, asc, eq, exists, inArray, isNull, ne, sql } from 'drizzle-orm';
 
-import {
-  getQuestWorkChatMembershipWriter,
-  WorkChatTransitionError,
-  type QuestTransaction,
-} from './quest-work-chat.port';
+import { type QuestTransaction } from './quest-work-chat.port';
 import {
   runQuestCommand,
   sha256Json,
   type QuestCommandOutcomeCode,
   type QuestCommandWork,
 } from './quest-command.service';
+import {
+  lockQuest,
+  runQuestV2Selection,
+  type SelectionAssignmentRow,
+  type SelectionSuccess,
+} from './quest-selection.service';
 import type { AcceptedWorker, QuestWorkChatMembershipTransition } from './quest-work-chat.contract';
 import {
-  questV2AssignmentStates,
   questV2Mode,
   questV2Participation,
   questV2TeamStates,
-  type QuestV2AssignmentState,
   type QuestV2TeamState,
 } from './quest-v2.contract';
 import type {
@@ -123,16 +123,6 @@ export type QuestV2CandidateTeamReadOutcome =
 export type QuestV2CandidateTeamDetailOutcome =
   CandidateTeam | { outcome: 'not-authorized' | 'not-found' | 'team-not-found' };
 
-type SelectionAssignment = {
-  id: string;
-  questId: string;
-  workerId: string;
-  state: QuestV2AssignmentState;
-  startedAt: Date | null;
-  createdAt: Date;
-  questState: 'QUEST_ASSIGNED';
-};
-
 type SelectionOutcomeCode = Extract<
   TeamCommandOutcomeCode,
   | 'already-assigned'
@@ -149,11 +139,6 @@ type SelectionOutcomeCode = Extract<
   | 'team-not-found'
   | 'headcount-mismatch'
 >;
-
-type SelectionSuccess = {
-  assignments: SelectionAssignment[];
-  questState: 'QUEST_ASSIGNED';
-};
 
 export type QuestV2CandidateTeamSelectionOutcome =
   SelectionSuccess | { outcome: SelectionOutcomeCode };
@@ -172,14 +157,6 @@ const teamFields = {
   createdAt: questCandidateTeamV2.createdAt,
 };
 
-const assignmentFields = {
-  id: questAssignment.id,
-  questId: questAssignment.questId,
-  workerId: questAssignment.workerId,
-  state: questAssignment.assignmentStatus,
-  startedAt: questAssignment.startedAt,
-  createdAt: questAssignment.createdAt,
-};
 type Database = typeof db | QuestTransaction;
 
 const normalizeJoinCode = (value: string): string => value.trim().toUpperCase();
@@ -404,80 +381,6 @@ const teamFromSnapshot = (value: unknown): CandidateTeam | undefined => {
     submission,
     createdAt,
   };
-};
-
-const selectionAssignmentFromSnapshot = (value: unknown): SelectionAssignment | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const snapshot = value as Record<string, unknown>;
-  if (
-    typeof snapshot.id !== 'string' ||
-    typeof snapshot.questId !== 'string' ||
-    typeof snapshot.workerId !== 'string' ||
-    typeof snapshot.state !== 'string' ||
-    snapshot.questState !== 'QUEST_ASSIGNED' ||
-    (snapshot.startedAt !== null && typeof snapshot.startedAt !== 'string') ||
-    typeof snapshot.createdAt !== 'string' ||
-    !(questV2AssignmentStates as readonly string[]).includes(snapshot.state)
-  )
-    return undefined;
-  const startedAt = snapshot.startedAt === null ? null : new Date(snapshot.startedAt);
-  const createdAt = new Date(snapshot.createdAt);
-  if (Number.isNaN(createdAt.getTime()) || (startedAt && Number.isNaN(startedAt.getTime())))
-    return undefined;
-  return {
-    id: snapshot.id,
-    questId: snapshot.questId,
-    workerId: snapshot.workerId,
-    state: snapshot.state as QuestV2AssignmentState,
-    startedAt,
-    createdAt,
-    questState: 'QUEST_ASSIGNED',
-  };
-};
-
-const selectionSnapshotFor = (result: SelectionSuccess) => ({
-  questState: result.questState,
-  assignments: result.assignments.map((assignment) => ({
-    id: assignment.id,
-    questId: assignment.questId,
-    workerId: assignment.workerId,
-    state: assignment.state,
-    questState: assignment.questState,
-    startedAt: assignment.startedAt?.toISOString() ?? null,
-    createdAt: assignment.createdAt.toISOString(),
-  })),
-});
-
-const selectionFromSnapshot = (value: unknown): SelectionSuccess | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const snapshot = value as Record<string, unknown>;
-  if (snapshot.questState !== 'QUEST_ASSIGNED' || !Array.isArray(snapshot.assignments))
-    return undefined;
-  const assignments: SelectionAssignment[] = [];
-  for (const assignmentValue of snapshot.assignments) {
-    const assignment = selectionAssignmentFromSnapshot(assignmentValue);
-    if (!assignment) return undefined;
-    assignments.push(assignment);
-  }
-  if (assignments.length === 0) return undefined;
-  return { assignments, questState: 'QUEST_ASSIGNED' };
-};
-
-const lockQuest = async (transaction: QuestTransaction, questId: string) => {
-  const [current] = await transaction
-    .select({
-      hirerId: quest.hirerId,
-      v2Mode: quest.v2Mode,
-      v2Participation: quest.v2Participation,
-      questState: quest.questStatus,
-      headcount: quest.headcount,
-      startTime: quest.startTime,
-    })
-    .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
-    .limit(1)
-    .for('update');
-  return current;
 };
 
 const readableQuest = (current: {
@@ -1265,31 +1168,19 @@ export const submitQuestV2CandidateTeam = async (
   });
 };
 
-const toSelectionAssignment = (row: {
-  id: string;
+const selectionTransitionFor = ({
+  questId,
+  hirerId,
+  now,
+  resourceId: teamId,
+  assignments,
+}: {
   questId: string;
-  workerId: string;
-  state: string;
-  startedAt: Date | null;
-  createdAt: Date;
-}): SelectionAssignment => {
-  if (!(questV2AssignmentStates as readonly string[]).includes(row.state)) {
-    throw new Error('Assignment has an invalid state for Quest API V2');
-  }
-  return {
-    ...row,
-    state: row.state as QuestV2AssignmentState,
-    questState: 'QUEST_ASSIGNED',
-  };
-};
-
-const selectionTransitionFor = (
-  questId: string,
-  hirerId: string,
-  teamId: string,
-  now: Date,
-  assignments: SelectionAssignment[]
-): QuestWorkChatMembershipTransition => {
+  hirerId: string;
+  now: Date;
+  resourceId: string;
+  assignments: SelectionAssignmentRow[];
+}): QuestWorkChatMembershipTransition => {
   const workers = assignments.map<AcceptedWorker>((assignment) => ({
     workerId: assignment.workerId,
     assignmentId: assignment.id,
@@ -1334,149 +1225,78 @@ export const selectQuestV2CandidateTeam = async (
     body: { questId, teamId },
   });
 
-  return db.transaction(async (transaction) => {
-    // The Quest row is locked before the module records the command; see the lock-order
-    // note on createQuestV2CandidateTeam.
-    const current = await lockQuest(transaction, questId);
-    if (!current) return { outcome: 'not-found' };
+  return runQuestV2Selection<SelectionBusinessOutcomeCode>({
+    hirerId,
+    questId,
+    rawCommandId,
+    now,
+    operationScope: questV2CandidateTeamSelectOperationScope,
+    requestHash,
+    participation: 'group',
+    gates: {
+      notHirer: 'not-authorized',
+      notMode: 'not-candidate',
+      notParticipation: 'not-group',
+    },
+    resourceType: 'quest-v2-candidate-team-selection',
+    selectResource: async (transaction) => {
+      const team = await lockTeam(transaction, questId, teamId);
+      if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+      if (
+        team.state !== 'TEAM_SUBMITTED' ||
+        team.submissionText === null ||
+        team.submittedAt === null
+      ) {
+        return { kind: 'rejected', rejection: 'not-selectable' };
+      }
+      if (team.headcount === null) {
+        return { kind: 'rejected', rejection: 'headcount-mismatch' };
+      }
+      const members = await teamMembers(transaction, teamId, true);
+      if (members.length !== team.headcount) {
+        return { kind: 'rejected', rejection: 'headcount-mismatch' };
+      }
+      const submissionFileIds = await teamSubmissionFileIds(transaction, teamId);
+      if (!(await validateSubmissionFiles(transaction, team.leaderId, submissionFileIds))) {
+        return { kind: 'rejected', rejection: 'not-selectable' };
+      }
 
-    const command = await runQuestCommand({
-      transaction,
-      identity: {
-        principalUserId: hirerId,
-        operationScope: questV2CandidateTeamSelectOperationScope,
-        key: rawCommandId,
-        requestHash,
-        questId,
-      },
-      now,
-      work: async (): Promise<QuestCommandWork<SelectionSuccess, SelectionBusinessOutcomeCode>> => {
-        if (current.hirerId !== hirerId) return { kind: 'rejected', rejection: 'not-authorized' };
-        if (current.v2Mode !== questV2Mode.candidate) {
-          return { kind: 'rejected', rejection: 'not-candidate' };
-        }
-        if (current.v2Participation !== questV2Participation.group) {
-          return { kind: 'rejected', rejection: 'not-group' };
-        }
-        if (current.questState !== 'QUEST_OPEN') return { kind: 'rejected', rejection: 'not-open' };
-        if (questStartHasPassed(current, now)) return { kind: 'rejected', rejection: 'not-open' };
-
-        const team = await lockTeam(transaction, questId, teamId);
-        if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
-        if (
-          team.state !== 'TEAM_SUBMITTED' ||
-          team.submissionText === null ||
-          team.submittedAt === null
-        ) {
-          return { kind: 'rejected', rejection: 'not-selectable' };
-        }
-        if (team.headcount === null) {
-          return { kind: 'rejected', rejection: 'headcount-mismatch' };
-        }
-        const members = await teamMembers(transaction, teamId, true);
-        if (members.length !== team.headcount) {
-          return { kind: 'rejected', rejection: 'headcount-mismatch' };
-        }
-        const submissionFileIds = await teamSubmissionFileIds(transaction, teamId);
-        if (!(await validateSubmissionFiles(transaction, team.leaderId, submissionFileIds))) {
-          return { kind: 'rejected', rejection: 'not-selectable' };
-        }
-
-        const existingAssignments = await transaction
-          .select(assignmentFields)
-          .from(questAssignment)
-          .where(eq(questAssignment.questId, questId))
-          .for('update');
-        const memberIds = members.map((member) => member.memberId);
-        if (existingAssignments.some((assignment) => memberIds.includes(assignment.workerId))) {
-          return { kind: 'rejected', rejection: 'already-assigned' };
-        }
-
-        await transaction
-          .update(questCandidateTeamV2)
-          .set({ state: 'TEAM_SELECTED' })
-          .where(
-            and(
-              eq(questCandidateTeamV2.id, teamId),
-              eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED')
-            )
-          );
-        await transaction
-          .update(questCandidateTeamV2)
-          .set({ state: 'TEAM_REJECTED' })
-          .where(
-            and(
-              eq(questCandidateTeamV2.questId, questId),
-              eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED'),
-              ne(questCandidateTeamV2.id, teamId)
-            )
-          );
-        await transaction
-          .update(questCandidateApplicationV2)
-          .set({ state: 'APPLICATION_REJECTED' })
-          .where(
-            and(
-              eq(questCandidateApplicationV2.questId, questId),
-              eq(questCandidateApplicationV2.state, 'APPLICATION_APPLIED')
-            )
-          );
-
-        const createdAssignments = await transaction
-          .insert(questAssignment)
-          .values(
-            memberIds.map((workerId) => ({
-              questId,
-              workerId,
-              assignmentStatus: 'ASSIGNMENT_ACTIVE',
-              createdAt: now,
-            }))
-          )
-          .returning(assignmentFields);
-        if (createdAssignments.length !== memberIds.length) {
-          throw new Error('Candidate Team Assignment insert returned invalid rows');
-        }
-        const assignmentByWorkerId = new Map(
-          createdAssignments.map((assignment) => [assignment.workerId, assignment])
-        );
-        const assignments = memberIds.map((workerId) => {
-          const assignment = assignmentByWorkerId.get(workerId);
-          if (!assignment) throw new Error('Candidate Team Assignment could not be read');
-          return toSelectionAssignment(assignment);
-        });
-
-        await transaction
-          .update(quest)
-          .set({ questStatus: 'QUEST_ASSIGNED', updatedAt: now })
-          .where(and(eq(quest.id, questId), eq(quest.questStatus, 'QUEST_OPEN')));
-
-        const writer = getQuestWorkChatMembershipWriter();
-        if (!writer)
-          throw new WorkChatTransitionError(
-            new Error('Work Chat membership writer is not configured')
-          );
-        try {
-          await writer.applyQuestTransition(
-            transaction,
-            selectionTransitionFor(questId, hirerId, teamId, now, assignments)
-          );
-        } catch (cause) {
-          throw new WorkChatTransitionError(cause);
-        }
-
-        const result: SelectionSuccess = { assignments, questState: 'QUEST_ASSIGNED' };
-        return {
-          kind: 'success',
-          result,
-          resourceType: 'quest-v2-candidate-team-selection',
-          resourceId: teamId,
-        };
-      },
-      toSnapshot: selectionSnapshotFor,
-      fromSnapshot: selectionFromSnapshot,
-    });
-
-    if ('outcome' in command) return { outcome: command.outcome };
-    if (command.kind === 'success') return command.result;
-    return { outcome: command.rejection };
+      return {
+        kind: 'selected',
+        workerIds: members.map((member) => member.memberId),
+        resourceId: teamId,
+        flipCandidateRecords: async (flipTransaction) => {
+          await flipTransaction
+            .update(questCandidateTeamV2)
+            .set({ state: 'TEAM_SELECTED' })
+            .where(
+              and(
+                eq(questCandidateTeamV2.id, teamId),
+                eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED')
+              )
+            );
+          await flipTransaction
+            .update(questCandidateTeamV2)
+            .set({ state: 'TEAM_REJECTED' })
+            .where(
+              and(
+                eq(questCandidateTeamV2.questId, questId),
+                eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED'),
+                ne(questCandidateTeamV2.id, teamId)
+              )
+            );
+          await flipTransaction
+            .update(questCandidateApplicationV2)
+            .set({ state: 'APPLICATION_REJECTED' })
+            .where(
+              and(
+                eq(questCandidateApplicationV2.questId, questId),
+                eq(questCandidateApplicationV2.state, 'APPLICATION_APPLIED')
+              )
+            );
+        },
+      };
+    },
+    transitionFor: selectionTransitionFor,
   });
 };
