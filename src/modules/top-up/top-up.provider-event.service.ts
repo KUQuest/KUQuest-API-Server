@@ -11,14 +11,12 @@ import { walletLedgerAccount, walletLedgerTransaction } from '@/database/schema/
 import {
   createSealedLedgerTransactionInTransaction,
   ensureWalletInTransaction,
-  type WalletTransaction,
-} from '@/modules/wallet/wallet.service';
-import {
   MoneyDomainError,
   positiveSatang,
   signedSatang,
   type Satang,
-} from '@/modules/wallet/wallet.money';
+  type WalletTransaction,
+} from '@/modules/wallet';
 
 import { timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';

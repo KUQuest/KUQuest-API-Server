@@ -14,7 +14,7 @@ import {
   satang,
   signedSatang,
 } from './wallet.money';
-import { completeMoneyCommand, runMoneyCommand } from './wallet.money-command.service';
+import { completeMoneyCommand, runMoneyCommand, sha256Json } from './wallet.money-command.service';
 import { assertWalletOperationAllowed } from './wallet.status.service';
 import {
   createSealedLedgerTransactionInTransaction,
@@ -43,12 +43,6 @@ export type EarningsConversion = {
   businessReference: string;
   ledgerTransactionId: string;
   createdAt: Date;
-};
-
-const sha256Json = async (value: object) => {
-  const payload = JSON.stringify(value);
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
 const conversionBusinessReference = async (principalUserId: string, key: string) =>
