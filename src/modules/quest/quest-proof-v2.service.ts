@@ -12,6 +12,11 @@ import {
   questV2ProofSubmission,
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
+import {
+  UnsupportedWorkChatAttachmentError,
+  WorkChatAttachmentTooLargeError,
+  WorkChatAttachmentUploadError,
+} from '@/modules/work-chat/work-chat.storage';
 
 import { and, asc, eq, inArray, isNull, isNotNull, lte, ne } from 'drizzle-orm';
 
@@ -78,7 +83,7 @@ export type QuestV2ProofSubmission = {
     uploadStatus: 'PROOF_FILE_READY' | 'PROOF_FILE_FAILED';
     failureCode: string | null;
   }>;
-  /** Internal marker used by the controller to clean up replay-only uploads. */
+  /** Internal marker used by the module to clean up replay-only uploads. */
   replayed?: boolean;
 };
 
@@ -102,6 +107,13 @@ export type QuestV2ProofDraftInput = {
   storedFiles?: StoredQuestV2ProofFileInput[];
   failedFiles?: QuestV2ProofFailedFile[];
   fileFingerprints?: string[];
+  retryPosition?: number;
+};
+
+type QuestV2ProofDraftBody = {
+  description?: string | null;
+  fileIds?: string[];
+  files?: File[];
   retryPosition?: number;
 };
 
@@ -321,6 +333,108 @@ export const retryQuestV2ProofUploadCleanup = async (limit = 100): Promise<numbe
     if (completed) retried += 1;
   }
   return retried;
+};
+
+const fingerprintFor = async (input: File, position: number): Promise<string> => {
+  const digest = await crypto.subtle.digest('SHA-256', await input.arrayBuffer());
+  const contentHash = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
+  const requestDigest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(
+      JSON.stringify({
+        contentHash,
+        position,
+        contentType: input.type,
+        fileName: input.name,
+        size: input.size,
+      })
+    )
+  );
+  return Array.from(new Uint8Array(requestDigest), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
+};
+
+const failureCodeFor = (error: unknown): string => {
+  if (error instanceof WorkChatAttachmentTooLargeError) return 'PROOF_FILE_TOO_LARGE';
+  if (error instanceof UnsupportedWorkChatAttachmentError) return 'PROOF_FILE_TYPE_NOT_SUPPORTED';
+  if (error instanceof WorkChatAttachmentUploadError) return 'PROOF_FILE_UPLOAD_FAILED';
+  return 'PROOF_FILE_UPLOAD_FAILED';
+};
+
+const uploadFiles = async (
+  memberId: string,
+  files: File[] = [],
+  retryPosition?: number
+): Promise<{
+  uploaded: StoredQuestV2ProofFileInput[];
+  failed: QuestV2ProofFailedFile[];
+  fingerprints: string[];
+  error?: unknown;
+}> => {
+  const uploaded: StoredQuestV2ProofFileInput[] = [];
+  const failed: QuestV2ProofFailedFile[] = [];
+  const fingerprints: string[] = [];
+  let firstError: unknown;
+  for (const [position, input] of files.entries()) {
+    const targetPosition = retryPosition ?? position;
+    fingerprints.push(await fingerprintFor(input, targetPosition));
+    try {
+      uploaded.push({
+        ...(await questV2ProofStorage.upload(memberId, input)),
+        position: targetPosition,
+      });
+    } catch (error) {
+      failed.push({ position: targetPosition, failureCode: failureCodeFor(error) });
+      firstError ??= error;
+    }
+  }
+  return { uploaded, failed, fingerprints, error: firstError };
+};
+
+const cleanupUploadedFiles = async (
+  memberId: string,
+  questId: string,
+  files: StoredQuestV2ProofFile[]
+) => {
+  const failed: StoredQuestV2ProofFile[] = [];
+  await Promise.all(
+    files.map(async (storedFile) => {
+      try {
+        await questV2ProofStorage.remove(storedFile);
+      } catch (error) {
+        failed.push(storedFile);
+        console.error('[quest-proof-upload-cleanup] Immediate object deletion failed', {
+          error,
+          bucket: storedFile.bucket,
+          objectKey: storedFile.objectKey,
+        });
+      }
+    })
+  );
+  if (failed.length > 0) await recordQuestV2ProofUploadCleanup(memberId, questId, failed);
+};
+
+const draftInputFor = (
+  body: QuestV2ProofDraftBody,
+  upload: {
+    uploaded: StoredQuestV2ProofFileInput[];
+    failed: QuestV2ProofFailedFile[];
+    fingerprints: string[];
+  }
+): QuestV2ProofDraftInput => {
+  const input: QuestV2ProofDraftInput = {
+    storedFiles: upload.uploaded,
+    failedFiles: upload.failed,
+    fileFingerprints: upload.fingerprints,
+  };
+  if (Object.prototype.hasOwnProperty.call(body, 'description'))
+    input.description = body.description;
+  if (Object.prototype.hasOwnProperty.call(body, 'fileIds')) input.fileIds = body.fileIds;
+  if (body.retryPosition !== undefined) input.retryPosition = body.retryPosition;
+  return input;
 };
 
 const isProofStatus = (value: string | null): value is QuestV2ProofStatus =>
@@ -993,6 +1107,51 @@ const writeCommandChecks = async (
   return owner ? { owner } : { outcome: 'not-authorized' as const };
 };
 
+/**
+ * Shared Draft-write path behind the two exported entry points: uploads the
+ * raw multipart files from the request body outside any transaction, persists
+ * through `persist`, and compensates by deleting the uploaded objects when
+ * the persist throws or returns a rejected or replayed outcome (recording
+ * cleanup tombstones for deletes that fail). A failed file is persisted as a
+ * failed position while the first upload error is returned alongside, so the
+ * caller still answers the failure status.
+ */
+const persistUploadedDraft = async (
+  memberId: string,
+  questId: string,
+  body: QuestV2ProofDraftBody,
+  persist: (input: QuestV2ProofDraftInput) => Promise<QuestV2ProofSubmissionOutcome>
+): Promise<QuestV2ProofSubmissionOutcome | { uploadError: unknown }> => {
+  const upload = await uploadFiles(memberId, body.files, body.retryPosition);
+  const input = draftInputFor(body, upload);
+  if (upload.error) {
+    let persisted = false;
+    if (upload.uploaded.length + upload.failed.length > 0) {
+      try {
+        const partial = await persist(input);
+        persisted = !('outcome' in partial) && partial.replayed !== true;
+      } catch (error) {
+        await cleanupUploadedFiles(memberId, questId, upload.uploaded);
+        throw error;
+      }
+    }
+    if (!persisted) await cleanupUploadedFiles(memberId, questId, upload.uploaded);
+    return { uploadError: upload.error };
+  }
+
+  let result: QuestV2ProofSubmissionOutcome;
+  try {
+    result = await persist(input);
+  } catch (error) {
+    await cleanupUploadedFiles(memberId, questId, upload.uploaded);
+    throw error;
+  }
+  if ('outcome' in result || result.replayed === true) {
+    await cleanupUploadedFiles(memberId, questId, upload.uploaded);
+  }
+  return result;
+};
+
 export const createQuestV2ProofSubmission = async (
   memberId: string,
   questId: string,
@@ -1226,6 +1385,27 @@ export const editQuestV2ProofSubmission = async (
     return { outcome: command.rejection };
   });
 };
+
+export const createQuestV2ProofSubmissionWithFiles = async (
+  memberId: string,
+  questId: string,
+  body: QuestV2ProofDraftBody,
+  commandId: string
+): Promise<QuestV2ProofSubmissionOutcome | { uploadError: unknown }> =>
+  persistUploadedDraft(memberId, questId, body, (input) =>
+    createQuestV2ProofSubmission(memberId, questId, input, commandId)
+  );
+
+export const editQuestV2ProofSubmissionWithFiles = async (
+  memberId: string,
+  questId: string,
+  proofSubmissionId: string,
+  body: QuestV2ProofDraftBody,
+  commandId: string
+): Promise<QuestV2ProofSubmissionOutcome | { uploadError: unknown }> =>
+  persistUploadedDraft(memberId, questId, body, (input) =>
+    editQuestV2ProofSubmission(memberId, questId, proofSubmissionId, input, commandId)
+  );
 
 export const deleteQuestV2ProofSubmission = async (
   memberId: string,
