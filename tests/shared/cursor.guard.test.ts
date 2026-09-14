@@ -89,7 +89,9 @@ describe('Cursor paging guard', () => {
     const offenders: string[] = [];
     const sources = [
       ...new Bun.Glob('src/**/*.schema.ts').scanSync({ cwd: repoRoot, onlyFiles: true }),
-    ].sort();
+    ]
+      .map(toPosixPath)
+      .sort();
     for (const file of sources) {
       const source = await Bun.file(resolve(repoRoot, file)).text();
       for (const match of source.matchAll(limitWithNumericMaximum)) {
