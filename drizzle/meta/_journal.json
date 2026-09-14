@@ -568,6 +568,13 @@
       "when": 1789460103388,
       "tag": "20260915081503_pink_molten_man",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1789375163780,
+      "tag": "20260914083923_abandoned_excalibur",
+      "breakpoints": true
     }
   ]
 }
