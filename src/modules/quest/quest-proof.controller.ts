@@ -5,7 +5,7 @@ import {
   ImageTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
-} from '@/shared/image-storage';
+} from '@/shared/object-storage';
 import type { Static } from 'elysia';
 
 import { WorkChatTransitionError } from './quest-work-chat.port';

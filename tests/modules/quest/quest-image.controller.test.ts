@@ -9,7 +9,7 @@ import {
   ImageTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
-} from '@/shared/image-storage';
+} from '@/shared/object-storage';
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
@@ -31,6 +31,7 @@ const uploadedImage = {
   objectKey: storedImage.objectKey,
   contentType: 'image/png' as const,
   sizeBytes: image.size,
+  fileName: image.name,
 };
 
 afterEach(() => mock.restore());

@@ -1,13 +1,17 @@
 import {
-  createWorkChatStorage,
-  type StoredWorkChatAttachment,
-} from '@/modules/work-chat/work-chat.storage';
+  createObjectStorage,
+  type StoredFile,
+  type AttachmentContentType,
+} from '@/shared/object-storage';
 
-export type StoredQuestV2ProofFile = StoredWorkChatAttachment & {
+export type StoredQuestV2ProofFile = StoredFile<AttachmentContentType> & {
   fileName: string;
 };
 
-/** Proof files use the same validation and object-storage boundary as Work Chat attachments. */
-export const questV2ProofStorage = createWorkChatStorage({
+export const questV2ProofStorage = createObjectStorage({
   keyPrefix: 'proof-submissions',
+  policy: 'image-pdf-video',
+  emptyFileMessage: 'Attachment file is empty',
+  tooLargeMessage: 'Attachment must be 10 MB or smaller',
+  unsupportedTypeMessage: 'Attachment must be a valid image, PDF, or video file',
 });

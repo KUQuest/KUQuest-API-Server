@@ -30,10 +30,6 @@ import {
   type QuestTransaction,
 } from '@/modules/quest';
 import { questV2ProofStorage } from '@/modules/quest/quest-proof-v2.storage';
-import {
-  UnsupportedWorkChatAttachmentError,
-  WorkChatAttachmentTooLargeError,
-} from '@/modules/work-chat/work-chat.storage';
 import { createWorkChatMembershipWriter } from '@/modules/work-chat';
 import {
   ensureInitialMoneyPolicy,
@@ -41,6 +37,7 @@ import {
   positiveSatang,
   reserveSpending,
 } from '@/modules/wallet';
+import { FileTooLargeError, UnsupportedFileTypeError } from '@/shared/object-storage';
 import {
   fundTestWallet,
   listTestLedgerPostings,
@@ -862,7 +859,7 @@ describe('Quest Proof Submission v2 behavior', () => {
     const upload = spyOn(questV2ProofStorage, 'upload').mockImplementation(
       async (memberId, input) => {
         if (input.name === 'bad-one.pdf' || input.name === 'bad-three.pdf') {
-          throw new UnsupportedWorkChatAttachmentError('bad file');
+          throw new UnsupportedFileTypeError('bad file');
         }
         return {
           bucket: 'proof-v2-behavior-test',
@@ -873,7 +870,7 @@ describe('Quest Proof Submission v2 behavior', () => {
         };
       }
     );
-    spyOn(questV2ProofStorage, 'remove').mockResolvedValue(undefined);
+    spyOn(questV2ProofStorage, 'delete').mockResolvedValue(undefined);
 
     const form = new FormData();
     form.append(
@@ -1643,7 +1640,7 @@ describe('Quest Proof Submission v2 behavior', () => {
         fileName: input.name,
       })
     );
-    const remove = spyOn(questV2ProofStorage, 'remove').mockResolvedValue(undefined);
+    const remove = spyOn(questV2ProofStorage, 'delete').mockResolvedValue(undefined);
 
     const firstForm = new FormData();
     firstForm.append(
@@ -1704,7 +1701,7 @@ describe('Quest Proof Submission v2 behavior', () => {
         fileName: input.name,
       })
     );
-    const remove = spyOn(questV2ProofStorage, 'remove').mockRejectedValueOnce(
+    const remove = spyOn(questV2ProofStorage, 'delete').mockRejectedValueOnce(
       new Error('temporary cleanup failure')
     );
     const form = new FormData();
@@ -1782,7 +1779,7 @@ describe('Quest Proof Submission v2 behavior', () => {
 
     const sizeQuest = await createQuest();
     spyOn(questV2ProofStorage, 'upload').mockRejectedValue(
-      new WorkChatAttachmentTooLargeError('Attachment must be 10 MB or smaller')
+      new FileTooLargeError('Attachment must be 10 MB or smaller')
     );
     const tooLargeForm = new FormData();
     tooLargeForm.append(

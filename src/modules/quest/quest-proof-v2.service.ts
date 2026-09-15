@@ -13,10 +13,10 @@ import {
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
 import {
-  UnsupportedWorkChatAttachmentError,
-  WorkChatAttachmentTooLargeError,
-  WorkChatAttachmentUploadError,
-} from '@/modules/work-chat/work-chat.storage';
+  FileTooLargeError,
+  FileUploadError,
+  UnsupportedFileTypeError,
+} from '@/shared/object-storage';
 
 import { and, asc, eq, inArray, isNull, isNotNull, lte, ne } from 'drizzle-orm';
 
@@ -312,7 +312,7 @@ export const retryQuestV2ProofUploadCleanup = async (limit = 100): Promise<numbe
     let failed = false;
     for (const object of manifest.cleanup.objects) {
       try {
-        await questV2ProofStorage.remove(object);
+        await questV2ProofStorage.delete(object.bucket, object.objectKey);
       } catch (error) {
         failed = true;
         console.error('[quest-proof-upload-cleanup] Object deletion failed', {
@@ -358,9 +358,9 @@ const fingerprintFor = async (input: File, position: number): Promise<string> =>
 };
 
 const failureCodeFor = (error: unknown): string => {
-  if (error instanceof WorkChatAttachmentTooLargeError) return 'PROOF_FILE_TOO_LARGE';
-  if (error instanceof UnsupportedWorkChatAttachmentError) return 'PROOF_FILE_TYPE_NOT_SUPPORTED';
-  if (error instanceof WorkChatAttachmentUploadError) return 'PROOF_FILE_UPLOAD_FAILED';
+  if (error instanceof FileTooLargeError) return 'PROOF_FILE_TOO_LARGE';
+  if (error instanceof UnsupportedFileTypeError) return 'PROOF_FILE_TYPE_NOT_SUPPORTED';
+  if (error instanceof FileUploadError) return 'PROOF_FILE_UPLOAD_FAILED';
   return 'PROOF_FILE_UPLOAD_FAILED';
 };
 
@@ -403,7 +403,7 @@ const cleanupUploadedFiles = async (
   await Promise.all(
     files.map(async (storedFile) => {
       try {
-        await questV2ProofStorage.remove(storedFile);
+        await questV2ProofStorage.delete(storedFile.bucket, storedFile.objectKey);
       } catch (error) {
         failed.push(storedFile);
         console.error('[quest-proof-upload-cleanup] Immediate object deletion failed', {

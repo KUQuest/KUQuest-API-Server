@@ -233,6 +233,7 @@ describe('Quest API v2 Hirer journey', () => {
           objectKey: plan?.objectKey ?? `quests/v2/${hirerId}/${image.name}`,
           contentType: 'image/png',
           sizeBytes: image.size,
+          fileName: image.name,
         })
       );
       spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation((image) => ({
