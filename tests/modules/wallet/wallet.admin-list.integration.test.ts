@@ -266,6 +266,17 @@ describe('Admin Wallet Directory Integration Tests', () => {
       expect(body.error?.code).toBe('INVALID_CURSOR');
       expect(body.error?.message).toBe('cursor is invalid');
     });
+
+    it('accepts the shared maximum page limit and rejects one above it', async () => {
+      const atMaximum = await listWallets(new URLSearchParams({ limit: '50' }));
+      expect(atMaximum.status).toBe(200);
+
+      const aboveMaximum = await listWallets(new URLSearchParams({ limit: '51' }));
+      expect(aboveMaximum.status).toBe(400);
+      const body = (await aboveMaximum.json()) as AdminWalletListResponse;
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('VALIDATION');
+    });
   });
 
   describe('GET /api/v1/admin/wallets/:walletId', () => {
