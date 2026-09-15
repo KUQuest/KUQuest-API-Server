@@ -45,8 +45,8 @@ const initialPolicy = {
   platformFeeBps: 200,
   feeRoundingMode: 'UP',
   topUpProviderFeeSatang: 0,
-  topUpProviderTaxBps: 0,
-  payoutProviderFeeSatang: 0,
+  topUpProviderFeeBps: 80,
+  topUpProviderTaxBps: 700,
   payoutProviderTaxBps: 0,
   quoteLifetimeSeconds: 300,
   reason: 'Initial Wallet & Payments policy',
@@ -87,6 +87,7 @@ const validatePolicyAmounts = <
     minimumPayoutSatang: number;
     maximumPayoutSatang: number;
     topUpProviderFeeSatang: number;
+    topUpProviderFeeBps?: number;
     payoutProviderFeeSatang: number;
   },
 >(
@@ -102,6 +103,8 @@ const validatePolicyAmounts = <
   minimumPayoutSatang: satang(policy.minimumPayoutSatang),
   maximumPayoutSatang: satang(policy.maximumPayoutSatang),
   topUpProviderFeeSatang: satang(policy.topUpProviderFeeSatang),
+  topUpProviderFeeBps:
+    policy.topUpProviderFeeBps !== undefined ? Number(policy.topUpProviderFeeBps) : 0,
   payoutProviderFeeSatang: satang(policy.payoutProviderFeeSatang),
 });
 

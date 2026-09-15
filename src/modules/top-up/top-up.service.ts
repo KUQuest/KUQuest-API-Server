@@ -154,10 +154,15 @@ const calculateTopUpTerms = (
   creditSatang: Satang,
   policy: {
     topUpProviderFeeSatang: number;
+    topUpProviderFeeBps?: number;
     topUpProviderTaxBps: number;
   }
 ) => {
-  const providerFeeSatang = satang(policy.topUpProviderFeeSatang);
+  const fixedFeeSatang = satang(policy.topUpProviderFeeSatang);
+  const variableFeeSatang = policy.topUpProviderFeeBps
+    ? satang(Math.ceil((creditSatang * policy.topUpProviderFeeBps) / 10_000))
+    : satang(0);
+  const providerFeeSatang = satang(fixedFeeSatang + variableFeeSatang);
   const providerTaxSatang = satang(
     Math.ceil((providerFeeSatang * policy.topUpProviderTaxBps) / 10_000)
   );
