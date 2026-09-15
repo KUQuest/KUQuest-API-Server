@@ -11,6 +11,18 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 ## Entries
 
+### 2026-09-15 — Land the shared module before you dispatch its consumers
+
+**What happened.** A shared storage contract was written in the batch context as a TypeScript block, and four implementer subagents were dispatched. Three subagents reported phantom LSP errors waiting for the shared module to appear on disk, and one ran 18 minutes while negotiating typing deviations over `hub` messages.
+**Root cause.** A contract in prose cannot be compiled against. Consumers work blind until the producer writes the file, so interface and type mismatches surface late.
+**Rule.** Land the shared module with one compiling call site or stub before you dispatch its consumers. Do not dispatch producers and consumers in the same concurrent batch when the contract does not yet compile on disk.
+
+### 2026-09-15 — Derive a subagent's Target list mechanically from search output
+
+**What happened.** An implementer task list retyped a 20-entry grep search result into four prose Target lists. One source file (`src/modules/quest/quest-proof.service.ts`) was dropped during transcription and had to be patched inline mid-flight, while two test files not in any Target list were modified by agents repairing cascade errors.
+**Root cause.** Hand-typing file lists from search output drops files and leaves edge cases untracked.
+**Rule.** Derive each subagent's Target list mechanically from search results. When a batch partitions a search result across multiple agents, verify that the union of their Target lists equals the search result before dispatch.
+
 ### 2026-09-15 — One edit call, two hunks: the second renumbers
 
 **What happened.** Two `CUT` operations in a single edit call against this ledger used ranges numbered on the snapshot the call received. The first cut shifted the file, so the second clipped the neighbouring entry's **Rule** line and left two stale lines dangling mid-entry. Only a `git diff` read before staging caught it; typecheck and the test suite cannot see prose.
@@ -45,7 +57,7 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 **What happened.** A batch contract told four subagents to read Wallet balances through the `getWallet` verb. Each ran its own test files green and reported success. `bun check` then failed with 24 `TS2769` errors across seven files: `getWallet` brands each balance as `Satang` (`number & { __brand: 'Satang' }`), and `expect(balance).toBe(before + 400)` cannot compile against a branded type. The repair was a new fixture plus a mechanical pass over seven files.
 **Root cause.** A brand is erased at runtime, so the behaviour a test asserts passes while the type fails. The subagents ran only `bun test`, and a language-server check reported clean on a stale buffer.
-**Rule.** A subagent that changes code runs `bun run typecheck` before it reports, not only its own test files: the whole-repository check costs about 10 seconds. Prove a shared contract with one compiling call site before you dispatch agents onto it. A domain verb is the first choice for a test to call, and a branded return type is the reason it can lose to a fixture that returns plain numbers.
+**Rule.** A subagent that changes code runs `bun run typecheck` before it reports, not only its own test files: the whole-repository check costs about 10 seconds. A domain verb is the first choice for a test to call, and a branded return type is the reason it can lose to a fixture that returns plain numbers.
 
 ### 2026-09-14 — Dispatch subagents into the checkout they already inhabit
 
@@ -115,7 +127,7 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 **What happened.** Two `sleep 90; gh pr checks` calls spent about four minutes of wall time, then two more `gh run view --log-failed` calls read the failures.
 **Root cause.** A sleep guesses the run length, and a passing summary line still needs a second call for the failing log.
-**Rule.** Watch a run with the `github` device `run_watch` operation. It follows the run, stops at the first failing job, and saves the full log to an artifact.
+**Rule.** Follow the run until completion; never poll with `sleep`. Watch with `gh pr checks <number> --watch` or the `github` device `run_watch` operation. Both stream progress and stop on settlement.
 
 ### 2026-09-13 — Audit the index, not the working tree
 
