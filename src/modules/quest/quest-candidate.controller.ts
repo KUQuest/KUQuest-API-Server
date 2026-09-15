@@ -43,7 +43,7 @@ import type {
   teamParamsSchema,
   teamUpdateSchema,
 } from './quest-candidate.schema';
-import { WorkChatTransitionError } from './quest-assignment.service';
+import { WorkChatTransitionError } from './quest-work-chat.port';
 
 type Set = AuthedContext['set'];
 const notFound = (

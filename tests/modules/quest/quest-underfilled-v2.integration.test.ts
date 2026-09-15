@@ -19,13 +19,8 @@ import {
   chatReadCursor,
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
-import {
-  walletFundingReservation,
-  walletLedgerAccount,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
 import { auth } from '@/modules/auth';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
+import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-work-chat.port';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import {
   decideQuestV2Underfilled,
@@ -34,13 +29,12 @@ import {
 import type { QuestTransaction, QuestWorkChatMembershipTransition } from '@/modules/quest';
 import { createWorkChatMembershipWriter } from '@/modules/work-chat';
 import {
-  createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
   ensureWallet,
   positiveSatang,
   reserveSpending,
-  signedSatang,
 } from '@/modules/wallet';
+import { fundTestWallet, readTestQuestEscrow } from '../wallet/wallet-test-fixtures';
 
 import { randomUUID } from 'node:crypto';
 
@@ -120,34 +114,6 @@ const request = (
     })
   );
 
-const account = async (userId: string, type: 'SPENDING' | 'FUNDING_RESERVED') => {
-  const [wallet] = await db
-    .select({ id: walletWallet.id })
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId));
-  const [row] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, type)));
-  return row.id;
-};
-
-const fundHirer = async (amountSatang: number) => {
-  const spending = await account(hirer.id, 'SPENDING');
-  const [suspense] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
-  await createSealedLedgerTransaction({
-    businessReference: `underfilled-v2-top-up-${randomUUID()}`,
-    eventType: 'TOP_UP',
-    postings: [
-      { accountId: spending, amountSatang: signedSatang(amountSatang) },
-      { accountId: suspense.id, amountSatang: signedSatang(-amountSatang) },
-    ],
-  });
-};
-
 const hashRequest = async (value: object) => {
   const digest = await crypto.subtle.digest(
     'SHA-256',
@@ -223,7 +189,7 @@ beforeAll(async () => {
   await db.insert(tag).values({ id: tagId, name: 'Underfilled V2 test tag' });
   await ensureWallet(hirer.id);
   for (const worker of workers) await ensureWallet(worker.id);
-  await fundHirer(100_000);
+  await fundTestWallet(hirer.id, 100_000);
 });
 
 beforeEach(() => {
@@ -572,14 +538,9 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
     ).toBe('QUEST_CANCELLED');
-    expect(
-      (
-        await db
-          .select({ status: walletFundingReservation.status })
-          .from(walletFundingReservation)
-          .where(eq(walletFundingReservation.callerReference, questId))
-      )[0]?.status
-    ).toBe('RELEASED');
+    expect((await readTestQuestEscrow({ ownerUserId: hirer.id, questId }))?.status).toBe(
+      'RELEASED'
+    );
 
     const replay = await request(
       `/api/v2/quests/${questId}/underfilled/decision`,

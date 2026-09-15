@@ -11,11 +11,6 @@ import {
   questV2UnderfilledDecision,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import {
-  walletFundingReservation,
-  walletLedgerAccount,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
 import { auth } from '@/modules/auth';
 import {
   configureQuestWorkChatMembershipWriter,
@@ -23,17 +18,21 @@ import {
   type QuestWorkChatMembershipTransition,
 } from '@/modules/quest';
 import {
-  createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
   ensureWallet,
   positiveSatang,
   reserveSpending,
-  signedSatang,
 } from '@/modules/wallet';
+import {
+  fundTestWallet,
+  listTestQuestEscrows,
+  readTestQuestEscrow,
+  readTestWallet,
+} from '../wallet/wallet-test-fixtures';
 
 import { randomUUID } from 'node:crypto';
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import {
   afterAll,
   afterEach,
@@ -84,42 +83,6 @@ const request = (questId: string, memberId: string, key?: string, body?: unknown
       body: body === undefined ? undefined : JSON.stringify(body),
     })
   );
-
-const account = async (userId: string, type: 'SPENDING' | 'EARNINGS') => {
-  const [wallet] = await db
-    .select({ id: walletWallet.id })
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId));
-  const [row] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, type)));
-  return row.id;
-};
-
-const fundHirer = async (amountSatang: number) => {
-  const spending = await account(hirerId, 'SPENDING');
-  const [suspense] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
-  await createSealedLedgerTransaction({
-    businessReference: `quest-cancellation-v2-top-up-${randomUUID()}`,
-    eventType: 'TOP_UP',
-    postings: [
-      { accountId: spending, amountSatang: signedSatang(amountSatang) },
-      { accountId: suspense.id, amountSatang: signedSatang(-amountSatang) },
-    ],
-  });
-};
-
-const earningsBalance = async (userId: string) => {
-  const [wallet] = await db
-    .select({ balance: walletWallet.earningsBalanceSatang })
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId));
-  return wallet.balance;
-};
 
 const createV2Quest = async (input: {
   status:
@@ -190,13 +153,8 @@ const createV2Quest = async (input: {
         amountSatang: positiveSatang((rewardSatang + platformFeeSatang) * headcount),
       })
     );
-    const [reservation] = await db
-      .select({
-        id: walletFundingReservation.id,
-        policyRevisionId: walletFundingReservation.policyRevisionId,
-      })
-      .from(walletFundingReservation)
-      .where(eq(walletFundingReservation.callerReference, questId));
+    const reservation = await readTestQuestEscrow({ ownerUserId: hirerId, questId });
+    if (!reservation) throw new Error(`Quest Escrow was not reserved for ${questId}`);
     await db
       .update(quest)
       .set({
@@ -305,7 +263,7 @@ beforeAll(async () => {
   await ensureWallet(hirerId);
   for (const workerId of workerIds) await ensureWallet(workerId);
   await ensureWallet(otherMemberId);
-  await fundHirer(100_000);
+  await fundTestWallet(hirerId, 100_000);
 });
 
 beforeEach(() => {
@@ -403,10 +361,7 @@ describe('Quest API v2 Hirer cancellation', () => {
         ?.status
     ).toBe('QUEST_CANCELLED');
     expect(
-      await db
-        .select({ id: walletFundingReservation.id })
-        .from(walletFundingReservation)
-        .where(eq(walletFundingReservation.callerReference, questId))
+      await listTestQuestEscrows({ ownerUserIds: [hirerId], questIds: [questId] })
     ).toHaveLength(0);
     expect(
       await db
@@ -425,7 +380,9 @@ describe('Quest API v2 Hirer cancellation', () => {
     'settles %s with integer-Satang values and replays the command',
     async (status, workers, expectedPaid, expectedRefund) => {
       if (!postgresAvailable) return;
-      const before = await Promise.all(workers.map((workerId) => earningsBalance(workerId)));
+      const before = await Promise.all(
+        workers.map(async (workerId) => (await readTestWallet(workerId)).earningsBalanceSatang)
+      );
       const questId = await createV2Quest({ status, workers: [...workers] });
 
       const first = await request(questId, hirerId, `cancel-v2-${questId}`);
@@ -443,9 +400,10 @@ describe('Quest API v2 Hirer cancellation', () => {
       expect((await replay.json()).data).toEqual(firstBody.data);
       expect(
         await Promise.all(
-          workers.map((workerId, index) =>
-            earningsBalance(workerId).then((value) => value - before[index])
-          )
+          workers.map(async (workerId, index) => {
+            const wallet = await readTestWallet(workerId);
+            return wallet.earningsBalanceSatang - before[index];
+          })
         )
       ).toEqual(workers.map((_, index) => (index === 0 ? expectedPaid : expectedPaid)));
       expect(
@@ -492,8 +450,8 @@ describe('Quest API v2 Hirer cancellation', () => {
       workers: candidateWorkers,
     });
     await selectCandidateTeam(candidateAssignedQuestId, candidateWorkers[1], candidateWorkers);
-    const leaderBefore = await earningsBalance(candidateWorkers[1]);
-    const memberBefore = await earningsBalance(candidateWorkers[0]);
+    const leaderBefore = (await readTestWallet(candidateWorkers[1])).earningsBalanceSatang;
+    const memberBefore = (await readTestWallet(candidateWorkers[0])).earningsBalanceSatang;
     const candidateResponse = await request(
       candidateAssignedQuestId,
       hirerId,
@@ -504,8 +462,10 @@ describe('Quest API v2 Hirer cancellation', () => {
       paidSatang: 400,
       refundedSatang: 1_640,
     });
-    expect(await earningsBalance(candidateWorkers[1])).toBe(leaderBefore + 400);
-    expect(await earningsBalance(candidateWorkers[0])).toBe(memberBefore);
+    expect((await readTestWallet(candidateWorkers[1])).earningsBalanceSatang).toBe(
+      leaderBefore + 400
+    );
+    expect((await readTestWallet(candidateWorkers[0])).earningsBalanceSatang).toBe(memberBefore);
 
     const candidateInProgressQuestId = await createV2Quest({
       status: 'QUEST_IN_PROGRESS',
@@ -514,8 +474,10 @@ describe('Quest API v2 Hirer cancellation', () => {
       workers: candidateWorkers,
     });
     await selectCandidateTeam(candidateInProgressQuestId, candidateWorkers[1], candidateWorkers);
-    const inProgressLeaderBefore = await earningsBalance(candidateWorkers[1]);
-    const inProgressMemberBefore = await earningsBalance(candidateWorkers[0]);
+    const inProgressLeaderBefore = (await readTestWallet(candidateWorkers[1]))
+      .earningsBalanceSatang;
+    const inProgressMemberBefore = (await readTestWallet(candidateWorkers[0]))
+      .earningsBalanceSatang;
     const inProgressResponse = await request(
       candidateInProgressQuestId,
       hirerId,
@@ -526,8 +488,12 @@ describe('Quest API v2 Hirer cancellation', () => {
       paidSatang: 2_000,
       refundedSatang: 0,
     });
-    expect(await earningsBalance(candidateWorkers[1])).toBe(inProgressLeaderBefore + 2_000);
-    expect(await earningsBalance(candidateWorkers[0])).toBe(inProgressMemberBefore);
+    expect((await readTestWallet(candidateWorkers[1])).earningsBalanceSatang).toBe(
+      inProgressLeaderBefore + 2_000
+    );
+    expect((await readTestWallet(candidateWorkers[0])).earningsBalanceSatang).toBe(
+      inProgressMemberBefore
+    );
   });
 
   it('uses the completed underfilled allocation for GROUP + FCFS cancellation', async () => {
@@ -543,13 +509,13 @@ describe('Quest API v2 Hirer cancellation', () => {
     });
     await completeUnderfilledAllocation(questId, workers, 4, 1_000);
 
-    const first = await earningsBalance(workers[0]);
-    const second = await earningsBalance(workers[1]);
+    const first = (await readTestWallet(workers[0])).earningsBalanceSatang;
+    const second = (await readTestWallet(workers[1])).earningsBalanceSatang;
     const response = await request(questId, hirerId, `cancel-v2-underfilled-${questId}`);
     expect(response.status).toBe(200);
     expect((await response.json()).data).toMatchObject({ paidSatang: 800, refundedSatang: 3_280 });
-    expect(await earningsBalance(workers[0])).toBe(first + 400);
-    expect(await earningsBalance(workers[1])).toBe(second + 400);
+    expect((await readTestWallet(workers[0])).earningsBalanceSatang).toBe(first + 400);
+    expect((await readTestWallet(workers[1])).earningsBalanceSatang).toBe(second + 400);
   });
 
   it('rejects terminal States and preserves the Quest, while a reused key fails canonically', async () => {
@@ -578,13 +544,13 @@ describe('Quest API v2 Hirer cancellation', () => {
   it('rolls back money, assignment, Quest, audit, and command effects when Work Chat fails', async () => {
     if (!postgresAvailable) return;
     const questId = await createV2Quest({ status: 'QUEST_ASSIGNED', workers: [workerIds[0]] });
-    const beforeEarnings = await earningsBalance(workerIds[0]);
+    const beforeEarnings = (await readTestWallet(workerIds[0])).earningsBalanceSatang;
     writerFailure = new Error('Work Chat unavailable');
 
     const response = await request(questId, hirerId, `cancel-v2-rollback-${questId}`);
     expect(response.status).toBe(503);
     expect((await response.json()).error.code).toBe('WORK_CHAT_UNAVAILABLE');
-    expect(await earningsBalance(workerIds[0])).toBe(beforeEarnings);
+    expect((await readTestWallet(workerIds[0])).earningsBalanceSatang).toBe(beforeEarnings);
     expect(
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status

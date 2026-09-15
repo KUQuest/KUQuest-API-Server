@@ -17,25 +17,23 @@ import {
   chatMessage,
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
-import {
-  walletFundingReservation,
-  walletLedgerAccount,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
 import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { editQuestV2 } from '@/modules/quest';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
+import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-work-chat.port';
 import type { QuestStatus } from '@/modules/quest/quest.contract';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 import {
-  createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
   ensureWallet,
   positiveSatang,
   reserveSpending,
-  signedSatang,
 } from '@/modules/wallet';
+import {
+  fundTestWallet,
+  readTestQuestEscrow,
+  readTestWallet,
+} from '../wallet/wallet-test-fixtures';
 
 import { randomUUID } from 'node:crypto';
 
@@ -102,37 +100,6 @@ const hideOpenQuest = async (questId: string) => {
     .from(quest)
     .where(eq(quest.id, questId));
   expect(row).toMatchObject({ hiddenAt: expect.any(Date), questStatus: 'QUEST_OPEN' });
-};
-
-const walletAccount = async (userId: string, type: 'SPENDING' | 'FUNDING_RESERVED') => {
-  const [wallet] = await db
-    .select({ id: walletWallet.id })
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId));
-  if (!wallet) throw new Error(`Wallet for ${userId} was not found`);
-  const [account] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, type)));
-  if (!account) throw new Error(`Wallet ${type} account was not found`);
-  return account.id;
-};
-
-const fundWallet = async (userId: string, amountSatang: number) => {
-  const spendingAccountId = await walletAccount(userId, 'SPENDING');
-  const [suspenseAccount] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
-  if (!suspenseAccount) throw new Error('Platform suspense account was not found');
-  await createSealedLedgerTransaction({
-    businessReference: `admin-quest-test-top-up:${randomUUID()}`,
-    eventType: 'TOP_UP',
-    postings: [
-      { accountId: spendingAccountId, amountSatang: signedSatang(amountSatang) },
-      { accountId: suspenseAccount.id, amountSatang: signedSatang(-amountSatang) },
-    ],
-  });
 };
 
 const createQuest = async (
@@ -299,7 +266,7 @@ beforeAll(async () => {
   await ensureWallet(hirerId);
   await ensureWallet(workerId);
   await ensureWallet(teamLeaderId);
-  await fundWallet(hirerId, 100_000);
+  await fundTestWallet(hirerId, 100_000);
 });
 
 beforeEach(() => {
@@ -534,13 +501,9 @@ describe('Admin Quest moderation commands', () => {
       })
     );
     const before = await Promise.all(
-      [teamLeaderId, workerId].map(async (userId) => {
-        const [row] = await db
-          .select({ earnings: walletWallet.earningsBalanceSatang })
-          .from(walletWallet)
-          .where(eq(walletWallet.userId, userId));
-        return row!.earnings;
-      })
+      [teamLeaderId, workerId].map(
+        async (userId) => (await readTestWallet(userId)).earningsBalanceSatang
+      )
     );
 
     const response = await adminRequest(
@@ -551,30 +514,16 @@ describe('Admin Quest moderation commands', () => {
 
     expect(response.status).toBe(200);
     const after = await Promise.all(
-      [teamLeaderId, workerId].map(async (userId) => {
-        const [row] = await db
-          .select({ earnings: walletWallet.earningsBalanceSatang })
-          .from(walletWallet)
-          .where(eq(walletWallet.userId, userId));
-        return row!.earnings;
-      })
+      [teamLeaderId, workerId].map(
+        async (userId) => (await readTestWallet(userId)).earningsBalanceSatang
+      )
     );
     // 20% of the 2,000 satang Worker Reward pool, paid to the Leader alone.
     expect(after).toEqual([before[0]! + 400, before[1]!]);
-    expect(
-      await db
-        .select({
-          status: walletFundingReservation.status,
-          remainingSatang: walletFundingReservation.remainingSatang,
-        })
-        .from(walletFundingReservation)
-        .where(
-          and(
-            eq(walletFundingReservation.ownerUserId, hirerId),
-            eq(walletFundingReservation.callerReference, questId)
-          )
-        )
-    ).toEqual([{ status: 'RELEASED', remainingSatang: 0 }]);
+    expect(await readTestQuestEscrow({ ownerUserId: hirerId, questId })).toMatchObject({
+      status: 'RELEASED',
+      remainingSatang: 0,
+    });
   });
 
   it('terminates an OPEN GROUP Candidate Quest and releases its full reservation', async () => {
@@ -601,20 +550,10 @@ describe('Admin Quest moderation commands', () => {
       questStatus: 'QUEST_CANCELLED',
       version: 2,
     });
-    expect(
-      await db
-        .select({
-          status: walletFundingReservation.status,
-          remainingSatang: walletFundingReservation.remainingSatang,
-        })
-        .from(walletFundingReservation)
-        .where(
-          and(
-            eq(walletFundingReservation.ownerUserId, hirerId),
-            eq(walletFundingReservation.callerReference, questId)
-          )
-        )
-    ).toEqual([{ status: 'RELEASED', remainingSatang: 0 }]);
+    expect(await readTestQuestEscrow({ ownerUserId: hirerId, questId })).toMatchObject({
+      status: 'RELEASED',
+      remainingSatang: 0,
+    });
   });
 
   it('replays a Hide command and rejects stale or reused keys without another effect', async () => {
@@ -904,19 +843,8 @@ describe('Admin Quest moderation commands', () => {
     // The escrow is untouched, so a refused command moves no money.
     const reservations = await Promise.all(
       questIdsByState.map(async (questId) => {
-        const [row] = await db
-          .select({
-            status: walletFundingReservation.status,
-            remainingSatang: walletFundingReservation.remainingSatang,
-          })
-          .from(walletFundingReservation)
-          .where(
-            and(
-              eq(walletFundingReservation.ownerUserId, hirerId),
-              eq(walletFundingReservation.callerReference, questId)
-            )
-          );
-        return row;
+        const escrow = await readTestQuestEscrow({ ownerUserId: hirerId, questId });
+        return escrow && { status: escrow.status, remainingSatang: escrow.remainingSatang };
       })
     );
     expect(reservations).toEqual(states.map(() => ({ status: 'ACTIVE', remainingSatang: 1_020 })));
@@ -975,10 +903,7 @@ describe('Admin Quest moderation commands', () => {
   it('terminates through Quest, Wallet, Assignment, Work Conversation, and Admin Action owners', async () => {
     if (!postgresAvailable) return;
     const { questId, assignmentId } = await createInProgressQuestWithChat();
-    const [beforeWorker] = await db
-      .select({ earnings: walletWallet.earningsBalanceSatang })
-      .from(walletWallet)
-      .where(eq(walletWallet.userId, workerId));
+    const { earningsBalanceSatang: beforeWorkerEarnings } = await readTestWallet(workerId);
 
     const response = await adminRequest(
       `/api/v1/admin/quests/${questId}/terminate`,
@@ -1008,23 +933,13 @@ describe('Admin Quest moderation commands', () => {
         .from(questAssignment)
         .where(eq(questAssignment.id, assignmentId))
     ).toEqual([{ status: 'ASSIGNMENT_CANCELLED' }]);
-    expect(
-      (
-        await db
-          .select({ earnings: walletWallet.earningsBalanceSatang })
-          .from(walletWallet)
-          .where(eq(walletWallet.userId, workerId))
-      )[0]!.earnings
-    ).toBe(beforeWorker!.earnings + 1_000);
-    expect(
-      await db
-        .select({
-          status: walletFundingReservation.status,
-          remaining: walletFundingReservation.remainingSatang,
-        })
-        .from(walletFundingReservation)
-        .where(eq(walletFundingReservation.callerReference, questId))
-    ).toEqual([{ status: 'SETTLED', remaining: 0 }]);
+    expect((await readTestWallet(workerId)).earningsBalanceSatang).toBe(
+      beforeWorkerEarnings + 1_000
+    );
+    expect(await readTestQuestEscrow({ ownerUserId: hirerId, questId })).toMatchObject({
+      status: 'SETTLED',
+      remainingSatang: 0,
+    });
     expect(
       await db
         .select({

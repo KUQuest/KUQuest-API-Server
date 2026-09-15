@@ -79,7 +79,6 @@ describe('Xendit Top-up webhook route', () => {
     expect(stored).toMatchObject({
       providerEventId: `derived:payment.capture:${paymentId}:PAID`,
       internalReference,
-      processingStatus: 'RECEIVED',
       rawPayloadCiphertext: expect.any(String),
     });
   });

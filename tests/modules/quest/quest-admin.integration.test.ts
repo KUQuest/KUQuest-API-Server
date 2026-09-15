@@ -21,6 +21,7 @@ import { tag } from '@/database/schema/tag.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
+import { encodeCursor } from '@/shared/cursor';
 
 import { randomUUID } from 'node:crypto';
 
@@ -421,6 +422,79 @@ describe('Admin Quest API routes', () => {
 
     const invalidCursor = await adminRequest('/api/v1/admin/quests?cursor=not-valid-base64url!!');
     expect(invalidCursor.status).toBe(400);
+  });
+
+  it('traverses microsecond-tied Quests exactly once in both sort directions and rejects a deleted cursor anchor', async () => {
+    type ListResponse = {
+      success: boolean;
+      data: { items: Array<{ id: string }>; nextCursor: string | null };
+    };
+
+    const token = `cursor-ms-${randomUUID()}`;
+    const seedQuestAt = async (createdAt: string): Promise<string> => {
+      const id = randomUUID();
+      questIds.push(id);
+      await sql`
+        insert into quest
+          (id, hirer_id, title, "condition", mode, participation, quest_status,
+           reward_satang, tag_id, start_time, created_at)
+        values (
+          ${id}, ${hirerId}, ${`Microsecond cursor quest ${token}`}, ${'Do the work'},
+          'NO_CANDIDATE', 'SOLO', 'QUEST_OPEN', 1000, ${tagId},
+          '2030-09-01T00:00:00Z', ${createdAt}::timestamptz
+        )
+      `;
+      return id;
+    };
+
+    const first = await seedQuestAt('2030-09-01T00:00:00.100200Z');
+    const tieFirst = await seedQuestAt('2030-09-01T00:00:00.100800Z');
+    const tieSecond = await seedQuestAt('2030-09-01T00:00:00.100800Z');
+    const last = await seedQuestAt('2030-09-01T00:00:00.101400Z');
+    const tieAscending = [tieFirst, tieSecond].sort((left, right) => (left < right ? -1 : 1));
+
+    const readEveryPage = async (sort: 'newest' | 'oldest'): Promise<string[]> => {
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 8; page += 1) {
+        const params = new URLSearchParams({ q: token, sort, limit: '1' });
+        if (cursor) params.set('cursor', cursor);
+        // Each page cursor comes from the previous response, so these requests
+        // must remain sequential.
+        // eslint-disable-next-line no-await-in-loop
+        const response = await adminRequest(`/api/v1/admin/quests?${params.toString()}`);
+        expect(response.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const body = (await response.json()) as ListResponse;
+        expect(body.success).toBe(true);
+        ids.push(...body.data.items.map((item) => item.id));
+        cursor = body.data.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      return ids;
+    };
+
+    expect(await readEveryPage('oldest')).toEqual([first, ...tieAscending, last]);
+    expect(await readEveryPage('newest')).toEqual([last, ...tieAscending.reverse(), first]);
+
+    // A Quest can be deleted while a client still holds its cursor. The list
+    // must reject the stale anchor instead of returning a silent empty page.
+    await db.delete(quest).where(eq(quest.id, first));
+    const staleCursor = encodeCursor({
+      id: first,
+      startTime: '2030-09-01T00:00:00.100200Z',
+    });
+    const staleResponse = await adminRequest(
+      `/api/v1/admin/quests?cursor=${encodeURIComponent(staleCursor)}`
+    );
+    const staleBody = (await staleResponse.json()) as {
+      success: boolean;
+      error?: { code: string; message: string };
+    };
+    expect(staleResponse.status).toBe(400);
+    expect(staleBody.success).toBe(false);
+    expect(staleBody.error?.code).toBe('INVALID_CURSOR');
   });
 
   it('searches Quest title and description within the Admin filter scope', async () => {

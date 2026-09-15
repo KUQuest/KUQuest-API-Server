@@ -4,7 +4,7 @@ import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import type { Static } from 'elysia';
 
-import { WorkChatTransitionError } from './quest-assignment.service';
+import { WorkChatTransitionError } from './quest-work-chat.port';
 import { cancelQuest, cancelQuestV2 } from './quest-settlement.service';
 import type { questSettlementParamsSchema } from './quest-settlement.schema';
 

@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 export const topUpStatusSchema = t.Union([
   t.Literal('PENDING'),
@@ -33,7 +34,7 @@ export const topUpParamsSchema = t.Object({
 });
 
 export const topUpListQuerySchema = t.Object({
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
 });
 
 export const topUpQuoteResponseSchema = t.Object({

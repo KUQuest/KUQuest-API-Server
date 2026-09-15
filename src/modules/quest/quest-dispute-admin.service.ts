@@ -21,8 +21,9 @@ import {
   type WalletTransaction,
 } from '@/modules/wallet';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, asc, desc, eq, gt, lt, or, sql } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 
 export type DisputeCaseStatus = (typeof disputeCaseStatuses)[number];
 export type DisputeCaseOutcome = 'DISPUTE_CASE_DISMISSED' | 'DISPUTE_CASE_RESOLVED';
@@ -199,23 +200,6 @@ const caseByIdInTransaction = async (
   return record;
 };
 
-const listCursorCondition = (cursor: CursorPayload | undefined, sort: 'newest' | 'oldest') => {
-  if (!cursor) return undefined;
-  const cursorDate = new Date(cursor.startTime);
-  if (Number.isNaN(cursorDate.getTime())) {
-    throw new CursorInputError('INVALID_CURSOR', 'Dispute cursor is invalid.');
-  }
-  return sort === 'oldest'
-    ? or(
-        gt(adminDisputeCase.createdAt, cursorDate),
-        and(eq(adminDisputeCase.createdAt, cursorDate), gt(adminDisputeCase.id, cursor.id))
-      )
-    : or(
-        lt(adminDisputeCase.createdAt, cursorDate),
-        and(eq(adminDisputeCase.createdAt, cursorDate), lt(adminDisputeCase.id, cursor.id))
-      );
-};
-
 /** Create the queue record after a filing adapter has authenticated its actor. */
 export const createAdminDisputeCaseInTransaction = async (
   transaction: WalletTransaction,
@@ -326,22 +310,23 @@ export const listAdminDisputeCases = async ({
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     throw new CursorInputError('INVALID_LIMIT', 'Dispute Case limit must be between 1 and 50.');
   }
-  const rows = await db
-    .select()
-    .from(adminDisputeCase)
-    .where(and(eq(adminDisputeCase.status, status), listCursorCondition(cursor, sort)))
-    .orderBy(
-      sort === 'oldest' ? asc(adminDisputeCase.createdAt) : desc(adminDisputeCase.createdAt),
-      sort === 'oldest' ? asc(adminDisputeCase.id) : desc(adminDisputeCase.id)
-    )
-    .limit(limit + 1);
-  const page = rows.slice(0, limit);
-  const last = page[page.length - 1];
-  return {
-    items: page.map(summaryFromRecord),
-    nextCursor:
-      rows.length > limit && last ? { startTime: last.createdAt.toISOString(), id: last.id } : null,
-  };
+  const page = await readKeysetPage({
+    anchor: { time: adminDisputeCase.createdAt, id: adminDisputeCase.id },
+    cursor,
+    limit,
+    sort,
+    where: eq(adminDisputeCase.status, status),
+    read: ({ where, orderBy, limit: probe }) =>
+      db
+        .select()
+        .from(adminDisputeCase)
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'Dispute cursor is invalid.'),
+  });
+  return { items: page.rows.map(summaryFromRecord), nextCursor: page.nextCursor };
 };
 
 export const getAdminDisputeCase = async (

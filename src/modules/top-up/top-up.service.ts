@@ -6,22 +6,22 @@ import {
   paymentTopUpStatusHistory,
   type TopUpStatus,
 } from '@/database/schema/payment.schema';
-import { walletIdempotencyKey, walletWallet } from '@/database/schema/wallet.schema';
+import { walletWallet } from '@/database/schema/wallet.schema';
 import {
+  assertWalletOperationAllowed,
+  completeMoneyCommand,
+  ensureWalletInTransaction,
+  getEffectiveMoneyPolicy,
   MAX_WALLET_CAPACITY_SATANG,
   MoneyDomainError,
   positiveSatang,
+  runMoneyCommand,
   satang,
-  type Satang,
-} from '@/modules/wallet/wallet.money';
-import { assertWalletOperationAllowed } from '@/modules/wallet/wallet.status.service';
-import {
-  ensureWalletInTransaction,
-  getEffectiveMoneyPolicy,
+  sha256Json,
+  stampMoneyCommandResource,
   validateOperationAmount,
-} from '@/modules/wallet/wallet.service';
-import type { WalletTransaction } from '@/modules/wallet/wallet.service';
-
+  type Satang,
+} from '@/modules/wallet';
 import { and, asc, desc, eq } from 'drizzle-orm';
 
 import {
@@ -85,16 +85,6 @@ export type TopUp = {
   creditedLedgerTransactionId: string | null;
   createdAt: Date;
   updatedAt: Date;
-};
-
-const idempotencyExpiry = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-const sha256Json = async (value: object) => {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value))
-  );
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
 const topUpBusinessReference = (topUpId: string) => `top-up:${topUpId}`;
@@ -218,190 +208,166 @@ type PreparedTopUp = {
   idempotencyKeyId: string;
 };
 
-const acquireInitiationIdempotency = async (
-  transaction: WalletTransaction,
-  input: InitiateTopUpInput,
-  requestHash: string
-) => {
-  if (input.idempotency.key.trim().length === 0) {
-    throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key must not be empty.');
-  }
-  const [created] = await transaction
-    .insert(walletIdempotencyKey)
-    .values({
-      principalUserId: input.principalUserId,
-      operationScope: topUpOperationScope,
-      key: input.idempotency.key,
-      requestHash,
-      expiresAt: idempotencyExpiry(),
-    })
-    .onConflictDoNothing()
-    .returning();
-  const [record] = created
-    ? [created]
-    : await transaction
-        .select()
-        .from(walletIdempotencyKey)
-        .where(
-          and(
-            eq(walletIdempotencyKey.principalUserId, input.principalUserId),
-            eq(walletIdempotencyKey.operationScope, topUpOperationScope),
-            eq(walletIdempotencyKey.key, input.idempotency.key)
-          )
-        )
-        .for('update');
-  if (!record)
-    throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key could not be acquired.');
-  if (record.requestHash !== requestHash) {
-    throw new MoneyDomainError(
-      'IDEMPOTENCY_KEY_REUSED',
-      'Idempotency key was used with a different request.'
-    );
-  }
-  if (record.resourceId) {
-    const [replayed] = await transaction
-      .select()
-      .from(paymentTopUp)
-      .where(
-        and(eq(paymentTopUp.id, record.resourceId), eq(paymentTopUp.userId, input.principalUserId))
-      );
-    if (!replayed)
-      throw new MoneyDomainError(
-        'IDEMPOTENCY_UNAVAILABLE',
-        'The idempotent Top-up record is missing.'
-      );
-    return { record, replay: topUpFromRecord(replayed) };
-  }
-  if (!created)
-    throw new MoneyDomainError(
-      'IDEMPOTENCY_IN_PROGRESS',
-      'A Top-up with this idempotency key is still processing.'
-    );
-  return { record, replay: undefined };
-};
-
 const prepareTopUp = async (
   input: InitiateTopUpInput,
   requestHash: string
 ): Promise<PreparedTopUp> =>
   db.transaction(async (transaction) => {
-    const idempotency = await acquireInitiationIdempotency(transaction, input, requestHash);
-    if (idempotency.replay) {
-      const [quote] = await transaction
-        .select({ expiresAt: paymentTopUpQuote.expiresAt })
-        .from(paymentTopUpQuote)
-        .where(
-          and(
-            eq(paymentTopUpQuote.id, idempotency.replay.quoteId),
-            eq(paymentTopUpQuote.userId, input.principalUserId)
-          )
-        );
-      if (!quote)
-        throw new MoneyDomainError(
-          'IDEMPOTENCY_UNAVAILABLE',
-          'The idempotent Top-up quote is missing.'
-        );
-      return {
-        topUp: idempotency.replay,
-        paymentRequest: {
-          internalReference: idempotency.replay.internalReference,
-          paymentTotalSatang: idempotency.replay.paymentTotalSatang,
-          expiresAt: quote.expiresAt,
-        },
-        idempotencyKeyId: idempotency.record.id,
-      };
+    if (input.idempotency.key.trim().length === 0) {
+      throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key must not be empty.');
     }
-
-    await ensureWalletInTransaction(transaction, input.principalUserId);
-    const [wallet] = await transaction
-      .select()
-      .from(walletWallet)
-      .where(eq(walletWallet.userId, input.principalUserId))
-      .for('update');
-    if (!wallet) throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
-    assertWalletOperationAllowed(wallet.walletStatus, 'TOP_UP');
-
-    const [quote] = await transaction
-      .select()
-      .from(paymentTopUpQuote)
-      .where(
-        and(
-          eq(paymentTopUpQuote.id, input.quoteId),
-          eq(paymentTopUpQuote.userId, input.principalUserId)
-        )
-      )
-      .for('update');
-    if (!quote)
-      throw new MoneyDomainError('TOP_UP_QUOTE_NOT_FOUND', 'Top-up quote does not exist.');
-    if (quote.consumedAt)
-      throw new MoneyDomainError('TOP_UP_QUOTE_CONSUMED', 'Top-up quote was already consumed.');
-    if (quote.expiresAt <= new Date())
-      throw new MoneyDomainError('TOP_UP_QUOTE_EXPIRED', 'Top-up quote has expired.');
-
-    const pending = await transaction
-      .select({ creditSatang: paymentTopUp.creditSatang })
-      .from(paymentTopUp)
-      .where(
-        and(eq(paymentTopUp.userId, input.principalUserId), eq(paymentTopUp.topUpStatus, 'PENDING'))
-      );
-    const walletTotal =
-      wallet.spendingBalanceSatang +
-      wallet.earningsBalanceSatang +
-      wallet.fundingReservedSatang +
-      wallet.reservedForPayoutsSatang;
-    const pendingTotal = pending.reduce((total, row) => total + row.creditSatang, 0);
-    if (walletTotal + pendingTotal + quote.creditSatang > MAX_WALLET_CAPACITY_SATANG) {
-      throw new MoneyDomainError(
-        'WALLET_CAPACITY_EXCEEDED',
-        'Pending Top-up funds would exceed Wallet capacity.'
-      );
-    }
-
-    const topUpId = crypto.randomUUID();
-    const internalReference = topUpBusinessReference(topUpId);
-    const [created] = await transaction
-      .insert(paymentTopUp)
-      .values({
-        internalReference,
-        userId: input.principalUserId,
-        quoteId: quote.id,
-        provider: 'XENDIT',
-        creditSatang: quote.creditSatang,
-        chargedFeeSatang: quote.chargedFeeSatang,
-        chargedTaxSatang: quote.chargedTaxSatang,
-        paymentTotalSatang: quote.paymentTotalSatang,
-        providerFeeSatang: quote.providerFeeSatang,
-        providerTaxSatang: quote.providerTaxSatang,
-        providerTotalSatang: quote.providerTotalSatang,
-        topUpStatus: 'PENDING',
-      })
-      .returning();
-    if (!created)
-      throw new MoneyDomainError('TOP_UP_CREATE_FAILED', 'Top-up could not be created.');
-    await transaction.insert(paymentTopUpStatusHistory).values({
-      topUpId: created.id,
-      toStatus: 'PENDING',
-      source: 'INITIATION',
-      actorUserId: input.principalUserId,
-    });
-    await transaction
-      .update(paymentTopUpQuote)
-      .set({ consumedAt: new Date() })
-      .where(eq(paymentTopUpQuote.id, quote.id));
-    await transaction
-      .update(walletIdempotencyKey)
-      .set({ resourceType: 'payment_top_up', resourceId: created.id })
-      .where(eq(walletIdempotencyKey.id, idempotency.record.id));
-
-    return {
-      topUp: topUpFromRecord(created),
-      paymentRequest: {
-        internalReference,
-        paymentTotalSatang: positiveSatang(created.paymentTotalSatang),
-        expiresAt: quote.expiresAt,
+    const { result } = await runMoneyCommand(
+      transaction,
+      {
+        principalUserId: input.principalUserId,
+        scope: topUpOperationScope,
+        key: input.idempotency.key,
+        requestHash,
       },
-      idempotencyKeyId: idempotency.record.id,
-    };
+      {
+        execute: async (transaction, keyId) => {
+          await ensureWalletInTransaction(transaction, input.principalUserId);
+          const [wallet] = await transaction
+            .select()
+            .from(walletWallet)
+            .where(eq(walletWallet.userId, input.principalUserId))
+            .for('update');
+          if (!wallet) throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
+          assertWalletOperationAllowed(wallet.walletStatus, 'TOP_UP');
+
+          const [quote] = await transaction
+            .select()
+            .from(paymentTopUpQuote)
+            .where(
+              and(
+                eq(paymentTopUpQuote.id, input.quoteId),
+                eq(paymentTopUpQuote.userId, input.principalUserId)
+              )
+            )
+            .for('update');
+          if (!quote)
+            throw new MoneyDomainError('TOP_UP_QUOTE_NOT_FOUND', 'Top-up quote does not exist.');
+          if (quote.consumedAt)
+            throw new MoneyDomainError(
+              'TOP_UP_QUOTE_CONSUMED',
+              'Top-up quote was already consumed.'
+            );
+          if (quote.expiresAt <= new Date())
+            throw new MoneyDomainError('TOP_UP_QUOTE_EXPIRED', 'Top-up quote has expired.');
+
+          const pending = await transaction
+            .select({ creditSatang: paymentTopUp.creditSatang })
+            .from(paymentTopUp)
+            .where(
+              and(
+                eq(paymentTopUp.userId, input.principalUserId),
+                eq(paymentTopUp.topUpStatus, 'PENDING')
+              )
+            );
+          const walletTotal =
+            wallet.spendingBalanceSatang +
+            wallet.earningsBalanceSatang +
+            wallet.fundingReservedSatang +
+            wallet.reservedForPayoutsSatang;
+          const pendingTotal = pending.reduce((total, row) => total + row.creditSatang, 0);
+          if (walletTotal + pendingTotal + quote.creditSatang > MAX_WALLET_CAPACITY_SATANG) {
+            throw new MoneyDomainError(
+              'WALLET_CAPACITY_EXCEEDED',
+              'Pending Top-up funds would exceed Wallet capacity.'
+            );
+          }
+
+          const topUpId = crypto.randomUUID();
+          const internalReference = topUpBusinessReference(topUpId);
+          const [created] = await transaction
+            .insert(paymentTopUp)
+            .values({
+              internalReference,
+              userId: input.principalUserId,
+              quoteId: quote.id,
+              provider: 'XENDIT',
+              creditSatang: quote.creditSatang,
+              chargedFeeSatang: quote.chargedFeeSatang,
+              chargedTaxSatang: quote.chargedTaxSatang,
+              paymentTotalSatang: quote.paymentTotalSatang,
+              providerFeeSatang: quote.providerFeeSatang,
+              providerTaxSatang: quote.providerTaxSatang,
+              providerTotalSatang: quote.providerTotalSatang,
+              topUpStatus: 'PENDING',
+            })
+            .returning();
+          if (!created)
+            throw new MoneyDomainError('TOP_UP_CREATE_FAILED', 'Top-up could not be created.');
+          await transaction.insert(paymentTopUpStatusHistory).values({
+            topUpId: created.id,
+            toStatus: 'PENDING',
+            source: 'INITIATION',
+            actorUserId: input.principalUserId,
+          });
+          await transaction
+            .update(paymentTopUpQuote)
+            .set({ consumedAt: new Date() })
+            .where(eq(paymentTopUpQuote.id, quote.id));
+          await stampMoneyCommandResource(transaction, keyId, 'payment_top_up', created.id);
+
+          return {
+            topUp: topUpFromRecord(created),
+            paymentRequest: {
+              internalReference,
+              paymentTotalSatang: positiveSatang(created.paymentTotalSatang),
+              expiresAt: quote.expiresAt,
+            },
+            idempotencyKeyId: keyId,
+          };
+        },
+        replay: async (transaction, keyRow) => {
+          if (!keyRow.resourceId)
+            throw new MoneyDomainError(
+              'IDEMPOTENCY_IN_PROGRESS',
+              'A Top-up with this idempotency key is still processing.'
+            );
+          const [replayed] = await transaction
+            .select()
+            .from(paymentTopUp)
+            .where(
+              and(
+                eq(paymentTopUp.id, keyRow.resourceId),
+                eq(paymentTopUp.userId, input.principalUserId)
+              )
+            );
+          if (!replayed)
+            throw new MoneyDomainError(
+              'IDEMPOTENCY_UNAVAILABLE',
+              'The idempotent Top-up record is missing.'
+            );
+          const topUp = topUpFromRecord(replayed);
+          const [quote] = await transaction
+            .select({ expiresAt: paymentTopUpQuote.expiresAt })
+            .from(paymentTopUpQuote)
+            .where(
+              and(
+                eq(paymentTopUpQuote.id, topUp.quoteId),
+                eq(paymentTopUpQuote.userId, input.principalUserId)
+              )
+            );
+          if (!quote)
+            throw new MoneyDomainError(
+              'IDEMPOTENCY_UNAVAILABLE',
+              'The idempotent Top-up quote is missing.'
+            );
+          return {
+            topUp,
+            paymentRequest: {
+              internalReference: topUp.internalReference,
+              paymentTotalSatang: topUp.paymentTotalSatang,
+              expiresAt: quote.expiresAt,
+            },
+            idempotencyKeyId: keyRow.id,
+          };
+        },
+      }
+    );
+    return result;
   });
 
 const readPreparedTopUp = async (principalUserId: string, topUpId: string) => {
@@ -453,10 +419,7 @@ const finalizeProviderResponse = async (
         'TOP_UP_UPDATE_FAILED',
         'Top-up provider state could not be saved.'
       );
-    await transaction
-      .update(walletIdempotencyKey)
-      .set({ processingStatus: 'COMPLETED', completedAt: new Date() })
-      .where(eq(walletIdempotencyKey.id, prepared.idempotencyKeyId));
+    await completeMoneyCommand(transaction, prepared.idempotencyKeyId);
     return topUpFromRecord(updated);
   });
 
@@ -495,10 +458,7 @@ const finalizeProviderRejection = async (
       source: 'PROVIDER',
       reason: error.message,
     });
-    await transaction
-      .update(walletIdempotencyKey)
-      .set({ processingStatus: 'COMPLETED', completedAt: new Date() })
-      .where(eq(walletIdempotencyKey.id, prepared.idempotencyKeyId));
+    await completeMoneyCommand(transaction, prepared.idempotencyKeyId);
     return topUpFromRecord(updated);
   });
 

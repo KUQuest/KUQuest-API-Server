@@ -55,7 +55,15 @@ See `src/modules/onboarding/` as the reference shape.
 - Exports: named exports only, no default exports.
 - Types: `PascalCase`; values/functions: `camelCase`; constants: `camelCase` unless truly global config (`API_V1_PREFIX`, `ALLOWED_EMAIL_DOMAIN` are `SCREAMING_SNAKE_CASE`).
 
+## Cursor paging
+
+- A list that pages on a timestamp reads its page through `readKeysetPage` (`src/shared/keyset-page.ts`). The reader owns the anchor check, the row-wise boundary in both sort directions, the `limit + 1` probe, the trim, and the `nextCursor` pair; the call site keeps its projection, its filters, its own invalid-cursor error, and its own page-limit rule. A second copy of those mechanics fails `tests/shared/cursor.guard.test.ts`.
+- A timestamp cursor compares row-wise against the anchor row read back from the database, never against a millisecond value from the cursor text — `defaultNow()` writes microseconds. A cursor whose anchor row is gone rejects with the module's invalid-cursor error (both rules live in `src/shared/keyset-page.ts`).
+- One page-limit rule holds for the whole API: `parsePageLimit` in `src/shared/cursor.ts` defaults to `DEFAULT_PAGE_LIMIT` and rejects a limit outside 1..`MAX_PAGE_LIMIT`. A query schema caps `limit` at `MAX_PAGE_LIMIT`, never at a number of its own.
+
 ## Testing
 
 - Integration-first: HTTP integration tests in `tests/modules/<name>/<name>.integration.test.ts` hit the real `app` via `app.handle(new Request(...))`, not mocks. Plain TypeScript application-service tests without an HTTP contract use the same `.integration.test.ts` suffix and execute the public service against real PostgreSQL.
 - Test structure mirrors `src/` — one test dir per module/shared/plugin/database area.
+- Every cursor list carries a page-walk test at `limit=1` with rows seeded inside one millisecond, in each sort the endpoint offers.
+- Assert the durable outcome, never a state a queued task can overwrite. A controller that answers and then queues work — `payout.webhook.controller.ts` and `top-up.webhook.controller.ts` both call `queueMicrotask` after the insert — promises the row, the attribution, and the ciphertext, not the `RECEIVED` status the claim moves on. A test that reads the transient value passes only while the database holds enough older rows to keep the claim busy.

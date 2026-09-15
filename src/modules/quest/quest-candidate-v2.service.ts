@@ -3,16 +3,10 @@ import {
   quest,
   questApiVersion,
   questCandidateApplicationV2,
-  questAssignment,
 } from '@/database/schema/quest.schema';
 
 import { and, asc, eq, ne } from 'drizzle-orm';
 
-import {
-  getQuestWorkChatMembershipWriter,
-  WorkChatTransitionError,
-  type QuestTransaction,
-} from './quest-work-chat.port';
 import {
   runQuestCommand,
   sha256Json,
@@ -22,12 +16,16 @@ import {
 import type { AcceptedWorker, QuestWorkChatMembershipTransition } from './quest-work-chat.contract';
 import {
   questV2ApplicationStates,
-  questV2AssignmentStates,
   questV2Mode,
   questV2Participation,
   type QuestV2ApplicationState,
-  type QuestV2AssignmentState,
 } from './quest-v2.contract';
+import {
+  lockQuest,
+  runQuestV2Selection,
+  type SelectionAssignmentRow,
+  type SelectionSuccess,
+} from './quest-selection.service';
 
 export const questV2CandidateApplicationCreateOperationScope =
   'quest.v2.candidate-application.create';
@@ -113,23 +111,6 @@ const applicationFromSnapshot = (value: unknown): QuestV2CandidateApplicationRow
     state: snapshot.state as QuestV2ApplicationState,
     appliedAt,
   };
-};
-
-const lockQuest = async (transaction: QuestTransaction, questId: string) => {
-  const [current] = await transaction
-    .select({
-      hirerId: quest.hirerId,
-      v2Mode: quest.v2Mode,
-      v2Participation: quest.v2Participation,
-      questState: quest.questStatus,
-      hiddenAt: quest.hiddenAt,
-      startTime: quest.startTime,
-    })
-    .from(quest)
-    .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
-    .limit(1)
-    .for('update');
-  return current;
 };
 
 const isReadableQuest = (current: {
@@ -345,119 +326,31 @@ export const withdrawQuestV2CandidateApplication = async (
     return { outcome: command.rejection };
   });
 
-type QuestV2CandidateSelectionAssignmentRow = {
-  id: string;
-  questId: string;
-  workerId: string;
-  state: QuestV2AssignmentState;
-  startedAt: Date | null;
-  createdAt: Date;
-  questState: 'QUEST_ASSIGNED';
-};
-
 type QuestV2CandidateSelectionBusinessOutcomeCode =
   'already-assigned' | 'application-not-found' | 'not-allowed' | 'not-open' | 'not-selectable';
 
 type QuestV2CandidateSelectionOutcomeCode =
   QuestV2CandidateSelectionBusinessOutcomeCode | 'not-found' | QuestCommandOutcomeCode;
 
-type QuestV2CandidateSelectionSuccess = {
-  assignments: QuestV2CandidateSelectionAssignmentRow[];
-  questState: 'QUEST_ASSIGNED';
-};
-
 export type QuestV2CandidateSelectionOutcome =
-  QuestV2CandidateSelectionSuccess | { outcome: QuestV2CandidateSelectionOutcomeCode };
+  SelectionSuccess | { outcome: QuestV2CandidateSelectionOutcomeCode };
 
-const assignmentFields = {
-  id: questAssignment.id,
-  questId: questAssignment.questId,
-  workerId: questAssignment.workerId,
-  state: questAssignment.assignmentStatus,
-  startedAt: questAssignment.startedAt,
-  createdAt: questAssignment.createdAt,
-};
-
-const toSelectionAssignment = (row: {
-  id: string;
+const selectionTransitionFor = ({
+  questId,
+  hirerId,
+  now,
+  assignments,
+}: {
   questId: string;
-  workerId: string;
-  state: string;
-  startedAt: Date | null;
-  createdAt: Date;
-}): QuestV2CandidateSelectionAssignmentRow => {
-  if (!(questV2AssignmentStates as readonly string[]).includes(row.state)) {
-    throw new Error('Assignment has an invalid state for Quest API V2');
+  hirerId: string;
+  now: Date;
+  resourceId: string;
+  assignments: SelectionAssignmentRow[];
+}): QuestWorkChatMembershipTransition => {
+  const [assignment] = assignments;
+  if (!assignment) {
+    throw new Error('Selection succeeded without creating an assignment');
   }
-  return {
-    ...row,
-    state: row.state as QuestV2AssignmentState,
-    questState: 'QUEST_ASSIGNED',
-  };
-};
-
-const selectionSnapshotFor = (result: QuestV2CandidateSelectionSuccess) => ({
-  questState: result.questState,
-  assignments: result.assignments.map((assignment) => ({
-    id: assignment.id,
-    questId: assignment.questId,
-    workerId: assignment.workerId,
-    state: assignment.state,
-    questState: assignment.questState,
-    startedAt: assignment.startedAt?.toISOString() ?? null,
-    createdAt: assignment.createdAt.toISOString(),
-  })),
-});
-
-const selectionFromSnapshot = (value: unknown): QuestV2CandidateSelectionSuccess | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const snapshot = value as {
-    questState?: unknown;
-    assignments?: unknown;
-  };
-  if (snapshot.questState !== 'QUEST_ASSIGNED' || !Array.isArray(snapshot.assignments)) {
-    return undefined;
-  }
-  const assignments: QuestV2CandidateSelectionAssignmentRow[] = [];
-  for (const snapshotValue of snapshot.assignments) {
-    if (!snapshotValue || typeof snapshotValue !== 'object' || Array.isArray(snapshotValue))
-      return undefined;
-    const assignment = snapshotValue as Record<string, unknown>;
-    if (
-      typeof assignment.id !== 'string' ||
-      typeof assignment.questId !== 'string' ||
-      typeof assignment.workerId !== 'string' ||
-      typeof assignment.state !== 'string' ||
-      assignment.questState !== 'QUEST_ASSIGNED' ||
-      typeof assignment.createdAt !== 'string' ||
-      (assignment.startedAt !== null && typeof assignment.startedAt !== 'string') ||
-      !(questV2AssignmentStates as readonly string[]).includes(assignment.state)
-    )
-      return undefined;
-    const createdAt = new Date(assignment.createdAt);
-    const startedAt = assignment.startedAt === null ? null : new Date(assignment.startedAt);
-    if (Number.isNaN(createdAt.getTime()) || (startedAt && Number.isNaN(startedAt.getTime()))) {
-      return undefined;
-    }
-    assignments.push({
-      id: assignment.id,
-      questId: assignment.questId,
-      workerId: assignment.workerId,
-      state: assignment.state as QuestV2AssignmentState,
-      questState: 'QUEST_ASSIGNED',
-      startedAt,
-      createdAt,
-    });
-  }
-  return { assignments, questState: 'QUEST_ASSIGNED' };
-};
-
-const selectionTransitionFor = (
-  questId: string,
-  hirerId: string,
-  now: Date,
-  assignment: QuestV2CandidateSelectionAssignmentRow
-): QuestWorkChatMembershipTransition => {
   const commandId = `quest-candidate-selection-v2:${assignment.id}`;
   const worker: AcceptedWorker = {
     workerId: assignment.workerId,
@@ -483,141 +376,72 @@ export const selectQuestV2CandidateApplication = async (
   applicationId: string,
   rawCommandId: string,
   now = new Date()
-): Promise<QuestV2CandidateSelectionOutcome> =>
-  db.transaction(async (transaction) => {
-    // Lock the Quest row before the command; see the lock-order note in
-    // createQuestV2CandidateApplication.
-    const current = await lockQuest(transaction, questId);
-    if (!current) return { outcome: 'not-found' };
-
-    const command = await runQuestCommand({
-      transaction,
-      identity: {
-        principalUserId: hirerId,
-        operationScope: questV2CandidateApplicationSelectOperationScope,
-        key: rawCommandId,
-        requestHash: await sha256Json({
-          authenticatedMemberId: hirerId,
-          operation: questV2CandidateApplicationSelectOperationScope,
-          path: '/api/v2/quests/:questId/applications/:applicationId/select',
-          questId,
-          applicationId,
-          body: {},
-        }),
-        questId,
-      },
-      now,
-      work: async (): Promise<
-        QuestCommandWork<
-          QuestV2CandidateSelectionSuccess,
-          QuestV2CandidateSelectionBusinessOutcomeCode
-        >
-      > => {
-        if (current.hirerId !== hirerId) return { kind: 'rejected', rejection: 'not-allowed' };
-        if (
-          current.v2Mode !== questV2Mode.candidate ||
-          current.v2Participation !== questV2Participation.single
-        ) {
-          return { kind: 'rejected', rejection: 'not-allowed' };
-        }
-        if (current.questState !== 'QUEST_OPEN') {
-          return { kind: 'rejected', rejection: 'not-open' };
-        }
-        if (current.startTime.getTime() <= now.getTime()) {
-          return { kind: 'rejected', rejection: 'not-open' };
-        }
-
-        const [application] = await transaction
-          .select(applicationFields)
-          .from(questCandidateApplicationV2)
-          .where(
-            and(
-              eq(questCandidateApplicationV2.id, applicationId),
-              eq(questCandidateApplicationV2.questId, questId)
-            )
-          )
-          .limit(1)
-          .for('update');
-        if (!application) return { kind: 'rejected', rejection: 'application-not-found' };
-        if (application.state !== 'APPLICATION_APPLIED') {
-          return { kind: 'rejected', rejection: 'not-selectable' };
-        }
-
-        const assignmentRows = await transaction
-          .select(assignmentFields)
-          .from(questAssignment)
-          .where(eq(questAssignment.questId, questId))
-          .for('update');
-        if (assignmentRows.some((assignment) => assignment.workerId === application.memberId)) {
-          return { kind: 'rejected', rejection: 'already-assigned' };
-        }
-
-        await transaction
-          .update(questCandidateApplicationV2)
-          .set({ state: 'APPLICATION_SELECTED' })
-          .where(eq(questCandidateApplicationV2.id, application.id));
-        await transaction
-          .update(questCandidateApplicationV2)
-          .set({ state: 'APPLICATION_REJECTED' })
-          .where(
-            and(
-              eq(questCandidateApplicationV2.questId, questId),
-              eq(questCandidateApplicationV2.state, 'APPLICATION_APPLIED'),
-              ne(questCandidateApplicationV2.id, application.id)
-            )
-          );
-
-        const [createdAssignment] = await transaction
-          .insert(questAssignment)
-          .values({
-            questId,
-            workerId: application.memberId,
-            assignmentStatus: 'ASSIGNMENT_ACTIVE',
-            createdAt: now,
-          })
-          .returning(assignmentFields);
-        if (!createdAssignment) throw new Error('Assignment insert returned no row');
-
-        await transaction
-          .update(quest)
-          .set({ questStatus: 'QUEST_ASSIGNED', updatedAt: now })
-          .where(and(eq(quest.id, questId), eq(quest.questStatus, 'QUEST_OPEN')));
-
-        const assignment = toSelectionAssignment(createdAssignment);
-        const writer = getQuestWorkChatMembershipWriter();
-        if (!writer) {
-          throw new WorkChatTransitionError(
-            new Error('Work Chat membership writer is not configured')
-          );
-        }
-        try {
-          await writer.applyQuestTransition(
-            transaction,
-            selectionTransitionFor(questId, hirerId, now, assignment)
-          );
-        } catch (cause) {
-          throw new WorkChatTransitionError(cause);
-        }
-
-        const result: QuestV2CandidateSelectionSuccess = {
-          assignments: [assignment],
-          questState: 'QUEST_ASSIGNED',
-        };
-        return {
-          kind: 'success',
-          result,
-          resourceType: 'quest-v2-candidate-selection',
-          resourceId: assignment.id,
-        };
-      },
-      toSnapshot: selectionSnapshotFor,
-      fromSnapshot: selectionFromSnapshot,
-    });
-
-    if ('outcome' in command) return { outcome: command.outcome };
-    if (command.kind === 'success') return command.result;
-    return { outcome: command.rejection };
+): Promise<QuestV2CandidateSelectionOutcome> => {
+  const requestHash = await sha256Json({
+    authenticatedMemberId: hirerId,
+    operation: questV2CandidateApplicationSelectOperationScope,
+    path: '/api/v2/quests/:questId/applications/:applicationId/select',
+    questId,
+    applicationId,
+    body: {},
   });
+
+  return runQuestV2Selection<QuestV2CandidateSelectionBusinessOutcomeCode>({
+    hirerId,
+    questId,
+    rawCommandId,
+    now,
+    operationScope: questV2CandidateApplicationSelectOperationScope,
+    requestHash,
+    participation: 'single',
+    gates: {
+      notHirer: 'not-allowed',
+      notMode: 'not-allowed',
+      notParticipation: 'not-allowed',
+    },
+    resourceType: 'quest-v2-candidate-selection',
+    selectResource: async (transaction) => {
+      const [application] = await transaction
+        .select(applicationFields)
+        .from(questCandidateApplicationV2)
+        .where(
+          and(
+            eq(questCandidateApplicationV2.id, applicationId),
+            eq(questCandidateApplicationV2.questId, questId)
+          )
+        )
+        .limit(1)
+        .for('update');
+      if (!application) return { kind: 'rejected', rejection: 'application-not-found' };
+      if (application.state !== 'APPLICATION_APPLIED') {
+        return { kind: 'rejected', rejection: 'not-selectable' };
+      }
+
+      return {
+        kind: 'selected',
+        workerIds: [application.memberId],
+        resourceId: (assignments) => assignments[0].id,
+        flipCandidateRecords: async (tx) => {
+          await tx
+            .update(questCandidateApplicationV2)
+            .set({ state: 'APPLICATION_SELECTED' })
+            .where(eq(questCandidateApplicationV2.id, application.id));
+          await tx
+            .update(questCandidateApplicationV2)
+            .set({ state: 'APPLICATION_REJECTED' })
+            .where(
+              and(
+                eq(questCandidateApplicationV2.questId, questId),
+                eq(questCandidateApplicationV2.state, 'APPLICATION_APPLIED'),
+                ne(questCandidateApplicationV2.id, application.id)
+              )
+            );
+        },
+      };
+    },
+    transitionFor: selectionTransitionFor,
+  });
+};
 
 export const listQuestV2CandidateApplications = async (
   memberId: string,

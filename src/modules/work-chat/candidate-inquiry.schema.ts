@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 const candidateInquiryParticipantSchema = t.Object({
   id: t.Nullable(t.String({ format: 'uuid' })),
@@ -88,7 +89,7 @@ export const candidateInquiryListQuerySchema = t.Object(
 
 export const candidateInquiryMessageListQuerySchema = t.Object(
   {
-    limit: t.Optional(t.Integer({ minimum: 1, maximum: 50 })),
+    limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
     before: t.Optional(t.String()),
     after: t.Optional(t.String()),
   },

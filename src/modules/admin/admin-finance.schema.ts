@@ -1,3 +1,5 @@
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
+
 import { t, type Static } from 'elysia';
 
 const dateTime = t.String({ format: 'date-time' });
@@ -102,7 +104,7 @@ export const adminLedgerTransactionsQuerySchema = t.Object({
   businessReference: t.Optional(t.String()),
   from: t.Optional(dateTime),
   to: t.Optional(dateTime),
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 100 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
 });
 

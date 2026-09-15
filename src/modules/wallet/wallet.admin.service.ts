@@ -1,14 +1,12 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import {
-  walletLedgerAccount,
-  walletLedgerPosting,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
-import { decodeCursor, encodeCursor } from '@/shared/cursor';
+import { walletWallet } from '@/database/schema/wallet.schema';
+import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, desc, eq, ilike, lt, or, sql } from 'drizzle-orm';
+import { and, eq, ilike, or } from 'drizzle-orm';
 
+import { walletProjectionMatchesLedger } from './wallet.service';
 import type {
   AdminWalletFullDetailResponse,
   AdminWalletListItem,
@@ -23,78 +21,55 @@ export type AdminWalletListPage = {
 export const listAdminWallets = async (
   query: AdminWalletListQuery = {}
 ): Promise<AdminWalletListPage> => {
-  const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
-  const conditions = [];
+  const limit = parsePageLimit(query.limit);
+  const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
 
-  if (query.status) {
-    conditions.push(eq(walletWallet.walletStatus, query.status));
-  }
-  if (query.userId) {
-    conditions.push(eq(walletWallet.userId, query.userId));
-  }
-  if (query.search) {
-    const s = `%${query.search}%`;
-    conditions.push(
-      or(
-        ilike(authUser.firstName, s),
-        ilike(authUser.lastName, s),
-        ilike(authUser.studentId, s),
-        ilike(authUser.email, s)
-      )
-    );
-  }
+  const page = await readKeysetPage({
+    anchor: { time: walletWallet.createdAt, id: walletWallet.id },
+    cursor,
+    limit,
+    where: and(
+      query.status ? eq(walletWallet.walletStatus, query.status) : undefined,
+      query.userId ? eq(walletWallet.userId, query.userId) : undefined,
+      query.search
+        ? or(
+            ilike(authUser.firstName, `%${query.search}%`),
+            ilike(authUser.lastName, `%${query.search}%`),
+            ilike(authUser.studentId, `%${query.search}%`),
+            ilike(authUser.email, `%${query.search}%`)
+          )
+        : undefined
+    ),
+    read: ({ where, orderBy, limit: probe }) =>
+      db
+        .select({
+          id: walletWallet.id,
+          userId: walletWallet.userId,
+          walletStatus: walletWallet.walletStatus,
+          spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+          earningsBalanceSatang: walletWallet.earningsBalanceSatang,
+          fundingReservedSatang: walletWallet.fundingReservedSatang,
+          reservedForPayoutsSatang: walletWallet.reservedForPayoutsSatang,
+          createdAt: walletWallet.createdAt,
+          updatedAt: walletWallet.updatedAt,
+          firstName: authUser.firstName,
+          lastName: authUser.lastName,
+          studentId: authUser.studentId,
+          email: authUser.email,
+          telephone: authUser.telephone,
+        })
+        .from(walletWallet)
+        .innerJoin(authUser, eq(walletWallet.userId, authUser.id))
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a Wallet'),
+  });
 
-  if (query.cursor) {
-    const parsed = decodeCursor(query.cursor);
-    if (parsed) {
-      const cursorDate = new Date(parsed.startTime);
-      conditions.push(
-        or(
-          lt(walletWallet.createdAt, cursorDate),
-          and(eq(walletWallet.createdAt, cursorDate), lt(walletWallet.id, parsed.id))
-        )
-      );
-    }
-  }
+  const nextCursor = page.nextCursor ? encodeCursor(page.nextCursor) : null;
 
-  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-
-  const rows = await db
-    .select({
-      id: walletWallet.id,
-      userId: walletWallet.userId,
-      walletStatus: walletWallet.walletStatus,
-      spendingBalanceSatang: walletWallet.spendingBalanceSatang,
-      earningsBalanceSatang: walletWallet.earningsBalanceSatang,
-      fundingReservedSatang: walletWallet.fundingReservedSatang,
-      reservedForPayoutsSatang: walletWallet.reservedForPayoutsSatang,
-      createdAt: walletWallet.createdAt,
-      updatedAt: walletWallet.updatedAt,
-      firstName: authUser.firstName,
-      lastName: authUser.lastName,
-      studentId: authUser.studentId,
-      email: authUser.email,
-      telephone: authUser.telephone,
-    })
-    .from(walletWallet)
-    .innerJoin(authUser, eq(walletWallet.userId, authUser.id))
-    .where(whereClause)
-    .orderBy(desc(walletWallet.createdAt), desc(walletWallet.id))
-    .limit(limit + 1);
-
-  const hasNextPage = rows.length > limit;
-  const pageRows = hasNextPage ? rows.slice(0, limit) : rows;
-
-  let nextCursor: string | null = null;
-  if (hasNextPage && pageRows.length > 0) {
-    const last = pageRows[pageRows.length - 1];
-    nextCursor = encodeCursor({
-      id: last.id,
-      startTime: last.createdAt.toISOString(),
-    });
-  }
-
-  const items: AdminWalletListItem[] = pageRows.map((r) => {
+  const items: AdminWalletListItem[] = page.rows.map((r) => {
     const totalBalanceSatang =
       r.spendingBalanceSatang +
       r.earningsBalanceSatang +
@@ -159,26 +134,12 @@ export const getAdminWalletDetail = async (
   }
 
   // Check projection reconciliation against ledger accounts
-  const accountRows = await db
-    .select({
-      type: walletLedgerAccount.type,
-      balanceSatang: sql<string>`coalesce(sum(${walletLedgerPosting.amountSatang}), 0)::text`,
-    })
-    .from(walletLedgerAccount)
-    .leftJoin(walletLedgerPosting, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
-    .where(eq(walletLedgerAccount.walletId, walletId))
-    .groupBy(walletLedgerAccount.type);
-
-  const ledgerBalances = new Map<string, number>();
-  for (const a of accountRows) {
-    ledgerBalances.set(a.type, Number(a.balanceSatang));
-  }
-
-  const matches =
-    row.spendingBalanceSatang === (ledgerBalances.get('SPENDING') ?? 0) &&
-    row.earningsBalanceSatang === (ledgerBalances.get('EARNINGS') ?? 0) &&
-    row.fundingReservedSatang === (ledgerBalances.get('FUNDING_RESERVED') ?? 0) &&
-    row.reservedForPayoutsSatang === (ledgerBalances.get('RESERVED_FOR_PAYOUTS') ?? 0);
+  const matches = await walletProjectionMatchesLedger(walletId, {
+    spendingBalanceSatang: row.spendingBalanceSatang,
+    earningsBalanceSatang: row.earningsBalanceSatang,
+    fundingReservedSatang: row.fundingReservedSatang,
+    reservedForPayoutsSatang: row.reservedForPayoutsSatang,
+  });
 
   const totalBalanceSatang =
     row.spendingBalanceSatang +

@@ -1,6 +1,7 @@
 export {
   addSatang,
   calculatePlatformFeeSatang,
+  MAX_WALLET_CAPACITY_SATANG,
   MoneyDomainError,
   positiveSatang,
   satang,
@@ -9,7 +10,12 @@ export {
   toBaht,
 } from './wallet.money';
 export type { MoneyDomainErrorCode, Satang, SatangDelta, SignedSatang } from './wallet.money';
-export { completeMoneyCommand, runMoneyCommand } from './wallet.money-command.service';
+export {
+  completeMoneyCommand,
+  runMoneyCommand,
+  sha256Json,
+  stampMoneyCommandResource,
+} from './wallet.money-command.service';
 export type {
   MoneyCommandHooks,
   MoneyCommandKeyRow,
@@ -37,9 +43,9 @@ export type {
   SettleDisputeCaseResult,
   SettleFundingReservationInput,
 } from './wallet.funding.service';
-export { convertEarnings, earningsConversionScope } from './wallet.service';
-export type { EarningsConversion, EarningsConversionInput } from './wallet.service';
-export type { WalletTransaction } from './wallet.service';
+export { convertEarnings, earningsConversionScope } from './wallet.conversion.service';
+export type { EarningsConversion, EarningsConversionInput } from './wallet.conversion.service';
+export type { WalletLedgerBalances, WalletTransaction } from './wallet.service';
 export {
   assertWalletOperationAllowed,
   changeWalletStatus,
@@ -52,6 +58,7 @@ export type { ChangeWalletStatusInput, WalletOperation } from './wallet.status.s
 export {
   createWallet,
   createWalletInTransaction,
+  effectiveMoneyPolicyAt,
   ensureInitialMoneyPolicy,
   ensureWallet,
   ensureWalletInTransaction,
@@ -62,6 +69,8 @@ export {
   getWalletActivities,
   rebuildWalletProjection,
   validateOperationAmount,
+  walletLedgerPostingDiscrepancySatang,
+  walletProjectionMatchesLedger,
   verifyWalletProjection,
 } from './wallet.service';
 export { walletRoute } from './wallet.route';

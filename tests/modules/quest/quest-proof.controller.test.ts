@@ -15,6 +15,7 @@ const uploaded = {
   objectKey: 'proofs/worker-1/a.png',
   contentType: 'image/png' as const,
   sizeBytes: 1,
+  fileName: 'a.png',
 };
 const set = {} as { status?: number };
 

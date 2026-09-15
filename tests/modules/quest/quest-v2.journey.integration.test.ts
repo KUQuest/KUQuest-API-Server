@@ -3,22 +3,20 @@ import { db, sql } from '@/database/client';
 import { file } from '@/database/schema/file.schema';
 import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { walletFundingReservation, walletLedgerAccount } from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import type { QuestV2CreateInput } from '@/modules/quest';
 import { questV2Storage } from '@/modules/quest/quest.storage';
+import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import {
-  createSealedLedgerTransaction,
-  ensureInitialMoneyPolicy,
-  ensureWallet,
-  releaseFundingReservation,
-  signedSatang,
-} from '@/modules/wallet';
+  fundTestWallet,
+  listTestQuestEscrows,
+  releaseTestQuestEscrows,
+} from '../wallet/wallet-test-fixtures';
 
 import { randomUUID } from 'node:crypto';
 
 import { Elysia } from 'elysia';
-import { and, eq, inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
 
 const testEmail = `quest-v2-journey-${randomUUID()}@ku.th`;
@@ -55,30 +53,6 @@ const baseInput: QuestV2CreateInput = {
   tagId,
   proofRequired: true,
   locations: [],
-};
-
-const fundHirer = async (amountSatang: number) => {
-  const wallet = await ensureWallet(hirerId);
-  const [spendingAccount] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(
-      and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, 'SPENDING'))
-    );
-  const [suspenseAccount] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
-  if (!spendingAccount || !suspenseAccount) throw new Error('Missing funding accounts');
-
-  await createSealedLedgerTransaction({
-    businessReference: `quest-v2-journey-funding-${randomUUID()}`,
-    eventType: 'TOP_UP',
-    postings: [
-      { accountId: spendingAccount.id, amountSatang: signedSatang(amountSatang) },
-      { accountId: suspenseAccount.id, amountSatang: signedSatang(-amountSatang) },
-    ],
-  });
 };
 
 const postQuest = (body: QuestV2CreateInput, key: string) =>
@@ -172,26 +146,7 @@ afterAll(async () => {
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(file).where(eq(file.uploadedByUserId, hirerId));
 
-  const reservations = await db
-    .select({ id: walletFundingReservation.id })
-    .from(walletFundingReservation)
-    .where(
-      and(
-        eq(walletFundingReservation.ownerUserId, hirerId),
-        eq(walletFundingReservation.status, 'ACTIVE')
-      )
-    );
-  await Promise.all(
-    reservations.map((reservation) =>
-      db.transaction((transaction) =>
-        releaseFundingReservation(transaction, {
-          ownerUserId: hirerId,
-          reservationId: reservation.id,
-          operationReference: `quest-v2-journey-cleanup-${randomUUID()}`,
-        })
-      )
-    )
-  );
+  await releaseTestQuestEscrows([hirerId]);
 
   await db.delete(tag).where(eq(tag.id, tagId));
 });
@@ -205,7 +160,7 @@ describe('Quest API v2 Hirer journey', () => {
   ] as const)(
     'completes create, edit, image upload, publish-check, and publish for %s %s',
     async (mode, participation, headcount) => {
-      await fundHirer(100_000);
+      await fundTestWallet(hirerId, 100_000);
       const input = { ...baseInput, mode, participation, headcount };
       const createKey = `journey-create-${randomUUID()}`;
 
@@ -278,6 +233,7 @@ describe('Quest API v2 Hirer journey', () => {
           objectKey: plan?.objectKey ?? `quests/v2/${hirerId}/${image.name}`,
           contentType: 'image/png',
           sizeBytes: image.size,
+          fileName: image.name,
         })
       );
       spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation((image) => ({
@@ -394,7 +350,7 @@ describe('Quest API v2 Hirer journey', () => {
   );
 
   it('publishes an online Quest with zero locations and zero Quest Images', async () => {
-    await fundHirer(5_000);
+    await fundTestWallet(hirerId, 5_000);
     const createResponse = await postQuest(
       { ...baseInput, locations: [] },
       `journey-online-create-${randomUUID()}`
@@ -419,7 +375,7 @@ describe('Quest API v2 Hirer journey', () => {
   });
 
   it('keeps one committed outcome when Draft edit and publish run concurrently', async () => {
-    await fundHirer(5_000);
+    await fundTestWallet(hirerId, 5_000);
     const createResponse = await postQuest(
       { ...baseInput, title: 'Race source Quest', locations: [] },
       `journey-race-create-${randomUUID()}`
@@ -462,21 +418,13 @@ describe('Quest API v2 Hirer journey', () => {
     );
     expect(detail.version).toBe(editResponse.status === 200 ? 3 : 2);
 
-    const reservations = await db
-      .select({ id: walletFundingReservation.id })
-      .from(walletFundingReservation)
-      .where(
-        and(
-          eq(walletFundingReservation.ownerUserId, hirerId),
-          eq(walletFundingReservation.callerScope, 'quest'),
-          eq(walletFundingReservation.callerReference, created.data.id)
-        )
-      );
-    expect(reservations).toHaveLength(1);
+    expect(
+      await listTestQuestEscrows({ ownerUserIds: [hirerId], questIds: [created.data.id] })
+    ).toHaveLength(1);
   });
 
   it('keeps a published v2 Quest out of v1 reads', async () => {
-    await fundHirer(5_000);
+    await fundTestWallet(hirerId, 5_000);
     const createResponse = await postQuest(
       { ...baseInput, title: 'Version boundary Quest', locations: [] },
       `journey-v1-boundary-create-${randomUUID()}`

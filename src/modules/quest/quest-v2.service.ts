@@ -21,6 +21,7 @@ import {
   type Satang,
 } from '@/modules/wallet';
 import { decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
+import { ImageUploadError } from '@/shared/object-storage';
 
 import {
   and,
@@ -58,7 +59,7 @@ import {
   type QuestStatus,
 } from './quest.contract';
 import { recordQuestEditHistory, type QuestEditHistoryEntry } from './quest-edit-history.service';
-import { questV2StorageCompatibility } from './quest-storage.adapter';
+import { questV2StorageCompatibility } from './quest-legacy-columns';
 import {
   formatQuestV2ScheduleTime,
   isQuestV2ScheduleTime,
@@ -1443,6 +1444,91 @@ export const recordQuestV2ImageCleanupRetry = async (
   } catch (cause) {
     throw new QuestV2ImageCleanupUnavailableError(cause);
   }
+};
+
+const compensateQuestV2ImageUpload = async (
+  context: QuestV2ImageCommandContext,
+  images: StoredQuestImage[]
+): Promise<void> => {
+  const pendingCleanup: StoredQuestImage[] = [];
+  await Promise.all(
+    images.map(async (image) => {
+      try {
+        await questV2Storage.delete(image.bucket, image.objectKey);
+      } catch (error) {
+        pendingCleanup.push(image);
+        console.error('[quest-v2-image-upload] Compensating object deletion failed', {
+          bucket: image.bucket,
+          error,
+          objectKey: image.objectKey,
+        });
+      }
+    })
+  );
+
+  const cleanupRecordedAt = new Date();
+  if (pendingCleanup.length > 0) {
+    try {
+      await recordQuestV2ImageCleanupTombstones(context.userId, pendingCleanup, cleanupRecordedAt);
+    } catch (error) {
+      await recordQuestV2ImageCleanupRetry(context, pendingCleanup, cleanupRecordedAt);
+      throw new QuestV2ImageCleanupUnavailableError(error);
+    }
+  }
+
+  try {
+    await releaseQuestV2ImageUploadReservation(context);
+  } catch (error) {
+    console.error('[quest-v2-image-upload] Idempotency reservation release failed', {
+      error,
+      key: context.key,
+      requestHash: context.requestHash,
+      userId: context.userId,
+    });
+  }
+};
+
+export type QuestV2ImageUploadResult =
+  | { outcome: QuestV2ImageMutationOutcome }
+  | { replay: { images: QuestV2ImageResponse[] } }
+  | { response: QuestV2ImageResponse[] };
+
+export const attachQuestV2Images = async (
+  imageCommand: QuestV2ImageCommandContext,
+  images: File[]
+): Promise<QuestV2ImageUploadResult> => {
+  const uploadPlans = images.map(() => questV2Storage.prepareUpload(imageCommand.userId));
+
+  const preflight = await checkQuestV2ImageUpload(imageCommand, images.length, uploadPlans);
+  if ('outcome' in preflight) return preflight;
+  if ('replay' in preflight) return preflight;
+
+  const uploaded: StoredQuestImage[] = [];
+  let operationFailed = false;
+  let operationError: unknown;
+  let result: QuestV2ImageUploadOutcome | undefined;
+
+  try {
+    for (const [index, image] of images.entries()) {
+      uploaded.push(await questV2Storage.upload(imageCommand.userId, image, uploadPlans[index]!));
+    }
+    result = await addQuestV2Images(imageCommand, uploaded);
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+    if (error instanceof ImageUploadError && error.cleanupObject) {
+      uploaded.push(error.cleanupObject as StoredQuestImage);
+    }
+  }
+
+  if (operationFailed || (result && ('outcome' in result || result.replayed))) {
+    await compensateQuestV2ImageUpload(imageCommand, uploaded);
+  }
+
+  if (operationFailed) throw operationError;
+  if (!result) throw new Error('Quest Image upload did not return a result');
+  if ('outcome' in result) return { outcome: result.outcome };
+  return { response: result.response };
 };
 
 export const retryQuestV2ImageCleanupManifests = async (limit = 100): Promise<number> => {

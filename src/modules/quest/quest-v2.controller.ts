@@ -8,15 +8,14 @@ import {
   ImageTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
-} from '@/shared/image-storage';
+} from '@/shared/object-storage';
 import { readResourceVersion } from '@/shared/resource-version';
 
 import type { Static } from 'elysia';
 
 import {
+  attachQuestV2Images,
   createQuestV2,
-  addQuestV2Images,
-  checkQuestV2ImageUpload,
   deleteQuestV2Image,
   editQuestV2,
   getPublicQuestV2Detail,
@@ -30,9 +29,6 @@ import {
   publishQuestV2,
   questV2ImageRemoveRequestHash,
   questV2ImageUploadRequestHash,
-  recordQuestV2ImageCleanupTombstones,
-  recordQuestV2ImageCleanupRetry,
-  releaseQuestV2ImageUploadReservation,
   QuestV2ImageCleanupUnavailableError,
 } from './quest-v2.service';
 import {
@@ -44,8 +40,6 @@ import {
 import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 import type { QuestV2ImageCommandContext, QuestV2ImageReference } from './quest-v2.service';
 import type { QuestV2PublishCheck } from './quest-v2.publish.policy';
-import { questV2Storage } from './quest.storage';
-import type { StoredQuestImage } from './quest.storage';
 import type {
   questV2CreateResponseSchema,
   questV2CreateSchema,
@@ -101,48 +95,6 @@ type QuestV2EditRequestParams = Static<typeof questV2EditRequestParamsSchema>;
 const invalidInput = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 400;
   return apiError(code, message);
-};
-
-const compensateQuestV2ImageUpload = async (
-  context: QuestV2ImageCommandContext,
-  images: StoredQuestImage[]
-): Promise<void> => {
-  const pendingCleanup: StoredQuestImage[] = [];
-  await Promise.all(
-    images.map(async (image) => {
-      try {
-        await questV2Storage.delete(image.bucket, image.objectKey);
-      } catch (error) {
-        pendingCleanup.push(image);
-        console.error('[quest-v2-image-upload] Compensating object deletion failed', {
-          bucket: image.bucket,
-          error,
-          objectKey: image.objectKey,
-        });
-      }
-    })
-  );
-
-  const cleanupRecordedAt = new Date();
-  if (pendingCleanup.length > 0) {
-    try {
-      await recordQuestV2ImageCleanupTombstones(context.userId, pendingCleanup, cleanupRecordedAt);
-    } catch (error) {
-      await recordQuestV2ImageCleanupRetry(context, pendingCleanup, cleanupRecordedAt);
-      throw new QuestV2ImageCleanupUnavailableError(error);
-    }
-  }
-
-  try {
-    await releaseQuestV2ImageUploadReservation(context);
-  } catch (error) {
-    console.error('[quest-v2-image-upload] Idempotency reservation release failed', {
-      error,
-      key: context.key,
-      requestHash: context.requestHash,
-      userId: context.userId,
-    });
-  }
 };
 
 const serializeQuestV2Images = (
@@ -205,22 +157,6 @@ const mapQuestV2ImageStorageError = (set: AuthedContext['set'], error: unknown) 
   ) {
     set.status = 503;
     return apiError('QUEST_IMAGE_STORAGE_UNAVAILABLE', 'Quest Image storage is unavailable');
-  }
-
-  return undefined;
-};
-
-const compensateQuestV2ImageUploadOrError = async (
-  set: AuthedContext['set'],
-  context: QuestV2ImageCommandContext,
-  images: StoredQuestImage[]
-): Promise<ReturnType<typeof apiError> | undefined> => {
-  try {
-    await compensateQuestV2ImageUpload(context, images);
-  } catch (error) {
-    const mapped = mapQuestV2ImageStorageError(set, error);
-    if (mapped) return mapped;
-    throw error;
   }
 
   return undefined;
@@ -465,62 +401,17 @@ export const addQuestImagesV2Controller = async ({
     key: headers['idempotency-key'],
     requestHash: await questV2ImageUploadRequestHash(session.user.id, params.questId, body.images),
   };
-  let uploadPlans: Array<ReturnType<typeof questV2Storage.prepareUpload>>;
+
   try {
-    uploadPlans = body.images.map(() => questV2Storage.prepareUpload(session.user.id));
+    const result = await attachQuestV2Images(imageCommand, body.images);
+    if ('replay' in result) return apiSuccess({ images: result.replay.images });
+    if ('outcome' in result) return mapQuestV2ImageMutationOutcome(set, result.outcome);
+    return apiSuccess({ images: result.response });
   } catch (error) {
     const mapped = mapQuestV2ImageStorageError(set, error);
     if (mapped) return mapped;
     throw error;
   }
-
-  const preflight = await checkQuestV2ImageUpload(imageCommand, body.images.length, uploadPlans);
-  if ('outcome' in preflight) {
-    return mapQuestV2ImageMutationOutcome(set, preflight.outcome);
-  }
-
-  if ('replay' in preflight) {
-    return apiSuccess({ images: preflight.replay.images });
-  }
-
-  const uploaded: StoredQuestImage[] = [];
-  let operationFailed = false;
-  let operationError: unknown;
-  let result: Awaited<ReturnType<typeof addQuestV2Images>> | undefined;
-
-  try {
-    for (const [index, image] of body.images.entries()) {
-      uploaded.push(await questV2Storage.upload(session.user.id, image, uploadPlans[index]!));
-    }
-    result = await addQuestV2Images(imageCommand, uploaded);
-  } catch (error) {
-    operationFailed = true;
-    operationError = error;
-    if (error instanceof ImageUploadError && error.cleanupObject) {
-      uploaded.push(error.cleanupObject);
-    }
-  }
-
-  let shouldCompensate = operationFailed;
-  if (result && ('outcome' in result || result.replayed)) shouldCompensate = true;
-  if (shouldCompensate) {
-    const compensationError = await compensateQuestV2ImageUploadOrError(
-      set,
-      imageCommand,
-      uploaded
-    );
-    if (compensationError) return compensationError;
-  }
-
-  if (operationFailed) {
-    const mapped = mapQuestV2ImageStorageError(set, operationError);
-    if (mapped) return mapped;
-    throw operationError;
-  }
-  if (!result) throw new Error('Quest Image upload did not return a result');
-  if ('outcome' in result) return mapQuestV2ImageMutationOutcome(set, result.outcome);
-
-  return apiSuccess({ images: result.response });
 };
 
 export const deleteQuestImageV2Controller = async ({

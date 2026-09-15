@@ -1,9 +1,8 @@
-import type { StoredImage } from '@/shared/image-storage';
-import { createImageStorage } from '@/shared/image-storage';
+import { createObjectStorage, type StoredImage } from '@/shared/object-storage';
 
 export type StoredProofImage = StoredImage;
 
-export const proofStorage = createImageStorage({
+export const proofStorage = createObjectStorage({
   keyPrefix: 'proofs',
   logLabel: 'proof-image-upload',
 });

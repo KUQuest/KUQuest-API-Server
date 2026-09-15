@@ -9,13 +9,6 @@ import {
   questImage,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import {
-  walletFundingReservation,
-  walletLedgerAccount,
-  walletLedgerPosting,
-  walletLedgerTransaction,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
 import { createStagingTestAuthRoute, createStudentAuth } from '@/modules/auth';
 import { listOwnQuests } from '@/modules/quest/quest.service';
 import {
@@ -28,12 +21,14 @@ import {
   type QuestV2CreateInput,
 } from '@/modules/quest';
 import { questStatus } from '@/modules/quest/quest.contract';
+import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import {
-  createSealedLedgerTransaction,
-  ensureInitialMoneyPolicy,
-  ensureWallet,
-  signedSatang,
-} from '@/modules/wallet';
+  fundTestWallet,
+  listTestQuestEscrows,
+  listTestWalletLedgerTransactions,
+  readTestWallet,
+  setTestWalletStatus,
+} from '../wallet/wallet-test-fixtures';
 
 import { randomUUID } from 'node:crypto';
 
@@ -89,30 +84,6 @@ const baseInput: QuestV2CreateInput = {
   locations: [{ label: '  Online  ' }],
 };
 
-const fundHirer = async (amountSatang: number) => {
-  const wallet = await ensureWallet(hirerId);
-  const [spendingAccount] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(
-      and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, 'SPENDING'))
-    );
-  const [suspenseAccount] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
-  if (!spendingAccount || !suspenseAccount) throw new Error('Missing funding accounts');
-
-  await createSealedLedgerTransaction({
-    businessReference: `quest-v2-publish-funding-${randomUUID()}`,
-    eventType: 'TOP_UP',
-    postings: [
-      { accountId: spendingAccount.id, amountSatang: signedSatang(amountSatang) },
-      { accountId: suspenseAccount.id, amountSatang: signedSatang(-amountSatang) },
-    ],
-  });
-};
-
 const readPublishCheckSnapshot = async (questId: string, userId: string) => {
   const [questSnapshot] = await db
     .select({
@@ -129,29 +100,16 @@ const readPublishCheckSnapshot = async (questId: string, userId: string) => {
     })
     .from(quest)
     .where(eq(quest.id, questId));
-  const [walletSnapshot] = await db
-    .select()
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId));
-  if (!walletSnapshot) throw new Error('Funding Wallet was not created');
+  const wallet = await readTestWallet(userId);
 
-  const reservations = await db
-    .select({ id: walletFundingReservation.id })
-    .from(walletFundingReservation)
-    .where(eq(walletFundingReservation.ownerUserId, userId));
-  const ledger = await db
-    .select({ id: walletLedgerTransaction.id })
-    .from(walletLedgerTransaction)
-    .innerJoin(
-      walletLedgerPosting,
-      eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id)
-    )
-    .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
-    .where(eq(walletLedgerAccount.walletId, walletSnapshot.id));
+  const reservations = (await listTestQuestEscrows({ ownerUserIds: [userId] })).map((escrow) => ({
+    id: escrow.id,
+  }));
+  const ledger = await listTestWalletLedgerTransactions(userId);
 
   return {
     quest: questSnapshot,
-    wallet: walletSnapshot,
+    wallet,
     reservations,
     ledger,
   };
@@ -273,10 +231,7 @@ beforeEach(async () => {
   await db.delete(questCommand).where(eq(questCommand.principalUserId, hirerId));
   await db.delete(questCommand).where(eq(questCommand.principalUserId, otherMemberId));
   await db.delete(questCommand).where(eq(questCommand.principalUserId, noWalletMemberId));
-  await db
-    .update(walletWallet)
-    .set({ walletStatus: 'ACTIVE' })
-    .where(eq(walletWallet.userId, hirerId));
+  await setTestWalletStatus(hirerId, 'ACTIVE');
   if (questIds.length > 0) {
     await db.delete(quest).where(inArray(quest.id, questIds));
     questIds = [];
@@ -582,7 +537,7 @@ describe('Quest API v2 persistence', () => {
 
 describe('Quest API v2 publish check', () => {
   it('allows an owned Draft with zero Quest Images and returns an exact inclusive quote', async () => {
-    await fundHirer(10_000);
+    await fundTestWallet(hirerId, 10_000);
     const created = await createQuestV2(
       hirerId,
       { ...baseInput, locations: [] },
@@ -681,7 +636,7 @@ describe('Quest API v2 publish check', () => {
   });
 
   it('returns the same readiness and quote through the HTTP boundary', async () => {
-    await fundHirer(10_000);
+    await fundTestWallet(hirerId, 10_000);
     const created = await createQuestV2(
       hirerId,
       { ...baseInput, locations: [] },
@@ -843,7 +798,7 @@ describe('Quest API v2 publish check', () => {
   it.each(['FROZEN', 'SUSPENDED', 'CLOSED'] as const)(
     'blocks a %s Wallet from HTTP publish readiness',
     async (walletStatus) => {
-      await fundHirer(10_000);
+      await fundTestWallet(hirerId, 10_000);
       const created = await createQuestV2(
         hirerId,
         { ...baseInput, locations: [] },
@@ -852,14 +807,8 @@ describe('Quest API v2 publish check', () => {
       if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
       questIds.push(created.quest.id);
 
-      await db.update(walletWallet).set({ walletStatus }).where(eq(walletWallet.userId, hirerId));
-      const [beforeWallet] = await db
-        .select({
-          spendingBalanceSatang: walletWallet.spendingBalanceSatang,
-          walletStatus: walletWallet.walletStatus,
-        })
-        .from(walletWallet)
-        .where(eq(walletWallet.userId, hirerId));
+      await setTestWalletStatus(hirerId, walletStatus);
+      const beforeWallet = await readTestWallet(hirerId);
 
       try {
         const response = await getPublishCheck(created.quest.id);
@@ -877,19 +826,10 @@ describe('Quest API v2 publish check', () => {
           message: 'Wallet does not permit a Funding Reservation.',
         });
 
-        const [afterWallet] = await db
-          .select({
-            spendingBalanceSatang: walletWallet.spendingBalanceSatang,
-            walletStatus: walletWallet.walletStatus,
-          })
-          .from(walletWallet)
-          .where(eq(walletWallet.userId, hirerId));
+        const afterWallet = await readTestWallet(hirerId);
         expect(afterWallet).toEqual(beforeWallet);
       } finally {
-        await db
-          .update(walletWallet)
-          .set({ walletStatus: 'ACTIVE' })
-          .where(eq(walletWallet.userId, hirerId));
+        await setTestWalletStatus(hirerId, 'ACTIVE');
       }
     }
   );

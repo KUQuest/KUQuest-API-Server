@@ -8,11 +8,7 @@ import {
   paymentPayouts,
   type PayoutStatus,
 } from '@/database/schema/payment.schema';
-import {
-  walletIdempotencyKey,
-  walletLedgerAccount,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
+import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
 import {
   createPayoutDestinationEncryption,
   payoutDestinationForProvider,
@@ -21,21 +17,22 @@ import {
   type PayoutDestinationForProvider,
 } from '@/modules/payout-destination';
 import {
-  MAX_WALLET_CAPACITY_SATANG,
-  MoneyDomainError,
-  positiveSatang,
-  satang,
-  signedSatang,
-  type Satang,
-} from '@/modules/wallet/wallet.money';
-import { assertWalletOperationAllowed } from '@/modules/wallet/wallet.status.service';
-import {
+  assertWalletOperationAllowed,
+  completeMoneyCommand,
   createSealedLedgerTransactionInTransaction,
   ensureWalletInTransaction,
   getEffectiveMoneyPolicy,
+  MAX_WALLET_CAPACITY_SATANG,
+  MoneyDomainError,
+  positiveSatang,
+  runMoneyCommand,
+  satang,
+  sha256Json,
+  signedSatang,
   validateOperationAmount,
-} from '@/modules/wallet/wallet.service';
-import type { WalletTransaction } from '@/modules/wallet/wallet.service';
+  type Satang,
+  type WalletTransaction,
+} from '@/modules/wallet';
 
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 
@@ -111,16 +108,6 @@ export type Payout = {
   finalLedgerTransactionId: string | null;
   createdAt: Date;
   updatedAt: Date;
-};
-
-const idempotencyExpiry = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-const sha256Json = async (value: object) => {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value))
-  );
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
 const validateTotal = (values: number[]) => {
@@ -282,72 +269,6 @@ export const quotePayout = async (input: PayoutQuoteInput): Promise<PayoutQuote>
 
 type PreparedPayout = {
   payout: Payout;
-  idempotencyKeyId: string | null;
-};
-
-const acquireInitiationIdempotency = async (
-  transaction: WalletTransaction,
-  input: InitiatePayoutInput,
-  requestHash: string
-) => {
-  if (input.idempotency.key.trim().length === 0) {
-    throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key must not be empty.');
-  }
-  const [created] = await transaction
-    .insert(walletIdempotencyKey)
-    .values({
-      principalUserId: input.principalUserId,
-      operationScope: payoutOperationScope,
-      key: input.idempotency.key,
-      requestHash,
-      expiresAt: idempotencyExpiry(),
-    })
-    .onConflictDoNothing()
-    .returning();
-  const [record] = created
-    ? [created]
-    : await transaction
-        .select()
-        .from(walletIdempotencyKey)
-        .where(
-          and(
-            eq(walletIdempotencyKey.principalUserId, input.principalUserId),
-            eq(walletIdempotencyKey.operationScope, payoutOperationScope),
-            eq(walletIdempotencyKey.key, input.idempotency.key)
-          )
-        )
-        .for('update');
-  if (!record)
-    throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key could not be acquired.');
-  if (record.requestHash !== requestHash) {
-    throw new MoneyDomainError(
-      'IDEMPOTENCY_KEY_REUSED',
-      'Idempotency key was used with a different request.'
-    );
-  }
-  if (record.resourceId) {
-    const [replayed] = await transaction
-      .select()
-      .from(paymentPayouts)
-      .where(
-        and(
-          eq(paymentPayouts.id, record.resourceId),
-          eq(paymentPayouts.userId, input.principalUserId)
-        )
-      );
-    if (!replayed)
-      throw new MoneyDomainError(
-        'IDEMPOTENCY_UNAVAILABLE',
-        'The idempotent Payout record is missing.'
-      );
-    return { record, replay: payoutFromRecord(replayed) };
-  }
-  if (!created)
-    throw new MoneyDomainError(
-      'IDEMPOTENCY_IN_PROGRESS',
-      'A Payout with this idempotency key is still processing.'
-    );
-  return { record, replay: undefined };
 };
 
 const accountIdsForPayout = async (transaction: WalletTransaction, walletId: string) => {
@@ -475,158 +396,199 @@ export const cancelPayoutInTransaction = async (
 const preparePayout = async (
   input: InitiatePayoutInput,
   requestHash: string
-): Promise<PreparedPayout> =>
-  db.transaction(async (transaction) => {
-    const idempotency = await acquireInitiationIdempotency(transaction, input, requestHash);
-    if (idempotency.replay) {
-      return { payout: idempotency.replay, idempotencyKeyId: idempotency.record.id };
-    }
+): Promise<PreparedPayout> => {
+  if (input.idempotency.key.trim().length === 0) {
+    throw new MoneyDomainError('IDEMPOTENCY_UNAVAILABLE', 'Idempotency key must not be empty.');
+  }
 
-    const wallet = await ensureWalletInTransaction(transaction, input.principalUserId);
-    const [lockedWallet] = await transaction
-      .select()
-      .from(walletWallet)
-      .where(eq(walletWallet.id, wallet.id))
-      .for('update');
-    if (!lockedWallet) throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
-    assertWalletOperationAllowed(lockedWallet.walletStatus, 'PAYOUT');
+  return db.transaction(async (transaction) => {
+    const { result } = await runMoneyCommand(
+      transaction,
+      {
+        principalUserId: input.principalUserId,
+        scope: payoutOperationScope,
+        key: input.idempotency.key,
+        requestHash,
+      },
+      {
+        execute: async (transaction, keyId) => {
+          const wallet = await ensureWalletInTransaction(transaction, input.principalUserId);
+          const [lockedWallet] = await transaction
+            .select()
+            .from(walletWallet)
+            .where(eq(walletWallet.id, wallet.id))
+            .for('update');
+          if (!lockedWallet)
+            throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
+          assertWalletOperationAllowed(lockedWallet.walletStatus, 'PAYOUT');
 
-    const [active] = await transaction
-      .select({ id: paymentPayouts.id })
-      .from(paymentPayouts)
-      .where(
-        and(
-          eq(paymentPayouts.userId, input.principalUserId),
-          inArray(paymentPayouts.payoutStatus, [
-            'PENDING_ADMIN_APPROVAL',
-            'SUBMITTED_TO_PROVIDER',
-            'PROVIDER_PENDING',
-          ])
-        )
-      )
-      .limit(1);
-    if (active)
-      throw new MoneyDomainError(
-        'PAYOUT_ACTIVE_EXISTS',
-        'The Student already has an active Payout.'
-      );
+          const [active] = await transaction
+            .select({ id: paymentPayouts.id })
+            .from(paymentPayouts)
+            .where(
+              and(
+                eq(paymentPayouts.userId, input.principalUserId),
+                inArray(paymentPayouts.payoutStatus, [
+                  'PENDING_ADMIN_APPROVAL',
+                  'SUBMITTED_TO_PROVIDER',
+                  'PROVIDER_PENDING',
+                ])
+              )
+            )
+            .limit(1);
+          if (active)
+            throw new MoneyDomainError(
+              'PAYOUT_ACTIVE_EXISTS',
+              'The Student already has an active Payout.'
+            );
 
-    const [quote] = await transaction
-      .select()
-      .from(paymentPayoutQuotes)
-      .where(
-        and(
-          eq(paymentPayoutQuotes.id, input.quoteId),
-          eq(paymentPayoutQuotes.userId, input.principalUserId)
-        )
-      )
-      .for('update');
-    if (!quote)
-      throw new MoneyDomainError('PAYOUT_QUOTE_NOT_FOUND', 'Payout Quote does not exist.');
-    if (quote.consumedAt)
-      throw new MoneyDomainError('PAYOUT_QUOTE_CONSUMED', 'Payout Quote was already consumed.');
-    if (quote.expiresAt <= new Date())
-      throw new MoneyDomainError('PAYOUT_QUOTE_EXPIRED', 'Payout Quote has expired.');
+          const [quote] = await transaction
+            .select()
+            .from(paymentPayoutQuotes)
+            .where(
+              and(
+                eq(paymentPayoutQuotes.id, input.quoteId),
+                eq(paymentPayoutQuotes.userId, input.principalUserId)
+              )
+            )
+            .for('update');
+          if (!quote)
+            throw new MoneyDomainError('PAYOUT_QUOTE_NOT_FOUND', 'Payout Quote does not exist.');
+          if (quote.consumedAt)
+            throw new MoneyDomainError(
+              'PAYOUT_QUOTE_CONSUMED',
+              'Payout Quote was already consumed.'
+            );
+          if (quote.expiresAt <= new Date())
+            throw new MoneyDomainError('PAYOUT_QUOTE_EXPIRED', 'Payout Quote has expired.');
 
-    const [destination] = await transaction
-      .select()
-      .from(paymentPayoutAccounts)
-      .where(
-        and(
-          eq(paymentPayoutAccounts.id, quote.payoutAccountId),
-          eq(paymentPayoutAccounts.userId, input.principalUserId),
-          isNull(paymentPayoutAccounts.retiredAt)
-        )
-      )
-      .for('update');
-    if (!destination)
-      throw new MoneyDomainError(
-        'PAYOUT_DESTINATION_NOT_FOUND',
-        'Active Payout Destination does not exist.'
-      );
-    if (lockedWallet.earningsBalanceSatang < quote.maximumDebitSatang) {
-      throw new MoneyDomainError(
-        'INSUFFICIENT_EARNINGS_BALANCE',
-        'Earnings Balance is insufficient for the Payout reserve.'
-      );
-    }
+          const [destination] = await transaction
+            .select()
+            .from(paymentPayoutAccounts)
+            .where(
+              and(
+                eq(paymentPayoutAccounts.id, quote.payoutAccountId),
+                eq(paymentPayoutAccounts.userId, input.principalUserId),
+                isNull(paymentPayoutAccounts.retiredAt)
+              )
+            )
+            .for('update');
+          if (!destination)
+            throw new MoneyDomainError(
+              'PAYOUT_DESTINATION_NOT_FOUND',
+              'Active Payout Destination does not exist.'
+            );
+          if (lockedWallet.earningsBalanceSatang < quote.maximumDebitSatang) {
+            throw new MoneyDomainError(
+              'INSUFFICIENT_EARNINGS_BALANCE',
+              'Earnings Balance is insufficient for the Payout reserve.'
+            );
+          }
 
-    const { earningsId, payoutReserveId } = await accountIdsForPayout(transaction, lockedWallet.id);
-    const payoutId = crypto.randomUUID();
-    const reserveLedger = await createSealedLedgerTransactionInTransaction(transaction, {
-      businessReference: `payout-reserve:${payoutId}`,
-      eventType: 'PAYOUT',
-      createdByUserId: input.principalUserId,
-      description: 'Reserve Earnings Balance for Payout',
-      postings: [
-        { accountId: earningsId, amountSatang: signedSatang(-quote.maximumDebitSatang) },
-        { accountId: payoutReserveId, amountSatang: signedSatang(quote.maximumDebitSatang) },
-      ],
-    });
-    if (!reserveLedger)
-      throw new MoneyDomainError('PAYOUT_CREATE_FAILED', 'Payout reserve could not be created.');
+          const { earningsId, payoutReserveId } = await accountIdsForPayout(
+            transaction,
+            lockedWallet.id
+          );
+          const payoutId = crypto.randomUUID();
+          const reserveLedger = await createSealedLedgerTransactionInTransaction(transaction, {
+            businessReference: `payout-reserve:${payoutId}`,
+            eventType: 'PAYOUT',
+            createdByUserId: input.principalUserId,
+            description: 'Reserve Earnings Balance for Payout',
+            postings: [
+              { accountId: earningsId, amountSatang: signedSatang(-quote.maximumDebitSatang) },
+              { accountId: payoutReserveId, amountSatang: signedSatang(quote.maximumDebitSatang) },
+            ],
+          });
+          if (!reserveLedger)
+            throw new MoneyDomainError(
+              'PAYOUT_CREATE_FAILED',
+              'Payout reserve could not be created.'
+            );
 
-    const internalReference = `payout:${payoutId}`;
-    const [created] = await transaction
-      .insert(paymentPayouts)
-      .values({
-        id: payoutId,
-        internalReference,
-        userId: input.principalUserId,
-        quoteId: quote.id,
-        payoutAccountId: destination.id,
-        destinationRecipientType: destination.recipientType,
-        destinationGivenName: destination.givenName,
-        destinationSurname: destination.surname,
-        destinationRelationship: destination.relationship,
-        destinationAccountCountry: destination.accountCountry,
-        destinationAccountCurrency: destination.accountCurrency,
-        destinationBankCode: destination.bankCode,
-        destinationAccountNumberKeyVersion: destination.accountNumberKeyVersion,
-        destinationAccountNumberNonce: destination.accountNumberNonce,
-        destinationAccountNumberCiphertext: destination.accountNumberCiphertext,
-        destinationAccountNumberAuthTag: destination.accountNumberAuthTag,
-        destinationMaskedLastFour: destination.maskedLastFour,
-        destinationAccountHolderName: destination.accountHolderName,
-        destinationRoutingType: destination.routingType,
-        destinationRoutingValueKeyVersion: destination.routingValueKeyVersion,
-        destinationRoutingValueNonce: destination.routingValueNonce,
-        destinationRoutingValueCiphertext: destination.routingValueCiphertext,
-        destinationRoutingValueAuthTag: destination.routingValueAuthTag,
-        destinationMaskedRoutingValue: destination.maskedRoutingValue,
-        provider: 'XENDIT',
-        principalSatang: quote.receiptSatang,
-        maximumFeeSatang: quote.maximumFeeSatang,
-        maximumTaxSatang: quote.maximumTaxSatang,
-        maximumDebitSatang: quote.maximumDebitSatang,
-        payoutStatus: 'PENDING_ADMIN_APPROVAL',
-        reserveLedgerTransactionId: reserveLedger.id,
-      })
-      .returning();
-    if (!created)
-      throw new MoneyDomainError('PAYOUT_CREATE_FAILED', 'Payout could not be created.');
-    await transaction.insert(paymentPayoutStatusHistory).values({
-      payoutId: created.id,
-      toStatus: 'PENDING_ADMIN_APPROVAL',
-      source: 'INITIATION',
-      actorUserId: input.principalUserId,
-    });
-    await transaction
-      .update(paymentPayoutQuotes)
-      .set({ consumedAt: new Date() })
-      .where(eq(paymentPayoutQuotes.id, quote.id));
-    await transaction
-      .update(walletIdempotencyKey)
-      .set({
-        resourceType: 'payment_payout',
-        resourceId: created.id,
-        processingStatus: 'COMPLETED',
-        completedAt: new Date(),
-      })
-      .where(eq(walletIdempotencyKey.id, idempotency.record.id));
+          const internalReference = `payout:${payoutId}`;
+          const [created] = await transaction
+            .insert(paymentPayouts)
+            .values({
+              id: payoutId,
+              internalReference,
+              userId: input.principalUserId,
+              quoteId: quote.id,
+              payoutAccountId: destination.id,
+              destinationRecipientType: destination.recipientType,
+              destinationGivenName: destination.givenName,
+              destinationSurname: destination.surname,
+              destinationRelationship: destination.relationship,
+              destinationAccountCountry: destination.accountCountry,
+              destinationAccountCurrency: destination.accountCurrency,
+              destinationBankCode: destination.bankCode,
+              destinationAccountNumberKeyVersion: destination.accountNumberKeyVersion,
+              destinationAccountNumberNonce: destination.accountNumberNonce,
+              destinationAccountNumberCiphertext: destination.accountNumberCiphertext,
+              destinationAccountNumberAuthTag: destination.accountNumberAuthTag,
+              destinationMaskedLastFour: destination.maskedLastFour,
+              destinationAccountHolderName: destination.accountHolderName,
+              destinationRoutingType: destination.routingType,
+              destinationRoutingValueKeyVersion: destination.routingValueKeyVersion,
+              destinationRoutingValueNonce: destination.routingValueNonce,
+              destinationRoutingValueCiphertext: destination.routingValueCiphertext,
+              destinationRoutingValueAuthTag: destination.routingValueAuthTag,
+              destinationMaskedRoutingValue: destination.maskedRoutingValue,
+              provider: 'XENDIT',
+              principalSatang: quote.receiptSatang,
+              maximumFeeSatang: quote.maximumFeeSatang,
+              maximumTaxSatang: quote.maximumTaxSatang,
+              maximumDebitSatang: quote.maximumDebitSatang,
+              payoutStatus: 'PENDING_ADMIN_APPROVAL',
+              reserveLedgerTransactionId: reserveLedger.id,
+            })
+            .returning();
+          if (!created)
+            throw new MoneyDomainError('PAYOUT_CREATE_FAILED', 'Payout could not be created.');
+          await transaction.insert(paymentPayoutStatusHistory).values({
+            payoutId: created.id,
+            toStatus: 'PENDING_ADMIN_APPROVAL',
+            source: 'INITIATION',
+            actorUserId: input.principalUserId,
+          });
+          await transaction
+            .update(paymentPayoutQuotes)
+            .set({ consumedAt: new Date() })
+            .where(eq(paymentPayoutQuotes.id, quote.id));
+          await completeMoneyCommand(transaction, keyId, 'payment_payout', created.id);
 
-    return { payout: payoutFromRecord(created), idempotencyKeyId: idempotency.record.id };
+          return payoutFromRecord(created);
+        },
+        replay: async (transaction, keyRow) => {
+          if (!keyRow.resourceId) {
+            throw new MoneyDomainError(
+              'IDEMPOTENCY_IN_PROGRESS',
+              'A Payout with this idempotency key is still processing.'
+            );
+          }
+          const [replayed] = await transaction
+            .select()
+            .from(paymentPayouts)
+            .where(
+              and(
+                eq(paymentPayouts.id, keyRow.resourceId),
+                eq(paymentPayouts.userId, input.principalUserId)
+              )
+            );
+          if (!replayed) {
+            throw new MoneyDomainError(
+              'IDEMPOTENCY_UNAVAILABLE',
+              'The idempotent Payout record is missing.'
+            );
+          }
+          return payoutFromRecord(replayed);
+        },
+      }
+    );
+
+    return { payout: result };
   });
+};
 
 const providerRequestFor = async (
   prepared: PreparedPayout,
@@ -734,12 +696,6 @@ const finalizeProviderResponse = async (
       providerStatus: response.providerStatus,
       source: 'PROVIDER',
     });
-    if (prepared.idempotencyKeyId) {
-      await transaction
-        .update(walletIdempotencyKey)
-        .set({ processingStatus: 'COMPLETED', completedAt: new Date() })
-        .where(eq(walletIdempotencyKey.id, prepared.idempotencyKeyId));
-    }
     return payoutFromRecord(updated);
   });
 
@@ -863,12 +819,6 @@ const finalizeFailed = async (
       source: details.historySource,
       reason: details.historyReason,
     });
-    if (prepared.idempotencyKeyId) {
-      await transaction
-        .update(walletIdempotencyKey)
-        .set({ processingStatus: 'COMPLETED', completedAt: new Date() })
-        .where(eq(walletIdempotencyKey.id, prepared.idempotencyKeyId));
-    }
     return payoutFromRecord(updated);
   });
 
@@ -1017,7 +967,7 @@ export const processApprovedPayout = async (
   const claim = await claimApprovedPayout(payoutId);
   if (!claim.claimed) return claim.payout;
 
-  const prepared: PreparedPayout = { payout: claim.payout, idempotencyKeyId: null };
+  const prepared: PreparedPayout = { payout: claim.payout };
   const input: InitiatePayoutInput = {
     principalUserId: claim.payout.principalUserId,
     quoteId: claim.payout.quoteId,

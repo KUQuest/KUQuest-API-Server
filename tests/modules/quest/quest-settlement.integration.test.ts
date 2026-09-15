@@ -8,27 +8,25 @@ import {
   questSettlementCommand,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import {
-  walletFundingReservation,
-  walletLedgerAccount,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
 import { auth } from '@/modules/auth';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
+import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-work-chat.port';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import type { QuestWorkChatMembershipTransition } from '@/modules/quest';
 import {
-  createSealedLedgerTransaction,
   ensureInitialMoneyPolicy,
   ensureWallet,
   positiveSatang,
   reserveSpending,
-  signedSatang,
 } from '@/modules/wallet';
+import {
+  fundTestWallet,
+  listTestQuestEscrows,
+  readTestWallet,
+} from '../wallet/wallet-test-fixtures';
 
 import { randomUUID } from 'node:crypto';
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import {
   afterAll,
   afterEach,
@@ -72,34 +70,6 @@ const request = (
       body: body === undefined ? undefined : JSON.stringify(body),
     })
   );
-
-const account = async (userId: string, type: 'SPENDING' | 'FUNDING_RESERVED') => {
-  const [wallet] = await db
-    .select({ id: walletWallet.id })
-    .from(walletWallet)
-    .where(eq(walletWallet.userId, userId));
-  const [row] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, type)));
-  return row.id;
-};
-
-const fundWallet = async (userId: string, amountSatang: number) => {
-  const spending = await account(userId, 'SPENDING');
-  const [suspense] = await db
-    .select({ id: walletLedgerAccount.id })
-    .from(walletLedgerAccount)
-    .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
-  await createSealedLedgerTransaction({
-    businessReference: `be184-test-topup-${randomUUID()}`,
-    eventType: 'TOP_UP',
-    postings: [
-      { accountId: spending, amountSatang: signedSatang(amountSatang) },
-      { accountId: suspense.id, amountSatang: signedSatang(-amountSatang) },
-    ],
-  });
-};
 
 const createQuest = async (
   status: 'QUEST_OPEN' | 'QUEST_ASSIGNED' | 'QUEST_IN_PROGRESS' | 'QUEST_SUBMITTED',
@@ -165,7 +135,7 @@ beforeAll(async () => {
   await db.insert(tag).values({ id: tagId, name: `Settlement test ${tagId}` });
   await ensureWallet(hirerId);
   for (const workerId of workerIds) await ensureWallet(workerId);
-  await fundWallet(hirerId, 100_000);
+  await fundTestWallet(hirerId, 100_000);
 });
 
 beforeEach(() => {
@@ -224,10 +194,7 @@ describe('Quest terminal settlement HTTP contract', () => {
         ?.status
     ).toBe('QUEST_CANCELLED');
     expect(
-      await db
-        .select({ id: walletFundingReservation.id })
-        .from(walletFundingReservation)
-        .where(eq(walletFundingReservation.callerReference, questId))
+      await listTestQuestEscrows({ ownerUserIds: [hirerId], questIds: [questId] })
     ).toHaveLength(0);
   });
 
@@ -278,30 +245,14 @@ describe('Quest terminal settlement HTTP contract', () => {
     );
     const questId = await createQuest('QUEST_ASSIGNED', workerIds, 1_002);
     const before = await Promise.all(
-      workerIds.map(
-        async (workerId) =>
-          (
-            await db
-              .select({ earnings: walletWallet.earningsBalanceSatang })
-              .from(walletWallet)
-              .where(eq(walletWallet.userId, workerId))
-          )[0]?.earnings ?? 0
-      )
+      workerIds.map(async (workerId) => (await readTestWallet(workerId)).earningsBalanceSatang)
     );
     const response = await request('POST', `/api/v1/quests/${questId}/cancel`, hirerId, undefined, {
       'idempotency-key': 'be184-remainder',
     });
     expect(response.status).toBe(200);
     const after = await Promise.all(
-      workerIds.map(
-        async (workerId) =>
-          (
-            await db
-              .select({ earnings: walletWallet.earningsBalanceSatang })
-              .from(walletWallet)
-              .where(eq(walletWallet.userId, workerId))
-          )[0]?.earnings ?? 0
-      )
+      workerIds.map(async (workerId) => (await readTestWallet(workerId)).earningsBalanceSatang)
     );
     expect(after.map((value, index) => value - before[index])).toEqual([201, 200, 200]);
   });
@@ -390,15 +341,11 @@ describe('Quest terminal settlement HTTP contract', () => {
       (async () => ({ user: { id: hirerId }, session: { userId: hirerId } }) as never) as never
     );
     const questId = await createQuest('QUEST_IN_PROGRESS', [workerIds[0]]);
-    const before = (
-      await db
-        .select({
-          spending: walletWallet.spendingBalanceSatang,
-          reserved: walletWallet.fundingReservedSatang,
-        })
-        .from(walletWallet)
-        .where(eq(walletWallet.userId, hirerId))
-    )[0];
+    const beforeWallet = await readTestWallet(hirerId);
+    const before = {
+      spending: beforeWallet.spendingBalanceSatang,
+      reserved: beforeWallet.fundingReservedSatang,
+    };
     configureQuestWorkChatMembershipWriter({
       applyQuestTransition: async () => {
         throw new Error('chat unavailable');
@@ -420,15 +367,11 @@ describe('Quest terminal settlement HTTP contract', () => {
           .where(eq(questAssignment.questId, questId))
       )[0]?.status
     ).toBe('ASSIGNMENT_ACTIVE');
-    const after = (
-      await db
-        .select({
-          spending: walletWallet.spendingBalanceSatang,
-          reserved: walletWallet.fundingReservedSatang,
-        })
-        .from(walletWallet)
-        .where(eq(walletWallet.userId, hirerId))
-    )[0];
+    const afterWallet = await readTestWallet(hirerId);
+    const after = {
+      spending: afterWallet.spendingBalanceSatang,
+      reserved: afterWallet.fundingReservedSatang,
+    };
     expect(after).toEqual(before);
     expect(
       await db
@@ -472,15 +415,11 @@ describe('Quest terminal settlement HTTP contract', () => {
       })
     );
 
-    const before = (
-      await db
-        .select({
-          spending: walletWallet.spendingBalanceSatang,
-          reserved: walletWallet.fundingReservedSatang,
-        })
-        .from(walletWallet)
-        .where(eq(walletWallet.userId, hirerId))
-    )[0];
+    const beforeWallet = await readTestWallet(hirerId);
+    const before = {
+      spending: beforeWallet.spendingBalanceSatang,
+      reserved: beforeWallet.fundingReservedSatang,
+    };
 
     const result = await runQuestLifecycleWorker({
       clock: { now: () => now },
@@ -531,15 +470,11 @@ describe('Quest terminal settlement HTTP contract', () => {
       actorUserId: null,
       actorAdminId: null,
     });
-    const after = (
-      await db
-        .select({
-          spending: walletWallet.spendingBalanceSatang,
-          reserved: walletWallet.fundingReservedSatang,
-        })
-        .from(walletWallet)
-        .where(eq(walletWallet.userId, hirerId))
-    )[0];
+    const afterWallet = await readTestWallet(hirerId);
+    const after = {
+      spending: afterWallet.spendingBalanceSatang,
+      reserved: afterWallet.fundingReservedSatang,
+    };
     expect(after).toEqual(
       before && {
         spending: before.spending + 2_040,
