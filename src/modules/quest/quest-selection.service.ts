@@ -3,11 +3,8 @@ import { quest, questApiVersion, questAssignment } from '@/database/schema/quest
 
 import { and, eq } from 'drizzle-orm';
 
-import {
-  getQuestWorkChatMembershipWriter,
-  WorkChatTransitionError,
-  type QuestTransaction,
-} from './quest-work-chat.port';
+import type { QuestTransaction } from './quest-work-chat.port';
+import { applyQuestStateTransition } from './quest-transition.service';
 import {
   runQuestCommand,
   type QuestCommandOutcomeCode,
@@ -292,31 +289,21 @@ export const runQuestV2Selection = async <C extends string>(
             ? resource.resourceId(assignments)
             : resource.resourceId;
 
-        await transaction
-          .update(quest)
-          .set({ questStatus: 'QUEST_ASSIGNED', updatedAt: input.now })
-          .where(and(eq(quest.id, input.questId), eq(quest.questStatus, 'QUEST_OPEN')));
-
-        const writer = getQuestWorkChatMembershipWriter();
-        if (!writer) {
-          throw new WorkChatTransitionError(
-            new Error('Work Chat membership writer is not configured')
-          );
-        }
-        try {
-          await writer.applyQuestTransition(
-            transaction,
+        await applyQuestStateTransition(transaction, {
+          questId: input.questId,
+          from: 'QUEST_OPEN',
+          to: 'QUEST_ASSIGNED',
+          now: input.now,
+          workChat: [
             input.transitionFor({
               questId: input.questId,
               hirerId: input.hirerId,
               now: input.now,
               resourceId,
               assignments,
-            })
-          );
-        } catch (cause) {
-          throw new WorkChatTransitionError(cause);
-        }
+            }),
+          ],
+        });
 
         return {
           kind: 'success',
