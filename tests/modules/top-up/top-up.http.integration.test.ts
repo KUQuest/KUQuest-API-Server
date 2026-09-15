@@ -45,8 +45,9 @@ describe('Top-up HTTP routes', () => {
     expect(document.paths['/api/v1/top-ups/{topUpId}/status-history']?.get?.operationId).toBe(
       'listTopUpStatusHistory'
     );
-    expect(document.paths['/api/v1/top-ups/{topUpId}/simulate']?.post?.operationId)
-      .toBe('simulateTopUp');
+    expect(document.paths['/api/v1/top-ups/{topUpId}/simulate']?.post?.operationId).toBe(
+      'simulateTopUp'
+    );
     expect(document.paths['/api/v1/payouts']?.post?.operationId).toBe('createPayout');
   });
 });

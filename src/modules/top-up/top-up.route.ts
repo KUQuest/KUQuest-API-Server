@@ -58,7 +58,8 @@ export const topUpRoute = new Elysia({
     detail: {
       tags: ['Top-ups'],
       summary: 'Simulate a PromptPay Top-up Payment',
-      description: 'Test-runtime-only action. Calls Xendit Test Mode to complete this pending Payment Request, then processes its webhook or reconciles the provider result.',
+      description:
+        'Test-runtime-only action. Calls Xendit Test Mode to complete this pending Payment Request, then processes its webhook or reconciles the provider result.',
       operationId: 'simulateTopUp',
       security: betterAuthSecurity,
     },
