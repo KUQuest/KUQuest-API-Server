@@ -25,7 +25,7 @@ import {
 } from './quest-escrow.service';
 import { assignmentStatus, questStatus, teamStatus, type QuestStatus } from './quest.contract';
 import {
-  requireQuestWorkChatMembershipWriter,
+  defaultQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
   type QuestTransaction,
 } from './quest-work-chat.port';
@@ -271,10 +271,9 @@ const applyInactiveWorkersChat = async (
   now: Date,
   actorId: string | null
 ) => {
-  const writer = requireQuestWorkChatMembershipWriter();
   try {
     for (const entry of inactiveWorkerEntries(current, workers, status, now, actorId))
-      await writer.applyQuestTransition(tx, entry);
+      await defaultQuestWorkChatMembershipWriter.applyQuestTransition(tx, entry);
   } catch (cause) {
     throw new WorkChatTransitionError(cause);
   }

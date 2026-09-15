@@ -16,7 +16,7 @@ import type {
   QuestWorkChatMembershipTransition,
 } from './quest-work-chat.contract';
 import {
-  requireQuestWorkChatMembershipWriter,
+  defaultQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
 } from './quest-work-chat.port';
 import type { QuestTransaction } from './quest-work-chat.port';
@@ -225,7 +225,7 @@ export const joinNoCandidateQuest = async (
   const now = options.now ?? new Date();
   const commandId = options.commandId.trim();
   if (!commandId) return { outcome: 'idempotency-key-required' };
-  const writer = options.workChatWriter ?? requireQuestWorkChatMembershipWriter();
+  const writer = options.workChatWriter ?? defaultQuestWorkChatMembershipWriter;
   const requestHash = await hashRequest(questId, workerId);
 
   return db.transaction(async (transaction) => {

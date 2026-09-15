@@ -17,7 +17,7 @@ import type {
   WorkChatMembershipWriter,
 } from './quest-work-chat.contract';
 import {
-  requireQuestWorkChatMembershipWriter,
+  defaultQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
   type QuestTransaction,
 } from './quest-work-chat.port';
@@ -116,7 +116,7 @@ const applyWorkChat = async (
   transitions: readonly QuestWorkChatMembershipTransition[]
 ) => {
   if (transitions.length === 0) return;
-  const writer = input.writer ?? requireQuestWorkChatMembershipWriter();
+  const writer = input.writer ?? defaultQuestWorkChatMembershipWriter;
   try {
     for (const transition of transitions) {
       await writer.applyQuestTransition(tx, transition);
