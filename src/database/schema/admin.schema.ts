@@ -21,10 +21,7 @@ import {
   questCandidateTeamV2,
   questV2ProofSubmission,
 } from './quest.schema';
-import {
-  chatAttachment,
-  chatMessage,
-} from './work-chat.schema';
+import { chatAttachment, chatMessage } from './work-chat.schema';
 
 export const adminAction = pgTable(
   'admin_action',
@@ -164,7 +161,7 @@ export const adminReportCase = pgTable(
     index('admin_report_cases_message_created_idx').on(table.messageId, table.createdAt, table.id),
     check(
       'admin_report_cases_status_check',
-      sql`${table.status} IN ('REPORT_CASE_PENDING', 'REPORT_CASE_DISMISSED', 'REPORT_CASE_HIDDEN', 'REPORT_CASE_RESTORED')`,
+      sql`${table.status} IN ('REPORT_CASE_PENDING', 'REPORT_CASE_DISMISSED', 'REPORT_CASE_HIDDEN', 'REPORT_CASE_RESTORED')`
     ),
     check('admin_report_cases_version_check', sql`${table.version} >= 1`),
     check(
@@ -172,13 +169,13 @@ export const adminReportCase = pgTable(
       sql`(
         (${table.status} IN ('REPORT_CASE_PENDING', 'REPORT_CASE_HIDDEN') AND ${table.caseClosedAt} IS NULL)
         OR (${table.status} IN ('REPORT_CASE_DISMISSED', 'REPORT_CASE_RESTORED') AND ${table.caseClosedAt} IS NOT NULL)
-      )`,
+      )`
     ),
     check(
       'admin_report_cases_closed_after_created_check',
-      sql`${table.caseClosedAt} IS NULL OR ${table.caseClosedAt} >= ${table.createdAt}`,
+      sql`${table.caseClosedAt} IS NULL OR ${table.caseClosedAt} >= ${table.createdAt}`
     ),
-  ],
+  ]
 );
 
 /** A Member's reason and optional detail for one Message. */
@@ -191,16 +188,14 @@ export const adminReporterEntry = pgTable(
     reporterMemberId: uuid('reporter_member_id')
       .notNull()
       .references(() => authUser.id, { onDelete: 'restrict' }),
-    reason: varchar('reason', { length: 64 })
-      .$type<ReporterEntryReason>()
-      .notNull(),
+    reason: varchar('reason', { length: 64 }).$type<ReporterEntryReason>().notNull(),
     detail: text('detail'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     unique('admin_reporter_entries_message_reporter_key').on(
       table.messageId,
-      table.reporterMemberId,
+      table.reporterMemberId
     ),
     foreignKey({
       name: 'admin_reporter_entries_case_message_fk',
@@ -209,15 +204,19 @@ export const adminReporterEntry = pgTable(
     }).onDelete('restrict'),
     check(
       'admin_reporter_entries_reason_check',
-      sql`${table.reason} = 'REPORT_ABUSIVE_OR_HARASSMENT'`,
+      sql`${table.reason} = 'REPORT_ABUSIVE_OR_HARASSMENT'`
     ),
     check(
       'admin_reporter_entries_detail_check',
-      sql`${table.detail} IS NULL OR btrim(${table.detail}) <> ''`,
+      sql`${table.detail} IS NULL OR btrim(${table.detail}) <> ''`
     ),
-    index('admin_reporter_entries_case_created_idx').on(table.reportCaseId, table.createdAt, table.id),
+    index('admin_reporter_entries_case_created_idx').on(
+      table.reportCaseId,
+      table.createdAt,
+      table.id
+    ),
     index('admin_reporter_entries_reporter_idx').on(table.reporterMemberId, table.createdAt),
-  ],
+  ]
 );
 
 /** A case-scoped reference to retained Message or Attachment evidence. */
@@ -229,7 +228,9 @@ export const adminEvidenceReference = pgTable(
       .notNull()
       .references(() => adminReportCase.id, { onDelete: 'restrict' }),
     messageId: uuid('message_id').references(() => chatMessage.id, { onDelete: 'restrict' }),
-    attachmentId: uuid('attachment_id').references(() => chatAttachment.id, { onDelete: 'restrict' }),
+    attachmentId: uuid('attachment_id').references(() => chatAttachment.id, {
+      onDelete: 'restrict',
+    }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -241,10 +242,14 @@ export const adminEvidenceReference = pgTable(
       .where(sql`${table.attachmentId} IS NOT NULL`),
     check(
       'admin_evidence_references_target_check',
-      sql`num_nonnulls(${table.messageId}, ${table.attachmentId}) = 1`,
+      sql`num_nonnulls(${table.messageId}, ${table.attachmentId}) = 1`
     ),
-    index('admin_evidence_references_case_created_idx').on(table.reportCaseId, table.createdAt, table.id),
-  ],
+    index('admin_evidence_references_case_created_idx').on(
+      table.reportCaseId,
+      table.createdAt,
+      table.id
+    ),
+  ]
 );
 
 /** Immutable record of an Admin Report Case state decision. */
@@ -270,19 +275,23 @@ export const adminModerationDecision = pgTable(
       sql`(
         (${table.previousStatus} = 'REPORT_CASE_PENDING' AND ${table.newStatus} IN ('REPORT_CASE_DISMISSED', 'REPORT_CASE_HIDDEN'))
         OR (${table.previousStatus} = 'REPORT_CASE_HIDDEN' AND ${table.newStatus} IN ('REPORT_CASE_DISMISSED', 'REPORT_CASE_HIDDEN', 'REPORT_CASE_RESTORED'))
-      )`,
+      )`
     ),
     check(
       'admin_moderation_decisions_reason_catalog_version_check',
-      sql`${table.reasonCatalogVersion} >= 1`,
+      sql`${table.reasonCatalogVersion} >= 1`
     ),
     check(
       'admin_moderation_decisions_reason_code_check',
-      sql`${table.reasonCode} ~ '^[A-Z][A-Z0-9_.-]{0,99}$'`,
+      sql`${table.reasonCode} ~ '^[A-Z][A-Z0-9_.-]{0,99}$'`
     ),
-    index('admin_moderation_decisions_case_created_idx').on(table.reportCaseId, table.createdAt, table.id),
+    index('admin_moderation_decisions_case_created_idx').on(
+      table.reportCaseId,
+      table.createdAt,
+      table.id
+    ),
     index('admin_moderation_decisions_admin_created_idx').on(table.adminId, table.createdAt),
-  ],
+  ]
 );
 
 export const disputeCaseStatus = {

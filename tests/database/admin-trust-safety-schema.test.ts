@@ -124,14 +124,22 @@ const cleanFixtures = async () => {
   if (!postgresAvailable) return;
 
   if (fixtureCaseIds.length > 0) {
-    await db.delete(adminModerationDecision).where(inArray(adminModerationDecision.reportCaseId, fixtureCaseIds));
-    await db.delete(adminEvidenceReference).where(inArray(adminEvidenceReference.reportCaseId, fixtureCaseIds));
-    await db.delete(adminReporterEntry).where(inArray(adminReporterEntry.reportCaseId, fixtureCaseIds));
+    await db
+      .delete(adminModerationDecision)
+      .where(inArray(adminModerationDecision.reportCaseId, fixtureCaseIds));
+    await db
+      .delete(adminEvidenceReference)
+      .where(inArray(adminEvidenceReference.reportCaseId, fixtureCaseIds));
+    await db
+      .delete(adminReporterEntry)
+      .where(inArray(adminReporterEntry.reportCaseId, fixtureCaseIds));
     await db.delete(adminReportCase).where(inArray(adminReportCase.id, fixtureCaseIds));
     fixtureCaseIds.length = 0;
   }
   if (fixtureMessageIds.length > 0) {
-    await db.delete(chatMessageAttachment).where(inArray(chatMessageAttachment.messageId, fixtureMessageIds));
+    await db
+      .delete(chatMessageAttachment)
+      .where(inArray(chatMessageAttachment.messageId, fixtureMessageIds));
     await db.delete(chatMessage).where(inArray(chatMessage.id, fixtureMessageIds));
     fixtureMessageIds.length = 0;
   }
@@ -140,7 +148,9 @@ const cleanFixtures = async () => {
     fixtureAttachmentIds.length = 0;
   }
   if (fixtureConversationIds.length > 0) {
-    await db.delete(chatMembership).where(inArray(chatMembership.conversationId, fixtureConversationIds));
+    await db
+      .delete(chatMembership)
+      .where(inArray(chatMembership.conversationId, fixtureConversationIds));
     await db.delete(chatConversation).where(inArray(chatConversation.id, fixtureConversationIds));
     fixtureConversationIds.length = 0;
   }
@@ -164,7 +174,12 @@ beforeAll(async () => {
   postgresAvailable = true;
   await db.insert(authUser).values([
     { id: hirerId, email: `${hirerId}@ku.th`, firstName: 'Schema', lastName: 'Hirer' },
-    { id: secondReporterId, email: `${secondReporterId}@ku.th`, firstName: 'Schema', lastName: 'Reporter' },
+    {
+      id: secondReporterId,
+      email: `${secondReporterId}@ku.th`,
+      firstName: 'Schema',
+      lastName: 'Reporter',
+    },
   ]);
   await db.insert(authAdmin).values({
     id: adminId,
@@ -198,7 +213,11 @@ describe('Admin Trust & Safety database schema', () => {
     expect(getTableColumns(adminReporterEntry)).toHaveProperty('reporterMemberId');
     expect(getTableColumns(adminEvidenceReference)).toHaveProperty('attachmentId');
     expect(getTableColumns(adminModerationDecision)).toHaveProperty('previousStatus');
-    expect(getTableConfig(adminReportCase).indexes.some((index) => index.config.name === 'admin_report_cases_one_open_message_uidx')).toBe(true);
+    expect(
+      getTableConfig(adminReportCase).indexes.some(
+        (index) => index.config.name === 'admin_report_cases_one_open_message_uidx'
+      )
+    ).toBe(true);
   });
 
   it('enforces one open Report Case and one Reporter Entry per Member per Message', async () => {
@@ -221,36 +240,51 @@ describe('Admin Trust & Safety database schema', () => {
       reason: 'REPORT_ABUSIVE_OR_HARASSMENT',
     });
     const entries = await db
-      .select({ reporterMemberId: adminReporterEntry.reporterMemberId, detail: adminReporterEntry.detail })
+      .select({
+        reporterMemberId: adminReporterEntry.reporterMemberId,
+        detail: adminReporterEntry.detail,
+      })
       .from(adminReporterEntry)
       .where(eq(adminReporterEntry.reportCaseId, reportCase!.id));
     expect(entries).toHaveLength(2);
-    expect(entries).toContainEqual({ reporterMemberId: hirerId, detail: 'The first report detail.' });
+    expect(entries).toContainEqual({
+      reporterMemberId: hirerId,
+      detail: 'The first report detail.',
+    });
     expect(entries).toContainEqual({ reporterMemberId: secondReporterId, detail: null });
 
-    const duplicateEntry = await db.insert(adminReporterEntry).values({
-      reportCaseId: reportCase!.id,
-      messageId,
-      reporterMemberId: hirerId,
-      reason: 'REPORT_ABUSIVE_OR_HARASSMENT',
-    }).catch((cause) => cause);
+    const duplicateEntry = await db
+      .insert(adminReporterEntry)
+      .values({
+        reportCaseId: reportCase!.id,
+        messageId,
+        reporterMemberId: hirerId,
+        reason: 'REPORT_ABUSIVE_OR_HARASSMENT',
+      })
+      .catch((cause) => cause);
     expect(duplicateEntry).toBeInstanceOf(Error);
 
-    const duplicateOpenCase = await db.insert(adminReportCase).values({
-      messageId,
-      status: reportCaseStatus.hidden,
-    }).catch((cause) => cause);
+    const duplicateOpenCase = await db
+      .insert(adminReportCase)
+      .values({
+        messageId,
+        status: reportCaseStatus.hidden,
+      })
+      .catch((cause) => cause);
     expect(duplicateOpenCase).toBeInstanceOf(Error);
   });
 
   it('allows a new Report Case after the previous case is closed', async () => {
     if (!postgresAvailable) return;
     const { messageId } = await createMessageFixture();
-    const [closedCase] = await db.insert(adminReportCase).values({
-      messageId,
-      status: reportCaseStatus.dismissed,
-      caseClosedAt: new Date('2030-01-02T10:00:00.000Z'),
-    }).returning();
+    const [closedCase] = await db
+      .insert(adminReportCase)
+      .values({
+        messageId,
+        status: reportCaseStatus.dismissed,
+        caseClosedAt: new Date('2030-01-02T10:00:00.000Z'),
+      })
+      .returning();
     fixtureCaseIds.push(closedCase!.id);
 
     const [newCase] = await db.insert(adminReportCase).values({ messageId }).returning();
@@ -273,40 +307,52 @@ describe('Admin Trust & Safety database schema', () => {
       attachmentId,
     });
 
-    const invalidReference = await db.insert(adminEvidenceReference).values({
-      reportCaseId: reportCase!.id,
-    }).catch((cause) => cause);
+    const invalidReference = await db
+      .insert(adminEvidenceReference)
+      .values({
+        reportCaseId: reportCase!.id,
+      })
+      .catch((cause) => cause);
     expect(invalidReference).toBeInstanceOf(Error);
   });
 
   it('rejects invalid statuses, Reporter Entry reasons, and moderation transitions', async () => {
     if (!postgresAvailable) return;
     const { messageId } = await createMessageFixture();
-    const invalidStatus = await db.insert(adminReportCase).values({
-      messageId,
-      status: 'REPORT_CASE_RESOLVED' as never,
-    }).catch((cause) => cause);
+    const invalidStatus = await db
+      .insert(adminReportCase)
+      .values({
+        messageId,
+        status: 'REPORT_CASE_RESOLVED' as never,
+      })
+      .catch((cause) => cause);
     expect(invalidStatus).toBeInstanceOf(Error);
 
     const [reportCase] = await db.insert(adminReportCase).values({ messageId }).returning();
     fixtureCaseIds.push(reportCase!.id);
 
-    const invalidReason = await db.insert(adminReporterEntry).values({
-      reportCaseId: reportCase!.id,
-      messageId,
-      reporterMemberId: hirerId,
-      reason: 'REPORT_SPAM' as never,
-    }).catch((cause) => cause);
+    const invalidReason = await db
+      .insert(adminReporterEntry)
+      .values({
+        reportCaseId: reportCase!.id,
+        messageId,
+        reporterMemberId: hirerId,
+        reason: 'REPORT_SPAM' as never,
+      })
+      .catch((cause) => cause);
     expect(invalidReason).toBeInstanceOf(Error);
 
-    const invalidTransition = await db.insert(adminModerationDecision).values({
-      reportCaseId: reportCase!.id,
-      adminId,
-      previousStatus: reportCaseStatus.pending,
-      newStatus: reportCaseStatus.restored,
-      reasonCatalogVersion: 1,
-      reasonCode: 'MESSAGE_REVIEWED',
-    }).catch((cause) => cause);
+    const invalidTransition = await db
+      .insert(adminModerationDecision)
+      .values({
+        reportCaseId: reportCase!.id,
+        adminId,
+        previousStatus: reportCaseStatus.pending,
+        newStatus: reportCaseStatus.restored,
+        reasonCatalogVersion: 1,
+        reasonCode: 'MESSAGE_REVIEWED',
+      })
+      .catch((cause) => cause);
     expect(invalidTransition).toBeInstanceOf(Error);
   });
 
@@ -315,16 +361,22 @@ describe('Admin Trust & Safety database schema', () => {
     const { messageId } = await createMessageFixture();
     const closedTime = new Date('2030-01-02T10:00:00.000Z');
 
-    const openWithClosedTime = await db.insert(adminReportCase).values({
-      messageId,
-      caseClosedAt: closedTime,
-    }).catch((cause) => cause);
+    const openWithClosedTime = await db
+      .insert(adminReportCase)
+      .values({
+        messageId,
+        caseClosedAt: closedTime,
+      })
+      .catch((cause) => cause);
     expect(openWithClosedTime).toBeInstanceOf(Error);
 
-    const closedWithoutClosedTime = await db.insert(adminReportCase).values({
-      messageId,
-      status: reportCaseStatus.dismissed,
-    }).catch((cause) => cause);
+    const closedWithoutClosedTime = await db
+      .insert(adminReportCase)
+      .values({
+        messageId,
+        status: reportCaseStatus.dismissed,
+      })
+      .catch((cause) => cause);
     expect(closedWithoutClosedTime).toBeInstanceOf(Error);
   });
 });
