@@ -96,9 +96,9 @@ describe('Top-up application services', () => {
       principalUserId: userId,
       creditSatang: 123,
       chargedFeeSatang: 1,
-      chargedTaxSatang: 1,
-      paymentTotalSatang: 125,
-      providerTotalSatang: 125,
+      chargedTaxSatang: 0,
+      paymentTotalSatang: 124,
+      providerTotalSatang: 124,
     });
     expect(quote.expiresAt.getTime()).toBeGreaterThan(Date.now());
 
@@ -128,15 +128,15 @@ describe('Top-up application services', () => {
       topUpStatus: 'PENDING',
       creditSatang: 123,
       chargedFeeSatang: 1,
-      chargedTaxSatang: 1,
-      paymentTotalSatang: 125,
+      chargedTaxSatang: 0,
+      paymentTotalSatang: 124,
       providerReference: `${provider.referencePrefix}-1`,
       qrPayload: 'qr-1',
     });
     expect(second.id).not.toBe(first.id);
     expect(provider.requests.map(({ paymentTotalSatang }) => paymentTotalSatang)).toEqual([
-      positiveSatang(125),
-      positiveSatang(461),
+      positiveSatang(124),
+      positiveSatang(460),
     ]);
 
     const replay = await initiateTopUp(
@@ -175,8 +175,8 @@ describe('Top-up application services', () => {
 
     // For 100 THB (10,000 Satang)
     // Fee: ceil(10,000 * 80 / 10,000) = 80 Satang (0.80 THB)
-    // VAT: ceil(80 * 700 / 10,000) = 6 Satang (0.06 THB)
-    // Total: 10,086 Satang (100.86 THB)
+    // VAT: floor(80 * 700 / 10,000) = 5 Satang (0.05 THB)
+    // Total: 10,085 Satang (100.85 THB)
     const quote100 = await quoteTopUp({
       principalUserId: userId,
       creditSatang: positiveSatang(10_000),
@@ -184,8 +184,8 @@ describe('Top-up application services', () => {
     expect(quote100).toMatchObject({
       creditSatang: 10_000,
       chargedFeeSatang: 80,
-      chargedTaxSatang: 6,
-      paymentTotalSatang: 10_086,
+      chargedTaxSatang: 5,
+      paymentTotalSatang: 10_085,
     });
   });
   it('consumes a quote only once and scopes ownership to the Member', async () => {

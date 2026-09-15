@@ -164,7 +164,7 @@ const calculateTopUpTerms = (
     : satang(0);
   const providerFeeSatang = satang(fixedFeeSatang + variableFeeSatang);
   const providerTaxSatang = satang(
-    Math.ceil((providerFeeSatang * policy.topUpProviderTaxBps) / 10_000)
+    Math.floor((providerFeeSatang * policy.topUpProviderTaxBps) / 10_000)
   );
   const paymentTotalSatang = validateTotal([creditSatang, providerFeeSatang, providerTaxSatang]);
   return {
