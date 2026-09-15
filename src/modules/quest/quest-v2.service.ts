@@ -21,7 +21,7 @@ import {
   type Satang,
 } from '@/modules/wallet';
 import { decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
-import { ImageUploadError } from '@/shared/image-storage';
+import { ImageUploadError } from '@/shared/object-storage';
 
 import {
   and,
@@ -59,7 +59,7 @@ import {
   type QuestStatus,
 } from './quest.contract';
 import { recordQuestEditHistory, type QuestEditHistoryEntry } from './quest-edit-history.service';
-import { questV2StorageCompatibility } from './quest-storage.adapter';
+import { questV2StorageCompatibility } from './quest-legacy-columns';
 import {
   formatQuestV2ScheduleTime,
   isQuestV2ScheduleTime,
@@ -1517,7 +1517,7 @@ export const attachQuestV2Images = async (
     operationFailed = true;
     operationError = error;
     if (error instanceof ImageUploadError && error.cleanupObject) {
-      uploaded.push(error.cleanupObject);
+      uploaded.push(error.cleanupObject as StoredQuestImage);
     }
   }
 

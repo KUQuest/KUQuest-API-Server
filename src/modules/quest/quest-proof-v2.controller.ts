@@ -1,11 +1,11 @@
 import type { AuthedContext } from '@/modules/auth';
 import { MoneyDomainError } from '@/modules/wallet';
-import {
-  UnsupportedWorkChatAttachmentError,
-  WorkChatAttachmentTooLargeError,
-  WorkChatAttachmentUploadError,
-} from '@/modules/work-chat/work-chat.storage';
 import { apiError, apiSuccess } from '@/shared/api-response';
+import {
+  FileTooLargeError,
+  FileUploadError,
+  UnsupportedFileTypeError,
+} from '@/shared/object-storage';
 
 import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 import type { QuestCommandOutcomeCode } from './quest-command.service';
@@ -144,15 +144,15 @@ const mapCommandError = (set: AuthedContext['set'], outcome: ProofCommandOutcome
 };
 
 const mapUploadError = (set: AuthedContext['set'], error: unknown) => {
-  if (error instanceof WorkChatAttachmentTooLargeError) {
+  if (error instanceof FileTooLargeError) {
     set.status = 413;
     return apiError('PROOF_FILE_TOO_LARGE', error.message);
   }
-  if (error instanceof UnsupportedWorkChatAttachmentError) {
+  if (error instanceof UnsupportedFileTypeError) {
     set.status = 415;
     return apiError('PROOF_FILE_TYPE_NOT_SUPPORTED', error.message);
   }
-  if (error instanceof WorkChatAttachmentUploadError) {
+  if (error instanceof FileUploadError) {
     set.status = 502;
     return apiError(
       'PROOF_FILE_UPLOAD_FAILED',

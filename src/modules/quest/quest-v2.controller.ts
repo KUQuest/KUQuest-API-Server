@@ -8,7 +8,7 @@ import {
   ImageTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
-} from '@/shared/image-storage';
+} from '@/shared/object-storage';
 import { readResourceVersion } from '@/shared/resource-version';
 
 import type { Static } from 'elysia';

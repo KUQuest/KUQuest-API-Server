@@ -11,7 +11,7 @@ import {
   ImageUploadError,
   UnsupportedImageTypeError,
   createDebugLogger,
-} from '@/shared/image-storage';
+} from '@/shared/object-storage';
 
 import type { Static } from 'elysia';
 

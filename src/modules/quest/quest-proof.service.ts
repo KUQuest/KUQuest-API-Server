@@ -1,4 +1,4 @@
-import type { StoredImage } from '@/shared/image-storage';
+import type { StoredImage } from '@/shared/object-storage';
 import { db } from '@/database/client';
 import { file } from '@/database/schema/file.schema';
 import {

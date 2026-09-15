@@ -17,7 +17,7 @@ import {
 import * as profileService from '@/modules/profile/profile.service';
 import { avatarStorage } from '@/modules/profile/profile.storage';
 import { encodeCursor } from '@/shared/cursor';
-import { ImageLinkUnavailableError, ImageUploadError } from '@/shared/image-storage';
+import { ImageLinkUnavailableError, ImageUploadError } from '@/shared/object-storage';
 
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
@@ -80,6 +80,7 @@ describe('setAvatar', () => {
     const storedAvatar = {
       bucket: 'kuquest',
       objectKey: `avatars/${studentAuthId}/avatar.png`,
+      fileName: 'avatar.png',
       contentType: 'image/png' as const,
       sizeBytes: 12,
     };
@@ -109,6 +110,7 @@ describe('setAvatar', () => {
     spyOn(avatarStorage, 'upload').mockResolvedValue({
       bucket: 'kuquest',
       objectKey: `avatars/${studentAuthId}/new.png`,
+      fileName: 'avatar.png',
       contentType: 'image/png',
       sizeBytes: 12,
     });
