@@ -11,6 +11,18 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 ## Entries
 
+### 2026-09-15 — Pin a constant revision for unversioned Admin Action resources
+
+**What happened.** When routing Admin Wallet status updates through `walletAdminActionService.executeCommand`, an implementer added an optional `expectedTimestamp?: Date` parameter with branching logic in `prepare` and `apply`. The parameter had no callers, and using `updatedAt` for the request revision would have broken idempotent replays because mutating `updatedAt` on freeze causes `ADMIN_ACTION_KEY_REUSED` on replay.
+**Root cause.** Designing for speculative future client timestamps instead of recognizing that unversioned resources need a constant revision sentinel for stable request hashing.
+**Rule.** When executing an `AdminAction` command against an unversioned resource, pin a constant revision (`expectedVersion: 1`). Do not introduce optional timestamp or version parameters without an existing client that supplies them.
+
+### 2026-09-15 — Prove a barrel cycle before falling back to internal module paths
+
+**What happened.** An implementer imported Admin Action dependencies from `@/modules/admin/admin-action.service` and `admin-action.policy` rather than the `@/modules/admin` barrel due to an unverified concern about circular dependencies with `@/modules/wallet`. Standards review flagged it as a hard violation of `CODESTYLES.md`, and testing proved the barrel import compiled cleanly with zero cycles.
+**Root cause.** Speculative fear of barrel cycles led to an architectural boundary violation without checking if a cycle actually existed.
+**Rule.** Always test barrel imports (`bun run typecheck` + `bun test`) before falling back to internal module paths. Only use deep imports when an actual cycle occurs, and document an explicit exception in a guard test.
+
 ### 2026-09-15 — Land the shared module before you dispatch its consumers
 
 **What happened.** A shared storage contract was written in the batch context as a TypeScript block, and four implementer subagents were dispatched. Three subagents reported phantom LSP errors waiting for the shared module to appear on disk, and one ran 18 minutes while negotiating typing deviations over `hub` messages.
