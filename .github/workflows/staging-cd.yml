@@ -459,6 +459,7 @@ jobs:
             package.json \
             tsconfig.json \
             scripts/seed-admin.ts \
+            src/config/default-database-url.ts \
             src/config/env.ts \
             src/database \
             src/modules/auth/admin-auth.config.ts \
