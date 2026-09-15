@@ -343,12 +343,13 @@ export const deleteQuestImageController = async ({
 
 export const listBoardQuestsController = async ({
   query,
+  session,
   set,
 }: AuthedContext & { query: ListQuery }): Promise<ApiResponse<BoardResponse>> => {
   const invalid = validateListQuery(query, set);
   if (invalid) return invalid;
 
-  return apiSuccess(await listBoardQuests(toFilters(query)));
+  return apiSuccess(await listBoardQuests(toFilters(query), session.user.id));
 };
 
 export const listOwnQuestsController = async ({
