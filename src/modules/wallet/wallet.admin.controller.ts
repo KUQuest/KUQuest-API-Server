@@ -1,10 +1,11 @@
+import { AdminActionError } from '@/modules/admin';
 import type { AdminContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import { CursorInputError } from '@/shared/cursor';
 
 import { MoneyDomainError } from './wallet.money';
-import { changeWalletStatus, listWalletStatusHistory } from './wallet.status.service';
+import { listWalletStatusHistory } from './wallet.status.service';
 import { rebuildWalletProjection, verifyWalletProjection } from './wallet.service';
 import type {
   AdminWalletParams,
@@ -12,33 +13,17 @@ import type {
   AdminWalletStatusChangeInput,
 } from './wallet.admin.schema';
 import type { AdminWalletListQuery } from './wallet.admin.schema';
-import { getAdminWalletDetail, listAdminWallets } from './wallet.admin.service';
-
-type WalletBalances = {
-  spendingBalanceSatang: number;
-  earningsBalanceSatang: number;
-  fundingReservedSatang: number;
-  reservedForPayoutsSatang: number;
-  walletStatus?: string;
-};
+import {
+  changeWalletStatusAdmin,
+  getAdminWalletDetail,
+  listAdminWallets,
+  serializeWallet,
+} from './wallet.admin.service';
 
 type ExtendedAdminContext = AdminContext & {
   adminSession?: {
     admin?: { id: string; email?: string };
     user?: { id: string; email?: string };
-  };
-};
-
-const serializeWallet = (
-  wallet: WalletBalances | { wallet: WalletBalances }
-): WalletBalances & { walletStatus: string } => {
-  const target = 'wallet' in wallet && wallet.wallet ? wallet.wallet : (wallet as WalletBalances);
-  return {
-    spendingBalanceSatang: target.spendingBalanceSatang,
-    earningsBalanceSatang: target.earningsBalanceSatang,
-    fundingReservedSatang: target.fundingReservedSatang,
-    reservedForPayoutsSatang: target.reservedForPayoutsSatang,
-    walletStatus: target.walletStatus ?? 'ACTIVE',
   };
 };
 
@@ -59,11 +44,22 @@ const mapMoneyDomainErrorStatus = (code: string): number => {
   return 409;
 };
 
+const setAdminActionStatus = (set: ExtendedAdminContext['set'], code: string) => {
+  set.status =
+    code === 'ADMIN_ACTION_ADMIN_NOT_FOUND'
+      ? 403
+      : ['ADMIN_ACTION_KEY_REUSED', 'ADMIN_ACTION_CONFLICT', 'ADMIN_ACTION_WRITE_FAILED'].includes(
+            code
+          )
+        ? 409
+        : 400;
+};
+
 export const changeWalletStatusAdminController = async ({
   admin,
   adminSession,
   body,
-  headers: _headers,
+  headers,
   params,
   set,
 }: ExtendedAdminContext & {
@@ -73,18 +69,29 @@ export const changeWalletStatusAdminController = async ({
 }): Promise<ApiResponse> => {
   try {
     const actorAdminId = adminSession?.admin?.id ?? admin?.id ?? adminSession?.user?.id;
+    if (!actorAdminId) {
+      set.status = 403;
+      return apiError('ADMIN_ACTION_ADMIN_NOT_FOUND', 'Admin authentication is required.');
+    }
 
-    const { wallet: updatedWallet } = await changeWalletStatus({
+    const result = await changeWalletStatusAdmin({
+      adminId: actorAdminId,
       walletId: params.walletId,
       toStatus: body.toStatus,
       reason: body.reason,
-      actorAdminId,
+      requestKey: headers['idempotency-key'],
     });
-    return apiSuccess({ wallet: serializeWallet(updatedWallet) });
+    return apiSuccess({ wallet: result.resourceSummary.wallet });
   } catch (error) {
-    if (!(error instanceof MoneyDomainError)) throw error;
-    set.status = mapMoneyDomainErrorStatus(error.code);
-    return apiError(error.code, error.message);
+    if (error instanceof AdminActionError) {
+      setAdminActionStatus(set, error.code);
+      return apiError(error.code, error.message);
+    }
+    if (error instanceof MoneyDomainError) {
+      set.status = mapMoneyDomainErrorStatus(error.code);
+      return apiError(error.code, error.message);
+    }
+    throw error;
   }
 };
 
