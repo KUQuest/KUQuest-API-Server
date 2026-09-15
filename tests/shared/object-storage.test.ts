@@ -7,7 +7,6 @@ import {
   ImageUploadError,
   UnsupportedFileTypeError,
   UnsupportedImageTypeError,
-  createImageStorage,
   createObjectStorage,
 } from '@/shared/object-storage';
 
@@ -87,15 +86,6 @@ describe('object storage image-only policy', () => {
     } as File;
 
     await expect(small.upload('user-1', file)).rejects.toBeInstanceOf(FileTooLargeError);
-  });
-
-  it('keeps the createImageStorage alias locked to the image-only policy', async () => {
-    const aliasStorage = createImageStorage({ keyPrefix: 'alias-images' });
-    const file = new File([new TextEncoder().encode('%PDF-1.4')], 'proof.pdf', {
-      type: 'application/pdf',
-    });
-
-    await expect(aliasStorage.upload('user-1', file)).rejects.toThrow(UnsupportedFileTypeError);
   });
 
   it('accepts valid JPEG and WebP images', async () => {

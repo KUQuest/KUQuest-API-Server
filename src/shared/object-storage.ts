@@ -29,16 +29,12 @@ export type StoredFile<TContentType extends string = StorageContentType> = {
 
 // Aliases for clean migration — zero difference
 export type StoredImage = StoredFile<ImageContentType>;
-export type StoredAttachment = StoredFile<AttachmentContentType>;
-
 export type FileUploadPlan = Pick<StoredFile, 'bucket' | 'objectKey'>;
-export type ImageUploadPlan = FileUploadPlan;
 
 export type FileLink = {
   url: string;
   expiresAt: Date;
 };
-export type ImageLink = FileLink;
 
 // Canonical errors — four, shared across every storage bucket
 export class FileTooLargeError extends Error {}
@@ -332,6 +328,3 @@ export function createObjectStorage({
     upload,
   };
 }
-
-export const createImageStorage = (config: Omit<ObjectStorageConfig, 'policy'>) =>
-  createObjectStorage({ ...config, policy: 'image-only' });
