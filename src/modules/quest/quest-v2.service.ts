@@ -75,6 +75,7 @@ import { softDeleteQuestImageAndRepack } from './quest-image.service';
 import { maxQuestV2Images } from './quest-v2.schema';
 import type { QuestV2BoardQuery, QuestV2CreateInput, QuestV2EditInput } from './quest-v2.schema';
 import { questV2Storage, type StoredQuestImage } from './quest.storage';
+import { applyQuestStateTransition } from './quest-transition.service';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type QuestDatabase = typeof db | QuestTransaction;
@@ -2049,10 +2050,12 @@ const publishQuestV2InTransaction = async (
         );
       }
 
-      const [updated] = await transaction
-        .update(quest)
-        .set({
-          questStatus: questStatus.open,
+      const published = await applyQuestStateTransition(transaction, {
+        questId,
+        from: current.questStatus,
+        to: questStatus.open,
+        now,
+        columns: {
           rewardSatang: check.questRewardSatang,
           questFundingTotalSatang: check.questFundingTotalSatang,
           headcount: check.headcount,
@@ -2061,19 +2064,10 @@ const publishQuestV2InTransaction = async (
           platformFeeBps: check.platformFeeBps,
           platformFeePerWorkerSatang: check.platformFeeSatang,
           questEscrowSatang: check.escrowRequirementSatang,
-          version: sql`${quest.version} + 1`,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(quest.id, questId),
-            eq(quest.hirerId, userId),
-            eq(quest.apiVersion, questApiVersion.v2),
-            eq(quest.questStatus, questStatus.draft)
-          )
-        )
-        .returning({ id: quest.id });
-      if (!updated) return { kind: 'rejected', rejection: { outcome: 'not-draft' } };
+        },
+        workChat: [],
+      });
+      if (!published) return { kind: 'rejected', rejection: { outcome: 'not-draft' } };
 
       const updatedRow = await selectQuestV2Row(transaction, userId, questId);
       if (!updatedRow) throw new Error(`Published Quest ${questId} could not be read back`);

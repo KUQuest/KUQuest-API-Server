@@ -11,11 +11,8 @@ import { satang, toBaht } from '@/modules/wallet';
 import { and, asc, eq, isNull, lte, or } from 'drizzle-orm';
 
 import { settleUnderfilledCancellationInTransaction } from './quest-settlement.service';
-import {
-  requireQuestWorkChatMembershipWriter,
-  WorkChatTransitionError,
-  type QuestTransaction,
-} from './quest-work-chat.port';
+import type { QuestTransaction } from './quest-work-chat.port';
+import { applyQuestStateTransition } from './quest-transition.service';
 import {
   runQuestCommand,
   sha256Json,
@@ -735,26 +732,25 @@ export const respondToQuestV2Underfilled = async (
                 )
                 .returning();
               if (!completed) return { kind: 'rejected', rejection: 'not-pending' };
-              await transaction
-                .update(quest)
-                .set({ questStatus: 'QUEST_ASSIGNED', updatedAt: now })
-                .where(and(eq(quest.id, questId), eq(quest.questStatus, 'QUEST_OPEN')));
-              const writer = requireQuestWorkChatMembershipWriter();
-              try {
-                await writer.applyQuestTransition(transaction, {
-                  producer: 'QUEST_UNDERFILLED',
-                  type: 'questBecameAssigned',
-                  commandId: `quest-v2-underfilled-assigned:${completed.id}`,
-                  eventId: completed.id,
-                  questId,
-                  actorId: workerId,
-                  occurredAt: now.toISOString(),
-                  questStatus: 'QUEST_ASSIGNED',
-                  assignedAt: now.toISOString(),
-                });
-              } catch (cause) {
-                throw new WorkChatTransitionError(cause);
-              }
+              await applyQuestStateTransition(transaction, {
+                questId,
+                from: 'QUEST_OPEN',
+                to: 'QUEST_ASSIGNED',
+                now,
+                workChat: [
+                  {
+                    producer: 'QUEST_UNDERFILLED',
+                    type: 'questBecameAssigned',
+                    commandId: `quest-v2-underfilled-assigned:${completed.id}`,
+                    eventId: completed.id,
+                    questId,
+                    actorId: workerId,
+                    occurredAt: now.toISOString(),
+                    questStatus: 'QUEST_ASSIGNED',
+                    assignedAt: now.toISOString(),
+                  },
+                ],
+              });
               nextDecision = completed;
               nextCurrent = { ...current, questState: 'QUEST_ASSIGNED' };
             }

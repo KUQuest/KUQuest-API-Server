@@ -18,6 +18,7 @@ import {
   WorkChatTransitionError,
   type QuestTransaction,
 } from './quest-work-chat.port';
+import { applyQuestStateTransition } from './quest-transition.service';
 import type {
   AcceptedWorker,
   WorkChatMembershipWriter,
@@ -1162,22 +1163,14 @@ export const selectCandidate = async (
         }))
       )
       .returning(selectionAssignmentFields);
-    await tx
-      .update(quest)
-      .set({
-        questStatus: questStatus.assigned,
-        version: sql`${quest.version} + 1`,
-        updatedAt: now,
-      })
-      .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.open)));
-    try {
-      await writer.applyQuestTransition(
-        tx,
-        selectionTransition(commandId, questId, hirerId, now, assignments)
-      );
-    } catch (cause) {
-      throw new WorkChatTransitionError(cause);
-    }
+    await applyQuestStateTransition(tx, {
+      questId,
+      from: questStatus.open,
+      to: questStatus.assigned,
+      now,
+      workChat: [selectionTransition(commandId, questId, hirerId, now, assignments)],
+      writer,
+    });
     await tx
       .update(questCandidateSelectionCommand)
       .set({

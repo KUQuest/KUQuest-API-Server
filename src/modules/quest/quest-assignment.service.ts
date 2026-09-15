@@ -20,6 +20,7 @@ import {
   WorkChatTransitionError,
 } from './quest-work-chat.port';
 import type { QuestTransaction } from './quest-work-chat.port';
+import { applyQuestStateTransition } from './quest-transition.service';
 
 type QuestWorkChatWriter = WorkChatMembershipWriter<QuestTransaction>;
 
@@ -289,11 +290,6 @@ export const joinNoCandidateQuest = async (
       current.participation === questParticipation.solo || joinedCount + 1 === current.headcount
         ? questStatus.assigned
         : questStatus.open;
-    await transaction
-      .update(quest)
-      .set({ questStatus: nextStatus, version: sql`${quest.version} + 1`, updatedAt: now })
-      .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.open)));
-
     const transition = transitionFor(
       questId,
       workerId,
@@ -302,10 +298,23 @@ export const joinNoCandidateQuest = async (
       now,
       commandId
     );
-    try {
-      await writer.applyQuestTransition(transaction, transition);
-    } catch (cause) {
-      throw new WorkChatTransitionError(cause);
+    if (nextStatus === questStatus.assigned) {
+      await applyQuestStateTransition(transaction, {
+        questId,
+        from: questStatus.open,
+        to: questStatus.assigned,
+        now,
+        workChat: [transition],
+        writer,
+      });
+    } else {
+      // The roster is not full yet: the Quest stays QUEST_OPEN, so only the Work
+      // Conversation entry is applied and the State write is skipped.
+      try {
+        await writer.applyQuestTransition(transaction, transition);
+      } catch (cause) {
+        throw new WorkChatTransitionError(cause);
+      }
     }
 
     await transaction

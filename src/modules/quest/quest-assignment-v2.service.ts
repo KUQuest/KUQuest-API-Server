@@ -8,6 +8,7 @@ import {
   requireQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
 } from './quest-work-chat.port';
+import { applyQuestStateTransition } from './quest-transition.service';
 import {
   runQuestCommand,
   sha256Json,
@@ -282,20 +283,33 @@ const joinQuestV2InTransaction = async (
 
       const nextQuestState =
         isSingleQuest || joinedCount + 1 === current.headcount ? 'QUEST_ASSIGNED' : 'QUEST_OPEN';
-      await transaction
-        .update(quest)
-        .set({ questStatus: nextQuestState, updatedAt: now })
-        .where(and(eq(quest.id, questId), eq(quest.questStatus, 'QUEST_OPEN')));
-
       const assignment = toQuestV2AssignmentRow(createdAssignment, nextQuestState);
       const workChatCommandId = `quest-assignment-v2:${assignment.id}`;
-      try {
-        await writer.applyQuestTransition(
-          transaction,
-          transitionFor(questId, userId, assignment.id, current.hirerId, now, workChatCommandId)
-        );
-      } catch (cause) {
-        throw new WorkChatTransitionError(cause);
+      const workChat = transitionFor(
+        questId,
+        userId,
+        assignment.id,
+        current.hirerId,
+        now,
+        workChatCommandId
+      );
+      if (nextQuestState === 'QUEST_ASSIGNED') {
+        await applyQuestStateTransition(transaction, {
+          questId,
+          from: 'QUEST_OPEN',
+          to: 'QUEST_ASSIGNED',
+          now,
+          workChat: [workChat],
+          writer,
+        });
+      } else {
+        // The roster is not full yet: the Quest stays QUEST_OPEN, so only the Work
+        // Conversation entry is applied and the State write is skipped.
+        try {
+          await writer.applyQuestTransition(transaction, workChat);
+        } catch (cause) {
+          throw new WorkChatTransitionError(cause);
+        }
       }
 
       return {

@@ -12,12 +12,13 @@ import {
 import { purgeExpiredProviderEventPayloads } from '@/modules/top-up';
 import { cleanupExpiredWorkChatAttachments } from '@/modules/work-chat';
 
-import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte } from 'drizzle-orm';
 
 import { assignmentStatus, questMode, questParticipation, questStatus } from './quest.contract';
 import { readQuestEscrow, releaseQuestEscrow } from './quest-escrow.service';
 import { autoApproveDueProofs } from './quest-proof.service';
 import { cancelUnfilledQuest, failQuestInTransaction } from './quest-settlement.service';
+import { applyQuestStateTransition } from './quest-transition.service';
 import { expireQuestEditRequest } from './quest.service';
 import {
   expireQuestV2EditRequest,
@@ -142,17 +143,13 @@ const startQuest = async (questId: string, now: Date): Promise<boolean> =>
           eq(questAssignment.assignmentStatus, assignmentStatus.active)
         )
       );
-    const [updated] = await transaction
-      .update(quest)
-      .set({
-        questStatus: questStatus.inProgress,
-        version: sql`${quest.version} + 1`,
-        updatedAt: now,
-      })
-      .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.assigned)))
-      .returning({ id: quest.id });
-
-    return Boolean(updated);
+    return applyQuestStateTransition(transaction, {
+      questId,
+      from: questStatus.assigned,
+      to: questStatus.inProgress,
+      now,
+      workChat: [],
+    });
   });
 
 const ownerHasValidProof = async (transaction: Transaction, questId: string, workerId: string) => {

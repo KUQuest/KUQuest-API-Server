@@ -19,12 +19,14 @@ import {
   settleApprovedLegacyQuestProofAfterFailureInTransaction,
   settleApprovedQuestInTransaction,
 } from './quest-settlement.service';
+import { applyQuestStateTransition } from './quest-transition.service';
 import {
   assignmentStatus,
   questMode,
   questParticipation,
   questStatus,
   teamStatus,
+  type QuestStatus,
 } from './quest.contract';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -339,7 +341,7 @@ const moveIfSubmitted = async (
   tx: Tx,
   current: {
     id: string;
-    questStatus: string;
+    questStatus: QuestStatus;
     mode: string;
     participation: string;
     proofRequired: boolean;
@@ -347,16 +349,13 @@ const moveIfSubmitted = async (
   now: Date
 ) => {
   if (await allObligationsSubmitted(tx, current)) {
-    const [updated] = await tx
-      .update(quest)
-      .set({
-        questStatus: questStatus.submitted,
-        version: sql`${quest.version} + 1`,
-        updatedAt: now,
-      })
-      .where(and(eq(quest.id, current.id), eq(quest.questStatus, current.questStatus as never)))
-      .returning({ id: quest.id });
-    return Boolean(updated);
+    return applyQuestStateTransition(tx, {
+      questId: current.id,
+      from: current.questStatus,
+      to: questStatus.submitted,
+      now,
+      workChat: [],
+    });
   }
   return false;
 };
@@ -587,25 +586,23 @@ export const reviewProof = async (
         await failQuestInTransaction(tx, questId, `quest-failure:${questId}`, now, hirerId);
         return { outcome: 'failed' };
       }
-      await tx
-        .update(quest)
-        .set({
-          questStatus: questStatus.rework,
-          version: sql`${quest.version} + 1`,
-          updatedAt: now,
-        })
-        .where(eq(quest.id, questId));
+      await applyQuestStateTransition(tx, {
+        questId,
+        from: current.questStatus,
+        to: questStatus.rework,
+        now,
+        workChat: [],
+      });
     } else if (current.questStatus === questStatus.failed) {
       await settleApprovedLegacyQuestProofAfterFailureInTransaction(tx, questId, proofId);
     } else if (await allObligationsApproved(tx, current)) {
-      await tx
-        .update(quest)
-        .set({
-          questStatus: questStatus.approved,
-          version: sql`${quest.version} + 1`,
-          updatedAt: now,
-        })
-        .where(eq(quest.id, questId));
+      await applyQuestStateTransition(tx, {
+        questId,
+        from: current.questStatus,
+        to: questStatus.approved,
+        now,
+        workChat: [],
+      });
       await settleApprovedQuestInTransaction(
         tx,
         questId,
@@ -678,16 +675,14 @@ const autoApproveDueProofFreeQuests = async (tx: Tx, now: Date) => {
     if (!current || current.proofRequired || current.questStatus !== questStatus.submitted)
       continue;
     if (!(await allObligationsSubmitted(tx, current))) continue;
-    const [approvedQuest] = await tx
-      .update(quest)
-      .set({
-        questStatus: questStatus.approved,
-        version: sql`${quest.version} + 1`,
-        updatedAt: now,
-      })
-      .where(and(eq(quest.id, candidate.id), eq(quest.questStatus, questStatus.submitted)))
-      .returning({ id: quest.id });
-    if (approvedQuest)
+    const approved = await applyQuestStateTransition(tx, {
+      questId: candidate.id,
+      from: current.questStatus,
+      to: questStatus.approved,
+      now,
+      workChat: [],
+    });
+    if (approved)
       await settleApprovedQuestInTransaction(
         tx,
         candidate.id,
@@ -770,21 +765,14 @@ export const autoApproveDueProofs = async (now = new Date()): Promise<string[]> 
           candidate.id
         );
       } else if (await allObligationsApproved(tx, current)) {
-        const [approvedQuest] = await tx
-          .update(quest)
-          .set({
-            questStatus: questStatus.approved,
-            version: sql`${quest.version} + 1`,
-            updatedAt: now,
-          })
-          .where(
-            and(
-              eq(quest.id, current.id),
-              inArray(quest.questStatus, [questStatus.submitted, questStatus.rework])
-            )
-          )
-          .returning({ id: quest.id });
-        if (approvedQuest)
+        const approved = await applyQuestStateTransition(tx, {
+          questId: current.id,
+          from: current.questStatus,
+          to: questStatus.approved,
+          now,
+          workChat: [],
+        });
+        if (approved)
           await settleApprovedQuestInTransaction(
             tx,
             candidate.questId,
