@@ -277,6 +277,7 @@ export const paymentMoneyPolicyRevision = pgTable(
     platformFeeBps: smallint('platform_fee_bps').notNull(),
     feeRoundingMode: text('fee_rounding_mode').default('UP').notNull(),
     topUpProviderFeeSatang: integer('top_up_provider_fee_satang').default(0).notNull(),
+    topUpProviderFeeBps: smallint('top_up_provider_fee_bps').default(0).notNull(),
     topUpProviderTaxBps: smallint('top_up_provider_tax_bps').default(0).notNull(),
     payoutProviderFeeSatang: integer('payout_provider_fee_satang').default(0).notNull(),
     payoutProviderTaxBps: smallint('payout_provider_tax_bps').default(0).notNull(),
@@ -294,7 +295,7 @@ export const paymentMoneyPolicyRevision = pgTable(
     ),
     check(
       'payment_money_policy_rates_check',
-      sql`${table.platformFeeBps} BETWEEN 0 AND 10000 AND ${table.topUpProviderFeeSatang} >= 0 AND ${table.topUpProviderTaxBps} BETWEEN 0 AND 10000 AND ${table.payoutProviderFeeSatang} >= 0 AND ${table.payoutProviderTaxBps} BETWEEN 0 AND 10000`
+      sql`${table.platformFeeBps} BETWEEN 0 AND 10000 AND ${table.topUpProviderFeeSatang} >= 0 AND ${table.topUpProviderFeeBps} BETWEEN 0 AND 10000 AND ${table.topUpProviderTaxBps} BETWEEN 0 AND 10000 AND ${table.payoutProviderFeeSatang} >= 0 AND ${table.payoutProviderTaxBps} BETWEEN 0 AND 10000`
     ),
     check('payment_money_policy_rounding_check', sql`${table.feeRoundingMode} = 'UP'`),
     check('payment_money_policy_windows_check', sql`${table.quoteLifetimeSeconds} > 0`),

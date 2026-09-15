@@ -95,10 +95,10 @@ describe('Top-up application services', () => {
     expect(quote).toMatchObject({
       principalUserId: userId,
       creditSatang: 123,
-      chargedFeeSatang: 0,
-      chargedTaxSatang: 0,
-      paymentTotalSatang: 123,
-      providerTotalSatang: 123,
+      chargedFeeSatang: 1,
+      chargedTaxSatang: 1,
+      paymentTotalSatang: 125,
+      providerTotalSatang: 125,
     });
     expect(quote.expiresAt.getTime()).toBeGreaterThan(Date.now());
 
@@ -127,14 +127,16 @@ describe('Top-up application services', () => {
       principalUserId: userId,
       topUpStatus: 'PENDING',
       creditSatang: 123,
-      paymentTotalSatang: 123,
+      chargedFeeSatang: 1,
+      chargedTaxSatang: 1,
+      paymentTotalSatang: 125,
       providerReference: `${provider.referencePrefix}-1`,
       qrPayload: 'qr-1',
     });
     expect(second.id).not.toBe(first.id);
     expect(provider.requests.map(({ paymentTotalSatang }) => paymentTotalSatang)).toEqual([
-      positiveSatang(123),
-      positiveSatang(456),
+      positiveSatang(125),
+      positiveSatang(461),
     ]);
 
     const replay = await initiateTopUp(
@@ -153,6 +155,39 @@ describe('Top-up application services', () => {
     ]);
   });
 
+  it('calculates 0.8% PromptPay fee and 7% VAT matching the Xendit structure', async () => {
+    const userId = await createMember('be113-xendit-pricing');
+
+    // For 500 THB (50,000 Satang)
+    // Fee: ceil(50,000 * 80 / 10,000) = 400 Satang (4.00 THB)
+    // VAT: ceil(400 * 700 / 10,000) = 28 Satang (0.28 THB)
+    // Total: 50,428 Satang (504.28 THB)
+    const quote500 = await quoteTopUp({
+      principalUserId: userId,
+      creditSatang: positiveSatang(50_000),
+    });
+    expect(quote500).toMatchObject({
+      creditSatang: 50_000,
+      chargedFeeSatang: 400,
+      chargedTaxSatang: 28,
+      paymentTotalSatang: 50_428,
+    });
+
+    // For 100 THB (10,000 Satang)
+    // Fee: ceil(10,000 * 80 / 10,000) = 80 Satang (0.80 THB)
+    // VAT: ceil(80 * 700 / 10,000) = 6 Satang (0.06 THB)
+    // Total: 10,086 Satang (100.86 THB)
+    const quote100 = await quoteTopUp({
+      principalUserId: userId,
+      creditSatang: positiveSatang(10_000),
+    });
+    expect(quote100).toMatchObject({
+      creditSatang: 10_000,
+      chargedFeeSatang: 80,
+      chargedTaxSatang: 6,
+      paymentTotalSatang: 10_086,
+    });
+  });
   it('consumes a quote only once and scopes ownership to the Member', async () => {
     const ownerId = await createMember('be113-owner');
     const otherId = await createMember('be113-other');
