@@ -1,6 +1,12 @@
 import { app } from '@/app';
+import { db, sql } from '@/database/client';
+import { authUser } from '@/database/schema/auth.schema';
+import { quest } from '@/database/schema/quest.schema';
+import { tag } from '@/database/schema/tag.schema';
+import { auth } from '@/modules/auth';
 
-import { describe, expect, it } from 'bun:test';
+import { eq, inArray } from 'drizzle-orm';
+import { describe, expect, it, spyOn } from 'bun:test';
 
 describe('Quest integration', () => {
   it.each([
@@ -237,5 +243,108 @@ describe('Quest integration', () => {
 
     expect(response.status).toBe(401);
     expect((await response.json()).error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('excludes the authenticated Hirer’s own QUEST_OPEN Quest from the v1 Board', async () => {
+    try {
+      await sql`select 1`;
+    } catch {
+      return;
+    }
+
+    const callerId = crypto.randomUUID();
+    const otherHirerId = crypto.randomUUID();
+    const tagId = crypto.randomUUID();
+    const ownQuestId = crypto.randomUUID();
+    const otherQuestId = crypto.randomUUID();
+    const fixturePrefix = `Board ownership ${crypto.randomUUID()}`;
+    let session: { mockRestore: () => void } | undefined;
+
+    try {
+      await db.insert(authUser).values([
+        {
+          id: callerId,
+          email: `${callerId}@kuquest.test`,
+          firstName: 'Board',
+          lastName: 'Caller',
+        },
+        {
+          id: otherHirerId,
+          email: `${otherHirerId}@kuquest.test`,
+          firstName: 'Other',
+          lastName: 'Hirer',
+        },
+      ]);
+      await db.insert(tag).values({ id: tagId, name: `${fixturePrefix} Tag` });
+      await db.insert(quest).values([
+        {
+          id: ownQuestId,
+          hirerId: callerId,
+          title: `${fixturePrefix} Own Quest`,
+          description: 'Owned by the authenticated Hirer',
+          condition: 'Complete the result',
+          mode: 'NO_CANDIDATE',
+          participation: 'SOLO',
+          questStatus: 'QUEST_OPEN',
+          rewardSatang: 100,
+          tagId,
+          headcount: 1,
+          startTime: new Date('2035-01-01T10:00:00.000Z'),
+          dueAt: new Date('2035-01-01T11:00:00.000Z'),
+        },
+        {
+          id: otherQuestId,
+          hirerId: otherHirerId,
+          title: `${fixturePrefix} Other Quest`,
+          description: 'Owned by another Hirer',
+          condition: 'Complete the result',
+          mode: 'NO_CANDIDATE',
+          participation: 'SOLO',
+          questStatus: 'QUEST_OPEN',
+          rewardSatang: 200,
+          tagId,
+          headcount: 1,
+          startTime: new Date('2035-01-01T11:00:00.000Z'),
+          dueAt: new Date('2035-01-01T12:00:00.000Z'),
+        },
+      ]);
+
+      session = spyOn(auth.api, 'getSession').mockImplementation(
+        (async ({ headers }: { headers: Headers }) => {
+          const memberId = headers.get('x-member-id') ?? callerId;
+          return { user: { id: memberId }, session: { userId: memberId } } as never;
+        }) as never
+      );
+
+      const query = `?q=${encodeURIComponent(fixturePrefix)}`;
+      const boardResponse = await app.handle(
+        new Request(`http://localhost/api/v1/quests${query}`, {
+          headers: { 'x-member-id': callerId },
+        })
+      );
+      expect(boardResponse.status).toBe(200);
+      const boardBody = (await boardResponse.json()) as {
+        success: true;
+        data: { items: Array<{ id: string }> };
+      };
+      expect(boardBody.data.items.map((item) => item.id)).toEqual([otherQuestId]);
+
+      const mineResponse = await app.handle(
+        new Request(`http://localhost/api/v1/quests/mine${query}`, {
+          headers: { 'x-member-id': callerId },
+        })
+      );
+      expect(mineResponse.status).toBe(200);
+      const mineBody = (await mineResponse.json()) as {
+        success: true;
+        data: { items: Array<{ id: string }> };
+      };
+      expect(mineBody.data.items.map((item) => item.id)).toEqual([ownQuestId]);
+    } finally {
+      session?.mockRestore();
+      await db.delete(quest).where(inArray(quest.id, [ownQuestId, otherQuestId]));
+      await db.delete(tag).where(eq(tag.id, tagId));
+      await db.delete(authUser).where(inArray(authUser.id, [callerId, otherHirerId]));
+    }
   });
 });
