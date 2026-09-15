@@ -1,9 +1,10 @@
-import type { StoredImage } from '@/shared/image-storage';
-import { createImageStorage } from '@/shared/image-storage';
+import type { StoredImage } from '@/shared/object-storage';
+import { createObjectStorage } from '@/shared/object-storage';
 
 export type StoredAvatar = StoredImage;
 
-export const avatarStorage = createImageStorage({
+export const avatarStorage = createObjectStorage({
+  policy: 'image-only',
   keyPrefix: 'avatars',
   logLabel: 'avatar-upload',
   emptyFileMessage: 'Avatar file is empty',

@@ -14,6 +14,7 @@ Behavioral guidelines to reduce common LLM coding mistakes ([source](https://git
 - No features beyond what was asked. No abstractions for single-use code. No unrequested "flexibility". No error handling for impossible scenarios.
 - 200 lines that could be 50 → rewrite it.
 - Ask: "Would a senior engineer call this overcomplicated?" If yes, simplify.
+- No speculative parameter optionality: do not add optional parameters (`param?: T`) with internal branching when zero callers supply them. If only one call site or mode exists, hard-code that behavior. An option earns its place only from a second real caller that provides it.
 
 **3. Surgical changes** — touch only what you must, clean up only your own mess.
 

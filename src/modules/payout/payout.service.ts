@@ -17,25 +17,22 @@ import {
   type PayoutDestinationForProvider,
 } from '@/modules/payout-destination';
 import {
-  MAX_WALLET_CAPACITY_SATANG,
-  MoneyDomainError,
-  positiveSatang,
-  satang,
-  signedSatang,
-  type Satang,
-} from '@/modules/wallet/wallet.money';
-import {
+  assertWalletOperationAllowed,
   completeMoneyCommand,
-  runMoneyCommand,
-} from '@/modules/wallet/wallet.money-command.service';
-import { assertWalletOperationAllowed } from '@/modules/wallet/wallet.status.service';
-import {
   createSealedLedgerTransactionInTransaction,
   ensureWalletInTransaction,
   getEffectiveMoneyPolicy,
+  MAX_WALLET_CAPACITY_SATANG,
+  MoneyDomainError,
+  positiveSatang,
+  runMoneyCommand,
+  satang,
+  sha256Json,
+  signedSatang,
   validateOperationAmount,
-} from '@/modules/wallet/wallet.service';
-import type { WalletTransaction } from '@/modules/wallet/wallet.service';
+  type Satang,
+  type WalletTransaction,
+} from '@/modules/wallet';
 
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 
@@ -111,14 +108,6 @@ export type Payout = {
   finalLedgerTransactionId: string | null;
   createdAt: Date;
   updatedAt: Date;
-};
-
-const sha256Json = async (value: object) => {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value))
-  );
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
 const validateTotal = (values: number[]) => {

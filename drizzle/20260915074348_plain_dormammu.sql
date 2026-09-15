@@ -1,0 +1,6 @@
+ALTER TABLE "payment_money_policy_revisions" DROP CONSTRAINT "payment_money_policy_rates_check";--> statement-breakpoint
+ALTER TABLE "payment_money_policy_revisions" ADD COLUMN "top_up_provider_fee_bps" smallint DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "payment_money_policy_revisions" ADD CONSTRAINT "payment_money_policy_rates_check" CHECK ("payment_money_policy_revisions"."platform_fee_bps" BETWEEN 0 AND 10000 AND "payment_money_policy_revisions"."top_up_provider_fee_satang" >= 0 AND "payment_money_policy_revisions"."top_up_provider_fee_bps" BETWEEN 0 AND 10000 AND "payment_money_policy_revisions"."top_up_provider_tax_bps" BETWEEN 0 AND 10000 AND "payment_money_policy_revisions"."payout_provider_fee_satang" >= 0 AND "payment_money_policy_revisions"."payout_provider_tax_bps" BETWEEN 0 AND 10000);--> statement-breakpoint
+ALTER TABLE "payment_money_policy_revisions" DISABLE TRIGGER "payment_money_policy_immutable";--> statement-breakpoint
+UPDATE "payment_money_policy_revisions" SET "top_up_provider_fee_bps" = 80, "top_up_provider_tax_bps" = 700 WHERE "revision" = 1;--> statement-breakpoint
+ALTER TABLE "payment_money_policy_revisions" ENABLE TRIGGER "payment_money_policy_immutable";

@@ -13,7 +13,7 @@ import {
 } from './quest-admin.service';
 import type { AdminQuestSummaryResponse } from './quest-admin.service';
 import { terminateQuestInTransaction } from './quest-settlement.service';
-import type { QuestTransaction } from './quest-assignment.service';
+import type { QuestTransaction } from './quest-work-chat.port';
 import { isTerminalQuestStatus, questStatus, type QuestStatus } from './quest.contract';
 
 export const questAdminReasonCodes = ['POLICY_REVIEW', 'SAFETY_REVIEW'] as const;

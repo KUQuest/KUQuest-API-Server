@@ -416,4 +416,30 @@ describe('Wallet provisioning service', () => {
     expect(outcomes.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
     expect(outcomes.filter(({ status }) => status === 'rejected')).toHaveLength(1);
   });
+
+  it('ends a Money Policy window at its effectiveUntil instant', async () => {
+    const policy = await getEffectiveMoneyPolicy();
+    const revision = Math.floor(Math.random() * 1_000_000) + 2_000_000;
+    const effectiveFrom = new Date(
+      Date.UTC(1900, 0, 1) + Math.floor(Math.random() * 3_000_000_000_000)
+    );
+    const effectiveUntil = new Date(effectiveFrom.getTime() + 1_000);
+    const id = crypto.randomUUID();
+    await db.insert(paymentMoneyPolicyRevision).values({
+      ...policy,
+      id,
+      revision,
+      reason: 'boundary test',
+      effectiveFrom,
+      effectiveUntil,
+    });
+
+    // Money Policy revisions are immutable, so the historic window stays behind;
+    // its random 1900-era range cannot overlap the live policy.
+    const lastCoveredInstant = new Date(effectiveUntil.getTime() - 1);
+    expect((await getEffectiveMoneyPolicy(lastCoveredInstant)).id).toBe(id);
+    await expect(getEffectiveMoneyPolicy(effectiveUntil)).rejects.toThrow(
+      /No Money Policy is effective/
+    );
+  });
 });

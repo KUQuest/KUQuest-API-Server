@@ -11,6 +11,42 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 ## Entries
 
+### 2026-09-15 — Pin a constant revision for unversioned Admin Action resources
+
+**What happened.** When routing Admin Wallet status updates through `walletAdminActionService.executeCommand`, an implementer added an optional `expectedTimestamp?: Date` parameter with branching logic in `prepare` and `apply`. The parameter had no callers, and using `updatedAt` for the request revision would have broken idempotent replays because mutating `updatedAt` on freeze causes `ADMIN_ACTION_KEY_REUSED` on replay.
+**Root cause.** Designing for speculative future client timestamps instead of recognizing that unversioned resources need a constant revision sentinel for stable request hashing.
+**Rule.** When executing an `AdminAction` command against an unversioned resource, pin a constant revision (`expectedVersion: 1`). Do not introduce optional timestamp or version parameters without an existing client that supplies them.
+
+### 2026-09-15 — Prove a barrel cycle before falling back to internal module paths
+
+**What happened.** An implementer imported Admin Action dependencies from `@/modules/admin/admin-action.service` and `admin-action.policy` rather than the `@/modules/admin` barrel due to an unverified concern about circular dependencies with `@/modules/wallet`. Standards review flagged it as a hard violation of `CODESTYLES.md`, and testing proved the barrel import compiled cleanly with zero cycles.
+**Root cause.** Speculative fear of barrel cycles led to an architectural boundary violation without checking if a cycle actually existed.
+**Rule.** Always test barrel imports (`bun run typecheck` + `bun test`) before falling back to internal module paths. Only use deep imports when an actual cycle occurs, and document an explicit exception in a guard test.
+
+### 2026-09-15 — Land the shared module before you dispatch its consumers
+
+**What happened.** A shared storage contract was written in the batch context as a TypeScript block, and four implementer subagents were dispatched. Three subagents reported phantom LSP errors waiting for the shared module to appear on disk, and one ran 18 minutes while negotiating typing deviations over `hub` messages.
+**Root cause.** A contract in prose cannot be compiled against. Consumers work blind until the producer writes the file, so interface and type mismatches surface late.
+**Rule.** Land the shared module with one compiling call site or stub before you dispatch its consumers. Do not dispatch producers and consumers in the same concurrent batch when the contract does not yet compile on disk.
+
+### 2026-09-15 — Derive a subagent's Target list mechanically from search output
+
+**What happened.** An implementer task list retyped a 20-entry grep search result into four prose Target lists. One source file (`src/modules/quest/quest-proof.service.ts`) was dropped during transcription and had to be patched inline mid-flight, while two test files not in any Target list were modified by agents repairing cascade errors.
+**Root cause.** Hand-typing file lists from search output drops files and leaves edge cases untracked.
+**Rule.** Derive each subagent's Target list mechanically from search results. When a batch partitions a search result across multiple agents, verify that the union of their Target lists equals the search result before dispatch.
+
+### 2026-09-15 — One edit call, two hunks: the second renumbers
+
+**What happened.** Two `CUT` operations in a single edit call against this ledger used ranges numbered on the snapshot the call received. The first cut shifted the file, so the second clipped the neighbouring entry's **Rule** line and left two stale lines dangling mid-entry. Only a `git diff` read before staging caught it; typecheck and the test suite cannot see prose.
+**Root cause.** In a multi-operation edit, each range resolves against the file as the previous operation left it, not as the call received it.
+**Rule.** Number each later hunk in one edit call against the file after the earlier hunks — or spend one call per hunk. After any multi-hunk edit to prose, read `git diff` before staging.
+
+### 2026-09-15 — Never precompute an Issue number
+
+**What happened.** The branch was named `refactor/545-*` and the claim API pointed at Issue 545 before the Issue existed; `gh issue create` returned #546. The cost was a branch rename and an assign call against a number that did not exist.
+**Root cause.** The next issue number was guessed from memory instead of read from the tool that mints it.
+**Rule.** Create the Issue first, read its number from the tool response, then claim it and name the branch from that response.
+
 ### 2026-09-14 — A raw `sql` template cannot bind a `Date`
 
 **What happened.** The first draft of `readKeysetPage` compared `date_trunc('milliseconds', ${anchor.time.column}) = ${new Date(cursor.startTime)}` inside a raw `sql` template. TypeScript accepted it, and the first test run died inside postgres.js with `ERR_INVALID_ARG_TYPE ... Received an instance of Date`, wrapped in a `DrizzleQueryError` that printed the SQL but not the cause.
@@ -27,13 +63,13 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 **What happened.** #438 fixed one list endpoint that compared a millisecond cursor against a microsecond `created_at`. #446 then fixed five more. A retrospective search for the pattern, instead of a ticket's file list, found five more live sites (Admin Finance, Admin Member, Admin Top-up, Admin Wallet, Admin Dispute queue), which became #537. Three tickets, one bug class, and the class stayed open through two of them.
 **Root cause.** Each ticket named files, so each run took the file list as the scope and never asked how many other sites held the same pattern.
-**Rule.** When a defect comes from a pattern rather than from one call site, search the repository for the pattern before you plan, and list every site in the ticket. Then close the class with a guard test that fails when a new site appears, on the `tests/modules/wallet/wallet.money-command.guard.test.ts` pattern: a `Bun.Glob` scan, a path allow-list with a reason per entry, and one `expect(offenders, report).toEqual([])`. A fix without a guard leaves the next site to a future retrospective.
+**Rule.** When a defect comes from a pattern rather than from one call site, search the repository for the pattern before you plan, and list every site in the ticket. The search includes a module's own internal consumers, not only the files the ticket blames — the import-hub review named twelve importers of the Work Chat port and the repo-wide search found sixteen, four of them v1's own siblings (#546). Then close the class with a guard test that fails when a new site appears, on the `tests/modules/wallet/wallet.money-command.guard.test.ts` pattern: a `Bun.Glob` scan, a path allow-list with a reason per entry, and one `expect(offenders, report).toEqual([])`. A fix without a guard leaves the next site to a future retrospective.
 
 ### 2026-09-14 — A green test run does not prove the types compile
 
 **What happened.** A batch contract told four subagents to read Wallet balances through the `getWallet` verb. Each ran its own test files green and reported success. `bun check` then failed with 24 `TS2769` errors across seven files: `getWallet` brands each balance as `Satang` (`number & { __brand: 'Satang' }`), and `expect(balance).toBe(before + 400)` cannot compile against a branded type. The repair was a new fixture plus a mechanical pass over seven files.
 **Root cause.** A brand is erased at runtime, so the behaviour a test asserts passes while the type fails. The subagents ran only `bun test`, and a language-server check reported clean on a stale buffer.
-**Rule.** A subagent that changes code runs `bun run typecheck` before it reports, not only its own test files: the whole-repository check costs about 10 seconds. Prove a shared contract with one compiling call site before you dispatch agents onto it. A domain verb is the first choice for a test to call, and a branded return type is the reason it can lose to a fixture that returns plain numbers.
+**Rule.** A subagent that changes code runs `bun run typecheck` before it reports, not only its own test files: the whole-repository check costs about 10 seconds. A domain verb is the first choice for a test to call, and a branded return type is the reason it can lose to a fixture that returns plain numbers.
 
 ### 2026-09-14 — Dispatch subagents into the checkout they already inhabit
 
@@ -103,7 +139,7 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 **What happened.** Two `sleep 90; gh pr checks` calls spent about four minutes of wall time, then two more `gh run view --log-failed` calls read the failures.
 **Root cause.** A sleep guesses the run length, and a passing summary line still needs a second call for the failing log.
-**Rule.** Watch a run with the `github` device `run_watch` operation. It follows the run, stops at the first failing job, and saves the full log to an artifact.
+**Rule.** Follow the run until completion; never poll with `sleep`. Watch with `gh pr checks <number> --watch` or the `github` device `run_watch` operation. Both stream progress and stop on settlement.
 
 ### 2026-09-13 — Audit the index, not the working tree
 

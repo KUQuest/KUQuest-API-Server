@@ -3,7 +3,8 @@ import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 
 import type { QuestAssignmentParams } from './quest-assignment.schema';
-import { joinNoCandidateQuest, WorkChatTransitionError } from './quest-assignment.service';
+import { joinNoCandidateQuest } from './quest-assignment.service';
+import { WorkChatTransitionError } from './quest-work-chat.port';
 import { requireQuestCommandId } from './quest-command.controller';
 
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {

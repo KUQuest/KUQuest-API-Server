@@ -9,9 +9,9 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import type { QuestWorkChatMembershipTransition } from '@/modules/quest';
+import { workChatMembershipWriter } from '@/modules/work-chat';
 import {
   ensureInitialMoneyPolicy,
   ensureWallet,
@@ -50,7 +50,6 @@ const applyQuestWorkChatTransition = mock(
     outcome: 'APPLIED' as const,
   })
 );
-const successfulWorkChatWriter = { applyQuestTransition: applyQuestWorkChatTransition };
 
 const request = (
   method: string,
@@ -140,11 +139,12 @@ beforeAll(async () => {
 
 beforeEach(() => {
   applyQuestWorkChatTransition.mockClear();
-  configureQuestWorkChatMembershipWriter(successfulWorkChatWriter);
+  spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+    applyQuestWorkChatTransition
+  );
 });
 
 afterEach(() => {
-  configureQuestWorkChatMembershipWriter(undefined);
   mock.restore();
 });
 
@@ -346,10 +346,8 @@ describe('Quest terminal settlement HTTP contract', () => {
       spending: beforeWallet.spendingBalanceSatang,
       reserved: beforeWallet.fundingReservedSatang,
     };
-    configureQuestWorkChatMembershipWriter({
-      applyQuestTransition: async () => {
-        throw new Error('chat unavailable');
-      },
+    spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(async () => {
+      throw new Error('chat unavailable');
     });
     const response = await request('POST', `/api/v1/quests/${questId}/cancel`, hirerId, undefined, {
       'idempotency-key': 'be184-chat-failure',

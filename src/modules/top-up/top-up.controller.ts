@@ -155,6 +155,24 @@ export const getTopUpController = async ({
   }
 };
 
+export const simulateTopUpController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: TopUpParams }): Promise<ApiResponse> => {
+  try {
+    const simulation = await simulateTopUpPayment(session.user.id, params.topUpId);
+    return apiSuccess({
+      ...(await serializeTopUp(simulation.topUp)),
+      simulated: true,
+      callbackReceived: simulation.callbackReceived,
+      reconciliationUsed: simulation.reconciliationUsed,
+    });
+  } catch (error) {
+    return mapFinanceError(set, error);
+  }
+};
+
 export const listTopUpStatusHistoryController = async ({
   params,
   session,

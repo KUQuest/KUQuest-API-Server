@@ -14,12 +14,9 @@ import {
 } from '@/database/schema/quest.schema';
 import { MoneyDomainError, satang, type Satang } from '@/modules/wallet';
 
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 
-import {
-  requireQuestWorkChatMembershipWriter,
-  WorkChatTransitionError,
-} from './quest-assignment.service';
+import { applyQuestStateTransition } from './quest-transition.service';
 import {
   platformFeeForQuest,
   readQuestEscrow,
@@ -27,9 +24,16 @@ import {
   settleQuestWorkers,
 } from './quest-escrow.service';
 import { assignmentStatus, questStatus, teamStatus, type QuestStatus } from './quest.contract';
-import type { QuestTransaction } from './quest-assignment.service';
+import {
+  defaultQuestWorkChatMembershipWriter,
+  WorkChatTransitionError,
+  type QuestTransaction,
+} from './quest-work-chat.port';
 import { hasPendingQuestV2EditRequest } from './quest-v2-edit.service';
-import type { InactiveAssignmentStatus } from './quest-work-chat.contract';
+import type {
+  InactiveAssignmentStatus,
+  QuestWorkChatMembershipTransition,
+} from './quest-work-chat.contract';
 
 export type QuestSettlementOutcome =
   | {
@@ -220,57 +224,56 @@ const selectedTeamLeader = async (
   return team?.leaderId ?? null;
 };
 
-const terminalChat = async (
-  tx: QuestTransaction,
+const terminalChatEntry = (
   current: { id: string; hirerId: string },
   status: 'QUEST_COMPLETED' | 'QUEST_CANCELLED' | 'QUEST_FAILED',
   commandId: string,
   now: Date,
   actorId: string | null = current.hirerId
-) => {
-  const writer = requireQuestWorkChatMembershipWriter();
-  try {
-    await writer.applyQuestTransition(tx, {
-      producer: 'QUEST_SETTLEMENT',
-      type: 'questBecameReadOnly',
-      commandId,
-      eventId: commandId,
-      questId: current.id,
-      actorId,
-      occurredAt: now.toISOString(),
-      questStatus: status,
-      readOnlyAt: now.toISOString(),
-    });
-  } catch (cause) {
-    throw new WorkChatTransitionError(cause);
-  }
-};
+): QuestWorkChatMembershipTransition => ({
+  producer: 'QUEST_SETTLEMENT',
+  type: 'questBecameReadOnly',
+  commandId,
+  eventId: commandId,
+  questId: current.id,
+  actorId,
+  occurredAt: now.toISOString(),
+  questStatus: status,
+  readOnlyAt: now.toISOString(),
+});
 
-const inactiveWorkersChat = async (
+const inactiveWorkerEntries = (
+  current: { id: string },
+  workers: { id: string; workerId: string }[],
+  status: InactiveAssignmentStatus,
+  now: Date,
+  actorId: string | null
+): QuestWorkChatMembershipTransition[] =>
+  workers.map((worker) => ({
+    producer: 'QUEST_SETTLEMENT',
+    type: 'workerBecameInactive',
+    commandId: worker.id,
+    eventId: worker.id,
+    questId: current.id,
+    actorId,
+    occurredAt: now.toISOString(),
+    assignmentId: worker.id,
+    workerId: worker.workerId,
+    assignmentStatus: status,
+    leftAt: now.toISOString(),
+  }));
+
+const applyInactiveWorkersChat = async (
   tx: QuestTransaction,
   current: { id: string },
   workers: { id: string; workerId: string }[],
   status: InactiveAssignmentStatus,
   now: Date,
   actorId: string | null
-): Promise<void> => {
-  const writer = requireQuestWorkChatMembershipWriter();
+) => {
   try {
-    for (const worker of workers) {
-      await writer.applyQuestTransition(tx, {
-        producer: 'QUEST_SETTLEMENT',
-        type: 'workerBecameInactive',
-        commandId: worker.id,
-        eventId: worker.id,
-        questId: current.id,
-        actorId,
-        occurredAt: now.toISOString(),
-        assignmentId: worker.id,
-        workerId: worker.workerId,
-        assignmentStatus: status,
-        leftAt: now.toISOString(),
-      });
-    }
+    for (const entry of inactiveWorkerEntries(current, workers, status, now, actorId))
+      await defaultQuestWorkChatMembershipWriter.applyQuestTransition(tx, entry);
   } catch (cause) {
     throw new WorkChatTransitionError(cause);
   }
@@ -360,11 +363,13 @@ const completeInTransaction = async (
         eq(questAssignment.assignmentStatus, assignmentStatus.active)
       )
     );
-  await tx
-    .update(quest)
-    .set({ questStatus: questStatus.completed, version: sql`${quest.version} + 1`, updatedAt: now })
-    .where(eq(quest.id, questId));
-  await terminalChat(tx, current, questStatus.completed, commandId, now);
+  await applyQuestStateTransition(tx, {
+    questId,
+    from: current.questStatus,
+    to: questStatus.completed,
+    now,
+    workChat: [terminalChatEntry(current, questStatus.completed, commandId, now)],
+  });
   const result: CommandResult = {
     questStatus: questStatus.completed,
     outcome: 'COMPLETED',
@@ -692,7 +697,7 @@ export const settleProofFreeQuestV2InTransaction = async (
       );
     const remainingWorkers = await activeAssignments(tx, questId);
     if (remainingWorkers.length > 0) {
-      await inactiveWorkersChat(
+      await applyInactiveWorkersChat(
         tx,
         current,
         [assignment],
@@ -718,15 +723,13 @@ export const settleProofFreeQuestV2InTransaction = async (
         eq(questAssignment.assignmentStatus, assignmentStatus.active)
       )
     );
-  await tx
-    .update(quest)
-    .set({
-      questStatus: questStatus.completed,
-      version: sql`${quest.version} + 1`,
-      updatedAt: now,
-    })
-    .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.inProgress)));
-  await terminalChat(tx, current, questStatus.completed, commandId, now);
+  await applyQuestStateTransition(tx, {
+    questId,
+    from: current.questStatus,
+    to: questStatus.completed,
+    now,
+    workChat: [terminalChatEntry(current, questStatus.completed, commandId, now)],
+  });
   return {
     questStatus: questStatus.completed,
     outcome: 'COMPLETED',
@@ -926,19 +929,17 @@ export const settleApprovedQuestV2ProofInTransaction = async (
           'Quest Escrow does not match the completion payout.'
         );
       }
-      await tx
-        .update(quest)
-        .set({
-          questStatus: questStatus.completed,
-          version: sql`${quest.version} + 1`,
-          updatedAt: now,
-        })
-        .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.inProgress)));
-      await terminalChat(tx, current, questStatus.completed, commandId, now, actorId);
+      await applyQuestStateTransition(tx, {
+        questId,
+        from: current.questStatus,
+        to: questStatus.completed,
+        now,
+        workChat: [terminalChatEntry(current, questStatus.completed, commandId, now, actorId)],
+      });
       resultingQuestStatus = questStatus.completed;
     } else {
       const completedWorkers = workers.filter(({ id }) => completedAssignmentIds.includes(id));
-      await inactiveWorkersChat(
+      await applyInactiveWorkersChat(
         tx,
         current,
         completedWorkers,
@@ -1008,17 +1009,16 @@ export const failQuestV2InTransaction = async (
     };
   }
 
-  await inactiveWorkersChat(tx, current, affected, assignmentStatus.incomplete, now, actorId);
-  await tx
-    .update(quest)
-    .set({
-      questStatus: questStatus.failed,
-      failedAt: now,
-      version: sql`${quest.version} + 1`,
-      updatedAt: now,
-    })
-    .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.inProgress)));
-  await terminalChat(tx, current, questStatus.failed, commandId, now, actorId);
+  await applyQuestStateTransition(tx, {
+    questId,
+    from: current.questStatus,
+    to: questStatus.failed,
+    now,
+    workChat: [
+      ...inactiveWorkerEntries(current, affected, assignmentStatus.incomplete, now, actorId),
+      terminalChatEntry(current, questStatus.failed, commandId, now, actorId),
+    ],
+  });
   return {
     questStatus: questStatus.failed,
     incompleteAssignmentIds: affected.map(({ id }) => id),
@@ -1075,31 +1075,22 @@ export const failQuestInTransaction = async (
           eq(questAssignment.assignmentStatus, assignmentStatus.active)
         )
       );
-    await inactiveWorkersChat(tx, current, active, assignmentStatus.incomplete, now, actorId);
   }
 
-  const [updated] = await tx
-    .update(quest)
-    .set({
-      questStatus: questStatus.failed,
-      failedAt: now,
-      version: sql`${quest.version} + 1`,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(quest.id, questId),
-        inArray(quest.questStatus, [
-          questStatus.inProgress,
-          questStatus.submitted,
-          questStatus.rework,
-        ])
-      )
-    )
-    .returning({ id: quest.id });
-  if (!updated) return { questStatus: questStatus.failed, incompleteAssignmentIds: [] };
+  const applied = await applyQuestStateTransition(tx, {
+    questId,
+    from: current.questStatus,
+    to: questStatus.failed,
+    now,
+    workChat: [
+      ...(active.length > 0
+        ? inactiveWorkerEntries(current, active, assignmentStatus.incomplete, now, actorId)
+        : []),
+      terminalChatEntry(current, questStatus.failed, commandId, now, actorId),
+    ],
+  });
+  if (!applied) return { questStatus: questStatus.failed, incompleteAssignmentIds: [] };
 
-  await terminalChat(tx, current, questStatus.failed, commandId, now, actorId);
   const completedAssignmentIds = new Set<string>();
   for (const proof of approvedProofs) {
     const settlement = await settleApprovedLegacyQuestProofAfterFailureInTransaction(
@@ -1320,25 +1311,16 @@ const applyV2CancellationInTransaction = async (
 
   const cancelledByUserId = hirerId;
   if (current.questStatus === questStatus.draft) {
-    await tx
-      .update(quest)
-      .set({
-        questStatus: questStatus.cancelled,
-        cancelledAt: now,
-        cancelledByUserId,
-        cancelledByAdminId: null,
-        version: sql`${quest.version} + 1`,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(quest.id, current.id),
-          eq(quest.questStatus, questStatus.draft),
-          eq(quest.version, current.version)
-        )
-      );
+    await applyQuestStateTransition(tx, {
+      questId: current.id,
+      from: current.questStatus,
+      to: questStatus.cancelled,
+      now,
+      version: current.version,
+      columns: { cancelledByUserId, cancelledByAdminId: null },
+      workChat: [terminalChatEntry(current, questStatus.cancelled, commandId, now, hirerId)],
+    });
     await recordV2CancellationAudit(tx, current, [], hirerId, now);
-    await terminalChat(tx, current, questStatus.cancelled, commandId, now, hirerId);
     return {
       questStatus: questStatus.cancelled,
       outcome: 'CANCELLED',
@@ -1529,20 +1511,19 @@ const applyV2CancellationInTransaction = async (
         eq(questAssignment.assignmentStatus, assignmentStatus.active)
       )
     );
-  await inactiveWorkersChat(tx, current, workers, assignmentStatus.cancelled, now, hirerId);
-  await tx
-    .update(quest)
-    .set({
-      questStatus: questStatus.cancelled,
-      cancelledAt: now,
-      cancelledByUserId,
-      cancelledByAdminId: null,
-      version: sql`${quest.version} + 1`,
-      updatedAt: now,
-    })
-    .where(and(eq(quest.id, current.id), eq(quest.version, current.version)));
+  await applyQuestStateTransition(tx, {
+    questId: current.id,
+    from: current.questStatus,
+    to: questStatus.cancelled,
+    now,
+    version: current.version,
+    columns: { cancelledByUserId, cancelledByAdminId: null },
+    workChat: [
+      ...inactiveWorkerEntries(current, workers, assignmentStatus.cancelled, now, hirerId),
+      terminalChatEntry(current, questStatus.cancelled, commandId, now, hirerId),
+    ],
+  });
   await recordV2CancellationAudit(tx, current, workers, hirerId, now);
-  await terminalChat(tx, current, questStatus.cancelled, commandId, now, hirerId);
   return {
     questStatus: questStatus.cancelled,
     outcome: 'CANCELLED',
@@ -1631,23 +1612,15 @@ const cancelInTransaction = async (
     return { outcome: 'invalid-state' };
   }
   if (current.questStatus === questStatus.draft) {
-    await tx
-      .update(quest)
-      .set({
-        questStatus: questStatus.cancelled,
-        cancelledAt: now,
-        cancelledByUserId,
-        cancelledByAdminId,
-        version: sql`${quest.version} + 1`,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(quest.id, questId),
-          eq(quest.questStatus, questStatus.draft),
-          eq(quest.version, current.version)
-        )
-      );
+    await applyQuestStateTransition(tx, {
+      questId,
+      from: current.questStatus,
+      to: questStatus.cancelled,
+      now,
+      version: current.version,
+      columns: { cancelledByUserId, cancelledByAdminId },
+      workChat: [],
+    });
     return {
       questStatus: questStatus.cancelled,
       outcome: 'CANCELLED',
@@ -1731,19 +1704,18 @@ const cancelInTransaction = async (
         eq(questAssignment.assignmentStatus, assignmentStatus.active)
       )
     );
-  await inactiveWorkersChat(tx, current, workers, assignmentStatus.cancelled, now, chatActorId);
-  await tx
-    .update(quest)
-    .set({
-      questStatus: questStatus.cancelled,
-      cancelledAt: now,
-      cancelledByUserId,
-      cancelledByAdminId,
-      version: sql`${quest.version} + 1`,
-      updatedAt: now,
-    })
-    .where(and(eq(quest.id, questId), eq(quest.version, current.version)));
-  await terminalChat(tx, current, questStatus.cancelled, commandId, now, chatActorId);
+  await applyQuestStateTransition(tx, {
+    questId,
+    from: current.questStatus,
+    to: questStatus.cancelled,
+    now,
+    version: current.version,
+    columns: { cancelledByUserId, cancelledByAdminId },
+    workChat: [
+      ...inactiveWorkerEntries(current, workers, assignmentStatus.cancelled, now, chatActorId),
+      terminalChatEntry(current, questStatus.cancelled, commandId, now, chatActorId),
+    ],
+  });
   return {
     questStatus: questStatus.cancelled,
     outcome: 'CANCELLED',
@@ -1882,19 +1854,17 @@ const autoCancelInTransaction = async (
         eq(questAssignment.assignmentStatus, assignmentStatus.active)
       )
     );
-  await inactiveWorkersChat(tx, current, workers, assignmentStatus.cancelled, now, null);
-  await tx
-    .update(quest)
-    .set({
-      questStatus: questStatus.cancelled,
-      cancelledAt: now,
-      cancelledByUserId: null,
-      cancelledByAdminId: null,
-      version: sql`${quest.version} + 1`,
-      updatedAt: now,
-    })
-    .where(and(eq(quest.id, questId), eq(quest.questStatus, questStatus.open)));
-  await terminalChat(tx, current, questStatus.cancelled, commandId, now, null);
+  await applyQuestStateTransition(tx, {
+    questId,
+    from: current.questStatus,
+    to: questStatus.cancelled,
+    now,
+    columns: { cancelledByUserId: null, cancelledByAdminId: null },
+    workChat: [
+      ...inactiveWorkerEntries(current, workers, assignmentStatus.cancelled, now, null),
+      terminalChatEntry(current, questStatus.cancelled, commandId, now, null),
+    ],
+  });
   const result: CommandResult = {
     questStatus: questStatus.cancelled,
     outcome: 'CANCELLED',

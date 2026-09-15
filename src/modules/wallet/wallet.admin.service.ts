@@ -1,15 +1,19 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
+import { walletWallet, type WalletStatus } from '@/database/schema/wallet.schema';
 import {
-  walletLedgerAccount,
-  walletLedgerPosting,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
+  createAdminActionService,
+  type AdminActionReasonCatalog,
+  type AdminActionResult,
+} from '@/modules/admin';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, eq, ilike, or } from 'drizzle-orm';
 
+import { MoneyDomainError } from './wallet.money';
+import { walletProjectionMatchesLedger } from './wallet.service';
+import { changeWalletStatusInTransaction } from './wallet.status.service';
 import type {
   AdminWalletFullDetailResponse,
   AdminWalletListItem,
@@ -137,26 +141,12 @@ export const getAdminWalletDetail = async (
   }
 
   // Check projection reconciliation against ledger accounts
-  const accountRows = await db
-    .select({
-      type: walletLedgerAccount.type,
-      balanceSatang: sql<string>`coalesce(sum(${walletLedgerPosting.amountSatang}), 0)::text`,
-    })
-    .from(walletLedgerAccount)
-    .leftJoin(walletLedgerPosting, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
-    .where(eq(walletLedgerAccount.walletId, walletId))
-    .groupBy(walletLedgerAccount.type);
-
-  const ledgerBalances = new Map<string, number>();
-  for (const a of accountRows) {
-    ledgerBalances.set(a.type, Number(a.balanceSatang));
-  }
-
-  const matches =
-    row.spendingBalanceSatang === (ledgerBalances.get('SPENDING') ?? 0) &&
-    row.earningsBalanceSatang === (ledgerBalances.get('EARNINGS') ?? 0) &&
-    row.fundingReservedSatang === (ledgerBalances.get('FUNDING_RESERVED') ?? 0) &&
-    row.reservedForPayoutsSatang === (ledgerBalances.get('RESERVED_FOR_PAYOUTS') ?? 0);
+  const matches = await walletProjectionMatchesLedger(walletId, {
+    spendingBalanceSatang: row.spendingBalanceSatang,
+    earningsBalanceSatang: row.earningsBalanceSatang,
+    fundingReservedSatang: row.fundingReservedSatang,
+    reservedForPayoutsSatang: row.reservedForPayoutsSatang,
+  });
 
   const totalBalanceSatang =
     row.spendingBalanceSatang +
@@ -186,4 +176,113 @@ export const getAdminWalletDetail = async (
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+};
+
+export type WalletBalances = {
+  spendingBalanceSatang: number;
+  earningsBalanceSatang: number;
+  fundingReservedSatang: number;
+  reservedForPayoutsSatang: number;
+  walletStatus?: string;
+};
+
+export type SerializedWallet = WalletBalances & { walletStatus: string };
+
+export const serializeWallet = (
+  wallet: WalletBalances | { wallet: WalletBalances }
+): SerializedWallet => {
+  const target = 'wallet' in wallet && wallet.wallet ? wallet.wallet : (wallet as WalletBalances);
+  return {
+    spendingBalanceSatang: target.spendingBalanceSatang,
+    earningsBalanceSatang: target.earningsBalanceSatang,
+    fundingReservedSatang: target.fundingReservedSatang,
+    reservedForPayoutsSatang: target.reservedForPayoutsSatang,
+    walletStatus: 'walletStatus' in target ? String(target.walletStatus) : 'ACTIVE',
+  };
+};
+
+export const walletAdminActionCatalog: AdminActionReasonCatalog = {
+  version: 1,
+  actions: {
+    WALLET_FREEZE: { kind: 'COMMAND', requiresReason: false, allowedReasonCodes: [] },
+    WALLET_UNFREEZE: { kind: 'COMMAND', requiresReason: false, allowedReasonCodes: [] },
+    WALLET_SUSPEND: { kind: 'COMMAND', requiresReason: false, allowedReasonCodes: [] },
+    WALLET_CLOSE: { kind: 'COMMAND', requiresReason: false, allowedReasonCodes: [] },
+  },
+};
+
+const walletAdminActionService = createAdminActionService(walletAdminActionCatalog);
+
+const walletStatusActions: Record<WalletStatus, string> = {
+  ACTIVE: 'WALLET_UNFREEZE',
+  FROZEN: 'WALLET_FREEZE',
+  SUSPENDED: 'WALLET_SUSPEND',
+  CLOSED: 'WALLET_CLOSE',
+};
+
+export const actionForWalletStatus = (toStatus: WalletStatus): string =>
+  walletStatusActions[toStatus];
+
+export type ChangeWalletStatusAdminInput = {
+  adminId: string;
+  walletId: string;
+  toStatus: WalletStatus;
+  reason: string;
+  requestKey: string;
+};
+
+export const changeWalletStatusAdmin = async (
+  input: ChangeWalletStatusAdminInput
+): Promise<AdminActionResult<{ wallet: SerializedWallet }>> => {
+  const action = actionForWalletStatus(input.toStatus);
+  return walletAdminActionService.executeCommand<{ wallet: SerializedWallet }>({
+    adminId: input.adminId,
+    action,
+    resourceType: 'wallet',
+    resourceId: input.walletId,
+    requestKey: input.requestKey,
+    expectedVersion: 1,
+    request: {
+      toStatus: input.toStatus,
+      reason: input.reason,
+    },
+    metadata: {},
+    prepare: async (transaction) => {
+      const [current] = await transaction
+        .select({
+          id: walletWallet.id,
+          walletStatus: walletWallet.walletStatus,
+          updatedAt: walletWallet.updatedAt,
+        })
+        .from(walletWallet)
+        .where(eq(walletWallet.id, input.walletId))
+        .limit(1)
+        .for('update');
+      if (!current) throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
+      if (current.walletStatus === input.toStatus) {
+        throw new MoneyDomainError('WALLET_STATUS_UNCHANGED', 'Wallet already has this status.');
+      }
+      if (current.walletStatus === 'CLOSED') {
+        throw new MoneyDomainError('WALLET_STATUS_CLOSED', 'Closed Wallet status is terminal.');
+      }
+
+      return {
+        currentVersion: 1,
+        apply: async () => {
+          const { wallet: updated } = await changeWalletStatusInTransaction(transaction, {
+            walletId: input.walletId,
+            toStatus: input.toStatus,
+            reason: input.reason,
+            actorAdminId: input.adminId,
+          });
+
+          return {
+            resourceSummary: { wallet: serializeWallet(updated) },
+            resourceVersion: 2,
+            resourceTimestamp: null,
+          };
+        },
+      };
+    },
+  });
 };

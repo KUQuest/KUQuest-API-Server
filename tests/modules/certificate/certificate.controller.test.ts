@@ -8,7 +8,7 @@ import {
 } from '@/modules/certificate/certificate.controller';
 import * as certificateService from '@/modules/certificate/certificate.service';
 import { certificateStorage } from '@/modules/certificate/certificate.storage';
-import { ImageLinkUnavailableError, ImageUploadError } from '@/shared/image-storage';
+import { ImageLinkUnavailableError, ImageUploadError } from '@/shared/object-storage';
 
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
@@ -239,6 +239,7 @@ describe('setCertificateImage', () => {
     const storedImage = {
       bucket: 'kuquest',
       objectKey: `certificates/${studentAuthId}/image.png`,
+      fileName: 'image.png',
       contentType: 'image/png' as const,
       sizeBytes: 12,
     };
@@ -271,6 +272,7 @@ describe('setCertificateImage', () => {
     spyOn(certificateStorage, 'upload').mockResolvedValue({
       bucket: 'kuquest',
       objectKey: `certificates/${studentAuthId}/new.png`,
+      fileName: 'image.png',
       contentType: 'image/png',
       sizeBytes: 12,
     });
@@ -311,6 +313,7 @@ describe('setCertificateImage', () => {
     const storedImage = {
       bucket: 'kuquest',
       objectKey: `certificates/${studentAuthId}/image.png`,
+      fileName: 'image.png',
       contentType: 'image/png' as const,
       sizeBytes: 12,
     };

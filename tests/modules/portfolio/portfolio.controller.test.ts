@@ -12,7 +12,7 @@ import {
   ImageTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
-} from '@/shared/image-storage';
+} from '@/shared/object-storage';
 
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
@@ -107,12 +107,14 @@ describe('createOwnPortfolio', () => {
     const uploadedA = {
       bucket: 'kuquest',
       objectKey: `portfolio/${studentAuthId}/a.png`,
+      fileName: 'a.png',
       contentType: 'image/png' as const,
       sizeBytes: 12,
     };
     const uploadedB = {
       bucket: 'kuquest',
       objectKey: `portfolio/${studentAuthId}/b.png`,
+      fileName: 'b.png',
       contentType: 'image/png' as const,
       sizeBytes: 12,
     };
@@ -137,6 +139,7 @@ describe('createOwnPortfolio', () => {
     const uploadedA = {
       bucket: 'kuquest',
       objectKey: `portfolio/${studentAuthId}/a.png`,
+      fileName: 'a.png',
       contentType: 'image/png' as const,
       sizeBytes: 12,
     };
@@ -165,6 +168,7 @@ describe('createOwnPortfolio', () => {
     const uploadedA = {
       bucket: 'kuquest',
       objectKey: `portfolio/${studentAuthId}/a.png`,
+      fileName: 'a.png',
       contentType: 'image/png' as const,
       sizeBytes: 12,
     };
@@ -301,6 +305,7 @@ describe('deleteOwnPortfolio', () => {
 const storedImage = {
   bucket: 'kuquest',
   objectKey: 'portfolio/student-1/new.png',
+  fileName: 'new.png',
   contentType: 'image/png' as const,
   sizeBytes: 12,
 };

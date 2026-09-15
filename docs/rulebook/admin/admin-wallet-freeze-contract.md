@@ -5,6 +5,10 @@ Part of the [Admin Rulebook](admin-rulebook.md). Defines accepted policy for Adm
 ## Statuses and blocked operations
 
 - Admin may set a Student's Wallet status to `FROZEN` or `SUSPENDED`. Both operations require a non-empty reason and a non-blank `Idempotency-Key`.
+- **AdminAction executor**: Admin freezing, suspending, lifting, or closing a Student's Wallet runs through the central `AdminAction` executor in the same database transaction as the Wallet status change.
+- **Recorded actions**: `WALLET_FREEZE` (to `FROZEN`), `WALLET_UNFREEZE` (to `ACTIVE`), `WALLET_SUSPEND` (to `SUSPENDED`), and `WALLET_CLOSE` (to `CLOSED`).
+- **Required inputs**: Every operation sends an `Idempotency-Key` header and a non-empty human reason.
+- **Idempotent replay**: Re-sending the same request with the same `Idempotency-Key` returns the cached result. Reusing an `Idempotency-Key` with a different request payload is rejected with `ADMIN_ACTION_KEY_REUSED`.
 - **Blocked operations**: A non-active Wallet (`FROZEN`, `SUSPENDED`, or `CLOSED`) blocks that Student from starting any new commitment:
   - Top-up
   - Payout request

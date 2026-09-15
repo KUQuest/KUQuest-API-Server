@@ -23,8 +23,8 @@ import {
   ImageLinkUnavailableError,
   ImageUploadError,
   UnsupportedImageTypeError,
-  createImageStorage,
-} from '@/shared/image-storage';
+  createObjectStorage,
+} from '@/shared/object-storage';
 
 import { Elysia } from 'elysia';
 import { eq, inArray } from 'drizzle-orm';
@@ -137,7 +137,7 @@ const postLegacyImages = (questId: string, files: File[], cookie = sessionCookie
 const makeImageFile = (name: string, bytes: number[] = [1, 2, 3]) =>
   new File([new Uint8Array(bytes)], name, { type: 'image/png' });
 
-const validatingStorage = createImageStorage({
+const validatingStorage = createObjectStorage({
   keyPrefix: 'test-quest-v2-validation',
   bucket: 'test-bucket',
   client: {
@@ -235,6 +235,7 @@ describe('Quest API v2 Quest Image integration', () => {
       objectKey: `quests/v2/${hirerId}/${image.name}`,
       contentType: 'image/png',
       sizeBytes: image.size,
+      fileName: image.name,
     }));
     const linkForWithExpiry = spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation(
       (image) => ({
@@ -326,6 +327,7 @@ describe('Quest API v2 Quest Image integration', () => {
         objectKey: `quests/v2/${hirerId}/${image.name}`,
         contentType: 'image/png',
         sizeBytes: image.size,
+        fileName: image.name,
       };
     });
     spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation((image) => ({
@@ -368,6 +370,7 @@ describe('Quest API v2 Quest Image integration', () => {
       objectKey: `quests/v2/${hirerId}/presign-failure.png`,
       contentType: 'image/png' as const,
       sizeBytes: 3,
+      fileName: 'presign-failure.png',
     };
     spyOn(questV2Storage, 'upload').mockResolvedValue(uploaded);
     const deleteObject = spyOn(questV2Storage, 'delete').mockResolvedValue();
@@ -417,6 +420,7 @@ describe('Quest API v2 Quest Image integration', () => {
       objectKey: `quests/v2/${hirerId}/${uploadedImage.name}`,
       contentType: 'image/png',
       sizeBytes: uploadedImage.size,
+      fileName: uploadedImage.name,
     }));
     spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation((storedImage) => ({
       url: `https://storage.test/${storedImage.objectKey}`,
@@ -467,6 +471,7 @@ describe('Quest API v2 Quest Image integration', () => {
       objectKey: `quests/v2/${hirerId}/${image.name}`,
       contentType: 'image/png',
       sizeBytes: image.size,
+      fileName: image.name,
     }));
     const linkForWithExpiry = spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation(
       (image) => ({
@@ -538,6 +543,7 @@ describe('Quest API v2 Quest Image integration', () => {
       objectKey: `quests/v2/${hirerId}/delete-presign-failure.png`,
       contentType: 'image/png' as const,
       sizeBytes: 3,
+      fileName: 'delete-presign-failure.png',
     };
     const secondUploaded = {
       ...firstUploaded,
@@ -610,6 +616,7 @@ describe('Quest API v2 Quest Image integration', () => {
       objectKey: `quests/v2/${hirerId}/${image.name}`,
       contentType: 'image/png',
       sizeBytes: image.size,
+      fileName: image.name,
     }));
     spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation((image) => ({
       url: `https://storage.test/${image.objectKey}`,
@@ -640,6 +647,7 @@ describe('Quest API v2 Quest Image integration', () => {
       objectKey: `quests/v2/${hirerId}/first.png`,
       contentType: 'image/png' as const,
       sizeBytes: 3,
+      fileName: 'first.png',
     };
     spyOn(questV2Storage, 'upload')
       .mockResolvedValueOnce(first)
@@ -677,6 +685,7 @@ describe('Quest API v2 Quest Image integration', () => {
       objectKey: `quests/v2/${hirerId}/orphan.png`,
       contentType: 'image/png' as const,
       sizeBytes: 3,
+      fileName: 'orphan.png',
     };
     spyOn(questV2Storage, 'upload')
       .mockResolvedValueOnce(first)
@@ -717,6 +726,7 @@ describe('Quest API v2 Quest Image integration', () => {
       objectKey: `quests/v2/${hirerId}/manifest.png`,
       contentType: 'image/png' as const,
       sizeBytes: 3,
+      fileName: 'manifest.png',
     };
     spyOn(questV2Storage, 'upload')
       .mockResolvedValueOnce(first)
@@ -919,6 +929,7 @@ describe('Quest API v2 Quest Image integration', () => {
       objectKey: `quests/v2/${hirerId}/ownership.png`,
       contentType: 'image/png',
       sizeBytes: 3,
+      fileName: 'ownership.png',
     });
     spyOn(questV2Storage, 'linkForWithExpiry').mockImplementation((image) => ({
       url: `https://storage.test/${image.objectKey}`,
@@ -1015,6 +1026,7 @@ describe('Quest API v2 Quest Image integration', () => {
         objectKey: `quests/${hirerId}/v1-contract.png`,
         contentType: 'image/png' as const,
         sizeBytes: 3,
+        fileName: 'v1-contract.png',
       };
       const upload = spyOn(questStorage, 'upload').mockResolvedValue(stored);
       spyOn(questStorage, 'linkFor').mockReturnValue('https://storage.test/v1-link');
@@ -1045,12 +1057,14 @@ describe('Quest API v2 Quest Image integration', () => {
         objectKey: `quests/${hirerId}/v1-isolation.png`,
         contentType: 'image/png' as const,
         sizeBytes: 3,
+        fileName: 'v1-isolation.png',
       };
       const v2Stored = {
         bucket: 'test-bucket',
         objectKey: `quests/v2/${hirerId}/v2-isolation.png`,
         contentType: 'image/png' as const,
         sizeBytes: 3,
+        fileName: 'v2-isolation.png',
       };
       const v1Upload = spyOn(questStorage, 'upload').mockResolvedValue(v1Stored);
       spyOn(questStorage, 'linkFor').mockReturnValue('https://storage.test/v1-isolation');

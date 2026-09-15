@@ -37,6 +37,13 @@
           branch develop · HEAD 4ec1a6d · 2026-09-13 · refresh of
           <span class="text-slate-800">architecture-review-20260912-235933</span>
         </p>
+        <p class="mt-1 text-sm text-slate-500 font-mono">
+          updated 2026-09-15 · develop
+          <span class="text-slate-800">8530ccb</span> — candidate
+          <a href="#c6" class="text-slate-800 underline">6</a> shipped in PR #547, candidate
+          <a href="#c12" class="text-slate-800 underline">12</a> in PR #542; shipped sections
+          describe the landed tree
+        </p>
 
         <div class="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
           <div class="flex items-center gap-2">
@@ -81,6 +88,35 @@
         <div class="mt-3 rounded border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm">
           <span class="lbl text-emerald-700">since the last review</span>
           <ul class="mt-1 space-y-0.5 text-slate-700">
+            <li>
+              Candidate 6 shipped: PR #547 (merge 7f7e096) re-pointed sixteen Work Chat port
+              importers to <span class="font-mono text-xs">quest-work-chat.port</span> and
+              deleted the re-export block. The review named twelve importers; the live search
+              found sixteen — the four extra were v1's own siblings.
+              <span class="font-mono text-xs">quest-assignment.service</span> v1 is now deletable
+              on its own schedule.
+            </li>
+            <li>
+              Candidate 12 shipped: PR #542 (merge 03379f0) put nine Admin list reads behind
+              <span class="font-mono text-xs">readKeysetPage</span> in
+              <span class="font-mono text-xs">src/shared/keyset-page.ts</span>. The review named
+              six; the pattern search found nine —
+              <span class="font-mono text-xs">quest-admin</span>,
+              <span class="font-mono text-xs">quest-dispute-admin</span> and
+              <span class="font-mono text-xs">quest-review</span> had joined since the counts were
+              taken.
+            </li>
+            <li>
+              A follow-up, PR #544 (merge c5fb86e), closed candidate 12's limit-drift class:
+              every query schema now caps limit at
+              <span class="font-mono text-xs">MAX_PAGE_LIMIT</span>, and a third guard in
+              <span class="font-mono text-xs">tests/shared/cursor.guard.test.ts</span> fails any
+              schema whose limit maximum is a numeric literal.
+            </li>
+            <li>
+              The open roadmap is filed: 4 → #550, 7 → #549, 11 → #548 (ready-for-agent); 3, 5,
+              8, 9, 13 → #551–#555 (needs-triage); 10 → #556 (wontfix).
+            </li>
             <li>
               Candidate 2 shipped: PR #475 landed the Quest Escrow seam (ADR-0030).
               <span class="font-mono text-xs">quest-escrow.service.ts</span> owns the five verbs,
@@ -284,6 +320,10 @@ flowchart LR
             still seed and assert wallet rows directly; the file inventory and the six missing
             fixture helpers are named in issue 497, with the decision in issue 489. The interface
             exists; the tests have not moved to it.
+            PR #540 (issue #539, merge 560f64e, 2026-09-14) landed the seam guard:
+            <span class="font-mono text-xs">quest.money-seam.guard.test.ts</span> fails any
+            Quest test that reads Quest money balances outside the wallet test fixtures — the
+            first slice of the issue-497 migration.
           </p>
         </article>
 
@@ -687,29 +727,26 @@ flowchart TB
         <article id="c6" class="scroll-mt-6">
           <h2 class="font-serif text-2xl">6 · Retire the legacy v1 module as an import hub</h2>
           <div class="mt-2 flex flex-wrap gap-2 text-xs">
-            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 font-medium"
-              >Strong</span
-            >
+            <span class="px-2 py-1 rounded bg-emerald-700 text-white font-medium">shipped</span>
             <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">in-process</span>
-            <span class="px-2 py-1 rounded bg-slate-800 text-white">live · mechanical</span>
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">PR #547 · 7f7e096</span>
           </div>
           <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
             <li>
-              quest-assignment.service.ts:330-336 (336) — re-exports the port and QuestTransaction
+              16 importers re-pointed to quest-work-chat.port — the review named twelve; the live
+              search found sixteen, four of them v1's own siblings (quest-candidate.controller ·
+              quest-candidate.service · quest-proof.controller · the mixed import in
+              quest-assignment.controller)
             </li>
             <li>
-              importers through v1: quest-settlement.service.ts:32-36 ·
-              quest-admin.command.service.ts:16 · quest-admin.service.ts:35 ·
-              quest-admin.controller.ts:11 · quest-review.service.ts:9 ·
-              quest-settlement.controller.ts:7
+              the re-export block (was :330-336) is deleted; quest-assignment.service keeps
+              requireQuestWorkChatMembershipWriter and WorkChatTransitionError for its own logic
             </li>
             <li>
-              6 test files: quest-admin-moderation:28 · quest-assignment-v2:14 · quest-assignment:8
-              · quest-lifecycle.worker:13 · quest-settlement:17 · quest-underfilled-v2:28
+              only v1 consumer left: joinNoCandidateQuest in quest-assignment.controller — the kept
+              v1-route edge
             </li>
-            <li>
-              src/modules/quest/index.ts:1-7 — already re-exports the same four names from the port
-            </li>
+            <li>no guard test needed: any future import of the port names from v1 fails typecheck</li>
           </ul>
 
           <div class="mt-5 grid md:grid-cols-2 gap-4">
@@ -771,6 +808,12 @@ flowchart LR
           <p class="mt-2 text-sm">
             <span class="lbl text-slate-400">deletion test</span> the re-export just moves imports;
             delete it.
+          </p>
+          <p class="mt-1 text-sm">
+            <span class="lbl text-slate-400">shipped</span> 2026-09-14 in PR #547 (merge
+            <span class="font-mono text-xs">7f7e096</span>) with no behaviour change;
+            <span class="font-mono text-xs">src/modules/quest/index.ts</span> already re-exported
+            the same five names from the port.
           </p>
         </article>
 
@@ -1396,20 +1439,29 @@ flowchart TB
         <article id="c12" class="scroll-mt-6">
           <h2 class="font-serif text-2xl">12 · One keyset read behind the Admin list reads</h2>
           <div class="mt-2 flex flex-wrap gap-2 text-xs">
-            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 font-medium"
-              >Strong</span
-            >
+            <span class="px-2 py-1 rounded bg-emerald-700 text-white font-medium">shipped</span>
             <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">in-process</span>
-            <span class="px-2 py-1 rounded bg-indigo-100 text-indigo-800">new</span>
+            <span class="px-2 py-1 rounded bg-slate-200 text-slate-700">PR #542 · 03379f0</span>
           </div>
           <ul class="mt-3 font-mono text-sm text-slate-600 space-y-0.5">
-            <li>admin-member.service.ts:48-105 (290) · wallet.admin.service.ts:47-98 (214)</li>
-            <li>admin-finance.service.ts:339-383 (745) · top-up.admin.service.ts:31-83 (109)</li>
             <li>
-              variants: payout.admin.service.ts:383-433 (434, MoneyDomainError) ·
-              admin-activity-log.service.ts:37-119 (125, CursorInputError)
+              src/shared/keyset-page.ts — readKeysetPage({ anchor: { time, id }, cursor, limit,
+              sort, where, read }) owns the anchor-row check, the row-wise boundary in both sorts,
+              the orderBy pair, the limit + 1 probe, the trim, hasNext and nextCursor
             </li>
-            <li>bypassed: src/shared/cursor.ts:23-39,51-60 (105) — parsePageLimit caps at 50</li>
+            <li>
+              nine list reads call it — the review named six; the pattern search found nine:
+              + quest-admin.service · quest-dispute-admin.service · quest-review.service
+            </li>
+            <li>
+              the four Admin schemas that had drifted to 100 (admin-finance · admin-member ·
+              top-up.admin · wallet.admin) declare MAX_PAGE_LIMIT; PR #544 then migrated the
+              remaining literal caps (thirteen 50s and the wallet 100) and added the guard
+            </li>
+            <li>
+              tests/shared/cursor.guard.test.ts — a second guard fails any anchor sub-select built
+              outside the reader; a third (PR #544) fails any numeric limit maximum in a schema
+            </li>
           </ul>
 
           <div class="mt-5 grid md:grid-cols-2 gap-4">
@@ -1465,7 +1517,7 @@ flowchart TB
               <p class="lbl text-slate-400 mb-3">after</p>
               <div style="height: 250px" class="flex flex-col gap-2">
                 <div class="border-2 border-slate-900 bg-white px-3 py-2 font-mono text-xs">
-                  keysetPage(table, cursorColumns, conditions, limit, sort)
+                  readKeysetPage({ anchor: { time, id }, cursor, limit, sort, where, read })
                 </div>
                 <div
                   class="deep border-2 border-slate-900 flex-1 p-3 text-[11px] text-slate-300 space-y-0.5 font-mono"
@@ -1476,7 +1528,7 @@ flowchart TB
                   <p>· limit clamp, probe, trim</p>
                   <p>· encode nextCursor</p>
                 </div>
-                <p class="text-[11px] text-slate-500">six Admin list reads shrink to filters.</p>
+                <p class="text-[11px] text-slate-500">nine Admin list reads shrink to filters.</p>
               </div>
             </div>
           </div>
@@ -1511,14 +1563,11 @@ flowchart TB
             is the proof that this is shared knowledge that leaked, not per-list logic.
           </p>
           <p class="mt-1 text-sm">
-            <span class="lbl text-slate-400">test surface</span> four of the six copies never assert
-            <span class="font-mono text-xs">nextCursor</span> at all (<span
-              class="font-mono text-xs"
-              >admin-member</span
-            >, <span class="font-mono text-xs">wallet.admin-list</span>,
-            <span class="font-mono text-xs">admin-finance</span>,
-            <span class="font-mono text-xs">top-up.admin</span>): the copied mechanics are untested
-            exactly where they were copied.
+            <span class="lbl text-slate-400">test surface</span>
+            <span class="font-mono text-xs">tests/shared/keyset-page.integration.test.ts</span>
+            walks pages at limit=1 over rows seeded inside one millisecond with a microsecond tie,
+            in both sorts, and covers the exact-boundary hasNext and the deleted-anchor cursor; the
+            per-copy assertion gap is moot now that the mechanics live once.
           </p>
         </article>
 
@@ -1629,7 +1678,7 @@ flowchart LR
       <section id="top-recommendation" class="border-t border-slate-300 pt-10">
         <h2 class="font-serif text-3xl">Top recommendation</h2>
         <div class="mt-4 rounded-xl border-2 border-slate-900 bg-white p-6">
-          <p class="lbl text-emerald-600 font-medium">candidate 2 shipped · next</p>
+          <p class="lbl text-emerald-600 font-medium">candidates 2 · 6 · 12 shipped · next</p>
           <a
             href="#c11"
             class="font-serif text-2xl underline decoration-emerald-500 decoration-2 underline-offset-4"
@@ -1646,18 +1695,21 @@ flowchart LR
           </p>
           <p class="mt-3 text-sm text-slate-500">
             Smaller starts, zero overlap:
-            <a href="#c6" class="underline">6 · retire the v1 import hub</a> is a mechanical
-            find-and-replace, and issue 497 moves candidate 2's twelve test files onto the fixture
-            seam.
+            <a href="#c6" class="underline">6 · retire the v1 import hub</a> shipped in PR #547
+            (2026-09-14), and issue 497 moves candidate 2's twelve test files onto the fixture seam
+            — its first slice, the money-seam guard, shipped in PR #540. Candidates
+            <a href="#c7" class="underline">7</a> and <a href="#c4" class="underline">4</a> are
+            filed as #549 and #550.
           </p>
         </div>
       </section>
 
       <footer class="pt-6 text-xs text-slate-400 font-mono">
-        Facts verified against develop at 4ec1a6d, 2026-09-13. Line counts from wc -l; call sites
-        from symbol search at this HEAD; churn from git log since 2026-08-20. Sections 4, 5, 7, 8,
-        9, 12 and 13 keep their 2026-09-12 line ranges; the format baseline moved those lines and
-        they were not re-walked.
+        Facts verified against develop at 4ec1a6d, 2026-09-13; updated 2026-09-15 at develop
+        8530ccb — candidates 6 and 12 shipped (PRs #547 and #542) and the follow-on PR #544 closed
+        the schema limit drift with a guard. Line counts from wc -l; call sites from symbol search
+        at this HEAD; churn from git log since 2026-08-20. Sections 4, 5, 7, 8, 9, 11 and 13 keep
+        their 2026-09-13 line ranges and counts; shipped sections describe the landed tree.
       </footer>
     </main>
   </body>

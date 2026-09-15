@@ -1,10 +1,8 @@
 export {
-  configureQuestWorkChatMembershipWriter,
-  getQuestWorkChatMembershipWriter,
-  requireQuestWorkChatMembershipWriter,
+  defaultQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
 } from './quest-work-chat.port';
-export type { QuestTransaction } from './quest-work-chat.port';
+export type { QuestTransaction, QuestWorkChatWriter } from './quest-work-chat.port';
 export type {
   AcceptedWorker,
   ApplyQuestWorkChatMembershipResult,

@@ -20,7 +20,6 @@ import {
 import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { editQuestV2 } from '@/modules/quest';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
 import type { QuestStatus } from '@/modules/quest/quest.contract';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 import {
@@ -38,7 +37,7 @@ import {
 import { randomUUID } from 'node:crypto';
 
 import { and, eq } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 
 let postgresAvailable = false;
 let adminCookie = '';
@@ -267,10 +266,6 @@ beforeAll(async () => {
   await ensureWallet(workerId);
   await ensureWallet(teamLeaderId);
   await fundTestWallet(hirerId, 100_000);
-});
-
-beforeEach(() => {
-  configureQuestWorkChatMembershipWriter(workChatMembershipWriter);
 });
 
 afterAll(async () => {

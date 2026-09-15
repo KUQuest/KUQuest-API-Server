@@ -15,10 +15,15 @@ import {
   walletLedgerTransaction,
   walletWallet,
 } from '@/database/schema/wallet.schema';
+import {
+  effectiveMoneyPolicyAt,
+  walletLedgerPostingDiscrepancySatang,
+  walletProjectionMatchesLedger,
+} from '@/modules/wallet';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, ilike, inArray, lte, sql } from 'drizzle-orm';
 
 import type {
   AdminFinanceOverviewData,
@@ -474,13 +479,7 @@ export const getAdminFinanceOverview = async (): Promise<AdminFinanceOverviewDat
     .where(eq(paymentPayouts.payoutStatus, 'SUCCEEDED'));
 
   // Double-entry balancing invariant check: sum of all postings must be 0
-  const [discrepancyRow] = await db
-    .select({
-      discrepancySatang: sql<string>`coalesce(sum(${walletLedgerPosting.amountSatang}), 0)::text`,
-    })
-    .from(walletLedgerPosting);
-
-  const discrepancy = Number(discrepancyRow?.discrepancySatang ?? 0);
+  const discrepancy = await walletLedgerPostingDiscrepancySatang();
 
   return {
     platformBalances: {
@@ -532,26 +531,12 @@ export const getAdminMemberFinanceProfile = async (
 
   if (wallet) {
     // Check projection against ledger
-    const accountRows = await db
-      .select({
-        type: walletLedgerAccount.type,
-        balanceSatang: sql<string>`coalesce(sum(${walletLedgerPosting.amountSatang}), 0)::text`,
-      })
-      .from(walletLedgerAccount)
-      .leftJoin(walletLedgerPosting, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
-      .where(eq(walletLedgerAccount.walletId, wallet.id))
-      .groupBy(walletLedgerAccount.type);
-
-    const ledgerBalances = new Map<string, number>();
-    for (const a of accountRows) {
-      ledgerBalances.set(a.type, Number(a.balanceSatang));
-    }
-
-    const matches =
-      wallet.spendingBalanceSatang === (ledgerBalances.get('SPENDING') ?? 0) &&
-      wallet.earningsBalanceSatang === (ledgerBalances.get('EARNINGS') ?? 0) &&
-      wallet.fundingReservedSatang === (ledgerBalances.get('FUNDING_RESERVED') ?? 0) &&
-      wallet.reservedForPayoutsSatang === (ledgerBalances.get('RESERVED_FOR_PAYOUTS') ?? 0);
+    const matches = await walletProjectionMatchesLedger(wallet.id, {
+      spendingBalanceSatang: wallet.spendingBalanceSatang,
+      earningsBalanceSatang: wallet.earningsBalanceSatang,
+      fundingReservedSatang: wallet.fundingReservedSatang,
+      reservedForPayoutsSatang: wallet.reservedForPayoutsSatang,
+    });
 
     walletData = {
       id: wallet.id,
@@ -653,15 +638,7 @@ export const getCurrentMoneyPolicy = async (): Promise<AdminMoneyPolicyItem | nu
   const [policy] = await db
     .select()
     .from(paymentMoneyPolicyRevision)
-    .where(
-      and(
-        lte(paymentMoneyPolicyRevision.effectiveFrom, now),
-        or(
-          isNull(paymentMoneyPolicyRevision.effectiveUntil),
-          gte(paymentMoneyPolicyRevision.effectiveUntil, now)
-        )
-      )
-    )
+    .where(effectiveMoneyPolicyAt(now))
     .orderBy(desc(paymentMoneyPolicyRevision.revision))
     .limit(1);
 
@@ -681,8 +658,8 @@ export const getCurrentMoneyPolicy = async (): Promise<AdminMoneyPolicyItem | nu
     platformFeeBps: policy.platformFeeBps,
     feeRoundingMode: policy.feeRoundingMode,
     topUpProviderFeeSatang: policy.topUpProviderFeeSatang,
+    topUpProviderFeeBps: policy.topUpProviderFeeBps ?? 0,
     topUpProviderTaxBps: policy.topUpProviderTaxBps,
-    payoutProviderFeeSatang: policy.payoutProviderFeeSatang,
     payoutProviderTaxBps: policy.payoutProviderTaxBps,
     quoteLifetimeSeconds: policy.quoteLifetimeSeconds,
     reason: policy.reason,
@@ -713,8 +690,8 @@ export const listMoneyPolicyRevisions = async (): Promise<AdminMoneyPolicyItem[]
     platformFeeBps: policy.platformFeeBps,
     feeRoundingMode: policy.feeRoundingMode,
     topUpProviderFeeSatang: policy.topUpProviderFeeSatang,
+    topUpProviderFeeBps: policy.topUpProviderFeeBps ?? 0,
     topUpProviderTaxBps: policy.topUpProviderTaxBps,
-    payoutProviderFeeSatang: policy.payoutProviderFeeSatang,
     payoutProviderTaxBps: policy.payoutProviderTaxBps,
     quoteLifetimeSeconds: policy.quoteLifetimeSeconds,
     reason: policy.reason,

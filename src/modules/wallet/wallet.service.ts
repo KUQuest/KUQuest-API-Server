@@ -45,8 +45,8 @@ const initialPolicy = {
   platformFeeBps: 200,
   feeRoundingMode: 'UP',
   topUpProviderFeeSatang: 0,
-  topUpProviderTaxBps: 0,
-  payoutProviderFeeSatang: 0,
+  topUpProviderFeeBps: 80,
+  topUpProviderTaxBps: 700,
   payoutProviderTaxBps: 0,
   quoteLifetimeSeconds: 300,
   reason: 'Initial Wallet & Payments policy',
@@ -87,6 +87,7 @@ const validatePolicyAmounts = <
     minimumPayoutSatang: number;
     maximumPayoutSatang: number;
     topUpProviderFeeSatang: number;
+    topUpProviderFeeBps?: number;
     payoutProviderFeeSatang: number;
   },
 >(
@@ -102,6 +103,8 @@ const validatePolicyAmounts = <
   minimumPayoutSatang: satang(policy.minimumPayoutSatang),
   maximumPayoutSatang: satang(policy.maximumPayoutSatang),
   topUpProviderFeeSatang: satang(policy.topUpProviderFeeSatang),
+  topUpProviderFeeBps:
+    policy.topUpProviderFeeBps !== undefined ? Number(policy.topUpProviderFeeBps) : 0,
   payoutProviderFeeSatang: satang(policy.payoutProviderFeeSatang),
 });
 
@@ -247,6 +250,16 @@ export const ensureInitialMoneyPolicy = async () => {
   return validatePolicyAmounts(raceWinner);
 };
 
+/** The Money Policy revision effective at `at`: the half-open interval [effectiveFrom, effectiveUntil). */
+export const effectiveMoneyPolicyAt = (at: Date) =>
+  and(
+    lte(paymentMoneyPolicyRevision.effectiveFrom, at),
+    or(
+      isNull(paymentMoneyPolicyRevision.effectiveUntil),
+      gt(paymentMoneyPolicyRevision.effectiveUntil, at)
+    )
+  );
+
 export const getEffectiveMoneyPolicyWith = async (
   executor: Pick<WalletTransaction, 'select'>,
   at = new Date()
@@ -254,15 +267,7 @@ export const getEffectiveMoneyPolicyWith = async (
   const policies = await executor
     .select()
     .from(paymentMoneyPolicyRevision)
-    .where(
-      and(
-        lte(paymentMoneyPolicyRevision.effectiveFrom, at),
-        or(
-          isNull(paymentMoneyPolicyRevision.effectiveUntil),
-          gt(paymentMoneyPolicyRevision.effectiveUntil, at)
-        )
-      )
-    )
+    .where(effectiveMoneyPolicyAt(at))
     .orderBy(desc(paymentMoneyPolicyRevision.revision))
     .limit(2);
 
@@ -281,21 +286,24 @@ export const getEffectiveMoneyPolicyWith = async (
 export const getEffectiveMoneyPolicy = async (at = new Date()) =>
   getEffectiveMoneyPolicyWith(db, at);
 
-const deriveWalletProjectionInTransaction = async (
-  transaction: WalletTransaction,
-  walletId: string,
-  lockWallet: boolean
-) => {
-  const [wallet] = lockWallet
-    ? await transaction
-        .select()
-        .from(walletWallet)
-        .where(eq(walletWallet.id, walletId))
-        .for('update')
-    : await transaction.select().from(walletWallet).where(eq(walletWallet.id, walletId));
-  if (!wallet) throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
+/** The four member account balances a Wallet projection is reconciled against. */
+export type WalletLedgerBalances = {
+  spendingBalanceSatang: number;
+  earningsBalanceSatang: number;
+  fundingReservedSatang: number;
+  reservedForPayoutsSatang: number;
+};
 
-  const accounts = await transaction
+/**
+ * The ledger is the source of truth for a Wallet's balances (ADR 0006): sums every
+ * sealed posting of the Wallet's four member accounts. Unsealed transactions are not
+ * yet part of any balance.
+ */
+const readLedgerBalances = async (
+  executor: Pick<WalletTransaction, 'select'>,
+  walletId: string
+) => {
+  const accounts = await executor
     .select({ id: walletLedgerAccount.id, type: walletLedgerAccount.type })
     .from(walletLedgerAccount)
     .where(
@@ -308,7 +316,7 @@ const deriveWalletProjectionInTransaction = async (
   const postings =
     accountIds.length === 0
       ? []
-      : await transaction
+      : await executor
           .select({
             accountId: walletLedgerPosting.accountId,
             amount: walletLedgerPosting.amountSatang,
@@ -334,12 +342,58 @@ const deriveWalletProjectionInTransaction = async (
 
   const balances = new Map<string, number>();
   for (const account of accounts) balances.set(account.type, totals.get(account.id) ?? 0);
-  const projectedBalances = {
+  const projectedBalances: WalletLedgerBalances = {
     spendingBalanceSatang: balances.get('SPENDING') ?? 0,
     earningsBalanceSatang: balances.get('EARNINGS') ?? 0,
     fundingReservedSatang: balances.get('FUNDING_RESERVED') ?? 0,
     reservedForPayoutsSatang: balances.get('RESERVED_FOR_PAYOUTS') ?? 0,
   };
+  return { accounts, postings, projectedBalances };
+};
+
+/** Reads the ledger balances for one Wallet. Sealed transactions only. */
+const walletLedgerBalances = async (walletId: string): Promise<WalletLedgerBalances> =>
+  (await readLedgerBalances(db, walletId)).projectedBalances;
+
+/** True when the Wallet projection passed in equals the ledger; the four account types stay inside Wallet. */
+export const walletProjectionMatchesLedger = async (
+  walletId: string,
+  projection: WalletLedgerBalances
+): Promise<boolean> => {
+  const ledger = await walletLedgerBalances(walletId);
+  return (
+    ledger.spendingBalanceSatang === projection.spendingBalanceSatang &&
+    ledger.earningsBalanceSatang === projection.earningsBalanceSatang &&
+    ledger.fundingReservedSatang === projection.fundingReservedSatang &&
+    ledger.reservedForPayoutsSatang === projection.reservedForPayoutsSatang
+  );
+};
+
+/** Sum of every ledger posting. Zero when the double-entry invariant holds. */
+export const walletLedgerPostingDiscrepancySatang = async (): Promise<number> => {
+  const [row] = await db
+    .select({
+      discrepancySatang: sql<string>`coalesce(sum(${walletLedgerPosting.amountSatang}), 0)::text`,
+    })
+    .from(walletLedgerPosting);
+  return Number(row?.discrepancySatang ?? 0);
+};
+
+const deriveWalletProjectionInTransaction = async (
+  transaction: WalletTransaction,
+  walletId: string,
+  lockWallet: boolean
+) => {
+  const [wallet] = lockWallet
+    ? await transaction
+        .select()
+        .from(walletWallet)
+        .where(eq(walletWallet.id, walletId))
+        .for('update')
+    : await transaction.select().from(walletWallet).where(eq(walletWallet.id, walletId));
+  if (!wallet) throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
+
+  const { accounts, postings, projectedBalances } = await readLedgerBalances(transaction, walletId);
   const total = Object.values(projectedBalances).reduce((sum, value) => sum + value, 0);
   if (
     total < 0 ||
@@ -412,7 +466,7 @@ const activityTypeFor = (
   return deltas.earnings > 0 ? ('EARN' as const) : ('SPEND' as const);
 };
 
-export const rebuildWalletProjectionInTransaction = async (
+const rebuildWalletProjectionInTransaction = async (
   transaction: WalletTransaction,
   walletId: string
 ) => {

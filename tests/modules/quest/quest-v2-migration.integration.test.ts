@@ -22,12 +22,9 @@ import {
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
-import {
-  autoApproveDueQuestV2Proofs,
-  configureQuestWorkChatMembershipWriter,
-  type QuestTransaction,
-} from '@/modules/quest';
-import { createWorkChatMembershipWriter } from '@/modules/work-chat';
+import { autoApproveDueQuestV2Proofs, type QuestTransaction } from '@/modules/quest';
+import type { QuestWorkChatWriter } from '@/modules/quest/quest-work-chat.port';
+import { workChatMembershipWriter } from '@/modules/work-chat';
 import {
   ensureInitialMoneyPolicy,
   ensureWallet,
@@ -60,6 +57,7 @@ import {
   expect,
   it,
   mock,
+  type Mock,
   spyOn,
 } from 'bun:test';
 
@@ -98,6 +96,7 @@ const tagId = randomUUID();
 const questIds: string[] = [];
 const fileIds: string[] = [];
 let writerFailure: Error | undefined;
+let applySpy: Mock<QuestWorkChatWriter['applyQuestTransition']> | undefined;
 
 type JsonSchema = {
   additionalProperties?: boolean;
@@ -863,12 +862,12 @@ const createWorkConversationForAssignments = async (
   questId: string,
   assignments: Array<{ assignmentId: string; workerId: string }>
 ) => {
-  const productionWriter = createWorkChatMembershipWriter();
+  applySpy?.mockRestore();
   const acceptedAt = new Date();
   if (assignments.length === 0) throw new Error('A Work Conversation needs an accepted Worker');
   const firstAssignment = assignments[0]!;
   await db.transaction((transaction) =>
-    productionWriter.applyQuestTransition(transaction, {
+    workChatMembershipWriter.applyQuestTransition(transaction, {
       producer: 'QUEST_ASSIGNMENT_V2',
       type: 'workersAccepted',
       commandId: `quest-migration-verification-accepted-${questId}`,
@@ -891,7 +890,6 @@ const createWorkConversationForAssignments = async (
       ],
     })
   );
-  configureQuestWorkChatMembershipWriter(productionWriter);
 };
 
 const createWorkConversation = (questId: string, assignmentId: string) =>
@@ -942,11 +940,12 @@ beforeAll(async () => {
 
 beforeEach(() => {
   writerFailure = undefined;
-  configureQuestWorkChatMembershipWriter(successfulWriter);
+  applySpy = spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+    successfulWriter.applyQuestTransition
+  );
 });
 
 afterEach(async () => {
-  configureQuestWorkChatMembershipWriter(undefined);
   mock.restore();
   const ids = [...questIds];
   await releaseActiveReservations(ids);
@@ -1264,7 +1263,7 @@ describe('Quest API v1 to v2 migration verification', () => {
 
   it('covers all v2 mode and participation quadrants at the HTTP seam', async () => {
     authenticate();
-    configureQuestWorkChatMembershipWriter(createWorkChatMembershipWriter());
+    applySpy?.mockRestore();
 
     const singleFcfsQuestId = await createOpenGroupCandidateQuest({
       mode: 'NO_CANDIDATE',
@@ -1552,7 +1551,7 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(firstSubmit.status).toBe(200);
     expect(secondSubmit.status).toBe(200);
 
-    configureQuestWorkChatMembershipWriter(createWorkChatMembershipWriter());
+    applySpy?.mockRestore();
     const selectionKeys = [
       'quest-migration-concurrent-team-one-select',
       'quest-migration-concurrent-team-two-select',
@@ -2061,7 +2060,7 @@ describe('Quest API v1 to v2 migration verification', () => {
     ).toHaveLength(0);
 
     writerFailure = undefined;
-    configureQuestWorkChatMembershipWriter(createWorkChatMembershipWriter());
+    applySpy?.mockRestore();
     const retry = await request(
       `/api/v2/quests/${questId}/teams/${team.id}/select`,
       'POST',

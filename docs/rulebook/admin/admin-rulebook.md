@@ -71,3 +71,20 @@ Follow the context pointer for the Admin branch being planned or implemented:
 - **Insufficient Hirer balance risk**: When a Dispute Case resolves after the 7-day money hold has released funds, insufficient Hirer balance fails the transfer as an accepted operational risk.
 - **Hidden Message retention hold**: A `REPORT_CASE_HIDDEN` case never auto-closes, retaining evidence indefinitely.
 - **Failed Quest Dispute boundary**: Cancelled Quests have no Dispute Case path; Dispute Cases only redirect money from Hirer to Worker.
+
+## Admin Action audit coverage & exemptions
+
+The central `AdminAction` executor writes an immutable `AdminAction` record for each discretionary Admin operation. Each record stores the Admin identity, the request payload, the resource summary, and the `Idempotency-Key`.
+
+Covered operations:
+
+- **Payout decisions**: `PAYOUT_APPROVE`, `PAYOUT_CANCEL`.
+- **Quest discovery moderation**: `QUEST_HIDE`, `QUEST_RESTORE`, `QUEST_TERMINATE`.
+- **Dispute Case resolution and evidence access**: `DISPUTE_CASE_RESOLVE`, `DISPUTE_CASE_DISMISS`, `DISPUTE_CASE_EVIDENCE_ACCESS`.
+- **Wallet status changes**: `WALLET_FREEZE`, `WALLET_UNFREEZE`, `WALLET_SUSPEND`, `WALLET_CLOSE`.
+
+Exemptions. These non-discretionary or non-Admin operations do not write `AdminAction` records:
+
+- **Payment Provider Event Reconcile & Retry**: Webhook and worker reconciliation tasks (`POST /api/v1/admin/top-ups/:topUpId/reconcile`, `POST /api/v1/admin/top-ups/events/:eventId/retry`, and the Payout counterparts) process external payment gateway events. Their audit trail lives in `paymentProviderEventInbox` and the status history tables (`paymentPayoutStatusHistory`, `paymentTopUpStatusHistory`).
+- **Dispute Case Opening**: Opening an initial Dispute Case on behalf of a Worker (`POST /api/v1/admin/disputes/open/:questId`) is an intake and filing flow. It records `openedByAdminId` directly on the `adminDisputeCase` entity, not an `AdminAction`. Discretionary resolution and evidence access stay full `AdminAction` records.
+- **Wallet Projection Rebuild**: The diagnostic recalculation from immutable ledger postings (`POST /api/v1/admin/wallets/:walletId/rebuild-projection`) makes no discretionary state change.

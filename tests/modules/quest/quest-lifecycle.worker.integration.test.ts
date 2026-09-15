@@ -10,13 +10,24 @@ import {
   questTeamInvitation,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-assignment.service';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import { questV2Storage } from '@/modules/quest/quest.storage';
 import { questV2ImageUploadOperationScope } from '@/modules/quest/quest-v2.service';
+import { workChatMembershipWriter } from '@/modules/work-chat';
 
 import { and, eq, inArray } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+  type Mock,
+} from 'bun:test';
 
 const hirerId = crypto.randomUUID();
 const workerId = crypto.randomUUID();
@@ -26,6 +37,7 @@ const questIds: string[] = [];
 const teamIds: string[] = [];
 const invitationIds: string[] = [];
 const cleanupFileIds: string[] = [];
+let applySpy: Mock<typeof workChatMembershipWriter.applyQuestTransition> | undefined;
 
 const createQuest = async (input: Partial<typeof quest.$inferInsert> = {}) => {
   const id = crypto.randomUUID();
@@ -54,6 +66,15 @@ const addAssignment = async (questId: string) => {
     .values({ questId, workerId, assignmentStatus: 'ASSIGNMENT_ACTIVE' });
 };
 
+beforeEach(() => {
+  applySpy = spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+    async () => ({
+      conversationId: 'lifecycle-test-conversation',
+      outcome: 'APPLIED',
+    })
+  );
+});
+
 beforeAll(async () => {
   try {
     await sql`select 1`;
@@ -65,16 +86,10 @@ beforeAll(async () => {
     { id: workerId, email: `${workerId}@ku.th`, firstName: 'Lifecycle', lastName: 'Worker' },
   ]);
   await db.insert(tag).values({ id: tagId, name: `Lifecycle ${tagId}` });
-  configureQuestWorkChatMembershipWriter({
-    applyQuestTransition: async () => ({
-      conversationId: 'lifecycle-test-conversation',
-      outcome: 'APPLIED',
-    }),
-  });
 });
 
 afterAll(async () => {
-  configureQuestWorkChatMembershipWriter(undefined);
+  applySpy?.mockRestore();
   await db.delete(questCommand).where(eq(questCommand.principalUserId, hirerId));
   await db.delete(file).where(inArray(file.id, cleanupFileIds));
   await db.delete(quest).where(inArray(quest.id, questIds));

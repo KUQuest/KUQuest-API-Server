@@ -39,6 +39,7 @@ import {
 import { maxQuestImages } from './quest.schema';
 import type { QuestCreateInput, QuestEditInput } from './quest.schema';
 import type { StoredQuestImage } from './quest.storage';
+import { applyQuestStateTransition } from './quest-transition.service';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type QuestDatabase = typeof db | QuestTransaction;
@@ -878,15 +879,13 @@ export const createQuestEditRequest = async (
     await transaction
       .insert(questEditRequestResponse)
       .values(workers.map(({ workerId }) => ({ requestId: request.id, userId: workerId })));
-    const [pausedQuest] = await transaction
-      .update(quest)
-      .set({
-        questStatus: questStatus.awaitingConsent,
-        version: sql`${quest.version} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(quest.id, questId), eq(quest.questStatus, current.questStatus)))
-      .returning({ id: quest.id });
+    const pausedQuest = await applyQuestStateTransition(transaction, {
+      questId,
+      from: current.questStatus,
+      to: questStatus.awaitingConsent,
+      now: new Date(),
+      workChat: [],
+    });
     if (!pausedQuest) return { outcome: 'not-editable' };
     return {
       requestId: request.id,
@@ -1126,14 +1125,13 @@ const resolveExpiredEditRequestInTransaction = async (
       .set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now })
       .where(eq(questEditRequest.id, requestId));
     if (current.questStatus === questStatus.awaitingConsent)
-      await transaction
-        .update(quest)
-        .set({
-          questStatus: request.previousQuestStatus,
-          version: sql`${quest.version} + 1`,
-          updatedAt: now,
-        })
-        .where(eq(quest.id, request.questId));
+      await applyQuestStateTransition(transaction, {
+        questId: request.questId,
+        from: current.questStatus,
+        to: request.previousQuestStatus,
+        now,
+        workChat: [],
+      });
     return { outcome: 'not-pending' };
   }
   if (now.getTime() < request.createdAt.getTime() + 5 * 60_000) {
@@ -1146,14 +1144,13 @@ const resolveExpiredEditRequestInTransaction = async (
       resolvedAt: now,
     })
     .where(eq(questEditRequest.id, requestId));
-  await transaction
-    .update(quest)
-    .set({
-      questStatus: request.previousQuestStatus,
-      version: sql`${quest.version} + 1`,
-      updatedAt: now,
-    })
-    .where(eq(quest.id, request.questId));
+  await applyQuestStateTransition(transaction, {
+    questId: request.questId,
+    from: current.questStatus,
+    to: request.previousQuestStatus,
+    now,
+    workChat: [],
+  });
   return { status: 'EDIT_REQUEST_REJECTED', requestId };
 };
 
@@ -1208,14 +1205,13 @@ export const respondToQuestEditRequest = async (
         .set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now })
         .where(eq(questEditRequest.id, requestId));
       if (current.questStatus === questStatus.awaitingConsent)
-        await transaction
-          .update(quest)
-          .set({
-            questStatus: request.previousQuestStatus,
-            version: sql`${quest.version} + 1`,
-            updatedAt: now,
-          })
-          .where(eq(quest.id, request.questId));
+        await applyQuestStateTransition(transaction, {
+          questId: request.questId,
+          from: current.questStatus,
+          to: request.previousQuestStatus,
+          now,
+          workChat: [],
+        });
       return { outcome: 'not-pending' };
     }
     if (now.getTime() >= request.createdAt.getTime() + 5 * 60_000) {
@@ -1223,14 +1219,13 @@ export const respondToQuestEditRequest = async (
         .update(questEditRequest)
         .set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now })
         .where(eq(questEditRequest.id, requestId));
-      await transaction
-        .update(quest)
-        .set({
-          questStatus: request.previousQuestStatus,
-          version: sql`${quest.version} + 1`,
-          updatedAt: now,
-        })
-        .where(eq(quest.id, request.questId));
+      await applyQuestStateTransition(transaction, {
+        questId: request.questId,
+        from: current.questStatus,
+        to: request.previousQuestStatus,
+        now,
+        workChat: [],
+      });
       return { outcome: 'expired' };
     }
     const [response] = await transaction
@@ -1255,14 +1250,13 @@ export const respondToQuestEditRequest = async (
         .update(questEditRequest)
         .set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now })
         .where(eq(questEditRequest.id, requestId));
-      await transaction
-        .update(quest)
-        .set({
-          questStatus: request.previousQuestStatus,
-          version: sql`${quest.version} + 1`,
-          updatedAt: now,
-        })
-        .where(eq(quest.id, request.questId));
+      await applyQuestStateTransition(transaction, {
+        questId: request.questId,
+        from: current.questStatus,
+        to: request.previousQuestStatus,
+        now,
+        workChat: [],
+      });
       return { status: 'EDIT_REQUEST_REJECTED', requestId };
     }
     const responses = await transaction
@@ -1283,14 +1277,13 @@ export const respondToQuestEditRequest = async (
         .update(questEditRequest)
         .set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now })
         .where(eq(questEditRequest.id, requestId));
-      await transaction
-        .update(quest)
-        .set({
-          questStatus: request.previousQuestStatus,
-          version: sql`${quest.version} + 1`,
-          updatedAt: now,
-        })
-        .where(eq(quest.id, request.questId));
+      await applyQuestStateTransition(transaction, {
+        questId: request.questId,
+        from: current.questStatus,
+        to: request.previousQuestStatus,
+        now,
+        workChat: [],
+      });
       return { outcome: 'not-pending' };
     }
     const proposedChanges = request.proposedChanges as Record<string, unknown>;
@@ -1302,14 +1295,13 @@ export const respondToQuestEditRequest = async (
         .update(questEditRequest)
         .set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now })
         .where(eq(questEditRequest.id, requestId));
-      await transaction
-        .update(quest)
-        .set({
-          questStatus: request.previousQuestStatus,
-          version: sql`${quest.version} + 1`,
-          updatedAt: now,
-        })
-        .where(eq(quest.id, request.questId));
+      await applyQuestStateTransition(transaction, {
+        questId: request.questId,
+        from: current.questStatus,
+        to: request.previousQuestStatus,
+        now,
+        workChat: [],
+      });
       return { outcome: 'invalid-files' };
     }
     await applyConsentChanges(
@@ -1323,14 +1315,13 @@ export const respondToQuestEditRequest = async (
       .update(questEditRequest)
       .set({ requestStatus: 'EDIT_REQUEST_APPROVED', resolvedAt: now })
       .where(eq(questEditRequest.id, requestId));
-    await transaction
-      .update(quest)
-      .set({
-        questStatus: request.previousQuestStatus,
-        version: sql`${quest.version} + 1`,
-        updatedAt: now,
-      })
-      .where(eq(quest.id, request.questId));
+    await applyQuestStateTransition(transaction, {
+      questId: request.questId,
+      from: current.questStatus,
+      to: request.previousQuestStatus,
+      now,
+      workChat: [],
+    });
     return { status: 'EDIT_REQUEST_APPROVED', requestId };
   });
 
@@ -1665,28 +1656,22 @@ export const publishQuest = async (
       amountSatang: calculateQuestEscrowRequirementSatang(snapshot),
     });
 
-    const [updated] = await transaction
-      .update(quest)
-      .set({
-        questStatus: questStatus.open,
+    const published = await applyQuestStateTransition(transaction, {
+      questId,
+      from: row.questStatus,
+      to: questStatus.open,
+      now: new Date(),
+      columns: {
         fundingReservationId: reservation.id,
         policyRevisionId: snapshot.policyRevisionId,
         platformFeeBps: snapshot.platformFeeBps,
         platformFeePerWorkerSatang: Number(check.platformFeePerWorkerSatang),
         questEscrowSatang: Number(check.escrowRequirementSatang),
-        version: sql`${quest.version} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(quest.id, questId),
-          eq(quest.hirerId, userId),
-          eq(quest.questStatus, questStatus.draft)
-        )
-      )
-      .returning({ id: quest.id });
+      },
+      workChat: [],
+    });
 
-    return updated
+    return published
       ? {
           outcome: 'published',
           reservationId: reservation.id,

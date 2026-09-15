@@ -21,6 +21,7 @@ import {
   type Satang,
 } from '@/modules/wallet';
 import { decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
+import { ImageUploadError } from '@/shared/object-storage';
 
 import {
   and,
@@ -58,7 +59,7 @@ import {
   type QuestStatus,
 } from './quest.contract';
 import { recordQuestEditHistory, type QuestEditHistoryEntry } from './quest-edit-history.service';
-import { questV2StorageCompatibility } from './quest-storage.adapter';
+import { questV2StorageCompatibility } from './quest-legacy-columns';
 import {
   formatQuestV2ScheduleTime,
   isQuestV2ScheduleTime,
@@ -74,6 +75,7 @@ import { softDeleteQuestImageAndRepack } from './quest-image.service';
 import { maxQuestV2Images } from './quest-v2.schema';
 import type { QuestV2BoardQuery, QuestV2CreateInput, QuestV2EditInput } from './quest-v2.schema';
 import { questV2Storage, type StoredQuestImage } from './quest.storage';
+import { applyQuestStateTransition } from './quest-transition.service';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type QuestDatabase = typeof db | QuestTransaction;
@@ -1445,6 +1447,91 @@ export const recordQuestV2ImageCleanupRetry = async (
   }
 };
 
+const compensateQuestV2ImageUpload = async (
+  context: QuestV2ImageCommandContext,
+  images: StoredQuestImage[]
+): Promise<void> => {
+  const pendingCleanup: StoredQuestImage[] = [];
+  await Promise.all(
+    images.map(async (image) => {
+      try {
+        await questV2Storage.delete(image.bucket, image.objectKey);
+      } catch (error) {
+        pendingCleanup.push(image);
+        console.error('[quest-v2-image-upload] Compensating object deletion failed', {
+          bucket: image.bucket,
+          error,
+          objectKey: image.objectKey,
+        });
+      }
+    })
+  );
+
+  const cleanupRecordedAt = new Date();
+  if (pendingCleanup.length > 0) {
+    try {
+      await recordQuestV2ImageCleanupTombstones(context.userId, pendingCleanup, cleanupRecordedAt);
+    } catch (error) {
+      await recordQuestV2ImageCleanupRetry(context, pendingCleanup, cleanupRecordedAt);
+      throw new QuestV2ImageCleanupUnavailableError(error);
+    }
+  }
+
+  try {
+    await releaseQuestV2ImageUploadReservation(context);
+  } catch (error) {
+    console.error('[quest-v2-image-upload] Idempotency reservation release failed', {
+      error,
+      key: context.key,
+      requestHash: context.requestHash,
+      userId: context.userId,
+    });
+  }
+};
+
+export type QuestV2ImageUploadResult =
+  | { outcome: QuestV2ImageMutationOutcome }
+  | { replay: { images: QuestV2ImageResponse[] } }
+  | { response: QuestV2ImageResponse[] };
+
+export const attachQuestV2Images = async (
+  imageCommand: QuestV2ImageCommandContext,
+  images: File[]
+): Promise<QuestV2ImageUploadResult> => {
+  const uploadPlans = images.map(() => questV2Storage.prepareUpload(imageCommand.userId));
+
+  const preflight = await checkQuestV2ImageUpload(imageCommand, images.length, uploadPlans);
+  if ('outcome' in preflight) return preflight;
+  if ('replay' in preflight) return preflight;
+
+  const uploaded: StoredQuestImage[] = [];
+  let operationFailed = false;
+  let operationError: unknown;
+  let result: QuestV2ImageUploadOutcome | undefined;
+
+  try {
+    for (const [index, image] of images.entries()) {
+      uploaded.push(await questV2Storage.upload(imageCommand.userId, image, uploadPlans[index]!));
+    }
+    result = await addQuestV2Images(imageCommand, uploaded);
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+    if (error instanceof ImageUploadError && error.cleanupObject) {
+      uploaded.push(error.cleanupObject as StoredQuestImage);
+    }
+  }
+
+  if (operationFailed || (result && ('outcome' in result || result.replayed))) {
+    await compensateQuestV2ImageUpload(imageCommand, uploaded);
+  }
+
+  if (operationFailed) throw operationError;
+  if (!result) throw new Error('Quest Image upload did not return a result');
+  if ('outcome' in result) return { outcome: result.outcome };
+  return { response: result.response };
+};
+
 export const retryQuestV2ImageCleanupManifests = async (limit = 100): Promise<number> => {
   const pending = await findOpenQuestCommandPayloads({
     executor: db,
@@ -1963,10 +2050,12 @@ const publishQuestV2InTransaction = async (
         );
       }
 
-      const [updated] = await transaction
-        .update(quest)
-        .set({
-          questStatus: questStatus.open,
+      const published = await applyQuestStateTransition(transaction, {
+        questId,
+        from: current.questStatus,
+        to: questStatus.open,
+        now,
+        columns: {
           rewardSatang: check.questRewardSatang,
           questFundingTotalSatang: check.questFundingTotalSatang,
           headcount: check.headcount,
@@ -1975,19 +2064,10 @@ const publishQuestV2InTransaction = async (
           platformFeeBps: check.platformFeeBps,
           platformFeePerWorkerSatang: check.platformFeeSatang,
           questEscrowSatang: check.escrowRequirementSatang,
-          version: sql`${quest.version} + 1`,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(quest.id, questId),
-            eq(quest.hirerId, userId),
-            eq(quest.apiVersion, questApiVersion.v2),
-            eq(quest.questStatus, questStatus.draft)
-          )
-        )
-        .returning({ id: quest.id });
-      if (!updated) return { kind: 'rejected', rejection: { outcome: 'not-draft' } };
+        },
+        workChat: [],
+      });
+      if (!published) return { kind: 'rejected', rejection: { outcome: 'not-draft' } };
 
       const updatedRow = await selectQuestV2Row(transaction, userId, questId);
       if (!updatedRow) throw new Error(`Published Quest ${questId} could not be read back`);

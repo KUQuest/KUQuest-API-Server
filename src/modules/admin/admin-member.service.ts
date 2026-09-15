@@ -3,12 +3,8 @@ import { department, faculty, occupation } from '@/database/schema/academic.sche
 import { authUser } from '@/database/schema/auth.schema';
 import { paymentPayouts } from '@/database/schema/payment.schema';
 import { quest, questAssignment, review } from '@/database/schema/quest.schema';
-import {
-  walletFundingReservationSettlement,
-  walletLedgerAccount,
-  walletLedgerPosting,
-  walletWallet,
-} from '@/database/schema/wallet.schema';
+import { walletFundingReservationSettlement, walletWallet } from '@/database/schema/wallet.schema';
+import { walletProjectionMatchesLedger } from '@/modules/wallet';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
@@ -156,26 +152,12 @@ export const getAdminMemberDetail = async (
 
   let walletData: AdminMemberDetailData['wallet'] = null;
   if (wallet) {
-    const accountRows = await db
-      .select({
-        type: walletLedgerAccount.type,
-        balanceSatang: sql<string>`coalesce(sum(${walletLedgerPosting.amountSatang}), 0)::text`,
-      })
-      .from(walletLedgerAccount)
-      .leftJoin(walletLedgerPosting, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
-      .where(eq(walletLedgerAccount.walletId, wallet.id))
-      .groupBy(walletLedgerAccount.type);
-
-    const ledgerBalances = new Map<string, number>();
-    for (const a of accountRows) {
-      ledgerBalances.set(a.type, Number(a.balanceSatang));
-    }
-
-    const matches =
-      wallet.spendingBalanceSatang === (ledgerBalances.get('SPENDING') ?? 0) &&
-      wallet.earningsBalanceSatang === (ledgerBalances.get('EARNINGS') ?? 0) &&
-      wallet.fundingReservedSatang === (ledgerBalances.get('FUNDING_RESERVED') ?? 0) &&
-      wallet.reservedForPayoutsSatang === (ledgerBalances.get('RESERVED_FOR_PAYOUTS') ?? 0);
+    const matches = await walletProjectionMatchesLedger(wallet.id, {
+      spendingBalanceSatang: wallet.spendingBalanceSatang,
+      earningsBalanceSatang: wallet.earningsBalanceSatang,
+      fundingReservedSatang: wallet.fundingReservedSatang,
+      reservedForPayoutsSatang: wallet.reservedForPayoutsSatang,
+    });
 
     const totalBalanceSatang =
       wallet.spendingBalanceSatang +

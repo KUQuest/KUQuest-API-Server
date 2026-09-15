@@ -21,7 +21,6 @@ import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
 import {
   autoApproveDueQuestV2Proofs,
-  configureQuestWorkChatMembershipWriter,
   createQuestV2ProofSubmission,
   failQuestV2AtDueAt,
   retryQuestV2ProofUploadCleanup,
@@ -30,17 +29,15 @@ import {
   type QuestTransaction,
 } from '@/modules/quest';
 import { questV2ProofStorage } from '@/modules/quest/quest-proof-v2.storage';
-import {
-  UnsupportedWorkChatAttachmentError,
-  WorkChatAttachmentTooLargeError,
-} from '@/modules/work-chat/work-chat.storage';
-import { createWorkChatMembershipWriter } from '@/modules/work-chat';
+import type { QuestWorkChatWriter } from '@/modules/quest/quest-work-chat.port';
+import { createWorkChatMembershipWriter, workChatMembershipWriter } from '@/modules/work-chat';
 import {
   ensureInitialMoneyPolicy,
   ensureWallet,
   positiveSatang,
   reserveSpending,
 } from '@/modules/wallet';
+import { FileTooLargeError, UnsupportedFileTypeError } from '@/shared/object-storage';
 import {
   fundTestWallet,
   listTestLedgerPostings,
@@ -60,6 +57,7 @@ import {
   expect,
   it,
   mock,
+  type Mock,
   spyOn,
 } from 'bun:test';
 
@@ -93,6 +91,7 @@ const questIds: string[] = [];
 const fileIds: string[] = [];
 let postgresAvailable = false;
 let proofSchemaAvailable = false;
+let applySpy: Mock<QuestWorkChatWriter['applyQuestTransition']> | undefined;
 
 const successfulWriter = {
   applyQuestTransition: async (_transaction: QuestTransaction, _transition: unknown) => ({
@@ -302,11 +301,12 @@ beforeAll(async () => {
 
 beforeEach(() => {
   authenticate();
-  configureQuestWorkChatMembershipWriter(successfulWriter);
+  applySpy = spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+    successfulWriter.applyQuestTransition
+  );
 });
 
 afterEach(async () => {
-  configureQuestWorkChatMembershipWriter(undefined);
   mock.restore();
   if (!postgresAvailable || !proofSchemaAvailable) return;
   if (questIds.length > 0) {
@@ -806,12 +806,12 @@ describe('Quest Proof Submission v2 behavior', () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
     const { questId, proofSubmissionId } = await createHttpSentProof();
     await reserveQuest(questId, 1_020);
-    configureQuestWorkChatMembershipWriter({
-      applyQuestTransition: async (_transaction, transition) => {
+    spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+      async (_transaction, transition) => {
         if (transition.type === 'workerBecameInactive') throw new Error('chat unavailable');
         return { conversationId: 'proof-v2-behavior-review-rollback', outcome: 'APPLIED' as const };
-      },
-    });
+      }
+    );
 
     const response = await jsonRequest(
       'POST',
@@ -862,7 +862,7 @@ describe('Quest Proof Submission v2 behavior', () => {
     const upload = spyOn(questV2ProofStorage, 'upload').mockImplementation(
       async (memberId, input) => {
         if (input.name === 'bad-one.pdf' || input.name === 'bad-three.pdf') {
-          throw new UnsupportedWorkChatAttachmentError('bad file');
+          throw new UnsupportedFileTypeError('bad file');
         }
         return {
           bucket: 'proof-v2-behavior-test',
@@ -873,7 +873,7 @@ describe('Quest Proof Submission v2 behavior', () => {
         };
       }
     );
-    spyOn(questV2ProofStorage, 'remove').mockResolvedValue(undefined);
+    spyOn(questV2ProofStorage, 'delete').mockResolvedValue(undefined);
 
     const form = new FormData();
     form.append(
@@ -1401,12 +1401,12 @@ describe('Quest Proof Submission v2 behavior', () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
     const { questId } = await createQuest({ proofRequired: false });
     await reserveQuest(questId, 1_020);
-    configureQuestWorkChatMembershipWriter({
-      applyQuestTransition: async (_transaction, transition) => {
+    spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+      async (_transaction, transition) => {
         if (transition.type === 'questBecameReadOnly') throw new Error('chat unavailable');
         return { conversationId: 'proof-v2-behavior-rollback', outcome: 'APPLIED' as const };
-      },
-    });
+      }
+    );
 
     const response = await request(
       'POST',
@@ -1466,7 +1466,7 @@ describe('Quest Proof Submission v2 behavior', () => {
         ],
       })
     );
-    configureQuestWorkChatMembershipWriter(productionWriter);
+    applySpy?.mockRestore();
     await reserveQuest(questId, 1_020);
 
     const response = await request(
@@ -1543,7 +1543,7 @@ describe('Quest Proof Submission v2 behavior', () => {
     );
     const { proofSubmissionId } = await createSentProofForQuest(questId, worker.id);
     await reserveQuest(questId, 2_040);
-    configureQuestWorkChatMembershipWriter(productionWriter);
+    applySpy?.mockRestore();
 
     const response = await jsonRequest(
       'POST',
@@ -1601,15 +1601,15 @@ describe('Quest Proof Submission v2 behavior', () => {
     if (!assignment) throw new Error('Behavior fixture Assignment was not created');
     await reserveQuest(questId, 2_040);
     const transitions: unknown[] = [];
-    configureQuestWorkChatMembershipWriter({
-      applyQuestTransition: async (_transaction, transition) => {
+    spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+      async (_transaction, transition) => {
         transitions.push(transition);
         return {
           conversationId: 'proof-v2-behavior-partial-proof-free',
           outcome: 'APPLIED' as const,
         };
-      },
-    });
+      }
+    );
 
     const response = await request(
       'POST',
@@ -1643,7 +1643,7 @@ describe('Quest Proof Submission v2 behavior', () => {
         fileName: input.name,
       })
     );
-    const remove = spyOn(questV2ProofStorage, 'remove').mockResolvedValue(undefined);
+    const remove = spyOn(questV2ProofStorage, 'delete').mockResolvedValue(undefined);
 
     const firstForm = new FormData();
     firstForm.append(
@@ -1704,7 +1704,7 @@ describe('Quest Proof Submission v2 behavior', () => {
         fileName: input.name,
       })
     );
-    const remove = spyOn(questV2ProofStorage, 'remove').mockRejectedValueOnce(
+    const remove = spyOn(questV2ProofStorage, 'delete').mockRejectedValueOnce(
       new Error('temporary cleanup failure')
     );
     const form = new FormData();
@@ -1782,7 +1782,7 @@ describe('Quest Proof Submission v2 behavior', () => {
 
     const sizeQuest = await createQuest();
     spyOn(questV2ProofStorage, 'upload').mockRejectedValue(
-      new WorkChatAttachmentTooLargeError('Attachment must be 10 MB or smaller')
+      new FileTooLargeError('Attachment must be 10 MB or smaller')
     );
     const tooLargeForm = new FormData();
     tooLargeForm.append(
