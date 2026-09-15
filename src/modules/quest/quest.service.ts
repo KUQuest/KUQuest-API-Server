@@ -17,7 +17,7 @@ import { tag } from '@/database/schema/tag.schema';
 import { getEffectiveFundingReservationPolicy, reserveSpending } from '@/modules/wallet';
 import { decodeCursor, encodeCursor, parsePageLimit, type CursorPayload } from '@/shared/cursor';
 
-import { and, asc, eq, exists, gt, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, exists, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 
 import {
   buildQuestPublishCheck,
@@ -390,7 +390,7 @@ const buildCursorCondition = (cursor: CursorPayload | undefined) => {
   );
 };
 
-const listRows = async (filters: QuestListFilters, hirerId?: string) => {
+const listRows = async (filters: QuestListFilters, hirerId?: string, excludeHirerId?: string) => {
   const limit = parsePageLimit(filters.limit);
   const cursor = decodeCursor(filters.cursor);
   const conditions = [
@@ -399,6 +399,8 @@ const listRows = async (filters: QuestListFilters, hirerId?: string) => {
       ? eq(quest.hirerId, hirerId)
       : and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
   ];
+
+  if (excludeHirerId) conditions.push(ne(quest.hirerId, excludeHirerId));
 
   if (filters.q) {
     const pattern = `%${escapeLike(filters.q)}%`;
@@ -499,8 +501,8 @@ const nextCursorFor = (rows: QuestRow[], hasMore: boolean) => {
     : null;
 };
 
-export const listBoardQuests = async (filters: QuestListFilters) => {
-  const result = await listRows(filters);
+export const listBoardQuests = async (filters: QuestListFilters, hirerId?: string) => {
+  const result = await listRows(filters, undefined, hirerId);
   const items = result.rows.map((row) => serializeBoardCard(row, result.locations));
 
   return {
