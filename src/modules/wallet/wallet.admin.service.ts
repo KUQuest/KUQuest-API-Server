@@ -1,12 +1,19 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { walletWallet } from '@/database/schema/wallet.schema';
+import { walletWallet, type WalletStatus } from '@/database/schema/wallet.schema';
+import { type AdminActionReasonCatalog } from '@/modules/admin/admin-action.policy';
+import {
+  createAdminActionService,
+  type AdminActionResult,
+} from '@/modules/admin/admin-action.service';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
 import { and, eq, ilike, or } from 'drizzle-orm';
 
+import { MoneyDomainError } from './wallet.money';
 import { walletProjectionMatchesLedger } from './wallet.service';
+import { changeWalletStatusInTransaction } from './wallet.status.service';
 import type {
   AdminWalletFullDetailResponse,
   AdminWalletListItem,
@@ -169,4 +176,124 @@ export const getAdminWalletDetail = async (
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+};
+
+export type WalletBalances = {
+  spendingBalanceSatang: number;
+  earningsBalanceSatang: number;
+  fundingReservedSatang: number;
+  reservedForPayoutsSatang: number;
+  walletStatus?: string;
+};
+
+export type SerializedWallet = WalletBalances & { walletStatus: string };
+
+export const serializeWallet = (
+  wallet: WalletBalances | { wallet: WalletBalances }
+): SerializedWallet => {
+  const target = 'wallet' in wallet && wallet.wallet ? wallet.wallet : (wallet as WalletBalances);
+  return {
+    spendingBalanceSatang: target.spendingBalanceSatang,
+    earningsBalanceSatang: target.earningsBalanceSatang,
+    fundingReservedSatang: target.fundingReservedSatang,
+    reservedForPayoutsSatang: target.reservedForPayoutsSatang,
+    walletStatus: 'walletStatus' in target ? String(target.walletStatus) : 'ACTIVE',
+  };
+};
+
+export const walletAdminActionCatalog: AdminActionReasonCatalog = {
+  version: 1,
+  actions: {
+    WALLET_FREEZE: { kind: 'COMMAND', requiresReason: false, allowedReasonCodes: [] },
+    WALLET_UNFREEZE: { kind: 'COMMAND', requiresReason: false, allowedReasonCodes: [] },
+    WALLET_SUSPEND: { kind: 'COMMAND', requiresReason: false, allowedReasonCodes: [] },
+    WALLET_CLOSE: { kind: 'COMMAND', requiresReason: false, allowedReasonCodes: [] },
+  },
+};
+
+const walletAdminActionService = createAdminActionService(walletAdminActionCatalog);
+
+const walletStatusActions: Record<WalletStatus, string> = {
+  ACTIVE: 'WALLET_UNFREEZE',
+  FROZEN: 'WALLET_FREEZE',
+  SUSPENDED: 'WALLET_SUSPEND',
+  CLOSED: 'WALLET_CLOSE',
+};
+
+export const actionForWalletStatus = (toStatus: WalletStatus): string =>
+  walletStatusActions[toStatus];
+
+export type ChangeWalletStatusAdminInput = {
+  adminId: string;
+  walletId: string;
+  toStatus: WalletStatus;
+  reason: string;
+  requestKey: string;
+  expectedTimestamp?: Date;
+};
+
+export const changeWalletStatusAdmin = async (
+  input: ChangeWalletStatusAdminInput
+): Promise<AdminActionResult<{ wallet: SerializedWallet }>> => {
+  const action = actionForWalletStatus(input.toStatus);
+  // A Wallet has no version column. The executor needs exactly one revision.
+  // With no caller timestamp, the command pins a constant revision, so the
+  // request hash stays stable and the same request key replays.
+  const revision = input.expectedTimestamp
+    ? { expectedTimestamp: input.expectedTimestamp }
+    : { expectedVersion: 1 };
+
+  return walletAdminActionService.executeCommand<{ wallet: SerializedWallet }>({
+    adminId: input.adminId,
+    action,
+    resourceType: 'wallet',
+    resourceId: input.walletId,
+    requestKey: input.requestKey,
+    ...revision,
+    request: {
+      toStatus: input.toStatus,
+      reason: input.reason,
+    },
+    metadata: {},
+    prepare: async (transaction) => {
+      const [current] = await transaction
+        .select({
+          id: walletWallet.id,
+          walletStatus: walletWallet.walletStatus,
+          updatedAt: walletWallet.updatedAt,
+        })
+        .from(walletWallet)
+        .where(eq(walletWallet.id, input.walletId))
+        .limit(1)
+        .for('update');
+      if (!current) throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
+      if (current.walletStatus === input.toStatus) {
+        throw new MoneyDomainError('WALLET_STATUS_UNCHANGED', 'Wallet already has this status.');
+      }
+      if (current.walletStatus === 'CLOSED') {
+        throw new MoneyDomainError('WALLET_STATUS_CLOSED', 'Closed Wallet status is terminal.');
+      }
+
+      return {
+        ...(input.expectedTimestamp
+          ? { currentTimestamp: current.updatedAt }
+          : { currentVersion: 1 }),
+        apply: async () => {
+          const { wallet: updated } = await changeWalletStatusInTransaction(transaction, {
+            walletId: input.walletId,
+            toStatus: input.toStatus,
+            reason: input.reason,
+            actorAdminId: input.adminId,
+          });
+
+          return {
+            resourceSummary: { wallet: serializeWallet(updated) },
+            ...(input.expectedTimestamp
+              ? { resourceVersion: null, resourceTimestamp: updated.updatedAt }
+              : { resourceVersion: 2, resourceTimestamp: null }),
+          };
+        },
+      };
+    },
+  });
 };

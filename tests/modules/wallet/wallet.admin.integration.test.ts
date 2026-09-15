@@ -1,10 +1,12 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
+import { adminAction } from '@/database/schema/admin.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { createWallet, getWallet } from '@/modules/wallet';
 
 import { beforeAll, describe, expect, it } from 'bun:test';
+import { and, eq } from 'drizzle-orm';
 
 const adminEmail = `wallet-admin-test-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminPassword1!';
@@ -75,20 +77,19 @@ describe('Admin Wallet API routes', () => {
   });
 
   it('freezes and restores a Wallet with status changes and history', async () => {
-    const freezeResponse = await app.handle(
+    const freezeIdempotencyKey = `freeze-${crypto.randomUUID()}`;
+    const freezeRequest = (reason: string) =>
       new Request(`http://localhost/api/v1/admin/wallets/${studentWalletId}/status`, {
         method: 'POST',
         headers: {
           cookie: adminCookie,
           'content-type': 'application/json',
-          'idempotency-key': `freeze-${crypto.randomUUID()}`,
+          'idempotency-key': freezeIdempotencyKey,
         },
-        body: JSON.stringify({
-          toStatus: 'FROZEN',
-          reason: 'Investigation hold',
-        }),
-      })
-    );
+        body: JSON.stringify({ toStatus: 'FROZEN', reason }),
+      });
+
+    const freezeResponse = await app.handle(freezeRequest('Investigation hold'));
     expect(freezeResponse.status).toBe(200);
     const freezeBody = (await freezeResponse.json()) as {
       data: { wallet: { walletStatus: string } };
@@ -97,6 +98,30 @@ describe('Admin Wallet API routes', () => {
 
     const walletAfterFreeze = await getWallet(studentId);
     expect(walletAfterFreeze.walletStatus).toBe('FROZEN');
+
+    const replayResponse = await app.handle(freezeRequest('Investigation hold'));
+    expect(replayResponse.status).toBe(200);
+    const replayBody = (await replayResponse.json()) as {
+      data: { wallet: { walletStatus: string } };
+    };
+    expect(replayBody.data.wallet.walletStatus).toBe('FROZEN');
+
+    const freezeActions = await db
+      .select({ id: adminAction.id })
+      .from(adminAction)
+      .where(
+        and(
+          eq(adminAction.resourceType, 'wallet'),
+          eq(adminAction.resourceId, studentWalletId),
+          eq(adminAction.action, 'WALLET_FREEZE')
+        )
+      );
+    expect(freezeActions).toHaveLength(1);
+
+    const conflictResponse = await app.handle(freezeRequest('Conflicting reason'));
+    expect(conflictResponse.status).toBe(409);
+    const conflictBody = (await conflictResponse.json()) as { error: { code: string } };
+    expect(conflictBody.error.code).toBe('ADMIN_ACTION_KEY_REUSED');
 
     const unfreezeResponse = await app.handle(
       new Request(`http://localhost/api/v1/admin/wallets/${studentWalletId}/status`, {
@@ -117,6 +142,18 @@ describe('Admin Wallet API routes', () => {
       data: { wallet: { walletStatus: string } };
     };
     expect(unfreezeBody.data.wallet.walletStatus).toBe('ACTIVE');
+
+    const unfreezeActions = await db
+      .select({ id: adminAction.id })
+      .from(adminAction)
+      .where(
+        and(
+          eq(adminAction.resourceType, 'wallet'),
+          eq(adminAction.resourceId, studentWalletId),
+          eq(adminAction.action, 'WALLET_UNFREEZE')
+        )
+      );
+    expect(unfreezeActions).toHaveLength(1);
 
     const walletAfterRestore = await getWallet(studentId);
     expect(walletAfterRestore.walletStatus).toBe('ACTIVE');
