@@ -1,4 +1,4 @@
-import { AdminActionError } from '@/modules/admin/admin-action.policy';
+import { AdminActionError } from '@/modules/admin';
 import type { AdminContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';

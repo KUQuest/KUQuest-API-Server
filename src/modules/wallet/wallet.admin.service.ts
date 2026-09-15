@@ -1,11 +1,11 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { walletWallet, type WalletStatus } from '@/database/schema/wallet.schema';
-import { type AdminActionReasonCatalog } from '@/modules/admin/admin-action.policy';
 import {
   createAdminActionService,
+  type AdminActionReasonCatalog,
   type AdminActionResult,
-} from '@/modules/admin/admin-action.service';
+} from '@/modules/admin';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
@@ -229,27 +229,19 @@ export type ChangeWalletStatusAdminInput = {
   toStatus: WalletStatus;
   reason: string;
   requestKey: string;
-  expectedTimestamp?: Date;
 };
 
 export const changeWalletStatusAdmin = async (
   input: ChangeWalletStatusAdminInput
 ): Promise<AdminActionResult<{ wallet: SerializedWallet }>> => {
   const action = actionForWalletStatus(input.toStatus);
-  // A Wallet has no version column. The executor needs exactly one revision.
-  // With no caller timestamp, the command pins a constant revision, so the
-  // request hash stays stable and the same request key replays.
-  const revision = input.expectedTimestamp
-    ? { expectedTimestamp: input.expectedTimestamp }
-    : { expectedVersion: 1 };
-
   return walletAdminActionService.executeCommand<{ wallet: SerializedWallet }>({
     adminId: input.adminId,
     action,
     resourceType: 'wallet',
     resourceId: input.walletId,
     requestKey: input.requestKey,
-    ...revision,
+    expectedVersion: 1,
     request: {
       toStatus: input.toStatus,
       reason: input.reason,
@@ -275,9 +267,7 @@ export const changeWalletStatusAdmin = async (
       }
 
       return {
-        ...(input.expectedTimestamp
-          ? { currentTimestamp: current.updatedAt }
-          : { currentVersion: 1 }),
+        currentVersion: 1,
         apply: async () => {
           const { wallet: updated } = await changeWalletStatusInTransaction(transaction, {
             walletId: input.walletId,
@@ -288,9 +278,8 @@ export const changeWalletStatusAdmin = async (
 
           return {
             resourceSummary: { wallet: serializeWallet(updated) },
-            ...(input.expectedTimestamp
-              ? { resourceVersion: null, resourceTimestamp: updated.updatedAt }
-              : { resourceVersion: 2, resourceTimestamp: null }),
+            resourceVersion: 2,
+            resourceTimestamp: null,
           };
         },
       };
