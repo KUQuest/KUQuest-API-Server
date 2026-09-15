@@ -10,7 +10,7 @@ import {
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest';
+import { workChatMembershipWriter } from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';
 
@@ -113,7 +113,6 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  configureQuestWorkChatMembershipWriter(undefined);
   mock.restore();
   await cleanQuests();
 });
@@ -177,10 +176,8 @@ describe('production Work Conversation composition', () => {
       workerId: workerIds[0],
       applicationStatus: 'APPLICATION_APPLIED',
     });
-    configureQuestWorkChatMembershipWriter({
-      applyQuestTransition: async () => {
-        throw new Error('Work Chat unavailable');
-      },
+    spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(async () => {
+      throw new Error('Work Chat unavailable');
     });
 
     const response = await post(

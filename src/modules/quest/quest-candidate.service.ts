@@ -14,8 +14,7 @@ import {
 import { and, asc, eq, exists, inArray, isNull, or, sql } from 'drizzle-orm';
 
 import {
-  getQuestWorkChatMembershipWriter,
-  WorkChatTransitionError,
+  defaultQuestWorkChatMembershipWriter,
   type QuestTransaction,
 } from './quest-work-chat.port';
 import { applyQuestStateTransition } from './quest-transition.service';
@@ -1046,9 +1045,7 @@ export const selectCandidate = async (
   if (!commandId) return { outcome: 'idempotency-key-required' };
   const now = options.now ?? new Date();
   const requestHash = await hashSelectionRequest(hirerId, questId, target);
-  const writer = options.workChatWriter ?? getQuestWorkChatMembershipWriter();
-  if (!writer)
-    throw new WorkChatTransitionError(new Error('Work Chat membership writer is not configured'));
+  const writer = options.workChatWriter ?? defaultQuestWorkChatMembershipWriter;
 
   return db.transaction(async (tx) => {
     const current = await lockQuest(tx, questId);

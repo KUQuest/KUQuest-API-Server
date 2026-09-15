@@ -12,17 +12,14 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
-import {
-  configureQuestWorkChatMembershipWriter,
-  type QuestTransaction,
-  type QuestWorkChatMembershipTransition,
-} from '@/modules/quest';
+import { type QuestTransaction, type QuestWorkChatMembershipTransition } from '@/modules/quest';
 import {
   ensureInitialMoneyPolicy,
   ensureWallet,
   positiveSatang,
   reserveSpending,
 } from '@/modules/wallet';
+import { workChatMembershipWriter } from '@/modules/work-chat';
 import {
   fundTestWallet,
   listTestQuestEscrows,
@@ -270,11 +267,12 @@ beforeEach(() => {
   transitions = [];
   writerFailure = undefined;
   authenticate();
-  configureQuestWorkChatMembershipWriter(successfulWriter);
+  spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+    successfulWriter.applyQuestTransition
+  );
 });
 
 afterEach(async () => {
-  configureQuestWorkChatMembershipWriter(undefined);
   mock.restore();
   if (!postgresAvailable || questIds.length === 0) return;
   await db.delete(quest).where(inArray(quest.id, questIds));

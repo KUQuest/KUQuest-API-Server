@@ -20,14 +20,13 @@ import {
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
-import { configureQuestWorkChatMembershipWriter } from '@/modules/quest/quest-work-chat.port';
 import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
 import {
   decideQuestV2Underfilled,
   getQuestV2Underfilled,
 } from '@/modules/quest/quest-underfilled-v2.service';
 import type { QuestTransaction, QuestWorkChatMembershipTransition } from '@/modules/quest';
-import { createWorkChatMembershipWriter } from '@/modules/work-chat';
+import { workChatMembershipWriter } from '@/modules/work-chat';
 import {
   ensureInitialMoneyPolicy,
   ensureWallet,
@@ -49,6 +48,7 @@ import {
   it,
   mock,
   spyOn,
+  type Mock,
 } from 'bun:test';
 
 const hirer = {
@@ -80,6 +80,7 @@ const workers = [
 const tagId = randomUUID();
 const questIds: string[] = [];
 let postgresAvailable = false;
+let applySpy: Mock<typeof workChatMembershipWriter.applyQuestTransition> | undefined;
 
 const successfulWriter = {
   applyQuestTransition: async (
@@ -194,11 +195,12 @@ beforeAll(async () => {
 
 beforeEach(() => {
   authenticate();
-  configureQuestWorkChatMembershipWriter(successfulWriter);
+  applySpy = spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+    successfulWriter.applyQuestTransition
+  );
 });
 
 afterEach(async () => {
-  configureQuestWorkChatMembershipWriter(undefined);
   mock.restore();
   if (!postgresAvailable) return;
   if (questIds.length > 0) {
@@ -475,7 +477,7 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
 
   it('closes remaining Candidate Inquiry Conversations when unanimous consent assigns the Quest', async () => {
     if (!postgresAvailable) return;
-    configureQuestWorkChatMembershipWriter(createWorkChatMembershipWriter());
+    applySpy?.mockRestore();
     const questId = await createQuest([workers[0].id, workers[1].id]);
     const opened = await request('/api/v1/chat/candidate-inquiries', 'POST', workers[2].id, {
       questId,

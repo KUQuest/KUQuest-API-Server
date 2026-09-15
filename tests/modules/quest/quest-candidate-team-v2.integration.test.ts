@@ -18,9 +18,9 @@ import {
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
-import { configureQuestWorkChatMembershipWriter, type QuestTransaction } from '@/modules/quest';
+import { type QuestTransaction } from '@/modules/quest';
 import type { QuestWorkChatMembershipTransition } from '@/modules/quest/quest-work-chat.contract';
-import { createWorkChatMembershipWriter } from '@/modules/work-chat';
+import { workChatMembershipWriter } from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';
 
@@ -35,6 +35,7 @@ import {
   it,
   mock,
   spyOn,
+  type Mock,
 } from 'bun:test';
 
 const hirer = {
@@ -87,6 +88,7 @@ const fileIds: string[] = [];
 let postgresAvailable = false;
 let transitions: QuestWorkChatMembershipTransition[] = [];
 let writerFailure: Error | undefined;
+let applySpy: Mock<typeof workChatMembershipWriter.applyQuestTransition> | undefined;
 
 type OpenApiOperation = {
   operationId?: string;
@@ -250,11 +252,12 @@ beforeAll(async () => {
 beforeEach(() => {
   transitions = [];
   writerFailure = undefined;
-  configureQuestWorkChatMembershipWriter(successfulWriter);
+  applySpy = spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+    successfulWriter.applyQuestTransition
+  );
 });
 
 afterEach(async () => {
-  configureQuestWorkChatMembershipWriter(undefined);
   mock.restore();
   if (!postgresAvailable) return;
 
@@ -1330,7 +1333,7 @@ describe('Quest Candidate Team API v2', () => {
     );
     expect(submitted.status).toBe(200);
 
-    configureQuestWorkChatMembershipWriter(createWorkChatMembershipWriter());
+    applySpy?.mockRestore();
     const selected = await request(
       `/api/v2/quests/${questId}/teams/${team.id}/select`,
       'POST',

@@ -4,10 +4,8 @@ import { authUser } from '@/database/schema/auth.schema';
 import { quest, questAssignment } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
-import {
-  configureQuestWorkChatMembershipWriter,
-  type QuestTransaction,
-} from '@/modules/quest/quest-work-chat.port';
+import type { QuestTransaction, QuestWorkChatWriter } from '@/modules/quest/quest-work-chat.port';
+import { workChatMembershipWriter } from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';
 
@@ -21,6 +19,7 @@ import {
   expect,
   it,
   mock,
+  type Mock,
   spyOn,
 } from 'bun:test';
 
@@ -41,6 +40,7 @@ const workers = [1, 2, 3].map((number) => ({
 const tagId = randomUUID();
 const questIds: string[] = [];
 let postgresAvailable = false;
+let applySpy: Mock<QuestWorkChatWriter['applyQuestTransition']> | undefined;
 const successfulWorkChatWriter = {
   applyQuestTransition: async () => ({
     conversationId: 'test-conversation',
@@ -96,11 +96,12 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  configureQuestWorkChatMembershipWriter(successfulWorkChatWriter);
+  applySpy = spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+    successfulWorkChatWriter.applyQuestTransition
+  );
 });
 
 afterEach(async () => {
-  configureQuestWorkChatMembershipWriter(undefined);
   mock.restore();
   if (postgresAvailable && questIds.length > 0) {
     await db.delete(quest).where(inArray(quest.id, questIds));
@@ -309,7 +310,7 @@ describe('direct NO_CANDIDATE joins', () => {
     const apply = mock(async (_transaction: QuestTransaction, _transition: unknown) => {
       throw new Error('chat unavailable');
     });
-    configureQuestWorkChatMembershipWriter({ applyQuestTransition: apply });
+    applySpy?.mockImplementation(apply);
 
     const response = await request(questId, workers[0].id, {
       'idempotency-key': 'join-command-fails',
@@ -317,7 +318,7 @@ describe('direct NO_CANDIDATE joins', () => {
     expect(response.status).toBe(503);
     expect((await response.json()).error.code).toBe('WORK_CHAT_UNAVAILABLE');
 
-    configureQuestWorkChatMembershipWriter(successfulWorkChatWriter);
+    applySpy?.mockImplementation(successfulWorkChatWriter.applyQuestTransition);
     const retry = await request(questId, workers[0].id, {
       'idempotency-key': 'join-command-fails',
     });

@@ -5,7 +5,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 
 import {
   type QuestTransaction,
-  requireQuestWorkChatMembershipWriter,
+  defaultQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
 } from './quest-work-chat.port';
 import { applyQuestStateTransition } from './quest-transition.service';
@@ -334,9 +334,15 @@ export const joinQuestV2 = async (
   rawCommandId: string,
   now: Date
 ): Promise<QuestV2AssignmentOutcome> => {
-  const writer = requireQuestWorkChatMembershipWriter();
   return db.transaction((transaction) =>
-    joinQuestV2InTransaction(transaction, workerId, questId, rawCommandId, now, writer)
+    joinQuestV2InTransaction(
+      transaction,
+      workerId,
+      questId,
+      rawCommandId,
+      now,
+      defaultQuestWorkChatMembershipWriter
+    )
   );
 };
 

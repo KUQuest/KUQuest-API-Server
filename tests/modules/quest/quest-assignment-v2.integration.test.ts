@@ -10,12 +10,9 @@ import {
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
-import {
-  configureQuestWorkChatMembershipWriter,
-  type QuestTransaction,
-} from '@/modules/quest/quest-work-chat.port';
+import type { QuestTransaction, QuestWorkChatWriter } from '@/modules/quest/quest-work-chat.port';
 import type { QuestWorkChatMembershipTransition } from '@/modules/quest/quest-work-chat.contract';
-import { createWorkChatMembershipWriter } from '@/modules/work-chat';
+import { workChatMembershipWriter } from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';
 
@@ -29,6 +26,7 @@ import {
   expect,
   it,
   mock,
+  type Mock,
   spyOn,
 } from 'bun:test';
 
@@ -57,11 +55,11 @@ const thirdWorker = {
   lastName: 'Worker',
 };
 const tagId = randomUUID();
-const productionWriter = createWorkChatMembershipWriter();
 const questIds: string[] = [];
 let postgresAvailable = false;
 let transitions: QuestWorkChatMembershipTransition[] = [];
 let writerFailure: Error | undefined;
+let applySpy: Mock<QuestWorkChatWriter['applyQuestTransition']> | undefined;
 
 const successfulWriter = {
   applyQuestTransition: async (
@@ -149,11 +147,12 @@ beforeAll(async () => {
 beforeEach(() => {
   transitions = [];
   writerFailure = undefined;
-  configureQuestWorkChatMembershipWriter(successfulWriter);
+  applySpy = spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+    successfulWriter.applyQuestTransition
+  );
 });
 
 afterEach(async () => {
-  configureQuestWorkChatMembershipWriter(undefined);
   mock.restore();
   if (!postgresAvailable) return;
   if (questIds.length > 0) {
@@ -395,7 +394,7 @@ describe('Quest Assignment API v2', () => {
   it('keeps Work Chat command identities separate for Workers using the same Idempotency-Key', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenGroupFcfsQuest();
-    configureQuestWorkChatMembershipWriter(productionWriter);
+    applySpy?.mockRestore();
     authenticate();
 
     const responses = await Promise.all([

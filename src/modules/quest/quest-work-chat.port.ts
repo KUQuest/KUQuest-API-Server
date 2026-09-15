@@ -1,35 +1,21 @@
 import { db } from '@/database/client';
+import { workChatMembershipWriter } from '@/modules/work-chat/work-chat.membership-writer';
 
 import type { WorkChatMembershipWriter } from './quest-work-chat.contract';
 
 /** The transaction boundary shared by Quest persistence and the Work Chat port. */
 export type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-type QuestWorkChatWriter = WorkChatMembershipWriter<QuestTransaction>;
-
-let configuredWorkChatWriter: QuestWorkChatWriter | undefined;
+export type QuestWorkChatWriter = WorkChatMembershipWriter<QuestTransaction>;
 
 /**
- * Configure the Chat adapter used by Quest membership transitions.
+ * The Chat adapter Quest membership transitions use when a caller names no other.
  *
- * The Chat module owns the production writer. Until application composition
- * provides it, Assignment creation and Candidate selection fail closed with
- * WORK_CHAT_UNAVAILABLE rather than committing Quest-only participation.
+ * The Chat module owns the production writer. The binding is immutable, so no
+ * composition step can forget it and no test can leak one into the next file.
+ * A caller that needs another adapter passes it at the call: the `workChatWriter`
+ * option of a Quest command, or the `writer` field of a Quest State transition.
  */
-export const configureQuestWorkChatMembershipWriter = (
-  writer: QuestWorkChatWriter | undefined
-): void => {
-  configuredWorkChatWriter = writer;
-};
-
-export const getQuestWorkChatMembershipWriter = (): QuestWorkChatWriter | undefined =>
-  configuredWorkChatWriter;
-
-export const requireQuestWorkChatMembershipWriter = (): QuestWorkChatWriter => {
-  if (!configuredWorkChatWriter) {
-    throw new WorkChatTransitionError(new Error('Work Chat membership writer is not configured'));
-  }
-  return configuredWorkChatWriter;
-};
+export const defaultQuestWorkChatMembershipWriter: QuestWorkChatWriter = workChatMembershipWriter;
 
 export class WorkChatTransitionError extends Error {
   constructor(cause: unknown) {
