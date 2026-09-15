@@ -84,4 +84,42 @@ describe('Money Command guard', () => {
 
     expect(offenders, report).toEqual([]);
   });
+
+  it('keeps every exported function in wallet.service consumed by at least one other file', async () => {
+    const walletServiceFile = 'src/modules/wallet/wallet.service.ts';
+    const text = await Bun.file(resolve(repoRoot, walletServiceFile)).text();
+    const exportedFunctions = [
+      ...text.matchAll(/export\s+const\s+([A-Za-z0-9_]+)\s*=\s*(?:async\s*)?\(/g),
+    ].map((match) => match[1]);
+
+    const allSources = await Promise.all(
+      [...new Bun.Glob('{src,tests}/**/*.ts').scanSync({ cwd: repoRoot, onlyFiles: true })].map(
+        async (file) => ({
+          file,
+          text: await Bun.file(resolve(repoRoot, file)).text(),
+        })
+      )
+    );
+
+    const offenders: string[] = [];
+
+    for (const fn of exportedFunctions) {
+      const boundary = new RegExp(`\\b${fn}\\b`);
+      const isConsumed = allSources.some(
+        (source) => source.file !== walletServiceFile && boundary.test(source.text)
+      );
+      if (!isConsumed) {
+        offenders.push(fn);
+      }
+    }
+
+    const report = offenders
+      .map(
+        (fn) =>
+          `wallet.service.ts exports ${fn}, but no other file imports it. Remove the unused export.`
+      )
+      .join('\n');
+
+    expect(offenders, report).toEqual([]);
+  });
 });

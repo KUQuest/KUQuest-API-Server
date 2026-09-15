@@ -2,13 +2,13 @@ import { env } from '@/config/env';
 
 import sharp from 'sharp';
 
-export const imageContentTypeByExtension = {
+const imageContentTypeByExtension = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
 } as const;
 
-export const attachmentContentTypeByExtension = {
+const attachmentContentTypeByExtension = {
   ...imageContentTypeByExtension,
   'application/pdf': 'pdf',
   'video/mp4': 'mp4',
