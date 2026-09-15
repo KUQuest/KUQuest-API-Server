@@ -10,6 +10,7 @@ import {
   getTopUpController,
   listTopUpStatusHistoryController,
   listTopUpsController,
+  simulateTopUpController,
 } from './top-up.controller';
 import {
   topUpCreateSchema,
@@ -48,6 +49,18 @@ export const topUpRoute = new Elysia({
       description:
         'Confirms a binding Provider Quote and returns the Xendit PromptPay QR. Set simulate=true only in a staging or development test runtime with an Xendit Development key.',
       operationId: 'createTopUp',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/:topUpId/simulate', simulateTopUpController, {
+    params: topUpParamsSchema,
+    response: responses(topUpResponseSchema, 401, 404, 409, 502),
+    detail: {
+      tags: ['Top-ups'],
+      summary: 'Simulate a PromptPay Top-up Payment',
+      description:
+        'Test-runtime-only action. Calls Xendit Test Mode to complete this pending Payment Request, then processes its webhook or reconciles the provider result.',
+      operationId: 'simulateTopUp',
       security: betterAuthSecurity,
     },
   })

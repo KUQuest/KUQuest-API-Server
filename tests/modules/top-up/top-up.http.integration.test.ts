@@ -18,6 +18,9 @@ describe('Top-up HTTP routes', () => {
         },
         body: JSON.stringify({ quoteId: crypto.randomUUID() }),
       }),
+      new Request(`http://localhost/api/v1/top-ups/${crypto.randomUUID()}/simulate`, {
+        method: 'POST',
+      }),
       new Request('http://localhost/api/v1/top-ups'),
       new Request(`http://localhost/api/v1/top-ups/${crypto.randomUUID()}`),
       new Request(`http://localhost/api/v1/top-ups/${crypto.randomUUID()}/status-history`),
@@ -25,7 +28,7 @@ describe('Top-up HTTP routes', () => {
 
     const responses = await Promise.all(requests.map((request) => app.handle(request)));
 
-    expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401]);
+    expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401, 401]);
   });
 
   it('publishes the Member Top-up and Payout HTTP contracts in OpenAPI', async () => {
@@ -41,6 +44,9 @@ describe('Top-up HTTP routes', () => {
     expect(document.paths['/api/v1/top-ups/{topUpId}']?.get?.operationId).toBe('getTopUp');
     expect(document.paths['/api/v1/top-ups/{topUpId}/status-history']?.get?.operationId).toBe(
       'listTopUpStatusHistory'
+    );
+    expect(document.paths['/api/v1/top-ups/{topUpId}/simulate']?.post?.operationId).toBe(
+      'simulateTopUp'
     );
     expect(document.paths['/api/v1/payouts']?.post?.operationId).toBe('createPayout');
   });
