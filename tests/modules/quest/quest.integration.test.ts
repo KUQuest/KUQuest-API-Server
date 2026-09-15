@@ -309,12 +309,14 @@ describe('Quest integration', () => {
         },
       ]);
 
-      session = spyOn(auth.api, 'getSession').mockImplementation(
-        (async ({ headers }: { headers: Headers }) => {
-          const memberId = headers.get('x-member-id') ?? callerId;
-          return { user: { id: memberId }, session: { userId: memberId } } as never;
-        }) as never
-      );
+      session = spyOn(auth.api, 'getSession').mockImplementation((async ({
+        headers,
+      }: {
+        headers: Headers;
+      }) => {
+        const memberId = headers.get('x-member-id') ?? callerId;
+        return { user: { id: memberId }, session: { userId: memberId } } as never;
+      }) as never);
 
       const query = `?q=${encodeURIComponent(fixturePrefix)}`;
       const boardResponse = await app.handle(
