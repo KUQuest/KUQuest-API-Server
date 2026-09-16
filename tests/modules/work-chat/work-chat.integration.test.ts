@@ -515,6 +515,29 @@ describe('Work Chat Member API', () => {
     );
     expect(sent.status).toBe(200);
     const sentBody = (await sent.json()) as { data: { message: { id: string; sequence: number } } };
+    const getInboxSummary = async (memberId: string) => {
+      const response = await workChatApp.handle(
+        new Request('http://localhost/api/v1/chat/conversations?limit=20', {
+          headers: { 'x-member-id': memberId },
+        })
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: {
+          items: Array<{
+            id: string;
+            latestMessage: { kind: string; preview: string } | null;
+            unreadCount: number;
+          }>;
+        };
+      };
+      return body.data.items.find(({ id }) => id === conversationId);
+    };
+    expect(await getInboxSummary(workerId)).toMatchObject({
+      id: conversationId,
+      latestMessage: { kind: 'USER', preview: 'Worker message' },
+      unreadCount: 4,
+    });
 
     const replay = await requestJson(
       'POST',
@@ -553,6 +576,16 @@ describe('Work Chat Member API', () => {
     );
     expect(read.status).toBe(200);
     expect((await read.json()).data.messageId).toBe(sentBody.data.message.id);
+    expect(await getInboxSummary(workerId)).toMatchObject({
+      id: conversationId,
+      latestMessage: { kind: 'USER', preview: 'Worker message' },
+      unreadCount: 0,
+    });
+    expect(await getInboxSummary(hirerId)).toMatchObject({
+      id: conversationId,
+      latestMessage: { kind: 'USER', preview: 'Worker message' },
+      unreadCount: 4,
+    });
 
     const hirerSent = await requestJson(
       'POST',

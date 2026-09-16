@@ -386,30 +386,40 @@ const loadConversationSummary = async (
   userId: string,
   conversation: NonNullable<Awaited<ReturnType<typeof getConversationMembership>>>
 ): Promise<WorkConversation> => {
-  const rows = await selectVisibleMessageRows(database, userId, conversation.id, { limit: 1 });
-  const latestRows = rows.slice(0, 1);
-  const latest = (await loadMessageDetails(database, latestRows))[0];
-  const [readCursor] = await database
-    .select({ lastReadSequence: chatReadCursor.lastReadSequence })
-    .from(chatReadCursor)
-    .where(
-      and(
-        eq(chatReadCursor.conversationId, conversation.id),
-        eq(chatReadCursor.membershipId, conversation.membershipId)
+  const [latestRows, unreadRows] = await Promise.all([
+    database
+      .select({
+        id: chatMessage.id,
+        kind: chatMessage.kind,
+        text: chatMessage.contentText,
+        createdAt: chatMessage.createdAt,
+      })
+      .from(chatMessage)
+      .where(
+        and(
+          eq(chatMessage.conversationId, conversation.id),
+          isNull(chatMessage.deletedAt),
+          memberCanSeeMessage(database, userId)
+        )
       )
-    )
-    .limit(1);
-  const [unread] = await database
-    .select({ count: sql<number>`count(*)` })
-    .from(chatMessage)
-    .where(
-      and(
-        eq(chatMessage.conversationId, conversation.id),
-        isNull(chatMessage.deletedAt),
-        gt(chatMessage.sequence, readCursor?.lastReadSequence ?? 0),
-        memberCanSeeMessage(database, userId)
-      )
-    );
+      .orderBy(desc(chatMessage.sequence))
+      .limit(1),
+    database
+      .select({ count: sql<number>`count(*)` })
+      .from(chatMessage)
+      .where(
+        and(
+          eq(chatMessage.conversationId, conversation.id),
+          isNull(chatMessage.deletedAt),
+          gt(
+            chatMessage.sequence,
+            sql`coalesce((select ${chatReadCursor.lastReadSequence} from ${chatReadCursor} where ${chatReadCursor.conversationId} = ${conversation.id} and ${chatReadCursor.membershipId} = ${conversation.membershipId} limit 1), 0)`
+          ),
+          memberCanSeeMessage(database, userId)
+        )
+      ),
+  ]);
+  const latest = latestRows[0];
 
   return {
     id: conversation.id,
@@ -430,7 +440,7 @@ const loadConversationSummary = async (
     lastActivityAt: latest?.createdAt ?? null,
     archived: conversation.archivedAt !== null,
     readOnly: conversation.readOnlyAt !== null,
-    unreadCount: Number(unread?.count ?? 0),
+    unreadCount: Number(unreadRows[0]?.count ?? 0),
   };
 };
 
