@@ -19,6 +19,15 @@ const questState = t.Union(
 export const questV2AssignmentParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
 });
+export const questV2AssignmentMineQuerySchema = t.Object(
+  {
+    status: t.Optional(t.Union([t.Literal('active'), t.Literal('completed'), t.Literal('all')])),
+  },
+  { additionalProperties: false }
+);
+
+export type QuestV2AssignmentMineQuery = Static<typeof questV2AssignmentMineQuerySchema>;
+export type QuestV2AssignmentMineStatus = NonNullable<QuestV2AssignmentMineQuery['status']>;
 
 export const questV2AssignmentHeadersSchema = t.Object({
   'idempotency-key': t.String({
