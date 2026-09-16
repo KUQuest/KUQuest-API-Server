@@ -27,6 +27,7 @@ import type {
   QuestWorkChatMembershipTransition,
   WorkChatMembershipWriter,
 } from './quest-work-chat.contract';
+import type { QuestV2AssignmentMineStatus } from './quest-assignment-v2.schema';
 
 export const questV2AssignmentJoinOperationScope = 'quest.v2.assignment.join';
 
@@ -378,8 +379,15 @@ export const listQuestV2Assignments = async (
   return assignments.map((assignment) => toQuestV2AssignmentRow(assignment, current.questState));
 };
 
+const assignmentStatusPredicateFor = (status: QuestV2AssignmentMineStatus) => {
+  if (status === 'active') return eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE');
+  if (status === 'completed') return eq(questAssignment.assignmentStatus, 'ASSIGNMENT_COMPLETED');
+  return undefined;
+};
+
 export const listMyQuestV2Assignments = async (
-  workerId: string
+  workerId: string,
+  status: QuestV2AssignmentMineStatus = 'active'
 ): Promise<QuestV2AssignmentRow[]> => {
   const rows = await db
     .select({
@@ -391,7 +399,7 @@ export const listMyQuestV2Assignments = async (
     .where(
       and(
         eq(questAssignment.workerId, workerId),
-        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
+        assignmentStatusPredicateFor(status),
         eq(quest.apiVersion, questApiVersion.v2)
       )
     )

@@ -745,6 +745,10 @@ const questV2CanonicalScheduleSchema = t.String({
   pattern: questV2CanonicalScheduleTimePattern.source,
 });
 
+const questV2AssignmentStateSchema = t.Union(
+  questV2AssignmentStates.map((state) => t.Literal(state))
+);
+
 export const questV2BoardCardSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   title: t.String(),
@@ -795,16 +799,15 @@ export const questV2PublicDetailSchema = t.Object({
     t.Object({ label: t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }) })
   ),
   images: t.Array(questV2PublicImageSchema),
+  hasJoined: t.Optional(t.Boolean()),
+  assignmentId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
+  assignmentStatus: t.Optional(t.Nullable(questV2AssignmentStateSchema)),
 });
 
 export const questV2PublicDetailResponseSchema = t.Object({
   success: t.Literal(true),
   data: questV2PublicDetailSchema,
 });
-
-const questV2AssignmentStateSchema = t.Union(
-  questV2AssignmentStates.map((state) => t.Literal(state))
-);
 
 // The Participation projection carries the public Quest fields plus the caller's own
 // Assignment. Quest Funding Total, Platform Fee, Money Policy, Wallet, Funding

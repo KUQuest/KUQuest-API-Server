@@ -17,6 +17,7 @@ import {
 import {
   questV2AssignmentHeadersSchema,
   questV2AssignmentListResponseSchema,
+  questV2AssignmentMineQuerySchema,
   questV2AssignmentParamsSchema,
   questV2AssignmentResponseSchema,
 } from './quest-assignment-v2.schema';
@@ -34,11 +35,13 @@ export const questAssignmentV2Route = new Elysia({
 })
   .use(authGuard)
   .get('/assignments/mine', listMyQuestV2AssignmentsController, {
-    response: responses(questV2AssignmentListResponseSchema, 401, 500),
+    query: questV2AssignmentMineQuerySchema,
+    response: responses(questV2AssignmentListResponseSchema, 400, 401, 500),
     detail: {
       tags: ['Quest Assignments v2'],
       summary: "List the authenticated Worker's v2 Assignments",
-      description: "Returns the authenticated Worker's active Assignments from v2 Quests.",
+      description:
+        "Returns the authenticated Worker's v2 Assignments, filtered by active, completed, or all status.",
       operationId: 'listMyQuestAssignmentsV2',
       security: betterAuthSecurity,
     },

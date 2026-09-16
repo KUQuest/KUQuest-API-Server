@@ -331,10 +331,13 @@ describe('Quest v2 Participation Detail', () => {
     expect(Object.keys(body.data).sort()).toEqual([
       'activeWorkerCount',
       'assignment',
+      'assignmentId',
+      'assignmentStatus',
       'capabilities',
       'condition',
       'description',
       'dueAt',
+      'hasJoined',
       'headcount',
       'hirerName',
       'id',

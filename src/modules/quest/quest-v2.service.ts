@@ -65,6 +65,7 @@ import {
   isQuestV2ScheduleTime,
   isValidQuestV2Headcount,
   questV2States,
+  type QuestV2AssignmentState,
   type QuestV2CanonicalQuest,
   type QuestV2Mode,
   type QuestV2Participation,
@@ -268,6 +269,9 @@ export type QuestV2PublicDetail = {
   hirerName: string;
   locations: Array<{ label: string }>;
   images: QuestV2ImageReference[];
+  hasJoined: boolean;
+  assignmentId: string | null;
+  assignmentStatus: QuestV2AssignmentState | null;
 };
 
 export type QuestV2ParticipationDetail = QuestV2PublicDetail & {
@@ -341,6 +345,8 @@ type QuestV2PublicDetailRow = QuestV2BoardRow & {
   description: string | null;
   questStatus: QuestStatus;
   proofRequired: boolean;
+  assignmentId: string | null;
+  assignmentStatus: string | null;
 };
 
 type CompleteQuestV2DiscoveryRow = QuestV2BoardRow & {
@@ -2682,9 +2688,15 @@ export const getPublicQuestV2Detail = async (
       proofRequired: quest.proofRequired,
       hirerFirstName: authUser.firstName,
       hirerLastName: authUser.lastName,
+      assignmentId: questAssignment.id,
+      assignmentStatus: questAssignment.assignmentStatus,
     })
     .from(quest)
     .innerJoin(authUser, eq(quest.hirerId, authUser.id))
+    .leftJoin(
+      questAssignment,
+      and(eq(questAssignment.questId, quest.id), eq(questAssignment.workerId, userId))
+    )
     .leftJoin(tag, eq(quest.tagId, tag.id))
     .where(and(eq(quest.id, questId), ...questV2PublicReadConditions(userId)))
     .limit(1);
@@ -2720,6 +2732,9 @@ export const getPublicQuestV2Detail = async (
     hirerName: `${publicRow.hirerFirstName} ${publicRow.hirerLastName}`.trim(),
     locations,
     images,
+    hasJoined: publicRow.assignmentId !== null,
+    assignmentId: publicRow.assignmentId,
+    assignmentStatus: publicRow.assignmentStatus as QuestV2AssignmentState | null,
   };
 };
 
@@ -2745,6 +2760,7 @@ export const getQuestV2ParticipationDetail = async (
       proofRequired: quest.proofRequired,
       hirerFirstName: authUser.firstName,
       hirerLastName: authUser.lastName,
+      assignmentId: questAssignment.id,
       assignmentStatus: questAssignment.assignmentStatus,
       assignmentStartedAt: questAssignment.startedAt,
     })
@@ -2800,6 +2816,9 @@ export const getQuestV2ParticipationDetail = async (
     hirerName: `${participationRow.hirerFirstName} ${participationRow.hirerLastName}`.trim(),
     locations,
     images,
+    hasJoined: participationRow.assignmentId !== null,
+    assignmentId: participationRow.assignmentId,
+    assignmentStatus: participationRow.assignmentStatus as QuestV2AssignmentState | null,
     assignment: {
       status: participationRow.assignmentStatus,
       startedAt: participationRow.assignmentStartedAt?.toISOString() ?? null,

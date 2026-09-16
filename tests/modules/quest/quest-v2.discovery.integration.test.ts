@@ -454,6 +454,29 @@ describe('Quest API v2 discovery contract', () => {
     expect(body.data).not.toHaveProperty('wallet');
     expect(body.data).not.toHaveProperty('fundingReservation');
     expect(body.data).not.toHaveProperty('candidate');
+    expect(body.data).toMatchObject({
+      hasJoined: false,
+      assignmentId: null,
+      assignmentStatus: null,
+    });
+
+    const [assignment] = await db
+      .insert(questAssignment)
+      .values({
+        questId: publicQuestId,
+        workerId: memberId,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE',
+      })
+      .returning({ id: questAssignment.id });
+    if (!assignment) throw new Error('Quest assignment was not created');
+
+    const assignedResponse = await getPublicDetail(publicQuestId);
+    expect(assignedResponse.status).toBe(200);
+    expect((await assignedResponse.json()).data).toMatchObject({
+      hasJoined: true,
+      assignmentId: assignment.id,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    });
   });
 
   // Public Quest Detail is not a Worker lifecycle view. An Active Worker reads a hidden

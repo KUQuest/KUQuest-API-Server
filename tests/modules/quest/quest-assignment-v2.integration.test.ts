@@ -332,6 +332,68 @@ describe('Quest Assignment API v2', () => {
     expect((await otherHirer.json()).error.code).toBe('QUEST_NOT_FOUND');
   });
 
+  it('filters the authenticated Worker assignments by active, completed, or all status', async () => {
+    if (!postgresAvailable) return;
+    const activeQuestId = await createOpenSingleFcfsQuest();
+    const completedQuestId = await createOpenSingleFcfsQuest({ questStatus: 'QUEST_COMPLETED' });
+    const incompleteQuestId = await createOpenSingleFcfsQuest({
+      questStatus: 'QUEST_FAILED',
+      failedAt: new Date(),
+    });
+    const cancelledQuestId = await createOpenSingleFcfsQuest({
+      questStatus: 'QUEST_CANCELLED',
+      cancelledAt: new Date(),
+      cancelledByUserId: hirer.id,
+    });
+    await db.insert(questAssignment).values([
+      { questId: activeQuestId, workerId: worker.id, assignmentStatus: 'ASSIGNMENT_ACTIVE' },
+      {
+        questId: completedQuestId,
+        workerId: worker.id,
+        assignmentStatus: 'ASSIGNMENT_COMPLETED',
+      },
+      {
+        questId: incompleteQuestId,
+        workerId: worker.id,
+        assignmentStatus: 'ASSIGNMENT_INCOMPLETE',
+      },
+      {
+        questId: cancelledQuestId,
+        workerId: worker.id,
+        assignmentStatus: 'ASSIGNMENT_CANCELLED',
+      },
+    ]);
+    authenticate();
+
+    const defaultResponse = await request('/api/v2/assignments/mine');
+    expect(defaultResponse.status).toBe(200);
+    expect((await defaultResponse.json()).data.items).toMatchObject([
+      { questId: activeQuestId, state: 'ASSIGNMENT_ACTIVE' },
+    ]);
+
+    const completedResponse = await request('/api/v2/assignments/mine?status=completed');
+    expect(completedResponse.status).toBe(200);
+    expect((await completedResponse.json()).data.items).toMatchObject([
+      { questId: completedQuestId, state: 'ASSIGNMENT_COMPLETED' },
+    ]);
+
+    const allResponse = await request('/api/v2/assignments/mine?status=all');
+    expect(allResponse.status).toBe(200);
+    const allItems = (await allResponse.json()).data.items;
+    expect(allItems).toHaveLength(4);
+    expect(allItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ questId: activeQuestId, state: 'ASSIGNMENT_ACTIVE' }),
+        expect.objectContaining({ questId: completedQuestId, state: 'ASSIGNMENT_COMPLETED' }),
+        expect.objectContaining({ questId: incompleteQuestId, state: 'ASSIGNMENT_INCOMPLETE' }),
+        expect.objectContaining({ questId: cancelledQuestId, state: 'ASSIGNMENT_CANCELLED' }),
+      ])
+    );
+
+    const invalidResponse = await request('/api/v2/assignments/mine?status=invalid');
+    expect(invalidResponse.status).toBe(400);
+  });
+
   it('accepts GROUP Workers slot-by-slot and assigns the Quest on the final slot', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenGroupFcfsQuest();
