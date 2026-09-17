@@ -234,13 +234,32 @@ const createFile = async (
   });
   return id;
 };
+const uploadTeamFile = (
+  questId: string,
+  teamId: string,
+  memberId: string,
+  upload: File,
+  commandId = `candidate-team-v2-file-upload-${randomUUID()}`
+) => {
+  const form = new FormData();
+  form.set('file', upload);
+  return request(
+    `/api/v2/quests/${questId}/teams/${teamId}/files`,
+    'POST',
+    memberId,
+    { 'idempotency-key': commandId },
+    form
+  );
+};
+
 const submitTeam = async (
   questId: string,
   teamId: string,
   leaderId: string,
-  commandId = `candidate-team-v2-submit-${randomUUID()}`
+  commandId = `candidate-team-v2-submit-${randomUUID()}`,
+  existingSubmissionFileId?: string
 ) => {
-  const submissionFileId = await createFile(leaderId);
+  const submissionFileId = existingSubmissionFileId ?? (await createFile(leaderId));
   const response = await request(
     `/api/v2/quests/${questId}/teams/${teamId}/submit`,
     'POST',
@@ -1085,6 +1104,222 @@ describe('Quest Candidate Team API v2', () => {
     );
     expect(joinAfterSubmit.status).toBe(409);
     expect((await joinAfterSubmit.json()).error.code).toBe('TEAM_NOT_FORMING');
+  });
+
+  it('uploads a valid Team Leader PDF and accepts it when the full Candidate Team submits', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId, candidate.id, 2, 'candidate-team-v2-file-upload-create');
+    const upload = await uploadTeamFile(
+      questId,
+      team.id,
+      candidate.id,
+      new File([new TextEncoder().encode('%PDF-1.4 minimal pdf body')], 'candidate-team.pdf', {
+        type: 'application/pdf',
+      }),
+      'candidate-team-v2-file-upload-valid'
+    );
+    expect(upload.status).toBe(201);
+    const uploaded = (await upload.json()).data as {
+      fileId: string;
+      fileName: string;
+      mediaType: string;
+      sizeBytes: number;
+    };
+    fileIds.push(uploaded.fileId);
+    expect(uploaded).toMatchObject({
+      fileName: 'candidate-team.pdf',
+      mediaType: 'application/pdf',
+      sizeBytes: 25,
+    });
+    expect(uploaded.fileId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
+
+    const [storedFile] = await db
+      .select({
+        id: file.id,
+        contentType: file.contentType,
+        sizeBytes: file.sizeBytes,
+        uploadedByUserId: file.uploadedByUserId,
+      })
+      .from(file)
+      .where(eq(file.id, uploaded.fileId));
+    expect(storedFile).toEqual({
+      id: uploaded.fileId,
+      contentType: 'application/pdf',
+      sizeBytes: 25,
+      uploadedByUserId: candidate.id,
+    });
+
+    await joinTeam(
+      questId,
+      team.id,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-file-upload-join'
+    );
+    const submitted = await submitTeam(
+      questId,
+      team.id,
+      candidate.id,
+      'candidate-team-v2-file-upload-submit',
+      uploaded.fileId
+    );
+    expect(submitted.submissionFileId).toBe(uploaded.fileId);
+    expect(submitted.body).toMatchObject({
+      state: 'TEAM_SUBMITTED',
+      submission: { fileIds: [uploaded.fileId] },
+    });
+  });
+
+  it('refuses Candidate Team file uploads by a non-Leader and after submission without storing files', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(
+      questId,
+      candidate.id,
+      2,
+      'candidate-team-v2-file-upload-guards-create'
+    );
+    const filesBeforeNonLeader = await db
+      .select({ id: file.id })
+      .from(file)
+      .where(eq(file.uploadedByUserId, secondCandidate.id));
+    const nonLeader = await uploadTeamFile(
+      questId,
+      team.id,
+      secondCandidate.id,
+      new File([new TextEncoder().encode('%PDF-1.4 minimal pdf body')], 'not-leader.pdf', {
+        type: 'application/pdf',
+      }),
+      'candidate-team-v2-file-upload-non-leader'
+    );
+    expect(nonLeader.status).toBe(409);
+    expect((await nonLeader.json()).error.code).toBe('TEAM_LEADER_REQUIRED');
+    expect(
+      await db
+        .select({ id: file.id })
+        .from(file)
+        .where(eq(file.uploadedByUserId, secondCandidate.id))
+    ).toEqual(filesBeforeNonLeader);
+
+    await joinTeam(
+      questId,
+      team.id,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-file-upload-guards-join'
+    );
+    await submitTeam(questId, team.id, candidate.id, 'candidate-team-v2-file-upload-guards-submit');
+    const filesBeforeSubmitted = await db
+      .select({ id: file.id })
+      .from(file)
+      .where(eq(file.uploadedByUserId, candidate.id));
+    const submitted = await uploadTeamFile(
+      questId,
+      team.id,
+      candidate.id,
+      new File([new TextEncoder().encode('%PDF-1.4 minimal pdf body')], 'submitted.pdf', {
+        type: 'application/pdf',
+      }),
+      'candidate-team-v2-file-upload-submitted'
+    );
+    expect(submitted.status).toBe(409);
+    expect((await submitted.json()).error.code).toBe('TEAM_NOT_FORMING');
+    expect(
+      await db.select({ id: file.id }).from(file).where(eq(file.uploadedByUserId, candidate.id))
+    ).toEqual(filesBeforeSubmitted);
+  });
+
+  it('rejects unsupported and oversized Candidate Team files without persisting them', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(
+      questId,
+      candidate.id,
+      2,
+      'candidate-team-v2-file-upload-validation-create'
+    );
+    const filesBefore = await db
+      .select({ id: file.id })
+      .from(file)
+      .where(eq(file.uploadedByUserId, candidate.id));
+    const unsupported = await uploadTeamFile(
+      questId,
+      team.id,
+      candidate.id,
+      new File(['plain text'], 'unsupported.txt', { type: 'text/plain' }),
+      'candidate-team-v2-file-upload-unsupported'
+    );
+    expect(unsupported.status).toBe(415);
+    expect((await unsupported.json()).error.code).toBe('TEAM_FILE_TYPE_NOT_SUPPORTED');
+
+    const tooLarge = await uploadTeamFile(
+      questId,
+      team.id,
+      candidate.id,
+      new File(
+        [
+          new TextEncoder().encode('%PDF-1.4 minimal pdf body'),
+          new Uint8Array(10 * 1024 * 1024 + 1 - 25),
+        ],
+        'too-large.pdf',
+        {
+          type: 'application/pdf',
+        }
+      ),
+      'candidate-team-v2-file-upload-too-large'
+    );
+    expect(tooLarge.status).toBe(413);
+    expect((await tooLarge.json()).error.code).toBe('TEAM_FILE_TOO_LARGE');
+    expect(
+      await db.select({ id: file.id }).from(file).where(eq(file.uploadedByUserId, candidate.id))
+    ).toEqual(filesBefore);
+  });
+
+  it('replays an idempotent Candidate Team file upload without another file record', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(
+      questId,
+      candidate.id,
+      2,
+      'candidate-team-v2-file-upload-replay-create'
+    );
+    const key = 'candidate-team-v2-file-upload-replay';
+    const first = await uploadTeamFile(
+      questId,
+      team.id,
+      candidate.id,
+      new File([new TextEncoder().encode('%PDF-1.4 minimal pdf body')], 'replay.pdf', {
+        type: 'application/pdf',
+      }),
+      key
+    );
+    expect(first.status).toBe(201);
+    const firstBody = await first.json();
+    const uploadedFileId = firstBody.data.fileId as string;
+    fileIds.push(uploadedFileId);
+
+    const replay = await uploadTeamFile(
+      questId,
+      team.id,
+      candidate.id,
+      new File([new TextEncoder().encode('%PDF-1.4 minimal pdf body')], 'replay.pdf', {
+        type: 'application/pdf',
+      }),
+      key
+    );
+    expect(replay.status).toBe(201);
+    expect(await replay.json()).toEqual(firstBody);
+    expect(
+      await db.select({ id: file.id }).from(file).where(eq(file.uploadedByUserId, candidate.id))
+    ).toEqual([{ id: uploadedFileId }]);
   });
 
   it('lets the owning Hirer reject a submitted Team without changing the Quest or creating work records', async () => {
