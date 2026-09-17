@@ -1,7 +1,7 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { adminReviewItem } from '@/database/schema/admin.schema';
+import { adminDisputeCase, adminReviewItem } from '@/database/schema/admin.schema';
 import { auditRecord } from '@/database/schema/audit.schema';
 import { file } from '@/database/schema/file.schema';
 import { chatConversation, chatMembership } from '@/database/schema/work-chat.schema';
@@ -341,13 +341,14 @@ describe('Quest Proof Submission v2 behavior', () => {
       'POST',
       `/api/v2/quests/${questId}/proof-submissions`,
       worker.id,
-      { description: 'draft', fileIds: [firstFileId] },
+      { description: 'draft', workerMessage: 'Worker note', fileIds: [firstFileId] },
       { 'idempotency-key': 'proof-v2-behavior-create' }
     );
     expect(created.status).toBe(201);
     const createdData = (await created.json()).data as Record<string, unknown>;
     expect(createdData).toMatchObject({
       description: 'draft',
+      workerMessage: 'Worker note',
       status: null,
       visibility: 'FULL',
       fileIds: [firstFileId],
@@ -469,6 +470,20 @@ describe('Quest Proof Submission v2 behavior', () => {
     );
     expect(reusedAgain.status).toBe(409);
     expect((await reusedAgain.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  });
+  it('rejects a Worker message longer than 200 characters', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest();
+    const proofFileId = await createFile(worker.id);
+
+    const result = await createQuestV2ProofSubmission(
+      worker.id,
+      questId,
+      { workerMessage: 'x'.repeat(201), fileIds: [proofFileId] },
+      `proof-v2-behavior-worker-message-too-long-${questId}`
+    );
+
+    expect(result).toEqual({ outcome: 'invalid-draft' });
   });
 
   it('lets two Workers send the same Idempotency-Key for their own proof commands', async () => {
@@ -656,10 +671,58 @@ describe('Quest Proof Submission v2 behavior', () => {
         evidenceReferences: [proofFileId],
       },
     ]);
+    expect(
+      await db
+        .select({ filerUserId: adminDisputeCase.filerUserId, status: adminDisputeCase.status })
+        .from(adminDisputeCase)
+        .where(
+          and(eq(adminDisputeCase.questId, questId), eq(adminDisputeCase.filerUserId, worker.id))
+        )
+    ).toEqual([{ filerUserId: worker.id, status: 'DISPUTE_CASE_PENDING' }]);
     expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
       status: 'ACTIVE',
       remainingSatang: 1_020,
     });
+  });
+  it('returns a temporary Proof file URL to an authorized Hirer', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, proofSubmissionId, proofFileId } = await createHttpSentProof();
+    const expiresAt = new Date('2030-01-01T00:15:00.000Z');
+    const link = spyOn(questV2ProofStorage, 'linkForWithExpiry').mockReturnValue({
+      url: 'https://storage.example/proof-file',
+      expiresAt,
+    });
+
+    const response = await request(
+      'GET',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/files/${proofFileId}`,
+      hirer.id
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      success: true,
+      data: {
+        fileId: proofFileId,
+        contentType: 'application/pdf',
+        sizeBytes: 100,
+        position: 0,
+        url: 'https://storage.example/proof-file',
+        urlExpiresAt: expiresAt.toISOString(),
+      },
+    });
+    expect(link).toHaveBeenCalledWith({
+      bucket: 'proof-v2-behavior-test',
+      objectKey: `${proofFileId}.pdf`,
+    });
+
+    const unauthorized = await request(
+      'GET',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/files/${proofFileId}`,
+      unrelated.id
+    );
+    expect(unauthorized.status).toBe(404);
   });
 
   it('requires a reason for a not-approved decision without changing the pending Proof', async () => {

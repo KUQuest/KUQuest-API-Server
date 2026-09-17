@@ -2,6 +2,7 @@ import { AdminActionError } from '@/modules/admin';
 import type { AdminContext, AuthedContext } from '@/modules/auth';
 import { MoneyDomainError } from '@/modules/wallet';
 import { apiError, apiSuccess } from '@/shared/api-response';
+import { FileLinkUnavailableError } from '@/shared/object-storage';
 import type { ApiResponse } from '@/shared/api-response';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import { readResourceVersion } from '@/shared/resource-version';
@@ -76,6 +77,10 @@ const mapAdminDisputeError = (set: AdminContext['set'], error: unknown): ApiResp
   if (error instanceof MoneyDomainError) {
     set.status = error.code === 'IDEMPOTENCY_UNAVAILABLE' ? 503 : 409;
     return apiError(error.code, error.message);
+  }
+  if (error instanceof FileLinkUnavailableError) {
+    set.status = 503;
+    return apiError('DISPUTE_EVIDENCE_UNAVAILABLE', 'Dispute evidence links are unavailable');
   }
   throw error;
 };

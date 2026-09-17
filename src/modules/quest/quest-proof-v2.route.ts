@@ -11,6 +11,7 @@ import {
   deleteQuestV2ProofSubmissionController,
   editQuestV2ProofSubmissionController,
   listQuestV2ProofSubmissionsController,
+  getQuestV2ProofFileController,
   reviewQuestV2ProofSubmissionController,
   submitQuestV2ProofSubmissionController,
 } from './quest-proof-v2.controller';
@@ -22,6 +23,8 @@ import {
   questV2ProofSubmissionEditSchema,
   questV2ProofSubmissionHeadersSchema,
   questV2ProofSubmissionListResponseSchema,
+  questV2ProofFileParamsSchema,
+  questV2ProofFileResponseSchema,
   questV2ProofSubmissionParamsSchema,
   questV2ProofSubmissionResponseSchema,
   questV2ProofSubmissionReviewResponseSchema,
@@ -168,6 +171,22 @@ export const questProofV2Route = new Elysia({
       security: betterAuthSecurity,
     },
   })
+  .get(
+    '/:questId/proof-submissions/:proofSubmissionId/files/:fileId',
+    getQuestV2ProofFileController,
+    {
+      params: questV2ProofFileParamsSchema,
+      response: responses(questV2ProofFileResponseSchema, 401, 404, 503),
+      detail: {
+        tags: ['Quest Proof v2'],
+        summary: 'Get a temporary v2 Proof file link',
+        description:
+          'Returns a short-lived link for a ready Proof file to its submitting Worker or the Quest Hirer.',
+        operationId: 'getQuestV2ProofFile',
+        security: betterAuthSecurity,
+      },
+    }
+  )
   .post('/:questId/completion-confirmation', confirmQuestV2CompletionController, {
     params: questV2ProofSubmissionParamsSchema,
     headers: questV2ProofSubmissionHeadersSchema,
