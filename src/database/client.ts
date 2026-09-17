@@ -5,6 +5,7 @@ import * as adminSchema from '@/database/schema/admin.schema';
 import * as auditSchema from '@/database/schema/audit.schema';
 import * as authSchema from '@/database/schema/auth.schema';
 import * as fileSchema from '@/database/schema/file.schema';
+import * as notificationSchema from '@/database/schema/notification.schema';
 import * as paymentSchema from '@/database/schema/payment.schema';
 import * as profileSchema from '@/database/schema/profile.schema';
 import * as questSchema from '@/database/schema/quest.schema';
@@ -21,6 +22,7 @@ const schema = {
   ...auditSchema,
   ...authSchema,
   ...fileSchema,
+  ...notificationSchema,
   ...paymentSchema,
   ...profileSchema,
   ...questSchema,

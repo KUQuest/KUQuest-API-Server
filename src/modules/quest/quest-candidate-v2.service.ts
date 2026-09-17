@@ -1,9 +1,11 @@
 import { db } from '@/database/client';
+import { authUser } from '@/database/schema/auth.schema';
 import {
   quest,
   questApiVersion,
   questCandidateApplicationV2,
 } from '@/database/schema/quest.schema';
+import { createNotification } from '@/modules/notification';
 
 import { and, asc, eq, ne } from 'drizzle-orm';
 
@@ -199,6 +201,39 @@ export const createQuestV2CandidateApplication = async (
           .returning(applicationFields);
         if (!createdApplication) throw new Error('Candidate application insert returned no row');
 
+        const [applicant] = await transaction
+          .select({ firstName: authUser.firstName, lastName: authUser.lastName })
+          .from(authUser)
+          .where(eq(authUser.id, memberId))
+          .limit(1);
+        const applicantName = applicant
+          ? `${applicant.firstName} ${applicant.lastName}`.trim()
+          : 'A worker';
+
+        const [questRow] = await transaction
+          .select({ title: quest.title })
+          .from(quest)
+          .where(eq(quest.id, questId))
+          .limit(1);
+        const questTitle = questRow?.title ?? 'a quest';
+
+        await createNotification(
+          {
+            recipientId: current.hirerId,
+            actorId: memberId,
+            category: 'CANDIDATE',
+            type: 'CANDIDATE_APPLIED',
+            severity: 'info',
+            title: 'New Candidate Application',
+            message: `${applicantName} applied to your quest '${questTitle}'.`,
+            resourceType: 'QUEST',
+            resourceId: questId,
+            actionRoute: `/quest/${questId}/manage`,
+            actionLabel: 'Review Candidates',
+          },
+          transaction
+        );
+
         const application = toApplicationRow(createdApplication);
         return {
           kind: 'success',
@@ -311,6 +346,39 @@ export const withdrawQuestV2CandidateApplication = async (
           throw new Error('Candidate application update returned no row');
         }
 
+        const [applicant] = await transaction
+          .select({ firstName: authUser.firstName, lastName: authUser.lastName })
+          .from(authUser)
+          .where(eq(authUser.id, memberId))
+          .limit(1);
+        const applicantName = applicant
+          ? `${applicant.firstName} ${applicant.lastName}`.trim()
+          : 'A candidate';
+
+        const [questRow] = await transaction
+          .select({ title: quest.title })
+          .from(quest)
+          .where(eq(quest.id, questId))
+          .limit(1);
+        const questTitle = questRow?.title ?? 'a quest';
+
+        await createNotification(
+          {
+            recipientId: current.hirerId,
+            actorId: memberId,
+            category: 'CANDIDATE',
+            type: 'CANDIDATE_WITHDRAWN',
+            severity: 'neutral',
+            title: 'Candidate Application Withdrawn',
+            message: `${applicantName} withdrew their application for '${questTitle}'.`,
+            resourceType: 'QUEST',
+            resourceId: questId,
+            actionRoute: `/quest/${questId}/manage`,
+            actionLabel: 'View Candidates',
+          },
+          transaction
+        );
+
         const updated = toApplicationRow(updatedApplication);
         return {
           kind: 'success',
@@ -410,6 +478,30 @@ export const rejectQuestV2CandidateApplication = async (
         if (!updatedApplication) {
           throw new Error('Candidate application update returned no row');
         }
+
+        const [questRow] = await transaction
+          .select({ title: quest.title })
+          .from(quest)
+          .where(eq(quest.id, questId))
+          .limit(1);
+        const questTitle = questRow?.title ?? 'a quest';
+
+        await createNotification(
+          {
+            recipientId: application.memberId,
+            actorId: hirerId,
+            category: 'CANDIDATE',
+            type: 'CANDIDATE_REJECTED',
+            severity: 'neutral',
+            title: 'Application Update',
+            message: `Your application for '${questTitle}' was not selected.`,
+            resourceType: 'QUEST',
+            resourceId: questId,
+            actionRoute: `/quest/${questId}`,
+            actionLabel: 'View Quest',
+          },
+          transaction
+        );
 
         const updated = toApplicationRow(updatedApplication);
         return {
@@ -524,6 +616,17 @@ export const selectQuestV2CandidateApplication = async (
         workerIds: [application.memberId],
         resourceId: (assignments) => assignments[0].id,
         flipCandidateRecords: async (tx) => {
+          const otherApplicants = await tx
+            .select({ memberId: questCandidateApplicationV2.memberId })
+            .from(questCandidateApplicationV2)
+            .where(
+              and(
+                eq(questCandidateApplicationV2.questId, questId),
+                eq(questCandidateApplicationV2.state, 'APPLICATION_APPLIED'),
+                ne(questCandidateApplicationV2.id, application.id)
+              )
+            );
+
           await tx
             .update(questCandidateApplicationV2)
             .set({ state: 'APPLICATION_SELECTED' })
@@ -538,6 +641,51 @@ export const selectQuestV2CandidateApplication = async (
                 ne(questCandidateApplicationV2.id, application.id)
               )
             );
+
+          const [questRow] = await tx
+            .select({ title: quest.title })
+            .from(quest)
+            .where(eq(quest.id, questId))
+            .limit(1);
+          const questTitle = questRow?.title ?? 'the quest';
+
+          await createNotification(
+            {
+              recipientId: application.memberId,
+              actorId: hirerId,
+              category: 'CANDIDATE',
+              type: 'CANDIDATE_SELECTED',
+              severity: 'success',
+              title: 'Application Accepted! 🎉',
+              message: `You were selected for '${questTitle}'. Tap to open your Work Chat.`,
+              resourceType: 'QUEST',
+              resourceId: questId,
+              actionRoute: `/quest/${questId}/work`,
+              actionLabel: 'Open Work Chat',
+            },
+            tx
+          );
+
+          await Promise.all(
+            otherApplicants.map((other) =>
+              createNotification(
+                {
+                  recipientId: other.memberId,
+                  actorId: hirerId,
+                  category: 'CANDIDATE',
+                  type: 'CANDIDATE_REJECTED',
+                  severity: 'neutral',
+                  title: 'Application Update',
+                  message: `The Hirer selected another candidate for '${questTitle}'.`,
+                  resourceType: 'QUEST',
+                  resourceId: questId,
+                  actionRoute: `/quest/${questId}`,
+                  actionLabel: 'View Quest',
+                },
+                tx
+              )
+            )
+          );
         },
       };
     },
