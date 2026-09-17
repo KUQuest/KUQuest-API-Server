@@ -33,6 +33,8 @@ export const questV2CandidateApplicationWithdrawOperationScope =
   'quest.v2.candidate-application.withdraw';
 export const questV2CandidateApplicationSelectOperationScope =
   'quest.v2.candidate-application.select';
+export const questV2CandidateApplicationRejectOperationScope =
+  'quest.v2.candidate-application.reject';
 
 type QuestV2CandidateApplicationRow = {
   id: string;
@@ -303,6 +305,106 @@ export const withdrawQuestV2CandidateApplication = async (
         const [updatedApplication] = await transaction
           .update(questCandidateApplicationV2)
           .set({ state: 'APPLICATION_WITHDRAWN' })
+          .where(eq(questCandidateApplicationV2.id, applicationId))
+          .returning(applicationFields);
+        if (!updatedApplication) {
+          throw new Error('Candidate application update returned no row');
+        }
+
+        const updated = toApplicationRow(updatedApplication);
+        return {
+          kind: 'success',
+          result: updated,
+          resourceType: 'quest-v2-candidate-application',
+          resourceId: updated.id,
+        };
+      },
+      toSnapshot: snapshotFor,
+      fromSnapshot: applicationFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return command.result;
+    return { outcome: command.rejection };
+  });
+
+type QuestV2CandidateApplicationRejectBusinessOutcomeCode =
+  'application-not-found' | 'not-allowed' | 'not-rejectable';
+
+type QuestV2CandidateApplicationRejectOutcomeCode =
+  QuestV2CandidateApplicationRejectBusinessOutcomeCode | 'not-found' | QuestCommandOutcomeCode;
+
+export type QuestV2CandidateApplicationRejectOutcome =
+  | QuestV2CandidateApplicationRow
+  | {
+      outcome: QuestV2CandidateApplicationRejectOutcomeCode;
+    };
+
+export const rejectQuestV2CandidateApplication = async (
+  hirerId: string,
+  questId: string,
+  applicationId: string,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateApplicationRejectOutcome> =>
+  db.transaction(async (transaction) => {
+    const current = await lockQuest(transaction, questId);
+    if (!current) return { outcome: 'not-found' };
+
+    const command = await runQuestCommand({
+      transaction,
+      identity: {
+        principalUserId: hirerId,
+        operationScope: questV2CandidateApplicationRejectOperationScope,
+        key: rawCommandId,
+        requestHash: await sha256Json({
+          authenticatedMemberId: hirerId,
+          operation: questV2CandidateApplicationRejectOperationScope,
+          path: '/api/v2/quests/:questId/applications/:applicationId/reject',
+          questId,
+          applicationId,
+          body: {},
+        }),
+        questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<
+          QuestV2CandidateApplicationRow,
+          QuestV2CandidateApplicationRejectBusinessOutcomeCode
+        >
+      > => {
+        if (current.hirerId !== hirerId) {
+          return { kind: 'rejected', rejection: 'not-allowed' };
+        }
+        if (
+          current.v2Mode !== questV2Mode.candidate ||
+          current.v2Participation !== questV2Participation.single ||
+          current.questState !== 'QUEST_OPEN' ||
+          current.startTime.getTime() <= now.getTime()
+        ) {
+          return { kind: 'rejected', rejection: 'not-allowed' };
+        }
+
+        const [application] = await transaction
+          .select(applicationFields)
+          .from(questCandidateApplicationV2)
+          .where(
+            and(
+              eq(questCandidateApplicationV2.id, applicationId),
+              eq(questCandidateApplicationV2.questId, questId)
+            )
+          )
+          .limit(1)
+          .for('update');
+        if (!application) return { kind: 'rejected', rejection: 'application-not-found' };
+        if (application.state !== 'APPLICATION_APPLIED') {
+          return { kind: 'rejected', rejection: 'not-rejectable' };
+        }
+
+        const [updatedApplication] = await transaction
+          .update(questCandidateApplicationV2)
+          .set({ state: 'APPLICATION_REJECTED' })
           .where(eq(questCandidateApplicationV2.id, applicationId))
           .returning(applicationFields);
         if (!updatedApplication) {

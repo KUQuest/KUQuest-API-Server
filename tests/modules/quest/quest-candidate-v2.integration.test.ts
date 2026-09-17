@@ -373,6 +373,8 @@ describe('Quest Candidate API v2', () => {
     const detail = document.paths['/api/v2/quests/{questId}/applications/{applicationId}'];
     const withdraw =
       document.paths['/api/v2/quests/{questId}/applications/{applicationId}/withdraw']?.post;
+    const reject =
+      document.paths['/api/v2/quests/{questId}/applications/{applicationId}/reject']?.post;
     const select =
       document.paths['/api/v2/quests/{questId}/applications/{applicationId}/select']?.post;
     const create = collection?.post;
@@ -381,9 +383,10 @@ describe('Quest Candidate API v2', () => {
     expect(collection?.get?.operationId).toBe('listQuestApplicationsV2');
     expect(detail?.get?.operationId).toBe('getQuestApplicationV2');
     expect(withdraw?.operationId).toBe('withdrawQuestApplicationV2');
+    expect(reject?.operationId).toBe('rejectQuestApplicationV2');
     expect(select?.operationId).toBe('selectQuestApplicationV2');
 
-    for (const operation of [create, withdraw, select]) {
+    for (const operation of [create, withdraw, reject, select]) {
       expect(operation?.security).toEqual([{ betterAuthSession: [] }]);
       expect(operation?.parameters).toEqual(
         expect.arrayContaining([
@@ -395,6 +398,174 @@ describe('Quest Candidate API v2', () => {
         ])
       );
     }
+  });
+
+  it('lets the owning Hirer reject an applied Candidate without changing the Quest or creating an Assignment', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenCandidateQuest();
+    authenticate();
+
+    const apply = await request(`/api/v2/quests/${questId}/applications`, 'POST', candidate.id, {
+      'idempotency-key': 'candidate-v2-reject-apply',
+    });
+    expect(apply.status).toBe(200);
+    const applicationId = (await apply.json()).data.id as string;
+
+    const response = await request(
+      `/api/v2/quests/${questId}/applications/${applicationId}/reject`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-v2-reject-1' }
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      success: boolean;
+      data: { id: string; questId: string; memberId: string; state: string };
+    };
+    expect(body).toMatchObject({
+      success: true,
+      data: {
+        id: applicationId,
+        questId,
+        memberId: candidate.id,
+        state: 'APPLICATION_REJECTED',
+      },
+    });
+
+    const [storedApplication] = await db
+      .select({ state: questCandidateApplicationV2.state })
+      .from(questCandidateApplicationV2)
+      .where(eq(questCandidateApplicationV2.id, applicationId));
+    expect(storedApplication?.state).toBe('APPLICATION_REJECTED');
+    const [storedQuest] = await db
+      .select({ state: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, questId));
+    expect(storedQuest?.state).toBe('QUEST_OPEN');
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
+    ).toHaveLength(0);
+    expect(transitions).toHaveLength(0);
+    expect(
+      await db.select().from(chatConversation).where(eq(chatConversation.questId, questId))
+    ).toHaveLength(0);
+  });
+
+  it('enforces Candidate rejection ownership and target-state guards', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+
+    const unauthorizedQuestId = await createOpenCandidateQuest();
+    const unauthorizedApply = await request(
+      `/api/v2/quests/${unauthorizedQuestId}/applications`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': 'candidate-v2-reject-guard-apply-unauthorized' }
+    );
+    const unauthorizedApplicationId = (await unauthorizedApply.json()).data.id as string;
+    const unauthorized = await request(
+      `/api/v2/quests/${unauthorizedQuestId}/applications/${unauthorizedApplicationId}/reject`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': 'candidate-v2-reject-guard-unauthorized' }
+    );
+    expect(unauthorized.status).toBe(409);
+    expect((await unauthorized.json()).error.code).toBe('CANDIDATE_REJECTION_NOT_ALLOWED');
+
+    for (const [state, suffix] of [
+      ['APPLICATION_SELECTED', 'selected'],
+      ['APPLICATION_REJECTED', 'rejected'],
+      ['APPLICATION_WITHDRAWN', 'withdrawn'],
+    ] as const) {
+      const questId = await createOpenCandidateQuest();
+      const applied = await request(
+        `/api/v2/quests/${questId}/applications`,
+        'POST',
+        candidate.id,
+        {
+          'idempotency-key': `candidate-v2-reject-guard-apply-${suffix}`,
+        }
+      );
+      const applicationId = (await applied.json()).data.id as string;
+      await db
+        .update(questCandidateApplicationV2)
+        .set({ state })
+        .where(eq(questCandidateApplicationV2.id, applicationId));
+
+      const response = await request(
+        `/api/v2/quests/${questId}/applications/${applicationId}/reject`,
+        'POST',
+        hirer.id,
+        { 'idempotency-key': `candidate-v2-reject-guard-${suffix}` }
+      );
+      expect(response.status).toBe(409);
+      expect((await response.json()).error.code).toBe('CANDIDATE_NOT_REJECTABLE');
+    }
+  });
+
+  it('replays Candidate rejection durably and rejects Idempotency-Key reuse for another application', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenCandidateQuest();
+    authenticate();
+
+    const firstApply = await request(
+      `/api/v2/quests/${questId}/applications`,
+      'POST',
+      candidate.id,
+      {
+        'idempotency-key': 'candidate-v2-reject-replay-apply-first',
+      }
+    );
+    const firstApplicationId = (await firstApply.json()).data.id as string;
+    const secondApply = await request(
+      `/api/v2/quests/${questId}/applications`,
+      'POST',
+      secondCandidate.id,
+      { 'idempotency-key': 'candidate-v2-reject-replay-apply-second' }
+    );
+    const secondApplicationId = (await secondApply.json()).data.id as string;
+
+    const first = await request(
+      `/api/v2/quests/${questId}/applications/${firstApplicationId}/reject`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-v2-reject-replay' }
+    );
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+
+    const replay = await request(
+      `/api/v2/quests/${questId}/applications/${firstApplicationId}/reject`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-v2-reject-replay' }
+    );
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(firstBody);
+
+    const reused = await request(
+      `/api/v2/quests/${questId}/applications/${secondApplicationId}/reject`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-v2-reject-replay' }
+    );
+    expect(reused.status).toBe(409);
+    expect((await reused.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+
+    const applications = await db
+      .select({ id: questCandidateApplicationV2.id, state: questCandidateApplicationV2.state })
+      .from(questCandidateApplicationV2)
+      .where(eq(questCandidateApplicationV2.questId, questId));
+    expect(applications).toEqual(
+      expect.arrayContaining([
+        { id: firstApplicationId, state: 'APPLICATION_REJECTED' },
+        { id: secondApplicationId, state: 'APPLICATION_APPLIED' },
+      ])
+    );
+    expect(transitions).toHaveLength(0);
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
+    ).toHaveLength(0);
   });
 
   it('lets a Candidate withdraw once while the Quest is open and replays the withdrawal', async () => {
