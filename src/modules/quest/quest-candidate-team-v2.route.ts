@@ -12,6 +12,7 @@ import {
   leaveQuestV2CandidateTeamController,
   listQuestV2CandidateTeamsController,
   regenerateQuestV2CandidateTeamJoinCodeController,
+  rejectQuestV2CandidateTeamController,
   removeQuestV2CandidateTeamMemberController,
   selectQuestV2CandidateTeamController,
   submitQuestV2CandidateTeamController,
@@ -165,6 +166,19 @@ export const questCandidateTeamV2Route = new Elysia({
       description:
         'The Team Leader submits a full, immutable Candidate Team with text and at least one valid Work Conversation Attachment file.',
       operationId: 'submitQuestCandidateTeamV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/quests/:questId/teams/:teamId/reject', rejectQuestV2CandidateTeamController, {
+    params: questV2CandidateTeamDetailParamsSchema,
+    headers: questV2CandidateTeamHeadersSchema,
+    response: responses(questV2CandidateTeamResponseSchema, 400, 401, 404, 409, 503),
+    detail: {
+      tags: ['Quest Candidate Teams v2'],
+      summary: 'Reject a submitted Candidate Team',
+      description:
+        'The owning Hirer rejects one submitted Candidate Team while the GROUP Candidate Quest remains open and before its start time.',
+      operationId: 'rejectQuestCandidateTeamV2',
       security: betterAuthSecurity,
     },
   })

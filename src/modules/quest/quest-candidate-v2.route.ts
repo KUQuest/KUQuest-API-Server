@@ -8,6 +8,7 @@ import {
   createQuestV2CandidateApplicationController,
   getQuestV2CandidateApplicationController,
   listQuestV2CandidateApplicationsController,
+  rejectQuestV2CandidateApplicationController,
   selectQuestV2CandidateApplicationController,
   withdrawQuestV2CandidateApplicationController,
 } from './quest-candidate-v2.controller';
@@ -76,6 +77,23 @@ export const questCandidateV2Route = new Elysia({
         description:
           "A Candidate can withdraw that Candidate's application only while the Quest is QUEST_OPEN and before selection.",
         operationId: 'withdrawQuestApplicationV2',
+        security: betterAuthSecurity,
+      },
+    }
+  )
+  .post(
+    '/quests/:questId/applications/:applicationId/reject',
+    rejectQuestV2CandidateApplicationController,
+    {
+      params: questV2CandidateApplicationDetailParamsSchema,
+      headers: questV2CandidateApplicationHeadersSchema,
+      response: responses(questV2CandidateApplicationResponseSchema, 400, 401, 404, 409, 503),
+      detail: {
+        tags: ['Quest Candidates v2'],
+        summary: 'Reject a v2 Candidate application',
+        description:
+          'The owning Hirer can reject an applied Candidate application while the Quest is open and before its start time.',
+        operationId: 'rejectQuestApplicationV2',
         security: betterAuthSecurity,
       },
     }

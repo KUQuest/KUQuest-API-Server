@@ -17,11 +17,13 @@ import {
   leaveQuestV2CandidateTeam,
   listQuestV2CandidateTeams,
   regenerateQuestV2CandidateTeamJoinCode,
+  rejectQuestV2CandidateTeam,
   removeQuestV2CandidateTeamMember,
   selectQuestV2CandidateTeam,
   submitQuestV2CandidateTeam,
   updateQuestV2CandidateTeam,
   type QuestV2CandidateTeamOutcome,
+  type QuestV2CandidateTeamRejectOutcome,
   type QuestV2CandidateTeamSelectionOutcome,
 } from './quest-candidate-team-v2.service';
 import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
@@ -174,6 +176,34 @@ const mapTeamError = (set: AuthedContext['set'], outcome: CandidateTeamError) =>
       set,
       'CANDIDATE_TEAM_NOT_SELECTABLE',
       'The Candidate Team is not submitted for selection'
+    );
+  }
+  return mapQuestCommandOutcome(set, outcome.outcome);
+};
+
+type CandidateTeamRejectError = Exclude<QuestV2CandidateTeamRejectOutcome, CandidateTeam>;
+
+const mapRejectError = (set: AuthedContext['set'], outcome: CandidateTeamRejectError) => {
+  if (outcome.outcome === 'not-found') {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+  if (outcome.outcome === 'team-not-found') {
+    set.status = 404;
+    return apiError('TEAM_NOT_FOUND', 'Candidate Team not found');
+  }
+  if (outcome.outcome === 'not-allowed') {
+    return conflict(
+      set,
+      'CANDIDATE_TEAM_REJECTION_NOT_ALLOWED',
+      'Only the owning Hirer can reject a Candidate Team while the Quest is open and before its start time'
+    );
+  }
+  if (outcome.outcome === 'not-rejectable') {
+    return conflict(
+      set,
+      'CANDIDATE_TEAM_NOT_REJECTABLE',
+      'Only a submitted Candidate Team can be rejected'
     );
   }
   return mapQuestCommandOutcome(set, outcome.outcome);
@@ -414,6 +444,24 @@ export const submitQuestV2CandidateTeamController = async ({
     commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
+  return apiSuccess(serializeTeam(result));
+};
+
+export const rejectQuestV2CandidateTeamController = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & { params: QuestV2CandidateTeamDetailParams }) => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+  const result = await rejectQuestV2CandidateTeam(
+    session.user.id,
+    params.questId,
+    params.teamId,
+    commandId
+  );
+  if ('outcome' in result) return mapRejectError(set, result);
   return apiSuccess(serializeTeam(result));
 };
 

@@ -49,6 +49,7 @@ export const questV2CandidateTeamRegenerateCodeOperationScope =
   'quest.v2.candidate-team.regenerate-code';
 export const questV2CandidateTeamSubmitOperationScope = 'quest.v2.candidate-team.submit';
 export const questV2CandidateTeamSelectOperationScope = 'quest.v2.candidate-team.select';
+export const questV2CandidateTeamRejectOperationScope = 'quest.v2.candidate-team.reject';
 
 const dayInMilliseconds = 24 * 60 * 60 * 1000;
 const maxAttachmentSizeBytes = 10 * 1024 * 1024;
@@ -112,6 +113,18 @@ type QuestV2CandidateTeamBusinessOutcomeCode =
   | 'team-full'
   | 'team-not-found'
   | 'not-found';
+
+type QuestV2CandidateTeamRejectBusinessOutcomeCode =
+  'team-not-found' | 'not-allowed' | 'not-rejectable';
+
+type QuestV2CandidateTeamRejectOutcomeCode =
+  QuestV2CandidateTeamRejectBusinessOutcomeCode | 'not-found' | QuestCommandOutcomeCode;
+
+export type QuestV2CandidateTeamRejectOutcome =
+  | CandidateTeam
+  | {
+      outcome: QuestV2CandidateTeamRejectOutcomeCode;
+    };
 
 type TeamCommandOutcomeCode = QuestV2CandidateTeamBusinessOutcomeCode | QuestCommandOutcomeCode;
 
@@ -1149,6 +1162,89 @@ export const submitQuestV2CandidateTeam = async (
           .values(
             input.fileIds.map((fileId, position) => ({ teamId, fileId, position, attachedAt: now }))
           );
+
+        const result = await readTeam(transaction, updatedTeam);
+        return {
+          kind: 'success',
+          result,
+          resourceType: 'quest-v2-candidate-team',
+          resourceId: result.id,
+        };
+      },
+      toSnapshot: snapshotFor,
+      fromSnapshot: teamFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return command.result;
+    return { outcome: command.rejection };
+  });
+};
+
+export const rejectQuestV2CandidateTeam = async (
+  hirerId: string,
+  questId: string,
+  teamId: string,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamRejectOutcome> => {
+  const requestHash = await sha256Json({
+    authenticatedMemberId: hirerId,
+    operation: questV2CandidateTeamRejectOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/reject',
+    questId,
+    teamId,
+    body: {},
+  });
+
+  return db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command; see the lock-order
+    // note on createQuestV2CandidateTeam.
+    const current = await lockQuest(transaction, questId);
+    if (!current) return { outcome: 'not-found' };
+
+    const command = await runQuestCommand({
+      transaction,
+      identity: {
+        principalUserId: hirerId,
+        operationScope: questV2CandidateTeamRejectOperationScope,
+        key: rawCommandId,
+        requestHash,
+        questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<CandidateTeam, QuestV2CandidateTeamRejectBusinessOutcomeCode>
+      > => {
+        if (current.hirerId !== hirerId) {
+          return { kind: 'rejected', rejection: 'not-allowed' };
+        }
+        if (
+          current.v2Mode !== questV2Mode.candidate ||
+          current.v2Participation !== questV2Participation.group ||
+          current.questState !== 'QUEST_OPEN' ||
+          current.startTime.getTime() <= now.getTime()
+        ) {
+          return { kind: 'rejected', rejection: 'not-allowed' };
+        }
+
+        const team = await lockTeam(transaction, questId, teamId);
+        if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+        if (team.state !== 'TEAM_SUBMITTED') {
+          return { kind: 'rejected', rejection: 'not-rejectable' };
+        }
+
+        const [updatedTeam] = await transaction
+          .update(questCandidateTeamV2)
+          .set({ state: 'TEAM_REJECTED' })
+          .where(
+            and(
+              eq(questCandidateTeamV2.id, teamId),
+              eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED')
+            )
+          )
+          .returning(teamFields);
+        if (!updatedTeam) throw new Error('Candidate Team rejection update returned no row');
 
         const result = await readTeam(transaction, updatedTeam);
         return {
