@@ -1,11 +1,18 @@
 import { env } from '@/config/env';
 import { db, sql } from '@/database/client';
 import { department, occupation } from '@/database/schema/academic.schema';
+import { adminDisputeCase, disputeCaseStatus } from '@/database/schema/admin.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { paymentPayouts } from '@/database/schema/payment.schema';
-import { quest } from '@/database/schema/quest.schema';
+import { quest, questAssignment } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletLedgerAccount, walletLedgerTransaction } from '@/database/schema/wallet.schema';
+import {
+  assignmentStatus,
+  questMode,
+  questParticipation,
+  questStatus,
+} from '@/modules/quest/quest.contract';
 import {
   createPayoutDestinationEncryption,
   getPayoutDestination,
@@ -19,9 +26,9 @@ import {
   ensureWallet,
   getWallet,
   positiveSatang,
+  reserveSpending,
   signedSatang,
 } from '@/modules/wallet';
-import { questMode, questParticipation, questStatus } from '@/modules/quest/quest.contract';
 
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 
@@ -29,6 +36,9 @@ export const financeSeedQuestTitle = '[Finance Test] Publish Escrow Quest Draft'
 export const financeSeedSpendingSatang = 1_000_000;
 export const financeSeedEarningsSatang = 500_000;
 export const financeSeedPayoutReceiptSatang = 100_000;
+export const financeSeedDisputeQuestTitle = '[Finance Test] Failed Dispute Quest';
+export const financeSeedDisputeAmountSatang = 50_000;
+const financeSeedDisputeReservationReference = 'finance-seed-dispute-quest-v1';
 
 const requireValue = (name: string, value: string | undefined): string => {
   if (!value?.trim()) throw new Error(`${name} is required for the finance seed.`);
@@ -40,6 +50,7 @@ const assertFinanceSeedEnvironment = (): {
   password: string;
   firstName: string;
   lastName: string;
+  studentId: string;
   recipientEmail: string;
   recipientFirstName: string;
   recipientLastName: string;
@@ -68,6 +79,15 @@ const assertFinanceSeedEnvironment = (): {
   if (!/^[^\s@]+@ku\.th$/.test(email)) {
     throw new Error('STAGING_TEST_AUTH_EMAIL must be a valid @ku.th email.');
   }
+  const rawStudentId = process.env.STAGING_TEST_AUTH_STUDENT_ID;
+  let studentId = '6599999999';
+  if (rawStudentId !== undefined && rawStudentId !== '') {
+    const trimmed = rawStudentId.trim();
+    if (!/^[0-9]{10}$/.test(trimmed)) {
+      throw new Error('STAGING_TEST_AUTH_STUDENT_ID must be exactly 10 digits.');
+    }
+    studentId = trimmed;
+  }
 
   const recipientEmail = requireValue(
     'LOCAL_FINANCE_TEST_RECIPIENT_EMAIL',
@@ -82,6 +102,7 @@ const assertFinanceSeedEnvironment = (): {
     password: requireValue('STAGING_TEST_AUTH_PASSWORD', env.stagingTestAuthPassword),
     firstName: requireValue('STAGING_TEST_AUTH_FIRST_NAME', env.stagingTestAuthFirstName),
     lastName: requireValue('STAGING_TEST_AUTH_LAST_NAME', env.stagingTestAuthLastName),
+    studentId,
     recipientEmail,
     recipientFirstName: requireValue(
       'LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME',
@@ -137,7 +158,7 @@ const ensureFinanceStudent = async (settings: ReturnType<typeof assertFinanceSee
       emailVerified: true,
       firstName: settings.firstName,
       lastName: settings.lastName,
-      studentId: '6599999999',
+      studentId: settings.studentId,
       occupationId: studentOccupation?.id,
       departmentId: studentDepartment?.id,
       termsAcceptedAt: new Date(),
@@ -317,6 +338,185 @@ const ensureFinanceQuestDraft = async (userId: string): Promise<string> => {
   return created.id;
 };
 
+type DatabaseTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+const ensureAdminDisputeCaseInTransaction = async (
+  transaction: DatabaseTransaction,
+  questId: string,
+  filerUserId: string
+): Promise<{ id: string }> => {
+  const [existingCase] = await transaction
+    .select({
+      id: adminDisputeCase.id,
+      status: adminDisputeCase.status,
+    })
+    .from(adminDisputeCase)
+    .where(
+      and(eq(adminDisputeCase.questId, questId), eq(adminDisputeCase.filerUserId, filerUserId))
+    )
+    .for('update');
+
+  if (existingCase) {
+    return { id: existingCase.id };
+  }
+
+  const [targetQuest] = await transaction
+    .select({
+      id: quest.id,
+      questStatus: quest.questStatus,
+      fundingReservationId: quest.fundingReservationId,
+    })
+    .from(quest)
+    .where(eq(quest.id, questId))
+    .for('update');
+
+  if (!targetQuest) {
+    throw new Error('The Quest for the Dispute Case does not exist.');
+  }
+  if (targetQuest.questStatus !== questStatus.failed) {
+    throw new Error('The finance Dispute Quest is not failed.');
+  }
+  if (!targetQuest.fundingReservationId) {
+    throw new Error('The finance Dispute Quest has no Funding Reservation.');
+  }
+
+  const [created] = await transaction
+    .insert(adminDisputeCase)
+    .values({
+      questId,
+      filerUserId,
+      status: disputeCaseStatus.pending,
+    })
+    .onConflictDoNothing({
+      target: [adminDisputeCase.questId, adminDisputeCase.filerUserId],
+    })
+    .returning({ id: adminDisputeCase.id });
+
+  if (created) {
+    return { id: created.id };
+  }
+
+  const [reloaded] = await transaction
+    .select({ id: adminDisputeCase.id })
+    .from(adminDisputeCase)
+    .where(
+      and(eq(adminDisputeCase.questId, questId), eq(adminDisputeCase.filerUserId, filerUserId))
+    )
+    .limit(1);
+
+  if (!reloaded) {
+    throw new Error('The finance Dispute Case could not be created.');
+  }
+
+  return { id: reloaded.id };
+};
+
+const ensureFinanceDisputeQuest = async (
+  hirerId: string,
+  workerId: string
+): Promise<{ questId: string; disputeCaseId: string }> =>
+  db.transaction(async (transaction) => {
+    const [existing] = await transaction
+      .select({
+        id: quest.id,
+        fundingReservationId: quest.fundingReservationId,
+        questStatus: quest.questStatus,
+        failedAt: quest.failedAt,
+      })
+      .from(quest)
+      .where(and(eq(quest.hirerId, hirerId), eq(quest.title, financeSeedDisputeQuestTitle)))
+      .for('update');
+
+    if (existing) {
+      if (existing.questStatus !== questStatus.failed) {
+        throw new Error('The finance Dispute Quest is not failed.');
+      }
+      if (!existing.fundingReservationId) {
+        throw new Error('The finance Dispute Quest has no Funding Reservation.');
+      }
+      const [assignment] = await transaction
+        .select({ id: questAssignment.id })
+        .from(questAssignment)
+        .where(
+          and(eq(questAssignment.questId, existing.id), eq(questAssignment.workerId, workerId))
+        )
+        .limit(1);
+      if (!assignment) {
+        await transaction.insert(questAssignment).values({
+          questId: existing.id,
+          workerId,
+          assignmentStatus: assignmentStatus.incomplete,
+        });
+      }
+      const disputeCase = await ensureAdminDisputeCaseInTransaction(
+        transaction,
+        existing.id,
+        workerId
+      );
+      return { questId: existing.id, disputeCaseId: disputeCase.id };
+    }
+
+    const reservation = await reserveSpending(transaction, {
+      ownerUserId: hirerId,
+      callerScope: 'quest',
+      callerReference: financeSeedDisputeReservationReference,
+      amountSatang: positiveSatang(financeSeedDisputeAmountSatang),
+    });
+    const [designTag] = await transaction
+      .select({ id: tag.id })
+      .from(tag)
+      .where(eq(tag.name, 'Design'))
+      .limit(1);
+    if (!designTag) throw new Error('The Design Tag is missing.');
+
+    const failedAt = new Date(Date.now() - 60 * 60 * 1000);
+    const [created] = await transaction
+      .insert(quest)
+      .values({
+        hirerId,
+        title: financeSeedDisputeQuestTitle,
+        description: 'A failed Quest for Admin Dispute review.',
+        condition: 'Review the seeded Dispute Case evidence.',
+        mode: questMode.noCandidate,
+        participation: questParticipation.solo,
+        questStatus: questStatus.failed,
+        version: 1,
+        rewardSatang: positiveSatang(financeSeedDisputeAmountSatang),
+        questFundingTotalSatang: positiveSatang(financeSeedDisputeAmountSatang),
+        fundingReservationId: reservation.id,
+        policyRevisionId: reservation.policyRevisionId,
+        platformFeeBps: 0,
+        platformFeePerWorkerSatang: 0,
+        questEscrowSatang: positiveSatang(financeSeedDisputeAmountSatang),
+        tagId: designTag.id,
+        headcount: 1,
+        startTime: new Date(failedAt.getTime() - 2 * 60 * 60 * 1000),
+        dueAt: new Date(failedAt.getTime() - 60 * 60 * 1000),
+        failedAt,
+        proofRequired: true,
+        createdAt: new Date(failedAt.getTime() - 3 * 60 * 60 * 1000),
+        updatedAt: failedAt,
+      })
+      .returning({ id: quest.id });
+    if (!created) throw new Error('The finance Dispute Quest could not be created.');
+
+    const [assignment] = await transaction
+      .insert(questAssignment)
+      .values({
+        questId: created.id,
+        workerId,
+        assignmentStatus: assignmentStatus.incomplete,
+      })
+      .returning({ id: questAssignment.id });
+    if (!assignment) throw new Error('The finance Dispute Quest Assignment could not be created.');
+
+    const disputeCase = await ensureAdminDisputeCaseInTransaction(
+      transaction,
+      created.id,
+      workerId
+    );
+    return { questId: created.id, disputeCaseId: disputeCase.id };
+  });
 const main = async (): Promise<void> => {
   const settings = assertFinanceSeedEnvironment();
   await ensureInitialMoneyPolicy();
@@ -329,6 +529,7 @@ const main = async (): Promise<void> => {
   const destination = await ensurePayoutDestination(financeMemberId, settings);
   const payout = await ensurePendingPayout(financeMemberId);
   const questId = await ensureFinanceQuestDraft(financeMemberId);
+  const dispute = await ensureFinanceDisputeQuest(financeMemberId, recipientId);
   const wallet = await getWallet(financeMemberId);
 
   console.log(`Prepared finance test Student ${settings.email}.`);
@@ -336,6 +537,9 @@ const main = async (): Promise<void> => {
   console.log(`Prepared Payout Destination ${destination.maskedRoutingValue}.`);
   console.log(`Prepared Payout ${payout.id} with status ${payout.payoutStatus}.`);
   console.log(`Prepared Quest Escrow draft ${questId}.`);
+  console.log(
+    `Prepared pending Dispute Case ${dispute.disputeCaseId} on Quest ${dispute.questId}.`
+  );
   console.log(
     `Seeded Wallet balances: Spending ${wallet.spendingBalanceSatang} satang, Earnings ${wallet.earningsBalanceSatang} satang.`
   );
