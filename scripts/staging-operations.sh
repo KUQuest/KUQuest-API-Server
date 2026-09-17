@@ -170,6 +170,8 @@ deploy() {
   fi
 
   trap report_deployment_failure ERR
+  deployment_stage=cleanup
+  docker image prune --all --force
   deployment_stage=pull
   docker compose pull api
   deployment_stage=backup
