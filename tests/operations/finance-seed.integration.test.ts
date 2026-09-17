@@ -1,18 +1,17 @@
 import { defaultLocalDatabaseUrl } from '@/config/default-database-url';
-import { db, sql } from '@/database/client';
-import { adminDisputeCase } from '@/database/schema/admin.schema';
-import { authAdmin } from '@/database/schema/auth.schema';
+import { sql } from '@/database/client';
+import { getWallet } from '@/modules/wallet';
 
 import { randomUUID } from 'node:crypto';
 
 import { expect, test } from 'bun:test';
-import { eq } from 'drizzle-orm';
 
 import {
-  financeSeedDisputeAmountSatang,
-  financeSeedDisputeQuestTitle,
+  financeSeedEarningsSatang,
+  financeSeedPayoutReceiptSatang,
+  financeSeedQuestTitle,
+  financeSeedSpendingSatang,
 } from '../../scripts/seed-finance-test';
-
 const financeSeedScript = `${import.meta.dir}/../../scripts/seed-finance-test.ts`;
 const stagingSeedScript = `${import.meta.dir}/../../scripts/seed-staging.ts`;
 
@@ -124,24 +123,21 @@ const cleanupFinanceTestData = async (_emails: string[] = [], _adminIds: string[
 
 // Note on test architecture and verify-staging-seed limitation:
 // scripts/verify-staging-seed.ts validates the complete staging bootstrap (including
-// all 10 demo students, demo open/completed quests, and reviews), so running
-// verify-staging-seed.ts standalone fails on missing demo fixtures in an isolated test database.
+// all 10 demo students, demo open/completed quests, reviews, and demo dispute case),
+// so running verify-staging-seed.ts standalone fails on missing demo fixtures in an isolated test database.
 // To keep the test fully deterministic and safe, we run the supported financeSeedScript directly
-// and assert against the exact database query contract that verify-staging-seed.ts evaluates
-// to verify the Admin Dispute case seed:
-//   - Failed Quest titled "[Finance Test] Failed Dispute Quest" with status QUEST_FAILED
-//   - Active Funding Reservation for 50,000 satang
-//   - Incomplete Assignment (ASSIGNMENT_INCOMPLETE) for the finance recipient
-//   - Admin Dispute Case with status DISPUTE_CASE_PENDING filed by the worker
-//   - Idempotent re-execution with no duplicate records
-//   - Preservation of terminal decisions (e.g., DISPUTE_CASE_DISMISSED) across re-seed runs
+// and assert against the finance seed contracts:
+//   - Finance test Student and recipient auth users prepared
+//   - Payout Destination and pending Payout created
+//   - Finance Quest Escrow draft prepared with status QUEST_DRAFT
+//   - Wallet spending and earnings balances properly seeded
+//   - Idempotent re-execution with no duplicate records or errors
 //   - Zero provider network calls made
-test('finance seed prepares, idempotently reuses, and preserves terminal decisions for the Admin Dispute seed', async () => {
+test('finance seed prepares and idempotently reuses the finance Student, Payout, and draft Quest', async () => {
   await ensurePostgres();
 
   const runId = randomUUID();
   const financeEmail = `finance-test-${runId}@ku.th`;
-  const createdAdminIds: string[] = [];
   const recipientEmail = `recipient-test-${runId}@ku.th`;
   const studentSuffix = (BigInt(`0x${runId.replace(/-/g, '').slice(0, 12)}`) % 90_000_000n)
     .toString()
@@ -167,54 +163,79 @@ test('finance seed prepares, idempotently reuses, and preserves terminal decisio
     DATABASE_URL: process.env.DATABASE_URL ?? defaultLocalDatabaseUrl,
   };
 
-  const queryDisputeSeedContract = async () => {
-    return sql<
+  const queryFinanceContract = async () => {
+    const [student] = await sql<
       {
-        disputeCaseId: string;
-        disputeStatus: string;
-        filerUserId: string;
-        questId: string;
-        questTitle: string;
-        questStatus: string;
-        reservationId: string;
-        reservationStatus: string;
-        reservationAmountSatang: number;
-        assignmentId: string;
-        assignmentStatus: string;
-        workerId: string;
-        hirerId: string;
+        id: string;
+        email: string;
       }[]
     >`
-      SELECT
-        dispute.id AS "disputeCaseId",
-        dispute.status AS "disputeStatus",
-        dispute.filer_user_id AS "filerUserId",
-        failed_quest.id AS "questId",
-        failed_quest.title AS "questTitle",
-        failed_quest.quest_status AS "questStatus",
-        reservation.id AS "reservationId",
-        reservation.status AS "reservationStatus",
-        reservation.total_reserved_satang AS "reservationAmountSatang",
-        assignment.id AS "assignmentId",
-        assignment.assignment_status AS "assignmentStatus",
-        worker.id AS "workerId",
-        hirer.id AS "hirerId"
-      FROM admin_dispute_cases dispute
-      INNER JOIN quest failed_quest ON failed_quest.id = dispute.quest_id
-      INNER JOIN wallet_funding_reservations reservation
-        ON reservation.id = failed_quest.funding_reservation_id
-      INNER JOIN quest_assignment assignment
-        ON assignment.quest_id = failed_quest.id
-      INNER JOIN auth_user hirer ON hirer.id = failed_quest.hirer_id
-      INNER JOIN auth_user worker ON worker.id = assignment.worker_id
-      WHERE lower(hirer.email) = ${financeEmail.toLowerCase()}
-        AND lower(worker.email) = ${recipientEmail.toLowerCase()}
-        AND failed_quest.title = ${financeSeedDisputeQuestTitle}
+      SELECT id, email
+      FROM auth_user
+      WHERE lower(email) = ${financeEmail.toLowerCase()}
+      LIMIT 1
     `;
+
+    const [recipient] = await sql<
+      {
+        id: string;
+        email: string;
+      }[]
+    >`
+      SELECT id, email
+      FROM auth_user
+      WHERE lower(email) = ${recipientEmail.toLowerCase()}
+      LIMIT 1
+    `;
+
+    const draftQuests = await sql<
+      {
+        id: string;
+        title: string;
+        questStatus: string;
+      }[]
+    >`
+      SELECT id, title, quest_status AS "questStatus"
+      FROM quest
+      WHERE hirer_id = ${student?.id ?? ''}
+        AND title = ${financeSeedQuestTitle}
+    `;
+
+    const destinations = await sql<
+      {
+        id: string;
+        retiredAt: Date | null;
+      }[]
+    >`
+      SELECT id, retired_at AS "retiredAt"
+      FROM payment_payout_accounts
+      WHERE user_id = ${student?.id ?? ''}
+        AND retired_at IS NULL
+    `;
+
+    const payouts = await sql<
+      {
+        id: string;
+        payoutStatus: string;
+      }[]
+    >`
+      SELECT id, payout_status AS "payoutStatus"
+      FROM payment_payouts
+      WHERE user_id = ${student?.id ?? ''}
+        AND payout_status = 'PENDING_ADMIN_APPROVAL'
+    `;
+
+    return {
+      student,
+      recipient,
+      draftQuests,
+      destinations,
+      payouts,
+    };
   };
 
   try {
-    // 1. Initial run: seed creates failed quest, active reservation, incomplete assignment, and pending dispute case
+    // 1. Initial run: seed creates finance Student, recipient, Payout Destination, pending Payout, and Quest draft
     const firstRun = Bun.spawnSync(['bun', financeSeedScript], {
       env: testEnv,
       stderr: 'pipe',
@@ -223,20 +244,24 @@ test('finance seed prepares, idempotently reuses, and preserves terminal decisio
     const firstOutput = `${firstRun.stdout.toString()}${firstRun.stderr.toString()}`;
 
     expect(firstRun.exitCode).toBe(0);
-    expect(firstOutput).toContain('Prepared pending Dispute Case');
+    expect(firstOutput).toContain(`Prepared finance test Student ${financeEmail}`);
+    expect(firstOutput).toContain(`Prepared finance test recipient ${recipientEmail}`);
+    expect(firstOutput).toContain('Prepared Quest Escrow draft');
     expect(firstOutput).toContain('No provider call was made by the finance seed.');
 
-    const firstRecords = await queryDisputeSeedContract();
-    expect(firstRecords).toHaveLength(1);
+    const firstData = await queryFinanceContract();
+    expect(firstData.student).toBeDefined();
+    expect(firstData.recipient).toBeDefined();
+    expect(firstData.draftQuests).toHaveLength(1);
+    expect(firstData.draftQuests[0]?.questStatus).toBe('QUEST_DRAFT');
+    expect(firstData.destinations).toHaveLength(1);
+    expect(firstData.payouts).toHaveLength(1);
 
-    const [disputeRecord] = firstRecords;
-    expect(disputeRecord.questTitle).toBe(financeSeedDisputeQuestTitle);
-    expect(disputeRecord.questStatus).toBe('QUEST_FAILED');
-    expect(disputeRecord.reservationStatus).toBe('ACTIVE');
-    expect(disputeRecord.reservationAmountSatang).toBe(financeSeedDisputeAmountSatang);
-    expect(disputeRecord.assignmentStatus).toBe('ASSIGNMENT_INCOMPLETE');
-    expect(disputeRecord.disputeStatus).toBe('DISPUTE_CASE_PENDING');
-    expect(disputeRecord.filerUserId).toBe(disputeRecord.workerId);
+    const wallet = await getWallet(firstData.student!.id);
+    expect(Number(wallet.spendingBalanceSatang)).toBe(financeSeedSpendingSatang);
+    expect(Number(wallet.earningsBalanceSatang)).toBe(
+      financeSeedEarningsSatang - financeSeedPayoutReceiptSatang
+    );
 
     // 2. Idempotency run: re-running the seed reuses existing records without duplication or errors
     const secondRun = Bun.spawnSync(['bun', financeSeedScript], {
@@ -247,57 +272,17 @@ test('finance seed prepares, idempotently reuses, and preserves terminal decisio
     const secondOutput = `${secondRun.stdout.toString()}${secondRun.stderr.toString()}`;
 
     expect(secondRun.exitCode).toBe(0);
-    expect(secondOutput).toContain('Prepared pending Dispute Case');
+    expect(secondOutput).toContain(`Prepared finance test Student ${financeEmail}`);
+    expect(secondOutput).toContain('No provider call was made by the finance seed.');
 
-    const secondRecords = await queryDisputeSeedContract();
-    expect(secondRecords).toHaveLength(1);
-    expect(secondRecords[0].disputeCaseId).toBe(disputeRecord.disputeCaseId);
-    expect(secondRecords[0].questId).toBe(disputeRecord.questId);
-    expect(secondRecords[0].reservationId).toBe(disputeRecord.reservationId);
-    expect(secondRecords[0].assignmentId).toBe(disputeRecord.assignmentId);
-
-    // 3. Terminal decision preservation: re-running the seed does not overwrite resolved/dismissed dispute cases
-    const adminId = randomUUID();
-    createdAdminIds.push(adminId);
-    await db.insert(authAdmin).values({
-      id: adminId,
-      email: `admin-${runId}@ku.th`,
-      firstName: 'Finance',
-      lastName: 'Admin',
-    });
-
-    await db
-      .update(adminDisputeCase)
-      .set({
-        status: 'DISPUTE_CASE_DISMISSED',
-        resolvedByAdminId: adminId,
-        resolvedAt: new Date(),
-      })
-      .where(eq(adminDisputeCase.id, disputeRecord.disputeCaseId));
-
-    const thirdRun = Bun.spawnSync(['bun', financeSeedScript], {
-      env: testEnv,
-      stderr: 'pipe',
-      stdout: 'pipe',
-    });
-    const thirdOutput = `${thirdRun.stdout.toString()}${thirdRun.stderr.toString()}`;
-
-    expect(thirdRun.exitCode).toBe(0);
-    expect(thirdOutput).toContain('Prepared pending Dispute Case');
-
-    const [persistedDispute] = await db
-      .select({
-        status: adminDisputeCase.status,
-        resolvedByAdminId: adminDisputeCase.resolvedByAdminId,
-        resolvedAt: adminDisputeCase.resolvedAt,
-      })
-      .from(adminDisputeCase)
-      .where(eq(adminDisputeCase.id, disputeRecord.disputeCaseId));
-
-    expect(persistedDispute?.status).toBe('DISPUTE_CASE_DISMISSED');
-    expect(persistedDispute?.resolvedByAdminId).toBe(adminId);
-    expect(persistedDispute?.resolvedAt).toBeInstanceOf(Date);
+    const secondData = await queryFinanceContract();
+    expect(secondData.draftQuests).toHaveLength(1);
+    expect(secondData.draftQuests[0]?.id).toBe(firstData.draftQuests[0]?.id);
+    expect(secondData.destinations).toHaveLength(1);
+    expect(secondData.destinations[0]?.id).toBe(firstData.destinations[0]?.id);
+    expect(secondData.payouts).toHaveLength(1);
+    expect(secondData.payouts[0]?.id).toBe(firstData.payouts[0]?.id);
   } finally {
-    await cleanupFinanceTestData([financeEmail, recipientEmail], createdAdminIds);
+    await cleanupFinanceTestData([financeEmail, recipientEmail]);
   }
 });
