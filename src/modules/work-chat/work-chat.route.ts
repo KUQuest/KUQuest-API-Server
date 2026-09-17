@@ -96,7 +96,8 @@ export const workChatRoute = new Elysia({
     detail: {
       tags: ['Work Chat'],
       summary: 'List Work Conversation Participants',
-      description: 'Lists the current Hirer and Worker participants with their roles.',
+      description:
+        'Lists the current Hirer and Worker participants with their roles and avatar when available.',
       operationId: 'listWorkConversationParticipants',
       security: betterAuthSecurity,
     },

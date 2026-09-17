@@ -127,7 +127,7 @@ export const candidateInquiryRoute = new Elysia({
       tags: ['Candidate Inquiry'],
       summary: 'List Candidate Inquiry Participants',
       description:
-        'Lists the Hirer and Prospective Worker in an open Candidate Inquiry Conversation.',
+        'Lists the Hirer and Prospective Worker with their avatars when available in an open Candidate Inquiry Conversation.',
       operationId: 'listCandidateInquiryParticipants',
       security: betterAuthSecurity,
     },

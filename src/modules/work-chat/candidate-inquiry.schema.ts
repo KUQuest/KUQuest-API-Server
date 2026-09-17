@@ -1,10 +1,12 @@
 import { t } from 'elysia';
+import { profileAvatarSchema } from '@/modules/profile/profile.schema';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 const candidateInquiryParticipantSchema = t.Object({
   id: t.Nullable(t.String({ format: 'uuid' })),
   role: t.Union([t.Literal('HIRER'), t.Literal('PROSPECTIVE_WORKER')]),
   displayName: t.String(),
+  avatar: profileAvatarSchema,
 });
 
 const candidateInquiryAttachmentSchema = t.Object({
@@ -23,6 +25,7 @@ const candidateInquiryMessageSchema = t.Object({
   sender: t.Object({
     id: t.Nullable(t.String({ format: 'uuid' })),
     displayName: t.String(),
+    avatar: profileAvatarSchema,
   }),
   text: t.Nullable(t.String()),
   attachments: t.Array(candidateInquiryAttachmentSchema),

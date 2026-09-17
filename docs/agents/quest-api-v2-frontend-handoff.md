@@ -915,6 +915,10 @@ Success status: HTTP 200.
     "dueAt": "2026-10-07T18:00:00.000+07:00",
     "proofRequired": true,
     "hirerName": "Hirer display name",
+    "hirerAvatar": {
+      "fileId": "avatar-file-uuid",
+      "url": "temporary-avatar-url"
+    },
     "locations": [{ "label": "Online" }],
     "images": [
       {
@@ -928,8 +932,9 @@ Success status: HTTP 200.
 }
 ```
 
-Public detail does not expose fileId.
-It exposes only temporary image URLs.
+Quest Images do not expose fileId; they expose only temporary image URLs.
+`hirerAvatar` is the Hirer's current avatar, with its file reference and a
+temporary URL. It is `null` when the Hirer has no current avatar.
 
 Error:
 
@@ -1705,6 +1710,10 @@ POST   /api/v1/chat/conversations/:conversationId/messages
 POST   /api/v1/chat/conversations/:conversationId/read
 WS     /api/v1/chat/conversations/:conversationId/events
 ```
+
+Work Conversation `participants` and Message `sender` identity objects include
+`avatar`, shaped as `{ fileId, url }` when the Member has a current avatar, or
+`null` otherwise. The URL is temporary and the client must handle `null`.
 
 REST is authoritative.
 Use WebSocket messages as updates, then refresh from REST when exact state is
@@ -2531,6 +2540,9 @@ POST   /api/v1/chat/candidate-inquiries/:conversationId/messages
 POST   /api/v1/chat/candidate-inquiries/:conversationId/read
 WS     /api/v1/chat/candidate-inquiries/:conversationId/events
 ```
+
+Candidate Inquiry `participants` and Message `sender` identity objects use the
+same `avatar` shape as Work Chat: `{ fileId, url }` or `null`.
 
 Create body:
 

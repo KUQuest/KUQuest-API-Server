@@ -234,7 +234,7 @@ export const questV2Route = new Elysia({
       tags: ['Quests v2'],
       summary: 'Get Public Quest Detail through the v2 contract',
       description:
-        'Returns the public projection of a non-hidden QUEST_OPEN Quest to an authenticated Member who is not the Hirer. Candidate and Finance internals are excluded.',
+        'Returns the public projection of a non-hidden QUEST_OPEN Quest to an authenticated Member who is not the Hirer. Candidate and Finance internals are excluded. Includes the Hirer Avatar when available.',
       operationId: 'getPublicQuestV2Detail',
       security: betterAuthSecurity,
     },

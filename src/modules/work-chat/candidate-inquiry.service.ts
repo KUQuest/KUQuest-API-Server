@@ -20,7 +20,12 @@ import {
   WorkChatAttachmentTooLargeError,
   workChatStorage,
 } from './work-chat.storage';
-import { loadMessageDetails, type MessageRow } from './work-chat.service';
+import {
+  loadMessageDetails,
+  toWorkChatAvatar,
+  type MessageRow,
+  type WorkChatAvatar,
+} from './work-chat.service';
 
 type CandidateInquiryDatabase = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 type MessageCursor = { sequence: number; id: string };
@@ -191,6 +196,7 @@ export type CandidateInquiryParticipant = {
   id: string | null;
   role: 'HIRER' | 'PROSPECTIVE_WORKER';
   displayName: string;
+  avatar: WorkChatAvatar;
 };
 
 const loadCandidateParticipants = async (
@@ -203,9 +209,13 @@ const loadCandidateParticipants = async (
       role: chatMembership.role,
       firstName: authUser.firstName,
       lastName: authUser.lastName,
+      avatarFileId: file.id,
+      avatarBucket: file.bucket,
+      avatarObjectKey: file.objectKey,
     })
     .from(chatMembership)
     .leftJoin(authUser, eq(authUser.id, chatMembership.memberId))
+    .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
     .where(
       and(
         eq(chatMembership.conversationId, conversationId),
@@ -219,6 +229,7 @@ const loadCandidateParticipants = async (
     id: row.id,
     role: row.role as CandidateInquiryParticipant['role'],
     displayName: `${row.firstName ?? ''} ${row.lastName ?? ''}`.trim() || 'Former member',
+    avatar: toWorkChatAvatar(row),
   }));
 };
 
