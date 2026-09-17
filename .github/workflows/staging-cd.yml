@@ -374,6 +374,19 @@ jobs:
               deploy@"$STAGING_SERVER" \
               "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
 
+      - name: Reclaim unused Docker images
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            'docker image prune --all --force'
+
       - name: Deploy API container
         shell: bash
         env:
