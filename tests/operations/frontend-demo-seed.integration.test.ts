@@ -26,19 +26,10 @@ const ensurePostgres = async () => {
   }
 };
 
-// Financial records (wallets, funding reservations, ledger entries, etc.)
-// are immutable by database retention triggers and cannot be hard-deleted.
-// Each test run uses fresh random UUID-based user emails and admin IDs where applicable,
-// and retaining these seed fixtures does not leak state across runs and avoids trigger violations.
-const cleanupDemoTestData = async (_emails: string[] = [], _adminIds: string[] = []) => {
-  // Explicit no-op: immutable financial records must be retained per database policy.
-};
-
 test('frontend demo seed prepares, idempotently reuses, and preserves terminal decisions for the demo Dispute Quest', async () => {
   await ensurePostgres();
 
   const runId = randomUUID();
-  const createdAdminIds: string[] = [];
   const hirerEmail = `nattapong.srisawat-${runId}@ku.th`;
   const workerEmail = `warisara.boonmee-${runId}@ku.th`;
 
@@ -136,75 +127,70 @@ test('frontend demo seed prepares, idempotently reuses, and preserves terminal d
     `;
   };
 
-  try {
-    // 1. Initial run: ensureFrontendDemoDisputeQuest creates failed Quest, active 50,000-satang reservation, incomplete assignment, and pending dispute case
-    const firstResult = await ensureFrontendDemoDisputeQuest(hirer.id, worker.id, tagId);
-    expect(firstResult.questId).toBeDefined();
-    expect(firstResult.disputeCaseId).toBeDefined();
+  // 1. Initial run: ensureFrontendDemoDisputeQuest creates failed Quest, active 50,000-satang reservation, incomplete assignment, and pending dispute case
+  const firstResult = await ensureFrontendDemoDisputeQuest(hirer.id, worker.id, tagId);
+  expect(firstResult.questId).toBeDefined();
+  expect(firstResult.disputeCaseId).toBeDefined();
 
-    const firstRecords = await queryDisputeSeedContract(firstResult.questId);
-    expect(firstRecords).toHaveLength(1);
+  const firstRecords = await queryDisputeSeedContract(firstResult.questId);
+  expect(firstRecords).toHaveLength(1);
 
-    const [disputeRecord] = firstRecords;
-    expect(disputeRecord.questTitle).toBe(frontendDemoDisputeQuestTitle);
-    expect(disputeRecord.questStatus).toBe('QUEST_FAILED');
-    expect(disputeRecord.reservationStatus).toBe('ACTIVE');
-    expect(disputeRecord.reservationAmountSatang).toBe(frontendDemoDisputeAmountSatang);
-    expect(disputeRecord.reservationReference).toBe(frontendDemoDisputeReservationReference);
-    expect(disputeRecord.assignmentStatus).toBe('ASSIGNMENT_INCOMPLETE');
-    expect(disputeRecord.disputeStatus).toBe(disputeCaseStatus.pending);
-    expect(disputeRecord.filerUserId).toBe(worker.id);
-    expect(disputeRecord.workerId).toBe(worker.id);
-    expect(disputeRecord.hirerId).toBe(hirer.id);
+  const [disputeRecord] = firstRecords;
+  expect(disputeRecord.questTitle).toBe(frontendDemoDisputeQuestTitle);
+  expect(disputeRecord.questStatus).toBe('QUEST_FAILED');
+  expect(disputeRecord.reservationStatus).toBe('ACTIVE');
+  expect(disputeRecord.reservationAmountSatang).toBe(frontendDemoDisputeAmountSatang);
+  expect(disputeRecord.reservationReference).toBe(frontendDemoDisputeReservationReference);
+  expect(disputeRecord.assignmentStatus).toBe('ASSIGNMENT_INCOMPLETE');
+  expect(disputeRecord.disputeStatus).toBe(disputeCaseStatus.pending);
+  expect(disputeRecord.filerUserId).toBe(worker.id);
+  expect(disputeRecord.workerId).toBe(worker.id);
+  expect(disputeRecord.hirerId).toBe(hirer.id);
 
-    // 2. Idempotency run: calling ensureFrontendDemoDisputeQuest again reuses existing records without duplication or errors
-    const secondResult = await ensureFrontendDemoDisputeQuest(hirer.id, worker.id, tagId);
-    expect(secondResult.questId).toBe(firstResult.questId);
-    expect(secondResult.disputeCaseId).toBe(firstResult.disputeCaseId);
+  // 2. Idempotency run: calling ensureFrontendDemoDisputeQuest again reuses existing records without duplication or errors
+  const secondResult = await ensureFrontendDemoDisputeQuest(hirer.id, worker.id, tagId);
+  expect(secondResult.questId).toBe(firstResult.questId);
+  expect(secondResult.disputeCaseId).toBe(firstResult.disputeCaseId);
 
-    const secondRecords = await queryDisputeSeedContract(firstResult.questId);
-    expect(secondRecords).toHaveLength(1);
-    expect(secondRecords[0].disputeCaseId).toBe(disputeRecord.disputeCaseId);
-    expect(secondRecords[0].questId).toBe(disputeRecord.questId);
-    expect(secondRecords[0].reservationId).toBe(disputeRecord.reservationId);
-    expect(secondRecords[0].assignmentId).toBe(disputeRecord.assignmentId);
+  const secondRecords = await queryDisputeSeedContract(firstResult.questId);
+  expect(secondRecords).toHaveLength(1);
+  expect(secondRecords[0].disputeCaseId).toBe(disputeRecord.disputeCaseId);
+  expect(secondRecords[0].questId).toBe(disputeRecord.questId);
+  expect(secondRecords[0].reservationId).toBe(disputeRecord.reservationId);
+  expect(secondRecords[0].assignmentId).toBe(disputeRecord.assignmentId);
 
-    // 3. Terminal decision preservation: re-running does not overwrite resolved/dismissed dispute cases
-    const adminId = randomUUID();
-    createdAdminIds.push(adminId);
-    await db.insert(authAdmin).values({
-      id: adminId,
-      email: `admin-${runId}@ku.th`,
-      firstName: 'Admin',
-      lastName: 'Reviewer',
-    });
+  // 3. Terminal decision preservation: re-running does not overwrite resolved/dismissed dispute cases
+  const adminId = randomUUID();
+  await db.insert(authAdmin).values({
+    id: adminId,
+    email: `admin-${runId}@ku.th`,
+    firstName: 'Admin',
+    lastName: 'Reviewer',
+  });
 
-    await db
-      .update(adminDisputeCase)
-      .set({
-        status: disputeCaseStatus.dismissed,
-        resolvedByAdminId: adminId,
-        resolvedAt: new Date(),
-      })
-      .where(eq(adminDisputeCase.id, disputeRecord.disputeCaseId));
+  await db
+    .update(adminDisputeCase)
+    .set({
+      status: disputeCaseStatus.dismissed,
+      resolvedByAdminId: adminId,
+      resolvedAt: new Date(),
+    })
+    .where(eq(adminDisputeCase.id, disputeRecord.disputeCaseId));
 
-    const thirdResult = await ensureFrontendDemoDisputeQuest(hirer.id, worker.id, tagId);
-    expect(thirdResult.questId).toBe(firstResult.questId);
-    expect(thirdResult.disputeCaseId).toBe(firstResult.disputeCaseId);
+  const thirdResult = await ensureFrontendDemoDisputeQuest(hirer.id, worker.id, tagId);
+  expect(thirdResult.questId).toBe(firstResult.questId);
+  expect(thirdResult.disputeCaseId).toBe(firstResult.disputeCaseId);
 
-    const [persistedDispute] = await db
-      .select({
-        status: adminDisputeCase.status,
-        resolvedByAdminId: adminDisputeCase.resolvedByAdminId,
-        resolvedAt: adminDisputeCase.resolvedAt,
-      })
-      .from(adminDisputeCase)
-      .where(eq(adminDisputeCase.id, disputeRecord.disputeCaseId));
+  const [persistedDispute] = await db
+    .select({
+      status: adminDisputeCase.status,
+      resolvedByAdminId: adminDisputeCase.resolvedByAdminId,
+      resolvedAt: adminDisputeCase.resolvedAt,
+    })
+    .from(adminDisputeCase)
+    .where(eq(adminDisputeCase.id, disputeRecord.disputeCaseId));
 
-    expect(persistedDispute?.status).toBe(disputeCaseStatus.dismissed);
-    expect(persistedDispute?.resolvedByAdminId).toBe(adminId);
-    expect(persistedDispute?.resolvedAt).toBeInstanceOf(Date);
-  } finally {
-    await cleanupDemoTestData([hirerEmail, workerEmail], createdAdminIds);
-  }
+  expect(persistedDispute?.status).toBe(disputeCaseStatus.dismissed);
+  expect(persistedDispute?.resolvedByAdminId).toBe(adminId);
+  expect(persistedDispute?.resolvedAt).toBeInstanceOf(Date);
 });

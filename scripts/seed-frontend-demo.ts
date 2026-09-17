@@ -74,7 +74,6 @@ const ensureAdminDisputeCaseInTransaction = async (
   const [existingCase] = await transaction
     .select({
       id: adminDisputeCase.id,
-      status: adminDisputeCase.status,
     })
     .from(adminDisputeCase)
     .where(
@@ -137,18 +136,19 @@ const ensureAdminDisputeCaseInTransaction = async (
   return { id: reloaded.id };
 };
 
-const getWalletAccountIdInTransaction = async (
+const getSpendingWalletAccountIdInTransaction = async (
   transaction: WalletTransaction,
-  userId: string,
-  type: 'SPENDING' | 'EARNINGS'
+  userId: string
 ): Promise<string> => {
   const wallet = await ensureWalletInTransaction(transaction, userId);
   const [account] = await transaction
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
-    .where(and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, type)))
+    .where(
+      and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, 'SPENDING'))
+    )
     .limit(1);
-  if (!account) throw new Error(`The demo ${type} Ledger Account is missing.`);
+  if (!account) throw new Error('The demo SPENDING Ledger Account is missing.');
   return account.id;
 };
 
@@ -168,8 +168,7 @@ const getPlatformSuspenseAccountIdInTransaction = async (
 
 const seedDemoHirerSpendingInTransaction = async (
   transaction: WalletTransaction,
-  userId: string,
-  amountSatang: number
+  userId: string
 ): Promise<void> => {
   const businessReference = `seed:frontend-demo:${userId}:spending:v1`;
   const [existing] = await transaction
@@ -179,7 +178,7 @@ const seedDemoHirerSpendingInTransaction = async (
     .limit(1);
   if (existing) return;
 
-  const walletAccountId = await getWalletAccountIdInTransaction(transaction, userId, 'SPENDING');
+  const walletAccountId = await getSpendingWalletAccountIdInTransaction(transaction, userId);
   const suspenseAccountId = await getPlatformSuspenseAccountIdInTransaction(transaction);
   await createSealedLedgerTransactionInTransaction(transaction, {
     businessReference,
@@ -187,8 +186,14 @@ const seedDemoHirerSpendingInTransaction = async (
     createdByUserId: userId,
     description: 'Non-production frontend demo seed',
     postings: [
-      { accountId: walletAccountId, amountSatang: signedSatang(amountSatang) },
-      { accountId: suspenseAccountId, amountSatang: signedSatang(-amountSatang) },
+      {
+        accountId: walletAccountId,
+        amountSatang: signedSatang(frontendDemoDisputeAmountSatang),
+      },
+      {
+        accountId: suspenseAccountId,
+        amountSatang: signedSatang(-frontendDemoDisputeAmountSatang),
+      },
     ],
   });
 };
@@ -201,15 +206,13 @@ export const ensureFrontendDemoDisputeQuest = async (
   await ensureInitialMoneyPolicy();
   return db.transaction(async (transaction) => {
     await ensureWalletInTransaction(transaction, hirerId);
-    await ensureWalletInTransaction(transaction, workerId);
-    await seedDemoHirerSpendingInTransaction(transaction, hirerId, frontendDemoDisputeAmountSatang);
+    await seedDemoHirerSpendingInTransaction(transaction, hirerId);
 
     const [existing] = await transaction
       .select({
         id: quest.id,
         fundingReservationId: quest.fundingReservationId,
         questStatus: quest.questStatus,
-        failedAt: quest.failedAt,
       })
       .from(quest)
       .where(and(eq(quest.hirerId, hirerId), eq(quest.title, frontendDemoDisputeQuestTitle)))
