@@ -963,6 +963,22 @@ describe('Quest Candidate API v2', () => {
     expect(v1Response.status).toBe(404);
     expect((await v1Response.json()).error.code).toBe('QUEST_NOT_FOUND');
 
+    const v1ListOnV2Route = await request(
+      `/api/v2/quests/${v1QuestId}/applications`,
+      'GET',
+      hirer.id
+    );
+    expect(v1ListOnV2Route.status).toBe(404);
+    expect((await v1ListOnV2Route.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+    const v1GetOnV2Route = await request(
+      `/api/v2/quests/${v1QuestId}/applications/${randomUUID()}`,
+      'GET',
+      hirer.id
+    );
+    expect(v1GetOnV2Route.status).toBe(404);
+    expect((await v1GetOnV2Route.json()).error.code).toBe('QUEST_NOT_FOUND');
+
     const v2QuestId = await createOpenCandidateQuest();
     const v1ApplyResponse = await request(
       `/api/v1/quests/${v2QuestId}/applications`,
