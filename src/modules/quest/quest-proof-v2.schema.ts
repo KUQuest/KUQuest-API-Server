@@ -19,6 +19,11 @@ export const questV2ProofSubmissionDetailParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
   proofSubmissionId: t.String({ format: 'uuid' }),
 });
+export const questV2ProofFileParamsSchema = t.Object({
+  questId: t.String({ format: 'uuid' }),
+  proofSubmissionId: t.String({ format: 'uuid' }),
+  fileId: t.String({ format: 'uuid' }),
+});
 
 export const questV2ProofSubmissionHeadersSchema = t.Object({
   'idempotency-key': t.String({
@@ -29,8 +34,10 @@ export const questV2ProofSubmissionHeadersSchema = t.Object({
   }),
 });
 
+const workerMessage = t.Nullable(t.String({ maxLength: 200, pattern: '\\S' }));
 const proofDraftProperties = {
   description: t.Optional(description),
+  workerMessage: t.Optional(workerMessage),
   fileIds: t.Optional(fileIds),
   files: t.Optional(t.Files({ maxItems: 5 })),
   retryPosition: t.Optional(
@@ -82,6 +89,15 @@ const proofFileSchema = t.Object({
   failureCode: t.Nullable(t.String({ minLength: 1, maxLength: 64 })),
 });
 
+const proofFileAccessSchema = t.Object({
+  fileId: t.String({ format: 'uuid' }),
+  contentType: t.String(),
+  sizeBytes: t.Integer({ minimum: 1, maximum: 10 * 1024 * 1024 }),
+  position: t.Integer({ minimum: 0, maximum: 4 }),
+  url: t.String({ format: 'uri' }),
+  urlExpiresAt: t.String({ format: 'date-time' }),
+});
+
 const proofSubmissionSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
@@ -89,6 +105,7 @@ const proofSubmissionSchema = t.Object({
   teamId: t.Nullable(t.String({ format: 'uuid' })),
   submittedByUserId: t.String({ format: 'uuid' }),
   description: t.Nullable(t.String()),
+  workerMessage: t.Nullable(t.String()),
   status: proofStatusSchema,
   submittedAt: t.Nullable(t.String({ format: 'date-time' })),
   createdAt: t.String({ format: 'date-time' }),
@@ -96,6 +113,11 @@ const proofSubmissionSchema = t.Object({
   visibility: visibilitySchema,
   fileIds: t.Array(t.String({ format: 'uuid' }), { maxItems: 5 }),
   files: t.Array(proofFileSchema, { maxItems: 5 }),
+});
+
+export const questV2ProofFileResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: proofFileAccessSchema,
 });
 
 export const questV2ProofSubmissionResponseSchema = t.Object({
@@ -144,6 +166,7 @@ export type QuestV2ProofSubmissionParams = Static<typeof questV2ProofSubmissionP
 export type QuestV2ProofSubmissionDetailParams = Static<
   typeof questV2ProofSubmissionDetailParamsSchema
 >;
+export type QuestV2ProofFileParams = Static<typeof questV2ProofFileParamsSchema>;
 export type QuestV2ProofSubmissionCreateInput = Static<typeof questV2ProofSubmissionCreateSchema>;
 export type QuestV2ProofSubmissionEditInput = Static<typeof questV2ProofSubmissionEditSchema>;
 export type QuestV2ProofSubmissionReviewInput = Static<typeof questV2ProofSubmissionReviewSchema>;

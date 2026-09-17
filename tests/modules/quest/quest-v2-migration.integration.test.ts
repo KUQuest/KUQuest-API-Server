@@ -439,7 +439,7 @@ const expectedV2OperationContracts: Record<
     responseStatuses: ['200', '400', '401', '403', '404', '409', '500', '503'],
   },
   createQuestV2ProofSubmission: {
-    bodyProperties: ['description', 'fileIds', 'files', 'retryPosition'],
+    bodyProperties: ['description', 'workerMessage', 'fileIds', 'files', 'retryPosition'],
     requiredBodyProperties: [],
     responseStatuses: ['201', '400', '401', '403', '404', '409', '413', '415', '500', '502', '503'],
   },
@@ -447,7 +447,7 @@ const expectedV2OperationContracts: Record<
     responseStatuses: ['200', '400', '401', '403', '404', '409', '500', '503'],
   },
   editQuestV2ProofSubmission: {
-    bodyProperties: ['description', 'fileIds', 'files', 'retryPosition'],
+    bodyProperties: ['description', 'workerMessage', 'fileIds', 'files', 'retryPosition'],
     requiredBodyProperties: [],
     responseStatuses: ['200', '400', '401', '403', '404', '409', '413', '415', '500', '502', '503'],
   },

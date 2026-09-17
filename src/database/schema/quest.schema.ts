@@ -597,6 +597,7 @@ export const questV2ProofSubmission = pgTable(
       .notNull()
       .references(() => authUser.id),
     description: varchar('description', { length: 1000 }),
+    workerMessage: varchar('worker_message', { length: 200 }),
     submissionStatus: varchar('submission_status', { length: 32 }).$type<
       'PROOF_PENDING' | 'PROOF_APPROVED' | 'PROOF_NOT_APPROVED'
     >(),

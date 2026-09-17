@@ -30,6 +30,7 @@ import {
   type QuestCommandOutcomeCode,
   type QuestCommandWork,
 } from './quest-command.service';
+import { createAdminDisputeCaseInTransaction } from './quest-dispute-admin.service';
 
 import {
   failQuestV2InTransaction,
@@ -47,6 +48,7 @@ import { questV2ProofStorage, type StoredQuestV2ProofFile } from './quest-proof-
 export const questV2ProofSubmissionOperationScope = 'quest.v2.proof-submission';
 
 const maxDescriptionLength = 1000;
+const maxWorkerMessageLength = 200;
 const maxProofFiles = 5;
 const maxAttachmentSizeBytes = 10 * 1024 * 1024;
 const allowedAttachmentContentTypes = new Set([
@@ -69,6 +71,7 @@ export type QuestV2ProofSubmission = {
   teamId: string | null;
   submittedByUserId: string;
   description: string | null;
+  workerMessage: string | null;
   status: QuestV2ProofStatus | null;
   submittedAt: Date | null;
   createdAt: Date;
@@ -103,6 +106,7 @@ type ReadyProofFile = {
 
 export type QuestV2ProofDraftInput = {
   description?: string | null;
+  workerMessage?: string | null;
   fileIds?: string[];
   storedFiles?: StoredQuestV2ProofFileInput[];
   failedFiles?: QuestV2ProofFailedFile[];
@@ -112,8 +116,9 @@ export type QuestV2ProofDraftInput = {
 
 type QuestV2ProofDraftBody = {
   description?: string | null;
-  fileIds?: string[];
+  workerMessage?: string | null;
   files?: File[];
+  fileIds?: string[];
   retryPosition?: number;
 };
 
@@ -193,6 +198,7 @@ type SubmissionRow = {
   teamId: string | null;
   submittedByUserId: string;
   description: string | null;
+  workerMessage: string | null;
   submissionStatus: string | null;
   sentAt: Date | null;
   createdAt: Date;
@@ -206,6 +212,7 @@ const submissionFields = {
   teamId: questV2ProofSubmission.teamId,
   submittedByUserId: questV2ProofSubmission.submittedByUserId,
   description: questV2ProofSubmission.description,
+  workerMessage: questV2ProofSubmission.workerMessage,
   submissionStatus: questV2ProofSubmission.submissionStatus,
   sentAt: questV2ProofSubmission.sentAt,
   createdAt: questV2ProofSubmission.createdAt,
@@ -432,6 +439,8 @@ const draftInputFor = (
   };
   if (Object.prototype.hasOwnProperty.call(body, 'description'))
     input.description = body.description;
+  if (Object.prototype.hasOwnProperty.call(body, 'workerMessage'))
+    input.workerMessage = body.workerMessage;
   if (Object.prototype.hasOwnProperty.call(body, 'fileIds')) input.fileIds = body.fileIds;
   if (body.retryPosition !== undefined) input.retryPosition = body.retryPosition;
   return input;
@@ -452,6 +461,16 @@ const normalizedDescription = (
   if (value === undefined || value === null) return { value: value ?? null };
   const trimmed = value.trim();
   if (trimmed.length === 0 || trimmed.length > maxDescriptionLength) {
+    return { outcome: 'invalid-draft' };
+  }
+  return { value: trimmed };
+};
+const normalizedWorkerMessage = (
+  value: string | null | undefined
+): { value: string | null } | { outcome: 'invalid-draft' } => {
+  if (value === undefined || value === null) return { value: value ?? null };
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > maxWorkerMessageLength) {
     return { outcome: 'invalid-draft' };
   }
   return { value: trimmed };
@@ -663,6 +682,7 @@ const toSubmission = async (
     teamId: row.teamId,
     submittedByUserId: row.submittedByUserId,
     description: visibility === 'FULL' ? row.description : null,
+    workerMessage: visibility === 'FULL' ? row.workerMessage : null,
     status:
       visibility === 'FULL'
         ? (row.submissionStatus as QuestV2ProofStatus | null)
@@ -703,6 +723,9 @@ const submissionFromSnapshot = (value: unknown): QuestV2ProofSubmission | undefi
     (snapshot.teamId !== null && typeof snapshot.teamId !== 'string') ||
     typeof snapshot.submittedByUserId !== 'string' ||
     (snapshot.description !== null && typeof snapshot.description !== 'string') ||
+    (snapshot.workerMessage !== undefined &&
+      snapshot.workerMessage !== null &&
+      typeof snapshot.workerMessage !== 'string') ||
     (snapshot.status !== null &&
       (typeof snapshot.status !== 'string' || !isProofStatus(snapshot.status))) ||
     (snapshot.submittedAt !== null && typeof snapshot.submittedAt !== 'string') ||
@@ -730,6 +753,8 @@ const submissionFromSnapshot = (value: unknown): QuestV2ProofSubmission | undefi
     teamId: snapshot.teamId,
     submittedByUserId: snapshot.submittedByUserId,
     description: snapshot.description as string | null,
+    workerMessage:
+      snapshot.workerMessage === undefined ? null : (snapshot.workerMessage as string | null),
     status: snapshot.status as QuestV2ProofStatus | null,
     submittedAt,
     createdAt,
@@ -774,6 +799,10 @@ const requestHashFor = (
           description: {
             present: isInputFieldPresent(input, 'description'),
             value: input.description ?? null,
+          },
+          workerMessage: {
+            present: isInputFieldPresent(input, 'workerMessage'),
+            value: input.workerMessage ?? null,
           },
           fileIds: {
             present: isInputFieldPresent(input, 'fileIds'),
@@ -1182,6 +1211,9 @@ export const createQuestV2ProofSubmission = async (
         if ('outcome' in checks) return { kind: 'rejected', rejection: checks.outcome };
         const description = normalizedDescription(input.description);
         if ('outcome' in description) return { kind: 'rejected', rejection: description.outcome };
+        const workerMessage = normalizedWorkerMessage(input.workerMessage);
+        if ('outcome' in workerMessage)
+          return { kind: 'rejected', rejection: workerMessage.outcome };
         if (input.retryPosition !== undefined) {
           return { kind: 'rejected', rejection: 'invalid-files' };
         }
@@ -1190,6 +1222,7 @@ export const createQuestV2ProofSubmission = async (
         const failedFiles = input.failedFiles ?? [];
         if (
           description.value === null &&
+          workerMessage.value === null &&
           inputFileIds.length + uploadedFiles.length + failedFiles.length === 0
         ) {
           return { kind: 'rejected', rejection: 'invalid-draft' };
@@ -1226,6 +1259,7 @@ export const createQuestV2ProofSubmission = async (
             teamId: checks.owner.teamId,
             submittedByUserId: memberId,
             description: description.value,
+            workerMessage: workerMessage.value,
             sentAt: null,
             updatedAt: now,
           })
@@ -1300,6 +1334,11 @@ export const editQuestV2ProofSubmission = async (
           ? normalizedDescription(input.description)
           : { value: submission.description };
         if ('outcome' in description) return { kind: 'rejected', rejection: description.outcome };
+        const workerMessage = isInputFieldPresent(input, 'workerMessage')
+          ? normalizedWorkerMessage(input.workerMessage)
+          : { value: submission.workerMessage };
+        if ('outcome' in workerMessage)
+          return { kind: 'rejected', rejection: workerMessage.outcome };
         const uploadedFiles = input.storedFiles ?? [];
         const failedFiles = input.failedFiles ?? [];
         if (input.retryPosition !== undefined && uploadedFiles.length + failedFiles.length !== 1)
@@ -1343,12 +1382,14 @@ export const editQuestV2ProofSubmission = async (
             mergedFiles.readyFiles.map(({ fileId }) => fileId)
           )) ||
           (description.value === null &&
+            workerMessage.value === null &&
             mergedFiles.readyFiles.length + mergedFiles.failedFiles.length === 0)
         )
           return {
             kind: 'rejected',
             rejection:
               description.value === null &&
+              workerMessage.value === null &&
               mergedFiles.readyFiles.length + mergedFiles.failedFiles.length === 0
                 ? 'invalid-draft'
                 : 'invalid-files',
@@ -1357,6 +1398,7 @@ export const editQuestV2ProofSubmission = async (
           .update(questV2ProofSubmission)
           .set({
             description: description.value,
+            workerMessage: workerMessage.value,
             updatedAt: now,
           })
           .where(eq(questV2ProofSubmission.id, submission.id))
@@ -1583,6 +1625,74 @@ export const listQuestV2ProofSubmissions = async (
   return submissions.filter(
     (submission): submission is QuestV2ProofSubmission => submission !== undefined
   );
+};
+export type QuestV2ProofFileAccess = {
+  fileId: string;
+  contentType: string;
+  sizeBytes: number;
+  position: number;
+  url: string;
+  urlExpiresAt: string;
+};
+
+export const getQuestV2ProofFile = async (
+  memberId: string,
+  questId: string,
+  proofSubmissionId: string,
+  fileId: string
+): Promise<QuestV2ProofFileAccess | undefined> => {
+  const [row] = await db
+    .select({
+      hirerId: quest.hirerId,
+      submittedByUserId: questV2ProofSubmission.submittedByUserId,
+      sentAt: questV2ProofSubmission.sentAt,
+      fileId: questV2ProofSubmissionFile.fileId,
+      contentType: file.contentType,
+      sizeBytes: file.sizeBytes,
+      position: questV2ProofSubmissionFile.position,
+      bucket: file.bucket,
+      objectKey: file.objectKey,
+    })
+    .from(questV2ProofSubmissionFile)
+    .innerJoin(
+      questV2ProofSubmission,
+      eq(questV2ProofSubmission.id, questV2ProofSubmissionFile.proofSubmissionId)
+    )
+    .innerJoin(quest, eq(quest.id, questV2ProofSubmission.questId))
+    .innerJoin(file, eq(file.id, questV2ProofSubmissionFile.fileId))
+    .where(
+      and(
+        eq(quest.id, questId),
+        eq(quest.apiVersion, questApiVersion.v2),
+        eq(questV2ProofSubmission.id, proofSubmissionId),
+        eq(questV2ProofSubmissionFile.fileId, fileId),
+        eq(questV2ProofSubmissionFile.uploadStatus, 'PROOF_FILE_READY'),
+        isNull(file.deletedAt)
+      )
+    )
+    .limit(1);
+
+  if (
+    !row ||
+    row.fileId === null ||
+    (row.hirerId !== memberId && row.submittedByUserId !== memberId) ||
+    (row.hirerId === memberId && row.sentAt === null)
+  ) {
+    return undefined;
+  }
+
+  const link = questV2ProofStorage.linkForWithExpiry({
+    bucket: row.bucket,
+    objectKey: row.objectKey,
+  });
+  return {
+    fileId: row.fileId,
+    contentType: row.contentType,
+    sizeBytes: row.sizeBytes,
+    position: row.position,
+    url: link.url,
+    urlExpiresAt: link.expiresAt.toISOString(),
+  };
 };
 
 export const confirmQuestV2Completion = async (
@@ -1990,6 +2100,13 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           input.now,
           input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null
         );
+        if (current.questState === 'QUEST_IN_PROGRESS') {
+          await createAdminDisputeCaseInTransaction(transaction, {
+            questId: input.questId,
+            filerUserId: subject.workerId,
+            now: input.now,
+          });
+        }
         questStatus = failure.questStatus;
         const attachments = await attachmentRowsFor(transaction, proof.id);
         const evidenceReferences = attachments
