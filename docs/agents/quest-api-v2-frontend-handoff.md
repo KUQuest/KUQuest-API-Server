@@ -1540,7 +1540,60 @@ Success status: HTTP 200.
 The data value is the complete Team object and includes the new plaintext
 joinCode and joinCodeExpiresAt.
 
-### 9.10 Submit a Candidate Team
+### 9.10 Upload a private Candidate Team file
+
+Upload each private file before submitting the Team. Keep each returned fileId
+and send those UUIDs in the subsequent Team submission fileIds array.
+
+Request:
+
+```http
+POST /api/v2/quests/:questId/teams/:teamId/files
+Idempotency-Key: upload-team-file-client-action-id
+Content-Type: multipart/form-data
+```
+
+Send exactly one multipart field named file. The allowed media types are
+image/jpeg, image/png, image/webp, application/pdf, video/mp4,
+video/quicktime, and video/webm. The file must be no larger than 10 MiB.
+
+Only the Team Leader may upload, and only for a TEAM_FORMING Team on a
+QUEST_OPEN Quest before startTime where mode is CANDIDATE and participation is
+GROUP.
+
+Success status: HTTP 201. The data value has these fields:
+
+| Field     | Type      | Meaning                             |
+| --------- | --------- | ----------------------------------- |
+| fileId    | UUID      | Private file ID for Team submission |
+| fileName  | string    | Persisted uploaded file name        |
+| mediaType | string    | Persisted allowed media type        |
+| sizeBytes | integer   | Persisted file size in bytes        |
+| createdAt | date-time | Persisted file creation time        |
+
+```json
+{
+  "fileId": "private-file-uuid",
+  "fileName": "proposal.pdf",
+  "mediaType": "application/pdf",
+  "sizeBytes": 1048576,
+  "createdAt": "2026-09-08T10:00:00.000+07:00"
+}
+```
+
+Errors:
+
+- 409 TEAM_LEADER_REQUIRED
+- 409 TEAM_NOT_FORMING
+- 413 TEAM_FILE_TOO_LARGE
+- 415 TEAM_FILE_TYPE_NOT_SUPPORTED
+- 502 TEAM_FILE_UPLOAD_FAILED
+- idempotency errors
+
+### 9.11 Submit a Candidate Team
+
+Upload the private files first, then submit the returned fileIds. Do not use
+Chat Attachment IDs.
 
 Request:
 
@@ -1559,10 +1612,10 @@ Content-Type: application/json
 
 Fields:
 
-| Field   | Type       | Required | Rule                                                                                 |
-| ------- | ---------- | -------- | ------------------------------------------------------------------------------------ |
-| text    | string     | yes      | Non-blank submission text                                                            |
-| fileIds | UUID array | yes      | Files owned by Team Leader; allowed image, PDF, and video types; total maximum 10 MB |
+| Field   | Type       | Required | Rule                                                                          |
+| ------- | ---------- | -------- | ----------------------------------------------------------------------------- |
+| text    | string     | yes      | Non-blank submission text                                                     |
+| fileIds | UUID array | yes      | Returned private file IDs owned by Team Leader; allowed types; maximum 10 MiB |
 
 The Team Leader can submit only when the Team is full.
 Submission changes the Team to TEAM_SUBMITTED.
@@ -1578,17 +1631,8 @@ Submission response:
 }
 ```
 
-Important file identifier gap:
-
-- This endpoint requires private File IDs.
-- Work Chat upload returns a Chat Attachment ID.
-- A Chat Attachment ID is not a private File ID.
-- The current v2 contract has no generic frontend file upload route that
-  returns the required private File ID.
-
 Do not send a Chat Attachment ID as fileIds.
 Do not guess an ID conversion.
-If this blocks the UI, report the missing backend contract.
 
 Errors:
 
@@ -1598,7 +1642,7 @@ Errors:
 - 409 TEAM_NOT_FORMING
 - idempotency errors
 
-### 9.11 Select a Candidate Team
+### 9.12 Select a Candidate Team
 
 Request:
 
@@ -2649,7 +2693,7 @@ EDIT_REQUEST_FAILED.
 
 ## 17. Complete endpoint catalog
 
-The current Quest v2 route set has 45 endpoints:
+The current Quest v2 route set has 46 endpoints:
 
 |   # | Method | Path                                                                | Main actor                 |
 | --: | ------ | ------------------------------------------------------------------- | -------------------------- |
@@ -2687,17 +2731,18 @@ The current Quest v2 route set has 45 endpoints:
 |  32 | POST   | /api/v2/quests/:questId/teams/:teamId/leave                         | Team member                |
 |  33 | DELETE | /api/v2/quests/:questId/teams/:teamId/members/:memberId             | Team Leader                |
 |  34 | POST   | /api/v2/quests/:questId/teams/:teamId/join-code                     | Team Leader                |
-|  35 | POST   | /api/v2/quests/:questId/teams/:teamId/submit                        | Team Leader                |
-|  36 | POST   | /api/v2/quests/:questId/teams/:teamId/select                        | Hirer                      |
-|  37 | POST   | /api/v2/quests/:questId/proof-submissions                           | Worker                     |
-|  38 | PATCH  | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId        | Proof owner                |
-|  39 | DELETE | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId        | Proof owner                |
-|  40 | POST   | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/submit | Proof owner                |
-|  41 | POST   | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/review | Hirer                      |
-|  42 | GET    | /api/v2/quests/:questId/proof-submissions                           | permitted participant      |
-|  43 | POST   | /api/v2/quests/:questId/completion-confirmation                     | Worker                     |
-|  44 | POST   | /api/v2/quests/:questId/reviews                                     | Hirer or Worker            |
-|  45 | PATCH  | /api/v2/quests/:questId/reviews/:reviewId                           | review author              |
+|  35 | POST   | /api/v2/quests/:questId/teams/:teamId/files                         | Team Leader                |
+|  36 | POST   | /api/v2/quests/:questId/teams/:teamId/submit                        | Team Leader                |
+|  37 | POST   | /api/v2/quests/:questId/teams/:teamId/select                        | Hirer                      |
+|  38 | POST   | /api/v2/quests/:questId/proof-submissions                           | Worker                     |
+|  39 | PATCH  | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId        | Proof owner                |
+|  40 | DELETE | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId        | Proof owner                |
+|  41 | POST   | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/submit | Proof owner                |
+|  42 | POST   | /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/review | Hirer                      |
+|  43 | GET    | /api/v2/quests/:questId/proof-submissions                           | permitted participant      |
+|  44 | POST   | /api/v2/quests/:questId/completion-confirmation                     | Worker                     |
+|  45 | POST   | /api/v2/quests/:questId/reviews                                     | Hirer or Worker            |
+|  46 | PATCH  | /api/v2/quests/:questId/reviews/:reviewId                           | review author              |
 
 ## 18. Error handling checklist
 
@@ -2762,15 +2807,7 @@ The lifecycle requires an automatic start transition.
 The current v2 route set has no Start Work endpoint.
 The frontend must wait for the lifecycle worker and refresh state.
 
-### 20.2 Candidate Team file upload identifier gap
-
-Candidate Team submission requires private fileIds.
-Chat upload returns Chat Attachment IDs.
-There is no documented generic file upload route that returns the required
-private fileId.
-Do not build an ID conversion assumption.
-
-### 20.3 Work Chat is v1
+### 20.2 Work Chat is v1
 
 Quest commands are v2, but Work Chat and Candidate Inquiry Conversation use
 the /api/v1/chat routes.

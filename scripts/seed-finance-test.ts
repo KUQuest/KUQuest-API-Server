@@ -301,9 +301,9 @@ const ensureFinanceQuestDraft = async (userId: string): Promise<string> => {
   const [designTag] = await db
     .select({ id: tag.id })
     .from(tag)
-    .where(eq(tag.name, 'Design'))
+    .where(inArray(tag.name, ['Graphic Design', 'Design']))
     .limit(1);
-  if (!designTag) throw new Error('The Design Tag is missing.');
+  if (!designTag) throw new Error('The Graphic Design Tag is missing.');
 
   const now = Date.now();
   const [created] = await db

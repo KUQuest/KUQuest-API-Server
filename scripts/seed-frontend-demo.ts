@@ -430,11 +430,11 @@ const main = async (): Promise<void> => {
 
   const now = new Date();
   const openQuests = [
-    ['Design a KU event poster', 'Design', 0, 50_000],
-    ['Translate an event announcement', 'Content', 1, 35_000],
+    ['Design a KU event poster', 'Graphic Design', 0, 50_000],
+    ['Translate an event announcement', 'Thai-English Translation', 1, 35_000],
     ['Analyse student survey data', 'Data Analysis', 2, 80_000],
-    ['Create a student club landing page', 'Frontend', 3, 120_000],
-    ['Plan a campus activity campaign', 'Content', 4, 60_000],
+    ['Create a student club landing page', 'Frontend Development', 3, 120_000],
+    ['Plan a campus activity campaign', 'Marketing Campaign', 4, 60_000],
   ] as const;
 
   const openRows = await db
@@ -459,15 +459,15 @@ const main = async (): Promise<void> => {
     .returning({ id: quest.id });
 
   const completedQuests = [
-    ['Build a student club landing page', 'Frontend', 0, 1, 120_000],
-    ['Prepare an event budget report', 'Data Analysis', 1, 2, 90_000],
-    ['Create a campus activity poster', 'Design', 2, 3, 70_000],
-    ['Write a campus newsletter', 'Content', 3, 4, 45_000],
-    ['Design a student club logo', 'Design', 4, 5, 55_000],
+    ['Build a student club landing page', 'Frontend Development', 0, 1, 120_000],
+    ['Prepare an event budget report', 'Accounting & Bookkeeping', 1, 2, 90_000],
+    ['Create a campus activity poster', 'Graphic Design', 2, 3, 70_000],
+    ['Write a campus newsletter', 'Content Writing & Copywriting', 3, 4, 45_000],
+    ['Design a student club logo', 'Logo & Branding Design', 4, 5, 55_000],
     ['Analyse a club member survey', 'Data Analysis', 5, 6, 65_000],
-    ['Build a volunteer signup page', 'Frontend', 6, 7, 100_000],
-    ['Translate a campus guide', 'Content', 7, 8, 40_000],
-    ['Create a student event dashboard', 'Frontend', 8, 9, 110_000],
+    ['Build a volunteer signup page', 'Frontend Development', 6, 7, 100_000],
+    ['Translate a campus guide', 'Thai-English Translation', 7, 8, 40_000],
+    ['Create a student event dashboard', 'Frontend Development', 8, 9, 110_000],
   ] as const;
 
   const completedRows = await db
