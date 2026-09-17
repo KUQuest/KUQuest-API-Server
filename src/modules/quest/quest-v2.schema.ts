@@ -749,6 +749,40 @@ const questV2AssignmentStateSchema = t.Union(
   questV2AssignmentStates.map((state) => t.Literal(state))
 );
 
+const questV2HirerProfileDepartmentSchema = t.Nullable(
+  t.Object({
+    id: t.String({ format: 'uuid' }),
+    name: t.String(),
+    faculty: t.Object({ name: t.String() }),
+  })
+);
+
+const questV2HirerProfileOccupationSchema = t.Nullable(
+  t.Object({
+    id: t.String({ format: 'uuid' }),
+    name: t.Union([t.Literal('Staff'), t.Literal('Lecturer'), t.Literal('Student')]),
+  })
+);
+
+const questV2HirerProfileAvatarSchema = t.Nullable(
+  t.Object({
+    fileId: t.String({ format: 'uuid' }),
+    url: t.String({ format: 'uri' }),
+  })
+);
+
+export const questV2HirerProfileSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  version: t.Integer({ minimum: 1 }),
+  firstName: t.String(),
+  lastName: t.String(),
+  bio: t.Nullable(t.String()),
+  academicYear: t.Nullable(t.Integer()),
+  department: questV2HirerProfileDepartmentSchema,
+  avatar: questV2HirerProfileAvatarSchema,
+  occupation: questV2HirerProfileOccupationSchema,
+});
+
 export const questV2BoardCardSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   title: t.String(),
@@ -761,6 +795,7 @@ export const questV2BoardCardSchema = t.Object({
   startTime: questV2CanonicalScheduleSchema,
   dueAt: questV2CanonicalScheduleSchema,
   hirerName: t.String(),
+  hirerProfile: questV2HirerProfileSchema,
   location: t.Nullable(t.String()),
 });
 

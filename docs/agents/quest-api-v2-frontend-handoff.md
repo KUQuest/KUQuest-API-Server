@@ -832,6 +832,17 @@ Success status: HTTP 200.
         "startTime": "2026-09-30T09:00:00.000+07:00",
         "dueAt": "2026-10-07T18:00:00.000+07:00",
         "hirerName": "Hirer display name",
+        "hirerProfile": {
+          "id": "hirer-uuid",
+          "version": 1,
+          "firstName": "Hirer",
+          "lastName": "Member",
+          "bio": null,
+          "academicYear": null,
+          "department": null,
+          "avatar": null,
+          "occupation": null
+        },
         "location": "Online"
       }
     ],
@@ -855,11 +866,17 @@ Board Card fields:
 | startTime         | Scheduled start                 |
 | dueAt             | Deadline or null                |
 | hirerName         | Display name only               |
+| hirerProfile      | Compact public Profile summary  |
 | location          | Display location or null        |
 
-Board Card does not include state, description, condition, images, Hirer ID,
-Quest Funding Total, fee, escrow, wallet, or policy data.
-Call public detail for full public Quest content.
+`hirerProfile` contains the Hirer Member ID, profile version, first and last
+name, Bio, Academic Year, Department, Occupation, and Avatar. It does not
+include Telephone, Student ID, Email, Work Experience, Portfolio items, or
+Certificates. Call `GET /api/v1/profile/:userId` for the full Public Profile.
+
+Board Card does not include state, description, condition, images, Quest
+Funding Total, fee, escrow, wallet, or policy data. Call public detail for full
+public Quest content.
 
 ### 6.2 Read public Quest detail
 
