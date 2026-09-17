@@ -77,7 +77,8 @@ await page.route('**/api/**', async (route) => {
     admin = false;
     data = {};
   } else if (path === '/api/v1/admin/payouts') data = ok({ items: [], nextCursor: null });
-  else if (path === '/api/v1/tags') data = ok([{ id: 'tag-1', name: 'Design' }]);
+  else if (path === '/api/v1/tags')
+    data = ok({ items: [{ id: 'tag-1', name: 'Graphic Design' }], nextCursor: null });
   else if (path === '/api/v1/wallet')
     data = ok({
       wallet: {

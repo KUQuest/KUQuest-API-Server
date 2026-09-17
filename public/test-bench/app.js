@@ -470,7 +470,7 @@ const loadTags = async () => {
   if (!state.session) return;
   try {
     const response = await request('/api/v1/tags', {}, 'List Tags');
-    const tags = response?.data ?? [];
+    const tags = Array.isArray(response?.data) ? response.data : (response?.data?.items ?? []);
     state.tags = tags;
     const select = document.querySelector('#quest-tag');
     select.replaceChildren(new Option('Select a Tag', ''));

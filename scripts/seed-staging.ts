@@ -1,6 +1,7 @@
 export {};
 
 const seedCommands = [
+  'db:seed-quest-tag',
   'db:seed-admin',
   'db:seed-demo-users',
   'db:seed-frontend-demo',
