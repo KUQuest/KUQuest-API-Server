@@ -1,4 +1,5 @@
 import { app } from '@/app';
+import { department, faculty, occupation } from '@/database/schema/academic.schema';
 import { db, sql } from '@/database/client';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
@@ -36,6 +37,9 @@ const adminId = crypto.randomUUID();
 const workerIds = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
 const tagId = crypto.randomUUID();
 const otherTagId = crypto.randomUUID();
+const facultyId = crypto.randomUUID();
+const departmentId = crypto.randomUUID();
+let occupationId = '';
 const questIds: string[] = [];
 const fileIds: string[] = [];
 const fixturePrefix = `Discovery ${crypto.randomUUID()}`;
@@ -114,6 +118,21 @@ beforeAll(async () => {
   memberId = ((await loginResponse.json()) as { user: { id: string } }).user.id;
   sessionCookie = getCookieHeader(loginResponse);
 
+  await db
+    .insert(faculty)
+    .values({ id: facultyId, name: `Discovery Faculty ${crypto.randomUUID()}` });
+  await db.insert(department).values({
+    id: departmentId,
+    facultyId,
+    name: `Discovery Department ${crypto.randomUUID()}`,
+  });
+  const [studentOccupation] = await db
+    .select({ id: occupation.id })
+    .from(occupation)
+    .where(eq(occupation.name, 'Student'))
+    .limit(1);
+  if (!studentOccupation) throw new Error('Student occupation fixture is missing');
+  occupationId = studentOccupation.id;
   await db.insert(authUser).values([
     ...workerIds.map((id, index) => ({
       id,
@@ -126,6 +145,10 @@ beforeAll(async () => {
       email: `${ownerId}@ku.th`,
       firstName: 'Quest',
       lastName: 'Owner',
+      bio: 'Quest owner profile',
+      academicYear: 2026,
+      departmentId,
+      occupationId,
     },
   ]);
   await db.insert(authAdmin).values({
@@ -152,6 +175,12 @@ afterAll(async () => {
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(tag).where(eq(tag.id, otherTagId));
   await db.delete(authAdmin).where(eq(authAdmin.id, adminId));
+  await db
+    .update(authUser)
+    .set({ departmentId: null, occupationId: null })
+    .where(eq(authUser.id, ownerId));
+  await db.delete(department).where(eq(department.id, departmentId));
+  await db.delete(faculty).where(eq(faculty.id, facultyId));
 });
 
 type OpenApiSchema = {
@@ -228,6 +257,7 @@ describe('Quest API v2 discovery contract', () => {
         id: expect.any(Object),
         questReward: expect.any(Object),
         activeWorkerCount: expect.any(Object),
+        hirerProfile: expect.any(Object),
       })
     );
     expect(boardData?.required).toEqual(['items', 'nextCursor']);
@@ -310,6 +340,17 @@ describe('Quest API v2 discovery contract', () => {
           startTime: string;
           dueAt: string;
           tag: { id: string; name: string };
+          hirerProfile: {
+            id: string;
+            version: number;
+            firstName: string;
+            lastName: string;
+            bio: string | null;
+            academicYear: number | null;
+            department: unknown;
+            avatar: unknown;
+            occupation: unknown;
+          };
         }>;
         nextCursor: string | null;
       };
@@ -334,6 +375,21 @@ describe('Quest API v2 discovery contract', () => {
       startTime: '2030-08-26T10:00:00.000+07:00',
       dueAt: '2030-08-26T12:00:00.000+07:00',
       tag: { id: tagId, name: tagName },
+      hirerProfile: {
+        id: ownerId,
+        version: 1,
+        firstName: 'Quest',
+        lastName: 'Owner',
+        bio: 'Quest owner profile',
+        academicYear: 2026,
+        department: {
+          id: departmentId,
+          name: expect.any(String),
+          faculty: { name: expect.any(String) },
+        },
+        avatar: null,
+        occupation: { id: occupationId, name: 'Student' },
+      },
     });
     expect(body.data.items.some((item) => item.id === ownQuest)).toBe(false);
     expect(body.data.nextCursor).toBeNull();
