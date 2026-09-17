@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -169,6 +170,119 @@ export const adminDisputeCase = pgTable(
         OR (${table.status} = 'DISPUTE_CASE_DISMISSED' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}) = 0 AND num_nonnulls(${table.resolvedByAdminId}, ${table.resolvedAt}) = 2)
         OR (${table.status} = 'DISPUTE_CASE_RESOLVED' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}, ${table.resolvedByAdminId}, ${table.resolvedAt}) = 4)
       )`
+    ),
+  ]
+);
+
+export const conductReportReason = {
+  abandoned: 'CONDUCT_ABANDONED',
+  outOfScope: 'CONDUCT_OUT_OF_SCOPE',
+  noShow: 'CONDUCT_NO_SHOW',
+} as const;
+export const conductReportReasons = [
+  conductReportReason.abandoned,
+  conductReportReason.outOfScope,
+  conductReportReason.noShow,
+] as const;
+export type ConductReportReason = (typeof conductReportReasons)[number];
+
+export const conductReportStatus = {
+  pending: 'CONDUCT_REPORT_PENDING',
+  upheld: 'CONDUCT_REPORT_UPHELD',
+  dismissed: 'CONDUCT_REPORT_DISMISSED',
+} as const;
+export const conductReportStatuses = [
+  conductReportStatus.pending,
+  conductReportStatus.upheld,
+  conductReportStatus.dismissed,
+] as const;
+export type ConductReportStatus = (typeof conductReportStatuses)[number];
+
+/** A retained Admin review record for one Member's conduct on one Quest. */
+export const adminConductReport = pgTable(
+  'admin_conduct_reports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'restrict' }),
+    filerUserId: uuid('filer_user_id')
+      .notNull()
+      .references(() => authUser.id, { onDelete: 'restrict' }),
+    reportedMemberId: uuid('reported_member_id')
+      .notNull()
+      .references(() => authUser.id, { onDelete: 'restrict' }),
+    /** The Assignment used as the Quest record evidence for this report. */
+    assignmentId: uuid('assignment_id').notNull(),
+    reason: varchar('reason', { length: 64 }).$type<ConductReportReason>().notNull(),
+    detail: text('detail'),
+    status: text('status')
+      .$type<ConductReportStatus>()
+      .default(conductReportStatus.pending)
+      .notNull(),
+    version: integer('version').default(1).notNull(),
+    decisionReason: varchar('decision_reason', { length: 1000 }),
+    resolvedByAdminId: uuid('resolved_by_admin_id').references(() => authAdmin.id, {
+      onDelete: 'restrict',
+    }),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('admin_conduct_reports_quest_reported_member_key').on(
+      table.questId,
+      table.reportedMemberId
+    ),
+    index('admin_conduct_reports_status_created_idx').on(table.status, table.createdAt, table.id),
+    index('admin_conduct_reports_quest_created_idx').on(table.questId, table.createdAt, table.id),
+    index('admin_conduct_reports_filer_created_idx').on(
+      table.filerUserId,
+      table.createdAt,
+      table.id
+    ),
+    index('admin_conduct_reports_reported_member_created_idx').on(
+      table.reportedMemberId,
+      table.createdAt,
+      table.id
+    ),
+    index('admin_conduct_reports_assignment_idx').on(table.assignmentId),
+    foreignKey({
+      name: 'admin_conduct_reports_assignment_context_fk',
+      columns: [table.questId, table.assignmentId],
+      foreignColumns: [questAssignment.questId, questAssignment.id],
+    }).onDelete('restrict'),
+    check(
+      'admin_conduct_reports_reason_check',
+      sql`${table.reason} IN ('CONDUCT_ABANDONED', 'CONDUCT_OUT_OF_SCOPE', 'CONDUCT_NO_SHOW')`
+    ),
+    check(
+      'admin_conduct_reports_status_check',
+      sql`${table.status} IN ('CONDUCT_REPORT_PENDING', 'CONDUCT_REPORT_UPHELD', 'CONDUCT_REPORT_DISMISSED')`
+    ),
+    check('admin_conduct_reports_version_check', sql`${table.version} >= 1`),
+    check(
+      'admin_conduct_reports_members_check',
+      sql`${table.filerUserId} <> ${table.reportedMemberId}`
+    ),
+    check(
+      'admin_conduct_reports_detail_check',
+      sql`${table.detail} IS NULL OR btrim(${table.detail}) <> ''`
+    ),
+    check(
+      'admin_conduct_reports_decision_reason_check',
+      sql`${table.decisionReason} IS NULL OR btrim(${table.decisionReason}) <> ''`
+    ),
+    check(
+      'admin_conduct_reports_resolution_check',
+      sql`(
+        (${table.status} = 'CONDUCT_REPORT_PENDING' AND num_nonnulls(${table.decisionReason}, ${table.resolvedByAdminId}, ${table.resolvedAt}) = 0)
+        OR (${table.status} IN ('CONDUCT_REPORT_UPHELD', 'CONDUCT_REPORT_DISMISSED') AND num_nonnulls(${table.decisionReason}, ${table.resolvedByAdminId}, ${table.resolvedAt}) = 3)
+      )`
+    ),
+    check(
+      'admin_conduct_reports_resolved_after_created_check',
+      sql`${table.resolvedAt} IS NULL OR ${table.resolvedAt} >= ${table.createdAt}`
     ),
   ]
 );
