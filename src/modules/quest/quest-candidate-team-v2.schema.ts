@@ -89,6 +89,25 @@ export const questV2CandidateTeamSubmissionSchema = t.Object(
   },
   { additionalProperties: false }
 );
+export const questV2CandidateTeamFileUploadSchema = t.Object(
+  {
+    file: t.File(),
+  },
+  { additionalProperties: false }
+);
+
+const uploadedFileSchema = t.Object({
+  fileId: t.String({ format: 'uuid' }),
+  fileName: t.String({ minLength: 1 }),
+  mediaType: t.String({ minLength: 1 }),
+  sizeBytes: t.Integer({ minimum: 1 }),
+  createdAt: t.String({ format: 'date-time' }),
+});
+
+export const questV2CandidateTeamFileUploadResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: uploadedFileSchema,
+});
 
 export const questV2CandidateTeamResponseSchema = t.Object({
   success: t.Literal(true),
@@ -107,9 +126,13 @@ export type QuestV2CandidateTeamDetailParams = Static<
 export type QuestV2CandidateTeamMemberParams = Static<
   typeof questV2CandidateTeamMemberParamsSchema
 >;
+
 export type QuestV2CandidateTeamCreateInput = Static<typeof questV2CandidateTeamCreateSchema>;
 export type QuestV2CandidateTeamUpdateInput = Static<typeof questV2CandidateTeamUpdateSchema>;
 export type QuestV2CandidateTeamJoinInput = Static<typeof questV2CandidateTeamJoinSchema>;
 export type QuestV2CandidateTeamSubmissionInput = Static<
   typeof questV2CandidateTeamSubmissionSchema
+>;
+export type QuestV2CandidateTeamFileUploadInput = Static<
+  typeof questV2CandidateTeamFileUploadSchema
 >;

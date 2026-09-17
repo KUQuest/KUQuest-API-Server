@@ -1,12 +1,18 @@
 import type { AuthedContext } from '@/modules/auth';
+import {
+  FileTooLargeError,
+  FileUploadError,
+  UnsupportedFileTypeError,
+} from '@/shared/object-storage';
 import { apiError, apiSuccess } from '@/shared/api-response';
 
 import type {
+  QuestV2CandidateTeamCreateInput,
   QuestV2CandidateTeamDetailParams,
+  QuestV2CandidateTeamFileUploadInput,
+  QuestV2CandidateTeamJoinInput,
   QuestV2CandidateTeamMemberParams,
   QuestV2CandidateTeamParams,
-  QuestV2CandidateTeamCreateInput,
-  QuestV2CandidateTeamJoinInput,
   QuestV2CandidateTeamSubmissionInput,
   QuestV2CandidateTeamUpdateInput,
 } from './quest-candidate-team-v2.schema';
@@ -22,6 +28,7 @@ import {
   selectQuestV2CandidateTeam,
   submitQuestV2CandidateTeam,
   updateQuestV2CandidateTeam,
+  uploadQuestV2CandidateTeamFile,
   type QuestV2CandidateTeamOutcome,
   type QuestV2CandidateTeamRejectOutcome,
   type QuestV2CandidateTeamSelectionOutcome,
@@ -179,6 +186,22 @@ const mapTeamError = (set: AuthedContext['set'], outcome: CandidateTeamError) =>
     );
   }
   return mapQuestCommandOutcome(set, outcome.outcome);
+};
+
+const mapCandidateTeamFileUploadError = (set: AuthedContext['set'], error: unknown) => {
+  if (error instanceof FileTooLargeError) {
+    set.status = 413;
+    return apiError('TEAM_FILE_TOO_LARGE', error.message);
+  }
+  if (error instanceof UnsupportedFileTypeError) {
+    set.status = 415;
+    return apiError('TEAM_FILE_TYPE_NOT_SUPPORTED', error.message);
+  }
+  if (error instanceof FileUploadError) {
+    set.status = 502;
+    return apiError('TEAM_FILE_UPLOAD_FAILED', 'Candidate Team file upload failed');
+  }
+  throw error;
 };
 
 type CandidateTeamRejectError = Exclude<QuestV2CandidateTeamRejectOutcome, CandidateTeam>;
@@ -445,6 +468,41 @@ export const submitQuestV2CandidateTeamController = async ({
   );
   if ('outcome' in result) return mapTeamError(set, result);
   return apiSuccess(serializeTeam(result));
+};
+
+export const uploadQuestV2CandidateTeamFileController = async ({
+  body,
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & {
+  body: QuestV2CandidateTeamFileUploadInput;
+  params: QuestV2CandidateTeamDetailParams;
+}) => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+
+  try {
+    const result = await uploadQuestV2CandidateTeamFile(
+      session.user.id,
+      params.questId,
+      params.teamId,
+      body,
+      commandId
+    );
+    if ('outcome' in result) return mapTeamError(set, result);
+    set.status = 201;
+    return apiSuccess({
+      fileId: result.fileId,
+      fileName: result.fileName,
+      mediaType: result.mediaType,
+      sizeBytes: result.sizeBytes,
+      createdAt: result.createdAt.toISOString(),
+    });
+  } catch (error) {
+    return mapCandidateTeamFileUploadError(set, error);
+  }
 };
 
 export const rejectQuestV2CandidateTeamController = async ({
