@@ -833,6 +833,7 @@ export const questAssignment = pgTable(
       'quest_assignment_status_check',
       sql`${table.assignmentStatus} IN ('ASSIGNMENT_ACTIVE', 'ASSIGNMENT_COMPLETED', 'ASSIGNMENT_INCOMPLETE', 'ASSIGNMENT_CANCELLED')`
     ),
+    unique('quest_assignment_quest_id_id_key').on(table.questId, table.id),
     unique('quest_assignment_quest_id_worker_id_key').on(table.questId, table.workerId),
     index('quest_assignment_quest_id_idx').on(table.questId),
     index('quest_assignment_worker_id_idx').on(table.workerId),
