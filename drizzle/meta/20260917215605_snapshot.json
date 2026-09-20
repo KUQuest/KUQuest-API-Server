@@ -1,5 +1,5 @@
 {
-  "id": "c70207be-244f-459b-9ec3-e64f30c54e95",
+  "id": "a21b31b5-a094-4308-8960-b61c86112667",
   "prevId": "77ff1403-060d-4c4b-bec0-fed87b1fe8e7",
   "version": "7",
   "dialect": "postgresql",
@@ -735,23 +735,6 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "public_sequence": {
-          "name": "public_sequence",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "identity": {
-            "type": "byDefault",
-            "name": "admin_dispute_case_public_sequence",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "2147483647",
-            "cache": "1",
-            "cycle": false
-          }
-        },
         "quest_id": {
           "name": "quest_id",
           "type": "uuid",
@@ -957,13 +940,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "admin_dispute_cases_public_sequence_unique": {
-          "name": "admin_dispute_cases_public_sequence_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "public_sequence"
-          ]
-        },
         "admin_dispute_cases_quest_filer_key": {
           "name": "admin_dispute_cases_quest_filer_key",
           "nullsNotDistinct": false,
@@ -5289,23 +5265,6 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "public_sequence": {
-          "name": "public_sequence",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "identity": {
-            "type": "byDefault",
-            "name": "quest_public_sequence",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "2147483647",
-            "cache": "1",
-            "cycle": false
-          }
-        },
         "hirer_id": {
           "name": "hirer_id",
           "type": "uuid",
@@ -5676,13 +5635,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "quest_public_sequence_unique": {
-          "name": "quest_public_sequence_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "public_sequence"
-          ]
-        },
         "quest_funding_reservation_id_unique": {
           "name": "quest_funding_reservation_id_unique",
           "nullsNotDistinct": false,
@@ -8907,6 +8859,12 @@
         "description": {
           "name": "description",
           "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "worker_message": {
+          "name": "worker_message",
+          "type": "varchar(200)",
           "primaryKey": false,
           "notNull": false
         },

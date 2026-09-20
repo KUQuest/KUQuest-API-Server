@@ -1,5 +1,6 @@
 import { db, sql } from '@/database/client';
 import { tag } from '@/database/schema/tag.schema';
+import { seedQuestTags } from '@/modules/tag/tag.service';
 import { fixedTagNames } from '@/shared/tag';
 
 import { asc, inArray } from 'drizzle-orm';
@@ -16,6 +17,7 @@ beforeAll(async () => {
       { cause }
     );
   }
+  await seedQuestTags();
 });
 
 describe('Tag seed', () => {
@@ -28,5 +30,21 @@ describe('Tag seed', () => {
 
     expect(rows.map(({ name }) => name)).toEqual(expectedTagNames);
     expect(new Set(rows.map(({ name }) => name)).size).toBe(expectedTagNames.length);
+  });
+
+  it('contains no legacy tags after seed', async () => {
+    const legacyNames = ['Content', 'Design', 'Frontend'];
+    const rows = await db
+      .select({ name: tag.name })
+      .from(tag)
+      .where(inArray(tag.name, legacyNames));
+
+    expect(rows).toEqual([]);
+  });
+
+  it('runs idempotently', async () => {
+    const result = await seedQuestTags();
+    expect(result.total).toBe(expectedTagNames.length);
+    expect(result.removed).toBe(0);
   });
 });

@@ -2,6 +2,7 @@ import type { AuthedContext } from '@/modules/auth';
 import { MoneyDomainError } from '@/modules/wallet';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import {
+  FileLinkUnavailableError,
   FileTooLargeError,
   FileUploadError,
   UnsupportedFileTypeError,
@@ -10,6 +11,7 @@ import {
 import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
 import type { QuestCommandOutcomeCode } from './quest-command.service';
 import type {
+  QuestV2ProofFileParams,
   QuestV2ProofSubmissionCreateInput,
   QuestV2ProofSubmissionDetailParams,
   QuestV2ProofSubmissionEditInput,
@@ -21,6 +23,7 @@ import {
   createQuestV2ProofSubmissionWithFiles,
   deleteQuestV2ProofSubmission,
   editQuestV2ProofSubmissionWithFiles,
+  getQuestV2ProofFile,
   listQuestV2ProofSubmissions,
   reviewQuestV2ProofSubmission,
   submitQuestV2ProofSubmission,
@@ -29,6 +32,7 @@ import {
   type ProofCommandOutcomeCode,
   type QuestV2ProofSubmissionListOutcome,
   type QuestV2ProofSubmissionOutcome,
+  type QuestV2ProofFileAccess,
 } from './quest-proof-v2.service';
 import { WorkChatTransitionError } from './quest-work-chat.port';
 
@@ -39,6 +43,7 @@ const serializeSubmission = (submission: QuestV2ProofSubmission) => ({
   teamId: submission.teamId,
   submittedByUserId: submission.submittedByUserId,
   description: submission.description,
+  workerMessage: submission.workerMessage,
   status: submission.status,
   submittedAt: submission.submittedAt?.toISOString() ?? null,
   createdAt: submission.createdAt.toISOString(),
@@ -400,6 +405,32 @@ export const listQuestV2ProofSubmissionsController = async ({
     );
   }
   return apiSuccess({ items: result.map(serializeSubmission) });
+};
+export const getQuestV2ProofFileController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: QuestV2ProofFileParams }) => {
+  let result: QuestV2ProofFileAccess | undefined;
+  try {
+    result = await getQuestV2ProofFile(
+      session.user.id,
+      params.questId,
+      params.proofSubmissionId,
+      params.fileId
+    );
+  } catch (error) {
+    if (error instanceof FileLinkUnavailableError) {
+      set.status = 503;
+      return apiError('PROOF_FILE_LINK_UNAVAILABLE', 'Proof file link could not be created');
+    }
+    throw error;
+  }
+  if (!result) {
+    set.status = 404;
+    return apiError('PROOF_FILE_NOT_FOUND', 'Proof file not found');
+  }
+  return apiSuccess(result);
 };
 
 export const confirmQuestV2CompletionController = async ({

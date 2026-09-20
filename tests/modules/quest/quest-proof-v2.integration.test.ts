@@ -80,16 +80,34 @@ describe('Quest Proof API v2 contract', () => {
         JSON.stringify({ decision: 'PROOF_APPROVED' })
       ),
       request('GET', `/api/v2/quests/${questId}/proof-submissions`),
+      request(
+        'GET',
+        `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/files/${proofSubmissionId}`
+      ),
       request('POST', `/api/v2/quests/${questId}/completion-confirmation`, headers),
     ];
     const responses = await Promise.all(requests);
 
     expect(responses.map((response) => response.status)).toEqual([
-      401, 401, 401, 401, 401, 401, 401,
+      401, 401, 401, 401, 401, 401, 401, 401,
     ]);
   });
 
-  it('documents all seven v2 operations with canonical Proof statuses and no retired vocabulary', async () => {
+  it('documents the Proof file access operation', async () => {
+    const response = await request('GET', '/openapi/json');
+    const document = (await response.json()) as {
+      paths: Record<string, Record<string, { operationId?: string; security?: unknown }>>;
+    };
+
+    const operation =
+      document.paths[
+        '/api/v2/quests/{questId}/proof-submissions/{proofSubmissionId}/files/{fileId}'
+      ]?.get;
+    expect(operation?.operationId).toBe('getQuestV2ProofFile');
+    expect(operation?.security).toEqual([{ betterAuthSession: [] }]);
+  });
+
+  it('documents all eight v2 operations with canonical Proof statuses and no retired vocabulary', async () => {
     const response = await request('GET', '/openapi/json');
     const document = (await response.json()) as {
       paths: Record<
@@ -127,6 +145,11 @@ describe('Quest Proof API v2 contract', () => {
         '/api/v2/quests/{questId}/proof-submissions/{proofSubmissionId}/review',
         'post',
         'reviewQuestV2ProofSubmission',
+      ],
+      [
+        '/api/v2/quests/{questId}/proof-submissions/{proofSubmissionId}/files/{fileId}',
+        'get',
+        'getQuestV2ProofFile',
       ],
       ['/api/v2/quests/{questId}/completion-confirmation', 'post', 'confirmQuestV2Completion'],
     ] as const;

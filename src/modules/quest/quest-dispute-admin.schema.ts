@@ -131,11 +131,14 @@ const adminDisputeEvidenceSchema = t.Object({
       workerId: t.Nullable(t.String({ format: 'uuid' })),
       teamId: t.Nullable(t.String({ format: 'uuid' })),
       submittedByUserId: t.String({ format: 'uuid' }),
+      workerMessage: t.Nullable(t.String()),
       submissionStatus: t.String(),
       submittedAt: t.Nullable(t.String({ format: 'date-time' })),
       files: t.Array(
         t.Object({
           fileId: t.String({ format: 'uuid' }),
+          url: t.String({ format: 'uri' }),
+          urlExpiresAt: t.String({ format: 'date-time' }),
           contentType: t.String(),
           sizeBytes: t.Integer({ minimum: 0 }),
           position: t.Integer({ minimum: 0 }),
