@@ -81,6 +81,7 @@ export class AdminDisputeCaseError extends Error {
 
 export type AdminDisputeCaseSummary = {
   id: string;
+  displayId: string;
   questId: string;
   filerUserId: string;
   openedByAdminId: string | null;
@@ -179,6 +180,7 @@ export const summaryFromRecord = (
   record: typeof adminDisputeCase.$inferSelect
 ): AdminDisputeCaseSummary => ({
   id: record.id,
+  displayId: `DSP-${record.publicSequence.toString().padStart(6, '0')}`,
   questId: record.questId,
   filerUserId: record.filerUserId,
   openedByAdminId: record.openedByAdminId,

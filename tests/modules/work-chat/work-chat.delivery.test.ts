@@ -11,7 +11,7 @@ const event = (id = 'message-1'): WorkChatCommittedEvent => ({
     conversationId: 'conversation-1',
     sequence: 1,
     kind: 'USER',
-    sender: { id: 'sender-1', displayName: 'Sender' },
+    sender: { id: 'sender-1', displayName: 'Sender', avatar: null },
     text: 'Committed Message',
     attachments: [],
     systemType: null,

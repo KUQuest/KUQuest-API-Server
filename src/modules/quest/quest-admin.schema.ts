@@ -79,6 +79,7 @@ const adminQuestMemberSchema = t.Object({
 
 export const adminQuestSummarySchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  displayId: t.String(),
   apiVersion: t.Union([t.Literal('v1'), t.Literal('v2')]),
   version: t.Integer(),
   title: t.String(),

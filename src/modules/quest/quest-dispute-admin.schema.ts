@@ -65,6 +65,7 @@ export const adminDisputeResolveBodySchema = t.Object(
 
 export const adminDisputeSummarySchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  displayId: t.String(),
   questId: t.String({ format: 'uuid' }),
   filerUserId: t.String({ format: 'uuid' }),
   openedByAdminId: t.Nullable(t.String({ format: 'uuid' })),

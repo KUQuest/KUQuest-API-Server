@@ -339,6 +339,7 @@ describe('Quest v2 Participation Detail', () => {
       'dueAt',
       'hasJoined',
       'headcount',
+      'hirerAvatar',
       'hirerName',
       'id',
       'images',

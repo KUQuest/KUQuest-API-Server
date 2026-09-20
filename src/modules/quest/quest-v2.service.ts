@@ -255,11 +255,13 @@ export type QuestV2BoardCard = {
       name: string;
       faculty: { name: string };
     } | null;
-    avatar: { fileId: string; url: string } | null;
+    avatar: QuestV2HirerAvatar;
     occupation: { id: string; name: 'Staff' | 'Lecturer' | 'Student' } | null;
   };
   location: string | null;
 };
+
+type QuestV2HirerAvatar = { fileId: string; url: string } | null;
 
 export type QuestV2PublicImageResponse = {
   imageId: string;
@@ -284,6 +286,7 @@ export type QuestV2PublicDetail = {
   dueAt: string;
   proofRequired: boolean;
   hirerName: string;
+  hirerAvatar: QuestV2HirerAvatar;
   locations: Array<{ label: string }>;
   images: QuestV2ImageReference[];
   hasJoined: boolean;
@@ -358,28 +361,33 @@ type QuestV2BoardRow = {
   hirerLastName: string;
 };
 
-type QuestV2BoardProfileRow = QuestV2BoardRow & {
-  hirerId: string;
-  hirerVersion: number;
-  hirerBio: string | null;
-  hirerAcademicYear: number | null;
-  hirerDepartmentId: string | null;
-  hirerDepartmentName: string | null;
-  hirerFacultyName: string | null;
-  hirerOccupationId: string | null;
-  hirerOccupationName: string | null;
+type QuestV2BoardProfileRow = QuestV2BoardRow &
+  QuestV2HirerAvatarRow & {
+    hirerId: string;
+    hirerVersion: number;
+    hirerBio: string | null;
+    hirerAcademicYear: number | null;
+    hirerDepartmentId: string | null;
+    hirerDepartmentName: string | null;
+    hirerFacultyName: string | null;
+    hirerOccupationId: string | null;
+    hirerOccupationName: string | null;
+  };
+
+type QuestV2HirerAvatarRow = {
   hirerAvatarFileId: string | null;
   hirerAvatarBucket: string | null;
   hirerAvatarObjectKey: string | null;
 };
 
-type QuestV2PublicDetailRow = QuestV2BoardRow & {
-  description: string | null;
-  questStatus: QuestStatus;
-  proofRequired: boolean;
-  assignmentId: string | null;
-  assignmentStatus: string | null;
-};
+type QuestV2PublicDetailRow = QuestV2BoardRow &
+  QuestV2HirerAvatarRow & {
+    description: string | null;
+    questStatus: QuestStatus;
+    proofRequired: boolean;
+    assignmentId: string | null;
+    assignmentStatus: string | null;
+  };
 
 type CompleteQuestV2DiscoveryRow = QuestV2BoardRow & {
   rewardSatang: number;
@@ -2578,22 +2586,23 @@ type QuestV2OccupationName = (typeof questV2OccupationNames)[number];
 const isQuestV2OccupationName = (name: string): name is QuestV2OccupationName =>
   questV2OccupationNames.includes(name as QuestV2OccupationName);
 
-const toQuestV2HirerProfile = (row: QuestV2BoardProfileRow): QuestV2BoardCard['hirerProfile'] => {
-  let avatar: QuestV2BoardCard['hirerProfile']['avatar'] = null;
-  if (row.hirerAvatarFileId && row.hirerAvatarBucket && row.hirerAvatarObjectKey) {
-    try {
-      avatar = {
-        fileId: row.hirerAvatarFileId,
-        url: avatarStorage.linkFor({
-          bucket: row.hirerAvatarBucket,
-          objectKey: row.hirerAvatarObjectKey,
-        }),
-      };
-    } catch {
-      avatar = null;
-    }
-  }
+const toQuestV2HirerAvatar = (row: QuestV2HirerAvatarRow): QuestV2HirerAvatar => {
+  if (!row.hirerAvatarFileId || !row.hirerAvatarBucket || !row.hirerAvatarObjectKey) return null;
 
+  try {
+    return {
+      fileId: row.hirerAvatarFileId,
+      url: avatarStorage.linkFor({
+        bucket: row.hirerAvatarBucket,
+        objectKey: row.hirerAvatarObjectKey,
+      }),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const toQuestV2HirerProfile = (row: QuestV2BoardProfileRow): QuestV2BoardCard['hirerProfile'] => {
   return {
     id: row.hirerId,
     version: row.hirerVersion,
@@ -2609,7 +2618,7 @@ const toQuestV2HirerProfile = (row: QuestV2BoardProfileRow): QuestV2BoardCard['h
             faculty: { name: row.hirerFacultyName },
           }
         : null,
-    avatar,
+    avatar: toQuestV2HirerAvatar(row),
     occupation:
       row.hirerOccupationId &&
       row.hirerOccupationName &&
@@ -2784,11 +2793,15 @@ export const getPublicQuestV2Detail = async (
       proofRequired: quest.proofRequired,
       hirerFirstName: authUser.firstName,
       hirerLastName: authUser.lastName,
+      hirerAvatarFileId: file.id,
+      hirerAvatarBucket: file.bucket,
+      hirerAvatarObjectKey: file.objectKey,
       assignmentId: questAssignment.id,
       assignmentStatus: questAssignment.assignmentStatus,
     })
     .from(quest)
     .innerJoin(authUser, eq(quest.hirerId, authUser.id))
+    .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
     .leftJoin(
       questAssignment,
       and(eq(questAssignment.questId, quest.id), eq(questAssignment.workerId, userId))
@@ -2826,6 +2839,7 @@ export const getPublicQuestV2Detail = async (
     dueAt: formatQuestV2ScheduleTime(publicRow.dueAt),
     proofRequired: publicRow.proofRequired,
     hirerName: `${publicRow.hirerFirstName} ${publicRow.hirerLastName}`.trim(),
+    hirerAvatar: toQuestV2HirerAvatar(publicRow),
     locations,
     images,
     hasJoined: publicRow.assignmentId !== null,
@@ -2856,6 +2870,9 @@ export const getQuestV2ParticipationDetail = async (
       proofRequired: quest.proofRequired,
       hirerFirstName: authUser.firstName,
       hirerLastName: authUser.lastName,
+      hirerAvatarFileId: file.id,
+      hirerAvatarBucket: file.bucket,
+      hirerAvatarObjectKey: file.objectKey,
       assignmentId: questAssignment.id,
       assignmentStatus: questAssignment.assignmentStatus,
       assignmentStartedAt: questAssignment.startedAt,
@@ -2868,6 +2885,7 @@ export const getQuestV2ParticipationDetail = async (
       questAssignment,
       and(eq(questAssignment.questId, quest.id), eq(questAssignment.workerId, userId))
     )
+    .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
     .leftJoin(tag, eq(quest.tagId, tag.id))
     .where(
       and(
@@ -2910,6 +2928,7 @@ export const getQuestV2ParticipationDetail = async (
     dueAt: formatQuestV2ScheduleTime(participationRow.dueAt),
     proofRequired: participationRow.proofRequired,
     hirerName: `${participationRow.hirerFirstName} ${participationRow.hirerLastName}`.trim(),
+    hirerAvatar: toQuestV2HirerAvatar(participationRow),
     locations,
     images,
     hasJoined: participationRow.assignmentId !== null,
