@@ -133,6 +133,9 @@ export const adminDisputeCase = pgTable(
   'admin_dispute_cases',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'admin_dispute_case_public_sequence' })
+      .unique(),
     questId: uuid('quest_id')
       .notNull()
       .references(() => quest.id, { onDelete: 'cascade' }),

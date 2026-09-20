@@ -286,18 +286,20 @@ describe('Admin Dispute API', () => {
     const fixture = await createDisputeFixture();
     const queue = await adminRequest('/api/v1/admin/disputes?limit=1&sort=newest');
     const queueBody = (await queue.json()) as {
-      data: { items: Array<{ id: string }>; nextCursor: string | null };
+      data: { items: Array<{ id: string; displayId: string }>; nextCursor: string | null };
     };
     expect(queue.status).toBe(200);
     expect(queueBody.data.items).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: fixture.disputeCaseId })])
     );
+    expect(queueBody.data.items[0]?.displayId).toEqual(expect.stringMatching(/^DSP-\d{6,}$/));
 
     const detail = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}`);
     const detailBody = (await detail.json()) as { data: Record<string, unknown> };
     expect(detail.status).toBe(200);
     expect(detailBody.data).toMatchObject({
       id: fixture.disputeCaseId,
+      displayId: expect.stringMatching(/^DSP-\d{6,}$/),
       questId: fixture.questId,
       status: 'DISPUTE_CASE_PENDING',
       quest: { id: fixture.questId, questStatus: 'QUEST_FAILED' },
