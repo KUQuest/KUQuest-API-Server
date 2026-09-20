@@ -2410,6 +2410,18 @@ describe('Quest Candidate Team API v2', () => {
     expect(v2Response.status).toBe(404);
     expect((await v2Response.json()).error.code).toBe('QUEST_NOT_FOUND');
 
+    const v1ListOnV2Route = await request(`/api/v2/quests/${v1QuestId}/teams`, 'GET', hirer.id);
+    expect(v1ListOnV2Route.status).toBe(404);
+    expect((await v1ListOnV2Route.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+    const v1GetOnV2Route = await request(
+      `/api/v2/quests/${v1QuestId}/teams/${randomUUID()}`,
+      'GET',
+      hirer.id
+    );
+    expect(v1GetOnV2Route.status).toBe(404);
+    expect((await v1GetOnV2Route.json()).error.code).toBe('QUEST_NOT_FOUND');
+
     expect(
       await db
         .select()
