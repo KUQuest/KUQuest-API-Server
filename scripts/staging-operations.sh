@@ -30,6 +30,15 @@ read_environment_value() {
   sed -n "s/^${name}=//p" "$environment_file" | tail -n 1
 }
 
+require_staging_seed_environment() {
+  local name
+
+  for name in ADMIN_EMAIL ADMIN_PASSWORD ADMIN_FIRST_NAME ADMIN_LAST_NAME; do
+    [[ -n "$(read_environment_value "$name")" ]] ||
+      fail "$name is required for staging seed"
+  done
+}
+
 backup_contents_are_valid() {
   local backup_name=$1
 
@@ -224,6 +233,7 @@ bootstrap() {
   local database_url
   local recovery_backup
   database_url=$(read_database_url)
+  require_staging_seed_environment
 
   docker compose pull api
   recovery_backup=$(create_verified_backup "$database_url")
