@@ -18,6 +18,7 @@ permissions: {}
 env:
   IMAGE_NAME: ghcr.io/kuquest/kuquest-api-server
   STAGING_SERVER: 192.168.1.210
+  STAGING_PUBLIC_URL: https://kuquest-dev-api.kubits.org
 
 jobs:
   build:
@@ -84,6 +85,9 @@ jobs:
 
     environment: staging
 
+    env:
+      STAGING_TEST_AUTH_ENABLED: ${{ secrets.STAGING_TEST_AUTH_ENABLED }}
+
     permissions:
       contents: read
       packages: read
@@ -143,6 +147,7 @@ jobs:
           BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           ADMIN_BETTER_AUTH_SECRET: ${{ secrets.ADMIN_BETTER_AUTH_SECRET }}
+          STAGING_ADMIN_SEED_ENABLED: ${{ secrets.STAGING_ADMIN_SEED_ENABLED }}
           ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           ADMIN_FIRST_NAME: ${{ secrets.ADMIN_FIRST_NAME }}
@@ -152,6 +157,10 @@ jobs:
           STAGING_TEST_AUTH_PASSWORD: ${{ secrets.STAGING_TEST_AUTH_PASSWORD }}
           STAGING_TEST_AUTH_FIRST_NAME: ${{ secrets.STAGING_TEST_AUTH_FIRST_NAME }}
           STAGING_TEST_AUTH_LAST_NAME: ${{ secrets.STAGING_TEST_AUTH_LAST_NAME }}
+          STAGING_TEST_AUTH_ACCOUNT_2_EMAIL: ${{ secrets.STAGING_TEST_AUTH_ACCOUNT_2_EMAIL }}
+          STAGING_TEST_AUTH_ACCOUNT_2_PASSWORD: ${{ secrets.STAGING_TEST_AUTH_ACCOUNT_2_PASSWORD }}
+          STAGING_TEST_AUTH_ACCOUNT_2_FIRST_NAME: ${{ secrets.STAGING_TEST_AUTH_ACCOUNT_2_FIRST_NAME }}
+          STAGING_TEST_AUTH_ACCOUNT_2_LAST_NAME: ${{ secrets.STAGING_TEST_AUTH_ACCOUNT_2_LAST_NAME }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
 
@@ -163,10 +172,11 @@ jobs:
 
           XENDIT_SECRET_KEY: ${{ secrets.XENDIT_SECRET_KEY }}
           XENDIT_WEBHOOK_TOKEN: ${{ secrets.XENDIT_WEBHOOK_TOKEN }}
-          PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY: ${{ secrets.PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY }}
-          PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION: ${{ secrets.PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION }}
+
           PAYOUT_DESTINATION_ENCRYPTION_KEY: ${{ secrets.PAYOUT_DESTINATION_ENCRYPTION_KEY }}
           PAYOUT_DESTINATION_ENCRYPTION_KEY_VERSION: ${{ secrets.PAYOUT_DESTINATION_ENCRYPTION_KEY_VERSION }}
+          PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY: ${{ secrets.PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY }}
+          PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION: ${{ secrets.PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION }}
 
           CMS_ORIGIN: ${{ secrets.CMS_ORIGIN }}
 
@@ -183,10 +193,6 @@ jobs:
             BETTER_AUTH_URL
             BETTER_AUTH_SECRET
             ADMIN_BETTER_AUTH_SECRET
-            ADMIN_EMAIL
-            ADMIN_PASSWORD
-            ADMIN_FIRST_NAME
-            ADMIN_LAST_NAME
             GOOGLE_CLIENT_ID
             GOOGLE_CLIENT_SECRET
             S3_ENDPOINT
@@ -196,8 +202,8 @@ jobs:
             S3_SECRET_ACCESS_KEY
             XENDIT_SECRET_KEY
             XENDIT_WEBHOOK_TOKEN
-            PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY
             PAYOUT_DESTINATION_ENCRYPTION_KEY
+            PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY
             CMS_ORIGIN
             TERMS_URL
             PRIVACY_URL
@@ -212,31 +218,59 @@ jobs:
             fi
           done
 
-          if [ "${STAGING_TEST_AUTH_ENABLED:-false}" != 'true' ]; then
-            echo "STAGING_TEST_AUTH_ENABLED must be true for the staging seed"
-            exit 1
+          if [ "${STAGING_ADMIN_SEED_ENABLED:-false}" = 'true' ]; then
+            ADMIN_SEED_SECRETS=(
+              ADMIN_EMAIL
+              ADMIN_PASSWORD
+              ADMIN_FIRST_NAME
+              ADMIN_LAST_NAME
+            )
+
+            for SECRET_NAME in "${ADMIN_SEED_SECRETS[@]}"; do
+              if [ -z "${!SECRET_NAME}" ]; then
+                echo "Missing GitHub secret: $SECRET_NAME"
+                exit 1
+              fi
+            done
           fi
 
-          TEST_AUTH_SECRETS=(
-            STAGING_TEST_AUTH_EMAIL
-            STAGING_TEST_AUTH_PASSWORD
-            STAGING_TEST_AUTH_FIRST_NAME
-            STAGING_TEST_AUTH_LAST_NAME
-          )
+          if [ "${STAGING_TEST_AUTH_ENABLED:-false}" = 'true' ]; then
+            TEST_AUTH_SECRETS=(
+              STAGING_TEST_AUTH_EMAIL
+              STAGING_TEST_AUTH_PASSWORD
+              STAGING_TEST_AUTH_FIRST_NAME
+              STAGING_TEST_AUTH_LAST_NAME
+            )
 
-          for SECRET_NAME in "${TEST_AUTH_SECRETS[@]}"; do
-            if [ -z "${!SECRET_NAME}" ]; then
-              echo "Missing GitHub secret: $SECRET_NAME"
+            for SECRET_NAME in "${TEST_AUTH_SECRETS[@]}"; do
+              if [ -z "${!SECRET_NAME}" ]; then
+                echo "Missing GitHub secret: $SECRET_NAME"
+                exit 1
+              fi
+            done
+
+            TEST_AUTH_ACCOUNT_2_SECRETS=(
+              STAGING_TEST_AUTH_ACCOUNT_2_EMAIL
+              STAGING_TEST_AUTH_ACCOUNT_2_PASSWORD
+              STAGING_TEST_AUTH_ACCOUNT_2_FIRST_NAME
+              STAGING_TEST_AUTH_ACCOUNT_2_LAST_NAME
+            )
+
+            for SECRET_NAME in "${TEST_AUTH_ACCOUNT_2_SECRETS[@]}"; do
+              if [ -z "${!SECRET_NAME}" ]; then
+                echo "Missing GitHub secret: $SECRET_NAME"
+                exit 1
+              fi
+            done
+
+            if [[ "$XENDIT_SECRET_KEY" != xnd_development_* ]]; then
+              echo "Staging Finance tests require an Xendit Development API key"
               exit 1
             fi
-          done
-
-          if [[ "$XENDIT_SECRET_KEY" != xnd_development_* ]]; then
-            echo "Staging requires an Xendit Development API key"
-            exit 1
           fi
 
           ENV_FILE="$RUNNER_TEMP/backend.env"
+          ADMIN_SEED_ENV_FILE="$RUNNER_TEMP/admin-seed.env"
           umask 077
 
           {
@@ -254,15 +288,23 @@ jobs:
             printf 'BETTER_AUTH_URL=%s\n' "$BETTER_AUTH_URL"
             printf 'BETTER_AUTH_SECRET=%s\n' "$BETTER_AUTH_SECRET"
             printf 'ADMIN_BETTER_AUTH_SECRET=%s\n' "$ADMIN_BETTER_AUTH_SECRET"
-            printf 'ADMIN_EMAIL=%s\n' "$ADMIN_EMAIL"
-            printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD"
-            printf 'ADMIN_FIRST_NAME=%s\n' "$ADMIN_FIRST_NAME"
-            printf 'ADMIN_LAST_NAME=%s\n' "$ADMIN_LAST_NAME"
-            printf 'STAGING_TEST_AUTH_ENABLED=true\n'
-            printf 'STAGING_TEST_AUTH_EMAIL=%s\n' "$STAGING_TEST_AUTH_EMAIL"
-            printf 'STAGING_TEST_AUTH_PASSWORD=%s\n' "$STAGING_TEST_AUTH_PASSWORD"
-            printf 'STAGING_TEST_AUTH_FIRST_NAME=%s\n' "$STAGING_TEST_AUTH_FIRST_NAME"
-            printf 'STAGING_TEST_AUTH_LAST_NAME=%s\n' "$STAGING_TEST_AUTH_LAST_NAME"
+            printf 'STAGING_TEST_AUTH_ENABLED=%s\n' "${STAGING_TEST_AUTH_ENABLED:-false}"
+            if [ "${STAGING_TEST_AUTH_ENABLED:-false}" = 'true' ]; then
+              printf 'STAGING_TEST_AUTH_EMAIL=%s\n' "$STAGING_TEST_AUTH_EMAIL"
+              printf 'STAGING_TEST_AUTH_PASSWORD=%s\n' "$STAGING_TEST_AUTH_PASSWORD"
+              printf 'STAGING_TEST_AUTH_FIRST_NAME=%s\n' "$STAGING_TEST_AUTH_FIRST_NAME"
+              printf 'STAGING_TEST_AUTH_LAST_NAME=%s\n' "$STAGING_TEST_AUTH_LAST_NAME"
+              printf 'STAGING_TEST_AUTH_ACCOUNT_2_EMAIL=%s\n' "$STAGING_TEST_AUTH_ACCOUNT_2_EMAIL"
+              printf 'STAGING_TEST_AUTH_ACCOUNT_2_PASSWORD=%s\n' "$STAGING_TEST_AUTH_ACCOUNT_2_PASSWORD"
+              printf 'STAGING_TEST_AUTH_ACCOUNT_2_FIRST_NAME=%s\n' "$STAGING_TEST_AUTH_ACCOUNT_2_FIRST_NAME"
+              printf 'STAGING_TEST_AUTH_ACCOUNT_2_LAST_NAME=%s\n' "$STAGING_TEST_AUTH_ACCOUNT_2_LAST_NAME"
+              printf 'LOCAL_FINANCE_TEST_ENABLED=true\n'
+              printf 'LOCAL_FINANCE_TEST_RECIPIENT_EMAIL=finance-test-recipient@ku.th\n'
+              printf 'LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME=Finance\n'
+              printf 'LOCAL_FINANCE_TEST_RECIPIENT_LAST_NAME=Recipient\n'
+            else
+              printf 'LOCAL_FINANCE_TEST_ENABLED=false\n'
+            fi
             printf 'GOOGLE_CLIENT_ID=%s\n' "$GOOGLE_CLIENT_ID"
             printf 'GOOGLE_CLIENT_SECRET=%s\n' "$GOOGLE_CLIENT_SECRET"
 
@@ -274,13 +316,11 @@ jobs:
 
             printf 'XENDIT_SECRET_KEY=%s\n' "$XENDIT_SECRET_KEY"
             printf 'XENDIT_WEBHOOK_TOKEN=%s\n' "$XENDIT_WEBHOOK_TOKEN"
-            printf 'PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY=%s\n' "$PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY"
-            printf 'PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION=%s\n' "${PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION:-v1}"
+
             printf 'PAYOUT_DESTINATION_ENCRYPTION_KEY=%s\n' "$PAYOUT_DESTINATION_ENCRYPTION_KEY"
             printf 'PAYOUT_DESTINATION_ENCRYPTION_KEY_VERSION=%s\n' "${PAYOUT_DESTINATION_ENCRYPTION_KEY_VERSION:-v1}"
-            printf 'LOCAL_FINANCE_TEST_RECIPIENT_EMAIL=finance-test-recipient@ku.th\n'
-            printf 'LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME=Finance\n'
-            printf 'LOCAL_FINANCE_TEST_RECIPIENT_LAST_NAME=Recipient\n'
+            printf 'PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY=%s\n' "$PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY"
+            printf 'PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION=%s\n' "${PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION:-v1}"
 
             printf 'CMS_ORIGIN=%s\n' "$CMS_ORIGIN"
 
@@ -289,6 +329,15 @@ jobs:
             printf 'DATA_USAGE_URL=%s\n' "$DATA_USAGE_URL"
             printf 'CONTACT_US_URL=%s\n' "$CONTACT_US_URL"
           } > "$ENV_FILE"
+
+          if [ "${STAGING_ADMIN_SEED_ENABLED:-false}" = 'true' ]; then
+            {
+              printf 'ADMIN_EMAIL=%s\n' "$ADMIN_EMAIL"
+              printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD"
+              printf 'ADMIN_FIRST_NAME=%s\n' "$ADMIN_FIRST_NAME"
+              printf 'ADMIN_LAST_NAME=%s\n' "$ADMIN_LAST_NAME"
+            } > "$ADMIN_SEED_ENV_FILE"
+          fi
 
       - name: Upload application environment
         shell: bash
@@ -325,6 +374,19 @@ jobs:
               deploy@"$STAGING_SERVER" \
               "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
 
+      - name: Reclaim unused Docker images
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            'docker image prune --all --force'
+
       - name: Deploy API container
         shell: bash
         env:
@@ -347,6 +409,155 @@ jobs:
              bash -s -- deploy" \
             < scripts/staging-operations.sh
 
+      - name: Seed staging Finance test data
+        if: ${{ env.STAGING_TEST_AUTH_ENABLED == 'true' }}
+        shell: bash
+        env:
+          APP_IMAGE: ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            "cd /opt/backend && \
+             APP_IMAGE='$APP_IMAGE' \
+             docker compose run --rm --no-deps \
+             -e STAGING_FINANCE_SEED_ENABLED=true \
+             api bun run db:seed-finance-test"
+
+      - name: Seed staging Admin account
+        shell: bash
+        env:
+          STAGING_ADMIN_SEED_ENABLED: ${{ secrets.STAGING_ADMIN_SEED_ENABLED }}
+          APP_IMAGE: ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "${STAGING_ADMIN_SEED_ENABLED:-false}" != 'true' ]; then
+            echo 'Staging Admin seed is disabled.'
+            exit 0
+          fi
+
+          SEED_DIR=$(ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            'mktemp -d /opt/backend/admin-seed.XXXXXX')
+
+          if [[ ! "$SEED_DIR" =~ ^/opt/backend/admin-seed\.[A-Za-z0-9]+$ ]]; then
+            echo 'Unexpected temporary seed directory returned by staging server.'
+            exit 1
+          fi
+
+          cleanup_seed_dir() {
+            ssh \
+              -i "$RUNNER_TEMP/staging_key" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+              deploy@"$STAGING_SERVER" \
+              "rm -rf -- '$SEED_DIR'" >/dev/null 2>&1 || true
+          }
+          trap cleanup_seed_dir EXIT
+
+          tar \
+            -C "$GITHUB_WORKSPACE" \
+            -cf - \
+            package.json \
+            tsconfig.json \
+            scripts/seed-admin.ts \
+            src/config/default-database-url.ts \
+            src/config/env.ts \
+            src/database \
+            src/modules/auth/admin-auth.config.ts \
+            src/modules/auth/admin-auth.policy.ts \
+            src/modules/auth/auth.config.shared.ts |
+            ssh \
+              -i "$RUNNER_TEMP/staging_key" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+              deploy@"$STAGING_SERVER" \
+              "tar -xf - -C '$SEED_DIR'"
+
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            "cat > '$SEED_DIR/.env.seed' && chmod 600 '$SEED_DIR/.env.seed'" \
+            < "$RUNNER_TEMP/admin-seed.env"
+
+          set +e
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            "cd /opt/backend && APP_IMAGE='$APP_IMAGE' docker compose run --rm --no-deps --env-from-file '$SEED_DIR/.env.seed' --volume '$SEED_DIR:/app/seed:ro' --workdir /app/seed api bun scripts/seed-admin.ts" \
+            > "$RUNNER_TEMP/admin-seed-output.log" 2>&1
+          SEED_STATUS=$?
+          set -e
+
+          cat "$RUNNER_TEMP/admin-seed-output.log"
+
+          if [ "$SEED_STATUS" -ne 0 ]; then
+            if grep -Fq 'An Admin with this email already exists; no changes were made' "$RUNNER_TEMP/admin-seed-output.log"; then
+              echo 'Staging Admin already exists; no changes were made.'
+            else
+              exit "$SEED_STATUS"
+            fi
+          fi
+
+      - name: Verify staging Student test account
+        if: ${{ env.STAGING_TEST_AUTH_ENABLED == 'true' }}
+        shell: bash
+        env:
+          STAGING_TEST_AUTH_EMAIL: ${{ secrets.STAGING_TEST_AUTH_EMAIL }}
+          STAGING_TEST_AUTH_PASSWORD: ${{ secrets.STAGING_TEST_AUTH_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          TEST_AUTH_DIR=$(mktemp -d "$RUNNER_TEMP/staging-test-auth.XXXXXX")
+          trap 'rm -rf -- "$TEST_AUTH_DIR"' EXIT
+
+          LOGIN_STATUS=$(curl \
+            --silent \
+            --show-error \
+            --max-time 20 \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --cookie-jar "$TEST_AUTH_DIR/cookies" \
+            --header 'content-type: application/json' \
+            --data "$(printf '{\"email\":\"%s\",\"password\":\"%s\"}' \
+              "$STAGING_TEST_AUTH_EMAIL" \
+              "$STAGING_TEST_AUTH_PASSWORD")" \
+            "$STAGING_PUBLIC_URL/api/staging/test-auth/sign-in/email")
+
+          if [ "$LOGIN_STATUS" != '200' ]; then
+            echo "Staging Student test login failed with HTTP $LOGIN_STATUS"
+            exit 1
+          fi
+
+          curl \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --max-time 20 \
+            --cookie "$TEST_AUTH_DIR/cookies" \
+            "$STAGING_PUBLIC_URL/api/v1/profile" \
+            > /dev/null
+
+          echo 'Staging Student test account login verified.'
+
       - name: Clean temporary secret files
         if: always()
         shell: bash
@@ -354,4 +565,6 @@ jobs:
           rm -f \
             "$RUNNER_TEMP/staging_key" \
             "$RUNNER_TEMP/staging_known_hosts" \
-            "$RUNNER_TEMP/backend.env"
+            "$RUNNER_TEMP/backend.env" \
+            "$RUNNER_TEMP/admin-seed.env" \
+            "$RUNNER_TEMP/admin-seed-output.log"
