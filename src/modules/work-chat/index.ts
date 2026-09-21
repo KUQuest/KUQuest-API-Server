@@ -4,6 +4,7 @@ export {
 } from './work-chat.membership-writer';
 export { workChatRoute } from './work-chat.route';
 export { candidateInquiryRoute } from './candidate-inquiry.route';
+export { messageReportRoute } from './message-report.route';
 export { workChatStorage } from './work-chat.storage';
 export { cleanupExpiredWorkChatAttachments } from './work-chat.service';
 export { isCurrentWorkConversationMember } from './work-chat.service';

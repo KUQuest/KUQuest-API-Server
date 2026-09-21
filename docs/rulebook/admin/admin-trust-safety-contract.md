@@ -6,7 +6,7 @@ Part of the [Admin Rulebook](admin-rulebook.md). Defines accepted policy for mes
 
 - Applies to Messages in both Work Conversations and Candidate Inquiry Conversations.
 - Any Member who may read a Message (including a Departed Worker reading history inside their Membership Window) may create one Reporter Entry for it.
-- **Reason**: A Reporter Entry carries `REPORT_ABUSIVE_OR_HARASSMENT` (abusive language or harassment) plus optional free-text detail. Quest conduct complaints open Conduct Reports under [Admin Conduct Report Contract](admin-conduct-report-contract.md).
+- **Reason**: A Reporter Entry carries one of `REPORT_ABUSIVE_OR_HARASSMENT`, `REPORT_SPAM`, `REPORT_INAPPROPRIATE_CONTENT`, `REPORT_DANGER_OR_THREAT`, or `REPORT_OTHER`, plus optional free-text detail. Quest conduct complaints open Conduct Reports under [Admin Conduct Report Contract](admin-conduct-report-contract.md).
 
 ## Report Case lifecycle
 
@@ -34,7 +34,7 @@ Every decision requires a reason and creates an immutable Moderation Decision. `
 The Admin schema persists these Trust & Safety records:
 
 - A Report Case points to one Message, stores the prefixed status and `caseClosedAt`, and permits at most one open case for that Message. Its generated public sequence is exposed by Admin APIs as a stable `RPT-######` display ID; the UUID remains the internal identifier.
-- A Reporter Entry points to its Report Case and Message, stores the Member reporter, `REPORT_ABUSIVE_OR_HARASSMENT`, and optional detail. The database allows at most one entry for one Member and one Message.
+- A Reporter Entry points to its Report Case and Message, stores the Member reporter, one of the five Message report reasons, and optional detail. The database allows at most one entry for one Member and one Message.
 - An Evidence Reference points to one Message or one Attachment. It does not copy Message text, file bytes, or signed URLs. Report Case and evidence references use restrictive deletion rules so open evidence is not removed by an ordinary domain delete.
 - A Moderation Decision stores the previous and new Report Case status, the Admin, the versioned controlled reason code, and the decision time. The database accepts only documented Report Case transitions.
 

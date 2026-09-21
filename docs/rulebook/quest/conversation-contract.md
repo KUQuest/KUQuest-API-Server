@@ -34,7 +34,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 ### 3. Relation to Trust & Safety (Admin Moderation)
 
-- Messages in **both** conversation types can be reported for abusive language or harassment (`REPORT_ABUSIVE_OR_HARASSMENT`).
+- Messages in **both** conversation types can be reported for `REPORT_ABUSIVE_OR_HARASSMENT`, `REPORT_SPAM`, `REPORT_INAPPROPRIATE_CONTENT`, `REPORT_DANGER_OR_THREAT`, or `REPORT_OTHER`.
 - Admin access to chat content is strictly gated through Report Case **Evidence References**; Admins cannot browse conversations without an active/historical case.
 
 ---

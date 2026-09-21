@@ -1,0 +1,2 @@
+ALTER TABLE "admin_reporter_entries" DROP CONSTRAINT "admin_reporter_entries_reason_check";--> statement-breakpoint
+ALTER TABLE "admin_reporter_entries" ADD CONSTRAINT "admin_reporter_entries_reason_check" CHECK ("admin_reporter_entries"."reason" IN ('REPORT_ABUSIVE_OR_HARASSMENT', 'REPORT_SPAM', 'REPORT_INAPPROPRIATE_CONTENT', 'REPORT_DANGER_OR_THREAT', 'REPORT_OTHER'));
