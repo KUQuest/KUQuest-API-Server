@@ -21,6 +21,7 @@ import {
 
 export const maxQuestV2Images = 3;
 export const maxQuestV2Drafts = 10;
+export const maxQuestV2ActiveQuests = 10;
 
 const questV2ModeSchema = t.Union([t.Literal(questV2Modes[0]), t.Literal(questV2Modes[1])]);
 

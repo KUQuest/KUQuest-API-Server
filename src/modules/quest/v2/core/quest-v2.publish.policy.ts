@@ -43,6 +43,7 @@ export type QuestV2PublishSnapshot = QuestV2FundingQuoteInput & {
   reason?: 'WALLET_NOT_FOUND' | 'WALLET_NOT_ACTIVE' | 'INSUFFICIENT_SPENDING_BALANCE';
   minimumFundingReservationSatang: Satang;
   maximumFundingReservationSatang: Satang;
+  activeQuestLimitReached: boolean;
 };
 
 export type QuestV2PublishCheck = QuestV2FundingQuote & {
@@ -168,6 +169,13 @@ export const buildQuestV2PublishCheck = (snapshot: QuestV2PublishSnapshot): Ques
     blockingReasons.push({
       code: 'INSUFFICIENT_SPENDING_BALANCE',
       message: 'Spending Balance is insufficient for Quest Escrow',
+    });
+  }
+
+  if (snapshot.activeQuestLimitReached) {
+    blockingReasons.push({
+      code: 'QUEST_ACTIVE_LIMIT_REACHED',
+      message: 'You can have at most 10 active published Quests',
     });
   }
 

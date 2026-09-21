@@ -78,7 +78,7 @@ import {
 } from './quest-v2.contract';
 import { buildQuestV2PublishCheck, type QuestV2PublishCheck } from './quest-v2.publish.policy';
 import { softDeleteQuestImageAndRepack } from '../../shared/image/quest-image.service';
-import { maxQuestV2Drafts, maxQuestV2Images } from './quest-v2.schema';
+import { maxQuestV2ActiveQuests, maxQuestV2Drafts, maxQuestV2Images } from './quest-v2.schema';
 import type { QuestV2BoardQuery, QuestV2CreateInput, QuestV2EditInput } from './quest-v2.schema';
 import { questV2Storage } from './quest-v2.storage';
 import type { StoredQuestImage } from '../../v1/services/quest.storage';
@@ -794,6 +794,17 @@ const buildQuestV2PublishCheckForRow = async (
     throw new MoneyDomainError('WALLET_NOT_FOUND', 'Wallet does not exist.');
   }
 
+  const [activeCount] = await database
+    .select({ count: sql<number>`count(*)::int` })
+    .from(quest)
+    .where(
+      and(
+        eq(quest.hirerId, userId),
+        eq(quest.apiVersion, questApiVersion.v2),
+        inArray(quest.questStatus, [questStatus.open, questStatus.assigned, questStatus.inProgress])
+      )
+    );
+
   return buildQuestV2PublishCheck({
     participation: row.v2Participation,
     tagId: row.tagId,
@@ -816,6 +827,7 @@ const buildQuestV2PublishCheckForRow = async (
     policyRevision: policy.revision,
     minimumFundingReservationSatang: satang(policy.minimumFundingReservationSatang),
     maximumFundingReservationSatang: satang(policy.maximumFundingReservationSatang),
+    activeQuestLimitReached: (activeCount?.count ?? 0) >= maxQuestV2ActiveQuests,
   });
 };
 
@@ -1107,6 +1119,9 @@ const lockQuestV2ImageOwner = async (
   transaction: QuestTransaction,
   context: QuestV2ImageCommandContext
 ) => {
+  const hirer = await lockQuestV2Hirer(transaction, context.userId);
+  if (!hirer) return undefined;
+
   const [ownedQuest] = await transaction
     .select({ id: quest.id, questStatus: quest.questStatus })
     .from(quest)
@@ -2033,6 +2048,16 @@ const fromQuestV2PublishIdempotencySnapshot = (
   return { quest: canonicalQuest, questEscrow };
 };
 
+const lockQuestV2Hirer = async (transaction: QuestTransaction, userId: string) => {
+  const [hirer] = await transaction
+    .select({ id: authUser.id })
+    .from(authUser)
+    .where(eq(authUser.id, userId))
+    .limit(1)
+    .for('update');
+  return hirer;
+};
+
 const lockQuestV2CommandQuest = async (transaction: QuestTransaction, questId: string) => {
   const [current] = await transaction
     .select({ id: quest.id, hirerId: quest.hirerId, questStatus: quest.questStatus })
@@ -2058,6 +2083,10 @@ const publishQuestV2InTransaction = async (
   requestHash: string,
   now: Date
 ): Promise<QuestV2PublishOutcome | undefined> => {
+  // Serialize the Hirer's active published Quest cap across concurrent publishes.
+  const hirer = await lockQuestV2Hirer(transaction, userId);
+  if (!hirer) return undefined;
+
   // Lock before runQuestCommand: the Quest Command foreign key insert takes
   // FOR KEY SHARE on the Quest row.
   const current = await lockQuestV2CommandQuest(transaction, questId);
@@ -2279,6 +2308,9 @@ const editQuestV2InTransaction = async (
   rawIdempotencyKey: string,
   now: Date
 ): Promise<QuestV2EditOutcome> => {
+  const hirer = await lockQuestV2Hirer(transaction, userId);
+  if (!hirer) return { outcome: 'not-found' };
+
   // Lock before runQuestCommand: the Quest Command foreign key insert takes
   // FOR KEY SHARE on the Quest row.
   const lockedQuest = await lockQuestV2CommandQuest(transaction, questId);

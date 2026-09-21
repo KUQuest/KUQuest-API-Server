@@ -1,7 +1,7 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { file } from '@/database/schema/file.schema';
-import { quest } from '@/database/schema/quest.schema';
+import { quest, questApiVersion } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import type { QuestV2CreateInput } from '@/modules/quest';
@@ -112,6 +112,14 @@ const getPublishCheck = (questId: string) =>
 const postPublish = (questId: string, key: string) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/${questId}/publish`, {
+      method: 'POST',
+      headers: { 'idempotency-key': key, cookie: sessionCookie },
+    })
+  );
+
+const postCancel = (questId: string, key: string) =>
+  app.handle(
+    new Request(`http://localhost/api/v2/quests/${questId}/cancel`, {
       method: 'POST',
       headers: { 'idempotency-key': key, cookie: sessionCookie },
     })
@@ -491,5 +499,103 @@ describe('Quest API v2 Hirer journey', () => {
         await db.delete(quest).where(inArray(quest.id, journeyDraftIds));
       }
     }
+  });
+
+  it('enforces the 10 active published Quest cap at the concurrent publish boundary', async () => {
+    await fundTestWallet(hirerId, 100_000);
+
+    const staleActive = await db
+      .select({ id: quest.id })
+      .from(quest)
+      .where(
+        and(
+          eq(quest.hirerId, hirerId),
+          eq(quest.apiVersion, questApiVersion.v2),
+          inArray(quest.questStatus, ['QUEST_OPEN', 'QUEST_ASSIGNED', 'QUEST_IN_PROGRESS'])
+        )
+      );
+    for (const row of staleActive) {
+      const cancelResponse = await postCancel(
+        row.id,
+        `journey-active-limit-precancel-${randomUUID()}`
+      );
+      expect(cancelResponse.status).toBe(200);
+      expect((await cancelResponse.json()).data).toMatchObject({ questStatus: 'QUEST_CANCELLED' });
+    }
+
+    for (let i = 0; i < 9; i++) {
+      const createResponse = await postQuest(
+        { ...baseInput, title: `Active limit Quest ${i + 1}`, locations: [] },
+        `journey-active-limit-create-${i}-${randomUUID()}`
+      );
+      expect(createResponse.status).toBe(200);
+      const created = (await createResponse.json()) as { success: true; data: { id: string } };
+      questIds.push(created.data.id);
+
+      const publishResponse = await postPublish(
+        created.data.id,
+        `journey-active-limit-publish-${i}-${randomUUID()}`
+      );
+      expect(publishResponse.status).toBe(200);
+    }
+
+    const contenderIds: string[] = [];
+    for (const label of ['A', 'B'] as const) {
+      const createResponse = await postQuest(
+        { ...baseInput, title: `Active limit contender ${label}`, locations: [] },
+        `journey-active-limit-contender-${label}-${randomUUID()}`
+      );
+      expect(createResponse.status).toBe(200);
+      const created = (await createResponse.json()) as { success: true; data: { id: string } };
+      questIds.push(created.data.id);
+      contenderIds.push(created.data.id);
+    }
+
+    const race = await Promise.all(
+      contenderIds.map(async (id, index) => {
+        const response = await postPublish(
+          id,
+          `journey-active-limit-race-${index}-${randomUUID()}`
+        );
+        return {
+          id,
+          status: response.status,
+          body: (await response.json()) as {
+            data?: { quest?: Record<string, unknown> };
+            error?: { code: string; message: string };
+          },
+        };
+      })
+    );
+    expect(race.map((entry) => entry.status).sort()).toEqual([200, 409]);
+
+    const [winner, loser] = race[0].status === 200 ? [race[0], race[1]] : [race[1], race[0]];
+    expect(winner.body.data).toMatchObject({ quest: { id: winner.id, state: 'QUEST_OPEN' } });
+    expect(loser.body.error?.code).toBe('QUEST_ACTIVE_LIMIT_REACHED');
+    expect(loser.body.error?.message).toBe('You can have at most 10 active published Quests');
+
+    const checkResponse = await getPublishCheck(loser.id);
+    expect(checkResponse.status).toBe(200);
+    const check = (await checkResponse.json()) as {
+      success: true;
+      data: { canPublish: boolean; blockingReasons: Array<{ code: string; message: string }> };
+    };
+    expect(check.data.canPublish).toBe(false);
+    expect(check.data.blockingReasons).toContainEqual({
+      code: 'QUEST_ACTIVE_LIMIT_REACHED',
+      message: 'You can have at most 10 active published Quests',
+    });
+
+    const tenthCancel = await postCancel(winner.id, `journey-active-limit-cancel-${randomUUID()}`);
+    expect(tenthCancel.status).toBe(200);
+    expect((await tenthCancel.json()).data).toMatchObject({ questStatus: 'QUEST_CANCELLED' });
+
+    const retryResponse = await postPublish(loser.id, `journey-active-limit-retry-${randomUUID()}`);
+    expect(retryResponse.status).toBe(200);
+    const retried = (await retryResponse.json()) as {
+      success: true;
+      data: { quest: Record<string, unknown> };
+    };
+    expect(retried.data.quest).toMatchObject({ id: loser.id, state: 'QUEST_OPEN' });
   });
 });
