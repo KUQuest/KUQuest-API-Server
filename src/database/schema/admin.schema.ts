@@ -134,8 +134,18 @@ export type ReportCaseStatus = (typeof reportCaseStatuses)[number];
 
 export const reporterEntryReason = {
   abusiveOrHarassment: 'REPORT_ABUSIVE_OR_HARASSMENT',
+  spam: 'REPORT_SPAM',
+  inappropriateContent: 'REPORT_INAPPROPRIATE_CONTENT',
+  dangerOrThreat: 'REPORT_DANGER_OR_THREAT',
+  other: 'REPORT_OTHER',
 } as const;
-export const reporterEntryReasons = [reporterEntryReason.abusiveOrHarassment] as const;
+export const reporterEntryReasons = [
+  reporterEntryReason.abusiveOrHarassment,
+  reporterEntryReason.spam,
+  reporterEntryReason.inappropriateContent,
+  reporterEntryReason.dangerOrThreat,
+  reporterEntryReason.other,
+] as const;
 export type ReporterEntryReason = (typeof reporterEntryReasons)[number];
 
 /** A Trust & Safety case that groups Reporter Entries for one Message. */
@@ -207,7 +217,7 @@ export const adminReporterEntry = pgTable(
     }).onDelete('restrict'),
     check(
       'admin_reporter_entries_reason_check',
-      sql`${table.reason} = 'REPORT_ABUSIVE_OR_HARASSMENT'`
+      sql`${table.reason} IN ('REPORT_ABUSIVE_OR_HARASSMENT', 'REPORT_SPAM', 'REPORT_INAPPROPRIATE_CONTENT', 'REPORT_DANGER_OR_THREAT', 'REPORT_OTHER')`
     ),
     check(
       'admin_reporter_entries_detail_check',

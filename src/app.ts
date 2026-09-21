@@ -24,7 +24,7 @@ import {
   questReviewV2Route,
   questV2Route,
 } from '@/modules/quest';
-import { candidateInquiryRoute, workChatRoute } from '@/modules/work-chat';
+import { candidateInquiryRoute, messageReportRoute, workChatRoute } from '@/modules/work-chat';
 
 import { Elysia } from 'elysia';
 
@@ -91,6 +91,7 @@ export const createApp = () => {
     .use(workExperienceRoute)
     .use(tagRoute)
     .use(candidateInquiryRoute)
+    .use(messageReportRoute)
     .use(workChatRoute)
     .use(payoutRoute)
     .use(payoutDestinationRoute)

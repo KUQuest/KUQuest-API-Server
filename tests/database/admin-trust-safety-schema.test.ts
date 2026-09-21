@@ -7,6 +7,7 @@ import {
   adminReporterEntry,
   reportCaseStatus,
   reportCaseStatuses,
+  reporterEntryReasons,
 } from '@/database/schema/admin.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest } from '@/database/schema/quest.schema';
@@ -214,6 +215,13 @@ describe('Admin Trust & Safety database schema', () => {
       'REPORT_CASE_RESTORED',
     ]);
     expect(reportCaseStatus.pending).toBe('REPORT_CASE_PENDING');
+    expect(reporterEntryReasons).toEqual([
+      'REPORT_ABUSIVE_OR_HARASSMENT',
+      'REPORT_SPAM',
+      'REPORT_INAPPROPRIATE_CONTENT',
+      'REPORT_DANGER_OR_THREAT',
+      'REPORT_OTHER',
+    ]);
     expect(getTableColumns(adminReportCase)).toHaveProperty('messageId');
     expect(getTableColumns(adminReportCase)).toHaveProperty('publicSequence');
     expect(getTableColumns(adminReporterEntry)).toHaveProperty('reporterMemberId');
@@ -347,7 +355,7 @@ describe('Admin Trust & Safety database schema', () => {
         reportCaseId: reportCase!.id,
         messageId,
         reporterMemberId: hirerId,
-        reason: 'REPORT_SPAM' as never,
+        reason: 'REPORT_UNKNOWN' as never,
       })
       .catch((cause) => cause);
     expect(invalidReason).toBeInstanceOf(Error);
