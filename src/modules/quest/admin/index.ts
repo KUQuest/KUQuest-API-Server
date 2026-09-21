@@ -1,5 +1,6 @@
 export { adminQuestRoute } from './quest-admin.route';
 export { adminDisputeRoute } from './quest-dispute-admin.route';
+export { questDisputeRoute } from './quest-dispute.route';
 export {
   createAdminDisputeController,
   fileAdminDisputeCaseController,

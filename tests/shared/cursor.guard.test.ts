@@ -35,8 +35,8 @@ const allowedLimitMaximums: Record<string, string> = {
 
 /** Lists that page on `quest.start_time`, which a Hirer supplies at millisecond precision. */
 const allowedFiles: Record<string, true> = {
-  'src/modules/quest/quest-v2.service.ts': true,
-  'src/modules/quest/quest.service.ts': true,
+  'src/modules/quest/v2/core/quest-v2.service.ts': true,
+  'src/modules/quest/v1/services/quest.service.ts': true,
 };
 
 const repoRoot = resolve(import.meta.dir, '..', '..');

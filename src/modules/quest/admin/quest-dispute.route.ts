@@ -4,11 +4,11 @@ import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
 import { Elysia } from 'elysia';
 
-import { fileAdminDisputeCaseController } from '../../admin/quest-dispute-admin.controller';
+import { fileAdminDisputeCaseController } from './quest-dispute-admin.controller';
 import {
   adminDisputeOpenParamsSchema,
   adminDisputeOpenResponseSchema,
-} from '../../admin/quest-dispute-admin.schema';
+} from './quest-dispute-admin.schema';
 
 export const questDisputeRoute = new Elysia({
   name: 'quest-dispute-route',

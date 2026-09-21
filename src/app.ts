@@ -9,8 +9,7 @@ import {
 import { tagRoute } from '@/modules/tag';
 import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
 import { adminTopUpRoute, topUpRoute, topUpWebhookRoute } from '@/modules/top-up';
-import { questDisputeRoute } from '@/modules/quest/shared';
-import { adminDisputeRoute } from '@/modules/quest/admin';
+import { adminDisputeRoute, questDisputeRoute } from '@/modules/quest/admin';
 import { questSettlementRoute } from '@/modules/quest';
 import {
   adminActivityLogRoute,
