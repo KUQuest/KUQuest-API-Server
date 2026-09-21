@@ -394,21 +394,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          printf '%s\n' 'RESET staging public schema' |
-            ssh \
-              -i "$RUNNER_TEMP/staging_key" \
-              -o BatchMode=yes \
-              -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
-              deploy@"$STAGING_SERVER" \
-              "APP_IMAGE='$IMAGE_TAG' \
-               STAGING_DIR=/opt/backend \
-               ENV_FILE=/opt/backend/.env \
-               BACKUP_DIR=/opt/backend/backups \
-               STAGING_NETWORK=kuquest-staging_default \
-               POSTGRES_CLIENT_IMAGE='${IMAGE_NAME}:postgres-client-${{ github.event.workflow_run.head_sha }}' \
-               bash -s -- bootstrap" \
-              < scripts/staging-operations.sh
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            "APP_IMAGE='$IMAGE_TAG' \
+             STAGING_DIR=/opt/backend \
+             ENV_FILE=/opt/backend/.env \
+             BACKUP_DIR=/opt/backend/backups \
+             STAGING_NETWORK=kuquest-staging_default \
+             POSTGRES_CLIENT_IMAGE='${IMAGE_NAME}:postgres-client-${{ github.event.workflow_run.head_sha }}' \
+             STAGING_RESET_CONFIRMATION='RESET staging public schema' \
+             bash -s -- bootstrap" \
+            < scripts/staging-operations.sh
 
       - name: Start seeded staging API
         shell: bash
