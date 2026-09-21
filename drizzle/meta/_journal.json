@@ -570,17 +570,10 @@
       "breakpoints": true
     },
     {
-      "idx": 74,
+      "idx": 82,
       "version": "7",
-      "when": 1789375163780,
-      "tag": "20260914083923_abandoned_excalibur",
-      "breakpoints": true
-    },
-    {
-      "idx": 81,
-      "version": "7",
-      "when": 1789123399213,
-      "tag": "20260911104319_keen_earthquake",
+      "when": 1789952106083,
+      "tag": "20260921005506_productive_red_shift",
       "breakpoints": true
     }
   ]
