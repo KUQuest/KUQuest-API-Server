@@ -29,6 +29,22 @@ Admin resolves a `REPORT_CASE_PENDING` case, or re-evaluates a `REPORT_CASE_HIDD
 
 Every decision requires a reason and creates an immutable Moderation Decision. `REPORT_CASE_HIDDEN` notifies the sender via System Message (if conversation open) or Android Push (if conversation closed).
 
+## Persistence boundary
+
+The Admin schema persists these Trust & Safety records:
+
+- A Report Case points to one Message, stores the prefixed status and `caseClosedAt`, and permits at most one open case for that Message.
+- A Reporter Entry points to its Report Case and Message, stores the Member reporter, `REPORT_ABUSIVE_OR_HARASSMENT`, and optional detail. The database allows at most one entry for one Member and one Message.
+- An Evidence Reference points to one Message or one Attachment. It does not copy Message text, file bytes, or signed URLs. Report Case and evidence references use restrictive deletion rules so open evidence is not removed by an ordinary domain delete.
+- A Moderation Decision stores the previous and new Report Case status, the Admin, the versioned controlled reason code, and the decision time. The database accepts only documented Report Case transitions.
+
+The application remains responsible for checking the actor's Chat visibility,
+case-scoping Attachment references, writing the matching Admin Action, and
+updating the Message and Attachment visibility atomically with a decision.
+The reason-code values are owned by the shared Admin operation contract; this
+schema stores the catalog version and validates the code shape until the
+operation contract publishes the Trust & Safety catalog.
+
 ## Retention
 
 Retention follows `docs/adr/0015-work-chat-retention-and-account-deletion.md`:
