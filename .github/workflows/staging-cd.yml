@@ -288,6 +288,10 @@ jobs:
             printf 'BETTER_AUTH_URL=%s\n' "$BETTER_AUTH_URL"
             printf 'BETTER_AUTH_SECRET=%s\n' "$BETTER_AUTH_SECRET"
             printf 'ADMIN_BETTER_AUTH_SECRET=%s\n' "$ADMIN_BETTER_AUTH_SECRET"
+            printf 'ADMIN_EMAIL=%s\n' "$ADMIN_EMAIL"
+            printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD"
+            printf 'ADMIN_FIRST_NAME=%s\n' "$ADMIN_FIRST_NAME"
+            printf 'ADMIN_LAST_NAME=%s\n' "$ADMIN_LAST_NAME"
             printf 'STAGING_TEST_AUTH_ENABLED=%s\n' "${STAGING_TEST_AUTH_ENABLED:-false}"
             if [ "${STAGING_TEST_AUTH_ENABLED:-false}" = 'true' ]; then
               printf 'STAGING_TEST_AUTH_EMAIL=%s\n' "$STAGING_TEST_AUTH_EMAIL"
