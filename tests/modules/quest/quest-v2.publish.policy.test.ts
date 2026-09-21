@@ -11,6 +11,7 @@ const policy = {
   minimumFundingReservationSatang: satang(100),
   maximumFundingReservationSatang: satang(70_000_000),
   canReserve: true,
+  activeQuestLimitReached: false,
 };
 
 describe('Quest v2 publish policy', () => {
@@ -206,6 +207,29 @@ describe('Quest v2 publish policy', () => {
       {
         code: 'QUEST_START_TIME_NOT_IN_FUTURE',
         message: 'Quest startTime must be in the future',
+      },
+    ]);
+  });
+
+  it('blocks publish when the Hirer has reached the active published Quest limit', () => {
+    const check = buildQuestV2PublishCheck({
+      ...policy,
+      activeQuestLimitReached: true,
+      participation: 'SINGLE',
+      tagId: 'tag-1',
+      conditionValid: true,
+      startTime: new Date('2026-09-01T10:00:00.000Z'),
+      dueAt: new Date('2026-09-01T12:00:00.000Z'),
+      now: new Date('2026-08-31T08:00:00.000Z'),
+      questFundingTotalSatang: positiveSatang(2_000),
+      headcount: 1,
+    });
+
+    expect(check.canPublish).toBe(false);
+    expect(check.blockingReasons).toEqual([
+      {
+        code: 'QUEST_ACTIVE_LIMIT_REACHED',
+        message: 'You can have at most 10 active published Quests',
       },
     ]);
   });
