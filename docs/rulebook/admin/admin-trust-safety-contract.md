@@ -33,7 +33,7 @@ Every decision requires a reason and creates an immutable Moderation Decision. `
 
 The Admin schema persists these Trust & Safety records:
 
-- A Report Case points to one Message, stores the prefixed status and `caseClosedAt`, and permits at most one open case for that Message.
+- A Report Case points to one Message, stores the prefixed status and `caseClosedAt`, and permits at most one open case for that Message. Its generated public sequence is exposed by Admin APIs as a stable `RPT-######` display ID; the UUID remains the internal identifier.
 - A Reporter Entry points to its Report Case and Message, stores the Member reporter, `REPORT_ABUSIVE_OR_HARASSMENT`, and optional detail. The database allows at most one entry for one Member and one Message.
 - An Evidence Reference points to one Message or one Attachment. It does not copy Message text, file bytes, or signed URLs. Report Case and evidence references use restrictive deletion rules so open evidence is not removed by an ordinary domain delete.
 - A Moderation Decision stores the previous and new Report Case status, the Admin, the versioned controlled reason code, and the decision time. The database accepts only documented Report Case transitions.

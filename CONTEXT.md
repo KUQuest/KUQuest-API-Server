@@ -364,7 +364,7 @@ An Android device registered by a Member to receive Push Notifications, managed 
 _Avoid_: phone number, treating one Member as one device
 
 **Report Case**:
-A Trust & Safety record that groups Reporter Entries for one Message and tracks its moderation status: `REPORT_CASE_PENDING`, `REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN`, or `REPORT_CASE_RESTORED`. `REPORT_CASE_PENDING` and `REPORT_CASE_HIDDEN` are open statuses; `REPORT_CASE_DISMISSED` and `REPORT_CASE_RESTORED` are closed statuses. A new Reporter Entry against a Message whose most recent Report Case is closed opens a new Report Case rather than reopening the old one. It retains the bounded evidence needed by moderation while open; rules are defined in `docs/rulebook/admin/admin-rulebook.md`.
+A Trust & Safety record that groups Reporter Entries for one Message and tracks its moderation status: `REPORT_CASE_PENDING`, `REPORT_CASE_DISMISSED`, `REPORT_CASE_HIDDEN`, or `REPORT_CASE_RESTORED`. `REPORT_CASE_PENDING` and `REPORT_CASE_HIDDEN` are open statuses; `REPORT_CASE_DISMISSED` and `REPORT_CASE_RESTORED` are closed statuses. A new Reporter Entry against a Message whose most recent Report Case is closed opens a new Report Case rather than reopening the old one. It retains the bounded evidence needed by moderation while open and has an Admin-facing display ID in the `RPT-######` format; rules are defined in `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: single Reporter Entry, Message flag, the superseded bare `PENDING`/`DISMISSED`/`HIDDEN`/`RESTORED` values
 
 **Conduct Report**:

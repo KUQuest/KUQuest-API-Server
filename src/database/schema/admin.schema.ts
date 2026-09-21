@@ -143,6 +143,9 @@ export const adminReportCase = pgTable(
   'admin_report_cases',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'admin_report_case_public_sequence' })
+      .unique(),
     messageId: uuid('message_id')
       .notNull()
       .references(() => chatMessage.id, { onDelete: 'restrict' }),

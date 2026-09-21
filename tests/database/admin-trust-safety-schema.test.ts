@@ -215,6 +215,7 @@ describe('Admin Trust & Safety database schema', () => {
     ]);
     expect(reportCaseStatus.pending).toBe('REPORT_CASE_PENDING');
     expect(getTableColumns(adminReportCase)).toHaveProperty('messageId');
+    expect(getTableColumns(adminReportCase)).toHaveProperty('publicSequence');
     expect(getTableColumns(adminReporterEntry)).toHaveProperty('reporterMemberId');
     expect(getTableColumns(adminEvidenceReference)).toHaveProperty('attachmentId');
     expect(getTableColumns(adminModerationDecision)).toHaveProperty('previousStatus');
@@ -230,6 +231,7 @@ describe('Admin Trust & Safety database schema', () => {
     const { messageId } = await createMessageFixture();
     const [reportCase] = await db.insert(adminReportCase).values({ messageId }).returning();
     fixtureCaseIds.push(reportCase!.id);
+    expect(reportCase!.publicSequence).toBeGreaterThan(0);
 
     await db.insert(adminReporterEntry).values({
       reportCaseId: reportCase!.id,
