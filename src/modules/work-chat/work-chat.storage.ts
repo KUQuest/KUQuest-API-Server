@@ -47,6 +47,7 @@ export const createWorkChatStorage = (config?: {
       storage.delete(stored.bucket, stored.objectKey),
     linkFor: (target: Pick<StoredWorkChatAttachment, 'bucket' | 'objectKey'>) =>
       storage.linkForWithExpiry(target),
+    linkForWithExpiry: storage.linkForWithExpiry,
   };
 };
 

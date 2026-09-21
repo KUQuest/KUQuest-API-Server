@@ -98,7 +98,7 @@ const decodeMessageCursor = (value: string): MessageCursor => {
   }
 };
 
-const memberCanSeeMessage = (database: WorkChatDatabase, userId: string) =>
+export const memberCanSeeMessage = (database: WorkChatDatabase, userId: string) =>
   exists(
     database
       .select({ id: chatMembership.id })
@@ -107,7 +107,8 @@ const memberCanSeeMessage = (database: WorkChatDatabase, userId: string) =>
         and(
           eq(chatMembership.conversationId, chatMessage.conversationId),
           eq(chatMembership.memberId, userId),
-          or(isNull(chatMembership.leftAt), lte(chatMessage.createdAt, chatMembership.leftAt))
+          or(isNull(chatMembership.leftAt), lte(chatMessage.createdAt, chatMembership.leftAt)),
+          or(isNull(chatMessage.hiddenAt), eq(chatMembership.id, chatMessage.senderMembershipId))
         )
       )
   );
@@ -194,7 +195,11 @@ export const toWorkChatAvatar = (row: WorkChatAvatarRow): WorkChatAvatar => {
   }
 };
 
-export const loadMessageDetails = async (database: WorkChatDatabase, rows: MessageRow[]) => {
+export const loadMessageDetails = async (
+  database: WorkChatDatabase,
+  rows: MessageRow[],
+  viewerMemberId: string
+) => {
   if (rows.length === 0) return [];
 
   const senderMembershipIds = rows
@@ -227,6 +232,23 @@ export const loadMessageDetails = async (database: WorkChatDatabase, rows: Messa
           .where(inArray(authUser.id, memberIds));
   const membershipById = new Map(memberships.map((membership) => [membership.id, membership]));
   const userById = new Map(users.map((user) => [user.id, user]));
+  const senderMessageIds = rows
+    .filter(
+      (row) =>
+        row.senderMembershipId !== null &&
+        membershipById.get(row.senderMembershipId)?.memberId === viewerMemberId
+    )
+    .map((row) => row.id);
+  const attachmentVisibility =
+    senderMessageIds.length === 0
+      ? eq(chatAttachment.status, 'CONSUMED')
+      : or(
+          eq(chatAttachment.status, 'CONSUMED'),
+          and(
+            eq(chatAttachment.status, 'HIDDEN'),
+            inArray(chatMessageAttachment.messageId, senderMessageIds)
+          )
+        );
 
   const attachments = await database
     .select({
@@ -239,13 +261,15 @@ export const loadMessageDetails = async (database: WorkChatDatabase, rows: Messa
     })
     .from(chatMessageAttachment)
     .innerJoin(chatAttachment, eq(chatAttachment.id, chatMessageAttachment.attachmentId))
+    .innerJoin(chatMessage, eq(chatMessage.id, chatMessageAttachment.messageId))
     .where(
       and(
         inArray(
           chatMessageAttachment.messageId,
           rows.map(({ id }) => id)
         ),
-        eq(chatAttachment.status, 'CONSUMED'),
+        eq(chatAttachment.conversationId, chatMessage.conversationId),
+        attachmentVisibility,
         isNull(chatAttachment.deletedAt)
       )
     )
@@ -593,7 +617,7 @@ export const listWorkConversationMessages = async (
   const hasMore = rows.length > options.limit;
   const selectedRows = rows.slice(0, options.limit);
   if (!after) selectedRows.reverse();
-  const items = await loadMessageDetails(db, selectedRows);
+  const items = await loadMessageDetails(db, selectedRows, userId);
   const cursorMessage = after ? selectedRows[selectedRows.length - 1] : selectedRows[0];
 
   return {
@@ -1030,7 +1054,7 @@ export const sendWorkConversationMessage = async (
         );
       }
       return {
-        message: (await loadMessageDetails(transaction, [existing]))[0]!,
+        message: (await loadMessageDetails(transaction, [existing], userId))[0]!,
         created: false,
       };
     }
@@ -1114,7 +1138,7 @@ export const sendWorkConversationMessage = async (
       .where(eq(chatConversation.id, conversationId));
 
     return {
-      message: (await loadMessageDetails(transaction, [message]))[0]!,
+      message: (await loadMessageDetails(transaction, [message], userId))[0]!,
       created: true,
     };
   });
