@@ -14,6 +14,7 @@ import {
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
+import { avatarStorage } from '@/modules/profile/profile.storage';
 import { createWorkChatMembershipWriter, workChatStorage } from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';
@@ -36,6 +37,11 @@ const workerId = randomUUID();
 const otherWorkerId = randomUUID();
 const outsiderId = randomUUID();
 const tagId = randomUUID();
+const hirerAvatarFileId = randomUUID();
+const workerAvatarFileId = randomUUID();
+const hirerAvatarObjectKey = 'avatars/candidate-inquiry-hirer';
+const workerAvatarObjectKey = 'avatars/candidate-inquiry-worker';
+const avatarFileIds = [hirerAvatarFileId, workerAvatarFileId];
 const fixtureQuestIds: string[] = [];
 const fixtureFileIds: string[] = [];
 let postgresAvailable = false;
@@ -233,6 +239,29 @@ beforeAll(async () => {
     { id: otherWorkerId, email: `${otherWorkerId}@ku.th`, firstName: 'Other', lastName: 'Worker' },
     { id: outsiderId, email: `${outsiderId}@ku.th`, firstName: 'Inquiry', lastName: 'Outsider' },
   ]);
+  await db.insert(file).values([
+    {
+      id: hirerAvatarFileId,
+      bucket: 'test-avatar',
+      objectKey: hirerAvatarObjectKey,
+      contentType: 'image/png',
+      sizeBytes: 3,
+      uploadedByUserId: hirerId,
+    },
+    {
+      id: workerAvatarFileId,
+      bucket: 'test-avatar',
+      objectKey: workerAvatarObjectKey,
+      contentType: 'image/png',
+      sizeBytes: 3,
+      uploadedByUserId: workerId,
+    },
+  ]);
+  await db.update(authUser).set({ imageFileId: hirerAvatarFileId }).where(eq(authUser.id, hirerId));
+  await db
+    .update(authUser)
+    .set({ imageFileId: workerAvatarFileId })
+    .where(eq(authUser.id, workerId));
   await db.insert(tag).values({
     id: tagId,
     name: `Candidate Inquiry ${tagId}`,
@@ -250,6 +279,11 @@ afterEach(async () => {
 
 afterAll(async () => {
   if (!postgresAvailable) return;
+  await db
+    .update(authUser)
+    .set({ imageFileId: null })
+    .where(inArray(authUser.id, [hirerId, workerId]));
+  await db.delete(file).where(inArray(file.id, avatarFileIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db
     .delete(authUser)
@@ -311,6 +345,9 @@ describe('Candidate Inquiry Conversation API', () => {
   it('opens a private inquiry, supports both participants, and keeps it out of Work Chat', async () => {
     if (!postgresAvailable) return;
     authenticate();
+    spyOn(avatarStorage, 'linkFor').mockImplementation(
+      ({ objectKey }) => `https://storage.test/${objectKey}`
+    );
     const questId = await createOpenQuest();
 
     const opened = await requestJson(
@@ -326,7 +363,12 @@ describe('Candidate Inquiry Conversation API', () => {
           id: string;
           type: string;
           state: string;
-          participants: Array<{ id: string; role: string; displayName: string }>;
+          participants: Array<{
+            id: string;
+            role: string;
+            displayName: string;
+            avatar: { fileId: string; url: string } | null;
+          }>;
         };
       };
     };
@@ -334,8 +376,21 @@ describe('Candidate Inquiry Conversation API', () => {
     expect(openedBody.data.inquiry.type).toBe('CONVERSATION_CANDIDATE_INQUIRY');
     expect(openedBody.data.inquiry.state).toBe('INQUIRY_OPEN');
     expect(openedBody.data.inquiry.participants).toEqual([
-      { id: hirerId, role: 'HIRER', displayName: 'Inquiry Hirer' },
-      { id: workerId, role: 'PROSPECTIVE_WORKER', displayName: 'Inquiry Worker' },
+      {
+        id: hirerId,
+        role: 'HIRER',
+        displayName: 'Inquiry Hirer',
+        avatar: { fileId: hirerAvatarFileId, url: `https://storage.test/${hirerAvatarObjectKey}` },
+      },
+      {
+        id: workerId,
+        role: 'PROSPECTIVE_WORKER',
+        displayName: 'Inquiry Worker',
+        avatar: {
+          fileId: workerAvatarFileId,
+          url: `https://storage.test/${workerAvatarObjectKey}`,
+        },
+      },
     ]);
 
     const replay = await requestJson(
@@ -355,9 +410,20 @@ describe('Candidate Inquiry Conversation API', () => {
     );
     expect(workerMessage.status).toBe(200);
     const workerMessageBody = (await workerMessage.json()) as {
-      data: { message: { id: string; kind: string } };
+      data: {
+        message: {
+          id: string;
+          kind: string;
+          sender: { id: string; displayName: string; avatar: { fileId: string; url: string } };
+        };
+      };
     };
     expect(workerMessageBody.data.message.kind).toBe('USER');
+    expect(workerMessageBody.data.message.sender).toEqual({
+      id: workerId,
+      displayName: 'Inquiry Worker',
+      avatar: { fileId: workerAvatarFileId, url: `https://storage.test/${workerAvatarObjectKey}` },
+    });
 
     const hirerHistory = await candidateInquiryApp.handle(
       new Request(`http://localhost/api/v1/chat/candidate-inquiries/${conversationId}/messages`, {

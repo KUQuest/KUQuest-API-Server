@@ -2,6 +2,8 @@ import { env } from '@/config/env';
 import { sql } from '@/database/client';
 import { getWallet } from '@/modules/wallet';
 
+import { frontendDemoDisputeQuestTitle } from './seed-frontend-demo';
+
 const demoEmails = [
   'nattapong.srisawat@ku.th',
   'warisara.boonmee@ku.th',
@@ -142,8 +144,29 @@ const main = async (): Promise<void> => {
   `);
   assertAtLeast('Finance Quest Escrow draft', financeDraftCount, 1);
 
+  const disputeCaseCount = await readCount(sql`
+    SELECT count(*)::int AS count
+    FROM admin_dispute_cases dispute
+    INNER JOIN quest failed_quest ON failed_quest.id = dispute.quest_id
+    INNER JOIN wallet_funding_reservations reservation
+      ON reservation.id = failed_quest.funding_reservation_id
+    INNER JOIN quest_assignment assignment
+      ON assignment.quest_id = failed_quest.id
+      AND assignment.worker_id = dispute.filer_user_id
+    INNER JOIN auth_user hirer ON hirer.id = failed_quest.hirer_id
+    INNER JOIN auth_user worker ON worker.id = assignment.worker_id
+    WHERE lower(hirer.email) = ${demoEmails[0]}
+      AND lower(worker.email) = ${demoEmails[1]}
+      AND failed_quest.title = ${frontendDemoDisputeQuestTitle}
+      AND failed_quest.quest_status = 'QUEST_FAILED'
+      AND reservation.status = 'ACTIVE'
+      AND assignment.assignment_status = 'ASSIGNMENT_INCOMPLETE'
+      AND dispute.status = 'DISPUTE_CASE_PENDING'
+  `);
+  assertAtLeast('Demo pending Dispute Case', disputeCaseCount, 1);
+
   console.log(
-    'Verified Admin, demo Quest, Assignment, Review, Wallet, Payout Destination, pending Payout, and finance draft seeds.'
+    'Verified Admin, demo Quest, Assignment, Review, Wallet, Payout Destination, pending Payout, finance draft, and demo pending Dispute Case seeds.'
   );
 };
 

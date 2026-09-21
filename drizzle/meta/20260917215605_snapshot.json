@@ -1,6 +1,6 @@
 {
-  "id": "a02369f3-c315-46f9-82c0-608cd6b58fc7",
-  "prevId": "fc09dcd3-eea4-49b6-aab5-ed4d9c339814",
+  "id": "a21b31b5-a094-4308-8960-b61c86112667",
+  "prevId": "77ff1403-060d-4c4b-bec0-fed87b1fe8e7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -388,6 +388,342 @@
       },
       "isRLSEnabled": false
     },
+    "public.admin_conduct_reports": {
+      "name": "admin_conduct_reports",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "quest_id": {
+          "name": "quest_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "filer_user_id": {
+          "name": "filer_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reported_member_id": {
+          "name": "reported_member_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "assignment_id": {
+          "name": "assignment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "detail": {
+          "name": "detail",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'CONDUCT_REPORT_PENDING'"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "decision_reason": {
+          "name": "decision_reason",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_by_admin_id": {
+          "name": "resolved_by_admin_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "admin_conduct_reports_status_created_idx": {
+          "name": "admin_conduct_reports_status_created_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "admin_conduct_reports_quest_created_idx": {
+          "name": "admin_conduct_reports_quest_created_idx",
+          "columns": [
+            {
+              "expression": "quest_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "admin_conduct_reports_filer_created_idx": {
+          "name": "admin_conduct_reports_filer_created_idx",
+          "columns": [
+            {
+              "expression": "filer_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "admin_conduct_reports_reported_member_created_idx": {
+          "name": "admin_conduct_reports_reported_member_created_idx",
+          "columns": [
+            {
+              "expression": "reported_member_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "admin_conduct_reports_assignment_idx": {
+          "name": "admin_conduct_reports_assignment_idx",
+          "columns": [
+            {
+              "expression": "assignment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "admin_conduct_reports_quest_id_quest_id_fk": {
+          "name": "admin_conduct_reports_quest_id_quest_id_fk",
+          "tableFrom": "admin_conduct_reports",
+          "tableTo": "quest",
+          "columnsFrom": [
+            "quest_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "admin_conduct_reports_filer_user_id_auth_user_id_fk": {
+          "name": "admin_conduct_reports_filer_user_id_auth_user_id_fk",
+          "tableFrom": "admin_conduct_reports",
+          "tableTo": "auth_user",
+          "columnsFrom": [
+            "filer_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "admin_conduct_reports_reported_member_id_auth_user_id_fk": {
+          "name": "admin_conduct_reports_reported_member_id_auth_user_id_fk",
+          "tableFrom": "admin_conduct_reports",
+          "tableTo": "auth_user",
+          "columnsFrom": [
+            "reported_member_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "admin_conduct_reports_resolved_by_admin_id_auth_admin_id_fk": {
+          "name": "admin_conduct_reports_resolved_by_admin_id_auth_admin_id_fk",
+          "tableFrom": "admin_conduct_reports",
+          "tableTo": "auth_admin",
+          "columnsFrom": [
+            "resolved_by_admin_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "admin_conduct_reports_assignment_context_fk": {
+          "name": "admin_conduct_reports_assignment_context_fk",
+          "tableFrom": "admin_conduct_reports",
+          "tableTo": "quest_assignment",
+          "columnsFrom": [
+            "quest_id",
+            "assignment_id"
+          ],
+          "columnsTo": [
+            "quest_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "admin_conduct_reports_quest_reported_member_key": {
+          "name": "admin_conduct_reports_quest_reported_member_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "quest_id",
+            "reported_member_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "admin_conduct_reports_reason_check": {
+          "name": "admin_conduct_reports_reason_check",
+          "value": "\"admin_conduct_reports\".\"reason\" IN ('CONDUCT_ABANDONED', 'CONDUCT_OUT_OF_SCOPE', 'CONDUCT_NO_SHOW')"
+        },
+        "admin_conduct_reports_status_check": {
+          "name": "admin_conduct_reports_status_check",
+          "value": "\"admin_conduct_reports\".\"status\" IN ('CONDUCT_REPORT_PENDING', 'CONDUCT_REPORT_UPHELD', 'CONDUCT_REPORT_DISMISSED')"
+        },
+        "admin_conduct_reports_version_check": {
+          "name": "admin_conduct_reports_version_check",
+          "value": "\"admin_conduct_reports\".\"version\" >= 1"
+        },
+        "admin_conduct_reports_members_check": {
+          "name": "admin_conduct_reports_members_check",
+          "value": "\"admin_conduct_reports\".\"filer_user_id\" <> \"admin_conduct_reports\".\"reported_member_id\""
+        },
+        "admin_conduct_reports_detail_check": {
+          "name": "admin_conduct_reports_detail_check",
+          "value": "\"admin_conduct_reports\".\"detail\" IS NULL OR btrim(\"admin_conduct_reports\".\"detail\") <> ''"
+        },
+        "admin_conduct_reports_decision_reason_check": {
+          "name": "admin_conduct_reports_decision_reason_check",
+          "value": "\"admin_conduct_reports\".\"decision_reason\" IS NULL OR btrim(\"admin_conduct_reports\".\"decision_reason\") <> ''"
+        },
+        "admin_conduct_reports_resolution_check": {
+          "name": "admin_conduct_reports_resolution_check",
+          "value": "(\n        (\"admin_conduct_reports\".\"status\" = 'CONDUCT_REPORT_PENDING' AND num_nonnulls(\"admin_conduct_reports\".\"decision_reason\", \"admin_conduct_reports\".\"resolved_by_admin_id\", \"admin_conduct_reports\".\"resolved_at\") = 0)\n        OR (\"admin_conduct_reports\".\"status\" IN ('CONDUCT_REPORT_UPHELD', 'CONDUCT_REPORT_DISMISSED') AND num_nonnulls(\"admin_conduct_reports\".\"decision_reason\", \"admin_conduct_reports\".\"resolved_by_admin_id\", \"admin_conduct_reports\".\"resolved_at\") = 3)\n      )"
+        },
+        "admin_conduct_reports_resolved_after_created_check": {
+          "name": "admin_conduct_reports_resolved_after_created_check",
+          "value": "\"admin_conduct_reports\".\"resolved_at\" IS NULL OR \"admin_conduct_reports\".\"resolved_at\" >= \"admin_conduct_reports\".\"created_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.admin_dispute_cases": {
       "name": "admin_dispute_cases",
       "schema": "",
@@ -398,23 +734,6 @@
           "primaryKey": true,
           "notNull": true,
           "default": "gen_random_uuid()"
-        },
-        "public_sequence": {
-          "name": "public_sequence",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "identity": {
-            "type": "byDefault",
-            "name": "admin_dispute_case_public_sequence",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "2147483647",
-            "cache": "1",
-            "cycle": false
-          }
         },
         "quest_id": {
           "name": "quest_id",
@@ -621,13 +940,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "admin_dispute_cases_public_sequence_unique": {
-          "name": "admin_dispute_cases_public_sequence_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "public_sequence"
-          ]
-        },
         "admin_dispute_cases_quest_filer_key": {
           "name": "admin_dispute_cases_quest_filer_key",
           "nullsNotDistinct": false,
@@ -654,644 +966,6 @@
         "admin_dispute_cases_terminal_fields_check": {
           "name": "admin_dispute_cases_terminal_fields_check",
           "value": "(\n        (\"admin_dispute_cases\".\"status\" = 'DISPUTE_CASE_PENDING' AND num_nonnulls(\"admin_dispute_cases\".\"resolved_worker_id\", \"admin_dispute_cases\".\"resolved_amount_satang\", \"admin_dispute_cases\".\"resolved_by_admin_id\", \"admin_dispute_cases\".\"resolved_at\") = 0)\n        OR (\"admin_dispute_cases\".\"status\" = 'DISPUTE_CASE_DISMISSED' AND num_nonnulls(\"admin_dispute_cases\".\"resolved_worker_id\", \"admin_dispute_cases\".\"resolved_amount_satang\") = 0 AND num_nonnulls(\"admin_dispute_cases\".\"resolved_by_admin_id\", \"admin_dispute_cases\".\"resolved_at\") = 2)\n        OR (\"admin_dispute_cases\".\"status\" = 'DISPUTE_CASE_RESOLVED' AND num_nonnulls(\"admin_dispute_cases\".\"resolved_worker_id\", \"admin_dispute_cases\".\"resolved_amount_satang\", \"admin_dispute_cases\".\"resolved_by_admin_id\", \"admin_dispute_cases\".\"resolved_at\") = 4)\n      )"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.admin_evidence_references": {
-      "name": "admin_evidence_references",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "report_case_id": {
-          "name": "report_case_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "message_id": {
-          "name": "message_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attachment_id": {
-          "name": "attachment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "admin_evidence_references_case_message_uidx": {
-          "name": "admin_evidence_references_case_message_uidx",
-          "columns": [
-            {
-              "expression": "report_case_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "message_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"admin_evidence_references\".\"message_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "admin_evidence_references_case_attachment_uidx": {
-          "name": "admin_evidence_references_case_attachment_uidx",
-          "columns": [
-            {
-              "expression": "report_case_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "attachment_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"admin_evidence_references\".\"attachment_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "admin_evidence_references_case_created_idx": {
-          "name": "admin_evidence_references_case_created_idx",
-          "columns": [
-            {
-              "expression": "report_case_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "admin_evidence_references_report_case_id_admin_report_cases_id_fk": {
-          "name": "admin_evidence_references_report_case_id_admin_report_cases_id_fk",
-          "tableFrom": "admin_evidence_references",
-          "tableTo": "admin_report_cases",
-          "columnsFrom": [
-            "report_case_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "admin_evidence_references_message_id_chat_message_id_fk": {
-          "name": "admin_evidence_references_message_id_chat_message_id_fk",
-          "tableFrom": "admin_evidence_references",
-          "tableTo": "chat_message",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "admin_evidence_references_attachment_id_chat_attachment_id_fk": {
-          "name": "admin_evidence_references_attachment_id_chat_attachment_id_fk",
-          "tableFrom": "admin_evidence_references",
-          "tableTo": "chat_attachment",
-          "columnsFrom": [
-            "attachment_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "admin_evidence_references_target_check": {
-          "name": "admin_evidence_references_target_check",
-          "value": "num_nonnulls(\"admin_evidence_references\".\"message_id\", \"admin_evidence_references\".\"attachment_id\") = 1"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.admin_moderation_decisions": {
-      "name": "admin_moderation_decisions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "report_case_id": {
-          "name": "report_case_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "admin_id": {
-          "name": "admin_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "previous_status": {
-          "name": "previous_status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "new_status": {
-          "name": "new_status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason_catalog_version": {
-          "name": "reason_catalog_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason_code": {
-          "name": "reason_code",
-          "type": "varchar(100)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "admin_moderation_decisions_case_created_idx": {
-          "name": "admin_moderation_decisions_case_created_idx",
-          "columns": [
-            {
-              "expression": "report_case_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "admin_moderation_decisions_admin_created_idx": {
-          "name": "admin_moderation_decisions_admin_created_idx",
-          "columns": [
-            {
-              "expression": "admin_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "admin_moderation_decisions_report_case_id_admin_report_cases_id_fk": {
-          "name": "admin_moderation_decisions_report_case_id_admin_report_cases_id_fk",
-          "tableFrom": "admin_moderation_decisions",
-          "tableTo": "admin_report_cases",
-          "columnsFrom": [
-            "report_case_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "admin_moderation_decisions_admin_id_auth_admin_id_fk": {
-          "name": "admin_moderation_decisions_admin_id_auth_admin_id_fk",
-          "tableFrom": "admin_moderation_decisions",
-          "tableTo": "auth_admin",
-          "columnsFrom": [
-            "admin_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "admin_moderation_decisions_transition_check": {
-          "name": "admin_moderation_decisions_transition_check",
-          "value": "(\n        (\"admin_moderation_decisions\".\"previous_status\" = 'REPORT_CASE_PENDING' AND \"admin_moderation_decisions\".\"new_status\" IN ('REPORT_CASE_DISMISSED', 'REPORT_CASE_HIDDEN'))\n        OR (\"admin_moderation_decisions\".\"previous_status\" = 'REPORT_CASE_HIDDEN' AND \"admin_moderation_decisions\".\"new_status\" IN ('REPORT_CASE_DISMISSED', 'REPORT_CASE_HIDDEN', 'REPORT_CASE_RESTORED'))\n      )"
-        },
-        "admin_moderation_decisions_reason_catalog_version_check": {
-          "name": "admin_moderation_decisions_reason_catalog_version_check",
-          "value": "\"admin_moderation_decisions\".\"reason_catalog_version\" >= 1"
-        },
-        "admin_moderation_decisions_reason_code_check": {
-          "name": "admin_moderation_decisions_reason_code_check",
-          "value": "\"admin_moderation_decisions\".\"reason_code\" ~ '^[A-Z][A-Z0-9_.-]{0,99}$'"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.admin_report_cases": {
-      "name": "admin_report_cases",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "message_id": {
-          "name": "message_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'REPORT_CASE_PENDING'"
-        },
-        "case_closed_at": {
-          "name": "case_closed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "admin_report_cases_one_open_message_uidx": {
-          "name": "admin_report_cases_one_open_message_uidx",
-          "columns": [
-            {
-              "expression": "message_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"admin_report_cases\".\"status\" IN ('REPORT_CASE_PENDING', 'REPORT_CASE_HIDDEN')",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "admin_report_cases_status_created_idx": {
-          "name": "admin_report_cases_status_created_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "admin_report_cases_message_created_idx": {
-          "name": "admin_report_cases_message_created_idx",
-          "columns": [
-            {
-              "expression": "message_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "admin_report_cases_message_id_chat_message_id_fk": {
-          "name": "admin_report_cases_message_id_chat_message_id_fk",
-          "tableFrom": "admin_report_cases",
-          "tableTo": "chat_message",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "admin_report_cases_id_message_key": {
-          "name": "admin_report_cases_id_message_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "id",
-            "message_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "admin_report_cases_status_check": {
-          "name": "admin_report_cases_status_check",
-          "value": "\"admin_report_cases\".\"status\" IN ('REPORT_CASE_PENDING', 'REPORT_CASE_DISMISSED', 'REPORT_CASE_HIDDEN', 'REPORT_CASE_RESTORED')"
-        },
-        "admin_report_cases_version_check": {
-          "name": "admin_report_cases_version_check",
-          "value": "\"admin_report_cases\".\"version\" >= 1"
-        },
-        "admin_report_cases_closed_time_check": {
-          "name": "admin_report_cases_closed_time_check",
-          "value": "(\n        (\"admin_report_cases\".\"status\" IN ('REPORT_CASE_PENDING', 'REPORT_CASE_HIDDEN') AND \"admin_report_cases\".\"case_closed_at\" IS NULL)\n        OR (\"admin_report_cases\".\"status\" IN ('REPORT_CASE_DISMISSED', 'REPORT_CASE_RESTORED') AND \"admin_report_cases\".\"case_closed_at\" IS NOT NULL)\n      )"
-        },
-        "admin_report_cases_closed_after_created_check": {
-          "name": "admin_report_cases_closed_after_created_check",
-          "value": "\"admin_report_cases\".\"case_closed_at\" IS NULL OR \"admin_report_cases\".\"case_closed_at\" >= \"admin_report_cases\".\"created_at\""
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.admin_reporter_entries": {
-      "name": "admin_reporter_entries",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "report_case_id": {
-          "name": "report_case_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "message_id": {
-          "name": "message_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reporter_member_id": {
-          "name": "reporter_member_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "detail": {
-          "name": "detail",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "admin_reporter_entries_case_created_idx": {
-          "name": "admin_reporter_entries_case_created_idx",
-          "columns": [
-            {
-              "expression": "report_case_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "admin_reporter_entries_reporter_idx": {
-          "name": "admin_reporter_entries_reporter_idx",
-          "columns": [
-            {
-              "expression": "reporter_member_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "admin_reporter_entries_reporter_member_id_auth_user_id_fk": {
-          "name": "admin_reporter_entries_reporter_member_id_auth_user_id_fk",
-          "tableFrom": "admin_reporter_entries",
-          "tableTo": "auth_user",
-          "columnsFrom": [
-            "reporter_member_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "admin_reporter_entries_case_message_fk": {
-          "name": "admin_reporter_entries_case_message_fk",
-          "tableFrom": "admin_reporter_entries",
-          "tableTo": "admin_report_cases",
-          "columnsFrom": [
-            "report_case_id",
-            "message_id"
-          ],
-          "columnsTo": [
-            "id",
-            "message_id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "admin_reporter_entries_message_reporter_key": {
-          "name": "admin_reporter_entries_message_reporter_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "message_id",
-            "reporter_member_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "admin_reporter_entries_reason_check": {
-          "name": "admin_reporter_entries_reason_check",
-          "value": "\"admin_reporter_entries\".\"reason\" = 'REPORT_ABUSIVE_OR_HARASSMENT'"
-        },
-        "admin_reporter_entries_detail_check": {
-          "name": "admin_reporter_entries_detail_check",
-          "value": "\"admin_reporter_entries\".\"detail\" IS NULL OR btrim(\"admin_reporter_entries\".\"detail\") <> ''"
         }
       },
       "isRLSEnabled": false
@@ -5591,23 +5265,6 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "public_sequence": {
-          "name": "public_sequence",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "identity": {
-            "type": "byDefault",
-            "name": "quest_public_sequence",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "2147483647",
-            "cache": "1",
-            "cycle": false
-          }
-        },
         "hirer_id": {
           "name": "hirer_id",
           "type": "uuid",
@@ -5978,13 +5635,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "quest_public_sequence_unique": {
-          "name": "quest_public_sequence_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "public_sequence"
-          ]
-        },
         "quest_funding_reservation_id_unique": {
           "name": "quest_funding_reservation_id_unique",
           "nullsNotDistinct": false,
@@ -6340,6 +5990,14 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "quest_assignment_quest_id_id_key": {
+          "name": "quest_assignment_quest_id_id_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "quest_id",
+            "id"
+          ]
+        },
         "quest_assignment_quest_id_worker_id_key": {
           "name": "quest_assignment_quest_id_worker_id_key",
           "nullsNotDistinct": false,
@@ -9201,6 +8859,12 @@
         "description": {
           "name": "description",
           "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "worker_message": {
+          "name": "worker_message",
+          "type": "varchar(200)",
           "primaryKey": false,
           "notNull": false
         },

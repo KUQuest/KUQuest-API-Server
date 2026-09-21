@@ -16,7 +16,14 @@ type OpenApiOperation = {
 };
 
 const routeContracts = [
-  ['get', '/api/v2/assignments/mine', 'listMyQuestAssignmentsV2', [200, 401, 500], false, false],
+  [
+    'get',
+    '/api/v2/assignments/mine',
+    'listMyQuestAssignmentsV2',
+    [200, 400, 401, 500],
+    false,
+    false,
+  ],
   [
     'get',
     '/api/v2/quests/{questId}/assignments',

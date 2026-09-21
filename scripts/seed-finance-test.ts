@@ -6,6 +6,7 @@ import { paymentPayouts } from '@/database/schema/payment.schema';
 import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletLedgerAccount, walletLedgerTransaction } from '@/database/schema/wallet.schema';
+import { questMode, questParticipation, questStatus } from '@/modules/quest/quest.contract';
 import {
   createPayoutDestinationEncryption,
   getPayoutDestination,
@@ -21,7 +22,6 @@ import {
   positiveSatang,
   signedSatang,
 } from '@/modules/wallet';
-import { questMode, questParticipation, questStatus } from '@/modules/quest/quest.contract';
 
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 
@@ -40,6 +40,7 @@ const assertFinanceSeedEnvironment = (): {
   password: string;
   firstName: string;
   lastName: string;
+  studentId: string;
   recipientEmail: string;
   recipientFirstName: string;
   recipientLastName: string;
@@ -68,6 +69,15 @@ const assertFinanceSeedEnvironment = (): {
   if (!/^[^\s@]+@ku\.th$/.test(email)) {
     throw new Error('STAGING_TEST_AUTH_EMAIL must be a valid @ku.th email.');
   }
+  const rawStudentId = process.env.STAGING_TEST_AUTH_STUDENT_ID;
+  let studentId = '6599999999';
+  if (rawStudentId !== undefined && rawStudentId !== '') {
+    const trimmed = rawStudentId.trim();
+    if (!/^[0-9]{10}$/.test(trimmed)) {
+      throw new Error('STAGING_TEST_AUTH_STUDENT_ID must be exactly 10 digits.');
+    }
+    studentId = trimmed;
+  }
 
   const recipientEmail = requireValue(
     'LOCAL_FINANCE_TEST_RECIPIENT_EMAIL',
@@ -82,6 +92,7 @@ const assertFinanceSeedEnvironment = (): {
     password: requireValue('STAGING_TEST_AUTH_PASSWORD', env.stagingTestAuthPassword),
     firstName: requireValue('STAGING_TEST_AUTH_FIRST_NAME', env.stagingTestAuthFirstName),
     lastName: requireValue('STAGING_TEST_AUTH_LAST_NAME', env.stagingTestAuthLastName),
+    studentId,
     recipientEmail,
     recipientFirstName: requireValue(
       'LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME',
@@ -137,7 +148,7 @@ const ensureFinanceStudent = async (settings: ReturnType<typeof assertFinanceSee
       emailVerified: true,
       firstName: settings.firstName,
       lastName: settings.lastName,
-      studentId: '6599999999',
+      studentId: settings.studentId,
       occupationId: studentOccupation?.id,
       departmentId: studentDepartment?.id,
       termsAcceptedAt: new Date(),
@@ -290,9 +301,9 @@ const ensureFinanceQuestDraft = async (userId: string): Promise<string> => {
   const [designTag] = await db
     .select({ id: tag.id })
     .from(tag)
-    .where(eq(tag.name, 'Design'))
+    .where(inArray(tag.name, ['Graphic Design', 'Design']))
     .limit(1);
-  if (!designTag) throw new Error('The Design Tag is missing.');
+  if (!designTag) throw new Error('The Graphic Design Tag is missing.');
 
   const now = Date.now();
   const [created] = await db

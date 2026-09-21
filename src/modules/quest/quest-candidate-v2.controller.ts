@@ -10,9 +10,11 @@ import {
   createQuestV2CandidateApplication,
   getQuestV2CandidateApplication,
   listQuestV2CandidateApplications,
+  rejectQuestV2CandidateApplication,
   selectQuestV2CandidateApplication,
   withdrawQuestV2CandidateApplication,
   type QuestV2CandidateApplicationOutcome,
+  type QuestV2CandidateApplicationRejectOutcome,
   type QuestV2CandidateSelectionOutcome,
 } from './quest-candidate-v2.service';
 import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
@@ -21,6 +23,7 @@ import { WorkChatTransitionError } from './quest-work-chat.port';
 type Application = Extract<QuestV2CandidateApplicationOutcome, { id: string }>;
 type ApplicationError = Exclude<QuestV2CandidateApplicationOutcome, Application>;
 type WithdrawOutcome = Awaited<ReturnType<typeof withdrawQuestV2CandidateApplication>>;
+type RejectError = Exclude<QuestV2CandidateApplicationRejectOutcome, Application>;
 type WithdrawError = Exclude<WithdrawOutcome, Application>;
 type SelectionError = Exclude<QuestV2CandidateSelectionOutcome, { assignments: unknown[] }>;
 
@@ -160,6 +163,51 @@ const mapWithdrawError = (set: AuthedContext['set'], outcome: WithdrawError) => 
     );
   }
   return mapQuestCommandOutcome(set, outcome.outcome);
+};
+
+const mapRejectError = (set: AuthedContext['set'], outcome: RejectError) => {
+  if (outcome.outcome === 'not-found') {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+  if (outcome.outcome === 'application-not-found') {
+    set.status = 404;
+    return apiError('APPLICATION_NOT_FOUND', 'Application not found');
+  }
+  if (outcome.outcome === 'not-allowed') {
+    return conflict(
+      set,
+      'CANDIDATE_REJECTION_NOT_ALLOWED',
+      'Only the owning Hirer can reject a Candidate application'
+    );
+  }
+  if (outcome.outcome === 'not-rejectable') {
+    return conflict(
+      set,
+      'CANDIDATE_NOT_REJECTABLE',
+      'Only an applied Candidate application can be rejected'
+    );
+  }
+  return mapQuestCommandOutcome(set, outcome.outcome);
+};
+
+export const rejectQuestV2CandidateApplicationController = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & { params: QuestV2CandidateApplicationDetailParams }) => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+
+  const result = await rejectQuestV2CandidateApplication(
+    session.user.id,
+    params.questId,
+    params.applicationId,
+    commandId
+  );
+  if ('outcome' in result) return mapRejectError(set, result);
+  return apiSuccess(serializeApplication(result));
 };
 
 export const withdrawQuestV2CandidateApplicationController = async ({

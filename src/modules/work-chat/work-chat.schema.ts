@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { profileAvatarSchema } from '@/modules/profile/profile.schema';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 const conversationSchema = t.Object({
@@ -46,6 +47,7 @@ const messageSchema = t.Object({
     t.Object({
       id: t.Nullable(t.String({ format: 'uuid' })),
       displayName: t.String(),
+      avatar: profileAvatarSchema,
     })
   ),
   text: t.Nullable(t.String()),
@@ -60,6 +62,7 @@ const participantSchema = t.Object({
   id: t.Nullable(t.String({ format: 'uuid' })),
   role: t.Union([t.Literal('HIRER'), t.Literal('WORKER')]),
   displayName: t.String(),
+  avatar: profileAvatarSchema,
 });
 
 export const workChatConversationParamsSchema = t.Object({

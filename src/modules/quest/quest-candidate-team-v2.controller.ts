@@ -1,12 +1,18 @@
 import type { AuthedContext } from '@/modules/auth';
+import {
+  FileTooLargeError,
+  FileUploadError,
+  UnsupportedFileTypeError,
+} from '@/shared/object-storage';
 import { apiError, apiSuccess } from '@/shared/api-response';
 
 import type {
+  QuestV2CandidateTeamCreateInput,
   QuestV2CandidateTeamDetailParams,
+  QuestV2CandidateTeamFileUploadInput,
+  QuestV2CandidateTeamJoinInput,
   QuestV2CandidateTeamMemberParams,
   QuestV2CandidateTeamParams,
-  QuestV2CandidateTeamCreateInput,
-  QuestV2CandidateTeamJoinInput,
   QuestV2CandidateTeamSubmissionInput,
   QuestV2CandidateTeamUpdateInput,
 } from './quest-candidate-team-v2.schema';
@@ -17,11 +23,14 @@ import {
   leaveQuestV2CandidateTeam,
   listQuestV2CandidateTeams,
   regenerateQuestV2CandidateTeamJoinCode,
+  rejectQuestV2CandidateTeam,
   removeQuestV2CandidateTeamMember,
   selectQuestV2CandidateTeam,
   submitQuestV2CandidateTeam,
   updateQuestV2CandidateTeam,
+  uploadQuestV2CandidateTeamFile,
   type QuestV2CandidateTeamOutcome,
+  type QuestV2CandidateTeamRejectOutcome,
   type QuestV2CandidateTeamSelectionOutcome,
 } from './quest-candidate-team-v2.service';
 import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
@@ -174,6 +183,50 @@ const mapTeamError = (set: AuthedContext['set'], outcome: CandidateTeamError) =>
       set,
       'CANDIDATE_TEAM_NOT_SELECTABLE',
       'The Candidate Team is not submitted for selection'
+    );
+  }
+  return mapQuestCommandOutcome(set, outcome.outcome);
+};
+
+const mapCandidateTeamFileUploadError = (set: AuthedContext['set'], error: unknown) => {
+  if (error instanceof FileTooLargeError) {
+    set.status = 413;
+    return apiError('TEAM_FILE_TOO_LARGE', error.message);
+  }
+  if (error instanceof UnsupportedFileTypeError) {
+    set.status = 415;
+    return apiError('TEAM_FILE_TYPE_NOT_SUPPORTED', error.message);
+  }
+  if (error instanceof FileUploadError) {
+    set.status = 502;
+    return apiError('TEAM_FILE_UPLOAD_FAILED', 'Candidate Team file upload failed');
+  }
+  throw error;
+};
+
+type CandidateTeamRejectError = Exclude<QuestV2CandidateTeamRejectOutcome, CandidateTeam>;
+
+const mapRejectError = (set: AuthedContext['set'], outcome: CandidateTeamRejectError) => {
+  if (outcome.outcome === 'not-found') {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+  if (outcome.outcome === 'team-not-found') {
+    set.status = 404;
+    return apiError('TEAM_NOT_FOUND', 'Candidate Team not found');
+  }
+  if (outcome.outcome === 'not-allowed') {
+    return conflict(
+      set,
+      'CANDIDATE_TEAM_REJECTION_NOT_ALLOWED',
+      'Only the owning Hirer can reject a Candidate Team while the Quest is open and before its start time'
+    );
+  }
+  if (outcome.outcome === 'not-rejectable') {
+    return conflict(
+      set,
+      'CANDIDATE_TEAM_NOT_REJECTABLE',
+      'Only a submitted Candidate Team can be rejected'
     );
   }
   return mapQuestCommandOutcome(set, outcome.outcome);
@@ -414,6 +467,59 @@ export const submitQuestV2CandidateTeamController = async ({
     commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
+  return apiSuccess(serializeTeam(result));
+};
+
+export const uploadQuestV2CandidateTeamFileController = async ({
+  body,
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & {
+  body: QuestV2CandidateTeamFileUploadInput;
+  params: QuestV2CandidateTeamDetailParams;
+}) => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+
+  try {
+    const result = await uploadQuestV2CandidateTeamFile(
+      session.user.id,
+      params.questId,
+      params.teamId,
+      body,
+      commandId
+    );
+    if ('outcome' in result) return mapTeamError(set, result);
+    set.status = 201;
+    return apiSuccess({
+      fileId: result.fileId,
+      fileName: result.fileName,
+      mediaType: result.mediaType,
+      sizeBytes: result.sizeBytes,
+      createdAt: result.createdAt.toISOString(),
+    });
+  } catch (error) {
+    return mapCandidateTeamFileUploadError(set, error);
+  }
+};
+
+export const rejectQuestV2CandidateTeamController = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & { params: QuestV2CandidateTeamDetailParams }) => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+  const result = await rejectQuestV2CandidateTeam(
+    session.user.id,
+    params.questId,
+    params.teamId,
+    commandId
+  );
+  if ('outcome' in result) return mapRejectError(set, result);
   return apiSuccess(serializeTeam(result));
 };
 

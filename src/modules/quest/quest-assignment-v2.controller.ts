@@ -8,7 +8,10 @@ import {
   type QuestV2AssignmentOutcome,
 } from './quest-assignment-v2.service';
 import { mapQuestCommandOutcome, requireQuestCommandId } from './quest-command.controller';
-import type { QuestV2AssignmentParams } from './quest-assignment-v2.schema';
+import type {
+  QuestV2AssignmentMineQuery,
+  QuestV2AssignmentParams,
+} from './quest-assignment-v2.schema';
 import { WorkChatTransitionError } from './quest-work-chat.port';
 
 type QuestV2Assignment = Extract<QuestV2AssignmentOutcome, { id: string }>;
@@ -111,5 +114,10 @@ export const listQuestV2AssignmentsController = async ({
   return apiSuccess({ items: result.map(serializeAssignment) });
 };
 
-export const listMyQuestV2AssignmentsController = async ({ session }: AuthedContext) =>
-  apiSuccess({ items: (await listMyQuestV2Assignments(session.user.id)).map(serializeAssignment) });
+export const listMyQuestV2AssignmentsController = async ({
+  query,
+  session,
+}: AuthedContext & { query: QuestV2AssignmentMineQuery }) =>
+  apiSuccess({
+    items: (await listMyQuestV2Assignments(session.user.id, query.status)).map(serializeAssignment),
+  });

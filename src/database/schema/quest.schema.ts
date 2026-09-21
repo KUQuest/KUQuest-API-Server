@@ -53,7 +53,7 @@ export const quest = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     publicSequence: integer('public_sequence')
-      .generatedByDefaultAsIdentity({ name : 'quest_public_sequence'})
+      .generatedByDefaultAsIdentity({ name: 'quest_public_sequence' })
       .unique(),
     hirerId: uuid('hirer_id')
       .notNull()
@@ -600,6 +600,7 @@ export const questV2ProofSubmission = pgTable(
       .notNull()
       .references(() => authUser.id),
     description: varchar('description', { length: 1000 }),
+    workerMessage: varchar('worker_message', { length: 200 }),
     submissionStatus: varchar('submission_status', { length: 32 }).$type<
       'PROOF_PENDING' | 'PROOF_APPROVED' | 'PROOF_NOT_APPROVED'
     >(),
@@ -836,6 +837,7 @@ export const questAssignment = pgTable(
       'quest_assignment_status_check',
       sql`${table.assignmentStatus} IN ('ASSIGNMENT_ACTIVE', 'ASSIGNMENT_COMPLETED', 'ASSIGNMENT_INCOMPLETE', 'ASSIGNMENT_CANCELLED')`
     ),
+    unique('quest_assignment_quest_id_id_key').on(table.questId, table.id),
     unique('quest_assignment_quest_id_worker_id_key').on(table.questId, table.workerId),
     index('quest_assignment_quest_id_idx').on(table.questId),
     index('quest_assignment_worker_id_idx').on(table.workerId),

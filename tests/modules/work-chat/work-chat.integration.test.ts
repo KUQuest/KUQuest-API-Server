@@ -14,6 +14,7 @@ import {
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
+import { avatarStorage } from '@/modules/profile/profile.storage';
 import {
   cleanupExpiredWorkChatAttachments,
   createWorkChatMembershipWriter,
@@ -40,6 +41,11 @@ const hirerId = randomUUID();
 const workerId = randomUUID();
 const otherMemberId = randomUUID();
 const tagId = randomUUID();
+const hirerAvatarFileId = randomUUID();
+const workerAvatarFileId = randomUUID();
+const hirerAvatarObjectKey = 'avatars/work-chat-hirer';
+const workerAvatarObjectKey = 'avatars/work-chat-worker';
+const avatarFileIds = [hirerAvatarFileId, workerAvatarFileId];
 const fixtureQuestIds: string[] = [];
 const fixtureFileIds: string[] = [];
 let postgresAvailable = false;
@@ -257,6 +263,29 @@ beforeAll(async () => {
     { id: workerId, email: `${workerId}@ku.th`, firstName: 'Route', lastName: 'Worker' },
     { id: otherMemberId, email: `${otherMemberId}@ku.th`, firstName: 'Other', lastName: 'Member' },
   ]);
+  await db.insert(file).values([
+    {
+      id: hirerAvatarFileId,
+      bucket: 'test-avatar',
+      objectKey: hirerAvatarObjectKey,
+      contentType: 'image/png',
+      sizeBytes: 3,
+      uploadedByUserId: hirerId,
+    },
+    {
+      id: workerAvatarFileId,
+      bucket: 'test-avatar',
+      objectKey: workerAvatarObjectKey,
+      contentType: 'image/png',
+      sizeBytes: 3,
+      uploadedByUserId: workerId,
+    },
+  ]);
+  await db.update(authUser).set({ imageFileId: hirerAvatarFileId }).where(eq(authUser.id, hirerId));
+  await db
+    .update(authUser)
+    .set({ imageFileId: workerAvatarFileId })
+    .where(eq(authUser.id, workerId));
   await db.insert(tag).values({ id: tagId, name: `Work Chat route ${tagId}` });
 });
 
@@ -271,6 +300,11 @@ afterEach(async () => {
 
 afterAll(async () => {
   if (!postgresAvailable) return;
+  await db
+    .update(authUser)
+    .set({ imageFileId: null })
+    .where(inArray(authUser.id, [hirerId, workerId]));
+  await db.delete(file).where(inArray(file.id, avatarFileIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(authUser).where(inArray(authUser.id, [hirerId, workerId, otherMemberId]));
 });
@@ -394,6 +428,9 @@ describe('Work Chat Member API', () => {
   it('allows the accepted Hirer and Worker to use the Conversation and denies a non-member', async () => {
     if (!postgresAvailable) return;
     authenticate();
+    spyOn(avatarStorage, 'linkFor').mockImplementation(
+      ({ objectKey }) => `https://storage.test/${objectKey}`
+    );
     const { questId, conversationId } = await createWorkConversation();
 
     const workerList = await workChatApp.handle(
@@ -419,7 +456,11 @@ describe('Work Chat Member API', () => {
       data: {
         items: Array<{
           kind: string;
-          sender: { id: string | null; displayName: string } | null;
+          sender: {
+            id: string | null;
+            displayName: string;
+            avatar: { fileId: string; url: string } | null;
+          } | null;
           eventId: string | null;
           systemType: string | null;
           systemPayload: Record<string, unknown> | null;
@@ -427,7 +468,11 @@ describe('Work Chat Member API', () => {
       };
     };
     expect(historyBody.data.items[0]?.kind).toBe('SYSTEM');
-    expect(historyBody.data.items[0]?.sender).toEqual({ id: null, displayName: 'KU bot' });
+    expect(historyBody.data.items[0]?.sender).toEqual({
+      id: null,
+      displayName: 'KU bot',
+      avatar: null,
+    });
     expect(historyBody.data.items[0]?.eventId).toBeString();
     expect(historyBody.data.items[0]?.systemType).toBe('ACCEPTED_PARTICIPANT_JOINED');
     expect(historyBody.data.items[0]?.systemPayload).toMatchObject({
@@ -442,11 +487,31 @@ describe('Work Chat Member API', () => {
     );
     expect(participants.status).toBe(200);
     const participantsBody = (await participants.json()) as {
-      data: { participants: Array<{ id: string; role: string; displayName: string }> };
+      data: {
+        participants: Array<{
+          id: string;
+          role: string;
+          displayName: string;
+          avatar: { fileId: string; url: string } | null;
+        }>;
+      };
     };
     expect(participantsBody.data.participants).toEqual([
-      { id: hirerId, role: 'HIRER', displayName: 'Route Hirer' },
-      { id: workerId, role: 'WORKER', displayName: 'Route Worker' },
+      {
+        id: hirerId,
+        role: 'HIRER',
+        displayName: 'Route Hirer',
+        avatar: { fileId: hirerAvatarFileId, url: `https://storage.test/${hirerAvatarObjectKey}` },
+      },
+      {
+        id: workerId,
+        role: 'WORKER',
+        displayName: 'Route Worker',
+        avatar: {
+          fileId: workerAvatarFileId,
+          url: `https://storage.test/${workerAvatarObjectKey}`,
+        },
+      },
     ]);
 
     const storedObject = {
@@ -514,7 +579,43 @@ describe('Work Chat Member API', () => {
       workerId
     );
     expect(sent.status).toBe(200);
-    const sentBody = (await sent.json()) as { data: { message: { id: string; sequence: number } } };
+    const sentBody = (await sent.json()) as {
+      data: {
+        message: {
+          id: string;
+          sequence: number;
+          sender: { id: string; displayName: string; avatar: { fileId: string; url: string } };
+        };
+      };
+    };
+    expect(sentBody.data.message.sender).toEqual({
+      id: workerId,
+      displayName: 'Route Worker',
+      avatar: { fileId: workerAvatarFileId, url: `https://storage.test/${workerAvatarObjectKey}` },
+    });
+    const getInboxSummary = async (memberId: string) => {
+      const response = await workChatApp.handle(
+        new Request('http://localhost/api/v1/chat/conversations?limit=20', {
+          headers: { 'x-member-id': memberId },
+        })
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: {
+          items: Array<{
+            id: string;
+            latestMessage: { kind: string; preview: string } | null;
+            unreadCount: number;
+          }>;
+        };
+      };
+      return body.data.items.find(({ id }) => id === conversationId);
+    };
+    expect(await getInboxSummary(workerId)).toMatchObject({
+      id: conversationId,
+      latestMessage: { kind: 'USER', preview: 'Worker message' },
+      unreadCount: 4,
+    });
 
     const replay = await requestJson(
       'POST',
@@ -553,6 +654,16 @@ describe('Work Chat Member API', () => {
     );
     expect(read.status).toBe(200);
     expect((await read.json()).data.messageId).toBe(sentBody.data.message.id);
+    expect(await getInboxSummary(workerId)).toMatchObject({
+      id: conversationId,
+      latestMessage: { kind: 'USER', preview: 'Worker message' },
+      unreadCount: 0,
+    });
+    expect(await getInboxSummary(hirerId)).toMatchObject({
+      id: conversationId,
+      latestMessage: { kind: 'USER', preview: 'Worker message' },
+      unreadCount: 4,
+    });
 
     const hirerSent = await requestJson(
       'POST',

@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
+import { avatarStorage } from '@/modules/profile/profile.storage';
 import {
   chatAttachment,
   chatConversation,
@@ -168,6 +169,31 @@ export type MessageRow = {
   createdAt: Date;
 };
 
+export type WorkChatAvatar = { fileId: string; url: string } | null;
+
+type WorkChatAvatarRow = {
+  avatarFileId: string | null;
+  avatarBucket: string | null;
+  avatarObjectKey: string | null;
+};
+
+export const toWorkChatAvatar = (row: WorkChatAvatarRow): WorkChatAvatar => {
+  if (!row.avatarFileId || !row.avatarBucket || !row.avatarObjectKey) return null;
+
+  try {
+    return {
+      fileId: row.avatarFileId,
+      url: avatarStorage.linkFor({ bucket: row.avatarBucket, objectKey: row.avatarObjectKey }),
+    };
+  } catch (error) {
+    console.error('[work-chat-avatar] Link creation failed', {
+      fileId: row.avatarFileId,
+      error,
+    });
+    return null;
+  }
+};
+
 export const loadMessageDetails = async (database: WorkChatDatabase, rows: MessageRow[]) => {
   if (rows.length === 0) return [];
 
@@ -188,8 +214,16 @@ export const loadMessageDetails = async (database: WorkChatDatabase, rows: Messa
     memberIds.length === 0
       ? []
       : await database
-          .select({ id: authUser.id, firstName: authUser.firstName, lastName: authUser.lastName })
+          .select({
+            id: authUser.id,
+            firstName: authUser.firstName,
+            lastName: authUser.lastName,
+            avatarFileId: file.id,
+            avatarBucket: file.bucket,
+            avatarObjectKey: file.objectKey,
+          })
           .from(authUser)
+          .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
           .where(inArray(authUser.id, memberIds));
   const membershipById = new Map(memberships.map((membership) => [membership.id, membership]));
   const userById = new Map(users.map((user) => [user.id, user]));
@@ -229,14 +263,19 @@ export const loadMessageDetails = async (database: WorkChatDatabase, rows: Messa
       : undefined;
     const sender =
       row.kind === 'SYSTEM'
-        ? { id: null, displayName: 'KU bot' }
-        : {
-            id: senderMembership?.memberId ?? null,
-            displayName: senderMembership?.memberId
-              ? `${userById.get(senderMembership.memberId)?.firstName ?? ''} ${userById.get(senderMembership.memberId)?.lastName ?? ''}`.trim() ||
-                'Former member'
-              : 'Former member',
-          };
+        ? { id: null, displayName: 'KU bot', avatar: null }
+        : (() => {
+            const user = senderMembership?.memberId
+              ? userById.get(senderMembership.memberId)
+              : undefined;
+            return {
+              id: senderMembership?.memberId ?? null,
+              displayName: senderMembership?.memberId
+                ? `${user?.firstName ?? ''} ${user?.lastName ?? ''}`.trim() || 'Former member'
+                : 'Former member',
+              avatar: user ? toWorkChatAvatar(user) : null,
+            };
+          })();
 
     return {
       id: row.id,
@@ -337,6 +376,7 @@ export type WorkConversationParticipant = {
   id: string | null;
   role: 'HIRER' | 'WORKER';
   displayName: string;
+  avatar: WorkChatAvatar;
 };
 
 export type WorkConversationAttachment = {
@@ -361,9 +401,13 @@ export const listWorkConversationParticipants = async (
       role: chatMembership.role,
       firstName: authUser.firstName,
       lastName: authUser.lastName,
+      avatarFileId: file.id,
+      avatarBucket: file.bucket,
+      avatarObjectKey: file.objectKey,
     })
     .from(chatMembership)
     .leftJoin(authUser, eq(authUser.id, chatMembership.memberId))
+    .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
     .where(
       and(
         eq(chatMembership.conversationId, conversationId),
@@ -378,6 +422,7 @@ export const listWorkConversationParticipants = async (
     role: participant.role as WorkConversationParticipant['role'],
     displayName:
       `${participant.firstName ?? ''} ${participant.lastName ?? ''}`.trim() || 'Former member',
+    avatar: toWorkChatAvatar(participant),
   }));
 };
 
@@ -386,30 +431,40 @@ const loadConversationSummary = async (
   userId: string,
   conversation: NonNullable<Awaited<ReturnType<typeof getConversationMembership>>>
 ): Promise<WorkConversation> => {
-  const rows = await selectVisibleMessageRows(database, userId, conversation.id, { limit: 1 });
-  const latestRows = rows.slice(0, 1);
-  const latest = (await loadMessageDetails(database, latestRows))[0];
-  const [readCursor] = await database
-    .select({ lastReadSequence: chatReadCursor.lastReadSequence })
-    .from(chatReadCursor)
-    .where(
-      and(
-        eq(chatReadCursor.conversationId, conversation.id),
-        eq(chatReadCursor.membershipId, conversation.membershipId)
+  const [latestRows, unreadRows] = await Promise.all([
+    database
+      .select({
+        id: chatMessage.id,
+        kind: chatMessage.kind,
+        text: chatMessage.contentText,
+        createdAt: chatMessage.createdAt,
+      })
+      .from(chatMessage)
+      .where(
+        and(
+          eq(chatMessage.conversationId, conversation.id),
+          isNull(chatMessage.deletedAt),
+          memberCanSeeMessage(database, userId)
+        )
       )
-    )
-    .limit(1);
-  const [unread] = await database
-    .select({ count: sql<number>`count(*)` })
-    .from(chatMessage)
-    .where(
-      and(
-        eq(chatMessage.conversationId, conversation.id),
-        isNull(chatMessage.deletedAt),
-        gt(chatMessage.sequence, readCursor?.lastReadSequence ?? 0),
-        memberCanSeeMessage(database, userId)
-      )
-    );
+      .orderBy(desc(chatMessage.sequence))
+      .limit(1),
+    database
+      .select({ count: sql<number>`count(*)` })
+      .from(chatMessage)
+      .where(
+        and(
+          eq(chatMessage.conversationId, conversation.id),
+          isNull(chatMessage.deletedAt),
+          gt(
+            chatMessage.sequence,
+            sql`coalesce((select ${chatReadCursor.lastReadSequence} from ${chatReadCursor} where ${chatReadCursor.conversationId} = ${conversation.id} and ${chatReadCursor.membershipId} = ${conversation.membershipId} limit 1), 0)`
+          ),
+          memberCanSeeMessage(database, userId)
+        )
+      ),
+  ]);
+  const latest = latestRows[0];
 
   return {
     id: conversation.id,
@@ -430,7 +485,7 @@ const loadConversationSummary = async (
     lastActivityAt: latest?.createdAt ?? null,
     archived: conversation.archivedAt !== null,
     readOnly: conversation.readOnlyAt !== null,
-    unreadCount: Number(unread?.count ?? 0),
+    unreadCount: Number(unreadRows[0]?.count ?? 0),
   };
 };
 

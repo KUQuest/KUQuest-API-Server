@@ -133,6 +133,7 @@ test('staging deploy backs up and migrates before replacing the API', async () =
     const result = runStagingOperation(fixture, 'deploy');
     const commands = (await readFile(fixture.dockerLog, 'utf8')).split('\n');
 
+    const cleanup = commands.findIndex((line) => line === 'image prune --all --force');
     const pull = commands.findIndex((line) => line === 'compose pull api');
     const backup = commands.findIndex((line) => line.includes('pg_dump'));
     const verifyBackup = commands.findIndex((line) => line.includes('pg_restore'));
@@ -144,6 +145,8 @@ test('staging deploy backs up and migrates before replacing the API', async () =
     );
 
     expect(result.exitCode).toBe(0);
+    expect(cleanup).toBeGreaterThan(-1);
+    expect(cleanup).toBeLessThan(pull);
     expect(pull).toBeGreaterThan(-1);
     expect(backup).toBeGreaterThan(pull);
     expect(verifyBackup).toBeGreaterThan(backup);

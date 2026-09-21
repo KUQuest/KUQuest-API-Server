@@ -1,4 +1,5 @@
 import { app } from '@/app';
+import { department, faculty, occupation } from '@/database/schema/academic.schema';
 import { db, sql } from '@/database/client';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
@@ -31,11 +32,15 @@ const getCookieHeader = (response: Response): string =>
 
 let memberId = '';
 let sessionCookie = '';
+let ownerAvatarFileId = '';
 const ownerId = crypto.randomUUID();
 const adminId = crypto.randomUUID();
 const workerIds = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
 const tagId = crypto.randomUUID();
 const otherTagId = crypto.randomUUID();
+const facultyId = crypto.randomUUID();
+const departmentId = crypto.randomUUID();
+let occupationId = '';
 const questIds: string[] = [];
 const fileIds: string[] = [];
 const fixturePrefix = `Discovery ${crypto.randomUUID()}`;
@@ -114,6 +119,21 @@ beforeAll(async () => {
   memberId = ((await loginResponse.json()) as { user: { id: string } }).user.id;
   sessionCookie = getCookieHeader(loginResponse);
 
+  await db
+    .insert(faculty)
+    .values({ id: facultyId, name: `Discovery Faculty ${crypto.randomUUID()}` });
+  await db.insert(department).values({
+    id: departmentId,
+    facultyId,
+    name: `Discovery Department ${crypto.randomUUID()}`,
+  });
+  const [studentOccupation] = await db
+    .select({ id: occupation.id })
+    .from(occupation)
+    .where(eq(occupation.name, 'Student'))
+    .limit(1);
+  if (!studentOccupation) throw new Error('Student occupation fixture is missing');
+  occupationId = studentOccupation.id;
   await db.insert(authUser).values([
     ...workerIds.map((id, index) => ({
       id,
@@ -126,8 +146,26 @@ beforeAll(async () => {
       email: `${ownerId}@ku.th`,
       firstName: 'Quest',
       lastName: 'Owner',
+      bio: 'Quest owner profile',
+      academicYear: 2026,
+      departmentId,
+      occupationId,
     },
   ]);
+  const [ownerAvatar] = await db
+    .insert(file)
+    .values({
+      bucket: 'test-bucket',
+      objectKey: `avatars/${ownerId}/current.png`,
+      contentType: 'image/png',
+      sizeBytes: 3,
+      uploadedByUserId: ownerId,
+    })
+    .returning({ id: file.id });
+  if (!ownerAvatar) throw new Error('Hirer avatar file was not created');
+  ownerAvatarFileId = ownerAvatar.id;
+  fileIds.push(ownerAvatar.id);
+  await db.update(authUser).set({ imageFileId: ownerAvatar.id }).where(eq(authUser.id, ownerId));
   await db.insert(authAdmin).values({
     id: adminId,
     email: `${adminId}@admin.kuquest`,
@@ -148,15 +186,23 @@ beforeEach(async () => {
 afterAll(async () => {
   if (questIds.length > 0) await db.delete(quest).where(inArray(quest.id, questIds));
   await deleteTestIdempotencyKeys({ principalUserIds: [memberId, ownerId, ...workerIds] });
+  await db.update(authUser).set({ imageFileId: null }).where(eq(authUser.id, ownerId));
   if (fileIds.length > 0) await db.delete(file).where(inArray(file.id, fileIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(tag).where(eq(tag.id, otherTagId));
   await db.delete(authAdmin).where(eq(authAdmin.id, adminId));
+  await db
+    .update(authUser)
+    .set({ departmentId: null, occupationId: null })
+    .where(eq(authUser.id, ownerId));
+  await db.delete(department).where(eq(department.id, departmentId));
+  await db.delete(faculty).where(eq(faculty.id, facultyId));
 });
 
 type OpenApiSchema = {
   properties?: Record<string, OpenApiSchema>;
   items?: OpenApiSchema;
+  anyOf?: OpenApiSchema[];
   required?: string[];
   format?: string;
   pattern?: string;
@@ -228,6 +274,7 @@ describe('Quest API v2 discovery contract', () => {
         id: expect.any(Object),
         questReward: expect.any(Object),
         activeWorkerCount: expect.any(Object),
+        hirerProfile: expect.any(Object),
       })
     );
     expect(boardData?.required).toEqual(['items', 'nextCursor']);
@@ -236,6 +283,14 @@ describe('Quest API v2 discovery contract', () => {
       publicDetail?.responses?.['200']?.content?.['application/json']?.schema?.properties?.data;
     expect(publicData?.properties?.images?.properties).toBeUndefined();
     expect(publicData?.properties?.condition?.properties).toBeDefined();
+    const hirerAvatar = publicData?.properties?.hirerAvatar;
+    expect(hirerAvatar?.nullable).toBe(true);
+    expect(hirerAvatar?.anyOf?.[0]?.properties).toEqual(
+      expect.objectContaining({
+        fileId: expect.any(Object),
+        url: expect.any(Object),
+      })
+    );
   });
 
   it('lists only eligible v2 Quests across the mode and participation matrix', async () => {
@@ -310,6 +365,17 @@ describe('Quest API v2 discovery contract', () => {
           startTime: string;
           dueAt: string;
           tag: { id: string; name: string };
+          hirerProfile: {
+            id: string;
+            version: number;
+            firstName: string;
+            lastName: string;
+            bio: string | null;
+            academicYear: number | null;
+            department: unknown;
+            avatar: unknown;
+            occupation: unknown;
+          };
         }>;
         nextCursor: string | null;
       };
@@ -334,6 +400,24 @@ describe('Quest API v2 discovery contract', () => {
       startTime: '2030-08-26T10:00:00.000+07:00',
       dueAt: '2030-08-26T12:00:00.000+07:00',
       tag: { id: tagId, name: tagName },
+      hirerProfile: {
+        id: ownerId,
+        version: 1,
+        firstName: 'Quest',
+        lastName: 'Owner',
+        bio: 'Quest owner profile',
+        academicYear: 2026,
+        department: {
+          id: departmentId,
+          name: expect.any(String),
+          faculty: { name: expect.any(String) },
+        },
+        avatar: {
+          fileId: ownerAvatarFileId,
+          url: expect.stringMatching(/^https?:\/\//),
+        },
+        occupation: { id: occupationId, name: 'Student' },
+      },
     });
     expect(body.data.items.some((item) => item.id === ownQuest)).toBe(false);
     expect(body.data.nextCursor).toBeNull();
@@ -428,6 +512,10 @@ describe('Quest API v2 discovery contract', () => {
       activeWorkerCount: 0,
       proofRequired: true,
       hirerName: 'Quest Owner',
+      hirerAvatar: {
+        fileId: ownerAvatarFileId,
+        url: expect.stringMatching(/^https?:\/\//),
+      },
       images: [
         {
           imageId: expect.any(String),
@@ -454,6 +542,29 @@ describe('Quest API v2 discovery contract', () => {
     expect(body.data).not.toHaveProperty('wallet');
     expect(body.data).not.toHaveProperty('fundingReservation');
     expect(body.data).not.toHaveProperty('candidate');
+    expect(body.data).toMatchObject({
+      hasJoined: false,
+      assignmentId: null,
+      assignmentStatus: null,
+    });
+
+    const [assignment] = await db
+      .insert(questAssignment)
+      .values({
+        questId: publicQuestId,
+        workerId: memberId,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE',
+      })
+      .returning({ id: questAssignment.id });
+    if (!assignment) throw new Error('Quest assignment was not created');
+
+    const assignedResponse = await getPublicDetail(publicQuestId);
+    expect(assignedResponse.status).toBe(200);
+    expect((await assignedResponse.json()).data).toMatchObject({
+      hasJoined: true,
+      assignmentId: assignment.id,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    });
   });
 
   // Public Quest Detail is not a Worker lifecycle view. An Active Worker reads a hidden

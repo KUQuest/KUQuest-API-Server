@@ -745,6 +745,44 @@ const questV2CanonicalScheduleSchema = t.String({
   pattern: questV2CanonicalScheduleTimePattern.source,
 });
 
+const questV2AssignmentStateSchema = t.Union(
+  questV2AssignmentStates.map((state) => t.Literal(state))
+);
+
+const questV2HirerProfileDepartmentSchema = t.Nullable(
+  t.Object({
+    id: t.String({ format: 'uuid' }),
+    name: t.String(),
+    faculty: t.Object({ name: t.String() }),
+  })
+);
+
+const questV2HirerProfileOccupationSchema = t.Nullable(
+  t.Object({
+    id: t.String({ format: 'uuid' }),
+    name: t.Union([t.Literal('Staff'), t.Literal('Lecturer'), t.Literal('Student')]),
+  })
+);
+
+const questV2HirerProfileAvatarSchema = t.Nullable(
+  t.Object({
+    fileId: t.String({ format: 'uuid' }),
+    url: t.String({ format: 'uri' }),
+  })
+);
+
+export const questV2HirerProfileSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  version: t.Integer({ minimum: 1 }),
+  firstName: t.String(),
+  lastName: t.String(),
+  bio: t.Nullable(t.String()),
+  academicYear: t.Nullable(t.Integer()),
+  department: questV2HirerProfileDepartmentSchema,
+  avatar: questV2HirerProfileAvatarSchema,
+  occupation: questV2HirerProfileOccupationSchema,
+});
+
 export const questV2BoardCardSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   title: t.String(),
@@ -757,6 +795,7 @@ export const questV2BoardCardSchema = t.Object({
   startTime: questV2CanonicalScheduleSchema,
   dueAt: questV2CanonicalScheduleSchema,
   hirerName: t.String(),
+  hirerProfile: questV2HirerProfileSchema,
   location: t.Nullable(t.String()),
 });
 
@@ -791,20 +830,20 @@ export const questV2PublicDetailSchema = t.Object({
   dueAt: questV2CanonicalScheduleSchema,
   proofRequired: t.Boolean(),
   hirerName: t.String(),
+  hirerAvatar: questV2HirerProfileAvatarSchema,
   locations: t.Array(
     t.Object({ label: t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }) })
   ),
   images: t.Array(questV2PublicImageSchema),
+  hasJoined: t.Optional(t.Boolean()),
+  assignmentId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
+  assignmentStatus: t.Optional(t.Nullable(questV2AssignmentStateSchema)),
 });
 
 export const questV2PublicDetailResponseSchema = t.Object({
   success: t.Literal(true),
   data: questV2PublicDetailSchema,
 });
-
-const questV2AssignmentStateSchema = t.Union(
-  questV2AssignmentStates.map((state) => t.Literal(state))
-);
 
 // The Participation projection carries the public Quest fields plus the caller's own
 // Assignment. Quest Funding Total, Platform Fee, Money Policy, Wallet, Funding

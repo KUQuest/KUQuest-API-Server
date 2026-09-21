@@ -12,6 +12,8 @@ import {
 
 import { and, asc, eq, exists, inArray, isNull, ne, sql } from 'drizzle-orm';
 
+import { FileUploadError } from '@/shared/object-storage';
+
 import { type QuestTransaction } from './quest-work-chat.port';
 import {
   runQuestCommand,
@@ -34,10 +36,15 @@ import {
 } from './quest-v2.contract';
 import type {
   QuestV2CandidateTeamCreateInput,
+  QuestV2CandidateTeamFileUploadInput,
   QuestV2CandidateTeamJoinInput,
   QuestV2CandidateTeamSubmissionInput,
   QuestV2CandidateTeamUpdateInput,
 } from './quest-candidate-team-v2.schema';
+import {
+  questV2CandidateTeamStorage,
+  type StoredQuestV2CandidateTeamFile,
+} from './quest-candidate-team-v2.storage';
 
 export const questV2CandidateTeamCreateOperationScope = 'quest.v2.candidate-team.create';
 export const questV2CandidateTeamUpdateOperationScope = 'quest.v2.candidate-team.update';
@@ -49,6 +56,8 @@ export const questV2CandidateTeamRegenerateCodeOperationScope =
   'quest.v2.candidate-team.regenerate-code';
 export const questV2CandidateTeamSubmitOperationScope = 'quest.v2.candidate-team.submit';
 export const questV2CandidateTeamSelectOperationScope = 'quest.v2.candidate-team.select';
+export const questV2CandidateTeamRejectOperationScope = 'quest.v2.candidate-team.reject';
+export const questV2CandidateTeamFileUploadOperationScope = 'quest.v2.candidate-team.file-upload';
 
 const dayInMilliseconds = 24 * 60 * 60 * 1000;
 const maxAttachmentSizeBytes = 10 * 1024 * 1024;
@@ -113,9 +122,33 @@ type QuestV2CandidateTeamBusinessOutcomeCode =
   | 'team-not-found'
   | 'not-found';
 
+type QuestV2CandidateTeamRejectBusinessOutcomeCode =
+  'team-not-found' | 'not-allowed' | 'not-rejectable';
+
+type QuestV2CandidateTeamRejectOutcomeCode =
+  QuestV2CandidateTeamRejectBusinessOutcomeCode | 'not-found' | QuestCommandOutcomeCode;
+
+export type QuestV2CandidateTeamRejectOutcome =
+  | CandidateTeam
+  | {
+      outcome: QuestV2CandidateTeamRejectOutcomeCode;
+    };
+
 type TeamCommandOutcomeCode = QuestV2CandidateTeamBusinessOutcomeCode | QuestCommandOutcomeCode;
 
 export type QuestV2CandidateTeamOutcome = CandidateTeam | { outcome: TeamCommandOutcomeCode };
+export type QuestV2CandidateTeamUploadedFile = {
+  fileId: string;
+  fileName: string;
+  mediaType: string;
+  sizeBytes: number;
+  createdAt: Date;
+  /** Internal marker used to compensate an object uploaded for a replay. */
+  replayed?: true;
+};
+
+export type QuestV2CandidateTeamFileUploadOutcome =
+  QuestV2CandidateTeamUploadedFile | { outcome: TeamCommandOutcomeCode };
 
 export type QuestV2CandidateTeamReadOutcome =
   CandidateTeam[] | { outcome: 'not-authorized' | 'not-found' };
@@ -472,6 +505,56 @@ const validateSubmissionFiles = async (
       row.sizeBytes > 0 &&
       row.sizeBytes <= maxAttachmentSizeBytes
   );
+};
+
+const fileUploadSnapshotFor = (uploaded: QuestV2CandidateTeamUploadedFile) => ({
+  fileId: uploaded.fileId,
+  fileName: uploaded.fileName,
+  mediaType: uploaded.mediaType,
+  sizeBytes: uploaded.sizeBytes,
+  createdAt: uploaded.createdAt.toISOString(),
+});
+
+const fileUploadFromSnapshot = (value: unknown): QuestV2CandidateTeamUploadedFile | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const snapshot = value as Record<string, unknown>;
+  if (
+    typeof snapshot.fileId !== 'string' ||
+    typeof snapshot.fileName !== 'string' ||
+    snapshot.fileName.length === 0 ||
+    typeof snapshot.mediaType !== 'string' ||
+    !allowedAttachmentContentTypes.has(snapshot.mediaType) ||
+    typeof snapshot.sizeBytes !== 'number' ||
+    !Number.isInteger(snapshot.sizeBytes) ||
+    snapshot.sizeBytes <= 0 ||
+    snapshot.sizeBytes > maxAttachmentSizeBytes ||
+    typeof snapshot.createdAt !== 'string'
+  ) {
+    return undefined;
+  }
+  const createdAt = new Date(snapshot.createdAt);
+  if (Number.isNaN(createdAt.getTime())) return undefined;
+  return {
+    fileId: snapshot.fileId,
+    fileName: snapshot.fileName,
+    mediaType: snapshot.mediaType,
+    sizeBytes: snapshot.sizeBytes,
+    createdAt,
+    replayed: true,
+  };
+};
+
+const fileUploadFingerprintFor = async (input: File): Promise<string> => {
+  const digest = await crypto.subtle.digest('SHA-256', await input.arrayBuffer());
+  const contentHash = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
+  return sha256Json({
+    contentHash,
+    contentType: input.type,
+    fileName: input.name,
+    sizeBytes: input.size,
+  });
 };
 
 export const createQuestV2CandidateTeam = async (
@@ -1061,6 +1144,138 @@ export const regenerateQuestV2CandidateTeamJoinCode = async (
   });
 };
 
+export const uploadQuestV2CandidateTeamFile = async (
+  leaderId: string,
+  questId: string,
+  teamId: string,
+  input: QuestV2CandidateTeamFileUploadInput,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamFileUploadOutcome> => {
+  const fingerprint = await fileUploadFingerprintFor(input.file);
+  const requestHash = await sha256Json({
+    authenticatedMemberId: leaderId,
+    operation: questV2CandidateTeamFileUploadOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/files',
+    body: { questId, teamId, fingerprint },
+  });
+  const fileId = crypto.randomUUID();
+  let stored: StoredQuestV2CandidateTeamFile;
+  try {
+    stored = await questV2CandidateTeamStorage.upload(fileId, input.file);
+  } catch (error) {
+    if (error instanceof FileUploadError && error.cleanupObject) {
+      const cleanupObject = error.cleanupObject;
+      try {
+        await questV2CandidateTeamStorage.remove(cleanupObject);
+      } catch (cleanupError) {
+        console.error('[candidate-team-file-upload] Compensating object deletion failed', {
+          bucket: cleanupObject.bucket,
+          cleanupError,
+          objectKey: cleanupObject.objectKey,
+        });
+      }
+    }
+    throw error;
+  }
+
+  let result: QuestV2CandidateTeamFileUploadOutcome;
+  try {
+    result = await db.transaction(async (transaction) => {
+      // The Quest row is locked before the module records the command; see the lock-order
+      // note on createQuestV2CandidateTeam.
+      const current = await lockQuest(transaction, questId);
+      if (!current) return { outcome: 'not-found' };
+
+      const command = await runQuestCommand({
+        transaction,
+        identity: {
+          principalUserId: leaderId,
+          operationScope: questV2CandidateTeamFileUploadOperationScope,
+          key: rawCommandId,
+          requestHash,
+          questId,
+        },
+        now,
+        work: async (): Promise<
+          QuestCommandWork<
+            QuestV2CandidateTeamUploadedFile,
+            QuestV2CandidateTeamBusinessOutcomeCode
+          >
+        > => {
+          if (current.v2Mode !== questV2Mode.candidate) {
+            return { kind: 'rejected', rejection: 'not-candidate' };
+          }
+          if (current.v2Participation !== questV2Participation.group) {
+            return { kind: 'rejected', rejection: 'not-group' };
+          }
+          if (current.questState !== 'QUEST_OPEN' || questStartHasPassed(current, now)) {
+            return { kind: 'rejected', rejection: 'not-open' };
+          }
+
+          const team = await lockTeam(transaction, questId, teamId);
+          if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+          if (team.leaderId !== leaderId) return { kind: 'rejected', rejection: 'not-leader' };
+          if (team.state !== 'TEAM_FORMING') return { kind: 'rejected', rejection: 'not-forming' };
+
+          const [persisted] = await transaction
+            .insert(file)
+            .values({
+              id: fileId,
+              bucket: stored.bucket,
+              objectKey: stored.objectKey,
+              contentType: stored.contentType,
+              sizeBytes: stored.sizeBytes,
+              uploadedByUserId: leaderId,
+            })
+            .returning({
+              id: file.id,
+              contentType: file.contentType,
+              sizeBytes: file.sizeBytes,
+              createdAt: file.createdAt,
+            });
+          if (!persisted) throw new Error('Candidate Team file insert returned no row');
+          if (!(await validateSubmissionFiles(transaction, leaderId, [persisted.id]))) {
+            throw new Error('Candidate Team file did not satisfy submission file requirements');
+          }
+
+          const uploaded = {
+            fileId: persisted.id,
+            fileName: stored.fileName,
+            mediaType: persisted.contentType,
+            sizeBytes: persisted.sizeBytes,
+            createdAt: persisted.createdAt,
+          };
+          return {
+            kind: 'success',
+            result: uploaded,
+            resourceType: 'quest-v2-candidate-team-file',
+            resourceId: uploaded.fileId,
+          };
+        },
+        toSnapshot: fileUploadSnapshotFor,
+        fromSnapshot: fileUploadFromSnapshot,
+      });
+
+      if ('outcome' in command) return { outcome: command.outcome };
+      if (command.kind === 'success') return command.result;
+      return { outcome: command.rejection };
+    });
+  } catch (error) {
+    await questV2CandidateTeamStorage
+      .delete(stored.bucket, stored.objectKey)
+      .catch(() => undefined);
+    throw error;
+  }
+
+  if ('outcome' in result || result.replayed === true) {
+    await questV2CandidateTeamStorage
+      .delete(stored.bucket, stored.objectKey)
+      .catch(() => undefined);
+  }
+  return result;
+};
+
 export const submitQuestV2CandidateTeam = async (
   leaderId: string,
   questId: string,
@@ -1149,6 +1364,89 @@ export const submitQuestV2CandidateTeam = async (
           .values(
             input.fileIds.map((fileId, position) => ({ teamId, fileId, position, attachedAt: now }))
           );
+
+        const result = await readTeam(transaction, updatedTeam);
+        return {
+          kind: 'success',
+          result,
+          resourceType: 'quest-v2-candidate-team',
+          resourceId: result.id,
+        };
+      },
+      toSnapshot: snapshotFor,
+      fromSnapshot: teamFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return command.result;
+    return { outcome: command.rejection };
+  });
+};
+
+export const rejectQuestV2CandidateTeam = async (
+  hirerId: string,
+  questId: string,
+  teamId: string,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamRejectOutcome> => {
+  const requestHash = await sha256Json({
+    authenticatedMemberId: hirerId,
+    operation: questV2CandidateTeamRejectOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/reject',
+    questId,
+    teamId,
+    body: {},
+  });
+
+  return db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command; see the lock-order
+    // note on createQuestV2CandidateTeam.
+    const current = await lockQuest(transaction, questId);
+    if (!current) return { outcome: 'not-found' };
+
+    const command = await runQuestCommand({
+      transaction,
+      identity: {
+        principalUserId: hirerId,
+        operationScope: questV2CandidateTeamRejectOperationScope,
+        key: rawCommandId,
+        requestHash,
+        questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<CandidateTeam, QuestV2CandidateTeamRejectBusinessOutcomeCode>
+      > => {
+        if (current.hirerId !== hirerId) {
+          return { kind: 'rejected', rejection: 'not-allowed' };
+        }
+        if (
+          current.v2Mode !== questV2Mode.candidate ||
+          current.v2Participation !== questV2Participation.group ||
+          current.questState !== 'QUEST_OPEN' ||
+          current.startTime.getTime() <= now.getTime()
+        ) {
+          return { kind: 'rejected', rejection: 'not-allowed' };
+        }
+
+        const team = await lockTeam(transaction, questId, teamId);
+        if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+        if (team.state !== 'TEAM_SUBMITTED') {
+          return { kind: 'rejected', rejection: 'not-rejectable' };
+        }
+
+        const [updatedTeam] = await transaction
+          .update(questCandidateTeamV2)
+          .set({ state: 'TEAM_REJECTED' })
+          .where(
+            and(
+              eq(questCandidateTeamV2.id, teamId),
+              eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED')
+            )
+          )
+          .returning(teamFields);
+        if (!updatedTeam) throw new Error('Candidate Team rejection update returned no row');
 
         const result = await readTeam(transaction, updatedTeam);
         return {

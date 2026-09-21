@@ -25,6 +25,8 @@ import { readKeysetPage } from '@/shared/keyset-page';
 
 import { and, asc, eq, sql } from 'drizzle-orm';
 
+import { questV2ProofStorage } from './quest-proof-v2.storage';
+
 export type DisputeCaseStatus = (typeof disputeCaseStatuses)[number];
 export type DisputeCaseOutcome = 'DISPUTE_CASE_DISMISSED' | 'DISPUTE_CASE_RESOLVED';
 
@@ -128,6 +130,7 @@ export type AdminDisputeEvidence = {
     workerId: string | null;
     teamId: string | null;
     submittedByUserId: string;
+    workerMessage: string | null;
     submissionStatus: string;
     submittedAt: string | null;
     files: Array<{
@@ -135,6 +138,8 @@ export type AdminDisputeEvidence = {
       contentType: string;
       sizeBytes: number;
       position: number;
+      url: string;
+      urlExpiresAt: string;
     }>;
   }>;
 };
@@ -411,12 +416,15 @@ const evidenceForCaseInTransaction = async (
       workerId: proofSubmission.workerId,
       teamId: proofSubmission.teamId,
       submittedByUserId: proofSubmission.submittedByUserId,
+      workerMessage: sql<string | null>`NULL`,
       submissionStatus: proofSubmission.submissionStatus,
       submittedAt: proofSubmission.submittedAt,
       fileId: proofSubmissionImage.fileId,
       contentType: file.contentType,
       sizeBytes: file.sizeBytes,
       position: proofSubmissionImage.position,
+      bucket: file.bucket,
+      objectKey: file.objectKey,
     })
     .from(proofSubmission)
     .leftJoin(proofSubmissionImage, eq(proofSubmissionImage.proofSubmissionId, proofSubmission.id))
@@ -434,12 +442,15 @@ const evidenceForCaseInTransaction = async (
       workerId: questV2ProofSubmission.workerId,
       teamId: questV2ProofSubmission.teamId,
       submittedByUserId: questV2ProofSubmission.submittedByUserId,
+      workerMessage: questV2ProofSubmission.workerMessage,
       submissionStatus: questV2ProofSubmission.submissionStatus,
       submittedAt: questV2ProofSubmission.sentAt,
       fileId: questV2ProofSubmissionFile.fileId,
       contentType: file.contentType,
       sizeBytes: file.sizeBytes,
       position: questV2ProofSubmissionFile.position,
+      bucket: file.bucket,
+      objectKey: file.objectKey,
     })
     .from(questV2ProofSubmission)
     .leftJoin(
@@ -462,16 +473,30 @@ const evidenceForCaseInTransaction = async (
       workerId: row.workerId,
       teamId: row.teamId,
       submittedByUserId: row.submittedByUserId,
+      workerMessage: row.workerMessage,
       submissionStatus: row.submissionStatus ?? 'PROOF_DRAFT',
       submittedAt: serializeDate(row.submittedAt),
       files: [],
     };
-    if (row.fileId && row.contentType && row.sizeBytes !== null && row.position !== null) {
+    if (
+      row.fileId &&
+      row.contentType &&
+      row.sizeBytes !== null &&
+      row.position !== null &&
+      row.bucket &&
+      row.objectKey
+    ) {
+      const link = questV2ProofStorage.linkForWithExpiry({
+        bucket: row.bucket,
+        objectKey: row.objectKey,
+      });
       proof.files.push({
         fileId: row.fileId,
         contentType: row.contentType,
         sizeBytes: row.sizeBytes,
         position: row.position,
+        url: link.url,
+        urlExpiresAt: link.expiresAt.toISOString(),
       });
     }
     proofSubmissions.set(row.id, proof);

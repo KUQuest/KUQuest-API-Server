@@ -117,9 +117,7 @@ const adminQuestSummaryFromRow = (row: {
   hirer: row.hirer,
 });
 
-export const serializeAdminQuestSummary = (
-  value: AdminQuestSummary,
-): AdminQuestSummaryResponse => {
+export const serializeAdminQuestSummary = (value: AdminQuestSummary): AdminQuestSummaryResponse => {
   const { publicSequence, ...summary } = value;
 
   return {

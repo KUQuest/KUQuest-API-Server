@@ -12,14 +12,18 @@ import {
   leaveQuestV2CandidateTeamController,
   listQuestV2CandidateTeamsController,
   regenerateQuestV2CandidateTeamJoinCodeController,
+  rejectQuestV2CandidateTeamController,
   removeQuestV2CandidateTeamMemberController,
   selectQuestV2CandidateTeamController,
   submitQuestV2CandidateTeamController,
   updateQuestV2CandidateTeamController,
+  uploadQuestV2CandidateTeamFileController,
 } from './quest-candidate-team-v2.controller';
 import {
   questV2CandidateTeamCreateSchema,
   questV2CandidateTeamDetailParamsSchema,
+  questV2CandidateTeamFileUploadResponseSchema,
+  questV2CandidateTeamFileUploadSchema,
   questV2CandidateTeamHeadersSchema,
   questV2CandidateTeamJoinSchema,
   questV2CandidateTeamListResponseSchema,
@@ -153,6 +157,33 @@ export const questCandidateTeamV2Route = new Elysia({
       },
     }
   )
+  .post('/quests/:questId/teams/:teamId/files', uploadQuestV2CandidateTeamFileController, {
+    params: questV2CandidateTeamDetailParamsSchema,
+    body: questV2CandidateTeamFileUploadSchema,
+    headers: questV2CandidateTeamHeadersSchema,
+    type: 'multipart/form-data',
+    response: responses(
+      questV2CandidateTeamFileUploadResponseSchema,
+      400,
+      401,
+      404,
+      409,
+      413,
+      415,
+      500,
+      502,
+      503,
+      { successStatus: 201 }
+    ),
+    detail: {
+      tags: ['Quest Candidate Teams v2'],
+      summary: 'Upload a private Candidate Team submission file',
+      description:
+        'Only the Team Leader can upload one private image, PDF, or video file up to 10 MB while the Candidate Team is forming for an open GROUP Candidate Quest.',
+      operationId: 'uploadQuestCandidateTeamFileV2',
+      security: betterAuthSecurity,
+    },
+  })
   .post('/quests/:questId/teams/:teamId/submit', submitQuestV2CandidateTeamController, {
     params: questV2CandidateTeamDetailParamsSchema,
     body: questV2CandidateTeamSubmissionSchema,
@@ -165,6 +196,19 @@ export const questCandidateTeamV2Route = new Elysia({
       description:
         'The Team Leader submits a full, immutable Candidate Team with text and at least one valid Work Conversation Attachment file.',
       operationId: 'submitQuestCandidateTeamV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/quests/:questId/teams/:teamId/reject', rejectQuestV2CandidateTeamController, {
+    params: questV2CandidateTeamDetailParamsSchema,
+    headers: questV2CandidateTeamHeadersSchema,
+    response: responses(questV2CandidateTeamResponseSchema, 400, 401, 404, 409, 503),
+    detail: {
+      tags: ['Quest Candidate Teams v2'],
+      summary: 'Reject a submitted Candidate Team',
+      description:
+        'The owning Hirer rejects one submitted Candidate Team while the GROUP Candidate Quest remains open and before its start time.',
+      operationId: 'rejectQuestCandidateTeamV2',
       security: betterAuthSecurity,
     },
   })
