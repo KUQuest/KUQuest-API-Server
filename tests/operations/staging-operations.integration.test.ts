@@ -43,6 +43,8 @@ if [[ "$*" == "compose ps -q api" ]]; then
   if [[ "\${MOCK_NO_PREVIOUS:-}" != "1" ]]; then
     printf 'current-api-container\\n'
   fi
+elif [[ "$*" == "network inspect kuquest-staging_default" && "\${MOCK_MISSING_NETWORK:-}" == "1" ]]; then
+  exit 1
 elif [[ "$1" == "inspect" ]]; then
   printf 'ghcr.io/kuquest/kuquest-api-server:previous\\n'
 elif [[ "$1" == "run" && "$*" == *"pg_dump"* ]]; then
@@ -390,6 +392,28 @@ test('bootstrap backs up, resets only public, migrates, and verifies', async () 
     expect(appliedJournalCount).toBeGreaterThan(expectedJournalCount);
     expect(seed).toBeGreaterThan(appliedJournalCount);
     expect(seedVerification).toBeGreaterThan(seed);
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('bootstrap recreates a missing staging network before backup', async () => {
+  const fixture = await createFixture();
+
+  try {
+    const result = runStagingOperation(fixture, 'bootstrap', {
+      env: { MOCK_MISSING_NETWORK: '1' },
+      input: 'RESET staging public schema\n',
+    });
+    const commands = (await readFile(fixture.dockerLog, 'utf8')).split('\n');
+    const createNetwork = commands.findIndex(
+      (line) => line === 'network create kuquest-staging_default'
+    );
+    const backup = commands.findIndex((line) => line.includes('pg_dump'));
+
+    expect(result.exitCode).toBe(0);
+    expect(createNetwork).toBeGreaterThan(-1);
+    expect(createNetwork).toBeLessThan(backup);
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }
