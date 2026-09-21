@@ -1119,6 +1119,9 @@ const lockQuestV2ImageOwner = async (
   transaction: QuestTransaction,
   context: QuestV2ImageCommandContext
 ) => {
+  const hirer = await lockQuestV2Hirer(transaction, context.userId);
+  if (!hirer) return undefined;
+
   const [ownedQuest] = await transaction
     .select({ id: quest.id, questStatus: quest.questStatus })
     .from(quest)
@@ -2045,6 +2048,16 @@ const fromQuestV2PublishIdempotencySnapshot = (
   return { quest: canonicalQuest, questEscrow };
 };
 
+const lockQuestV2Hirer = async (transaction: QuestTransaction, userId: string) => {
+  const [hirer] = await transaction
+    .select({ id: authUser.id })
+    .from(authUser)
+    .where(eq(authUser.id, userId))
+    .limit(1)
+    .for('update');
+  return hirer;
+};
+
 const lockQuestV2CommandQuest = async (transaction: QuestTransaction, questId: string) => {
   const [current] = await transaction
     .select({ id: quest.id, hirerId: quest.hirerId, questStatus: quest.questStatus })
@@ -2071,12 +2084,8 @@ const publishQuestV2InTransaction = async (
   now: Date
 ): Promise<QuestV2PublishOutcome | undefined> => {
   // Serialize the Hirer's active published Quest cap across concurrent publishes.
-  await transaction
-    .select({ id: authUser.id })
-    .from(authUser)
-    .where(eq(authUser.id, userId))
-    .limit(1)
-    .for('update');
+  const hirer = await lockQuestV2Hirer(transaction, userId);
+  if (!hirer) return undefined;
 
   // Lock before runQuestCommand: the Quest Command foreign key insert takes
   // FOR KEY SHARE on the Quest row.
@@ -2299,6 +2308,9 @@ const editQuestV2InTransaction = async (
   rawIdempotencyKey: string,
   now: Date
 ): Promise<QuestV2EditOutcome> => {
+  const hirer = await lockQuestV2Hirer(transaction, userId);
+  if (!hirer) return { outcome: 'not-found' };
+
   // Lock before runQuestCommand: the Quest Command foreign key insert takes
   // FOR KEY SHARE on the Quest row.
   const lockedQuest = await lockQuestV2CommandQuest(transaction, questId);
