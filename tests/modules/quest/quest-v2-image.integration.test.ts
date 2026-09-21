@@ -14,10 +14,10 @@ import {
   retryQuestV2ImageCleanupManifests,
   type QuestV2CreateInput,
 } from '@/modules/quest';
-import { createQuest } from '@/modules/quest/quest.service';
-import type { QuestCreateInput } from '@/modules/quest/quest.schema';
-import * as questV2Service from '@/modules/quest/quest-v2.service';
-import { questStorage, questV2Storage } from '@/modules/quest/quest.storage';
+import { createQuest } from '@/modules/quest/v1/quest.service';
+import type { QuestCreateInput } from '@/modules/quest/v1/quest.schema';
+import * as questV2Service from '@/modules/quest/v2/quest-v2.service';
+import { questStorage, questV2Storage } from '@/modules/quest/v1/quest.storage';
 import {
   ImageTooLargeError,
   ImageLinkUnavailableError,

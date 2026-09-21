@@ -17,8 +17,8 @@ import {
   type QuestV2CandidateApplicationRejectOutcome,
   type QuestV2CandidateSelectionOutcome,
 } from './quest-candidate-v2.service';
-import { mapQuestCommandOutcome, requireQuestCommandId } from '../quest-command.controller';
-import { WorkChatTransitionError } from '../quest-work-chat.port';
+import { mapQuestCommandOutcome, requireQuestCommandId } from '../../quest-command.controller';
+import { WorkChatTransitionError } from '../../quest-work-chat.port';
 
 type Application = Extract<QuestV2CandidateApplicationOutcome, { id: string }>;
 type ApplicationError = Exclude<QuestV2CandidateApplicationOutcome, Application>;

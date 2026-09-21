@@ -1,10 +1,10 @@
-import * as questService from '@/modules/quest/quest.service';
+import * as questService from '@/modules/quest/v1/quest.service';
 import {
   addQuestImagesController,
   deleteQuestImageController,
   getQuestDetailController,
-} from '@/modules/quest/quest.controller';
-import { questStorage } from '@/modules/quest/quest.storage';
+} from '@/modules/quest/v1/quest.controller';
+import { questStorage } from '@/modules/quest/v1/quest.storage';
 import {
   ImageTooLargeError,
   ImageUploadError,

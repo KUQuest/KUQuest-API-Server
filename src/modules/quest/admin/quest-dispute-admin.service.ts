@@ -25,7 +25,7 @@ import { readKeysetPage } from '@/shared/keyset-page';
 
 import { and, asc, eq, sql } from 'drizzle-orm';
 
-import { questV2ProofStorage } from '../proof-v2/quest-proof-v2.storage';
+import { questV2ProofStorage } from '../v2/proof/quest-proof-v2.storage';
 
 export type DisputeCaseStatus = (typeof disputeCaseStatuses)[number];
 export type DisputeCaseOutcome = 'DISPUTE_CASE_DISMISSED' | 'DISPUTE_CASE_RESOLVED';

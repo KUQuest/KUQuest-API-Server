@@ -12,11 +12,11 @@ import {
   sha256Json,
   type QuestCommandOutcomeCode,
   type QuestCommandWork,
-} from '../quest-command.service';
+} from '../../quest-command.service';
 import type {
   AcceptedWorker,
   QuestWorkChatMembershipTransition,
-} from '../quest-work-chat.contract';
+} from '../../quest-work-chat.contract';
 import {
   questV2ApplicationStates,
   questV2Mode,
@@ -28,7 +28,7 @@ import {
   runQuestV2Selection,
   type SelectionAssignmentRow,
   type SelectionSuccess,
-} from '../quest-selection.service';
+} from '../../quest-selection.service';
 
 export const questV2CandidateApplicationCreateOperationScope =
   'quest.v2.candidate-application.create';

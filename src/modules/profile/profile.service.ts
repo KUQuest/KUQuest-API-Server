@@ -3,11 +3,7 @@ import { department, faculty, occupation } from '@/database/schema/academic.sche
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment } from '@/database/schema/quest.schema';
-import {
-  countReviews,
-  getReceivedRatings,
-  listReviews,
-} from '@/modules/quest/quest-review.service';
+import { countReviews, getReceivedRatings, listReviews } from '@/modules/quest/v1';
 import { tag } from '@/database/schema/tag.schema';
 import type { CursorPayload } from '@/shared/cursor';
 

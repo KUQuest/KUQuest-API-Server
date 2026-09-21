@@ -1,1 +1,1 @@
-export * from './legacy-v1/quest-review.schema';
+export * from './v1/quest-review.schema';

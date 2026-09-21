@@ -7,14 +7,14 @@ import {
   type QuestTransaction,
   defaultQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
-} from '../quest-work-chat.port';
-import { applyQuestStateTransition } from '../quest-transition.service';
+} from '../../quest-work-chat.port';
+import { applyQuestStateTransition } from '../../quest-transition.service';
 import {
   runQuestCommand,
   sha256Json,
   type QuestCommandOutcomeCode,
   type QuestCommandWork,
-} from '../quest-command.service';
+} from '../../quest-command.service';
 import {
   questV2AssignmentStates,
   questV2Mode,
@@ -26,7 +26,7 @@ import {
 import type {
   QuestWorkChatMembershipTransition,
   WorkChatMembershipWriter,
-} from '../quest-work-chat.contract';
+} from '../../quest-work-chat.contract';
 import type { QuestV2AssignmentMineStatus } from './quest-assignment-v2.schema';
 
 export const questV2AssignmentJoinOperationScope = 'quest.v2.assignment.join';

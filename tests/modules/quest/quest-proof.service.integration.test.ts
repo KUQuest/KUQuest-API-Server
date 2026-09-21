@@ -2,7 +2,7 @@ import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { proofSubmission, quest, questAssignment } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { autoApproveDueProofs, reviewProof } from '@/modules/quest/quest-proof.service';
+import { autoApproveDueProofs, reviewProof } from '@/modules/quest/v1/quest-proof.service';
 
 import { randomUUID } from 'node:crypto';
 

@@ -25,5 +25,11 @@ export {
 export { joinNoCandidateQuest } from './quest-assignment.service';
 export { submitProof, listProofs, reviewProof, autoApproveDueProofs } from './quest-proof.service';
 export { proofStorage } from './quest-proof.storage';
-export { createReview, listReviews, updateReview } from './quest-review.service';
+export {
+  countReviews,
+  createReview,
+  getReceivedRatings,
+  listReviews,
+  updateReview,
+} from './quest-review.service';
 export { questStorage } from './quest.storage';

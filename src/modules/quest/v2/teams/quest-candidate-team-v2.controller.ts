@@ -33,8 +33,8 @@ import {
   type QuestV2CandidateTeamRejectOutcome,
   type QuestV2CandidateTeamSelectionOutcome,
 } from './quest-candidate-team-v2.service';
-import { mapQuestCommandOutcome, requireQuestCommandId } from '../quest-command.controller';
-import { WorkChatTransitionError } from '../quest-work-chat.port';
+import { mapQuestCommandOutcome, requireQuestCommandId } from '../../quest-command.controller';
+import { WorkChatTransitionError } from '../../quest-work-chat.port';
 
 type CandidateTeam = Extract<QuestV2CandidateTeamOutcome, { id: string }>;
 type CandidateTeamError = Exclude<QuestV2CandidateTeamOutcome, CandidateTeam>;

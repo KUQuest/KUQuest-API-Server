@@ -1,1 +1,1 @@
-export * from './legacy-v1/quest-proof.storage';
+export * from './v1/quest-proof.storage';

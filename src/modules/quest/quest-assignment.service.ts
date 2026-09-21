@@ -1,1 +1,1 @@
-export * from './legacy-v1/quest-assignment.service';
+export * from './v1/quest-assignment.service';

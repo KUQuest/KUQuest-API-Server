@@ -12,8 +12,8 @@ import type {
   QuestV2UnderfilledDecisionInput,
   QuestV2UnderfilledParams,
 } from './quest-underfilled-v2.schema';
-import { mapQuestCommandOutcome, requireQuestCommandId } from '../quest-command.controller';
-import { WorkChatTransitionError } from '../quest-work-chat.port';
+import { mapQuestCommandOutcome, requireQuestCommandId } from '../../quest-command.controller';
+import { WorkChatTransitionError } from '../../quest-work-chat.port';
 
 type UnderfilledData = Extract<QuestV2UnderfilledOutcome, { underfilled: unknown }>['underfilled'];
 type UnderfilledError = Exclude<QuestV2UnderfilledOutcome, { underfilled: unknown }>;

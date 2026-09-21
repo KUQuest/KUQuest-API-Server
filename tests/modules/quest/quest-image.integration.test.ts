@@ -8,9 +8,9 @@ import {
   createQuest,
   deleteQuestImage,
   getQuestDetail,
-} from '@/modules/quest/quest.service';
-import type { QuestCreateInput } from '@/modules/quest/quest.schema';
-import type { StoredQuestImage } from '@/modules/quest/quest.storage';
+} from '@/modules/quest/v1/quest.service';
+import type { QuestCreateInput } from '@/modules/quest/v1/quest.schema';
+import type { StoredQuestImage } from '@/modules/quest/v1/quest.storage';
 
 import { randomUUID } from 'node:crypto';
 

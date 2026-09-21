@@ -1,1 +1,1 @@
-export * from './legacy-v1/quest-review.route';
+export * from './v1/quest-review.route';

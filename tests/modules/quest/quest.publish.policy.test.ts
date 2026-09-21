@@ -1,7 +1,7 @@
 import {
   buildQuestPublishCheck,
   calculateQuestEscrowRequirementSatang,
-} from '@/modules/quest/quest.publish.policy';
+} from '@/modules/quest/v1/quest.publish.policy';
 
 import { describe, expect, it } from 'bun:test';
 

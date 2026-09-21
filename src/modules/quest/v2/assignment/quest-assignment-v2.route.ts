@@ -13,7 +13,7 @@ import {
   decideQuestUnderfilledV2Controller,
   getQuestUnderfilledV2Controller,
   respondToQuestUnderfilledV2Controller,
-} from '../lifecycle';
+} from '../../lifecycle';
 import {
   questV2AssignmentHeadersSchema,
   questV2AssignmentListResponseSchema,
@@ -27,7 +27,7 @@ import {
   questV2UnderfilledHeadersSchema,
   questV2UnderfilledParamsSchema,
   questV2UnderfilledResponseSchema,
-} from '../lifecycle';
+} from '../../lifecycle';
 
 export const questAssignmentV2Route = new Elysia({
   name: 'quest-assignment-v2-route',

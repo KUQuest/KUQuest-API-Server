@@ -16,10 +16,10 @@ import { and, asc, eq, inArray, lte } from 'drizzle-orm';
 
 import { assignmentStatus, questMode, questParticipation, questStatus } from '../quest.contract';
 import { readQuestEscrow, releaseQuestEscrow } from '../quest-escrow.service';
-import { autoApproveDueProofs } from '../legacy-v1';
+import { autoApproveDueProofs } from '../v1';
 import { cancelUnfilledQuest, failQuestInTransaction } from '../settlement';
 import { applyQuestStateTransition } from '../quest-transition.service';
-import { expireQuestEditRequest } from '../legacy-v1';
+import { expireQuestEditRequest } from '../v1';
 import {
   expireQuestV2EditRequest,
   hasPendingQuestV2EditRequest,
@@ -29,12 +29,12 @@ import {
   detectQuestV2Underfilled,
   expireQuestV2Underfilled,
   pendingQuestV2UnderfilledQuestIds,
-} from './quest-underfilled-v2.service';
+} from '../v2/underfilled';
 import {
   autoApproveDueQuestV2Proofs,
   failDueAtQuestV2Proofs,
   retryQuestV2ProofUploadCleanup,
-} from '../proof-v2';
+} from '../v2/proof';
 import {
   cleanupQuestV2ImageObjects,
   recoverQuestV2ImageUploadManifests,

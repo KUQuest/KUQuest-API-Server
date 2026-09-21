@@ -1,1 +1,1 @@
-export * from './legacy-v1/quest-assignment.route';
+export * from './v1/quest-assignment.route';

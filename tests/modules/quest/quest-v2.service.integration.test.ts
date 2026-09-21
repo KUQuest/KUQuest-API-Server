@@ -10,7 +10,7 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createStagingTestAuthRoute, createStudentAuth } from '@/modules/auth';
-import { listOwnQuests } from '@/modules/quest/quest.service';
+import { listOwnQuests } from '@/modules/quest/v1/quest.service';
 import {
   createQuestV2,
   getQuestV2Detail,

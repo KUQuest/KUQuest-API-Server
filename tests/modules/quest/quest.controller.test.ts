@@ -1,4 +1,4 @@
-import * as questService from '@/modules/quest/quest.service';
+import * as questService from '@/modules/quest/v1/quest.service';
 import {
   createQuestController,
   createQuestEditRequestController,
@@ -7,7 +7,7 @@ import {
   respondToQuestEditRequestController,
   getQuestDetailController,
   listBoardQuestsController,
-} from '@/modules/quest/quest.controller';
+} from '@/modules/quest/v1/quest.controller';
 
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 

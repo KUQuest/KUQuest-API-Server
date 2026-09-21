@@ -1,1 +1,1 @@
-export * from './legacy-v1/quest-candidate.controller';
+export * from './v1/quest-candidate.controller';

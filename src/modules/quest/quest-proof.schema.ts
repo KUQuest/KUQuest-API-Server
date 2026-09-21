@@ -1,1 +1,1 @@
-export * from './legacy-v1/quest-proof.schema';
+export * from './v1/quest-proof.schema';

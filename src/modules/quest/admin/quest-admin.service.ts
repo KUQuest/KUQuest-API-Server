@@ -26,7 +26,7 @@ import { readKeysetPage } from '@/shared/keyset-page';
 import { and, asc, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
 
 import { questMode, questParticipation, type QuestStatus } from '../quest.contract';
-import { escapeLike } from '../legacy-v1';
+import { escapeLike } from '../v1';
 import {
   questV2Mode,
   questV2Participation,

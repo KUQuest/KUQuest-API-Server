@@ -7,12 +7,12 @@ import {
   listQuestV2Assignments,
   type QuestV2AssignmentOutcome,
 } from './quest-assignment-v2.service';
-import { mapQuestCommandOutcome, requireQuestCommandId } from '../quest-command.controller';
+import { mapQuestCommandOutcome, requireQuestCommandId } from '../../quest-command.controller';
 import type {
   QuestV2AssignmentMineQuery,
   QuestV2AssignmentParams,
 } from './quest-assignment-v2.schema';
-import { WorkChatTransitionError } from '../quest-work-chat.port';
+import { WorkChatTransitionError } from '../../quest-work-chat.port';
 
 type QuestV2Assignment = Extract<QuestV2AssignmentOutcome, { id: string }>;
 type QuestV2AssignmentError = Exclude<QuestV2AssignmentOutcome, QuestV2Assignment>;
