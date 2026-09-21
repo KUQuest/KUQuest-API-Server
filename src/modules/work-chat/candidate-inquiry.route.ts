@@ -18,6 +18,16 @@ import {
   uploadCandidateInquiryAttachmentController,
 } from './candidate-inquiry.controller';
 import {
+  extractChatSocketClientMessageId,
+  parseChatSocketSendMessage,
+  serializeChatSocketMessage,
+} from './chat-socket.schema';
+import {
+  CandidateInquiryServiceError,
+  isCurrentCandidateInquiryMember,
+  sendCandidateInquiryMessage,
+} from './candidate-inquiry.service';
+import {
   candidateInquiryAttachmentDiscardResponseSchema,
   candidateInquiryAttachmentLinkResponseSchema,
   candidateInquiryAttachmentParamsSchema,
@@ -37,9 +47,22 @@ import {
   candidateInquirySendMessageSchema,
 } from './candidate-inquiry.schema';
 import { workChatDelivery } from './work-chat.delivery';
-import { isCurrentCandidateInquiryMember } from './candidate-inquiry.service';
-
 const webSocketUnsubscribers = new WeakMap<object, () => void>();
+
+const sendCandidateInquirySocketRejection = (
+  ws: { send: (message: string) => unknown },
+  clientMessageId: string | null,
+  code: string,
+  message: string
+) => {
+  ws.send(
+    JSON.stringify({
+      type: 'MESSAGE_REJECTED',
+      clientMessageId,
+      error: { code, message },
+    })
+  );
+};
 
 export const candidateInquiryRoute = new Elysia({
   name: 'candidate-inquiry-route',
@@ -67,8 +90,36 @@ export const candidateInquiryRoute = new Elysia({
       );
       webSocketUnsubscribers.set(ws, unsubscribe);
     },
-    message(ws) {
-      ws.close(1008, 'Candidate Inquiry Events are read-only');
+    async message(ws, payload) {
+      const command = parseChatSocketSendMessage(payload);
+      if (!command) {
+        sendCandidateInquirySocketRejection(
+          ws,
+          extractChatSocketClientMessageId(payload),
+          'INVALID_COMMAND',
+          'Only a valid SEND_MESSAGE command is supported'
+        );
+        ws.close(1008, 'Invalid Candidate Inquiry command');
+        return;
+      }
+
+      try {
+        const message = await sendCandidateInquiryMessage(
+          ws.data.session.user.id,
+          ws.data.params.conversationId,
+          command
+        );
+        ws.send(
+          JSON.stringify({
+            type: 'MESSAGE_ACCEPTED',
+            clientMessageId: command.clientMessageId,
+            message: serializeChatSocketMessage(message),
+          })
+        );
+      } catch (error) {
+        if (!(error instanceof CandidateInquiryServiceError)) throw error;
+        sendCandidateInquirySocketRejection(ws, command.clientMessageId, error.code, error.message);
+      }
     },
     close(ws) {
       webSocketUnsubscribers.get(ws)?.();
@@ -76,9 +127,9 @@ export const candidateInquiryRoute = new Elysia({
     },
     detail: {
       tags: ['Candidate Inquiry'],
-      summary: 'Subscribe to Candidate Inquiry Events',
+      summary: 'Subscribe to Candidate Inquiry Events and send Messages',
       description:
-        'Subscribes a current Candidate Inquiry participant to committed Message Events. REST remains authoritative and this channel is read-only.',
+        'Subscribes a current Candidate Inquiry participant to committed Message Events and accepts optional SEND_MESSAGE commands. REST remains authoritative for persistence and recovery.',
       operationId: 'subscribeCandidateInquiryEvents',
       security: betterAuthSecurity,
     },

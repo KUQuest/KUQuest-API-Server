@@ -16,6 +16,16 @@ import {
   uploadWorkConversationAttachmentController,
 } from './work-chat.controller';
 import {
+  extractChatSocketClientMessageId,
+  parseChatSocketSendMessage,
+  serializeChatSocketMessage,
+} from './chat-socket.schema';
+import {
+  isCurrentWorkConversationMember,
+  sendWorkConversationMessage,
+  WorkChatServiceError,
+} from './work-chat.service';
+import {
   workChatAttachmentLinkResponseSchema,
   workChatAttachmentDiscardResponseSchema,
   workChatAttachmentParamsSchema,
@@ -33,9 +43,22 @@ import {
   workChatSendMessageSchema,
 } from './work-chat.schema';
 import { workChatDelivery } from './work-chat.delivery';
-import { isCurrentWorkConversationMember } from './work-chat.service';
 
 const webSocketUnsubscribers = new WeakMap<object, () => void>();
+const sendWorkChatSocketRejection = (
+  ws: { send: (message: string) => unknown },
+  clientMessageId: string | null,
+  code: string,
+  message: string
+) => {
+  ws.send(
+    JSON.stringify({
+      type: 'MESSAGE_REJECTED',
+      clientMessageId,
+      error: { code, message },
+    })
+  );
+};
 
 export const workChatRoute = new Elysia({
   name: 'work-chat-route',
@@ -63,8 +86,36 @@ export const workChatRoute = new Elysia({
       );
       webSocketUnsubscribers.set(ws, unsubscribe);
     },
-    message(ws) {
-      ws.close(1008, 'Work Conversation Events are read-only');
+    async message(ws, payload) {
+      const command = parseChatSocketSendMessage(payload);
+      if (!command) {
+        sendWorkChatSocketRejection(
+          ws,
+          extractChatSocketClientMessageId(payload),
+          'INVALID_COMMAND',
+          'Only a valid SEND_MESSAGE command is supported'
+        );
+        ws.close(1008, 'Invalid Work Conversation command');
+        return;
+      }
+
+      try {
+        const message = await sendWorkConversationMessage(
+          ws.data.session.user.id,
+          ws.data.params.conversationId,
+          command
+        );
+        ws.send(
+          JSON.stringify({
+            type: 'MESSAGE_ACCEPTED',
+            clientMessageId: command.clientMessageId,
+            message: serializeChatSocketMessage(message),
+          })
+        );
+      } catch (error) {
+        if (!(error instanceof WorkChatServiceError)) throw error;
+        sendWorkChatSocketRejection(ws, command.clientMessageId, error.code, error.message);
+      }
     },
     close(ws) {
       webSocketUnsubscribers.get(ws)?.();
@@ -72,9 +123,9 @@ export const workChatRoute = new Elysia({
     },
     detail: {
       tags: ['Work Chat'],
-      summary: 'Subscribe to committed Work Conversation Events',
+      summary: 'Subscribe to Work Conversation Events and send Messages',
       description:
-        'Subscribes a current Work Conversation Member to committed Message Events. REST remains authoritative and this channel is read-only.',
+        'Subscribes a current Work Conversation Member to committed Message Events and accepts optional SEND_MESSAGE commands. REST remains authoritative for persistence and recovery.',
       operationId: 'subscribeWorkConversationEvents',
       security: betterAuthSecurity,
     },
