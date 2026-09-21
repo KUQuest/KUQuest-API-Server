@@ -1,0 +1,22 @@
+meta {
+  name: Admin Sign Out
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/admin/auth/sign-out
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{adminSessionCookie}}
+  Origin: http://localhost:3000
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    bru.setEnvVar("adminSessionCookie", "");
+  }
+}

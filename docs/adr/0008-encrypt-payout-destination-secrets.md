@@ -1,0 +1,3 @@
+# Encrypt payout destination secrets
+
+Payout account numbers and routing values are encrypted before persistence with application-level AES-256-GCM and exposed only as masked display data outside the provider adapter. Each encrypted value carries a versioned key identifier, nonce, ciphertext, and authentication tag; only runtimes enabling Payout services require the key. Raw destination values are never copied into status histories, activity projections, logs, or idempotency records. Xendit requires destination details to initiate a Payout and does not provide the current flow with a reusable destination token, so retaining encrypted values is necessary while plaintext storage is not acceptable.

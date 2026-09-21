@@ -1,8 +1,5 @@
 import { openapi } from '@elysia/openapi';
-import {
-  authOpenAPIComponents,
-  authOpenAPIPaths,
-} from '@/modules/auth/auth.openapi';
+import { authOpenAPIComponents, authOpenAPIPaths } from '@/modules/auth/auth.openapi';
 
 export const openapiPlugin = openapi({
   documentation: {
@@ -41,14 +38,39 @@ export const openapiPlugin = openapi({
       },
       {
         name: 'Portfolio',
-        description: "Authenticated endpoints for managing the current Student's portfolio gallery.",
+        description:
+          "Authenticated endpoints for managing the current Student's portfolio gallery.",
       },
       {
         name: 'Certificates',
-        description: "Authenticated endpoints for managing the current Student's profile certificates.",
+        description:
+          "Authenticated endpoints for managing the current Student's profile certificates.",
+      },
+      {
+        name: 'Tags',
+        description: 'Authenticated Member reference data for Quest Tags.',
+      },
+      {
+        name: 'Xendit webhooks',
+        description: 'Provider callbacks for durable Top-up outcome processing.',
+      },
+      {
+        name: 'Admin Reports',
+        description: 'Admin Trust and Safety Report Case queue, evidence, and decisions.',
       },
     ],
-    components: authOpenAPIComponents,
+    components: {
+      ...authOpenAPIComponents,
+      securitySchemes: {
+        ...authOpenAPIComponents.securitySchemes,
+        xenditWebhookAuth: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-callback-token',
+          description: 'Xendit webhook callback token.',
+        },
+      },
+    },
     paths: authOpenAPIPaths,
   },
 });

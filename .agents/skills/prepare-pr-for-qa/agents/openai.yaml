@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prepare PR for QA"
+  short_description: "Prepare a PR and QA Brief"
+  default_prompt: "Use $prepare-pr-for-qa to prepare this implementation branch for human QA."

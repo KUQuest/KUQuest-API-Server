@@ -1,5 +1,5 @@
-import { relations } from 'drizzle-orm';
-import { boolean, pgTable, text, uuid, unique } from 'drizzle-orm/pg-core';
+import { relations, sql } from 'drizzle-orm';
+import { boolean, check, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 
 export const faculty = pgTable(
   'faculty',
@@ -7,7 +7,7 @@ export const faculty = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     name: text('name').notNull(),
   },
-  (table) => [unique('faculty_name_key').on(table.name)],
+  (table) => [unique('faculty_name_key').on(table.name)]
 );
 
 export const department = pgTable(
@@ -19,7 +19,7 @@ export const department = pgTable(
       .references(() => faculty.id),
     name: text('name').notNull(),
   },
-  (table) => [unique('department_faculty_id_name_key').on(table.facultyId, table.name)],
+  (table) => [unique('department_faculty_id_name_key').on(table.facultyId, table.name)]
 );
 
 export const occupation = pgTable(
@@ -31,7 +31,10 @@ export const occupation = pgTable(
     // instead of the server hardcoding a name comparison.
     requiresStudentId: boolean('requires_student_id').notNull(),
   },
-  (table) => [unique('occupation_name_key').on(table.name)],
+  (table) => [
+    unique('occupation_name_key').on(table.name),
+    check('occupation_name_nonempty', sql`length(trim(name)) > 0`),
+  ]
 );
 
 export const facultyRelations = relations(faculty, ({ many }) => ({

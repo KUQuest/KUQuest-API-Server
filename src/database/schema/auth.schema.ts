@@ -19,7 +19,7 @@ import { file } from './file.schema';
 export const authUser = pgTable(
   'auth_user',
   {
-    id: text('id').primaryKey(),
+    id: uuid('id').defaultRandom().primaryKey(),
     email: text('email').notNull(),
     emailVerified: boolean('email_verified').default(false).notNull(),
     // better-auth's core `image` field has no equivalent in the design's auth_user;
@@ -36,6 +36,7 @@ export const authUser = pgTable(
     occupationId: uuid('occupation_id').references(() => occupation.id),
     termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
     termsVersion: text('terms_version'),
+    version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
@@ -46,19 +47,19 @@ export const authUser = pgTable(
     unique('auth_user_email_key').on(table.email),
     check(
       'auth_user_academic_year_check',
-      sql`${table.academicYear} IS NULL OR (${table.academicYear} >= 1000 AND ${table.academicYear} <= 9999)`,
+      sql`${table.academicYear} IS NULL OR (${table.academicYear} >= 1000 AND ${table.academicYear} <= 9999)`
     ),
     index('auth_user_department_id_idx').on(table.departmentId),
     uniqueIndex('auth_user_student_id_uidx')
       .on(table.studentId)
       .where(sql`${table.studentId} IS NOT NULL`),
-  ],
+  ]
 );
 
 export const authAdmin = pgTable(
   'auth_admin',
   {
-    id: text('id').primaryKey(),
+    id: uuid('id').defaultRandom().primaryKey(),
     username: text('username'),
     email: text('email').notNull(),
     emailVerified: boolean('email_verified').default(false).notNull(),
@@ -78,15 +79,17 @@ export const authAdmin = pgTable(
     uniqueIndex('auth_admin_username_uidx')
       .on(sql`lower(${table.username})`)
       .where(sql`${table.username} IS NOT NULL`),
-  ],
+  ]
 );
 
 export const authSession = pgTable(
   'auth_session',
   {
-    id: text('id').primaryKey(),
-    userId: text('user_id').references(() => authUser.id, { onDelete: 'cascade' }),
-    adminId: text('admin_id').references(() => authAdmin.id, { onDelete: 'cascade' }),
+    id: text('id')
+      .default(sql`gen_random_uuid()::text`)
+      .primaryKey(),
+    userId: uuid('user_id').references(() => authUser.id, { onDelete: 'cascade' }),
+    adminId: uuid('admin_id').references(() => authAdmin.id, { onDelete: 'cascade' }),
     token: text('token').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     ipAddress: text('ip_address'),
@@ -102,15 +105,17 @@ export const authSession = pgTable(
     check('auth_session_check', sql`num_nonnulls(${table.userId}, ${table.adminId}) = 1`),
     index('auth_session_admin_id_idx').on(table.adminId),
     index('auth_session_user_id_idx').on(table.userId),
-  ],
+  ]
 );
 
 export const authAccount = pgTable(
   'auth_account',
   {
-    id: text('id').primaryKey(),
-    userId: text('user_id').references(() => authUser.id, { onDelete: 'cascade' }),
-    adminId: text('admin_id').references(() => authAdmin.id, { onDelete: 'cascade' }),
+    id: text('id')
+      .default(sql`gen_random_uuid()::text`)
+      .primaryKey(),
+    userId: uuid('user_id').references(() => authUser.id, { onDelete: 'cascade' }),
+    adminId: uuid('admin_id').references(() => authAdmin.id, { onDelete: 'cascade' }),
     accountId: text('account_id').notNull(),
     providerId: text('provider_id').notNull(),
     accessToken: text('access_token'),
@@ -130,25 +135,27 @@ export const authAccount = pgTable(
     check('auth_account_check', sql`num_nonnulls(${table.userId}, ${table.adminId}) = 1`),
     check(
       'auth_account_check1',
-      sql`${table.adminId} IS NULL OR ${table.providerId} = 'credential'`,
+      sql`${table.adminId} IS NULL OR ${table.providerId} = 'credential'`
     ),
     unique('auth_account_provider_id_account_id_key').on(table.providerId, table.accountId),
     index('auth_account_admin_id_idx').on(table.adminId),
     index('auth_account_user_id_idx').on(table.userId),
-  ],
+  ]
 );
 
 export const authVerification = pgTable(
   'auth_verification',
   {
-    id: text('id').primaryKey(),
+    id: text('id')
+      .default(sql`gen_random_uuid()::text`)
+      .primaryKey(),
     identifier: text('identifier').notNull(),
     value: text('value').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index('auth_verification_identifier_idx').on(table.identifier)],
+  (table) => [index('auth_verification_identifier_idx').on(table.identifier)]
 );
 
 export const authUserRelations = relations(authUser, ({ many, one }) => ({

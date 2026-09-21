@@ -1,0 +1,15 @@
+meta {
+  name: Get Data
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/v1/onboarding/get-data
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}

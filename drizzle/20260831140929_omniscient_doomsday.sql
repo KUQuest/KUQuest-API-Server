@@ -1,0 +1,1 @@
+ALTER TABLE "wallet_idempotency_keys" ADD COLUMN "result_data" jsonb;

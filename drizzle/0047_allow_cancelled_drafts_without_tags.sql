@@ -1,0 +1,2 @@
+ALTER TABLE "quest" DROP CONSTRAINT "quest_tag_check";--> statement-breakpoint
+ALTER TABLE "quest" ADD CONSTRAINT "quest_tag_check" CHECK ("quest"."quest_status" IN ('QUEST_DRAFT', 'QUEST_CANCELLED') OR "quest"."tag_id" IS NOT NULL);

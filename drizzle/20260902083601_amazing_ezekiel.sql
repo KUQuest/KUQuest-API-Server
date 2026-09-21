@@ -1,0 +1,2 @@
+ALTER TABLE "chat_conversation" DROP CONSTRAINT "chat_conversation_quest_id_key";--> statement-breakpoint
+CREATE UNIQUE INDEX "chat_conversation_work_quest_uidx" ON "chat_conversation" USING btree ("quest_id") WHERE "chat_conversation"."type" = 'CONVERSATION_WORK';

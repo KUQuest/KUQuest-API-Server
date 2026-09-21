@@ -1,0 +1,17 @@
+meta {
+  name: API Root
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/
+  body: none
+  auth: none
+}
+
+docs {
+  Serves the browser Google auth test page. Open in an actual browser (not this
+  client) to complete the Google OAuth flow, then copy the
+  `better-auth.session_token` cookie into the `userSessionCookie` env var.
+}

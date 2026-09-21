@@ -1,36 +1,65 @@
-# Issue Tracker
+# Issue Tracker: GitHub
 
-Issues for this repository live in the **KUQuest Linear workspace**.
+Issues and specs for this repository live as GitHub Issues. Use the `gh` CLI
+for all issue operations.
 
-## Default destination
+## Repository
 
-- Team: **Backend**
-- Team key: `BE`
-- Team ID: `fe4b5ef6-dfd4-4fcc-9619-e3a8b8115579`
+- Repository: `KUQuest/KUQuest-API-Server`
+- Issues: enabled
+- CLI: `gh`
 
-Use the connected Linear integration to search, create, and update issues.
+## Conventions
 
-## Projects
+- **Create an issue**: `gh issue create --title "..." --body "..."`. Use a
+  heredoc for multi-line bodies.
+- **Read an issue**: `gh issue view <number> --comments`, and include labels
+  when the issue's triage state matters.
+- **List issues**: `gh issue list --state open` with suitable label and state
+  filters.
+- **Comment on an issue**: `gh issue comment <number> --body "..."`.
+- **Apply or remove labels**: `gh issue edit <number> --add-label "..."` or
+  `--remove-label "..."`.
+- **Close an issue**: `gh issue close <number> --comment "..."`.
 
-Assign a project only when the work clearly belongs to an existing Linear
-project. Otherwise, leave the project unset rather than guessing.
+## Pull requests as a triage surface
 
-Examples of relevant projects include:
+**PRs as a request surface: no.** External PRs do not enter the issue triage
+queue automatically. Pull requests remain implementation artifacts and must
+link to their related GitHub Issue.
 
-- Login & Auth (Google OAuth)
-- Quest Creation & Discovery (Core Loop)
+GitHub shares one number space across Issues and pull requests. Resolve a
+number with `gh pr view <number>` first, then use `gh issue view <number>` when
+it is not a pull request.
 
-## GitHub relationship
+## When a skill says "publish to the issue tracker"
 
-Linear is the source of truth for requirements, status, assignment, and triage.
+Create a GitHub Issue.
 
-GitHub pull requests are implementation artifacts. Add the related PR as a link
-on the Linear issue. Do not create a duplicate GitHub issue.
+## When a skill says "fetch the relevant ticket"
 
-## Working with issues
+Run `gh issue view <number> --comments`.
 
-- Refer to issues by their Linear identifier, such as `BE-123`.
-- Preserve existing state, assignment, project, priority, and labels unless the
-  task requires changing them.
-- Use the canonical triage labels defined in
-  `docs/agents/triage-labels.md`.
+## Wayfinding operations
+
+The `/wayfinder` map is a single GitHub Issue with child Issues as tickets.
+
+- **Map**: create one Issue labelled `wayfinder:map` with the Notes,
+  Decisions-so-far, and Fog sections.
+- **Child ticket**: link the child Issue as a GitHub sub-issue when supported.
+  Otherwise, add `Part of #<map>` at the top of its body and keep a task list
+  in the map body. Use `wayfinder:<type>` labels for `research`, `prototype`,
+  `grilling`, or `task`.
+- **Blocking**: use GitHub native Issue dependencies when available. Add an
+  edge with the REST API and the numeric Issue id, not the Issue number:
+  `gh api repos/KUQuest/KUQuest-API-Server/issues/<number>/dependencies/blocked_by -X POST -F issue_id=<numeric id>`.
+  Read the numeric id with `gh issue view <number> --json id,number`. The `-F`
+  flag sends a number; `-f` sends a string and returns 422. If native
+  dependencies are not available, add `Blocked by: #<n>, #<n>` at the top of the child body.
+- **Claim**: assign the Issue with the REST API, then prove the result:
+  `gh api repos/KUQuest/KUQuest-API-Server/issues/<number>/assignees -X POST -f "assignees[]=<login>"`,
+  then `gh issue view <number> --json assignees`. Read your login with
+  `gh api user -q .login`. The `gh issue edit --add-assignee` flag exits 0 here
+  and assigns nobody.
+- **Resolve**: comment the answer, close the Issue, and append a context
+  pointer to the map's Decisions-so-far.

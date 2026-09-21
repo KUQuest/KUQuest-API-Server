@@ -1,0 +1,2 @@
+ALTER TABLE "wallet_activities" DROP CONSTRAINT "wallet_activities_type_check";--> statement-breakpoint
+ALTER TABLE "wallet_activities" ADD CONSTRAINT "wallet_activities_type_check" CHECK ("wallet_activities"."type" IN ('TOP_UP', 'SPEND', 'EARN', 'HOLD', 'RELEASE', 'CONVERT'));

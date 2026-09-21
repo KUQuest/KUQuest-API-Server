@@ -1,8 +1,10 @@
+give me a little bit of context, talk in ASD-STE100 Simplified Technical English, and use the ubiquitous language from `CONTEXT.md`.
+
 ## Agent skills
 
 ### Issue tracker
 
-Issues live in the KUQuest Linear workspace, using the Backend team (`BE`) by default. GitHub PRs should be linked to their Linear issue. See `docs/agents/issue-tracker.md`.
+Issues live in this GitHub repository's Issues. Use the `gh` CLI by default, and link GitHub PRs to their related issue. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
@@ -11,6 +13,18 @@ Use the five canonical labels without remapping: `needs-triage`, `needs-info`, `
 ### Domain docs
 
 Single-context repository: read root `CONTEXT.md` and relevant ADRs under `docs/adr/`. See `docs/agents/domain.md`.
+
+**Finance Rulebook** — for `Top-up`, `Wallet`, `Funding Reservation`, `Ledger Transaction`, `Earnings Conversion`, `Payout`, or `Payout Destination`, read `docs/rulebook/finance/finance-rulebook.md` before planning or coding.
+
+**Quest Rulebook** — for Quest State, Start Work, Proof Submission, cancellation, failure, or Work Chat membership, read `docs/rulebook/quest/quest-work-chat-rulebook.md` §Resolved Quest lifecycle before planning or coding.
+
+**Admin Rulebook** — for Payout Approval, Dispute Case, Quest Hide, Wallet Freeze or Suspend, Report Case moderation, Conduct Report, Red Flag, or Member Ban, read `docs/rulebook/admin/admin-rulebook.md` before planning or coding.
+
+**Rulebook routing** — for an authoritative decision table mapping tasks, actors, and states to Rulebooks, sub-contracts, and reconciliation guides, read `docs/agents/routing.md` before planning or coding.
+
+### Clarifying domain context
+
+For a Quest, Work Chat, Candidate Inquiry Conversation, or pre-assignment request, identify the active branch before planning or coding. When the actor, Quest State, mode, or participation shape stays unknown after the domain docs, follow the clarification ladder in `docs/agents/routing.md` §4 and ask for one missing fact at a time.
 
 ### Code style
 
@@ -27,31 +41,18 @@ Follow `CODESTYLES.md` at the repo root — formatting, import order, module lay
 
 Typical chain: `grilling`/`grill-with-docs` → `to-spec`/`to-tickets` → `triage` as issues come in → `wayfinder` if scope exceeds one session.
 
+### Pull request and CI/CD workflow rules
+
+- GitHub Actions uses the workflow files from `main`.
+- Put application, test, finance, documentation, and other non-workflow changes in a PR with base `develop`.
+- If a task changes a file under `.github/workflows/`, commit that workflow change and open a separate PR with base `main`.
+- A PR with base `main` must contain only the required GitHub Actions workflow file changes. Do not include application, test, finance, or documentation changes in that PR.
+- If one task needs both workflow and non-workflow changes, use separate commits and separate PRs: workflow PR to `main`, other changes PR to `develop`.
+
 ### Coding guidelines
 
-Behavioral guidelines to reduce common LLM coding mistakes ([source](https://github.com/multica-ai/andrej-karpathy-skills)). Bias toward caution over speed; use judgment on trivial tasks.
+Behavioral rules that reduce common LLM coding mistakes: hidden assumptions, speculative abstraction, collateral edits, and unverified work. Read before implementing. See `docs/agents/coding-guidelines.md`.
 
-**1. Think before coding** — don't assume, don't hide confusion, surface tradeoffs.
-- State assumptions explicitly; if uncertain, ask.
-- If multiple interpretations exist, present them — don't pick silently.
-- If a simpler approach exists, say so; push back when warranted.
-- If something is unclear, stop, name what's confusing, ask.
+### Gotchas
 
-**2. Simplicity first** — minimum code that solves the problem, nothing speculative.
-- No features beyond what was asked. No abstractions for single-use code. No unrequested "flexibility". No error handling for impossible scenarios.
-- 200 lines that could be 50 → rewrite it.
-- Ask: "Would a senior engineer call this overcomplicated?" If yes, simplify.
-
-**3. Surgical changes** — touch only what you must, clean up only your own mess.
-- Don't "improve" adjacent code, comments, or formatting. Don't refactor what isn't broken. Match existing style even if you'd do it differently.
-- Unrelated dead code: mention it, don't delete it.
-- Remove imports/variables/functions YOUR changes made unused; don't remove pre-existing dead code unless asked.
-- Test: every changed line traces directly to the user's request.
-
-**4. Goal-driven execution** — define success criteria, loop until verified.
-- "Add validation" → write tests for invalid inputs, then make them pass.
-- "Fix the bug" → write a test that reproduces it, then make it pass.
-- "Refactor X" → ensure tests pass before and after.
-- Multi-step tasks: state a brief plan, one line per step with its verify check.
-
-These guidelines are working if: fewer unnecessary changes in diffs, fewer rewrites from overcomplication, clarifying questions come before implementation rather than after mistakes.
+Mistakes agents made in this repo and the rules they produced. Read before working; append when a session's failure generalizes. See `docs/agents/gotchas.md`.

@@ -1,35 +1,109 @@
+import {
+  adminQuestRoute,
+  questAssignmentRoute,
+  questCandidateRoute,
+  questProofRoute,
+  questReviewRoute,
+  questRoute,
+} from '@/modules/quest';
+import { tagRoute } from '@/modules/tag';
+import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
+import { adminTopUpRoute, topUpRoute, topUpWebhookRoute } from '@/modules/top-up';
+import { adminDisputeRoute, questDisputeRoute } from '@/modules/quest/admin';
+import { questSettlementRoute } from '@/modules/quest';
+import {
+  adminActivityLogRoute,
+  adminFinanceRoute,
+  adminMemberRoute,
+  adminOverviewRoute,
+  adminReportRoute,
+} from '@/modules/admin';
+import {
+  questAssignmentV2Route,
+  questCandidateV2Route,
+  questCandidateTeamV2Route,
+  questProofV2Route,
+  questReviewV2Route,
+  questV2Route,
+} from '@/modules/quest';
+import { candidateInquiryRoute, messageReportRoute, workChatRoute } from '@/modules/work-chat';
+
 import { Elysia } from 'elysia';
 
 import { academicRegistrationRoute } from './modules/academic-registration';
-import { authPlugin, authTestRoute } from './modules/auth';
+import { authPlugin, authTestRoute, stagingTestAuthRoute } from './modules/auth';
 import { certificateRoute } from './modules/certificate';
 import { healthRoute } from './modules/health';
 import { onboardingRoute } from './modules/onboarding';
 import { portfolioRoute } from './modules/portfolio';
 import { profileRoute } from './modules/profile';
+import { workExperienceRoute } from './modules/work-experience';
+import { localFinanceTestRoute } from './modules/local-finance-test';
+import { adminWalletRoute, walletRoute } from './modules/wallet';
+import { payoutDestinationRoute } from './modules/payout-destination';
 import { corsPlugin } from './plugins/cors';
 import { errorHandlerPlugin } from './plugins/error-handler';
 import { openapiPlugin } from './plugins/openapi';
 
-export const app = new Elysia({
-  name: 'kuquest-api',
-})
-  .use(errorHandlerPlugin)
-  .use(corsPlugin)
-  .use(authPlugin)
-  .use(openapiPlugin)
-  .get('/', () => 'Hello Elysia', {
-    detail: {
-      tags: ['General'],
-      summary: 'API root',
-      description: 'Returns a basic response from the KUQuest API.',
-      operationId: 'getApiRoot',
-    },
+export const createApp = () => {
+  return new Elysia({
+    name: 'kuquest-api',
   })
-  .use(authTestRoute)
-  .use(healthRoute)
-  .use(onboardingRoute)
-  .use(academicRegistrationRoute)
-  .use(profileRoute)
-  .use(certificateRoute)
-  .use(portfolioRoute)
+    .use(errorHandlerPlugin)
+    .use(corsPlugin)
+    .use(authPlugin)
+    .use(stagingTestAuthRoute)
+    .use(localFinanceTestRoute)
+    .use(walletRoute)
+    .use(openapiPlugin)
+    .get('/', () => 'Hello Elysia', {
+      detail: {
+        tags: ['General'],
+        summary: 'API root',
+        description: 'Returns a basic response from the KUQuest API.',
+        operationId: 'getApiRoot',
+      },
+    })
+    .use(authTestRoute)
+    .use(healthRoute)
+    .use(onboardingRoute)
+    .use(academicRegistrationRoute)
+    .use(profileRoute)
+    .use(questAssignmentRoute)
+    .use(questCandidateRoute)
+    .use(questProofRoute)
+    .use(questReviewRoute)
+    .use(questDisputeRoute)
+    .use(questSettlementRoute)
+    .use(adminDisputeRoute)
+    .use(questAssignmentV2Route)
+    .use(questCandidateV2Route)
+    .use(questCandidateTeamV2Route)
+    .use(questProofV2Route)
+    .use(questReviewV2Route)
+    .use(questV2Route)
+    .use(questRoute)
+    .use(adminQuestRoute)
+    .use(adminOverviewRoute)
+    .use(adminActivityLogRoute)
+    .use(adminFinanceRoute)
+    .use(adminMemberRoute)
+    .use(adminReportRoute)
+    .use(certificateRoute)
+    .use(portfolioRoute)
+    .use(workExperienceRoute)
+    .use(tagRoute)
+    .use(candidateInquiryRoute)
+    .use(messageReportRoute)
+    .use(workChatRoute)
+    .use(payoutRoute)
+    .use(payoutDestinationRoute)
+    .use(adminPayoutRoute)
+    .use(payoutWebhookRoute)
+    .use(topUpRoute)
+    .use(topUpWebhookRoute)
+    .use(adminWalletRoute)
+    .use(adminTopUpRoute);
+};
+
+export const app = createApp();

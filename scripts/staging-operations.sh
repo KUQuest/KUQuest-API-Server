@@ -24,6 +24,12 @@ read_database_url() {
   printf '%s' "$value"
 }
 
+read_environment_value() {
+  local name=$1
+
+  sed -n "s/^${name}=//p" "$environment_file" | tail -n 1
+}
+
 backup_contents_are_valid() {
   local backup_name=$1
 
@@ -142,6 +148,9 @@ prepare_operation() {
   [[ -f "$environment_file" ]] ||
     fail "environment file does not exist: $environment_file"
 
+  [[ "$(read_environment_value DEPLOYMENT_ENV)" == 'staging' ]] ||
+    fail "DEPLOYMENT_ENV=staging is required in $environment_file"
+
   cd "$staging_dir"
   export APP_IMAGE
 }
@@ -161,12 +170,16 @@ deploy() {
   fi
 
   trap report_deployment_failure ERR
+  deployment_stage=cleanup
+  docker image prune --all --force
   deployment_stage=pull
   docker compose pull api
   deployment_stage=backup
   create_verified_backup "$database_url" >/dev/null
   deployment_stage=migration
   docker compose run --rm --no-deps api bun run db:migrate
+
+  docker compose run --rm --no-deps api bun run db:verify-migration-journal
   trap - ERR
 
   local rollout_status
@@ -221,8 +234,10 @@ bootstrap() {
     'PostgreSQL roles, the server, and other databases are not changed.' \
     'Type exactly: RESET staging public schema' >&2
 
-  local confirmation
-  read -r confirmation
+  local confirmation=${STAGING_RESET_CONFIRMATION:-}
+  if [[ -z "$confirmation" ]]; then
+    read -r confirmation
+  fi
   if [[ "$confirmation" != 'RESET staging public schema' ]]; then
     fail "confirmation did not match; no schema reset was performed. Backup: $recovery_backup"
   fi
@@ -238,7 +253,26 @@ bootstrap() {
     _ \
     'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
 
+  DATABASE_URL=$database_url docker run \
+    --rm \
+    --network "$staging_network" \
+    --env DATABASE_URL \
+    "$postgres_image" \
+    sh \
+    -c \
+    'exec psql --dbname "$DATABASE_URL" --set=ON_ERROR_STOP=1 --command "$1"' \
+    _ \
+    'CREATE SCHEMA IF NOT EXISTS drizzle;
+     CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (
+       id SERIAL PRIMARY KEY,
+       hash text NOT NULL,
+       created_at bigint
+     );
+     TRUNCATE TABLE drizzle.__drizzle_migrations;'
+
   docker compose run --rm --no-deps api bun run db:migrate
+
+  docker compose run --rm --no-deps api bun run db:verify-migration-journal
 
   local verification
   verification=$(
@@ -252,10 +286,11 @@ bootstrap() {
       'exec psql --dbname "$DATABASE_URL" --tuples-only --no-align --command "$1"' \
       _ \
       "SELECT CASE WHEN
-         to_regclass('public.user') IS NOT NULL AND
-         to_regclass('public.account') IS NOT NULL AND
-         to_regclass('public.session') IS NOT NULL AND
-         to_regclass('public.verification') IS NOT NULL AND
+         to_regclass('public.auth_user') IS NOT NULL AND
+         to_regclass('public.auth_admin') IS NOT NULL AND
+         to_regclass('public.auth_account') IS NOT NULL AND
+         to_regclass('public.auth_session') IS NOT NULL AND
+         to_regclass('public.auth_verification') IS NOT NULL AND
          to_regclass('drizzle.__drizzle_migrations') IS NOT NULL
        THEN 'ok' ELSE 'missing' END;"
   )
@@ -297,6 +332,9 @@ bootstrap() {
   if [[ "$applied_journal_count" != "$expected_journal_count" ]]; then
     fail "migration journal is incomplete; restore from $recovery_backup"
   fi
+
+  docker compose run --rm --no-deps api bun run db:seed-staging
+  docker compose run --rm --no-deps api bun run db:verify-staging-seed
 
   trap - ERR
   printf 'Staging schema bootstrap succeeded. Recovery backup: %s\n' \

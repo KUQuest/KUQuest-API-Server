@@ -6,18 +6,32 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
+    "worker:quest-lifecycle": "bun scripts/quest-lifecycle-worker.ts",
+    "worker:payout": "bun scripts/payout-worker.ts",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "build": "bun build src/index.ts --target=bun --outdir=dist",
     "db:generate": "drizzle-kit generate",
     "db:check": "bun scripts/check-migrations.ts",
+    "db:seed-quest-tag": "bun scripts/seed-quest-tag.ts",
     "db:seed-admin": "bun scripts/seed-admin.ts",
-    "db:migrate": "drizzle-kit migrate",
+    "db:seed-demo-users": "bun scripts/seed-demo-users.ts",
+    "db:seed-frontend-demo": "bun scripts/seed-frontend-demo.ts",
+    "db:seed-frontend-images": "bun scripts/seed-frontend-images.ts",
+    "db:seed-finance-test": "bun scripts/seed-finance-test.ts",
+    "db:seed-staging": "STAGING_FINANCE_SEED_ENABLED=true WRITE_DEMO_COOKIES=false bun scripts/seed-staging.ts",
+    "db:verify-migration-journal": "bun scripts/verify-migration-journal.ts",
+    "db:verify-staging-seed": "bun scripts/verify-staging-seed.ts",
+    "db:reset-local": "bun scripts/reset-local-database.ts",
+    "db:migrate": "bun scripts/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "check": "bun run db:check && bun run lint && bun run typecheck && bun test && bun run build"
+    "check": "bun run db:check && bun run lint && bun run format:check && bun run typecheck && bun test && bun run build",
+    "prepare": "husky || true"
   },
   "dependencies": {
     "@better-auth/expo": "1.6.23",
@@ -28,12 +42,17 @@
     "drizzle-orm": "^0.45.2",
     "elysia": "latest",
     "postgres": "^3.4.9",
+    "qrcode": "1.5.4",
     "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/qrcode": "1.5.6",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.5.0",
     "oxlint": "^1.73.0",
     "oxlint-tsgolint": "^0.24.0",
+    "prettier": "^3.9.6",
     "typescript": "latest"
   }
 }

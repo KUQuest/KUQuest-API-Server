@@ -1,0 +1,503 @@
+import { app } from '@/app';
+import { db, sql } from '@/database/client';
+import { authUser } from '@/database/schema/auth.schema';
+import {
+  proofSubmission,
+  quest,
+  questAssignment,
+  questSettlementCommand,
+} from '@/database/schema/quest.schema';
+import { tag } from '@/database/schema/tag.schema';
+import { auth } from '@/modules/auth';
+import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
+import type { QuestWorkChatMembershipTransition } from '@/modules/quest';
+import { workChatMembershipWriter } from '@/modules/work-chat';
+import {
+  ensureInitialMoneyPolicy,
+  ensureWallet,
+  positiveSatang,
+  reserveSpending,
+} from '@/modules/wallet';
+import {
+  fundTestWallet,
+  listTestQuestEscrows,
+  readTestWallet,
+} from '../wallet/wallet-test-fixtures';
+
+import { randomUUID } from 'node:crypto';
+
+import { eq, inArray } from 'drizzle-orm';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test';
+
+let postgresAvailable = false;
+const hirerId = randomUUID();
+const workerIds = [randomUUID(), randomUUID(), randomUUID()];
+const tagId = randomUUID();
+const questIds: string[] = [];
+const applyQuestWorkChatTransition = mock(
+  async (_transaction: unknown, _transition: QuestWorkChatMembershipTransition) => ({
+    conversationId: 'test-conversation',
+    outcome: 'APPLIED' as const,
+  })
+);
+
+const request = (
+  method: string,
+  path: string,
+  userId: string,
+  body?: unknown,
+  headers: HeadersInit = {}
+) =>
+  app.handle(
+    new Request(`http://localhost${path}`, {
+      method,
+      headers: {
+        ...headers,
+        'x-user-id': userId,
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  );
+
+const createQuest = async (
+  status: 'QUEST_OPEN' | 'QUEST_ASSIGNED' | 'QUEST_IN_PROGRESS' | 'QUEST_SUBMITTED',
+  workers: string[] = [],
+  rewardSatang = 1_000
+) => {
+  const questId = randomUUID();
+  questIds.push(questId);
+  await db.insert(quest).values({
+    id: questId,
+    hirerId,
+    title: 'Settlement test',
+    condition: 'Complete the work',
+    mode: 'NO_CANDIDATE',
+    participation: workers.length > 1 ? 'GROUP' : 'SOLO',
+    questStatus: status,
+    rewardSatang,
+    headcount: workers.length || 1,
+    tagId,
+    startTime: new Date('2030-01-01T10:00:00.000Z'),
+  });
+  if (workers.length > 0) {
+    const assignmentCreatedAt = new Date();
+    await db.insert(questAssignment).values(
+      workers.map((workerId, index) => ({
+        questId,
+        workerId,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE',
+        createdAt: new Date(assignmentCreatedAt.getTime() + index),
+      }))
+    );
+  }
+  await db.transaction((transaction) =>
+    reserveSpending(transaction, {
+      ownerUserId: hirerId,
+      callerScope: 'quest',
+      callerReference: questId,
+      amountSatang: positiveSatang(
+        (workers.length || 1) * (rewardSatang + Math.ceil(rewardSatang * 0.02))
+      ),
+    })
+  );
+  return questId;
+};
+
+beforeAll(async () => {
+  try {
+    await sql`select 1`;
+    postgresAvailable = true;
+  } catch {
+    return;
+  }
+  await ensureInitialMoneyPolicy();
+  await db.insert(authUser).values([
+    { id: hirerId, email: `${hirerId}@ku.th`, firstName: 'Settlement', lastName: 'Hirer' },
+    ...workerIds.map((id, index) => ({
+      id,
+      email: `${id}@ku.th`,
+      firstName: 'Settlement',
+      lastName: `Worker ${index}`,
+    })),
+  ]);
+  await db.insert(tag).values({ id: tagId, name: `Settlement test ${tagId}` });
+  await ensureWallet(hirerId);
+  for (const workerId of workerIds) await ensureWallet(workerId);
+  await fundTestWallet(hirerId, 100_000);
+});
+
+beforeEach(() => {
+  applyQuestWorkChatTransition.mockClear();
+  spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+    applyQuestWorkChatTransition
+  );
+});
+
+afterEach(() => {
+  mock.restore();
+});
+
+afterAll(async () => {
+  if (postgresAvailable && questIds.length > 0)
+    await db.delete(quest).where(inArray(quest.id, questIds));
+});
+
+describe('Quest terminal settlement HTTP contract', () => {
+  it('cancels a null-tag Draft without a Funding Reservation or refund', async () => {
+    if (!postgresAvailable) return;
+    spyOn(auth.api, 'getSession').mockImplementation(
+      (async ({ headers }: { headers: Headers }) =>
+        ({
+          user: { id: headers.get('x-user-id') ?? hirerId },
+          session: { userId: headers.get('x-user-id') ?? hirerId },
+        }) as never) as never
+    );
+    const questId = randomUUID();
+    questIds.push(questId);
+    await db.insert(quest).values({
+      id: questId,
+      hirerId,
+      title: 'Draft cancellation test',
+      condition: 'Complete the work',
+      mode: 'NO_CANDIDATE',
+      participation: 'SOLO',
+      questStatus: 'QUEST_DRAFT',
+      rewardSatang: 1_000,
+      headcount: 1,
+      startTime: new Date('2030-01-01T10:00:00.000Z'),
+      tagId: null,
+    });
+
+    const response = await request('POST', `/api/v1/quests/${questId}/cancel`, hirerId, undefined, {
+      'idempotency-key': `cancel-draft-${questId}`,
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).data).toEqual({
+      questStatus: 'QUEST_CANCELLED',
+      outcome: 'CANCELLED',
+      paidSatang: 0,
+      refundedSatang: 0,
+    });
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_CANCELLED');
+    expect(
+      await listTestQuestEscrows({ ownerUserIds: [hirerId], questIds: [questId] })
+    ).toHaveLength(0);
+  });
+
+  it('cancels OPEN, ASSIGNED, and IN_PROGRESS with exact integer-Satang outcomes', async () => {
+    if (!postgresAvailable) return;
+    const authenticate = spyOn(auth.api, 'getSession').mockImplementation(
+      (async ({ headers }: { headers: Headers }) =>
+        ({
+          user: { id: headers.get('x-user-id') ?? hirerId },
+          session: { userId: headers.get('x-user-id') ?? hirerId },
+        }) as never) as never
+    );
+    for (const [status, workers, expectedPaid, expectedRefund] of [
+      ['QUEST_OPEN', [], 0, 1_020],
+      ['QUEST_ASSIGNED', [workerIds[0]], 200, 820],
+      ['QUEST_IN_PROGRESS', [workerIds[1]], 1_000, 0],
+    ] as const) {
+      const questId = await createQuest(status, [...workers]);
+      const response = await request(
+        'POST',
+        `/api/v1/quests/${questId}/cancel`,
+        hirerId,
+        undefined,
+        { 'idempotency-key': `cancel-${questId}` }
+      );
+      expect(response.status).toBe(200);
+      expect((await response.json()).data).toMatchObject({
+        questStatus: 'QUEST_CANCELLED',
+        paidSatang: expectedPaid,
+        refundedSatang: expectedRefund,
+      });
+      const transitions = applyQuestWorkChatTransition.mock.calls
+        .map(([, transition]) => transition)
+        .filter((transition) => transition.questId === questId);
+      expect(transitions.map(({ type }) => type)).toEqual(
+        workers.length === 0
+          ? ['questBecameReadOnly']
+          : ['workerBecameInactive', 'questBecameReadOnly']
+      );
+    }
+    expect(authenticate).toHaveBeenCalled();
+  });
+
+  it('gives an ASSIGNED group remainder Satang to earliest Assignments', async () => {
+    if (!postgresAvailable) return;
+    spyOn(auth.api, 'getSession').mockImplementation(
+      (async () => ({ user: { id: hirerId }, session: { userId: hirerId } }) as never) as never
+    );
+    const questId = await createQuest('QUEST_ASSIGNED', workerIds, 1_002);
+    const before = await Promise.all(
+      workerIds.map(async (workerId) => (await readTestWallet(workerId)).earningsBalanceSatang)
+    );
+    const response = await request('POST', `/api/v1/quests/${questId}/cancel`, hirerId, undefined, {
+      'idempotency-key': 'be184-remainder',
+    });
+    expect(response.status).toBe(200);
+    const after = await Promise.all(
+      workerIds.map(async (workerId) => (await readTestWallet(workerId)).earningsBalanceSatang)
+    );
+    expect(after.map((value, index) => value - before[index])).toEqual([201, 200, 200]);
+  });
+
+  it('settles approved Proof Submission obligations and completes active Assignments', async () => {
+    if (!postgresAvailable) return;
+    spyOn(auth.api, 'getSession').mockImplementation(
+      (async () => ({ user: { id: hirerId }, session: { userId: hirerId } }) as never) as never
+    );
+    const questId = await createQuest('QUEST_SUBMITTED', [workerIds[0]]);
+    const proofId = randomUUID();
+    await db.insert(proofSubmission).values({
+      id: proofId,
+      questId,
+      workerId: workerIds[0],
+      submittedByUserId: workerIds[0],
+      content: 'Done',
+    });
+    const response = await request(
+      'POST',
+      `/api/v1/quests/${questId}/proof/${proofId}/review`,
+      hirerId,
+      { status: 'PROOF_APPROVED' }
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.questStatus).toBe('QUEST_COMPLETED');
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_COMPLETED');
+    expect(
+      (
+        await db
+          .select({ status: questAssignment.assignmentStatus })
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, questId))
+      )[0]?.status
+    ).toBe('ASSIGNMENT_COMPLETED');
+  });
+
+  it('replays one cancellation and rejects a different key after terminal settlement', async () => {
+    if (!postgresAvailable) return;
+    spyOn(auth.api, 'getSession').mockImplementation(
+      (async () => ({ user: { id: hirerId }, session: { userId: hirerId } }) as never) as never
+    );
+    const questId = await createQuest('QUEST_ASSIGNED', [workerIds[2]]);
+    const first = await request('POST', `/api/v1/quests/${questId}/cancel`, hirerId, undefined, {
+      'idempotency-key': 'be184-replay',
+    });
+    const replay = await request('POST', `/api/v1/quests/${questId}/cancel`, hirerId, undefined, {
+      'idempotency-key': 'be184-replay',
+    });
+    const duplicate = await request(
+      'POST',
+      `/api/v1/quests/${questId}/cancel`,
+      hirerId,
+      undefined,
+      { 'idempotency-key': 'be184-other' }
+    );
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data).toEqual((await first.clone().json()).data);
+    expect(duplicate.status).toBe(409);
+    expect(
+      await db
+        .select()
+        .from(questSettlementCommand)
+        .where(eq(questSettlementCommand.questId, questId))
+    ).toHaveLength(1);
+  });
+
+  it('does not expose the legacy Admin dispute route', async () => {
+    if (!postgresAvailable) return;
+    const response = await request(
+      'POST',
+      `/api/v1/admin/quests/${randomUUID()}/dispute/resolve`,
+      randomUUID(),
+      { outcome: 'REFUND_HIRER' },
+      { 'idempotency-key': 'be184-legacy-dispute-disabled' }
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('rolls back Quest, Assignment, Wallet, and command changes when Work Chat rejects the terminal transition', async () => {
+    if (!postgresAvailable) return;
+    spyOn(auth.api, 'getSession').mockImplementation(
+      (async () => ({ user: { id: hirerId }, session: { userId: hirerId } }) as never) as never
+    );
+    const questId = await createQuest('QUEST_IN_PROGRESS', [workerIds[0]]);
+    const beforeWallet = await readTestWallet(hirerId);
+    const before = {
+      spending: beforeWallet.spendingBalanceSatang,
+      reserved: beforeWallet.fundingReservedSatang,
+    };
+    spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(async () => {
+      throw new Error('chat unavailable');
+    });
+    const response = await request('POST', `/api/v1/quests/${questId}/cancel`, hirerId, undefined, {
+      'idempotency-key': 'be184-chat-failure',
+    });
+    expect(response.status).toBe(503);
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_IN_PROGRESS');
+    expect(
+      (
+        await db
+          .select({ status: questAssignment.assignmentStatus })
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, questId))
+      )[0]?.status
+    ).toBe('ASSIGNMENT_ACTIVE');
+    const afterWallet = await readTestWallet(hirerId);
+    const after = {
+      spending: afterWallet.spendingBalanceSatang,
+      reserved: afterWallet.fundingReservedSatang,
+    };
+    expect(after).toEqual(before);
+    expect(
+      await db
+        .select()
+        .from(questSettlementCommand)
+        .where(eq(questSettlementCommand.commandId, 'be184-chat-failure'))
+    ).toHaveLength(0);
+  });
+
+  it('automatically cancels a partially filled GROUP Quest at its start boundary', async () => {
+    if (!postgresAvailable) return;
+
+    const questId = randomUUID();
+    questIds.push(questId);
+    const now = new Date('2026-08-29T12:00:00.000Z');
+    await db.insert(quest).values({
+      id: questId,
+      hirerId,
+      title: 'Unfilled group Quest',
+      condition: 'Complete the work',
+      mode: 'NO_CANDIDATE',
+      participation: 'GROUP',
+      questStatus: 'QUEST_OPEN',
+      rewardSatang: 1_000,
+      headcount: 2,
+      tagId,
+      startTime: new Date(now.getTime() - 1),
+      dueAt: new Date(now.getTime() + 60 * 60 * 1000),
+    });
+    await db.insert(questAssignment).values({
+      questId,
+      workerId: workerIds[0],
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    });
+    await db.transaction((transaction) =>
+      reserveSpending(transaction, {
+        ownerUserId: hirerId,
+        callerScope: 'quest',
+        callerReference: questId,
+        amountSatang: positiveSatang(2_040),
+      })
+    );
+
+    const beforeWallet = await readTestWallet(hirerId);
+    const before = {
+      spending: beforeWallet.spendingBalanceSatang,
+      reserved: beforeWallet.fundingReservedSatang,
+    };
+
+    const result = await runQuestLifecycleWorker({
+      clock: { now: () => now },
+      autoApprove: async () => [],
+    });
+
+    expect(result.autoCancelledQuestIds).toContain(questId);
+    const [cancelled] = await db
+      .select({
+        status: quest.questStatus,
+        cancelledByUserId: quest.cancelledByUserId,
+        cancelledByAdminId: quest.cancelledByAdminId,
+      })
+      .from(quest)
+      .where(eq(quest.id, questId));
+    expect(cancelled).toEqual({
+      status: 'QUEST_CANCELLED',
+      cancelledByUserId: null,
+      cancelledByAdminId: null,
+    });
+    expect(
+      (
+        await db
+          .select({ status: questAssignment.assignmentStatus })
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, questId))
+      )[0]?.status
+    ).toBe('ASSIGNMENT_CANCELLED');
+    expect(
+      applyQuestWorkChatTransition.mock.calls
+        .map(([, transition]) => transition)
+        .filter((transition) => transition.questId === questId)
+        .map(({ type }) => type)
+    ).toEqual(['workerBecameInactive', 'questBecameReadOnly']);
+    expect(
+      (
+        await db
+          .select({
+            status: questSettlementCommand.commandType,
+            actorUserId: questSettlementCommand.actorUserId,
+            actorAdminId: questSettlementCommand.actorAdminId,
+          })
+          .from(questSettlementCommand)
+          .where(eq(questSettlementCommand.questId, questId))
+      )[0]
+    ).toEqual({
+      status: 'AUTO_CANCEL',
+      actorUserId: null,
+      actorAdminId: null,
+    });
+    const afterWallet = await readTestWallet(hirerId);
+    const after = {
+      spending: afterWallet.spendingBalanceSatang,
+      reserved: afterWallet.fundingReservedSatang,
+    };
+    expect(after).toEqual(
+      before && {
+        spending: before.spending + 2_040,
+        reserved: before.reserved - 2_040,
+      }
+    );
+
+    const replay = await runQuestLifecycleWorker({
+      clock: { now: () => now },
+      autoApprove: async () => [],
+    });
+    expect(replay.autoCancelledQuestIds).not.toContain(questId);
+    expect(
+      await db
+        .select()
+        .from(questSettlementCommand)
+        .where(eq(questSettlementCommand.questId, questId))
+    ).toHaveLength(1);
+  });
+
+  it('requires a command key before authentication', async () => {
+    const missing = await app.handle(
+      new Request(`http://localhost/api/v1/quests/${randomUUID()}/cancel`, { method: 'POST' })
+    );
+    expect(missing.status).toBe(400);
+    expect((await missing.json()).error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+  });
+});

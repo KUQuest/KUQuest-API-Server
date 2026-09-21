@@ -1,4 +1,4 @@
-import {t} from 'elysia';
+import { t, type Static } from 'elysia';
 
 export const maxPortfolioImages = 10;
 
@@ -16,16 +16,38 @@ const descriptionSchema = t.String({
 });
 
 export const portfolioParamSchema = t.Object({
-  portfolioId: t.String({ format: 'uuid'}),
+  portfolioId: t.String({ format: 'uuid' }),
+});
+
+export const portfolioImageParamSchema = t.Object({
+  portfolioId: t.String({ format: 'uuid' }),
+  fileId: t.String({ format: 'uuid' }),
+});
+
+export const portfolioImageCollectionParamSchema = t.Object({
+  portfolioId: t.String({ format: 'uuid' }),
+});
+
+export type PortfolioImageTarget =
+  Static<typeof portfolioImageParamSchema> | Static<typeof portfolioImageCollectionParamSchema>;
+
+export const portfolioImageUploadSchema = t.Object(
+  { image: t.File() },
+  { additionalProperties: false }
+);
+
+export const portfolioMutationResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({ version: t.Integer({ minimum: 1 }) }),
 });
 
 export const portfolioCreateSchema = t.Object(
   {
     title: titleSchema,
     description: t.Optional(descriptionSchema),
-    images: t.Files({maxItems: maxPortfolioImages}),
+    images: t.Optional(t.Files({ maxItems: maxPortfolioImages })),
   },
-  { additionalProperties: false},
+  { additionalProperties: false }
 );
 
 export const portfolioUpdateSchema = t.Object(
@@ -33,33 +55,32 @@ export const portfolioUpdateSchema = t.Object(
     title: t.Optional(titleSchema),
     description: t.Optional(descriptionSchema),
   },
-  {additionalProperties: false},
+  { additionalProperties: false }
 );
 
-const portfolioImageSchema = t.Object({
+export const portfolioImageSchema = t.Object({
   fileId: t.String({ format: 'uuid' }),
   position: t.Integer(),
   url: t.String({ format: 'uri', example: 'https://storage.example.com/portfolio/a.png' }),
 });
 
-const portfolioItemSchema = t.Object({
+export const portfolioItemSchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  version: t.Integer({ minimum: 1 }),
   title: t.String({ example: 'Capstone Project' }),
   description: t.Nullable(t.String({ example: 'A short description of the work.' })),
   images: t.Array(portfolioImageSchema),
   createdAt: t.String({ format: 'date-time' }),
 });
 
-export const portfolioListRespondSchema = 
-t.Object({
+export const portfolioListRespondSchema = t.Object({
   success: t.Literal(true),
   data: t.Array(portfolioItemSchema),
 });
 
-export const portfolioCreateResponseSchema =
-t.Object({
+export const portfolioCreateResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
-    id: t.String({ format: 'uuid'}),
+    id: t.String({ format: 'uuid' }),
   }),
 });
