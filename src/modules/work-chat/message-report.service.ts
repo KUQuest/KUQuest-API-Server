@@ -76,6 +76,10 @@ const visibleMessage = async (
                     or(
                       isNull(chatMembership.leftAt),
                       lte(chatMessage.createdAt, chatMembership.leftAt)
+                    ),
+                    or(
+                      isNull(chatMessage.hiddenAt),
+                      eq(chatMembership.id, chatMessage.senderMembershipId)
                     )
                   )
                 )
@@ -104,6 +108,10 @@ const visibleMessage = async (
                         eq(chatMembership.role, 'PROSPECTIVE_WORKER'),
                         eq(chatMembership.memberId, chatConversation.candidateWorkerId)
                       )
+                    ),
+                    or(
+                      isNull(chatMessage.hiddenAt),
+                      eq(chatMembership.id, chatMessage.senderMembershipId)
                     )
                   )
                 )
@@ -141,7 +149,8 @@ const findOpenCase = async (database: MessageReportDatabase, messageId: string) 
       )
     )
     .orderBy(desc(adminReportCase.createdAt), desc(adminReportCase.id))
-    .limit(1);
+    .limit(1)
+    .for('update');
   return openCase;
 };
 
