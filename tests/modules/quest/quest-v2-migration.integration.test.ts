@@ -23,7 +23,7 @@ import {
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
 import { autoApproveDueQuestV2Proofs, type QuestTransaction } from '@/modules/quest';
-import type { QuestWorkChatWriter } from '@/modules/quest/quest-work-chat.port';
+import type { QuestWorkChatWriter } from '@/modules/quest/shared';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 import {
   ensureInitialMoneyPolicy,

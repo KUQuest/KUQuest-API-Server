@@ -10,8 +10,8 @@ import {
   runQuestCommand,
   type QuestCommandResult,
   type QuestCommandWork,
-} from '@/modules/quest/quest-command.service';
-import { requireQuestCommandId } from '@/modules/quest/quest-command.controller';
+} from '@/modules/quest/shared';
+import { requireQuestCommandId } from '@/modules/quest/shared';
 
 import { randomUUID } from 'node:crypto';
 

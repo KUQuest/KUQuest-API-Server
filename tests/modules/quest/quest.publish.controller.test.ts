@@ -1,9 +1,6 @@
-import * as questService from '@/modules/quest/quest.service';
+import * as questService from '@/modules/quest/v1';
 import { MoneyDomainError } from '@/modules/wallet';
-import {
-  getQuestPublishCheckController,
-  publishQuestController,
-} from '@/modules/quest/quest.controller';
+import { getQuestPublishCheckController, publishQuestController } from '@/modules/quest/v1';
 
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 

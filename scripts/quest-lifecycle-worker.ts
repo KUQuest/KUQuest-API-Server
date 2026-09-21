@@ -1,5 +1,5 @@
 import { sql } from '@/database/client';
-import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
+import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 
 try {
   const result = await runQuestLifecycleWorker();

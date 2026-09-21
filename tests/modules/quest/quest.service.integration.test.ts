@@ -14,8 +14,8 @@ import {
   getQuestDetail,
   listBoardQuests,
   listOwnQuests,
-} from '@/modules/quest/quest.service';
-import type { QuestCreateInput } from '@/modules/quest/quest.schema';
+} from '@/modules/quest/v1';
+import type { QuestCreateInput } from '@/modules/quest/v1';
 
 import { randomUUID } from 'node:crypto';
 

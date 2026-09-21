@@ -6,7 +6,7 @@ import { paymentPayouts } from '@/database/schema/payment.schema';
 import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletLedgerAccount, walletLedgerTransaction } from '@/database/schema/wallet.schema';
-import { questMode, questParticipation, questStatus } from '@/modules/quest/quest.contract';
+import { questMode, questParticipation, questStatus } from '@/modules/quest/shared';
 import {
   createPayoutDestinationEncryption,
   getPayoutDestination,

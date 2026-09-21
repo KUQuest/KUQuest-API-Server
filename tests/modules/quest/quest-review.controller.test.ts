@@ -1,5 +1,5 @@
-import * as reviewService from '@/modules/quest/quest-review.service';
-import { createReviewController } from '@/modules/quest/quest-review.controller';
+import * as reviewService from '@/modules/quest/v1';
+import { createReviewController } from '@/modules/quest/v1';
 
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 

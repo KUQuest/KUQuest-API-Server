@@ -15,7 +15,7 @@ import {
   questStatus,
   type AssignmentStatus,
   type QuestStatus,
-} from '@/modules/quest/quest.contract';
+} from '@/modules/quest/shared';
 
 import { deleteTestIdempotencyKeys } from '../wallet/wallet-test-fixtures';
 

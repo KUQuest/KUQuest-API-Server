@@ -5,7 +5,7 @@ import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import type { QuestV2CreateInput } from '@/modules/quest';
-import { questV2Storage } from '@/modules/quest/quest.storage';
+import { questV2Storage } from '@/modules/quest/v2';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import {
   fundTestWallet,
@@ -16,7 +16,7 @@ import {
 import { randomUUID } from 'node:crypto';
 
 import { Elysia } from 'elysia';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
 
 const testEmail = `quest-v2-journey-${randomUUID()}@ku.th`;
@@ -456,5 +456,40 @@ describe('Quest API v2 Hirer journey', () => {
     );
     expect(v1DetailResponse.status).toBe(404);
     expect((await v1DetailResponse.json()).error.code).toBe('QUEST_NOT_FOUND');
+  });
+
+  it('returns 409 QUEST_DRAFT_LIMIT_REACHED when creating more than 10 drafts', async () => {
+    const journeyDraftIds: string[] = [];
+    try {
+      // Fill up to 10 drafts (first clean any current drafts for hirer)
+      await db
+        .delete(quest)
+        .where(and(eq(quest.hirerId, hirerId), eq(quest.questStatus, 'QUEST_DRAFT')));
+
+      for (let i = 0; i < 10; i++) {
+        const res = await postQuest(
+          { ...baseInput, title: `Draft limit batch ${i + 1}` },
+          `journey-draft-limit-${i}-${randomUUID()}`
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: { id: string } };
+        journeyDraftIds.push(body.data.id);
+        questIds.push(body.data.id);
+      }
+
+      // 11th creation attempt returns 409
+      const overflowRes = await postQuest(
+        { ...baseInput, title: 'Draft limit overflow' },
+        `journey-draft-limit-11-${randomUUID()}`
+      );
+      expect(overflowRes.status).toBe(409);
+      const errorBody = (await overflowRes.json()) as { error: { code: string; message: string } };
+      expect(errorBody.error.code).toBe('QUEST_DRAFT_LIMIT_REACHED');
+      expect(errorBody.error.message).toBe('You can have at most 10 active Draft Quests');
+    } finally {
+      if (journeyDraftIds.length > 0) {
+        await db.delete(quest).where(inArray(quest.id, journeyDraftIds));
+      }
+    }
   });
 });

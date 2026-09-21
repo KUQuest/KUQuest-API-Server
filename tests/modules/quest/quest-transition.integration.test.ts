@@ -2,11 +2,8 @@ import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import type { QuestWorkChatMembershipTransition } from '@/modules/quest/quest-work-chat.contract';
-import {
-  applyQuestStateTransition,
-  QuestTransitionNotAllowedError,
-} from '@/modules/quest/quest-transition.service';
+import type { QuestWorkChatMembershipTransition } from '@/modules/quest/shared';
+import { applyQuestStateTransition, QuestTransitionNotAllowedError } from '@/modules/quest/shared';
 
 import { randomUUID } from 'node:crypto';
 

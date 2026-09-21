@@ -7,7 +7,7 @@ import { quest, questAssignment, questImage, questLocation } from '@/database/sc
 import { tag } from '@/database/schema/tag.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
-import { questStatus } from '@/modules/quest/quest.contract';
+import { questStatus } from '@/modules/quest/shared';
 import { deleteTestIdempotencyKeys } from '../wallet/wallet-test-fixtures';
 
 import { Elysia } from 'elysia';

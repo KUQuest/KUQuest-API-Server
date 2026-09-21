@@ -12,7 +12,7 @@ const digestAllowedFiles: Record<string, true> = {
   'src/modules/wallet/wallet.money-command.service.ts': true,
   // Quest owns its own command records and their digest (ADR-0029). Importing the Wallet
   // helper here would add the Quest-to-Wallet import that ADR-0009 and ADR-0030 remove.
-  'src/modules/quest/quest-command.service.ts': true,
+  'src/modules/quest/shared/command/quest-command.service.ts': true,
 };
 
 const boundaryAllowedFiles: Record<string, true> = {
