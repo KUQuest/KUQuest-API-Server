@@ -20,7 +20,7 @@ import {
 import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { editQuestV2 } from '@/modules/quest';
-import type { QuestStatus } from '@/modules/quest/quest.contract';
+import type { QuestStatus } from '@/modules/quest/shared';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 import {
   ensureInitialMoneyPolicy,

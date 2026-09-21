@@ -3,14 +3,9 @@ import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import {
-  addQuestImages,
-  createQuest,
-  deleteQuestImage,
-  getQuestDetail,
-} from '@/modules/quest/v1/quest.service';
-import type { QuestCreateInput } from '@/modules/quest/v1/quest.schema';
-import type { StoredQuestImage } from '@/modules/quest/v1/quest.storage';
+import { addQuestImages, createQuest, deleteQuestImage, getQuestDetail } from '@/modules/quest/v1';
+import type { QuestCreateInput } from '@/modules/quest/v1';
+import type { StoredQuestImage } from '@/modules/quest/v1';
 
 import { randomUUID } from 'node:crypto';
 

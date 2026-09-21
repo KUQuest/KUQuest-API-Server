@@ -8,7 +8,7 @@ import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/
 
 import type { Static } from 'elysia';
 
-import { WorkChatTransitionError } from '../quest-work-chat.port';
+import { WorkChatTransitionError } from '../shared/work-chat/quest-work-chat.port';
 import {
   hideQuest,
   QuestAdminCommandError,

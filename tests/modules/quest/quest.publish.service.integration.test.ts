@@ -2,8 +2,8 @@ import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createQuest, getQuestPublishCheck, publishQuest } from '@/modules/quest/v1/quest.service';
-import type { QuestCreateInput } from '@/modules/quest/v1/quest.schema';
+import { createQuest, getQuestPublishCheck, publishQuest } from '@/modules/quest/v1';
+import type { QuestCreateInput } from '@/modules/quest/v1';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import {
   fundTestWallet,

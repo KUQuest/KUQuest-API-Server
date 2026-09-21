@@ -10,8 +10,8 @@ import {
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
-import type { QuestTransaction, QuestWorkChatWriter } from '@/modules/quest/quest-work-chat.port';
-import type { QuestWorkChatMembershipTransition } from '@/modules/quest/quest-work-chat.contract';
+import type { QuestTransaction, QuestWorkChatWriter } from '@/modules/quest/shared';
+import type { QuestWorkChatMembershipTransition } from '@/modules/quest/shared';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';

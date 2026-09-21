@@ -28,8 +28,8 @@ import {
   submitQuestV2ProofSubmission,
   type QuestTransaction,
 } from '@/modules/quest';
-import { questV2ProofStorage } from '@/modules/quest/v2/proof/quest-proof-v2.storage';
-import type { QuestWorkChatWriter } from '@/modules/quest/quest-work-chat.port';
+import { questV2ProofStorage } from '@/modules/quest/v2';
+import type { QuestWorkChatWriter } from '@/modules/quest/shared';
 import { createWorkChatMembershipWriter, workChatMembershipWriter } from '@/modules/work-chat';
 import {
   ensureInitialMoneyPolicy,

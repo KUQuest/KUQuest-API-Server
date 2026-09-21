@@ -1,8 +1,8 @@
 import { t } from 'elysia';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
-import { questStatuses } from '../quest.contract';
-import { questV2Modes, questV2Participations } from '../quest-v2.contract';
+import { questStatuses } from '../shared/contracts/quest.contract';
+import { questV2Modes, questV2Participations } from '../v2/core/quest-v2.contract';
 
 // Generic in the member type, so the schema keeps the literal union the controllers read.
 const literalUnion = <T extends string>(values: readonly T[]) =>

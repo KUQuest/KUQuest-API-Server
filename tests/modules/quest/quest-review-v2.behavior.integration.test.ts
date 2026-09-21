@@ -4,10 +4,7 @@ import { authUser } from '@/database/schema/auth.schema';
 import { quest, questAssignment, review } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
-import {
-  createQuestV2Review,
-  updateQuestV2Review,
-} from '@/modules/quest/v2/review/quest-review-v2.service';
+import { createQuestV2Review, updateQuestV2Review } from '@/modules/quest/v2';
 
 import { randomUUID } from 'node:crypto';
 

@@ -4,7 +4,7 @@ import { authUser } from '@/database/schema/auth.schema';
 import { quest, questAssignment } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
-import type { QuestTransaction, QuestWorkChatWriter } from '@/modules/quest/quest-work-chat.port';
+import type { QuestTransaction, QuestWorkChatWriter } from '@/modules/quest/shared';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';

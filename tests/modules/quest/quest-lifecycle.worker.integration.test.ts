@@ -11,8 +11,8 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
-import { questV2Storage } from '@/modules/quest/v1/quest.storage';
-import { questV2ImageUploadOperationScope } from '@/modules/quest/v2/quest-v2.service';
+import { questV2Storage } from '@/modules/quest/v2';
+import { questV2ImageUploadOperationScope } from '@/modules/quest/v2';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 
 import { and, eq, inArray } from 'drizzle-orm';

@@ -8,8 +8,11 @@ import {
   UnsupportedFileTypeError,
 } from '@/shared/object-storage';
 
-import { mapQuestCommandOutcome, requireQuestCommandId } from '../../quest-command.controller';
-import type { QuestCommandOutcomeCode } from '../../quest-command.service';
+import {
+  mapQuestCommandOutcome,
+  requireQuestCommandId,
+} from '../../shared/command/quest-command.controller';
+import type { QuestCommandOutcomeCode } from '../../shared/command/quest-command.service';
 import type {
   QuestV2ProofFileParams,
   QuestV2ProofSubmissionCreateInput,
@@ -34,7 +37,7 @@ import {
   type QuestV2ProofSubmissionOutcome,
   type QuestV2ProofFileAccess,
 } from './quest-proof-v2.service';
-import { WorkChatTransitionError } from '../../quest-work-chat.port';
+import { WorkChatTransitionError } from '../../shared/work-chat/quest-work-chat.port';
 
 const serializeSubmission = (submission: QuestV2ProofSubmission) => ({
   id: submission.id,

@@ -13,7 +13,10 @@ import {
   type QuestV2ReviewOutcome,
   type QuestV2ReviewRow,
 } from './quest-review-v2.service';
-import { mapQuestCommandOutcome, requireQuestCommandId } from '../../quest-command.controller';
+import {
+  mapQuestCommandOutcome,
+  requireQuestCommandId,
+} from '../../shared/command/quest-command.controller';
 
 const serializeReview = (review: QuestV2ReviewRow) => ({
   id: review.id,

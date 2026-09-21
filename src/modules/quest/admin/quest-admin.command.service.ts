@@ -2,8 +2,8 @@ import { quest } from '@/database/schema/quest.schema';
 import {
   createAdminActionService,
   type AdminActionResult,
-  type AdminActionReasonCatalog,
-} from '@/modules/admin';
+} from '@/modules/admin/admin-action.service';
+import type { AdminActionReasonCatalog } from '@/modules/admin/admin-action.policy';
 
 import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 
@@ -13,8 +13,12 @@ import {
 } from './quest-admin.service';
 import type { AdminQuestSummaryResponse } from './quest-admin.service';
 import { terminateQuestInTransaction } from '../settlement';
-import type { QuestTransaction } from '../quest-work-chat.port';
-import { isTerminalQuestStatus, questStatus, type QuestStatus } from '../quest.contract';
+import type { QuestTransaction } from '../shared/work-chat/quest-work-chat.port';
+import {
+  isTerminalQuestStatus,
+  questStatus,
+  type QuestStatus,
+} from '../shared/contracts/quest.contract';
 
 export const questAdminReasonCodes = ['POLICY_REVIEW', 'SAFETY_REVIEW'] as const;
 

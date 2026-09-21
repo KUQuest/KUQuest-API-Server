@@ -8,10 +8,10 @@ import {
   sha256Json,
   type QuestCommandOutcomeCode,
   type QuestCommandWork,
-} from '../../quest-command.service';
-import { isTerminalQuestStatus } from '../../quest.contract';
-import type { QuestStatus } from '../../quest.contract';
-import type { QuestTransaction } from '../../quest-work-chat.port';
+} from '../../shared/command/quest-command.service';
+import { isTerminalQuestStatus } from '../../shared/contracts/quest.contract';
+import type { QuestStatus } from '../../shared/contracts/quest.contract';
+import type { QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
 
 import type { QuestV2ReviewCreateInput, QuestV2ReviewUpdateInput } from './quest-review-v2.schema';
 

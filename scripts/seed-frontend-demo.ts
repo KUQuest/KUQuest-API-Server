@@ -15,7 +15,7 @@ import {
   questMode,
   questParticipation,
   questStatus,
-} from '@/modules/quest/quest.contract';
+} from '@/modules/quest/shared';
 import {
   createSealedLedgerTransactionInTransaction,
   ensureInitialMoneyPolicy,

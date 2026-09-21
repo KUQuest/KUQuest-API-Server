@@ -21,7 +21,7 @@ import {
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
-import { decideQuestV2Underfilled, getQuestV2Underfilled } from '@/modules/quest/lifecycle';
+import { decideQuestV2Underfilled, getQuestV2Underfilled } from '@/modules/quest/v2';
 import type { QuestTransaction, QuestWorkChatMembershipTransition } from '@/modules/quest';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 import {

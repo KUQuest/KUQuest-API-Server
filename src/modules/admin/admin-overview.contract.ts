@@ -1,4 +1,4 @@
-import { questStatus } from '@/modules/quest/quest.contract';
+import { questStatus } from '@/modules/quest/shared';
 
 /**
  * The accepted Quest State projection for the Admin Overview.

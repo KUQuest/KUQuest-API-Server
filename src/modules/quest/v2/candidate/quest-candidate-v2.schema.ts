@@ -1,6 +1,6 @@
 import { t, type Static } from 'elysia';
 
-import { questV2ApplicationStates, questV2AssignmentStates } from '../quest-v2.contract';
+import { questV2ApplicationStates, questV2AssignmentStates } from '../core/quest-v2.contract';
 
 const applicationState = t.Union(
   questV2ApplicationStates.map((value) => t.Literal(value)) as [

@@ -25,15 +25,19 @@ import { readKeysetPage } from '@/shared/keyset-page';
 
 import { and, asc, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
 
-import { questMode, questParticipation, type QuestStatus } from '../quest.contract';
+import {
+  questMode,
+  questParticipation,
+  type QuestStatus,
+} from '../shared/contracts/quest.contract';
 import { escapeLike } from '../v1';
 import {
   questV2Mode,
   questV2Participation,
   type QuestV2Mode,
   type QuestV2Participation,
-} from '../quest-v2.contract';
-import type { QuestTransaction } from '../quest-work-chat.port';
+} from '../v2/core/quest-v2.contract';
+import type { QuestTransaction } from '../shared/work-chat/quest-work-chat.port';
 
 export type AdminQuestSort = 'newest' | 'oldest';
 

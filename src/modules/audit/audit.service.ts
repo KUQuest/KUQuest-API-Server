@@ -1,6 +1,6 @@
 import { auditRecord } from '@/database/schema/audit.schema';
 
-import type { QuestTransaction } from '@/modules/quest/quest-work-chat.port';
+import type { QuestTransaction } from '@/modules/quest/shared';
 
 export type AuditActor =
   | { actorType: 'MEMBER'; actorUserId: string }

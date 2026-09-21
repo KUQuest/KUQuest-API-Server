@@ -7,7 +7,7 @@ import { tag } from '@/database/schema/tag.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
-import { autoApproveDueProofs, reviewProof } from '@/modules/quest/v1/quest-proof.service';
+import { autoApproveDueProofs, reviewProof } from '@/modules/quest/v1';
 import { createAdminDisputeCaseInTransaction } from '@/modules/quest/admin';
 import {
   ensureInitialMoneyPolicy,

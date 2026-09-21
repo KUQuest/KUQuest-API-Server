@@ -19,7 +19,7 @@ import {
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
 import { type QuestTransaction } from '@/modules/quest';
-import type { QuestWorkChatMembershipTransition } from '@/modules/quest/quest-work-chat.contract';
+import type { QuestWorkChatMembershipTransition } from '@/modules/quest/shared';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';

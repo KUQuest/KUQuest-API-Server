@@ -1,7 +1,4 @@
-import {
-  buildQuestV2PublishCheck,
-  calculateQuestV2FundingQuote,
-} from '@/modules/quest/v2/quest-v2.publish.policy';
+import { buildQuestV2PublishCheck, calculateQuestV2FundingQuote } from '@/modules/quest/v2';
 import { positiveSatang, satang } from '@/modules/wallet';
 
 import { describe, expect, it } from 'bun:test';

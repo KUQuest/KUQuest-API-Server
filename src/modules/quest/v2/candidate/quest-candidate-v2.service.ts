@@ -12,23 +12,23 @@ import {
   sha256Json,
   type QuestCommandOutcomeCode,
   type QuestCommandWork,
-} from '../../quest-command.service';
+} from '../../shared/command/quest-command.service';
 import type {
   AcceptedWorker,
   QuestWorkChatMembershipTransition,
-} from '../../quest-work-chat.contract';
+} from '../../shared/work-chat/quest-work-chat.contract';
 import {
   questV2ApplicationStates,
   questV2Mode,
   questV2Participation,
   type QuestV2ApplicationState,
-} from '../quest-v2.contract';
+} from '../core/quest-v2.contract';
 import {
   lockQuest,
   runQuestV2Selection,
   type SelectionAssignmentRow,
   type SelectionSuccess,
-} from '../../quest-selection.service';
+} from '../../shared/contracts/quest-selection.service';
 
 export const questV2CandidateApplicationCreateOperationScope =
   'quest.v2.candidate-application.create';

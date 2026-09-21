@@ -5,7 +5,7 @@ import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import type { QuestV2CreateInput } from '@/modules/quest';
-import { questV2Storage } from '@/modules/quest/v1/quest.storage';
+import { questV2Storage } from '@/modules/quest/v2';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import {
   fundTestWallet,

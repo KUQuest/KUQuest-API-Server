@@ -16,24 +16,29 @@ import { MoneyDomainError, satang, type Satang } from '@/modules/wallet';
 
 import { and, asc, eq, inArray } from 'drizzle-orm';
 
-import { applyQuestStateTransition } from '../quest-transition.service';
+import { applyQuestStateTransition } from '../shared/transition/quest-transition.service';
 import {
   platformFeeForQuest,
   readQuestEscrow,
   releaseQuestEscrow,
   settleQuestWorkers,
-} from '../quest-escrow.service';
-import { assignmentStatus, questStatus, teamStatus, type QuestStatus } from '../quest.contract';
+} from '../shared/escrow/quest-escrow.service';
+import {
+  assignmentStatus,
+  questStatus,
+  teamStatus,
+  type QuestStatus,
+} from '../shared/contracts/quest.contract';
 import {
   defaultQuestWorkChatMembershipWriter,
   WorkChatTransitionError,
   type QuestTransaction,
-} from '../quest-work-chat.port';
-import { hasPendingQuestV2EditRequest } from '../quest-v2-edit.service';
+} from '../shared/work-chat/quest-work-chat.port';
+import { hasPendingQuestV2EditRequest } from '../v2/core/quest-v2-edit.service';
 import type {
   InactiveAssignmentStatus,
   QuestWorkChatMembershipTransition,
-} from '../quest-work-chat.contract';
+} from '../shared/work-chat/quest-work-chat.contract';
 
 export type QuestSettlementOutcome =
   | {

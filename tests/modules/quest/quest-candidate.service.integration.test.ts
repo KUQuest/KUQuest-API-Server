@@ -13,7 +13,7 @@ import {
   listTeamMembers,
   listTeams,
   updateTeam,
-} from '@/modules/quest/v1/quest-candidate.service';
+} from '@/modules/quest/v1';
 
 import { randomUUID } from 'node:crypto';
 

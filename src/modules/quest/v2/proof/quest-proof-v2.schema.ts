@@ -1,6 +1,6 @@
 import { t, type Static } from 'elysia';
 
-import { questV2States } from '../quest-v2.contract';
+import { questV2States } from '../core/quest-v2.contract';
 
 const proofStatus = t.Union([
   t.Literal('PROOF_PENDING'),

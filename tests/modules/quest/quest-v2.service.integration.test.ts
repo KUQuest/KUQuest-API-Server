@@ -10,7 +10,7 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createStagingTestAuthRoute, createStudentAuth } from '@/modules/auth';
-import { listOwnQuests } from '@/modules/quest/v1/quest.service';
+import { listOwnQuests } from '@/modules/quest/v1';
 import {
   createQuestV2,
   getQuestV2Detail,
@@ -20,7 +20,7 @@ import {
   questV2EditOperationScope,
   type QuestV2CreateInput,
 } from '@/modules/quest';
-import { questStatus } from '@/modules/quest/quest.contract';
+import { questStatus } from '@/modules/quest/shared';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import {
   fundTestWallet,

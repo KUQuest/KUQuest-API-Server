@@ -11,9 +11,9 @@ import {
 import { file } from '@/database/schema/file.schema';
 import {
   createAdminActionService,
-  type AdminActionReasonCatalog,
   type AdminActionResult,
-} from '@/modules/admin';
+} from '@/modules/admin/admin-action.service';
+import type { AdminActionReasonCatalog } from '@/modules/admin/admin-action.policy';
 import {
   MoneyDomainError,
   positiveSatang,

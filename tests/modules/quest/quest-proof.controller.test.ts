@@ -1,9 +1,6 @@
-import * as proofService from '@/modules/quest/v1/quest-proof.service';
-import {
-  reviewProofController,
-  submitProofController,
-} from '@/modules/quest/v1/quest-proof.controller';
-import { proofStorage } from '@/modules/quest/v1/quest-proof.storage';
+import * as proofService from '@/modules/quest/v1';
+import { reviewProofController, submitProofController } from '@/modules/quest/v1';
+import { proofStorage } from '@/modules/quest/v1';
 
 import { afterEach, describe, expect, mock, spyOn, it } from 'bun:test';
 

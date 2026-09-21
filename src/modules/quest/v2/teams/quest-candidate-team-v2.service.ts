@@ -14,29 +14,29 @@ import { and, asc, eq, exists, inArray, isNull, ne, sql } from 'drizzle-orm';
 
 import { FileUploadError } from '@/shared/object-storage';
 
-import { type QuestTransaction } from '../../quest-work-chat.port';
+import { type QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
 import {
   runQuestCommand,
   sha256Json,
   type QuestCommandOutcomeCode,
   type QuestCommandWork,
-} from '../../quest-command.service';
+} from '../../shared/command/quest-command.service';
 import {
   lockQuest,
   runQuestV2Selection,
   type SelectionAssignmentRow,
   type SelectionSuccess,
-} from '../../quest-selection.service';
+} from '../../shared/contracts/quest-selection.service';
 import type {
   AcceptedWorker,
   QuestWorkChatMembershipTransition,
-} from '../../quest-work-chat.contract';
+} from '../../shared/work-chat/quest-work-chat.contract';
 import {
   questV2Mode,
   questV2Participation,
   questV2TeamStates,
   type QuestV2TeamState,
-} from '../quest-v2.contract';
+} from '../core/quest-v2.contract';
 import type {
   QuestV2CandidateTeamCreateInput,
   QuestV2CandidateTeamFileUploadInput,

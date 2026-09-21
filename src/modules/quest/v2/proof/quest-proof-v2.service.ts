@@ -20,7 +20,7 @@ import {
 
 import { and, asc, eq, inArray, isNull, isNotNull, lte, ne } from 'drizzle-orm';
 
-import type { QuestTransaction } from '../../quest-work-chat.port';
+import type { QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
 import {
   completeQuestCommand,
   findOpenQuestCommandPayloads,
@@ -29,7 +29,7 @@ import {
   sha256Json,
   type QuestCommandOutcomeCode,
   type QuestCommandWork,
-} from '../../quest-command.service';
+} from '../../shared/command/quest-command.service';
 import { createAdminDisputeCaseInTransaction } from '../../admin';
 
 import {
@@ -42,7 +42,7 @@ import {
   questV2Participation,
   questV2States,
   type QuestV2State,
-} from '../quest-v2.contract';
+} from '../core/quest-v2.contract';
 import { questV2ProofStorage, type StoredQuestV2ProofFile } from './quest-proof-v2.storage';
 
 export const questV2ProofSubmissionOperationScope = 'quest.v2.proof-submission';
