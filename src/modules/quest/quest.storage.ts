@@ -1,13 +1,6 @@
-import { createObjectStorage, type StoredImage } from '@/shared/object-storage';
-
-export type StoredQuestImage = StoredImage;
-
-export const questStorage = createObjectStorage({
-  keyPrefix: 'quests',
-  logLabel: 'quest-image-upload',
-});
-
-export const questV2Storage = createObjectStorage({
-  keyPrefix: 'quests/v2',
-  logLabel: 'quest-v2-image-upload',
-});
+export * from './legacy-v1/quest.service';
+export * from './legacy-v1/quest.storage';
+export * from './legacy-v1/quest.schema';
+export * from './legacy-v1/quest.controller';
+export * from './legacy-v1/quest.route';
+export * from './legacy-v1/quest.publish.policy';

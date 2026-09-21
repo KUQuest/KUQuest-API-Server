@@ -1,0 +1,1603 @@
+import { db } from '@/database/client';
+import { file } from '@/database/schema/file.schema';
+import {
+  quest,
+  questApiVersion,
+  questCandidateApplicationV2,
+  questAssignment,
+  questCandidateTeamV2,
+  questCandidateTeamV2Member,
+  questCandidateTeamV2SubmissionFile,
+} from '@/database/schema/quest.schema';
+
+import { and, asc, eq, exists, inArray, isNull, ne, sql } from 'drizzle-orm';
+
+import { FileUploadError } from '@/shared/object-storage';
+
+import { type QuestTransaction } from '../quest-work-chat.port';
+import {
+  runQuestCommand,
+  sha256Json,
+  type QuestCommandOutcomeCode,
+  type QuestCommandWork,
+} from '../quest-command.service';
+import {
+  lockQuest,
+  runQuestV2Selection,
+  type SelectionAssignmentRow,
+  type SelectionSuccess,
+} from '../quest-selection.service';
+import type {
+  AcceptedWorker,
+  QuestWorkChatMembershipTransition,
+} from '../quest-work-chat.contract';
+import {
+  questV2Mode,
+  questV2Participation,
+  questV2TeamStates,
+  type QuestV2TeamState,
+} from '../quest-v2.contract';
+import type {
+  QuestV2CandidateTeamCreateInput,
+  QuestV2CandidateTeamFileUploadInput,
+  QuestV2CandidateTeamJoinInput,
+  QuestV2CandidateTeamSubmissionInput,
+  QuestV2CandidateTeamUpdateInput,
+} from './quest-candidate-team-v2.schema';
+import {
+  questV2CandidateTeamStorage,
+  type StoredQuestV2CandidateTeamFile,
+} from './quest-candidate-team-v2.storage';
+
+export const questV2CandidateTeamCreateOperationScope = 'quest.v2.candidate-team.create';
+export const questV2CandidateTeamUpdateOperationScope = 'quest.v2.candidate-team.update';
+export const questV2CandidateTeamJoinOperationScope = 'quest.v2.candidate-team.join';
+export const questV2CandidateTeamLeaveOperationScope = 'quest.v2.candidate-team.leave';
+export const questV2CandidateTeamRemoveMemberOperationScope =
+  'quest.v2.candidate-team.remove-member';
+export const questV2CandidateTeamRegenerateCodeOperationScope =
+  'quest.v2.candidate-team.regenerate-code';
+export const questV2CandidateTeamSubmitOperationScope = 'quest.v2.candidate-team.submit';
+export const questV2CandidateTeamSelectOperationScope = 'quest.v2.candidate-team.select';
+export const questV2CandidateTeamRejectOperationScope = 'quest.v2.candidate-team.reject';
+export const questV2CandidateTeamFileUploadOperationScope = 'quest.v2.candidate-team.file-upload';
+
+const dayInMilliseconds = 24 * 60 * 60 * 1000;
+const maxAttachmentSizeBytes = 10 * 1024 * 1024;
+const legacyCandidateTeamName = 'Candidate Team';
+const joinCodeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const joinCodeLength = 8;
+const allowedAttachmentContentTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+]);
+
+type CandidateTeamMember = {
+  memberId: string;
+  joinedAt: Date;
+};
+
+type CandidateTeamSubmission = {
+  text: string;
+  fileIds: string[];
+  submittedAt: Date;
+};
+
+type CandidateTeam = {
+  id: string;
+  questId: string;
+  leaderId: string;
+  name: string;
+  headcount: number;
+  state: QuestV2TeamState;
+  joinCode: string | null;
+  joinCodeExpiresAt: Date | null;
+  members: CandidateTeamMember[];
+  submission: CandidateTeamSubmission | null;
+  createdAt: Date;
+};
+
+type QuestV2CandidateTeamBusinessOutcomeCode =
+  | 'already-assigned'
+  | 'already-member'
+  | 'headcount-mismatch'
+  | 'headcount-not-allowed'
+  | 'hirer-not-allowed'
+  | 'join-code-expired'
+  | 'join-code-invalid'
+  | 'leader-removal-not-allowed'
+  | 'member-not-found'
+  | 'not-authorized'
+  | 'not-candidate'
+  | 'not-forming'
+  | 'not-group'
+  | 'not-leader'
+  | 'not-open'
+  | 'not-selectable'
+  | 'submission-files-invalid'
+  | 'submission-invalid'
+  | 'team-full'
+  | 'team-not-found'
+  | 'not-found';
+
+type QuestV2CandidateTeamRejectBusinessOutcomeCode =
+  'team-not-found' | 'not-allowed' | 'not-rejectable';
+
+type QuestV2CandidateTeamRejectOutcomeCode =
+  QuestV2CandidateTeamRejectBusinessOutcomeCode | 'not-found' | QuestCommandOutcomeCode;
+
+export type QuestV2CandidateTeamRejectOutcome =
+  | CandidateTeam
+  | {
+      outcome: QuestV2CandidateTeamRejectOutcomeCode;
+    };
+
+type TeamCommandOutcomeCode = QuestV2CandidateTeamBusinessOutcomeCode | QuestCommandOutcomeCode;
+
+export type QuestV2CandidateTeamOutcome = CandidateTeam | { outcome: TeamCommandOutcomeCode };
+export type QuestV2CandidateTeamUploadedFile = {
+  fileId: string;
+  fileName: string;
+  mediaType: string;
+  sizeBytes: number;
+  createdAt: Date;
+  /** Internal marker used to compensate an object uploaded for a replay. */
+  replayed?: true;
+};
+
+export type QuestV2CandidateTeamFileUploadOutcome =
+  QuestV2CandidateTeamUploadedFile | { outcome: TeamCommandOutcomeCode };
+
+export type QuestV2CandidateTeamReadOutcome =
+  CandidateTeam[] | { outcome: 'not-authorized' | 'not-found' };
+
+export type QuestV2CandidateTeamDetailOutcome =
+  CandidateTeam | { outcome: 'not-authorized' | 'not-found' | 'team-not-found' };
+
+type SelectionOutcomeCode = Extract<
+  TeamCommandOutcomeCode,
+  | 'already-assigned'
+  | 'idempotency-in-progress'
+  | 'idempotency-key-reused'
+  | 'idempotency-unavailable'
+  | 'invalid-idempotency-key'
+  | 'not-authorized'
+  | 'not-candidate'
+  | 'not-found'
+  | 'not-group'
+  | 'not-open'
+  | 'not-selectable'
+  | 'team-not-found'
+  | 'headcount-mismatch'
+>;
+
+export type QuestV2CandidateTeamSelectionOutcome =
+  SelectionSuccess | { outcome: SelectionOutcomeCode };
+
+const teamFields = {
+  id: questCandidateTeamV2.id,
+  questId: questCandidateTeamV2.questId,
+  leaderId: questCandidateTeamV2.leaderId,
+  name: questCandidateTeamV2.name,
+  headcount: questCandidateTeamV2.headcount,
+  state: questCandidateTeamV2.state,
+  joinCodeHash: questCandidateTeamV2.joinCodeHash,
+  joinCodeExpiresAt: questCandidateTeamV2.joinCodeExpiresAt,
+  submissionText: questCandidateTeamV2.submissionText,
+  submittedAt: questCandidateTeamV2.submittedAt,
+  createdAt: questCandidateTeamV2.createdAt,
+};
+
+type Database = typeof db | QuestTransaction;
+
+const normalizeJoinCode = (value: string): string => value.trim().toUpperCase();
+
+const generateJoinCode = (): string => {
+  const randomValues = new Uint32Array(joinCodeLength);
+  crypto.getRandomValues(randomValues);
+  return Array.from(
+    randomValues,
+    (value) => joinCodeAlphabet[value % joinCodeAlphabet.length]
+  ).join('');
+};
+
+const hashJoinCode = (joinCode: string): Promise<string> => sha256Json({ joinCode });
+
+const isTeamState = (value: string): value is QuestV2TeamState =>
+  (questV2TeamStates as readonly string[]).includes(value);
+
+const toCandidateTeam = (
+  row: {
+    id: string;
+    questId: string;
+    leaderId: string;
+    name: string;
+    headcount: number | null;
+    state: string;
+    joinCodeHash: string | null;
+    joinCodeExpiresAt: Date | null;
+    submissionText: string | null;
+    submittedAt: Date | null;
+    createdAt: Date;
+  },
+  members: CandidateTeamMember[],
+  fileIds: string[],
+  joinCode: string | null = null
+): CandidateTeam => {
+  if (
+    row.headcount === null ||
+    !Number.isInteger(row.headcount) ||
+    row.headcount < 2 ||
+    row.headcount > 20
+  ) {
+    throw new Error('Candidate Team has an invalid headcount');
+  }
+  if (!isTeamState(row.state)) throw new Error('Candidate Team has an invalid state');
+  if ((row.joinCodeHash === null) !== (row.joinCodeExpiresAt === null)) {
+    throw new Error('Candidate Team has an invalid Join Code');
+  }
+  if ((row.submissionText === null) !== (row.submittedAt === null)) {
+    throw new Error('Candidate Team has an invalid submission');
+  }
+
+  return {
+    id: row.id,
+    questId: row.questId,
+    leaderId: row.leaderId,
+    name: row.name,
+    headcount: row.headcount,
+    state: row.state,
+    joinCode,
+    joinCodeExpiresAt: row.joinCodeExpiresAt,
+    members,
+    submission:
+      row.submissionText === null || row.submittedAt === null
+        ? null
+        : {
+            text: row.submissionText,
+            fileIds,
+            submittedAt: row.submittedAt,
+          },
+    createdAt: row.createdAt,
+  };
+};
+
+const teamMembers = async (
+  database: Database,
+  teamId: string,
+  lock = false
+): Promise<CandidateTeamMember[]> => {
+  const query = database
+    .select({
+      memberId: questCandidateTeamV2Member.memberId,
+      joinedAt: questCandidateTeamV2Member.joinedAt,
+    })
+    .from(questCandidateTeamV2Member)
+    .where(eq(questCandidateTeamV2Member.teamId, teamId))
+    .orderBy(asc(questCandidateTeamV2Member.joinedAt), asc(questCandidateTeamV2Member.memberId));
+  return lock ? query.for('update') : query;
+};
+
+const teamSubmissionFileIds = async (database: Database, teamId: string): Promise<string[]> => {
+  const rows = await database
+    .select({ fileId: questCandidateTeamV2SubmissionFile.fileId })
+    .from(questCandidateTeamV2SubmissionFile)
+    .where(eq(questCandidateTeamV2SubmissionFile.teamId, teamId))
+    .orderBy(
+      asc(questCandidateTeamV2SubmissionFile.position),
+      asc(questCandidateTeamV2SubmissionFile.fileId)
+    );
+  return rows.map(({ fileId }) => fileId);
+};
+
+const readTeam = async (
+  database: Database,
+  row: {
+    id: string;
+    questId: string;
+    leaderId: string;
+    name: string;
+    headcount: number | null;
+    state: string;
+    joinCodeHash: string | null;
+    joinCodeExpiresAt: Date | null;
+    submissionText: string | null;
+    submittedAt: Date | null;
+    createdAt: Date;
+  },
+  joinCode: string | null = null
+): Promise<CandidateTeam> =>
+  toCandidateTeam(
+    row,
+    await teamMembers(database, row.id),
+    await teamSubmissionFileIds(database, row.id),
+    joinCode
+  );
+
+const snapshotFor = (team: CandidateTeam) => ({
+  id: team.id,
+  questId: team.questId,
+  leaderId: team.leaderId,
+  name: team.name,
+  headcount: team.headcount,
+  state: team.state,
+  joinCode: team.joinCode,
+  joinCodeExpiresAt: team.joinCodeExpiresAt?.toISOString() ?? null,
+  members: team.members.map((member) => ({
+    memberId: member.memberId,
+    joinedAt: member.joinedAt.toISOString(),
+  })),
+  submission: team.submission
+    ? {
+        text: team.submission.text,
+        fileIds: team.submission.fileIds,
+        submittedAt: team.submission.submittedAt.toISOString(),
+      }
+    : null,
+  createdAt: team.createdAt.toISOString(),
+});
+
+const teamFromSnapshot = (value: unknown): CandidateTeam | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const snapshot = value as Record<string, unknown>;
+  if (
+    typeof snapshot.id !== 'string' ||
+    typeof snapshot.questId !== 'string' ||
+    typeof snapshot.leaderId !== 'string' ||
+    (snapshot.name !== undefined && typeof snapshot.name !== 'string') ||
+    typeof snapshot.headcount !== 'number' ||
+    typeof snapshot.state !== 'string' ||
+    (snapshot.joinCode !== null && typeof snapshot.joinCode !== 'string') ||
+    (snapshot.joinCodeExpiresAt !== null && typeof snapshot.joinCodeExpiresAt !== 'string') ||
+    !Array.isArray(snapshot.members) ||
+    (snapshot.submission !== null &&
+      (typeof snapshot.submission !== 'object' || Array.isArray(snapshot.submission))) ||
+    typeof snapshot.createdAt !== 'string' ||
+    !isTeamState(snapshot.state)
+  )
+    return undefined;
+  if (!Number.isInteger(snapshot.headcount) || snapshot.headcount < 2 || snapshot.headcount > 20)
+    return undefined;
+
+  const joinCodeExpiresAt =
+    snapshot.joinCodeExpiresAt === null ? null : new Date(snapshot.joinCodeExpiresAt);
+  const createdAt = new Date(snapshot.createdAt);
+  if (
+    Number.isNaN(createdAt.getTime()) ||
+    (joinCodeExpiresAt && Number.isNaN(joinCodeExpiresAt.getTime()))
+  )
+    return undefined;
+
+  const members: CandidateTeamMember[] = [];
+  for (const memberValue of snapshot.members) {
+    if (!memberValue || typeof memberValue !== 'object' || Array.isArray(memberValue))
+      return undefined;
+    const member = memberValue as Record<string, unknown>;
+    if (typeof member.memberId !== 'string' || typeof member.joinedAt !== 'string')
+      return undefined;
+    const joinedAt = new Date(member.joinedAt);
+    if (Number.isNaN(joinedAt.getTime())) return undefined;
+    members.push({ memberId: member.memberId, joinedAt });
+  }
+
+  let submission: CandidateTeamSubmission | null = null;
+  if (snapshot.submission !== null) {
+    const submissionValue = snapshot.submission as Record<string, unknown>;
+    if (
+      typeof submissionValue.text !== 'string' ||
+      !Array.isArray(submissionValue.fileIds) ||
+      typeof submissionValue.submittedAt !== 'string' ||
+      !submissionValue.fileIds.every((fileId) => typeof fileId === 'string')
+    )
+      return undefined;
+    const submittedAt = new Date(submissionValue.submittedAt);
+    if (Number.isNaN(submittedAt.getTime())) return undefined;
+    submission = {
+      text: submissionValue.text,
+      fileIds: submissionValue.fileIds as string[],
+      submittedAt,
+    };
+  }
+
+  return {
+    id: snapshot.id,
+    questId: snapshot.questId,
+    leaderId: snapshot.leaderId,
+    name: typeof snapshot.name === 'string' ? snapshot.name : legacyCandidateTeamName,
+    headcount: snapshot.headcount,
+    state: snapshot.state,
+    joinCode: snapshot.joinCode,
+    joinCodeExpiresAt,
+    members,
+    submission,
+    createdAt,
+  };
+};
+
+const readableQuest = (current: {
+  v2Mode: string | null;
+  v2Participation: string | null;
+  questState: string;
+}) =>
+  current.v2Mode === questV2Mode.candidate &&
+  current.v2Participation === questV2Participation.group &&
+  current.questState === 'QUEST_OPEN';
+
+const questStartHasPassed = (current: { startTime: Date }, now: Date) =>
+  current.startTime.getTime() <= now.getTime();
+
+const lockTeam = async (transaction: QuestTransaction, questId: string, teamId: string) => {
+  const [team] = await transaction
+    .select(teamFields)
+    .from(questCandidateTeamV2)
+    .where(and(eq(questCandidateTeamV2.id, teamId), eq(questCandidateTeamV2.questId, questId)))
+    .limit(1)
+    .for('update');
+  return team;
+};
+
+const hasTeamMembership = async (
+  transaction: QuestTransaction,
+  questId: string,
+  memberId: string
+): Promise<boolean> => {
+  const [membership] = await transaction
+    .select({ teamId: questCandidateTeamV2Member.teamId })
+    .from(questCandidateTeamV2Member)
+    .innerJoin(questCandidateTeamV2, eq(questCandidateTeamV2Member.teamId, questCandidateTeamV2.id))
+    .where(
+      and(
+        eq(questCandidateTeamV2.questId, questId),
+        eq(questCandidateTeamV2Member.memberId, memberId),
+        ne(questCandidateTeamV2.state, 'TEAM_DISBANDED')
+      )
+    )
+    .limit(1)
+    .for('update');
+  return Boolean(membership);
+};
+
+const hasActiveAssignment = async (
+  transaction: QuestTransaction,
+  questId: string,
+  memberId: string
+): Promise<boolean> => {
+  const [assignment] = await transaction
+    .select({ id: questAssignment.id })
+    .from(questAssignment)
+    .where(
+      and(
+        eq(questAssignment.questId, questId),
+        eq(questAssignment.workerId, memberId),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+      )
+    )
+    .limit(1)
+    .for('update');
+  return Boolean(assignment);
+};
+
+const validTeamHeadcount = (headcount: number, questHeadcount: number): boolean =>
+  Number.isInteger(headcount) && headcount >= 2 && headcount <= questHeadcount;
+
+const validateSubmissionFiles = async (
+  transaction: QuestTransaction,
+  memberId: string,
+  fileIds: string[]
+): Promise<boolean> => {
+  if (fileIds.length === 0 || new Set(fileIds).size !== fileIds.length) return false;
+  const rows = await transaction
+    .select({
+      id: file.id,
+      contentType: file.contentType,
+      sizeBytes: file.sizeBytes,
+    })
+    .from(file)
+    .where(
+      and(inArray(file.id, fileIds), eq(file.uploadedByUserId, memberId), isNull(file.deletedAt))
+    );
+  if (rows.length !== fileIds.length) return false;
+  return rows.every(
+    (row) =>
+      allowedAttachmentContentTypes.has(row.contentType) &&
+      row.sizeBytes > 0 &&
+      row.sizeBytes <= maxAttachmentSizeBytes
+  );
+};
+
+const fileUploadSnapshotFor = (uploaded: QuestV2CandidateTeamUploadedFile) => ({
+  fileId: uploaded.fileId,
+  fileName: uploaded.fileName,
+  mediaType: uploaded.mediaType,
+  sizeBytes: uploaded.sizeBytes,
+  createdAt: uploaded.createdAt.toISOString(),
+});
+
+const fileUploadFromSnapshot = (value: unknown): QuestV2CandidateTeamUploadedFile | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const snapshot = value as Record<string, unknown>;
+  if (
+    typeof snapshot.fileId !== 'string' ||
+    typeof snapshot.fileName !== 'string' ||
+    snapshot.fileName.length === 0 ||
+    typeof snapshot.mediaType !== 'string' ||
+    !allowedAttachmentContentTypes.has(snapshot.mediaType) ||
+    typeof snapshot.sizeBytes !== 'number' ||
+    !Number.isInteger(snapshot.sizeBytes) ||
+    snapshot.sizeBytes <= 0 ||
+    snapshot.sizeBytes > maxAttachmentSizeBytes ||
+    typeof snapshot.createdAt !== 'string'
+  ) {
+    return undefined;
+  }
+  const createdAt = new Date(snapshot.createdAt);
+  if (Number.isNaN(createdAt.getTime())) return undefined;
+  return {
+    fileId: snapshot.fileId,
+    fileName: snapshot.fileName,
+    mediaType: snapshot.mediaType,
+    sizeBytes: snapshot.sizeBytes,
+    createdAt,
+    replayed: true,
+  };
+};
+
+const fileUploadFingerprintFor = async (input: File): Promise<string> => {
+  const digest = await crypto.subtle.digest('SHA-256', await input.arrayBuffer());
+  const contentHash = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
+  return sha256Json({
+    contentHash,
+    contentType: input.type,
+    fileName: input.name,
+    sizeBytes: input.size,
+  });
+};
+
+export const createQuestV2CandidateTeam = async (
+  leaderId: string,
+  questId: string,
+  input: QuestV2CandidateTeamCreateInput,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamOutcome> => {
+  const requestHash = await sha256Json({
+    authenticatedMemberId: leaderId,
+    operation: questV2CandidateTeamCreateOperationScope,
+    path: '/api/v2/quests/:questId/teams',
+    body: { questId, name: input.name, headcount: input.headcount },
+  });
+
+  return db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command. The command row's
+    // quest foreign key takes FOR KEY SHARE on the Quest row, so taking the caller's
+    // FOR UPDATE after the module's insert deadlocks two concurrent commands for the
+    // same Quest.
+    const current = await lockQuest(transaction, questId);
+    if (!current) return { outcome: 'not-found' };
+
+    const command = await runQuestCommand({
+      transaction,
+      identity: {
+        principalUserId: leaderId,
+        operationScope: questV2CandidateTeamCreateOperationScope,
+        key: rawCommandId,
+        requestHash,
+        questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<CandidateTeam, QuestV2CandidateTeamBusinessOutcomeCode>
+      > => {
+        if (current.v2Mode !== questV2Mode.candidate) {
+          return { kind: 'rejected', rejection: 'not-candidate' };
+        }
+        if (current.v2Participation !== questV2Participation.group) {
+          return { kind: 'rejected', rejection: 'not-group' };
+        }
+        if (current.hirerId === leaderId)
+          return { kind: 'rejected', rejection: 'hirer-not-allowed' };
+        if (current.questState !== 'QUEST_OPEN') return { kind: 'rejected', rejection: 'not-open' };
+        if (questStartHasPassed(current, now)) return { kind: 'rejected', rejection: 'not-open' };
+        if (!validTeamHeadcount(input.headcount, current.headcount)) {
+          return { kind: 'rejected', rejection: 'headcount-not-allowed' };
+        }
+        if (await hasActiveAssignment(transaction, questId, leaderId)) {
+          return { kind: 'rejected', rejection: 'already-assigned' };
+        }
+        if (await hasTeamMembership(transaction, questId, leaderId)) {
+          return { kind: 'rejected', rejection: 'already-member' };
+        }
+
+        const joinCode = generateJoinCode();
+        const joinCodeExpiresAt = new Date(now.getTime() + dayInMilliseconds);
+        const [createdTeam] = await transaction
+          .insert(questCandidateTeamV2)
+          .values({
+            questId,
+            leaderId,
+            name: input.name,
+            headcount: input.headcount,
+            state: 'TEAM_FORMING',
+            joinCodeHash: await hashJoinCode(joinCode),
+            joinCodeExpiresAt,
+            createdAt: now,
+          })
+          .returning(teamFields);
+        if (!createdTeam) throw new Error('Candidate Team insert returned no row');
+
+        await transaction.insert(questCandidateTeamV2Member).values({
+          teamId: createdTeam.id,
+          memberId: leaderId,
+          joinedAt: now,
+        });
+        const team = await readTeam(transaction, createdTeam, joinCode);
+        return {
+          kind: 'success',
+          result: team,
+          resourceType: 'quest-v2-candidate-team',
+          resourceId: team.id,
+        };
+      },
+      toSnapshot: snapshotFor,
+      fromSnapshot: teamFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return command.result;
+    return { outcome: command.rejection };
+  });
+};
+
+export const listQuestV2CandidateTeams = async (
+  memberId: string,
+  questId: string
+): Promise<QuestV2CandidateTeamReadOutcome> => {
+  const [current] = await db
+    .select({
+      hirerId: quest.hirerId,
+      v2Mode: quest.v2Mode,
+      v2Participation: quest.v2Participation,
+      questState: quest.questStatus,
+    })
+    .from(quest)
+    .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
+    .limit(1);
+  if (!current || !readableQuest(current)) return { outcome: 'not-found' };
+
+  const rows = await db
+    .select(teamFields)
+    .from(questCandidateTeamV2)
+    .where(
+      and(
+        eq(questCandidateTeamV2.questId, questId),
+        ne(questCandidateTeamV2.state, 'TEAM_DISBANDED'),
+        ...(current.hirerId === memberId
+          ? []
+          : [
+              exists(sql`(
+          select 1
+          from quest_candidate_team_v2_member member
+          where member.team_id = ${questCandidateTeamV2.id}
+            and member.member_id = ${memberId}
+        )`),
+            ])
+      )
+    )
+    .orderBy(asc(questCandidateTeamV2.createdAt), asc(questCandidateTeamV2.id));
+  if (current.hirerId !== memberId && rows.length === 0) return { outcome: 'not-authorized' };
+  return Promise.all(rows.map((row) => readTeam(db, row)));
+};
+
+export const getQuestV2CandidateTeam = async (
+  memberId: string,
+  questId: string,
+  teamId: string
+): Promise<QuestV2CandidateTeamDetailOutcome> => {
+  const [current] = await db
+    .select({
+      hirerId: quest.hirerId,
+      v2Mode: quest.v2Mode,
+      v2Participation: quest.v2Participation,
+      questState: quest.questStatus,
+    })
+    .from(quest)
+    .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
+    .limit(1);
+  if (!current || !readableQuest(current)) return { outcome: 'not-found' };
+
+  const [row] = await db
+    .select(teamFields)
+    .from(questCandidateTeamV2)
+    .where(
+      and(
+        eq(questCandidateTeamV2.id, teamId),
+        eq(questCandidateTeamV2.questId, questId),
+        ne(questCandidateTeamV2.state, 'TEAM_DISBANDED'),
+        ...(current.hirerId === memberId
+          ? []
+          : [
+              exists(sql`(
+          select 1
+          from quest_candidate_team_v2_member member
+          where member.team_id = ${questCandidateTeamV2.id}
+            and member.member_id = ${memberId}
+        )`),
+            ])
+      )
+    )
+    .limit(1);
+  if (!row)
+    return current.hirerId === memberId
+      ? { outcome: 'team-not-found' }
+      : { outcome: 'not-authorized' };
+  return readTeam(db, row);
+};
+
+export const updateQuestV2CandidateTeam = async (
+  leaderId: string,
+  questId: string,
+  teamId: string,
+  input: QuestV2CandidateTeamUpdateInput,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamOutcome> => {
+  const requestHash = await sha256Json({
+    authenticatedMemberId: leaderId,
+    operation: questV2CandidateTeamUpdateOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId',
+    body: { questId, teamId, name: input.name },
+  });
+
+  return db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command; see the lock-order
+    // note on createQuestV2CandidateTeam.
+    const current = await lockQuest(transaction, questId);
+    if (!current) return { outcome: 'not-found' };
+
+    const command = await runQuestCommand({
+      transaction,
+      identity: {
+        principalUserId: leaderId,
+        operationScope: questV2CandidateTeamUpdateOperationScope,
+        key: rawCommandId,
+        requestHash,
+        questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<CandidateTeam, QuestV2CandidateTeamBusinessOutcomeCode>
+      > => {
+        if (current.v2Mode !== questV2Mode.candidate) {
+          return { kind: 'rejected', rejection: 'not-candidate' };
+        }
+        if (current.v2Participation !== questV2Participation.group) {
+          return { kind: 'rejected', rejection: 'not-group' };
+        }
+        if (current.questState !== 'QUEST_OPEN') return { kind: 'rejected', rejection: 'not-open' };
+        if (questStartHasPassed(current, now)) return { kind: 'rejected', rejection: 'not-open' };
+
+        const team = await lockTeam(transaction, questId, teamId);
+        if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+        if (team.leaderId !== leaderId) return { kind: 'rejected', rejection: 'not-leader' };
+        if (team.state !== 'TEAM_FORMING') return { kind: 'rejected', rejection: 'not-forming' };
+
+        const [updatedTeam] = await transaction
+          .update(questCandidateTeamV2)
+          .set({ name: input.name })
+          .where(
+            and(eq(questCandidateTeamV2.id, teamId), eq(questCandidateTeamV2.state, 'TEAM_FORMING'))
+          )
+          .returning(teamFields);
+        if (!updatedTeam) throw new Error('Candidate Team update returned no row');
+
+        const updated = await readTeam(transaction, updatedTeam);
+        return {
+          kind: 'success',
+          result: updated,
+          resourceType: 'quest-v2-candidate-team',
+          resourceId: updated.id,
+        };
+      },
+      toSnapshot: snapshotFor,
+      fromSnapshot: teamFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return command.result;
+    return { outcome: command.rejection };
+  });
+};
+
+export const joinQuestV2CandidateTeam = async (
+  memberId: string,
+  questId: string,
+  teamId: string,
+  input: QuestV2CandidateTeamJoinInput,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamOutcome> => {
+  const joinCode = normalizeJoinCode(input.joinCode);
+  const requestHash = await sha256Json({
+    authenticatedMemberId: memberId,
+    operation: questV2CandidateTeamJoinOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/join',
+    body: { questId, teamId, joinCode },
+  });
+
+  return db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command; see the lock-order
+    // note on createQuestV2CandidateTeam.
+    const current = await lockQuest(transaction, questId);
+    if (!current) return { outcome: 'not-found' };
+
+    const command = await runQuestCommand({
+      transaction,
+      identity: {
+        principalUserId: memberId,
+        operationScope: questV2CandidateTeamJoinOperationScope,
+        key: rawCommandId,
+        requestHash,
+        questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<CandidateTeam, QuestV2CandidateTeamBusinessOutcomeCode>
+      > => {
+        if (current.v2Mode !== questV2Mode.candidate) {
+          return { kind: 'rejected', rejection: 'not-candidate' };
+        }
+        if (current.v2Participation !== questV2Participation.group) {
+          return { kind: 'rejected', rejection: 'not-group' };
+        }
+        if (current.hirerId === memberId)
+          return { kind: 'rejected', rejection: 'hirer-not-allowed' };
+        if (current.questState !== 'QUEST_OPEN') return { kind: 'rejected', rejection: 'not-open' };
+        if (questStartHasPassed(current, now)) return { kind: 'rejected', rejection: 'not-open' };
+
+        const team = await lockTeam(transaction, questId, teamId);
+        if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+        if (team.state !== 'TEAM_FORMING') return { kind: 'rejected', rejection: 'not-forming' };
+        if (!team.joinCodeHash || !team.joinCodeExpiresAt) {
+          return { kind: 'rejected', rejection: 'join-code-invalid' };
+        }
+        if (team.joinCodeExpiresAt.getTime() <= now.getTime()) {
+          return { kind: 'rejected', rejection: 'join-code-expired' };
+        }
+        if ((await hashJoinCode(joinCode)) !== team.joinCodeHash) {
+          return { kind: 'rejected', rejection: 'join-code-invalid' };
+        }
+
+        const members = await teamMembers(transaction, teamId, true);
+        if (members.length >= (team.headcount ?? 0))
+          return { kind: 'rejected', rejection: 'team-full' };
+        if (await hasActiveAssignment(transaction, questId, memberId)) {
+          return { kind: 'rejected', rejection: 'already-assigned' };
+        }
+        if (await hasTeamMembership(transaction, questId, memberId)) {
+          return { kind: 'rejected', rejection: 'already-member' };
+        }
+
+        await transaction.insert(questCandidateTeamV2Member).values({
+          teamId,
+          memberId,
+          joinedAt: now,
+        });
+        const result = await readTeam(transaction, team);
+        return {
+          kind: 'success',
+          result,
+          resourceType: 'quest-v2-candidate-team',
+          resourceId: result.id,
+        };
+      },
+      toSnapshot: snapshotFor,
+      fromSnapshot: teamFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return command.result;
+    return { outcome: command.rejection };
+  });
+};
+
+const leaveOrRemoveTeamMember = async (
+  memberId: string,
+  questId: string,
+  teamId: string,
+  rawCommandId: string,
+  operationScope: string,
+  path: string,
+  removeMemberId: string | undefined,
+  now: Date
+): Promise<QuestV2CandidateTeamOutcome> => {
+  const requestHash = await sha256Json({
+    authenticatedMemberId: memberId,
+    operation: operationScope,
+    path,
+    body: {
+      questId,
+      teamId,
+      ...(removeMemberId ? { memberId: removeMemberId } : {}),
+    },
+  });
+
+  return db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command; see the lock-order
+    // note on createQuestV2CandidateTeam.
+    const current = await lockQuest(transaction, questId);
+    if (!current) return { outcome: 'not-found' };
+
+    const command = await runQuestCommand({
+      transaction,
+      identity: {
+        principalUserId: memberId,
+        operationScope,
+        key: rawCommandId,
+        requestHash,
+        questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<CandidateTeam, QuestV2CandidateTeamBusinessOutcomeCode>
+      > => {
+        if (current.v2Mode !== questV2Mode.candidate) {
+          return { kind: 'rejected', rejection: 'not-candidate' };
+        }
+        if (current.v2Participation !== questV2Participation.group) {
+          return { kind: 'rejected', rejection: 'not-group' };
+        }
+        if (current.questState !== 'QUEST_OPEN') return { kind: 'rejected', rejection: 'not-open' };
+        if (questStartHasPassed(current, now)) return { kind: 'rejected', rejection: 'not-open' };
+
+        const team = await lockTeam(transaction, questId, teamId);
+        if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+        if (team.state !== 'TEAM_FORMING') return { kind: 'rejected', rejection: 'not-forming' };
+        const members = await teamMembers(transaction, teamId, true);
+
+        if (removeMemberId === undefined) {
+          if (!members.some((member) => member.memberId === memberId)) {
+            return { kind: 'rejected', rejection: 'member-not-found' };
+          }
+          await transaction
+            .delete(questCandidateTeamV2Member)
+            .where(
+              and(
+                eq(questCandidateTeamV2Member.teamId, teamId),
+                eq(questCandidateTeamV2Member.memberId, memberId)
+              )
+            );
+        } else {
+          if (team.leaderId !== memberId) return { kind: 'rejected', rejection: 'not-leader' };
+          if (removeMemberId === memberId) {
+            return { kind: 'rejected', rejection: 'leader-removal-not-allowed' };
+          }
+          if (!members.some((member) => member.memberId === removeMemberId)) {
+            return { kind: 'rejected', rejection: 'member-not-found' };
+          }
+          await transaction
+            .delete(questCandidateTeamV2Member)
+            .where(
+              and(
+                eq(questCandidateTeamV2Member.teamId, teamId),
+                eq(questCandidateTeamV2Member.memberId, removeMemberId)
+              )
+            );
+        }
+
+        const remaining = members.filter(
+          (member) => member.memberId !== (removeMemberId ?? memberId)
+        );
+        let updatedTeam = team;
+        if (remaining.length === 0) {
+          const [disbanded] = await transaction
+            .update(questCandidateTeamV2)
+            .set({
+              state: 'TEAM_DISBANDED',
+              joinCodeHash: null,
+              joinCodeExpiresAt: null,
+            })
+            .where(eq(questCandidateTeamV2.id, teamId))
+            .returning(teamFields);
+          if (!disbanded) throw new Error('Candidate Team disband returned no row');
+          updatedTeam = disbanded;
+        } else if (removeMemberId === undefined && team.leaderId === memberId) {
+          const [transferred] = await transaction
+            .update(questCandidateTeamV2)
+            .set({ leaderId: remaining[0]!.memberId })
+            .where(eq(questCandidateTeamV2.id, teamId))
+            .returning(teamFields);
+          if (!transferred) throw new Error('Candidate Team leadership transfer returned no row');
+          updatedTeam = transferred;
+        }
+
+        const result = await readTeam(transaction, updatedTeam);
+        return {
+          kind: 'success',
+          result,
+          resourceType: 'quest-v2-candidate-team',
+          resourceId: result.id,
+        };
+      },
+      toSnapshot: snapshotFor,
+      fromSnapshot: teamFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return command.result;
+    return { outcome: command.rejection };
+  });
+};
+
+export const leaveQuestV2CandidateTeam = (
+  memberId: string,
+  questId: string,
+  teamId: string,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamOutcome> =>
+  leaveOrRemoveTeamMember(
+    memberId,
+    questId,
+    teamId,
+    rawCommandId,
+    questV2CandidateTeamLeaveOperationScope,
+    '/api/v2/quests/:questId/teams/:teamId/leave',
+    undefined,
+    now
+  );
+
+export const removeQuestV2CandidateTeamMember = (
+  leaderId: string,
+  questId: string,
+  teamId: string,
+  memberId: string,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamOutcome> =>
+  leaveOrRemoveTeamMember(
+    leaderId,
+    questId,
+    teamId,
+    rawCommandId,
+    questV2CandidateTeamRemoveMemberOperationScope,
+    '/api/v2/quests/:questId/teams/:teamId/members/:memberId',
+    memberId,
+    now
+  );
+
+export const regenerateQuestV2CandidateTeamJoinCode = async (
+  leaderId: string,
+  questId: string,
+  teamId: string,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamOutcome> => {
+  const requestHash = await sha256Json({
+    authenticatedMemberId: leaderId,
+    operation: questV2CandidateTeamRegenerateCodeOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/join-code',
+    body: { questId, teamId },
+  });
+
+  return db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command; see the lock-order
+    // note on createQuestV2CandidateTeam.
+    const current = await lockQuest(transaction, questId);
+    if (!current) return { outcome: 'not-found' };
+
+    const command = await runQuestCommand({
+      transaction,
+      identity: {
+        principalUserId: leaderId,
+        operationScope: questV2CandidateTeamRegenerateCodeOperationScope,
+        key: rawCommandId,
+        requestHash,
+        questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<CandidateTeam, QuestV2CandidateTeamBusinessOutcomeCode>
+      > => {
+        if (current.v2Mode !== questV2Mode.candidate) {
+          return { kind: 'rejected', rejection: 'not-candidate' };
+        }
+        if (current.v2Participation !== questV2Participation.group) {
+          return { kind: 'rejected', rejection: 'not-group' };
+        }
+        if (current.questState !== 'QUEST_OPEN') return { kind: 'rejected', rejection: 'not-open' };
+        if (questStartHasPassed(current, now)) return { kind: 'rejected', rejection: 'not-open' };
+
+        const team = await lockTeam(transaction, questId, teamId);
+        if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+        if (team.leaderId !== leaderId) return { kind: 'rejected', rejection: 'not-leader' };
+        if (team.state !== 'TEAM_FORMING') return { kind: 'rejected', rejection: 'not-forming' };
+
+        const joinCode = generateJoinCode();
+        const [updatedTeam] = await transaction
+          .update(questCandidateTeamV2)
+          .set({
+            joinCodeHash: await hashJoinCode(joinCode),
+            joinCodeExpiresAt: new Date(now.getTime() + dayInMilliseconds),
+          })
+          .where(eq(questCandidateTeamV2.id, teamId))
+          .returning(teamFields);
+        if (!updatedTeam) throw new Error('Candidate Team Join Code update returned no row');
+        const result = await readTeam(transaction, updatedTeam, joinCode);
+        return {
+          kind: 'success',
+          result,
+          resourceType: 'quest-v2-candidate-team',
+          resourceId: result.id,
+        };
+      },
+      toSnapshot: snapshotFor,
+      fromSnapshot: teamFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return command.result;
+    return { outcome: command.rejection };
+  });
+};
+
+export const uploadQuestV2CandidateTeamFile = async (
+  leaderId: string,
+  questId: string,
+  teamId: string,
+  input: QuestV2CandidateTeamFileUploadInput,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamFileUploadOutcome> => {
+  const fingerprint = await fileUploadFingerprintFor(input.file);
+  const requestHash = await sha256Json({
+    authenticatedMemberId: leaderId,
+    operation: questV2CandidateTeamFileUploadOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/files',
+    body: { questId, teamId, fingerprint },
+  });
+  const fileId = crypto.randomUUID();
+  let stored: StoredQuestV2CandidateTeamFile;
+  try {
+    stored = await questV2CandidateTeamStorage.upload(fileId, input.file);
+  } catch (error) {
+    if (error instanceof FileUploadError && error.cleanupObject) {
+      const cleanupObject = error.cleanupObject;
+      try {
+        await questV2CandidateTeamStorage.remove(cleanupObject);
+      } catch (cleanupError) {
+        console.error('[candidate-team-file-upload] Compensating object deletion failed', {
+          bucket: cleanupObject.bucket,
+          cleanupError,
+          objectKey: cleanupObject.objectKey,
+        });
+      }
+    }
+    throw error;
+  }
+
+  let result: QuestV2CandidateTeamFileUploadOutcome;
+  try {
+    result = await db.transaction(async (transaction) => {
+      // The Quest row is locked before the module records the command; see the lock-order
+      // note on createQuestV2CandidateTeam.
+      const current = await lockQuest(transaction, questId);
+      if (!current) return { outcome: 'not-found' };
+
+      const command = await runQuestCommand({
+        transaction,
+        identity: {
+          principalUserId: leaderId,
+          operationScope: questV2CandidateTeamFileUploadOperationScope,
+          key: rawCommandId,
+          requestHash,
+          questId,
+        },
+        now,
+        work: async (): Promise<
+          QuestCommandWork<
+            QuestV2CandidateTeamUploadedFile,
+            QuestV2CandidateTeamBusinessOutcomeCode
+          >
+        > => {
+          if (current.v2Mode !== questV2Mode.candidate) {
+            return { kind: 'rejected', rejection: 'not-candidate' };
+          }
+          if (current.v2Participation !== questV2Participation.group) {
+            return { kind: 'rejected', rejection: 'not-group' };
+          }
+          if (current.questState !== 'QUEST_OPEN' || questStartHasPassed(current, now)) {
+            return { kind: 'rejected', rejection: 'not-open' };
+          }
+
+          const team = await lockTeam(transaction, questId, teamId);
+          if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+          if (team.leaderId !== leaderId) return { kind: 'rejected', rejection: 'not-leader' };
+          if (team.state !== 'TEAM_FORMING') return { kind: 'rejected', rejection: 'not-forming' };
+
+          const [persisted] = await transaction
+            .insert(file)
+            .values({
+              id: fileId,
+              bucket: stored.bucket,
+              objectKey: stored.objectKey,
+              contentType: stored.contentType,
+              sizeBytes: stored.sizeBytes,
+              uploadedByUserId: leaderId,
+            })
+            .returning({
+              id: file.id,
+              contentType: file.contentType,
+              sizeBytes: file.sizeBytes,
+              createdAt: file.createdAt,
+            });
+          if (!persisted) throw new Error('Candidate Team file insert returned no row');
+          if (!(await validateSubmissionFiles(transaction, leaderId, [persisted.id]))) {
+            throw new Error('Candidate Team file did not satisfy submission file requirements');
+          }
+
+          const uploaded = {
+            fileId: persisted.id,
+            fileName: stored.fileName,
+            mediaType: persisted.contentType,
+            sizeBytes: persisted.sizeBytes,
+            createdAt: persisted.createdAt,
+          };
+          return {
+            kind: 'success',
+            result: uploaded,
+            resourceType: 'quest-v2-candidate-team-file',
+            resourceId: uploaded.fileId,
+          };
+        },
+        toSnapshot: fileUploadSnapshotFor,
+        fromSnapshot: fileUploadFromSnapshot,
+      });
+
+      if ('outcome' in command) return { outcome: command.outcome };
+      if (command.kind === 'success') return command.result;
+      return { outcome: command.rejection };
+    });
+  } catch (error) {
+    await questV2CandidateTeamStorage
+      .delete(stored.bucket, stored.objectKey)
+      .catch(() => undefined);
+    throw error;
+  }
+
+  if ('outcome' in result || result.replayed === true) {
+    await questV2CandidateTeamStorage
+      .delete(stored.bucket, stored.objectKey)
+      .catch(() => undefined);
+  }
+  return result;
+};
+
+export const submitQuestV2CandidateTeam = async (
+  leaderId: string,
+  questId: string,
+  teamId: string,
+  input: QuestV2CandidateTeamSubmissionInput,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamOutcome> => {
+  const text = input.text.trim();
+  const requestHash = await sha256Json({
+    authenticatedMemberId: leaderId,
+    operation: questV2CandidateTeamSubmitOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/submit',
+    body: { questId, teamId, text, fileIds: input.fileIds },
+  });
+
+  return db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command; see the lock-order
+    // note on createQuestV2CandidateTeam.
+    const current = await lockQuest(transaction, questId);
+    if (!current) return { outcome: 'not-found' };
+
+    const command = await runQuestCommand({
+      transaction,
+      identity: {
+        principalUserId: leaderId,
+        operationScope: questV2CandidateTeamSubmitOperationScope,
+        key: rawCommandId,
+        requestHash,
+        questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<CandidateTeam, QuestV2CandidateTeamBusinessOutcomeCode>
+      > => {
+        if (current.v2Mode !== questV2Mode.candidate) {
+          return { kind: 'rejected', rejection: 'not-candidate' };
+        }
+        if (current.v2Participation !== questV2Participation.group) {
+          return { kind: 'rejected', rejection: 'not-group' };
+        }
+        if (current.questState !== 'QUEST_OPEN') return { kind: 'rejected', rejection: 'not-open' };
+        if (questStartHasPassed(current, now)) return { kind: 'rejected', rejection: 'not-open' };
+
+        const team = await lockTeam(transaction, questId, teamId);
+        if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+        if (team.leaderId !== leaderId) return { kind: 'rejected', rejection: 'not-leader' };
+        if (team.state !== 'TEAM_FORMING') return { kind: 'rejected', rejection: 'not-forming' };
+        const members = await teamMembers(transaction, teamId, true);
+        if (team.headcount === null || members.length !== team.headcount) {
+          return { kind: 'rejected', rejection: 'headcount-mismatch' };
+        }
+        if (!text || text.length > 1000) {
+          return { kind: 'rejected', rejection: 'submission-invalid' };
+        }
+        if (!(await validateSubmissionFiles(transaction, leaderId, input.fileIds))) {
+          return { kind: 'rejected', rejection: 'submission-files-invalid' };
+        }
+
+        const [usedFile] = await transaction
+          .select({ fileId: questCandidateTeamV2SubmissionFile.fileId })
+          .from(questCandidateTeamV2SubmissionFile)
+          .where(inArray(questCandidateTeamV2SubmissionFile.fileId, input.fileIds))
+          .limit(1);
+        if (usedFile) {
+          return { kind: 'rejected', rejection: 'submission-files-invalid' };
+        }
+
+        const [updatedTeam] = await transaction
+          .update(questCandidateTeamV2)
+          .set({
+            state: 'TEAM_SUBMITTED',
+            joinCodeHash: null,
+            joinCodeExpiresAt: null,
+            submissionText: text,
+            submittedAt: now,
+          })
+          .where(
+            and(eq(questCandidateTeamV2.id, teamId), eq(questCandidateTeamV2.state, 'TEAM_FORMING'))
+          )
+          .returning(teamFields);
+        if (!updatedTeam) throw new Error('Candidate Team submission update returned no row');
+
+        await transaction
+          .insert(questCandidateTeamV2SubmissionFile)
+          .values(
+            input.fileIds.map((fileId, position) => ({ teamId, fileId, position, attachedAt: now }))
+          );
+
+        const result = await readTeam(transaction, updatedTeam);
+        return {
+          kind: 'success',
+          result,
+          resourceType: 'quest-v2-candidate-team',
+          resourceId: result.id,
+        };
+      },
+      toSnapshot: snapshotFor,
+      fromSnapshot: teamFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return command.result;
+    return { outcome: command.rejection };
+  });
+};
+
+export const rejectQuestV2CandidateTeam = async (
+  hirerId: string,
+  questId: string,
+  teamId: string,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamRejectOutcome> => {
+  const requestHash = await sha256Json({
+    authenticatedMemberId: hirerId,
+    operation: questV2CandidateTeamRejectOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/reject',
+    questId,
+    teamId,
+    body: {},
+  });
+
+  return db.transaction(async (transaction) => {
+    // The Quest row is locked before the module records the command; see the lock-order
+    // note on createQuestV2CandidateTeam.
+    const current = await lockQuest(transaction, questId);
+    if (!current) return { outcome: 'not-found' };
+
+    const command = await runQuestCommand({
+      transaction,
+      identity: {
+        principalUserId: hirerId,
+        operationScope: questV2CandidateTeamRejectOperationScope,
+        key: rawCommandId,
+        requestHash,
+        questId,
+      },
+      now,
+      work: async (): Promise<
+        QuestCommandWork<CandidateTeam, QuestV2CandidateTeamRejectBusinessOutcomeCode>
+      > => {
+        if (current.hirerId !== hirerId) {
+          return { kind: 'rejected', rejection: 'not-allowed' };
+        }
+        if (
+          current.v2Mode !== questV2Mode.candidate ||
+          current.v2Participation !== questV2Participation.group ||
+          current.questState !== 'QUEST_OPEN' ||
+          current.startTime.getTime() <= now.getTime()
+        ) {
+          return { kind: 'rejected', rejection: 'not-allowed' };
+        }
+
+        const team = await lockTeam(transaction, questId, teamId);
+        if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+        if (team.state !== 'TEAM_SUBMITTED') {
+          return { kind: 'rejected', rejection: 'not-rejectable' };
+        }
+
+        const [updatedTeam] = await transaction
+          .update(questCandidateTeamV2)
+          .set({ state: 'TEAM_REJECTED' })
+          .where(
+            and(
+              eq(questCandidateTeamV2.id, teamId),
+              eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED')
+            )
+          )
+          .returning(teamFields);
+        if (!updatedTeam) throw new Error('Candidate Team rejection update returned no row');
+
+        const result = await readTeam(transaction, updatedTeam);
+        return {
+          kind: 'success',
+          result,
+          resourceType: 'quest-v2-candidate-team',
+          resourceId: result.id,
+        };
+      },
+      toSnapshot: snapshotFor,
+      fromSnapshot: teamFromSnapshot,
+    });
+
+    if ('outcome' in command) return { outcome: command.outcome };
+    if (command.kind === 'success') return command.result;
+    return { outcome: command.rejection };
+  });
+};
+
+const selectionTransitionFor = ({
+  questId,
+  hirerId,
+  now,
+  resourceId: teamId,
+  assignments,
+}: {
+  questId: string;
+  hirerId: string;
+  now: Date;
+  resourceId: string;
+  assignments: SelectionAssignmentRow[];
+}): QuestWorkChatMembershipTransition => {
+  const workers = assignments.map<AcceptedWorker>((assignment) => ({
+    workerId: assignment.workerId,
+    assignmentId: assignment.id,
+    joinedAt: assignment.createdAt.toISOString(),
+  }));
+  const [firstWorker, ...otherWorkers] = workers;
+  if (!firstWorker) throw new Error('Candidate Team selection has no Workers');
+  return {
+    producer: 'QUEST_CANDIDATE_SELECTION',
+    type: 'workersAccepted',
+    commandId: `quest-candidate-team-selection-v2:${teamId}`,
+    eventId: teamId,
+    questId,
+    actorId: hirerId,
+    occurredAt: now.toISOString(),
+    hirerId,
+    workers: [firstWorker, ...otherWorkers],
+  };
+};
+
+type SelectionBusinessOutcomeCode =
+  | 'already-assigned'
+  | 'headcount-mismatch'
+  | 'not-authorized'
+  | 'not-candidate'
+  | 'not-group'
+  | 'not-open'
+  | 'not-selectable'
+  | 'team-not-found';
+
+export const selectQuestV2CandidateTeam = async (
+  hirerId: string,
+  questId: string,
+  teamId: string,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamSelectionOutcome> => {
+  const requestHash = await sha256Json({
+    authenticatedMemberId: hirerId,
+    operation: questV2CandidateTeamSelectOperationScope,
+    path: '/api/v2/quests/:questId/teams/:teamId/select',
+    body: { questId, teamId },
+  });
+
+  return runQuestV2Selection<SelectionBusinessOutcomeCode>({
+    hirerId,
+    questId,
+    rawCommandId,
+    now,
+    operationScope: questV2CandidateTeamSelectOperationScope,
+    requestHash,
+    participation: 'group',
+    gates: {
+      notHirer: 'not-authorized',
+      notMode: 'not-candidate',
+      notParticipation: 'not-group',
+    },
+    resourceType: 'quest-v2-candidate-team-selection',
+    selectResource: async (transaction) => {
+      const team = await lockTeam(transaction, questId, teamId);
+      if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
+      if (
+        team.state !== 'TEAM_SUBMITTED' ||
+        team.submissionText === null ||
+        team.submittedAt === null
+      ) {
+        return { kind: 'rejected', rejection: 'not-selectable' };
+      }
+      if (team.headcount === null) {
+        return { kind: 'rejected', rejection: 'headcount-mismatch' };
+      }
+      const members = await teamMembers(transaction, teamId, true);
+      if (members.length !== team.headcount) {
+        return { kind: 'rejected', rejection: 'headcount-mismatch' };
+      }
+      const submissionFileIds = await teamSubmissionFileIds(transaction, teamId);
+      if (!(await validateSubmissionFiles(transaction, team.leaderId, submissionFileIds))) {
+        return { kind: 'rejected', rejection: 'not-selectable' };
+      }
+
+      return {
+        kind: 'selected',
+        workerIds: members.map((member) => member.memberId),
+        resourceId: teamId,
+        flipCandidateRecords: async (flipTransaction) => {
+          await flipTransaction
+            .update(questCandidateTeamV2)
+            .set({ state: 'TEAM_SELECTED' })
+            .where(
+              and(
+                eq(questCandidateTeamV2.id, teamId),
+                eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED')
+              )
+            );
+          await flipTransaction
+            .update(questCandidateTeamV2)
+            .set({ state: 'TEAM_REJECTED' })
+            .where(
+              and(
+                eq(questCandidateTeamV2.questId, questId),
+                eq(questCandidateTeamV2.state, 'TEAM_SUBMITTED'),
+                ne(questCandidateTeamV2.id, teamId)
+              )
+            );
+          await flipTransaction
+            .update(questCandidateApplicationV2)
+            .set({ state: 'APPLICATION_REJECTED' })
+            .where(
+              and(
+                eq(questCandidateApplicationV2.questId, questId),
+                eq(questCandidateApplicationV2.state, 'APPLICATION_APPLIED')
+              )
+            );
+        },
+      };
+    },
+    transitionFor: selectionTransitionFor,
+  });
+};

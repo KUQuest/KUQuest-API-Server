@@ -20,6 +20,7 @@ import {
 } from './quest-v2.contract';
 
 export const maxQuestV2Images = 3;
+export const maxQuestV2Drafts = 10;
 
 const questV2ModeSchema = t.Union([t.Literal(questV2Modes[0]), t.Literal(questV2Modes[1])]);
 

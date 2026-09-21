@@ -75,7 +75,7 @@ import {
 } from './quest-v2.contract';
 import { buildQuestV2PublishCheck, type QuestV2PublishCheck } from './quest-v2.publish.policy';
 import { softDeleteQuestImageAndRepack } from './quest-image.service';
-import { maxQuestV2Images } from './quest-v2.schema';
+import { maxQuestV2Drafts, maxQuestV2Images } from './quest-v2.schema';
 import type { QuestV2BoardQuery, QuestV2CreateInput, QuestV2EditInput } from './quest-v2.schema';
 import { questV2Storage, type StoredQuestImage } from './quest.storage';
 import { applyQuestStateTransition } from './quest-transition.service';
@@ -134,6 +134,7 @@ type QuestV2CreateValidationOutcome =
   | 'invalid-location'
   | 'invalid-title'
   | 'tag-not-found'
+  | 'limit-reached'
   | 'idempotency-unavailable';
 
 type QuestV2EditValidationOutcome =
@@ -2162,6 +2163,20 @@ const createQuestInTransaction = async (
     work: async (): Promise<
       QuestCommandWork<QuestV2CanonicalQuest, QuestV2CreateBusinessOutcomeCode>
     > => {
+      const [draftCount] = await transaction
+        .select({ count: sql<number>`count(*)::int` })
+        .from(quest)
+        .where(
+          and(
+            eq(quest.hirerId, userId),
+            eq(quest.apiVersion, questApiVersion.v2),
+            eq(quest.questStatus, questStatus.draft)
+          )
+        );
+      if ((draftCount?.count ?? 0) >= maxQuestV2Drafts) {
+        return { kind: 'rejected', rejection: 'limit-reached' };
+      }
+
       if (input.tagId) {
         const [existingTag] = await transaction
           .select({ id: tag.id })

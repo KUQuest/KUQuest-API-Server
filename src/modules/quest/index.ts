@@ -37,10 +37,15 @@ export type {
   QuestV2UnderfilledResolutionCode,
 } from './quest-v2.contract';
 export { questV2Route } from './quest-v2.route';
-export { questAssignmentV2Route } from './quest-assignment-v2.route';
-export { questCandidateV2Route } from './quest-candidate-v2.route';
-export { questCandidateTeamV2Route } from './quest-candidate-team-v2.route';
-export { questProofV2Route } from './quest-proof-v2.route';
+export { questAssignmentV2Route } from './assignment';
+export * from './assignment';
+export { questCandidateV2Route } from './candidate';
+export * from './candidate';
+export { questCandidateTeamV2Route } from './teams-v2';
+export * from './teams-v2';
+export * from './proof-v2';
+export * from './admin';
+export * from './legacy-v1';
 export { questReviewV2Route } from './quest-review-v2.route';
 export {
   createQuestV2Review,
@@ -55,81 +60,25 @@ export type {
   QuestV2ReviewParams,
   QuestV2ReviewUpdateInput,
 } from './quest-review-v2.schema';
-export { cancelQuestV2, questV2CancellationOperationScope } from './quest-settlement.service';
-export type { QuestSettlementOutcome } from './quest-settlement.service';
 export {
-  createQuestV2CandidateApplication,
-  getQuestV2CandidateApplication,
-  listQuestV2CandidateApplications,
-  withdrawQuestV2CandidateApplication,
-  questV2CandidateApplicationCreateOperationScope,
-  questV2CandidateApplicationWithdrawOperationScope,
-  questV2CandidateApplicationSelectOperationScope,
-  selectQuestV2CandidateApplication,
-} from './quest-candidate-v2.service';
-export type {
-  QuestV2CandidateApplicationOutcome,
-  QuestV2CandidateApplicationWithdrawOutcome,
-  QuestV2CandidateSelectionOutcome,
-  QuestV2CandidateApplicationReadOutcome,
-} from './quest-candidate-v2.service';
-export {
-  joinQuestV2,
-  listMyQuestV2Assignments,
-  listQuestV2Assignments,
-  questV2AssignmentJoinOperationScope,
-} from './quest-assignment-v2.service';
-export type {
-  QuestV2AssignmentOutcome,
-  QuestV2AssignmentReadOutcome,
-} from './quest-assignment-v2.service';
-export {
-  confirmQuestV2Completion,
-  autoApproveDueQuestV2Proofs,
-  createQuestV2ProofSubmission,
-  deleteQuestV2ProofSubmission,
-  editQuestV2ProofSubmission,
-  failDueAtQuestV2Proofs,
-  failQuestV2AtDueAt,
-  listQuestV2ProofSubmissions,
-  getQuestV2ProofFile,
-  questV2ProofSubmissionOperationScope,
-  recordQuestV2ProofUploadCleanup,
-  retryQuestV2ProofUploadCleanup,
-  reviewQuestV2ProofSubmission,
-  QuestV2ProofUploadCleanupUnavailableError,
-  submitQuestV2ProofSubmission,
-} from './quest-proof-v2.service';
-export type {
-  QuestV2CompletionConfirmation,
-  QuestV2CompletionConfirmationOutcome,
-  QuestV2ProofDraftInput,
-  QuestV2ProofFailedFile,
-  QuestV2ProofStatus,
-  QuestV2ProofSubmission,
-  QuestV2ProofFileAccess,
-  QuestV2ProofSubmissionDeleteOutcome,
-  QuestV2ProofSubmissionListOutcome,
-  QuestV2ProofSubmissionOutcome,
-  QuestV2ProofReview,
-  QuestV2ProofReviewDecision,
-  QuestV2ProofReviewOutcome,
-  StoredQuestV2ProofFileInput,
-} from './quest-proof-v2.service';
-export {
-  decideQuestV2Underfilled,
-  detectQuestV2Underfilled,
-  expireQuestV2Underfilled,
-  getQuestV2Underfilled,
-  pendingQuestV2UnderfilledQuestIds,
-  questV2UnderfilledConsentOperationScope,
-  questV2UnderfilledDecisionOperationScope,
-  respondToQuestV2Underfilled,
-} from './quest-underfilled-v2.service';
-export type {
-  QuestV2UnderfilledDetectionResult,
-  QuestV2UnderfilledOutcome,
-} from './quest-underfilled-v2.service';
+  cancelQuest,
+  cancelQuestV2,
+  cancelUnfilledQuest,
+  completeQuest,
+  failQuestInTransaction,
+  failQuestV2InTransaction,
+  questV2CancellationOperationScope,
+  settleApprovedLegacyQuestProofAfterFailureInTransaction,
+  settleApprovedQuestInTransaction,
+  settleApprovedQuestV2ProofInTransaction,
+  settleProofFreeQuestV2InTransaction,
+  settleUnderfilledCancellationInTransaction,
+  terminateQuestInTransaction,
+  questSettlementRoute,
+  questCancellationResponseSchema,
+  type QuestSettlementOutcome,
+} from './settlement';
+export * from './lifecycle';
 export {
   addQuestV2Images,
   checkQuestV2ImageUpload,
@@ -205,4 +154,3 @@ export type {
   QuestV2Params,
   QuestV2WriteHeaders,
 } from './quest-v2.schema';
-export type { QuestV2AssignmentParams } from './quest-assignment-v2.schema';

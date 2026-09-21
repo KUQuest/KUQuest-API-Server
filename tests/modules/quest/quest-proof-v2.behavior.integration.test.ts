@@ -28,7 +28,7 @@ import {
   submitQuestV2ProofSubmission,
   type QuestTransaction,
 } from '@/modules/quest';
-import { questV2ProofStorage } from '@/modules/quest/quest-proof-v2.storage';
+import { questV2ProofStorage } from '@/modules/quest/proof-v2/quest-proof-v2.storage';
 import type { QuestWorkChatWriter } from '@/modules/quest/quest-work-chat.port';
 import { createWorkChatMembershipWriter, workChatMembershipWriter } from '@/modules/work-chat';
 import {

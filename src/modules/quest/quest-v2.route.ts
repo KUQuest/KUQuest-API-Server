@@ -20,8 +20,7 @@ import {
   publishQuestV2Controller,
   respondToQuestV2EditRequestController,
 } from './quest-v2.controller';
-import { cancelQuestV2Controller } from './quest-settlement.controller';
-import { questCancellationResponseSchema } from './quest-settlement.schema';
+import { cancelQuestV2Controller, questCancellationResponseSchema } from './settlement';
 import {
   questV2CreateHttpResponseSchema,
   questV2CreateHttpSchema,

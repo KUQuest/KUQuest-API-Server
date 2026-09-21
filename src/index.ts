@@ -2,8 +2,7 @@ import { app } from '@/app';
 import { env, validateRuntimeEnv } from '@/config/env';
 import { startPayoutScheduler } from '@/modules/payout';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
-import { startQuestLifecycleScheduler } from '@/modules/quest/quest-lifecycle.scheduler';
-import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
+import { startQuestLifecycleScheduler, runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 
 validateRuntimeEnv();
 

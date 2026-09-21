@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { createQuestLifecycleScheduler } from '@/modules/quest/quest-lifecycle.scheduler';
+import { createQuestLifecycleScheduler } from '@/modules/quest/lifecycle';
 
 const flush = async () => {
   await Promise.resolve();

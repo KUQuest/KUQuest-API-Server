@@ -188,6 +188,10 @@ const mapCreateOutcome = (
       'A Quest with this idempotency key is still processing'
     );
   }
+  if (outcome === 'limit-reached') {
+    set.status = 409;
+    return apiError('QUEST_DRAFT_LIMIT_REACHED', 'You can have at most 10 active Draft Quests');
+  }
   if (outcome === 'tag-not-found') return invalidInput(set, 'TAG_NOT_FOUND', 'Tag not found');
   if (outcome === 'invalid-dates') {
     return invalidInput(set, 'INVALID_QUEST_DATES', 'dueAt must be after startTime');

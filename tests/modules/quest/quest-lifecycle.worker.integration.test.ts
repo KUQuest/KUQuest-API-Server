@@ -10,7 +10,7 @@ import {
   questTeamInvitation,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
+import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 import { questV2Storage } from '@/modules/quest/quest.storage';
 import { questV2ImageUploadOperationScope } from '@/modules/quest/quest-v2.service';
 import { workChatMembershipWriter } from '@/modules/work-chat';

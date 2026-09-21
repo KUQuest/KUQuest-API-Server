@@ -1,15 +1,17 @@
-import { questRoute } from '@/modules/quest/quest.route';
-import { adminQuestRoute } from '@/modules/quest/quest-admin.route';
+import {
+  adminQuestRoute,
+  questAssignmentRoute,
+  questCandidateRoute,
+  questProofRoute,
+  questReviewRoute,
+  questRoute,
+} from '@/modules/quest';
 import { tagRoute } from '@/modules/tag';
 import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
 import { adminTopUpRoute, topUpRoute, topUpWebhookRoute } from '@/modules/top-up';
-import { questAssignmentRoute } from '@/modules/quest/quest-assignment.route';
-import { questCandidateRoute } from '@/modules/quest/quest-candidate.route';
-import { questProofRoute } from '@/modules/quest/quest-proof.route';
-import { questReviewRoute } from '@/modules/quest/quest-review.route';
 import { questDisputeRoute } from '@/modules/quest/quest-dispute.route';
-import { adminDisputeRoute } from '@/modules/quest/quest-dispute-admin.route';
-import { questSettlementRoute } from '@/modules/quest/quest-settlement.route';
+import { adminDisputeRoute } from '@/modules/quest/admin';
+import { questSettlementRoute } from '@/modules/quest';
 import {
   adminActivityLogRoute,
   adminFinanceRoute,

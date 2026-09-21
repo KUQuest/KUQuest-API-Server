@@ -20,11 +20,8 @@ import {
   chatTransitionCommand,
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
-import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
-import {
-  decideQuestV2Underfilled,
-  getQuestV2Underfilled,
-} from '@/modules/quest/quest-underfilled-v2.service';
+import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
+import { decideQuestV2Underfilled, getQuestV2Underfilled } from '@/modules/quest/lifecycle';
 import type { QuestTransaction, QuestWorkChatMembershipTransition } from '@/modules/quest';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 import {
