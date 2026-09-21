@@ -173,7 +173,12 @@ beforeAll(async () => {
 
   postgresAvailable = true;
   await db.insert(authUser).values([
-    { id: hirerId, email: `${hirerId}@ku.th`, firstName: 'Schema', lastName: 'Hirer' },
+    {
+      id: hirerId,
+      email: `${hirerId}@ku.th`,
+      firstName: 'Schema',
+      lastName: 'Hirer',
+    },
     {
       id: secondReporterId,
       email: `${secondReporterId}@ku.th`,
@@ -251,7 +256,10 @@ describe('Admin Trust & Safety database schema', () => {
       reporterMemberId: hirerId,
       detail: 'The first report detail.',
     });
-    expect(entries).toContainEqual({ reporterMemberId: secondReporterId, detail: null });
+    expect(entries).toContainEqual({
+      reporterMemberId: secondReporterId,
+      detail: null,
+    });
 
     const duplicateEntry = await db
       .insert(adminReporterEntry)

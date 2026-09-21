@@ -227,7 +227,9 @@ export const adminEvidenceReference = pgTable(
     reportCaseId: uuid('report_case_id')
       .notNull()
       .references(() => adminReportCase.id, { onDelete: 'restrict' }),
-    messageId: uuid('message_id').references(() => chatMessage.id, { onDelete: 'restrict' }),
+    messageId: uuid('message_id').references(() => chatMessage.id, {
+      onDelete: 'restrict',
+    }),
     attachmentId: uuid('attachment_id').references(() => chatAttachment.id, {
       onDelete: 'restrict',
     }),
@@ -312,7 +314,9 @@ export const adminDisputeCase = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     publicSequence: integer('public_sequence')
-      .generatedByDefaultAsIdentity({ name: 'admin_dispute_case_public_sequence' })
+      .generatedByDefaultAsIdentity({
+        name: 'admin_dispute_case_public_sequence',
+      })
       .unique(),
     questId: uuid('quest_id')
       .notNull()
