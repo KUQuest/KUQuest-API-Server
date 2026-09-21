@@ -453,6 +453,22 @@ test('bootstrap requires the exact destructive confirmation', async () => {
   }
 });
 
+test('bootstrap accepts the exact reset confirmation from its environment', async () => {
+  const fixture = await createFixture();
+
+  try {
+    const result = runStagingOperation(fixture, 'bootstrap', {
+      env: { STAGING_RESET_CONFIRMATION: 'RESET staging public schema' },
+    });
+    const commands = await readFile(fixture.dockerLog, 'utf8');
+
+    expect(result.exitCode).toBe(0);
+    expect(commands).toContain('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test('bootstrap reports its recovery backup when migration fails', async () => {
   const fixture = await createFixture();
 

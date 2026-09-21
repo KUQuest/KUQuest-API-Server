@@ -234,8 +234,10 @@ bootstrap() {
     'PostgreSQL roles, the server, and other databases are not changed.' \
     'Type exactly: RESET staging public schema' >&2
 
-  local confirmation
-  read -r confirmation
+  local confirmation=${STAGING_RESET_CONFIRMATION:-}
+  if [[ -z "$confirmation" ]]; then
+    read -r confirmation
+  fi
   if [[ "$confirmation" != 'RESET staging public schema' ]]; then
     fail "confirmation did not match; no schema reset was performed. Backup: $recovery_backup"
   fi
