@@ -387,7 +387,30 @@ jobs:
             deploy@"$STAGING_SERVER" \
             'docker image prune --all --force'
 
-      - name: Deploy API container
+      - name: Reset and seed staging database
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          printf '%s\n' 'RESET staging public schema' |
+            ssh \
+              -i "$RUNNER_TEMP/staging_key" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+              deploy@"$STAGING_SERVER" \
+              "APP_IMAGE='$IMAGE_TAG' \
+               STAGING_DIR=/opt/backend \
+               ENV_FILE=/opt/backend/.env \
+               BACKUP_DIR=/opt/backend/backups \
+               STAGING_NETWORK=kuquest-staging_default \
+               POSTGRES_CLIENT_IMAGE='${IMAGE_NAME}:postgres-client-${{ github.event.workflow_run.head_sha }}' \
+               bash -s -- bootstrap" \
+              < scripts/staging-operations.sh
+
+      - name: Start seeded staging API
         shell: bash
         env:
           IMAGE_TAG: ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
@@ -400,14 +423,9 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
             deploy@"$STAGING_SERVER" \
-            "APP_IMAGE='$IMAGE_TAG' \
-             STAGING_DIR=/opt/backend \
-             ENV_FILE=/opt/backend/.env \
-             BACKUP_DIR=/opt/backend/backups \
-             STAGING_NETWORK=kuquest-staging_default \
-             POSTGRES_CLIENT_IMAGE='${IMAGE_NAME}:postgres-client-${{ github.event.workflow_run.head_sha }}' \
-             bash -s -- deploy" \
-            < scripts/staging-operations.sh
+            "cd /opt/backend &&
+             APP_IMAGE='$IMAGE_TAG' \
+             docker compose up -d --no-deps --remove-orphans --wait --wait-timeout 60 api"
 
       - name: Seed staging Finance test data
         if: ${{ env.STAGING_TEST_AUTH_ENABLED == 'true' }}
