@@ -30,7 +30,7 @@ const createFixture = async () => {
   await mkdir(backupDirectory);
   await writeFile(
     join(directory, '.env'),
-    'DEPLOYMENT_ENV=staging\nDATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\n'
+    'DEPLOYMENT_ENV=staging\nDATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\nADMIN_EMAIL=admin@example.com\nADMIN_PASSWORD=Admin123!\nADMIN_FIRST_NAME=Admin\nADMIN_LAST_NAME=User\n'
   );
   await writeFile(
     join(binaryDirectory, 'docker'),
@@ -408,6 +408,28 @@ test('bootstrap reports its recovery backup when seed verification fails', async
     expect(result.exitCode).toBe(1);
     expect(output).toContain('Bootstrap failed; restore from');
     expect(output).toContain(fixture.backupDirectory);
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('bootstrap refuses missing admin seed environment before backup', async () => {
+  const fixture = await createFixture();
+
+  try {
+    await writeFile(
+      join(fixture.directory, '.env'),
+      'DEPLOYMENT_ENV=staging\nDATABASE_URL=postgresql://kuquest:secret@database:5432/kuquest\n'
+    );
+    const result = runStagingOperation(fixture, 'bootstrap', {
+      input: 'RESET staging public schema\n',
+    });
+    const output = `${result.stdout.toString()}${result.stderr.toString()}`;
+    const commands = await readFile(fixture.dockerLog, 'utf8').catch(() => '');
+
+    expect(result.exitCode).toBe(1);
+    expect(output).toContain('ADMIN_EMAIL is required for staging seed');
+    expect(commands).not.toContain('pg_dump');
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }
