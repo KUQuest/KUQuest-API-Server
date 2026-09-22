@@ -17,9 +17,9 @@ import type {
 import {
   AdminReportCaseError,
   decideAdminReportCase,
-  getAdminReportCase,
+  getAdminReport,
   getAdminReportEvidence,
-  listAdminReportCases,
+  listAdminReports,
 } from './admin-report.service';
 import { AdminActionError } from './admin-action.policy';
 
@@ -65,7 +65,7 @@ export const listAdminReportsController = async ({
   set,
 }: AdminContext & { query: AdminReportListQuery }): Promise<ApiResponse<AdminReportListData>> => {
   try {
-    const result = await listAdminReportCases({
+    const result = await listAdminReports({
       kind: query.kind,
       status: query.status,
       memberId: query.memberId,
@@ -88,7 +88,7 @@ export const getAdminReportController = async ({
   set,
 }: AdminContext & { params: AdminReportParams }): Promise<ApiResponse<AdminReportDetailData>> => {
   try {
-    return apiSuccess(await getAdminReportCase(params.reportId));
+    return apiSuccess(await getAdminReport(params.reportId)) as ApiResponse<AdminReportDetailData>;
   } catch (error) {
     return mapAdminReportError(set, error) as ApiResponse<AdminReportDetailData>;
   }
