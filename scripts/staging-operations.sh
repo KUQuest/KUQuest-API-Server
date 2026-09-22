@@ -39,10 +39,6 @@ require_staging_seed_environment() {
   done
 }
 
-ensure_staging_network() {
-  docker network inspect "$staging_network" >/dev/null 2>&1 ||
-    docker network create "$staging_network" >/dev/null
-}
 
 backup_contents_are_valid() {
   local backup_name=$1
@@ -239,9 +235,8 @@ bootstrap() {
   local recovery_backup
   database_url=$(read_database_url)
   require_staging_seed_environment
-  ensure_staging_network
-
   docker compose pull api
+  docker compose up --no-start api
   recovery_backup=$(create_verified_backup "$database_url")
   trap report_bootstrap_failure ERR
 
