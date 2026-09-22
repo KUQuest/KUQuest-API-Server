@@ -536,8 +536,8 @@ const main = async (): Promise<void> => {
   if (!hirer) throw new Error('Hirer demo user (index 0) is missing.');
   const worker = orderedUsers[1];
   if (!worker) throw new Error('Worker demo user (index 1) is missing.');
-  const designTagId = tagIds.get('Design');
-  if (!designTagId) throw new Error('Design tag is missing for demo Dispute Quest.');
+  const designTagId = tagIds.get('Graphic Design');
+  if (!designTagId) throw new Error('Graphic Design tag is missing for demo Dispute Quest.');
 
   const dispute = await ensureFrontendDemoDisputeQuest(hirer.id, worker.id, designTagId);
 
