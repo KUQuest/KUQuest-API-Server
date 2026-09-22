@@ -30,6 +30,16 @@ read_environment_value() {
   sed -n "s/^${name}=//p" "$environment_file" | tail -n 1
 }
 
+require_staging_seed_environment() {
+  local name
+
+  for name in ADMIN_EMAIL ADMIN_PASSWORD ADMIN_FIRST_NAME ADMIN_LAST_NAME; do
+    [[ -n "$(read_environment_value "$name")" ]] ||
+      fail "$name is required for staging seed"
+  done
+}
+
+
 backup_contents_are_valid() {
   local backup_name=$1
 
@@ -224,8 +234,9 @@ bootstrap() {
   local database_url
   local recovery_backup
   database_url=$(read_database_url)
-
+  require_staging_seed_environment
   docker compose pull api
+  docker compose up --no-start api
   recovery_backup=$(create_verified_backup "$database_url")
   trap report_bootstrap_failure ERR
 
@@ -234,8 +245,10 @@ bootstrap() {
     'PostgreSQL roles, the server, and other databases are not changed.' \
     'Type exactly: RESET staging public schema' >&2
 
-  local confirmation
-  read -r confirmation
+  local confirmation=${STAGING_RESET_CONFIRMATION:-}
+  if [[ -z "$confirmation" ]]; then
+    read -r confirmation
+  fi
   if [[ "$confirmation" != 'RESET staging public schema' ]]; then
     fail "confirmation did not match; no schema reset was performed. Backup: $recovery_backup"
   fi

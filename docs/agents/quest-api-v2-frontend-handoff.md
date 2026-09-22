@@ -693,6 +693,10 @@ Known blocking codes:
 - WALLET_NOT_ACTIVE
 - QUEST_ESCROW_AMOUNT_OUT_OF_RANGE
 - INSUFFICIENT_SPENDING_BALANCE
+- QUEST_ACTIVE_LIMIT_REACHED
+
+QUEST_ACTIVE_LIMIT_REACHED means the Hirer already has 10 active published v2 Quests.
+Active means QUEST_OPEN, QUEST_ASSIGNED, or QUEST_IN_PROGRESS.
 
 Possible infrastructure error:
 
@@ -763,8 +767,12 @@ Publish errors:
 - 409 WALLET_NOT_ACTIVE
 - 409 INSUFFICIENT_SPENDING_BALANCE
 - 409 QUEST_ESCROW_AMOUNT_OUT_OF_RANGE
+- 409 QUEST_ACTIVE_LIMIT_REACHED
 - idempotency errors
 - 503 QUEST_ESCROW_UNAVAILABLE
+
+A 409 QUEST_ACTIVE_LIMIT_REACHED means the Hirer already has 10 active published v2 Quests.
+Active means QUEST_OPEN, QUEST_ASSIGNED, or QUEST_IN_PROGRESS.
 
 After success, render Quest State QUEST_OPEN.
 
