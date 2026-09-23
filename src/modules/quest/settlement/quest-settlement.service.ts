@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import { recordAudit, type AuditActor } from '@/modules/audit/audit.service';
 import {
   quest,
@@ -1516,7 +1517,7 @@ const applyV2CancellationInTransaction = async (
         eq(questAssignment.assignmentStatus, assignmentStatus.active)
       )
     );
-  await applyQuestStateTransition(tx, {
+  const cancelled = await applyQuestStateTransition(tx, {
     questId: current.id,
     from: current.questStatus,
     to: questStatus.cancelled,
@@ -1529,6 +1530,17 @@ const applyV2CancellationInTransaction = async (
     ],
   });
   await recordV2CancellationAudit(tx, current, workers, hirerId, now);
+  if (
+    cancelled &&
+    (current.questStatus === questStatus.assigned || current.questStatus === questStatus.inProgress)
+  ) {
+    await notifyQuestUpdate(tx, {
+      questId: current.id,
+      recipientMemberIds: [...new Set([hirerId, ...workers.map(({ workerId }) => workerId)])],
+      closeMemberIds: workers.map(({ workerId }) => workerId),
+      changeType: 'QUEST_CANCELLED',
+    });
+  }
   return {
     questStatus: questStatus.cancelled,
     outcome: 'CANCELLED',
