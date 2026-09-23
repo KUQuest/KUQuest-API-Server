@@ -24,6 +24,7 @@ import {
   questCandidateTeamV2Route,
   questProofV2Route,
   questReviewV2Route,
+  questV2RealtimeRoute,
   questV2Route,
 } from '@/modules/quest';
 import { candidateInquiryRoute, messageReportRoute, workChatRoute } from '@/modules/work-chat';
@@ -81,6 +82,7 @@ export const createApp = () => {
     .use(questCandidateTeamV2Route)
     .use(questProofV2Route)
     .use(questReviewV2Route)
+    .use(questV2RealtimeRoute)
     .use(questV2Route)
     .use(questRoute)
     .use(adminQuestRoute)

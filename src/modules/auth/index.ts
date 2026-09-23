@@ -8,6 +8,7 @@ export { adminAuthenticationGuard, enabledAdminGuard } from './admin-auth.guard'
 export { authTestRoute } from './auth-test.route';
 export { createStagingTestAuthRoute, stagingTestAuthRoute } from './staging-test-auth.route';
 export { assertAllowedEmail, isAllowedEmail } from './auth.policy';
+export { getTrustedOrigins } from './auth.config.shared';
 export type { AuthSession } from './auth.config';
 export type { AuthedContext, AuthenticatedSession } from './auth.guard';
 export type { AdminAuthSession } from './admin-auth.config';

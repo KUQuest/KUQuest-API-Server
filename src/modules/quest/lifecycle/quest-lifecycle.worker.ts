@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import {
   proofSubmission,
   questApiVersion,
@@ -114,7 +115,12 @@ const boundedSize = (value: number | undefined) => {
 const startQuest = async (questId: string, now: Date): Promise<boolean> =>
   db.transaction(async (transaction) => {
     const [current] = await transaction
-      .select({ id: quest.id, startTime: quest.startTime })
+      .select({
+        id: quest.id,
+        hirerId: quest.hirerId,
+        apiVersion: quest.apiVersion,
+        startTime: quest.startTime,
+      })
       .from(quest)
       .where(
         and(
@@ -128,8 +134,8 @@ const startQuest = async (questId: string, now: Date): Promise<boolean> =>
     if (!current) return false;
     if (await hasPendingQuestV2EditRequest(transaction, questId)) return false;
 
-    await transaction
-      .select({ id: questAssignment.id })
+    const assignments = await transaction
+      .select({ id: questAssignment.id, workerId: questAssignment.workerId })
       .from(questAssignment)
       .where(
         and(
@@ -148,13 +154,23 @@ const startQuest = async (questId: string, now: Date): Promise<boolean> =>
           eq(questAssignment.assignmentStatus, assignmentStatus.active)
         )
       );
-    return applyQuestStateTransition(transaction, {
+    const started = await applyQuestStateTransition(transaction, {
       questId,
       from: questStatus.assigned,
       to: questStatus.inProgress,
       now,
       workChat: [],
     });
+    if (started && current.apiVersion === questApiVersion.v2) {
+      await notifyQuestUpdate(transaction, {
+        questId,
+        recipientMemberIds: [
+          ...new Set([current.hirerId, ...assignments.map(({ workerId }) => workerId)]),
+        ],
+        changeType: 'QUEST_STARTED',
+      });
+    }
+    return started;
   });
 
 const ownerHasValidProof = async (transaction: Transaction, questId: string, workerId: string) => {

@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import {
   quest,
   questApiVersion,
@@ -37,6 +38,48 @@ type ConditionItem = { position: number; text: string };
 type ConditionSnapshot = { items: ConditionItem[] };
 type QuestV2EditRequestRow = typeof questV2EditRequest.$inferSelect;
 type QuestV2EditResponseRow = typeof questV2EditRequestResponse.$inferSelect;
+
+const notifyQuestEditUpdate = async (
+  transaction: QuestTransaction,
+  questId: string,
+  editRequestId: string
+) => {
+  const [currentQuest] = await transaction
+    .select({ hirerId: quest.hirerId })
+    .from(quest)
+    .where(eq(quest.id, questId))
+    .limit(1);
+  if (!currentQuest) throw new Error(`Quest ${questId} could not be read for Edit notification`);
+
+  const activeWorkers = await transaction
+    .select({ workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .where(
+      and(
+        eq(questAssignment.questId, questId),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+      )
+    );
+  const requestWorkers = await transaction
+    .select({ workerId: questV2EditRequestResponse.workerId })
+    .from(questV2EditRequestResponse)
+    .where(eq(questV2EditRequestResponse.requestId, editRequestId));
+  const activeWorkerIds = new Set(activeWorkers.map(({ workerId }) => workerId));
+
+  await notifyQuestUpdate(transaction, {
+    questId,
+    recipientMemberIds: [...new Set([currentQuest.hirerId, ...activeWorkerIds])],
+    closeMemberIds: [
+      ...new Set(
+        requestWorkers
+          .map(({ workerId }) => workerId)
+          .filter((workerId) => !activeWorkerIds.has(workerId))
+      ),
+    ],
+    changeType: 'QUEST_EDIT_UPDATED',
+    editRequestId,
+  });
+};
 
 export const questV2EditRequestCreateOperationScope = 'quest.v2.edit-request.create';
 export const questV2EditRequestRespondOperationScope = 'quest.v2.edit-request.respond';
@@ -231,6 +274,7 @@ const failRequest = async (
         eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING')
       )
     );
+  await notifyQuestEditUpdate(transaction, request.questId, request.id);
   return {
     ...request,
     requestStatus: 'EDIT_REQUEST_FAILED',
@@ -446,6 +490,14 @@ export const createQuestV2EditRequest = async (
         await transaction
           .insert(questV2EditRequestResponse)
           .values(workers.map(({ workerId }) => ({ requestId: created.id, workerId })));
+        await notifyQuestUpdate(transaction, {
+          questId,
+          recipientMemberIds: [
+            ...new Set([current.hirerId, ...workers.map(({ workerId }) => workerId)]),
+          ],
+          changeType: 'QUEST_EDIT_UPDATED',
+          editRequestId: created.id,
+        });
         const resource = await projectRequest(transaction, userId, current, created);
         if (!resource) throw new Error(`Quest Edit Request ${created.id} could not be projected`);
         return {
@@ -618,6 +670,7 @@ export const respondToQuestV2EditRequest = async (
           throw new Error(`Quest Edit Request ${requestId} could not be read back`);
         const resource = await projectRequest(transaction, userId, currentQuest, updatedRequest);
         if (!resource) throw new Error(`Quest Edit Request ${requestId} could not be projected`);
+        await notifyQuestEditUpdate(transaction, request.questId, requestId);
         return {
           kind: 'success',
           result: resource,

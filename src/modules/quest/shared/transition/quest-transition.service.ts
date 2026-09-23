@@ -10,6 +10,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 
 import { quest } from '@/database/schema/quest.schema';
+import { notifyQuestRosterUpdate } from '@/modules/quest/v2/realtime/quest-update.delivery';
 
 import { questStatus, type QuestStatus } from '../contracts/quest.contract';
 import type {
@@ -166,5 +167,8 @@ export const applyQuestStateTransition = async (
     .returning({ id: quest.id });
   if (!updated) return false;
   await applyWorkChat(tx, input, entries);
+  if (input.from === questStatus.open && input.to === questStatus.assigned) {
+    await notifyQuestRosterUpdate(tx, input.questId);
+  }
   return true;
 };

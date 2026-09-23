@@ -28,6 +28,7 @@ import type {
   WorkChatMembershipWriter,
 } from '../../shared/work-chat/quest-work-chat.contract';
 import type { QuestV2AssignmentMineStatus } from './quest-assignment-v2.schema';
+import { notifyQuestRosterUpdate } from '../realtime';
 
 export const questV2AssignmentJoinOperationScope = 'quest.v2.assignment.join';
 
@@ -311,6 +312,7 @@ const joinQuestV2InTransaction = async (
         } catch (cause) {
           throw new WorkChatTransitionError(cause);
         }
+        await notifyQuestRosterUpdate(transaction, questId);
       }
 
       return {
