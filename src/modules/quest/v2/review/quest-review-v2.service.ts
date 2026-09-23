@@ -44,6 +44,7 @@ type ReviewBusinessOutcomeCode =
 type ReviewOutcomeCode = ReviewBusinessOutcomeCode | QuestCommandOutcomeCode;
 
 export type QuestV2ReviewOutcome = QuestV2ReviewRow | { outcome: ReviewOutcomeCode };
+type QuestV2ReviewReadResult<T> = T | { outcome: 'not-found' | 'review-not-found' };
 
 const reviewFields = {
   id: review.id,
@@ -417,4 +418,43 @@ export const updateQuestV2Review = async (
     if (command.kind === 'success') return command.result;
     return { outcome: command.rejection };
   });
+};
+
+const canReadReviews = async (questId: string, memberId: string): Promise<boolean> => {
+  const [current] = await db
+    .select({ hirerId: quest.hirerId, questStatus: quest.questStatus })
+    .from(quest)
+    .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
+    .limit(1);
+  if (!current || !isTerminalQuestStatus(current.questStatus)) return false;
+  if (current.hirerId === memberId) return true;
+
+  const [assignment] = await db
+    .select({ id: questAssignment.id })
+    .from(questAssignment)
+    .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, memberId)))
+    .limit(1);
+  return Boolean(assignment);
+};
+
+export const listQuestV2Reviews = async (
+  memberId: string,
+  questId: string
+): Promise<QuestV2ReviewReadResult<QuestV2ReviewRow[]>> => {
+  if (!(await canReadReviews(questId, memberId))) return { outcome: 'not-found' };
+  return db.select(reviewFields).from(review).where(eq(review.questId, questId));
+};
+
+export const getQuestV2Review = async (
+  memberId: string,
+  questId: string,
+  reviewId: string
+): Promise<QuestV2ReviewReadResult<QuestV2ReviewRow>> => {
+  if (!(await canReadReviews(questId, memberId))) return { outcome: 'not-found' };
+  const [row] = await db
+    .select(reviewFields)
+    .from(review)
+    .where(and(eq(review.questId, questId), eq(review.id, reviewId)))
+    .limit(1);
+  return row ?? { outcome: 'review-not-found' };
 };
