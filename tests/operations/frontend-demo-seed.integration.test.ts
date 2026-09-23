@@ -68,7 +68,7 @@ test('frontend demo seed prepares, idempotently reuses, and preserves terminal d
   const [existingTag] = await db
     .select({ id: tag.id })
     .from(tag)
-    .where(eq(tag.name, 'Design'))
+    .where(eq(tag.name, 'Graphic Design'))
     .limit(1);
 
   const tagId =
@@ -76,7 +76,7 @@ test('frontend demo seed prepares, idempotently reuses, and preserves terminal d
     (
       await db
         .insert(tag)
-        .values({ name: `Design-${runId}` })
+        .values({ name: `Graphic Design-${runId}` })
         .returning({ id: tag.id })
     )[0]!.id;
 
