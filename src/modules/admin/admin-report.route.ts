@@ -17,6 +17,7 @@ import {
   adminReportDetailResponseSchema,
   adminReportEvidenceHeadersSchema,
   adminReportEvidenceParamsSchema,
+  adminReportEvidenceQuerySchema,
   adminReportEvidenceResponseSchema,
   adminReportListQuerySchema,
   adminReportListResponseSchema,
@@ -68,13 +69,14 @@ export const adminReportRoute = new Elysia({
   })
   .get('/evidence/:evidenceRef', getAdminReportEvidenceController, {
     params: adminReportEvidenceParamsSchema,
+    query: adminReportEvidenceQuerySchema,
     headers: adminReportEvidenceHeadersSchema,
     response: responses(adminReportEvidenceResponseSchema, 400, 401, 403, 404, 503),
     detail: {
       tags: ['Admin Reports'],
-      summary: 'Read case-scoped Report evidence',
+      summary: 'Read case-scoped Report evidence or Conduct Report Chat history',
       description:
-        'Returns the reported Message and bounded surrounding Messages. Every access is recorded as an Admin Action and is not a general Work Conversation read.',
+        'Returns Report Case context or one bounded chronological page from a Conduct Report Conversation. Conduct Report evidence handles are scoped to their Report and permitted Conversation. Every page read is recorded as an Admin Action.',
       operationId: 'getAdminReportEvidence',
       security: betterAuthSecurity,
     },

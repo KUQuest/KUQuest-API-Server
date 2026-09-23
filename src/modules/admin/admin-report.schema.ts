@@ -64,7 +64,15 @@ export const adminReportParamsSchema = t.Object({
 });
 
 export const adminReportEvidenceParamsSchema = t.Object({
-  evidenceRef: uuid,
+  evidenceRef: t.String({
+    pattern:
+      '^(?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}|CRH_[A-Za-z0-9_-]{43})$',
+  }),
+});
+
+export const adminReportEvidenceQuerySchema = t.Object({
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
+  cursor: t.Optional(t.String()),
 });
 
 export const adminReportListQuerySchema = t.Object({
@@ -229,6 +237,17 @@ export const adminConductReportDetailSchema = t.Composite([
   t.Object({
     assignment: adminConductReportAssignmentSchema,
     proofSubmission: t.Nullable(adminConductReportProofSchema),
+    evidenceHandles: t.Array(
+      t.Object({
+        handle: t.String({ pattern: '^CRH_[A-Za-z0-9_-]{43}$' }),
+        conversationType: t.Union([
+          t.Literal('CONVERSATION_WORK'),
+          t.Literal('CONVERSATION_CANDIDATE_INQUIRY'),
+        ]),
+        candidate: t.Nullable(adminReportMemberSchema),
+        expiresAt: t.Nullable(dateTime),
+      })
+    ),
   }),
 ]);
 
@@ -313,20 +332,38 @@ const adminReportEvidenceMessageSchema = t.Object({
   attachments: t.Array(adminReportEvidenceAttachmentSchema),
 });
 
+const adminReportCaseEvidenceSchema = t.Object({
+  caseId: uuid,
+  evidenceRefId: uuid,
+  reportedMessageId: uuid,
+  truncated: t.Boolean(),
+  messages: t.Array(adminReportEvidenceMessageSchema),
+});
+
+const adminConductReportEvidenceSchema = t.Object({
+  conductReportId: uuid,
+  evidenceHandle: t.String({ pattern: '^CRH_[A-Za-z0-9_-]{43}$' }),
+  conversationType: t.Union([
+    t.Literal('CONVERSATION_WORK'),
+    t.Literal('CONVERSATION_CANDIDATE_INQUIRY'),
+  ]),
+  expiresAt: t.Nullable(dateTime),
+  messages: t.Array(adminReportEvidenceMessageSchema),
+  nextCursor: t.Nullable(t.String()),
+  adminActionId: uuid,
+});
+
 export const adminReportEvidenceResponseSchema = t.Object({
   success: t.Literal(true),
-  data: t.Object({
-    caseId: uuid,
-    evidenceRefId: uuid,
-    reportedMessageId: uuid,
-    truncated: t.Boolean(),
-    messages: t.Array(adminReportEvidenceMessageSchema),
-    adminActionId: uuid,
-  }),
+  data: t.Union([
+    t.Composite([adminReportCaseEvidenceSchema, t.Object({ adminActionId: uuid })]),
+    adminConductReportEvidenceSchema,
+  ]),
 });
 
 export type AdminReportParams = Static<typeof adminReportParamsSchema>;
 export type AdminReportEvidenceParams = Static<typeof adminReportEvidenceParamsSchema>;
+export type AdminReportEvidenceQuery = Static<typeof adminReportEvidenceQuerySchema>;
 export type AdminReportListQuery = Static<typeof adminReportListQuerySchema>;
 export type AdminReportDecisionBody = Static<typeof adminReportDecisionBodySchema>;
 export type AdminReportListData = Static<typeof adminReportListResponseSchema>['data'];

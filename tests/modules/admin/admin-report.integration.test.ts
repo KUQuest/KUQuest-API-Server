@@ -3,6 +3,7 @@ import { db, sql } from '@/database/client';
 import {
   adminAction,
   adminConductReport,
+  adminConductReportEvidenceHandle,
   adminEvidenceReference,
   adminModerationDecision,
   adminReportCase,
@@ -53,6 +54,7 @@ const adminPassword = 'AdminPass1!';
 const reporterId = randomUUID();
 const senderId = randomUUID();
 const additionalWorkerId = randomUUID();
+const unrelatedCandidateId = randomUUID();
 const tagId = randomUUID();
 const fixtureQuestIds: string[] = [];
 const fixtureConversationIds: string[] = [];
@@ -367,12 +369,177 @@ const createConductReportFixture = async (
 
   return {
     assignmentId,
+    assignmentWorkerIds,
     candidateTeamId,
     proofSubmissionId,
     draftProofSubmissionId,
+    filerId,
+    reportedMemberId,
     questId,
     reportId,
   };
+};
+
+const createConductReportChatFixture = async (
+  fixture: Awaited<ReturnType<typeof createConductReportFixture>>,
+  input: { messageCount?: number; candidateWorkerIds?: string[]; attachmentSequence?: number } = {}
+) => {
+  const createdAt = new Date('2020-02-02T10:00:00.000Z');
+  const messageCount = input.messageCount ?? 0;
+  const workConversationId = randomUUID();
+  const hirerMembershipId = randomUUID();
+  const workMessageIds = Array.from({ length: messageCount }, () => randomUUID());
+  const candidateConversationIds: string[] = [];
+
+  fixtureConversationIds.push(workConversationId);
+  fixtureMessageIds.push(...workMessageIds);
+
+  await db.insert(chatConversation).values({
+    id: workConversationId,
+    questId: fixture.questId,
+    type: 'CONVERSATION_WORK',
+    questTitle: `Conduct report fixture ${fixture.questId}`,
+    questStatus: 'QUEST_IN_PROGRESS',
+    nextSequence: messageCount + 1,
+    createdAt,
+    updatedAt: new Date(createdAt.getTime() + messageCount * 60_000),
+  });
+
+  const assignments = await db
+    .select({ id: questAssignment.id, workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .where(eq(questAssignment.questId, fixture.questId));
+  await db.insert(chatMembership).values([
+    {
+      id: hirerMembershipId,
+      conversationId: workConversationId,
+      memberId: senderId,
+      role: 'HIRER',
+      joinedAt: createdAt,
+      createdAt,
+    },
+    ...assignments.map((assignment) => ({
+      id: randomUUID(),
+      conversationId: workConversationId,
+      assignmentId: assignment.id,
+      memberId: assignment.workerId,
+      role: 'WORKER' as const,
+      joinedAt: createdAt,
+      createdAt,
+    })),
+  ]);
+
+  if (workMessageIds.length > 0) {
+    await db.insert(chatMessage).values(
+      workMessageIds.map((id, index) => ({
+        id,
+        conversationId: workConversationId,
+        sequence: index + 1,
+        kind: 'USER' as const,
+        senderMembershipId: hirerMembershipId,
+        clientMessageId: `conduct-report-history-${id}`,
+        contentText: `Conduct Report history message ${index + 1}`,
+        createdAt: new Date(createdAt.getTime() + (index + 1) * 60_000),
+      }))
+    );
+  }
+
+  if (input.attachmentSequence) {
+    const messageId = workMessageIds[input.attachmentSequence - 1];
+    if (!messageId)
+      throw new Error('Attachment sequence is outside the Work Conversation history.');
+    const attachmentId = randomUUID();
+    const fileId = randomUUID();
+    fixtureAttachmentIds.push(attachmentId);
+    fixtureFileIds.push(fileId);
+    await db.insert(file).values({
+      id: fileId,
+      bucket: 'conduct-report-fixture',
+      objectKey: `conduct-report-fixture/${fileId}`,
+      contentType: 'image/png',
+      sizeBytes: 3,
+      uploadedByUserId: senderId,
+      createdAt,
+    });
+    await db.insert(chatAttachment).values({
+      id: attachmentId,
+      conversationId: workConversationId,
+      uploadedByMemberId: hirerMembershipId,
+      fileId,
+      status: 'CONSUMED',
+      originalFilename: 'conduct-evidence.png',
+      mimeType: 'image/png',
+      sizeBytes: 3,
+      validatedAt: createdAt,
+      consumedAt: createdAt,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    await db.insert(chatMessageAttachment).values({
+      messageId,
+      attachmentId,
+      position: 1,
+      attachedAt: createdAt,
+    });
+  }
+
+  for (const candidateWorkerId of new Set(input.candidateWorkerIds ?? [])) {
+    if (candidateWorkerId === senderId) continue;
+    const conversationId = randomUUID();
+    const hirerInquiryMembershipId = randomUUID();
+    const candidateMembershipId = randomUUID();
+    const messageId = randomUUID();
+    candidateConversationIds.push(conversationId);
+    fixtureConversationIds.push(conversationId);
+    fixtureMessageIds.push(messageId);
+
+    // eslint-disable-next-line no-await-in-loop
+    await db.insert(chatConversation).values({
+      id: conversationId,
+      questId: fixture.questId,
+      type: 'CONVERSATION_CANDIDATE_INQUIRY',
+      questTitle: `Conduct report fixture ${fixture.questId}`,
+      questStatus: 'QUEST_ASSIGNED',
+      state: 'INQUIRY_CLOSED',
+      candidateWorkerId,
+      closedAt: createdAt,
+      nextSequence: 2,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    // eslint-disable-next-line no-await-in-loop
+    await db.insert(chatMembership).values([
+      {
+        id: hirerInquiryMembershipId,
+        conversationId,
+        memberId: senderId,
+        role: 'HIRER',
+        joinedAt: createdAt,
+        createdAt,
+      },
+      {
+        id: candidateMembershipId,
+        conversationId,
+        memberId: candidateWorkerId,
+        role: 'PROSPECTIVE_WORKER',
+        joinedAt: createdAt,
+        createdAt,
+      },
+    ]);
+    // eslint-disable-next-line no-await-in-loop
+    await db.insert(chatMessage).values({
+      id: messageId,
+      conversationId,
+      sequence: 1,
+      kind: 'USER',
+      senderMembershipId: candidateMembershipId,
+      clientMessageId: `conduct-candidate-inquiry-${messageId}`,
+      contentText: `Candidate Inquiry from ${candidateWorkerId}`,
+      createdAt: new Date(createdAt.getTime() + 60_000),
+    });
+  }
+
+  return { workConversationId, workMessageIds, candidateConversationIds };
 };
 
 const cleanFixtures = async () => {
@@ -381,16 +548,11 @@ const cleanFixtures = async () => {
   await db.transaction(async (transaction) => {
     if (fixtureConductReportIds.length > 0) {
       await transaction
+        .delete(adminConductReportEvidenceHandle)
+        .where(inArray(adminConductReportEvidenceHandle.reportId, fixtureConductReportIds));
+      await transaction
         .delete(adminConductReport)
         .where(inArray(adminConductReport.id, fixtureConductReportIds));
-    }
-    if (fixtureConductAssignmentIds.length > 0) {
-      await transaction
-        .delete(questAssignment)
-        .where(inArray(questAssignment.id, fixtureConductAssignmentIds));
-    }
-    if (fixtureConductQuestIds.length > 0) {
-      await transaction.delete(quest).where(inArray(quest.id, fixtureConductQuestIds));
     }
     if (fixtureCaseIds.length > 0) {
       await transaction
@@ -422,6 +584,14 @@ const cleanFixtures = async () => {
       await transaction
         .delete(chatConversation)
         .where(inArray(chatConversation.id, fixtureConversationIds));
+    }
+    if (fixtureConductAssignmentIds.length > 0) {
+      await transaction
+        .delete(questAssignment)
+        .where(inArray(questAssignment.id, fixtureConductAssignmentIds));
+    }
+    if (fixtureConductQuestIds.length > 0) {
+      await transaction.delete(quest).where(inArray(quest.id, fixtureConductQuestIds));
     }
     if (fixtureQuestIds.length > 0) {
       await transaction
@@ -461,6 +631,12 @@ beforeAll(async () => {
       email: `${additionalWorkerId}@ku.th`,
       firstName: 'Report',
       lastName: 'Additional Worker',
+    },
+    {
+      id: unrelatedCandidateId,
+      email: `${unrelatedCandidateId}@ku.th`,
+      firstName: 'Report',
+      lastName: 'Unrelated Candidate',
     },
   ]);
   await db.insert(tag).values({ id: tagId, name: `Admin report ${tagId}` });
@@ -512,7 +688,9 @@ afterAll(async () => {
   await cleanFixtures();
   if (!postgresAvailable) return;
   await db.delete(tag).where(eq(tag.id, tagId));
-  await db.delete(authUser).where(inArray(authUser.id, [senderId, reporterId, additionalWorkerId]));
+  await db
+    .delete(authUser)
+    .where(inArray(authUser.id, [senderId, reporterId, additionalWorkerId, unrelatedCandidateId]));
 });
 
 describe('Admin Report Case API', () => {
@@ -809,6 +987,271 @@ describe('Admin Report Case API', () => {
         });
       }
     }
+  });
+
+  it('exposes case-scoped handles and paginates Work history for all Quest shapes', async () => {
+    if (!postgresAvailable) return;
+    const scenarios = [
+      {
+        mode: 'FIRST_COME_FIRST_SERVED' as const,
+        participation: 'SINGLE' as const,
+        reason: conductReportReason.abandoned,
+        filerId: senderId,
+        reportedMemberId: reporterId,
+      },
+      {
+        mode: 'CANDIDATE' as const,
+        participation: 'SINGLE' as const,
+        reason: conductReportReason.outOfScope,
+        filerId: reporterId,
+        reportedMemberId: senderId,
+        assignmentWorkerId: reporterId,
+      },
+      {
+        mode: 'FIRST_COME_FIRST_SERVED' as const,
+        participation: 'GROUP' as const,
+        reason: conductReportReason.noShow,
+        filerId: reporterId,
+        reportedMemberId: additionalWorkerId,
+        assignmentWorkerIds: [reporterId, additionalWorkerId],
+      },
+      {
+        mode: 'CANDIDATE' as const,
+        participation: 'GROUP' as const,
+        reason: conductReportReason.abandoned,
+        filerId: senderId,
+        reportedMemberId: reporterId,
+        assignmentWorkerIds: [reporterId, additionalWorkerId],
+        candidateTeamLeaderId: reporterId,
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      // Each shape gets separate persisted Chat data and Admin evidence reads.
+      // eslint-disable-next-line no-await-in-loop
+      const fixture = await createConductReportFixture(scenario);
+      const candidateWorkerIds = [fixture.filerId, fixture.reportedMemberId].filter(
+        (memberId) => memberId !== senderId
+      );
+      // eslint-disable-next-line no-await-in-loop
+      await createConductReportChatFixture(fixture, {
+        messageCount: 2,
+        candidateWorkerIds,
+      });
+
+      // eslint-disable-next-line no-await-in-loop
+      const detailResponse = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+      expect(detailResponse.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const detail = (await detailResponse.json()).data;
+      const workHandle = detail.evidenceHandles.find(
+        (handle: { conversationType: string }) => handle.conversationType === 'CONVERSATION_WORK'
+      );
+      expect(workHandle.handle).toMatch(/^CRH_[A-Za-z0-9_-]{43}$/);
+      expect(
+        detail.evidenceHandles.filter(
+          (handle: { conversationType: string }) =>
+            handle.conversationType === 'CONVERSATION_CANDIDATE_INQUIRY'
+        )
+      ).toHaveLength(candidateWorkerIds.length);
+
+      // eslint-disable-next-line no-await-in-loop
+      const firstPage = await adminRequest(`/api/v1/admin/evidence/${workHandle.handle}?limit=1`, {
+        headers: { 'idempotency-key': `conduct-page-one-${fixture.reportId}` },
+      });
+      expect(firstPage.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const firstPageBody = (await firstPage.json()).data;
+      expect(
+        firstPageBody.messages.map((message: { sequence: number }) => message.sequence)
+      ).toEqual([1]);
+      expect(firstPageBody.nextCursor).toEqual(expect.any(String));
+
+      const secondPageQuery = new URLSearchParams({ limit: '1', cursor: firstPageBody.nextCursor });
+      // eslint-disable-next-line no-await-in-loop
+      const secondPage = await adminRequest(
+        `/api/v1/admin/evidence/${workHandle.handle}?${secondPageQuery}`,
+        { headers: { 'idempotency-key': `conduct-page-two-${fixture.reportId}` } }
+      );
+      expect(secondPage.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const secondPageBody = (await secondPage.json()).data;
+      expect(
+        secondPageBody.messages.map((message: { sequence: number }) => message.sequence)
+      ).toEqual([2]);
+      expect(secondPageBody.nextCursor).toBeNull();
+    }
+  });
+
+  it('limits Candidate Inquiry access, audits each page and Attachment link, and enforces retention', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture({
+      mode: 'FIRST_COME_FIRST_SERVED',
+      participation: 'GROUP',
+      reason: conductReportReason.noShow,
+      filerId: reporterId,
+      reportedMemberId: additionalWorkerId,
+      assignmentWorkerId: reporterId,
+      assignmentWorkerIds: [reporterId, additionalWorkerId],
+    });
+    const conversations = await createConductReportChatFixture(fixture, {
+      messageCount: 5,
+      attachmentSequence: 2,
+      candidateWorkerIds: [reporterId, additionalWorkerId, unrelatedCandidateId],
+    });
+    const detailResponse = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(detailResponse.status).toBe(200);
+    const detail = (await detailResponse.json()).data;
+    const workHandle = detail.evidenceHandles.find(
+      (handle: { conversationType: string }) => handle.conversationType === 'CONVERSATION_WORK'
+    );
+    const candidateHandles = detail.evidenceHandles.filter(
+      (handle: { conversationType: string }) =>
+        handle.conversationType === 'CONVERSATION_CANDIDATE_INQUIRY'
+    );
+    expect(
+      candidateHandles.map((handle: { candidate: { id: string } }) => handle.candidate.id).sort()
+    ).toEqual([reporterId, additionalWorkerId].sort());
+    const reportedCandidateHandle = candidateHandles.find(
+      (handle: { candidate: { id: string } }) => handle.candidate.id === reporterId
+    );
+    const otherCandidateHandle = candidateHandles.find(
+      (handle: { candidate: { id: string } }) => handle.candidate.id === additionalWorkerId
+    );
+
+    const initialMemberships = await db
+      .select({ id: chatMembership.id })
+      .from(chatMembership)
+      .where(
+        inArray(
+          chatMembership.conversationId,
+          conversations.candidateConversationIds.concat(conversations.workConversationId)
+        )
+      );
+    const pages: Array<{
+      messages: Array<{ sequence: number; attachments: unknown[] }>;
+      nextCursor: string | null;
+    }> = [];
+    let cursor: string | null = null;
+    for (let index = 0; index < 3; index += 1) {
+      const query = new URLSearchParams({ limit: '2' });
+      if (cursor) query.set('cursor', cursor);
+      // eslint-disable-next-line no-await-in-loop
+      const response = await adminRequest(`/api/v1/admin/evidence/${workHandle.handle}?${query}`, {
+        headers: { 'idempotency-key': `conduct-history-${index}-${fixture.reportId}` },
+      });
+      expect(response.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const body = (await response.json()).data;
+      pages.push(body);
+      cursor = body.nextCursor;
+    }
+    expect(pages.map((page) => page.messages.map((message) => message.sequence))).toEqual([
+      [1, 2],
+      [3, 4],
+      [5],
+    ]);
+    expect(pages[0]!.messages[1]!.attachments).toEqual([
+      expect.objectContaining({
+        originalFilename: 'conduct-evidence.png',
+        url: 'https://storage.example/report-evidence',
+        urlExpiresAt: '2030-02-01T10:15:00.000Z',
+      }),
+    ]);
+    expect(pages[2]!.nextCursor).toBeNull();
+
+    const candidatePage = await adminRequest(
+      `/api/v1/admin/evidence/${reportedCandidateHandle.handle}?limit=2`,
+      { headers: { 'idempotency-key': `conduct-candidate-page-${fixture.reportId}` } }
+    );
+    expect(candidatePage.status).toBe(200);
+    expect((await candidatePage.json()).data).toMatchObject({
+      conductReportId: fixture.reportId,
+      conversationType: 'CONVERSATION_CANDIDATE_INQUIRY',
+      messages: [{ contentText: `Candidate Inquiry from ${reporterId}` }],
+    });
+
+    const unrelatedConversationRead = await adminRequest(
+      `/api/v1/admin/evidence/${conversations.candidateConversationIds[2]}`,
+      { headers: { 'idempotency-key': `conduct-unrelated-${fixture.reportId}` } }
+    );
+    expect(unrelatedConversationRead.status).toBe(404);
+
+    await db
+      .update(adminConductReportEvidenceHandle)
+      .set({ conversationId: conversations.candidateConversationIds[2]! })
+      .where(eq(adminConductReportEvidenceHandle.id, otherCandidateHandle.handle));
+    const reassignedHandleRead = await adminRequest(
+      `/api/v1/admin/evidence/${otherCandidateHandle.handle}`,
+      { headers: { 'idempotency-key': `conduct-reassigned-${fixture.reportId}` } }
+    );
+    expect(reassignedHandleRead.status).toBe(404);
+    await db
+      .update(adminConductReportEvidenceHandle)
+      .set({ conversationId: conversations.candidateConversationIds[1]! })
+      .where(eq(adminConductReportEvidenceHandle.id, otherCandidateHandle.handle));
+
+    const actions = await db
+      .select({
+        action: adminAction.action,
+        metadata: adminAction.metadata,
+        resultData: adminAction.resultData,
+      })
+      .from(adminAction)
+      .where(eq(adminAction.resourceId, fixture.reportId));
+    expect(
+      actions.filter((action) => action.action === 'CONDUCT_REPORT_EVIDENCE_ACCESS')
+    ).toHaveLength(4);
+    expect(
+      actions.filter((action) => action.action === 'CONDUCT_REPORT_EVIDENCE_FILE_ACCESS')
+    ).toHaveLength(1);
+    expect(JSON.stringify(actions)).not.toContain('Conduct Report history message');
+    expect(JSON.stringify(actions)).not.toContain('https://storage.example');
+    expect(JSON.stringify(actions)).not.toContain('conduct-report-fixture/');
+
+    const directConversationRead = await adminRequest(
+      `/api/v1/admin/evidence/${conversations.workConversationId}`,
+      { headers: { 'idempotency-key': `conduct-direct-work-${fixture.reportId}` } }
+    );
+    expect(directConversationRead.status).toBe(404);
+    const noWriteRoute = await adminRequest(`/api/v1/admin/evidence/${workHandle.handle}`, {
+      method: 'POST',
+      headers: { 'idempotency-key': `conduct-no-write-${fixture.reportId}` },
+    });
+    expect(noWriteRoute.status).toBe(404);
+    expect(
+      await db
+        .select({ id: chatMembership.id })
+        .from(chatMembership)
+        .where(
+          inArray(
+            chatMembership.conversationId,
+            conversations.candidateConversationIds.concat(conversations.workConversationId)
+          )
+        )
+    ).toHaveLength(initialMemberships.length);
+
+    const terminalAt = new Date('2020-02-03T10:00:00.000Z');
+    await db
+      .update(quest)
+      .set({ questStatus: 'QUEST_FAILED', failedAt: terminalAt, updatedAt: terminalAt })
+      .where(eq(quest.id, fixture.questId));
+    await db
+      .update(chatConversation)
+      .set({
+        questStatus: 'QUEST_FAILED',
+        readOnlyAt: terminalAt,
+        archivedAt: terminalAt,
+        latestTerminalAt: terminalAt,
+        updatedAt: terminalAt,
+      })
+      .where(eq(chatConversation.id, conversations.workConversationId));
+    const expiredRead = await adminRequest(`/api/v1/admin/evidence/${workHandle.handle}`, {
+      headers: { 'idempotency-key': `conduct-expired-${fixture.reportId}` },
+    });
+    expect(expiredRead.status).toBe(404);
+    const expiredDetail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect((await expiredDetail.json()).data.evidenceHandles).toEqual([]);
   });
 
   it('walks the shared Report queue at limit 1 in both sort directions across microsecond rows', async () => {

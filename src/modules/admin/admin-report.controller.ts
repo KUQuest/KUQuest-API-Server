@@ -10,6 +10,7 @@ import type {
   AdminReportDetailData,
   AdminReportEvidenceData,
   AdminReportEvidenceParams,
+  AdminReportEvidenceQuery,
   AdminReportListData,
   AdminReportListQuery,
   AdminReportParams,
@@ -139,11 +140,13 @@ export const decideAdminReportController = async ({
 
 export const getAdminReportEvidenceController = async ({
   params,
+  query,
   request,
   admin,
   set,
 }: AdminContext & {
   params: AdminReportEvidenceParams;
+  query: AdminReportEvidenceQuery;
   request: Request;
 }): Promise<ApiResponse<AdminReportEvidenceData>> => {
   try {
@@ -151,9 +154,13 @@ export const getAdminReportEvidenceController = async ({
       await getAdminReportEvidence(
         admin.id,
         params.evidenceRef,
-        request.headers.get('idempotency-key') ?? ''
+        request.headers.get('idempotency-key') ?? '',
+        {
+          limit: parsePageLimit(query.limit),
+          cursor: decodeCursor(query.cursor),
+        }
       )
-    );
+    ) as ApiResponse<AdminReportEvidenceData>;
   } catch (error) {
     return mapAdminReportError(set, error) as ApiResponse<AdminReportEvidenceData>;
   }
