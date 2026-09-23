@@ -1,14 +1,27 @@
 import { db } from '@/database/client';
 import {
+  adminConductReport,
   adminEvidenceReference,
   adminModerationDecision,
   adminReportCase,
   adminReporterEntry,
+  conductReportStatus,
   reportCaseStatus,
+  type ConductReportStatus,
   type ReportCaseStatus,
 } from '@/database/schema/admin.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
+import {
+  proofSubmission,
+  quest,
+  questAssignment,
+  questCandidateTeamV2,
+  questCandidateTeamV2Member,
+  questTeam,
+  questTeamMember,
+  questV2ProofSubmission,
+} from '@/database/schema/quest.schema';
 import {
   chatAttachment,
   chatConversation,
@@ -17,15 +30,38 @@ import {
   chatMessageAttachment,
 } from '@/database/schema/work-chat.schema';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
-import { readKeysetPage } from '@/shared/keyset-page';
+import {
+  readKeysetPage,
+  type KeysetAnchor,
+  type KeysetCursorAnchor,
+  type KeysetSort,
+} from '@/shared/keyset-page';
 import { workChatStorage } from '@/modules/work-chat';
 
-import { and, asc, count, desc, eq, exists, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  sql,
+} from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 
 import type {
+  AdminConductReportDetail,
+  AdminConductReportSummary,
   AdminReportCommandData,
+  AdminReportDetailData,
   AdminReportEvidenceData,
   AdminReportListData,
+  AdminReportListQuery,
 } from './admin-report.schema';
 import {
   createAdminActionService,
@@ -33,7 +69,7 @@ import {
   type AdminActionTransaction,
 } from './admin-action.service';
 import type { AdminActionReasonCatalog } from './admin-action.policy';
-import { formatReportCaseDisplayId } from './admin-display-id';
+import { formatConductReportDisplayId, formatReportCaseDisplayId } from './admin-display-id';
 
 export type ReportCaseOutcome =
   'REPORT_CASE_DISMISSED' | 'REPORT_CASE_HIDDEN' | 'REPORT_CASE_RESTORED';
@@ -90,6 +126,38 @@ type ReportCaseListRow = {
   questId: string;
 };
 
+type AdminReportKind = 'REPORT_CASE' | 'CONDUCT_REPORT';
+type ConductReportMember = Pick<
+  typeof authUser.$inferSelect,
+  'id' | 'email' | 'firstName' | 'lastName'
+>;
+type ConductReportQuest = Pick<
+  typeof quest.$inferSelect,
+  | 'id'
+  | 'publicSequence'
+  | 'apiVersion'
+  | 'title'
+  | 'mode'
+  | 'participation'
+  | 'v2Mode'
+  | 'v2Participation'
+  | 'questStatus'
+  | 'headcount'
+  | 'proofRequired'
+  | 'startTime'
+  | 'dueAt'
+  | 'createdAt'
+  | 'updatedAt'
+>;
+type ConductReportListRow = {
+  report: typeof adminConductReport.$inferSelect;
+  filer: ConductReportMember;
+  reportedMember: ConductReportMember;
+  quest: ConductReportQuest;
+  hirer: ConductReportMember;
+  sortCreatedAt: string;
+};
+
 type ReporterRow = {
   id: string;
   reportCaseId: string;
@@ -111,9 +179,18 @@ type EvidenceReferenceRow = {
   createdAt: Date;
 };
 
-type ReportCaseSummary = AdminReportListData['items'][number];
+type ReportCaseSummary = Extract<AdminReportListData['items'][number], { kind: 'REPORT_CASE' }>;
+type ConductReportSummary = AdminConductReportSummary;
+type ConductReportDetail = AdminConductReportDetail;
+type AdminReportStatus = NonNullable<AdminReportListQuery['status']>;
 type ReportCaseCommandSummary = AdminReportCommandData['resourceSummary'];
 type AdminReportEvidence = Omit<AdminReportEvidenceData, 'adminActionId'>;
+
+const conductReportFilerUser = alias(authUser, 'conduct_report_filer');
+const conductReportReportedUser = alias(authUser, 'conduct_report_reported_member');
+const conductReportHirerUser = alias(authUser, 'conduct_report_hirer');
+const conductReportAssignmentWorker = alias(authUser, 'conduct_report_assignment_worker');
+const conductReportProofSubmitter = alias(authUser, 'conduct_report_proof_submitter');
 
 const serializeDate = (value: Date | null): string | null => value?.toISOString() ?? null;
 
@@ -265,31 +342,199 @@ const summaryRows = async (
   return rows.map((row) => summaryFrom(row, reporters, references));
 };
 
-export type ListAdminReportCasesInput = {
-  kind?: 'REPORT_CASE';
-  status?: ReportCaseStatus;
+const selectConductReportRows = (database: ReportDatabase) =>
+  database
+    .select({
+      report: adminConductReport,
+      filer: {
+        id: conductReportFilerUser.id,
+        email: conductReportFilerUser.email,
+        firstName: conductReportFilerUser.firstName,
+        lastName: conductReportFilerUser.lastName,
+      },
+      reportedMember: {
+        id: conductReportReportedUser.id,
+        email: conductReportReportedUser.email,
+        firstName: conductReportReportedUser.firstName,
+        lastName: conductReportReportedUser.lastName,
+      },
+      quest: {
+        id: quest.id,
+        publicSequence: quest.publicSequence,
+        apiVersion: quest.apiVersion,
+        title: quest.title,
+        mode: quest.mode,
+        participation: quest.participation,
+        v2Mode: quest.v2Mode,
+        v2Participation: quest.v2Participation,
+        questStatus: quest.questStatus,
+        headcount: quest.headcount,
+        proofRequired: quest.proofRequired,
+        startTime: quest.startTime,
+        dueAt: quest.dueAt,
+        createdAt: quest.createdAt,
+        updatedAt: quest.updatedAt,
+      },
+      hirer: {
+        id: conductReportHirerUser.id,
+        email: conductReportHirerUser.email,
+        firstName: conductReportHirerUser.firstName,
+        lastName: conductReportHirerUser.lastName,
+      },
+      sortCreatedAt: sql<string>`to_char(${adminConductReport.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+    })
+    .from(adminConductReport)
+    .innerJoin(quest, eq(quest.id, adminConductReport.questId))
+    .innerJoin(
+      conductReportFilerUser,
+      eq(conductReportFilerUser.id, adminConductReport.filerUserId)
+    )
+    .innerJoin(
+      conductReportReportedUser,
+      eq(conductReportReportedUser.id, adminConductReport.reportedMemberId)
+    )
+    .innerJoin(conductReportHirerUser, eq(conductReportHirerUser.id, quest.hirerId));
+
+const canonicalQuestMode = (row: ConductReportQuest): ConductReportSummary['quest']['mode'] =>
+  row.apiVersion === 'v2' && row.v2Mode
+    ? row.v2Mode
+    : row.mode === 'NO_CANDIDATE'
+      ? 'FIRST_COME_FIRST_SERVED'
+      : 'CANDIDATE';
+
+const canonicalQuestParticipation = (
+  row: ConductReportQuest
+): ConductReportSummary['quest']['participation'] =>
+  row.apiVersion === 'v2' && row.v2Participation
+    ? row.v2Participation
+    : row.participation === 'SOLO'
+      ? 'SINGLE'
+      : 'GROUP';
+
+const conductReportSummaryFrom = (row: ConductReportListRow): ConductReportSummary => ({
+  kind: 'CONDUCT_REPORT',
+  id: row.report.id,
+  displayId: formatConductReportDisplayId(row.report.publicSequence),
+  filer: row.filer,
+  reportedMember: row.reportedMember,
+  quest: {
+    id: row.quest.id,
+    displayId: `QST-${row.quest.publicSequence.toString().padStart(6, '0')}`,
+    title: row.quest.title,
+    questStatus: row.quest.questStatus,
+    mode: canonicalQuestMode(row.quest),
+    participation: canonicalQuestParticipation(row.quest),
+    headcount: row.quest.headcount,
+    proofRequired: row.quest.proofRequired,
+    startTime: row.quest.startTime.toISOString(),
+    dueAt: serializeDate(row.quest.dueAt),
+    createdAt: row.quest.createdAt.toISOString(),
+    updatedAt: row.quest.updatedAt.toISOString(),
+    hirer: row.hirer,
+  },
+  reason: row.report.reason,
+  detail: row.report.detail,
+  status: row.report.status,
+  version: row.report.version,
+  createdAt: row.report.createdAt.toISOString(),
+  updatedAt: row.report.updatedAt.toISOString(),
+  resolvedAt: serializeDate(row.report.resolvedAt),
+});
+
+const readAdminReportCursorAnchor = async (cursor: CursorPayload) => {
+  const readCase = async () => {
+    const [row] = await db
+      .select({ startTime: adminReportCase.createdAt })
+      .from(adminReportCase)
+      .where(eq(adminReportCase.id, cursor.id))
+      .limit(1);
+    return row ? { ...row, id: cursor.id, scope: 'REPORT_CASE' as const } : undefined;
+  };
+  const readConductReport = async () => {
+    const [row] = await db
+      .select({ startTime: adminConductReport.createdAt })
+      .from(adminConductReport)
+      .where(eq(adminConductReport.id, cursor.id))
+      .limit(1);
+    return row ? { ...row, id: cursor.id, scope: 'CONDUCT_REPORT' as const } : undefined;
+  };
+
+  if (cursor.scope === 'REPORT_CASE') return readCase();
+  if (cursor.scope === 'CONDUCT_REPORT') return readConductReport();
+  if (cursor.scope !== undefined) return undefined;
+
+  const [caseAnchor, conductAnchor] = await Promise.all([readCase(), readConductReport()]);
+  if (caseAnchor && conductAnchor) return undefined;
+  return caseAnchor ?? conductAnchor;
+};
+
+const cursorAnchorFor = (kind: AdminReportKind, target: KeysetAnchor): KeysetCursorAnchor => ({
+  read: readAdminReportCursorAnchor,
+  boundary: (anchor, sort) => {
+    const source =
+      anchor.scope === 'REPORT_CASE'
+        ? {
+            table: adminReportCase,
+            time: adminReportCase.createdAt,
+            id: adminReportCase.id,
+          }
+        : {
+            table: adminConductReport,
+            time: adminConductReport.createdAt,
+            id: adminConductReport.id,
+          };
+    const anchorRow = sql`(
+      select ${source.time}, ${source.id}, ${anchor.scope}::text
+      from ${source.table}
+      where ${source.id} = ${anchor.id}
+    )`;
+    return sort === 'oldest'
+      ? sql`(${target.time}, ${target.id}, ${kind}::text) > ${anchorRow}`
+      : sql`(${target.time}, ${target.id}, ${kind}::text) < ${anchorRow}`;
+  },
+  orderBy: (sort: KeysetSort) =>
+    sort === 'oldest' ? [asc(target.time), asc(target.id)] : [desc(target.time), desc(target.id)],
+});
+
+const isReportCaseStatus = (status: AdminReportStatus): status is ReportCaseStatus =>
+  Object.values(reportCaseStatus).includes(status as ReportCaseStatus);
+
+const isConductReportStatus = (status: AdminReportStatus): status is ConductReportStatus =>
+  Object.values(conductReportStatus).includes(status as ConductReportStatus);
+
+export type ListAdminReportsInput = {
+  kind?: AdminReportKind;
+  status?: AdminReportStatus;
   memberId?: string;
   questId?: string;
   limit?: number;
   cursor?: CursorPayload;
-  sort?: 'newest' | 'oldest';
+  sort?: KeysetSort;
 };
 
-export const listAdminReportCases = async ({
+export const listAdminReports = async ({
+  kind,
   status,
   memberId,
   questId,
   limit = 20,
   cursor,
   sort = 'newest',
-}: ListAdminReportCasesInput = {}) => {
+}: ListAdminReportsInput = {}) => {
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
-    throw new CursorInputError('INVALID_LIMIT', 'Report Case limit must be between 1 and 50.');
+    throw new CursorInputError('INVALID_LIMIT', 'Report list limit must be between 1 and 50.');
   }
 
-  const where = and(
-    status
-      ? eq(adminReportCase.status, status)
+  const includeReportCases =
+    kind !== 'CONDUCT_REPORT' && (status === undefined || isReportCaseStatus(status));
+  const includeConductReports =
+    kind !== 'REPORT_CASE' && (status === undefined || isConductReportStatus(status));
+  const reportCaseStatusValue = status && isReportCaseStatus(status) ? status : undefined;
+  const conductReportStatusValue = status && isConductReportStatus(status) ? status : undefined;
+
+  const reportCaseWhere = and(
+    reportCaseStatusValue
+      ? eq(adminReportCase.status, reportCaseStatusValue)
       : inArray(adminReportCase.status, [reportCaseStatus.pending, reportCaseStatus.hidden]),
     memberId
       ? exists(
@@ -306,41 +551,365 @@ export const listAdminReportCases = async ({
       : undefined,
     questId ? eq(chatConversation.questId, questId) : undefined
   );
+  const conductReportWhere = and(
+    conductReportStatusValue
+      ? eq(adminConductReport.status, conductReportStatusValue)
+      : eq(adminConductReport.status, conductReportStatus.pending),
+    memberId ? eq(adminConductReport.reportedMemberId, memberId) : undefined,
+    questId ? eq(adminConductReport.questId, questId) : undefined
+  );
 
-  const page = await readKeysetPage({
-    anchor: { time: adminReportCase.createdAt, id: adminReportCase.id },
-    cursor,
-    limit,
-    sort,
-    where,
-    read: ({ where: pageWhere, orderBy, limit: probe }) =>
-      db
-        .select({
-          reportCase: adminReportCase,
-          conversationId: chatMessage.conversationId,
-          questId: chatConversation.questId,
+  const [reportCasePage, conductReportPage] = await Promise.all([
+    includeReportCases
+      ? readKeysetPage({
+          cursorAnchor: cursorAnchorFor('REPORT_CASE', {
+            time: adminReportCase.createdAt,
+            id: adminReportCase.id,
+          }),
+          cursor,
+          limit,
+          sort,
+          where: reportCaseWhere,
+          read: ({ where: pageWhere, orderBy, limit: probe }) =>
+            db
+              .select({
+                reportCase: adminReportCase,
+                conversationId: chatMessage.conversationId,
+                questId: chatConversation.questId,
+                sortCreatedAt: sql<string>`to_char(${adminReportCase.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+              })
+              .from(adminReportCase)
+              .innerJoin(chatMessage, eq(chatMessage.id, adminReportCase.messageId))
+              .innerJoin(chatConversation, eq(chatConversation.id, chatMessage.conversationId))
+              .where(pageWhere)
+              .orderBy(...orderBy)
+              .limit(probe),
+          rowCursor: (row) => ({
+            startTime: row.reportCase.createdAt,
+            id: row.reportCase.id,
+            scope: 'REPORT_CASE',
+          }),
+          invalidCursor: () =>
+            new CursorInputError('INVALID_CURSOR', 'Report Case cursor is invalid.'),
         })
-        .from(adminReportCase)
-        .innerJoin(chatMessage, eq(chatMessage.id, adminReportCase.messageId))
-        .innerJoin(chatConversation, eq(chatConversation.id, chatMessage.conversationId))
-        .where(pageWhere)
-        .orderBy(...orderBy)
-        .limit(probe),
-    rowCursor: (row) => ({ startTime: row.reportCase.createdAt, id: row.reportCase.id }),
-    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'Report Case cursor is invalid.'),
-  });
+      : Promise.resolve({
+          rows: [] as Array<ReportCaseListRow & { sortCreatedAt: string }>,
+          hasNext: false,
+        }),
+    includeConductReports
+      ? readKeysetPage({
+          cursorAnchor: cursorAnchorFor('CONDUCT_REPORT', {
+            time: adminConductReport.createdAt,
+            id: adminConductReport.id,
+          }),
+          cursor,
+          limit,
+          sort,
+          where: conductReportWhere,
+          read: ({ where: pageWhere, orderBy, limit: probe }) =>
+            selectConductReportRows(db)
+              .where(pageWhere)
+              .orderBy(...orderBy)
+              .limit(probe),
+          rowCursor: (row) => ({
+            startTime: row.report.createdAt,
+            id: row.report.id,
+            scope: 'CONDUCT_REPORT',
+          }),
+          invalidCursor: () =>
+            new CursorInputError('INVALID_CURSOR', 'Conduct Report cursor is invalid.'),
+        })
+      : Promise.resolve({ rows: [] as ConductReportListRow[], hasNext: false }),
+  ]);
+
+  const [reportCaseSummaries, conductReportSummaries] = await Promise.all([
+    summaryRows(db, reportCasePage.rows),
+    Promise.resolve(conductReportPage.rows.map(conductReportSummaryFrom)),
+  ]);
+  const compareText = (left: string, right: string): number =>
+    left < right ? -1 : left > right ? 1 : 0;
+  const sortFactor = sort === 'newest' ? -1 : 1;
+  const sorted = [
+    ...reportCaseSummaries.map((item, index) => ({
+      item,
+      sortCreatedAt: reportCasePage.rows[index]!.sortCreatedAt,
+    })),
+    ...conductReportSummaries.map((item, index) => ({
+      item,
+      sortCreatedAt: conductReportPage.rows[index]!.sortCreatedAt,
+    })),
+  ].sort(
+    (left, right) =>
+      sortFactor *
+      (compareText(left.sortCreatedAt, right.sortCreatedAt) ||
+        compareText(left.item.id, right.item.id) ||
+        compareText(left.item.kind, right.item.kind))
+  );
+  const items = sorted.slice(0, limit).map(({ item }) => item);
+  const hasNext = reportCasePage.hasNext || conductReportPage.hasNext || sorted.length > limit;
+  const last = sorted[Math.min(limit, sorted.length) - 1];
 
   return {
-    items: await summaryRows(db, page.rows),
-    nextCursor: page.nextCursor,
+    items,
+    nextCursor:
+      hasNext && last
+        ? {
+            startTime: last.item.createdAt,
+            id: last.item.id,
+            scope: last.item.kind,
+          }
+        : null,
   };
 };
 
-export const getAdminReportCase = async (reportId: string): Promise<ReportCaseSummary> => {
-  const row = await readReportCaseById(db, reportId);
-  if (!row) throw new AdminReportCaseError('REPORT_CASE_NOT_FOUND', 'Report Case does not exist.');
-  const [summary] = await summaryRows(db, [row]);
-  return summary!;
+type ConductReportProofRow = {
+  id: string;
+  workerId: string | null;
+  teamId: string | null;
+  submittedBy: ConductReportMember;
+  description: string | null;
+  workerMessage: string | null;
+  content: string | null;
+  submissionStatus: 'PROOF_PENDING' | 'PROOF_APPROVED' | 'PROOF_NOT_APPROVED' | null;
+  reviewNote: string | null;
+  sentAt: Date | null;
+  submittedAt: Date | null;
+  reviewedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date | null;
+};
+
+const selectedCandidateTeamId = async (
+  database: ReportDatabase,
+  questRow: ConductReportQuest,
+  workerId: string
+): Promise<string | undefined> => {
+  if (
+    questRow.apiVersion === 'v2' &&
+    questRow.v2Mode === 'CANDIDATE' &&
+    questRow.v2Participation === 'GROUP'
+  ) {
+    const [team] = await database
+      .select({ id: questCandidateTeamV2.id })
+      .from(questCandidateTeamV2)
+      .innerJoin(
+        questCandidateTeamV2Member,
+        eq(questCandidateTeamV2Member.teamId, questCandidateTeamV2.id)
+      )
+      .where(
+        and(
+          eq(questCandidateTeamV2.questId, questRow.id),
+          eq(questCandidateTeamV2Member.memberId, workerId),
+          eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
+        )
+      )
+      .limit(1);
+    return team?.id;
+  }
+
+  if (
+    questRow.apiVersion !== 'v2' &&
+    questRow.mode === 'CANDIDATE' &&
+    questRow.participation === 'GROUP'
+  ) {
+    const [team] = await database
+      .select({ id: questTeam.id })
+      .from(questTeam)
+      .innerJoin(questTeamMember, eq(questTeamMember.teamId, questTeam.id))
+      .where(
+        and(
+          eq(questTeam.questId, questRow.id),
+          eq(questTeamMember.userId, workerId),
+          eq(questTeam.teamStatus, 'TEAM_SELECTED')
+        )
+      )
+      .limit(1);
+    return team?.id;
+  }
+
+  return undefined;
+};
+
+const conductReportProofRowFor = async (
+  database: ReportDatabase,
+  questRow: ConductReportQuest,
+  workerId: string
+): Promise<ConductReportProofRow | undefined> => {
+  const teamId = await selectedCandidateTeamId(database, questRow, workerId);
+  if (
+    (questRow.apiVersion === 'v2' &&
+      questRow.v2Mode === 'CANDIDATE' &&
+      questRow.v2Participation === 'GROUP' &&
+      !teamId) ||
+    (questRow.apiVersion !== 'v2' &&
+      questRow.mode === 'CANDIDATE' &&
+      questRow.participation === 'GROUP' &&
+      !teamId)
+  ) {
+    return undefined;
+  }
+
+  if (questRow.apiVersion === 'v2') {
+    const [row] = await database
+      .select({
+        id: questV2ProofSubmission.id,
+        workerId: questV2ProofSubmission.workerId,
+        teamId: questV2ProofSubmission.teamId,
+        submittedBy: {
+          id: conductReportProofSubmitter.id,
+          email: conductReportProofSubmitter.email,
+          firstName: conductReportProofSubmitter.firstName,
+          lastName: conductReportProofSubmitter.lastName,
+        },
+        description: questV2ProofSubmission.description,
+        workerMessage: questV2ProofSubmission.workerMessage,
+        content: sql<string | null>`null`,
+        submissionStatus: questV2ProofSubmission.submissionStatus,
+        reviewNote: sql<string | null>`null`,
+        sentAt: questV2ProofSubmission.sentAt,
+        submittedAt: sql<Date | null>`null`,
+        reviewedAt: sql<Date | null>`null`,
+        createdAt: questV2ProofSubmission.createdAt,
+        updatedAt: questV2ProofSubmission.updatedAt,
+      })
+      .from(questV2ProofSubmission)
+      .innerJoin(
+        conductReportProofSubmitter,
+        eq(conductReportProofSubmitter.id, questV2ProofSubmission.submittedByUserId)
+      )
+      .where(
+        and(
+          eq(questV2ProofSubmission.questId, questRow.id),
+          isNotNull(questV2ProofSubmission.sentAt),
+          teamId
+            ? eq(questV2ProofSubmission.teamId, teamId)
+            : eq(questV2ProofSubmission.workerId, workerId)
+        )
+      )
+      .orderBy(desc(questV2ProofSubmission.createdAt), desc(questV2ProofSubmission.id))
+      .limit(1);
+    return row;
+  }
+
+  const [row] = await database
+    .select({
+      id: proofSubmission.id,
+      workerId: proofSubmission.workerId,
+      teamId: proofSubmission.teamId,
+      submittedBy: {
+        id: conductReportProofSubmitter.id,
+        email: conductReportProofSubmitter.email,
+        firstName: conductReportProofSubmitter.firstName,
+        lastName: conductReportProofSubmitter.lastName,
+      },
+      description: sql<string | null>`null`,
+      workerMessage: sql<string | null>`null`,
+      content: proofSubmission.content,
+      submissionStatus: proofSubmission.submissionStatus,
+      reviewNote: proofSubmission.reviewNote,
+      sentAt: sql<Date | null>`null`,
+      submittedAt: proofSubmission.submittedAt,
+      reviewedAt: proofSubmission.reviewedAt,
+      createdAt: proofSubmission.submittedAt,
+      updatedAt: sql<Date | null>`null`,
+    })
+    .from(proofSubmission)
+    .innerJoin(
+      conductReportProofSubmitter,
+      eq(conductReportProofSubmitter.id, proofSubmission.submittedByUserId)
+    )
+    .where(
+      and(
+        eq(proofSubmission.questId, questRow.id),
+        teamId ? eq(proofSubmission.teamId, teamId) : eq(proofSubmission.workerId, workerId)
+      )
+    )
+    .orderBy(desc(proofSubmission.submittedAt), desc(proofSubmission.id))
+    .limit(1);
+  return row
+    ? {
+        ...row,
+        submissionStatus: row.submissionStatus as ConductReportProofRow['submissionStatus'],
+      }
+    : undefined;
+};
+
+export const getAdminReport = async (reportId: string): Promise<AdminReportDetailData> => {
+  const reportCaseRow = await readReportCaseById(db, reportId);
+  if (reportCaseRow) {
+    const [summary] = await summaryRows(db, [reportCaseRow]);
+    return summary!;
+  }
+
+  const [conductReportRow] = await selectConductReportRows(db)
+    .where(eq(adminConductReport.id, reportId))
+    .limit(1);
+  if (!conductReportRow) {
+    throw new AdminReportCaseError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
+  }
+
+  const [assignmentRow] = await db
+    .select({
+      assignment: questAssignment,
+      worker: {
+        id: conductReportAssignmentWorker.id,
+        email: conductReportAssignmentWorker.email,
+        firstName: conductReportAssignmentWorker.firstName,
+        lastName: conductReportAssignmentWorker.lastName,
+      },
+    })
+    .from(questAssignment)
+    .innerJoin(
+      conductReportAssignmentWorker,
+      eq(conductReportAssignmentWorker.id, questAssignment.workerId)
+    )
+    .where(
+      and(
+        eq(questAssignment.id, conductReportRow.report.assignmentId),
+        eq(questAssignment.questId, conductReportRow.report.questId)
+      )
+    )
+    .limit(1);
+  if (!assignmentRow) {
+    throw new AdminReportCaseError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
+  }
+
+  const proofRow = await conductReportProofRowFor(
+    db,
+    conductReportRow.quest,
+    assignmentRow.assignment.workerId
+  );
+  const summary = conductReportSummaryFrom(conductReportRow);
+  const detail: ConductReportDetail = {
+    ...summary,
+    assignment: {
+      id: assignmentRow.assignment.id,
+      worker: assignmentRow.worker,
+      assignmentStatus: assignmentRow.assignment
+        .assignmentStatus as ConductReportDetail['assignment']['assignmentStatus'],
+      startedAt: serializeDate(assignmentRow.assignment.startedAt),
+      createdAt: assignmentRow.assignment.createdAt.toISOString(),
+    },
+    proofSubmission: proofRow
+      ? {
+          id: proofRow.id,
+          workerId: proofRow.workerId,
+          teamId: proofRow.teamId,
+          submittedBy: proofRow.submittedBy,
+          description: proofRow.description,
+          workerMessage: proofRow.workerMessage,
+          content: proofRow.content,
+          submissionStatus: proofRow.submissionStatus,
+          reviewNote: proofRow.reviewNote,
+          sentAt: serializeDate(proofRow.sentAt),
+          submittedAt: serializeDate(proofRow.submittedAt),
+          reviewedAt: serializeDate(proofRow.reviewedAt),
+          createdAt: proofRow.createdAt.toISOString(),
+          updatedAt: serializeDate(proofRow.updatedAt),
+        }
+      : null,
+  };
+  return detail;
 };
 
 const assertTransition = (currentStatus: ReportCaseStatus, outcome: ReportCaseOutcome): void => {
