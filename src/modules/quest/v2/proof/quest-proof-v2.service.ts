@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import { adminReviewItem } from '@/database/schema/admin.schema';
 import { file } from '@/database/schema/file.schema';
 import { recordAudit, type AuditActor } from '@/modules/audit/audit.service';
@@ -495,6 +496,79 @@ const lockQuest = async (
     .for('update');
   return current;
 };
+
+const proofParticipantIds = async (
+  transaction: QuestTransaction,
+  submission: Pick<SubmissionRow, 'workerId' | 'teamId'>
+): Promise<string[]> => {
+  if (!submission.teamId) return submission.workerId ? [submission.workerId] : [];
+  const members = await transaction
+    .select({ memberId: questCandidateTeamV2Member.memberId })
+    .from(questCandidateTeamV2Member)
+    .where(eq(questCandidateTeamV2Member.teamId, submission.teamId));
+  return members.map(({ memberId }) => memberId);
+};
+
+const activeAssignmentWorkerIds = async (
+  transaction: QuestTransaction,
+  questId: string
+): Promise<string[]> => {
+  const assignments = await transaction
+    .select({ workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .where(
+      and(
+        eq(questAssignment.questId, questId),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+      )
+    );
+  return assignments.map(({ workerId }) => workerId);
+};
+
+const failedQuestPendingProofParticipantIds = async (
+  transaction: QuestTransaction,
+  questId: string,
+  dueAt: Date
+): Promise<string[]> => {
+  const submissions = await transaction
+    .select({
+      workerId: questV2ProofSubmission.workerId,
+      teamId: questV2ProofSubmission.teamId,
+    })
+    .from(questV2ProofSubmission)
+    .where(
+      and(
+        eq(questV2ProofSubmission.questId, questId),
+        eq(questV2ProofSubmission.submissionStatus, 'PROOF_PENDING'),
+        isNotNull(questV2ProofSubmission.sentAt),
+        lte(questV2ProofSubmission.sentAt, dueAt)
+      )
+    );
+  const members = await Promise.all(
+    submissions.map((submission) => proofParticipantIds(transaction, submission))
+  );
+  return [...new Set(members.flat())];
+};
+
+const emitQuestUpdate = (
+  transaction: QuestTransaction,
+  questId: string,
+  changeType:
+    | 'PROOF_SUBMITTED'
+    | 'PROOF_REVIEWED'
+    | 'PROOF_AUTO_APPROVED'
+    | 'COMPLETION_CONFIRMED'
+    | 'QUEST_COMPLETED'
+    | 'QUEST_FAILED',
+  recipientMemberIds: string[],
+  closeMemberIds?: string[]
+) =>
+  notifyQuestUpdate(transaction, {
+    questId,
+    changeType,
+    recipientMemberIds: [...new Set(recipientMemberIds)],
+    ...(closeMemberIds?.length ? { closeMemberIds: [...new Set(closeMemberIds)] } : {}),
+  });
 
 const ownerCondition = (owner: ProofOwner) =>
   owner.workerId
@@ -1568,6 +1642,10 @@ export const submitQuestV2ProofSubmission = async (
           .returning(submissionFields);
         if (!sent) return { kind: 'rejected', rejection: 'already-sent' };
         const result = await toSubmission(transaction, sent);
+        await emitQuestUpdate(transaction, questId, 'PROOF_SUBMITTED', [
+          current.hirerId,
+          ...(await proofParticipantIds(transaction, sent)),
+        ]);
         return {
           kind: 'success',
           result,
@@ -1757,6 +1835,7 @@ export const confirmQuestV2Completion = async (
           .returning({ confirmedAt: questV2CompletionConfirmation.confirmedAt });
         if (!confirmation)
           throw new Error('Quest API v2 Completion Confirmation insert returned no row');
+        const activeWorkerIds = await activeAssignmentWorkerIds(transaction, questId);
         let questStatus: QuestV2State = currentQuestState;
         const groupFcfs =
           current.v2Mode === questV2Mode.firstComeFirstServed &&
@@ -1779,6 +1858,25 @@ export const confirmQuestV2Completion = async (
             now
           );
           questStatus = 'QUEST_COMPLETED';
+        }
+        const participants = await proofParticipantIds(transaction, checks.owner);
+        const closeMemberIds =
+          groupFcfs && questStatus !== 'QUEST_COMPLETED' ? participants : undefined;
+        await emitQuestUpdate(
+          transaction,
+          questId,
+          'COMPLETION_CONFIRMED',
+          [current.hirerId, ...participants],
+          closeMemberIds
+        );
+        if (questStatus === 'QUEST_COMPLETED') {
+          await emitQuestUpdate(
+            transaction,
+            questId,
+            'QUEST_COMPLETED',
+            [current.hirerId, ...activeWorkerIds],
+            activeWorkerIds
+          );
         }
         return {
           kind: 'success',
@@ -2049,6 +2147,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
         input.now
       );
 
+      const activeWorkerIds = await activeAssignmentWorkerIds(transaction, input.questId);
       let questStatus: QuestV2State = current.questState as QuestV2State;
       if (input.decision === 'PROOF_APPROVED') {
         const settlement = await settleApprovedQuestV2ProofInTransaction(
@@ -2155,6 +2254,50 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
         if (current.questState === 'QUEST_IN_PROGRESS') {
           await recordQuestFailureAudit(transaction, input.actor, input.questId, input.now);
         }
+      }
+      const proofMembers = await proofParticipantIds(transaction, updated);
+      const changeType =
+        input.operationScope === questV2ProofAutoApprovalOperationScope
+          ? 'PROOF_AUTO_APPROVED'
+          : 'PROOF_REVIEWED';
+      const terminalFailure =
+        current.questState === 'QUEST_IN_PROGRESS' && questStatus === 'QUEST_FAILED';
+      const pendingAfterFailure =
+        questStatus === 'QUEST_FAILED' && current.dueAt
+          ? await failedQuestPendingProofParticipantIds(transaction, input.questId, current.dueAt)
+          : [];
+      const closesAffected =
+        !terminalFailure &&
+        questStatus !== 'QUEST_COMPLETED' &&
+        (questStatus === 'QUEST_FAILED' || input.decision === 'PROOF_APPROVED')
+          ? proofMembers
+          : [];
+      await emitQuestUpdate(
+        transaction,
+        input.questId,
+        changeType,
+        [current.hirerId, ...proofMembers],
+        closesAffected
+      );
+      if (terminalFailure) {
+        const closeMemberIds = activeWorkerIds.filter(
+          (workerId) => !pendingAfterFailure.includes(workerId)
+        );
+        await emitQuestUpdate(
+          transaction,
+          input.questId,
+          'QUEST_FAILED',
+          [current.hirerId, ...activeWorkerIds],
+          closeMemberIds
+        );
+      } else if (current.questState !== 'QUEST_COMPLETED' && questStatus === 'QUEST_COMPLETED') {
+        await emitQuestUpdate(
+          transaction,
+          input.questId,
+          'QUEST_COMPLETED',
+          [current.hirerId, ...activeWorkerIds],
+          activeWorkerIds
+        );
       }
 
       return {
@@ -2322,6 +2465,12 @@ export const failQuestV2AtDueAt = async (questId: string, now = new Date()): Pro
     }
     const assignmentIds = await dueQuestV2ProofFailureAssignmentIds(transaction, current, questId);
     if (assignmentIds.length === 0) return false;
+    const workerIds = await activeAssignmentWorkerIds(transaction, questId);
+    const pendingProofWorkerIds = await failedQuestPendingProofParticipantIds(
+      transaction,
+      questId,
+      current.dueAt
+    );
     const failure = await failQuestV2InTransaction(
       transaction,
       questId,
@@ -2338,6 +2487,13 @@ export const failQuestV2AtDueAt = async (questId: string, now = new Date()): Pro
       now
     );
     await recordQuestFailureAudit(transaction, { actorType: 'SYSTEM' }, questId, now);
+    await emitQuestUpdate(
+      transaction,
+      questId,
+      'QUEST_FAILED',
+      [current.hirerId, ...workerIds],
+      workerIds.filter((workerId) => !pendingProofWorkerIds.includes(workerId))
+    );
     return true;
   });
 
