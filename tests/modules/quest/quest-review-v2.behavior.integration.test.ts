@@ -235,6 +235,49 @@ describe('Quest Review API v2 behavior', () => {
         comment: 'Clear communication',
       });
 
+      const hirerList = await request('GET', `/api/v2/quests/${questId}/reviews`, hirer.id);
+      const workerList = await request('GET', `/api/v2/quests/${questId}/reviews`, worker.id);
+      expect(hirerList.status).toBe(200);
+      expect(workerList.status).toBe(200);
+      const hirerListBody = await jsonBody(hirerList);
+      const workerListBody = await jsonBody(workerList);
+      expect(hirerListBody.data?.items).toHaveLength(2);
+      expect(workerListBody.data?.items).toHaveLength(2);
+      const expectedReviews = [
+        expect.objectContaining({
+          id: hirerReviewBody.data?.id,
+          questId,
+          reviewerId: hirer.id,
+          revieweeId: worker.id,
+          rating: 5,
+          comment: 'Good work',
+        }),
+        expect.objectContaining({
+          questId,
+          reviewerId: worker.id,
+          revieweeId: hirer.id,
+          rating: 4,
+          comment: 'Clear communication',
+        }),
+      ];
+      expect(hirerListBody.data?.items).toEqual(expect.arrayContaining(expectedReviews));
+      expect(workerListBody.data?.items).toEqual(expect.arrayContaining(expectedReviews));
+
+      const reviewDetail = await request(
+        'GET',
+        `/api/v2/quests/${questId}/reviews/${hirerReviewBody.data?.id}`,
+        worker.id
+      );
+      expect(reviewDetail.status).toBe(200);
+      expect((await jsonBody(reviewDetail)).data).toMatchObject({
+        id: hirerReviewBody.data?.id,
+        questId,
+        reviewerId: hirer.id,
+        revieweeId: worker.id,
+        rating: 5,
+        comment: 'Good work',
+      });
+
       const profileReviews = await request('GET', `/api/v1/profile/${worker.id}/reviews`, hirer.id);
       expect(profileReviews.status).toBe(200);
       const profileReviewsBody = await jsonBody(profileReviews);
@@ -258,6 +301,56 @@ describe('Quest Review API v2 behavior', () => {
       });
     }
   );
+
+  it('hides Reviews from non-participants and scopes reads to terminal Quests', async () => {
+    if (!postgresAvailable || !reviewSchemaAvailable) return;
+    const terminalQuestId = await createQuest('QUEST_COMPLETED');
+    const otherQuestId = await createQuest('QUEST_COMPLETED');
+    const inProgressQuestId = await createQuest('QUEST_IN_PROGRESS');
+    const createReview = async (questId: string) =>
+      request(
+        'POST',
+        `/api/v2/quests/${questId}/reviews`,
+        hirer.id,
+        { revieweeId: worker.id, rating: 5 },
+        { 'idempotency-key': commandKey('read-scope', questId) }
+      );
+
+    const [terminalReviewResponse, otherReviewResponse] = await Promise.all([
+      createReview(terminalQuestId),
+      createReview(otherQuestId),
+    ]);
+    expect(terminalReviewResponse.status).toBe(200);
+    expect(otherReviewResponse.status).toBe(200);
+    const terminalReviewId = (await jsonBody(terminalReviewResponse)).data?.id as string;
+    const otherReviewId = (await jsonBody(otherReviewResponse)).data?.id as string;
+
+    const nonParticipantList = await request(
+      'GET',
+      `/api/v2/quests/${terminalQuestId}/reviews`,
+      unrelated.id
+    );
+    const nonParticipantDetail = await request(
+      'GET',
+      `/api/v2/quests/${terminalQuestId}/reviews/${terminalReviewId}`,
+      unrelated.id
+    );
+    const nonTerminalList = await request(
+      'GET',
+      `/api/v2/quests/${inProgressQuestId}/reviews`,
+      hirer.id
+    );
+    const crossQuestDetail = await request(
+      'GET',
+      `/api/v2/quests/${terminalQuestId}/reviews/${otherReviewId}`,
+      hirer.id
+    );
+
+    expect(nonParticipantList.status).toBe(404);
+    expect(nonParticipantDetail.status).toBe(404);
+    expect(nonTerminalList.status).toBe(404);
+    expect(crossQuestDetail.status).toBe(404);
+  });
 
   it('allows two Members to use the same Idempotency-Key for their own Reviews', async () => {
     if (!postgresAvailable || !reviewSchemaAvailable) return;
