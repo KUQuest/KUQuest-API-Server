@@ -38,18 +38,25 @@ export const questV2ReviewUpdateSchema = t.Object(
   { additionalProperties: false, minProperties: 1 }
 );
 
+const questV2ReviewItemSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  questId: t.String({ format: 'uuid' }),
+  reviewerId: t.String({ format: 'uuid' }),
+  revieweeId: t.String({ format: 'uuid' }),
+  rating: t.Integer({ minimum: 1, maximum: 5 }),
+  comment: t.Nullable(t.String()),
+  createdAt: t.String({ format: 'date-time' }),
+  updatedAt: t.String({ format: 'date-time' }),
+});
+
 export const questV2ReviewResponseSchema = t.Object({
   success: t.Literal(true),
-  data: t.Object({
-    id: t.String({ format: 'uuid' }),
-    questId: t.String({ format: 'uuid' }),
-    reviewerId: t.String({ format: 'uuid' }),
-    revieweeId: t.String({ format: 'uuid' }),
-    rating: t.Integer({ minimum: 1, maximum: 5 }),
-    comment: t.Nullable(t.String()),
-    createdAt: t.String({ format: 'date-time' }),
-    updatedAt: t.String({ format: 'date-time' }),
-  }),
+  data: questV2ReviewItemSchema,
+});
+
+export const questV2ReviewListResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({ items: t.Array(questV2ReviewItemSchema) }),
 });
 
 export type QuestV2ReviewParams = Static<typeof questV2ReviewParamsSchema>;
