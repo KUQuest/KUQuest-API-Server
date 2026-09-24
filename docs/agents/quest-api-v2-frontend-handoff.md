@@ -1318,6 +1318,67 @@ Errors:
 - 503 WORK_CHAT_UNAVAILABLE
 - idempotency errors
 
+### 8.6 Candidate roster WebSocket (SINGLE and GROUP)
+
+Connect:
+
+```text
+WS /api/v2/quests/:questId/candidate-roster/events
+```
+
+This is a separate stream from `/api/v2/quests/:questId/events`.
+Do not expect Candidate roster events on `/events`.
+
+The Hirer can connect when the Hirer can read the Candidate roster from REST.
+A Candidate can connect only when that Candidate can read the Candidate
+application or Candidate Team from REST:
+
+- SINGLE: the Hirer can read all applications. A Candidate can read only their
+  own application while the Quest is QUEST_OPEN or QUEST_ASSIGNED.
+- GROUP: the Hirer can read Candidate Teams. A Team Member can read only that
+  Candidate Team while the Quest is QUEST_OPEN.
+
+The Server sends this message after it accepts the connection:
+
+```json
+{
+  "type": "SUBSCRIBED",
+  "version": 1,
+  "questId": "quest-uuid"
+}
+```
+
+The Server sends this invalidation after a permitted roster change:
+
+```json
+{
+  "type": "CANDIDATE_ROSTER_UPDATED",
+  "version": 1,
+  "questId": "quest-uuid"
+}
+```
+
+The event has no application, Candidate, or Team data.
+For SINGLE, the Server sends it to the Hirer and the affected Candidate.
+For GROUP, the Server sends it to the Hirer and the affected Team Members.
+The Server does not send an event to other Candidates or Teams.
+
+After `SUBSCRIBED` and each invalidation, read the current roster from REST.
+Use `GET /api/v2/quests/:questId/applications` for SINGLE or
+`GET /api/v2/quests/:questId/teams` for GROUP.
+REST is authoritative. The Server does not replay missed WebSocket messages.
+
+The stream is read-only.
+If a client sends a message, the Server closes the connection with code 1008.
+If a Candidate leaves or is removed from a Team, the Server closes that
+Candidate's connection with code 4403.
+When a Quest State change removes REST roster access, the Server sends one
+final invalidation and closes each Candidate roster connection with code 4403.
+This occurs at QUEST_ASSIGNED for GROUP and at QUEST_IN_PROGRESS,
+QUEST_COMPLETED, QUEST_FAILED, or QUEST_CANCELLED for SINGLE.
+The Candidate Teams REST list is no longer readable after a GROUP Quest is
+assigned.
+
 ## 9. Candidate GROUP flow: Candidate Teams
 
 Use this branch only when mode is CANDIDATE and participation is GROUP.
@@ -1325,6 +1386,8 @@ Use this branch only when mode is CANDIDATE and participation is GROUP.
 A Candidate Team is a team of Prospective Workers.
 The Team Leader creates and submits it.
 The Hirer selects one submitted Team.
+
+Use the Candidate roster WebSocket contract in Section 8.6 for Candidate Team updates.
 
 ### 9.1 Team response shape
 
