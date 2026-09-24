@@ -25,7 +25,7 @@ import {
   signedSatang,
   type WalletTransaction,
 } from '@/modules/wallet';
-import { fixedTagNames } from '@/shared/tag';
+import { fixedTagNames, type FixedTagName } from '@/shared/tag';
 
 import { and, eq, inArray, isNull, like, ne } from 'drizzle-orm';
 
@@ -429,13 +429,15 @@ const main = async (): Promise<void> => {
   }
 
   const now = new Date();
+  const demoDesignTagName: FixedTagName = 'ออกแบบ (Design)';
+  const demoWorkTagName: FixedTagName = 'งานและการบ้าน (Work/Homework)';
   const openQuests = [
-    ['Design a KU event poster', 'Graphic Design', 0, 50_000],
-    ['Translate an event announcement', 'Thai-English Translation', 1, 35_000],
-    ['Analyse student survey data', 'Data Analysis', 2, 80_000],
-    ['Create a student club landing page', 'Frontend Development', 3, 120_000],
-    ['Plan a campus activity campaign', 'Marketing Campaign', 4, 60_000],
-  ] as const;
+    ['Design a KU event poster', demoDesignTagName, 0, 50_000],
+    ['Translate an event announcement', demoWorkTagName, 1, 35_000],
+    ['Analyse student survey data', demoWorkTagName, 2, 80_000],
+    ['Create a student club landing page', demoWorkTagName, 3, 120_000],
+    ['Plan a campus activity campaign', demoWorkTagName, 4, 60_000],
+  ] as const satisfies readonly (readonly [string, FixedTagName, number, number])[];
 
   const openRows = await db
     .insert(quest)
@@ -459,16 +461,16 @@ const main = async (): Promise<void> => {
     .returning({ id: quest.id });
 
   const completedQuests = [
-    ['Build a student club landing page', 'Frontend Development', 0, 1, 120_000],
-    ['Prepare an event budget report', 'Accounting & Bookkeeping', 1, 2, 90_000],
-    ['Create a campus activity poster', 'Graphic Design', 2, 3, 70_000],
-    ['Write a campus newsletter', 'Content Writing & Copywriting', 3, 4, 45_000],
-    ['Design a student club logo', 'Logo & Branding Design', 4, 5, 55_000],
-    ['Analyse a club member survey', 'Data Analysis', 5, 6, 65_000],
-    ['Build a volunteer signup page', 'Frontend Development', 6, 7, 100_000],
-    ['Translate a campus guide', 'Thai-English Translation', 7, 8, 40_000],
-    ['Create a student event dashboard', 'Frontend Development', 8, 9, 110_000],
-  ] as const;
+    ['Build a student club landing page', demoWorkTagName, 0, 1, 120_000],
+    ['Prepare an event budget report', demoWorkTagName, 1, 2, 90_000],
+    ['Create a campus activity poster', demoDesignTagName, 2, 3, 70_000],
+    ['Write a campus newsletter', demoWorkTagName, 3, 4, 45_000],
+    ['Design a student club logo', demoDesignTagName, 4, 5, 55_000],
+    ['Analyse a club member survey', demoWorkTagName, 5, 6, 65_000],
+    ['Build a volunteer signup page', demoWorkTagName, 6, 7, 100_000],
+    ['Translate a campus guide', demoWorkTagName, 7, 8, 40_000],
+    ['Create a student event dashboard', demoWorkTagName, 8, 9, 110_000],
+  ] as const satisfies readonly (readonly [string, FixedTagName, number, number, number])[];
 
   const completedRows = await db
     .insert(quest)
@@ -536,8 +538,8 @@ const main = async (): Promise<void> => {
   if (!hirer) throw new Error('Hirer demo user (index 0) is missing.');
   const worker = orderedUsers[1];
   if (!worker) throw new Error('Worker demo user (index 1) is missing.');
-  const designTagId = tagIds.get('Graphic Design');
-  if (!designTagId) throw new Error('Graphic Design tag is missing for demo Dispute Quest.');
+  const designTagId = tagIds.get(demoDesignTagName);
+  if (!designTagId) throw new Error('The Design Tag is missing for demo Dispute Quest.');
 
   const dispute = await ensureFrontendDemoDisputeQuest(hirer.id, worker.id, designTagId);
 
