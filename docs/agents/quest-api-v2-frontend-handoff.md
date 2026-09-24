@@ -1577,6 +1577,25 @@ Errors:
 - 409 QUEST_NOT_OPEN
 - idempotency errors
 
+The alternate code-only route needs no Team ID:
+
+```http
+POST /api/v2/quests/:questId/teams/join
+Idempotency-Key: join-team-client-action-id
+Content-Type: application/json
+```
+
+Send the same `{ "joinCode": "abcd2345" }` body. The Server finds the forming
+Team within the specified Quest and runs the same join checks. Success
+returns the complete Team object. An unknown or ambiguous code returns
+`409 JOIN_CODE_INVALID`; a matching expired code returns
+`409 JOIN_CODE_EXPIRED`. The code-only route does not reveal Team details
+until the join succeeds. The existing Team-ID route remains available.
+
+Team reads cannot recover the plaintext Join Code because the Server stores
+only its hash. A Team Leader who loses the code must regenerate it; this
+invalidates the previous code.
+
 ### 9.7 Leave a Candidate Team
 
 Request:
