@@ -81,6 +81,7 @@ Covered operations:
 - **Payout decisions**: `PAYOUT_APPROVE`, `PAYOUT_CANCEL`.
 - **Quest discovery moderation**: `QUEST_HIDE`, `QUEST_RESTORE`, `QUEST_TERMINATE`.
 - **Dispute Case resolution and evidence access**: `DISPUTE_CASE_RESOLVE`, `DISPUTE_CASE_DISMISS`, `DISPUTE_CASE_EVIDENCE_ACCESS`.
+- **Conduct Report dismissal**: `CONDUCT_REPORT_DISMISS`.
 - **Wallet status changes**: `WALLET_FREEZE`, `WALLET_UNFREEZE`, `WALLET_SUSPEND`, `WALLET_CLOSE`.
 
 Exemptions. These non-discretionary or non-Admin operations do not write `AdminAction` records:

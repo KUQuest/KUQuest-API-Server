@@ -34,6 +34,19 @@ A **Conduct Report** evaluates how a Member behaved on a Quest, supported by the
 - Requires a reason and a non-blank `Idempotency-Key`.
 - Decisions are final and create an Audit Record.
 
+### Dismissal reason catalog
+
+Admin Action reason catalog version `1` defines the action-specific codes for a
+Conduct Report dismissal. `CONDUCT_REPORT_DISMISS` accepts:
+
+- `CONDUCT_REPORT_NO_VIOLATION`
+- `CONDUCT_REPORT_INSUFFICIENT_EVIDENCE`
+
+The immutable `AdminAction` is the authoritative record of the decision reason
+code and catalog version. The Conduct Report's `decisionReason` stores the same
+controlled code to mark the final decision. Admins cannot submit or persist
+free-form decision text.
+
 ## Notifications and privacy
 
 - `CONDUCT_REPORT_UPHELD` sends an Android Push Notification to the reported Member naming the reason and result.

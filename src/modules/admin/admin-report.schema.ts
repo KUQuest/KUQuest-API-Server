@@ -2,6 +2,8 @@ import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import { t, type Static } from 'elysia';
 
+import { conductReportDismissReasonCodes } from './admin-report.policy';
+
 const dateTime = t.String({ format: 'date-time' });
 const uuid = t.String({ format: 'uuid' });
 
@@ -59,6 +61,11 @@ const adminReportReasonCodeSchema = t.String({
   pattern: '^[A-Z][A-Z0-9_.-]*$',
 });
 
+const conductReportDecisionReasonCodeSchema = t.Union([
+  t.Literal(conductReportDismissReasonCodes[0]),
+  t.Literal(conductReportDismissReasonCodes[1]),
+]);
+
 export const adminReportParamsSchema = t.Object({
   reportId: uuid,
 });
@@ -108,7 +115,7 @@ export const adminReportEvidenceHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
 });
 
-export const adminReportDecisionBodySchema = t.Object(
+export const adminReportCaseDecisionBodySchema = t.Object(
   {
     outcome: t.Union([
       t.Literal('REPORT_CASE_DISMISSED'),
@@ -119,6 +126,19 @@ export const adminReportDecisionBodySchema = t.Object(
   },
   { additionalProperties: false }
 );
+
+export const adminConductReportDecisionBodySchema = t.Object(
+  {
+    outcome: t.Literal('CONDUCT_REPORT_DISMISSED'),
+    decisionReasonCode: conductReportDecisionReasonCodeSchema,
+  },
+  { additionalProperties: false }
+);
+
+export const adminReportDecisionBodySchema = t.Union([
+  adminReportCaseDecisionBodySchema,
+  adminConductReportDecisionBodySchema,
+]);
 
 const adminReporterSummarySchema = t.Object({
   id: uuid,
@@ -274,7 +294,7 @@ export const adminReportDetailResponseSchema = t.Object({
   data: adminReportDetailSchema,
 });
 
-const adminReportCommandSummarySchema = t.Object({
+const adminReportCaseCommandSummarySchema = t.Object({
   id: uuid,
   displayId: t.String(),
   kind: t.Literal('REPORT_CASE'),
@@ -285,6 +305,21 @@ const adminReportCommandSummarySchema = t.Object({
   caseClosedAt: t.Nullable(dateTime),
   updatedAt: dateTime,
 });
+
+const adminConductReportCommandSummarySchema = t.Object({
+  kind: t.Literal('CONDUCT_REPORT'),
+  id: uuid,
+  displayId: t.String({ pattern: '^CND-[0-9]{6,}$' }),
+  status: conductReportStatusSchema,
+  version: t.Integer({ minimum: 1 }),
+  updatedAt: dateTime,
+  resolvedAt: t.Nullable(dateTime),
+});
+
+const adminReportCommandSummarySchema = t.Union([
+  adminReportCaseCommandSummarySchema,
+  adminConductReportCommandSummarySchema,
+]);
 
 export const adminReportCommandResponseSchema = t.Object({
   success: t.Literal(true),
@@ -370,5 +405,9 @@ export type AdminReportListData = Static<typeof adminReportListResponseSchema>['
 export type AdminReportDetailData = Static<typeof adminReportDetailResponseSchema>['data'];
 export type AdminConductReportSummary = Static<typeof adminConductReportSummarySchema>;
 export type AdminConductReportDetail = Static<typeof adminConductReportDetailSchema>;
+export type AdminConductReportCommandSummary = Static<
+  typeof adminConductReportCommandSummarySchema
+>;
+export type AdminReportCommandSummary = Static<typeof adminReportCommandSummarySchema>;
 export type AdminReportCommandData = Static<typeof adminReportCommandResponseSchema>['data'];
 export type AdminReportEvidenceData = Static<typeof adminReportEvidenceResponseSchema>['data'];
