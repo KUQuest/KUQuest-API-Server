@@ -10,18 +10,18 @@ import { asc, eq, inArray } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'bun:test';
 
 const expectedTagNames = [
-  'ทำความสะอาด (Cleaning)',
-  'ส่งของ (Delivery)',
-  'ซ่อมแซม (Fixing)',
-  'สอนหนังสือ (Teaching)',
-  'กีฬา (Sport)',
-  'เกมและสันทนาการ (Game/Activity)',
-  'งานและการบ้าน (Work/Homework)',
-  'อาหารและเครื่องดื่ม (Food and Drinks)',
-  'สัตว์เลี้ยง (Pet)',
-  'ออกแบบ (Design)',
-  'ถ่ายภาพ (Photography)',
-  'อื่นๆ (ETC.)',
+  'Cleaning',
+  'Delivery',
+  'Fixing',
+  'Teaching',
+  'Sport',
+  'Game/Activity',
+  'Work/Homework',
+  'Food and Drinks',
+  'Pet',
+  'Design',
+  'Photography',
+  'Other',
 ];
 
 beforeAll(async () => {
@@ -53,19 +53,67 @@ describe('Tag seed', () => {
     const migrationCases = [
       {
         legacyName: 'English Tutoring',
-        targetName: 'สอนหนังสือ (Teaching)',
+        targetName: 'Teaching',
       },
       {
         legacyName: 'Event Photography & Videography',
-        targetName: 'ถ่ายภาพ (Photography)',
+        targetName: 'Photography',
       },
       {
         legacyName: 'Campus Errand & Delivery',
-        targetName: 'ส่งของ (Delivery)',
+        targetName: 'Delivery',
       },
       {
         legacyName: 'Unrecognized Legacy Tag',
-        targetName: 'อื่นๆ (ETC.)',
+        targetName: 'Other',
+      },
+      {
+        legacyName: 'ทำความสะอาด (Cleaning)',
+        targetName: 'Cleaning',
+      },
+      {
+        legacyName: 'ส่งของ (Delivery)',
+        targetName: 'Delivery',
+      },
+      {
+        legacyName: 'ซ่อมแซม (Fixing)',
+        targetName: 'Fixing',
+      },
+      {
+        legacyName: 'สอนหนังสือ (Teaching)',
+        targetName: 'Teaching',
+      },
+      {
+        legacyName: 'กีฬา (Sport)',
+        targetName: 'Sport',
+      },
+      {
+        legacyName: 'เกมและสันทนาการ (Game/Activity)',
+        targetName: 'Game/Activity',
+      },
+      {
+        legacyName: 'งานและการบ้าน (Work/Homework)',
+        targetName: 'Work/Homework',
+      },
+      {
+        legacyName: 'อาหารและเครื่องดื่ม (Food and Drinks)',
+        targetName: 'Food and Drinks',
+      },
+      {
+        legacyName: 'สัตว์เลี้ยง (Pet)',
+        targetName: 'Pet',
+      },
+      {
+        legacyName: 'ออกแบบ (Design)',
+        targetName: 'Design',
+      },
+      {
+        legacyName: 'ถ่ายภาพ (Photography)',
+        targetName: 'Photography',
+      },
+      {
+        legacyName: 'อื่นๆ (ETC.)',
+        targetName: 'Other',
       },
     ].map((migration) => ({
       ...migration,

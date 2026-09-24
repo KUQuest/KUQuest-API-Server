@@ -164,7 +164,7 @@ test('finance seed prepares and idempotently reuses the finance Student, Payout,
   };
   await sql`
     INSERT INTO tag (name)
-    VALUES ('ออกแบบ (Design)')
+    VALUES ('Design')
     ON CONFLICT (name) DO NOTHING
   `;
 
@@ -261,7 +261,7 @@ test('finance seed prepares and idempotently reuses the finance Student, Payout,
     expect(firstData.recipient).toBeDefined();
     expect(firstData.draftQuests).toHaveLength(1);
     expect(firstData.draftQuests[0]?.questStatus).toBe('QUEST_DRAFT');
-    expect(firstData.draftQuests[0]?.tagName).toBe('ออกแบบ (Design)');
+    expect(firstData.draftQuests[0]?.tagName).toBe('Design');
     expect(firstData.destinations).toHaveLength(1);
     expect(firstData.payouts).toHaveLength(1);
 

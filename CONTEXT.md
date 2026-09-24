@@ -49,7 +49,7 @@ The read-only view of another Member's Profile, served by `GET /api/v1/profile/:
 _Avoid_: conflating with own-Profile's response shape — they share a resource but not a schema.
 
 **Tag**:
-A shared Quest category that describes the type of work a Quest needs. Each Quest has exactly one canonical Tag. A Member's Profile Tags are derived from their three most frequent Quest Tags across successfully completed Quest participation; they describe work categories, not abilities, and are not manually assigned.
+A shared Quest category that describes the type of work a Quest needs. Each Quest has exactly one canonical Tag, and every Tag name uses English only. A Member's Profile Tags are derived from their three most frequent Quest Tags across successfully completed Quest participation; they describe work categories, not abilities, and are not manually assigned.
 _Avoid_: treating Tag as a skill label, Occupation, or manually assigned Profile field.
 
 **Review**:

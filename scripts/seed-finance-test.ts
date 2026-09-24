@@ -30,7 +30,7 @@ export const financeSeedQuestTitle = '[Finance Test] Publish Escrow Quest Draft'
 export const financeSeedSpendingSatang = 1_000_000;
 export const financeSeedEarningsSatang = 500_000;
 export const financeSeedPayoutReceiptSatang = 100_000;
-const financeQuestTagName: FixedTagName = 'ออกแบบ (Design)';
+const financeQuestTagName: FixedTagName = 'Design';
 
 const requireValue = (name: string, value: string | undefined): string => {
   if (!value?.trim()) throw new Error(`${name} is required for the finance seed.`);
