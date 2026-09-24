@@ -106,6 +106,33 @@ xdg-open human-read/quest-scenarios.html
 
 ---
 
+## Member payment status updates
+
+Connect an authenticated Member WebSocket to `WS /api/v1/payments/events` while a
+Top-up or Payout screen is open. After connection, the Server sends
+`{\"type\":\"SUBSCRIBED\",\"version\":1}`. On a committed status change to that
+Member's Top-up or Payout, it sends:
+
+```json
+{
+  "type": "PAYMENT_STATUS_CHANGED",
+  "version": 1,
+  "resourceType": "TOP_UP",
+  "resourceId": "payment-uuid"
+}
+```
+
+`resourceType` is `TOP_UP` or `PAYOUT`. The WebSocket is read-only and sends no
+balance, destination, Provider data, or status value. Read the current state from
+`GET /api/v1/top-ups/:topUpId` or `GET /api/v1/payouts/:payoutId` after
+`SUBSCRIBED`, each change, and each reconnect. Events are not replayed. REST
+remains authoritative; business commands and Provider callbacks do not use
+this WebSocket. Close the connection when the screen is no longer active. Each
+API process accepts at most two connections per Member and 500 in total; an
+extra connection closes with code `4429`.
+
+---
+
 ## 🤝 Contribution & Pull Request Workflow
 
 - **Application, Test, and Documentation PRs:** Create pull requests targeting the **`develop`** branch.

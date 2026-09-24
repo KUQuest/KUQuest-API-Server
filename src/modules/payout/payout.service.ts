@@ -16,6 +16,7 @@ import {
   type PayoutDestinationEncryption,
   type PayoutDestinationForProvider,
 } from '@/modules/payout-destination';
+import { notifyPaymentStatus } from '@/modules/payment-status';
 import {
   assertWalletOperationAllowed,
   completeMoneyCommand,
@@ -347,6 +348,11 @@ export const approvePayoutInTransaction = async (
     reason: input.reasonCode,
   });
   await enqueuePayoutSubmissionJobInTransaction(transaction, payout.id);
+  await notifyPaymentStatus(transaction, {
+    memberId: payout.userId,
+    resourceType: 'PAYOUT',
+    resourceId: payout.id,
+  });
   return updated;
 };
 
@@ -389,6 +395,11 @@ export const cancelPayoutInTransaction = async (
     actorAdminId: input.adminId,
     source: 'ADMIN_CANCELLATION',
     reason: input.reasonCode,
+  });
+  await notifyPaymentStatus(transaction, {
+    memberId: payout.userId,
+    resourceType: 'PAYOUT',
+    resourceId: payout.id,
   });
   return updated;
 };
@@ -556,6 +567,11 @@ const preparePayout = async (
             .set({ consumedAt: new Date() })
             .where(eq(paymentPayoutQuotes.id, quote.id));
           await completeMoneyCommand(transaction, keyId, 'payment_payout', created.id);
+          await notifyPaymentStatus(transaction, {
+            memberId: created.userId,
+            resourceType: 'PAYOUT',
+            resourceId: created.id,
+          });
 
           return payoutFromRecord(created);
         },
@@ -696,6 +712,12 @@ const finalizeProviderResponse = async (
       providerStatus: response.providerStatus,
       source: 'PROVIDER',
     });
+    if (record.payoutStatus !== 'PROVIDER_PENDING')
+      await notifyPaymentStatus(transaction, {
+        memberId: record.userId,
+        resourceType: 'PAYOUT',
+        resourceId: record.id,
+      });
     return payoutFromRecord(updated);
   });
 
@@ -748,6 +770,12 @@ const finalizeUncertain = async (
         reason: providerFailureReason('Provider response is uncertain', error),
       });
     }
+    if (nextStatus !== record.payoutStatus)
+      await notifyPaymentStatus(transaction, {
+        memberId: record.userId,
+        resourceType: 'PAYOUT',
+        resourceId: record.id,
+      });
     return payoutFromRecord(updated);
   });
 
@@ -818,6 +846,11 @@ const finalizeFailed = async (
       providerStatus: details.providerStatus,
       source: details.historySource,
       reason: details.historyReason,
+    });
+    await notifyPaymentStatus(transaction, {
+      memberId: record.userId,
+      resourceType: 'PAYOUT',
+      resourceId: record.id,
     });
     return payoutFromRecord(updated);
   });

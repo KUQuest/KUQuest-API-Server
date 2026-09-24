@@ -7,6 +7,7 @@ import {
   type TopUpStatus,
 } from '@/database/schema/payment.schema';
 import { walletWallet } from '@/database/schema/wallet.schema';
+import { notifyPaymentStatus } from '@/modules/payment-status';
 import {
   assertWalletOperationAllowed,
   completeMoneyCommand,
@@ -314,6 +315,11 @@ const prepareTopUp = async (
             .set({ consumedAt: new Date() })
             .where(eq(paymentTopUpQuote.id, quote.id));
           await stampMoneyCommandResource(transaction, keyId, 'payment_top_up', created.id);
+          await notifyPaymentStatus(transaction, {
+            memberId: created.userId,
+            resourceType: 'TOP_UP',
+            resourceId: created.id,
+          });
 
           return {
             topUp: topUpFromRecord(created),
@@ -464,6 +470,11 @@ const finalizeProviderRejection = async (
       reason: error.message,
     });
     await completeMoneyCommand(transaction, prepared.idempotencyKeyId);
+    await notifyPaymentStatus(transaction, {
+      memberId: record.userId,
+      resourceType: 'TOP_UP',
+      resourceId: record.id,
+    });
     return topUpFromRecord(updated);
   });
 

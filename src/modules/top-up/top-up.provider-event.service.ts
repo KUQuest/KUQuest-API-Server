@@ -8,6 +8,7 @@ import {
   type ProviderEventProcessingStatus,
 } from '@/database/schema/payment.schema';
 import { walletLedgerAccount, walletLedgerTransaction } from '@/database/schema/wallet.schema';
+import { notifyPaymentStatus } from '@/modules/payment-status';
 import {
   createSealedLedgerTransactionInTransaction,
   ensureWalletInTransaction,
@@ -587,6 +588,11 @@ const applyTopUpOutcomeInTransaction = async (
         ? 'Provider confirmed the Top-up.'
         : 'Provider ended the Top-up without payment.',
     occurredAt: facts.providerOccurredAt,
+  });
+  await notifyPaymentStatus(transaction, {
+    memberId: topUp.userId,
+    resourceType: 'TOP_UP',
+    resourceId: topUp.id,
   });
   return updated;
 };

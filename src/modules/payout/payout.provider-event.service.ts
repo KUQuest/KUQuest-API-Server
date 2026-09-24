@@ -12,6 +12,7 @@ import {
   walletLedgerPosting,
   walletLedgerTransaction,
 } from '@/database/schema/wallet.schema';
+import { notifyPaymentStatus } from '@/modules/payment-status';
 import {
   assertXenditWebhookToken,
   canonicalizeProviderPayload,
@@ -690,6 +691,11 @@ const applyPayoutOutcomeInTransaction = async (
       reason: 'Provider confirmed the Payout.',
       occurredAt: facts.providerOccurredAt,
     });
+    await notifyPaymentStatus(transaction, {
+      memberId: payout.userId,
+      resourceType: 'PAYOUT',
+      resourceId: payout.id,
+    });
     return;
   }
 
@@ -742,6 +748,12 @@ const applyPayoutOutcomeInTransaction = async (
         reason: 'Provider reports the Payout is still in progress.',
         occurredAt: facts.providerOccurredAt,
       });
+      if (payout.payoutStatus !== 'PROVIDER_PENDING')
+        await notifyPaymentStatus(transaction, {
+          memberId: payout.userId,
+          resourceType: 'PAYOUT',
+          resourceId: payout.id,
+        });
     } else {
       await transaction
         .update(paymentPayouts)
@@ -785,6 +797,11 @@ const applyPayoutOutcomeInTransaction = async (
     source,
     reason: `Provider ${nextStatus.toLowerCase()} the Payout.`,
     occurredAt: facts.providerOccurredAt,
+  });
+  await notifyPaymentStatus(transaction, {
+    memberId: payout.userId,
+    resourceType: 'PAYOUT',
+    resourceId: payout.id,
   });
 };
 
