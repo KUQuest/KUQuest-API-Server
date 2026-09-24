@@ -349,7 +349,7 @@ describe('Quest Edit v2 realtime updates', () => {
     }
   });
 
-  it('serializes concurrent Edit expiry and Start Work, then rejects late responses', async () => {
+  it('serializes concurrent Edit expiry without automatic Start Work, then rejects late responses', async () => {
     const questId = await createAssignedQuest();
     const { server, sockets } = await connectParticipants(questId);
     const [hirer, worker, otherWorker] = sockets;
@@ -391,22 +391,11 @@ describe('Quest Edit v2 realtime updates', () => {
           batchSize: 1,
         }),
       ]);
-      expect(sweeps.flatMap(({ startedQuestIds }) => startedQuestIds)).toEqual([questId]);
       expect(sweeps.flatMap(({ timedOutEditRequestIds }) => timedOutEditRequestIds)).toEqual([
         requestId,
       ]);
       await Promise.all(sockets.map((socket) => expectEditUpdate(socket, questId, requestId)));
-      const startedUpdate = {
-        type: 'QUEST_UPDATED',
-        version: 1,
-        questId,
-        changeType: 'QUEST_STARTED',
-      };
-      await Promise.all(
-        sockets.map(async (socket) => {
-          expect(JSON.parse((await socket.nextText())!)).toEqual(startedUpdate);
-        })
-      );
+      for (const socket of sockets) expect(await socket.nextText(250)).toBeUndefined();
 
       const ownerRead = await readEdit(requestId, hirerSession.cookie);
       expect((await ownerRead.json()).data).toMatchObject({
@@ -421,7 +410,7 @@ describe('Quest Edit v2 realtime updates', () => {
       const participation = await readParticipation(questId, workerSession.cookie);
       const participationData = (await participation.json()).data;
       expect(participationData).toMatchObject({
-        state: 'QUEST_IN_PROGRESS',
+        state: 'QUEST_ASSIGNED',
         condition: { items: [{ position: 0, text: 'Original condition' }] },
       });
       const lateResponse = await respondToEdit(
@@ -437,7 +426,7 @@ describe('Quest Edit v2 realtime updates', () => {
       });
       const participationAfterLateResponse = await readParticipation(questId, workerSession.cookie);
       expect((await participationAfterLateResponse.json()).data).toMatchObject({
-        state: 'QUEST_IN_PROGRESS',
+        state: 'QUEST_ASSIGNED',
         condition: { items: [{ position: 0, text: 'Original condition' }] },
       });
       expect(await Promise.all(sockets.map((socket) => socket.nextText(250)))).toEqual([

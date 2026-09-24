@@ -1,7 +1,7 @@
 import { app } from '@/app';
 import { db, sql as postgresSql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { quest, questAssignment } from '@/database/schema/quest.schema';
+import { quest, questAssignment, questTeam } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
 import type { QuestTransaction, QuestWorkChatWriter } from '@/modules/quest/shared';
@@ -55,6 +55,36 @@ const request = (questId: string, workerId?: string, headers: HeadersInit = {}) 
       headers: workerId === undefined ? headers : { ...headers, 'x-worker-id': workerId },
     })
   );
+const startWorkRequest = (questId: string, workerId: string, commandId: string) =>
+  app.handle(
+    new Request(`http://localhost/api/v1/quests/${questId}/start-work`, {
+      method: 'POST',
+      headers: { 'x-worker-id': workerId, 'Idempotency-Key': commandId },
+    })
+  );
+
+const createAssignedQuest = async (
+  mode: 'NO_CANDIDATE' | 'CANDIDATE',
+  participation: 'SOLO' | 'GROUP',
+  workerIds: string[]
+) => {
+  const now = Date.now();
+  const questId = await createOpenQuest({
+    mode,
+    participation,
+    questStatus: 'QUEST_ASSIGNED',
+    startTime: new Date(now - 60 * 60 * 1000),
+    dueAt: new Date(now + 60 * 60 * 1000),
+  });
+  await db.insert(questAssignment).values(
+    workerIds.map((workerId) => ({
+      questId,
+      workerId,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    }))
+  );
+  return questId;
+};
 
 const authenticate = () =>
   spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => {
@@ -155,6 +185,13 @@ describe('direct NO_CANDIDATE joins', () => {
         >
       >;
     };
+    const unauthenticatedStart = await app.handle(
+      new Request(`http://localhost/api/v1/quests/${questId}/start-work`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': 'start-auth-check' },
+      })
+    );
+    expect(unauthenticatedStart.status).toBe(401);
     const operation = document.paths['/api/v1/quests/{questId}/join']?.post;
     expect(operation?.operationId).toBe('joinNoCandidateQuest');
     expect(operation?.security).toEqual([{ betterAuthSession: [] }]);
@@ -166,7 +203,22 @@ describe('direct NO_CANDIDATE joins', () => {
         minLength: 1,
         maxLength: 200,
         pattern: '\\S',
-        description: 'Non-blank command identity for replay-safe direct joins',
+        description: 'Non-blank command identity for replay-safe Worker commands',
+        type: 'string',
+      },
+    });
+    const startOperation = document.paths['/api/v1/quests/{questId}/start-work']?.post;
+    expect(startOperation?.operationId).toBe('startQuestWorkV1');
+    expect(startOperation?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(startOperation?.parameters).toContainEqual({
+      name: 'idempotency-key',
+      in: 'header',
+      required: true,
+      schema: {
+        minLength: 1,
+        maxLength: 200,
+        pattern: '\\S',
+        description: 'Non-blank command identity for replay-safe Worker commands',
         type: 'string',
       },
     });
@@ -340,5 +392,68 @@ describe('direct NO_CANDIDATE joins', () => {
     expect(current?.status).toBe('QUEST_ASSIGNED');
     expect(assignments).toHaveLength(1);
     expect(apply).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('legacy Start Work commands', () => {
+  it('starts a SOLO NO_CANDIDATE Quest and replays its command result', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createAssignedQuest('NO_CANDIDATE', 'SOLO', [workers[0].id]);
+    authenticate();
+
+    const response = await startWorkRequest(questId, workers[0].id, 'legacy-start-solo');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.questStatus).toBe('QUEST_IN_PROGRESS');
+    expect(body.data.startedAt).toBeTruthy();
+
+    const replay = await startWorkRequest(questId, workers[0].id, 'legacy-start-solo');
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(body);
+  });
+
+  it('allows the assigned Worker to start a SOLO CANDIDATE Quest', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createAssignedQuest('CANDIDATE', 'SOLO', [workers[0].id]);
+    authenticate();
+
+    const response = await startWorkRequest(questId, workers[0].id, 'legacy-start-candidate-solo');
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.questStatus).toBe('QUEST_IN_PROGRESS');
+  });
+
+  it('waits for every Active Worker on GROUP NO_CANDIDATE Quests', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createAssignedQuest('NO_CANDIDATE', 'GROUP', [
+      workers[0].id,
+      workers[1].id,
+    ]);
+    authenticate();
+
+    const first = await startWorkRequest(questId, workers[0].id, 'legacy-start-group-first');
+    expect(first.status).toBe(200);
+    expect((await first.json()).data.questStatus).toBe('QUEST_ASSIGNED');
+    const second = await startWorkRequest(questId, workers[1].id, 'legacy-start-group-second');
+    expect(second.status).toBe(200);
+    expect((await second.json()).data.questStatus).toBe('QUEST_IN_PROGRESS');
+  });
+
+  it('allows only the selected Team Leader to start a GROUP CANDIDATE Quest', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createAssignedQuest('CANDIDATE', 'GROUP', [workers[0].id, workers[1].id]);
+    await db.insert(questTeam).values({
+      questId,
+      leaderId: workers[0].id,
+      name: 'Legacy Start Work Team',
+      teamStatus: 'TEAM_SELECTED',
+    });
+    authenticate();
+
+    const member = await startWorkRequest(questId, workers[1].id, 'legacy-start-team-member');
+    expect(member.status).toBe(409);
+    expect((await member.json()).error.code).toBe('START_WORK_NOT_REQUIRED');
+    const leader = await startWorkRequest(questId, workers[0].id, 'legacy-start-team-leader');
+    expect(leader.status).toBe(200);
+    expect((await leader.json()).data.questStatus).toBe('QUEST_IN_PROGRESS');
   });
 });

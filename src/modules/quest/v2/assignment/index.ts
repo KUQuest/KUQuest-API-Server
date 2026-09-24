@@ -3,6 +3,7 @@ export {
   joinQuestV2Controller,
   listMyQuestV2AssignmentsController,
   listQuestV2AssignmentsController,
+  startQuestWorkV2Controller,
 } from './quest-assignment-v2.controller';
 export {
   joinQuestV2,
@@ -17,7 +18,7 @@ export {
   questV2AssignmentListResponseSchema,
   questV2AssignmentMineQuerySchema,
   questV2AssignmentParamsSchema,
-  questV2AssignmentResponseSchema,
+  questV2StartWorkResponseSchema,
   type QuestV2AssignmentMineQuery,
   type QuestV2AssignmentMineStatus,
   type QuestV2AssignmentParams,

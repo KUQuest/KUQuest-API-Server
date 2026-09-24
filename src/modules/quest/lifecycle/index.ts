@@ -8,7 +8,6 @@ export {
   runQuestLifecycleWorker,
   runQuestLifecycle,
   processQuestLifecycle,
-  startDueAssignedQuests,
   cancelDueUnfilledQuests,
   failOverdueQuests,
   expirePendingQuestTeamInvitations,

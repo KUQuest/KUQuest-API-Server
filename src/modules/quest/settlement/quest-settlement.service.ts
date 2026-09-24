@@ -977,7 +977,11 @@ export const failQuestV2InTransaction = async (
   if (!current || current.apiVersion !== 'v2') {
     throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The Quest is not a v2 Quest.');
   }
-  if (![questStatus.inProgress, questStatus.failed].includes(current.questStatus as never)) {
+  if (
+    ![questStatus.assigned, questStatus.inProgress, questStatus.failed].includes(
+      current.questStatus as never
+    )
+  ) {
     throw new MoneyDomainError(
       'FUNDING_SETTLEMENT_FAILED',
       'The v2 Quest cannot fail from its current state.'
@@ -1037,7 +1041,8 @@ export const failQuestInTransaction = async (
   questId: string,
   commandId: string,
   now: Date,
-  actorId: string | null
+  actorId: string | null,
+  assignmentIdsToMarkIncomplete?: string[]
 ): Promise<QuestV2FailureEffect> => {
   const current = await lockQuest(tx, questId);
   if (!current || current.apiVersion !== 'v1') {
@@ -1047,9 +1052,12 @@ export const failQuestInTransaction = async (
     return { questStatus: questStatus.failed, incompleteAssignmentIds: [] };
   }
   if (
-    ![questStatus.inProgress, questStatus.submitted, questStatus.rework].includes(
-      current.questStatus as never
-    )
+    ![
+      questStatus.assigned,
+      questStatus.inProgress,
+      questStatus.submitted,
+      questStatus.rework,
+    ].includes(current.questStatus as never)
   ) {
     throw new MoneyDomainError(
       'FUNDING_SETTLEMENT_FAILED',
@@ -1058,6 +1066,9 @@ export const failQuestInTransaction = async (
   }
 
   const active = await activeAssignments(tx, questId);
+  const affected = assignmentIdsToMarkIncomplete
+    ? active.filter(({ id }) => assignmentIdsToMarkIncomplete.includes(id))
+    : active;
   const approvedProofs = await tx
     .select({ id: proofSubmission.id })
     .from(proofSubmission)
@@ -1068,7 +1079,7 @@ export const failQuestInTransaction = async (
       )
     )
     .for('update');
-  if (active.length > 0) {
+  if (affected.length > 0) {
     await tx
       .update(questAssignment)
       .set({ assignmentStatus: assignmentStatus.incomplete })
@@ -1076,7 +1087,7 @@ export const failQuestInTransaction = async (
         and(
           inArray(
             questAssignment.id,
-            active.map(({ id }) => id)
+            affected.map(({ id }) => id)
           ),
           eq(questAssignment.assignmentStatus, assignmentStatus.active)
         )
@@ -1089,8 +1100,8 @@ export const failQuestInTransaction = async (
     to: questStatus.failed,
     now,
     workChat: [
-      ...(active.length > 0
-        ? inactiveWorkerEntries(current, active, assignmentStatus.incomplete, now, actorId)
+      ...(affected.length > 0
+        ? inactiveWorkerEntries(current, affected, assignmentStatus.incomplete, now, actorId)
         : []),
       terminalChatEntry(current, questStatus.failed, commandId, now, actorId),
     ],
@@ -1109,12 +1120,11 @@ export const failQuestInTransaction = async (
   }
   return {
     questStatus: questStatus.failed,
-    incompleteAssignmentIds: active
+    incompleteAssignmentIds: affected
       .map(({ id }) => id)
       .filter((id) => !completedAssignmentIds.has(id)),
   };
 };
-
 export const completeQuest = async (
   questId: string,
   actorUserId: string,

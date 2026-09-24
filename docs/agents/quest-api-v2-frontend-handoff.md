@@ -188,20 +188,21 @@ QUEST_IN_PROGRESS -> QUEST_FAILED
 The backend owns all state transitions.
 The frontend must render the state returned by the server.
 
-### Important: no v2 Start Work endpoint
+### Start Work
 
-There is no endpoint named Start Work in the current Quest v2 API.
-There is no POST /api/v2/quests/:questId/start route.
-Do not invent or call one.
+`POST /api/v2/quests/:questId/start-work` is the Worker-authenticated Start Work
+command. Send a non-blank `Idempotency-Key`. The Server accepts it only while
+the Quest is `QUEST_ASSIGNED` and `startTime <= now <= dueAt`, and only from an
+Active Assignment's required starter:
 
-When a Quest is QUEST_ASSIGNED and startTime is due, the backend lifecycle
-worker changes it to QUEST_IN_PROGRESS.
-The worker also sets startedAt on active Assignments.
-The transition can be delayed by worker scheduling.
-Poll or refresh the Quest and Assignment with the application's normal refresh
-mechanism.
+- `SINGLE`: the Worker.
+- `GROUP + FIRST_COME_FIRST_SERVED`: every Active Worker.
+- `GROUP + CANDIDATE`: the Team Leader.
 
-A pending Quest Edit prevents the assigned-to-in-progress transition.
+Each accepted command persists `startedAt` on that Assignment. The Quest stays
+`QUEST_ASSIGNED` until every required starter acts; only then does it become
+`QUEST_IN_PROGRESS`. A missing required Start Work action at `dueAt` fails the
+Quest. The lifecycle worker does not start assigned Quests automatically.
 
 ## 4. Select the correct lifecycle branch
 
@@ -224,7 +225,7 @@ Use this table:
 | CANDIDATE plus SINGLE                           | Candidate application                       |
 | CANDIDATE plus GROUP                            | Candidate Team                              |
 | GROUP first-come Quest is not full at startTime | Underfilled decision and consent            |
-| Quest is assigned                               | Assignment, Work Chat, automatic start      |
+| Quest is assigned                               | Assignment, Work Chat, explicit Start Work  |
 | Quest is in progress                            | Proof Submission or completion confirmation |
 | Quest is terminal                               | Rating Review                               |
 
@@ -992,7 +993,7 @@ assignment.status is ASSIGNMENT_ACTIVE, ASSIGNMENT_COMPLETED,
 ASSIGNMENT_INCOMPLETE, or ASSIGNMENT_CANCELLED.
 Access rests on the Assignment row in any of those states, so the Member keeps
 this view after settlement makes the Assignment terminal.
-assignment.startedAt is null until automatic start sets it.
+assignment.startedAt is null until the assigned Worker uses the required Start Work action.
 It is a UTC instant with a Z suffix. The +07:00 rule in section 2.5 covers
 Quest schedule fields such as startTime and dueAt, not this one.
 
@@ -1108,7 +1109,7 @@ Assignment fields:
 | workerId   | Worker Member identifier                                                                |
 | state      | ASSIGNMENT_ACTIVE, ASSIGNMENT_COMPLETED, ASSIGNMENT_INCOMPLETE, or ASSIGNMENT_CANCELLED |
 | questState | Current Quest State                                                                     |
-| startedAt  | Automatic start time or null                                                            |
+| startedAt  | Required Start Work time or null                                                        |
 | createdAt  | Assignment creation time                                                                |
 
 ### 7.3 List Quest Assignments
@@ -1724,19 +1725,20 @@ Errors:
 - 503 WORK_CHAT_UNAVAILABLE
 - idempotency errors
 
-## 10. Automatic start and Work Chat
+## 10. Start Work and Work Chat
 
-### 10.1 Automatic start
+### 10.1 Start Work
 
 After an Assignment is created:
 
-1. Render QUEST_ASSIGNED before startTime.
-2. Refresh after the scheduled start.
-3. Enable work and Proof Submission UI after QUEST_IN_PROGRESS.
-4. Handle a delayed worker transition without showing a false failure.
-5. Check for a pending Quest Edit before assuming that the Quest can start.
-
-There is no client Start Work command.
+1. Render `QUEST_ASSIGNED` until `startTime`.
+2. Show Start Work only to the required starter for that participation mode.
+3. Send `POST /api/v2/quests/:questId/start-work` with an `Idempotency-Key`.
+4. Keep the Quest in `QUEST_ASSIGNED` until every required starter acts.
+5. Enable work and Proof Submission UI only after the Server returns
+   `QUEST_IN_PROGRESS`.
+6. Handle a Start Work refusal after `dueAt` as a failed deadline, not a
+   delayed lifecycle-worker transition.
 
 ### 10.2 Work Chat
 
@@ -1813,7 +1815,7 @@ It is not the private fileId required by Candidate Team submission.
 
 A Hirer can propose a Condition change only while the Quest is
 QUEST_ASSIGNED and there is at least one active Worker.
-A pending Quest Edit blocks automatic start.
+An edit request does not start the Quest automatically.
 
 Create request:
 
@@ -2825,8 +2827,8 @@ The Quest v2 integration is complete only when all items below are true:
 - [ ] The client uses If-Match for Draft edits.
 - [ ] The client refreshes temporary image URLs after expiry.
 - [ ] The client selects the correct mode and participation branch.
-- [ ] The client does not call or invent a v2 Start Work endpoint.
-- [ ] The client handles automatic QUEST_ASSIGNED to QUEST_IN_PROGRESS.
+- [ ] The client calls the v2 Start Work endpoint as the required starter.
+- [ ] The client does not rely on the lifecycle worker to transition an assigned Quest.
 - [ ] The client does not grant Work Chat membership.
 - [ ] The client does not confuse Candidate Inquiry Conversation with Work Chat.
 - [ ] The client does not send Chat Attachment IDs as Candidate Team fileIds.
@@ -2838,11 +2840,11 @@ The Quest v2 integration is complete only when all items below are true:
 
 ## 20. Known contract gaps
 
-### 20.1 No v2 Start Work command
+### 20.1 Start Work is explicit
 
-The lifecycle requires an automatic start transition.
-The current v2 route set has no Start Work endpoint.
-The frontend must wait for the lifecycle worker and refresh state.
+The v2 route set includes `POST /api/v2/quests/:questId/start-work`; legacy
+clients use `POST /api/v1/quests/:questId/start-work`. Neither API version
+automatically starts a Quest when `startTime` arrives.
 
 ### 20.2 Work Chat is v1
 

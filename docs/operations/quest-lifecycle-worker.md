@@ -12,15 +12,16 @@ The worker processes time-dependent Quest transitions and releases reserved fund
 
 ## Worker Responsibilities
 
-The worker executes these lifecycle transitions in order:
+Workers start assigned work through authenticated `/api/v1/quests/:questId/start-work`
+or `/api/v2/quests/:questId/start-work` commands; the lifecycle worker never
+starts an assigned Quest automatically.
 
 1. **Auto-approve Proofs**: Records `PROOF_APPROVED` when the 24-hour Proof Review Window expires without Hirer action.
-2. **Fail Overdue Quests**: Moves Quests to `QUEST_FAILED` when `dueAt` expires without approved proof.
+2. **Fail Overdue Quests**: Moves a Quest to `QUEST_FAILED` when `dueAt` expires before its required Start Work, proof, or confirmation action.
 3. **Release Failure Holds**: Releases the Hirer's Funding Reservation after the dispute window expires.
 4. **Time Out Edit Requests**: Expires pending Quest Edit requests past their deadline.
 5. **Handle Underfilled Quests**: Cancels underfilled `GROUP` Quests and releases the Hirer's Quest Escrow.
-6. **Start Quests**: Moves Quests from `QUEST_ASSIGNED` to `QUEST_IN_PROGRESS` when `startTime` arrives.
-7. **Expire Invitations**: Cancels expired team invitations.
+6. **Expire Invitations**: Cancels expired team invitations.
 
 ## Prerequisites
 
@@ -47,7 +48,6 @@ bun run worker:quest-lifecycle
 2. Verify that standard output contains a valid JSON payload:
    ```json
    {
-     "startedQuestIds": [],
      "autoCancelledQuestIds": [],
      "underfilledQuestIds": [],
      "timedOutUnderfilledQuestIds": [],
@@ -123,15 +123,17 @@ WHERE submission_status = 'PROOF_PENDING'
   AND sent_at < NOW() - INTERVAL '24 hours';
 ```
 
-### Invariant 3: No Overdue Assigned Quests
+### Invariant 3: No Unhandled Assigned Start Deadlines
 
-This query must return zero rows:
+This query must return zero rows after a lifecycle worker pass for either API
+version:
 
 ```sql
-SELECT id, quest_status, start_time
+SELECT id, api_version, quest_status, due_at
 FROM quest
-WHERE quest_status = 'QUEST_ASSIGNED'
-  AND start_time <= NOW();
+WHERE api_version IN ('v1', 'v2')
+  AND quest_status = 'QUEST_ASSIGNED'
+  AND due_at <= NOW();
 ```
 
 ## 4. Emergency Escrow Release
