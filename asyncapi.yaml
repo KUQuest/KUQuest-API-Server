@@ -1,0 +1,169 @@
+asyncapi: 3.1.0
+info:
+  title: KUQuest Quest Realtime API
+  version: 2.0.0
+  description: |
+    Authenticated, read-only WebSocket streams for Quest updates and Candidate roster updates.
+    Events invalidate client state. Read current state from REST after each event and after reconnect.
+defaultContentType: application/json
+servers:
+  local:
+    host: localhost:5000
+    protocol: ws
+    description: Local development default. Use the deployed API host and wss over TLS.
+    security:
+      - $ref: '#/components/securitySchemes/memberSessionCookie'
+channels:
+  questUpdates:
+    address: /api/v2/quests/{questId}/events
+    description: |
+      Quest state and Assignment roster invalidations. The Server authorizes the Hirer or a Worker
+      with current access. This stream does not replay messages after reconnect.
+    parameters:
+      questId:
+        description: UUID of the Quest in this channel address.
+        examples:
+          - 00000000-0000-0000-0000-000000000000
+    messages:
+      subscribed:
+        $ref: '#/components/messages/subscriptionAccepted'
+      questUpdated:
+        $ref: '#/components/messages/questUpdated'
+  candidateRosterUpdates:
+    address: /api/v2/quests/{questId}/candidate-roster/events
+    description: |
+      Candidate application and Candidate Team roster invalidations. The Server authorizes the
+      Hirer or a Candidate who can read the current roster. This stream does not replay messages
+      after reconnect.
+    parameters:
+      questId:
+        description: UUID of the Quest in this channel address.
+        examples:
+          - 00000000-0000-0000-0000-000000000000
+    messages:
+      subscribed:
+        $ref: '#/components/messages/subscriptionAccepted'
+      candidateRosterUpdated:
+        $ref: '#/components/messages/candidateRosterUpdated'
+operations:
+  receiveQuestUpdates:
+    action: receive
+    channel:
+      $ref: '#/channels/questUpdates'
+    summary: Receive Quest invalidations
+    description: |
+      The Server sends SUBSCRIBED after it accepts the connection. It then sends QUEST_UPDATED
+      when an authorized Quest change occurs. The message contains no Quest snapshot. Read the
+      current Quest or Assignment state from the matching REST endpoint. The stream is read-only;
+      a client message closes the connection with code 1008.
+    messages:
+      - $ref: '#/channels/questUpdates/messages/subscribed'
+      - $ref: '#/channels/questUpdates/messages/questUpdated'
+  receiveCandidateRosterUpdates:
+    action: receive
+    channel:
+      $ref: '#/channels/candidateRosterUpdates'
+    summary: Receive Candidate roster invalidations
+    description: |
+      The Server sends SUBSCRIBED after it accepts the connection. It then sends
+      CANDIDATE_ROSTER_UPDATED after an authorized roster change. For a SINGLE Candidate Quest,
+      read GET /api/v2/quests/{questId}/applications. For a GROUP Candidate Quest, read
+      GET /api/v2/quests/{questId}/teams. The event contains no roster data. The stream is
+      read-only; a client message closes the connection with code 1008.
+    messages:
+      - $ref: '#/channels/candidateRosterUpdates/messages/subscribed'
+      - $ref: '#/channels/candidateRosterUpdates/messages/candidateRosterUpdated'
+components:
+  securitySchemes:
+    memberSessionCookie:
+      type: httpApiKey
+      name: better-auth.session_token
+      in: cookie
+      description: Better Auth session cookie. The API checks the session and Quest access.
+  messages:
+    subscriptionAccepted:
+      name: SUBSCRIBED
+      summary: WebSocket subscription accepted
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+          - questId
+        properties:
+          type:
+            const: SUBSCRIBED
+          version:
+            const: 1
+          questId:
+            type: string
+            format: uuid
+    questUpdated:
+      name: QUEST_UPDATED
+      summary: Quest state or Assignment roster changed
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+          - questId
+          - changeType
+        properties:
+          type:
+            const: QUEST_UPDATED
+          version:
+            const: 1
+          questId:
+            type: string
+            format: uuid
+          changeType:
+            type: string
+            enum:
+              - ASSIGNMENT_ROSTER_UPDATED
+              - QUEST_STARTED
+              - PROOF_SUBMITTED
+              - PROOF_REVIEWED
+              - PROOF_AUTO_APPROVED
+              - COMPLETION_CONFIRMED
+              - QUEST_COMPLETED
+              - QUEST_FAILED
+              - QUEST_CANCELLED
+              - QUEST_EDIT_UPDATED
+          editRequestId:
+            type: string
+            format: uuid
+            description: Present only when changeType is QUEST_EDIT_UPDATED.
+        allOf:
+          - if:
+              properties:
+                changeType:
+                  const: QUEST_EDIT_UPDATED
+              required:
+                - changeType
+            then:
+              required:
+                - editRequestId
+            else:
+              not:
+                required:
+                  - editRequestId
+    candidateRosterUpdated:
+      name: CANDIDATE_ROSTER_UPDATED
+      summary: Candidate application or Candidate Team roster changed
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+          - questId
+        properties:
+          type:
+            const: CANDIDATE_ROSTER_UPDATED
+          version:
+            const: 1
+          questId:
+            type: string
+            format: uuid
