@@ -2,14 +2,22 @@ import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import {
   adminAction,
+  adminConductReport,
   adminEvidenceReference,
   adminModerationDecision,
   adminReportCase,
   adminReporterEntry,
+  conductReportReason,
 } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
-import { quest, questAssignment } from '@/database/schema/quest.schema';
+import {
+  quest,
+  questAssignment,
+  questCandidateTeamV2,
+  questCandidateTeamV2Member,
+  questV2ProofSubmission,
+} from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
   chatAttachment,
@@ -44,6 +52,7 @@ const adminEmail = `${randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';
 const reporterId = randomUUID();
 const senderId = randomUUID();
+const additionalWorkerId = randomUUID();
 const tagId = randomUUID();
 const fixtureQuestIds: string[] = [];
 const fixtureConversationIds: string[] = [];
@@ -51,6 +60,9 @@ const fixtureMessageIds: string[] = [];
 const fixtureAttachmentIds: string[] = [];
 const fixtureFileIds: string[] = [];
 const fixtureCaseIds: string[] = [];
+const fixtureConductReportIds: string[] = [];
+const fixtureConductQuestIds: string[] = [];
+const fixtureConductAssignmentIds: string[] = [];
 
 const cookieHeaderFor = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
@@ -215,10 +227,171 @@ const createReportFixture = async () => {
   };
 };
 
+const createConductReportFixture = async (
+  input: {
+    mode?: 'FIRST_COME_FIRST_SERVED' | 'CANDIDATE';
+    participation?: 'SINGLE' | 'GROUP';
+    reason?: (typeof conductReportReason)[keyof typeof conductReportReason];
+    filerId?: string;
+    reportedMemberId?: string;
+    assignmentWorkerId?: string;
+    assignmentWorkerIds?: string[];
+    candidateTeamLeaderId?: string;
+    includeTeamProof?: boolean;
+    includeDraftProof?: boolean;
+  } = {}
+) => {
+  const questId = randomUUID();
+  const reportId = randomUUID();
+  const createdAt = new Date('2020-02-02T10:00:00.000Z');
+  const mode = input.mode ?? 'FIRST_COME_FIRST_SERVED';
+  const participation = input.participation ?? 'SINGLE';
+  const filerId = input.filerId ?? senderId;
+  const reportedMemberId = input.reportedMemberId ?? reporterId;
+  const assignmentWorkerId = input.assignmentWorkerId ?? reportedMemberId;
+  const assignmentWorkerIds = [...new Set(input.assignmentWorkerIds ?? [assignmentWorkerId])];
+
+  fixtureConductReportIds.push(reportId);
+  fixtureConductQuestIds.push(questId);
+
+  await db.insert(quest).values({
+    id: questId,
+    hirerId: senderId,
+    apiVersion: 'v2',
+    title: `Conduct report fixture ${questId}`,
+    condition: 'Complete the reported Quest work.',
+    mode: mode === 'CANDIDATE' ? 'CANDIDATE' : 'NO_CANDIDATE',
+    participation: participation === 'GROUP' ? 'GROUP' : 'SOLO',
+    v2Mode: mode,
+    v2Participation: participation,
+    questStatus: 'QUEST_IN_PROGRESS',
+    rewardSatang: participation === 'GROUP' ? 2_000 : 1_000,
+    questFundingTotalSatang: participation === 'GROUP' ? 2_000 : 1_000,
+    questEscrowSatang: participation === 'GROUP' ? 2_040 : 1_020,
+    headcount: participation === 'GROUP' ? 2 : 1,
+    startTime: createdAt,
+    dueAt: new Date(createdAt.getTime() + 60 * 60 * 1000),
+    tagId,
+  });
+  const assignmentRows = await db
+    .insert(questAssignment)
+    .values(
+      assignmentWorkerIds.map((workerId) => ({
+        questId,
+        workerId,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE' as const,
+        createdAt,
+      }))
+    )
+    .returning({ id: questAssignment.id, workerId: questAssignment.workerId });
+  fixtureConductAssignmentIds.push(...assignmentRows.map(({ id }) => id));
+  const assignmentId = assignmentRows.find(
+    (assignment) => assignment.workerId === assignmentWorkerId
+  )?.id;
+  if (!assignmentId) throw new Error('Conduct Report test Assignment was not created.');
+
+  let candidateTeamId: string | undefined;
+  let proofSubmissionId: string | undefined;
+  let draftProofSubmissionId: string | undefined;
+  if (mode === 'CANDIDATE' && participation === 'GROUP') {
+    const leaderId = input.candidateTeamLeaderId;
+    if (!leaderId || !assignmentWorkerIds.includes(leaderId) || assignmentWorkerIds.length < 2) {
+      throw new Error('GROUP + CANDIDATE test fixtures need a selected two-member Team.');
+    }
+
+    candidateTeamId = randomUUID();
+    await db.insert(questCandidateTeamV2).values({
+      id: candidateTeamId,
+      questId,
+      leaderId,
+      name: 'Admin Report test Team',
+      headcount: assignmentWorkerIds.length,
+      state: 'TEAM_SELECTED',
+      submissionText: 'Candidate Team proof.',
+      submittedAt: createdAt,
+      createdAt,
+    });
+    await db.insert(questCandidateTeamV2Member).values(
+      assignmentWorkerIds.map((memberId) => ({
+        teamId: candidateTeamId!,
+        memberId,
+        joinedAt: createdAt,
+      }))
+    );
+
+    if (input.includeTeamProof) {
+      proofSubmissionId = randomUUID();
+      await db.insert(questV2ProofSubmission).values({
+        id: proofSubmissionId,
+        questId,
+        teamId: candidateTeamId,
+        submittedByUserId: leaderId,
+        description: 'Team Proof Submission description.',
+        workerMessage: 'Team Proof Submission message.',
+        submissionStatus: 'PROOF_PENDING',
+        sentAt: createdAt,
+        createdAt,
+        updatedAt: createdAt,
+      });
+    }
+  }
+
+  if (input.includeDraftProof) {
+    draftProofSubmissionId = randomUUID();
+    await db.insert(questV2ProofSubmission).values({
+      id: draftProofSubmissionId,
+      questId,
+      workerId: assignmentWorkerId,
+      teamId: null,
+      submittedByUserId: assignmentWorkerId,
+      description: 'Private unsent Proof Submission draft.',
+      workerMessage: 'Private unsent Worker Message.',
+      submissionStatus: null,
+      sentAt: null,
+      createdAt,
+      updatedAt: createdAt,
+    });
+  }
+
+  await db.insert(adminConductReport).values({
+    id: reportId,
+    questId,
+    filerUserId: filerId,
+    reportedMemberId,
+    assignmentId,
+    reason: input.reason ?? conductReportReason.abandoned,
+    detail: 'The Quest record requires Admin review.',
+    createdAt,
+    updatedAt: createdAt,
+  });
+
+  return {
+    assignmentId,
+    candidateTeamId,
+    proofSubmissionId,
+    draftProofSubmissionId,
+    questId,
+    reportId,
+  };
+};
+
 const cleanFixtures = async () => {
   if (!postgresAvailable) return;
 
   await db.transaction(async (transaction) => {
+    if (fixtureConductReportIds.length > 0) {
+      await transaction
+        .delete(adminConductReport)
+        .where(inArray(adminConductReport.id, fixtureConductReportIds));
+    }
+    if (fixtureConductAssignmentIds.length > 0) {
+      await transaction
+        .delete(questAssignment)
+        .where(inArray(questAssignment.id, fixtureConductAssignmentIds));
+    }
+    if (fixtureConductQuestIds.length > 0) {
+      await transaction.delete(quest).where(inArray(quest.id, fixtureConductQuestIds));
+    }
     if (fixtureCaseIds.length > 0) {
       await transaction
         .delete(adminModerationDecision)
@@ -267,6 +440,9 @@ const cleanFixtures = async () => {
   fixtureAttachmentIds.length = 0;
   fixtureFileIds.length = 0;
   fixtureCaseIds.length = 0;
+  fixtureConductReportIds.length = 0;
+  fixtureConductQuestIds.length = 0;
+  fixtureConductAssignmentIds.length = 0;
 };
 
 beforeAll(async () => {
@@ -280,6 +456,12 @@ beforeAll(async () => {
   await db.insert(authUser).values([
     { id: senderId, email: `${senderId}@ku.th`, firstName: 'Report', lastName: 'Sender' },
     { id: reporterId, email: `${reporterId}@ku.th`, firstName: 'Report', lastName: 'Reporter' },
+    {
+      id: additionalWorkerId,
+      email: `${additionalWorkerId}@ku.th`,
+      firstName: 'Report',
+      lastName: 'Additional Worker',
+    },
   ]);
   await db.insert(tag).values({ id: tagId, name: `Admin report ${tagId}` });
 
@@ -330,16 +512,28 @@ afterAll(async () => {
   await cleanFixtures();
   if (!postgresAvailable) return;
   await db.delete(tag).where(eq(tag.id, tagId));
-  await db.delete(authUser).where(inArray(authUser.id, [senderId, reporterId]));
+  await db.delete(authUser).where(inArray(authUser.id, [senderId, reporterId, additionalWorkerId]));
 });
 
 describe('Admin Report Case API', () => {
   it('publishes the four Admin surfaces and rejects anonymous and Member Sessions', async () => {
     const openApiResponse = await app.handle(new Request('http://localhost/openapi/json'));
     const document = (await openApiResponse.json()) as {
-      paths: Record<string, Record<string, { operationId?: string; security?: unknown }>>;
+      paths: Record<
+        string,
+        Record<
+          string,
+          {
+            operationId?: string;
+            security?: unknown;
+            responses?: Record<string, { content?: Record<string, { schema?: unknown }> }>;
+          }
+        >
+      >;
     };
-    expect(document.paths['/api/v1/admin/reports']?.get?.operationId).toBe('listAdminReports');
+    const listOperation = document.paths['/api/v1/admin/reports']?.get;
+    const detailOperation = document.paths['/api/v1/admin/reports/{reportId}']?.get;
+    expect(listOperation?.operationId).toBe('listAdminReports');
     expect(document.paths['/api/v1/admin/reports/{reportId}']?.get?.operationId).toBe(
       'getAdminReport'
     );
@@ -349,6 +543,15 @@ describe('Admin Report Case API', () => {
     expect(document.paths['/api/v1/admin/evidence/{evidenceRef}']?.get?.operationId).toBe(
       'getAdminReportEvidence'
     );
+
+    const listSchema = listOperation?.responses?.['200']?.content?.['application/json']?.schema;
+    const detailSchema = detailOperation?.responses?.['200']?.content?.['application/json']?.schema;
+    expect(JSON.stringify(listSchema)).toContain('REPORT_CASE');
+    expect(JSON.stringify(listSchema)).toContain('CONDUCT_REPORT');
+    expect(JSON.stringify(detailSchema)).toContain('REPORT_CASE');
+    expect(JSON.stringify(detailSchema)).toContain('CONDUCT_REPORT');
+    expect(JSON.stringify(detailSchema)).toContain('assignment');
+    expect(JSON.stringify(detailSchema)).toContain('proofSubmission');
 
     const anonymous = await app.handle(new Request('http://localhost/api/v1/admin/reports'));
     expect(anonymous.status).toBe(401);
@@ -393,7 +596,10 @@ describe('Admin Report Case API', () => {
 
     const detail = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}`);
     expect(detail.status).toBe(200);
-    expect((await detail.json()).data.messageId).toBe(fixture.messageId);
+    expect((await detail.json()).data).toMatchObject({
+      kind: 'REPORT_CASE',
+      messageId: fixture.messageId,
+    });
 
     const firstEvidence = await adminRequest(`/api/v1/admin/evidence/${fixture.evidenceRefId}`, {
       headers: { 'idempotency-key': `report-evidence-${fixture.caseId}` },
@@ -457,6 +663,245 @@ describe('Admin Report Case API', () => {
     ).toEqual([expect.objectContaining({ url: null, urlExpiresAt: null })]);
   });
 
+  it('lists and details a Conduct Report with its Quest record discriminator', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture();
+
+    const list = await adminRequest(
+      `/api/v1/admin/reports?kind=CONDUCT_REPORT&status=CONDUCT_REPORT_PENDING&memberId=${reporterId}&questId=${fixture.questId}`
+    );
+    expect(list.status).toBe(200);
+    const listBody = await list.json();
+    expect(listBody.data.items).toHaveLength(1);
+    expect(listBody.data.items[0]).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      id: fixture.reportId,
+      displayId: expect.stringMatching(/^CND-\d{6}$/),
+      filer: { id: senderId },
+      reportedMember: { id: reporterId },
+      quest: {
+        id: fixture.questId,
+        mode: 'FIRST_COME_FIRST_SERVED',
+        participation: 'SINGLE',
+      },
+      reason: 'CONDUCT_ABANDONED',
+      status: 'CONDUCT_REPORT_PENDING',
+      version: 1,
+    });
+    expect(listBody.data.items[0]).not.toHaveProperty('assignment');
+
+    const detail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(detail.status).toBe(200);
+    const detailBody = await detail.json();
+    expect(detailBody.data).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      id: fixture.reportId,
+      displayId: expect.stringMatching(/^CND-\d{6}$/),
+      assignment: {
+        id: fixture.assignmentId,
+        worker: { id: reporterId },
+        assignmentStatus: 'ASSIGNMENT_ACTIVE',
+      },
+      proofSubmission: null,
+      detail: 'The Quest record requires Admin review.',
+    });
+  });
+
+  it('does not expose an unsent v2 Proof Submission draft in Conduct Report detail', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture({
+      mode: 'CANDIDATE',
+      participation: 'SINGLE',
+      filerId: reporterId,
+      reportedMemberId: senderId,
+      assignmentWorkerId: reporterId,
+      includeDraftProof: true,
+    });
+    expect(fixture.draftProofSubmissionId).toBeDefined();
+
+    const detail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(detail.status).toBe(200);
+    const detailBody = await detail.json();
+    expect(detailBody.data.proofSubmission).toBeNull();
+    expect(JSON.stringify(detailBody)).not.toContain('Private unsent Proof Submission draft.');
+    expect(JSON.stringify(detailBody)).not.toContain('Private unsent Worker Message.');
+  });
+
+  it('lists all Quest mode and participation combinations and all Conduct Report reasons', async () => {
+    if (!postgresAvailable) return;
+    const cases = [
+      {
+        mode: 'FIRST_COME_FIRST_SERVED' as const,
+        participation: 'SINGLE' as const,
+        reason: conductReportReason.abandoned,
+        filerId: senderId,
+        reportedMemberId: reporterId,
+      },
+      {
+        mode: 'CANDIDATE' as const,
+        participation: 'SINGLE' as const,
+        reason: conductReportReason.outOfScope,
+        filerId: reporterId,
+        reportedMemberId: senderId,
+        assignmentWorkerId: reporterId,
+      },
+      {
+        mode: 'FIRST_COME_FIRST_SERVED' as const,
+        participation: 'GROUP' as const,
+        reason: conductReportReason.noShow,
+        filerId: reporterId,
+        reportedMemberId: additionalWorkerId,
+        assignmentWorkerIds: [reporterId, additionalWorkerId],
+      },
+      {
+        mode: 'CANDIDATE' as const,
+        participation: 'GROUP' as const,
+        reason: conductReportReason.outOfScope,
+        filerId: additionalWorkerId,
+        reportedMemberId: senderId,
+        assignmentWorkerId: additionalWorkerId,
+        assignmentWorkerIds: [reporterId, additionalWorkerId],
+        candidateTeamLeaderId: reporterId,
+        includeTeamProof: true,
+      },
+    ];
+
+    for (const scenario of cases) {
+      // Each response checks a valid Rulebook relationship through the Admin HTTP boundary.
+      // eslint-disable-next-line no-await-in-loop
+      const fixture = await createConductReportFixture(scenario);
+      // eslint-disable-next-line no-await-in-loop
+      const response = await adminRequest(
+        '/api/v1/admin/reports?' +
+          new URLSearchParams({
+            kind: 'CONDUCT_REPORT',
+            questId: fixture.questId,
+          }).toString()
+      );
+      expect(response.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const body = await response.json();
+      expect(body.data.items).toHaveLength(1);
+      expect(body.data.items[0]).toMatchObject({
+        kind: 'CONDUCT_REPORT',
+        id: fixture.reportId,
+        quest: {
+          mode: scenario.mode,
+          participation: scenario.participation,
+        },
+        reason: scenario.reason,
+      });
+      expect(body.data.items[0]).not.toHaveProperty('proofSubmission');
+
+      if (fixture.proofSubmissionId) {
+        // eslint-disable-next-line no-await-in-loop
+        const detail = await adminRequest('/api/v1/admin/reports/' + fixture.reportId);
+        expect(detail.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const detailBody = await detail.json();
+        expect(detailBody.data.proofSubmission).toMatchObject({
+          id: fixture.proofSubmissionId,
+          teamId: fixture.candidateTeamId,
+          submittedBy: { id: reporterId },
+          description: 'Team Proof Submission description.',
+          workerMessage: 'Team Proof Submission message.',
+          submissionStatus: 'PROOF_PENDING',
+        });
+      }
+    }
+  });
+
+  it('walks the shared Report queue at limit 1 in both sort directions across microsecond rows', async () => {
+    if (!postgresAvailable) return;
+    const reportCaseEarly = await createReportFixture();
+    const conductReportEarly = await createConductReportFixture({
+      filerId: reporterId,
+      reportedMemberId: senderId,
+      assignmentWorkerId: reporterId,
+    });
+    const reportCaseLate = await createReportFixture();
+    const conductReportLate = await createConductReportFixture({
+      filerId: reporterId,
+      reportedMemberId: senderId,
+      assignmentWorkerId: reporterId,
+    });
+    const seeded = [
+      {
+        kind: 'REPORT_CASE' as const,
+        id: reportCaseEarly.caseId,
+        createdAt: '2035-04-01T00:00:00.100200Z',
+      },
+      {
+        kind: 'CONDUCT_REPORT' as const,
+        id: conductReportEarly.reportId,
+        createdAt: '2035-04-01T00:00:00.100800Z',
+      },
+      {
+        kind: 'REPORT_CASE' as const,
+        id: reportCaseLate.caseId,
+        createdAt: '2035-04-01T00:00:00.101300Z',
+      },
+      {
+        kind: 'CONDUCT_REPORT' as const,
+        id: conductReportLate.reportId,
+        createdAt: '2035-04-01T00:00:00.101300Z',
+      },
+    ];
+
+    for (const row of seeded) {
+      // Raw SQL preserves microseconds that JavaScript Date would truncate.
+      if (row.kind === 'REPORT_CASE') {
+        // eslint-disable-next-line no-await-in-loop
+        await sql`UPDATE admin_report_cases SET created_at = ${row.createdAt}::timestamptz WHERE id = ${row.id}`;
+      } else {
+        // eslint-disable-next-line no-await-in-loop
+        await sql`UPDATE admin_conduct_reports SET created_at = ${row.createdAt}::timestamptz WHERE id = ${row.id}`;
+      }
+    }
+
+    const readEveryPage = async (sort: 'newest' | 'oldest') => {
+      const rows: Array<{ kind: 'REPORT_CASE' | 'CONDUCT_REPORT'; id: string }> = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 8; page += 1) {
+        const params = new URLSearchParams({ limit: '1', sort, memberId: senderId });
+        if (cursor) params.set('cursor', cursor);
+        // Each cursor comes from the prior response, so these requests stay sequential.
+        // eslint-disable-next-line no-await-in-loop
+        const response = await adminRequest('/api/v1/admin/reports?' + params.toString());
+        expect(response.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const body = await response.json();
+        rows.push(
+          ...body.data.items.map(
+            (item: { kind: 'REPORT_CASE' | 'CONDUCT_REPORT'; id: string }) => ({
+              kind: item.kind,
+              id: item.id,
+            })
+          )
+        );
+        cursor = body.data.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      return rows;
+    };
+
+    const timestampTiesAscending = [
+      { kind: 'REPORT_CASE' as const, id: reportCaseLate.caseId },
+      { kind: 'CONDUCT_REPORT' as const, id: conductReportLate.reportId },
+    ].sort((left, right) => left.id.localeCompare(right.id));
+    expect(await readEveryPage('oldest')).toEqual([
+      { kind: 'REPORT_CASE', id: reportCaseEarly.caseId },
+      { kind: 'CONDUCT_REPORT', id: conductReportEarly.reportId },
+      ...timestampTiesAscending,
+    ]);
+    expect(await readEveryPage('newest')).toEqual([
+      ...timestampTiesAscending.reverse(),
+      { kind: 'CONDUCT_REPORT', id: conductReportEarly.reportId },
+      { kind: 'REPORT_CASE', id: reportCaseEarly.caseId },
+    ]);
+  });
+
   it('applies Hide and Restore atomically, hides the Message from other Members, and rejects stale commands', async () => {
     if (!postgresAvailable) return;
     const fixture = await createReportFixture();
@@ -483,6 +928,18 @@ describe('Admin Report Case API', () => {
       version: 2,
     });
     expect((await concurrentConflict.json()).error.code).toBe('ADMIN_ACTION_CONFLICT');
+
+    const hiddenQueue = await adminRequest(
+      `/api/v1/admin/reports?kind=REPORT_CASE&questId=${fixture.questId}`
+    );
+    expect(hiddenQueue.status).toBe(200);
+    expect((await hiddenQueue.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        id: fixture.caseId,
+        kind: 'REPORT_CASE',
+        status: 'REPORT_CASE_HIDDEN',
+      })
+    );
 
     const [hiddenMessage] = await db
       .select({ hiddenAt: chatMessage.hiddenAt, hiddenByAdminId: chatMessage.hiddenByAdminId })
@@ -592,6 +1049,12 @@ describe('Admin Report Case API', () => {
       body: JSON.stringify({ outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'POLICY_REVIEW' }),
     });
     expect(dismiss.status).toBe(200);
+
+    const openQueue = await adminRequest(
+      `/api/v1/admin/reports?kind=REPORT_CASE&questId=${fixture.questId}`
+    );
+    expect(openQueue.status).toBe(200);
+    expect((await openQueue.json()).data.items).toEqual([]);
 
     const [row] = await db
       .select({ status: adminReportCase.status, caseClosedAt: adminReportCase.caseClosedAt })
