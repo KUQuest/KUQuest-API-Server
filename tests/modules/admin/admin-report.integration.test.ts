@@ -704,6 +704,7 @@ describe('Admin Report Case API', () => {
           {
             operationId?: string;
             security?: unknown;
+            requestBody?: { content?: Record<string, { schema?: unknown }> };
             responses?: Record<string, { content?: Record<string, { schema?: unknown }> }>;
           }
         >
@@ -711,25 +712,29 @@ describe('Admin Report Case API', () => {
     };
     const listOperation = document.paths['/api/v1/admin/reports']?.get;
     const detailOperation = document.paths['/api/v1/admin/reports/{reportId}']?.get;
+    const decisionOperation = document.paths['/api/v1/admin/reports/{reportId}/decide']?.post;
     expect(listOperation?.operationId).toBe('listAdminReports');
     expect(document.paths['/api/v1/admin/reports/{reportId}']?.get?.operationId).toBe(
       'getAdminReport'
     );
-    expect(document.paths['/api/v1/admin/reports/{reportId}/decide']?.post?.operationId).toBe(
-      'decideAdminReport'
-    );
+    expect(decisionOperation?.operationId).toBe('decideAdminReport');
     expect(document.paths['/api/v1/admin/evidence/{evidenceRef}']?.get?.operationId).toBe(
       'getAdminReportEvidence'
     );
 
     const listSchema = listOperation?.responses?.['200']?.content?.['application/json']?.schema;
     const detailSchema = detailOperation?.responses?.['200']?.content?.['application/json']?.schema;
+    const decisionRequestSchema =
+      decisionOperation?.requestBody?.content?.['application/json']?.schema;
     expect(JSON.stringify(listSchema)).toContain('REPORT_CASE');
     expect(JSON.stringify(listSchema)).toContain('CONDUCT_REPORT');
     expect(JSON.stringify(detailSchema)).toContain('REPORT_CASE');
     expect(JSON.stringify(detailSchema)).toContain('CONDUCT_REPORT');
     expect(JSON.stringify(detailSchema)).toContain('assignment');
     expect(JSON.stringify(detailSchema)).toContain('proofSubmission');
+    expect(JSON.stringify(decisionRequestSchema)).toContain('CONDUCT_REPORT_DISMISSED');
+    expect(JSON.stringify(decisionRequestSchema)).toContain('CONDUCT_REPORT_NO_VIOLATION');
+    expect(JSON.stringify(decisionRequestSchema)).toContain('CONDUCT_REPORT_INSUFFICIENT_EVIDENCE');
 
     const anonymous = await app.handle(new Request('http://localhost/api/v1/admin/reports'));
     expect(anonymous.status).toBe(401);
@@ -1343,6 +1348,344 @@ describe('Admin Report Case API', () => {
       { kind: 'CONDUCT_REPORT', id: conductReportEarly.reportId },
       { kind: 'REPORT_CASE', id: reportCaseEarly.caseId },
     ]);
+  });
+
+  it('dismisses a pending Conduct Report and replays the same Admin Action', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture();
+    const requestKey = `conduct-dismiss-${fixture.reportId}`;
+    const [questBefore] = await db
+      .select({
+        questStatus: quest.questStatus,
+        rewardSatang: quest.rewardSatang,
+        questFundingTotalSatang: quest.questFundingTotalSatang,
+        questEscrowSatang: quest.questEscrowSatang,
+      })
+      .from(quest)
+      .where(eq(quest.id, fixture.questId));
+    const [assignmentBefore] = await db
+      .select({ assignmentStatus: questAssignment.assignmentStatus })
+      .from(questAssignment)
+      .where(eq(questAssignment.id, fixture.assignmentId));
+    const body = {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+    };
+
+    const first = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+      body: JSON.stringify(body),
+    });
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+    expect(firstBody.data.resourceSummary).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      id: fixture.reportId,
+      status: 'CONDUCT_REPORT_DISMISSED',
+      version: 2,
+      resolvedAt: expect.any(String),
+    });
+    expect(firstBody.data.resourceSummary).not.toHaveProperty('decisionReasonText');
+
+    const [report] = await db
+      .select({
+        status: adminConductReport.status,
+        version: adminConductReport.version,
+        decisionReason: adminConductReport.decisionReason,
+        resolvedByAdminId: adminConductReport.resolvedByAdminId,
+        resolvedAt: adminConductReport.resolvedAt,
+      })
+      .from(adminConductReport)
+      .where(eq(adminConductReport.id, fixture.reportId));
+    expect(report).toMatchObject({
+      status: 'CONDUCT_REPORT_DISMISSED',
+      version: 2,
+      decisionReason: 'CONDUCT_REPORT_NO_VIOLATION',
+      resolvedByAdminId: adminId,
+      resolvedAt: expect.any(Date),
+    });
+
+    const [action] = await db
+      .select()
+      .from(adminAction)
+      .where(eq(adminAction.id, firstBody.data.adminActionId));
+    expect(action).toMatchObject({
+      adminId,
+      action: 'CONDUCT_REPORT_DISMISS',
+      resourceType: 'conduct_report',
+      resourceId: fixture.reportId,
+      requestKey,
+      reasonCatalogVersion: 1,
+      reasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+      expectedVersion: 1,
+      resultVersion: 2,
+      metadata: { outcome: 'CONDUCT_REPORT_DISMISSED' },
+    });
+    expect(action?.metadata).not.toHaveProperty('decisionReasonText');
+    expect(action?.resultData).not.toHaveProperty('decisionReasonText');
+    expect(action?.resultData).not.toHaveProperty('detail');
+    expect(
+      await db
+        .select({
+          questStatus: quest.questStatus,
+          rewardSatang: quest.rewardSatang,
+          questFundingTotalSatang: quest.questFundingTotalSatang,
+          questEscrowSatang: quest.questEscrowSatang,
+        })
+        .from(quest)
+        .where(eq(quest.id, fixture.questId))
+    ).toEqual([questBefore]);
+    expect(
+      await db
+        .select({ assignmentStatus: questAssignment.assignmentStatus })
+        .from(questAssignment)
+        .where(eq(questAssignment.id, fixture.assignmentId))
+    ).toEqual([assignmentBefore]);
+
+    const replay = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+      body: JSON.stringify(body),
+    });
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data.adminActionId).toBe(firstBody.data.adminActionId);
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(
+          and(
+            eq(adminAction.action, 'CONDUCT_REPORT_DISMISS'),
+            eq(adminAction.resourceId, fixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+  });
+
+  it('validates the Conduct Report dismissal catalog and keeps Admin-only access', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture();
+    const path = `/api/v1/admin/reports/${fixture.reportId}/decide`;
+
+    const invalidCode = await adminRequest(path, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-dismiss-invalid-${fixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_DISMISSED',
+        decisionReasonCode: 'POLICY_REVIEW',
+      }),
+    });
+    expect(invalidCode.status).toBe(400);
+    expect((await invalidCode.json()).error.code).toBe('VALIDATION');
+
+    const freeFormText = await adminRequest(path, {
+      method: 'POST',
+      headers: { 'idempotency-key': `conduct-dismiss-text-${fixture.reportId}`, 'if-match': '1' },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_DISMISSED',
+        decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        decisionReasonText: 'This free-form reason must not be accepted.',
+      }),
+    });
+    expect(freeFormText.status).toBe(400);
+    expect((await freeFormText.json()).error.code).toBe('VALIDATION');
+
+    const anonymous = await app.handle(
+      new Request(`http://localhost${path}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'conduct-anonymous',
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'CONDUCT_REPORT_DISMISSED',
+          decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        }),
+      })
+    );
+    expect(anonymous.status).toBe(401);
+
+    mock.restore();
+    memberAuthentication(reporterId);
+    const member = await app.handle(
+      new Request(`http://localhost${path}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'conduct-member',
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'CONDUCT_REPORT_DISMISSED',
+          decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        }),
+      })
+    );
+    expect(member.status).toBe(403);
+
+    const [report] = await db
+      .select({ status: adminConductReport.status, version: adminConductReport.version })
+      .from(adminConductReport)
+      .where(eq(adminConductReport.id, fixture.reportId));
+    expect(report).toEqual({ status: 'CONDUCT_REPORT_PENDING', version: 1 });
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(eq(adminAction.resourceId, fixture.reportId))
+    ).toHaveLength(0);
+  });
+
+  it('rejects stale versions and terminal Conduct Reports without a second decision', async () => {
+    if (!postgresAvailable) return;
+    const concurrentFixture = await createConductReportFixture();
+    const concurrentPath = `/api/v1/admin/reports/${concurrentFixture.reportId}/decide`;
+    const concurrentResponses = await Promise.all(
+      ['a', 'b'].map((suffix) =>
+        adminRequest(concurrentPath, {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `conduct-dismiss-${suffix}-${concurrentFixture.reportId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'CONDUCT_REPORT_DISMISSED',
+            decisionReasonCode: 'CONDUCT_REPORT_INSUFFICIENT_EVIDENCE',
+          }),
+        })
+      )
+    );
+    const concurrentBodies = await Promise.all(
+      concurrentResponses.map((response) => response.json())
+    );
+    expect(concurrentResponses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(concurrentBodies.find((body) => body.error)?.error.code).toBe('ADMIN_ACTION_CONFLICT');
+
+    const stale = await adminRequest(concurrentPath, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-dismiss-stale-${concurrentFixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_DISMISSED',
+        decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+      }),
+    });
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).error.code).toBe('ADMIN_ACTION_CONFLICT');
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(
+          and(
+            eq(adminAction.action, 'CONDUCT_REPORT_DISMISS'),
+            eq(adminAction.resourceId, concurrentFixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+
+    const terminalFixture = await createConductReportFixture();
+    const resolvedAt = new Date('2020-02-02T11:00:00.000Z');
+    await db
+      .update(adminConductReport)
+      .set({
+        status: 'CONDUCT_REPORT_DISMISSED',
+        version: 2,
+        decisionReason: 'CONDUCT_REPORT_NO_VIOLATION',
+        resolvedByAdminId: adminId,
+        resolvedAt,
+        updatedAt: resolvedAt,
+      })
+      .where(eq(adminConductReport.id, terminalFixture.reportId));
+    const terminal = await adminRequest(
+      `/api/v1/admin/reports/${terminalFixture.reportId}/decide`,
+      {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `conduct-dismiss-terminal-${terminalFixture.reportId}`,
+          'if-match': '2',
+        },
+        body: JSON.stringify({
+          outcome: 'CONDUCT_REPORT_DISMISSED',
+          decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        }),
+      }
+    );
+    expect(terminal.status).toBe(409);
+    expect((await terminal.json()).error.code).toBe('CONDUCT_REPORT_OUTCOME_INVALID');
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(eq(adminAction.resourceId, terminalFixture.reportId))
+    ).toHaveLength(0);
+  });
+
+  it('rolls back a Conduct Report dismissal when AdminAction persistence fails', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture();
+    await sql`CREATE OR REPLACE FUNCTION admin_report_test_fail_conduct_dismiss() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.action = 'CONDUCT_REPORT_DISMISS' THEN
+          RAISE EXCEPTION 'forced Conduct Report AdminAction failure';
+        END IF;
+        RETURN NEW;
+      END;
+    $$`;
+    await sql`CREATE TRIGGER admin_report_test_fail_conduct_dismiss_trigger
+      BEFORE INSERT ON admin_action
+      FOR EACH ROW EXECUTE FUNCTION admin_report_test_fail_conduct_dismiss()`;
+
+    const expectedFailureLog = spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `conduct-dismiss-atomic-${fixture.reportId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'CONDUCT_REPORT_DISMISSED',
+          decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        }),
+      });
+      expect(response.status).toBe(500);
+
+      const [report] = await db
+        .select({
+          status: adminConductReport.status,
+          version: adminConductReport.version,
+          decisionReason: adminConductReport.decisionReason,
+          resolvedByAdminId: adminConductReport.resolvedByAdminId,
+          resolvedAt: adminConductReport.resolvedAt,
+        })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId));
+      expect(report).toEqual({
+        status: 'CONDUCT_REPORT_PENDING',
+        version: 1,
+        decisionReason: null,
+        resolvedByAdminId: null,
+        resolvedAt: null,
+      });
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(eq(adminAction.resourceId, fixture.reportId))
+      ).toHaveLength(0);
+    } finally {
+      expectedFailureLog.mockRestore();
+      await sql`DROP TRIGGER IF EXISTS admin_report_test_fail_conduct_dismiss_trigger ON admin_action`;
+      await sql`DROP FUNCTION IF EXISTS admin_report_test_fail_conduct_dismiss()`;
+    }
   });
 
   it('applies Hide and Restore atomically, hides the Message from other Members, and rejects stale commands', async () => {
