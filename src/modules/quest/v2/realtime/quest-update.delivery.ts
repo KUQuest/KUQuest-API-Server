@@ -19,10 +19,7 @@ import { getQuestUpdateRoster } from './quest-update.service';
 const questUpdateChannel = 'kuquest_quest_updates';
 
 type HirerQuestChangeType =
-  | QuestUpdateChangeType
-  | 'CANDIDATE_ROSTER_UPDATED'
-  | 'QUEST_PUBLISHED'
-  | 'QUEST_CREATED';
+  QuestUpdateChangeType | 'CANDIDATE_ROSTER_UPDATED' | 'QUEST_PUBLISHED' | 'QUEST_CREATED';
 
 type QuestUpdateSocket = {
   send: (message: string) => unknown;
