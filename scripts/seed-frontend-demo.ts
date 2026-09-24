@@ -429,8 +429,8 @@ const main = async (): Promise<void> => {
   }
 
   const now = new Date();
-  const demoDesignTagName: FixedTagName = 'ออกแบบ (Design)';
-  const demoWorkTagName: FixedTagName = 'งานและการบ้าน (Work/Homework)';
+  const demoDesignTagName: FixedTagName = 'Design';
+  const demoWorkTagName: FixedTagName = 'Work/Homework';
   const openQuests = [
     ['Design a KU event poster', demoDesignTagName, 0, 50_000],
     ['Translate an event announcement', demoWorkTagName, 1, 35_000],

@@ -1,17 +1,17 @@
-export const otherQuestTagName = 'อื่นๆ (ETC.)';
+export const otherQuestTagName = 'Other';
 
 export const fixedTagNames = [
-  'ทำความสะอาด (Cleaning)',
-  'ส่งของ (Delivery)',
-  'ซ่อมแซม (Fixing)',
-  'สอนหนังสือ (Teaching)',
-  'กีฬา (Sport)',
-  'เกมและสันทนาการ (Game/Activity)',
-  'งานและการบ้าน (Work/Homework)',
-  'อาหารและเครื่องดื่ม (Food and Drinks)',
-  'สัตว์เลี้ยง (Pet)',
-  'ออกแบบ (Design)',
-  'ถ่ายภาพ (Photography)',
+  'Cleaning',
+  'Delivery',
+  'Fixing',
+  'Teaching',
+  'Sport',
+  'Game/Activity',
+  'Work/Homework',
+  'Food and Drinks',
+  'Pet',
+  'Design',
+  'Photography',
   otherQuestTagName,
 ] as const;
 
