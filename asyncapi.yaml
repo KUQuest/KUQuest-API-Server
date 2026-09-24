@@ -1,10 +1,11 @@
 asyncapi: 3.1.0
 info:
-  title: KUQuest Quest Realtime API
+  title: KUQuest Realtime API
   version: 2.0.0
   description: |
-    Authenticated, read-only WebSocket streams for Quest updates and Candidate roster updates.
-    Events invalidate client state. Read current state from REST after each event and after reconnect.
+    Authenticated WebSocket APIs for Quest and Candidate roster invalidations,
+    Candidate Inquiry Conversation messages, and Work Conversation messages.
+    REST remains authoritative for current state and conversation history.
 defaultContentType: application/json
 servers:
   local:
@@ -45,6 +46,48 @@ channels:
         $ref: '#/components/messages/subscriptionAccepted'
       candidateRosterUpdated:
         $ref: '#/components/messages/candidateRosterUpdated'
+
+  workConversations:
+    address: /api/v1/chat/conversations/{conversationId}/events
+    description: |
+      The Hirer and all current Active Workers share one Work Conversation. The Server
+      checks Conversation membership. A terminal Work Conversation remains readable
+      but read-only. REST provides message history after reconnect.
+    parameters:
+      conversationId:
+        description: UUID of the Work Conversation.
+        examples:
+          - 00000000-0000-0000-0000-000000000000
+    messages:
+      sendChatMessage:
+        $ref: '#/components/messages/sendChatMessage'
+      messageAccepted:
+        $ref: '#/components/messages/chatMessageAccepted'
+      messageRejected:
+        $ref: '#/components/messages/chatMessageRejected'
+      workConversationMessage:
+        $ref: '#/components/messages/workConversationMessageEvent'
+  candidateInquiries:
+    address: /api/v1/chat/candidate-inquiries/{conversationId}/events
+    description: |
+      A Candidate Inquiry Conversation is private to the Hirer and one Prospective
+      Worker while the Quest is QUEST_OPEN. It closes when that Prospective Worker
+      receives an Assignment, the Quest enters QUEST_ASSIGNED, or the Quest is
+      cancelled. It never becomes a Work Conversation. REST provides history after reconnect.
+    parameters:
+      conversationId:
+        description: UUID of the Candidate Inquiry Conversation.
+        examples:
+          - 00000000-0000-0000-0000-000000000000
+    messages:
+      sendChatMessage:
+        $ref: '#/components/messages/sendChatMessage'
+      messageAccepted:
+        $ref: '#/components/messages/chatMessageAccepted'
+      messageRejected:
+        $ref: '#/components/messages/chatMessageRejected'
+      candidateInquiryMessage:
+        $ref: '#/components/messages/candidateInquiryMessageEvent'
 operations:
   receiveQuestUpdates:
     action: receive
@@ -73,13 +116,56 @@ operations:
     messages:
       - $ref: '#/channels/candidateRosterUpdates/messages/subscribed'
       - $ref: '#/channels/candidateRosterUpdates/messages/candidateRosterUpdated'
+
+  sendWorkConversationMessage:
+    action: send
+    channel:
+      $ref: '#/channels/workConversations'
+    summary: Send a Work Conversation Message
+    messages:
+      - $ref: '#/channels/workConversations/messages/sendChatMessage'
+  receiveWorkConversationEvents:
+    action: receive
+    channel:
+      $ref: '#/channels/workConversations'
+    summary: Receive Work Conversation events
+    description: |
+      The Server acknowledges or rejects each SEND_MESSAGE command. It sends
+      WORK_CONVERSATION_MESSAGE for committed Messages delivered to conversation
+      subscribers. The socket does not replay missed Messages; read history from REST
+      after reconnect.
+    messages:
+      - $ref: '#/channels/workConversations/messages/messageAccepted'
+      - $ref: '#/channels/workConversations/messages/messageRejected'
+      - $ref: '#/channels/workConversations/messages/workConversationMessage'
+  sendCandidateInquiryMessage:
+    action: send
+    channel:
+      $ref: '#/channels/candidateInquiries'
+    summary: Send a Candidate Inquiry Message
+    messages:
+      - $ref: '#/channels/candidateInquiries/messages/sendChatMessage'
+  receiveCandidateInquiryEvents:
+    action: receive
+    channel:
+      $ref: '#/channels/candidateInquiries'
+    summary: Receive Candidate Inquiry events
+    description: |
+      The Server acknowledges or rejects each SEND_MESSAGE command. It sends
+      CANDIDATE_INQUIRY_MESSAGE for committed Messages delivered to conversation
+      subscribers. The socket does not replay missed Messages; read history from REST
+      after reconnect.
+    messages:
+      - $ref: '#/channels/candidateInquiries/messages/messageAccepted'
+      - $ref: '#/channels/candidateInquiries/messages/messageRejected'
+      - $ref: '#/channels/candidateInquiries/messages/candidateInquiryMessage'
 components:
   securitySchemes:
     memberSessionCookie:
       type: httpApiKey
       name: better-auth.session_token
       in: cookie
-      description: Better Auth session cookie. The API checks the session and Quest access.
+      description: Better Auth session cookie. The API checks the session and access to the addressed Quest or Conversation.
   messages:
     subscriptionAccepted:
       name: SUBSCRIBED
@@ -167,3 +253,267 @@ components:
           questId:
             type: string
             format: uuid
+
+    sendChatMessage:
+      name: SEND_MESSAGE
+      summary: Send a chat Message
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - clientMessageId
+        anyOf:
+          - required:
+              - text
+          - required:
+              - attachmentIds
+            properties:
+              attachmentIds:
+                minItems: 1
+        properties:
+          type:
+            const: SEND_MESSAGE
+          clientMessageId:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '\S'
+          text:
+            type: string
+            minLength: 1
+            maxLength: 1000
+            pattern: '\S'
+            description: Optional when the Message includes at least one Attachment.
+          attachmentIds:
+            type: array
+            uniqueItems: true
+            items:
+              type: string
+              format: uuid
+            description: IDs of Attachments uploaded through the REST API.
+    chatMessageAccepted:
+      name: MESSAGE_ACCEPTED
+      summary: Chat Message accepted
+      payload:
+        type: object
+        required:
+          - type
+          - clientMessageId
+          - message
+        properties:
+          type:
+            const: MESSAGE_ACCEPTED
+          clientMessageId:
+            type: string
+          message:
+            anyOf:
+              - $ref: '#/components/schemas/workConversationMessage'
+              - $ref: '#/components/schemas/candidateInquiryMessage'
+    chatMessageRejected:
+      name: MESSAGE_REJECTED
+      summary: Chat Message rejected
+      payload:
+        type: object
+        required:
+          - type
+          - clientMessageId
+          - error
+        properties:
+          type:
+            const: MESSAGE_REJECTED
+          clientMessageId:
+            type:
+              - string
+              - 'null'
+          error:
+            type: object
+            required:
+              - code
+              - message
+            properties:
+              code:
+                type: string
+              message:
+                type: string
+    workConversationMessageEvent:
+      name: WORK_CONVERSATION_MESSAGE
+      summary: Committed Work Conversation Message
+      payload:
+        type: object
+        required:
+          - type
+          - message
+        properties:
+          type:
+            const: WORK_CONVERSATION_MESSAGE
+          message:
+            $ref: '#/components/schemas/workConversationMessage'
+    candidateInquiryMessageEvent:
+      name: CANDIDATE_INQUIRY_MESSAGE
+      summary: Committed Candidate Inquiry Message
+      payload:
+        type: object
+        required:
+          - type
+          - message
+        properties:
+          type:
+            const: CANDIDATE_INQUIRY_MESSAGE
+          message:
+            $ref: '#/components/schemas/candidateInquiryMessage'
+  schemas:
+    chatAvatar:
+      type: object
+      required:
+        - fileId
+        - url
+      properties:
+        fileId:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+    chatSender:
+      type: object
+      required:
+        - id
+        - displayName
+        - avatar
+      properties:
+        id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        displayName:
+          type: string
+        avatar:
+          anyOf:
+            - $ref: '#/components/schemas/chatAvatar'
+            - type: 'null'
+    chatAttachment:
+      type: object
+      required:
+        - id
+        - fileName
+        - mediaType
+        - sizeBytes
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        fileName:
+          type: string
+        mediaType:
+          type: string
+        sizeBytes:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+    workConversationMessage:
+      type: object
+      required:
+        - id
+        - conversationId
+        - sequence
+        - kind
+        - sender
+        - text
+        - attachments
+        - systemType
+        - systemPayload
+        - eventId
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversationId:
+          type: string
+          format: uuid
+        sequence:
+          type: integer
+          minimum: 1
+        kind:
+          type: string
+          enum:
+            - USER
+            - SYSTEM
+        sender:
+          anyOf:
+            - $ref: '#/components/schemas/chatSender'
+            - type: 'null'
+        text:
+          type:
+            - string
+            - 'null'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/chatAttachment'
+        systemType:
+          type:
+            - string
+            - 'null'
+        systemPayload:
+          anyOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        eventId:
+          type:
+            - string
+            - 'null'
+        createdAt:
+          type: string
+          format: date-time
+    candidateInquiryMessage:
+      type: object
+      required:
+        - id
+        - conversationId
+        - sequence
+        - kind
+        - sender
+        - text
+        - attachments
+        - systemType
+        - systemPayload
+        - eventId
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversationId:
+          type: string
+          format: uuid
+        sequence:
+          type: integer
+          minimum: 1
+        kind:
+          const: USER
+        sender:
+          $ref: '#/components/schemas/chatSender'
+        text:
+          type:
+            - string
+            - 'null'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/chatAttachment'
+        systemType:
+          const: null
+        systemPayload:
+          const: null
+        eventId:
+          const: null
+        createdAt:
+          type: string
+          format: date-time
