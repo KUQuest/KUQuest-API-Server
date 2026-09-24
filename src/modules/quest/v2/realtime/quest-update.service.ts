@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { chatConversation } from '@/database/schema/work-chat.schema';
 import {
   quest,
   questApiVersion,
@@ -76,15 +77,30 @@ export const getQuestUpdateAccess = async (
     .from(questAssignment)
     .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, memberId)))
     .limit(1);
-  if (!assignment) return undefined;
   if (
-    assignment.status === 'ASSIGNMENT_ACTIVE' &&
+    assignment?.status === 'ASSIGNMENT_ACTIVE' &&
     (current.state === 'QUEST_OPEN' ||
       current.state === 'QUEST_ASSIGNED' ||
       current.state === 'QUEST_IN_PROGRESS')
   ) {
     return { role: 'WORKER', mode: 'LIVE' };
   }
+  if (current.state === 'QUEST_OPEN') {
+    const [inquiry] = await db
+      .select({ id: chatConversation.id })
+      .from(chatConversation)
+      .where(
+        and(
+          eq(chatConversation.questId, questId),
+          eq(chatConversation.candidateWorkerId, memberId),
+          eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
+          eq(chatConversation.state, 'INQUIRY_OPEN')
+        )
+      )
+      .limit(1);
+    if (inquiry) return { role: 'PROSPECTIVE_WORKER', mode: 'LIVE' };
+  }
+  if (!assignment) return undefined;
 
   if (current.state !== 'QUEST_FAILED' || current.dueAt === null) return undefined;
   const [pendingProof] = await db

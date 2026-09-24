@@ -145,7 +145,7 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
       tags: ['Quest'],
       summary: 'Subscribe to read-only Quest updates',
       description:
-        'Subscribes an authorized Hirer or Worker to current Quest updates. Read Quest state from REST after SUBSCRIBED.',
+        'Subscribes the Hirer, an Active Worker, or a Prospective Worker with an open Candidate Inquiry Conversation to realtime Quest updates. Read Quest state from REST after SUBSCRIBED.',
       operationId: 'subscribeQuestUpdates',
     },
   })

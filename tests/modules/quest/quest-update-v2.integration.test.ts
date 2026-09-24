@@ -277,6 +277,74 @@ afterAll(async () => {
 });
 
 describe('Quest v2 realtime updates', () => {
+  it('notifies Hirer and open-inquiry Members when a pre-participation Quest changes', async () => {
+    const hirer = sessions[0];
+    const prospectiveWorker = sessions[1];
+    if (!hirer || !prospectiveWorker) throw new Error('Test sessions are missing');
+
+    const questId = await createOpenCandidateQuest('SINGLE');
+    const [conversation] = await db
+      .insert(chatConversation)
+      .values({
+        questId,
+        type: 'CONVERSATION_CANDIDATE_INQUIRY',
+        questTitle: fixturePrefix,
+        questStatus: questStatus.open,
+        state: 'INQUIRY_OPEN',
+        candidateWorkerId: prospectiveWorker.id,
+      })
+      .returning({ id: chatConversation.id });
+    if (!conversation) throw new Error('Candidate Inquiry Conversation was not created');
+
+    const joinedAt = new Date(Date.now() - 1000);
+    await db.insert(chatMembership).values([
+      {
+        conversationId: conversation.id,
+        memberId: hirer.id,
+        role: 'HIRER',
+        joinedAt,
+      },
+      {
+        conversationId: conversation.id,
+        memberId: prospectiveWorker.id,
+        role: 'PROSPECTIVE_WORKER',
+        joinedAt,
+      },
+    ]);
+
+    const connection = await connectToApp(questId, prospectiveWorker.cookie);
+    try {
+      await expectRealtimeSubscription(connection, questId);
+      const response = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${questId}`, {
+          method: 'PATCH',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': `open-edit-${randomUUID()}`,
+            'if-match': '1',
+            cookie: hirer.cookie,
+          },
+          body: JSON.stringify({ title: 'Quest details changed' }),
+        })
+      );
+      expect(response.status).toBe(200);
+      const [updatedConversation] = await db
+        .select({ questTitle: chatConversation.questTitle })
+        .from(chatConversation)
+        .where(eq(chatConversation.id, conversation.id));
+      expect(updatedConversation?.questTitle).toBe('Quest details changed');
+      expect(JSON.parse((await connection.client.nextText())!)).toEqual({
+        type: 'QUEST_UPDATED',
+        version: 1,
+        questId,
+        changeType: 'QUEST_OPEN_EDIT_UPDATED',
+      });
+    } finally {
+      connection.client.destroy();
+      await connection.server.stop();
+    }
+  });
+
   it('delivers roster-only updates to the Hirer and current Workers while a GROUP Quest is open', async () => {
     const [hirer, worker, otherWorker] = sessions;
     if (!hirer || !worker || !otherWorker) throw new Error('Test sessions are missing');

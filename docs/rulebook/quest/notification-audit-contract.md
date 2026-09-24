@@ -26,6 +26,9 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 - **Recipients**:
   - A new Message in a Work Conversation notifies every other current Accepted Participant, never the sender.
   - Directly affected Events notify the affected recipient. Quest-wide Events notify all current Accepted Participants.
+  - A `QUEST_OPEN_EDIT_UPDATED` realtime event goes to the Hirer and Members
+    with an open Candidate Inquiry Conversation. It does not create a Push
+    Notification.
 - **Muting and critical events**:
   - A Member can mute non-critical Push per Quest.
   - Critical Events remain deliverable: approval, non-approval, missing work at `dueAt`, `QUEST_FAILED`, `QUEST_COMPLETED`, `QUEST_CANCELLED`, and Quest Edits requiring a response.

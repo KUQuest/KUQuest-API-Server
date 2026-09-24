@@ -15,6 +15,7 @@ const questUpdateOtherChangeTypeSchema = t.Union([
   t.Literal('QUEST_COMPLETED'),
   t.Literal('QUEST_FAILED'),
   t.Literal('QUEST_CANCELLED'),
+  t.Literal('QUEST_OPEN_EDIT_UPDATED'),
 ]);
 
 export const questUpdateChangeTypeSchema = t.Union([
@@ -48,7 +49,10 @@ export const questUpdateNotificationSchema = t.Union([
 
 export type QuestUpdateChangeType = typeof questUpdateChangeTypeSchema.static;
 export type QuestUpdateNotification = typeof questUpdateNotificationSchema.static;
-export type QuestUpdateAccess = { role: 'HIRER' | 'WORKER'; mode: 'LIVE' | 'PENDING_PROOF' };
+export type QuestUpdateAccess = {
+  role: 'HIRER' | 'WORKER' | 'PROSPECTIVE_WORKER';
+  mode: 'LIVE' | 'PENDING_PROOF';
+};
 const candidateRosterHirerScopeSchema = t.Object(
   { kind: t.Literal('HIRER') },
   { additionalProperties: false }
