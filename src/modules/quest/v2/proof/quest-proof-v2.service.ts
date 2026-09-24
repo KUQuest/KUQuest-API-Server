@@ -2358,7 +2358,11 @@ const dueQuestV2ProofFailureAssignmentIds = async (
   questId: string
 ): Promise<string[]> => {
   const assignments = await transaction
-    .select({ id: questAssignment.id, workerId: questAssignment.workerId })
+    .select({
+      id: questAssignment.id,
+      workerId: questAssignment.workerId,
+      startedAt: questAssignment.startedAt,
+    })
     .from(questAssignment)
     .where(
       and(
@@ -2369,6 +2373,27 @@ const dueQuestV2ProofFailureAssignmentIds = async (
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id))
     .for('update');
   if (assignments.length === 0 || !current.dueAt) return [];
+  if (current.questState === 'QUEST_ASSIGNED') {
+    if (
+      current.v2Mode === questV2Mode.candidate &&
+      current.v2Participation === questV2Participation.group
+    ) {
+      const [team] = await transaction
+        .select({ leaderId: questCandidateTeamV2.leaderId })
+        .from(questCandidateTeamV2)
+        .where(
+          and(
+            eq(questCandidateTeamV2.questId, questId),
+            eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
+          )
+        )
+        .limit(1)
+        .for('update');
+      const leaderAssignment = assignments.find(({ workerId }) => workerId === team?.leaderId);
+      return leaderAssignment?.startedAt ? [] : assignments.map(({ id }) => id);
+    }
+    return assignments.filter(({ startedAt }) => !startedAt).map(({ id }) => id);
+  }
 
   const groupCandidate =
     current.v2Mode === questV2Mode.candidate &&
@@ -2457,7 +2482,7 @@ export const failQuestV2AtDueAt = async (questId: string, now = new Date()): Pro
     const current = await lockQuest(transaction, questId);
     if (
       !current ||
-      current.questState !== 'QUEST_IN_PROGRESS' ||
+      !['QUEST_ASSIGNED', 'QUEST_IN_PROGRESS'].includes(current.questState) ||
       !current.dueAt ||
       current.dueAt > now
     ) {
@@ -2505,7 +2530,7 @@ export const failDueAtQuestV2Proofs = async (now = new Date(), limit = 100): Pro
     .where(
       and(
         eq(quest.apiVersion, questApiVersion.v2),
-        eq(quest.questStatus, 'QUEST_IN_PROGRESS'),
+        inArray(quest.questStatus, ['QUEST_ASSIGNED', 'QUEST_IN_PROGRESS']),
         lte(quest.dueAt, now)
       )
     )

@@ -13,3 +13,11 @@ export {
   type WorkChatMembershipWriter,
 } from './work-chat';
 export * from './contracts';
+export {
+  startQuestWork,
+  questV1StartWorkOperationScope,
+  questV2StartWorkOperationScope,
+  type QuestStartWork,
+  type QuestStartWorkOutcome,
+} from './quest-start-work.service';
+export { mapQuestStartWorkOutcome } from './quest-start-work.controller';

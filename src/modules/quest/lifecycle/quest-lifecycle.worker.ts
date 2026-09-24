@@ -1,5 +1,4 @@
 import { db } from '@/database/client';
-import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import {
   proofSubmission,
   questApiVersion,
@@ -24,11 +23,9 @@ import {
 import { readQuestEscrow, releaseQuestEscrow } from '../shared/escrow/quest-escrow.service';
 import { autoApproveDueProofs } from '../v1';
 import { cancelUnfilledQuest, failQuestInTransaction } from '../settlement';
-import { applyQuestStateTransition } from '../shared/transition/quest-transition.service';
 import { expireQuestEditRequest } from '../v1';
 import {
   expireQuestV2EditRequest,
-  hasPendingQuestV2EditRequest,
   pendingQuestV2EditRequestIds,
 } from '../v2/core/quest-v2-edit.service';
 import {
@@ -51,6 +48,7 @@ type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const DEFAULT_BATCH_SIZE = 100;
 const dueFailureStatuses = [
+  questStatus.assigned,
   questStatus.inProgress,
   questStatus.submitted,
   questStatus.rework,
@@ -75,7 +73,6 @@ export type QuestLifecycleWorkerOptions = {
 
 export type QuestLifecycleWorkerError = {
   operation:
-    | 'start'
     | 'auto-cancel'
     | 'underfilled-detection'
     | 'underfilled-timeout'
@@ -93,7 +90,6 @@ export type QuestLifecycleWorkerError = {
 };
 
 export type QuestLifecycleWorkerResult = {
-  startedQuestIds: string[];
   autoCancelledQuestIds: string[];
   underfilledQuestIds: string[];
   timedOutUnderfilledQuestIds: string[];
@@ -112,67 +108,6 @@ const boundedSize = (value: number | undefined) => {
   return value;
 };
 
-const startQuest = async (questId: string, now: Date): Promise<boolean> =>
-  db.transaction(async (transaction) => {
-    const [current] = await transaction
-      .select({
-        id: quest.id,
-        hirerId: quest.hirerId,
-        apiVersion: quest.apiVersion,
-        startTime: quest.startTime,
-      })
-      .from(quest)
-      .where(
-        and(
-          eq(quest.id, questId),
-          eq(quest.questStatus, questStatus.assigned),
-          lte(quest.startTime, now)
-        )
-      )
-      .limit(1)
-      .for('update');
-    if (!current) return false;
-    if (await hasPendingQuestV2EditRequest(transaction, questId)) return false;
-
-    const assignments = await transaction
-      .select({ id: questAssignment.id, workerId: questAssignment.workerId })
-      .from(questAssignment)
-      .where(
-        and(
-          eq(questAssignment.questId, questId),
-          eq(questAssignment.assignmentStatus, assignmentStatus.active)
-        )
-      )
-      .for('update');
-
-    await transaction
-      .update(questAssignment)
-      .set({ startedAt: now })
-      .where(
-        and(
-          eq(questAssignment.questId, questId),
-          eq(questAssignment.assignmentStatus, assignmentStatus.active)
-        )
-      );
-    const started = await applyQuestStateTransition(transaction, {
-      questId,
-      from: questStatus.assigned,
-      to: questStatus.inProgress,
-      now,
-      workChat: [],
-    });
-    if (started && current.apiVersion === questApiVersion.v2) {
-      await notifyQuestUpdate(transaction, {
-        questId,
-        recipientMemberIds: [
-          ...new Set([current.hirerId, ...assignments.map(({ workerId }) => workerId)]),
-        ],
-        changeType: 'QUEST_STARTED',
-      });
-    }
-    return started;
-  });
-
 const ownerHasValidProof = async (transaction: Transaction, questId: string, workerId: string) => {
   const [proof] = await transaction
     .select({ id: proofSubmission.id })
@@ -190,7 +125,7 @@ const ownerHasValidProof = async (transaction: Transaction, questId: string, wor
 
 const selectedTeamForQuest = async (transaction: Transaction, questId: string) => {
   const [team] = await transaction
-    .select({ id: questTeam.id })
+    .select({ id: questTeam.id, leaderId: questTeam.leaderId })
     .from(questTeam)
     .where(and(eq(questTeam.questId, questId), eq(questTeam.teamStatus, 'TEAM_SELECTED')))
     .limit(1);
@@ -266,6 +201,33 @@ const questHasIncompleteObligations = async (
   }
   return false;
 };
+const dueStartFailureAssignmentIds = async (
+  transaction: Transaction,
+  current: { id: string; mode: string; participation: string }
+) => {
+  const assignments = await transaction
+    .select({
+      id: questAssignment.id,
+      workerId: questAssignment.workerId,
+      startedAt: questAssignment.startedAt,
+    })
+    .from(questAssignment)
+    .where(
+      and(
+        eq(questAssignment.questId, current.id),
+        eq(questAssignment.assignmentStatus, assignmentStatus.active)
+      )
+    )
+    .for('update');
+  if (assignments.length === 0) return [];
+
+  if (current.mode === questMode.candidate && current.participation === questParticipation.group) {
+    const team = await selectedTeamForQuest(transaction, current.id);
+    const leader = assignments.find(({ workerId }) => workerId === team?.leaderId);
+    return leader?.startedAt ? [] : assignments.map(({ id }) => id);
+  }
+  return assignments.filter(({ startedAt }) => !startedAt).map(({ id }) => id);
+};
 
 const failLegacyQuest = async (questId: string, now: Date): Promise<boolean> =>
   db.transaction(async (transaction) => {
@@ -289,14 +251,26 @@ const failLegacyQuest = async (questId: string, now: Date): Promise<boolean> =>
       )
       .limit(1)
       .for('update');
-    if (!current || !(await questHasIncompleteObligations(transaction, current))) return false;
+    if (!current) return false;
+    const assignmentIdsToMarkIncomplete =
+      current.questStatus === questStatus.assigned
+        ? await dueStartFailureAssignmentIds(transaction, current)
+        : undefined;
+    if (
+      current.questStatus === questStatus.assigned
+        ? assignmentIdsToMarkIncomplete?.length === 0
+        : !(await questHasIncompleteObligations(transaction, current))
+    ) {
+      return false;
+    }
 
     const result = await failQuestInTransaction(
       transaction,
       questId,
       `quest-failure:${questId}`,
       now,
-      null
+      null,
+      assignmentIdsToMarkIncomplete
     );
     return result.incompleteAssignmentIds.length > 0;
   });
@@ -462,23 +436,6 @@ const dueInvitationIds = async (now: Date, limit: number) =>
     .orderBy(asc(questTeamInvitation.expiresAt), asc(questTeamInvitation.id))
     .limit(limit);
 
-/** Start all due assigned Quests in one bounded, retry-safe batch. */
-export const startDueAssignedQuests = async (now = new Date(), limit = DEFAULT_BATCH_SIZE) => {
-  const ids = await db
-    .select({ id: quest.id })
-    .from(quest)
-    .where(and(eq(quest.questStatus, questStatus.assigned), lte(quest.startTime, now)))
-    .orderBy(asc(quest.startTime), asc(quest.id))
-    .limit(boundedSize(limit));
-  const errors: QuestLifecycleWorkerError[] = [];
-  return processIds(
-    ids.map(({ id }) => id),
-    'start',
-    (id) => startQuest(id, now),
-    errors
-  );
-};
-
 /** Cancel every due OPEN Quest that did not reach ASSIGNED. */
 export const cancelDueUnfilledQuests = async (now = new Date(), limit = DEFAULT_BATCH_SIZE) => {
   const ids = await dueUnfilledQuestIds(now, boundedSize(limit));
@@ -643,20 +600,6 @@ export const runQuestLifecycleWorker = async (
     errors,
     options.onError
   );
-  const startedQuestIds = await processIds(
-    (
-      await db
-        .select({ id: quest.id })
-        .from(quest)
-        .where(and(eq(quest.questStatus, questStatus.assigned), lte(quest.startTime, now)))
-        .orderBy(asc(quest.startTime), asc(quest.id))
-        .limit(limit)
-    ).map(({ id }) => id),
-    'start',
-    (id) => startQuest(id, now),
-    errors,
-    options.onError
-  );
   const underfilledQuestIds: string[] = [];
   const autoCancelledQuestIds = await processIds(
     (await dueUnfilledQuestIds(now, limit)).map(({ id }) => id),
@@ -681,7 +624,6 @@ export const runQuestLifecycleWorker = async (
   );
 
   return {
-    startedQuestIds,
     autoCancelledQuestIds,
     underfilledQuestIds,
     timedOutUnderfilledQuestIds,
