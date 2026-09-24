@@ -162,6 +162,11 @@ test('finance seed prepares and idempotently reuses the finance Student, Payout,
     BETTER_AUTH_SECRET: 'finance-seed-test-secret-at-least-32-chars-long',
     DATABASE_URL: process.env.DATABASE_URL ?? defaultLocalDatabaseUrl,
   };
+  await sql`
+    INSERT INTO tag (name)
+    VALUES ('ออกแบบ (Design)')
+    ON CONFLICT (name) DO NOTHING
+  `;
 
   const queryFinanceContract = async () => {
     const [student] = await sql<
@@ -193,12 +198,14 @@ test('finance seed prepares and idempotently reuses the finance Student, Payout,
         id: string;
         title: string;
         questStatus: string;
+        tagName: string;
       }[]
     >`
-      SELECT id, title, quest_status AS "questStatus"
+      SELECT quest.id, quest.title, quest.quest_status AS "questStatus", tag.name AS "tagName"
       FROM quest
-      WHERE hirer_id = ${student?.id ?? ''}
-        AND title = ${financeSeedQuestTitle}
+      INNER JOIN tag ON tag.id = quest.tag_id
+      WHERE quest.hirer_id = ${student?.id ?? ''}
+        AND quest.title = ${financeSeedQuestTitle}
     `;
 
     const destinations = await sql<
@@ -254,6 +261,7 @@ test('finance seed prepares and idempotently reuses the finance Student, Payout,
     expect(firstData.recipient).toBeDefined();
     expect(firstData.draftQuests).toHaveLength(1);
     expect(firstData.draftQuests[0]?.questStatus).toBe('QUEST_DRAFT');
+    expect(firstData.draftQuests[0]?.tagName).toBe('ออกแบบ (Design)');
     expect(firstData.destinations).toHaveLength(1);
     expect(firstData.payouts).toHaveLength(1);
 

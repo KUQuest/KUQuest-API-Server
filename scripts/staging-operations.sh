@@ -137,10 +137,155 @@ rollout_api() {
     api
 }
 
+run_psql() {
+  local database_url=$1
+  shift
+
+  DATABASE_URL=$database_url docker run \
+    --rm \
+    --network "$staging_network" \
+    --env DATABASE_URL \
+    "$postgres_image" \
+    sh \
+    -c \
+    'exec psql --dbname "$DATABASE_URL" --set=ON_ERROR_STOP=1 "$@"' \
+    _ \
+    "$@"
+}
+
+run_staging_database_setup() {
+  local database_url=$1
+  local verification
+  local expected_journal_count
+  local applied_journal_count
+
+  DATABASE_URL=$database_url docker compose run --rm --no-deps --env DATABASE_URL api \
+    bun run db:migrate || return $?
+  DATABASE_URL=$database_url docker compose run --rm --no-deps --env DATABASE_URL api \
+    bun run db:verify-migration-journal || return $?
+
+  verification=$(
+    run_psql "$database_url" \
+      --tuples-only \
+      --no-align \
+      --command \
+      "SELECT CASE WHEN
+         to_regclass('public.auth_user') IS NOT NULL AND
+         to_regclass('public.auth_admin') IS NOT NULL AND
+         to_regclass('public.auth_account') IS NOT NULL AND
+         to_regclass('public.auth_session') IS NOT NULL AND
+         to_regclass('public.auth_verification') IS NOT NULL AND
+         to_regclass('drizzle.__drizzle_migrations') IS NOT NULL
+       THEN 'ok' ELSE 'missing' END;"
+  ) || return $?
+
+  if [[ "$verification" != 'ok' ]]; then
+    printf 'Staging migration verification failed.\n' >&2
+    return 1
+  fi
+
+  expected_journal_count=$(
+    DATABASE_URL=$database_url docker compose run \
+      --rm \
+      --no-deps \
+      --env DATABASE_URL \
+      api \
+      bun \
+      -e \
+      'const journal = await Bun.file("drizzle/meta/_journal.json").json(); console.log(journal.entries.length);'
+  ) || return $?
+
+  if [[ ! "$expected_journal_count" =~ ^[0-9]+$ ]] ||
+    (( expected_journal_count == 0 )); then
+    printf 'Unable to read the image migration journal.\n' >&2
+    return 1
+  fi
+
+  applied_journal_count=$(
+    run_psql "$database_url" \
+      --tuples-only \
+      --no-align \
+      --command 'SELECT count(*) FROM drizzle.__drizzle_migrations;'
+  ) || return $?
+
+  if [[ "$applied_journal_count" != "$expected_journal_count" ]]; then
+    printf 'Staging migration journal is incomplete.\n' >&2
+    return 1
+  fi
+
+  DATABASE_URL=$database_url docker compose run --rm --no-deps --env DATABASE_URL api \
+    bun run db:seed-staging || return $?
+  DATABASE_URL=$database_url docker compose run --rm --no-deps --env DATABASE_URL api \
+    bun run db:verify-staging-seed || return $?
+}
+
+preflight_staging_seed() {
+  local database_url=$1
+  local preflight_database_name
+  local preflight_database_url
+  local setup_status
+
+  preflight_database_name="kuquest_seed_preflight_$(date -u +%Y%m%d%H%M%S)_$$"
+  preflight_database_url=$(
+    PREFLIGHT_DATABASE_NAME=$preflight_database_name docker compose run \
+      --rm \
+      --no-deps \
+      --env PREFLIGHT_DATABASE_NAME \
+      api \
+      bun \
+      -e \
+      'const url = new URL(process.env.DATABASE_URL); url.pathname = `/${process.env.PREFLIGHT_DATABASE_NAME}`; process.stdout.write(url.toString());'
+  ) || return $?
+
+  run_psql "$database_url" \
+    --command "CREATE DATABASE \"$preflight_database_name\" TEMPLATE template0;" ||
+    return $?
+
+  if run_staging_database_setup "$preflight_database_url"; then
+    setup_status=0
+  else
+    setup_status=$?
+  fi
+
+  if ! run_psql "$database_url" \
+    --command "DROP DATABASE IF EXISTS \"$preflight_database_name\" WITH (FORCE);"; then
+    printf 'Could not remove the staging seed preflight database.\n' >&2
+    return 1
+  fi
+
+  if (( setup_status != 0 )); then
+    return "$setup_status"
+  fi
+
+  printf 'Full staging seed preflight passed.\n'
+}
+
+reset_staging_schema() {
+  local database_url=$1
+
+  run_psql "$database_url" --command 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' ||
+    return $?
+  run_psql "$database_url" \
+    --command 'CREATE SCHEMA IF NOT EXISTS drizzle;
+     CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (
+       id SERIAL PRIMARY KEY,
+       hash text NOT NULL,
+       created_at bigint
+     );
+     TRUNCATE TABLE drizzle.__drizzle_migrations;' ||
+    return $?
+}
+
 report_bootstrap_failure() {
   local status=$?
   trap - ERR
-  printf 'Bootstrap failed; restore from %s\n' "$recovery_backup" >&2
+  if [[ "$staging_schema_reset_started" == true ]]; then
+    printf 'Bootstrap failed after the staging schema reset began; restore from %s\n' \
+      "$recovery_backup" >&2
+  else
+    printf 'Staging seed preflight failed; staging schema was not reset. Recovery backup: %s\n' \
+      "$recovery_backup" >&2
+  fi
   exit "$status"
 }
 
@@ -233,6 +378,7 @@ bootstrap() {
 
   local database_url
   local recovery_backup
+  local staging_schema_reset_started=false
   database_url=$(read_database_url)
   require_staging_seed_environment
   docker compose pull api
@@ -242,6 +388,7 @@ bootstrap() {
 
   printf '%s\n' \
     'This one-time operation will drop and recreate only the staging database public schema.' \
+    'The complete migration and seed sequence will first run in a temporary database.' \
     'PostgreSQL roles, the server, and other databases are not changed.' \
     'Type exactly: RESET staging public schema' >&2
 
@@ -253,99 +400,11 @@ bootstrap() {
     fail "confirmation did not match; no schema reset was performed. Backup: $recovery_backup"
   fi
 
-  DATABASE_URL=$database_url docker run \
-    --rm \
-    --network "$staging_network" \
-    --env DATABASE_URL \
-    "$postgres_image" \
-    sh \
-    -c \
-    'exec psql --dbname "$DATABASE_URL" --set=ON_ERROR_STOP=1 --command "$1"' \
-    _ \
-    'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+  preflight_staging_seed "$database_url"
 
-  DATABASE_URL=$database_url docker run \
-    --rm \
-    --network "$staging_network" \
-    --env DATABASE_URL \
-    "$postgres_image" \
-    sh \
-    -c \
-    'exec psql --dbname "$DATABASE_URL" --set=ON_ERROR_STOP=1 --command "$1"' \
-    _ \
-    'CREATE SCHEMA IF NOT EXISTS drizzle;
-     CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (
-       id SERIAL PRIMARY KEY,
-       hash text NOT NULL,
-       created_at bigint
-     );
-     TRUNCATE TABLE drizzle.__drizzle_migrations;'
-
-  docker compose run --rm --no-deps api bun run db:migrate
-
-  docker compose run --rm --no-deps api bun run db:verify-migration-journal
-
-  local verification
-  verification=$(
-    DATABASE_URL=$database_url docker run \
-      --rm \
-      --network "$staging_network" \
-      --env DATABASE_URL \
-      "$postgres_image" \
-      sh \
-      -c \
-      'exec psql --dbname "$DATABASE_URL" --tuples-only --no-align --command "$1"' \
-      _ \
-      "SELECT CASE WHEN
-         to_regclass('public.auth_user') IS NOT NULL AND
-         to_regclass('public.auth_admin') IS NOT NULL AND
-         to_regclass('public.auth_account') IS NOT NULL AND
-         to_regclass('public.auth_session') IS NOT NULL AND
-         to_regclass('public.auth_verification') IS NOT NULL AND
-         to_regclass('drizzle.__drizzle_migrations') IS NOT NULL
-       THEN 'ok' ELSE 'missing' END;"
-  )
-
-  if [[ "$verification" != 'ok' ]]; then
-    fail "bootstrap verification failed; restore from $recovery_backup"
-  fi
-
-  local expected_journal_count
-  expected_journal_count=$(
-    docker compose run \
-      --rm \
-      --no-deps \
-      api \
-      bun \
-      -e \
-      'const journal = await Bun.file("drizzle/meta/_journal.json").json(); console.log(journal.entries.length);'
-  )
-
-  if [[ ! "$expected_journal_count" =~ ^[0-9]+$ ]] ||
-    (( expected_journal_count == 0 )); then
-    fail "unable to read the image migration journal; restore from $recovery_backup"
-  fi
-
-  local applied_journal_count
-  applied_journal_count=$(
-    DATABASE_URL=$database_url docker run \
-      --rm \
-      --network "$staging_network" \
-      --env DATABASE_URL \
-      "$postgres_image" \
-      sh \
-      -c \
-      'exec psql --dbname "$DATABASE_URL" --tuples-only --no-align --command "$1"' \
-      _ \
-      'SELECT count(*) FROM drizzle.__drizzle_migrations;'
-  )
-
-  if [[ "$applied_journal_count" != "$expected_journal_count" ]]; then
-    fail "migration journal is incomplete; restore from $recovery_backup"
-  fi
-
-  docker compose run --rm --no-deps api bun run db:seed-staging
-  docker compose run --rm --no-deps api bun run db:verify-staging-seed
+  staging_schema_reset_started=true
+  reset_staging_schema "$database_url"
+  run_staging_database_setup "$database_url"
 
   trap - ERR
   printf 'Staging schema bootstrap succeeded. Recovery backup: %s\n' \
