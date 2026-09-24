@@ -8,6 +8,7 @@ import {
   joinQuestV2Controller,
   listMyQuestV2AssignmentsController,
   listQuestV2AssignmentsController,
+  startQuestWorkV2Controller,
 } from './quest-assignment-v2.controller';
 import {
   decideQuestUnderfilledV2Controller,
@@ -20,6 +21,7 @@ import {
   questV2AssignmentMineQuerySchema,
   questV2AssignmentParamsSchema,
   questV2AssignmentResponseSchema,
+  questV2StartWorkResponseSchema,
 } from './quest-assignment-v2.schema';
 import {
   questV2UnderfilledConsentInputSchema,
@@ -53,7 +55,7 @@ export const questAssignmentV2Route = new Elysia({
       tags: ['Quest Assignments v2'],
       summary: 'List permitted v2 Quest Assignments',
       description:
-        "The owning Hirer can read all active Assignments. An active Worker can read only that Worker's Assignment.",
+        "The owning Hirer can read all Assignments, including completed, incomplete, and cancelled Assignments, for Reviews. A Worker can read only that Worker's active Assignment.",
       operationId: 'listQuestAssignmentsV2',
       security: betterAuthSecurity,
     },
@@ -68,6 +70,19 @@ export const questAssignmentV2Route = new Elysia({
       description:
         'Creates an active Assignment for an eligible Worker. A GROUP Quest remains open until its published headcount is full.',
       operationId: 'joinQuestV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/quests/:questId/start-work', startQuestWorkV2Controller, {
+    params: questV2AssignmentParamsSchema,
+    headers: questV2AssignmentHeadersSchema,
+    response: responses(questV2StartWorkResponseSchema, 400, 401, 404, 409, 500),
+    detail: {
+      tags: ['Quest Assignments v2'],
+      summary: 'Start Work on an assigned v2 Quest',
+      description:
+        'Records the required Worker Start Work action between startTime and dueAt. GROUP + FCFS requires every Active Worker; GROUP + CANDIDATE requires the Team Leader.',
+      operationId: 'startQuestWorkV2',
       security: betterAuthSecurity,
     },
   })

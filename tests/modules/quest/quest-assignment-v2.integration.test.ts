@@ -1,7 +1,12 @@
 import { app } from '@/app';
 import { db, sql as postgresSql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { quest, questAssignment, questCommand } from '@/database/schema/quest.schema';
+import {
+  quest,
+  questAssignment,
+  questCandidateTeamV2,
+  questCommand,
+} from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
   chatConversation,
@@ -124,6 +129,40 @@ const createOpenGroupFcfsQuest = (overrides: Partial<typeof quest.$inferInsert> 
     ...overrides,
   });
 
+const createAssignedQuest = async (input: {
+  mode: 'FIRST_COME_FIRST_SERVED' | 'CANDIDATE';
+  participation: 'SINGLE' | 'GROUP';
+  workerIds: string[];
+  teamLeaderId?: string;
+}) => {
+  const now = new Date();
+  const questId = await createOpenQuest({
+    v2Mode: input.mode,
+    v2Participation: input.participation,
+    questStatus: 'QUEST_ASSIGNED',
+    headcount: input.workerIds.length,
+    startTime: new Date(now.getTime() - 60_000),
+    dueAt: new Date(now.getTime() + 60 * 60_000),
+  });
+  await db.insert(questAssignment).values(
+    input.workerIds.map((workerId) => ({
+      questId,
+      workerId,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    }))
+  );
+  if (input.teamLeaderId) {
+    await db.insert(questCandidateTeamV2).values({
+      questId,
+      leaderId: input.teamLeaderId,
+      name: 'Start Work Team',
+      headcount: input.workerIds.length,
+      state: 'TEAM_SELECTED',
+    });
+  }
+  return questId;
+};
+
 const hashRequest = async (value: object) => {
   const digest = await crypto.subtle.digest(
     'SHA-256',
@@ -200,7 +239,7 @@ describe('Quest Assignment API v2', () => {
     expect((await response.json()).error.code).toBe('VALIDATION');
   });
 
-  it('requires authentication and publishes the three first-slice operations', async () => {
+  it('requires authentication and publishes the v2 Assignment operations', async () => {
     if (!postgresAvailable) return;
 
     const unauthenticated = await app.handle(
@@ -223,6 +262,12 @@ describe('Quest Assignment API v2', () => {
     expect(document.paths['/api/v2/quests/{questId}/join']?.post?.security).toEqual([
       { betterAuthSession: [] },
     ]);
+    expect(document.paths['/api/v2/quests/{questId}/start-work']?.post?.operationId).toBe(
+      'startQuestWorkV2'
+    );
+    expect(document.paths['/api/v2/quests/{questId}/start-work']?.post?.security).toEqual([
+      { betterAuthSession: [] },
+    ]);
   });
 
   it('creates one active Assignment, moves a SINGLE Quest to assigned, and replays the command', async () => {
@@ -243,6 +288,7 @@ describe('Quest Assignment API v2', () => {
         questState: string;
       };
     };
+
     expect(firstBody.data).toMatchObject({
       questId,
       workerId: worker.id,
@@ -269,6 +315,176 @@ describe('Quest Assignment API v2', () => {
     expect(assignments[0]?.id).toBe(firstBody.data.id);
     expect(transitions).toHaveLength(1);
     expect(transitions[0]?.producer).toBe('QUEST_ASSIGNMENT_V2');
+  });
+
+  it('starts SINGLE FCFS and Candidate Quests explicitly and replays Start Work commands', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    for (const mode of ['FIRST_COME_FIRST_SERVED', 'CANDIDATE'] as const) {
+      const questId = await createAssignedQuest({
+        mode,
+        participation: 'SINGLE',
+        workerIds: [worker.id],
+      });
+      const unassigned = await request(
+        `/api/v2/quests/${questId}/start-work`,
+        'POST',
+        thirdWorker.id,
+        { 'idempotency-key': `start-work-unassigned-${mode}` }
+      );
+      expect(unassigned.status).toBe(409);
+      expect((await unassigned.json()).error.code).toBe('ASSIGNMENT_NOT_FOUND');
+      const response = await request(`/api/v2/quests/${questId}/start-work`, 'POST', worker.id, {
+        'idempotency-key': `start-work-single-${mode}`,
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.data).toMatchObject({ questId, questState: 'QUEST_IN_PROGRESS' });
+      expect(body.data.startedAt).toBeString();
+      const replay = await request(`/api/v2/quests/${questId}/start-work`, 'POST', worker.id, {
+        'idempotency-key': `start-work-single-${mode}`,
+      });
+      expect(replay.status).toBe(200);
+      expect(await replay.json()).toEqual(body);
+      const [assignment] = await db
+        .select({ startedAt: questAssignment.startedAt })
+        .from(questAssignment)
+        .where(eq(questAssignment.questId, questId));
+      expect(assignment?.startedAt).not.toBeNull();
+      expect(
+        (await db.select({ state: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+          ?.state
+      ).toBe('QUEST_IN_PROGRESS');
+    }
+  });
+
+  it('waits for every GROUP FCFS Worker and only accepts the Candidate Team Leader', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const fcfsQuestId = await createAssignedQuest({
+      mode: 'FIRST_COME_FIRST_SERVED',
+      participation: 'GROUP',
+      workerIds: [worker.id, secondWorker.id],
+    });
+    const firstStart = await request(
+      `/api/v2/quests/${fcfsQuestId}/start-work`,
+      'POST',
+      worker.id,
+      { 'idempotency-key': 'start-work-group-fcfs-first' }
+    );
+    expect(firstStart.status).toBe(200);
+    expect((await firstStart.json()).data.questState).toBe('QUEST_ASSIGNED');
+    const [beforeSecondStart] = await db
+      .select({ state: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, fcfsQuestId));
+    expect(beforeSecondStart?.state).toBe('QUEST_ASSIGNED');
+
+    const secondStart = await request(
+      `/api/v2/quests/${fcfsQuestId}/start-work`,
+      'POST',
+      secondWorker.id,
+      { 'idempotency-key': 'start-work-group-fcfs-second' }
+    );
+    expect(secondStart.status).toBe(200);
+    expect((await secondStart.json()).data.questState).toBe('QUEST_IN_PROGRESS');
+
+    const concurrentQuestId = await createAssignedQuest({
+      mode: 'FIRST_COME_FIRST_SERVED',
+      participation: 'GROUP',
+      workerIds: [worker.id, secondWorker.id],
+    });
+    const concurrentStarts = await Promise.all([
+      request(`/api/v2/quests/${concurrentQuestId}/start-work`, 'POST', worker.id, {
+        'idempotency-key': 'start-work-group-concurrent-first',
+      }),
+      request(`/api/v2/quests/${concurrentQuestId}/start-work`, 'POST', secondWorker.id, {
+        'idempotency-key': 'start-work-group-concurrent-second',
+      }),
+    ]);
+    expect(concurrentStarts.map(({ status }) => status)).toEqual([200, 200]);
+    const concurrentResults = await Promise.all(
+      concurrentStarts.map((response) => response.json())
+    );
+    expect(concurrentResults.map(({ data }) => data.questState)).toEqual(
+      expect.arrayContaining(['QUEST_ASSIGNED', 'QUEST_IN_PROGRESS'])
+    );
+    const [concurrentQuest] = await db
+      .select({ state: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, concurrentQuestId));
+    expect(concurrentQuest?.state).toBe('QUEST_IN_PROGRESS');
+
+    const candidateQuestId = await createAssignedQuest({
+      mode: 'CANDIDATE',
+      participation: 'GROUP',
+      workerIds: [worker.id, secondWorker.id],
+      teamLeaderId: worker.id,
+    });
+    const memberStart = await request(
+      `/api/v2/quests/${candidateQuestId}/start-work`,
+      'POST',
+      secondWorker.id,
+      { 'idempotency-key': 'start-work-candidate-member' }
+    );
+    expect(memberStart.status).toBe(409);
+    expect((await memberStart.json()).error.code).toBe('START_WORK_NOT_REQUIRED');
+    const leaderStart = await request(
+      `/api/v2/quests/${candidateQuestId}/start-work`,
+      'POST',
+      worker.id,
+      { 'idempotency-key': 'start-work-candidate-leader' }
+    );
+    expect(leaderStart.status).toBe(200);
+    expect((await leaderStart.json()).data.questState).toBe('QUEST_IN_PROGRESS');
+    const candidateAssignments = await db
+      .select({ workerId: questAssignment.workerId, startedAt: questAssignment.startedAt })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, candidateQuestId));
+    expect(
+      candidateAssignments.find(({ workerId }) => workerId === worker.id)?.startedAt
+    ).not.toBeNull();
+    expect(
+      candidateAssignments.find(({ workerId }) => workerId === secondWorker.id)?.startedAt
+    ).toBeNull();
+  });
+
+  it('rejects Start Work before startTime and after dueAt', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const earlyQuestId = await createAssignedQuest({
+      mode: 'FIRST_COME_FIRST_SERVED',
+      participation: 'SINGLE',
+      workerIds: [worker.id],
+    });
+    const futureStartTime = new Date(Date.now() + 60 * 60_000);
+    await db
+      .update(quest)
+      .set({
+        startTime: futureStartTime,
+        dueAt: new Date(futureStartTime.getTime() + 60 * 60_000),
+      })
+      .where(eq(quest.id, earlyQuestId));
+    const early = await request(`/api/v2/quests/${earlyQuestId}/start-work`, 'POST', worker.id, {
+      'idempotency-key': 'start-work-too-early',
+    });
+    expect(early.status).toBe(409);
+    expect((await early.json()).error.code).toBe('START_WORK_NOT_AVAILABLE');
+
+    const lateQuestId = await createAssignedQuest({
+      mode: 'FIRST_COME_FIRST_SERVED',
+      participation: 'SINGLE',
+      workerIds: [worker.id],
+    });
+    await db
+      .update(quest)
+      .set({ dueAt: new Date(Date.now() - 1) })
+      .where(eq(quest.id, lateQuestId));
+    const late = await request(`/api/v2/quests/${lateQuestId}/start-work`, 'POST', worker.id, {
+      'idempotency-key': 'start-work-too-late',
+    });
+    expect(late.status).toBe(409);
+    expect((await late.json()).error.code).toBe('START_WORK_DEADLINE_PASSED');
   });
 
   it('does not accept a SINGLE FCFS Join after the start boundary', async () => {
@@ -330,6 +546,36 @@ describe('Quest Assignment API v2', () => {
     );
     expect(otherHirer.status).toBe(404);
     expect((await otherHirer.json()).error.code).toBe('QUEST_NOT_FOUND');
+  });
+
+  it('lets the Hirer read completed Worker IDs for Reviews after Quest completion', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupFcfsQuest({ questStatus: 'QUEST_COMPLETED' });
+    await db.insert(questAssignment).values([
+      {
+        questId,
+        workerId: worker.id,
+        assignmentStatus: 'ASSIGNMENT_COMPLETED',
+      },
+      {
+        questId,
+        workerId: secondWorker.id,
+        assignmentStatus: 'ASSIGNMENT_COMPLETED',
+      },
+    ]);
+    authenticate();
+
+    const response = await request(`/api/v2/quests/${questId}/assignments`, 'GET', hirer.id);
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: { items: Array<{ workerId: string; state: string }> };
+    };
+    expect(body.data.items).toHaveLength(2);
+    expect(body.data.items.map(({ workerId }) => workerId)).toEqual(
+      expect.arrayContaining([worker.id, secondWorker.id])
+    );
+    expect(body.data.items.every(({ state }) => state === 'ASSIGNMENT_COMPLETED')).toBe(true);
   });
 
   it('filters the authenticated Worker assignments by active, completed, or all status', async () => {

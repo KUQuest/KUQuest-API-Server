@@ -1,4 +1,5 @@
 import type { AuthedContext } from '@/modules/auth';
+import { mapQuestStartWorkOutcome, startQuestWork } from '@/modules/quest/shared';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 
@@ -81,6 +82,25 @@ export const joinNoCandidateQuestController = async ({
     }
     throw error;
   }
+};
+
+export const startQuestWorkV1Controller = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & { params: QuestAssignmentParams }): Promise<ApiResponse> => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+
+  const result = await startQuestWork('v1', session.user.id, params.questId, commandId);
+  if ('outcome' in result) return mapQuestStartWorkOutcome(set, result);
+  return apiSuccess({
+    questId: result.questId,
+    assignmentId: result.assignmentId,
+    startedAt: result.startedAt.toISOString(),
+    questStatus: result.questStatus,
+  });
 };
 
 export const joinQuestDirectlyController = joinNoCandidateQuestController;

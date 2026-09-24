@@ -16,6 +16,8 @@ import type {
   QuestV2AssignmentParams,
 } from './quest-assignment-v2.schema';
 import { WorkChatTransitionError } from '../../shared/work-chat/quest-work-chat.port';
+import { mapQuestStartWorkOutcome } from '../../shared/quest-start-work.controller';
+import { startQuestWork } from '../../shared/quest-start-work.service';
 
 type QuestV2Assignment = Extract<QuestV2AssignmentOutcome, { id: string }>;
 type QuestV2AssignmentError = Exclude<QuestV2AssignmentOutcome, QuestV2Assignment>;
@@ -100,6 +102,24 @@ export const joinQuestV2Controller = async ({
     }
     throw error;
   }
+};
+
+export const startQuestWorkV2Controller = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & { params: QuestV2AssignmentParams }) => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+  const result = await startQuestWork('v2', session.user.id, params.questId, commandId, new Date());
+  if ('outcome' in result) return mapQuestStartWorkOutcome(set, result);
+  return apiSuccess({
+    questId: result.questId,
+    assignmentId: result.assignmentId,
+    startedAt: result.startedAt.toISOString(),
+    questState: result.questStatus,
+  });
 };
 
 const mapReadOutcome = (set: AuthedContext['set']) => {

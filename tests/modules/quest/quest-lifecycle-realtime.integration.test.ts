@@ -219,7 +219,7 @@ afterAll(async () => {
 });
 
 describe('Quest lifecycle realtime updates', () => {
-  it('announces a committed worker start and leaves future assigned Quests quiet', async () => {
+  it('does not announce or perform an automatic Start Work transition', async () => {
     const [hirer, worker] = sessions;
     if (!hirer || !worker) throw new Error('Lifecycle test sessions are missing');
     const questId = await createAssignedQuest('1900-08-26T10:00:00.000+07:00');
@@ -245,39 +245,23 @@ describe('Quest lifecycle realtime updates', () => {
         });
       }
 
-      const result = await runQuestLifecycleWorker({
+      await runQuestLifecycleWorker({
         batchSize: 1,
         clock: { now: () => new Date('1900-08-26T11:00:00.000+07:00') },
         autoApprove: async () => [],
       });
-      expect(result.startedQuestIds).toContain(questId);
-
-      const expected = {
-        type: 'QUEST_UPDATED',
-        version: 1,
-        questId,
-        changeType: 'QUEST_STARTED',
-      };
-      expect(JSON.parse((await hirerConnection.client.nextText())!)).toEqual(expected);
-      expect(JSON.parse((await workerSocket.nextText())!)).toEqual(expected);
-      expect(await futureSocket.nextText(250)).toBeUndefined();
-      const restResponse = await app.handle(
+      for (const socket of [hirerConnection.client, workerSocket, futureSocket]) {
+        expect(await socket.nextText(250)).toBeUndefined();
+      }
+      const response = await app.handle(
         new Request(`http://localhost/api/v2/quests/${questId}/participation`, {
           headers: { cookie: worker.cookie },
         })
       );
-      expect(restResponse.status).toBe(200);
-      expect(await restResponse.json()).toMatchObject({
-        data: { id: questId, state: 'QUEST_IN_PROGRESS' },
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: { id: questId, state: 'QUEST_ASSIGNED' },
       });
-      const repeated = await runQuestLifecycleWorker({
-        batchSize: 1,
-        clock: { now: () => new Date('1900-08-26T11:00:00.000+07:00') },
-        autoApprove: async () => [],
-      });
-      expect(repeated.startedQuestIds).not.toContain(questId);
-      expect(await hirerConnection.client.nextText(250)).toBeUndefined();
-      expect(await workerSocket.nextText(250)).toBeUndefined();
     } finally {
       hirerConnection.client.destroy();
       workerSocket?.destroy();
@@ -286,7 +270,7 @@ describe('Quest lifecycle realtime updates', () => {
     }
   });
 
-  it('starts Candidate Group work for the Team Leader and members', async () => {
+  it('does not automatically start Candidate Group work', async () => {
     const [hirer, leader, member] = sessions;
     if (!hirer || !leader || !member) throw new Error('Lifecycle test sessions are missing');
     const questId = await createAssignedQuest(
@@ -319,20 +303,13 @@ describe('Quest lifecycle realtime updates', () => {
           questId,
         });
       }
-      const result = await runQuestLifecycleWorker({
+      await runQuestLifecycleWorker({
         batchSize: 1,
         clock: { now: () => new Date('1900-08-26T11:00:00.000+07:00') },
         autoApprove: async () => [],
       });
-      expect(result.startedQuestIds).toContain(questId);
-      const expected = {
-        type: 'QUEST_UPDATED',
-        version: 1,
-        questId,
-        changeType: 'QUEST_STARTED',
-      };
       for (const socket of [hirerConnection.client, ...workerSockets]) {
-        expect(JSON.parse((await socket.nextText())!)).toEqual(expected);
+        expect(await socket.nextText(250)).toBeUndefined();
       }
       for (const participant of [leader, member]) {
         const response = await app.handle(
@@ -342,7 +319,7 @@ describe('Quest lifecycle realtime updates', () => {
         );
         expect(response.status).toBe(200);
         expect(await response.json()).toMatchObject({
-          data: { id: questId, state: 'QUEST_IN_PROGRESS' },
+          data: { id: questId, state: 'QUEST_ASSIGNED' },
         });
       }
     } finally {
