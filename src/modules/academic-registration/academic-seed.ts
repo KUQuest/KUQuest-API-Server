@@ -239,25 +239,6 @@ export const academicCatalog: readonly AcademicCatalogEntry[] = [
       'Sustainable Land Use and Natural Resource Management',
     ],
   },
-  {
-    faculty: 'Engineering at Sriracha',
-    departments: [
-      'Automotive Engineering',
-      'Digital Manufacturing System Engineering',
-      'Robotic and Automation Systems Engineering',
-    ],
-  },
-  {
-    faculty: 'Management Sciences',
-    departments: [
-      'Accounting',
-      'Digital Marketing and Branding',
-      'Hospitality Industry',
-      'International Business',
-      'Logistics Management',
-      'Management',
-    ],
-  },
 ] as const;
 
 export const seedAcademicOptions = async (): Promise<{
