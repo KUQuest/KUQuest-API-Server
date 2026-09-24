@@ -263,6 +263,15 @@ describe('profile integration', () => {
       expect(JSON.stringify(responseProperties)).toContain('certificates');
       expect(JSON.stringify(responseProperties)).toContain('experience');
       expect(JSON.stringify(responseProperties)).toContain('occupation');
+      const dataSchema = responseProperties.data as
+        { properties?: Record<string, unknown> } | undefined;
+      const reputationSchema = dataSchema?.properties?.reputation as
+        { properties?: Record<string, unknown> } | undefined;
+      const ratingSchema = reputationSchema?.properties?.rating as
+        { properties?: Record<string, unknown> } | undefined;
+
+      expect(reputationSchema?.properties).toHaveProperty('totalQuests');
+      expect(ratingSchema?.properties).toHaveProperty('average');
     });
 
     it('documents derived Tags on own Profile but not tagIds on PATCH', async () => {
