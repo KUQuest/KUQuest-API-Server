@@ -10,11 +10,11 @@ the owner projection at `/api/v2/quests/:questId` and the public one at
 The Admin Quest Hide Contract says hiding is discovery isolation only and
 leaves Current Accepted Participants unaffected. The implementation honored
 that by widening the `/public` read to any caller holding an `ASSIGNMENT_ACTIVE`
-Assignment, which let an Active Worker read a hidden or closed Quest. The rule
-was right and the placement was wrong: the accepted contract in
-`docs/agents/quest-api-v2-frontend-handoff.md` states that Public Detail is not
-a Worker lifecycle view, and a payload built for discovery — `hirerName`,
-`activeWorkerCount` — says nothing about the reader's own Assignment.
+Assignment, which let an Active Worker read a hidden or closed Quest.
+The rule was right and the placement was wrong: ADR 0027 defines
+`/api/v2/quests/:questId/public` as a Public Quest Detail projection for
+discovery. A payload built for discovery — `hirerName`, `activeWorkerCount` —
+says nothing about the reader's own Assignment.
 
 The widening also drew the participant boundary at `ASSIGNMENT_ACTIVE`.
 Settlement makes every Active Assignment terminal in one statement, so a Worker
