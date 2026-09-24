@@ -92,9 +92,17 @@ export const candidateRosterUpdateNotificationSchema = t.Object(
   },
   { additionalProperties: false }
 );
+export const questBoardUpdateNotificationSchema = t.Object(
+  {
+    questId: t.String({ format: 'uuid' }),
+    type: t.Literal('QUEST_BOARD_INVALIDATED'),
+  },
+  { additionalProperties: false }
+);
 export const questRealtimeNotificationSchema = t.Union([
   questUpdateNotificationSchema,
   candidateRosterUpdateNotificationSchema,
+  questBoardUpdateNotificationSchema,
 ]);
 
 export type CandidateRosterScope = typeof candidateRosterScopeSchema.static;

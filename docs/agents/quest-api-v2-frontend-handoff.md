@@ -890,7 +890,49 @@ Board Card does not include state, description, condition, images, Quest
 Funding Total, fee, escrow, wallet, or policy data. Call public detail for full
 public Quest content.
 
-### 6.2 Read public Quest detail
+### 6.2 Subscribe to Quest Board updates
+
+Connect:
+
+```text
+WS /api/v2/quests/board/events
+```
+
+Any authenticated Member can connect, including a Prospective Worker.
+
+After the Server accepts the connection, it sends:
+
+```json
+{
+  "type": "SUBSCRIBED",
+  "version": 1,
+  "scope": "QUEST_BOARD"
+}
+```
+
+After a successful Publish changes a Quest to QUEST_OPEN, the Server sends:
+
+```json
+{
+  "type": "QUEST_BOARD_INVALIDATED",
+  "version": 1,
+  "questId": "quest-uuid"
+}
+```
+
+The event does not contain a Quest Board Card. Fetch `GET /api/v2/quests` with
+the current filters after each invalidation. Restart cursor paging from the
+first page. The Quest may not match the current Member's filters or Board
+visibility rules. The current Hirer does not see their own Quest.
+
+The Server sends no event when a Hirer creates a QUEST_DRAFT. REST is
+authoritative. On reconnect, fetch the Quest Board again; the Server does not
+replay missed events.
+
+The stream is read-only. If a client sends a message, the Server closes the
+connection with code 1008.
+
+### 6.3 Read public Quest detail
 
 Request:
 
