@@ -53,7 +53,7 @@ export const questAssignmentV2Route = new Elysia({
       tags: ['Quest Assignments v2'],
       summary: 'List permitted v2 Quest Assignments',
       description:
-        "The owning Hirer can read all active Assignments. An active Worker can read only that Worker's Assignment.",
+        "The owning Hirer can read all Assignments, including completed, incomplete, and cancelled Assignments, for Reviews. A Worker can read only that Worker's active Assignment.",
       operationId: 'listQuestAssignmentsV2',
       security: betterAuthSecurity,
     },

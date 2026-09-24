@@ -197,12 +197,7 @@ const listAssignments = async (
   const rows = await transaction
     .select(assignmentFields)
     .from(questAssignment)
-    .where(
-      and(
-        eq(questAssignment.questId, questId),
-        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
-      )
-    )
+    .where(eq(questAssignment.questId, questId))
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
   return rows.map((row) => toQuestV2AssignmentRow(row, questState));
 };
