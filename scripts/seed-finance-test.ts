@@ -22,6 +22,7 @@ import {
   positiveSatang,
   signedSatang,
 } from '@/modules/wallet';
+import { type FixedTagName } from '@/shared/tag';
 
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 
@@ -29,6 +30,7 @@ export const financeSeedQuestTitle = '[Finance Test] Publish Escrow Quest Draft'
 export const financeSeedSpendingSatang = 1_000_000;
 export const financeSeedEarningsSatang = 500_000;
 export const financeSeedPayoutReceiptSatang = 100_000;
+const financeQuestTagName: FixedTagName = 'ออกแบบ (Design)';
 
 const requireValue = (name: string, value: string | undefined): string => {
   if (!value?.trim()) throw new Error(`${name} is required for the finance seed.`);
@@ -301,9 +303,9 @@ const ensureFinanceQuestDraft = async (userId: string): Promise<string> => {
   const [designTag] = await db
     .select({ id: tag.id })
     .from(tag)
-    .where(inArray(tag.name, ['Graphic Design', 'Design']))
+    .where(eq(tag.name, financeQuestTagName))
     .limit(1);
-  if (!designTag) throw new Error('The Graphic Design Tag is missing.');
+  if (!designTag) throw new Error('The Design Tag is missing for the finance Quest.');
 
   const now = Date.now();
   const [created] = await db

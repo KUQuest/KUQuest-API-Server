@@ -69,6 +69,35 @@ elif [[ "$*" == *"drizzle/meta/_journal.json"* ]]; then
   printf '1\\n'
 elif [[ "$1" == "run" && "$*" == *"SELECT count(*) FROM drizzle.__drizzle_migrations"* ]]; then
   printf '1\\n'
+elif [[ "$*" == *"PREFLIGHT_DATABASE_NAME"* && "$*" == *"bun -e"* ]]; then
+  printf 'postgresql://kuquest:secret@database:5432/kuquest_seed_preflight_mock\\n'
+fi
+
+if [[ "$*" == *"bun run db:migrate"* ]]; then
+  if [[ "\${MOCK_MIGRATION_FAILURE:-}" == "preflight" ]]; then
+    exit 1
+  fi
+  if [[ "\${MOCK_MIGRATION_FAILURE:-}" == "1" ]]; then
+    exit 1
+  fi
+  if [[ "\${MOCK_MIGRATION_FAILURE:-}" == "after-reset" ]]; then
+    if [[ -e "$DOCKER_LOG.migration-seen" ]]; then
+      exit 1
+    fi
+    : > "$DOCKER_LOG.migration-seen"
+  fi
+fi
+
+if [[ "$*" == *"bun run db:seed-staging"* ]]; then
+  if [[ "\${MOCK_SEED_FAILURE:-}" == "preflight" ]]; then
+    exit 1
+  fi
+  if [[ "\${MOCK_SEED_FAILURE:-}" == "after-reset" ]]; then
+    if [[ -e "$DOCKER_LOG.seed-seen" ]]; then
+      exit 1
+    fi
+    : > "$DOCKER_LOG.seed-seen"
+  fi
 fi
 
 if [[ "$*" == compose\\ up* && "\${MOCK_ROLLOUT_FAILURE:-}" == "1" && "$APP_IMAGE" == *":new" ]]; then
@@ -76,13 +105,6 @@ if [[ "$*" == compose\\ up* && "\${MOCK_ROLLOUT_FAILURE:-}" == "1" && "$APP_IMAG
 fi
 
 if [[ "$*" == compose\\ up* && "\${MOCK_RESTORE_FAILURE:-}" == "1" && "$APP_IMAGE" == *":previous" ]]; then
-  exit 1
-fi
-
-if [[ "$*" == *"compose run --rm --no-deps api bun run db:migrate"* && "\${MOCK_MIGRATION_FAILURE:-}" == "1" ]]; then
-  exit 1
-fi
-if [[ "$*" == *"compose run --rm --no-deps api bun run db:seed-staging"* && "\${MOCK_SEED_FAILURE:-}" == "1" ]]; then
   exit 1
 fi
 `
@@ -343,7 +365,7 @@ test('failed restoration reports both rollout and rollback failures', async () =
   }
 });
 
-test('bootstrap backs up, resets only public, migrates, and verifies', async () => {
+test('bootstrap runs the full seed preflight before resetting staging', async () => {
   const fixture = await createFixture();
 
   try {
@@ -352,44 +374,75 @@ test('bootstrap backs up, resets only public, migrates, and verifies', async () 
     });
     const commands = (await readFile(fixture.dockerLog, 'utf8')).split('\n');
     const backup = commands.findIndex((line) => line.includes('pg_dump'));
+    const createPreflightDatabase = commands.findIndex((line) => line.includes('CREATE DATABASE'));
+    const preflightMigrate = commands.findIndex((line) => line.includes('bun run db:migrate'));
+    const preflightMigrationVerification = commands.findIndex((line) =>
+      line.includes('db:verify-migration-journal')
+    );
+    const preflightSchemaVerification = commands.findIndex((line) =>
+      line.includes("to_regclass('public.auth_user')")
+    );
+    const preflightExpectedJournalCount = commands.findIndex((line) =>
+      line.includes('drizzle/meta/_journal.json')
+    );
+    const preflightAppliedJournalCount = commands.findIndex((line) =>
+      line.includes('SELECT count(*) FROM drizzle.__drizzle_migrations')
+    );
+    const preflightSeed = commands.findIndex((line) => line.includes('bun run db:seed-staging'));
+    const preflightSeedVerification = commands.findIndex((line) =>
+      line.includes('bun run db:verify-staging-seed')
+    );
+    const dropPreflightDatabase = commands.findIndex((line) =>
+      line.includes('DROP DATABASE IF EXISTS')
+    );
     const reset = commands.findIndex((line) =>
       line.includes('DROP SCHEMA public CASCADE; CREATE SCHEMA public;')
     );
     const journalReset = commands.findIndex((line) =>
       line.includes('TRUNCATE TABLE drizzle.__drizzle_migrations')
     );
-    const migrate = commands.findIndex((line) =>
-      line.includes('compose run --rm --no-deps api bun run db:migrate')
+    const actualMigrate = commands.findIndex(
+      (line, index) => index > reset && line.includes('bun run db:migrate')
     );
-    const verify = commands.findIndex((line) =>
-      line.includes("to_regclass('drizzle.__drizzle_migrations')")
+    const actualMigrationVerification = commands.findIndex(
+      (line, index) => index > reset && line.includes('db:verify-migration-journal')
     );
-    const expectedJournalCount = commands.findIndex((line) =>
-      line.includes('drizzle/meta/_journal.json')
+    const actualSchemaVerification = commands.findIndex(
+      (line, index) => index > reset && line.includes("to_regclass('public.auth_user')")
     );
-    const appliedJournalCount = commands.findIndex((line) =>
-      line.includes('SELECT count(*) FROM drizzle.__drizzle_migrations')
+    const actualExpectedJournalCount = commands.findIndex(
+      (line, index) => index > reset && line.includes('drizzle/meta/_journal.json')
     );
-    const exactMigrationVerification = commands.findIndex((line) =>
-      line.includes('compose run --rm --no-deps api bun run db:verify-migration-journal')
+    const actualAppliedJournalCount = commands.findIndex(
+      (line, index) =>
+        index > reset && line.includes('SELECT count(*) FROM drizzle.__drizzle_migrations')
     );
-    const seed = commands.findIndex((line) =>
-      line.includes('compose run --rm --no-deps api bun run db:seed-staging')
+    const actualSeed = commands.findIndex(
+      (line, index) => index > reset && line.includes('bun run db:seed-staging')
     );
-    const seedVerification = commands.findIndex((line) =>
-      line.includes('compose run --rm --no-deps api bun run db:verify-staging-seed')
+    const actualSeedVerification = commands.findIndex(
+      (line, index) => index > reset && line.includes('bun run db:verify-staging-seed')
     );
 
     expect(result.exitCode).toBe(0);
-    expect(reset).toBeGreaterThan(backup);
+    expect(createPreflightDatabase).toBeGreaterThan(backup);
+    expect(preflightMigrate).toBeGreaterThan(createPreflightDatabase);
+    expect(preflightMigrationVerification).toBeGreaterThan(preflightMigrate);
+    expect(preflightSchemaVerification).toBeGreaterThan(preflightMigrationVerification);
+    expect(preflightExpectedJournalCount).toBeGreaterThan(preflightSchemaVerification);
+    expect(preflightAppliedJournalCount).toBeGreaterThan(preflightExpectedJournalCount);
+    expect(preflightSeed).toBeGreaterThan(preflightAppliedJournalCount);
+    expect(preflightSeedVerification).toBeGreaterThan(preflightSeed);
+    expect(dropPreflightDatabase).toBeGreaterThan(preflightSeedVerification);
+    expect(reset).toBeGreaterThan(dropPreflightDatabase);
     expect(journalReset).toBeGreaterThan(reset);
-    expect(migrate).toBeGreaterThan(reset);
-    expect(exactMigrationVerification).toBeGreaterThan(migrate);
-    expect(verify).toBeGreaterThan(migrate);
-    expect(expectedJournalCount).toBeGreaterThan(migrate);
-    expect(appliedJournalCount).toBeGreaterThan(expectedJournalCount);
-    expect(seed).toBeGreaterThan(appliedJournalCount);
-    expect(seedVerification).toBeGreaterThan(seed);
+    expect(actualMigrate).toBeGreaterThan(reset);
+    expect(actualMigrationVerification).toBeGreaterThan(actualMigrate);
+    expect(actualSchemaVerification).toBeGreaterThan(actualMigrationVerification);
+    expect(actualExpectedJournalCount).toBeGreaterThan(actualSchemaVerification);
+    expect(actualAppliedJournalCount).toBeGreaterThan(actualExpectedJournalCount);
+    expect(actualSeed).toBeGreaterThan(actualAppliedJournalCount);
+    expect(actualSeedVerification).toBeGreaterThan(actualSeed);
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }
@@ -414,19 +467,42 @@ test('bootstrap creates the Compose network before backup', async () => {
   }
 });
 
-test('bootstrap reports its recovery backup when seed verification fails', async () => {
+test('bootstrap reports recovery backup when the staging seed fails after reset', async () => {
   const fixture = await createFixture();
 
   try {
     const result = runStagingOperation(fixture, 'bootstrap', {
-      env: { MOCK_SEED_FAILURE: '1' },
+      env: { MOCK_SEED_FAILURE: 'after-reset' },
       input: 'RESET staging public schema\n',
     });
     const output = `${result.stdout.toString()}${result.stderr.toString()}`;
+    const commands = await readFile(fixture.dockerLog, 'utf8');
 
     expect(result.exitCode).toBe(1);
-    expect(output).toContain('Bootstrap failed; restore from');
+    expect(output).toContain('Bootstrap failed after the staging schema reset began; restore from');
     expect(output).toContain(fixture.backupDirectory);
+    expect(commands).toContain('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('bootstrap does not reset staging when the seed preflight fails', async () => {
+  const fixture = await createFixture();
+
+  try {
+    const result = runStagingOperation(fixture, 'bootstrap', {
+      env: { MOCK_SEED_FAILURE: 'preflight' },
+      input: 'RESET staging public schema\n',
+    });
+    const output = `${result.stdout.toString()}${result.stderr.toString()}`;
+    const commands = await readFile(fixture.dockerLog, 'utf8');
+
+    expect(result.exitCode).toBe(1);
+    expect(commands).not.toContain('DROP SCHEMA public CASCADE');
+    expect(commands).toContain('CREATE DATABASE');
+    expect(commands).toContain('DROP DATABASE IF EXISTS');
+    expect(output).toContain('Staging seed preflight failed; staging schema was not reset');
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }
@@ -515,16 +591,16 @@ test('bootstrap reports its recovery backup when migration fails', async () => {
 
   try {
     const result = runStagingOperation(fixture, 'bootstrap', {
-      env: { MOCK_MIGRATION_FAILURE: '1' },
+      env: { MOCK_MIGRATION_FAILURE: 'after-reset' },
       input: 'RESET staging public schema\n',
     });
     const output = `${result.stdout.toString()}${result.stderr.toString()}`;
     const commands = await readFile(fixture.dockerLog, 'utf8');
 
     expect(result.exitCode).toBe(1);
-    expect(output).toContain('Bootstrap failed; restore from');
+    expect(output).toContain('Bootstrap failed after the staging schema reset began; restore from');
     expect(output).toContain(fixture.backupDirectory);
-    expect(commands).not.toContain('to_regclass');
+    expect(commands).toContain('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }
