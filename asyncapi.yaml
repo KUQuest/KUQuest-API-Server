@@ -3,9 +3,9 @@ info:
   title: KUQuest Realtime API
   version: 2.0.0
   description: |
-    Authenticated WebSocket APIs for Quest and Candidate roster invalidations,
-    Candidate Inquiry Conversation messages, and Work Conversation messages.
-    REST remains authoritative for current state and conversation history.
+    Authenticated WebSocket APIs for Quest Board, Quest, and Candidate roster
+    invalidations, Candidate Inquiry Conversation messages, and Work Conversation
+    messages. REST remains authoritative for current state and conversation history.
 defaultContentType: application/json
 servers:
   local:
@@ -46,6 +46,16 @@ channels:
         $ref: '#/components/messages/subscriptionAccepted'
       candidateRosterUpdated:
         $ref: '#/components/messages/candidateRosterUpdated'
+  questBoardUpdates:
+    address: /api/v2/quests/board/events
+    description: |
+      Any authenticated Member can subscribe, including a Prospective Worker. This
+      stream invalidates Quest Board state only; it does not contain a Board Card.
+    messages:
+      subscribed:
+        $ref: '#/components/messages/questBoardSubscriptionAccepted'
+      questBoardInvalidated:
+        $ref: '#/components/messages/questBoardInvalidated'
 
   workConversations:
     address: /api/v1/chat/conversations/{conversationId}/events
@@ -116,6 +126,21 @@ operations:
     messages:
       - $ref: '#/channels/candidateRosterUpdates/messages/subscribed'
       - $ref: '#/channels/candidateRosterUpdates/messages/candidateRosterUpdated'
+  receiveQuestBoardUpdates:
+    action: receive
+    channel:
+      $ref: '#/channels/questBoardUpdates'
+    summary: Receive Quest Board invalidations
+    description: |
+      The Server sends SUBSCRIBED after it accepts the connection. After a committed
+      Hirer Publish changes a Quest to QUEST_OPEN, it sends QUEST_BOARD_INVALIDATED
+      with the Quest ID. It sends no event for Draft creation, a failed or rolled-back
+      Publish, or an idempotent Publish replay. Fetch GET /api/v2/quests with current
+      filters after each event and after reconnect. Start cursor paging at the first
+      page. REST enforces Board visibility, including exclusion of the current
+      Hirer's own Quest. The Server does not replay missed messages. A client message
+      closes the connection with code 1008. Session expiry closes with code 4401;
+      denied Origin closes with code 4403.
 
   sendWorkConversationMessage:
     action: send
@@ -165,7 +190,7 @@ components:
       type: httpApiKey
       name: better-auth.session_token
       in: cookie
-      description: Better Auth session cookie. The API checks the session and access to the addressed Quest or Conversation.
+      description: Better Auth session cookie. The API checks the session and the applicable access rules for each channel.
   messages:
     subscriptionAccepted:
       name: SUBSCRIBED
@@ -248,6 +273,41 @@ components:
         properties:
           type:
             const: CANDIDATE_ROSTER_UPDATED
+          version:
+            const: 1
+          questId:
+            type: string
+            format: uuid
+    questBoardSubscriptionAccepted:
+      name: SUBSCRIBED
+      summary: Quest Board subscription accepted
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+          - scope
+        properties:
+          type:
+            const: SUBSCRIBED
+          version:
+            const: 1
+          scope:
+            const: QUEST_BOARD
+    questBoardInvalidated:
+      name: QUEST_BOARD_INVALIDATED
+      summary: Quest Board state invalidated
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+          - questId
+        properties:
+          type:
+            const: QUEST_BOARD_INVALIDATED
           version:
             const: 1
           questId:

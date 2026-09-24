@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { authSession } from '@/database/schema/auth.schema';
 import {
   quest,
   questApiVersion,
@@ -10,7 +11,7 @@ import {
 } from '@/database/schema/quest.schema';
 import type { QuestTransaction } from '@/modules/quest/shared';
 
-import { and, eq, isNotNull, lte, ne, or } from 'drizzle-orm';
+import { and, eq, gt, isNotNull, lte, ne, or } from 'drizzle-orm';
 
 import {
   isReadableCandidateApplicationRoster,
@@ -165,4 +166,19 @@ export const getCandidateRosterAccess = async (
     )
     .limit(1);
   return membership ? { kind: 'TEAM', teamId: membership.teamId } : undefined;
+};
+
+export const getQuestBoardUpdateAccess = async (memberId: string, sessionId: string) => {
+  const [session] = await db
+    .select({ id: authSession.id })
+    .from(authSession)
+    .where(
+      and(
+        eq(authSession.id, sessionId),
+        eq(authSession.userId, memberId),
+        gt(authSession.expiresAt, new Date())
+      )
+    )
+    .limit(1);
+  return session?.id;
 };
