@@ -32,6 +32,7 @@ import { candidateInquiryRoute, messageReportRoute, workChatRoute } from '@/modu
 import { Elysia } from 'elysia';
 
 import { academicRegistrationRoute } from './modules/academic-registration';
+import { asyncApiRoute } from './modules/asyncapi/asyncapi.route';
 import { authPlugin, authTestRoute, stagingTestAuthRoute } from './modules/auth';
 import { certificateRoute } from './modules/certificate';
 import { healthRoute } from './modules/health';
@@ -66,6 +67,7 @@ export const createApp = () => {
       },
     })
     .use(authTestRoute)
+    .use(asyncApiRoute)
     .use(healthRoute)
     .use(onboardingRoute)
     .use(academicRegistrationRoute)
