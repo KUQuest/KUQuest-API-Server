@@ -387,6 +387,7 @@ describe('getPublicReviews', () => {
       department: null,
       occupation: null,
       avatar: null,
+      reputation: { totalQuests: 0, rating: { average: null } },
     });
     spyOn(profileService, 'getProfileReviews').mockResolvedValue({
       rows: [
@@ -463,6 +464,7 @@ const publicProfileRecord = {
   department: null,
   occupation: null,
   avatar: null,
+  reputation: { totalQuests: 0, rating: { average: null } },
 };
 
 describe('getPublicReviews pagination', () => {
@@ -643,6 +645,7 @@ describe('getPublicProfile', () => {
         faculty: { name: 'Engineering' },
       },
       occupation: null,
+      reputation: { totalQuests: 2, rating: { average: 4.5 } },
       avatar: {
         fileId,
         bucket: 'kuquest',
@@ -715,6 +718,7 @@ describe('getPublicProfile', () => {
         },
         avatar: { fileId, url: 'https://storage.test/avatar.png' },
         occupation: null,
+        reputation: { totalQuests: 2, rating: { average: 4.5 } },
         experience: [
           {
             id: 'experience-1',

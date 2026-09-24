@@ -299,6 +299,15 @@ describe('Quest Review API v2 behavior', () => {
           distribution: { '5': 1, '4': 0, '3': 0, '2': 0, '1': 0 },
         },
       });
+
+      const publicProfile = await request('GET', `/api/v1/profile/${worker.id}`, hirer.id);
+      expect(publicProfile.status).toBe(200);
+      expect((await jsonBody(publicProfile)).data).toMatchObject({
+        reputation: {
+          totalQuests: questStatus === 'QUEST_COMPLETED' ? 1 : 0,
+          rating: { average: 5 },
+        },
+      });
     }
   );
 

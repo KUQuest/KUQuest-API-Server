@@ -153,6 +153,12 @@ export const publicProfileResponseSchema = t.Object({
     department: t.Nullable(departmentSchema),
     avatar: t.Nullable(avatarSchema),
     occupation: t.Nullable(occupationSchema),
+    reputation: t.Object({
+      totalQuests: t.Integer({ minimum: 0 }),
+      rating: t.Object({
+        average: t.Nullable(t.Number({ minimum: 0, maximum: 5 })),
+      }),
+    }),
     experience: t.Array(workExperienceSchema),
     portfolio: t.Array(portfolioItemSchema),
     certificates: t.Array(certificateSchema),

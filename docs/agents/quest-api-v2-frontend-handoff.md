@@ -882,6 +882,9 @@ Board Card fields:
 name, Bio, Academic Year, Department, Occupation, and Avatar. It does not
 include Telephone, Student ID, Email, Work Experience, Portfolio items, or
 Certificates. Call `GET /api/v1/profile/:userId` for the full Public Profile.
+The Public Profile includes `reputation.totalQuests`, the Member's completed
+Quest count, and `reputation.rating.average`. Average is null when no eligible
+Review exists.
 
 Board Card does not include state, description, condition, images, Quest
 Funding Total, fee, escrow, wallet, or policy data. Call public detail for full

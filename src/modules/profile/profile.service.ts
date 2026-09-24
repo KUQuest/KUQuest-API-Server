@@ -223,6 +223,7 @@ export const getPublicProfile = async (userId: string) => {
     .limit(1);
 
   if (!row) return undefined;
+  const reputation = await getProfileReputation(userId);
 
   const {
     departmentId,
@@ -238,6 +239,10 @@ export const getPublicProfile = async (userId: string) => {
 
   return {
     ...profile,
+    reputation: {
+      totalQuests: reputation.totalQuests,
+      rating: { average: reputation.rating.average },
+    },
     department:
       departmentId && departmentName && facultyName
         ? { id: departmentId, name: departmentName, faculty: { name: facultyName } }
