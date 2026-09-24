@@ -83,7 +83,7 @@ import type { QuestV2BoardQuery, QuestV2CreateInput, QuestV2EditInput } from './
 import { questV2Storage } from './quest-v2.storage';
 import type { StoredQuestImage } from '../../v1/services/quest.storage';
 import { applyQuestStateTransition } from '../../shared/transition/quest-transition.service';
-import { notifyQuestBoardInvalidated } from '../realtime';
+import { notifyHirerQuestCreated, notifyQuestBoardInvalidated } from '../realtime';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type QuestDatabase = typeof db | QuestTransaction;
@@ -167,9 +167,9 @@ type QuestV2EditOutcomeCode =
 export type QuestV2CreateOutcome =
   | { quest: QuestV2CanonicalQuest }
   | {
-      outcome:
-        QuestV2CreateValidationOutcome | 'idempotency-key-reused' | 'idempotency-in-progress';
-    };
+    outcome:
+    QuestV2CreateValidationOutcome | 'idempotency-key-reused' | 'idempotency-in-progress';
+  };
 
 export type QuestV2EditOutcome =
   { quest: QuestV2CanonicalQuest } | { outcome: QuestV2EditOutcomeCode };
@@ -202,13 +202,13 @@ export type QuestV2PublishOutcome =
   | QuestV2PublishResponse
   | { outcome: 'blocked'; check: QuestV2PublishCheck }
   | {
-      outcome:
-        | 'invalid-idempotency-key'
-        | 'idempotency-key-reused'
-        | 'idempotency-in-progress'
-        | 'idempotency-unavailable'
-        | 'not-draft';
-    };
+    outcome:
+    | 'invalid-idempotency-key'
+    | 'idempotency-key-reused'
+    | 'idempotency-in-progress'
+    | 'idempotency-unavailable'
+    | 'not-draft';
+  };
 
 export type QuestV2ImageReference = {
   imageId: string;
@@ -321,10 +321,10 @@ export type QuestV2ImageUploadPreflight =
 
 export type QuestV2ImageUploadOutcome =
   | {
-      images: QuestV2ImageReference[];
-      response: QuestV2ImageResponse[];
-      replayed?: boolean;
-    }
+    images: QuestV2ImageReference[];
+    response: QuestV2ImageResponse[];
+    replayed?: boolean;
+  }
   | { outcome: QuestV2ImageMutationOutcome };
 
 export type QuestV2ImageRemoveOutcome =
@@ -463,8 +463,8 @@ const normalizeCreateInput = (
 ):
   | NormalizedCreateInput
   | {
-      outcome: Exclude<QuestV2CreateValidationOutcome, 'tag-not-found' | 'idempotency-unavailable'>;
-    } => {
+    outcome: Exclude<QuestV2CreateValidationOutcome, 'tag-not-found' | 'idempotency-unavailable'>;
+  } => {
   const conditionItems = data.condition.items.map((item) => item.trim());
   if (
     conditionItems.length === 0 ||
@@ -2266,6 +2266,7 @@ const createQuestInTransaction = async (
       const createdRow = await selectQuestV2Row(transaction, userId, createdQuest.id);
       if (!createdRow) throw new Error(`Created Quest ${createdQuest.id} could not be read back`);
       const canonicalQuest = await buildCanonicalQuest(transaction, createdRow);
+      await notifyHirerQuestCreated(transaction, createdQuest.id);
 
       return {
         kind: 'success',
@@ -2666,16 +2667,16 @@ const toQuestV2HirerProfile = (row: QuestV2BoardProfileRow): QuestV2BoardCard['h
     department:
       row.hirerDepartmentId && row.hirerDepartmentName && row.hirerFacultyName
         ? {
-            id: row.hirerDepartmentId,
-            name: row.hirerDepartmentName,
-            faculty: { name: row.hirerFacultyName },
-          }
+          id: row.hirerDepartmentId,
+          name: row.hirerDepartmentName,
+          faculty: { name: row.hirerFacultyName },
+        }
         : null,
     avatar: toQuestV2HirerAvatar(row),
     occupation:
       row.hirerOccupationId &&
-      row.hirerOccupationName &&
-      isQuestV2OccupationName(row.hirerOccupationName)
+        row.hirerOccupationName &&
+        isQuestV2OccupationName(row.hirerOccupationName)
         ? { id: row.hirerOccupationId, name: row.hirerOccupationName }
         : null,
   };

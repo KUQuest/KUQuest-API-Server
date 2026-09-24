@@ -99,10 +99,19 @@ export const questBoardUpdateNotificationSchema = t.Object(
   },
   { additionalProperties: false }
 );
+export const hirerQuestCreatedNotificationSchema = t.Object(
+  {
+    questId: t.String({ format: 'uuid' }),
+    type: t.Literal('QUEST_CREATED'),
+  },
+  { additionalProperties: false }
+);
+
 export const questRealtimeNotificationSchema = t.Union([
   questUpdateNotificationSchema,
   candidateRosterUpdateNotificationSchema,
   questBoardUpdateNotificationSchema,
+  hirerQuestCreatedNotificationSchema,
 ]);
 
 export type CandidateRosterScope = typeof candidateRosterScopeSchema.static;

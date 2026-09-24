@@ -7,6 +7,7 @@ import {
   ensureQuestUpdateListener,
   stopQuestUpdateListener,
   subscribeToCandidateRosterUpdates,
+  subscribeToHirerQuestUpdates,
   subscribeToQuestBoardUpdates,
   subscribeToQuestUpdates,
 } from './quest-update.delivery';
@@ -218,6 +219,38 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
       description:
         'Subscribes a Hirer or Candidate who can read the Candidate applications or Candidate Teams. Read roster data from REST after SUBSCRIBED and each invalidation.',
       operationId: 'subscribeCandidateRosterUpdates',
+    },
+  })
+  .ws(`${API_V2_PREFIX}/me/hirer-quests/events`, {
+    async open(ws) {
+      const { user, session } = ws.data.session;
+      await openRealtimeSubscription<string>({
+        socket: ws,
+        origin: ws.data.questOrigin,
+        subscribedMessage: { type: 'SUBSCRIBED', version: 1 },
+        expiresAt: session.expiresAt,
+        accessDeniedReason: 'Hirer Quest access not allowed',
+        checkAccess: () => getQuestBoardUpdateAccess(user.id, session.id),
+        sameAccess: (initial, current) => initial === current,
+        subscribe: () =>
+          subscribeToHirerQuestUpdates(user.id, session.id, {
+            send: (message) => ws.send(message),
+            close: (code, reason) => ws.close(code, reason),
+          }),
+      });
+    },
+    message(ws) {
+      ws.close(1008, 'Hirer Quest stream is read-only');
+    },
+    close(ws) {
+      socketCleanups.get(ws)?.();
+    },
+    detail: {
+      tags: ['Quest'],
+      summary: 'Subscribe to owned Quest updates',
+      description:
+        'Sends SUBSCRIBED, then HIRER_QUEST_UPDATED for owned v2 Quest creation, publication, lifecycle, application, and Candidate Team changes. Read Quest state from REST after each update.',
+      operationId: 'subscribeHirerQuestUpdates',
     },
   })
   .onStop(() => stopQuestUpdateListener());

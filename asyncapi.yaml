@@ -57,6 +57,17 @@ channels:
       questBoardInvalidated:
         $ref: '#/components/messages/questBoardInvalidated'
 
+  hirerQuestUpdates:
+    address: /api/v2/me/hirer-quests/events
+    description: |
+      All v2 Quests owned by the authenticated Hirer, including Quests not currently
+      displayed on Home. The Server sends invalidations only, with no replay.
+    messages:
+      subscribed:
+        $ref: '#/components/messages/hirerQuestSubscriptionAccepted'
+      hirerQuestUpdated:
+        $ref: '#/components/messages/hirerQuestUpdated'
+
   workConversations:
     address: /api/v1/chat/conversations/{conversationId}/events
     description: |
@@ -142,6 +153,22 @@ operations:
       closes the connection with code 1008. Session expiry closes with code 4401;
       denied Origin closes with code 4403.
 
+  receiveHirerQuestUpdates:
+    action: receive
+    channel:
+      $ref: '#/channels/hirerQuestUpdates'
+    summary: Receive updates for all owned Quests
+    description: |
+      The Server sends SUBSCRIBED after it accepts the connection, then
+      HIRER_QUEST_UPDATED after a committed change to any owned v2 Quest.
+      Reload GET /api/v2/quests/mine from the first cursor page after
+      SUBSCRIBED, each event, and every reconnect. The stream contains no
+      Quest data and does not replay missed events. A client message closes
+      the connection with code 1008.
+    messages:
+      - $ref: '#/channels/hirerQuestUpdates/messages/subscribed'
+      - $ref: '#/channels/hirerQuestUpdates/messages/hirerQuestUpdated'
+
   sendWorkConversationMessage:
     action: send
     channel:
@@ -210,6 +237,55 @@ components:
           questId:
             type: string
             format: uuid
+    hirerQuestSubscriptionAccepted:
+      name: SUBSCRIBED
+      summary: Hirer-owned Quest subscription accepted
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+        properties:
+          type:
+            const: SUBSCRIBED
+          version:
+            const: 1
+    hirerQuestUpdated:
+      name: HIRER_QUEST_UPDATED
+      summary: An owned Quest changed
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+          - questId
+          - changeType
+        properties:
+          type:
+            const: HIRER_QUEST_UPDATED
+          version:
+            const: 1
+          questId:
+            type: string
+            format: uuid
+          changeType:
+            type: string
+            enum:
+              - ASSIGNMENT_ROSTER_UPDATED
+              - QUEST_STARTED
+              - PROOF_SUBMITTED
+              - PROOF_REVIEWED
+              - PROOF_AUTO_APPROVED
+              - COMPLETION_CONFIRMED
+              - QUEST_COMPLETED
+              - QUEST_FAILED
+              - QUEST_CANCELLED
+              - QUEST_EDIT_UPDATED
+              - CANDIDATE_ROSTER_UPDATED
+              - QUEST_PUBLISHED
+              - QUEST_CREATED
     questUpdated:
       name: QUEST_UPDATED
       summary: Quest state or Assignment roster changed
