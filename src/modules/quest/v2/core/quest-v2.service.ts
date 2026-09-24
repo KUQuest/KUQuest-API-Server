@@ -83,6 +83,7 @@ import type { QuestV2BoardQuery, QuestV2CreateInput, QuestV2EditInput } from './
 import { questV2Storage } from './quest-v2.storage';
 import type { StoredQuestImage } from '../../v1/services/quest.storage';
 import { applyQuestStateTransition } from '../../shared/transition/quest-transition.service';
+import { notifyQuestBoardInvalidated } from '../realtime';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type QuestDatabase = typeof db | QuestTransaction;
@@ -2151,6 +2152,7 @@ const publishQuestV2InTransaction = async (
 
       const updatedRow = await selectQuestV2Row(transaction, userId, questId);
       if (!updatedRow) throw new Error(`Published Quest ${questId} could not be read back`);
+      await notifyQuestBoardInvalidated(transaction, questId);
 
       return {
         kind: 'success',

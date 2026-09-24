@@ -7,11 +7,16 @@ import {
   ensureQuestUpdateListener,
   stopQuestUpdateListener,
   subscribeToCandidateRosterUpdates,
+  subscribeToQuestBoardUpdates,
   subscribeToQuestUpdates,
 } from './quest-update.delivery';
 import { questUpdateParamsSchema } from './quest-update.schema';
 import type { CandidateRosterScope, QuestUpdateAccess } from './quest-update.schema';
-import { getCandidateRosterAccess, getQuestUpdateAccess } from './quest-update.service';
+import {
+  getCandidateRosterAccess,
+  getQuestBoardUpdateAccess,
+  getQuestUpdateAccess,
+} from './quest-update.service';
 
 const trustedOrigins = getTrustedOrigins(true);
 const socketCleanups = new WeakMap<object, () => void>();
@@ -35,7 +40,7 @@ const sameCandidateRosterScope = (left: CandidateRosterScope, right: CandidateRo
 const openRealtimeSubscription = async <T>({
   socket,
   origin,
-  questId,
+  subscribedMessage,
   expiresAt,
   accessDeniedReason,
   checkAccess,
@@ -44,7 +49,7 @@ const openRealtimeSubscription = async <T>({
 }: {
   socket: QuestRealtimeSocket;
   origin: string | null;
-  questId: string;
+  subscribedMessage: Record<string, string | number>;
   expiresAt: Date;
   accessDeniedReason: string;
   checkAccess: () => Promise<T | undefined>;
@@ -104,7 +109,7 @@ const openRealtimeSubscription = async <T>({
   });
 
   try {
-    socket.send(JSON.stringify({ type: 'SUBSCRIBED', version: 1, questId }));
+    socket.send(JSON.stringify(subscribedMessage));
   } catch {
     socketCleanups.get(socket)?.();
     socket.close(1011, 'Subscription failed');
@@ -114,6 +119,38 @@ const openRealtimeSubscription = async <T>({
 export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route' })
   .use(authGuard)
   .derive({ as: 'scoped' }, ({ request }) => ({ questOrigin: request.headers.get('origin') }))
+  .ws(`${API_V2_PREFIX}/quests/board/events`, {
+    async open(ws) {
+      const { user, session } = ws.data.session;
+      await openRealtimeSubscription<string>({
+        socket: ws,
+        origin: ws.data.questOrigin,
+        subscribedMessage: { type: 'SUBSCRIBED', version: 1, scope: 'QUEST_BOARD' },
+        expiresAt: session.expiresAt,
+        accessDeniedReason: 'Quest Board access not allowed',
+        checkAccess: () => getQuestBoardUpdateAccess(user.id, session.id),
+        sameAccess: (initial, current) => initial === current,
+        subscribe: () =>
+          subscribeToQuestBoardUpdates(user.id, session.id, {
+            send: (message) => ws.send(message),
+            close: (code, reason) => ws.close(code, reason),
+          }),
+      });
+    },
+    message(ws) {
+      ws.close(1008, 'Quest Board stream is read-only');
+    },
+    close(ws) {
+      socketCleanups.get(ws)?.();
+    },
+    detail: {
+      tags: ['Quest'],
+      summary: 'Subscribe to Quest Board updates',
+      description:
+        'Subscribes an authenticated Member to Quest Board invalidations. Read the Board from REST after SUBSCRIBED and each invalidation.',
+      operationId: 'subscribeQuestBoardUpdates',
+    },
+  })
   .ws(`${API_V2_PREFIX}/quests/:questId/events`, {
     params: questUpdateParamsSchema,
     async open(ws) {
@@ -122,7 +159,7 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
       await openRealtimeSubscription<QuestUpdateAccess>({
         socket: ws,
         origin: ws.data.questOrigin,
-        questId,
+        subscribedMessage: { type: 'SUBSCRIBED', version: 1, questId },
         expiresAt: session.expiresAt,
         accessDeniedReason: 'Quest access not allowed',
         checkAccess: () => getQuestUpdateAccess(user.id, questId),
@@ -157,7 +194,7 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
       await openRealtimeSubscription<CandidateRosterScope>({
         socket: ws,
         origin: ws.data.questOrigin,
-        questId,
+        subscribedMessage: { type: 'SUBSCRIBED', version: 1, questId },
         expiresAt: session.expiresAt,
         accessDeniedReason: 'Candidate roster access not allowed',
         checkAccess: () => getCandidateRosterAccess(user.id, questId),
