@@ -12,6 +12,39 @@ const reportCaseStatusSchema = t.Union([
   t.Literal('REPORT_CASE_RESTORED'),
 ]);
 
+const conductReportStatusSchema = t.Union([
+  t.Literal('CONDUCT_REPORT_PENDING'),
+  t.Literal('CONDUCT_REPORT_UPHELD'),
+  t.Literal('CONDUCT_REPORT_DISMISSED'),
+]);
+
+const conductReportReasonSchema = t.Union([
+  t.Literal('CONDUCT_ABANDONED'),
+  t.Literal('CONDUCT_OUT_OF_SCOPE'),
+  t.Literal('CONDUCT_NO_SHOW'),
+]);
+
+const reportKindSchema = t.Union([t.Literal('REPORT_CASE'), t.Literal('CONDUCT_REPORT')]);
+
+const questModeSchema = t.Union([t.Literal('FIRST_COME_FIRST_SERVED'), t.Literal('CANDIDATE')]);
+
+const questParticipationSchema = t.Union([t.Literal('SINGLE'), t.Literal('GROUP')]);
+
+const questStatusSchema = t.Union([
+  t.Literal('QUEST_DRAFT'),
+  t.Literal('QUEST_OPEN'),
+  t.Literal('QUEST_AWAITING_CONSENT'),
+  t.Literal('QUEST_ASSIGNED'),
+  t.Literal('QUEST_IN_PROGRESS'),
+  t.Literal('QUEST_SUBMITTED'),
+  t.Literal('QUEST_APPROVED'),
+  t.Literal('QUEST_REWORK'),
+  t.Literal('QUEST_COMPLETED'),
+  t.Literal('QUEST_CANCELLED'),
+  t.Literal('QUEST_DISPUTED'),
+  t.Literal('QUEST_FAILED'),
+]);
+
 const reporterEntryReasonSchema = t.Union([
   t.Literal('REPORT_ABUSIVE_OR_HARASSMENT'),
   t.Literal('REPORT_SPAM'),
@@ -35,8 +68,8 @@ export const adminReportEvidenceParamsSchema = t.Object({
 });
 
 export const adminReportListQuerySchema = t.Object({
-  kind: t.Optional(t.Literal('REPORT_CASE')),
-  status: t.Optional(reportCaseStatusSchema),
+  kind: t.Optional(reportKindSchema),
+  status: t.Optional(t.Union([reportCaseStatusSchema, conductReportStatusSchema])),
   memberId: t.Optional(uuid),
   questId: t.Optional(uuid),
   limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
@@ -100,6 +133,45 @@ const adminEvidenceReferenceSummarySchema = t.Object({
   createdAt: dateTime,
 });
 
+const adminReportMemberSchema = t.Object({
+  id: uuid,
+  email: t.String(),
+  firstName: t.String(),
+  lastName: t.String(),
+});
+
+const adminConductReportQuestSchema = t.Object({
+  id: uuid,
+  displayId: t.String({ pattern: '^QST-[0-9]{6,}$' }),
+  title: t.String(),
+  questStatus: questStatusSchema,
+  mode: questModeSchema,
+  participation: questParticipationSchema,
+  headcount: t.Integer({ minimum: 1 }),
+  proofRequired: t.Boolean(),
+  startTime: dateTime,
+  dueAt: t.Nullable(dateTime),
+  createdAt: dateTime,
+  updatedAt: dateTime,
+  hirer: adminReportMemberSchema,
+});
+
+export const adminConductReportSummarySchema = t.Object({
+  kind: t.Literal('CONDUCT_REPORT'),
+  id: uuid,
+  displayId: t.String({ pattern: '^CND-[0-9]{6,}$' }),
+  filer: adminReportMemberSchema,
+  reportedMember: adminReportMemberSchema,
+  quest: adminConductReportQuestSchema,
+  reason: conductReportReasonSchema,
+  detail: t.Nullable(t.String()),
+  status: conductReportStatusSchema,
+  version: t.Integer({ minimum: 1 }),
+  createdAt: dateTime,
+  updatedAt: dateTime,
+  resolvedAt: t.Nullable(dateTime),
+});
+
 export const adminReportCaseSummarySchema = t.Object({
   kind: t.Literal('REPORT_CASE'),
   id: uuid,
@@ -116,17 +188,71 @@ export const adminReportCaseSummarySchema = t.Object({
   evidenceReferences: t.Array(adminEvidenceReferenceSummarySchema),
 });
 
+const adminConductReportAssignmentSchema = t.Object({
+  id: uuid,
+  worker: adminReportMemberSchema,
+  assignmentStatus: t.Union([
+    t.Literal('ASSIGNMENT_ACTIVE'),
+    t.Literal('ASSIGNMENT_COMPLETED'),
+    t.Literal('ASSIGNMENT_INCOMPLETE'),
+    t.Literal('ASSIGNMENT_CANCELLED'),
+  ]),
+  startedAt: t.Nullable(dateTime),
+  createdAt: dateTime,
+});
+
+const adminConductReportProofSchema = t.Object({
+  id: uuid,
+  workerId: t.Nullable(uuid),
+  teamId: t.Nullable(uuid),
+  submittedBy: adminReportMemberSchema,
+  description: t.Nullable(t.String()),
+  workerMessage: t.Nullable(t.String()),
+  content: t.Nullable(t.String()),
+  submissionStatus: t.Nullable(
+    t.Union([
+      t.Literal('PROOF_PENDING'),
+      t.Literal('PROOF_APPROVED'),
+      t.Literal('PROOF_NOT_APPROVED'),
+    ])
+  ),
+  reviewNote: t.Nullable(t.String()),
+  sentAt: t.Nullable(dateTime),
+  submittedAt: t.Nullable(dateTime),
+  reviewedAt: t.Nullable(dateTime),
+  createdAt: dateTime,
+  updatedAt: t.Nullable(dateTime),
+});
+
+export const adminConductReportDetailSchema = t.Composite([
+  adminConductReportSummarySchema,
+  t.Object({
+    assignment: adminConductReportAssignmentSchema,
+    proofSubmission: t.Nullable(adminConductReportProofSchema),
+  }),
+]);
+
+const adminReportListItemSchema = t.Union([
+  adminReportCaseSummarySchema,
+  adminConductReportSummarySchema,
+]);
+
+const adminReportDetailSchema = t.Union([
+  adminReportCaseSummarySchema,
+  adminConductReportDetailSchema,
+]);
+
 export const adminReportListResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
-    items: t.Array(adminReportCaseSummarySchema),
+    items: t.Array(adminReportListItemSchema),
     nextCursor: t.Nullable(t.String()),
   }),
 });
 
 export const adminReportDetailResponseSchema = t.Object({
   success: t.Literal(true),
-  data: adminReportCaseSummarySchema,
+  data: adminReportDetailSchema,
 });
 
 const adminReportCommandSummarySchema = t.Object({
@@ -205,5 +331,7 @@ export type AdminReportListQuery = Static<typeof adminReportListQuerySchema>;
 export type AdminReportDecisionBody = Static<typeof adminReportDecisionBodySchema>;
 export type AdminReportListData = Static<typeof adminReportListResponseSchema>['data'];
 export type AdminReportDetailData = Static<typeof adminReportDetailResponseSchema>['data'];
+export type AdminConductReportSummary = Static<typeof adminConductReportSummarySchema>;
+export type AdminConductReportDetail = Static<typeof adminConductReportDetailSchema>;
 export type AdminReportCommandData = Static<typeof adminReportCommandResponseSchema>['data'];
 export type AdminReportEvidenceData = Static<typeof adminReportEvidenceResponseSchema>['data'];

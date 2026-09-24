@@ -8,6 +8,7 @@ import {
   joinQuestV2Controller,
   listMyQuestV2AssignmentsController,
   listQuestV2AssignmentsController,
+  startQuestWorkV2Controller,
 } from './quest-assignment-v2.controller';
 import {
   decideQuestUnderfilledV2Controller,
@@ -20,6 +21,7 @@ import {
   questV2AssignmentMineQuerySchema,
   questV2AssignmentParamsSchema,
   questV2AssignmentResponseSchema,
+  questV2StartWorkResponseSchema,
 } from './quest-assignment-v2.schema';
 import {
   questV2UnderfilledConsentInputSchema,
@@ -68,6 +70,19 @@ export const questAssignmentV2Route = new Elysia({
       description:
         'Creates an active Assignment for an eligible Worker. A GROUP Quest remains open until its published headcount is full.',
       operationId: 'joinQuestV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/quests/:questId/start-work', startQuestWorkV2Controller, {
+    params: questV2AssignmentParamsSchema,
+    headers: questV2AssignmentHeadersSchema,
+    response: responses(questV2StartWorkResponseSchema, 400, 401, 404, 409, 500),
+    detail: {
+      tags: ['Quest Assignments v2'],
+      summary: 'Start Work on an assigned v2 Quest',
+      description:
+        'Records the required Worker Start Work action between startTime and dueAt. GROUP + FCFS requires every Active Worker; GROUP + CANDIDATE requires the Team Leader.',
+      operationId: 'startQuestWorkV2',
       security: betterAuthSecurity,
     },
   })

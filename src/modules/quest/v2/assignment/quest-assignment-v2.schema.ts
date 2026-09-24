@@ -34,7 +34,7 @@ export const questV2AssignmentHeadersSchema = t.Object({
     minLength: 1,
     maxLength: 200,
     pattern: '\\S',
-    description: 'Non-blank command identity for replay-safe Quest Assignment commands',
+    description: 'Non-blank command identity for replay-safe Assignment and Start Work commands',
   }),
 });
 
@@ -51,6 +51,16 @@ const assignmentSchema = t.Object({
 export const questV2AssignmentResponseSchema = t.Object({
   success: t.Literal(true),
   data: assignmentSchema,
+});
+
+export const questV2StartWorkResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    questId: t.String({ format: 'uuid' }),
+    assignmentId: t.String({ format: 'uuid' }),
+    startedAt: t.String({ format: 'date-time' }),
+    questState,
+  }),
 });
 
 export const questV2AssignmentListResponseSchema = t.Object({

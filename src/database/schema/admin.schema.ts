@@ -399,6 +399,9 @@ export const adminConductReport = pgTable(
   'admin_conduct_reports',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'admin_conduct_report_public_sequence' })
+      .unique(),
     questId: uuid('quest_id')
       .notNull()
       .references(() => quest.id, { onDelete: 'restrict' }),

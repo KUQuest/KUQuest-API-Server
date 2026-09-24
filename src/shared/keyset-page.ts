@@ -13,8 +13,20 @@ export type KeysetSort = 'newest' | 'oldest';
  */
 export type KeysetAnchor = { time: PgColumn; id: PgColumn };
 
-export type KeysetPageRequest<TRow> = {
-  anchor: KeysetAnchor;
+type KeysetCursorAnchorRow = { startTime: Date; id: string; scope: string };
+
+export type KeysetCursorAnchor = {
+  read: (cursor: CursorPayload) => Promise<KeysetCursorAnchorRow | undefined>;
+  boundary: (anchor: KeysetCursorAnchorRow, sort: KeysetSort) => SQL;
+  orderBy: (sort: KeysetSort) => SQL[];
+};
+
+type KeysetRowCursor = { startTime: Date; id: string; scope?: string };
+
+export type KeysetPageRequest<TRow> = (
+  | { anchor: KeysetAnchor; cursorAnchor?: never }
+  | { anchor?: never; cursorAnchor: KeysetCursorAnchor }
+) & {
   cursor?: CursorPayload | undefined;
   /** Rows per page. Check it against the page-limit rule with `parsePageLimit` first. */
   limit: number;
@@ -24,7 +36,7 @@ export type KeysetPageRequest<TRow> = {
   /** Runs the list query with the boundary, the order, and the probe limit of this reader. */
   read: (page: { where: SQL | undefined; orderBy: SQL[]; limit: number }) => Promise<TRow[]>;
   /** Reads the cursor pair out of a page row. */
-  rowCursor: (row: TRow) => { startTime: Date; id: string };
+  rowCursor: (row: TRow) => KeysetRowCursor;
   /** The error of the calling module for a cursor that names no row. */
   invalidCursor: () => Error;
 };
@@ -47,6 +59,7 @@ export type KeysetPage<TRow> = {
  */
 export const readKeysetPage = async <TRow>({
   anchor,
+  cursorAnchor,
   cursor,
   limit,
   sort = 'newest',
@@ -55,32 +68,57 @@ export const readKeysetPage = async <TRow>({
   rowCursor,
   invalidCursor,
 }: KeysetPageRequest<TRow>): Promise<KeysetPage<TRow>> => {
+  if (!anchor && !cursorAnchor) throw new Error('A keyset anchor is required.');
+
+  let customBoundary: SQL | undefined;
   if (cursor) {
-    const [matched] = await db
-      .select({ anchored: sql<number>`1` })
-      .from(anchor.time.table)
-      .where(
-        and(
-          eq(anchor.id, cursor.id),
-          sql`date_trunc('milliseconds', ${anchor.time}) = ${cursor.startTime}::timestamptz`
-        )
-      );
-    if (!matched) throw invalidCursor();
+    if (cursorAnchor) {
+      const matched = await cursorAnchor.read(cursor);
+      if (
+        !matched ||
+        matched.startTime.toISOString() !== cursor.startTime ||
+        (cursor.scope !== undefined && matched.scope !== cursor.scope)
+      ) {
+        throw invalidCursor();
+      }
+      customBoundary = cursorAnchor.boundary(matched, sort);
+    } else {
+      if (!anchor || cursor.scope !== undefined) throw invalidCursor();
+      const [matched] = await db
+        .select({ anchored: sql<number>`1` })
+        .from(anchor.time.table)
+        .where(
+          and(
+            eq(anchor.id, cursor.id),
+            sql`date_trunc('milliseconds', ${anchor.time}) = ${cursor.startTime}::timestamptz`
+          )
+        );
+      if (!matched) throw invalidCursor();
+    }
   }
 
-  const anchorRow = cursor
-    ? sql`(select ${anchor.time}, ${anchor.id} from ${anchor.time.table} where ${anchor.id} = ${cursor.id})`
-    : undefined;
-  const boundary = anchorRow
-    ? sort === 'oldest'
-      ? sql`(${anchor.time}, ${anchor.id}) > ${anchorRow}`
-      : sql`(${anchor.time}, ${anchor.id}) < ${anchorRow}`
-    : undefined;
+  let boundary = customBoundary;
+  let orderBy: SQL[];
+  if (anchor) {
+    const anchorRow = cursor
+      ? sql`(select ${anchor.time}, ${anchor.id} from ${anchor.time.table} where ${anchor.id} = ${cursor.id})`
+      : undefined;
+    boundary ??= anchorRow
+      ? sort === 'oldest'
+        ? sql`(${anchor.time}, ${anchor.id}) > ${anchorRow}`
+        : sql`(${anchor.time}, ${anchor.id}) < ${anchorRow}`
+      : undefined;
+    orderBy =
+      sort === 'oldest' ? [asc(anchor.time), asc(anchor.id)] : [desc(anchor.time), desc(anchor.id)];
+  } else if (cursorAnchor) {
+    orderBy = cursorAnchor.orderBy(sort);
+  } else {
+    throw new Error('A keyset anchor is required.');
+  }
 
   const probe = await read({
     where: and(where, boundary),
-    orderBy:
-      sort === 'oldest' ? [asc(anchor.time), asc(anchor.id)] : [desc(anchor.time), desc(anchor.id)],
+    orderBy,
     limit: limit + 1,
   });
 
@@ -92,6 +130,12 @@ export const readKeysetPage = async <TRow>({
   return {
     rows,
     hasNext,
-    nextCursor: tail ? { startTime: tail.startTime.toISOString(), id: tail.id } : null,
+    nextCursor: tail
+      ? {
+          startTime: tail.startTime.toISOString(),
+          id: tail.id,
+          ...(tail.scope === undefined ? {} : { scope: tail.scope }),
+        }
+      : null,
   };
 };

@@ -30,6 +30,7 @@ describe('Admin database schema', () => {
 
     expect(Object.keys(columns)).toEqual([
       'id',
+      'publicSequence',
       'questId',
       'filerUserId',
       'reportedMemberId',
@@ -44,6 +45,7 @@ describe('Admin database schema', () => {
       'createdAt',
       'updatedAt',
     ]);
+    expect(columns.publicSequence.name).toBe('public_sequence');
     expect(columns.questId.name).toBe('quest_id');
     expect(columns.filerUserId.name).toBe('filer_user_id');
     expect(columns.reportedMemberId.name).toBe('reported_member_id');
