@@ -49,8 +49,8 @@ The read-only view of another Member's Profile, served by `GET /api/v1/profile/:
 _Avoid_: conflating with own-Profile's response shape — they share a resource but not a schema.
 
 **Tag**:
-A shared Quest skill label used to describe the ability demonstrated by a Quest. Each Quest has exactly one canonical Tag. A Member's profile Tags are derived from their three most frequent Tags across successfully completed Quest participation; they are not manually assigned profile data.
-_Avoid_: profile skill, occupation, treating Tags as editable Member fields.
+A shared Quest category that describes the type of work a Quest needs. Each Quest has exactly one canonical Tag. A Member's Profile Tags are derived from their three most frequent Quest Tags across successfully completed Quest participation; they describe work categories, not abilities, and are not manually assigned.
+_Avoid_: treating Tag as a skill label, Occupation, or manually assigned Profile field.
 
 **Review**:
 A rating and optional comment that a Hirer or Worker gives to the other after a Quest reaches any Terminal State: `QUEST_COMPLETED`, `QUEST_FAILED`, or `QUEST_CANCELLED`. A Review is tied to one Quest, each direction is allowed once per Quest, and the author may edit it until seven days after the Quest becomes Terminal. Reviews cannot be deleted and contribute to the reviewed Member's Reputation.

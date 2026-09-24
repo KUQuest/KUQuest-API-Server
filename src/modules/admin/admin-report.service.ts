@@ -58,9 +58,10 @@ import {
 import { alias } from 'drizzle-orm/pg-core';
 
 import type {
+  AdminConductReportCommandSummary,
   AdminConductReportDetail,
   AdminConductReportSummary,
-  AdminReportCommandData,
+  AdminReportCommandSummary,
   AdminReportDetailData,
   AdminReportEvidenceData,
   AdminReportListData,
@@ -71,61 +72,30 @@ import {
   type AdminActionResult,
   type AdminActionTransaction,
 } from './admin-action.service';
-import type { AdminActionReasonCatalog } from './admin-action.policy';
 import { formatConductReportDisplayId, formatReportCaseDisplayId } from './admin-display-id';
+import {
+  reportAdminActionCatalog,
+  type ConductReportDismissReasonCode,
+} from './admin-report.policy';
 
 export type ReportCaseOutcome =
   'REPORT_CASE_DISMISSED' | 'REPORT_CASE_HIDDEN' | 'REPORT_CASE_RESTORED';
-
-export const reportAdminReasonCodes = ['POLICY_REVIEW', 'SAFETY_REVIEW'] as const;
-
-export const reportAdminActionCatalog: AdminActionReasonCatalog = {
-  version: 1,
-  actions: {
-    REPORT_CASE_DISMISS: {
-      kind: 'COMMAND',
-      requiresReason: true,
-      allowedReasonCodes: reportAdminReasonCodes,
-    },
-    REPORT_CASE_HIDE: {
-      kind: 'COMMAND',
-      requiresReason: true,
-      allowedReasonCodes: reportAdminReasonCodes,
-    },
-    REPORT_CASE_RESTORE: {
-      kind: 'COMMAND',
-      requiresReason: true,
-      allowedReasonCodes: reportAdminReasonCodes,
-    },
-    REPORT_CASE_EVIDENCE_ACCESS: {
-      kind: 'EVIDENCE_ACCESS',
-      requiresReason: false,
-      allowedReasonCodes: [],
-    },
-    CONDUCT_REPORT_EVIDENCE_ACCESS: {
-      kind: 'EVIDENCE_ACCESS',
-      requiresReason: false,
-      allowedReasonCodes: [],
-    },
-    CONDUCT_REPORT_EVIDENCE_FILE_ACCESS: {
-      kind: 'EVIDENCE_ACCESS',
-      requiresReason: false,
-      allowedReasonCodes: [],
-    },
-  },
-};
 
 const adminActionService = createAdminActionService(reportAdminActionCatalog);
 const maxEvidenceContextMessages = 3;
 const evidenceProbeLimit = maxEvidenceContextMessages + 1;
 
-export class AdminReportCaseError extends Error {
+export class AdminReportError extends Error {
   readonly code:
-    'REPORT_CASE_NOT_FOUND' | 'REPORT_CASE_OUTCOME_INVALID' | 'REPORT_EVIDENCE_NOT_FOUND';
+    | 'REPORT_CASE_NOT_FOUND'
+    | 'REPORT_CASE_OUTCOME_INVALID'
+    | 'CONDUCT_REPORT_NOT_FOUND'
+    | 'CONDUCT_REPORT_OUTCOME_INVALID'
+    | 'REPORT_EVIDENCE_NOT_FOUND';
 
-  constructor(code: AdminReportCaseError['code'], message: string) {
+  constructor(code: AdminReportError['code'], message: string) {
     super(message);
-    this.name = 'AdminReportCaseError';
+    this.name = 'AdminReportError';
     this.code = code;
   }
 }
@@ -198,7 +168,8 @@ type ReportCaseSummary = Extract<AdminReportListData['items'][number], { kind: '
 type ConductReportSummary = AdminConductReportSummary;
 type ConductReportDetail = AdminConductReportDetail;
 type AdminReportStatus = NonNullable<AdminReportListQuery['status']>;
-type ReportCaseCommandSummary = AdminReportCommandData['resourceSummary'];
+type ReportCaseCommandSummary = Extract<AdminReportCommandSummary, { kind: 'REPORT_CASE' }>;
+type ConductReportCommandSummary = AdminConductReportCommandSummary;
 type AdminReportCaseEvidence = Extract<AdminReportEvidenceData, { caseId: string }>;
 type AdminConductReportEvidence = Extract<AdminReportEvidenceData, { conductReportId: string }>;
 type AdminReportCaseEvidenceWithoutAction = Omit<AdminReportCaseEvidence, 'adminActionId'>;
@@ -1049,7 +1020,7 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
     .where(eq(adminConductReport.id, reportId))
     .limit(1);
   if (!conductReportRow) {
-    throw new AdminReportCaseError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
+    throw new AdminReportError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
   }
 
   const [assignmentRow] = await db
@@ -1075,7 +1046,7 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
     )
     .limit(1);
   if (!assignmentRow) {
-    throw new AdminReportCaseError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
+    throw new AdminReportError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
   }
 
   const proofRow = await conductReportProofRowFor(
@@ -1128,7 +1099,7 @@ const assertTransition = (currentStatus: ReportCaseStatus, outcome: ReportCaseOu
         : [];
 
   if (!allowed.includes(outcome)) {
-    throw new AdminReportCaseError(
+    throw new AdminReportError(
       'REPORT_CASE_OUTCOME_INVALID',
       'The Report Case is not in a state that accepts this outcome.'
     );
@@ -1194,11 +1165,14 @@ const restoreMessageInTransaction = async (
     );
 };
 
-export type DecideAdminReportCaseInput = {
+type AdminReportCommandInput = {
   adminId: string;
   reportId: string;
   expectedVersion: number;
   requestKey: string;
+};
+
+export type DecideAdminReportCaseInput = AdminReportCommandInput & {
   reasonCode?: string;
   outcome: ReportCaseOutcome;
   now?: Date;
@@ -1232,7 +1206,7 @@ export const decideAdminReportCase = async (
     prepare: async (database) => {
       const current = await readReportCaseById(database, input.reportId, true);
       if (!current) {
-        throw new AdminReportCaseError('REPORT_CASE_NOT_FOUND', 'Report Case does not exist.');
+        throw new AdminReportError('REPORT_CASE_NOT_FOUND', 'Report Case does not exist.');
       }
       assertTransition(current.reportCase.status, input.outcome);
 
@@ -1277,7 +1251,7 @@ export const decideAdminReportCase = async (
             .where(eq(adminReportCase.id, current.reportCase.id))
             .returning();
           if (!updated) {
-            throw new AdminReportCaseError(
+            throw new AdminReportError(
               'REPORT_CASE_NOT_FOUND',
               'Report Case could not be updated.'
             );
@@ -1293,6 +1267,134 @@ export const decideAdminReportCase = async (
     },
   });
 
+  return { ...result, outcome: input.outcome };
+};
+
+type DismissAdminConductReportInput = AdminReportCommandInput & {
+  decisionReasonCode: ConductReportDismissReasonCode;
+};
+
+const dismissAdminConductReport = async (
+  input: DismissAdminConductReportInput
+): Promise<AdminActionResult<ConductReportCommandSummary>> => {
+  const now = new Date();
+
+  return adminActionService.executeCommand<ConductReportCommandSummary>({
+    adminId: input.adminId,
+    action: 'CONDUCT_REPORT_DISMISS',
+    resourceType: 'conduct_report',
+    resourceId: input.reportId,
+    requestKey: input.requestKey,
+    reasonCode: input.decisionReasonCode,
+    request: { outcome: conductReportStatus.dismissed },
+    metadata: { outcome: conductReportStatus.dismissed },
+    expectedVersion: input.expectedVersion,
+    prepare: async (database) => {
+      const [current] = await database
+        .select({ status: adminConductReport.status, version: adminConductReport.version })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, input.reportId))
+        .limit(1)
+        .for('update');
+      if (!current) {
+        throw new AdminReportError('CONDUCT_REPORT_NOT_FOUND', 'Conduct Report does not exist.');
+      }
+      return {
+        currentVersion: current.version,
+        apply: async () => {
+          if (current.status !== conductReportStatus.pending) {
+            throw new AdminReportError(
+              'CONDUCT_REPORT_OUTCOME_INVALID',
+              'Only a pending Conduct Report can be dismissed.'
+            );
+          }
+
+          const [updated] = await database
+            .update(adminConductReport)
+            .set({
+              status: conductReportStatus.dismissed,
+              decisionReason: input.decisionReasonCode,
+              resolvedByAdminId: input.adminId,
+              resolvedAt: now,
+              version: sql`${adminConductReport.version} + 1`,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                eq(adminConductReport.id, input.reportId),
+                eq(adminConductReport.version, current.version)
+              )
+            )
+            .returning({
+              id: adminConductReport.id,
+              publicSequence: adminConductReport.publicSequence,
+              status: adminConductReport.status,
+              version: adminConductReport.version,
+              updatedAt: adminConductReport.updatedAt,
+              resolvedAt: adminConductReport.resolvedAt,
+            });
+          if (!updated) {
+            throw new AdminReportError(
+              'CONDUCT_REPORT_NOT_FOUND',
+              'Conduct Report could not be updated.'
+            );
+          }
+
+          return {
+            resourceSummary: {
+              kind: 'CONDUCT_REPORT',
+              id: updated.id,
+              displayId: formatConductReportDisplayId(updated.publicSequence),
+              status: updated.status,
+              version: updated.version,
+              updatedAt: updated.updatedAt.toISOString(),
+              resolvedAt: serializeDate(updated.resolvedAt),
+            },
+            resourceVersion: updated.version,
+            resourceTimestamp: null,
+          };
+        },
+      };
+    },
+  });
+};
+
+export type DecideAdminReportInput = AdminReportCommandInput &
+  (
+    | { outcome: ReportCaseOutcome; reasonCode?: string; now?: Date }
+    | {
+        outcome: typeof conductReportStatus.dismissed;
+        decisionReasonCode: ConductReportDismissReasonCode;
+      }
+  );
+
+export type DecideAdminReportResult = AdminActionResult<AdminReportCommandSummary> & {
+  outcome: ReportCaseOutcome | typeof conductReportStatus.dismissed;
+};
+
+export const decideAdminReport = async (
+  input: DecideAdminReportInput
+): Promise<DecideAdminReportResult> => {
+  if (input.outcome === conductReportStatus.dismissed) {
+    const result = await dismissAdminConductReport({
+      adminId: input.adminId,
+      reportId: input.reportId,
+      expectedVersion: input.expectedVersion,
+      requestKey: input.requestKey,
+      decisionReasonCode: input.decisionReasonCode,
+    });
+    return { ...result, outcome: input.outcome };
+  }
+
+  const result = await decideAdminReportCase({
+    adminId: input.adminId,
+    reportId: input.reportId,
+    expectedVersion: input.expectedVersion,
+    requestKey: input.requestKey,
+    now: input.now,
+    reasonCode: input.reasonCode,
+    outcome: input.outcome,
+  });
   return { ...result, outcome: input.outcome };
 };
 
@@ -1382,17 +1484,17 @@ const evidenceForInTransaction = async (
     .where(eq(adminEvidenceReference.id, evidenceRefId))
     .limit(1);
   if (!reference) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
   if (
     reference.caseStatus !== reportCaseStatus.pending &&
     reference.caseStatus !== reportCaseStatus.hidden
   ) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
 
   if (reference.messageId && reference.messageId !== reference.reportMessageId) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
 
   if (reference.attachmentId) {
@@ -1409,10 +1511,7 @@ const evidenceForInTransaction = async (
       )
       .limit(1);
     if (!attachmentReference) {
-      throw new AdminReportCaseError(
-        'REPORT_EVIDENCE_NOT_FOUND',
-        'Report evidence does not exist.'
-      );
+      throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
     }
   }
 
@@ -1423,7 +1522,7 @@ const evidenceForInTransaction = async (
     1
   );
   if (!target || target.conversationId !== reference.conversationId) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
 
   const [before, after] = await Promise.all([
@@ -1530,7 +1629,7 @@ const reportCaseIdForEvidence = async (evidenceRefId: string): Promise<string> =
     .where(eq(adminEvidenceReference.id, evidenceRefId))
     .limit(1);
   if (!reference) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
   return reference.caseId;
 };
@@ -1631,7 +1730,7 @@ const conductReportEvidenceContextFor = async (
     .limit(1);
 
   if (!row) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
 
   if (row.conversationType === 'CONVERSATION_CANDIDATE_INQUIRY') {
@@ -1646,13 +1745,10 @@ const conductReportEvidenceContextFor = async (
       )
       .limit(1);
     if (!participant) {
-      throw new AdminReportCaseError(
-        'REPORT_EVIDENCE_NOT_FOUND',
-        'Report evidence does not exist.'
-      );
+      throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
     }
   } else if (row.conversationType !== 'CONVERSATION_WORK') {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
 
   const latestTerminalAt = row.conversationLatestTerminalAt ?? row.workLatestTerminalAt;
@@ -1666,7 +1762,7 @@ const conductReportEvidenceContextFor = async (
     latestTerminalAt
   );
   if (expiresAt && expiresAt <= new Date()) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
 
   return {
@@ -1853,7 +1949,7 @@ const conductReportIdForEvidenceHandle = async (evidenceHandle: string): Promise
     .where(eq(adminConductReportEvidenceHandle.id, evidenceHandle))
     .limit(1);
   if (!row) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
   return row.reportId;
 };
@@ -1882,10 +1978,7 @@ const getConductReportEvidencePage = async (
     read: async (database) => {
       const context = await conductReportEvidenceContextFor(database, evidenceHandle);
       if (context.reportId !== reportId) {
-        throw new AdminReportCaseError(
-          'REPORT_EVIDENCE_NOT_FOUND',
-          'Report evidence does not exist.'
-        );
+        throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
       }
       const loaded = await conductReportEvidencePageInTransaction(
         database,
@@ -1919,10 +2012,7 @@ const getConductReportEvidencePage = async (
     (await db.transaction(async (database) => {
       const context = await conductReportEvidenceContextFor(database, evidenceHandle);
       if (context.reportId !== reportId) {
-        throw new AdminReportCaseError(
-          'REPORT_EVIDENCE_NOT_FOUND',
-          'Report evidence does not exist.'
-        );
+        throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
       }
       const replayed = await conductReportEvidencePageInTransaction(
         database,

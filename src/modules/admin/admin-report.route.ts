@@ -1,6 +1,7 @@
 import { enabledAdminGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
 import { Elysia } from 'elysia';
 
@@ -13,6 +14,8 @@ import {
 import {
   adminReportCommandHeadersSchema,
   adminReportCommandResponseSchema,
+  adminConductReportDecisionBodySchema,
+  adminReportCaseDecisionBodySchema,
   adminReportDecisionBodySchema,
   adminReportDetailResponseSchema,
   adminReportEvidenceHeadersSchema,
@@ -23,6 +26,19 @@ import {
   adminReportListResponseSchema,
   adminReportParamsSchema,
 } from './admin-report.schema';
+
+const rejectUnknownAdminReportDecisionFields = ({ body }: { body: unknown }) => {
+  const schema =
+    body !== null &&
+    typeof body === 'object' &&
+    !Array.isArray(body) &&
+    'outcome' in body &&
+    body.outcome === 'CONDUCT_REPORT_DISMISSED'
+      ? adminConductReportDecisionBodySchema
+      : adminReportCaseDecisionBodySchema;
+
+  rejectUnknownFields(schema)({ body });
+};
 
 export const adminReportRoute = new Elysia({
   name: 'admin-report-route',
@@ -57,12 +73,13 @@ export const adminReportRoute = new Elysia({
     params: adminReportParamsSchema,
     headers: adminReportCommandHeadersSchema,
     body: adminReportDecisionBodySchema,
+    transform: rejectUnknownAdminReportDecisionFields,
     response: responses(adminReportCommandResponseSchema, 400, 401, 403, 404, 409),
     detail: {
       tags: ['Admin Reports'],
-      summary: 'Apply a Trust and Safety Report Case decision',
+      summary: 'Apply a Report Case or Conduct Report decision',
       description:
-        'Dismisses, hides, or restores a Report Case with an Admin Action, a current resource version, and an immutable Moderation Decision.',
+        'Applies an Admin decision to a Report Case or dismisses a pending Conduct Report. Commands require an action-specific reason code, current resource version, Idempotency-Key, and immutable Admin Action.',
       operationId: 'decideAdminReport',
       security: betterAuthSecurity,
     },
