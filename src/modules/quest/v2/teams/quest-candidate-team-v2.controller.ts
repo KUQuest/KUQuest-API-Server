@@ -167,6 +167,13 @@ const mapTeamError = (set: AuthedContext['set'], outcome: CandidateTeamError) =>
       'The Candidate Team must be full before submission'
     );
   }
+  if (outcome.outcome === 'red-flagged') {
+    return conflict(
+      set,
+      'MEMBER_RED_FLAGGED',
+      'A Member with an active Red Flag cannot apply as a Candidate'
+    );
+  }
   if (outcome.outcome === 'submission-invalid') {
     return conflict(
       set,

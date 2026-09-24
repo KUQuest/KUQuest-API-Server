@@ -62,6 +62,13 @@ const mapJoinOutcome = (set: AuthedContext['set'], outcome: QuestV2AssignmentErr
   if (outcome.outcome === 'not-open') {
     return conflict(set, 'QUEST_NOT_OPEN', 'Only an open Quest can accept a direct join');
   }
+  if (outcome.outcome === 'red-flagged') {
+    return conflict(
+      set,
+      'MEMBER_RED_FLAGGED',
+      'A Member with an active Red Flag cannot join a direct-join Quest'
+    );
+  }
   if (outcome.outcome === 'roster-frozen') {
     return conflict(
       set,

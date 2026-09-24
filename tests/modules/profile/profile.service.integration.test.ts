@@ -166,11 +166,11 @@ beforeAll(async () => {
 beforeEach(async () => {
   await db
     .update(authUser)
-    .set({ ...startingState[studentA]!, imageFileId: null })
+    .set({ ...startingState[studentA]!, imageFileId: null, redFlagExpiresAt: null })
     .where(eq(authUser.id, studentA));
   await db
     .update(authUser)
-    .set({ ...startingState[studentB]!, imageFileId: null })
+    .set({ ...startingState[studentB]!, imageFileId: null, redFlagExpiresAt: null })
     .where(eq(authUser.id, studentB));
 });
 
@@ -306,6 +306,7 @@ describe('reading a public profile', () => {
       'firstName',
       'lastName',
       'occupation',
+      'redFlagged',
       'reputation',
       'version',
     ]);
@@ -315,6 +316,7 @@ describe('reading a public profile', () => {
       lastName: 'One',
       bio: 'first bio',
       academicYear: 2025,
+      redFlagged: false,
       department: {
         id: departmentId,
         name: 'Test Department',
@@ -372,6 +374,15 @@ describe('reading a public profile', () => {
       await db.delete(quest).where(eq(quest.id, questId));
       await db.delete(authUser).where(eq(authUser.id, workerId));
     }
+  });
+
+  it('marks an active Red Flag on the public Member Profile', async () => {
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) })
+      .where(eq(authUser.id, studentA));
+
+    expect((await getPublicProfile(studentA))?.redFlagged).toBe(true);
   });
 
   it('returns a public avatar reference when one is stored', async () => {

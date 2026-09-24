@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, closeSocketForActiveMemberBan, memberBanGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
@@ -69,6 +69,7 @@ export const candidateInquiryRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/chat/candidate-inquiries`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .ws('/:conversationId/events', {
     params: candidateInquiryParamsSchema,
     async open(ws) {
@@ -84,6 +85,7 @@ export const candidateInquiryRoute = new Elysia({
       const unsubscribe = workChatDelivery.subscribe(
         memberId,
         async (event) => {
+          if (await closeSocketForActiveMemberBan(ws, memberId)) return;
           ws.send(JSON.stringify({ type: 'CANDIDATE_INQUIRY_MESSAGE', message: event.message }));
         },
         ws.data.params.conversationId
@@ -91,6 +93,9 @@ export const candidateInquiryRoute = new Elysia({
       webSocketUnsubscribers.set(ws, unsubscribe);
     },
     async message(ws, payload) {
+      const memberId = ws.data.session.user.id;
+      if (await closeSocketForActiveMemberBan(ws, memberId)) return;
+
       const command = parseChatSocketSendMessage(payload);
       if (!command) {
         sendCandidateInquirySocketRejection(
@@ -105,7 +110,7 @@ export const candidateInquiryRoute = new Elysia({
 
       try {
         const message = await sendCandidateInquiryMessage(
-          ws.data.session.user.id,
+          memberId,
           ws.data.params.conversationId,
           command
         );

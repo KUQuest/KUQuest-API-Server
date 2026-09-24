@@ -20,6 +20,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 - Push is enabled by default after Android permission is granted.
 - **Delivery and deduplication**:
   - Each logical Event produces at most one alert per recipient, even after retry.
+  - FCM messages include a stable `eventKey` and use a data-only payload. The Android client records each `eventKey` before it displays an alert and ignores later copies of a recorded key. Foreground Popups use the same key.
   - Delivery state is recorded (`PUSH_DELIVERY_PENDING`, `PUSH_DELIVERY_DELIVERED`, `PUSH_DELIVERY_FAILED`, `PUSH_DELIVERY_DISABLED`).
   - Transient failures are retried. Invalid destinations end at `PUSH_DELIVERY_DISABLED`.
   - When the app is active in foreground, an in-app Popup replaces the duplicate Push.

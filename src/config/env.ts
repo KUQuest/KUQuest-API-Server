@@ -68,6 +68,11 @@ export const env = {
   payoutDestinationEncryptionKey: process.env.PAYOUT_DESTINATION_ENCRYPTION_KEY,
   payoutDestinationEncryptionKeyVersion:
     process.env.PAYOUT_DESTINATION_ENCRYPTION_KEY_VERSION ?? 'v1',
+  pushDeviceEncryptionKey: process.env.PUSH_DEVICE_ENCRYPTION_KEY,
+  pushDeviceEncryptionKeyVersion: process.env.PUSH_DEVICE_ENCRYPTION_KEY_VERSION ?? 'v1',
+  fcmProjectId: process.env.FCM_PROJECT_ID,
+  fcmClientEmail: process.env.FCM_CLIENT_EMAIL,
+  fcmPrivateKey: process.env.FCM_PRIVATE_KEY,
   cmsOrigin: process.env.CMS_ORIGIN,
   termsUrl: process.env.TERMS_URL,
   privacyUrl: process.env.PRIVACY_URL,

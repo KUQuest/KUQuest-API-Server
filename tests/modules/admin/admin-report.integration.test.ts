@@ -9,9 +9,11 @@ import {
   adminReportCase,
   adminReporterEntry,
   conductReportReason,
+  memberPenaltyRecord,
 } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
+import { pushDelivery } from '@/database/schema/push.schema';
 import {
   quest,
   questAssignment,
@@ -65,6 +67,7 @@ const fixtureCaseIds: string[] = [];
 const fixtureConductReportIds: string[] = [];
 const fixtureConductQuestIds: string[] = [];
 const fixtureConductAssignmentIds: string[] = [];
+const penaltyMemberIds = new Set<string>();
 
 const cookieHeaderFor = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
@@ -546,7 +549,23 @@ const cleanFixtures = async () => {
   if (!postgresAvailable) return;
 
   await db.transaction(async (transaction) => {
+    const penaltySourceIds = [...fixtureConductReportIds, ...fixtureCaseIds];
+    if (penaltySourceIds.length > 0) {
+      const penaltyMembers = await transaction
+        .select({ memberId: memberPenaltyRecord.memberId })
+        .from(memberPenaltyRecord)
+        .where(inArray(memberPenaltyRecord.sourceId, penaltySourceIds));
+      for (const penaltyMember of penaltyMembers) {
+        penaltyMemberIds.add(penaltyMember.memberId);
+      }
+    }
     if (fixtureConductReportIds.length > 0) {
+      await transaction.delete(pushDelivery).where(
+        inArray(
+          pushDelivery.eventKey,
+          fixtureConductReportIds.map((reportId) => `conduct-report-upheld:${reportId}`)
+        )
+      );
       await transaction
         .delete(adminConductReportEvidenceHandle)
         .where(inArray(adminConductReportEvidenceHandle.reportId, fixtureConductReportIds));
@@ -688,9 +707,12 @@ afterAll(async () => {
   await cleanFixtures();
   if (!postgresAvailable) return;
   await db.delete(tag).where(eq(tag.id, tagId));
-  await db
-    .delete(authUser)
-    .where(inArray(authUser.id, [senderId, reporterId, additionalWorkerId, unrelatedCandidateId]));
+  const removableMemberIds = [reporterId, additionalWorkerId, unrelatedCandidateId].filter(
+    (memberId) => !penaltyMemberIds.has(memberId)
+  );
+  if (removableMemberIds.length > 0) {
+    await db.delete(authUser).where(inArray(authUser.id, removableMemberIds));
+  }
 });
 
 describe('Admin Report Case API', () => {
@@ -733,6 +755,7 @@ describe('Admin Report Case API', () => {
     expect(JSON.stringify(detailSchema)).toContain('assignment');
     expect(JSON.stringify(detailSchema)).toContain('proofSubmission');
     expect(JSON.stringify(decisionRequestSchema)).toContain('CONDUCT_REPORT_DISMISSED');
+    expect(JSON.stringify(decisionRequestSchema)).toContain('CONDUCT_REPORT_UPHELD');
     expect(JSON.stringify(decisionRequestSchema)).toContain('CONDUCT_REPORT_NO_VIOLATION');
     expect(JSON.stringify(decisionRequestSchema)).toContain('CONDUCT_REPORT_INSUFFICIENT_EVIDENCE');
 
@@ -1463,6 +1486,153 @@ describe('Admin Report Case API', () => {
     ).toHaveLength(1);
   });
 
+  it('upholds a Conduct Report, records a Misconduct violation, and replays the Admin Action', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture({ reason: conductReportReason.outOfScope });
+    const path = `/api/v1/admin/reports/${fixture.reportId}/decide`;
+    const body = { outcome: 'CONDUCT_REPORT_UPHELD' };
+    const requestKey = `conduct-uphold-${fixture.reportId}`;
+
+    const first = await adminRequest(path, {
+      method: 'POST',
+      headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+      body: JSON.stringify(body),
+    });
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+    expect(firstBody.data.resourceSummary).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      id: fixture.reportId,
+      status: 'CONDUCT_REPORT_UPHELD',
+      version: 2,
+      resolvedAt: expect.any(String),
+    });
+
+    const [report] = await db
+      .select({
+        status: adminConductReport.status,
+        version: adminConductReport.version,
+        reason: adminConductReport.reason,
+        decisionReason: adminConductReport.decisionReason,
+        resolvedByAdminId: adminConductReport.resolvedByAdminId,
+        resolvedAt: adminConductReport.resolvedAt,
+      })
+      .from(adminConductReport)
+      .where(eq(adminConductReport.id, fixture.reportId));
+    expect(report).toMatchObject({
+      status: 'CONDUCT_REPORT_UPHELD',
+      version: 2,
+      reason: 'CONDUCT_OUT_OF_SCOPE',
+      decisionReason: 'CONDUCT_OUT_OF_SCOPE',
+      resolvedByAdminId: adminId,
+      resolvedAt: expect.any(Date),
+    });
+
+    const [action] = await db
+      .select()
+      .from(adminAction)
+      .where(eq(adminAction.id, firstBody.data.adminActionId));
+    expect(action).toMatchObject({
+      adminId,
+      action: 'CONDUCT_REPORT_UPHOLD',
+      resourceType: 'conduct_report',
+      resourceId: fixture.reportId,
+      requestKey,
+      reasonCatalogVersion: 1,
+      reasonCode: 'CONDUCT_OUT_OF_SCOPE',
+      expectedVersion: 1,
+      resultVersion: 2,
+      metadata: { outcome: 'CONDUCT_REPORT_UPHELD' },
+    });
+
+    const penaltyRows = await db
+      .select({
+        ladder: memberPenaltyRecord.ladder,
+        source: memberPenaltyRecord.source,
+        sourceId: memberPenaltyRecord.sourceId,
+        result: memberPenaltyRecord.result,
+        actorType: memberPenaltyRecord.actorType,
+        actorAdminId: memberPenaltyRecord.actorAdminId,
+        reasonCode: memberPenaltyRecord.reasonCode,
+      })
+      .from(memberPenaltyRecord)
+      .where(
+        and(
+          eq(memberPenaltyRecord.memberId, fixture.reportedMemberId),
+          eq(memberPenaltyRecord.source, 'CONDUCT_REPORT'),
+          eq(memberPenaltyRecord.sourceId, fixture.reportId)
+        )
+      );
+    expect(penaltyRows).toEqual([
+      {
+        ladder: 'MISCONDUCT',
+        source: 'CONDUCT_REPORT',
+        sourceId: fixture.reportId,
+        result: 'PENALTY_EXEMPT',
+        actorType: 'ADMIN',
+        actorAdminId: adminId,
+        reasonCode: 'CONDUCT_OUT_OF_SCOPE',
+      },
+    ]);
+
+    const [delivery] = await db
+      .select()
+      .from(pushDelivery)
+      .where(
+        and(
+          eq(pushDelivery.recipientMemberId, fixture.reportedMemberId),
+          eq(pushDelivery.eventKey, `conduct-report-upheld:${fixture.reportId}`)
+        )
+      );
+    expect(delivery).toMatchObject({
+      eventType: 'CONDUCT_REPORT_UPHELD',
+      title: 'Conduct Report decision',
+      status: 'PUSH_DELIVERY_PENDING',
+      data: {
+        eventType: 'CONDUCT_REPORT_UPHELD',
+        reportId: fixture.reportId,
+        reasonCode: 'CONDUCT_OUT_OF_SCOPE',
+        decision: 'UPHELD',
+        penaltyResult: 'PENALTY_EXEMPT',
+      },
+    });
+    expect(delivery?.body).toBe(
+      'Your Conduct Report was upheld for work outside the agreed scope. The result is no additional restriction.'
+    );
+    expect(delivery?.deepLink).toMatch(/^kuquest:\/\/conduct-reports\/CND-\d{6}$/);
+
+    const replay = await adminRequest(path, {
+      method: 'POST',
+      headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+      body: JSON.stringify(body),
+    });
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data.adminActionId).toBe(firstBody.data.adminActionId);
+    expect(
+      await db
+        .select({ id: memberPenaltyRecord.id })
+        .from(memberPenaltyRecord)
+        .where(eq(memberPenaltyRecord.sourceId, fixture.reportId))
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: pushDelivery.id })
+        .from(pushDelivery)
+        .where(eq(pushDelivery.eventKey, `conduct-report-upheld:${fixture.reportId}`))
+    ).toHaveLength(1);
+
+    const repeated = await adminRequest(path, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-uphold-again-${fixture.reportId}`,
+        'if-match': '2',
+      },
+      body: JSON.stringify(body),
+    });
+    expect(repeated.status).toBe(409);
+    expect((await repeated.json()).error.code).toBe('CONDUCT_REPORT_OUTCOME_INVALID');
+  });
+
   it('validates the Conduct Report dismissal catalog and keeps Admin-only access', async () => {
     if (!postgresAvailable) return;
     const fixture = await createConductReportFixture();
@@ -1688,6 +1858,69 @@ describe('Admin Report Case API', () => {
     }
   });
 
+  it('rolls back a Conduct Report penalty when AdminAction persistence fails', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture();
+    await sql`CREATE OR REPLACE FUNCTION admin_report_test_fail_conduct_uphold() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.action = 'CONDUCT_REPORT_UPHOLD' THEN
+          RAISE EXCEPTION 'forced Conduct Report AdminAction failure';
+        END IF;
+        RETURN NEW;
+      END;
+    $$`;
+    await sql`CREATE TRIGGER admin_report_test_fail_conduct_uphold_trigger
+      BEFORE INSERT ON admin_action
+      FOR EACH ROW EXECUTE FUNCTION admin_report_test_fail_conduct_uphold()`;
+
+    const expectedFailureLog = spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `conduct-uphold-atomic-${fixture.reportId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+      });
+      expect(response.status).toBe(500);
+
+      const [report] = await db
+        .select({
+          status: adminConductReport.status,
+          version: adminConductReport.version,
+          decisionReason: adminConductReport.decisionReason,
+          resolvedByAdminId: adminConductReport.resolvedByAdminId,
+          resolvedAt: adminConductReport.resolvedAt,
+        })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId));
+      expect(report).toEqual({
+        status: 'CONDUCT_REPORT_PENDING',
+        version: 1,
+        decisionReason: null,
+        resolvedByAdminId: null,
+        resolvedAt: null,
+      });
+      expect(
+        await db
+          .select({ id: memberPenaltyRecord.id })
+          .from(memberPenaltyRecord)
+          .where(eq(memberPenaltyRecord.sourceId, fixture.reportId))
+      ).toHaveLength(0);
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(eq(adminAction.resourceId, fixture.reportId))
+      ).toHaveLength(0);
+    } finally {
+      expectedFailureLog.mockRestore();
+      await sql`DROP TRIGGER IF EXISTS admin_report_test_fail_conduct_uphold_trigger ON admin_action`;
+      await sql`DROP FUNCTION IF EXISTS admin_report_test_fail_conduct_uphold()`;
+    }
+  });
+
   it('applies Hide and Restore atomically, hides the Message from other Members, and rejects stale commands', async () => {
     if (!postgresAvailable) return;
     const fixture = await createReportFixture();
@@ -1738,6 +1971,42 @@ describe('Admin Report Case API', () => {
         .from(adminModerationDecision)
         .where(eq(adminModerationDecision.reportCaseId, fixture.caseId))
     ).toHaveLength(1);
+    expect(
+      await db
+        .select({ result: memberPenaltyRecord.result })
+        .from(memberPenaltyRecord)
+        .where(
+          and(
+            eq(memberPenaltyRecord.memberId, senderId),
+            eq(memberPenaltyRecord.sourceId, fixture.caseId)
+          )
+        )
+    ).toEqual([{ result: 'PENALTY_EXEMPT' }]);
+
+    const rehide = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `report-rehide-${fixture.caseId}`,
+        'if-match': '2',
+      },
+      body: JSON.stringify({ outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'POLICY_REVIEW' }),
+    });
+    expect(rehide.status).toBe(200);
+    expect((await rehide.json()).data.resourceSummary).toMatchObject({
+      status: 'REPORT_CASE_HIDDEN',
+      version: 3,
+    });
+    expect(
+      await db
+        .select({ result: memberPenaltyRecord.result })
+        .from(memberPenaltyRecord)
+        .where(
+          and(
+            eq(memberPenaltyRecord.memberId, senderId),
+            eq(memberPenaltyRecord.sourceId, fixture.caseId)
+          )
+        )
+    ).toEqual([{ result: 'PENALTY_EXEMPT' }]);
 
     const hiddenEvidence = await adminRequest(`/api/v1/admin/evidence/${fixture.evidenceRefId}`, {
       headers: { 'idempotency-key': `report-hidden-evidence-${fixture.caseId}` },
@@ -1800,14 +2069,14 @@ describe('Admin Report Case API', () => {
       method: 'POST',
       headers: {
         'idempotency-key': `report-restore-${fixture.caseId}`,
-        'if-match': '2',
+        'if-match': '3',
       },
       body: JSON.stringify({ outcome: 'REPORT_CASE_RESTORED', reasonCode: 'POLICY_REVIEW' }),
     });
     expect(restore.status).toBe(200);
     expect((await restore.json()).data.resourceSummary).toMatchObject({
       status: 'REPORT_CASE_RESTORED',
-      version: 3,
+      version: 4,
     });
     const [restoredMessage] = await db
       .select({ hiddenAt: chatMessage.hiddenAt, hiddenByAdminId: chatMessage.hiddenByAdminId })
@@ -1819,7 +2088,24 @@ describe('Admin Report Case API', () => {
         .select({ id: adminModerationDecision.id })
         .from(adminModerationDecision)
         .where(eq(adminModerationDecision.reportCaseId, fixture.caseId))
-    ).toHaveLength(2);
+    ).toHaveLength(3);
+    const penaltyRows = await db
+      .select({
+        result: memberPenaltyRecord.result,
+        reversalOfRecordId: memberPenaltyRecord.reversalOfRecordId,
+      })
+      .from(memberPenaltyRecord)
+      .where(
+        and(
+          eq(memberPenaltyRecord.memberId, senderId),
+          eq(memberPenaltyRecord.sourceId, fixture.caseId)
+        )
+      );
+    expect(penaltyRows).toHaveLength(2);
+    expect(penaltyRows.map((row) => row.result)).toContain('PENALTY_EXEMPT');
+    expect(
+      penaltyRows.find((row) => row.result === 'PENALTY_REVERSAL')?.reversalOfRecordId
+    ).toEqual(expect.any(String));
   });
 
   it('dismisses a pending Report Case without hiding the Message and rejects a repeated transition', async () => {

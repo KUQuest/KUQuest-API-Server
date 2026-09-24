@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { quest, questApiVersion, questAssignment, review } from '@/database/schema/quest.schema';
+import { recordReviewAveragePenaltyInTransaction } from '@/modules/admin/member-penalty';
 
 import { and, eq } from 'drizzle-orm';
 
@@ -314,6 +315,13 @@ export const createQuestV2Review = async (
           })
           .returning(reviewFields);
         if (!created) return { kind: 'rejected', rejection: 'conflict' };
+
+        await recordReviewAveragePenaltyInTransaction(transaction, {
+          memberId: created.revieweeId,
+          reviewId: created.id,
+          rating: created.rating,
+          now,
+        });
 
         return {
           kind: 'success',

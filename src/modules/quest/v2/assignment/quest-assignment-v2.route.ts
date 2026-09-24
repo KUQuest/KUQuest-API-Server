@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V2_PREFIX } from '@/shared/api-version';
 
@@ -36,6 +36,7 @@ export const questAssignmentV2Route = new Elysia({
   prefix: API_V2_PREFIX,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .get('/assignments/mine', listMyQuestV2AssignmentsController, {
     query: questV2AssignmentMineQuerySchema,
     response: responses(questV2AssignmentListResponseSchema, 400, 401, 500),

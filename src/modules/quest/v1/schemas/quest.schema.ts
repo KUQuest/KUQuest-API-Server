@@ -170,6 +170,7 @@ const questSummarySchema = t.Object({
   startTime: t.String({ format: 'date-time' }),
   estimatedDurationMinutes: t.Nullable(t.Integer({ minimum: 1 })),
   hirerName: t.String(),
+  hirerRedFlagged: t.Boolean(),
   location: t.Nullable(locationSchema),
 });
 
@@ -200,6 +201,7 @@ export const questDetailSchema = t.Object({
   estimatedDurationMinutes: t.Nullable(t.Integer({ minimum: 1 })),
   proofRequired: t.Boolean(),
   hirerName: t.String(),
+  hirerRedFlagged: t.Boolean(),
   locations: t.Array(locationSchema),
   images: t.Array(questImageSchema),
 });

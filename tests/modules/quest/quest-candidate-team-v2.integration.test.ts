@@ -333,6 +333,42 @@ afterAll(async () => {
 });
 
 describe('Quest Candidate Team API v2', () => {
+  it('does not submit a Candidate Team with a Member who has an active Red Flag', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const questId = await createOpenGroupCandidateQuest({ headcount: 2 });
+    const team = await createTeam(questId, candidate.id, 2);
+    const joined = await joinTeam(questId, team.id, secondCandidate.id, team.joinCode);
+    expect(joined.status).toBe(200);
+    const submissionFileId = await createFile(candidate.id);
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) })
+      .where(eq(authUser.id, secondCandidate.id));
+
+    try {
+      const response = await request(
+        `/api/v2/quests/${questId}/teams/${team.id}/submit`,
+        'POST',
+        candidate.id,
+        { 'content-type': 'application/json', 'idempotency-key': `red-flag-${randomUUID()}` },
+        JSON.stringify({ text: 'Submitted team', fileIds: [submissionFileId] })
+      );
+      expect(response.status).toBe(409);
+      expect((await response.json()).error.code).toBe('MEMBER_RED_FLAGGED');
+      const [storedTeam] = await db
+        .select({ state: questCandidateTeamV2.state })
+        .from(questCandidateTeamV2)
+        .where(eq(questCandidateTeamV2.id, team.id));
+      expect(storedTeam?.state).toBe('TEAM_FORMING');
+    } finally {
+      await db
+        .update(authUser)
+        .set({ redFlagExpiresAt: null })
+        .where(eq(authUser.id, secondCandidate.id));
+    }
+  });
+
   it('does not accept Candidate Team commands after the start boundary', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenGroupCandidateQuest({

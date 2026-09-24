@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
@@ -60,6 +60,7 @@ export const questCandidateRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/quests`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .post('/:questId/applications', createApplicationController, {
     params: applicationParamsSchema,
     body: applicationCreateSchema,

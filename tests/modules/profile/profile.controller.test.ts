@@ -380,6 +380,7 @@ describe('getPublicReviews', () => {
   it("returns another member's Reviews when the profile exists", async () => {
     spyOn(profileService, 'getPublicProfile').mockResolvedValue({
       version: 1,
+      redFlagged: false,
       firstName: 'Student',
       lastName: 'Two',
       bio: null,
@@ -457,6 +458,7 @@ const reviewRow = (id: string, overrides: Record<string, unknown> = {}) => ({
 
 const publicProfileRecord = {
   version: 1,
+  redFlagged: false,
   firstName: 'Student',
   lastName: 'Two',
   bio: null,
@@ -635,6 +637,7 @@ describe('getPublicProfile', () => {
   it('inlines public resources without exposing private fields', async () => {
     spyOn(profileService, 'getPublicProfile').mockResolvedValue({
       version: 1,
+      redFlagged: false,
       firstName: 'Student',
       lastName: 'Two',
       bio: 'A public bio',
@@ -707,6 +710,7 @@ describe('getPublicProfile', () => {
       success: true,
       data: {
         version: 1,
+        redFlagged: false,
         firstName: 'Student',
         lastName: 'Two',
         bio: 'A public bio',

@@ -14,7 +14,8 @@ import {
 import {
   adminReportCommandHeadersSchema,
   adminReportCommandResponseSchema,
-  adminConductReportDecisionBodySchema,
+  adminConductReportDismissDecisionBodySchema,
+  adminConductReportUpholdDecisionBodySchema,
   adminReportCaseDecisionBodySchema,
   adminReportDecisionBodySchema,
   adminReportDetailResponseSchema,
@@ -29,12 +30,12 @@ import {
 
 const rejectUnknownAdminReportDecisionFields = ({ body }: { body: unknown }) => {
   const schema =
-    body !== null &&
-    typeof body === 'object' &&
-    !Array.isArray(body) &&
-    'outcome' in body &&
-    body.outcome === 'CONDUCT_REPORT_DISMISSED'
-      ? adminConductReportDecisionBodySchema
+    body !== null && typeof body === 'object' && !Array.isArray(body) && 'outcome' in body
+      ? body.outcome === 'CONDUCT_REPORT_DISMISSED'
+        ? adminConductReportDismissDecisionBodySchema
+        : body.outcome === 'CONDUCT_REPORT_UPHELD'
+          ? adminConductReportUpholdDecisionBodySchema
+          : adminReportCaseDecisionBodySchema
       : adminReportCaseDecisionBodySchema;
 
   rejectUnknownFields(schema)({ body });
@@ -79,7 +80,7 @@ export const adminReportRoute = new Elysia({
       tags: ['Admin Reports'],
       summary: 'Apply a Report Case or Conduct Report decision',
       description:
-        'Applies an Admin decision to a Report Case or dismisses a pending Conduct Report. Commands require an action-specific reason code, current resource version, Idempotency-Key, and immutable Admin Action.',
+        'Applies an Admin decision to a Report Case, or dismisses or upholds a pending Conduct Report. Commands require an action-specific reason code, current resource version, Idempotency-Key, and immutable Admin Action.',
       operationId: 'decideAdminReport',
       security: betterAuthSecurity,
     },

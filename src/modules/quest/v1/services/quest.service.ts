@@ -15,6 +15,11 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { getEffectiveFundingReservationPolicy, reserveSpending } from '@/modules/wallet';
+import {
+  isRedFlagActive,
+  isMemberRedFlagged,
+  isMemberRedFlaggedInTransaction,
+} from '@/modules/admin/member-penalty';
 import { decodeCursor, encodeCursor, parsePageLimit, type CursorPayload } from '@/shared/cursor';
 
 import { and, asc, eq, exists, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
@@ -65,6 +70,7 @@ export type QuestPublishOutcome =
       questEscrowSatang: number;
     }
   | { outcome: 'not-draft' }
+  | { outcome: 'red-flagged' }
   | { outcome: 'blocked'; check: QuestPublishCheck };
 
 type QuestRow = {
@@ -85,6 +91,7 @@ type QuestRow = {
   proofRequired: boolean;
   hirerFirstName: string;
   hirerLastName: string;
+  hirerRedFlagExpiresAt: Date | null;
 };
 
 type LocationRow = {
@@ -447,6 +454,7 @@ const listRows = async (filters: QuestListFilters, hirerId?: string, excludeHire
       proofRequired: quest.proofRequired,
       hirerFirstName: authUser.firstName,
       hirerLastName: authUser.lastName,
+      hirerRedFlagExpiresAt: authUser.redFlagExpiresAt,
     })
     .from(quest)
     .innerJoin(authUser, eq(quest.hirerId, authUser.id))
@@ -482,6 +490,7 @@ const serializeCard = (row: QuestRow, locations: Map<string, LocationRow[]>) => 
     startTime: row.startTime.toISOString(),
     estimatedDurationMinutes: durationMinutes(row.startTime, row.dueAt),
     hirerName: hirerName(row),
+    hirerRedFlagged: isRedFlagActive(row.hirerRedFlagExpiresAt),
     location,
   };
 };
@@ -1511,6 +1520,7 @@ export const getQuestDetail = async (userId: string, questId: string) => {
       proofRequired: quest.proofRequired,
       hirerFirstName: authUser.firstName,
       hirerLastName: authUser.lastName,
+      hirerRedFlagExpiresAt: authUser.redFlagExpiresAt,
     })
     .from(quest)
     .innerJoin(authUser, eq(quest.hirerId, authUser.id))
@@ -1557,6 +1567,7 @@ export const getQuestDetail = async (userId: string, questId: string) => {
     estimatedDurationMinutes: durationMinutes(row.startTime, row.dueAt),
     proofRequired: row.proofRequired,
     hirerName: hirerName(row),
+    hirerRedFlagged: isRedFlagActive(row.hirerRedFlagExpiresAt),
     locations: locations.map((location) => toLocation(location)),
     images,
   };
@@ -1629,11 +1640,14 @@ const buildPublishCheck = async (transaction: QuestTransaction, row: QuestPublis
 export const getQuestPublishCheck = async (
   userId: string,
   questId: string
-): Promise<QuestPublishCheck | { outcome: 'not-draft' } | undefined> =>
+): Promise<QuestPublishCheck | { outcome: 'not-draft' | 'red-flagged' } | undefined> =>
   db.transaction(async (transaction) => {
     const row = await selectPublishRow(transaction, userId, questId, false);
     if (!row) return undefined;
     if (row.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
+    if (await isMemberRedFlagged(userId)) {
+      return { outcome: 'red-flagged' };
+    }
 
     return buildPublishCheck(transaction, row);
   });
@@ -1646,6 +1660,9 @@ export const publishQuest = async (
     const row = await selectPublishRow(transaction, userId, questId, true);
     if (!row) return undefined;
     if (row.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
+    if (await isMemberRedFlaggedInTransaction(transaction, userId, new Date())) {
+      return { outcome: 'red-flagged' };
+    }
 
     const snapshot = await buildPublishSnapshot(transaction, row);
     const check = buildQuestPublishCheck(snapshot);

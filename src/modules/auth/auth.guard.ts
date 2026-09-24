@@ -1,7 +1,7 @@
+import { apiError } from '@/shared/api-response';
+
 import { Elysia } from 'elysia';
 import type { StatusMap } from 'elysia/utils';
-
-import { apiError } from '@/shared/api-response';
 
 import { auth } from './auth.config';
 
@@ -10,7 +10,7 @@ export const authGuard = new Elysia({ name: 'auth-guard' })
     const session = await auth.api.getSession({ headers: request.headers });
     return { session };
   })
-  .onBeforeHandle({ as: 'scoped' }, ({ session, status }) => {
+  .onBeforeHandle({ as: 'scoped' }, async ({ session, status }) => {
     if (!session) return status(401, apiError('UNAUTHORIZED', 'Unauthorized'));
   })
   // onBeforeHandle above guarantees session is non-null by the time a handler runs;

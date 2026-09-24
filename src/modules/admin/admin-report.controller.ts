@@ -133,11 +133,13 @@ export const decideAdminReportController = async ({
             outcome: 'CONDUCT_REPORT_DISMISSED',
             decisionReasonCode: body.decisionReasonCode,
           })
-        : await decideAdminReport({
-            ...command,
-            outcome: body.outcome,
-            reasonCode: body.reasonCode,
-          });
+        : body.outcome === 'CONDUCT_REPORT_UPHELD'
+          ? await decideAdminReport({ ...command, outcome: 'CONDUCT_REPORT_UPHELD' })
+          : await decideAdminReport({
+              ...command,
+              outcome: body.outcome,
+              reasonCode: body.reasonCode,
+            });
     if (result.resourceVersion === null) {
       set.status = 500;
       return apiError(
