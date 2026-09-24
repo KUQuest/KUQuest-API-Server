@@ -819,20 +819,21 @@ export const updateQuestV2CandidateTeam = async (
   });
 };
 
-export const joinQuestV2CandidateTeam = async (
+const joinCandidateTeam = async (
   memberId: string,
   questId: string,
-  teamId: string,
-  input: QuestV2CandidateTeamJoinInput,
+  teamId: string | null,
+  joinCodeHash: string,
   rawCommandId: string,
-  now = new Date()
+  path: string,
+  requestBody: Record<string, string>,
+  now: Date
 ): Promise<QuestV2CandidateTeamOutcome> => {
-  const joinCode = normalizeJoinCode(input.joinCode);
   const requestHash = await sha256Json({
     authenticatedMemberId: memberId,
     operation: questV2CandidateTeamJoinOperationScope,
-    path: '/api/v2/quests/:questId/teams/:teamId/join',
-    body: { questId, teamId, joinCode },
+    path,
+    body: requestBody,
   });
 
   return db.transaction(async (transaction) => {
@@ -865,7 +866,24 @@ export const joinQuestV2CandidateTeam = async (
         if (current.questState !== 'QUEST_OPEN') return { kind: 'rejected', rejection: 'not-open' };
         if (questStartHasPassed(current, now)) return { kind: 'rejected', rejection: 'not-open' };
 
-        const team = await lockTeam(transaction, questId, teamId);
+        let resolvedTeamId = teamId;
+        if (resolvedTeamId === null) {
+          const matches = await transaction
+            .select({ id: questCandidateTeamV2.id })
+            .from(questCandidateTeamV2)
+            .where(
+              and(
+                eq(questCandidateTeamV2.questId, questId),
+                eq(questCandidateTeamV2.joinCodeHash, joinCodeHash)
+              )
+            );
+          if (matches.length !== 1) {
+            return { kind: 'rejected', rejection: 'join-code-invalid' };
+          }
+          resolvedTeamId = matches[0]!.id;
+        }
+
+        const team = await lockTeam(transaction, questId, resolvedTeamId);
         if (!team) return { kind: 'rejected', rejection: 'team-not-found' };
         if (team.state !== 'TEAM_FORMING') return { kind: 'rejected', rejection: 'not-forming' };
         if (!team.joinCodeHash || !team.joinCodeExpiresAt) {
@@ -874,11 +892,11 @@ export const joinQuestV2CandidateTeam = async (
         if (team.joinCodeExpiresAt.getTime() <= now.getTime()) {
           return { kind: 'rejected', rejection: 'join-code-expired' };
         }
-        if ((await hashJoinCode(joinCode)) !== team.joinCodeHash) {
+        if (team.joinCodeHash !== joinCodeHash) {
           return { kind: 'rejected', rejection: 'join-code-invalid' };
         }
 
-        const members = await teamMembers(transaction, teamId, true);
+        const members = await teamMembers(transaction, resolvedTeamId, true);
         if (members.length >= (team.headcount ?? 0))
           return { kind: 'rejected', rejection: 'team-full' };
         if (await hasActiveAssignment(transaction, questId, memberId)) {
@@ -889,11 +907,14 @@ export const joinQuestV2CandidateTeam = async (
         }
 
         await transaction.insert(questCandidateTeamV2Member).values({
-          teamId,
+          teamId: resolvedTeamId,
           memberId,
           joinedAt: now,
         });
-        await notifyCandidateRosterUpdate(transaction, questId, { kind: 'TEAM', teamId });
+        await notifyCandidateRosterUpdate(transaction, questId, {
+          kind: 'TEAM',
+          teamId: resolvedTeamId,
+        });
         const result = await readTeam(transaction, team);
         return {
           kind: 'success',
@@ -910,6 +931,47 @@ export const joinQuestV2CandidateTeam = async (
     if (command.kind === 'success') return command.result;
     return { outcome: command.rejection };
   });
+};
+
+export const joinQuestV2CandidateTeam = async (
+  memberId: string,
+  questId: string,
+  teamId: string,
+  input: QuestV2CandidateTeamJoinInput,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamOutcome> => {
+  const joinCode = normalizeJoinCode(input.joinCode);
+  return joinCandidateTeam(
+    memberId,
+    questId,
+    teamId,
+    await hashJoinCode(joinCode),
+    rawCommandId,
+    '/api/v2/quests/:questId/teams/:teamId/join',
+    { questId, teamId, joinCode },
+    now
+  );
+};
+
+export const joinQuestV2CandidateTeamByCode = async (
+  memberId: string,
+  questId: string,
+  input: QuestV2CandidateTeamJoinInput,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CandidateTeamOutcome> => {
+  const joinCode = normalizeJoinCode(input.joinCode);
+  return joinCandidateTeam(
+    memberId,
+    questId,
+    null,
+    await hashJoinCode(joinCode),
+    rawCommandId,
+    '/api/v2/quests/:questId/teams/join',
+    { questId, joinCode },
+    now
+  );
 };
 
 const leaveOrRemoveTeamMember = async (
