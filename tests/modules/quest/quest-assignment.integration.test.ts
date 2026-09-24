@@ -72,6 +72,7 @@ const createAssignedQuest = async (
   const questId = await createOpenQuest({
     mode,
     participation,
+    questStatus: 'QUEST_ASSIGNED',
     startTime: new Date(now - 60 * 60 * 1000),
     dueAt: new Date(now + 60 * 60 * 1000),
   });

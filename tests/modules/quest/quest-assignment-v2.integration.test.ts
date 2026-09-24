@@ -457,9 +457,13 @@ describe('Quest Assignment API v2', () => {
       participation: 'SINGLE',
       workerIds: [worker.id],
     });
+    const futureStartTime = new Date(Date.now() + 60 * 60_000);
     await db
       .update(quest)
-      .set({ startTime: new Date(Date.now() + 60 * 60_000) })
+      .set({
+        startTime: futureStartTime,
+        dueAt: new Date(futureStartTime.getTime() + 60 * 60_000),
+      })
       .where(eq(quest.id, earlyQuestId));
     const early = await request(`/api/v2/quests/${earlyQuestId}/start-work`, 'POST', worker.id, {
       'idempotency-key': 'start-work-too-early',
