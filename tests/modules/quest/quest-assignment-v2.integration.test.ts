@@ -548,6 +548,36 @@ describe('Quest Assignment API v2', () => {
     expect((await otherHirer.json()).error.code).toBe('QUEST_NOT_FOUND');
   });
 
+  it('lets the Hirer read completed Worker IDs for Reviews after Quest completion', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupFcfsQuest({ questStatus: 'QUEST_COMPLETED' });
+    await db.insert(questAssignment).values([
+      {
+        questId,
+        workerId: worker.id,
+        assignmentStatus: 'ASSIGNMENT_COMPLETED',
+      },
+      {
+        questId,
+        workerId: secondWorker.id,
+        assignmentStatus: 'ASSIGNMENT_COMPLETED',
+      },
+    ]);
+    authenticate();
+
+    const response = await request(`/api/v2/quests/${questId}/assignments`, 'GET', hirer.id);
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: { items: Array<{ workerId: string; state: string }> };
+    };
+    expect(body.data.items).toHaveLength(2);
+    expect(body.data.items.map(({ workerId }) => workerId)).toEqual(
+      expect.arrayContaining([worker.id, secondWorker.id])
+    );
+    expect(body.data.items.every(({ state }) => state === 'ASSIGNMENT_COMPLETED')).toBe(true);
+  });
+
   it('filters the authenticated Worker assignments by active, completed, or all status', async () => {
     if (!postgresAvailable) return;
     const activeQuestId = await createOpenSingleFcfsQuest();
