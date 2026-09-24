@@ -14,7 +14,11 @@ import { and, asc, eq, exists, inArray, isNull, ne, sql } from 'drizzle-orm';
 
 import { FileUploadError } from '@/shared/object-storage';
 
+import { notifyCandidateRosterUpdate } from '../realtime';
+import { isReadableCandidateTeamRoster } from '../shared/candidate-roster-access.policy';
+
 import { type QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
+
 import {
   runQuestCommand,
   sha256Json,
@@ -419,14 +423,7 @@ const teamFromSnapshot = (value: unknown): CandidateTeam | undefined => {
   };
 };
 
-const readableQuest = (current: {
-  v2Mode: string | null;
-  v2Participation: string | null;
-  questState: string;
-}) =>
-  current.v2Mode === questV2Mode.candidate &&
-  current.v2Participation === questV2Participation.group &&
-  current.questState === 'QUEST_OPEN';
+const readableQuest = isReadableCandidateTeamRoster;
 
 const questStartHasPassed = (current: { startTime: Date }, now: Date) =>
   current.startTime.getTime() <= now.getTime();
@@ -637,6 +634,10 @@ export const createQuestV2CandidateTeam = async (
           memberId: leaderId,
           joinedAt: now,
         });
+        await notifyCandidateRosterUpdate(transaction, questId, {
+          kind: 'TEAM',
+          teamId: createdTeam.id,
+        });
         const team = await readTeam(transaction, createdTeam, joinCode);
         return {
           kind: 'success',
@@ -796,6 +797,9 @@ export const updateQuestV2CandidateTeam = async (
           )
           .returning(teamFields);
         if (!updatedTeam) throw new Error('Candidate Team update returned no row');
+        if (team.name !== input.name) {
+          await notifyCandidateRosterUpdate(transaction, questId, { kind: 'TEAM', teamId });
+        }
 
         const updated = await readTeam(transaction, updatedTeam);
         return {
@@ -889,6 +893,7 @@ export const joinQuestV2CandidateTeam = async (
           memberId,
           joinedAt: now,
         });
+        await notifyCandidateRosterUpdate(transaction, questId, { kind: 'TEAM', teamId });
         const result = await readTeam(transaction, team);
         return {
           kind: 'success',
@@ -1016,6 +1021,11 @@ const leaveOrRemoveTeamMember = async (
           if (!transferred) throw new Error('Candidate Team leadership transfer returned no row');
           updatedTeam = transferred;
         }
+        await notifyCandidateRosterUpdate(transaction, questId, {
+          kind: 'TEAM',
+          teamId,
+          closeMemberIds: [removeMemberId ?? memberId],
+        });
 
         const result = await readTeam(transaction, updatedTeam);
         return {
@@ -1367,6 +1377,7 @@ export const submitQuestV2CandidateTeam = async (
           .values(
             input.fileIds.map((fileId, position) => ({ teamId, fileId, position, attachedAt: now }))
           );
+        await notifyCandidateRosterUpdate(transaction, questId, { kind: 'TEAM', teamId });
 
         const result = await readTeam(transaction, updatedTeam);
         return {
@@ -1450,6 +1461,7 @@ export const rejectQuestV2CandidateTeam = async (
           )
           .returning(teamFields);
         if (!updatedTeam) throw new Error('Candidate Team rejection update returned no row');
+        await notifyCandidateRosterUpdate(transaction, questId, { kind: 'TEAM', teamId });
 
         const result = await readTeam(transaction, updatedTeam);
         return {
@@ -1595,6 +1607,10 @@ export const selectQuestV2CandidateTeam = async (
                 eq(questCandidateApplicationV2.state, 'APPLICATION_APPLIED')
               )
             );
+          await notifyCandidateRosterUpdate(flipTransaction, questId, {
+            kind: 'QUEST',
+            closeAll: true,
+          });
         },
       };
     },

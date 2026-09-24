@@ -29,6 +29,8 @@ import {
   type SelectionAssignmentRow,
   type SelectionSuccess,
 } from '../../shared/contracts/quest-selection.service';
+import { notifyCandidateRosterUpdate } from '../realtime';
+import { isReadableCandidateApplicationRoster } from '../shared/candidate-roster-access.policy';
 
 export const questV2CandidateApplicationCreateOperationScope =
   'quest.v2.candidate-application.create';
@@ -118,14 +120,7 @@ const applicationFromSnapshot = (value: unknown): QuestV2CandidateApplicationRow
   };
 };
 
-const isReadableQuest = (current: {
-  v2Mode: string | null;
-  v2Participation: string | null;
-  questState: string;
-}) =>
-  current.v2Mode === questV2Mode.candidate &&
-  current.v2Participation === questV2Participation.single &&
-  (current.questState === 'QUEST_OPEN' || current.questState === 'QUEST_ASSIGNED');
+const isReadableQuest = isReadableCandidateApplicationRoster;
 
 export const createQuestV2CandidateApplication = async (
   memberId: string,
@@ -203,6 +198,11 @@ export const createQuestV2CandidateApplication = async (
         if (!createdApplication) throw new Error('Candidate application insert returned no row');
 
         const application = toApplicationRow(createdApplication);
+        await notifyCandidateRosterUpdate(transaction, questId, { kind: 'HIRER' });
+        await notifyCandidateRosterUpdate(transaction, questId, {
+          kind: 'APPLICATION',
+          applicationId: application.id,
+        });
         return {
           kind: 'success',
           result: application,
@@ -315,6 +315,11 @@ export const withdrawQuestV2CandidateApplication = async (
         }
 
         const updated = toApplicationRow(updatedApplication);
+        await notifyCandidateRosterUpdate(transaction, questId, { kind: 'HIRER' });
+        await notifyCandidateRosterUpdate(transaction, questId, {
+          kind: 'APPLICATION',
+          applicationId: updated.id,
+        });
         return {
           kind: 'success',
           result: updated,
@@ -415,6 +420,11 @@ export const rejectQuestV2CandidateApplication = async (
         }
 
         const updated = toApplicationRow(updatedApplication);
+        await notifyCandidateRosterUpdate(transaction, questId, { kind: 'HIRER' });
+        await notifyCandidateRosterUpdate(transaction, questId, {
+          kind: 'APPLICATION',
+          applicationId: updated.id,
+        });
         return {
           kind: 'success',
           result: updated,
@@ -527,11 +537,12 @@ export const selectQuestV2CandidateApplication = async (
         workerIds: [application.memberId],
         resourceId: (assignments) => assignments[0].id,
         flipCandidateRecords: async (tx) => {
-          await tx
+          const [selectedApplication] = await tx
             .update(questCandidateApplicationV2)
             .set({ state: 'APPLICATION_SELECTED' })
-            .where(eq(questCandidateApplicationV2.id, application.id));
-          await tx
+            .where(eq(questCandidateApplicationV2.id, application.id))
+            .returning({ id: questCandidateApplicationV2.id });
+          const rejectedApplications = await tx
             .update(questCandidateApplicationV2)
             .set({ state: 'APPLICATION_REJECTED' })
             .where(
@@ -540,7 +551,22 @@ export const selectQuestV2CandidateApplication = async (
                 eq(questCandidateApplicationV2.state, 'APPLICATION_APPLIED'),
                 ne(questCandidateApplicationV2.id, application.id)
               )
-            );
+            )
+            .returning({ id: questCandidateApplicationV2.id });
+
+          await notifyCandidateRosterUpdate(tx, questId, { kind: 'HIRER' });
+          if (selectedApplication) {
+            await notifyCandidateRosterUpdate(tx, questId, {
+              kind: 'APPLICATION',
+              applicationId: selectedApplication.id,
+            });
+          }
+          for (const rejectedApplication of rejectedApplications) {
+            await notifyCandidateRosterUpdate(tx, questId, {
+              kind: 'APPLICATION',
+              applicationId: rejectedApplication.id,
+            });
+          }
         },
       };
     },

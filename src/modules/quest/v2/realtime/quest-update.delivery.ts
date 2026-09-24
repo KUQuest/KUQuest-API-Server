@@ -5,7 +5,14 @@ import type { QuestTransaction } from '@/modules/quest/shared';
 
 import { and, eq, gt, sql as drizzleSql } from 'drizzle-orm';
 
-import { parseQuestUpdateNotification, type QuestUpdateNotification } from './quest-update.schema';
+import {
+  parseQuestRealtimeNotification,
+  type CandidateRosterScope,
+  type CandidateRosterUpdateAudience,
+  type CandidateRosterUpdateNotification,
+  type QuestRealtimeNotification,
+  type QuestUpdateNotification,
+} from './quest-update.schema';
 import { getQuestUpdateRoster } from './quest-update.service';
 
 const questUpdateChannel = 'kuquest_quest_updates';
@@ -22,7 +29,15 @@ type QuestUpdateSubscription = {
   socket: QuestUpdateSocket;
 };
 
-const subscriptions = new Map<string, QuestUpdateSubscription>();
+type CandidateRosterSubscription = QuestUpdateSubscription & {
+  stream: 'CANDIDATE_ROSTER';
+  scope: CandidateRosterScope;
+};
+
+type QuestRealtimeSubscription =
+  (QuestUpdateSubscription & { stream: 'QUEST' }) | CandidateRosterSubscription;
+
+const subscriptions = new Map<string, QuestRealtimeSubscription>();
 let listenerStart: Promise<void> | undefined;
 let unlisten: (() => Promise<void>) | undefined;
 let listenerRegistered = false;
@@ -63,10 +78,7 @@ const sessionIsCurrent = async (subscription: QuestUpdateSubscription) => {
   return session !== undefined;
 };
 
-const deliverQuestUpdate = async (payload: string) => {
-  const event = parseQuestUpdateNotification(payload);
-  if (!event) return;
-
+const deliverQuestUpdate = async (event: QuestUpdateNotification) => {
   // Keep the QUEST_OPEN exception limited to Assignment roster invalidations.
   if (event.changeType !== 'ASSIGNMENT_ROSTER_UPDATED') {
     const [current] = await db
@@ -88,7 +100,7 @@ const deliverQuestUpdate = async (payload: string) => {
   const finalRecipients = new Set(event.closeMemberIds ?? []);
 
   for (const [id, subscription] of subscriptions) {
-    if (subscription.questId !== event.questId) continue;
+    if (subscription.stream !== 'QUEST' || subscription.questId !== event.questId) continue;
 
     if (recipients.has(subscription.memberId)) {
       if (!(await sessionIsCurrent(subscription))) {
@@ -109,14 +121,105 @@ const deliverQuestUpdate = async (payload: string) => {
   }
 };
 
-export const notifyQuestUpdate = async (
+const candidateRosterAudienceMatches = (
+  scope: CandidateRosterScope,
+  audience: CandidateRosterUpdateAudience
+) => {
+  switch (audience.kind) {
+    case 'HIRER':
+      return scope.kind === 'HIRER';
+    case 'APPLICATION':
+      return scope.kind === 'APPLICATION' && scope.applicationId === audience.applicationId;
+    case 'TEAM':
+      return scope.kind === 'HIRER' || (scope.kind === 'TEAM' && scope.teamId === audience.teamId);
+    case 'QUEST':
+      return true;
+  }
+};
+
+const deliverCandidateRosterUpdate = async (event: CandidateRosterUpdateNotification) => {
+  const message = JSON.stringify({
+    type: event.type,
+    version: 1,
+    questId: event.questId,
+  });
+  const closeMemberIds =
+    event.audience.kind === 'TEAM' ? new Set(event.audience.closeMemberIds ?? []) : undefined;
+  const closeAll = event.audience.kind === 'QUEST' && event.audience.closeAll;
+
+  for (const [id, subscription] of subscriptions) {
+    if (subscription.stream !== 'CANDIDATE_ROSTER' || subscription.questId !== event.questId)
+      continue;
+
+    const receivesUpdate = candidateRosterAudienceMatches(subscription.scope, event.audience);
+    const removedMember = closeMemberIds?.has(subscription.memberId) ?? false;
+    const losesAccess = closeAll || removedMember;
+    if (!receivesUpdate && !losesAccess) continue;
+
+    if (receivesUpdate && !removedMember) {
+      if (!(await sessionIsCurrent(subscription))) {
+        closeSubscription(id, subscription, 4401, 'Session expired');
+        continue;
+      }
+      try {
+        subscription.socket.send(message);
+      } catch {
+        closeSubscription(id, subscription, 1011, 'Delivery failed');
+        continue;
+      }
+    }
+
+    if (losesAccess) {
+      closeSubscription(id, subscription, 4403, 'Candidate roster access ended');
+    }
+  }
+};
+
+const deliverQuestRealtimeNotification = async (event: QuestRealtimeNotification) => {
+  if ('type' in event) {
+    await deliverCandidateRosterUpdate(event);
+    return;
+  }
+
+  await deliverQuestUpdate(event);
+  if (
+    event.changeType === 'QUEST_STARTED' ||
+    event.changeType === 'QUEST_COMPLETED' ||
+    event.changeType === 'QUEST_FAILED' ||
+    event.changeType === 'QUEST_CANCELLED'
+  ) {
+    await deliverCandidateRosterUpdate({
+      questId: event.questId,
+      type: 'CANDIDATE_ROSTER_UPDATED',
+      audience: { kind: 'QUEST', closeAll: true },
+    });
+  }
+};
+
+const notifyQuestRealtimeUpdate = async (
   transaction: QuestTransaction,
-  event: QuestUpdateNotification
+  event: QuestRealtimeNotification
 ) => {
   await transaction.execute(
     drizzleSql`select pg_notify(${questUpdateChannel}, ${JSON.stringify(event)})`
   );
 };
+
+export const notifyQuestUpdate = async (
+  transaction: QuestTransaction,
+  event: QuestUpdateNotification
+) => notifyQuestRealtimeUpdate(transaction, event);
+
+export const notifyCandidateRosterUpdate = async (
+  transaction: QuestTransaction,
+  questId: string,
+  audience: CandidateRosterUpdateAudience
+) =>
+  notifyQuestRealtimeUpdate(transaction, {
+    questId,
+    type: 'CANDIDATE_ROSTER_UPDATED',
+    audience,
+  });
 
 export const notifyQuestRosterUpdate = async (transaction: QuestTransaction, questId: string) => {
   const roster = await getQuestUpdateRoster(transaction, questId);
@@ -129,16 +232,26 @@ export const notifyQuestRosterUpdate = async (transaction: QuestTransaction, que
   });
 };
 
+const subscribe = (subscription: QuestRealtimeSubscription) => {
+  const id = crypto.randomUUID();
+  subscriptions.set(id, subscription);
+  return () => subscriptions.delete(id);
+};
+
 export const subscribeToQuestUpdates = (
   questId: string,
   memberId: string,
   sessionId: string,
   socket: QuestUpdateSocket
-) => {
-  const id = crypto.randomUUID();
-  subscriptions.set(id, { questId, memberId, sessionId, socket });
-  return () => subscriptions.delete(id);
-};
+) => subscribe({ stream: 'QUEST', questId, memberId, sessionId, socket });
+
+export const subscribeToCandidateRosterUpdates = (
+  questId: string,
+  memberId: string,
+  sessionId: string,
+  scope: CandidateRosterScope,
+  socket: QuestUpdateSocket
+) => subscribe({ stream: 'CANDIDATE_ROSTER', questId, memberId, sessionId, scope, socket });
 
 export const ensureQuestUpdateListener = async () => {
   if (!listenerStart) {
@@ -146,8 +259,10 @@ export const ensureQuestUpdateListener = async () => {
       .listen(
         questUpdateChannel,
         (payload) => {
+          const event = parseQuestRealtimeNotification(payload);
+          if (!event) return;
           deliveryQueue = deliveryQueue
-            .then(() => deliverQuestUpdate(payload))
+            .then(() => deliverQuestRealtimeNotification(event))
             .catch((error: unknown) => {
               console.error('[quest-update] Could not deliver committed update:', error);
               closeAllSubscriptions(1013, 'Update service unavailable');
