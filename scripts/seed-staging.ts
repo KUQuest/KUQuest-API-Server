@@ -1,6 +1,7 @@
 export {};
 
 const seedCommands = [
+  'db:seed-academic-options',
   'db:seed-quest-tag',
   'db:seed-admin',
   'db:seed-demo-users',

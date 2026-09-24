@@ -18,6 +18,7 @@
     "build": "bun build src/index.ts --target=bun --outdir=dist",
     "db:generate": "drizzle-kit generate",
     "db:check": "bun scripts/check-migrations.ts",
+    "db:seed-academic-options": "bun scripts/seed-academic-options.ts",
     "db:seed-quest-tag": "bun scripts/seed-quest-tag.ts",
     "db:seed-admin": "bun scripts/seed-admin.ts",
     "db:seed-demo-users": "bun scripts/seed-demo-users.ts",
