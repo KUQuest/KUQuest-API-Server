@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import {
   adminConductReport,
+  adminConductReportEvidenceHandle,
   adminEvidenceReference,
   adminModerationDecision,
   adminReportCase,
@@ -29,7 +30,7 @@ import {
   chatMessage,
   chatMessageAttachment,
 } from '@/database/schema/work-chat.schema';
-import { CursorInputError, type CursorPayload } from '@/shared/cursor';
+import { CursorInputError, encodeCursor, type CursorPayload } from '@/shared/cursor';
 import {
   readKeysetPage,
   type KeysetAnchor,
@@ -37,6 +38,8 @@ import {
   type KeysetSort,
 } from '@/shared/keyset-page';
 import { workChatStorage } from '@/modules/work-chat';
+
+import { createHash, randomBytes } from 'node:crypto';
 
 import {
   and,
@@ -55,9 +58,10 @@ import {
 import { alias } from 'drizzle-orm/pg-core';
 
 import type {
+  AdminConductReportCommandSummary,
   AdminConductReportDetail,
   AdminConductReportSummary,
-  AdminReportCommandData,
+  AdminReportCommandSummary,
   AdminReportDetailData,
   AdminReportEvidenceData,
   AdminReportListData,
@@ -68,51 +72,30 @@ import {
   type AdminActionResult,
   type AdminActionTransaction,
 } from './admin-action.service';
-import type { AdminActionReasonCatalog } from './admin-action.policy';
 import { formatConductReportDisplayId, formatReportCaseDisplayId } from './admin-display-id';
+import {
+  reportAdminActionCatalog,
+  type ConductReportDismissReasonCode,
+} from './admin-report.policy';
 
 export type ReportCaseOutcome =
   'REPORT_CASE_DISMISSED' | 'REPORT_CASE_HIDDEN' | 'REPORT_CASE_RESTORED';
-
-export const reportAdminReasonCodes = ['POLICY_REVIEW', 'SAFETY_REVIEW'] as const;
-
-export const reportAdminActionCatalog: AdminActionReasonCatalog = {
-  version: 1,
-  actions: {
-    REPORT_CASE_DISMISS: {
-      kind: 'COMMAND',
-      requiresReason: true,
-      allowedReasonCodes: reportAdminReasonCodes,
-    },
-    REPORT_CASE_HIDE: {
-      kind: 'COMMAND',
-      requiresReason: true,
-      allowedReasonCodes: reportAdminReasonCodes,
-    },
-    REPORT_CASE_RESTORE: {
-      kind: 'COMMAND',
-      requiresReason: true,
-      allowedReasonCodes: reportAdminReasonCodes,
-    },
-    REPORT_CASE_EVIDENCE_ACCESS: {
-      kind: 'EVIDENCE_ACCESS',
-      requiresReason: false,
-      allowedReasonCodes: [],
-    },
-  },
-};
 
 const adminActionService = createAdminActionService(reportAdminActionCatalog);
 const maxEvidenceContextMessages = 3;
 const evidenceProbeLimit = maxEvidenceContextMessages + 1;
 
-export class AdminReportCaseError extends Error {
+export class AdminReportError extends Error {
   readonly code:
-    'REPORT_CASE_NOT_FOUND' | 'REPORT_CASE_OUTCOME_INVALID' | 'REPORT_EVIDENCE_NOT_FOUND';
+    | 'REPORT_CASE_NOT_FOUND'
+    | 'REPORT_CASE_OUTCOME_INVALID'
+    | 'CONDUCT_REPORT_NOT_FOUND'
+    | 'CONDUCT_REPORT_OUTCOME_INVALID'
+    | 'REPORT_EVIDENCE_NOT_FOUND';
 
-  constructor(code: AdminReportCaseError['code'], message: string) {
+  constructor(code: AdminReportError['code'], message: string) {
     super(message);
-    this.name = 'AdminReportCaseError';
+    this.name = 'AdminReportError';
     this.code = code;
   }
 }
@@ -142,6 +125,8 @@ type ConductReportQuest = Pick<
   | 'v2Mode'
   | 'v2Participation'
   | 'questStatus'
+  | 'failedAt'
+  | 'cancelledAt'
   | 'headcount'
   | 'proofRequired'
   | 'startTime'
@@ -183,14 +168,31 @@ type ReportCaseSummary = Extract<AdminReportListData['items'][number], { kind: '
 type ConductReportSummary = AdminConductReportSummary;
 type ConductReportDetail = AdminConductReportDetail;
 type AdminReportStatus = NonNullable<AdminReportListQuery['status']>;
-type ReportCaseCommandSummary = AdminReportCommandData['resourceSummary'];
-type AdminReportEvidence = Omit<AdminReportEvidenceData, 'adminActionId'>;
+type ReportCaseCommandSummary = Extract<AdminReportCommandSummary, { kind: 'REPORT_CASE' }>;
+type ConductReportCommandSummary = AdminConductReportCommandSummary;
+type AdminReportCaseEvidence = Extract<AdminReportEvidenceData, { caseId: string }>;
+type AdminConductReportEvidence = Extract<AdminReportEvidenceData, { conductReportId: string }>;
+type AdminReportCaseEvidenceWithoutAction = Omit<AdminReportCaseEvidence, 'adminActionId'>;
+type AdminConductReportEvidenceWithoutAction = Omit<AdminConductReportEvidence, 'adminActionId'>;
+type AdminReportEvidenceMessage = AdminReportCaseEvidence['messages'][number];
+type AdminReportEvidencePageInput = { limit: number; cursor?: CursorPayload };
 
 const conductReportFilerUser = alias(authUser, 'conduct_report_filer');
 const conductReportReportedUser = alias(authUser, 'conduct_report_reported_member');
 const conductReportHirerUser = alias(authUser, 'conduct_report_hirer');
 const conductReportAssignmentWorker = alias(authUser, 'conduct_report_assignment_worker');
 const conductReportProofSubmitter = alias(authUser, 'conduct_report_proof_submitter');
+const conductReportEvidenceCandidate = alias(authUser, 'conduct_report_evidence_candidate');
+const conductReportEvidenceWorkConversation = alias(
+  chatConversation,
+  'conduct_report_evidence_work_conversation'
+);
+
+const conductReportEvidenceHandlePrefix = 'CRH_';
+const conductReportEvidenceCursorScope = 'CONDUCT_REPORT_EVIDENCE';
+
+const newConductReportEvidenceHandle = (): string =>
+  `${conductReportEvidenceHandlePrefix}${randomBytes(32).toString('base64url')}`;
 
 const serializeDate = (value: Date | null): string | null => value?.toISOString() ?? null;
 
@@ -368,6 +370,8 @@ const selectConductReportRows = (database: ReportDatabase) =>
         v2Mode: quest.v2Mode,
         v2Participation: quest.v2Participation,
         questStatus: quest.questStatus,
+        failedAt: quest.failedAt,
+        cancelledAt: quest.cancelledAt,
         headcount: quest.headcount,
         proofRequired: quest.proofRequired,
         startTime: quest.startTime,
@@ -834,6 +838,177 @@ const conductReportProofRowFor = async (
     : undefined;
 };
 
+type PermittedConductReportConversation = {
+  id: string;
+  conversationType: 'CONVERSATION_WORK' | 'CONVERSATION_CANDIDATE_INQUIRY';
+  candidate: ConductReportMember | null;
+  latestTerminalAt: Date | null;
+};
+
+type ConductReportEvidenceHandleSummary = ConductReportDetail['evidenceHandles'][number];
+
+const oneCalendarYearAfter = (value: Date): Date => {
+  const year = value.getUTCFullYear() + 1;
+  const month = value.getUTCMonth();
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const result = new Date(value);
+  result.setUTCFullYear(year, month, Math.min(value.getUTCDate(), lastDay));
+  return result;
+};
+
+const conductReportEvidenceExpiresAt = (
+  questRow: Pick<ConductReportQuest, 'questStatus' | 'failedAt' | 'cancelledAt' | 'updatedAt'>,
+  latestTerminalAt: Date | null
+): Date | null => {
+  const terminalAt =
+    latestTerminalAt ??
+    (questRow.questStatus === 'QUEST_FAILED'
+      ? questRow.failedAt
+      : questRow.questStatus === 'QUEST_CANCELLED'
+        ? questRow.cancelledAt
+        : questRow.questStatus === 'QUEST_COMPLETED'
+          ? questRow.updatedAt
+          : null);
+  return terminalAt ? oneCalendarYearAfter(terminalAt) : null;
+};
+
+const permittedConductReportConversations = async (
+  database: ReportDatabase,
+  report: typeof adminConductReport.$inferSelect
+): Promise<PermittedConductReportConversation[]> => {
+  const [workConversation] = await database
+    .select({
+      id: chatConversation.id,
+      latestTerminalAt: chatConversation.latestTerminalAt,
+    })
+    .from(chatConversation)
+    .where(
+      and(
+        eq(chatConversation.questId, report.questId),
+        eq(chatConversation.type, 'CONVERSATION_WORK'),
+        isNull(chatConversation.deletedAt)
+      )
+    )
+    .limit(1);
+
+  const candidateInquiries = await database
+    .select({
+      id: chatConversation.id,
+      candidate: {
+        id: conductReportEvidenceCandidate.id,
+        email: conductReportEvidenceCandidate.email,
+        firstName: conductReportEvidenceCandidate.firstName,
+        lastName: conductReportEvidenceCandidate.lastName,
+      },
+    })
+    .from(chatConversation)
+    .innerJoin(
+      conductReportEvidenceCandidate,
+      eq(conductReportEvidenceCandidate.id, chatConversation.candidateWorkerId)
+    )
+    .where(
+      and(
+        eq(chatConversation.questId, report.questId),
+        eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
+        isNull(chatConversation.deletedAt),
+        exists(
+          database
+            .select({ id: chatMembership.id })
+            .from(chatMembership)
+            .where(
+              and(
+                eq(chatMembership.conversationId, chatConversation.id),
+                inArray(chatMembership.memberId, [report.filerUserId, report.reportedMemberId])
+              )
+            )
+        )
+      )
+    )
+    .orderBy(asc(chatConversation.createdAt), asc(chatConversation.id));
+
+  return [
+    ...(workConversation
+      ? [
+          {
+            id: workConversation.id,
+            conversationType: 'CONVERSATION_WORK' as const,
+            candidate: null,
+            latestTerminalAt: workConversation.latestTerminalAt,
+          },
+        ]
+      : []),
+    ...candidateInquiries.map((conversation) => ({
+      id: conversation.id,
+      conversationType: 'CONVERSATION_CANDIDATE_INQUIRY' as const,
+      candidate: conversation.candidate,
+      latestTerminalAt: workConversation?.latestTerminalAt ?? null,
+    })),
+  ];
+};
+
+const conductReportEvidenceHandlesFor = async (
+  database: ReportDatabase,
+  row: ConductReportListRow
+): Promise<ConductReportEvidenceHandleSummary[]> => {
+  const conversations = await permittedConductReportConversations(database, row.report);
+  const now = new Date();
+  const eligibleConversations = conversations.filter((conversation) => {
+    const expiresAt = conductReportEvidenceExpiresAt(row.quest, conversation.latestTerminalAt);
+    return expiresAt === null || expiresAt > now;
+  });
+  if (eligibleConversations.length === 0) return [];
+
+  await database
+    .insert(adminConductReportEvidenceHandle)
+    .values(
+      eligibleConversations.map((conversation) => ({
+        id: newConductReportEvidenceHandle(),
+        reportId: row.report.id,
+        conversationId: conversation.id,
+        createdAt: now,
+      }))
+    )
+    .onConflictDoNothing({
+      target: [
+        adminConductReportEvidenceHandle.reportId,
+        adminConductReportEvidenceHandle.conversationId,
+      ],
+    });
+
+  const storedHandles = await database
+    .select({
+      handle: adminConductReportEvidenceHandle.id,
+      conversationId: adminConductReportEvidenceHandle.conversationId,
+    })
+    .from(adminConductReportEvidenceHandle)
+    .where(
+      and(
+        eq(adminConductReportEvidenceHandle.reportId, row.report.id),
+        inArray(
+          adminConductReportEvidenceHandle.conversationId,
+          eligibleConversations.map((conversation) => conversation.id)
+        )
+      )
+    );
+  const handleByConversation = new Map(
+    storedHandles.map((stored) => [stored.conversationId, stored.handle])
+  );
+
+  return eligibleConversations.flatMap((conversation) => {
+    const handle = handleByConversation.get(conversation.id);
+    if (!handle) return [];
+    const expiresAt = conductReportEvidenceExpiresAt(row.quest, conversation.latestTerminalAt);
+    return [
+      {
+        handle,
+        conversationType: conversation.conversationType,
+        candidate: conversation.candidate,
+        expiresAt: expiresAt?.toISOString() ?? null,
+      },
+    ];
+  });
+};
+
 export const getAdminReport = async (reportId: string): Promise<AdminReportDetailData> => {
   const reportCaseRow = await readReportCaseById(db, reportId);
   if (reportCaseRow) {
@@ -845,7 +1020,7 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
     .where(eq(adminConductReport.id, reportId))
     .limit(1);
   if (!conductReportRow) {
-    throw new AdminReportCaseError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
+    throw new AdminReportError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
   }
 
   const [assignmentRow] = await db
@@ -871,7 +1046,7 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
     )
     .limit(1);
   if (!assignmentRow) {
-    throw new AdminReportCaseError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
+    throw new AdminReportError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
   }
 
   const proofRow = await conductReportProofRowFor(
@@ -908,6 +1083,9 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
           updatedAt: serializeDate(proofRow.updatedAt),
         }
       : null,
+    evidenceHandles: await db.transaction((transaction) =>
+      conductReportEvidenceHandlesFor(transaction, conductReportRow)
+    ),
   };
   return detail;
 };
@@ -921,7 +1099,7 @@ const assertTransition = (currentStatus: ReportCaseStatus, outcome: ReportCaseOu
         : [];
 
   if (!allowed.includes(outcome)) {
-    throw new AdminReportCaseError(
+    throw new AdminReportError(
       'REPORT_CASE_OUTCOME_INVALID',
       'The Report Case is not in a state that accepts this outcome.'
     );
@@ -987,11 +1165,14 @@ const restoreMessageInTransaction = async (
     );
 };
 
-export type DecideAdminReportCaseInput = {
+type AdminReportCommandInput = {
   adminId: string;
   reportId: string;
   expectedVersion: number;
   requestKey: string;
+};
+
+export type DecideAdminReportCaseInput = AdminReportCommandInput & {
   reasonCode?: string;
   outcome: ReportCaseOutcome;
   now?: Date;
@@ -1025,7 +1206,7 @@ export const decideAdminReportCase = async (
     prepare: async (database) => {
       const current = await readReportCaseById(database, input.reportId, true);
       if (!current) {
-        throw new AdminReportCaseError('REPORT_CASE_NOT_FOUND', 'Report Case does not exist.');
+        throw new AdminReportError('REPORT_CASE_NOT_FOUND', 'Report Case does not exist.');
       }
       assertTransition(current.reportCase.status, input.outcome);
 
@@ -1070,7 +1251,7 @@ export const decideAdminReportCase = async (
             .where(eq(adminReportCase.id, current.reportCase.id))
             .returning();
           if (!updated) {
-            throw new AdminReportCaseError(
+            throw new AdminReportError(
               'REPORT_CASE_NOT_FOUND',
               'Report Case could not be updated.'
             );
@@ -1086,6 +1267,134 @@ export const decideAdminReportCase = async (
     },
   });
 
+  return { ...result, outcome: input.outcome };
+};
+
+type DismissAdminConductReportInput = AdminReportCommandInput & {
+  decisionReasonCode: ConductReportDismissReasonCode;
+};
+
+const dismissAdminConductReport = async (
+  input: DismissAdminConductReportInput
+): Promise<AdminActionResult<ConductReportCommandSummary>> => {
+  const now = new Date();
+
+  return adminActionService.executeCommand<ConductReportCommandSummary>({
+    adminId: input.adminId,
+    action: 'CONDUCT_REPORT_DISMISS',
+    resourceType: 'conduct_report',
+    resourceId: input.reportId,
+    requestKey: input.requestKey,
+    reasonCode: input.decisionReasonCode,
+    request: { outcome: conductReportStatus.dismissed },
+    metadata: { outcome: conductReportStatus.dismissed },
+    expectedVersion: input.expectedVersion,
+    prepare: async (database) => {
+      const [current] = await database
+        .select({ status: adminConductReport.status, version: adminConductReport.version })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, input.reportId))
+        .limit(1)
+        .for('update');
+      if (!current) {
+        throw new AdminReportError('CONDUCT_REPORT_NOT_FOUND', 'Conduct Report does not exist.');
+      }
+      return {
+        currentVersion: current.version,
+        apply: async () => {
+          if (current.status !== conductReportStatus.pending) {
+            throw new AdminReportError(
+              'CONDUCT_REPORT_OUTCOME_INVALID',
+              'Only a pending Conduct Report can be dismissed.'
+            );
+          }
+
+          const [updated] = await database
+            .update(adminConductReport)
+            .set({
+              status: conductReportStatus.dismissed,
+              decisionReason: input.decisionReasonCode,
+              resolvedByAdminId: input.adminId,
+              resolvedAt: now,
+              version: sql`${adminConductReport.version} + 1`,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                eq(adminConductReport.id, input.reportId),
+                eq(adminConductReport.version, current.version)
+              )
+            )
+            .returning({
+              id: adminConductReport.id,
+              publicSequence: adminConductReport.publicSequence,
+              status: adminConductReport.status,
+              version: adminConductReport.version,
+              updatedAt: adminConductReport.updatedAt,
+              resolvedAt: adminConductReport.resolvedAt,
+            });
+          if (!updated) {
+            throw new AdminReportError(
+              'CONDUCT_REPORT_NOT_FOUND',
+              'Conduct Report could not be updated.'
+            );
+          }
+
+          return {
+            resourceSummary: {
+              kind: 'CONDUCT_REPORT',
+              id: updated.id,
+              displayId: formatConductReportDisplayId(updated.publicSequence),
+              status: updated.status,
+              version: updated.version,
+              updatedAt: updated.updatedAt.toISOString(),
+              resolvedAt: serializeDate(updated.resolvedAt),
+            },
+            resourceVersion: updated.version,
+            resourceTimestamp: null,
+          };
+        },
+      };
+    },
+  });
+};
+
+export type DecideAdminReportInput = AdminReportCommandInput &
+  (
+    | { outcome: ReportCaseOutcome; reasonCode?: string; now?: Date }
+    | {
+        outcome: typeof conductReportStatus.dismissed;
+        decisionReasonCode: ConductReportDismissReasonCode;
+      }
+  );
+
+export type DecideAdminReportResult = AdminActionResult<AdminReportCommandSummary> & {
+  outcome: ReportCaseOutcome | typeof conductReportStatus.dismissed;
+};
+
+export const decideAdminReport = async (
+  input: DecideAdminReportInput
+): Promise<DecideAdminReportResult> => {
+  if (input.outcome === conductReportStatus.dismissed) {
+    const result = await dismissAdminConductReport({
+      adminId: input.adminId,
+      reportId: input.reportId,
+      expectedVersion: input.expectedVersion,
+      requestKey: input.requestKey,
+      decisionReasonCode: input.decisionReasonCode,
+    });
+    return { ...result, outcome: input.outcome };
+  }
+
+  const result = await decideAdminReportCase({
+    adminId: input.adminId,
+    reportId: input.reportId,
+    expectedVersion: input.expectedVersion,
+    requestKey: input.requestKey,
+    now: input.now,
+    reasonCode: input.reasonCode,
+    outcome: input.outcome,
+  });
   return { ...result, outcome: input.outcome };
 };
 
@@ -1135,7 +1444,7 @@ const selectEvidenceMessageRows = async (
     )
     .limit(limit);
 
-const evidenceMessageFrom = (row: EvidenceMessageRow): AdminReportEvidence['messages'][number] => ({
+const evidenceMessageFrom = (row: EvidenceMessageRow): AdminReportEvidenceMessage => ({
   id: row.id,
   conversationId: row.conversationId,
   sequence: row.sequence,
@@ -1159,7 +1468,7 @@ const evidenceMessageFrom = (row: EvidenceMessageRow): AdminReportEvidence['mess
 const evidenceForInTransaction = async (
   database: ReportDatabase,
   evidenceRefId: string
-): Promise<AdminReportEvidence> => {
+): Promise<AdminReportCaseEvidenceWithoutAction> => {
   const [reference] = await database
     .select({
       caseId: adminReportCase.id,
@@ -1175,17 +1484,17 @@ const evidenceForInTransaction = async (
     .where(eq(adminEvidenceReference.id, evidenceRefId))
     .limit(1);
   if (!reference) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
   if (
     reference.caseStatus !== reportCaseStatus.pending &&
     reference.caseStatus !== reportCaseStatus.hidden
   ) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
 
   if (reference.messageId && reference.messageId !== reference.reportMessageId) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
 
   if (reference.attachmentId) {
@@ -1202,10 +1511,7 @@ const evidenceForInTransaction = async (
       )
       .limit(1);
     if (!attachmentReference) {
-      throw new AdminReportCaseError(
-        'REPORT_EVIDENCE_NOT_FOUND',
-        'Report evidence does not exist.'
-      );
+      throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
     }
   }
 
@@ -1216,7 +1522,7 @@ const evidenceForInTransaction = async (
     1
   );
   if (!target || target.conversationId !== reference.conversationId) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
 
   const [before, after] = await Promise.all([
@@ -1323,7 +1629,7 @@ const reportCaseIdForEvidence = async (evidenceRefId: string): Promise<string> =
     .where(eq(adminEvidenceReference.id, evidenceRefId))
     .limit(1);
   if (!reference) {
-    throw new AdminReportCaseError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
   return reference.caseId;
 };
@@ -1331,10 +1637,15 @@ const reportCaseIdForEvidence = async (evidenceRefId: string): Promise<string> =
 export const getAdminReportEvidence = async (
   adminId: string,
   evidenceRefId: string,
-  requestKey: string
+  requestKey: string,
+  page: AdminReportEvidencePageInput
 ): Promise<AdminReportEvidenceData> => {
+  if (/^CRH_[A-Za-z0-9_-]{43}$/.test(evidenceRefId)) {
+    return getConductReportEvidencePage(adminId, evidenceRefId, requestKey, page);
+  }
+
   const reportCaseId = await reportCaseIdForEvidence(evidenceRefId);
-  let evidence: AdminReportEvidence | undefined;
+  let evidence: AdminReportCaseEvidenceWithoutAction | undefined;
   const result = await adminActionService.recordEvidenceAccess({
     adminId,
     action: 'REPORT_CASE_EVIDENCE_ACCESS',
@@ -1361,5 +1672,363 @@ export const getAdminReportEvidence = async (
   const loaded =
     evidence ??
     (await db.transaction((database) => evidenceForInTransaction(database, evidenceRefId)));
+  return { ...loaded, adminActionId: result.adminActionId };
+};
+
+type ConductReportEvidenceContext = {
+  reportId: string;
+  conversationId: string;
+  conversationType: 'CONVERSATION_WORK' | 'CONVERSATION_CANDIDATE_INQUIRY';
+  expiresAt: Date | null;
+};
+
+const conductReportEvidenceContextFor = async (
+  database: ReportDatabase,
+  evidenceHandle: string
+): Promise<ConductReportEvidenceContext> => {
+  const [row] = await database
+    .select({
+      reportId: adminConductReport.id,
+      filerUserId: adminConductReport.filerUserId,
+      reportedMemberId: adminConductReport.reportedMemberId,
+      conversationId: chatConversation.id,
+      conversationType: chatConversation.type,
+      conversationLatestTerminalAt: chatConversation.latestTerminalAt,
+      workLatestTerminalAt: conductReportEvidenceWorkConversation.latestTerminalAt,
+      questStatus: quest.questStatus,
+      failedAt: quest.failedAt,
+      cancelledAt: quest.cancelledAt,
+      questUpdatedAt: quest.updatedAt,
+    })
+    .from(adminConductReportEvidenceHandle)
+    .innerJoin(
+      adminConductReport,
+      eq(adminConductReport.id, adminConductReportEvidenceHandle.reportId)
+    )
+    .innerJoin(
+      chatConversation,
+      and(
+        eq(chatConversation.id, adminConductReportEvidenceHandle.conversationId),
+        eq(chatConversation.questId, adminConductReport.questId)
+      )
+    )
+    .innerJoin(quest, eq(quest.id, adminConductReport.questId))
+    .leftJoin(
+      conductReportEvidenceWorkConversation,
+      and(
+        eq(conductReportEvidenceWorkConversation.questId, adminConductReport.questId),
+        eq(conductReportEvidenceWorkConversation.type, 'CONVERSATION_WORK'),
+        isNull(conductReportEvidenceWorkConversation.deletedAt)
+      )
+    )
+    .where(
+      and(
+        eq(adminConductReportEvidenceHandle.id, evidenceHandle),
+        isNull(chatConversation.deletedAt)
+      )
+    )
+    .limit(1);
+
+  if (!row) {
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+  }
+
+  if (row.conversationType === 'CONVERSATION_CANDIDATE_INQUIRY') {
+    const [participant] = await database
+      .select({ id: chatMembership.id })
+      .from(chatMembership)
+      .where(
+        and(
+          eq(chatMembership.conversationId, row.conversationId),
+          inArray(chatMembership.memberId, [row.filerUserId, row.reportedMemberId])
+        )
+      )
+      .limit(1);
+    if (!participant) {
+      throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+    }
+  } else if (row.conversationType !== 'CONVERSATION_WORK') {
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+  }
+
+  const latestTerminalAt = row.conversationLatestTerminalAt ?? row.workLatestTerminalAt;
+  const expiresAt = conductReportEvidenceExpiresAt(
+    {
+      questStatus: row.questStatus,
+      failedAt: row.failedAt,
+      cancelledAt: row.cancelledAt,
+      updatedAt: row.questUpdatedAt,
+    },
+    latestTerminalAt
+  );
+  if (expiresAt && expiresAt <= new Date()) {
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+  }
+
+  return {
+    reportId: row.reportId,
+    conversationId: row.conversationId,
+    conversationType: row.conversationType,
+    expiresAt,
+  };
+};
+
+const conductReportEvidenceCursorAnchor = (
+  database: ReportDatabase,
+  conversationId: string
+): KeysetCursorAnchor => ({
+  read: async (cursor) => {
+    if (cursor.scope !== conductReportEvidenceCursorScope) return undefined;
+    const [row] = await database
+      .select({ startTime: chatMessage.createdAt })
+      .from(chatMessage)
+      .where(
+        and(
+          eq(chatMessage.id, cursor.id),
+          eq(chatMessage.conversationId, conversationId),
+          isNull(chatMessage.deletedAt)
+        )
+      )
+      .limit(1);
+    return row ? { ...row, id: cursor.id, scope: conductReportEvidenceCursorScope } : undefined;
+  },
+  boundary: (anchor, sort) => {
+    const anchorRow = sql`(
+      select ${chatMessage.sequence}, ${chatMessage.id}
+      from ${chatMessage}
+      where ${chatMessage.id} = ${anchor.id}
+        and ${chatMessage.conversationId} = ${conversationId}
+        and ${chatMessage.deletedAt} is null
+    )`;
+    return sort === 'oldest'
+      ? sql`(${chatMessage.sequence}, ${chatMessage.id}) > ${anchorRow}`
+      : sql`(${chatMessage.sequence}, ${chatMessage.id}) < ${anchorRow}`;
+  },
+  orderBy: (sort) =>
+    sort === 'oldest'
+      ? [asc(chatMessage.sequence), asc(chatMessage.id)]
+      : [desc(chatMessage.sequence), desc(chatMessage.id)],
+});
+
+const conductReportEvidencePageInTransaction = async (
+  database: ReportDatabase,
+  evidenceHandle: string,
+  context: ConductReportEvidenceContext,
+  pageInput: AdminReportEvidencePageInput
+): Promise<AdminConductReportEvidenceWithoutAction> => {
+  const page = await readKeysetPage({
+    cursorAnchor: conductReportEvidenceCursorAnchor(database, context.conversationId),
+    cursor: pageInput.cursor,
+    limit: pageInput.limit,
+    sort: 'oldest',
+    where: and(
+      eq(chatMessage.conversationId, context.conversationId),
+      isNull(chatMessage.deletedAt)
+    ),
+    read: ({ where, limit }) => selectEvidenceMessageRows(database, where, 'asc', limit),
+    rowCursor: (row) => ({
+      startTime: row.createdAt,
+      id: row.id,
+      scope: conductReportEvidenceCursorScope,
+    }),
+    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'Evidence cursor is invalid.'),
+  });
+
+  const messages = page.rows.map(evidenceMessageFrom);
+  if (messages.length > 0) {
+    const attachmentRows = await database
+      .select({
+        messageId: chatMessageAttachment.messageId,
+        id: chatAttachment.id,
+        status: chatAttachment.status,
+        originalFilename: chatAttachment.originalFilename,
+        mimeType: chatAttachment.mimeType,
+        sizeBytes: chatAttachment.sizeBytes,
+        bucket: file.bucket,
+        objectKey: file.objectKey,
+        attachmentObjectDeletedAt: chatAttachment.objectDeletedAt,
+        fileObjectDeletedAt: file.objectDeletedAt,
+        fileDeletedAt: file.deletedAt,
+      })
+      .from(chatMessageAttachment)
+      .innerJoin(chatAttachment, eq(chatAttachment.id, chatMessageAttachment.attachmentId))
+      .leftJoin(file, eq(file.id, chatAttachment.fileId))
+      .where(
+        and(
+          inArray(
+            chatMessageAttachment.messageId,
+            messages.map((message) => message.id)
+          ),
+          eq(chatAttachment.conversationId, context.conversationId),
+          inArray(chatAttachment.status, ['CONSUMED', 'HIDDEN']),
+          isNull(chatAttachment.deletedAt)
+        )
+      )
+      .orderBy(asc(chatMessageAttachment.messageId), asc(chatMessageAttachment.position));
+
+    const messageById = new Map(messages.map((message) => [message.id, message]));
+    for (const attachment of attachmentRows) {
+      const link =
+        attachment.bucket &&
+        attachment.objectKey &&
+        !attachment.attachmentObjectDeletedAt &&
+        !attachment.fileObjectDeletedAt &&
+        !attachment.fileDeletedAt
+          ? workChatStorage.linkForWithExpiry({
+              bucket: attachment.bucket,
+              objectKey: attachment.objectKey,
+            })
+          : null;
+      messageById.get(attachment.messageId)?.attachments.push({
+        id: attachment.id,
+        status: attachment.status,
+        originalFilename: attachment.originalFilename,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        url: link?.url ?? null,
+        urlExpiresAt: link?.expiresAt.toISOString() ?? null,
+      });
+    }
+  }
+
+  return {
+    conductReportId: context.reportId,
+    evidenceHandle,
+    conversationType: context.conversationType,
+    expiresAt: context.expiresAt?.toISOString() ?? null,
+    messages,
+    nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
+  };
+};
+
+const fileAccessRequestKey = (
+  requestKey: string,
+  evidenceHandle: string,
+  attachmentId: string
+): string =>
+  `CRHF_${createHash('sha256')
+    .update(`${requestKey}:${evidenceHandle}:${attachmentId}`)
+    .digest('hex')}`;
+
+const recordConductReportFileAccesses = async (
+  database: AdminActionTransaction,
+  input: {
+    adminId: string;
+    reportId: string;
+    evidenceHandle: string;
+    requestKey: string;
+    messages: AdminConductReportEvidenceWithoutAction['messages'];
+  }
+): Promise<void> => {
+  for (const message of input.messages) {
+    for (const attachment of message.attachments) {
+      if (!attachment.url) continue;
+      // eslint-disable-next-line no-await-in-loop
+      await adminActionService.recordEvidenceAccessInTransaction(database, {
+        adminId: input.adminId,
+        action: 'CONDUCT_REPORT_EVIDENCE_FILE_ACCESS',
+        resourceType: 'conduct_report',
+        resourceId: input.reportId,
+        requestKey: fileAccessRequestKey(input.requestKey, input.evidenceHandle, attachment.id),
+        request: { resourceId: attachment.id, handleId: input.evidenceHandle },
+        metadata: { scope: 'conduct-report-file-link' },
+        read: async () => ({
+          resourceSummary: { resourceId: attachment.id },
+          resourceVersion: null,
+          resourceTimestamp: null,
+        }),
+      });
+    }
+  }
+};
+
+const conductReportIdForEvidenceHandle = async (evidenceHandle: string): Promise<string> => {
+  const [row] = await db
+    .select({ reportId: adminConductReportEvidenceHandle.reportId })
+    .from(adminConductReportEvidenceHandle)
+    .where(eq(adminConductReportEvidenceHandle.id, evidenceHandle))
+    .limit(1);
+  if (!row) {
+    throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+  }
+  return row.reportId;
+};
+
+const getConductReportEvidencePage = async (
+  adminId: string,
+  evidenceHandle: string,
+  requestKey: string,
+  pageInput: AdminReportEvidencePageInput
+): Promise<AdminConductReportEvidence> => {
+  const reportId = await conductReportIdForEvidenceHandle(evidenceHandle);
+  let evidence: AdminConductReportEvidenceWithoutAction | undefined;
+  const result = await adminActionService.recordEvidenceAccess({
+    adminId,
+    action: 'CONDUCT_REPORT_EVIDENCE_ACCESS',
+    resourceType: 'conduct_report',
+    resourceId: reportId,
+    requestKey,
+    request: {
+      view: 'conduct-report-chat-history',
+      resourceId: evidenceHandle,
+      limit: pageInput.limit,
+      cursor: pageInput.cursor ?? null,
+    },
+    metadata: { scope: 'conduct-report-chat-history' },
+    read: async (database) => {
+      const context = await conductReportEvidenceContextFor(database, evidenceHandle);
+      if (context.reportId !== reportId) {
+        throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+      }
+      const loaded = await conductReportEvidencePageInTransaction(
+        database,
+        evidenceHandle,
+        context,
+        pageInput
+      );
+      evidence = loaded;
+      await recordConductReportFileAccesses(database, {
+        adminId,
+        reportId,
+        evidenceHandle,
+        requestKey,
+        messages: loaded.messages,
+      });
+      return {
+        resourceSummary: {
+          resourceId: evidenceHandle,
+          conversationType: context.conversationType,
+          itemCount: loaded.messages.length,
+          hasNext: loaded.nextCursor !== null,
+        },
+        resourceVersion: null,
+        resourceTimestamp: null,
+      };
+    },
+  });
+
+  const loaded =
+    evidence ??
+    (await db.transaction(async (database) => {
+      const context = await conductReportEvidenceContextFor(database, evidenceHandle);
+      if (context.reportId !== reportId) {
+        throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+      }
+      const replayed = await conductReportEvidencePageInTransaction(
+        database,
+        evidenceHandle,
+        context,
+        pageInput
+      );
+      await recordConductReportFileAccesses(database, {
+        adminId,
+        reportId,
+        evidenceHandle,
+        requestKey,
+        messages: replayed.messages,
+      });
+      return replayed;
+    }));
+
   return { ...loaded, adminActionId: result.adminActionId };
 };

@@ -10,13 +10,14 @@ import type {
   AdminReportDetailData,
   AdminReportEvidenceData,
   AdminReportEvidenceParams,
+  AdminReportEvidenceQuery,
   AdminReportListData,
   AdminReportListQuery,
   AdminReportParams,
 } from './admin-report.schema';
 import {
-  AdminReportCaseError,
-  decideAdminReportCase,
+  AdminReportError,
+  decideAdminReport,
   getAdminReport,
   getAdminReportEvidence,
   listAdminReports,
@@ -28,8 +29,12 @@ const mapAdminReportError = (set: AdminContext['set'], error: unknown): ApiRespo
     set.status = 400;
     return apiError(error.code, error.message);
   }
-  if (error instanceof AdminReportCaseError) {
-    if (error.code === 'REPORT_CASE_NOT_FOUND' || error.code === 'REPORT_EVIDENCE_NOT_FOUND') {
+  if (error instanceof AdminReportError) {
+    if (
+      error.code === 'REPORT_CASE_NOT_FOUND' ||
+      error.code === 'CONDUCT_REPORT_NOT_FOUND' ||
+      error.code === 'REPORT_EVIDENCE_NOT_FOUND'
+    ) {
       set.status = 404;
       return apiError('REPORT_NOT_FOUND', 'Report resource was not found.');
     }
@@ -108,23 +113,36 @@ export const decideAdminReportController = async ({
   const revision = readResourceVersion(request);
   if (revision.invalid || revision.value === undefined) {
     set.status = 400;
-    return apiError('ADMIN_ACTION_INVALID_VERSION', 'A current Report Case version is required.');
+    return apiError(
+      'ADMIN_ACTION_INVALID_VERSION',
+      'A current Report resource version is required.'
+    );
   }
 
   try {
-    const result = await decideAdminReportCase({
+    const command = {
       adminId: admin.id,
       reportId: params.reportId,
       expectedVersion: revision.value,
       requestKey: request.headers.get('idempotency-key') ?? '',
-      reasonCode: body.reasonCode,
-      outcome: body.outcome,
-    });
+    };
+    const result =
+      body.outcome === 'CONDUCT_REPORT_DISMISSED'
+        ? await decideAdminReport({
+            ...command,
+            outcome: 'CONDUCT_REPORT_DISMISSED',
+            decisionReasonCode: body.decisionReasonCode,
+          })
+        : await decideAdminReport({
+            ...command,
+            outcome: body.outcome,
+            reasonCode: body.reasonCode,
+          });
     if (result.resourceVersion === null) {
       set.status = 500;
       return apiError(
         'ADMIN_ACTION_INVALID_RESULT',
-        'Admin Action did not return a Report Case version.'
+        'Admin Action did not return a Report resource version.'
       );
     }
     return apiSuccess({
@@ -139,11 +157,13 @@ export const decideAdminReportController = async ({
 
 export const getAdminReportEvidenceController = async ({
   params,
+  query,
   request,
   admin,
   set,
 }: AdminContext & {
   params: AdminReportEvidenceParams;
+  query: AdminReportEvidenceQuery;
   request: Request;
 }): Promise<ApiResponse<AdminReportEvidenceData>> => {
   try {
@@ -151,9 +171,13 @@ export const getAdminReportEvidenceController = async ({
       await getAdminReportEvidence(
         admin.id,
         params.evidenceRef,
-        request.headers.get('idempotency-key') ?? ''
+        request.headers.get('idempotency-key') ?? '',
+        {
+          limit: parsePageLimit(query.limit),
+          cursor: decodeCursor(query.cursor),
+        }
       )
-    );
+    ) as ApiResponse<AdminReportEvidenceData>;
   } catch (error) {
     return mapAdminReportError(set, error) as ApiResponse<AdminReportEvidenceData>;
   }

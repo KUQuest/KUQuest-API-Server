@@ -21,7 +21,7 @@ import {
   questCandidateTeamV2,
   questV2ProofSubmission,
 } from './quest.schema';
-import { chatAttachment, chatMessage } from './work-chat.schema';
+import { chatAttachment, chatConversation, chatMessage } from './work-chat.schema';
 
 export const adminAction = pgTable(
   'admin_action',
@@ -482,6 +482,32 @@ export const adminConductReport = pgTable(
     check(
       'admin_conduct_reports_resolved_after_created_check',
       sql`${table.resolvedAt} IS NULL OR ${table.resolvedAt} >= ${table.createdAt}`
+    ),
+  ]
+);
+
+/** An opaque capability for one Conduct Report's permitted Chat Conversation. */
+export const adminConductReportEvidenceHandle = pgTable(
+  'admin_conduct_report_evidence_handles',
+  {
+    id: varchar('id', { length: 47 }).primaryKey(),
+    reportId: uuid('report_id')
+      .notNull()
+      .references(() => adminConductReport.id, { onDelete: 'restrict' }),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => chatConversation.id, { onDelete: 'restrict' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('admin_conduct_report_evidence_handles_report_conversation_key').on(
+      table.reportId,
+      table.conversationId
+    ),
+    index('admin_conduct_report_evidence_handles_conversation_idx').on(table.conversationId),
+    check(
+      'admin_conduct_report_evidence_handles_id_check',
+      sql`${table.id} ~ '^CRH_[A-Za-z0-9_-]{43}$'`
     ),
   ]
 );
