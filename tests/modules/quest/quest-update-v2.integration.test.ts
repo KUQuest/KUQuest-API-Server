@@ -1,10 +1,13 @@
 import { app, createApp } from '@/app';
 import { db, sql } from '@/database/client';
 import { authSession } from '@/database/schema/auth.schema';
+import { file } from '@/database/schema/file.schema';
 import { chatConversation, chatMembership } from '@/database/schema/work-chat.schema';
 import {
   quest,
   questAssignment,
+  questCandidateTeamV2,
+  questCandidateTeamV2SubmissionFile,
   questCommand,
   questV2ProofSubmission,
 } from '@/database/schema/quest.schema';
@@ -12,7 +15,7 @@ import { tag } from '@/database/schema/tag.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
-import { assignmentStatus, questStatus } from '@/modules/quest/shared';
+import { assignmentStatus, questStatus, startQuestWork } from '@/modules/quest/shared';
 
 import { QuestWebSocketClient } from './quest-update-test-client';
 import { randomUUID } from 'node:crypto';
@@ -62,10 +65,14 @@ const signIn = async (auth: Elysia, email: string) => {
   return { id: body.user.id, cookie: getCookieHeader(response) };
 };
 
+const createFreshSessions = async () =>
+  Promise.all(members.map((member, index) => signIn(authApps[index]!, member.email)));
+
 const fixturePrefix = `Quest update ${randomUUID()}`;
 const tagId = randomUUID();
 const questIds: string[] = [];
 const memberIds: string[] = [];
+const fileIds: string[] = [];
 const sessions: Array<{ id: string; cookie: string }> = [];
 const baseInput: QuestV2CreateInput = {
   title: fixturePrefix,
@@ -145,7 +152,41 @@ const createOpenGroupQuest = async () => {
   return questId;
 };
 
-const connectToApp = async (questId: string, cookie: string, origin?: string | null) => {
+const createOpenCandidateQuest = async (participation: QuestV2CreateInput['participation']) => {
+  const hirerId = sessions[0]?.id;
+  if (!hirerId) throw new Error('Hirer session is missing');
+  const result = await createQuestV2(
+    hirerId,
+    {
+      ...baseInput,
+      mode: 'CANDIDATE',
+      participation,
+      headcount: participation === 'GROUP' ? 3 : 1,
+    },
+    `quest-update-open-candidate-${randomUUID()}`
+  );
+  if (!('quest' in result)) throw new Error(`Quest creation failed: ${result.outcome}`);
+
+  const questId = result.quest.id;
+  questIds.push(questId);
+  await db
+    .update(quest)
+    .set({ questStatus: questStatus.open, rewardSatang: 1234 })
+    .where(eq(quest.id, questId));
+  return questId;
+};
+
+type QuestUpdateTestConnection = {
+  server: { stop: () => Promise<unknown> };
+  client: QuestWebSocketClient;
+};
+
+const connectToApp = async (
+  questId: string,
+  cookie: string,
+  origin?: string | null,
+  path = `/api/v2/quests/${questId}/events`
+) => {
   const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
   const port = server.server?.port;
   if (port === undefined) {
@@ -153,12 +194,39 @@ const connectToApp = async (questId: string, cookie: string, origin?: string | n
     throw new Error('Quest update server did not start');
   }
   try {
-    const client = await QuestWebSocketClient.connect(port, questId, cookie, origin);
+    const client = await QuestWebSocketClient.connect(port, questId, cookie, origin, path);
     return { server, client };
   } catch (error) {
     await server.stop();
     throw error;
   }
+};
+const expectRealtimeSubscription = async (
+  connection: QuestUpdateTestConnection,
+  questId: string
+) => {
+  expect(JSON.parse((await connection.client.nextText())!)).toEqual({
+    type: 'SUBSCRIBED',
+    version: 1,
+    questId,
+  });
+};
+
+const expectCandidateRosterEvent = async (
+  connection: QuestUpdateTestConnection,
+  questId: string
+) => {
+  expect(JSON.parse((await connection.client.nextText())!)).toEqual({
+    type: 'CANDIDATE_ROSTER_UPDATED',
+    version: 1,
+    questId,
+  });
+};
+
+const expectSocketClosedWithCode = async (connection: QuestUpdateTestConnection, code: number) => {
+  const frame = await connection.client.nextFrame();
+  expect(frame?.opcode).toBe(8);
+  expect(frame?.payload.readUInt16BE(0)).toBe(code);
 };
 
 const deleteWorkChatForQuests = async (ids: string[]) => {
@@ -197,6 +265,9 @@ afterAll(async () => {
   if (questIds.length > 0) {
     await deleteWorkChatForQuests(questIds);
     await db.delete(quest).where(inArray(quest.id, questIds));
+  }
+  if (fileIds.length > 0) {
+    await db.delete(file).where(inArray(file.id, fileIds));
   }
   if (memberIds.length > 0) {
     await db.delete(questCommand).where(inArray(questCommand.principalUserId, memberIds));
@@ -679,6 +750,425 @@ describe('Quest v2 realtime updates', () => {
       }
     } finally {
       first.client.destroy();
+    }
+  });
+  it('delivers SINGLE Candidate invalidations only to Hirer and affected applications', async () => {
+    const [hirer, candidate, otherCandidate, laterCandidate] = await createFreshSessions();
+    if (!hirer || !candidate || !otherCandidate || !laterCandidate) {
+      throw new Error('Test sessions are missing');
+    }
+
+    const questId = await createOpenCandidateQuest('SINGLE');
+    const path = `/api/v2/quests/${questId}/candidate-roster/events`;
+    const connections: QuestUpdateTestConnection[] = [];
+    const apply = async (cookie: string) =>
+      app.handle(
+        new Request(`http://localhost/api/v2/quests/${questId}/applications`, {
+          method: 'POST',
+          headers: { cookie, 'idempotency-key': `candidate-apply-${randomUUID()}` },
+        })
+      );
+
+    try {
+      const hirerRoster = await connectToApp(questId, hirer.cookie, undefined, path);
+      connections.push(hirerRoster);
+      await expectRealtimeSubscription(hirerRoster, questId);
+      const questUpdates = await connectToApp(questId, hirer.cookie);
+      connections.push(questUpdates);
+      await expectRealtimeSubscription(questUpdates, questId);
+
+      const candidateApply = await apply(candidate.cookie);
+      const otherCandidateApply = await apply(otherCandidate.cookie);
+      expect(candidateApply.status).toBe(200);
+      expect(otherCandidateApply.status).toBe(200);
+      const applicationId = (await candidateApply.json()).data.id as string;
+      const otherApplicationId = (await otherCandidateApply.json()).data.id as string;
+      await expectCandidateRosterEvent(hirerRoster, questId);
+      await expectCandidateRosterEvent(hirerRoster, questId);
+
+      const candidateStream = await connectToApp(questId, candidate.cookie, undefined, path);
+      connections.push(candidateStream);
+      await expectRealtimeSubscription(candidateStream, questId);
+      const otherCandidateStream = await connectToApp(
+        questId,
+        otherCandidate.cookie,
+        undefined,
+        path
+      );
+      connections.push(otherCandidateStream);
+      await expectRealtimeSubscription(otherCandidateStream, questId);
+
+      const outsiderStream = await connectToApp(questId, laterCandidate.cookie, undefined, path);
+      connections.push(outsiderStream);
+      await expectSocketClosedWithCode(outsiderStream, 4403);
+
+      const rejection = await app.handle(
+        new Request(
+          `http://localhost/api/v2/quests/${questId}/applications/${applicationId}/reject`,
+          {
+            method: 'POST',
+            headers: {
+              cookie: hirer.cookie,
+              'idempotency-key': `candidate-reject-${randomUUID()}`,
+            },
+          }
+        )
+      );
+      expect(rejection.status).toBe(200);
+      await expectCandidateRosterEvent(hirerRoster, questId);
+      await expectCandidateRosterEvent(candidateStream, questId);
+      expect(await otherCandidateStream.client.nextFrame(250)).toBeUndefined();
+
+      const withdrawal = await app.handle(
+        new Request(
+          `http://localhost/api/v2/quests/${questId}/applications/${otherApplicationId}/withdraw`,
+          {
+            method: 'POST',
+            headers: {
+              cookie: otherCandidate.cookie,
+              'idempotency-key': `candidate-withdraw-${randomUUID()}`,
+            },
+          }
+        )
+      );
+      expect(withdrawal.status).toBe(200);
+      await expectCandidateRosterEvent(hirerRoster, questId);
+      await expectCandidateRosterEvent(otherCandidateStream, questId);
+      expect(await candidateStream.client.nextFrame(250)).toBeUndefined();
+      expect(await questUpdates.client.nextFrame(250)).toBeUndefined();
+
+      const laterApply = await apply(laterCandidate.cookie);
+      expect(laterApply.status).toBe(200);
+      const laterApplicationId = (await laterApply.json()).data.id as string;
+      await expectCandidateRosterEvent(hirerRoster, questId);
+      const laterCandidateStream = await connectToApp(
+        questId,
+        laterCandidate.cookie,
+        undefined,
+        path
+      );
+      connections.push(laterCandidateStream);
+      await expectRealtimeSubscription(laterCandidateStream, questId);
+
+      const selection = await app.handle(
+        new Request(
+          `http://localhost/api/v2/quests/${questId}/applications/${laterApplicationId}/select`,
+          {
+            method: 'POST',
+            headers: {
+              cookie: hirer.cookie,
+              'idempotency-key': `candidate-select-${randomUUID()}`,
+            },
+          }
+        )
+      );
+      expect(selection.status).toBe(200);
+      await expectCandidateRosterEvent(hirerRoster, questId);
+      await expectCandidateRosterEvent(laterCandidateStream, questId);
+      expect(await candidateStream.client.nextFrame(250)).toBeUndefined();
+      expect(await otherCandidateStream.client.nextFrame(250)).toBeUndefined();
+
+      const [candidateRoster, otherCandidateRoster, laterCandidateRoster, hirerRosterResponse] =
+        await Promise.all([
+          app.handle(
+            new Request(`http://localhost/api/v2/quests/${questId}/applications`, {
+              headers: { cookie: candidate.cookie },
+            })
+          ),
+          app.handle(
+            new Request(`http://localhost/api/v2/quests/${questId}/applications`, {
+              headers: { cookie: otherCandidate.cookie },
+            })
+          ),
+          app.handle(
+            new Request(`http://localhost/api/v2/quests/${questId}/applications`, {
+              headers: { cookie: laterCandidate.cookie },
+            })
+          ),
+          app.handle(
+            new Request(`http://localhost/api/v2/quests/${questId}/applications`, {
+              headers: { cookie: hirer.cookie },
+            })
+          ),
+        ]);
+      expect(candidateRoster.status).toBe(200);
+      expect((await candidateRoster.json()).data.items).toMatchObject([
+        { id: applicationId, state: 'APPLICATION_REJECTED' },
+      ]);
+      expect(otherCandidateRoster.status).toBe(200);
+      expect((await otherCandidateRoster.json()).data.items).toMatchObject([
+        { id: otherApplicationId, state: 'APPLICATION_WITHDRAWN' },
+      ]);
+      expect(laterCandidateRoster.status).toBe(200);
+      expect((await laterCandidateRoster.json()).data.items).toMatchObject([
+        { id: laterApplicationId, state: 'APPLICATION_SELECTED' },
+      ]);
+      expect(hirerRosterResponse.status).toBe(200);
+      expect((await hirerRosterResponse.json()).data.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: applicationId, state: 'APPLICATION_REJECTED' }),
+          expect.objectContaining({ id: otherApplicationId, state: 'APPLICATION_WITHDRAWN' }),
+          expect.objectContaining({ id: laterApplicationId, state: 'APPLICATION_SELECTED' }),
+        ])
+      );
+
+      const now = new Date();
+      await db
+        .update(quest)
+        .set({
+          startTime: new Date(now.getTime() - 1_000),
+          dueAt: new Date(now.getTime() + 60_000),
+        })
+        .where(eq(quest.id, questId));
+      const started = await startQuestWork(
+        'v2',
+        laterCandidate.id,
+        questId,
+        `candidate-start-${randomUUID()}`,
+        now
+      );
+      expect(started).toMatchObject({ questId, questStatus: 'QUEST_IN_PROGRESS' });
+      for (const connection of [
+        hirerRoster,
+        candidateStream,
+        otherCandidateStream,
+        laterCandidateStream,
+      ]) {
+        await expectCandidateRosterEvent(connection, questId);
+        await expectSocketClosedWithCode(connection, 4403);
+      }
+      const closedRoster = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${questId}/applications`, {
+          headers: { cookie: laterCandidate.cookie },
+        })
+      );
+      expect(closedRoster.status).toBe(404);
+    } finally {
+      for (const connection of connections) {
+        connection.client.destroy();
+        await connection.server.stop();
+      }
+    }
+  });
+
+  it('invalidates GROUP Candidate Team changes and closes members who leave', async () => {
+    const [hirer, teamLeader, teamMember, outsider] = await createFreshSessions();
+    if (!hirer || !teamLeader || !teamMember || !outsider) {
+      throw new Error('Test sessions are missing');
+    }
+
+    const questId = await createOpenCandidateQuest('GROUP');
+    const path = `/api/v2/quests/${questId}/candidate-roster/events`;
+    const connections: QuestUpdateTestConnection[] = [];
+
+    try {
+      const hirerStream = await connectToApp(questId, hirer.cookie, undefined, path);
+      connections.push(hirerStream);
+      await expectRealtimeSubscription(hirerStream, questId);
+
+      const teamCreate = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${questId}/teams`, {
+          method: 'POST',
+          headers: {
+            cookie: teamLeader.cookie,
+            'content-type': 'application/json',
+            'idempotency-key': `candidate-team-create-${randomUUID()}`,
+          },
+          body: JSON.stringify({ name: 'Roster Team', headcount: 3 }),
+        })
+      );
+      expect(teamCreate.status).toBe(201);
+      const team = (await teamCreate.json()).data;
+      await expectCandidateRosterEvent(hirerStream, questId);
+
+      const leaderStream = await connectToApp(questId, teamLeader.cookie, undefined, path);
+      connections.push(leaderStream);
+      await expectRealtimeSubscription(leaderStream, questId);
+
+      const rename = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${questId}/teams/${team.id}`, {
+          method: 'PATCH',
+          headers: {
+            cookie: teamLeader.cookie,
+            'content-type': 'application/json',
+            'idempotency-key': `candidate-team-rename-${randomUUID()}`,
+          },
+          body: JSON.stringify({ name: 'Renamed Roster Team' }),
+        })
+      );
+      expect(rename.status).toBe(200);
+      await expectCandidateRosterEvent(hirerStream, questId);
+      await expectCandidateRosterEvent(leaderStream, questId);
+
+      const join = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${questId}/teams/${team.id}/join`, {
+          method: 'POST',
+          headers: {
+            cookie: teamMember.cookie,
+            'content-type': 'application/json',
+            'idempotency-key': `candidate-team-join-${randomUUID()}`,
+          },
+          body: JSON.stringify({ joinCode: team.joinCode }),
+        })
+      );
+      expect(join.status).toBe(200);
+      await expectCandidateRosterEvent(hirerStream, questId);
+      await expectCandidateRosterEvent(leaderStream, questId);
+
+      const memberStream = await connectToApp(questId, teamMember.cookie, undefined, path);
+      connections.push(memberStream);
+      await expectRealtimeSubscription(memberStream, questId);
+      const outsiderStream = await connectToApp(questId, outsider.cookie, undefined, path);
+      connections.push(outsiderStream);
+      await expectSocketClosedWithCode(outsiderStream, 4403);
+
+      const memberLeave = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${questId}/teams/${team.id}/leave`, {
+          method: 'POST',
+          headers: {
+            cookie: teamMember.cookie,
+            'idempotency-key': `candidate-team-leave-${randomUUID()}`,
+          },
+        })
+      );
+      expect(memberLeave.status).toBe(200);
+      await expectCandidateRosterEvent(hirerStream, questId);
+      await expectCandidateRosterEvent(leaderStream, questId);
+      await expectSocketClosedWithCode(memberStream, 4403);
+
+      const memberRead = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${questId}/teams/${team.id}`, {
+          headers: { cookie: teamMember.cookie },
+        })
+      );
+      expect(memberRead.status).toBe(404);
+
+      const leaderLeave = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${questId}/teams/${team.id}/leave`, {
+          method: 'POST',
+          headers: {
+            cookie: teamLeader.cookie,
+            'idempotency-key': `candidate-team-final-leave-${randomUUID()}`,
+          },
+        })
+      );
+      expect(leaderLeave.status).toBe(200);
+      await expectCandidateRosterEvent(hirerStream, questId);
+      await expectSocketClosedWithCode(leaderStream, 4403);
+    } finally {
+      for (const connection of connections) {
+        connection.client.destroy();
+        await connection.server.stop();
+      }
+    }
+  });
+  it('sends a final GROUP Candidate invalidation before closing sockets on selection', async () => {
+    const [hirer, teamLeader, teamMember] = await createFreshSessions();
+    if (!hirer || !teamLeader || !teamMember) {
+      throw new Error('Test sessions are missing');
+    }
+
+    const questId = await createOpenCandidateQuest('GROUP');
+    const path = `/api/v2/quests/${questId}/candidate-roster/events`;
+    const connections: QuestUpdateTestConnection[] = [];
+    const teamCreate = await app.handle(
+      new Request(`http://localhost/api/v2/quests/${questId}/teams`, {
+        method: 'POST',
+        headers: {
+          cookie: teamLeader.cookie,
+          'content-type': 'application/json',
+          'idempotency-key': `candidate-team-create-${randomUUID()}`,
+        },
+        body: JSON.stringify({ name: 'Selection Team', headcount: 2 }),
+      })
+    );
+    expect(teamCreate.status).toBe(201);
+    const team = (await teamCreate.json()).data;
+
+    const join = await app.handle(
+      new Request(`http://localhost/api/v2/quests/${questId}/teams/${team.id}/join`, {
+        method: 'POST',
+        headers: {
+          cookie: teamMember.cookie,
+          'content-type': 'application/json',
+          'idempotency-key': `candidate-team-join-${randomUUID()}`,
+        },
+        body: JSON.stringify({ joinCode: team.joinCode }),
+      })
+    );
+    expect(join.status).toBe(200);
+
+    const fileId = randomUUID();
+    fileIds.push(fileId);
+    const submittedAt = new Date();
+    await db.transaction(async (transaction) => {
+      await transaction.insert(file).values({
+        id: fileId,
+        bucket: 'test',
+        objectKey: `candidate-roster-realtime/${fileId}.pdf`,
+        contentType: 'application/pdf',
+        sizeBytes: 4,
+        uploadedByUserId: teamLeader.id,
+        deletedAt: null,
+        objectDeletedAt: null,
+      });
+      await transaction.insert(questCandidateTeamV2SubmissionFile).values({
+        teamId: team.id,
+        fileId,
+        position: 0,
+        attachedAt: submittedAt,
+      });
+      await transaction
+        .update(questCandidateTeamV2)
+        .set({
+          state: 'TEAM_SUBMITTED',
+          submissionText: 'Candidate Team submission',
+          submittedAt,
+          joinCodeHash: null,
+          joinCodeExpiresAt: null,
+        })
+        .where(eq(questCandidateTeamV2.id, team.id));
+    });
+
+    const teamRead = await app.handle(
+      new Request(`http://localhost/api/v2/quests/${questId}/teams/${team.id}`, {
+        headers: { cookie: teamLeader.cookie },
+      })
+    );
+    expect(teamRead.status).toBe(200);
+    expect((await teamRead.json()).data).toMatchObject({ state: 'TEAM_SUBMITTED' });
+
+    try {
+      const hirerStream = await connectToApp(questId, hirer.cookie, undefined, path);
+      connections.push(hirerStream);
+      await expectRealtimeSubscription(hirerStream, questId);
+      const leaderStream = await connectToApp(questId, teamLeader.cookie, undefined, path);
+      connections.push(leaderStream);
+      await expectRealtimeSubscription(leaderStream, questId);
+      const memberStream = await connectToApp(questId, teamMember.cookie, undefined, path);
+      connections.push(memberStream);
+      await expectRealtimeSubscription(memberStream, questId);
+
+      const selection = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${questId}/teams/${team.id}/select`, {
+          method: 'POST',
+          headers: {
+            cookie: hirer.cookie,
+            'idempotency-key': `candidate-team-select-${randomUUID()}`,
+          },
+        })
+      );
+      expect(selection.status).toBe(200);
+      expect((await selection.json()).data).toMatchObject({ questState: 'QUEST_ASSIGNED' });
+      for (const connection of connections) {
+        await expectCandidateRosterEvent(connection, questId);
+        await expectSocketClosedWithCode(connection, 4403);
+      }
+    } finally {
+      for (const connection of connections) {
+        connection.client.destroy();
+        await connection.server.stop();
+      }
     }
   });
 });

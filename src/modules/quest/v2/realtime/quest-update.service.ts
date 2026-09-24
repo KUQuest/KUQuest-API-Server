@@ -3,14 +3,21 @@ import {
   quest,
   questApiVersion,
   questAssignment,
+  questCandidateApplicationV2,
+  questCandidateTeamV2,
   questCandidateTeamV2Member,
   questV2ProofSubmission,
 } from '@/database/schema/quest.schema';
 import type { QuestTransaction } from '@/modules/quest/shared';
 
-import { and, eq, isNotNull, lte, or } from 'drizzle-orm';
+import { and, eq, isNotNull, lte, ne, or } from 'drizzle-orm';
 
-import type { QuestUpdateAccess } from './quest-update.schema';
+import {
+  isReadableCandidateApplicationRoster,
+  isReadableCandidateTeamRoster,
+  type CandidateRosterQuestAccessState,
+} from '../shared/candidate-roster-access.policy';
+import type { CandidateRosterScope, QuestUpdateAccess } from './quest-update.schema';
 
 export const getQuestUpdateRoster = async (transaction: QuestTransaction, questId: string) => {
   const [current] = await transaction
@@ -102,4 +109,60 @@ export const getQuestUpdateAccess = async (
     .limit(1);
 
   return pendingProof ? { role: 'WORKER', mode: 'PENDING_PROOF' } : undefined;
+};
+
+export const getCandidateRosterAccess = async (
+  memberId: string,
+  questId: string
+): Promise<CandidateRosterScope | undefined> => {
+  const [current] = await db
+    .select({
+      apiVersion: quest.apiVersion,
+      hirerId: quest.hirerId,
+      v2Mode: quest.v2Mode,
+      v2Participation: quest.v2Participation,
+      questState: quest.questStatus,
+    })
+    .from(quest)
+    .where(eq(quest.id, questId))
+    .limit(1);
+  if (!current || current.apiVersion !== questApiVersion.v2) return undefined;
+
+  const state: CandidateRosterQuestAccessState = {
+    v2Mode: current.v2Mode,
+    v2Participation: current.v2Participation,
+    questState: current.questState,
+  };
+  const canReadApplications = isReadableCandidateApplicationRoster(state);
+  const canReadTeams = isReadableCandidateTeamRoster(state);
+  if (!canReadApplications && !canReadTeams) return undefined;
+  if (current.hirerId === memberId) return { kind: 'HIRER' };
+
+  if (canReadApplications) {
+    const [application] = await db
+      .select({ id: questCandidateApplicationV2.id })
+      .from(questCandidateApplicationV2)
+      .where(
+        and(
+          eq(questCandidateApplicationV2.questId, questId),
+          eq(questCandidateApplicationV2.memberId, memberId)
+        )
+      )
+      .limit(1);
+    return application ? { kind: 'APPLICATION', applicationId: application.id } : undefined;
+  }
+
+  const [membership] = await db
+    .select({ teamId: questCandidateTeamV2Member.teamId })
+    .from(questCandidateTeamV2Member)
+    .innerJoin(questCandidateTeamV2, eq(questCandidateTeamV2Member.teamId, questCandidateTeamV2.id))
+    .where(
+      and(
+        eq(questCandidateTeamV2.questId, questId),
+        eq(questCandidateTeamV2Member.memberId, memberId),
+        ne(questCandidateTeamV2.state, 'TEAM_DISBANDED')
+      )
+    )
+    .limit(1);
+  return membership ? { kind: 'TEAM', teamId: membership.teamId } : undefined;
 };

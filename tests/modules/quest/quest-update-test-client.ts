@@ -35,7 +35,8 @@ export class QuestWebSocketClient {
     port: number,
     questId: string,
     cookie: string,
-    origin: string | null = 'http://localhost:5000'
+    origin: string | null = 'http://localhost:5000',
+    path = `/api/v2/quests/${questId}/events`
   ) {
     const socket = createConnection({ host: '127.0.0.1', port });
     const key = randomBytes(16).toString('base64');
@@ -81,7 +82,7 @@ export class QuestWebSocketClient {
       socket.on('connect', () => {
         socket.write(
           [
-            `GET /api/v2/quests/${questId}/events HTTP/1.1`,
+            `GET ${path} HTTP/1.1`,
             `Host: 127.0.0.1:${port}`,
             'Upgrade: websocket',
             'Connection: Upgrade',
