@@ -217,6 +217,20 @@ const joinTeam = async (
     JSON.stringify({ joinCode })
   );
 
+const joinByCode = (
+  questId: string,
+  memberId: string,
+  joinCode: string,
+  commandId = `candidate-team-v2-join-by-code-${randomUUID()}`
+) =>
+  request(
+    `/api/v2/quests/${questId}/teams/join`,
+    'POST',
+    memberId,
+    { 'content-type': 'application/json', 'idempotency-key': commandId },
+    JSON.stringify({ joinCode })
+  );
+
 const createFile = async (
   uploadedByUserId: string,
   contentType = 'application/pdf',
@@ -804,6 +818,107 @@ describe('Quest Candidate Team API v2', () => {
     );
     expect(secondTeam.status).toBe(409);
     expect((await secondTeam.json()).error.code).toBe('TEAM_MEMBERSHIP_ALREADY_EXISTS');
+  });
+
+  it('joins by quest-scoped code and replays after the code is regenerated', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId);
+
+    const joined = await joinByCode(
+      questId,
+      secondCandidate.id,
+      ` ${team.joinCode.toLowerCase()} `,
+      'candidate-team-v2-join-by-code'
+    );
+    expect(joined.status).toBe(200);
+    const joinedBody = (await joined.json()).data;
+    expect(joinedBody).toMatchObject({
+      id: team.id,
+      questId,
+      members: [
+        expect.objectContaining({ memberId: candidate.id }),
+        expect.objectContaining({ memberId: secondCandidate.id }),
+      ],
+    });
+
+    const regenerated = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/join-code`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': 'candidate-team-v2-join-by-code-regenerate' }
+    );
+    expect(regenerated.status).toBe(200);
+    expect((await regenerated.json()).data.joinCode).not.toBe(team.joinCode);
+
+    const oldCode = await joinByCode(
+      questId,
+      thirdCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-join-by-code-regenerated'
+    );
+    expect(oldCode.status).toBe(409);
+    expect((await oldCode.json()).error.code).toBe('JOIN_CODE_INVALID');
+
+    const replay = await joinByCode(
+      questId,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-join-by-code'
+    );
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data).toEqual(joinedBody);
+  });
+
+  it('hides team metadata for invalid codes and returns expiry for matching expired codes', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId);
+
+    const invalid = await joinByCode(
+      questId,
+      secondCandidate.id,
+      'NOTACODE',
+      'candidate-team-v2-join-by-code-invalid'
+    );
+    expect(invalid.status).toBe(409);
+    expect(await invalid.json()).toEqual({
+      success: false,
+      error: { code: 'JOIN_CODE_INVALID', message: 'The Join Code is invalid' },
+    });
+
+    await db
+      .update(questCandidateTeamV2)
+      .set({ joinCodeExpiresAt: new Date('2020-01-01T00:00:00.000Z') })
+      .where(eq(questCandidateTeamV2.id, team.id));
+    const expired = await joinByCode(
+      questId,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-join-by-code-expired'
+    );
+    expect(expired.status).toBe(409);
+    expect((await expired.json()).error.code).toBe('JOIN_CODE_EXPIRED');
+  });
+
+  it('enforces Candidate Team capacity for concurrent code-only joins', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId, candidate.id, 2);
+
+    const responses = await Promise.all([
+      joinByCode(questId, secondCandidate.id, team.joinCode, 'candidate-team-v2-code-cap-one'),
+      joinByCode(questId, thirdCandidate.id, team.joinCode, 'candidate-team-v2-code-cap-two'),
+    ]);
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 409]);
+    const rejected = responses.find(({ status }) => status === 409);
+    expect((await rejected!.json()).error.code).toBe('TEAM_FULL');
+
+    const detail = await request(`/api/v2/quests/${questId}/teams/${team.id}`, 'GET', hirer.id);
+    expect((await detail.json()).data.members).toHaveLength(2);
   });
 
   it('enforces current Join Code, expiry, regeneration, membership uniqueness, and team capacity', async () => {
