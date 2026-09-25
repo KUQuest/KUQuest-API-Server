@@ -87,7 +87,7 @@ import type { QuestV2BoardQuery, QuestV2CreateInput, QuestV2EditInput } from './
 import { questV2Storage } from './quest-v2.storage';
 import type { StoredQuestImage } from '../../v1/services/quest.storage';
 import { applyQuestStateTransition } from '../../shared/transition/quest-transition.service';
-import { notifyQuestBoardInvalidated } from '../realtime';
+import { notifyHirerQuestCreated, notifyQuestBoardInvalidated } from '../realtime';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type QuestDatabase = typeof db | QuestTransaction;
@@ -2273,6 +2273,7 @@ const createQuestInTransaction = async (
       const createdRow = await selectQuestV2Row(transaction, userId, createdQuest.id);
       if (!createdRow) throw new Error(`Created Quest ${createdQuest.id} could not be read back`);
       const canonicalQuest = await buildCanonicalQuest(transaction, createdRow);
+      await notifyHirerQuestCreated(transaction, createdQuest.id);
 
       return {
         kind: 'success',
