@@ -6,6 +6,9 @@ info:
     Authenticated WebSocket APIs for Quest Board, Quest, and Candidate roster
     invalidations, Candidate Inquiry Conversation messages, and Work Conversation
     messages. REST remains authoritative for current state and conversation history.
+
+    Frontend clients can optionally append `?traceId=<uuid>` to any WebSocket URL
+    to correlate handshake attempts and connection lifecycle events in Server logs.
 defaultContentType: application/json
 servers:
   local:

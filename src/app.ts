@@ -28,6 +28,7 @@ import {
   questV2Route,
 } from '@/modules/quest';
 import { candidateInquiryRoute, messageReportRoute, workChatRoute } from '@/modules/work-chat';
+import { finishRequestLog, startRequestLog } from '@/shared/request-log';
 
 import { Elysia } from 'elysia';
 
@@ -51,6 +52,8 @@ export const createApp = () => {
   return new Elysia({
     name: 'kuquest-api',
   })
+    .onRequest(startRequestLog)
+    .onAfterResponse(finishRequestLog)
     .use(errorHandlerPlugin)
     .use(corsPlugin)
     .use(authPlugin)
