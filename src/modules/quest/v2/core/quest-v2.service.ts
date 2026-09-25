@@ -5,6 +5,8 @@ import {
   quest,
   questAssignment,
   questApiVersion,
+  questCandidateApplicationV2,
+  questCandidateTeamV2,
   questCommand,
   questConditionItem,
   questImage,
@@ -12,7 +14,9 @@ import {
 } from '@/database/schema/quest.schema';
 import { file } from '@/database/schema/file.schema';
 import { tag } from '@/database/schema/tag.schema';
+import { chatConversation } from '@/database/schema/work-chat.schema';
 import { avatarStorage } from '@/modules/profile/profile.storage';
+import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import {
   getEffectiveFundingReservationPolicy,
   MoneyDomainError,
@@ -83,7 +87,7 @@ import type { QuestV2BoardQuery, QuestV2CreateInput, QuestV2EditInput } from './
 import { questV2Storage } from './quest-v2.storage';
 import type { StoredQuestImage } from '../../v1/services/quest.storage';
 import { applyQuestStateTransition } from '../../shared/transition/quest-transition.service';
-import { notifyQuestBoardInvalidated } from '../realtime';
+import { notifyHirerQuestCreated, notifyQuestBoardInvalidated } from '../realtime';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type QuestDatabase = typeof db | QuestTransaction;
@@ -158,6 +162,9 @@ type QuestV2EditOutcomeCode =
   | QuestV2EditValidationOutcome
   | 'not-found'
   | 'not-draft'
+  | 'open-field-locked'
+  | 'participation-started'
+  | 'open-quest-invalid'
   | 'conflict'
   | 'tag-not-found'
   | 'idempotency-key-reused'
@@ -2266,6 +2273,7 @@ const createQuestInTransaction = async (
       const createdRow = await selectQuestV2Row(transaction, userId, createdQuest.id);
       if (!createdRow) throw new Error(`Created Quest ${createdQuest.id} could not be read back`);
       const canonicalQuest = await buildCanonicalQuest(transaction, createdRow);
+      await notifyHirerQuestCreated(transaction, createdQuest.id);
 
       return {
         kind: 'success',
@@ -2354,11 +2362,34 @@ const editQuestV2InTransaction = async (
         .limit(1);
 
       if (!current) return { kind: 'rejected', rejection: 'not-found' };
-      if (current.questStatus !== questStatus.draft) {
+      if (current.questStatus !== questStatus.draft && current.questStatus !== questStatus.open) {
         return { kind: 'rejected', rejection: 'not-draft' };
       }
       if (current.version !== expectedVersion) {
         return { kind: 'rejected', rejection: 'conflict' };
+      }
+      if (current.questStatus === questStatus.open) {
+        if (input.questFundingTotalSatang !== undefined || input.headcount !== undefined) {
+          return { kind: 'rejected', rejection: 'open-field-locked' };
+        }
+        const [application] = await transaction
+          .select({ id: questCandidateApplicationV2.id })
+          .from(questCandidateApplicationV2)
+          .where(eq(questCandidateApplicationV2.questId, questId))
+          .limit(1);
+        const [team] = await transaction
+          .select({ id: questCandidateTeamV2.id })
+          .from(questCandidateTeamV2)
+          .where(eq(questCandidateTeamV2.questId, questId))
+          .limit(1);
+        const [assignment] = await transaction
+          .select({ id: questAssignment.id })
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, questId))
+          .limit(1);
+        if (application || team || assignment) {
+          return { kind: 'rejected', rejection: 'participation-started' };
+        }
       }
       if (!current.v2Mode || !current.v2Participation) {
         throw new Error(`Quest ${questId} has incomplete v2 persistence data`);
@@ -2375,6 +2406,14 @@ const editQuestV2InTransaction = async (
       if (nextDueAt !== null && nextDueAt <= nextStartTime) {
         return { kind: 'rejected', rejection: 'invalid-dates' };
       }
+      if (
+        current.questStatus === questStatus.open &&
+        (nextStartTime <= now ||
+          nextDueAt === null ||
+          (input.tagId === undefined ? current.tagId === null : input.tagId === null))
+      ) {
+        return { kind: 'rejected', rejection: 'open-quest-invalid' };
+      }
 
       if (input.tagId) {
         const [existingTag] = await transaction
@@ -2385,6 +2424,20 @@ const editQuestV2InTransaction = async (
         if (!existingTag) return { kind: 'rejected', rejection: 'tag-not-found' };
       }
 
+      const inquiryConversations =
+        current.questStatus === questStatus.open
+          ? await transaction
+              .select({ memberId: chatConversation.candidateWorkerId })
+              .from(chatConversation)
+              .where(
+                and(
+                  eq(chatConversation.questId, questId),
+                  eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
+                  eq(chatConversation.state, 'INQUIRY_OPEN'),
+                  isNotNull(chatConversation.candidateWorkerId)
+                )
+              )
+          : [];
       const historyEntries: QuestEditHistoryEntry[] = [];
       const trackEdit = (fieldName: string, oldValue: unknown, newValue: unknown): void => {
         historyEntries.push({ fieldName, oldValue, newValue });
@@ -2493,12 +2546,28 @@ const editQuestV2InTransaction = async (
             eq(quest.id, questId),
             eq(quest.hirerId, userId),
             eq(quest.apiVersion, questApiVersion.v2),
-            eq(quest.questStatus, questStatus.draft),
+            eq(quest.questStatus, current.questStatus),
             eq(quest.version, expectedVersion)
           )
         )
         .returning({ id: quest.id });
       if (!updated) return { kind: 'rejected', rejection: 'conflict' };
+      if (
+        current.questStatus === questStatus.open &&
+        input.title !== undefined &&
+        input.title !== current.title
+      ) {
+        await transaction
+          .update(chatConversation)
+          .set({ questTitle: input.title, updatedAt: now })
+          .where(
+            and(
+              eq(chatConversation.questId, questId),
+              eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
+              eq(chatConversation.state, 'INQUIRY_OPEN')
+            )
+          );
+      }
 
       await recordQuestEditHistory(transaction, {
         questId,
@@ -2506,6 +2575,18 @@ const editQuestV2InTransaction = async (
         editedAt: now,
         editedByUserId: userId,
       });
+      if (current.questStatus === questStatus.open) {
+        await notifyQuestUpdate(transaction, {
+          questId,
+          recipientMemberIds: [
+            ...new Set([
+              userId,
+              ...inquiryConversations.flatMap(({ memberId }) => (memberId ? [memberId] : [])),
+            ]),
+          ],
+          changeType: 'QUEST_OPEN_EDIT_UPDATED',
+        });
+      }
 
       const updatedRow = await selectQuestV2Row(transaction, userId, questId);
       if (!updatedRow) throw new Error(`Updated Quest ${questId} could not be read back`);

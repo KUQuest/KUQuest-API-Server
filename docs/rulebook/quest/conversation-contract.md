@@ -69,6 +69,10 @@ A Candidate Inquiry Conversation lets a Prospective Worker ask the Hirer questio
 
 - A new Message notifies only the other participant in that Candidate Inquiry Conversation.
 - Active on-page users see Messages in place; otherwise it uses in-app Popup or Android Push.
+- A successful pre-participation `QUEST_OPEN` edit sends a separate realtime
+  Quest-update event to the Hirer and each Member with an open Candidate
+  Inquiry Conversation for that Quest. It does not create a Message or an
+  offline Push Notification.
 - After `INQUIRY_CLOSED`, no new Message or notification is created.
 
 ---

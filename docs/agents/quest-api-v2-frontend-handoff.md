@@ -396,6 +396,27 @@ Success status: HTTP 200.
 Each item is a complete CanonicalQuest without the image gallery.
 The example is shortened. Use the CanonicalQuest shape in section 16.
 
+#### Subscribe to all owned Quest updates
+
+Connect with the Better Auth session cookie:
+
+```text
+WS /api/v2/me/hirer-quests/events
+```
+
+The Server sends `{ "type": "SUBSCRIBED", "version": 1 }` after it accepts
+the connection. For each committed change to an owned v2 Quest, it sends
+`{ "type": "HIRER_QUEST_UPDATED", "version": 1, "questId": "quest-uuid",
+"changeType": "..." }`. Change types include existing Quest updates,
+`CANDIDATE_ROSTER_UPDATED`, `QUEST_PUBLISHED`, and `QUEST_CREATED`.
+The event contains no Quest or Candidate data.
+
+Read `GET /api/v2/quests/mine` from the first cursor page after `SUBSCRIBED`,
+after each event, and after reconnect. Continue paging as needed. REST is
+authoritative; the stream does not replay missed events. A client message
+closes the connection with code 1008. The public `GET /api/v2/quests` Board
+does not list the Hirer's owned Quests.
+
 ### 5.3 Read the Hirer’s Quest detail
 
 Request:

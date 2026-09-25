@@ -15,6 +15,8 @@ import { tag } from '@/database/schema/tag.schema';
 import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
+import { ensureInitialMoneyPolicy } from '@/modules/wallet';
+import { fundTestWallet, releaseTestQuestEscrows } from '../wallet/wallet-test-fixtures';
 import { assignmentStatus, questStatus, startQuestWork } from '@/modules/quest/shared';
 
 import { QuestWebSocketClient } from './quest-update-test-client';
@@ -253,15 +255,19 @@ const deleteWorkChatForQuests = async (ids: string[]) => {
 };
 beforeAll(async () => {
   await sql`select 1`;
+  await ensureInitialMoneyPolicy();
   for (const [index, member] of members.entries()) {
     const signedIn = await signIn(authApps[index]!, member.email);
     sessions.push(signedIn);
     memberIds.push(signedIn.id);
   }
+  await fundTestWallet(sessions[0]!.id, 100_000);
   await db.insert(tag).values({ id: tagId, name: `Quest update tag ${randomUUID()}` });
 });
 
 afterAll(async () => {
+  const hirerId = sessions[0]?.id;
+  if (hirerId) await releaseTestQuestEscrows([hirerId]);
   if (questIds.length > 0) {
     await deleteWorkChatForQuests(questIds);
     await db.delete(quest).where(inArray(quest.id, questIds));
@@ -273,10 +279,232 @@ afterAll(async () => {
     await db.delete(questCommand).where(inArray(questCommand.principalUserId, memberIds));
     // Keep members and Idempotency Keys referenced by immutable Wallet history.
   }
+
   await db.delete(tag).where(eq(tag.id, tagId));
 });
 
 describe('Quest v2 realtime updates', () => {
+  it('streams only owned Quest changes to Hirers over the read-only events socket', async () => {
+    const hirer = sessions[0];
+    const worker = sessions[1];
+    const otherHirer = sessions[3];
+    if (!hirer || !worker || !otherHirer) throw new Error('Test sessions are missing');
+
+    const path = '/api/v2/me/hirer-quests/events';
+    const hirerStream = await connectToApp(randomUUID(), hirer.cookie, undefined, path);
+    const otherHirerStream = await connectToApp(randomUUID(), otherHirer.cookie, undefined, path);
+    const connections = [hirerStream, otherHirerStream];
+
+    try {
+      expect(JSON.parse((await hirerStream.client.nextText())!)).toEqual({
+        type: 'SUBSCRIBED',
+        version: 1,
+      });
+      expect(JSON.parse((await otherHirerStream.client.nextText())!)).toEqual({
+        type: 'SUBSCRIBED',
+        version: 1,
+      });
+
+      const unauthorized = await QuestWebSocketClient.connect(
+        hirerStream.server.server!.port!,
+        randomUUID(),
+        '',
+        null,
+        path
+      ).then(
+        () => false,
+        (error: unknown) => error instanceof Error && error.message.includes(' 401 ')
+      );
+      expect(unauthorized).toBe(true);
+
+      const created = await createQuestV2(hirer.id, baseInput, `hirer-events-${randomUUID()}`);
+      if (!('quest' in created)) throw new Error(`Quest creation failed: ${created.outcome}`);
+      questIds.push(created.quest.id);
+      expect(JSON.parse((await hirerStream.client.nextText())!)).toEqual({
+        type: 'HIRER_QUEST_UPDATED',
+        version: 1,
+        questId: created.quest.id,
+        changeType: 'QUEST_CREATED',
+      });
+      expect(await otherHirerStream.client.nextText(250)).toBeUndefined();
+
+      const candidateQuestId = await createOpenCandidateQuest('SINGLE');
+      expect(JSON.parse((await hirerStream.client.nextText())!)).toEqual({
+        type: 'HIRER_QUEST_UPDATED',
+        version: 1,
+        questId: candidateQuestId,
+        changeType: 'QUEST_CREATED',
+      });
+      expect(await otherHirerStream.client.nextText(250)).toBeUndefined();
+      const perQuestStream = await QuestWebSocketClient.connect(
+        hirerStream.server.server!.port!,
+        candidateQuestId,
+        hirer.cookie
+      );
+      try {
+        expect(JSON.parse((await perQuestStream.nextText())!)).toEqual({
+          type: 'SUBSCRIBED',
+          version: 1,
+          questId: candidateQuestId,
+        });
+        await db.transaction((transaction) =>
+          notifyQuestUpdate(transaction, {
+            questId: candidateQuestId,
+            recipientMemberIds: [hirer.id],
+            changeType: 'QUEST_STARTED',
+          })
+        );
+        expect(JSON.parse((await hirerStream.client.nextText())!)).toEqual({
+          type: 'HIRER_QUEST_UPDATED',
+          version: 1,
+          questId: candidateQuestId,
+          changeType: 'QUEST_STARTED',
+        });
+        expect(await perQuestStream.nextText(250)).toBeUndefined();
+      } finally {
+        perQuestStream.destroy();
+      }
+
+      const application = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${candidateQuestId}/applications`, {
+          method: 'POST',
+          headers: {
+            cookie: worker.cookie,
+            'idempotency-key': `hirer-events-application-${randomUUID()}`,
+          },
+        })
+      );
+      expect(application.status).toBe(200);
+      expect(JSON.parse((await hirerStream.client.nextText())!)).toEqual({
+        type: 'HIRER_QUEST_UPDATED',
+        version: 1,
+        questId: candidateQuestId,
+        changeType: 'CANDIDATE_ROSTER_UPDATED',
+      });
+      expect(await otherHirerStream.client.nextText(250)).toBeUndefined();
+
+      const groupQuestId = await createOpenCandidateQuest('GROUP');
+      expect(JSON.parse((await hirerStream.client.nextText())!)).toEqual({
+        type: 'HIRER_QUEST_UPDATED',
+        version: 1,
+        questId: groupQuestId,
+        changeType: 'QUEST_CREATED',
+      });
+      const team = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${groupQuestId}/teams`, {
+          method: 'POST',
+          headers: {
+            cookie: worker.cookie,
+            'content-type': 'application/json',
+            'idempotency-key': `hirer-events-team-${randomUUID()}`,
+          },
+          body: JSON.stringify({ name: 'Home roster team', headcount: 2 }),
+        })
+      );
+      expect(team.status).toBe(201);
+      expect(JSON.parse((await hirerStream.client.nextText())!)).toEqual({
+        type: 'HIRER_QUEST_UPDATED',
+        version: 1,
+        questId: groupQuestId,
+        changeType: 'CANDIDATE_ROSTER_UPDATED',
+      });
+      expect(await otherHirerStream.client.nextText(250)).toBeUndefined();
+
+      const publish = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${created.quest.id}/publish`, {
+          method: 'POST',
+          headers: {
+            cookie: hirer.cookie,
+            'idempotency-key': `hirer-events-publish-${randomUUID()}`,
+          },
+        })
+      );
+      expect(publish.status).toBe(200);
+      expect(JSON.parse((await hirerStream.client.nextText())!)).toEqual({
+        type: 'HIRER_QUEST_UPDATED',
+        version: 1,
+        questId: created.quest.id,
+        changeType: 'QUEST_PUBLISHED',
+      });
+      expect(await otherHirerStream.client.nextText(250)).toBeUndefined();
+
+      hirerStream.client.sendText('{"type":"read"}');
+      await expectSocketClosedWithCode(hirerStream, 1008);
+    } finally {
+      for (const connection of connections) {
+        connection.client.destroy();
+        await connection.server.stop();
+      }
+    }
+  });
+  it('notifies Hirer and open-inquiry Members when a pre-participation Quest changes', async () => {
+    const hirer = sessions[0];
+    const prospectiveWorker = sessions[1];
+    if (!hirer || !prospectiveWorker) throw new Error('Test sessions are missing');
+
+    const questId = await createOpenCandidateQuest('SINGLE');
+    const [conversation] = await db
+      .insert(chatConversation)
+      .values({
+        questId,
+        type: 'CONVERSATION_CANDIDATE_INQUIRY',
+        questTitle: fixturePrefix,
+        questStatus: questStatus.open,
+        state: 'INQUIRY_OPEN',
+        candidateWorkerId: prospectiveWorker.id,
+      })
+      .returning({ id: chatConversation.id });
+    if (!conversation) throw new Error('Candidate Inquiry Conversation was not created');
+
+    const joinedAt = new Date(Date.now() - 1000);
+    await db.insert(chatMembership).values([
+      {
+        conversationId: conversation.id,
+        memberId: hirer.id,
+        role: 'HIRER',
+        joinedAt,
+      },
+      {
+        conversationId: conversation.id,
+        memberId: prospectiveWorker.id,
+        role: 'PROSPECTIVE_WORKER',
+        joinedAt,
+      },
+    ]);
+
+    const connection = await connectToApp(questId, prospectiveWorker.cookie);
+    try {
+      await expectRealtimeSubscription(connection, questId);
+      const response = await app.handle(
+        new Request(`http://localhost/api/v2/quests/${questId}`, {
+          method: 'PATCH',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': `open-edit-${randomUUID()}`,
+            'if-match': '1',
+            cookie: hirer.cookie,
+          },
+          body: JSON.stringify({ title: 'Quest details changed' }),
+        })
+      );
+      expect(response.status).toBe(200);
+      const [updatedConversation] = await db
+        .select({ questTitle: chatConversation.questTitle })
+        .from(chatConversation)
+        .where(eq(chatConversation.id, conversation.id));
+      expect(updatedConversation?.questTitle).toBe('Quest details changed');
+      expect(JSON.parse((await connection.client.nextText())!)).toEqual({
+        type: 'QUEST_UPDATED',
+        version: 1,
+        questId,
+        changeType: 'QUEST_OPEN_EDIT_UPDATED',
+      });
+    } finally {
+      connection.client.destroy();
+      await connection.server.stop();
+    }
+  });
+
   it('delivers roster-only updates to the Hirer and current Workers while a GROUP Quest is open', async () => {
     const [hirer, worker, otherWorker] = sessions;
     if (!hirer || !worker || !otherWorker) throw new Error('Test sessions are missing');
