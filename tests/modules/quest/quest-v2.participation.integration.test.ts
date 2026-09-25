@@ -341,6 +341,7 @@ describe('Quest v2 Participation Detail', () => {
       'headcount',
       'hirerAvatar',
       'hirerName',
+      'hirerRedFlagged',
       'id',
       'images',
       'locations',
