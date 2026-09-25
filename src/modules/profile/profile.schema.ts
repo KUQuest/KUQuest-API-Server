@@ -150,6 +150,7 @@ export const publicProfileResponseSchema = t.Object({
     lastName: t.String(),
     bio: t.Nullable(t.String()),
     academicYear: t.Nullable(t.Integer()),
+    redFlagged: t.Boolean(),
     department: t.Nullable(departmentSchema),
     avatar: t.Nullable(avatarSchema),
     occupation: t.Nullable(occupationSchema),

@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
@@ -23,6 +23,7 @@ export const messageReportRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/chat/reports`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .post('', submitMessageReportController, {
     body: submitMessageReportSchema,
     transform: rejectUnknownFields(submitMessageReportSchema),

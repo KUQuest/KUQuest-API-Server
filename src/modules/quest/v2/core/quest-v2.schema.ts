@@ -783,6 +783,7 @@ export const questV2HirerProfileSchema = t.Object({
   department: questV2HirerProfileDepartmentSchema,
   avatar: questV2HirerProfileAvatarSchema,
   occupation: questV2HirerProfileOccupationSchema,
+  redFlagged: t.Boolean(),
 });
 
 export const questV2BoardCardSchema = t.Object({
@@ -832,6 +833,7 @@ export const questV2PublicDetailSchema = t.Object({
   dueAt: questV2CanonicalScheduleSchema,
   proofRequired: t.Boolean(),
   hirerName: t.String(),
+  hirerRedFlagged: t.Boolean(),
   hirerAvatar: questV2HirerProfileAvatarSchema,
   locations: t.Array(
     t.Object({ label: t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }) })

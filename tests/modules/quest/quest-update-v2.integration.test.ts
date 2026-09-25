@@ -1,6 +1,6 @@
 import { app, createApp } from '@/app';
 import { db, sql } from '@/database/client';
-import { authSession } from '@/database/schema/auth.schema';
+import { authSession, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { chatConversation, chatMembership } from '@/database/schema/work-chat.schema';
 import {
@@ -595,6 +595,35 @@ describe('Quest v2 realtime updates', () => {
       workerSocket?.destroy();
       otherWorkerSocket?.destroy();
       await server.stop();
+    }
+  });
+
+  it('closes an open Quest update socket when the Member becomes banned', async () => {
+    const [, worker] = sessions;
+    if (!worker) throw new Error('Worker session is missing');
+    const questId = await createAssignedQuest([worker.id]);
+    const connection = await connectToApp(questId, worker.cookie);
+
+    try {
+      await expectRealtimeSubscription(connection, questId);
+      await db
+        .update(authUser)
+        .set({ bannedUntil: new Date(Date.now() + 60_000) })
+        .where(eq(authUser.id, worker.id));
+
+      await db.transaction((transaction) =>
+        notifyQuestUpdate(transaction, {
+          questId,
+          recipientMemberIds: [worker.id],
+          changeType: 'PROOF_SUBMITTED',
+        })
+      );
+
+      await expectSocketClosedWithCode(connection, 4403);
+    } finally {
+      await db.update(authUser).set({ bannedUntil: null }).where(eq(authUser.id, worker.id));
+      connection.client.destroy();
+      await connection.server.stop();
     }
   });
 

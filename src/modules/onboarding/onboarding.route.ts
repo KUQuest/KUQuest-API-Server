@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
@@ -23,6 +23,7 @@ export const onboardingRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/onboarding`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .get('/academic-options', getAcademicOptionsController, {
     response: responses(academicOptionsResponseSchema, 401),
     detail: {

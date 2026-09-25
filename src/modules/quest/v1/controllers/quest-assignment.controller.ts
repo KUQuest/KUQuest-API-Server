@@ -53,6 +53,13 @@ export const joinNoCandidateQuestController = async ({
     if (result.outcome === 'not-open') {
       return conflict(set, 'QUEST_NOT_OPEN', 'Only an open Quest can accept a direct join');
     }
+    if (result.outcome === 'red-flagged') {
+      return conflict(
+        set,
+        'MEMBER_RED_FLAGGED',
+        'A Member with an active Red Flag cannot join a direct-join Quest'
+      );
+    }
     if (result.outcome === 'hirer-not-allowed') {
       return conflict(set, 'HIRER_CANNOT_JOIN', 'The Hirer cannot join their own Quest');
     }

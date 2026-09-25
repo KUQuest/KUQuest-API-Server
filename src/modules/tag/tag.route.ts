@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 
@@ -12,6 +12,7 @@ export const tagRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/tags`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .get('', listTags, {
     query: tagListQuerySchema,
     response: responses(tagListResponseSchema, 400, 401),

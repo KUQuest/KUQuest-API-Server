@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
@@ -23,6 +23,7 @@ export const walletRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/wallet`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .get('', getOwnWallet, {
     response: responses(walletResponseSchema, 401, 404, 409),
     detail: {

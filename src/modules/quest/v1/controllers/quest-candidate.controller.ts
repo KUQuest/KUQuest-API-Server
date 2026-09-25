@@ -176,7 +176,14 @@ export const createApplicationController = async ({
   params: Static<typeof applicationParamsSchema>;
 }) => {
   const result = await createApplication(session.user.id, params.questId, body);
-  if ('outcome' in result)
+  if ('outcome' in result) {
+    if (result.outcome === 'red-flagged') {
+      return conflict(
+        set,
+        'MEMBER_RED_FLAGGED',
+        'A Member with an active Red Flag cannot apply as a Candidate'
+      );
+    }
     return result.outcome === 'already-exists'
       ? conflict(
           set,
@@ -184,6 +191,7 @@ export const createApplicationController = async ({
           'You already have an application for this Quest'
         )
       : notFound(set, 'QUEST_NOT_FOUND', 'Quest not found');
+  }
   return apiSuccess(serializeApplication(result));
 };
 export const listApplicationsController = async ({
@@ -309,9 +317,15 @@ export const submitTeamController = async ({
   if ('outcome' in result)
     return result.outcome === 'headcount-mismatch'
       ? conflict(set, 'TEAM_HEADCOUNT_MISMATCH', 'Team size must equal Quest headcount')
-      : result.outcome === 'not-authorized'
-        ? notFound(set, 'TEAM_NOT_FOUND', 'Team not found')
-        : conflict(set, 'TEAM_NOT_SUBMITTABLE', 'This Team cannot be submitted');
+      : result.outcome === 'red-flagged'
+        ? conflict(
+            set,
+            'MEMBER_RED_FLAGGED',
+            'A Member with an active Red Flag cannot apply as a Candidate'
+          )
+        : result.outcome === 'not-authorized'
+          ? notFound(set, 'TEAM_NOT_FOUND', 'Team not found')
+          : conflict(set, 'TEAM_NOT_SUBMITTABLE', 'This Team cannot be submitted');
   return apiSuccess(serializeTeam(result));
 };
 export const leaveTeamController = async ({

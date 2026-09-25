@@ -28,6 +28,7 @@ import {
   questV2Route,
 } from '@/modules/quest';
 import { candidateInquiryRoute, messageReportRoute, workChatRoute } from '@/modules/work-chat';
+import { pushRoute } from '@/modules/push';
 
 import { Elysia } from 'elysia';
 
@@ -72,6 +73,7 @@ export const createApp = () => {
     .use(onboardingRoute)
     .use(academicRegistrationRoute)
     .use(profileRoute)
+    .use(pushRoute)
     .use(questAssignmentRoute)
     .use(questCandidateRoute)
     .use(questProofRoute)

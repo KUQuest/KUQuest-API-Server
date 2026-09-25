@@ -618,6 +618,13 @@ export const getQuestV2PublishCheckController = async ({
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
   if ('outcome' in result) {
+    if (result.outcome === 'red-flagged') {
+      set.status = 409;
+      return apiError(
+        'MEMBER_RED_FLAGGED',
+        'A Member with an active Red Flag cannot publish a new Quest'
+      );
+    }
     set.status = 409;
     return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be checked');
   }
@@ -734,6 +741,13 @@ export const publishQuestV2Controller = async ({
     if (result.outcome === 'not-draft') {
       set.status = 409;
       return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be published');
+    }
+    if (result.outcome === 'red-flagged') {
+      set.status = 409;
+      return apiError(
+        'MEMBER_RED_FLAGGED',
+        'A Member with an active Red Flag cannot publish a new Quest'
+      );
     }
     return mapQuestCommandOutcome(
       set,

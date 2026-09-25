@@ -212,6 +212,7 @@ describe('Quest controllers', () => {
       estimatedDurationMinutes: null,
       proofRequired: true,
       hirerName: 'Quest Hirer',
+      hirerRedFlagged: false,
       locations: [],
       images: [],
     };

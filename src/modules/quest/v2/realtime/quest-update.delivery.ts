@@ -1,6 +1,7 @@
 import { db, sql as postgresSql } from '@/database/client';
 import { authSession } from '@/database/schema/auth.schema';
 import { quest } from '@/database/schema/quest.schema';
+import { closeSocketForActiveMemberBan } from '@/modules/auth';
 import type { QuestTransaction } from '@/modules/quest/shared';
 
 import { and, eq, gt, inArray, sql as drizzleSql } from 'drizzle-orm';
@@ -87,6 +88,17 @@ const sessionIsCurrent = async (subscription: QuestSubscriptionIdentity) => {
   return session !== undefined;
 };
 
+const closeSubscriptionIfMemberIsBanned = async (
+  id: string,
+  subscription: QuestUpdateSubscription
+) =>
+  closeSocketForActiveMemberBan(
+    {
+      close: (code, reason) => closeSubscription(id, subscription, code, reason),
+    },
+    subscription.memberId
+  );
+
 const deliverQuestUpdate = async (event: QuestUpdateNotification) => {
   // Keep the QUEST_OPEN exception limited to Assignment roster invalidations.
   if (event.changeType !== 'ASSIGNMENT_ROSTER_UPDATED') {
@@ -112,6 +124,7 @@ const deliverQuestUpdate = async (event: QuestUpdateNotification) => {
     if (subscription.stream !== 'QUEST' || subscription.questId !== event.questId) continue;
 
     if (recipients.has(subscription.memberId)) {
+      if (await closeSubscriptionIfMemberIsBanned(id, subscription)) continue;
       if (!(await sessionIsCurrent(subscription))) {
         closeSubscription(id, subscription, 4401, 'Session expired');
         continue;
@@ -166,6 +179,7 @@ const deliverCandidateRosterUpdate = async (event: CandidateRosterUpdateNotifica
     if (!receivesUpdate && !losesAccess) continue;
 
     if (receivesUpdate && !removedMember) {
+      if (await closeSubscriptionIfMemberIsBanned(id, subscription)) continue;
       if (!(await sessionIsCurrent(subscription))) {
         closeSubscription(id, subscription, 4401, 'Session expired');
         continue;

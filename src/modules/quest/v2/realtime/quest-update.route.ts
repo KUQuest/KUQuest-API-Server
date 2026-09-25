@@ -1,4 +1,4 @@
-import { authGuard, getTrustedOrigins } from '@/modules/auth';
+import { authGuard, memberBanGuard, getTrustedOrigins } from '@/modules/auth';
 import { API_V2_PREFIX } from '@/shared/api-version';
 
 import { Elysia } from 'elysia';
@@ -118,6 +118,7 @@ const openRealtimeSubscription = async <T>({
 
 export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route' })
   .use(authGuard)
+  .use(memberBanGuard)
   .derive({ as: 'scoped' }, ({ request }) => ({ questOrigin: request.headers.get('origin') }))
   .ws(`${API_V2_PREFIX}/quests/board/events`, {
     async open(ws) {

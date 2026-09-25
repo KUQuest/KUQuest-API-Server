@@ -1,6 +1,10 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import {
+  hasRedFlaggedMemberInTransaction,
+  isMemberRedFlaggedInTransaction,
+} from '@/modules/admin/member-penalty';
+import {
   quest,
   questApiVersion,
   questApplication,
@@ -99,7 +103,8 @@ export type CandidateOutcome =
         | 'already-exists'
         | 'not-authorized'
         | 'not-editable'
-        | 'not-withdrawable';
+        | 'not-withdrawable'
+        | 'red-flagged';
     }
   | {
       id: string;
@@ -160,6 +165,9 @@ export const createApplication = async (
       current.hirerId === workerId
     )
       return { outcome: 'not-eligible' };
+    if (await isMemberRedFlaggedInTransaction(tx, workerId, now)) {
+      return { outcome: 'red-flagged' };
+    }
     const [existing] = await tx
       .select({ id: questApplication.id })
       .from(questApplication)
@@ -318,6 +326,7 @@ export type TeamOutcome =
         | 'not-authorized'
         | 'not-editable'
         | 'headcount-mismatch'
+        | 'red-flagged'
         | 'leader-removal-not-allowed';
     }
   | Awaited<ReturnType<typeof withMembers>>;
@@ -570,7 +579,8 @@ export const removeTeamMember = async (
 export const submitTeam = async (
   userId: string,
   questId: string,
-  teamId: string
+  teamId: string,
+  now = new Date()
 ): Promise<TeamOutcome> =>
   db.transaction(async (tx) => {
     const current = await lockQuest(tx, questId);
@@ -590,6 +600,15 @@ export const submitTeam = async (
       .from(questTeamMember)
       .where(eq(questTeamMember.teamId, teamId));
     if (members.length !== current.headcount) return { outcome: 'headcount-mismatch' };
+    if (
+      await hasRedFlaggedMemberInTransaction(
+        tx,
+        members.map(({ userId }) => userId),
+        now
+      )
+    ) {
+      return { outcome: 'red-flagged' };
+    }
     const [updated] = await tx
       .update(questTeam)
       .set({ teamStatus: teamStatus.submitted })
