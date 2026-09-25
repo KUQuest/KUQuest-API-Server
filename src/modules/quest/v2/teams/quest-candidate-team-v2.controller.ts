@@ -20,6 +20,7 @@ import {
   createQuestV2CandidateTeam,
   getQuestV2CandidateTeam,
   joinQuestV2CandidateTeam,
+  joinQuestV2CandidateTeamByCode,
   leaveQuestV2CandidateTeam,
   listQuestV2CandidateTeams,
   regenerateQuestV2CandidateTeamJoinCode,
@@ -388,6 +389,28 @@ export const joinQuestV2CandidateTeamController = async ({
     session.user.id,
     params.questId,
     params.teamId,
+    body,
+    commandId
+  );
+  if ('outcome' in result) return mapTeamError(set, result);
+  return apiSuccess(serializeTeam(result));
+};
+
+export const joinQuestV2CandidateTeamByCodeController = async ({
+  body,
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & {
+  body: QuestV2CandidateTeamJoinInput;
+  params: QuestV2CandidateTeamParams;
+}) => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+  const result = await joinQuestV2CandidateTeamByCode(
+    session.user.id,
+    params.questId,
     body,
     commandId
   );
