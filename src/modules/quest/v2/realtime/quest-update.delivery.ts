@@ -1,6 +1,6 @@
 import { db, sql as postgresSql } from '@/database/client';
 import { authSession } from '@/database/schema/auth.schema';
-import { quest } from '@/database/schema/quest.schema';
+import { quest, questApiVersion } from '@/database/schema/quest.schema';
 import type { QuestTransaction } from '@/modules/quest/shared';
 
 import { and, eq, gt, inArray, sql as drizzleSql } from 'drizzle-orm';
@@ -11,11 +11,15 @@ import {
   type CandidateRosterUpdateAudience,
   type CandidateRosterUpdateNotification,
   type QuestRealtimeNotification,
+  type QuestUpdateChangeType,
   type QuestUpdateNotification,
 } from './quest-update.schema';
 import { getQuestUpdateRoster } from './quest-update.service';
 
 const questUpdateChannel = 'kuquest_quest_updates';
+
+type HirerQuestChangeType =
+  QuestUpdateChangeType | 'CANDIDATE_ROSTER_UPDATED' | 'QUEST_PUBLISHED' | 'QUEST_CREATED';
 
 type QuestUpdateSocket = {
   send: (message: string) => unknown;
@@ -41,10 +45,15 @@ type QuestBoardSubscription = QuestSubscriptionIdentity & {
   stream: 'QUEST_BOARD';
 };
 
+type HirerQuestSubscription = QuestSubscriptionIdentity & {
+  stream: 'HIRER_QUESTS';
+};
+
 type QuestRealtimeSubscription =
   | (QuestUpdateSubscription & { stream: 'QUEST' })
   | CandidateRosterSubscription
-  | QuestBoardSubscription;
+  | QuestBoardSubscription
+  | HirerQuestSubscription;
 
 const subscriptions = new Map<string, QuestRealtimeSubscription>();
 let listenerStart: Promise<void> | undefined;
@@ -228,16 +237,74 @@ const deliverQuestBoardInvalidated = async (
   }
 };
 
+const deliverHirerQuestUpdate = async (questId: string, changeType: HirerQuestChangeType) => {
+  const hirerSubscriptions: Array<[string, HirerQuestSubscription]> = [];
+  for (const [id, subscription] of subscriptions) {
+    if (subscription.stream === 'HIRER_QUESTS') hirerSubscriptions.push([id, subscription]);
+  }
+  if (hirerSubscriptions.length === 0) return;
+
+  const [currentQuest] = await db
+    .select({ hirerId: quest.hirerId })
+    .from(quest)
+    .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
+    .limit(1);
+  if (!currentQuest) return;
+
+  const hirerSessions = hirerSubscriptions.filter(
+    ([, subscription]) => subscription.memberId === currentQuest.hirerId
+  );
+  if (hirerSessions.length === 0) return;
+
+  const activeSessions = await db
+    .select({ id: authSession.id, userId: authSession.userId })
+    .from(authSession)
+    .where(
+      and(
+        inArray(authSession.id, [
+          ...new Set(hirerSessions.map(([, subscription]) => subscription.sessionId)),
+        ]),
+        gt(authSession.expiresAt, new Date())
+      )
+    );
+  const activeSessionKeys = new Set(activeSessions.map(({ id, userId }) => `${id}:${userId}`));
+  const message = JSON.stringify({
+    type: 'HIRER_QUEST_UPDATED',
+    version: 1,
+    questId,
+    changeType,
+  });
+
+  for (const [id, subscription] of hirerSessions) {
+    if (!activeSessionKeys.has(`${subscription.sessionId}:${subscription.memberId}`)) {
+      closeSubscription(id, subscription, 4401, 'Session expired');
+      continue;
+    }
+    try {
+      subscription.socket.send(message);
+    } catch {
+      closeSubscription(id, subscription, 1011, 'Delivery failed');
+    }
+  }
+};
+
 const deliverQuestRealtimeNotification = async (event: QuestRealtimeNotification) => {
   if ('type' in event) {
     if (event.type === 'CANDIDATE_ROSTER_UPDATED') {
       await deliverCandidateRosterUpdate(event);
-    } else {
+      if (event.audience.kind !== 'APPLICATION') {
+        await deliverHirerQuestUpdate(event.questId, 'CANDIDATE_ROSTER_UPDATED');
+      }
+    } else if (event.type === 'QUEST_BOARD_INVALIDATED') {
       await deliverQuestBoardInvalidated(event);
+      await deliverHirerQuestUpdate(event.questId, 'QUEST_PUBLISHED');
+    } else {
+      await deliverHirerQuestUpdate(event.questId, 'QUEST_CREATED');
     }
     return;
   }
 
+  await deliverHirerQuestUpdate(event.questId, event.changeType);
   await deliverQuestUpdate(event);
   if (
     event.changeType === 'QUEST_STARTED' ||
@@ -281,6 +348,9 @@ export const notifyCandidateRosterUpdate = async (
 export const notifyQuestBoardInvalidated = async (transaction: QuestTransaction, questId: string) =>
   notifyQuestRealtimeUpdate(transaction, { questId, type: 'QUEST_BOARD_INVALIDATED' });
 
+export const notifyHirerQuestCreated = async (transaction: QuestTransaction, questId: string) =>
+  notifyQuestRealtimeUpdate(transaction, { questId, type: 'QUEST_CREATED' });
+
 export const notifyQuestRosterUpdate = async (transaction: QuestTransaction, questId: string) => {
   const roster = await getQuestUpdateRoster(transaction, questId);
   if (!roster) return;
@@ -318,6 +388,12 @@ export const subscribeToQuestBoardUpdates = (
   sessionId: string,
   socket: QuestUpdateSocket
 ) => subscribe({ stream: 'QUEST_BOARD', memberId, sessionId, socket });
+
+export const subscribeToHirerQuestUpdates = (
+  memberId: string,
+  sessionId: string,
+  socket: QuestUpdateSocket
+) => subscribe({ stream: 'HIRER_QUESTS', memberId, sessionId, socket });
 
 export const ensureQuestUpdateListener = async () => {
   if (!listenerStart) {
