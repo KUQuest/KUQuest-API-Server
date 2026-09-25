@@ -153,10 +153,10 @@ export const questV2Route = new Elysia({
     response: responses(questV2EditHttpResponseSchema, 400, 401, 404, 409, 500, 503),
     detail: {
       tags: ['Quests v2'],
-      summary: 'Edit a v2 Quest Draft',
+      summary: 'Edit a v2 Quest Draft or eligible open Quest',
       description:
-        'Updates the supplied fields of an owned QUEST_DRAFT with optimistic concurrency.',
-      operationId: 'editQuestV2Draft',
+        'Updates supplied fields of an owned Quest with optimistic concurrency. In QUEST_OPEN, the Hirer may edit title, description, Condition, mode, participation, schedule, Tag, proof requirement, and locations before the first Candidate application, Candidate Team, or Assignment. `questFundingTotal` and `headcount` are locked. The API returns 409 `QUEST_OPEN_FIELD_LOCKED` for locked fields and 409 `QUEST_OPEN_EDIT_CLOSED` after participation starts. A Quest must retain a Tag, a future `startTime`, and a `dueAt` after `startTime`; otherwise the API returns 400 `INVALID_OPEN_QUEST`. `QUEST_ASSIGNED` Condition changes use the separate Quest Edit Request protocol.',
+      operationId: 'editQuestV2',
       security: betterAuthSecurity,
     },
   })

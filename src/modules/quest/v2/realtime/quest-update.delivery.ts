@@ -88,8 +88,12 @@ const sessionIsCurrent = async (subscription: QuestSubscriptionIdentity) => {
 };
 
 const deliverQuestUpdate = async (event: QuestUpdateNotification) => {
-  // Keep the QUEST_OPEN exception limited to Assignment roster invalidations.
-  if (event.changeType !== 'ASSIGNMENT_ROSTER_UPDATED') {
+  // Open Quests publish only roster invalidations and updates for Members with
+  // an open Candidate Inquiry Conversation.
+  if (
+    event.changeType !== 'ASSIGNMENT_ROSTER_UPDATED' &&
+    event.changeType !== 'QUEST_OPEN_EDIT_UPDATED'
+  ) {
     const [current] = await db
       .select({ state: quest.questStatus })
       .from(quest)
