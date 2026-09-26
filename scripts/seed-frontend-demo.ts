@@ -1,7 +1,17 @@
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { department, occupation } from '@/database/schema/academic.schema';
-import { adminDisputeCase, disputeCaseStatus } from '@/database/schema/admin.schema';
+import {
+  adminConductReport,
+  adminDisputeCase,
+  adminEvidenceReference,
+  adminReportCase,
+  adminReporterEntry,
+  conductReportReason,
+  disputeCaseStatus,
+  reportCaseStatus,
+  reporterEntryReason,
+} from '@/database/schema/admin.schema';
 import {
   profileCertificate,
   profilePortfolioItem,
@@ -10,6 +20,7 @@ import {
 import { tag } from '@/database/schema/tag.schema';
 import { quest, questAssignment, review } from '@/database/schema/quest.schema';
 import { walletLedgerAccount, walletLedgerTransaction } from '@/database/schema/wallet.schema';
+import { chatConversation, chatMembership, chatMessage } from '@/database/schema/work-chat.schema';
 import {
   assignmentStatus,
   questMode,
@@ -27,11 +38,13 @@ import {
 } from '@/modules/wallet';
 import { fixedTagNames, type FixedTagName } from '@/shared/tag';
 
-import { and, eq, inArray, isNull, like, ne } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, like, ne } from 'drizzle-orm';
 
 export const frontendDemoDisputeQuestTitle = '[Demo] Failed Dispute Quest';
 export const frontendDemoDisputeAmountSatang = 50_000;
 export const frontendDemoDisputeReservationReference = 'frontend-demo-dispute-quest-v1';
+export const frontendDemoReportQuestTitle = '[Frontend Demo] Report Case Showcase';
+export const frontendDemoReportCaseCount = 15;
 const DEMO_USERS = [
   {
     firstName: 'Nattapong',
@@ -56,6 +69,85 @@ const DEMO_USERS = [
 const demoEmails = DEMO_USERS.map(
   ({ firstName, lastName }) => `${firstName.toLowerCase()}.${lastName.toLowerCase()}@ku.th`
 );
+
+// These fixtures are Message-based Report Cases. Conduct Reports use Quest record evidence and are deferred.
+const frontendDemoReportCaseFixtures = [
+  {
+    message: 'Please review the updated event poster before the campus campaign starts.',
+    reason: reporterEntryReason.abusiveOrHarassment,
+    detail: 'The message uses an aggressive tone toward the other Member.',
+  },
+  {
+    message: 'Buy this service now. Buy this service now. Buy this service now.',
+    reason: reporterEntryReason.spam,
+    detail: 'The same promotional message is repeated in the Work Conversation.',
+  },
+  {
+    message: 'I can publish your phone number with the rest of the project files.',
+    reason: reporterEntryReason.dangerOrThreat,
+    detail: 'The message appears to threaten disclosure of private information.',
+  },
+  {
+    message: 'Your work is useless. Do not send another draft.',
+    reason: reporterEntryReason.inappropriateContent,
+    detail: 'The message contains insulting content unrelated to the Quest work.',
+  },
+  {
+    message: 'Here is the draft summary. Please confirm that the figures are correct.',
+    reason: reporterEntryReason.other,
+    detail: 'The reporter needs an Admin to review the context of this message.',
+  },
+  {
+    message: 'You will regret it if you do not accept this change today.',
+    reason: reporterEntryReason.abusiveOrHarassment,
+    detail: 'The message pressures the other Member with hostile language.',
+  },
+  {
+    message: 'Limited offer: click the link below to get a free reward.',
+    reason: reporterEntryReason.spam,
+    detail: 'The message is an unsolicited promotion in the Work Conversation.',
+  },
+  {
+    message: 'I know where you live on campus. Finish this now.',
+    reason: reporterEntryReason.dangerOrThreat,
+    detail: 'The message may be a personal threat.',
+  },
+  {
+    message: 'Send the private student list to me. Nobody will notice.',
+    reason: reporterEntryReason.inappropriateContent,
+    detail: 'The message requests an inappropriate use of Member information.',
+  },
+  {
+    message: 'Can an Admin verify whether this file request is allowed?',
+    reason: reporterEntryReason.other,
+    detail: 'The reporter asks for a policy review of the conversation.',
+  },
+  {
+    message: 'If you disagree, I will make sure your profile is reported everywhere.',
+    reason: reporterEntryReason.abusiveOrHarassment,
+    detail: 'The message threatens repeated reporting to pressure the other Member.',
+  },
+  {
+    message: 'This is an urgent paid promotion. Forward it to every Member.',
+    reason: reporterEntryReason.spam,
+    detail: 'The message is unrelated bulk promotion.',
+  },
+  {
+    message: 'I will come to your class if you do not answer this message.',
+    reason: reporterEntryReason.dangerOrThreat,
+    detail: 'The message contains a possible in-person threat.',
+  },
+  {
+    message: 'Use the leaked answer sheet so we can finish the Quest faster.',
+    reason: reporterEntryReason.inappropriateContent,
+    detail: 'The message appears to request dishonest activity.',
+  },
+  {
+    message: 'Please check this conversation because the context is unclear.',
+    reason: reporterEntryReason.other,
+    detail: 'The report is a general request for Admin review.',
+  },
+] as const;
 
 const getOrCreateTag = async (name: string): Promise<string> => {
   const [existing] = await db.select({ id: tag.id }).from(tag).where(eq(tag.name, name)).limit(1);
@@ -135,6 +227,380 @@ const ensureAdminDisputeCaseInTransaction = async (
 
   return { id: reloaded.id };
 };
+
+export const ensureFrontendDemoReportCases = async (
+  hirerId: string,
+  workerId: string,
+  tagId: string
+): Promise<{ questId: string; caseIds: string[] }> => {
+  const now = new Date();
+  const questCreatedAt = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+
+  return db.transaction(async (transaction) => {
+    const [existingQuest] = await transaction
+      .select({ id: quest.id, questStatus: quest.questStatus })
+      .from(quest)
+      .where(and(eq(quest.hirerId, hirerId), eq(quest.title, frontendDemoReportQuestTitle)))
+      .for('update');
+
+    const reportQuest =
+      existingQuest ??
+      (
+        await transaction
+          .insert(quest)
+          .values({
+            hirerId,
+            title: frontendDemoReportQuestTitle,
+            description: 'A frontend demo Quest that contains seeded Report Cases.',
+            condition: 'Review the Work Conversation and report Message content when necessary.',
+            mode: questMode.noCandidate,
+            participation: questParticipation.solo,
+            questStatus: questStatus.inProgress,
+            rewardSatang: 50_000,
+            tagId,
+            headcount: 1,
+            startTime: new Date(questCreatedAt.getTime() - 60 * 60 * 1000),
+            dueAt: new Date(questCreatedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
+            proofRequired: true,
+            createdAt: questCreatedAt,
+            updatedAt: questCreatedAt,
+          })
+          .returning({ id: quest.id, questStatus: quest.questStatus })
+      )[0];
+
+    if (!reportQuest) throw new Error('The frontend demo Report Case Quest could not be created.');
+
+    const [existingAssignment] = await transaction
+      .select({ id: questAssignment.id, workerId: questAssignment.workerId })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, reportQuest.id))
+      .for('update');
+
+    if (existingAssignment && existingAssignment.workerId !== workerId) {
+      throw new Error('The frontend demo Report Case Quest has a different Worker.');
+    }
+
+    const assignment =
+      existingAssignment ??
+      (
+        await transaction
+          .insert(questAssignment)
+          .values({
+            questId: reportQuest.id,
+            workerId,
+            assignmentStatus: assignmentStatus.active,
+            startedAt: questCreatedAt,
+            createdAt: questCreatedAt,
+          })
+          .returning({ id: questAssignment.id, workerId: questAssignment.workerId })
+      )[0];
+
+    if (!assignment) {
+      throw new Error('The frontend demo Report Case Assignment could not be created.');
+    }
+
+    const [existingConversation] = await transaction
+      .select({
+        id: chatConversation.id,
+        type: chatConversation.type,
+        nextSequence: chatConversation.nextSequence,
+      })
+      .from(chatConversation)
+      .where(eq(chatConversation.questId, reportQuest.id))
+      .for('update');
+
+    if (existingConversation && existingConversation.type !== 'CONVERSATION_WORK') {
+      throw new Error('The frontend demo Report Case Quest has a non-Work Conversation.');
+    }
+
+    const conversation =
+      existingConversation ??
+      (
+        await transaction
+          .insert(chatConversation)
+          .values({
+            questId: reportQuest.id,
+            type: 'CONVERSATION_WORK',
+            questTitle: frontendDemoReportQuestTitle,
+            questStatus: reportQuest.questStatus,
+            nextSequence: frontendDemoReportCaseCount + 1,
+            createdAt: questCreatedAt,
+            updatedAt: questCreatedAt,
+          })
+          .returning({ id: chatConversation.id, nextSequence: chatConversation.nextSequence })
+      )[0];
+
+    if (!conversation) {
+      throw new Error('The frontend demo Report Case Conversation could not be created.');
+    }
+
+    if (Number(conversation.nextSequence) < frontendDemoReportCaseCount + 1) {
+      await transaction
+        .update(chatConversation)
+        .set({ nextSequence: frontendDemoReportCaseCount + 1 })
+        .where(eq(chatConversation.id, conversation.id));
+    }
+
+    const [existingHirerMembership] = await transaction
+      .select({ id: chatMembership.id, memberId: chatMembership.memberId })
+      .from(chatMembership)
+      .where(
+        and(
+          eq(chatMembership.conversationId, conversation.id),
+          eq(chatMembership.role, 'HIRER'),
+          isNull(chatMembership.leftAt)
+        )
+      )
+      .for('update');
+
+    if (existingHirerMembership && existingHirerMembership.memberId !== hirerId) {
+      throw new Error('The frontend demo Report Case Conversation has a different Hirer.');
+    }
+
+    const hirerMembership =
+      existingHirerMembership ??
+      (
+        await transaction
+          .insert(chatMembership)
+          .values({
+            conversationId: conversation.id,
+            memberId: hirerId,
+            role: 'HIRER',
+            joinedAt: questCreatedAt,
+            createdAt: questCreatedAt,
+          })
+          .returning({ id: chatMembership.id })
+      )[0];
+
+    const [existingWorkerMembership] = await transaction
+      .select({ id: chatMembership.id, memberId: chatMembership.memberId })
+      .from(chatMembership)
+      .where(
+        and(
+          eq(chatMembership.conversationId, conversation.id),
+          eq(chatMembership.assignmentId, assignment.id),
+          eq(chatMembership.role, 'WORKER'),
+          isNull(chatMembership.leftAt)
+        )
+      )
+      .for('update');
+
+    if (existingWorkerMembership && existingWorkerMembership.memberId !== workerId) {
+      throw new Error('The frontend demo Report Case Conversation has a different Worker.');
+    }
+
+    const workerMembership =
+      existingWorkerMembership ??
+      (
+        await transaction
+          .insert(chatMembership)
+          .values({
+            conversationId: conversation.id,
+            assignmentId: assignment.id,
+            memberId: workerId,
+            role: 'WORKER',
+            joinedAt: questCreatedAt,
+            createdAt: questCreatedAt,
+          })
+          .returning({ id: chatMembership.id })
+      )[0];
+
+    if (!hirerMembership || !workerMembership) {
+      throw new Error('The frontend demo Report Case memberships could not be created.');
+    }
+
+    const caseIds: string[] = [];
+    for (const [index, fixture] of frontendDemoReportCaseFixtures.entries()) {
+      const senderMembershipId = index % 2 === 0 ? hirerMembership.id : workerMembership.id;
+      const reporterMemberId = index % 2 === 0 ? workerId : hirerId;
+      const clientMessageId = `frontend-demo-report-case-${index + 1}`;
+      const sequence = index + 1;
+      const messageCreatedAt = new Date(questCreatedAt.getTime() + (index + 1) * 60 * 1000);
+
+      const [existingMessage] = await transaction
+        .select({
+          id: chatMessage.id,
+          conversationId: chatMessage.conversationId,
+          sequence: chatMessage.sequence,
+        })
+        .from(chatMessage)
+        .where(
+          and(
+            eq(chatMessage.senderMembershipId, senderMembershipId),
+            eq(chatMessage.clientMessageId, clientMessageId)
+          )
+        )
+        .for('update');
+
+      if (existingMessage && existingMessage.conversationId !== conversation.id) {
+        throw new Error(
+          `The seeded Report Case Message ${clientMessageId} belongs to another Conversation.`
+        );
+      }
+      if (existingMessage && existingMessage.sequence !== sequence) {
+        throw new Error(
+          `The seeded Report Case Message ${clientMessageId} has an unexpected sequence.`
+        );
+      }
+
+      const message =
+        existingMessage ??
+        (
+          await transaction
+            .insert(chatMessage)
+            .values({
+              conversationId: conversation.id,
+              sequence,
+              kind: 'USER',
+              senderMembershipId,
+              clientMessageId,
+              contentText: fixture.message,
+              createdAt: messageCreatedAt,
+            })
+            .returning({ id: chatMessage.id })
+        )[0];
+
+      if (!message)
+        throw new Error(`The frontend demo Message ${clientMessageId} could not be created.`);
+
+      const [existingCase] = await transaction
+        .select({ id: adminReportCase.id })
+        .from(adminReportCase)
+        .where(eq(adminReportCase.messageId, message.id))
+        .orderBy(desc(adminReportCase.createdAt), desc(adminReportCase.id))
+        .limit(1)
+        .for('update');
+
+      const reportCase =
+        existingCase ??
+        (
+          await transaction
+            .insert(adminReportCase)
+            .values({
+              messageId: message.id,
+              status: reportCaseStatus.pending,
+              createdAt: messageCreatedAt,
+              updatedAt: messageCreatedAt,
+            })
+            .returning({ id: adminReportCase.id })
+        )[0];
+
+      if (!reportCase)
+        throw new Error(`The frontend demo Report Case ${index + 1} could not be created.`);
+
+      const [existingEntry] = await transaction
+        .select({ id: adminReporterEntry.id, reportCaseId: adminReporterEntry.reportCaseId })
+        .from(adminReporterEntry)
+        .where(
+          and(
+            eq(adminReporterEntry.messageId, message.id),
+            eq(adminReporterEntry.reporterMemberId, reporterMemberId)
+          )
+        )
+        .limit(1);
+
+      if (existingEntry && existingEntry.reportCaseId !== reportCase.id) {
+        throw new Error(
+          `The seeded Report Case ${index + 1} has a Reporter Entry for another case.`
+        );
+      }
+
+      if (!existingEntry) {
+        await transaction.insert(adminReporterEntry).values({
+          reportCaseId: reportCase.id,
+          messageId: message.id,
+          reporterMemberId,
+          reason: fixture.reason,
+          detail: fixture.detail,
+          createdAt: new Date(messageCreatedAt.getTime() + 1_000),
+        });
+      }
+
+      const [existingEvidence] = await transaction
+        .select({ id: adminEvidenceReference.id })
+        .from(adminEvidenceReference)
+        .where(
+          and(
+            eq(adminEvidenceReference.reportCaseId, reportCase.id),
+            eq(adminEvidenceReference.messageId, message.id)
+          )
+        )
+        .limit(1);
+
+      if (!existingEvidence) {
+        await transaction.insert(adminEvidenceReference).values({
+          reportCaseId: reportCase.id,
+          messageId: message.id,
+          createdAt: new Date(messageCreatedAt.getTime() + 2_000),
+        });
+      }
+
+      caseIds.push(reportCase.id);
+    }
+
+    return { questId: reportQuest.id, caseIds };
+  });
+};
+
+const ensureFrontendDemoConductReport = async (
+  questId: string,
+  filerUserId: string,
+  reportedMemberId: string
+): Promise<{ id: string }> =>
+  db.transaction(async (transaction) => {
+    const [assignment] = await transaction
+      .select({ id: questAssignment.id })
+      .from(questAssignment)
+      .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, filerUserId)))
+      .for('update');
+    if (!assignment) {
+      throw new Error('The frontend demo Conduct Report Worker Assignment is missing.');
+    }
+
+    const [existingReport] = await transaction
+      .select({
+        id: adminConductReport.id,
+        filerUserId: adminConductReport.filerUserId,
+        assignmentId: adminConductReport.assignmentId,
+        reason: adminConductReport.reason,
+      })
+      .from(adminConductReport)
+      .where(
+        and(
+          eq(adminConductReport.questId, questId),
+          eq(adminConductReport.reportedMemberId, reportedMemberId)
+        )
+      )
+      .for('update');
+
+    if (existingReport) {
+      if (
+        existingReport.filerUserId !== filerUserId ||
+        existingReport.assignmentId !== assignment.id ||
+        existingReport.reason !== conductReportReason.outOfScope
+      ) {
+        throw new Error('The frontend demo Conduct Report conflicts with another report.');
+      }
+      return { id: existingReport.id };
+    }
+
+    const [createdReport] = await transaction
+      .insert(adminConductReport)
+      .values({
+        questId,
+        filerUserId,
+        reportedMemberId,
+        assignmentId: assignment.id,
+        reason: conductReportReason.outOfScope,
+        detail: 'Demo report: the Hirer requested work outside the Quest Condition.',
+      })
+      .returning({ id: adminConductReport.id });
+
+    if (!createdReport) {
+      throw new Error('The frontend demo Conduct Report could not be created.');
+    }
+    return { id: createdReport.id };
+  });
 
 const getSpendingWalletAccountIdInTransaction = async (
   transaction: WalletTransaction,
@@ -542,6 +1008,12 @@ const main = async (): Promise<void> => {
   if (!designTagId) throw new Error('The Design Tag is missing for demo Dispute Quest.');
 
   const dispute = await ensureFrontendDemoDisputeQuest(hirer.id, worker.id, designTagId);
+  const reportCases = await ensureFrontendDemoReportCases(hirer.id, worker.id, designTagId);
+  const conductReport = await ensureFrontendDemoConductReport(
+    reportCases.questId,
+    worker.id,
+    hirer.id
+  );
 
   console.log(`Prepared ${orderedUsers.length} demo Profiles.`);
   console.log(
@@ -553,6 +1025,10 @@ const main = async (): Promise<void> => {
   console.log(
     `Prepared pending Dispute Case ${dispute.disputeCaseId} on Quest ${dispute.questId}.`
   );
+  console.log(
+    `Prepared ${reportCases.caseIds.length} Report Cases on Quest ${reportCases.questId}.`
+  );
+  console.log(`Prepared Conduct Report ${conductReport.id} on Quest ${reportCases.questId}.`);
 };
 
 if (import.meta.main) {

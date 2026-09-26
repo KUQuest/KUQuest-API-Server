@@ -32,13 +32,16 @@ const studentInitiatedOperations = new Set<WalletOperation>([
   'PAYOUT',
 ]);
 
+type WalletStatusActor =
+  | { actorUserId: string; actorAdminId?: never; actorSystem?: never }
+  | { actorAdminId: string; actorUserId?: never; actorSystem?: never }
+  | { actorSystem: true; actorUserId?: never; actorAdminId?: never };
+
 export type ChangeWalletStatusInput = {
   walletId: string;
   toStatus: WalletStatus;
   reason: string;
-  actorUserId?: string;
-  actorAdminId?: string;
-};
+} & WalletStatusActor;
 
 export const isWalletOperationAllowed = (
   walletStatus: WalletStatus,
@@ -69,10 +72,11 @@ const validateStatusChangeInput = (input: ChangeWalletStatusInput) => {
   }
 
   const actors = [input.actorUserId, input.actorAdminId].filter(Boolean);
-  if (actors.length !== 1) {
+  const hasValidActor = input.actorSystem ? actors.length === 0 : actors.length === 1;
+  if (!hasValidActor) {
     throw new MoneyDomainError(
       'INVALID_WALLET_STATUS_ACTOR',
-      'Exactly one Wallet status actor is required.'
+      'Exactly one Wallet status actor or the system origin is required.'
     );
   }
 };
