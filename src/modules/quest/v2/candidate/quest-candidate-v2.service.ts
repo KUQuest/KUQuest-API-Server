@@ -3,9 +3,11 @@ import {
   quest,
   questApiVersion,
   questCandidateApplicationV2,
+  questCandidateTeamV2,
+  questCandidateTeamV2Member,
 } from '@/database/schema/quest.schema';
 
-import { and, asc, eq, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, ne } from 'drizzle-orm';
 
 import {
   runQuestCommand,
@@ -40,6 +42,78 @@ export const questV2CandidateApplicationSelectOperationScope =
   'quest.v2.candidate-application.select';
 export const questV2CandidateApplicationRejectOperationScope =
   'quest.v2.candidate-application.reject';
+
+/** A Member's Candidate history is distinct from the Hirer's per-Quest roster. */
+export const listMyQuestV2CandidateApplications = async (memberId: string) => {
+  const applications = await db
+    .select({
+      id: questCandidateApplicationV2.id,
+      questId: questCandidateApplicationV2.questId,
+      state: questCandidateApplicationV2.state,
+      appliedAt: questCandidateApplicationV2.appliedAt,
+      title: quest.title,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
+      mode: quest.v2Mode,
+      participation: quest.v2Participation,
+      questState: quest.questStatus,
+    })
+    .from(questCandidateApplicationV2)
+    .innerJoin(quest, eq(quest.id, questCandidateApplicationV2.questId))
+    .where(
+      and(
+        eq(questCandidateApplicationV2.memberId, memberId),
+        eq(quest.apiVersion, questApiVersion.v2)
+      )
+    )
+    .orderBy(desc(questCandidateApplicationV2.appliedAt), desc(questCandidateApplicationV2.id));
+
+  const teams = await db
+    .select({
+      id: questCandidateTeamV2.id,
+      questId: questCandidateTeamV2.questId,
+      state: questCandidateTeamV2.state,
+      appliedAt: questCandidateTeamV2.createdAt,
+      title: quest.title,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
+      mode: quest.v2Mode,
+      participation: quest.v2Participation,
+      questState: quest.questStatus,
+    })
+    .from(questCandidateTeamV2Member)
+    .innerJoin(questCandidateTeamV2, eq(questCandidateTeamV2.id, questCandidateTeamV2Member.teamId))
+    .innerJoin(quest, eq(quest.id, questCandidateTeamV2.questId))
+    .where(
+      and(
+        eq(questCandidateTeamV2Member.memberId, memberId),
+        eq(quest.apiVersion, questApiVersion.v2)
+      )
+    )
+    .orderBy(desc(questCandidateTeamV2.createdAt), desc(questCandidateTeamV2.id));
+
+  return [
+    ...applications.map((row) => ({ ...row, kind: 'SINGLE' as const })),
+    ...teams.map((row) => ({ ...row, kind: 'TEAM' as const })),
+  ]
+    .sort((a, b) => b.appliedAt.getTime() - a.appliedAt.getTime() || b.id.localeCompare(a.id))
+    .map((row) => ({
+      id: row.id,
+      questId: row.questId,
+      memberId,
+      kind: row.kind,
+      state: row.state,
+      appliedAt: row.appliedAt.toISOString(),
+      quest: {
+        title: row.title,
+        startTime: row.startTime.toISOString(),
+        dueAt: row.dueAt?.toISOString() ?? null,
+        mode: row.mode,
+        participation: row.participation,
+        state: row.questState,
+      },
+    }));
+};
 
 type QuestV2CandidateApplicationRow = {
   id: string;

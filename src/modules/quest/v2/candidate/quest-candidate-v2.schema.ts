@@ -64,6 +64,39 @@ export const questV2CandidateApplicationListResponseSchema = t.Object({
   }),
 });
 
+export const questV2MyCandidateApplicationsResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    items: t.Array(
+      t.Object({
+        id: t.String({ format: 'uuid' }),
+        questId: t.String({ format: 'uuid' }),
+        memberId: t.String({ format: 'uuid' }),
+        kind: t.Union([t.Literal('SINGLE'), t.Literal('TEAM')]),
+        state: t.Union([
+          applicationState,
+          t.Union([
+            t.Literal('TEAM_FORMING'),
+            t.Literal('TEAM_SUBMITTED'),
+            t.Literal('TEAM_SELECTED'),
+            t.Literal('TEAM_REJECTED'),
+            t.Literal('TEAM_DISBANDED'),
+          ]),
+        ]),
+        appliedAt: t.String({ format: 'date-time' }),
+        quest: t.Object({
+          title: t.String(),
+          startTime: t.String({ format: 'date-time' }),
+          dueAt: t.Nullable(t.String({ format: 'date-time' })),
+          mode: t.Literal('CANDIDATE'),
+          participation: t.Union([t.Literal('SINGLE'), t.Literal('GROUP')]),
+          state: t.String(),
+        }),
+      })
+    ),
+  }),
+});
+
 export const questV2CandidateSelectionParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
   applicationId: t.String({ format: 'uuid' }),

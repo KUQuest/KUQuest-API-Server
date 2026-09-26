@@ -5,6 +5,7 @@ import { t } from 'elysia';
 export const tagSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   name: t.String(),
+  nameTh: t.Nullable(t.String()),
 });
 
 export const tagListQuerySchema = t.Object(

@@ -2,7 +2,7 @@ import { db } from '@/database/client';
 import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { DEFAULT_PAGE_LIMIT } from '@/shared/cursor';
-import { fixedTagNames, otherQuestTagName, type FixedTagName } from '@/shared/tag';
+import { fixedTagNames, fixedTagNamesTh, otherQuestTagName, type FixedTagName } from '@/shared/tag';
 
 import { and, asc, eq, gt, ilike, inArray, or } from 'drizzle-orm';
 
@@ -11,6 +11,7 @@ import { decodeTagCursor, encodeTagCursor } from './tag.cursor';
 export type Tag = {
   id: string;
   name: string;
+  nameTh: string | null;
 };
 
 export type TagSearchOptions = {
@@ -98,6 +99,8 @@ export const legacyTagMappings: Partial<Record<string, FixedTagName>> = {
   'อื่นๆ (ETC.)': otherQuestTagName,
 };
 
+const tagLabelsTh: Readonly<Record<string, string | undefined>> = fixedTagNamesTh;
+
 export const listTags = async (options?: TagSearchOptions): Promise<TagPage> => {
   const limit = options?.limit ?? DEFAULT_PAGE_LIMIT;
   const cursorPayload = decodeTagCursor(options?.cursor);
@@ -107,7 +110,7 @@ export const listTags = async (options?: TagSearchOptions): Promise<TagPage> => 
     ? ilike(tag.name, `%${rawQuery.replace(/[%_\\]/g, '\\$&')}%`)
     : undefined;
 
-  let probe: Tag[];
+  let probe: Pick<Tag, 'id' | 'name'>[];
 
   if (cursorPayload) {
     const cursorFilter = or(
@@ -131,8 +134,11 @@ export const listTags = async (options?: TagSearchOptions): Promise<TagPage> => 
   }
 
   const hasNext = probe.length > limit;
-  const items = hasNext ? probe.slice(0, limit) : probe;
-  const lastItem = items[items.length - 1];
+  const items = (hasNext ? probe.slice(0, limit) : probe).map((row) => ({
+    ...row,
+    nameTh: tagLabelsTh[row.name] ?? null,
+  }));
+  const lastItem = probe[Math.min(probe.length, limit) - 1];
 
   return {
     items,
