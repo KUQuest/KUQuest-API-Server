@@ -41,12 +41,15 @@ const allowedFiles: Record<string, true> = {
 
 const repoRoot = resolve(import.meta.dir, '..', '..');
 
+/** `Bun.Glob` returns `\` separators on Windows; the allow-list and the reader path use `/`. */
+const toPosixPath = (file: string): string => file.replaceAll('\\', '/');
+
 describe('Cursor paging guard', () => {
   it('pages every timestamp cursor row-wise against the anchor row', async () => {
     const offenders: string[] = [];
-    const sources = [
-      ...new Bun.Glob('src/**/*.ts').scanSync({ cwd: repoRoot, onlyFiles: true }),
-    ].sort();
+    const sources = [...new Bun.Glob('src/**/*.ts').scanSync({ cwd: repoRoot, onlyFiles: true })]
+      .map(toPosixPath)
+      .sort();
     for (const file of sources) {
       if (allowedFiles[file]) continue;
       const source = await Bun.file(resolve(repoRoot, file)).text();
@@ -64,9 +67,9 @@ describe('Cursor paging guard', () => {
 
   it('keeps the keyset anchor sub-select in the shared reader alone', async () => {
     const offenders: string[] = [];
-    const sources = [
-      ...new Bun.Glob('src/**/*.ts').scanSync({ cwd: repoRoot, onlyFiles: true }),
-    ].sort();
+    const sources = [...new Bun.Glob('src/**/*.ts').scanSync({ cwd: repoRoot, onlyFiles: true })]
+      .map(toPosixPath)
+      .sort();
     for (const file of sources) {
       if (file === keysetReader) continue;
       const source = await Bun.file(resolve(repoRoot, file)).text();
@@ -86,7 +89,9 @@ describe('Cursor paging guard', () => {
     const offenders: string[] = [];
     const sources = [
       ...new Bun.Glob('src/**/*.schema.ts').scanSync({ cwd: repoRoot, onlyFiles: true }),
-    ].sort();
+    ]
+      .map(toPosixPath)
+      .sort();
     for (const file of sources) {
       const source = await Bun.file(resolve(repoRoot, file)).text();
       for (const match of source.matchAll(limitWithNumericMaximum)) {

@@ -241,6 +241,17 @@ describe('Admin Members Endpoints Integration Tests', () => {
         await db.delete(authUser).where(eq(authUser.lastName, marker));
       }
     });
+
+    it('accepts the shared maximum page limit and rejects one above it', async () => {
+      const atMaximum = await memberListRequest(new URLSearchParams({ limit: '50' }));
+      expect(atMaximum.status).toBe(200);
+
+      const aboveMaximum = await memberListRequest(new URLSearchParams({ limit: '51' }));
+      expect(aboveMaximum.status).toBe(400);
+      const body = (await aboveMaximum.json()) as MemberErrorBody;
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('VALIDATION');
+    });
   });
 
   describe('GET /api/v1/admin/members/:id', () => {

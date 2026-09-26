@@ -252,12 +252,21 @@ describe('Wallet HTTP routes', () => {
     );
     expect(zeroAmount.status).toBe(400);
 
-    // Invalid activities limit (>100)
+    // Activities limit follows the shared MAX_PAGE_LIMIT (50)
+    const atMaximum = await app.handle(
+      new Request('http://localhost/api/v1/wallet/activities?limit=50', {
+        headers: { cookie },
+      })
+    );
+    expect(atMaximum.status).toBe(200);
+
     const invalidLimit = await app.handle(
-      new Request('http://localhost/api/v1/wallet/activities?limit=101', {
+      new Request('http://localhost/api/v1/wallet/activities?limit=51', {
         headers: { cookie },
       })
     );
     expect(invalidLimit.status).toBe(400);
+    const invalidLimitBody = (await invalidLimit.json()) as { error?: { code: string } };
+    expect(invalidLimitBody.error?.code).toBe('VALIDATION');
   });
 });
