@@ -5,6 +5,8 @@ import {
   quest,
   questAssignment,
   questCandidateApplicationV2,
+  questCandidateTeamV2,
+  questCandidateTeamV2Member,
   questCommand,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
@@ -196,6 +198,77 @@ afterAll(async () => {
 });
 
 describe('Quest Candidate API v2', () => {
+  it('lists only the Member own single and team Candidate history across Quests', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const appliedQuestId = await createOpenCandidateQuest();
+    const rejectedQuestId = await createOpenCandidateQuest();
+    const teamQuestId = await createOpenCandidateQuest({
+      participation: 'GROUP',
+      v2Participation: 'GROUP',
+      headcount: 2,
+    });
+    const outsiderQuestId = await createOpenCandidateQuest();
+    const appliedId = randomUUID();
+    const rejectedId = randomUUID();
+    await db.insert(questCandidateApplicationV2).values([
+      { id: appliedId, questId: appliedQuestId, memberId: candidate.id },
+      {
+        id: rejectedId,
+        questId: rejectedQuestId,
+        memberId: candidate.id,
+        state: 'APPLICATION_REJECTED',
+      },
+      { questId: outsiderQuestId, memberId: secondCandidate.id },
+    ]);
+    const [team] = await db
+      .insert(questCandidateTeamV2)
+      .values({
+        questId: teamQuestId,
+        leaderId: secondCandidate.id,
+        name: 'Audit team',
+        headcount: 2,
+        state: 'TEAM_REJECTED',
+      })
+      .returning({ id: questCandidateTeamV2.id });
+    if (!team) throw new Error('Team fixture missing');
+    await db.insert(questCandidateTeamV2Member).values([
+      { teamId: team.id, memberId: candidate.id },
+      { teamId: team.id, memberId: secondCandidate.id },
+    ]);
+
+    const response = await request('/api/v2/applications/mine');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: appliedId,
+          questId: appliedQuestId,
+          state: 'APPLICATION_APPLIED',
+          kind: 'SINGLE',
+          quest: expect.objectContaining({ mode: 'CANDIDATE', participation: 'SINGLE' }),
+        }),
+        expect.objectContaining({
+          id: rejectedId,
+          questId: rejectedQuestId,
+          state: 'APPLICATION_REJECTED',
+          kind: 'SINGLE',
+        }),
+        expect.objectContaining({
+          id: team.id,
+          questId: teamQuestId,
+          state: 'TEAM_REJECTED',
+          kind: 'TEAM',
+        }),
+      ])
+    );
+    expect(body.data.items).toHaveLength(3);
+    const outsider = await request('/api/v2/applications/mine', 'GET', unrelated.id);
+    expect(outsider.status).toBe(200);
+    expect((await outsider.json()).data.items).toEqual([]);
+  });
+
   it('does not accept Candidate application commands after the start boundary', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenCandidateQuest({

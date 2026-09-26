@@ -829,4 +829,48 @@ describe('Admin Dispute API', () => {
       .where(eq(adminDisputeCase.id, cancelled.disputeCaseId));
     expect(caseRow).toEqual({ status: 'DISPUTE_CASE_PENDING', version: 1 });
   });
+
+  it('allows a Member to read their own filed Dispute Case on a Quest', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+
+    const [createdCase] = await db
+      .insert(adminDisputeCase)
+      .values({
+        questId: fixture.questId,
+        filerUserId: (
+          await db.select({ id: authUser.id }).from(authUser).where(eq(authUser.email, memberEmail))
+        )[0].id,
+      })
+      .returning();
+
+    // 1. Initial lookup returns the pending case for the authenticated filer
+    const response = await app.handle(
+      new Request(`http://localhost/api/v1/quests/${fixture.questId}/disputes/mine`, {
+        headers: { cookie: memberCookie },
+      })
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      success: boolean;
+      data: { case: { id: string; questId: string; status: string } | null };
+    };
+    expect(body.success).toBe(true);
+    expect(body.data.case).toMatchObject({
+      id: createdCase.id,
+      questId: fixture.questId,
+      status: 'DISPUTE_CASE_PENDING',
+    });
+
+    // 2. An un-disputed quest returns null case without error
+    const otherQuestId = crypto.randomUUID();
+    const notFoundResponse = await app.handle(
+      new Request(`http://localhost/api/v1/quests/${otherQuestId}/disputes/mine`, {
+        headers: { cookie: memberCookie },
+      })
+    );
+    expect(notFoundResponse.status).toBe(200);
+    const emptyBody = (await notFoundResponse.json()) as { success: boolean; data: { case: null } };
+    expect(emptyBody.data.case).toBeNull();
+  });
 });
