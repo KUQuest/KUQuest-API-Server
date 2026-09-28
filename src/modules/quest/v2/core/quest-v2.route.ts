@@ -166,12 +166,12 @@ export const questV2Route = new Elysia({
     body: questV2ImagesUploadSchema,
     headers: questV2WriteHeadersSchema,
     type: 'multipart/form-data',
-    response: responses(questV2ImagesResponseSchema, 400, 401, 404, 409, 413, 415, 500, 503),
+    response: responses(questV2ImagesResponseSchema, 400, 401, 404, 409, 413, 415, 422, 500, 503),
     detail: {
       tags: ['Quests v2'],
       summary: 'Add Quest Images to a v2 Draft',
       description:
-        'Accepts a multipart images field with one to three validated JPEG, PNG, or WebP files of at most 5 MB each. Appends files to the authenticated Hirer’s QUEST_DRAFT in request order and returns imageId, fileId, position, url, and urlExpiresAt for the complete ordered gallery. A retry with the same Idempotency-Key replays the original response; temporary links expire 15 minutes after materialization, so use Quest detail for a fresh link.',
+        'Accepts a multipart images field with one to three validated JPEG, PNG, or WebP files of at most 5 MB each and 25 megapixels each. Appends files to the authenticated Hirer’s QUEST_DRAFT in request order and returns imageId, fileId, position, url, and urlExpiresAt for the complete ordered gallery. A retry with the same Idempotency-Key replays the original response; temporary links expire 15 minutes after materialization, so use Quest detail for a fresh link.',
       operationId: 'addQuestImagesV2',
       security: betterAuthSecurity,
     },

@@ -842,6 +842,7 @@ describe('Quest Candidate Team API v2', () => {
     const read = await request(`/api/v2/quests/${questId}/teams/${team.id}`, 'GET', candidate.id);
     expect(read.status).toBe(200);
     const readTeam = (await read.json()).data as Record<string, unknown>;
+
     expect(readTeam.joinCode).toBeNull();
     expect(readTeam.joinCodeExpiresAt).toBe(team.joinCodeExpiresAt);
 

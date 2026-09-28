@@ -1,0 +1,40 @@
+meta {
+  name: Create Top-up with Auto-Simulate
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/v1/top-ups
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "quoteId": "{{topUpQuoteId}}",
+    "simulate": true
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && data.data && data.data.id) {
+    bru.setEnvVar("topUpId", data.data.id);
+  }
+}
+
+docs {
+  Shortcut: creates the PromptPay payment request AND immediately simulates payment completion in a single call.
+  Funds are credited into spendingBalanceSatang immediately.
+}

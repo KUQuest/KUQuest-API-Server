@@ -1,0 +1,20 @@
+meta {
+  name: Get Participation Detail (Worker)
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/participation
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns the participant-scoped view of a Quest for an active Worker holding an Assignment.
+  Includes public Quest details plus the calling Worker's assignment status, startedAt, and capabilities.
+}

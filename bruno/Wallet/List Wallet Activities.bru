@@ -1,0 +1,19 @@
+meta {
+  name: List Wallet Activities
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/wallet/activities
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns the reverse-chronological ledger-backed activities for the authenticated Student wallet (e.g. TOP_UP, HOLD, RELEASE, SETTLE, CONVERSION).
+}

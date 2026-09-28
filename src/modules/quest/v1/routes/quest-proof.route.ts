@@ -30,10 +30,12 @@ export const questProofRoute = new Elysia({ name: 'quest-proof-route', prefix: '
     body: proofSubmitSchema,
     type: 'multipart/form-data',
     transform: rejectUnknownFields(proofSubmitSchema),
-    response: responses(proofResponseSchema, 400, 401, 404, 409, 413, 415, 502),
+    response: responses(proofResponseSchema, 400, 401, 404, 409, 413, 415, 422, 502),
     detail: {
       tags: ['Quest Proof'],
       summary: 'Submit Quest proof',
+      description:
+        'Submits up to 5 proof files. Images must be at most 10 MB and 25 megapixels; larger images return 422 PROOF_FILE_DIMENSIONS_TOO_LARGE.',
       operationId: 'submitQuestProof',
       security: betterAuthSecurity,
     },

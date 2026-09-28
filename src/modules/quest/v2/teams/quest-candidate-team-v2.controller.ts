@@ -1,6 +1,7 @@
 import type { AuthedContext } from '@/modules/auth';
 import {
   FileTooLargeError,
+  FileDimensionsTooLargeError,
   FileUploadError,
   UnsupportedFileTypeError,
 } from '@/shared/object-storage';
@@ -200,6 +201,13 @@ const mapTeamError = (set: AuthedContext['set'], outcome: CandidateTeamError) =>
 };
 
 const mapCandidateTeamFileUploadError = (set: AuthedContext['set'], error: unknown) => {
+  if (error instanceof FileDimensionsTooLargeError) {
+    set.status = 422;
+    return apiError(
+      'TEAM_FILE_DIMENSIONS_TOO_LARGE',
+      'Image dimensions must not exceed 25 megapixels'
+    );
+  }
   if (error instanceof FileTooLargeError) {
     set.status = 413;
     return apiError('TEAM_FILE_TOO_LARGE', error.message);

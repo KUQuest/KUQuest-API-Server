@@ -3,6 +3,7 @@ import { MoneyDomainError } from '@/modules/wallet';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import {
   FileLinkUnavailableError,
+  FileDimensionsTooLargeError,
   FileTooLargeError,
   FileUploadError,
   UnsupportedFileTypeError,
@@ -152,6 +153,13 @@ const mapCommandError = (set: AuthedContext['set'], outcome: ProofCommandOutcome
 };
 
 const mapUploadError = (set: AuthedContext['set'], error: unknown) => {
+  if (error instanceof FileDimensionsTooLargeError) {
+    set.status = 422;
+    return apiError(
+      'PROOF_FILE_DIMENSIONS_TOO_LARGE',
+      'Proof image dimensions must not exceed 25 megapixels'
+    );
+  }
   if (error instanceof FileTooLargeError) {
     set.status = 413;
     return apiError('PROOF_FILE_TOO_LARGE', error.message);

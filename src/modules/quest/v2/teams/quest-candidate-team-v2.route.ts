@@ -187,7 +187,7 @@ export const questCandidateTeamV2Route = new Elysia({
       409,
       413,
       415,
-      500,
+      422,
       502,
       503,
       { successStatus: 201 }
@@ -196,7 +196,7 @@ export const questCandidateTeamV2Route = new Elysia({
       tags: ['Quest Candidate Teams v2'],
       summary: 'Upload a private Candidate Team submission file',
       description:
-        'Only the Team Leader can upload one private image, PDF, or video file up to 10 MB while the Candidate Team is forming for an open GROUP Candidate Quest.',
+        'Only the Team Leader can upload one private image, PDF, or video file up to 10 MB while the Candidate Team is forming for an open GROUP Candidate Quest. Images must be at most 25 megapixels; larger images return 422 TEAM_FILE_DIMENSIONS_TOO_LARGE.',
       operationId: 'uploadQuestCandidateTeamFileV2',
       security: betterAuthSecurity,
     },

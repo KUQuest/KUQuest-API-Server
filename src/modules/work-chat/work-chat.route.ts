@@ -171,12 +171,12 @@ export const workChatRoute = new Elysia({
     params: workChatConversationParamsSchema,
     body: workChatAttachmentUploadSchema,
     type: 'multipart/form-data',
-    response: responses(workChatAttachmentResponseSchema, 401, 404, 409, 413, 415, 429, 502),
+    response: responses(workChatAttachmentResponseSchema, 401, 404, 409, 413, 415, 422, 429, 502),
     detail: {
       tags: ['Work Chat'],
       summary: 'Upload a Work Conversation Attachment',
       description:
-        'Uploads an image, PDF, or video up to 10 MB for the authenticated current Member to attach to a Message.',
+        'Uploads an image, PDF, or video up to 10 MB. Images are limited to 25 megapixels; larger images return 422 ATTACHMENT_DIMENSIONS_TOO_LARGE.',
       operationId: 'uploadWorkConversationAttachment',
       security: betterAuthSecurity,
     },

@@ -1,0 +1,19 @@
+meta {
+  name: List Candidate Inquiries
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/chat/candidate-inquiries
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns all Candidate Inquiry Conversations for the authenticated Member.
+}

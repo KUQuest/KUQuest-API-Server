@@ -1,0 +1,32 @@
+meta {
+  name: Hirer Decide Underfilled
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/underfilled/decision
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "decision": "PROCEED"
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Hirer decides whether to PROCEED with the current joined workers or CANCEL the Quest when an underfilled state occurs at startTime.
+  If PROCEED, triggers the 10-minute Worker consent window.
+}

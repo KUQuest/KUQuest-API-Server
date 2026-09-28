@@ -201,12 +201,21 @@ export const candidateInquiryRoute = new Elysia({
     params: candidateInquiryParamsSchema,
     body: candidateInquiryAttachmentUploadSchema,
     type: 'multipart/form-data',
-    response: responses(candidateInquiryAttachmentResponseSchema, 401, 404, 413, 415, 429, 502),
+    response: responses(
+      candidateInquiryAttachmentResponseSchema,
+      401,
+      404,
+      413,
+      415,
+      422,
+      429,
+      502
+    ),
     detail: {
       tags: ['Candidate Inquiry'],
       summary: 'Upload a Candidate Inquiry Attachment',
       description:
-        'Uploads an image, PDF, or video up to 10 MB for the authenticated participant to attach to a Message.',
+        'Uploads an image, PDF, or video up to 10 MB. Images are limited to 25 megapixels; larger images return 422 ATTACHMENT_DIMENSIONS_TOO_LARGE.',
       operationId: 'uploadCandidateInquiryAttachment',
       security: betterAuthSecurity,
     },

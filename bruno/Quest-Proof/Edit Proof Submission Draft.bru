@@ -1,0 +1,31 @@
+meta {
+  name: Edit Proof Submission Draft
+  type: http
+  seq: 2
+}
+
+patch {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/proof-submissions/{{proofSubmissionId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "description": "ส่งผลงานออกแบบโปสเตอร์แก้ไขเรียบร้อยครับ ขนาด A3 สีเขียว KU ตามที่บรีฟ"
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Worker updates the description or files of an unsent Proof Submission Draft before dueAt.
+}
