@@ -169,6 +169,12 @@ export const adminDisputeOpenResponseSchema = t.Object({
   success: t.Literal(true),
   data: adminDisputeSummarySchema,
 });
+export const questDisputeMineResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    case: t.Nullable(adminDisputeSummarySchema),
+  }),
+});
 
 export type AdminDisputeListQuery = typeof adminDisputeListQuerySchema.static;
 export type AdminDisputeResolveBody = typeof adminDisputeResolveBodySchema.static;

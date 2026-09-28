@@ -12,6 +12,7 @@ import {
   selectQuestV2CandidateApplicationController,
   withdrawQuestV2CandidateApplicationController,
 } from './quest-candidate-v2.controller';
+import { listMyQuestV2CandidateApplications } from './quest-candidate-v2.service';
 import {
   questV2CandidateApplicationHeadersSchema,
   questV2CandidateApplicationDetailParamsSchema,
@@ -20,6 +21,7 @@ import {
   questV2CandidateApplicationResponseSchema,
   questV2CandidateSelectionParamsSchema,
   questV2CandidateSelectionResponseSchema,
+  questV2MyCandidateApplicationsResponseSchema,
 } from './quest-candidate-v2.schema';
 
 export const questCandidateV2Route = new Elysia({
@@ -27,6 +29,24 @@ export const questCandidateV2Route = new Elysia({
   prefix: API_V2_PREFIX,
 })
   .use(authGuard)
+  .get(
+    '/applications/mine',
+    async ({ session }) => {
+      const items = await listMyQuestV2CandidateApplications(session.user.id);
+      return { success: true, data: { items } };
+    },
+    {
+      response: responses(questV2MyCandidateApplicationsResponseSchema, 401, 500),
+      detail: {
+        tags: ['Quest Candidates v2'],
+        summary: "List authenticated Member's Candidate applications",
+        description:
+          "Lists the authenticated Member's individual Candidate applications and Candidate Team memberships across all Quests, including rejected and terminal history.",
+        operationId: 'listMyCandidateApplicationsV2',
+        security: betterAuthSecurity,
+      },
+    }
+  )
   .post('/quests/:questId/applications', createQuestV2CandidateApplicationController, {
     params: questV2CandidateApplicationParamsSchema,
     headers: questV2CandidateApplicationHeadersSchema,

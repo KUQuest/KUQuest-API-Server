@@ -1184,7 +1184,7 @@ describe('Quest API v2 Draft editing', () => {
       success: false,
       error: {
         code: 'QUEST_EDIT_CONFLICT',
-        message: 'The Draft was changed by another request',
+        message: 'Quest was changed by another request',
       },
     });
 
@@ -1417,7 +1417,7 @@ describe('Quest API v2 Draft editing', () => {
     expect((await empty.json()).error.code).toBe('VALIDATION');
   });
 
-  it('allows only the owning Hirer to edit a Draft and rejects non-Draft State', async () => {
+  it('allows only the owning Hirer to edit and rejects assigned Quests', async () => {
     const created = await createQuestV2(hirerId, baseInput, `v2-edit-owner-create-${randomUUID()}`);
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -1444,7 +1444,7 @@ describe('Quest API v2 Draft editing', () => {
 
     await db
       .update(quest)
-      .set({ questStatus: questStatus.open, rewardSatang: 100 })
+      .set({ questStatus: 'QUEST_ASSIGNED', rewardSatang: 100 })
       .where(eq(quest.id, created.quest.id));
 
     const notDraft = await patchQuest(
@@ -1456,7 +1456,7 @@ describe('Quest API v2 Draft editing', () => {
     expect(notDraft.status).toBe(409);
     expect(await notDraft.json()).toEqual({
       success: false,
-      error: { code: 'QUEST_NOT_DRAFT', message: 'Only Draft Quests can be edited' },
+      error: { code: 'QUEST_NOT_EDITABLE', message: 'Quest cannot be edited in its current State' },
     });
   });
 });
