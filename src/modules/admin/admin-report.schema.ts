@@ -127,13 +127,23 @@ export const adminReportCaseDecisionBodySchema = t.Object(
   { additionalProperties: false }
 );
 
-export const adminConductReportDecisionBodySchema = t.Object(
+export const adminConductReportDismissDecisionBodySchema = t.Object(
   {
     outcome: t.Literal('CONDUCT_REPORT_DISMISSED'),
     decisionReasonCode: conductReportDecisionReasonCodeSchema,
   },
   { additionalProperties: false }
 );
+
+export const adminConductReportUpholdDecisionBodySchema = t.Object(
+  { outcome: t.Literal('CONDUCT_REPORT_UPHELD') },
+  { additionalProperties: false }
+);
+
+export const adminConductReportDecisionBodySchema = t.Union([
+  adminConductReportDismissDecisionBodySchema,
+  adminConductReportUpholdDecisionBodySchema,
+]);
 
 export const adminReportDecisionBodySchema = t.Union([
   adminReportCaseDecisionBodySchema,

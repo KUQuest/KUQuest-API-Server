@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { quest, questApiVersion, questAssignment } from '@/database/schema/quest.schema';
+import { isMemberRedFlaggedInTransaction } from '@/modules/admin/member-penalty';
 
 import { and, asc, eq, sql } from 'drizzle-orm';
 
@@ -50,7 +51,8 @@ type QuestV2AssignmentBusinessOutcomeCode =
   | 'not-supported-participation'
   | 'not-found'
   | 'roster-frozen'
-  | 'not-first-come-first-served';
+  | 'not-first-come-first-served'
+  | 'red-flagged';
 
 type QuestV2AssignmentOutcomeCode = QuestV2AssignmentBusinessOutcomeCode | QuestCommandOutcomeCode;
 
@@ -253,6 +255,9 @@ const joinQuestV2InTransaction = async (
       }
       if (current.startTime.getTime() <= now.getTime()) {
         return { kind: 'rejected', rejection: isGroupQuest ? 'roster-frozen' : 'not-open' };
+      }
+      if (await isMemberRedFlaggedInTransaction(transaction, userId, now)) {
+        return { kind: 'rejected', rejection: 'red-flagged' };
       }
 
       const [activeCount] = await transaction

@@ -8,8 +8,10 @@ import {
   adminReporterEntry,
   conductReportStatus,
   reportCaseStatus,
+  type ConductReportReason,
   type ConductReportStatus,
   type ReportCaseStatus,
+  type MemberPenaltyResult,
 } from '@/database/schema/admin.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
@@ -38,6 +40,11 @@ import {
   type KeysetSort,
 } from '@/shared/keyset-page';
 import { workChatStorage } from '@/modules/work-chat';
+import {
+  recordMemberConfirmedViolationInTransaction,
+  reverseReportCaseViolationInTransaction,
+} from '@/modules/admin/member-penalty';
+import { enqueuePushDeliveryInTransaction } from '@/modules/push';
 
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -85,6 +92,34 @@ const adminActionService = createAdminActionService(reportAdminActionCatalog);
 const maxEvidenceContextMessages = 3;
 const evidenceProbeLimit = maxEvidenceContextMessages + 1;
 
+const conductReportReasonLabel = (reason: ConductReportReason) => {
+  switch (reason) {
+    case 'CONDUCT_ABANDONED':
+      return 'abandonment';
+    case 'CONDUCT_OUT_OF_SCOPE':
+      return 'work outside the agreed scope';
+    case 'CONDUCT_NO_SHOW':
+      return 'not attending the Quest';
+  }
+};
+
+const memberPenaltyResultLabel = (result: MemberPenaltyResult) => {
+  switch (result) {
+    case 'PENALTY_EXEMPT':
+      return 'no additional restriction';
+    case 'PENALTY_RED_FLAG':
+      return 'a 7-day Red Flag';
+    case 'PENALTY_TEMPORARY_BAN_7_DAYS':
+      return 'a 7-day Member Ban';
+    case 'PENALTY_TEMPORARY_BAN_1_MONTH':
+      return 'a 1-month Member Ban';
+    case 'PENALTY_PERMANENT_BAN':
+      return 'a permanent Member Ban';
+    case 'PENALTY_REVERSAL':
+      return 'a reversed penalty';
+  }
+};
+
 export class AdminReportError extends Error {
   readonly code:
     | 'REPORT_CASE_NOT_FOUND'
@@ -108,6 +143,8 @@ type ReportCaseListRow = {
   conversationId: string;
   questId: string;
 };
+
+type ReportCaseCommandRow = ReportCaseListRow & { reportedMemberId: string | null };
 
 type AdminReportKind = 'REPORT_CASE' | 'CONDUCT_REPORT';
 type ConductReportMember = Pick<
@@ -316,19 +353,21 @@ const readReportCaseById = async (
   database: ReportDatabase,
   reportId: string,
   lock = false
-): Promise<ReportCaseListRow | undefined> => {
+): Promise<ReportCaseCommandRow | undefined> => {
   const query = database
     .select({
       reportCase: adminReportCase,
       conversationId: chatMessage.conversationId,
       questId: chatConversation.questId,
+      reportedMemberId: chatMembership.memberId,
     })
     .from(adminReportCase)
     .innerJoin(chatMessage, eq(chatMessage.id, adminReportCase.messageId))
+    .leftJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId))
     .innerJoin(chatConversation, eq(chatConversation.id, chatMessage.conversationId))
     .where(eq(adminReportCase.id, reportId));
 
-  const rows = lock ? await query.for('update') : await query.limit(1);
+  const rows = lock ? await query.for('update', { of: adminReportCase }) : await query.limit(1);
   return rows[0];
 };
 
@@ -1221,6 +1260,16 @@ export const decideAdminReportCase = async (
               input.adminId,
               now
             );
+            if (current.reportedMemberId) {
+              await recordMemberConfirmedViolationInTransaction(database, {
+                memberId: current.reportedMemberId,
+                source: 'REPORT_CASE',
+                sourceId: current.reportCase.id,
+                actorAdminId: input.adminId,
+                reasonCode: input.reasonCode!,
+                now,
+              });
+            }
           } else if (input.outcome === reportCaseStatus.restored) {
             await restoreMessageInTransaction(
               database,
@@ -1228,6 +1277,15 @@ export const decideAdminReportCase = async (
               current.conversationId,
               now
             );
+            if (current.reportedMemberId) {
+              await reverseReportCaseViolationInTransaction(database, {
+                memberId: current.reportedMemberId,
+                reportCaseId: current.reportCase.id,
+                actorAdminId: input.adminId,
+                reasonCode: input.reasonCode!,
+                now,
+              });
+            }
           }
 
           await database.insert(adminModerationDecision).values({
@@ -1270,28 +1328,51 @@ export const decideAdminReportCase = async (
   return { ...result, outcome: input.outcome };
 };
 
-type DismissAdminConductReportInput = AdminReportCommandInput & {
-  decisionReasonCode: ConductReportDismissReasonCode;
-};
+type DecideAdminConductReportInput =
+  | (AdminReportCommandInput & {
+      outcome: typeof conductReportStatus.dismissed;
+      decisionReasonCode: ConductReportDismissReasonCode;
+    })
+  | (AdminReportCommandInput & { outcome: typeof conductReportStatus.upheld });
 
-const dismissAdminConductReport = async (
-  input: DismissAdminConductReportInput
+const decideAdminConductReport = async (
+  input: DecideAdminConductReportInput
 ): Promise<AdminActionResult<ConductReportCommandSummary>> => {
   const now = new Date();
+  const [report] = await db
+    .select({ reason: adminConductReport.reason })
+    .from(adminConductReport)
+    .where(eq(adminConductReport.id, input.reportId))
+    .limit(1);
+  if (!report) {
+    throw new AdminReportError('CONDUCT_REPORT_NOT_FOUND', 'Conduct Report does not exist.');
+  }
+  const reasonCode =
+    input.outcome === conductReportStatus.dismissed ? input.decisionReasonCode : report.reason;
 
   return adminActionService.executeCommand<ConductReportCommandSummary>({
     adminId: input.adminId,
-    action: 'CONDUCT_REPORT_DISMISS',
+    action:
+      input.outcome === conductReportStatus.dismissed
+        ? 'CONDUCT_REPORT_DISMISS'
+        : 'CONDUCT_REPORT_UPHOLD',
     resourceType: 'conduct_report',
     resourceId: input.reportId,
     requestKey: input.requestKey,
-    reasonCode: input.decisionReasonCode,
-    request: { outcome: conductReportStatus.dismissed },
-    metadata: { outcome: conductReportStatus.dismissed },
+    reasonCode,
+    request: { outcome: input.outcome },
+    metadata: { outcome: input.outcome },
     expectedVersion: input.expectedVersion,
     prepare: async (database) => {
       const [current] = await database
-        .select({ status: adminConductReport.status, version: adminConductReport.version })
+        .select({
+          id: adminConductReport.id,
+          status: adminConductReport.status,
+          version: adminConductReport.version,
+          publicSequence: adminConductReport.publicSequence,
+          reason: adminConductReport.reason,
+          reportedMemberId: adminConductReport.reportedMemberId,
+        })
         .from(adminConductReport)
         .where(eq(adminConductReport.id, input.reportId))
         .limit(1)
@@ -1305,15 +1386,47 @@ const dismissAdminConductReport = async (
           if (current.status !== conductReportStatus.pending) {
             throw new AdminReportError(
               'CONDUCT_REPORT_OUTCOME_INVALID',
-              'Only a pending Conduct Report can be dismissed.'
+              'Only a pending Conduct Report can be decided.'
             );
+          }
+
+          if (input.outcome === conductReportStatus.upheld) {
+            const penaltyRecord = await recordMemberConfirmedViolationInTransaction(database, {
+              memberId: current.reportedMemberId,
+              source: 'CONDUCT_REPORT',
+              sourceId: input.reportId,
+              actorAdminId: input.adminId,
+              reasonCode: current.reason,
+              now,
+            });
+            const displayId = formatConductReportDisplayId(current.publicSequence);
+            await enqueuePushDeliveryInTransaction(database, {
+              recipientMemberId: current.reportedMemberId,
+              eventKey: `conduct-report-upheld:${current.id}`,
+              eventType: 'CONDUCT_REPORT_UPHELD',
+              title: 'Conduct Report decision',
+              body: `Your Conduct Report was upheld for ${conductReportReasonLabel(current.reason)}. The result is ${memberPenaltyResultLabel(penaltyRecord.result)}.`,
+              deepLink: `kuquest://conduct-reports/${displayId}`,
+              data: {
+                eventType: 'CONDUCT_REPORT_UPHELD',
+                reportId: current.id,
+                reportDisplayId: displayId,
+                reasonCode: current.reason,
+                decision: 'UPHELD',
+                penaltyResult: penaltyRecord.result,
+              },
+              now,
+            });
           }
 
           const [updated] = await database
             .update(adminConductReport)
             .set({
-              status: conductReportStatus.dismissed,
-              decisionReason: input.decisionReasonCode,
+              status: input.outcome,
+              decisionReason:
+                input.outcome === conductReportStatus.dismissed
+                  ? input.decisionReasonCode
+                  : current.reason,
               resolvedByAdminId: input.adminId,
               resolvedAt: now,
               version: sql`${adminConductReport.version} + 1`,
@@ -1366,23 +1479,22 @@ export type DecideAdminReportInput = AdminReportCommandInput &
         outcome: typeof conductReportStatus.dismissed;
         decisionReasonCode: ConductReportDismissReasonCode;
       }
+    | { outcome: typeof conductReportStatus.upheld }
   );
 
 export type DecideAdminReportResult = AdminActionResult<AdminReportCommandSummary> & {
-  outcome: ReportCaseOutcome | typeof conductReportStatus.dismissed;
+  outcome:
+    ReportCaseOutcome | typeof conductReportStatus.dismissed | typeof conductReportStatus.upheld;
 };
 
 export const decideAdminReport = async (
   input: DecideAdminReportInput
 ): Promise<DecideAdminReportResult> => {
-  if (input.outcome === conductReportStatus.dismissed) {
-    const result = await dismissAdminConductReport({
-      adminId: input.adminId,
-      reportId: input.reportId,
-      expectedVersion: input.expectedVersion,
-      requestKey: input.requestKey,
-      decisionReasonCode: input.decisionReasonCode,
-    });
+  if (
+    input.outcome === conductReportStatus.dismissed ||
+    input.outcome === conductReportStatus.upheld
+  ) {
+    const result = await decideAdminConductReport(input);
     return { ...result, outcome: input.outcome };
   }
 

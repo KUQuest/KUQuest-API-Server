@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { isMemberRedFlaggedInTransaction } from '@/modules/admin/member-penalty';
 import {
   quest,
   questApiVersion,
@@ -124,7 +125,12 @@ type QuestV2CandidateApplicationRow = {
 };
 
 type CandidateApplicationBusinessOutcomeCode =
-  'already-exists' | 'hirer-not-allowed' | 'not-candidate' | 'not-open' | 'not-single';
+  | 'already-exists'
+  | 'hirer-not-allowed'
+  | 'not-candidate'
+  | 'not-open'
+  | 'not-single'
+  | 'red-flagged';
 
 type CandidateApplicationOutcomeCode =
   CandidateApplicationBusinessOutcomeCode | 'not-found' | QuestCommandOutcomeCode;
@@ -259,6 +265,9 @@ export const createQuestV2CandidateApplication = async (
           )
           .limit(1);
         if (existing) return { kind: 'rejected', rejection: 'already-exists' };
+        if (await isMemberRedFlaggedInTransaction(transaction, memberId, now)) {
+          return { kind: 'rejected', rejection: 'red-flagged' };
+        }
 
         const [createdApplication] = await transaction
           .insert(questCandidateApplicationV2)

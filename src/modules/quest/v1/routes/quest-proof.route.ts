@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
@@ -24,6 +24,7 @@ import {
 
 export const questProofRoute = new Elysia({ name: 'quest-proof-route', prefix: '/api/v1/quests' })
   .use(authGuard)
+  .use(memberBanGuard)
   .post('/:questId/proof', submitProofController, {
     params: proofParamsSchema,
     body: proofSubmitSchema,

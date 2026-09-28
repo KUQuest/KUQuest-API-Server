@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { hasRedFlaggedMemberInTransaction } from '@/modules/admin/member-penalty';
 import { file } from '@/database/schema/file.schema';
 import {
   quest,
@@ -123,6 +124,7 @@ type QuestV2CandidateTeamBusinessOutcomeCode =
   | 'not-leader'
   | 'not-open'
   | 'not-selectable'
+  | 'red-flagged'
   | 'submission-files-invalid'
   | 'submission-invalid'
   | 'team-full'
@@ -1402,6 +1404,15 @@ export const submitQuestV2CandidateTeam = async (
         const members = await teamMembers(transaction, teamId, true);
         if (team.headcount === null || members.length !== team.headcount) {
           return { kind: 'rejected', rejection: 'headcount-mismatch' };
+        }
+        if (
+          await hasRedFlaggedMemberInTransaction(
+            transaction,
+            members.map(({ memberId }) => memberId),
+            now
+          )
+        ) {
+          return { kind: 'rejected', rejection: 'red-flagged' };
         }
         if (!text || text.length > 1000) {
           return { kind: 'rejected', rejection: 'submission-invalid' };

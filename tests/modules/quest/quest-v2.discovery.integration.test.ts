@@ -181,6 +181,7 @@ beforeEach(async () => {
     await db.delete(quest).where(inArray(quest.id, questIds));
     questIds.splice(0, questIds.length);
   }
+  await db.update(authUser).set({ redFlagExpiresAt: null }).where(eq(authUser.id, ownerId));
 });
 
 afterAll(async () => {
@@ -351,6 +352,10 @@ describe('Quest API v2 discovery contract', () => {
     const ownQuest = await createOpenQuest(memberId, {
       title: `${fixturePrefix} Own Quest`,
     });
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) })
+      .where(eq(authUser.id, ownerId));
 
     const response = await getBoard(`?q=${encodeURIComponent(fixturePrefix)}`);
     expect(response.status).toBe(200);
@@ -375,6 +380,7 @@ describe('Quest API v2 discovery contract', () => {
             department: unknown;
             avatar: unknown;
             occupation: unknown;
+            redFlagged: boolean;
           };
         }>;
         nextCursor: string | null;
@@ -417,6 +423,7 @@ describe('Quest API v2 discovery contract', () => {
           url: expect.stringMatching(/^https?:\/\//),
         },
         occupation: { id: occupationId, name: 'Student' },
+        redFlagged: true,
       },
     });
     expect(body.data.items.some((item) => item.id === ownQuest)).toBe(false);
@@ -488,6 +495,10 @@ describe('Quest API v2 discovery contract', () => {
       fileId: publicFile.id,
       position: 0,
     });
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) })
+      .where(eq(authUser.id, ownerId));
 
     const linkCreatedAt = Date.now();
     const response = await getPublicDetail(publicQuestId);
@@ -512,6 +523,7 @@ describe('Quest API v2 discovery contract', () => {
       activeWorkerCount: 0,
       proofRequired: true,
       hirerName: 'Quest Owner',
+      hirerRedFlagged: true,
       hirerAvatar: {
         fileId: ownerAvatarFileId,
         url: expect.stringMatching(/^https?:\/\//),

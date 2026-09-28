@@ -1,6 +1,7 @@
 import { db, sql as postgresSql } from '@/database/client';
 import { authSession } from '@/database/schema/auth.schema';
 import { quest, questApiVersion } from '@/database/schema/quest.schema';
+import { closeSocketForActiveMemberBan } from '@/modules/auth';
 import type { QuestTransaction } from '@/modules/quest/shared';
 
 import { and, eq, gt, inArray, sql as drizzleSql } from 'drizzle-orm';
@@ -96,6 +97,17 @@ const sessionIsCurrent = async (subscription: QuestSubscriptionIdentity) => {
   return session !== undefined;
 };
 
+const closeSubscriptionIfMemberIsBanned = async (
+  id: string,
+  subscription: QuestSubscriptionIdentity
+) =>
+  closeSocketForActiveMemberBan(
+    {
+      close: (code, reason) => closeSubscription(id, subscription, code, reason),
+    },
+    subscription.memberId
+  );
+
 const deliverQuestUpdate = async (event: QuestUpdateNotification) => {
   // Open Quests publish only roster invalidations and updates for Members with
   // an open Candidate Inquiry Conversation.
@@ -125,6 +137,7 @@ const deliverQuestUpdate = async (event: QuestUpdateNotification) => {
     if (subscription.stream !== 'QUEST' || subscription.questId !== event.questId) continue;
 
     if (recipients.has(subscription.memberId)) {
+      if (await closeSubscriptionIfMemberIsBanned(id, subscription)) continue;
       if (!(await sessionIsCurrent(subscription))) {
         closeSubscription(id, subscription, 4401, 'Session expired');
         continue;
@@ -179,6 +192,7 @@ const deliverCandidateRosterUpdate = async (event: CandidateRosterUpdateNotifica
     if (!receivesUpdate && !losesAccess) continue;
 
     if (receivesUpdate && !removedMember) {
+      if (await closeSubscriptionIfMemberIsBanned(id, subscription)) continue;
       if (!(await sessionIsCurrent(subscription))) {
         closeSubscription(id, subscription, 4401, 'Session expired');
         continue;
@@ -225,6 +239,7 @@ const deliverQuestBoardInvalidated = async (
   });
 
   for (const [id, subscription] of boardSubscriptions) {
+    if (await closeSubscriptionIfMemberIsBanned(id, subscription)) continue;
     if (!activeSessionKeys.has(`${subscription.sessionId}:${subscription.memberId}`)) {
       closeSubscription(id, subscription, 4401, 'Session expired');
       continue;
@@ -276,6 +291,7 @@ const deliverHirerQuestUpdate = async (questId: string, changeType: HirerQuestCh
   });
 
   for (const [id, subscription] of hirerSessions) {
+    if (await closeSubscriptionIfMemberIsBanned(id, subscription)) continue;
     if (!activeSessionKeys.has(`${subscription.sessionId}:${subscription.memberId}`)) {
       closeSubscription(id, subscription, 4401, 'Session expired');
       continue;
