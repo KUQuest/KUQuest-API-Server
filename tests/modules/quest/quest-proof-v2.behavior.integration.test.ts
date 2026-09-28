@@ -977,6 +977,7 @@ describe('Quest Proof Submission v2 behavior', () => {
     const attachments = await db
       .select({
         fileId: questV2ProofSubmissionFile.fileId,
+        position: questV2ProofSubmissionFile.position,
         status: questV2ProofSubmissionFile.uploadStatus,
         failureCode: questV2ProofSubmissionFile.failureCode,
       })
