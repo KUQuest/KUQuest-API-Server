@@ -2,8 +2,22 @@ import { db } from '@/database/client';
 import { memberPenaltyRecord, type MemberPenaltyResult } from '@/database/schema/admin.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { review } from '@/database/schema/quest.schema';
+import { walletStatusHistory, walletWallet } from '@/database/schema/wallet.schema';
+import { changeWalletStatusInTransaction } from '@/modules/wallet/wallet.status.service';
+import { ensureWalletInTransaction } from '@/modules/wallet/wallet.service';
 
-import { and, asc, count, eq, inArray, sql as drizzleSql, sum } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  lte,
+  sql as drizzleSql,
+  sum,
+} from 'drizzle-orm';
 
 export type MemberPenaltyTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -34,6 +48,13 @@ const addOneCalendarMonth = (date: Date): Date => {
 
 const isTemporaryBan = (result: MemberPenaltyResult): boolean =>
   result === 'PENALTY_TEMPORARY_BAN_7_DAYS' || result === 'PENALTY_TEMPORARY_BAN_1_MONTH';
+const isBanResult = (result: MemberPenaltyResult): boolean =>
+  isTemporaryBan(result) || result === 'PENALTY_PERMANENT_BAN';
+
+const automaticBanFreezeReason = (penaltyRecordId: string): string =>
+  `Automatic Member Ban freeze: ${penaltyRecordId}`;
+const isAutomaticBanFreezeReason = (reason: string | null): boolean =>
+  reason?.startsWith('Automatic Member Ban freeze: ') ?? false;
 
 const temporaryBanExpiresAt = (record: MemberPenaltyRow): Date | null => {
   if (record.result === 'PENALTY_TEMPORARY_BAN_7_DAYS') return addDays(record.createdAt, 7);
@@ -131,12 +152,67 @@ const banLiftTimes = (records: MemberPenaltyRow[], now: Date): Date[] => {
   });
 };
 
-const hasActiveBan = (records: MemberPenaltyRow[], now: Date): boolean => {
-  const active = activeOriginalRecords(records);
-  return active.some((record) => {
+const activeBanRecord = (records: MemberPenaltyRow[], now: Date): MemberPenaltyRow | undefined =>
+  activeOriginalRecords(records).find((record) => {
     if (record.result === 'PENALTY_PERMANENT_BAN') return true;
     const expiry = temporaryBanExpiresAt(record);
     return expiry !== null && expiry > now;
+  });
+
+const reconcileBanWalletStatusInTransaction = async (
+  transaction: MemberPenaltyTransaction,
+  memberId: string,
+  records: MemberPenaltyRow[],
+  now: Date
+): Promise<void> => {
+  const activeBan = activeBanRecord(records, now);
+  if (activeBan) await ensureWalletInTransaction(transaction, memberId);
+
+  const [wallet] = await transaction
+    .select()
+    .from(walletWallet)
+    .where(eq(walletWallet.userId, memberId))
+    .for('update');
+  if (!wallet) return;
+
+  if (activeBan) {
+    if (wallet.walletStatus !== 'ACTIVE') return;
+
+    await changeWalletStatusInTransaction(transaction, {
+      walletId: wallet.id,
+      toStatus: 'FROZEN',
+      reason: automaticBanFreezeReason(activeBan.id),
+      actorSystem: true,
+    });
+    return;
+  }
+
+  if (wallet.walletStatus !== 'FROZEN') return;
+  const [latestStatus] = await transaction
+    .select({
+      actorAdminId: walletStatusHistory.actorAdminId,
+      actorUserId: walletStatusHistory.actorUserId,
+      reason: walletStatusHistory.reason,
+      toStatus: walletStatusHistory.toStatus,
+    })
+    .from(walletStatusHistory)
+    .where(eq(walletStatusHistory.walletId, wallet.id))
+    .orderBy(desc(walletStatusHistory.occurredAt), desc(walletStatusHistory.id))
+    .limit(1);
+  if (
+    latestStatus?.toStatus !== 'FROZEN' ||
+    latestStatus.actorAdminId !== null ||
+    latestStatus.actorUserId !== null ||
+    !isAutomaticBanFreezeReason(latestStatus.reason)
+  ) {
+    return;
+  }
+
+  await changeWalletStatusInTransaction(transaction, {
+    walletId: wallet.id,
+    toStatus: 'ACTIVE',
+    reason: 'Automatic Member Ban freeze expired.',
+    actorSystem: true,
   });
 };
 
@@ -200,7 +276,7 @@ export const recordMemberConfirmedViolationInTransaction = async (
     ? confirmed.filter((record) => record.createdAt >= lastBanLift).length
     : Number.POSITIVE_INFINITY;
   const pc13ExemptionApplies =
-    lastBanLift !== null && !hasActiveBan(records, input.now) && violationsSinceBanLift < 3;
+    lastBanLift !== null && !activeBanRecord(records, input.now) && violationsSinceBanLift < 3;
   const exemptionApplies = confirmed.length < 10 || pc13ExemptionApplies;
   const strikeCount = activeOriginalRecords(records).filter(
     (record) => record.ladder === 'MISCONDUCT' && record.result !== 'PENALTY_EXEMPT'
@@ -225,6 +301,14 @@ export const recordMemberConfirmedViolationInTransaction = async (
 
   if (!created) throw new Error('Member Penalty record could not be created.');
   await rebuildMemberProjections(transaction, input.memberId, input.now);
+  if (isBanResult(created.result)) {
+    await reconcileBanWalletStatusInTransaction(
+      transaction,
+      input.memberId,
+      [...records, created],
+      input.now
+    );
+  }
   return created;
 };
 
@@ -270,6 +354,14 @@ export const reverseReportCaseViolationInTransaction = async (
 
   if (!reversal) throw new Error('Member Penalty reversal could not be created.');
   await rebuildMemberProjections(transaction, input.memberId, input.now);
+  if (isBanResult(original.result)) {
+    await reconcileBanWalletStatusInTransaction(
+      transaction,
+      input.memberId,
+      [...records, reversal],
+      input.now
+    );
+  }
   return reversal;
 };
 
@@ -324,7 +416,67 @@ export const recordReviewAveragePenaltyInTransaction = async (
 
   if (!created) throw new Error('Review penalty record could not be created.');
   await rebuildMemberProjections(transaction, input.memberId, input.now);
+  if (isBanResult(created.result)) {
+    await reconcileBanWalletStatusInTransaction(
+      transaction,
+      input.memberId,
+      [...records, created],
+      input.now
+    );
+  }
   return created;
+};
+
+const expiredBanBatchSize = 100;
+
+/** Process one Member whose projected temporary Ban expiry has passed. */
+export const processExpiredMemberBanWalletFreeze = async (
+  memberId: string,
+  now = new Date()
+): Promise<boolean> =>
+  db.transaction(async (transaction) => {
+    await lockMemberPenaltyMutation(transaction, memberId);
+    const [lockedMember] = await transaction
+      .select({ bannedUntil: authUser.bannedUntil })
+      .from(authUser)
+      .where(eq(authUser.id, memberId))
+      .for('update');
+    if (!lockedMember?.bannedUntil || lockedMember.bannedUntil > now) return false;
+
+    const records = await readMemberRecords(transaction, memberId);
+    await rebuildMemberProjections(transaction, memberId, now);
+    await reconcileBanWalletStatusInTransaction(transaction, memberId, records, now);
+    return true;
+  });
+
+/** Clear expired Member Ban projections and lift only an automatic Wallet freeze. */
+export const processExpiredMemberBanWalletFreezes = async (now = new Date()): Promise<number> => {
+  let processed = 0;
+  let firstError: unknown;
+  let hasErrors = false;
+  const expiredMembers = await db
+    .select({ id: authUser.id })
+    .from(authUser)
+    .where(and(isNotNull(authUser.bannedUntil), lte(authUser.bannedUntil, now)))
+    .orderBy(asc(authUser.bannedUntil), asc(authUser.id))
+    .limit(expiredBanBatchSize);
+
+  for (const member of expiredMembers) {
+    try {
+      // Serialize Member updates and continue after one Member's transaction fails.
+      // eslint-disable-next-line no-await-in-loop
+      const didProcess = await processExpiredMemberBanWalletFreeze(member.id, now);
+      if (didProcess) processed += 1;
+    } catch (error) {
+      if (!hasErrors) {
+        firstError = error;
+        hasErrors = true;
+      }
+    }
+  }
+
+  if (hasErrors) throw firstError;
+  return processed;
 };
 
 export type MemberPenaltyRestriction = {

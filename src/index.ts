@@ -1,5 +1,6 @@
 import { app } from '@/app';
 import { env, validateRuntimeEnv } from '@/config/env';
+import { startMemberBanWalletFreezeScheduler } from '@/modules/admin/member-penalty';
 import { startPayoutScheduler } from '@/modules/payout';
 import { startPushScheduler } from '@/modules/push';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
@@ -15,6 +16,7 @@ app.listen({
 });
 
 startQuestLifecycleScheduler({ run: () => runQuestLifecycleWorker() });
+startMemberBanWalletFreezeScheduler();
 startPayoutScheduler();
 startPushScheduler();
 

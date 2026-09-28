@@ -13,8 +13,9 @@ import {
 } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
-import { pushDelivery } from '@/database/schema/push.schema';
+import { pushDelivery, pushDevice } from '@/database/schema/push.schema';
 import {
+  proofSubmission,
   quest,
   questAssignment,
   questCandidateTeamV2,
@@ -22,6 +23,14 @@ import {
   questV2ProofSubmission,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
+import {
+  walletFundingReservation,
+  walletLedgerAccount,
+  walletLedgerPosting,
+  walletLedgerTransaction,
+  walletStatusHistory,
+  walletWallet,
+} from '@/database/schema/wallet.schema';
 import {
   chatAttachment,
   chatConversation,
@@ -31,11 +40,21 @@ import {
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
+import {
+  processExpiredMemberBanWalletFreeze,
+  recordMemberConfirmedViolationInTransaction,
+} from '@/modules/admin/member-penalty';
+import {
+  createPushDeviceEncryption,
+  processPendingPushDeliveries,
+  registerAndroidPushDevice,
+} from '@/modules/push';
+import { changeWalletStatus, ensureWallet, getWallet } from '@/modules/wallet';
 import { workChatStorage } from '@/modules/work-chat';
 
 import { randomUUID } from 'node:crypto';
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import {
   afterAll,
   afterEach,
@@ -67,6 +86,7 @@ const fixtureCaseIds: string[] = [];
 const fixtureConductReportIds: string[] = [];
 const fixtureConductQuestIds: string[] = [];
 const fixtureConductAssignmentIds: string[] = [];
+const fixturePushDeviceIds: string[] = [];
 const penaltyMemberIds = new Set<string>();
 
 const cookieHeaderFor = (response: Response): string =>
@@ -383,6 +403,95 @@ const createConductReportFixture = async (
   };
 };
 
+const createBanConductReportFixture = async (
+  input: { discretionaryFreeze?: boolean; permanentBan?: boolean } = {}
+) => {
+  const reportedMemberId = randomUUID();
+  const createdAt = new Date('2020-01-01T00:00:00.000Z');
+  await db.insert(authUser).values({
+    id: reportedMemberId,
+    email: `${reportedMemberId}@ku.th`,
+    firstName: 'Conduct',
+    lastName: 'Reported Member',
+    createdAt,
+  });
+
+  const fixture = await createConductReportFixture({
+    reportedMemberId,
+    assignmentWorkerId: reportedMemberId,
+  });
+  const wallet = await ensureWallet(reportedMemberId);
+  if (input.discretionaryFreeze) {
+    await changeWalletStatus({
+      walletId: wallet.id,
+      toStatus: 'FROZEN',
+      actorAdminId: adminId,
+      reason: 'Administrative investigation',
+    });
+  }
+
+  const firstViolationAt = new Date(
+    Date.now() - (input.permanentBan ? 8 : 0) * 24 * 60 * 60 * 1000 - 60_000
+  );
+  const priorViolationCount = input.permanentBan ? 12 : 11;
+  await db.transaction(async (transaction) => {
+    for (let index = 0; index < priorViolationCount; index += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const penalty = await recordMemberConfirmedViolationInTransaction(transaction, {
+        memberId: reportedMemberId,
+        source: 'REPORT_CASE',
+        sourceId: randomUUID(),
+        actorAdminId: adminId,
+        reasonCode: 'SAFETY_REVIEW',
+        now: firstViolationAt,
+      });
+      const expectedPriorResult = input.permanentBan
+        ? index === 11
+          ? 'PENALTY_TEMPORARY_BAN_7_DAYS'
+          : index === 10
+            ? 'PENALTY_RED_FLAG'
+            : 'PENALTY_EXEMPT'
+        : index === 10
+          ? 'PENALTY_RED_FLAG'
+          : 'PENALTY_EXEMPT';
+      if (penalty.result !== expectedPriorResult) {
+        throw new Error('The Conduct Report fixture did not reach the expected penalty threshold.');
+      }
+    }
+  });
+
+  if (input.permanentBan) {
+    const [temporaryBan] = await db
+      .select({ bannedUntil: authUser.bannedUntil })
+      .from(authUser)
+      .where(eq(authUser.id, reportedMemberId));
+    if (!temporaryBan?.bannedUntil) {
+      throw new Error('The Conduct Report fixture did not create a temporary Ban.');
+    }
+    await processExpiredMemberBanWalletFreeze(reportedMemberId, new Date());
+
+    const afterBanLiftAt = new Date();
+    for (let index = 0; index < 3; index += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const penalty = await db.transaction((transaction) =>
+        recordMemberConfirmedViolationInTransaction(transaction, {
+          memberId: reportedMemberId,
+          source: 'REPORT_CASE',
+          sourceId: randomUUID(),
+          actorAdminId: adminId,
+          reasonCode: 'SAFETY_REVIEW',
+          now: afterBanLiftAt,
+        })
+      );
+      if (penalty.result !== 'PENALTY_EXEMPT') {
+        throw new Error('The Conduct Report fixture did not apply a PC-13 exemption.');
+      }
+    }
+  }
+
+  return { fixture, reportedMemberId, wallet };
+};
+
 const createConductReportChatFixture = async (
   fixture: Awaited<ReturnType<typeof createConductReportFixture>>,
   input: { messageCount?: number; candidateWorkerIds?: string[]; attachmentSequence?: number } = {}
@@ -573,6 +682,9 @@ const cleanFixtures = async () => {
         .delete(adminConductReport)
         .where(inArray(adminConductReport.id, fixtureConductReportIds));
     }
+    if (fixturePushDeviceIds.length > 0) {
+      await transaction.delete(pushDevice).where(inArray(pushDevice.id, fixturePushDeviceIds));
+    }
     if (fixtureCaseIds.length > 0) {
       await transaction
         .delete(adminModerationDecision)
@@ -632,6 +744,7 @@ const cleanFixtures = async () => {
   fixtureConductReportIds.length = 0;
   fixtureConductQuestIds.length = 0;
   fixtureConductAssignmentIds.length = 0;
+  fixturePushDeviceIds.length = 0;
 };
 
 beforeAll(async () => {
@@ -1631,6 +1744,571 @@ describe('Admin Report Case API', () => {
     });
     expect(repeated.status).toBe(409);
     expect((await repeated.json()).error.code).toBe('CONDUCT_REPORT_OUTCOME_INVALID');
+    expect(
+      await db
+        .select({ status: adminConductReport.status, version: adminConductReport.version })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId))
+    ).toEqual([{ status: 'CONDUCT_REPORT_UPHELD', version: 2 }]);
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(
+          and(
+            eq(adminAction.action, 'CONDUCT_REPORT_UPHOLD'),
+            eq(adminAction.resourceId, fixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: memberPenaltyRecord.id })
+        .from(memberPenaltyRecord)
+        .where(
+          and(
+            eq(memberPenaltyRecord.memberId, fixture.reportedMemberId),
+            eq(memberPenaltyRecord.source, 'CONDUCT_REPORT'),
+            eq(memberPenaltyRecord.sourceId, fixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: pushDelivery.id })
+        .from(pushDelivery)
+        .where(eq(pushDelivery.eventKey, `conduct-report-upheld:${fixture.reportId}`))
+    ).toHaveLength(1);
+  });
+
+  it('freezes the reported Member Wallet for a temporary Ban and restores it after expiry', async () => {
+    if (!postgresAvailable) return;
+    const { fixture, reportedMemberId, wallet } = await createBanConductReportFixture();
+    await ensureWallet(senderId);
+    const walletOwnerIds = [senderId, reportedMemberId];
+
+    const [questBefore] = await db.select().from(quest).where(eq(quest.id, fixture.questId));
+    const assignmentsBefore = await db
+      .select()
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, fixture.questId));
+    const legacyProofBefore = await db
+      .select()
+      .from(proofSubmission)
+      .where(eq(proofSubmission.questId, fixture.questId));
+    const v2ProofBefore = await db
+      .select()
+      .from(questV2ProofSubmission)
+      .where(eq(questV2ProofSubmission.questId, fixture.questId));
+    const balancesBefore = await db
+      .select({
+        userId: walletWallet.userId,
+        spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+        earningsBalanceSatang: walletWallet.earningsBalanceSatang,
+        fundingReservedSatang: walletWallet.fundingReservedSatang,
+        reservedForPayoutsSatang: walletWallet.reservedForPayoutsSatang,
+      })
+      .from(walletWallet)
+      .where(inArray(walletWallet.userId, walletOwnerIds))
+      .orderBy(asc(walletWallet.userId));
+    const questEscrowBefore = await db
+      .select()
+      .from(walletFundingReservation)
+      .where(
+        and(
+          eq(walletFundingReservation.callerScope, 'quest'),
+          eq(walletFundingReservation.callerReference, fixture.questId)
+        )
+      );
+    const ledgerBefore = await db
+      .selectDistinct({
+        id: walletLedgerTransaction.id,
+        eventType: walletLedgerTransaction.eventType,
+      })
+      .from(walletLedgerTransaction)
+      .innerJoin(
+        walletLedgerPosting,
+        eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id)
+      )
+      .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
+      .innerJoin(walletWallet, eq(walletWallet.id, walletLedgerAccount.walletId))
+      .where(inArray(walletWallet.userId, walletOwnerIds))
+      .orderBy(asc(walletLedgerTransaction.id));
+
+    const decision = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-uphold-temp-ban-${fixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+    });
+    expect(decision.status).toBe(200);
+
+    const [penalty] = await db
+      .select({ result: memberPenaltyRecord.result })
+      .from(memberPenaltyRecord)
+      .where(
+        and(
+          eq(memberPenaltyRecord.memberId, reportedMemberId),
+          eq(memberPenaltyRecord.source, 'CONDUCT_REPORT'),
+          eq(memberPenaltyRecord.sourceId, fixture.reportId)
+        )
+      );
+    expect(penalty?.result).toBe('PENALTY_TEMPORARY_BAN_7_DAYS');
+    const [frozenWallet] = await db
+      .select({ walletStatus: walletWallet.walletStatus })
+      .from(walletWallet)
+      .where(eq(walletWallet.id, wallet.id));
+    expect(frozenWallet?.walletStatus).toBe('FROZEN');
+    const freezeHistory = await db
+      .select({
+        actorAdminId: walletStatusHistory.actorAdminId,
+        actorUserId: walletStatusHistory.actorUserId,
+        fromStatus: walletStatusHistory.fromStatus,
+        toStatus: walletStatusHistory.toStatus,
+        reason: walletStatusHistory.reason,
+      })
+      .from(walletStatusHistory)
+      .where(eq(walletStatusHistory.walletId, wallet.id))
+      .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id));
+    expect(freezeHistory).toHaveLength(2);
+    expect(freezeHistory[1]).toMatchObject({
+      actorAdminId: null,
+      actorUserId: null,
+      fromStatus: 'ACTIVE',
+      toStatus: 'FROZEN',
+      reason: expect.stringMatching(/^Automatic Member Ban freeze: /),
+    });
+
+    const [bannedMember] = await db
+      .select({ bannedUntil: authUser.bannedUntil })
+      .from(authUser)
+      .where(eq(authUser.id, reportedMemberId));
+    expect(bannedMember?.bannedUntil).toBeInstanceOf(Date);
+    const expiryRunAt = new Date(bannedMember!.bannedUntil!.getTime() + 1);
+    expect(await processExpiredMemberBanWalletFreeze(reportedMemberId, expiryRunAt)).toBe(true);
+
+    const [restoredWallet] = await db
+      .select({ walletStatus: walletWallet.walletStatus })
+      .from(walletWallet)
+      .where(eq(walletWallet.id, wallet.id));
+    expect(restoredWallet?.walletStatus).toBe('ACTIVE');
+    expect(
+      await db
+        .select({ bannedUntil: authUser.bannedUntil })
+        .from(authUser)
+        .where(eq(authUser.id, reportedMemberId))
+    ).toEqual([{ bannedUntil: null }]);
+    const restoredHistory = await db
+      .select({
+        fromStatus: walletStatusHistory.fromStatus,
+        toStatus: walletStatusHistory.toStatus,
+      })
+      .from(walletStatusHistory)
+      .where(eq(walletStatusHistory.walletId, wallet.id))
+      .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id));
+    expect(restoredHistory.map(({ toStatus }) => toStatus)).toEqual(['ACTIVE', 'FROZEN', 'ACTIVE']);
+
+    expect(await db.select().from(quest).where(eq(quest.id, fixture.questId))).toEqual([
+      questBefore,
+    ]);
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, fixture.questId))
+    ).toEqual(assignmentsBefore);
+    expect(
+      await db.select().from(proofSubmission).where(eq(proofSubmission.questId, fixture.questId))
+    ).toEqual(legacyProofBefore);
+    expect(
+      await db
+        .select()
+        .from(questV2ProofSubmission)
+        .where(eq(questV2ProofSubmission.questId, fixture.questId))
+    ).toEqual(v2ProofBefore);
+    expect(
+      await db
+        .select({
+          userId: walletWallet.userId,
+          spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+          earningsBalanceSatang: walletWallet.earningsBalanceSatang,
+          fundingReservedSatang: walletWallet.fundingReservedSatang,
+          reservedForPayoutsSatang: walletWallet.reservedForPayoutsSatang,
+        })
+        .from(walletWallet)
+        .where(inArray(walletWallet.userId, walletOwnerIds))
+        .orderBy(asc(walletWallet.userId))
+    ).toEqual(balancesBefore);
+    expect(
+      await db
+        .select()
+        .from(walletFundingReservation)
+        .where(
+          and(
+            eq(walletFundingReservation.callerScope, 'quest'),
+            eq(walletFundingReservation.callerReference, fixture.questId)
+          )
+        )
+    ).toEqual(questEscrowBefore);
+    expect(
+      await db
+        .selectDistinct({
+          id: walletLedgerTransaction.id,
+          eventType: walletLedgerTransaction.eventType,
+        })
+        .from(walletLedgerTransaction)
+        .innerJoin(
+          walletLedgerPosting,
+          eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id)
+        )
+        .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
+        .innerJoin(walletWallet, eq(walletWallet.id, walletLedgerAccount.walletId))
+        .where(inArray(walletWallet.userId, walletOwnerIds))
+        .orderBy(asc(walletLedgerTransaction.id))
+    ).toEqual(ledgerBefore);
+    expect(
+      await db
+        .select({ status: adminConductReport.status, version: adminConductReport.version })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId))
+    ).toEqual([{ status: 'CONDUCT_REPORT_UPHELD', version: 2 }]);
+  });
+
+  it('freezes the Wallet when an upheld Conduct Report creates a permanent Ban', async () => {
+    if (!postgresAvailable) return;
+    const { fixture, reportedMemberId, wallet } = await createBanConductReportFixture({
+      permanentBan: true,
+    });
+    const [activeWallet] = await db
+      .select({ walletStatus: walletWallet.walletStatus })
+      .from(walletWallet)
+      .where(eq(walletWallet.id, wallet.id));
+    expect(activeWallet?.walletStatus).toBe('ACTIVE');
+
+    const decision = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-uphold-permanent-ban-${fixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+    });
+    expect(decision.status).toBe(200);
+    expect(
+      await db
+        .select({ result: memberPenaltyRecord.result })
+        .from(memberPenaltyRecord)
+        .where(
+          and(
+            eq(memberPenaltyRecord.memberId, reportedMemberId),
+            eq(memberPenaltyRecord.source, 'CONDUCT_REPORT'),
+            eq(memberPenaltyRecord.sourceId, fixture.reportId)
+          )
+        )
+    ).toEqual([{ result: 'PENALTY_PERMANENT_BAN' }]);
+    expect(
+      await db
+        .select({ walletStatus: walletWallet.walletStatus })
+        .from(walletWallet)
+        .where(eq(walletWallet.id, wallet.id))
+    ).toEqual([{ walletStatus: 'FROZEN' }]);
+    expect(
+      await db
+        .select({ bannedUntil: authUser.bannedUntil })
+        .from(authUser)
+        .where(eq(authUser.id, reportedMemberId))
+    ).toEqual([{ bannedUntil: null }]);
+  });
+
+  it('keeps a discretionary Wallet freeze after the temporary Ban expires', async () => {
+    if (!postgresAvailable) return;
+    const { fixture, reportedMemberId, wallet } = await createBanConductReportFixture({
+      discretionaryFreeze: true,
+    });
+
+    const decision = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-uphold-existing-freeze-${fixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+    });
+    expect(decision.status).toBe(200);
+
+    const [bannedMember] = await db
+      .select({ bannedUntil: authUser.bannedUntil })
+      .from(authUser)
+      .where(eq(authUser.id, reportedMemberId));
+    expect(bannedMember?.bannedUntil).toBeInstanceOf(Date);
+    expect(
+      await processExpiredMemberBanWalletFreeze(
+        reportedMemberId,
+        new Date(bannedMember!.bannedUntil!.getTime() + 1)
+      )
+    ).toBe(true);
+
+    const [unchangedWallet] = await db
+      .select({ walletStatus: walletWallet.walletStatus })
+      .from(walletWallet)
+      .where(eq(walletWallet.id, wallet.id));
+    expect(unchangedWallet?.walletStatus).toBe('FROZEN');
+    const history = await db
+      .select({
+        actorAdminId: walletStatusHistory.actorAdminId,
+        reason: walletStatusHistory.reason,
+      })
+      .from(walletStatusHistory)
+      .where(eq(walletStatusHistory.walletId, wallet.id))
+      .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id));
+    expect(history).toHaveLength(2);
+    expect(history[1]).toEqual({
+      actorAdminId: adminId,
+      reason: 'Administrative investigation',
+    });
+  });
+
+  it('keeps an Admin-suspended Wallet after the temporary Ban expires', async () => {
+    if (!postgresAvailable) return;
+    const { fixture, reportedMemberId, wallet } = await createBanConductReportFixture();
+
+    const decision = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-uphold-suspended-wallet-${fixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+    });
+    expect(decision.status).toBe(200);
+
+    await changeWalletStatus({
+      walletId: wallet.id,
+      toStatus: 'SUSPENDED',
+      actorAdminId: adminId,
+      reason: 'Administrative suspension',
+    });
+
+    const [bannedMember] = await db
+      .select({ bannedUntil: authUser.bannedUntil })
+      .from(authUser)
+      .where(eq(authUser.id, reportedMemberId));
+    expect(bannedMember?.bannedUntil).toBeInstanceOf(Date);
+    expect(
+      await processExpiredMemberBanWalletFreeze(
+        reportedMemberId,
+        new Date(bannedMember!.bannedUntil!.getTime() + 1)
+      )
+    ).toBe(true);
+
+    expect(
+      await db
+        .select({ walletStatus: walletWallet.walletStatus })
+        .from(walletWallet)
+        .where(eq(walletWallet.id, wallet.id))
+    ).toEqual([{ walletStatus: 'SUSPENDED' }]);
+    const history = await db
+      .select({
+        actorAdminId: walletStatusHistory.actorAdminId,
+        reason: walletStatusHistory.reason,
+        toStatus: walletStatusHistory.toStatus,
+      })
+      .from(walletStatusHistory)
+      .where(eq(walletStatusHistory.walletId, wallet.id))
+      .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id));
+    expect(history.map(({ toStatus }) => toStatus)).toEqual(['ACTIVE', 'FROZEN', 'SUSPENDED']);
+    expect(history[2]).toEqual({
+      actorAdminId: adminId,
+      reason: 'Administrative suspension',
+      toStatus: 'SUSPENDED',
+    });
+  });
+
+  it('keeps an upheld decision final after Push delivery fails and leaves Quest money state unchanged', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture({
+      reason: conductReportReason.outOfScope,
+      includeDraftProof: true,
+    });
+    const walletOwnerIds = [...new Set([senderId, fixture.reportedMemberId])];
+    await Promise.all(walletOwnerIds.map((memberId) => ensureWallet(memberId)));
+
+    const encryption = createPushDeviceEncryption({
+      key: '9f'.repeat(32),
+      keyVersion: 'admin-report-test',
+    });
+    const device = await registerAndroidPushDevice(
+      fixture.reportedMemberId,
+      `admin-report-fcm-${randomUUID()}-android`,
+      { encryption }
+    );
+    fixturePushDeviceIds.push(device.id);
+
+    const snapshotState = async () => ({
+      quest: await db.select().from(quest).where(eq(quest.id, fixture.questId)),
+      assignments: await db
+        .select()
+        .from(questAssignment)
+        .where(eq(questAssignment.questId, fixture.questId)),
+      legacyProofSubmissions: await db
+        .select()
+        .from(proofSubmission)
+        .where(eq(proofSubmission.questId, fixture.questId)),
+      v2ProofSubmissions: await db
+        .select()
+        .from(questV2ProofSubmission)
+        .where(eq(questV2ProofSubmission.questId, fixture.questId)),
+      wallets: await Promise.all(walletOwnerIds.map((memberId) => getWallet(memberId))),
+      walletStatusHistory: await db
+        .select({
+          id: walletStatusHistory.id,
+          fromStatus: walletStatusHistory.fromStatus,
+          toStatus: walletStatusHistory.toStatus,
+          occurredAt: walletStatusHistory.occurredAt,
+        })
+        .from(walletStatusHistory)
+        .innerJoin(walletWallet, eq(walletWallet.id, walletStatusHistory.walletId))
+        .where(inArray(walletWallet.userId, walletOwnerIds))
+        .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id)),
+      ledgerTransactions: await db
+        .selectDistinct({
+          id: walletLedgerTransaction.id,
+          eventType: walletLedgerTransaction.eventType,
+        })
+        .from(walletLedgerTransaction)
+        .innerJoin(
+          walletLedgerPosting,
+          eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id)
+        )
+        .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
+        .innerJoin(walletWallet, eq(walletWallet.id, walletLedgerAccount.walletId))
+        .where(inArray(walletWallet.userId, walletOwnerIds))
+        .orderBy(asc(walletLedgerTransaction.id)),
+      questEscrows: await db
+        .select({
+          id: walletFundingReservation.id,
+          ownerUserId: walletFundingReservation.ownerUserId,
+          questId: walletFundingReservation.callerReference,
+          policyRevisionId: walletFundingReservation.policyRevisionId,
+          totalReservedSatang: walletFundingReservation.totalReservedSatang,
+          remainingSatang: walletFundingReservation.remainingSatang,
+          status: walletFundingReservation.status,
+          createdLedgerTransactionId: walletFundingReservation.createdLedgerTransactionId,
+        })
+        .from(walletFundingReservation)
+        .where(
+          and(
+            eq(walletFundingReservation.ownerUserId, senderId),
+            eq(walletFundingReservation.callerScope, 'quest'),
+            eq(walletFundingReservation.callerReference, fixture.questId)
+          )
+        ),
+    });
+    const stateBefore = await snapshotState();
+
+    const decision = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-uphold-push-failure-${fixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+    });
+    expect(decision.status).toBe(200);
+
+    const eventKey = `conduct-report-upheld:${fixture.reportId}`;
+    let attemptedEvent = false;
+    const processed = await processPendingPushDeliveries({
+      now: () => new Date(Date.now() + 1),
+      encryption,
+      send: async (_token, message) => {
+        if (message.data.eventKey === eventKey) attemptedEvent = true;
+        return { kind: 'RETRYABLE_FAILURE', errorCode: 'FCM_HTTP_503' };
+      },
+    });
+    expect(processed).toBeGreaterThan(0);
+    expect(attemptedEvent).toBe(true);
+
+    expect(
+      await db
+        .select({ status: adminConductReport.status, version: adminConductReport.version })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId))
+    ).toEqual([{ status: 'CONDUCT_REPORT_UPHELD', version: 2 }]);
+    expect(
+      await db
+        .select({ source: memberPenaltyRecord.source, sourceId: memberPenaltyRecord.sourceId })
+        .from(memberPenaltyRecord)
+        .where(
+          and(
+            eq(memberPenaltyRecord.source, 'CONDUCT_REPORT'),
+            eq(memberPenaltyRecord.sourceId, fixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ status: pushDelivery.status, lastErrorCode: pushDelivery.lastErrorCode })
+        .from(pushDelivery)
+        .where(eq(pushDelivery.eventKey, eventKey))
+    ).toEqual([{ status: 'PUSH_DELIVERY_PENDING', lastErrorCode: 'FCM_HTTP_503' }]);
+    expect(await snapshotState()).toEqual(stateBefore);
+  });
+
+  it('creates one penalty and one Push event when two Admin requests uphold the same Conduct Report', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture({ reason: conductReportReason.outOfScope });
+    const path = `/api/v1/admin/reports/${fixture.reportId}/decide`;
+    const responses = await Promise.all(
+      ['a', 'b'].map((suffix) =>
+        adminRequest(path, {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `conduct-uphold-race-${suffix}-${fixture.reportId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+        })
+      )
+    );
+    const bodies = await Promise.all(responses.map((response) => response.json()));
+
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(bodies.find((body) => body.error)?.error.code).toBe('ADMIN_ACTION_CONFLICT');
+    expect(
+      await db
+        .select({ status: adminConductReport.status, version: adminConductReport.version })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId))
+    ).toEqual([{ status: 'CONDUCT_REPORT_UPHELD', version: 2 }]);
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(
+          and(
+            eq(adminAction.action, 'CONDUCT_REPORT_UPHOLD'),
+            eq(adminAction.resourceId, fixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: memberPenaltyRecord.id })
+        .from(memberPenaltyRecord)
+        .where(
+          and(
+            eq(memberPenaltyRecord.memberId, fixture.reportedMemberId),
+            eq(memberPenaltyRecord.source, 'CONDUCT_REPORT'),
+            eq(memberPenaltyRecord.sourceId, fixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: pushDelivery.id })
+        .from(pushDelivery)
+        .where(eq(pushDelivery.eventKey, `conduct-report-upheld:${fixture.reportId}`))
+    ).toHaveLength(1);
   });
 
   it('validates the Conduct Report dismissal catalog and keeps Admin-only access', async () => {
@@ -1860,7 +2538,7 @@ describe('Admin Report Case API', () => {
 
   it('rolls back a Conduct Report penalty when AdminAction persistence fails', async () => {
     if (!postgresAvailable) return;
-    const fixture = await createConductReportFixture();
+    const { fixture, reportedMemberId, wallet } = await createBanConductReportFixture();
     await sql`CREATE OR REPLACE FUNCTION admin_report_test_fail_conduct_uphold() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
         IF NEW.action = 'CONDUCT_REPORT_UPHOLD' THEN
@@ -1907,6 +2585,30 @@ describe('Admin Report Case API', () => {
           .select({ id: memberPenaltyRecord.id })
           .from(memberPenaltyRecord)
           .where(eq(memberPenaltyRecord.sourceId, fixture.reportId))
+      ).toHaveLength(0);
+      expect(
+        await db
+          .select({ walletStatus: walletWallet.walletStatus })
+          .from(walletWallet)
+          .where(eq(walletWallet.id, wallet.id))
+      ).toEqual([{ walletStatus: 'ACTIVE' }]);
+      expect(
+        await db
+          .select({ id: walletStatusHistory.id })
+          .from(walletStatusHistory)
+          .where(eq(walletStatusHistory.walletId, wallet.id))
+      ).toHaveLength(1);
+      expect(
+        await db
+          .select({ bannedUntil: authUser.bannedUntil })
+          .from(authUser)
+          .where(eq(authUser.id, reportedMemberId))
+      ).toEqual([{ bannedUntil: null }]);
+      expect(
+        await db
+          .select({ id: pushDelivery.id })
+          .from(pushDelivery)
+          .where(eq(pushDelivery.eventKey, `conduct-report-upheld:${fixture.reportId}`))
       ).toHaveLength(0);
       expect(
         await db

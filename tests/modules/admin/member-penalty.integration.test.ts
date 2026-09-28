@@ -2,11 +2,13 @@ import { db } from '@/database/client';
 import { memberPenaltyRecord } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { quest, review } from '@/database/schema/quest.schema';
+import { walletStatusHistory, walletWallet } from '@/database/schema/wallet.schema';
 import {
   recordMemberConfirmedViolationInTransaction,
   recordReviewAveragePenaltyInTransaction,
   reverseReportCaseViolationInTransaction,
 } from '@/modules/admin/member-penalty';
+import { ensureWalletInTransaction } from '@/modules/wallet';
 
 import { randomUUID } from 'node:crypto';
 
@@ -179,6 +181,7 @@ describe('Member Penalty persistence', () => {
           firstName: 'Penalty',
           lastName: 'Admin',
         });
+        const wallet = await ensureWalletInTransaction(transaction, memberId);
 
         const results = [];
         for (let index = 0; index < 12; index += 1) {
@@ -195,6 +198,21 @@ describe('Member Penalty persistence', () => {
 
         expect(results.slice(0, 10)).toEqual(Array.from({ length: 10 }, () => 'PENALTY_EXEMPT'));
         expect(results.slice(10)).toEqual(['PENALTY_RED_FLAG', 'PENALTY_TEMPORARY_BAN_7_DAYS']);
+        const [frozenWallet] = await transaction
+          .select({ walletStatus: walletWallet.walletStatus })
+          .from(walletWallet)
+          .where(eq(walletWallet.id, wallet.id));
+        expect(frozenWallet?.walletStatus).toBe('FROZEN');
+        const freezeHistory = await transaction
+          .select({
+            fromStatus: walletStatusHistory.fromStatus,
+            toStatus: walletStatusHistory.toStatus,
+          })
+          .from(walletStatusHistory)
+          .where(eq(walletStatusHistory.walletId, wallet.id))
+          .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id));
+        expect(freezeHistory.map(({ toStatus }) => toStatus)).toEqual(['ACTIVE', 'FROZEN']);
+        expect(freezeHistory[1]?.fromStatus).toBe('ACTIVE');
         const initialRestriction = await transaction
           .select({
             bannedUntil: authUser.bannedUntil,
@@ -225,6 +243,11 @@ describe('Member Penalty persistence', () => {
           'PENALTY_EXEMPT',
           'PENALTY_PERMANENT_BAN',
         ]);
+        const [permanentlyFrozenWallet] = await transaction
+          .select({ walletStatus: walletWallet.walletStatus })
+          .from(walletWallet)
+          .where(eq(walletWallet.id, wallet.id));
+        expect(permanentlyFrozenWallet?.walletStatus).toBe('FROZEN');
 
         throw rollback;
       })
@@ -331,6 +354,7 @@ describe('Member Penalty persistence', () => {
           rewardSatang: null,
           createdAt: now,
         });
+        const wallet = await ensureWalletInTransaction(transaction, memberId);
         await transaction.insert(review).values(
           existingReviewIds.map((id, index) => ({
             id,
@@ -359,6 +383,11 @@ describe('Member Penalty persistence', () => {
           now,
         });
         expect(firstPenalty?.result).toBe('PENALTY_TEMPORARY_BAN_7_DAYS');
+        const [frozenWallet] = await transaction
+          .select({ walletStatus: walletWallet.walletStatus })
+          .from(walletWallet)
+          .where(eq(walletWallet.id, wallet.id));
+        expect(frozenWallet?.walletStatus).toBe('FROZEN');
 
         await transaction.insert(review).values({
           id: lowAverageReviewId,
