@@ -441,7 +441,20 @@ const expectedV2OperationContracts: Record<
   createQuestV2ProofSubmission: {
     bodyProperties: ['description', 'workerMessage', 'fileIds', 'files', 'retryPosition'],
     requiredBodyProperties: [],
-    responseStatuses: ['201', '400', '401', '403', '404', '409', '413', '415', '500', '502', '503'],
+    responseStatuses: [
+      '201',
+      '400',
+      '401',
+      '403',
+      '404',
+      '409',
+      '413',
+      '415',
+      '422',
+      '500',
+      '502',
+      '503',
+    ],
   },
   confirmQuestV2Completion: {
     responseStatuses: ['200', '400', '401', '403', '404', '409', '500', '503'],
@@ -449,7 +462,20 @@ const expectedV2OperationContracts: Record<
   editQuestV2ProofSubmission: {
     bodyProperties: ['description', 'workerMessage', 'fileIds', 'files', 'retryPosition'],
     requiredBodyProperties: [],
-    responseStatuses: ['200', '400', '401', '403', '404', '409', '413', '415', '500', '502', '503'],
+    responseStatuses: [
+      '200',
+      '400',
+      '401',
+      '403',
+      '404',
+      '409',
+      '413',
+      '415',
+      '422',
+      '500',
+      '502',
+      '503',
+    ],
   },
   getQuestCandidateTeamV2: {
     responseStatuses: ['200', '401', '404', '500'],

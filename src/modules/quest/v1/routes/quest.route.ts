@@ -148,11 +148,12 @@ export const questRoute = new Elysia({
     params: questParamsSchema,
     body: questImagesUploadSchema,
     type: 'multipart/form-data',
-    response: responses(questImagesUploadResponseSchema, 400, 401, 404, 409, 413, 415, 502),
+    response: responses(questImagesUploadResponseSchema, 400, 401, 404, 409, 413, 415, 422, 502),
     detail: {
       tags: ['Quests'],
       summary: 'Add images to a Quest Draft',
-      description: 'Adds up to 3 total images to the authenticated Hirer’s Draft Quest.',
+      description:
+        'Adds up to 3 total JPEG, PNG, or WebP images (each up to 5 MB and 25 megapixels) to the authenticated Hirer’s Draft Quest.',
       operationId: 'addQuestImages',
       security: betterAuthSecurity,
     },

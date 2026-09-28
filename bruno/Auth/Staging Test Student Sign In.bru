@@ -1,0 +1,25 @@
+meta {
+  name: Staging Test Student Sign In
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/staging/test-auth/sign-in/default
+  body: none
+  auth: none
+}
+
+script:post-response {
+  const setCookie = res.getHeader("set-cookie");
+  const raw = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+  const match = raw && (raw.match(/__Secure-better-auth\.session_token=[^;]+/) || raw.match(/better-auth\.session_token=[^;]+/));
+  if (match) {
+    bru.setEnvVar("userSessionCookie", match[0]);
+  }
+}
+
+docs {
+  One-click login for Staging test student account without needing a password.
+  On success, captures the session token into userSessionCookie in the active environment.
+}

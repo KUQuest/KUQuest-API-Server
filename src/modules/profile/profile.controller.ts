@@ -8,6 +8,7 @@ import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/
 import type { ApiResponse } from '@/shared/api-response';
 import {
   ImageTooLargeError,
+  ImageDimensionsTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
   createDebugLogger,
@@ -284,6 +285,13 @@ export const setAvatar = async ({
   try {
     storedAvatar = await avatarStorage.upload(session.user.id, body.avatar);
   } catch (error) {
+    if (error instanceof ImageDimensionsTooLargeError) {
+      set.status = 422;
+      return apiError(
+        'AVATAR_DIMENSIONS_TOO_LARGE',
+        'Image dimensions must not exceed 25 megapixels'
+      );
+    }
     if (error instanceof ImageTooLargeError) {
       set.status = 413;
       return apiError('AVATAR_TOO_LARGE', error.message);

@@ -37,7 +37,11 @@ import {
   positiveSatang,
   reserveSpending,
 } from '@/modules/wallet';
-import { FileTooLargeError, UnsupportedFileTypeError } from '@/shared/object-storage';
+import {
+  FileDimensionsTooLargeError,
+  FileTooLargeError,
+  UnsupportedFileTypeError,
+} from '@/shared/object-storage';
 import {
   fundTestWallet,
   listTestLedgerPostings,
@@ -924,9 +928,9 @@ describe('Quest Proof Submission v2 behavior', () => {
     const { questId } = await createQuest();
     const upload = spyOn(questV2ProofStorage, 'upload').mockImplementation(
       async (memberId, input) => {
-        if (input.name === 'bad-one.pdf' || input.name === 'bad-three.pdf') {
-          throw new UnsupportedFileTypeError('bad file');
-        }
+        if (input.name === 'bad-one.jpg')
+          throw new FileDimensionsTooLargeError('Image dimensions must not exceed 25 megapixels');
+        if (input.name === 'bad-three.pdf') throw new UnsupportedFileTypeError('bad file');
         return {
           bucket: 'proof-v2-behavior-test',
           objectKey: `proof-submissions/${memberId}/${input.name}`,
@@ -945,7 +949,7 @@ describe('Quest Proof Submission v2 behavior', () => {
     );
     form.append(
       'files',
-      new File([new Uint8Array([4, 5, 6])], 'bad-one.pdf', { type: 'application/pdf' })
+      new File([new Uint8Array([4, 5, 6])], 'bad-one.jpg', { type: 'image/jpeg' })
     );
     form.append(
       'files',
@@ -962,8 +966,8 @@ describe('Quest Proof Submission v2 behavior', () => {
       form,
       { 'idempotency-key': 'proof-v2-behavior-partial' }
     );
-    expect(partial.status).toBe(415);
-    expect((await partial.json()).error.code).toBe('PROOF_FILE_TYPE_NOT_SUPPORTED');
+    expect(partial.status).toBe(422);
+    expect((await partial.json()).error.code).toBe('PROOF_FILE_DIMENSIONS_TOO_LARGE');
     expect(upload).toHaveBeenCalledTimes(4);
 
     const [submission] = await db
@@ -982,6 +986,13 @@ describe('Quest Proof Submission v2 behavior', () => {
       expect.arrayContaining([
         expect.objectContaining({ status: 'PROOF_FILE_READY', failureCode: null }),
         expect.objectContaining({
+          position: 1,
+          status: 'PROOF_FILE_FAILED',
+          fileId: null,
+          failureCode: 'PROOF_FILE_DIMENSIONS_TOO_LARGE',
+        }),
+        expect.objectContaining({
+          position: 3,
           status: 'PROOF_FILE_FAILED',
           fileId: null,
           failureCode: 'PROOF_FILE_TYPE_NOT_SUPPORTED',
@@ -993,7 +1004,7 @@ describe('Quest Proof Submission v2 behavior', () => {
     const failedRetryForm = new FormData();
     failedRetryForm.append(
       'files',
-      new File([new Uint8Array([13, 14, 15])], 'bad-one.pdf', { type: 'application/pdf' })
+      new File([new Uint8Array([13, 14, 15])], 'bad-one.jpg', { type: 'image/jpeg' })
     );
     failedRetryForm.set('retryPosition', '1');
     const failedRetry = await request(
@@ -1003,7 +1014,7 @@ describe('Quest Proof Submission v2 behavior', () => {
       failedRetryForm,
       { 'idempotency-key': 'proof-v2-behavior-partial-failed-retry' }
     );
-    expect(failedRetry.status).toBe(415);
+    expect(failedRetry.status).toBe(422);
     const failedRetryAttachments = await db
       .select({
         position: questV2ProofSubmissionFile.position,

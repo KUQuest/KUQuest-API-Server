@@ -8,6 +8,7 @@ import { Elysia } from 'elysia';
 import {
   createQuestV2CandidateTeamController,
   getQuestV2CandidateTeamController,
+  joinQuestV2CandidateTeamByCodeController,
   joinQuestV2CandidateTeamController,
   leaveQuestV2CandidateTeamController,
   listQuestV2CandidateTeamsController,
@@ -54,6 +55,21 @@ export const questCandidateTeamV2Route = new Elysia({
       description:
         'An eligible Prospective Worker creates one forming Candidate Team and receives its 24-hour Join Code.',
       operationId: 'createQuestCandidateTeamV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .post('/quests/:questId/teams/join', joinQuestV2CandidateTeamByCodeController, {
+    params: questV2CandidateTeamParamsSchema,
+    body: questV2CandidateTeamJoinSchema,
+    headers: questV2CandidateTeamHeadersSchema,
+    transform: rejectUnknownFields(questV2CandidateTeamJoinSchema),
+    response: responses(questV2CandidateTeamResponseSchema, 400, 401, 404, 409, 503),
+    detail: {
+      tags: ['Quest Candidate Teams v2'],
+      summary: 'Join a forming Candidate Team with a Join Code',
+      description:
+        'An eligible Prospective Worker joins the Candidate Team identified by its current, unexpired Join Code.',
+      operationId: 'joinQuestCandidateTeamByCodeV2',
       security: betterAuthSecurity,
     },
   })
@@ -170,7 +186,7 @@ export const questCandidateTeamV2Route = new Elysia({
       409,
       413,
       415,
-      500,
+      422,
       502,
       503,
       { successStatus: 201 }
@@ -179,7 +195,7 @@ export const questCandidateTeamV2Route = new Elysia({
       tags: ['Quest Candidate Teams v2'],
       summary: 'Upload a private Candidate Team submission file',
       description:
-        'Only the Team Leader can upload one private image, PDF, or video file up to 10 MB while the Candidate Team is forming for an open GROUP Candidate Quest.',
+        'Only the Team Leader can upload one private image, PDF, or video file up to 10 MB while the Candidate Team is forming for an open GROUP Candidate Quest. Images must be at most 25 megapixels; larger images return 422 TEAM_FILE_DIMENSIONS_TOO_LARGE.',
       operationId: 'uploadQuestCandidateTeamFileV2',
       security: betterAuthSecurity,
     },

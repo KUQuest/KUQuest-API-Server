@@ -1,0 +1,26 @@
+meta {
+  name: Select Candidate Team (Hirer)
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/teams/{{teamId}}/select
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Hirer selects the winning Candidate Team.
+  Atomically assigns all team members, moves the Quest to QUEST_ASSIGNED, opens the team Work Conversation, and rejects all other competing Candidate Teams.
+}

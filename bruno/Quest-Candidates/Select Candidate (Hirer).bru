@@ -1,0 +1,26 @@
+meta {
+  name: Select Candidate (Hirer)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/applications/{{applicationId}}/select
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Hirer accepts this Candidate.
+  Atomically creates an active Assignment for the chosen Worker, advances Quest to QUEST_ASSIGNED, opens the Work Conversation, and rejects all other applicants.
+}

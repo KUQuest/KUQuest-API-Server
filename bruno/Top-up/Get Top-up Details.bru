@@ -1,0 +1,19 @@
+meta {
+  name: Get Top-up Details
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/v1/top-ups/{{topUpId}}
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns the current status of the Top-up (PENDING, PAID, EXPIRED, FAILED) along with QR payload and ledger transaction details.
+}

@@ -1,0 +1,32 @@
+meta {
+  name: Hirer Approve Proof
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/proof-submissions/{{proofSubmissionId}}/review
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "decision": "PROOF_APPROVED"
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Hirer approves the submitted Proof.
+  Atomically settles Quest Escrow: releases reward satang to the Worker's earningsBalanceSatang, records completed Assignment, and moves Quest to QUEST_COMPLETED.
+}

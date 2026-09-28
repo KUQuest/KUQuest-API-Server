@@ -1,4 +1,5 @@
 import {
+  FileDimensionsTooLargeError,
   FileLinkUnavailableError,
   FileTooLargeError,
   FileUploadError,
@@ -124,6 +125,23 @@ describe('object storage image-only policy', () => {
       new File([webp], 'photo.webp', { type: 'image/webp' })
     );
     expect(storedWebp).toMatchObject({ contentType: 'image/webp', sizeBytes: webp.byteLength });
+  });
+  it('reports valid images above the pixel limit separately from unsupported formats', async () => {
+    const oversizedImage = await sharp({
+      create: {
+        width: 5001,
+        height: 5000,
+        channels: 3,
+        background: { r: 0, g: 0, b: 255 },
+      },
+    })
+      .jpeg()
+      .toBuffer();
+    const image = new File([oversizedImage], 'large.jpg', { type: 'image/jpeg' });
+
+    await expect(storage.upload('user-1', image)).rejects.toBeInstanceOf(
+      FileDimensionsTooLargeError
+    );
   });
 
   it('keeps the Image error aliases pointing at the canonical errors', () => {

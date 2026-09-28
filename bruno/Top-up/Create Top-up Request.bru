@@ -1,0 +1,40 @@
+meta {
+  name: Create Top-up Request
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v1/top-ups
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "quoteId": "{{topUpQuoteId}}"
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && data.data && data.data.id) {
+    bru.setEnvVar("topUpId", data.data.id);
+  }
+}
+
+docs {
+  Confirms the Provider Quote and generates the Xendit PromptPay payment request.
+  Returns topUpId, qrPayload, and qrDataUrl (base64 image for the QR code).
+  Automatically sets topUpId in the active environment on success.
+}

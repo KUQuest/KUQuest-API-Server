@@ -1,0 +1,34 @@
+meta {
+  name: Publish Quest
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/publish
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && data.data && data.data.quest) {
+    bru.setEnvVar("questVersion", data.data.quest.version);
+  }
+}
+
+docs {
+  Publishes a QUEST_DRAFT Quest to QUEST_OPEN.
+  Locks Funding Reservation (Quest Escrow) from the Hirer's spendingBalanceSatang and posts the Quest onto the Quest Board.
+  Updates questVersion on success.
+}

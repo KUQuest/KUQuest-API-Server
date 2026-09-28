@@ -14,6 +14,7 @@ import {
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
 import {
+  FileDimensionsTooLargeError,
   FileTooLargeError,
   FileUploadError,
   UnsupportedFileTypeError,
@@ -367,6 +368,7 @@ const fingerprintFor = async (input: File, position: number): Promise<string> =>
 
 const failureCodeFor = (error: unknown): string => {
   if (error instanceof FileTooLargeError) return 'PROOF_FILE_TOO_LARGE';
+  if (error instanceof FileDimensionsTooLargeError) return 'PROOF_FILE_DIMENSIONS_TOO_LARGE';
   if (error instanceof UnsupportedFileTypeError) return 'PROOF_FILE_TYPE_NOT_SUPPORTED';
   if (error instanceof FileUploadError) return 'PROOF_FILE_UPLOAD_FAILED';
   return 'PROOF_FILE_UPLOAD_FAILED';

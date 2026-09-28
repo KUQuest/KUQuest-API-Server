@@ -11,6 +11,7 @@ import {
   chatReadCursor,
 } from '@/database/schema/work-chat.schema';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
+import { FileDimensionsTooLargeError } from '@/shared/object-storage';
 
 import {
   and,
@@ -46,6 +47,7 @@ export class WorkChatServiceError extends Error {
       | 'ATTACHMENT_NOT_FOUND'
       | 'ATTACHMENT_LINK_UNAVAILABLE'
       | 'ATTACHMENT_TOO_LARGE'
+      | 'ATTACHMENT_DIMENSIONS_TOO_LARGE'
       | 'ATTACHMENT_UNSUPPORTED'
       | 'ATTACHMENT_UPLOAD_FAILED'
       | 'CLIENT_MESSAGE_ID_REUSED'
@@ -701,6 +703,12 @@ const enforceSendRateLimit = async (
 };
 
 const mapAttachmentStorageError = (error: unknown): WorkChatServiceError => {
+  if (error instanceof FileDimensionsTooLargeError) {
+    return new WorkChatServiceError(
+      'ATTACHMENT_DIMENSIONS_TOO_LARGE',
+      'Image dimensions must not exceed 25 megapixels'
+    );
+  }
   if (error instanceof WorkChatAttachmentTooLargeError) {
     return new WorkChatServiceError('ATTACHMENT_TOO_LARGE', error.message);
   }

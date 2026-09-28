@@ -1,0 +1,19 @@
+meta {
+  name: List Top-ups
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/v1/top-ups?limit=10
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns the most recent Top-up records for the authenticated Student.
+}

@@ -1,6 +1,7 @@
 import type { AuthedContext } from '@/modules/auth';
 import {
   FileTooLargeError,
+  FileDimensionsTooLargeError,
   FileUploadError,
   UnsupportedFileTypeError,
 } from '@/shared/object-storage';
@@ -20,6 +21,7 @@ import {
   createQuestV2CandidateTeam,
   getQuestV2CandidateTeam,
   joinQuestV2CandidateTeam,
+  joinQuestV2CandidateTeamByCode,
   leaveQuestV2CandidateTeam,
   listQuestV2CandidateTeams,
   regenerateQuestV2CandidateTeamJoinCode,
@@ -192,6 +194,13 @@ const mapTeamError = (set: AuthedContext['set'], outcome: CandidateTeamError) =>
 };
 
 const mapCandidateTeamFileUploadError = (set: AuthedContext['set'], error: unknown) => {
+  if (error instanceof FileDimensionsTooLargeError) {
+    set.status = 422;
+    return apiError(
+      'TEAM_FILE_DIMENSIONS_TOO_LARGE',
+      'Image dimensions must not exceed 25 megapixels'
+    );
+  }
   if (error instanceof FileTooLargeError) {
     set.status = 413;
     return apiError('TEAM_FILE_TOO_LARGE', error.message);
@@ -388,6 +397,28 @@ export const joinQuestV2CandidateTeamController = async ({
     session.user.id,
     params.questId,
     params.teamId,
+    body,
+    commandId
+  );
+  if ('outcome' in result) return mapTeamError(set, result);
+  return apiSuccess(serializeTeam(result));
+};
+
+export const joinQuestV2CandidateTeamByCodeController = async ({
+  body,
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & {
+  body: QuestV2CandidateTeamJoinInput;
+  params: QuestV2CandidateTeamParams;
+}) => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+  const result = await joinQuestV2CandidateTeamByCode(
+    session.user.id,
+    params.questId,
     body,
     commandId
   );

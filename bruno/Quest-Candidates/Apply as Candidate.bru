@@ -1,0 +1,33 @@
+meta {
+  name: Apply as Candidate
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/applications
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && data.data && data.data.id) {
+    bru.setEnvVar("applicationId", data.data.id);
+  }
+}
+
+docs {
+  Worker submits an application to an open SINGLE + CANDIDATE Quest.
+  Captures applicationId into the active environment on success.
+}

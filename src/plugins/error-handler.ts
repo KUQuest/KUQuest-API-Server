@@ -1,6 +1,7 @@
 import { Elysia } from 'elysia';
 
 import { apiError } from '@/shared/api-response';
+import { getRequestLogId } from '@/shared/request-log';
 
 // Codes a client caused and may safely be told about. Everything absent from this map
 // — including arbitrary thrown Errors — becomes a generic 500 so internals never leak.
@@ -9,6 +10,8 @@ const clientErrors: Record<string, { status: number; message?: string }> = {
   VALIDATION: { status: 400 },
   PARSE: { status: 400, message: 'Malformed request body' },
 };
+
+const errorNamePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 
 export const errorHandlerPlugin = new Elysia({ name: 'error-handler' }).onError(
   { as: 'global' },
@@ -65,7 +68,13 @@ export const errorHandlerPlugin = new Elysia({ name: 'error-handler' }).onError(
       : 'Internal server error';
 
     if (!clientError && error instanceof Error) {
-      console.error(error);
+      console.error(
+        JSON.stringify({
+          event: 'request.exception',
+          requestId: getRequestLogId(request),
+          errorName: errorNamePattern.test(error.name) ? error.name : 'Error',
+        })
+      );
     }
 
     set.status = clientError?.status ?? 500;

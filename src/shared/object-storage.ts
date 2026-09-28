@@ -38,6 +38,7 @@ export type FileLink = {
 
 // Canonical errors — four, shared across every storage bucket
 export class FileTooLargeError extends Error {}
+export class FileDimensionsTooLargeError extends Error {}
 export class UnsupportedFileTypeError extends Error {}
 export class FileUploadError<TContentType extends string = StorageContentType> extends Error {
   constructor(
@@ -53,6 +54,8 @@ export class FileLinkUnavailableError extends Error {}
 // Backwards-compatible aliases while consumers migrate
 export const ImageTooLargeError = FileTooLargeError;
 export type ImageTooLargeError = FileTooLargeError;
+export const ImageDimensionsTooLargeError = FileDimensionsTooLargeError;
+export type ImageDimensionsTooLargeError = FileDimensionsTooLargeError;
 export const UnsupportedImageTypeError = UnsupportedFileTypeError;
 export type UnsupportedImageTypeError = UnsupportedFileTypeError;
 export const ImageUploadError = FileUploadError;
@@ -111,14 +114,19 @@ const isWebp = (bytes: Uint8Array): boolean =>
 
 const decodeImageContentType = async (bytes: Uint8Array): Promise<ImageContentType | undefined> => {
   try {
-    const decoded = sharp(bytes, { failOn: 'warning', limitInputPixels: maxImagePixels });
+    const decoded = sharp(bytes, { failOn: 'warning', limitInputPixels: false });
     const metadata = await decoded.metadata();
     const contentType = metadata.format
       ? contentTypeByFormat[metadata.format as keyof typeof contentTypeByFormat]
       : undefined;
-    if (contentType) await decoded.clone().raw().toBuffer();
+    if (metadata.width && metadata.height && metadata.width > maxImagePixels / metadata.height) {
+      throw new FileDimensionsTooLargeError('Image dimensions must not exceed 25 megapixels');
+    }
+    if (contentType)
+      await sharp(bytes, { failOn: 'warning', limitInputPixels: maxImagePixels }).raw().toBuffer();
     return contentType;
-  } catch {
+  } catch (error) {
+    if (error instanceof FileDimensionsTooLargeError) throw error;
     return undefined;
   }
 };

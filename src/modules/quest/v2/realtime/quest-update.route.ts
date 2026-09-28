@@ -1,5 +1,6 @@
 import { authGuard, getTrustedOrigins } from '@/modules/auth';
 import { API_V2_PREFIX } from '@/shared/api-version';
+import { logSocket } from '@/shared/request-log';
 
 import { Elysia } from 'elysia';
 
@@ -23,6 +24,7 @@ const trustedOrigins = getTrustedOrigins(true);
 const socketCleanups = new WeakMap<object, () => void>();
 
 type QuestRealtimeSocket = {
+  data: { request: Request; route: string };
   send: (message: string) => unknown;
   close: (code?: number, reason?: string) => unknown;
 };
@@ -57,6 +59,7 @@ const openRealtimeSubscription = async <T>({
   sameAccess: (initial: T, current: T) => boolean;
   subscribe: (access: T) => () => void;
 }) => {
+  logSocket(socket, 'open');
   if (origin !== null && !trustedOrigins.includes(origin)) {
     socket.close(4403, 'Origin not allowed');
     return;
@@ -111,6 +114,7 @@ const openRealtimeSubscription = async <T>({
 
   try {
     socket.send(JSON.stringify(subscribedMessage));
+    logSocket(socket, 'subscribed');
   } catch {
     socketCleanups.get(socket)?.();
     socket.close(1011, 'Subscription failed');
@@ -133,16 +137,21 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
         sameAccess: (initial, current) => initial === current,
         subscribe: () =>
           subscribeToQuestBoardUpdates(user.id, session.id, {
-            send: (message) => ws.send(message),
+            send: (message) => {
+              ws.send(message);
+              logSocket(ws, 'send', { type: 'QUEST_BOARD_INVALIDATED' });
+            },
             close: (code, reason) => ws.close(code, reason),
           }),
       });
     },
     message(ws) {
+      logSocket(ws, 'rejected', { type: 'READ_ONLY_COMMAND', code: 1008 });
       ws.close(1008, 'Quest Board stream is read-only');
     },
-    close(ws) {
+    close(ws, code) {
       socketCleanups.get(ws)?.();
+      logSocket(ws, 'close', { code });
     },
     detail: {
       tags: ['Quest'],
@@ -168,16 +177,21 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
           initial.role === current.role && initial.mode === current.mode,
         subscribe: () =>
           subscribeToQuestUpdates(questId, user.id, session.id, {
-            send: (message) => ws.send(message),
+            send: (message) => {
+              ws.send(message);
+              logSocket(ws, 'send', { type: 'QUEST_UPDATED' });
+            },
             close: (code, reason) => ws.close(code, reason),
           }),
       });
     },
     message(ws) {
+      logSocket(ws, 'rejected', { type: 'READ_ONLY_COMMAND', code: 1008 });
       ws.close(1008, 'Quest stream is read-only');
     },
-    close(ws) {
+    close(ws, code) {
       socketCleanups.get(ws)?.();
+      logSocket(ws, 'close', { code });
     },
     detail: {
       tags: ['Quest'],
@@ -202,16 +216,21 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
         sameAccess: sameCandidateRosterScope,
         subscribe: (scope) =>
           subscribeToCandidateRosterUpdates(questId, user.id, session.id, scope, {
-            send: (message) => ws.send(message),
+            send: (message) => {
+              ws.send(message);
+              logSocket(ws, 'send', { type: 'CANDIDATE_ROSTER_UPDATED' });
+            },
             close: (code, reason) => ws.close(code, reason),
           }),
       });
     },
     message(ws) {
+      logSocket(ws, 'rejected', { type: 'READ_ONLY_COMMAND', code: 1008 });
       ws.close(1008, 'Candidate roster stream is read-only');
     },
-    close(ws) {
+    close(ws, code) {
       socketCleanups.get(ws)?.();
+      logSocket(ws, 'close', { code });
     },
     detail: {
       tags: ['Quest'],
@@ -234,16 +253,21 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
         sameAccess: (initial, current) => initial === current,
         subscribe: () =>
           subscribeToHirerQuestUpdates(user.id, session.id, {
-            send: (message) => ws.send(message),
+            send: (message) => {
+              ws.send(message);
+              logSocket(ws, 'send', { type: 'HIRER_QUEST_UPDATED' });
+            },
             close: (code, reason) => ws.close(code, reason),
           }),
       });
     },
     message(ws) {
+      logSocket(ws, 'rejected', { type: 'READ_ONLY_COMMAND', code: 1008 });
       ws.close(1008, 'Hirer Quest stream is read-only');
     },
-    close(ws) {
+    close(ws, code) {
       socketCleanups.get(ws)?.();
+      logSocket(ws, 'close', { code });
     },
     detail: {
       tags: ['Quest'],
