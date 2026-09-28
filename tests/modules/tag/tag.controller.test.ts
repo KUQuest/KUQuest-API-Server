@@ -5,8 +5,8 @@ import { CursorInputError } from '@/shared/cursor';
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
 const storedTags = [
-  { id: '018f47a7-1c7d-7c98-9a11-690d7e83430c', name: 'Graphic Design' },
-  { id: '018f47a7-1c7d-7c98-9a11-690d7e83430d', name: 'Frontend Development' },
+  { id: '018f47a7-1c7d-7c98-9a11-690d7e83430c', name: 'Graphic Design', nameTh: null },
+  { id: '018f47a7-1c7d-7c98-9a11-690d7e83430d', name: 'Frontend Development', nameTh: null },
 ];
 
 const mockPage = {

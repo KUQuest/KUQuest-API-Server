@@ -3,6 +3,8 @@ import { db, sql } from '@/database/client';
 import {
   quest,
   questAssignment,
+  questCandidateApplicationV2,
+  questCandidateTeamV2,
   questCommand,
   questEditHistory,
 } from '@/database/schema/quest.schema';
@@ -119,6 +121,35 @@ const createAssignedQuest = async (workerIds = [worker.id]) => {
   return result.quest.id;
 };
 
+const createOpenQuest = async () => {
+  const result = await createQuestV2(
+    owner.id,
+    { ...baseInput, title: `${baseInput.title} ${crypto.randomUUID()}` },
+    `quest-v2-open-edit-create-${crypto.randomUUID()}`
+  );
+  if (!('quest' in result)) throw new Error(`Quest creation failed: ${result.outcome}`);
+  questIds.push(result.quest.id);
+  await db
+    .update(quest)
+    .set({ questStatus: 'QUEST_OPEN', rewardSatang: 100 })
+    .where(eq(quest.id, result.quest.id));
+  return result.quest.id;
+};
+
+const patchQuest = (questId: string, body: unknown, version = 1) =>
+  app.handle(
+    new Request(`http://localhost/api/v2/quests/${questId}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        'idempotency-key': `open-edit-${crypto.randomUUID()}`,
+        'if-match': String(version),
+        cookie: owner.cookie,
+      },
+      body: JSON.stringify(body),
+    })
+  );
+
 const createEdit = (questId: string, body: unknown, key = `edit-${crypto.randomUUID()}`) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/${questId}/edit-requests`, {
@@ -181,6 +212,111 @@ afterAll(async () => {
 });
 
 describe('Quest Edit v2', () => {
+  it('allows edits to an open Quest before participation starts', async () => {
+    const questId = await createOpenQuest();
+    const response = await patchQuest(questId, {
+      title: 'Updated open Quest',
+      condition: { items: ['Updated requirement'] },
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        state: string;
+        title: string;
+        version: number;
+        condition: { items: Array<{ position: number; text: string }> };
+      };
+    };
+    expect(body.data).toMatchObject({
+      state: 'QUEST_OPEN',
+      title: 'Updated open Quest',
+      version: 2,
+      condition: { items: [{ position: 0, text: 'Updated requirement' }] },
+    });
+
+    const history = await db
+      .select({ fieldName: questEditHistory.fieldName })
+      .from(questEditHistory)
+      .where(eq(questEditHistory.questId, questId));
+    expect(history.map(({ fieldName }) => fieldName).sort()).toEqual(['condition', 'title']);
+  });
+
+  it('keeps published funding and headcount locked', async () => {
+    const questId = await createOpenQuest();
+
+    const responses = await Promise.all([
+      patchQuest(questId, { questFundingTotal: 30 }),
+      patchQuest(questId, { headcount: 2 }),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([409, 409]);
+    const bodies = (await Promise.all(responses.map((response) => response.json()))) as Array<{
+      error: { code: string };
+    }>;
+    expect(bodies.map(({ error }) => error.code)).toEqual([
+      'QUEST_OPEN_FIELD_LOCKED',
+      'QUEST_OPEN_FIELD_LOCKED',
+    ]);
+  });
+
+  it('keeps published Tag and schedule requirements valid', async () => {
+    const questId = await createOpenQuest();
+    const responses = await Promise.all([
+      patchQuest(questId, { tagId: null }),
+      patchQuest(questId, { dueAt: null }),
+      patchQuest(questId, { startTime: '2020-01-01T10:00:00.000+07:00' }),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([400, 400, 400]);
+    const bodies = (await Promise.all(responses.map((response) => response.json()))) as Array<{
+      error: { code: string };
+    }>;
+    expect(bodies.map(({ error }) => error.code)).toEqual([
+      'INVALID_OPEN_QUEST',
+      'INVALID_OPEN_QUEST',
+      'INVALID_OPEN_QUEST',
+    ]);
+  });
+
+  it('closes open edits after an application, Candidate Team, or Assignment exists', async () => {
+    const applicationQuestId = await createOpenQuest();
+    await db.insert(questCandidateApplicationV2).values({
+      questId: applicationQuestId,
+      memberId: worker.id,
+      state: 'APPLICATION_WITHDRAWN',
+    });
+
+    const teamQuestId = await createOpenQuest();
+    await db.insert(questCandidateTeamV2).values({
+      questId: teamQuestId,
+      leaderId: worker.id,
+      name: 'Disbanded team',
+      headcount: 2,
+      state: 'TEAM_DISBANDED',
+    });
+
+    const assignmentQuestId = await createOpenQuest();
+    await db.insert(questAssignment).values({
+      questId: assignmentQuestId,
+      workerId: worker.id,
+      assignmentStatus: 'ASSIGNMENT_CANCELLED',
+    });
+
+    const responses = await Promise.all(
+      [applicationQuestId, teamQuestId, assignmentQuestId].map((questId) =>
+        patchQuest(questId, { title: 'Must stay unchanged' })
+      )
+    );
+    expect(responses.map((response) => response.status)).toEqual([409, 409, 409]);
+    const bodies = (await Promise.all(responses.map((response) => response.json()))) as Array<{
+      error: { code: string };
+    }>;
+    expect(bodies.map(({ error }) => error.code)).toEqual([
+      'QUEST_OPEN_EDIT_CLOSED',
+      'QUEST_OPEN_EDIT_CLOSED',
+      'QUEST_OPEN_EDIT_CLOSED',
+    ]);
+  });
+
   it('publishes the authenticated v2 Quest Edit operations', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
     const document = (await response.json()) as {
@@ -199,6 +335,7 @@ describe('Quest Edit v2', () => {
     const create = document.paths['/api/v2/quests/{questId}/edit-requests']?.post;
     const read = document.paths['/api/v2/quests/edit-requests/{requestId}']?.get;
     const respond = document.paths['/api/v2/quests/edit-requests/{requestId}/respond']?.post;
+    const edit = document.paths['/api/v2/quests/{questId}']?.patch;
 
     expect(create?.operationId).toBe('createQuestEditRequestV2');
     expect(read?.operationId).toBe('getQuestEditRequestV2');
@@ -206,6 +343,11 @@ describe('Quest Edit v2', () => {
     expect(create?.security).toEqual([{ betterAuthSession: [] }]);
     expect(read?.security).toEqual([{ betterAuthSession: [] }]);
     expect(respond?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(edit?.operationId).toBe('editQuestV2');
+    expect(edit?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(Object.keys(edit?.responses ?? {})).toEqual(
+      expect.arrayContaining(['200', '400', '401', '404', '409', '500', '503'])
+    );
     expect(Object.keys(create?.responses ?? {})).toEqual(
       expect.arrayContaining(['201', '400', '401', '404', '409', '500', '503'])
     );

@@ -88,6 +88,28 @@ Key Local URLs:
 - **RustFS S3 Console**: [http://localhost:9001](http://localhost:9001) _(login with credentials from `.env`)_
 - **Drizzle Studio**: `bun run db:studio` -> [https://local.drizzle.studio](https://local.drizzle.studio)
 
+### Request and WebSocket logs
+
+The Server writes one JSON `http.request` line for each completed HTTP request. Use the
+`X-Request-ID` response header to find that line. Cross-origin Admin web requests can
+read this header. The log includes the method, route template, status, duration, and
+safe error code when available. A request that never reaches the Server has no Server
+request ID.
+
+WebSocket upgrades that fail have an `http.request` line. Successful connections
+write `ws.open`, `ws.subscribed`, frame-type events, and `ws.close` with a close code.
+Browser WebSocket clients cannot read upgrade response headers. To correlate a
+connection from the frontend, generate a UUID for that connection and append
+`?traceId=<uuid>` to its WebSocket URL. Search for `clientTraceId` in Server logs;
+the Server also assigns its own `requestId`. Invalid trace IDs are ignored. A
+`ws.send` line means the Server called send, not that the frontend received a frame.
+
+These request and WebSocket log entries omit query strings, request and frame
+bodies, Session tokens, Member identifiers, and Message text. Do not put
+credentials in WebSocket URLs. In staging, read container output with
+`docker compose logs --since 10m api`; configure log rotation and retention
+on the deployment host before keeping production logs.
+
 ---
 
 ## 🧪 Testing & Code Quality

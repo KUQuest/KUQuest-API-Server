@@ -545,4 +545,95 @@ describe('Quest lifecycle realtime updates', () => {
       await hirerConnection.server.stop();
     }
   });
+  it('notifies Quest Board subscribers after Publish', async () => {
+    const [hirer, firstProspectiveWorker, secondProspectiveWorker] = sessions;
+    if (!hirer || !firstProspectiveWorker || !secondProspectiveWorker) {
+      throw new Error('Lifecycle test sessions are missing');
+    }
+
+    const firstConnection = await connectToApp('board', firstProspectiveWorker.cookie);
+    let secondSocket: QuestWebSocketClient | undefined;
+    const waitForBoardInvalidation = async (
+      socket: QuestWebSocketClient,
+      questId: string,
+      timeoutMs = 5_000
+    ) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const text = await socket.nextText(deadline - Date.now());
+        if (!text) return undefined;
+        const event = JSON.parse(text) as { type?: string; version?: number; questId?: string };
+        if (event.type === 'QUEST_BOARD_INVALIDATED' && event.questId === questId) return event;
+      }
+      return undefined;
+    };
+
+    try {
+      secondSocket = await QuestWebSocketClient.connect(
+        firstConnection.server.server!.port!,
+        'board',
+        secondProspectiveWorker.cookie
+      );
+      const sockets = [firstConnection.client, secondSocket];
+      for (const socket of sockets) {
+        expect(JSON.parse((await socket.nextText())!)).toEqual({
+          type: 'SUBSCRIBED',
+          version: 1,
+          scope: 'QUEST_BOARD',
+        });
+      }
+
+      const created = await createQuestV2(
+        hirer.id,
+        { ...baseInput, title: `Quest Board realtime ${randomUUID()}` },
+        `quest-board-create-${randomUUID()}`
+      );
+      if (!('quest' in created)) throw new Error(`Quest creation failed: ${created.outcome}`);
+      const questId = created.quest.id;
+      questIds.push(questId);
+
+      for (const socket of sockets) {
+        expect(await waitForBoardInvalidation(socket, questId, 250)).toBeUndefined();
+      }
+
+      const publishKey = `quest-board-publish-${randomUUID()}`;
+      const publish = () =>
+        app.handle(
+          new Request(`http://localhost/api/v2/quests/${questId}/publish`, {
+            method: 'POST',
+            headers: { cookie: hirer.cookie, 'idempotency-key': publishKey },
+          })
+        );
+      const response = await publish();
+      expect(response.status).toBe(200);
+
+      const expectedEvent = {
+        type: 'QUEST_BOARD_INVALIDATED',
+        version: 1,
+        questId,
+      };
+      for (const socket of sockets) {
+        expect(await waitForBoardInvalidation(socket, questId)).toEqual(expectedEvent);
+      }
+
+      const boardResponse = await app.handle(
+        new Request(`http://localhost/api/v2/quests?tagId=${tagId}`, {
+          headers: { cookie: firstProspectiveWorker.cookie },
+        })
+      );
+      expect(boardResponse.status).toBe(200);
+      const board = (await boardResponse.json()) as { data: { items: Array<{ id: string }> } };
+      expect(board.data.items.map(({ id }) => id)).toContain(questId);
+
+      const replay = await publish();
+      expect(replay.status).toBe(200);
+      for (const socket of sockets) {
+        expect(await waitForBoardInvalidation(socket, questId, 250)).toBeUndefined();
+      }
+    } finally {
+      firstConnection.client.destroy();
+      secondSocket?.destroy();
+      await firstConnection.server.stop();
+    }
+  });
 });
