@@ -34,10 +34,14 @@ A **Conduct Report** evaluates how a Member behaved on a Quest, supported by the
 - Requires a reason and a non-blank `Idempotency-Key`.
 - Decisions are final and create an Audit Record.
 
-### Dismissal reason catalog
+### Decision reason catalog
 
 Admin Action reason catalog version `1` defines the action-specific codes for a
-Conduct Report dismissal. `CONDUCT_REPORT_DISMISS` accepts:
+Conduct Report decision. `CONDUCT_REPORT_UPHOLD` uses the Conduct Report's
+reason as its `AdminAction.reasonCode` and `decisionReason`. Admins cannot
+submit a separate or free-form reason for an upheld report.
+
+`CONDUCT_REPORT_DISMISS` accepts:
 
 - `CONDUCT_REPORT_NO_VIOLATION`
 - `CONDUCT_REPORT_INSUFFICIENT_EVIDENCE`

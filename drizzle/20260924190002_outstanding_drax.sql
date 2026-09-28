@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "member_penalty_records_violation_source_uidx" ON "member_penalty_records" USING btree ("member_id","source","source_id") WHERE "member_penalty_records"."source" IN ('REPORT_CASE', 'CONDUCT_REPORT') AND "member_penalty_records"."result" <> 'PENALTY_REVERSAL';

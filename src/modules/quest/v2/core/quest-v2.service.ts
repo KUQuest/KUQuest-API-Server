@@ -15,8 +15,17 @@ import {
 import { file } from '@/database/schema/file.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { chatConversation } from '@/database/schema/work-chat.schema';
+import {
+  isRedFlagActive,
+  isMemberRedFlagged,
+  isMemberRedFlaggedInTransaction,
+} from '@/modules/admin/member-penalty';
 import { avatarStorage } from '@/modules/profile/profile.storage';
-import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
+import {
+  notifyHirerQuestCreated,
+  notifyQuestBoardInvalidated,
+  notifyQuestUpdate,
+} from '@/modules/quest/v2/realtime';
 import {
   getEffectiveFundingReservationPolicy,
   MoneyDomainError,
@@ -87,7 +96,6 @@ import type { QuestV2BoardQuery, QuestV2CreateInput, QuestV2EditInput } from './
 import { questV2Storage } from './quest-v2.storage';
 import type { StoredQuestImage } from '../../v1/services/quest.storage';
 import { applyQuestStateTransition } from '../../shared/transition/quest-transition.service';
-import { notifyHirerQuestCreated, notifyQuestBoardInvalidated } from '../realtime';
 
 type QuestTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type QuestDatabase = typeof db | QuestTransaction;
@@ -181,7 +189,8 @@ export type QuestV2CreateOutcome =
 export type QuestV2EditOutcome =
   { quest: QuestV2CanonicalQuest } | { outcome: QuestV2EditOutcomeCode };
 
-export type QuestV2PublishCheckOutcome = QuestV2PublishCheck | { outcome: 'not-draft' };
+export type QuestV2PublishCheckOutcome =
+  QuestV2PublishCheck | { outcome: 'not-draft' | 'red-flagged' };
 
 export type QuestV2QuestEscrowSnapshot = {
   reservationId: string;
@@ -214,7 +223,8 @@ export type QuestV2PublishOutcome =
         | 'idempotency-key-reused'
         | 'idempotency-in-progress'
         | 'idempotency-unavailable'
-        | 'not-draft';
+        | 'not-draft'
+        | 'red-flagged';
     };
 
 export type QuestV2ImageReference = {
@@ -270,6 +280,7 @@ export type QuestV2BoardCard = {
     } | null;
     avatar: QuestV2HirerAvatar;
     occupation: { id: string; name: 'Staff' | 'Lecturer' | 'Student' } | null;
+    redFlagged: boolean;
   };
   location: string | null;
 };
@@ -299,6 +310,7 @@ export type QuestV2PublicDetail = {
   dueAt: string;
   proofRequired: boolean;
   hirerName: string;
+  hirerRedFlagged: boolean;
   hirerAvatar: QuestV2HirerAvatar;
   locations: Array<{ label: string }>;
   images: QuestV2ImageReference[];
@@ -372,6 +384,7 @@ type QuestV2BoardRow = {
   dueAt: Date | null;
   hirerFirstName: string;
   hirerLastName: string;
+  hirerRedFlagExpiresAt: Date | null;
 };
 
 type QuestV2BoardProfileRow = QuestV2BoardRow &
@@ -2082,7 +2095,8 @@ class QuestV2PublishBlockedError extends Error {
   }
 }
 
-type QuestV2PublishRejection = { outcome: 'not-draft' } | { outcome: 'not-found' };
+type QuestV2PublishRejection =
+  { outcome: 'not-draft' } | { outcome: 'not-found' } | { outcome: 'red-flagged' };
 const publishQuestV2InTransaction = async (
   transaction: QuestTransaction,
   userId: string,
@@ -2115,6 +2129,9 @@ const publishQuestV2InTransaction = async (
         return { kind: 'rejected', rejection: { outcome: 'not-found' } };
       if (current.questStatus !== questStatus.draft) {
         return { kind: 'rejected', rejection: { outcome: 'not-draft' } };
+      }
+      if (await isMemberRedFlaggedInTransaction(transaction, userId, now)) {
+        return { kind: 'rejected', rejection: { outcome: 'red-flagged' } };
       }
 
       const row = await selectQuestV2Row(transaction, userId, questId);
@@ -2759,6 +2776,7 @@ const toQuestV2HirerProfile = (row: QuestV2BoardProfileRow): QuestV2BoardCard['h
       isQuestV2OccupationName(row.hirerOccupationName)
         ? { id: row.hirerOccupationId, name: row.hirerOccupationName }
         : null,
+    redFlagged: isRedFlagActive(row.hirerRedFlagExpiresAt),
   };
 };
 
@@ -2854,6 +2872,7 @@ export const listQuestBoardV2 = async (
       hirerId: authUser.id,
       hirerFirstName: authUser.firstName,
       hirerLastName: authUser.lastName,
+      hirerRedFlagExpiresAt: authUser.redFlagExpiresAt,
       hirerVersion: authUser.version,
       hirerBio: authUser.bio,
       hirerAcademicYear: authUser.academicYear,
@@ -2927,6 +2946,7 @@ export const getPublicQuestV2Detail = async (
       proofRequired: quest.proofRequired,
       hirerFirstName: authUser.firstName,
       hirerLastName: authUser.lastName,
+      hirerRedFlagExpiresAt: authUser.redFlagExpiresAt,
       hirerAvatarFileId: file.id,
       hirerAvatarBucket: file.bucket,
       hirerAvatarObjectKey: file.objectKey,
@@ -2973,6 +2993,7 @@ export const getPublicQuestV2Detail = async (
     dueAt: formatQuestV2ScheduleTime(publicRow.dueAt),
     proofRequired: publicRow.proofRequired,
     hirerName: `${publicRow.hirerFirstName} ${publicRow.hirerLastName}`.trim(),
+    hirerRedFlagged: isRedFlagActive(publicRow.hirerRedFlagExpiresAt),
     hirerAvatar: toQuestV2HirerAvatar(publicRow),
     locations,
     images,
@@ -3004,6 +3025,7 @@ export const getQuestV2ParticipationDetail = async (
       proofRequired: quest.proofRequired,
       hirerFirstName: authUser.firstName,
       hirerLastName: authUser.lastName,
+      hirerRedFlagExpiresAt: authUser.redFlagExpiresAt,
       hirerAvatarFileId: file.id,
       hirerAvatarBucket: file.bucket,
       hirerAvatarObjectKey: file.objectKey,
@@ -3062,6 +3084,7 @@ export const getQuestV2ParticipationDetail = async (
     dueAt: formatQuestV2ScheduleTime(participationRow.dueAt),
     proofRequired: participationRow.proofRequired,
     hirerName: `${participationRow.hirerFirstName} ${participationRow.hirerLastName}`.trim(),
+    hirerRedFlagged: isRedFlagActive(participationRow.hirerRedFlagExpiresAt),
     hirerAvatar: toQuestV2HirerAvatar(participationRow),
     locations,
     images,
@@ -3139,5 +3162,6 @@ export const getQuestV2PublishCheck = async (
     const row = await selectQuestV2Row(transaction, userId, questId);
     if (!row) return undefined;
     if (row.questStatus !== questStatus.draft) return { outcome: 'not-draft' };
+    if (await isMemberRedFlagged(userId)) return { outcome: 'red-flagged' };
     return buildQuestV2PublishCheckForRow(transaction, userId, row);
   });

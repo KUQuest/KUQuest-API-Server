@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import {
   check,
   foreignKey,
@@ -77,6 +78,109 @@ export const adminAction = pgTable(
       'admin_action_result_data_object_check',
       sql`jsonb_typeof(${table.resultData}) = 'object'`
     ),
+  ]
+);
+
+export const memberPenaltyLadders = ['MISCONDUCT', 'REVIEW'] as const;
+export type MemberPenaltyLadder = (typeof memberPenaltyLadders)[number];
+
+export const memberPenaltySources = ['REPORT_CASE', 'CONDUCT_REPORT', 'REVIEW_AVERAGE'] as const;
+export type MemberPenaltySource = (typeof memberPenaltySources)[number];
+
+export const memberPenaltyResults = [
+  'PENALTY_EXEMPT',
+  'PENALTY_RED_FLAG',
+  'PENALTY_TEMPORARY_BAN_7_DAYS',
+  'PENALTY_TEMPORARY_BAN_1_MONTH',
+  'PENALTY_PERMANENT_BAN',
+  'PENALTY_REVERSAL',
+] as const;
+export type MemberPenaltyResult = (typeof memberPenaltyResults)[number];
+
+/** Immutable source-of-truth history for Member penalty ladders and reversals. */
+export const memberPenaltyRecord = pgTable(
+  'member_penalty_records',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => authUser.id, { onDelete: 'restrict' }),
+    ladder: text('ladder').$type<MemberPenaltyLadder>().notNull(),
+    source: text('source').$type<MemberPenaltySource>().notNull(),
+    sourceId: uuid('source_id').notNull(),
+    sequenceNumber: integer('sequence_number').notNull(),
+    result: text('result').$type<MemberPenaltyResult>().notNull(),
+    actorType: text('actor_type').$type<'ADMIN' | 'SYSTEM'>().notNull(),
+    actorAdminId: uuid('actor_admin_id').references(() => authAdmin.id, {
+      onDelete: 'restrict',
+    }),
+    reasonCode: varchar('reason_code', { length: 100 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    reversalOfRecordId: uuid('reversal_of_record_id').references(
+      (): AnyPgColumn => memberPenaltyRecord.id,
+      { onDelete: 'restrict' }
+    ),
+  },
+  (table) => [
+    check('member_penalty_records_ladder_check', sql`${table.ladder} IN ('MISCONDUCT', 'REVIEW')`),
+    check(
+      'member_penalty_records_source_check',
+      sql`${table.source} IN ('REPORT_CASE', 'CONDUCT_REPORT', 'REVIEW_AVERAGE')`
+    ),
+    check(
+      'member_penalty_records_source_ladder_check',
+      sql`(
+        (${table.source} IN ('REPORT_CASE', 'CONDUCT_REPORT') AND ${table.ladder} = 'MISCONDUCT') OR
+        (${table.source} = 'REVIEW_AVERAGE' AND ${table.ladder} = 'REVIEW')
+      )`
+    ),
+    check(
+      'member_penalty_records_result_check',
+      sql`${table.result} IN ('PENALTY_EXEMPT', 'PENALTY_RED_FLAG', 'PENALTY_TEMPORARY_BAN_7_DAYS', 'PENALTY_TEMPORARY_BAN_1_MONTH', 'PENALTY_PERMANENT_BAN', 'PENALTY_REVERSAL')`
+    ),
+    check('member_penalty_records_sequence_check', sql`${table.sequenceNumber} > 0`),
+    check(
+      'member_penalty_records_actor_check',
+      sql`(
+        (${table.actorType} = 'ADMIN' AND ${table.actorAdminId} IS NOT NULL) OR
+        (${table.actorType} = 'SYSTEM' AND ${table.actorAdminId} IS NULL)
+      )`
+    ),
+    check(
+      'member_penalty_records_reason_code_check',
+      sql`${table.reasonCode} ~ '^[A-Z][A-Z0-9_.-]{0,99}$'`
+    ),
+    check(
+      'member_penalty_records_reversal_check',
+      sql`(${table.result} = 'PENALTY_REVERSAL') = (${table.reversalOfRecordId} IS NOT NULL)`
+    ),
+    check(
+      'member_penalty_records_not_self_reversal_check',
+      sql`${table.reversalOfRecordId} IS NULL OR ${table.reversalOfRecordId} <> ${table.id}`
+    ),
+    uniqueIndex('member_penalty_records_reversal_uidx')
+      .on(table.reversalOfRecordId)
+      .where(sql`${table.reversalOfRecordId} IS NOT NULL`),
+    uniqueIndex('member_penalty_records_review_source_uidx')
+      .on(table.memberId, table.sourceId)
+      .where(sql`${table.source} = 'REVIEW_AVERAGE'`),
+    uniqueIndex('member_penalty_records_violation_source_uidx')
+      .on(table.memberId, table.source, table.sourceId)
+      .where(
+        sql`${table.source} IN ('REPORT_CASE', 'CONDUCT_REPORT') AND ${table.result} <> 'PENALTY_REVERSAL'`
+      ),
+    index('member_penalty_records_member_created_idx').on(
+      table.memberId,
+      table.createdAt,
+      table.id
+    ),
+    index('member_penalty_records_member_ladder_idx').on(
+      table.memberId,
+      table.ladder,
+      table.sequenceNumber
+    ),
+    index('member_penalty_records_member_result_idx').on(table.memberId, table.result),
+    index('member_penalty_records_source_idx').on(table.source, table.sourceId),
   ]
 );
 

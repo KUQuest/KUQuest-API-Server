@@ -486,6 +486,14 @@ const notDraft = (set: AuthedContext['set']) => {
   return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be published');
 };
 
+const memberRedFlagged = (set: AuthedContext['set']) => {
+  set.status = 409;
+  return apiError(
+    'MEMBER_RED_FLAGGED',
+    'A Member with an active Red Flag cannot publish a new Quest'
+  );
+};
+
 const mapQuestEscrowError = (set: AuthedContext['set'], error: MoneyDomainError) => {
   const clientSafeCodes = new Set([
     'AMOUNT_OUT_OF_RANGE',
@@ -514,7 +522,10 @@ export const getQuestPublishCheckController = async ({
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
-  if ('outcome' in result) return notDraft(set);
+  if ('outcome' in result) {
+    if (result.outcome === 'red-flagged') return memberRedFlagged(set);
+    return notDraft(set);
+  }
 
   return apiSuccess(result);
 };
@@ -535,6 +546,7 @@ export const publishQuestController = async ({
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
+  if (result.outcome === 'red-flagged') return memberRedFlagged(set);
   if (result.outcome === 'not-draft') return notDraft(set);
   if (result.outcome === 'blocked') {
     const [firstReason] = result.check.blockingReasons;

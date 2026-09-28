@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V2_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
@@ -36,6 +36,7 @@ export const questProofV2Route = new Elysia({
   prefix: `${API_V2_PREFIX}/quests`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .post('/:questId/proof-submissions', createQuestV2ProofSubmissionController, {
     params: questV2ProofSubmissionParamsSchema,
     body: questV2ProofSubmissionCreateSchema,

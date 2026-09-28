@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V2_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
@@ -26,6 +26,7 @@ export const questReviewV2Route = new Elysia({
   prefix: `${API_V2_PREFIX}/quests`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .get('/:questId/reviews', listQuestV2ReviewsController, {
     params: questV2ReviewParamsSchema,
     response: responses(questV2ReviewListResponseSchema, 401, 404, 500, 503),

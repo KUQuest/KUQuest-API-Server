@@ -1,3 +1,5 @@
+import { conductReportReasons } from '@/database/schema/admin.schema';
+
 import type { AdminActionReasonCatalog } from './admin-action.policy';
 
 export const reportAdminReasonCodes = ['POLICY_REVIEW', 'SAFETY_REVIEW'] as const;
@@ -31,6 +33,11 @@ export const reportAdminActionCatalog: AdminActionReasonCatalog = {
       kind: 'COMMAND',
       requiresReason: true,
       allowedReasonCodes: conductReportDismissReasonCodes,
+    },
+    CONDUCT_REPORT_UPHOLD: {
+      kind: 'COMMAND',
+      requiresReason: true,
+      allowedReasonCodes: conductReportReasons,
     },
     REPORT_CASE_EVIDENCE_ACCESS: {
       kind: 'EVIDENCE_ACCESS',

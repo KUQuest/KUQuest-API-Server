@@ -89,6 +89,7 @@ beforeEach(async () => {
     await db.delete(quest).where(inArray(quest.id, questIds));
     questIds = [];
   }
+  await db.update(authUser).set({ redFlagExpiresAt: null }).where(eq(authUser.id, hirerId));
 });
 
 afterAll(async () => {
@@ -99,6 +100,17 @@ afterAll(async () => {
 });
 
 describe('Quest persistence', () => {
+  it('shows the Hirer Red Flag on public Quest detail', async () => {
+    const questId = await createFixture();
+    await openQuest(questId);
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) })
+      .where(eq(authUser.id, hirerId));
+
+    expect((await getQuestDetail(otherMemberId, questId))?.hirerRedFlagged).toBe(true);
+  });
+
   it('creates a private Draft and returns full detail to its Hirer', async () => {
     const questId = await createFixture({
       reward: 250,

@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
@@ -30,6 +30,7 @@ export const portfolioRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/profile/portfolio`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .get('', listOwnPortfolio, {
     response: responses(portfolioListRespondSchema, 401),
     detail: {

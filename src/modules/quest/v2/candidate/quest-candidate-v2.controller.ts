@@ -64,6 +64,13 @@ const mapApplicationError = (set: AuthedContext['set'], outcome: ApplicationErro
   if (outcome.outcome === 'not-open') {
     return conflict(set, 'QUEST_NOT_OPEN', 'Only an open Quest accepts Candidate applications');
   }
+  if (outcome.outcome === 'red-flagged') {
+    return conflict(
+      set,
+      'MEMBER_RED_FLAGGED',
+      'A Member with an active Red Flag cannot apply as a Candidate'
+    );
+  }
   if (outcome.outcome === 'already-exists') {
     return conflict(
       set,
