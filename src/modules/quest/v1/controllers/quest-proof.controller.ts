@@ -3,6 +3,7 @@ import { MoneyDomainError } from '@/modules/wallet';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import {
   ImageTooLargeError,
+  ImageDimensionsTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
 } from '@/shared/object-storage';
@@ -132,6 +133,13 @@ export const submitProofController = async ({
         proofStorage.delete(image.bucket, image.objectKey).catch(() => undefined)
       )
     );
+    if (error instanceof ImageDimensionsTooLargeError) {
+      set.status = 422;
+      return apiError(
+        'PROOF_FILE_DIMENSIONS_TOO_LARGE',
+        'Image dimensions must not exceed 25 megapixels'
+      );
+    }
     if (error instanceof ImageTooLargeError) {
       set.status = 413;
       return apiError('IMAGE_TOO_LARGE', error.message);

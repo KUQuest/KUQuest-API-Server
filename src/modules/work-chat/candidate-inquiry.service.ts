@@ -11,6 +11,7 @@ import {
   chatReadCursor,
 } from '@/database/schema/work-chat.schema';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
+import { FileDimensionsTooLargeError } from '@/shared/object-storage';
 
 import { and, asc, desc, eq, gte, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 
@@ -36,6 +37,7 @@ export class CandidateInquiryServiceError extends Error {
     readonly code:
       | 'ATTACHMENT_LINK_UNAVAILABLE'
       | 'ATTACHMENT_NOT_FOUND'
+      | 'ATTACHMENT_DIMENSIONS_TOO_LARGE'
       | 'ATTACHMENT_TOO_LARGE'
       | 'ATTACHMENT_UNSUPPORTED'
       | 'ATTACHMENT_UPLOAD_FAILED'
@@ -810,6 +812,12 @@ type CandidateInquiryAttachment = {
 };
 
 const mapAttachmentStorageError = (error: unknown): CandidateInquiryServiceError => {
+  if (error instanceof FileDimensionsTooLargeError) {
+    return new CandidateInquiryServiceError(
+      'ATTACHMENT_DIMENSIONS_TOO_LARGE',
+      'Image dimensions must not exceed 25 megapixels'
+    );
+  }
   if (error instanceof WorkChatAttachmentTooLargeError) {
     return new CandidateInquiryServiceError('ATTACHMENT_TOO_LARGE', error.message);
   }

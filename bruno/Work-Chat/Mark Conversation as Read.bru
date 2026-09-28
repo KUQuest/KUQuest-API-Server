@@ -1,0 +1,26 @@
+meta {
+  name: Mark Conversation as Read
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/v1/chat/conversations/{{conversationId}}/read
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "messageId": "00000000-0000-0000-0000-000000000000"
+  }
+}
+
+docs {
+  Advances the authenticated Member's read cursor to the specified message ID, clearing unread badge counts.
+}

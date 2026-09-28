@@ -92,12 +92,22 @@ export const certificateRoute = new Elysia({
     params: certificateParamsSchema,
     body: certificateImageUploadSchema,
     type: 'multipart/form-data',
-    response: responses(certificateImageUploadResponseSchema, 400, 401, 404, 409, 413, 415, 502),
+    response: responses(
+      certificateImageUploadResponseSchema,
+      400,
+      401,
+      404,
+      409,
+      413,
+      415,
+      422,
+      502
+    ),
     detail: {
       tags: ['Certificates'],
       summary: 'Set a certificate image',
       description:
-        'Uploads a valid JPEG, PNG, or WebP image up to 5 MB and attaches it to a certificate owned by the current user. After replacement commits, the previous object is deleted and its file metadata is retained as a tombstone.',
+        'Uploads a valid JPEG, PNG, or WebP image up to 5 MB and 25 megapixels and attaches it to a certificate owned by the current user. After replacement commits, the previous object is deleted and its file metadata is retained as a tombstone.',
       operationId: 'setCertificateImage',
       security: betterAuthSecurity,
     },

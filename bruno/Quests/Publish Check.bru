@@ -1,0 +1,19 @@
+meta {
+  name: Publish Check
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/publish-check
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Evaluates pre-publish readiness without side effects: returns financial quote (reward, platform fee, escrow total) and any blocking errors or warnings.
+}

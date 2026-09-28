@@ -125,7 +125,7 @@ describe('Quest API v2 integration', () => {
     expect((await response.json()).error.code).toBe('UNAUTHORIZED');
   });
 
-  it('documents the v2 Draft foundation with the v2 paths and security', async () => {
+  it('documents the v2 Quest paths and security', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
     const document = (await response.json()) as {
       paths: Record<string, Record<string, OpenApiOperation>>;
@@ -134,7 +134,7 @@ describe('Quest API v2 integration', () => {
     expect(document.paths['/api/v2/quests']?.post?.operationId).toBe('createQuestV2');
     expect(document.paths['/api/v2/quests/mine']?.get?.operationId).toBe('listOwnQuestsV2');
     expect(document.paths['/api/v2/quests/{questId}']?.get?.operationId).toBe('getQuestV2Detail');
-    expect(document.paths['/api/v2/quests/{questId}']?.patch?.operationId).toBe('editQuestV2Draft');
+    expect(document.paths['/api/v2/quests/{questId}']?.patch?.operationId).toBe('editQuestV2');
     expect(document.paths['/api/v2/quests/{questId}/publish-check']?.get?.operationId).toBe(
       'getQuestV2PublishCheck'
     );

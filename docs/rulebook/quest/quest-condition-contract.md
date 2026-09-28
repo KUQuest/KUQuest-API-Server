@@ -8,7 +8,41 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 - A Condition Item is non-empty after surrounding whitespace is removed and is at most 255 characters.
 - Condition Items are explicitly ordered and stable after save.
 - Any Member who can view the Quest can view the ordered, read-only Condition list.
-- The Hirer may change Condition Items only while the Quest is `QUEST_ASSIGNED`.
+- The Hirer may change Condition Items in `QUEST_DRAFT` and, before
+  participation, in `QUEST_OPEN` as specified below.
+- In `QUEST_ASSIGNED`, Condition changes use the Quest Edit protocol below.
+
+## `QUEST_OPEN` edits
+
+The Hirer may edit an owned v2 Quest while it is `QUEST_OPEN` only before
+participation starts. The Server locks the Quest row and checks participation
+records in the same transaction as the edit.
+
+- Participation starts when any Candidate application, Candidate Team, or
+  Assignment record exists. This includes withdrawn applications, disbanded
+  Candidate Teams, and ended Assignments. An open Candidate Inquiry
+  Conversation does not start participation.
+- Before participation starts, the Hirer may change `title`, `description`,
+  `condition`, `mode`, `participation`, `startTime`, `dueAt`, `tagId`,
+  `proofRequired`, and `locations`.
+- The updated Quest must keep a Tag, a future `startTime`, and a non-null
+  `dueAt` later than `startTime`. The edit cannot make a published Quest fail
+  its publish-time schedule or Tag requirements.
+- `questFundingTotal`, `headcount`, Quest Images, ownership, and Quest State
+  cannot change through this edit. Funding fields stay fixed because the
+  published Quest Escrow reservation cannot be revised by this contract.
+- After participation starts, all Quest edits are refused. Existing
+  Candidates, Candidate Teams, and FCFS Workers are never rewritten or removed
+  by an edit.
+- Each changed field appends one Quest edit history row. The edit increments
+  the Quest version once and does not change its State or Quest Escrow.
+- A changed `title` also updates `questTitle` on each open Candidate Inquiry
+  Conversation for the Quest in the same transaction.
+- An edit sends a realtime Quest-update event to the Hirer and Members with an
+  open Candidate Inquiry Conversation for that Quest. The event does not add a
+  Message to an inquiry. No event is sent to other Prospective Workers.
+- Quest Images remain editable only in `QUEST_DRAFT`. The
+  `QUEST_ASSIGNED` Quest Edit protocol below is unchanged.
 
 ## Quest Edit protocol
 

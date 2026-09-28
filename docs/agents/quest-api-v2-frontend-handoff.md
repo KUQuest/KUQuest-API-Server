@@ -396,6 +396,27 @@ Success status: HTTP 200.
 Each item is a complete CanonicalQuest without the image gallery.
 The example is shortened. Use the CanonicalQuest shape in section 16.
 
+#### Subscribe to all owned Quest updates
+
+Connect with the Better Auth session cookie:
+
+```text
+WS /api/v2/me/hirer-quests/events
+```
+
+The Server sends `{ "type": "SUBSCRIBED", "version": 1 }` after it accepts
+the connection. For each committed change to an owned v2 Quest, it sends
+`{ "type": "HIRER_QUEST_UPDATED", "version": 1, "questId": "quest-uuid",
+"changeType": "..." }`. Change types include existing Quest updates,
+`CANDIDATE_ROSTER_UPDATED`, `QUEST_PUBLISHED`, and `QUEST_CREATED`.
+The event contains no Quest or Candidate data.
+
+Read `GET /api/v2/quests/mine` from the first cursor page after `SUBSCRIBED`,
+after each event, and after reconnect. Continue paging as needed. REST is
+authoritative; the stream does not replay missed events. A client message
+closes the connection with code 1008. The public `GET /api/v2/quests` Board
+does not list the Hirer's owned Quests.
+
 ### 5.3 Read the Hirer’s Quest detail
 
 Request:
@@ -890,7 +911,49 @@ Board Card does not include state, description, condition, images, Quest
 Funding Total, fee, escrow, wallet, or policy data. Call public detail for full
 public Quest content.
 
-### 6.2 Read public Quest detail
+### 6.2 Subscribe to Quest Board updates
+
+Connect:
+
+```text
+WS /api/v2/quests/board/events
+```
+
+Any authenticated Member can connect, including a Prospective Worker.
+
+After the Server accepts the connection, it sends:
+
+```json
+{
+  "type": "SUBSCRIBED",
+  "version": 1,
+  "scope": "QUEST_BOARD"
+}
+```
+
+After a successful Publish changes a Quest to QUEST_OPEN, the Server sends:
+
+```json
+{
+  "type": "QUEST_BOARD_INVALIDATED",
+  "version": 1,
+  "questId": "quest-uuid"
+}
+```
+
+The event does not contain a Quest Board Card. Fetch `GET /api/v2/quests` with
+the current filters after each invalidation. Restart cursor paging from the
+first page. The Quest may not match the current Member's filters or Board
+visibility rules. The current Hirer does not see their own Quest.
+
+The Server sends no event when a Hirer creates a QUEST_DRAFT. REST is
+authoritative. On reconnect, fetch the Quest Board again; the Server does not
+replay missed events.
+
+The stream is read-only. If a client sends a message, the Server closes the
+connection with code 1008.
+
+### 6.3 Read public Quest detail
 
 Request:
 
@@ -1576,6 +1639,25 @@ Errors:
 - 409 HIRER_CANNOT_JOIN_TEAM
 - 409 QUEST_NOT_OPEN
 - idempotency errors
+
+The alternate code-only route needs no Team ID:
+
+```http
+POST /api/v2/quests/:questId/teams/join
+Idempotency-Key: join-team-client-action-id
+Content-Type: application/json
+```
+
+Send the same `{ "joinCode": "abcd2345" }` body. The Server finds the forming
+Team within the specified Quest and runs the same join checks. Success
+returns the complete Team object. An unknown or ambiguous code returns
+`409 JOIN_CODE_INVALID`; a matching expired code returns
+`409 JOIN_CODE_EXPIRED`. The code-only route does not reveal Team details
+until the join succeeds. The existing Team-ID route remains available.
+
+Team reads cannot recover the plaintext Join Code because the Server stores
+only its hash. A Team Leader who loses the code must regenerate it; this
+invalidates the previous code.
 
 ### 9.7 Leave a Candidate Team
 

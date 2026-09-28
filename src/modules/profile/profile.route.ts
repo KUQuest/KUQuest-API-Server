@@ -114,12 +114,12 @@ export const profileRoute = new Elysia({
   .post('/avatar', setAvatar, {
     body: avatarUploadSchema,
     type: 'multipart/form-data',
-    response: responses(avatarUploadResponseSchema, 400, 401, 404, 413, 415, 502),
+    response: responses(avatarUploadResponseSchema, 400, 401, 404, 413, 415, 422, 502),
     detail: {
       tags: ['Profile'],
       summary: 'Set the current Student avatar',
       description:
-        'Uploads a valid JPEG, PNG, or WebP avatar up to 5 MB and stores its file reference. After replacement commits, the previous object is deleted and its file metadata is retained as a tombstone.',
+        'Uploads a valid JPEG, PNG, or WebP avatar up to 5 MB and 25 megapixels and stores its file reference. After replacement commits, the previous object is deleted and its file metadata is retained as a tombstone.',
       operationId: 'setProfileAvatar',
       security: betterAuthSecurity,
     },

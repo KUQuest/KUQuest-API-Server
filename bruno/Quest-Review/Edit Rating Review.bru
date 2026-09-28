@@ -1,0 +1,32 @@
+meta {
+  name: Edit Rating Review
+  type: http
+  seq: 2
+}
+
+patch {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/reviews/{{reviewId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "rating": 5,
+    "comment": "ทำงานดีมาก ตรงต่อเวลา ชิ้นงานเรียบร้อยตรงตามบรีฟ และสื่อสารรวดเร็วมากครับ"
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Edits the author's Rating Review within seven days after the Quest becomes Terminal (QUEST_COMPLETED, QUEST_FAILED, QUEST_CANCELLED).
+}

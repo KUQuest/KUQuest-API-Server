@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PromptPay Top-up &amp; Ledger Clearing Sequence</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --color-paper: #f5f5f5;
+        --color-paper-card: #ffffff;
+        --color-ink: #2d3142;
+        --color-muted: #4f5d75;
+        --color-soft: #7a8399;
+        --color-accent: #eb6c36;
+        --color-accent-tint: rgba(235, 108, 54, 0.08);
+        --color-rule: rgba(45, 49, 66, 0.12);
+        --font-sans: 'Geist', system-ui, sans-serif;
+        --font-serif: 'Instrument Serif', Georgia, serif;
+        --font-mono: 'Geist Mono', monospace;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        background: var(--color-paper);
+        color: var(--color-ink);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        padding: 3rem 1.5rem;
+      }
+
+      .frame {
+        max-width: 1040px;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+      }
+
+      header {
+        border-bottom: 1px solid var(--color-rule);
+        padding-bottom: 1.25rem;
+      }
+
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        font-weight: 500;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+        margin-bottom: 0.5rem;
+      }
+
+      h1 {
+        font-family: var(--font-serif);
+        font-size: clamp(2rem, 3.2vw + 1rem, 2.75rem);
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        color: var(--color-ink);
+        margin-bottom: 0.5rem;
+      }
+
+      .lead {
+        font-size: 1rem;
+        color: var(--color-muted);
+        line-height: 1.5;
+        max-width: 850px;
+      }
+
+      .diagram-container {
+        width: 100%;
+        overflow-x: auto;
+      }
+
+      svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .cards-grid {
+        display: grid;
+        grid-template-columns: 1.1fr 1fr 0.9fr;
+        gap: 1.25rem;
+      }
+
+      .card {
+        background: var(--color-paper-card);
+        border: 1px solid var(--color-rule);
+        border-radius: 6px;
+        padding: 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .card-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .card-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+      }
+      .card-dot.accent { background: var(--color-accent); }
+      .card-dot.link { background: #2e5aa8; }
+      .card-dot.ink { background: var(--color-ink); }
+
+      .card h3 {
+        font-size: 0.9375rem;
+        font-weight: 600;
+        color: var(--color-ink);
+      }
+
+      .card p {
+        font-size: 0.8125rem;
+        color: var(--color-muted);
+        line-height: 1.5;
+      }
+
+      footer {
+        border-top: 1px solid var(--color-rule);
+        padding-top: 1rem;
+        display: flex;
+        justify-content: space-between;
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        color: var(--color-soft);
+      }
+
+      @media (max-width: 800px) {
+        .cards-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <header>
+        <p class="eyebrow">Finance Architecture · Inbound Money Flow</p>
+        <h1>PromptPay Top-up &amp; Ledger Clearing Sequence</h1>
+        <p class="lead">
+          Interactive sequence tracing how a Member converts Thai Baht into integer-satang Spending Balance.
+          Guaranteed by a 300-second binding Provider Quote, Xendit PromptPay payment request, authenticated webhook,
+          and balanced double-entry ledger posting.
+        </p>
+      </header>
+
+      <div class="diagram-container">
+        <svg
+          viewBox="0 0 1000 840"
+          role="img"
+          aria-labelledby="topup-sequence-title topup-sequence-desc"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <title id="topup-sequence-title">PromptPay Top-up Sequence Flow</title>
+          <desc id="topup-sequence-desc">
+            Four-party sequence diagram illustrating quote generation, payment request creation, external PromptPay scanning, and exact-amount ledger clearing.
+          </desc>
+
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#4f5d75" />
+            </marker>
+            <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#eb6c36" />
+            </marker>
+            <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8" />
+            </marker>
+          </defs>
+
+          <!-- Background Paper -->
+          <rect width="100%" height="100%" fill="#f5f5f5" />
+
+          <!-- ==================== ACTOR HEADERS ==================== -->
+          <!-- Lifeline 1: Member (Client) -->
+          <line x1="140" y1="76" x2="140" y2="760" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" opacity="0.4" />
+          <!-- Lifeline 2: KUQuest API -->
+          <line x1="390" y1="76" x2="390" y2="760" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" opacity="0.4" />
+          <!-- Lifeline 3: Xendit Provider -->
+          <line x1="640" y1="76" x2="640" y2="760" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" opacity="0.4" />
+          <!-- Lifeline 4: Wallet Subledger -->
+          <line x1="880" y1="76" x2="880" y2="760" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" opacity="0.4" />
+
+          <!-- Actor 1: Member -->
+          <rect x="76" y="24" width="128" height="52" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1" />
+          <rect x="84" y="30" width="36" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.4)" stroke-width="0.8" />
+          <text x="102" y="39" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLIENT</text>
+          <text x="140" y="58" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Member</text>
+          <text x="140" y="70" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">Mobile / Web</text>
+
+          <!-- Actor 2: KUQuest Server -->
+          <rect x="326" y="24" width="128" height="52" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1" />
+          <rect x="334" y="30" width="32" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.4)" stroke-width="0.8" />
+          <text x="350" y="39" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+          <text x="390" y="58" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">KUQuest API</text>
+          <text x="390" y="70" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">Elysia :5000</text>
+
+          <!-- Actor 3: Xendit Provider -->
+          <rect x="576" y="24" width="128" height="52" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1" />
+          <rect x="584" y="30" width="44" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.4)" stroke-width="0.8" />
+          <text x="606" y="39" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">EXTERNAL</text>
+          <text x="640" y="58" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Xendit Gateway</text>
+          <text x="640" y="70" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">PromptPay Rails</text>
+
+          <!-- Actor 4: Wallet Ledger -->
+          <rect x="816" y="24" width="128" height="52" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1" />
+          <rect x="824" y="30" width="34" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.4)" stroke-width="0.8" />
+          <text x="841" y="39" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DB</text>
+          <text x="880" y="58" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Wallet Ledger</text>
+          <text x="880" y="70" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">Double-Entry SQL</text>
+
+          <!-- ==================== ACTIVATION BARS ==================== -->
+          <!-- Server Bar 1 (Quote) -->
+          <rect x="386" y="116" width="8" height="60" rx="2" fill="#e8eaed" stroke="#4f5d75" stroke-width="0.8" />
+          <!-- Server Bar 2 (Create Payment) -->
+          <rect x="386" y="220" width="8" height="124" rx="2" fill="#e8eaed" stroke="#4f5d75" stroke-width="0.8" />
+          <!-- Provider Bar 1 -->
+          <rect x="636" y="248" width="8" height="60" rx="2" fill="#e8eaed" stroke="#4f5d75" stroke-width="0.8" />
+          <!-- Server Bar 3 (Webhook Clearing) -->
+          <rect x="386" y="500" width="8" height="172" rx="2" fill="#e8eaed" stroke="#4f5d75" stroke-width="0.8" />
+          <!-- Ledger Bar -->
+          <rect x="876" y="572" width="8" height="64" rx="2" fill="#e8eaed" stroke="#4f5d75" stroke-width="0.8" />
+
+          <!-- ==================== PHASE 1: BINDING QUOTE ==================== -->
+          <!-- Frame: Phase 1 -->
+          <rect x="64" y="96" width="872" height="96" rx="4" fill="rgba(45,49,66,0.015)" stroke="rgba(45,49,66,0.15)" stroke-width="1" />
+          <rect x="64" y="96" width="132" height="16" rx="2" fill="#f5f5f5" stroke="rgba(45,49,66,0.15)" stroke-width="1" />
+          <text x="130" y="108" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">PHASE 1 · BINDING QUOTE</text>
+
+          <!-- Step 1: POST /top-ups/quotes -->
+          <line x1="140" y1="128" x2="386" y2="128" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)" />
+          <rect x="206" y="112" width="124" height="12" rx="2" fill="#f5f5f5" />
+          <text x="268" y="121" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /api/v1/top-ups/quotes</text>
+
+          <!-- Step 2: Return Quote Snapshot -->
+          <line x1="386" y1="164" x2="140" y2="164" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)" />
+          <rect x="180" y="148" width="176" height="12" rx="2" fill="#f5f5f5" />
+          <text x="268" y="157" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">200 QUOTE (TTL: 300s, 0.8% FEE + VAT)</text>
+
+          <!-- ==================== PHASE 2: PAYMENT REQUEST ==================== -->
+          <!-- Frame: Phase 2 -->
+          <rect x="64" y="204" width="872" height="240" rx="4" fill="rgba(45,49,66,0.015)" stroke="rgba(45,49,66,0.15)" stroke-width="1" />
+          <rect x="64" y="204" width="168" height="16" rx="2" fill="#f5f5f5" stroke="rgba(45,49,66,0.15)" stroke-width="1" />
+          <text x="148" y="216" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">PHASE 2 · PAYMENT REQUEST &amp; QR</text>
+
+          <!-- Step 3: POST /top-ups -->
+          <line x1="140" y1="236" x2="386" y2="236" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)" />
+          <rect x="200" y="220" width="136" height="12" rx="2" fill="#f5f5f5" />
+          <text x="268" y="229" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /top-ups (IDEMPOTENCY)</text>
+
+          <!-- Step 4: Create Xendit Payment Request -->
+          <line x1="394" y1="260" x2="636" y2="260" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)" />
+          <rect x="444" y="244" width="144" height="12" rx="2" fill="#f5f5f5" />
+          <text x="516" y="253" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /v3/payment_requests</text>
+
+          <!-- Step 5: Xendit returns QR payload -->
+          <line x1="636" y1="296" x2="394" y2="296" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)" />
+          <rect x="450" y="280" width="132" height="12" rx="2" fill="#f5f5f5" />
+          <text x="516" y="289" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">PROMPTPAY QR STRING &amp; ID</text>
+
+          <!-- Step 6: Server returns TopUp details & QR Data URL -->
+          <line x1="386" y1="332" x2="140" y2="332" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)" />
+          <rect x="188" y="316" width="160" height="12" rx="2" fill="#f5f5f5" />
+          <text x="268" y="325" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">200 TOP_UP (STATUS: PENDING, QR)</text>
+
+          <!-- Step 7: Member scans & pays mobile banking -->
+          <line x1="140" y1="384" x2="636" y2="384" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="6,4" marker-end="url(#arrow)" />
+          <rect x="306" y="368" width="168" height="12" rx="2" fill="#f5f5f5" />
+          <text x="390" y="377" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SCANS QR &amp; AUTHORIZES PAYMENT</text>
+
+          <!-- Editorial callout inside Phase 2 -->
+          <text x="390" y="416" fill="#7a8399" font-size="9" font-family="'Geist', sans-serif" font-style="italic" text-anchor="middle">
+            In test runtimes, /simulate bypasses banking rails and invokes reconciliation directly.
+          </text>
+
+          <!-- ==================== PHASE 3: WEBHOOK & LEDGER ==================== -->
+          <!-- Frame: Phase 3 -->
+          <rect x="64" y="460" width="872" height="248" rx="4" fill="rgba(45,49,66,0.015)" stroke="rgba(45,49,66,0.15)" stroke-width="1" />
+          <rect x="64" y="460" width="188" height="16" rx="2" fill="#f5f5f5" stroke="rgba(45,49,66,0.15)" stroke-width="1" />
+          <text x="158" y="472" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">PHASE 3 · WEBHOOK &amp; SETTLEMENT</text>
+
+          <!-- Step 8: Webhook notification from Xendit -->
+          <line x1="640" y1="512" x2="394" y2="512" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)" />
+          <rect x="444" y="496" width="144" height="12" rx="2" fill="#f5f5f5" />
+          <text x="516" y="505" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">WEBHOOK: payment.succeeded</text>
+
+          <!-- Step 9: Self verify amount and signature -->
+          <path d="M 394 536 L 436 536 A 8 8 0 0 1 444 544 L 444 552 A 8 8 0 0 1 436 560 L 394 560" fill="none" stroke="#4f5d75" stroke-width="1" />
+          <text x="456" y="552" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace">VERIFY HMAC &amp; EXACT AMOUNT</text>
+
+          <!-- Step 10: Balanced Double-Entry Ledger Post (Focal 1) -->
+          <line x1="394" y1="592" x2="876" y2="592" stroke="#eb6c36" stroke-width="1.5" marker-end="url(#arrow-accent)" />
+          <rect x="560" y="576" width="180" height="12" rx="2" fill="#f5f5f5" />
+          <text x="650" y="585" fill="#eb6c36" font-size="8" font-weight="600" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST TX: SUSPENSE &rarr; SPENDING</text>
+
+          <!-- Step 11: Ledger Ack -->
+          <line x1="876" y1="624" x2="394" y2="624" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)" />
+          <rect x="578" y="608" width="144" height="12" rx="2" fill="#f5f5f5" />
+          <text x="650" y="617" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">COMMITTED BALANCED ENTRY</text>
+
+          <!-- Step 12: Acknowledge Webhook -->
+          <line x1="394" y1="656" x2="640" y2="656" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)" />
+          <rect x="472" y="640" width="88" height="12" rx="2" fill="#f5f5f5" />
+          <text x="516" y="649" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">200 ACK (INBOX)</text>
+
+          <!-- Step 13: Top-up Status Updated to PAID (Focal 2) -->
+          <line x1="386" y1="684" x2="140" y2="684" stroke="#eb6c36" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow-accent)" />
+          <rect x="180" y="668" width="176" height="12" rx="2" fill="#f5f5f5" />
+          <text x="268" y="677" fill="#eb6c36" font-size="8" font-weight="600" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">WALLET CREDITED (STATUS: PAID)</text>
+
+          <!-- ==================== LEGEND STRIP ==================== -->
+          <line x1="64" y1="780" x2="936" y2="780" stroke="rgba(45,49,66,0.12)" stroke-width="0.8" />
+          <text x="64" y="804" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+
+          <!-- Legend Item 1: Synchronous API Call -->
+          <line x1="140" y1="801" x2="176" y2="801" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)" />
+          <text x="186" y="805" fill="#4f5d75" font-size="8" font-family="'Geist', sans-serif">Synchronous REST API</text>
+
+          <!-- Legend Item 2: Return / Response -->
+          <line x1="360" y1="801" x2="396" y2="801" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)" />
+          <text x="406" y="805" fill="#4f5d75" font-size="8" font-family="'Geist', sans-serif">Asynchronous / Response</text>
+
+          <!-- Legend Item 3: Focal Ledger Settlement -->
+          <line x1="600" y1="801" x2="636" y2="801" stroke="#eb6c36" stroke-width="1.5" marker-end="url(#arrow-accent)" />
+          <text x="646" y="805" fill="#eb6c36" font-size="8" font-weight="600" font-family="'Geist', sans-serif">Ledger Settlement (Focal)</text>
+        </svg>
+      </div>
+
+      <div class="cards-grid">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-dot link"></span>
+            <h3>1. Binding Provider Quote</h3>
+          </div>
+          <p>
+            The Member requests an integer-satang credit amount. The Server queries the active Money Policy
+            and issues a binding quote with a strict 300-second TTL. The quote locks the exact fee (0.8% PromptPay rate + 7% VAT)
+            and total payment requirement.
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-dot ink"></span>
+            <h3>2. PromptPay QR &amp; Webhook</h3>
+          </div>
+          <p>
+            Upon confirmation with an Idempotency-Key, KUQuest initiates a Payment Request via Xendit
+            and returns an EMVCo PromptPay QR payload and Data URL. Mobile banking payments trigger an authenticated
+            webhook stored durably in the inbox.
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-dot accent"></span>
+            <h3>3. Exact-Amount Clearing</h3>
+          </div>
+          <p>
+            The Server verifies the HMAC signature and requires that the received amount equals the quoted total satang.
+            It atomically writes a balanced double-entry ledger transaction crediting the Member's Spending account
+            from Platform Suspense.
+          </p>
+        </div>
+      </div>
+
+      <footer>
+        <span>KUQuest Core Architecture Series · ADR 0006 &amp; Finance Rulebook</span>
+        <span>Version 1.2 · 2026-09-15</span>
+      </footer>
+    </div>
+  </body>
+</html>

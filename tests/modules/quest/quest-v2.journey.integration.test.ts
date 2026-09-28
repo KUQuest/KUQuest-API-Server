@@ -405,7 +405,7 @@ describe('Quest API v2 Hirer journey', () => {
     expect(publishResponse.status).toBe(200);
     expect([200, 409]).toContain(editResponse.status);
     if (editResponse.status === 409) {
-      expect((await editResponse.json()).error.code).toBe('QUEST_NOT_DRAFT');
+      expect((await editResponse.json()).error.code).toBe('QUEST_EDIT_CONFLICT');
     } else {
       expect((await editResponse.json()).data).toMatchObject({
         version: 2,

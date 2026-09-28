@@ -1,4 +1,6 @@
 import { db } from '@/database/client';
+import { authSession } from '@/database/schema/auth.schema';
+import { chatConversation } from '@/database/schema/work-chat.schema';
 import {
   quest,
   questApiVersion,
@@ -10,7 +12,7 @@ import {
 } from '@/database/schema/quest.schema';
 import type { QuestTransaction } from '@/modules/quest/shared';
 
-import { and, eq, isNotNull, lte, ne, or } from 'drizzle-orm';
+import { and, eq, gt, isNotNull, lte, ne, or } from 'drizzle-orm';
 
 import {
   isReadableCandidateApplicationRoster,
@@ -76,15 +78,30 @@ export const getQuestUpdateAccess = async (
     .from(questAssignment)
     .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, memberId)))
     .limit(1);
-  if (!assignment) return undefined;
   if (
-    assignment.status === 'ASSIGNMENT_ACTIVE' &&
+    assignment?.status === 'ASSIGNMENT_ACTIVE' &&
     (current.state === 'QUEST_OPEN' ||
       current.state === 'QUEST_ASSIGNED' ||
       current.state === 'QUEST_IN_PROGRESS')
   ) {
     return { role: 'WORKER', mode: 'LIVE' };
   }
+  if (current.state === 'QUEST_OPEN') {
+    const [inquiry] = await db
+      .select({ id: chatConversation.id })
+      .from(chatConversation)
+      .where(
+        and(
+          eq(chatConversation.questId, questId),
+          eq(chatConversation.candidateWorkerId, memberId),
+          eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
+          eq(chatConversation.state, 'INQUIRY_OPEN')
+        )
+      )
+      .limit(1);
+    if (inquiry) return { role: 'PROSPECTIVE_WORKER', mode: 'LIVE' };
+  }
+  if (!assignment) return undefined;
 
   if (current.state !== 'QUEST_FAILED' || current.dueAt === null) return undefined;
   const [pendingProof] = await db
@@ -165,4 +182,19 @@ export const getCandidateRosterAccess = async (
     )
     .limit(1);
   return membership ? { kind: 'TEAM', teamId: membership.teamId } : undefined;
+};
+
+export const getQuestBoardUpdateAccess = async (memberId: string, sessionId: string) => {
+  const [session] = await db
+    .select({ id: authSession.id })
+    .from(authSession)
+    .where(
+      and(
+        eq(authSession.id, sessionId),
+        eq(authSession.userId, memberId),
+        gt(authSession.expiresAt, new Date())
+      )
+    )
+    .limit(1);
+  return session?.id;
 };

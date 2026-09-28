@@ -1,0 +1,27 @@
+meta {
+  name: List Work Conversations
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/chat/conversations
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && Array.isArray(data.data.items) && data.data.items.length > 0) {
+    bru.setEnvVar("conversationId", data.data.items[0].id);
+  }
+}
+
+docs {
+  Returns all active Work Conversations for the authenticated Member.
+  Automatically sets conversationId to the first conversation in the active environment on success.
+}

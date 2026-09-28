@@ -6,6 +6,7 @@ import { CursorInputError, decodeCursor, parsePageLimit } from '@/shared/cursor'
 import {
   ImageLinkUnavailableError,
   ImageTooLargeError,
+  ImageDimensionsTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
 } from '@/shared/object-storage';
@@ -142,6 +143,10 @@ const mapQuestV2ImageMutationOutcome = (
 };
 
 const mapQuestV2ImageStorageError = (set: AuthedContext['set'], error: unknown) => {
+  if (error instanceof ImageDimensionsTooLargeError) {
+    set.status = 422;
+    return apiError('IMAGE_DIMENSIONS_TOO_LARGE', 'Image dimensions must not exceed 25 megapixels');
+  }
   if (error instanceof ImageTooLargeError) {
     set.status = 413;
     return apiError('IMAGE_TOO_LARGE', error.message);
@@ -246,17 +251,38 @@ const mapEditOutcome = (
       'A Quest edit with this idempotency key is still processing'
     );
   }
+  if (outcome === 'open-field-locked') {
+    set.status = 409;
+    return apiError(
+      'QUEST_OPEN_FIELD_LOCKED',
+      'questFundingTotal and headcount cannot change after publish'
+    );
+  }
+  if (outcome === 'participation-started') {
+    set.status = 409;
+    return apiError(
+      'QUEST_OPEN_EDIT_CLOSED',
+      'A Quest cannot be edited after Candidate, Candidate Team, or Worker participation starts'
+    );
+  }
+  if (outcome === 'open-quest-invalid') {
+    return invalidInput(
+      set,
+      'INVALID_OPEN_QUEST',
+      'An open Quest must keep a future startTime, a dueAt after startTime, and a Tag'
+    );
+  }
   if (outcome === 'not-found') {
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
   if (outcome === 'not-draft') {
     set.status = 409;
-    return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be edited');
+    return apiError('QUEST_NOT_EDITABLE', 'Quest cannot be edited in its current State');
   }
   if (outcome === 'conflict') {
     set.status = 409;
-    return apiError('QUEST_EDIT_CONFLICT', 'The Draft was changed by another request');
+    return apiError('QUEST_EDIT_CONFLICT', 'Quest was changed by another request');
   }
   if (outcome === 'tag-not-found') return invalidInput(set, 'TAG_NOT_FOUND', 'Tag not found');
   if (outcome === 'invalid-dates') {
