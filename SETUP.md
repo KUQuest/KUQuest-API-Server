@@ -43,6 +43,12 @@ the deployment before expecting the operating system to open the app directly:
 - `IOS_APP_LINK_APP_IDS`: comma-separated Apple App IDs in
   `TEAM_ID.bundle.identifier` form for the signed app variants.
 
+The staging deployment reads both values from GitHub Environment `staging`
+variables with the same names. The current development client uses package
+`com.kuquest.mobile.debug` and this local debug-certificate SHA-256:
+`FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C`.
+This fingerprint only verifies builds signed with that exact debug key; it
+does not cover the staging or production release packages.
 Do not use sample, debug, or placeholder fingerprints for a distributed
 Staging or Production app. The API returns `503` for an association document
 until its complete, valid configuration is present. The invite page remains
