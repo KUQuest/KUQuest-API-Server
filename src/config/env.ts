@@ -1,3 +1,8 @@
+import {
+  parseAndroidAppLinkTargets,
+  parseAppleAppLinkIds,
+} from '@/modules/team-invite/team-invite.config';
+
 const parsePort = (value: string | undefined): number => {
   const port = Number(value ?? 5000);
 
@@ -29,6 +34,8 @@ export const env = {
   deploymentEnv: process.env.DEPLOYMENT_ENV ?? 'development',
   host: process.env.HOST ?? '0.0.0.0',
   port: parsePort(process.env.PORT),
+  androidAppLinkTargets: parseAndroidAppLinkTargets(process.env.ANDROID_APP_LINK_TARGETS),
+  iosAppLinkAppIds: parseAppleAppLinkIds(process.env.IOS_APP_LINK_APP_IDS),
 
   databaseUrl: process.env.DATABASE_URL,
   betterAuthUrl: process.env.BETTER_AUTH_URL,

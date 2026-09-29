@@ -29,6 +29,25 @@ Key environment variables in `.env`:
 - `GOOGLE_CLIENT_ID` & `GOOGLE_CLIENT_SECRET`: OAuth 2.0 Web Application credentials for `@ku.th` student sign-in
 - `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`: Object storage configuration (points to local RustFS container)
 
+### HTTPS Candidate Team invites
+
+The API serves the browser fallback at `/invite/team` and the Android/iOS
+association files at `/.well-known/assetlinks.json` and
+`/.well-known/apple-app-site-association`. Set both association variables on
+the deployment before expecting the operating system to open the app directly:
+
+- `ANDROID_APP_LINK_TARGETS`: JSON array of `{ "packageName": string,
+"sha256CertFingerprints": string[] }` entries. Include every app package
+  that should claim this host and each actual signing-certificate SHA-256
+  fingerprint used to distribute it.
+- `IOS_APP_LINK_APP_IDS`: comma-separated Apple App IDs in
+  `TEAM_ID.bundle.identifier` form for the signed app variants.
+
+Do not use sample, debug, or placeholder fingerprints for a distributed
+Staging or Production app. The API returns `503` for an association document
+until its complete, valid configuration is present. The invite page remains
+available and lets a recipient copy the temporary Join Code.
+
 Generate 32-character secrets with:
 
 ```bash
