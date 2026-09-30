@@ -1873,6 +1873,42 @@ Errors:
 - 503 WORK_CHAT_UNAVAILABLE
 - idempotency errors
 
+### 9.13 Read a submitted Candidate Team file link
+
+Request:
+
+```http
+GET /api/v2/quests/:questId/teams/:teamId/files/:fileId
+```
+
+Only the owning Hirer or a Member who can read the Candidate Team may request a
+link. The Team must be submitted, the file ID must appear in its submission,
+and the file must not be deleted. Missing, unassociated, deleted, or
+inaccessible files return the same `404 TEAM_FILE_NOT_FOUND` response.
+
+Success status: HTTP 200. The response uses `Cache-Control: no-store`; the
+signed URL is temporary and its expiry is returned explicitly.
+
+```json
+{
+  "success": true,
+  "data": {
+    "fileId": "private-file-uuid",
+    "contentType": "image/png",
+    "sizeBytes": 120000,
+    "position": 0,
+    "url": "https://storage.example.test/private-file?signature=...",
+    "urlExpiresAt": "2026-09-08T10:15:00.000+07:00"
+  }
+}
+```
+
+Errors:
+
+- 401 unauthorized
+- 404 `TEAM_FILE_NOT_FOUND`
+- 503 `TEAM_FILE_LINK_UNAVAILABLE`
+
 ## 10. Start Work and Work Chat
 
 ### 10.1 Start Work

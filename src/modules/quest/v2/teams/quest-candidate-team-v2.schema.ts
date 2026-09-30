@@ -44,6 +44,11 @@ export const questV2CandidateTeamDetailParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
   teamId: t.String({ format: 'uuid' }),
 });
+export const questV2CandidateTeamFileParamsSchema = t.Object({
+  questId: t.String({ format: 'uuid' }),
+  teamId: t.String({ format: 'uuid' }),
+  fileId: t.String({ format: 'uuid' }),
+});
 
 export const questV2CandidateTeamMemberParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
@@ -103,6 +108,19 @@ const uploadedFileSchema = t.Object({
   sizeBytes: t.Integer({ minimum: 1 }),
   createdAt: t.String({ format: 'date-time' }),
 });
+const candidateTeamFileAccessSchema = t.Object({
+  fileId: t.String({ format: 'uuid' }),
+  contentType: t.String(),
+  sizeBytes: t.Integer({ minimum: 1, maximum: 10 * 1024 * 1024 }),
+  position: t.Integer({ minimum: 0 }),
+  url: t.String({ format: 'uri' }),
+  urlExpiresAt: t.String({ format: 'date-time' }),
+});
+
+export const questV2CandidateTeamFileResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: candidateTeamFileAccessSchema,
+});
 
 export const questV2CandidateTeamFileUploadResponseSchema = t.Object({
   success: t.Literal(true),
@@ -126,6 +144,7 @@ export type QuestV2CandidateTeamDetailParams = Static<
 export type QuestV2CandidateTeamMemberParams = Static<
   typeof questV2CandidateTeamMemberParamsSchema
 >;
+export type QuestV2CandidateTeamFileParams = Static<typeof questV2CandidateTeamFileParamsSchema>;
 
 export type QuestV2CandidateTeamCreateInput = Static<typeof questV2CandidateTeamCreateSchema>;
 export type QuestV2CandidateTeamUpdateInput = Static<typeof questV2CandidateTeamUpdateSchema>;
