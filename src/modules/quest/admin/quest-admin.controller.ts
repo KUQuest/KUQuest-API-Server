@@ -126,6 +126,8 @@ export const listAdminQuestsController = async ({
     return apiSuccess({
       items: result.items.map(serializeAdminQuestSummary),
       nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null,
+      totalCount: result.totalCount,
+      countsByStatus: result.countsByStatus,
     });
   } catch (error) {
     if (error instanceof CursorInputError) {

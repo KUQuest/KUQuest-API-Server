@@ -17,8 +17,12 @@ type DisplayIdType = keyof typeof displayIdPrefixes;
 const formatDisplayId = (type: DisplayIdType, publicSequence: number): string =>
   `${displayIdPrefixes[type]}-${publicSequence.toString().padStart(displayIdWidth, '0')}`;
 
-export const formatDisplayIdSql = (type: DisplayIdType, publicSequence: SQLWrapper) =>
-  sql<string>`concat(cast(${displayIdPrefixes[type]} as text), '-', lpad(cast(${publicSequence} as text), ${displayIdWidth}, '0'))`;
+export const formatDisplayIdSql = (type: DisplayIdType, publicSequence: SQLWrapper) => {
+  const sequenceText = sql<string>`cast(${publicSequence} as text)`;
+  const paddedSequence = sql<string>`lpad(${sequenceText}, greatest(${displayIdWidth}, length(${sequenceText})), '0')`;
+
+  return sql<string>`concat(cast(${displayIdPrefixes[type]} as text), '-', ${paddedSequence})`;
+};
 
 export const formatQuestDisplayId = (publicSequence: number): string =>
   formatDisplayId('quest', publicSequence);

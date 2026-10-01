@@ -111,6 +111,20 @@ export const adminQuestListResponseSchema = t.Object({
   data: t.Object({
     items: t.Array(adminQuestSummarySchema),
     nextCursor: t.Nullable(t.String()),
+    totalCount: t.Integer({ minimum: 0 }),
+    countsByStatus: t.Object({
+      QUEST_DRAFT: t.Integer({ minimum: 0 }),
+      QUEST_OPEN: t.Integer({ minimum: 0 }),
+      QUEST_AWAITING_CONSENT: t.Integer({ minimum: 0 }),
+      QUEST_ASSIGNED: t.Integer({ minimum: 0 }),
+      QUEST_IN_PROGRESS: t.Integer({ minimum: 0 }),
+      QUEST_SUBMITTED: t.Integer({ minimum: 0 }),
+      QUEST_APPROVED: t.Integer({ minimum: 0 }),
+      QUEST_REWORK: t.Integer({ minimum: 0 }),
+      QUEST_COMPLETED: t.Integer({ minimum: 0 }),
+      QUEST_CANCELLED: t.Integer({ minimum: 0 }),
+      QUEST_FAILED: t.Integer({ minimum: 0 }),
+    }),
   }),
 });
 

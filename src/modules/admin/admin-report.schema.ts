@@ -83,6 +83,7 @@ export const adminReportEvidenceQuerySchema = t.Object({
 });
 
 export const adminReportListQuerySchema = t.Object({
+  q: t.Optional(t.String({ maxLength: 200 })),
   kind: t.Optional(reportKindSchema),
   status: t.Optional(t.Union([reportCaseStatusSchema, conductReportStatusSchema])),
   memberId: t.Optional(uuid),
@@ -337,6 +338,16 @@ export const adminReportListResponseSchema = t.Object({
   data: t.Object({
     items: t.Array(adminReportListItemSchema),
     nextCursor: t.Nullable(t.String()),
+    totalCount: t.Integer({ minimum: 0 }),
+    countsByStatus: t.Object({
+      REPORT_CASE_PENDING: t.Integer({ minimum: 0 }),
+      REPORT_CASE_DISMISSED: t.Integer({ minimum: 0 }),
+      REPORT_CASE_HIDDEN: t.Integer({ minimum: 0 }),
+      REPORT_CASE_RESTORED: t.Integer({ minimum: 0 }),
+      CONDUCT_REPORT_PENDING: t.Integer({ minimum: 0 }),
+      CONDUCT_REPORT_UPHELD: t.Integer({ minimum: 0 }),
+      CONDUCT_REPORT_DISMISSED: t.Integer({ minimum: 0 }),
+    }),
   }),
 });
 

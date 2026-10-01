@@ -55,6 +55,7 @@ const workerIds = [randomUUID(), randomUUID(), randomUUID()];
 const studentIdFor = (userId: string): string => `KU-${userId.slice(0, 8)}`;
 const tagId = randomUUID();
 const questIds: string[] = [];
+const fixtureHirerIds: string[] = [];
 const questImageFileId = randomUUID();
 const questImageId = randomUUID();
 const disputeQuestId = randomUUID();
@@ -415,8 +416,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (questIds.length === 0) return;
-  await db.delete(quest).where(inArray(quest.id, questIds));
+  if (questIds.length > 0) await db.delete(quest).where(inArray(quest.id, questIds));
+  if (fixtureHirerIds.length > 0)
+    await db.delete(authUser).where(inArray(authUser.id, fixtureHirerIds));
 });
 
 describe('Admin Quest API routes', () => {
@@ -638,7 +640,7 @@ describe('Admin Quest API routes', () => {
     expect(staleBody.error?.code).toBe('INVALID_CURSOR');
   });
 
-  it('searches Quest title and description within the Admin filter scope', async () => {
+  it('searches only list response fields within the Admin filter scope', async () => {
     type ListResponse = {
       data: { items: Array<Record<string, unknown>>; nextCursor: string | null };
     };
@@ -654,7 +656,7 @@ describe('Admin Quest API routes', () => {
     );
     const byDescriptionBody = (await byDescription.json()) as ListResponse;
     expect(byDescription.status).toBe(200);
-    expect(byDescriptionBody.data.items.map((item) => item.id)).toContain(detailQuestId);
+    expect(byDescriptionBody.data.items.map((item) => item.id)).not.toContain(detailQuestId);
 
     const withFilter = await adminRequest(
       '/api/v1/admin/quests?q=list%20quest&hidden=false&limit=50'
@@ -668,6 +670,114 @@ describe('Admin Quest API routes', () => {
     const wildcardBody = (await wildcard.json()) as ListResponse;
     expect(wildcard.status).toBe(200);
     expect(wildcardBody.data.items.map((item) => item.id)).not.toContain(openQuestId);
+  });
+
+  it('returns counts across pages and searches exposed Quest list fields', async () => {
+    type ListResponse = {
+      success: boolean;
+      data: {
+        items: Array<{ id: string }>;
+        nextCursor: string | null;
+        totalCount: number;
+        countsByStatus: Record<string, number>;
+      };
+    };
+
+    const searchTerm = `count-hirer-${randomUUID()}`;
+    const countHirerId = randomUUID();
+    const countQuestIds = [randomUUID(), randomUUID()];
+    fixtureHirerIds.push(countHirerId);
+    questIds.push(...countQuestIds);
+    await db.insert(authUser).values({
+      id: countHirerId,
+      email: `${searchTerm}@ku.th`,
+      firstName: searchTerm,
+      lastName: 'Count Hirer',
+    });
+    await db.insert(quest).values([
+      {
+        id: countQuestIds[0]!,
+        publicSequence: 1_234_567,
+        hirerId: countHirerId,
+        title: 'Count queue Open Quest',
+        description: 'Not present in the list response.',
+        condition: 'Complete the work',
+        mode: 'NO_CANDIDATE',
+        participation: 'SOLO',
+        questStatus: 'QUEST_OPEN',
+        rewardSatang: 1_000,
+        tagId,
+        startTime: new Date('2030-10-01T00:00:00.000Z'),
+      },
+      {
+        id: countQuestIds[1]!,
+        hirerId: countHirerId,
+        title: 'Count queue Assigned Quest',
+        description: 'Also not present in the list response.',
+        condition: 'Complete the work',
+        mode: 'NO_CANDIDATE',
+        participation: 'SOLO',
+        questStatus: 'QUEST_ASSIGNED',
+        rewardSatang: 1_000,
+        tagId,
+        startTime: new Date('2030-10-02T00:00:00.000Z'),
+      },
+    ]);
+
+    const list = (cursor?: string | null, status?: string) => {
+      const params = new URLSearchParams({
+        q: searchTerm,
+        hidden: 'false',
+        limit: '1',
+      });
+      if (cursor) params.set('cursor', cursor);
+      if (status) params.set('status', status);
+      return adminRequest(`/api/v1/admin/quests?${params.toString()}`);
+    };
+
+    const first = await list();
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as ListResponse;
+    expect(firstBody.data).toMatchObject({
+      totalCount: 2,
+      countsByStatus: {
+        QUEST_OPEN: 1,
+        QUEST_ASSIGNED: 1,
+        QUEST_CANCELLED: 0,
+      },
+    });
+    expect(firstBody.data.items).toHaveLength(1);
+    expect(firstBody.data.nextCursor).toBeString();
+
+    const second = await list(firstBody.data.nextCursor);
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as ListResponse;
+    expect(secondBody.data).toMatchObject({
+      totalCount: 2,
+      countsByStatus: firstBody.data.countsByStatus,
+    });
+    expect(secondBody.data.items).toHaveLength(1);
+    expect(secondBody.data.nextCursor).toBeNull();
+    expect(
+      new Set([...firstBody.data.items, ...secondBody.data.items].map((item) => item.id))
+    ).toEqual(new Set(countQuestIds));
+
+    const openOnly = await list(undefined, 'QUEST_OPEN');
+    const openBody = (await openOnly.json()) as ListResponse;
+    expect(openOnly.status).toBe(200);
+    expect(openBody.data).toMatchObject({
+      totalCount: 1,
+      countsByStatus: firstBody.data.countsByStatus,
+    });
+    expect(openBody.data.items.map((item) => item.id)).toEqual([countQuestIds[0]]);
+    const byDisplayId = await adminRequest('/api/v1/admin/quests?q=QST-1234567&limit=10');
+    expect(byDisplayId.status).toBe(200);
+    const displayIdBody = (await byDisplayId.json()) as ListResponse;
+    expect(displayIdBody.data).toMatchObject({
+      totalCount: 1,
+      countsByStatus: { QUEST_OPEN: 1 },
+      items: [{ id: countQuestIds[0] }],
+    });
   });
 
   it('reads full Quest detail facets for Admin review', async () => {

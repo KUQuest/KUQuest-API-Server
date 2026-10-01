@@ -93,6 +93,7 @@ export const listAdminDisputesController = async ({
 > => {
   try {
     const result = await listAdminDisputeCases({
+      q: query.q,
       status: query.status,
       limit: parsePageLimit(query.limit),
       cursor: decodeCursor(query.cursor),
@@ -101,6 +102,8 @@ export const listAdminDisputesController = async ({
     return apiSuccess({
       items: result.items,
       nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null,
+      totalCount: result.totalCount,
+      countsByStatus: result.countsByStatus,
     });
   } catch (error) {
     return mapAdminDisputeError(set, error) as ApiResponse<AdminDisputeListResponse>;

@@ -29,6 +29,7 @@ export const adminDisputeOpenBodySchema = t.Object(
 );
 
 export const adminDisputeListQuerySchema = t.Object({
+  q: t.Optional(t.String({ maxLength: 200 })),
   status: t.Optional(disputeCaseStatusSchema),
   limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
@@ -84,6 +85,12 @@ export const adminDisputeListResponseSchema = t.Object({
   data: t.Object({
     items: t.Array(adminDisputeSummarySchema),
     nextCursor: t.Nullable(t.String()),
+    totalCount: t.Integer({ minimum: 0 }),
+    countsByStatus: t.Object({
+      DISPUTE_CASE_PENDING: t.Integer({ minimum: 0 }),
+      DISPUTE_CASE_DISMISSED: t.Integer({ minimum: 0 }),
+      DISPUTE_CASE_RESOLVED: t.Integer({ minimum: 0 }),
+    }),
   }),
 });
 
