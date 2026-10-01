@@ -166,8 +166,11 @@ operations:
       HIRER_QUEST_UPDATED after a committed change to any owned v2 Quest.
       Reload GET /api/v2/quests/mine from the first cursor page after
       SUBSCRIBED, each event, and every reconnect. The stream contains no
-      Quest data and does not replay missed events. A client message closes
-      the connection with code 1008.
+      Quest data and does not replay missed events. The only extra field is
+      expiresAt on UNDERFILLED_DECISION_PENDING, which the Server sends once
+      when the Hirer decision window opens. The Hirer then opens Quest Detail
+      and reads GET /api/v2/quests/{questId}/underfilled. A client message
+      closes the connection with code 1008.
     messages:
       - $ref: '#/channels/hirerQuestUpdates/messages/subscribed'
       - $ref: '#/channels/hirerQuestUpdates/messages/hirerQuestUpdated'
