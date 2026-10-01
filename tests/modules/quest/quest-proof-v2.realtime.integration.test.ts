@@ -735,6 +735,14 @@ describe('Quest Proof v2 realtime source updates', () => {
           changeType: 'QUEST_FAILED',
         });
       }
+      for (const socket of [hirerSocket, workerSocket]) {
+        expect(JSON.parse((await socket.nextText())!)).toEqual({
+          type: 'QUEST_UPDATED',
+          version: 1,
+          questId,
+          changeType: 'DISPUTE_WINDOW_OPENED',
+        });
+      }
       const review = await fetch(
         `${origin}/api/v2/quests/${questId}/proof-submissions/${draft.data.id}/review`,
         {
@@ -995,6 +1003,7 @@ describe('Quest Proof v2 realtime source updates', () => {
           changeType: 'QUEST_FAILED',
         });
       }
+      expect(JSON.parse((await sockets[0]!.nextText())!).changeType).toBe('DISPUTE_WINDOW_OPENED');
       expect((await sockets[1]?.nextFrame())?.opcode).toBe(8);
       expect(result.failedQuestIds).toContain(questId);
       const read = await fetch(`http://127.0.0.1:${port}/api/v2/quests/${questId}`, {

@@ -64,6 +64,9 @@ const allowedAttachmentContentTypes = new Set([
 ]);
 const proofStatuses = ['PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED'] as const;
 
+/** Pending Proof Submissions auto-approve this long after submission (rulebook). */
+const proofAutoApprovalWindowMs = 24 * 60 * 60 * 1000;
+
 export type QuestV2ProofStatus = (typeof proofStatuses)[number];
 
 export type QuestV2ProofSubmission = {
@@ -76,6 +79,12 @@ export type QuestV2ProofSubmission = {
   workerMessage: string | null;
   status: QuestV2ProofStatus | null;
   submittedAt: Date | null;
+  /** Exact instant the auto-approval job acts; non-null only while PROOF_PENDING. */
+  reviewDeadlineAt: Date | null;
+  /** Hirer's reason; visible only with FULL visibility. */
+  reviewReason: string | null;
+  reviewedAt: Date | null;
+  reviewedBy: 'HIRER' | 'AUTO_APPROVE' | null;
   createdAt: Date;
   updatedAt: Date;
   visibility: 'FULL' | 'SUMMARY';
@@ -203,6 +212,9 @@ type SubmissionRow = {
   workerMessage: string | null;
   submissionStatus: string | null;
   sentAt: Date | null;
+  reviewReason: string | null;
+  reviewedAt: Date | null;
+  reviewedBy: 'HIRER' | 'AUTO_APPROVE' | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -217,6 +229,9 @@ const submissionFields = {
   workerMessage: questV2ProofSubmission.workerMessage,
   submissionStatus: questV2ProofSubmission.submissionStatus,
   sentAt: questV2ProofSubmission.sentAt,
+  reviewReason: questV2ProofSubmission.reviewReason,
+  reviewedAt: questV2ProofSubmission.reviewedAt,
+  reviewedBy: questV2ProofSubmission.reviewedBy,
   createdAt: questV2ProofSubmission.createdAt,
   updatedAt: questV2ProofSubmission.updatedAt,
 };
@@ -561,7 +576,8 @@ const emitQuestUpdate = (
     | 'PROOF_AUTO_APPROVED'
     | 'COMPLETION_CONFIRMED'
     | 'QUEST_COMPLETED'
-    | 'QUEST_FAILED',
+    | 'QUEST_FAILED'
+    | 'DISPUTE_WINDOW_OPENED',
   recipientMemberIds: string[],
   closeMemberIds?: string[]
 ) =>
@@ -742,6 +758,11 @@ const attachmentRowsFor = async (database: typeof db | QuestTransaction, submiss
     .where(eq(questV2ProofSubmissionFile.proofSubmissionId, submissionId))
     .orderBy(asc(questV2ProofSubmissionFile.position));
 
+const reviewDeadlineFor = (status: string | null, sentAt: Date | null): Date | null =>
+  status === 'PROOF_PENDING' && sentAt
+    ? new Date(sentAt.getTime() + proofAutoApprovalWindowMs)
+    : null;
+
 const toSubmission = async (
   database: typeof db | QuestTransaction,
   row: SubmissionRow,
@@ -764,6 +785,10 @@ const toSubmission = async (
         ? (row.submissionStatus as QuestV2ProofStatus | null)
         : (row.submissionStatus as QuestV2ProofStatus),
     submittedAt: row.sentAt,
+    reviewDeadlineAt: reviewDeadlineFor(row.submissionStatus, row.sentAt),
+    reviewReason: visibility === 'FULL' ? row.reviewReason : null,
+    reviewedAt: row.reviewedAt,
+    reviewedBy: row.reviewedBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     visibility,
@@ -779,6 +804,8 @@ const toSubmission = async (
 const snapshotFor = (submission: QuestV2ProofSubmission) => ({
   ...submission,
   submittedAt: submission.submittedAt?.toISOString() ?? null,
+  reviewDeadlineAt: submission.reviewDeadlineAt?.toISOString() ?? null,
+  reviewedAt: submission.reviewedAt?.toISOString() ?? null,
   createdAt: submission.createdAt.toISOString(),
   updatedAt: submission.updatedAt.toISOString(),
 });
@@ -833,6 +860,13 @@ const submissionFromSnapshot = (value: unknown): QuestV2ProofSubmission | undefi
       snapshot.workerMessage === undefined ? null : (snapshot.workerMessage as string | null),
     status: snapshot.status as QuestV2ProofStatus | null,
     submittedAt,
+    reviewDeadlineAt: reviewDeadlineFor(snapshot.status as QuestV2ProofStatus | null, submittedAt),
+    reviewReason: typeof snapshot.reviewReason === 'string' ? snapshot.reviewReason : null,
+    reviewedAt: dateFromSnapshot(snapshot.reviewedAt) ?? null,
+    reviewedBy:
+      snapshot.reviewedBy === 'HIRER' || snapshot.reviewedBy === 'AUTO_APPROVE'
+        ? snapshot.reviewedBy
+        : null,
     createdAt,
     updatedAt,
     visibility: 'FULL',
@@ -2114,6 +2148,9 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
         .update(questV2ProofSubmission)
         .set({
           submissionStatus: input.decision,
+          reviewReason: normalizedReason.reason,
+          reviewedAt: input.now,
+          reviewedBy: input.actor.actorType === 'MEMBER' ? 'HIRER' : 'AUTO_APPROVE',
           updatedAt: input.now,
         })
         .where(
@@ -2264,6 +2301,10 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           [current.hirerId, ...activeWorkerIds],
           closeMemberIds
         );
+        await emitQuestUpdate(transaction, input.questId, 'DISPUTE_WINDOW_OPENED', [
+          current.hirerId,
+          ...activeWorkerIds,
+        ]);
       } else if (current.questState !== 'QUEST_COMPLETED' && questStatus === 'QUEST_COMPLETED') {
         await emitQuestUpdate(
           transaction,
@@ -2492,6 +2533,10 @@ export const failQuestV2AtDueAt = async (questId: string, now = new Date()): Pro
       [current.hirerId, ...workerIds],
       workerIds.filter((workerId) => !pendingProofWorkerIds.includes(workerId))
     );
+    await emitQuestUpdate(transaction, questId, 'DISPUTE_WINDOW_OPENED', [
+      current.hirerId,
+      ...workerIds,
+    ]);
     return true;
   });
 
@@ -2521,7 +2566,7 @@ export const autoApproveDueQuestV2Proofs = async (
   limit = 100
 ): Promise<string[]> => {
   if (!Number.isInteger(limit) || limit < 1) throw new Error('limit must be a positive integer');
-  const sentBefore = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const sentBefore = new Date(now.getTime() - proofAutoApprovalWindowMs);
   const due = await db
     .select({
       proofSubmissionId: questV2ProofSubmission.id,

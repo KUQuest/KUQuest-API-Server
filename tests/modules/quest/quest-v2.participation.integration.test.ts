@@ -259,6 +259,23 @@ describe('Quest v2 Participation Detail', () => {
 
     const body = (await (await getParticipation(startedQuest)).json()) as ParticipationBody;
     expect(body.data.assignment.startedAt).toBe('2030-08-26T03:30:00.000Z');
+    expect(body.data).toMatchObject({ activeWorkerCount: 1, startedWorkerCount: 1 });
+  });
+
+  it('counts started Active Workers without naming them', async () => {
+    const groupQuest = await createPublishedQuest();
+    await assign(groupQuest);
+    await db.insert(questAssignment).values({
+      questId: groupQuest,
+      workerId: ownerId,
+      assignmentStatus: assignmentStatus.active,
+      startedAt: new Date('2030-08-26T03:30:00.000Z'),
+    });
+    await setQuestState(groupQuest, questStatus.inProgress);
+
+    const body = (await (await getParticipation(groupQuest)).json()) as ParticipationBody;
+    expect(body.data).toMatchObject({ activeWorkerCount: 2, startedWorkerCount: 1 });
+    expect(body.data.assignment.startedAt).toBeNull();
   });
 
   it('refuses every caller without an Assignment on the Quest', async () => {
@@ -339,6 +356,7 @@ describe('Quest v2 Participation Detail', () => {
       'capabilities',
       'condition',
       'description',
+      'dispute',
       'dueAt',
       'hasJoined',
       'headcount',
@@ -349,10 +367,12 @@ describe('Quest v2 Participation Detail', () => {
       'images',
       'locations',
       'mode',
+      'moneyHold',
       'participation',
       'proofRequired',
       'questReward',
       'startTime',
+      'startedWorkerCount',
       'state',
       'tag',
       'title',

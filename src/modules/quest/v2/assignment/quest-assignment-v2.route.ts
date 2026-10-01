@@ -57,7 +57,7 @@ export const questAssignmentV2Route = new Elysia({
       tags: ['Quest Assignments v2'],
       summary: 'List permitted v2 Quest Assignments',
       description:
-        "The owning Hirer can read all Assignments, including completed, incomplete, and cancelled Assignments, for Reviews. A Worker can read only that Worker's active Assignment.",
+        'The owning Hirer can read all Assignments, including completed, incomplete, and cancelled Assignments, for Reviews. A Worker can read only that Worker\'s own active Assignment. On a GROUP Quest a Worker does NOT receive the other Workers\' Assignments (privacy); to show roster progress, read `activeWorkerCount` and `startedWorkerCount` from GET /quests/{questId}/participation. Every row carries `member.displayName` (the Member Summary; "Former member" when the Member has no name). `startedAt` is returned to the Worker on their own row and is null until Start Work.',
       operationId: 'listQuestAssignmentsV2',
       security: betterAuthSecurity,
     },

@@ -17,6 +17,9 @@ const questUpdateOtherChangeTypeSchema = t.Union([
   t.Literal('COMPLETION_CONFIRMED'),
   t.Literal('QUEST_COMPLETED'),
   t.Literal('QUEST_FAILED'),
+  t.Literal('DISPUTE_WINDOW_OPENED'),
+  t.Literal('DISPUTE_WINDOW_CLOSED'),
+  t.Literal('DISPUTE_CASE_UPDATED'),
   t.Literal('QUEST_CANCELLED'),
   t.Literal('QUEST_OPEN_EDIT_UPDATED'),
 ]);

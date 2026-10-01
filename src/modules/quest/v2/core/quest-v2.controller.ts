@@ -44,6 +44,10 @@ import {
 } from '../../shared/command/quest-command.controller';
 import { loadMemberSummaries } from '../../shared/member-summary';
 import type { QuestV2ImageCommandContext, QuestV2ImageReference } from './quest-v2.service';
+import {
+  readQuestDisputeSummary,
+  readQuestMoneyHold,
+} from '../../admin/quest-dispute-admin.service';
 import type { QuestV2PublishCheck } from './quest-v2.publish.policy';
 import type {
   questV2CreateResponseSchema,
@@ -552,6 +556,23 @@ export const listQuestBoardV2Controller = async ({
   return apiSuccess(await listQuestBoardV2(session.user.id, query));
 };
 
+const serializeMoneyHold = async (viewerId: string, questId: string) => {
+  const hold = await readQuestMoneyHold(viewerId, questId);
+  return hold ? { ...hold, releasesAt: hold.releasesAt.toISOString() } : null;
+};
+
+const serializeDispute = async (viewerId: string, questId: string) => {
+  const dispute = await readQuestDisputeSummary(viewerId, questId);
+  if (!dispute) return null;
+  return {
+    canFile: dispute.canFile,
+    windowEndsAt: dispute.windowEndsAt?.toISOString() ?? null,
+    myCase: dispute.myCase
+      ? { ...dispute.myCase, createdAt: dispute.myCase.createdAt.toISOString() }
+      : null,
+  };
+};
+
 export const getQuestV2DetailController = async ({
   params,
   session,
@@ -567,7 +588,12 @@ export const getQuestV2DetailController = async ({
 
   const images = serializeQuestV2Images(set, questDetail.images);
   if ('success' in images) return images;
-  return apiSuccess({ ...questDetail, images });
+  return apiSuccess({
+    ...questDetail,
+    images,
+    dispute: await serializeDispute(session.user.id, params.questId),
+    moneyHold: await serializeMoneyHold(session.user.id, params.questId),
+  });
 };
 
 export const getPublicQuestV2DetailController = async ({
@@ -619,7 +645,12 @@ export const getQuestV2ParticipationDetailController = async ({
     return apiError('QUEST_IMAGE_STORAGE_UNAVAILABLE', 'Quest Image storage is unavailable');
   }
 
-  return apiSuccess({ ...questDetail, images });
+  return apiSuccess({
+    ...questDetail,
+    images,
+    dispute: await serializeDispute(session.user.id, params.questId),
+    moneyHold: await serializeMoneyHold(session.user.id, params.questId),
+  });
 };
 
 export const getQuestV2PublishCheckController = async ({

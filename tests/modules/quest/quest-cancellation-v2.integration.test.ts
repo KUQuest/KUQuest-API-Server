@@ -68,7 +68,13 @@ const authenticate = () =>
     return { user: { id: userId }, session: { userId } } as never;
   }) as never);
 
-const request = (questId: string, memberId: string, key?: string, body?: unknown) =>
+const request = (
+  questId: string,
+  memberId: string,
+  key?: string,
+  body?: unknown,
+  extraHeaders: Record<string, string> = {}
+) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/${questId}/cancel`, {
       method: 'POST',
@@ -76,8 +82,16 @@ const request = (questId: string, memberId: string, key?: string, body?: unknown
         'x-member-id': memberId,
         ...(key === undefined ? {} : { 'idempotency-key': key }),
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...extraHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  );
+
+const previewRequest = (questId: string, memberId: string) =>
+  app.handle(
+    new Request(`http://localhost/api/v2/quests/${questId}/cancel-preview`, {
+      headers: { 'x-member-id': memberId },
     })
   );
 
@@ -423,6 +437,74 @@ describe('Quest API v2 Hirer cancellation', () => {
       );
     }
   );
+
+  it.each([
+    ['QUEST_DRAFT', [], 'NO_PENALTY', 0, 0, 0],
+    ['QUEST_OPEN', [], 'NO_PENALTY', 0, 1_020, 0],
+    ['QUEST_ASSIGNED', [workerIds[0]], 'PARTIAL_PENALTY', 200, 820, 0],
+    ['QUEST_IN_PROGRESS', [workerIds[1]], 'FULL_PENALTY', 1_000, 0, 20],
+  ] as const)(
+    'previews %s cancellation without side effects and matches the real cancel',
+    async (status, workers, tier, paid, refunded, fee) => {
+      if (!postgresAvailable) return;
+      const questId = await createV2Quest({ status, workers: [...workers] });
+
+      const preview = await previewRequest(questId, hirerId);
+      expect(preview.status).toBe(200);
+      const previewData = (await preview.json()).data;
+      const { previewVersion } = previewData;
+      expect(previewData).toMatchObject({
+        questStatus: status,
+        tier,
+        paidSatang: paid,
+        refundedSatang: refunded,
+        platformFeeSatang: fee,
+        affectedWorkerCount: workers.length,
+        computedAt: expect.any(String),
+        previewVersion: expect.any(String),
+      });
+      expect(
+        (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+          ?.status
+      ).toBe(status);
+      if (status !== 'QUEST_DRAFT') {
+        expect((await readTestQuestEscrow({ ownerUserId: hirerId, questId }))?.status).toBe(
+          'ACTIVE'
+        );
+      }
+
+      const cancelled = await request(questId, hirerId, `cancel-v2-preview-${questId}`, undefined, {
+        'x-cancel-preview-version': previewVersion,
+      });
+      expect(cancelled.status).toBe(200);
+      expect((await cancelled.json()).data).toMatchObject({
+        paidSatang: paid,
+        refundedSatang: refunded,
+      });
+    }
+  );
+
+  it('refuses a stale preview version without moving money and masks other Members', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV2Quest({ status: 'QUEST_ASSIGNED', workers: [workerIds[2]] });
+    const previewData = (await (await previewRequest(questId, hirerId)).json()).data;
+    await db.update(quest).set({ questStatus: 'QUEST_IN_PROGRESS' }).where(eq(quest.id, questId));
+
+    const stale = await request(questId, hirerId, `cancel-v2-stale-${questId}`, undefined, {
+      'x-cancel-preview-version': previewData.previewVersion,
+    });
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).error.code).toBe('CANCEL_PREVIEW_STALE');
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_IN_PROGRESS');
+    expect((await readTestQuestEscrow({ ownerUserId: hirerId, questId }))?.status).toBe('ACTIVE');
+
+    const other = await previewRequest(questId, otherMemberId);
+    expect(other.status).toBe(403);
+    expect((await previewRequest(randomUUID(), hirerId)).status).toBe(404);
+  });
 
   it('uses the active Worker allocation for GROUP + FCFS and pays only the Team Leader for GROUP + CANDIDATE', async () => {
     if (!postgresAvailable) return;
