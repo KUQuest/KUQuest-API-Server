@@ -77,6 +77,7 @@ const createPendingPayout = async () => {
     email: `${studentId}@ku.th`,
     firstName: 'Route',
     lastName: 'Student',
+    studentId: String(1_000_000_000 + Math.floor(Math.random() * 9_000_000_000)),
   });
   await ensureWallet(studentId);
   await savePayoutDestination(
@@ -257,6 +258,32 @@ describe('Payout API routes', () => {
       new Set([firstPage.data.items[0]?.id, secondPage.data.items[0]?.id])
     );
 
+    const memberPageResponse = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts?userId=${firstPayout.principalUserId}`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    const memberPage = (await memberPageResponse.json()) as {
+      success: boolean;
+      data: {
+        items: Array<{
+          id: string;
+          displayId: string;
+          student: { id: string; studentId: string | null };
+        }>;
+      };
+    };
+    expect(memberPageResponse.status).toBe(200);
+    expect(memberPage.success).toBe(true);
+    expect(memberPage.data.items.map((item) => item.id)).toEqual([firstPayout.id]);
+    expect(memberPage.data.items[0]?.displayId).toMatch(/^PAY-\d{6,}$/);
+    expect(memberPage.data.items[0]?.id).toBe(firstPayout.id);
+    expect(memberPage.data.items[0]?.displayId).not.toBe(firstPayout.id);
+    expect(memberPage.data.items[0]?.student).toMatchObject({
+      id: firstPayout.principalUserId,
+      studentId: expect.stringMatching(/^\d{10}$/),
+    });
+
     const approvalResponse = await app.handle(
       new Request(`http://localhost/api/v1/admin/payouts/${firstPayout.id}/approve`, {
         method: 'POST',
@@ -302,9 +329,19 @@ describe('Payout API routes', () => {
       })
     );
     const detail = (await detailResponse.json()) as {
-      data: { history: Array<{ source: string; reason: string | null }>; [key: string]: unknown };
+      data: {
+        displayId: string;
+        student: { id: string; studentId: string | null };
+        history: Array<{ source: string; reason: string | null }>;
+        [key: string]: unknown;
+      };
     };
     expect(detailResponse.status).toBe(200);
+    expect(detail.data.displayId).toBe(memberPage.data.items[0]?.displayId);
+    expect(detail.data.student).toMatchObject({
+      id: firstPayout.principalUserId,
+      studentId: expect.stringMatching(/^\d{10}$/),
+    });
     expect(detail.data.history).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ source: 'ADMIN_APPROVAL', reason: 'PAYOUT_POLICY_REVIEW' }),
