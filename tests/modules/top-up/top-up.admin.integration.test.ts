@@ -44,7 +44,10 @@ class FakeInboundPaymentProvider implements InboundPaymentProvider {
 
 type AdminTopUpListResponse = {
   success: boolean;
-  data?: { items: { id: string }[]; nextCursor: string | null };
+  data?: {
+    items: { id: string; displayId: string }[];
+    nextCursor: string | null;
+  };
   error?: { code: string; message: string };
 };
 
@@ -62,6 +65,7 @@ const seedTopUpMember = async (): Promise<string> => {
     email: `${userId}@ku.th`,
     firstName: 'AdminList',
     lastName: 'Walk',
+    studentId: String(1_000_000_000 + Math.floor(Math.random() * 9_000_000_000)),
   });
   await ensureWallet(userId);
   return userId;
@@ -145,6 +149,10 @@ describe('Admin Top-Up API routes', () => {
       })
     );
     expect(unauthenticatedReconcile.status).toBe(401);
+    const unauthenticatedDetail = await app.handle(
+      new Request(`http://localhost/api/v1/admin/top-ups/${fakeId}`)
+    );
+    expect(unauthenticatedDetail.status).toBe(401);
 
     const unauthenticatedRetry = await app.handle(
       new Request(`http://localhost/api/v1/admin/top-ups/events/${fakeId}/retry`, {
@@ -174,6 +182,96 @@ describe('Admin Top-Up API routes', () => {
       })
     );
     expect(response.status).toBe(404);
+  });
+  it('returns safe Admin Top-Up detail with a stable display ID', async () => {
+    const userId = await seedTopUpMember();
+    const topUpId = await seedDatedTopUp(
+      userId,
+      new FakeInboundPaymentProvider(),
+      new Date().toISOString()
+    );
+
+    const listResponse = await listTopUps(new URLSearchParams({ userId }));
+    const listBody = (await listResponse.json()) as {
+      data: {
+        items: Array<{
+          id: string;
+          displayId: string;
+          member: { firstName: string; lastName: string; studentId: string | null };
+        }>;
+      };
+    };
+    const listItem = listBody.data.items.find((item) => item.id === topUpId);
+    if (!listItem) throw new Error('The seeded Top-Up is missing from the Admin list.');
+    expect(listResponse.status).toBe(200);
+    expect(listItem.displayId).toMatch(/^TOP-\d{6,}$/);
+
+    const detailResponse = await app.handle(
+      new Request(`http://localhost/api/v1/admin/top-ups/${topUpId}`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    const detail = (await detailResponse.json()) as {
+      success: boolean;
+      data: {
+        id: string;
+        displayId: string;
+        userId: string;
+        member: { firstName: string; lastName: string; studentId: string | null };
+        [key: string]: unknown;
+      };
+    };
+    expect(detailResponse.status).toBe(200);
+    expect(detail.success).toBe(true);
+    expect(detail.data).toMatchObject({
+      id: topUpId,
+      displayId: listItem.displayId,
+      userId,
+      member: {
+        firstName: 'AdminList',
+        lastName: 'Walk',
+        studentId: expect.stringMatching(/^\d{10}$/),
+      },
+      topUpStatus: 'PENDING',
+      creditAmountSatang: 100,
+      paymentMethod: 'TEST_QR',
+    });
+    expect(detail.data.id).toBe(topUpId);
+    expect(detail.data.displayId).not.toBe(topUpId);
+    expect(detail.data.member).toEqual(listItem.member);
+    expect(detail.data).not.toHaveProperty('internalReference');
+    expect(detail.data).not.toHaveProperty('providerApiVersion');
+    expect(detail.data).not.toHaveProperty('qrPayload');
+    expect(JSON.stringify(detail)).not.toContain('qr-1');
+    expect(Object.keys(detail.data).sort()).toEqual([
+      'createdAt',
+      'creditAmountSatang',
+      'displayId',
+      'expiresAt',
+      'id',
+      'member',
+      'paidAt',
+      'paymentMethod',
+      'paymentTotalSatang',
+      'providerFeeSatang',
+      'providerReference',
+      'providerTaxSatang',
+      'topUpStatus',
+      'userId',
+    ]);
+
+    const missingResponse = await app.handle(
+      new Request(`http://localhost/api/v1/admin/top-ups/${crypto.randomUUID()}`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    const missingBody = (await missingResponse.json()) as {
+      success: boolean;
+      error: { code: string };
+    };
+    expect(missingResponse.status).toBe(404);
+    expect(missingBody.success).toBe(false);
+    expect(missingBody.error.code).toBe('TOP_UP_NOT_FOUND');
   });
 
   it('pages newest-first through every Top-Up without dropping rows that share the anchor millisecond', async () => {

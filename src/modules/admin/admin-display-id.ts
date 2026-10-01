@@ -1,5 +1,14 @@
+const formatDisplayId = (prefix: string, publicSequence: number): string =>
+  `${prefix}-${publicSequence.toString().padStart(6, '0')}`;
+
 export const formatReportCaseDisplayId = (publicSequence: number): string =>
-  `RPT-${publicSequence.toString().padStart(6, '0')}`;
+  formatDisplayId('RPT', publicSequence);
 
 export const formatConductReportDisplayId = (publicSequence: number): string =>
-  `CND-${publicSequence.toString().padStart(6, '0')}`;
+  formatDisplayId('CND', publicSequence);
+
+export const formatPayoutDisplayId = (publicSequence: number): string =>
+  formatDisplayId('PAY', publicSequence);
+
+export const formatTopUpDisplayId = (publicSequence: number): string =>
+  formatDisplayId('TOP', publicSequence);
