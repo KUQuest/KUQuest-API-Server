@@ -153,14 +153,16 @@ const createQuest = async (
     startTime,
     dueAt: new Date(now.getTime() + 60 * 60 * 1_000),
   });
-  await db.insert(questAssignment).values(
-    workerIds.map((workerId, index) => ({
-      questId,
-      workerId,
-      assignmentStatus: 'ASSIGNMENT_ACTIVE',
-      createdAt: new Date(now.getTime() - 10_000 + index),
-    }))
-  );
+  if (workerIds.length > 0) {
+    await db.insert(questAssignment).values(
+      workerIds.map((workerId, index) => ({
+        questId,
+        workerId,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE',
+        createdAt: new Date(now.getTime() - 10_000 + index),
+      }))
+    );
+  }
   if (reserve) {
     await db.transaction((transaction) =>
       reserveSpending(transaction, {
@@ -316,6 +318,10 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       decision: { status: 'UNDERFILLED_DECISION_PENDING', value: null },
       consent: { totalCount: 1, pendingCount: 1 },
     });
+    const hirerView = await request(`/api/v2/quests/${questId}/underfilled`, 'GET', hirer.id);
+    expect((await hirerView.json()).data.responses).toMatchObject([
+      { workerId: workers[0].id, member: { id: workers[0].id, displayName: 'First Worker' } },
+    ]);
 
     const lateJoin = await request(
       `/api/v2/quests/${questId}/join`,
@@ -348,6 +354,29 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
     ).toBe('QUEST_CANCELLED');
+  });
+
+  it('announces QUEST_AUTO_CANCELLED to the Hirer when an unfilled Quest is cancelled at startTime', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest([], true);
+    type QuestUpdate = { questId: string; changeType: string; recipientMemberIds: string[] };
+    let announce!: (event: QuestUpdate) => void;
+    const announced = new Promise<QuestUpdate>((resolve) => (announce = resolve));
+    const listener = await sql.listen('kuquest_quest_updates', (payload) => {
+      const event = JSON.parse(payload) as QuestUpdate;
+      if (event.questId === questId) announce(event);
+    });
+    try {
+      const result = await detect(new Date());
+      expect(result.autoCancelledQuestIds).toContain(questId);
+      expect(await announced).toMatchObject({
+        questId,
+        changeType: 'QUEST_AUTO_CANCELLED',
+        recipientMemberIds: [hirer.id],
+      });
+    } finally {
+      await listener.unlisten();
+    }
   });
 
   it('lets the Hirer proceed, exposes the exact revised Reward, and replays the decision command', async () => {

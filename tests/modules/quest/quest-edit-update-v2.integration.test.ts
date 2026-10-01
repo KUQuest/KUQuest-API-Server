@@ -332,11 +332,24 @@ describe('Quest Edit v2 realtime updates', () => {
         expect.arrayContaining([
           {
             workerId: workerSession.id,
+            member: expect.objectContaining({
+              id: workerSession.id,
+              displayName: expect.stringMatching(/\S/),
+            }),
             decision: 'EDIT_RESPONSE_DECLINED',
             reason: 'Private response detail',
             respondedAt: expect.any(String),
           },
-          { workerId: otherWorkerSession.id, decision: null, reason: null, respondedAt: null },
+          {
+            workerId: otherWorkerSession.id,
+            member: expect.objectContaining({
+              id: otherWorkerSession.id,
+              displayName: expect.stringMatching(/\S/),
+            }),
+            decision: null,
+            reason: null,
+            respondedAt: null,
+          },
         ])
       );
       const participation = await readParticipation(questId, workerSession.cookie);

@@ -668,7 +668,8 @@ export const createQuestV2CandidateTeam = async (
 
 export const listQuestV2CandidateTeams = async (
   memberId: string,
-  questId: string
+  questId: string,
+  state?: string
 ): Promise<QuestV2CandidateTeamReadOutcome> => {
   const [current] = await db
     .select({
@@ -703,7 +704,9 @@ export const listQuestV2CandidateTeams = async (
     )
     .orderBy(asc(questCandidateTeamV2.createdAt), asc(questCandidateTeamV2.id));
   if (current.hirerId !== memberId && rows.length === 0) return { outcome: 'not-authorized' };
-  return Promise.all(rows.map((row) => readTeam(db, row)));
+  return Promise.all(
+    rows.filter((row) => state === undefined || row.state === state).map((row) => readTeam(db, row))
+  );
 };
 
 export const getQuestV2CandidateTeam = async (

@@ -1912,6 +1912,12 @@ const autoCancelInTransaction = async (
     ],
     actor: { actorType: 'SYSTEM' },
   });
+  await notifyQuestUpdate(tx, {
+    questId,
+    recipientMemberIds: [...new Set([current.hirerId, ...workers.map(({ workerId }) => workerId)])],
+    closeMemberIds: workers.map(({ workerId }) => workerId),
+    changeType: 'QUEST_AUTO_CANCELLED',
+  });
   const result: CommandResult = {
     questStatus: questStatus.cancelled,
     outcome: 'CANCELLED',

@@ -196,6 +196,13 @@ export const startQuestWork = async (
           )
           .returning({ id: questAssignment.id, startedAt: questAssignment.startedAt });
         if (!startedAssignment?.startedAt) return { kind: 'rejected', rejection: 'not-authorized' };
+        if (apiVersion === 'v2') {
+          await notifyQuestUpdate(transaction, {
+            questId,
+            recipientMemberIds: [current.hirerId],
+            changeType: 'ASSIGNMENT_STARTED',
+          });
+        }
 
         const allRequiredStarted =
           candidateGroup ||
