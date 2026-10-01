@@ -13,7 +13,6 @@ import {
   questV2UnderfilledDecision,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import { detectQuestV2Underfilled } from '@/modules/quest/v2';
@@ -21,6 +20,7 @@ import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import { fundTestWallet, releaseTestQuestEscrows } from '../wallet/wallet-test-fixtures';
 import { assignmentStatus, questStatus, startQuestWork } from '@/modules/quest/shared';
 
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 import { QuestWebSocketClient } from './quest-update-test-client';
 import { randomUUID } from 'node:crypto';
 

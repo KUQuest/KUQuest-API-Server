@@ -7,7 +7,6 @@ import {
   questV2EditRequest,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle/quest-lifecycle.worker';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import { assignmentStatus, questStatus } from '@/modules/quest/shared';
@@ -16,6 +15,7 @@ import { Elysia } from 'elysia';
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 import { QuestWebSocketClient } from './quest-update-test-client';
 
 const password = 'TestStudent1!';

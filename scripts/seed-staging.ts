@@ -1,49 +1,49 @@
-export {};
+import { db, sql } from '@/database/client';
+import { authAdmin } from '@/database/schema/auth.schema';
+import { seedAcademicOptions } from '@/modules/academic-registration/academic-registration.service';
+import { seedQuestTags } from '@/modules/tag/tag.service';
 
-const seedCommands = [
-  'db:seed-academic-options',
-  'db:seed-quest-tag',
-  'db:seed-admin',
-  'db:seed-demo-users',
-  'db:seed-frontend-demo',
-  'db:seed-finance-test',
-] as const;
+import { eq } from 'drizzle-orm';
 
-const runSeed = async (command: string): Promise<void> => {
-  const child = Bun.spawn(['bun', 'run', command], {
-    env: process.env,
-    stdin: 'inherit',
-    stdout: 'inherit',
-    stderr: 'inherit',
-  });
-  const exitCode = await child.exited;
-  if (exitCode !== 0) throw new Error(`${command} failed with exit code ${exitCode}.`);
-};
+import { assertDemoSeedEnvironment, demoPassword } from './demo-seed';
+import { seedDemoMembers } from './seed-demo-users';
+import { seedDemoQuests } from './seed-demo-quests';
 
 const main = async (): Promise<void> => {
-  if (process.env.STAGING_FINANCE_SEED_ENABLED !== 'true') {
-    throw new Error('Set STAGING_FINANCE_SEED_ENABLED=true to load the staging seed data.');
+  assertDemoSeedEnvironment();
+  demoPassword();
+  await seedAcademicOptions();
+  console.log('1/4: Quest Tags');
+  await seedQuestTags();
+  console.log('2/4: Admin');
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  if (!email) throw new Error('ADMIN_EMAIL is required for the complete seed flow.');
+  const [admin] = await db
+    .select({ id: authAdmin.id })
+    .from(authAdmin)
+    .where(eq(authAdmin.email, email))
+    .limit(1);
+  if (!admin) {
+    const child = Bun.spawn(['bun', 'scripts/seed-admin.ts'], {
+      env: process.env,
+      stdin: 'inherit',
+      stdout: 'inherit',
+      stderr: 'inherit',
+    });
+    if ((await child.exited) !== 0) throw new Error('Admin seed failed.');
   }
-  const isDevelopmentSeed =
-    process.env.NODE_ENV === 'development' && process.env.DEPLOYMENT_ENV === 'development';
-  const isStagingSeed =
-    process.env.NODE_ENV === 'production' && process.env.DEPLOYMENT_ENV === 'staging';
-  if (!isDevelopmentSeed && !isStagingSeed) {
-    throw new Error(
-      'The staging seed is allowed only in development/development or production/staging.'
-    );
-  }
-
-  for (const command of seedCommands) {
-    // The seeds are separate processes because each supported seed owns its database connection.
-    // eslint-disable-next-line no-await-in-loop
-    await runSeed(command);
-  }
+  console.log('3/4: 10 demo Members and complete Profiles');
+  await seedDemoMembers();
+  console.log('4/4: 10 funded Published Quests');
+  await seedDemoQuests();
+  console.log('Demo flow complete. Each new Member has 1,000 Baht available after Quest funding.');
 };
 
 try {
   await main();
 } catch (error) {
-  console.error(error instanceof Error ? error.message : 'Staging seed failed.');
+  console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
+} finally {
+  await sql.end();
 }

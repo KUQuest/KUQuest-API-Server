@@ -13,7 +13,7 @@ import {
   frontendDemoDisputeAmountSatang,
   frontendDemoDisputeQuestTitle,
   frontendDemoDisputeReservationReference,
-} from '../../scripts/seed-frontend-demo';
+} from '../fixtures/demo-dispute-scenario';
 
 const ensurePostgres = async () => {
   try {
