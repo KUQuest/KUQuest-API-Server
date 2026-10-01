@@ -67,10 +67,8 @@ let memberCookie = '';
 const hirerId = crypto.randomUUID();
 const tagId = crypto.randomUUID();
 const questIds: string[] = [];
-const overviewWalletUserIds: string[] = [];
 const overviewAssignmentIds: string[] = [];
 const overviewConductReportIds: string[] = [];
-const overviewPenaltyMemberIds: string[] = [];
 const overviewReportCaseIds: string[] = [];
 const overviewMessageIds: string[] = [];
 const overviewMembershipIds: string[] = [];
@@ -344,17 +342,6 @@ afterAll(async () => {
   }
   if (overviewAssignmentIds.length > 0) {
     await db.delete(questAssignment).where(inArray(questAssignment.id, overviewAssignmentIds));
-  }
-  if (overviewWalletUserIds.length > 0) {
-    // Penalty records are immutable, so retain their Member and Wallet fixtures.
-    const retainedPenaltyMembers = new Set(overviewPenaltyMemberIds);
-    const disposableMemberIds = overviewWalletUserIds.filter(
-      (memberId) => !retainedPenaltyMembers.has(memberId)
-    );
-    if (disposableMemberIds.length > 0) {
-      await db.delete(walletWallet).where(inArray(walletWallet.userId, disposableMemberIds));
-      await db.delete(authUser).where(inArray(authUser.id, disposableMemberIds));
-    }
   }
   if (questIds.length > 0) {
     await db.delete(adminDisputeCase).where(inArray(adminDisputeCase.questId, questIds));
@@ -767,8 +754,8 @@ describe('Admin Overview API', () => {
       .from(adminReportCase)
       .where(eq(adminReportCase.id, pendingReportId));
 
+    // Wallet rows and Member Penalty records are immutable; retain their Member fixtures.
     const memberIds = Array.from({ length: 6 }, () => crypto.randomUUID());
-    overviewWalletUserIds.push(...memberIds);
     const activeStatusUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const expiredStatusAt = new Date(Date.now() - 60 * 1000);
     const memberRestrictions = [
@@ -809,7 +796,6 @@ describe('Admin Overview API', () => {
       actorType: 'SYSTEM',
       reasonCode: 'REVIEW_AVERAGE_CROSSING',
     });
-    overviewPenaltyMemberIds.push(memberIds[3]!);
 
     const conductQuestId = await seedQuest('QUEST_ASSIGNED');
     const conductQuestTitle = `Admin Overview Quest ${conductQuestId}`;
