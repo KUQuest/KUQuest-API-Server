@@ -9,6 +9,7 @@ import {
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
 import { file } from '@/database/schema/file.schema';
+import { formatDisputeDisplayId } from '@/modules/admin';
 import {
   createAdminActionService,
   type AdminActionResult,
@@ -180,7 +181,7 @@ export const summaryFromRecord = (
   record: typeof adminDisputeCase.$inferSelect
 ): AdminDisputeCaseSummary => ({
   id: record.id,
-  displayId: `DSP-${record.publicSequence.toString().padStart(6, '0')}`,
+  displayId: formatDisputeDisplayId(record.publicSequence),
   questId: record.questId,
   filerUserId: record.filerUserId,
   openedByAdminId: record.openedByAdminId,
