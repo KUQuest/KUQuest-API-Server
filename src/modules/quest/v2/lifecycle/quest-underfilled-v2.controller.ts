@@ -17,9 +17,24 @@ import {
   requireQuestCommandId,
 } from '../../shared/command/quest-command.controller';
 import { WorkChatTransitionError } from '../../shared/work-chat/quest-work-chat.port';
+import { loadMemberSummaries } from '../../shared/member-summary';
 
 type UnderfilledData = Extract<QuestV2UnderfilledOutcome, { underfilled: unknown }>['underfilled'];
 type UnderfilledError = Exclude<QuestV2UnderfilledOutcome, { underfilled: unknown }>;
+
+/** Adds the `member` summary the Hirer view needs next to each `workerId`. */
+const withMembers = async (data: UnderfilledData) => {
+  const memberOf = await loadMemberSummaries(
+    (data.responses ?? []).map(({ workerId }) => workerId)
+  );
+  return {
+    ...data,
+    responses: data.responses?.map((response) => ({
+      ...response,
+      member: memberOf(response.workerId),
+    })),
+  };
+};
 
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 409;
@@ -76,7 +91,7 @@ export const getQuestUnderfilledV2Controller = async ({
   try {
     const result = await getQuestV2Underfilled(session.user.id, params.questId);
     if ('outcome' in result) return mapOutcome(set, result);
-    return apiSuccess(result.underfilled as UnderfilledData);
+    return apiSuccess(await withMembers(result.underfilled));
   } catch (error) {
     const response = handleWorkChatError(set, error);
     if (response) return response;
@@ -105,7 +120,7 @@ export const decideQuestUnderfilledV2Controller = async ({
       new Date()
     );
     if ('outcome' in result) return mapOutcome(set, result);
-    return apiSuccess(result.underfilled as UnderfilledData);
+    return apiSuccess(await withMembers(result.underfilled));
   } catch (error) {
     const response = handleWorkChatError(set, error);
     if (response) return response;
@@ -134,7 +149,7 @@ export const respondToQuestUnderfilledV2Controller = async ({
       new Date()
     );
     if ('outcome' in result) return mapOutcome(set, result);
-    return apiSuccess(result.underfilled as UnderfilledData);
+    return apiSuccess(await withMembers(result.underfilled));
   } catch (error) {
     const response = handleWorkChatError(set, error);
     if (response) return response;

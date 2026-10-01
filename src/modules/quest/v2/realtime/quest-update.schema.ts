@@ -8,6 +8,9 @@ export const questUpdateParamsSchema = t.Object({
 const questUpdateOtherChangeTypeSchema = t.Union([
   t.Literal('ASSIGNMENT_ROSTER_UPDATED'),
   t.Literal('QUEST_STARTED'),
+  t.Literal('ASSIGNMENT_STARTED'),
+  t.Literal('ASSIGNMENT_JOINED'),
+  t.Literal('QUEST_AUTO_CANCELLED'),
   t.Literal('PROOF_SUBMITTED'),
   t.Literal('PROOF_REVIEWED'),
   t.Literal('PROOF_AUTO_APPROVED'),

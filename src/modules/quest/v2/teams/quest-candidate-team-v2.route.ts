@@ -27,6 +27,7 @@ import {
   questV2CandidateTeamFileUploadSchema,
   questV2CandidateTeamHeadersSchema,
   questV2CandidateTeamJoinSchema,
+  questV2CandidateTeamListQuerySchema,
   questV2CandidateTeamListResponseSchema,
   questV2CandidateTeamMemberParamsSchema,
   questV2CandidateTeamParamsSchema,
@@ -76,12 +77,13 @@ export const questCandidateTeamV2Route = new Elysia({
   })
   .get('/quests/:questId/teams', listQuestV2CandidateTeamsController, {
     params: questV2CandidateTeamParamsSchema,
-    response: responses(questV2CandidateTeamListResponseSchema, 401, 404, 500),
+    query: questV2CandidateTeamListQuerySchema,
+    response: responses(questV2CandidateTeamListResponseSchema, 400, 401, 404, 500),
     detail: {
       tags: ['Quest Candidate Teams v2'],
       summary: 'List permitted Candidate Teams for a v2 Quest',
       description:
-        "The Hirer can list all Candidate Teams. A Team Member can list that Member's Candidate Team.",
+        "The Hirer can list all Candidate Teams. A Team Member can list that Member's Candidate Team. Pass `state` (for example TEAM_SUBMITTED) to keep one state. Every Team carries `leader` and `members[].member` summaries.",
       operationId: 'listQuestCandidateTeamsV2',
       security: betterAuthSecurity,
     },

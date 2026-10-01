@@ -326,7 +326,8 @@ const deliverQuestRealtimeNotification = async (event: QuestRealtimeNotification
     event.changeType === 'QUEST_STARTED' ||
     event.changeType === 'QUEST_COMPLETED' ||
     event.changeType === 'QUEST_FAILED' ||
-    event.changeType === 'QUEST_CANCELLED'
+    event.changeType === 'QUEST_CANCELLED' ||
+    event.changeType === 'QUEST_AUTO_CANCELLED'
   ) {
     await deliverCandidateRosterUpdate({
       questId: event.questId,

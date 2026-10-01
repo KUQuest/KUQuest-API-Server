@@ -257,6 +257,13 @@ components:
     hirerQuestUpdated:
       name: HIRER_QUEST_UPDATED
       summary: An owned Quest changed
+      description: |
+        The event carries no data; read REST after each event. Roster refresh types:
+        ASSIGNMENT_JOINED (a First-Come-First-Served Worker joined), ASSIGNMENT_STARTED
+        (a Worker pressed Start Work), PROOF_SUBMITTED (a Worker submitted Proof), and
+        QUEST_AUTO_CANCELLED (the Server cancelled an unfilled Quest at its start time).
+        Read GET /api/v2/quests/{questId}/assignments, /teams, and /applications for the
+        roster; each person there carries a `member` summary.
       payload:
         type: object
         additionalProperties: false
@@ -278,6 +285,9 @@ components:
             enum:
               - ASSIGNMENT_ROSTER_UPDATED
               - QUEST_STARTED
+              - ASSIGNMENT_STARTED
+              - ASSIGNMENT_JOINED
+              - QUEST_AUTO_CANCELLED
               - PROOF_SUBMITTED
               - PROOF_REVIEWED
               - PROOF_AUTO_APPROVED
@@ -314,6 +324,9 @@ components:
             enum:
               - ASSIGNMENT_ROSTER_UPDATED
               - QUEST_STARTED
+              - ASSIGNMENT_STARTED
+              - ASSIGNMENT_JOINED
+              - QUEST_AUTO_CANCELLED
               - PROOF_SUBMITTED
               - PROOF_REVIEWED
               - PROOF_AUTO_APPROVED

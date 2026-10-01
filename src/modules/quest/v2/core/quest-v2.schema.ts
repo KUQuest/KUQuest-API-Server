@@ -18,6 +18,7 @@ import {
   questV2AssignmentStates,
   questV2States,
 } from './quest-v2.contract';
+import { memberSummarySchema } from '../../shared/member-summary';
 
 export const maxQuestV2Images = 3;
 export const maxQuestV2Drafts = 10;
@@ -895,12 +896,12 @@ const questV2EditResponseSummarySchema = t.Object({
   declinedCount: t.Integer({ minimum: 0 }),
   pendingCount: t.Integer({ minimum: 0 }),
 });
-const questV2EditHirerResponseSchema = t.Object({
+const questV2EditHirerResponseFields = {
   workerId: t.String({ format: 'uuid' }),
   decision: t.Nullable(questV2EditResponseDecisionSchema),
   reason: t.Nullable(t.String({ maxLength: 255 })),
   respondedAt: t.Nullable(t.String({ format: 'date-time' })),
-});
+};
 const questV2EditWorkerResponseSchema = t.Object({
   decision: t.Nullable(questV2EditResponseDecisionSchema),
   reason: t.Nullable(t.String({ maxLength: 255 })),
@@ -926,7 +927,7 @@ export const questV2EditRequestParamsSchema = t.Object({
   requestId: t.String({ format: 'uuid' }),
 });
 
-export const questV2EditRequestDataSchema = t.Object({
+const questV2EditRequestDataFields = {
   requestId: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
   status: questV2EditRequestStatusSchema,
@@ -938,13 +939,25 @@ export const questV2EditRequestDataSchema = t.Object({
   previousCondition: questV2EditConditionSchema,
   proposedCondition: questV2EditConditionSchema,
   responseSummary: questV2EditResponseSummarySchema,
-  responses: t.Optional(t.Array(questV2EditHirerResponseSchema)),
   ownResponse: t.Optional(t.Nullable(questV2EditWorkerResponseSchema)),
+};
+
+/** The stored and replayed shape: Worker responses carry IDs only. */
+export const questV2EditRequestDataSchema = t.Object({
+  ...questV2EditRequestDataFields,
+  responses: t.Optional(t.Array(t.Object(questV2EditHirerResponseFields))),
+});
+
+const questV2EditRequestViewSchema = t.Object({
+  ...questV2EditRequestDataFields,
+  responses: t.Optional(
+    t.Array(t.Object({ ...questV2EditHirerResponseFields, member: memberSummarySchema }))
+  ),
 });
 
 export const questV2EditRequestResponseSchema = t.Object({
   success: t.Literal(true),
-  data: questV2EditRequestDataSchema,
+  data: questV2EditRequestViewSchema,
 });
 
 export type QuestV2EditRequestCreateInput = Static<typeof questV2EditRequestCreateSchema>;

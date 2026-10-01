@@ -410,11 +410,13 @@ describe('Quest Candidate API v2', () => {
       candidate.id
     );
     expect(candidateRead.status).toBe(200);
-    expect((await candidateRead.json()).data).toMatchObject({
+    const readBody = (await candidateRead.json()).data;
+    expect(readBody).toMatchObject({
       id: application.id,
       memberId: candidate.id,
       state: 'APPLICATION_APPLIED',
     });
+    expect(readBody.member).toMatchObject({ id: candidate.id, displayName: 'Candidate Worker' });
 
     const hirerList = await request(`/api/v2/quests/${questId}/applications`, 'GET', hirer.id);
     expect(hirerList.status).toBe(200);
@@ -435,6 +437,44 @@ describe('Quest Candidate API v2', () => {
     );
     expect(unrelatedRead.status).toBe(404);
     expect((await unrelatedRead.json()).error.code).toBe('APPLICATION_NOT_FOUND');
+
+    const appliedOnly = await request(
+      `/api/v2/quests/${questId}/applications?state=APPLICATION_APPLIED`,
+      'GET',
+      hirer.id
+    );
+    expect(appliedOnly.status).toBe(200);
+    const appliedItems = (await appliedOnly.json()).data.items as Array<{
+      memberId: string;
+      member: { id: string; displayName: string };
+    }>;
+    expect(appliedItems).toHaveLength(1);
+    expect(appliedItems[0]?.member).toMatchObject({
+      id: candidate.id,
+      displayName: 'Candidate Worker',
+    });
+
+    const rejectedOnly = await request(
+      `/api/v2/quests/${questId}/applications?state=APPLICATION_REJECTED`,
+      'GET',
+      hirer.id
+    );
+    expect(rejectedOnly.status).toBe(200);
+    expect((await rejectedOnly.json()).data.items).toEqual([]);
+
+    const unrelatedFiltered = await request(
+      `/api/v2/quests/${questId}/applications?state=APPLICATION_REJECTED`,
+      'GET',
+      unrelated.id
+    );
+    expect(unrelatedFiltered.status).toBe(404);
+
+    const invalidState = await request(
+      `/api/v2/quests/${questId}/applications?state=NOPE`,
+      'GET',
+      hirer.id
+    );
+    expect(invalidState.status).toBe(400);
   });
 
   it('publishes the V2 Candidate application read and write operations in OpenAPI', async () => {

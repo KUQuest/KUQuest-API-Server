@@ -12,6 +12,7 @@ import type {
   QuestV2CandidateTeamDetailParams,
   QuestV2CandidateTeamFileUploadInput,
   QuestV2CandidateTeamJoinInput,
+  QuestV2CandidateTeamListQuery,
   QuestV2CandidateTeamMemberParams,
   QuestV2CandidateTeamParams,
   QuestV2CandidateTeamSubmissionInput,
@@ -40,34 +41,47 @@ import {
   requireQuestCommandId,
 } from '../../shared/command/quest-command.controller';
 import { WorkChatTransitionError } from '../../shared/work-chat/quest-work-chat.port';
+import { loadMemberSummaries } from '../../shared/member-summary';
 
 type CandidateTeam = Extract<QuestV2CandidateTeamOutcome, { id: string }>;
 type CandidateTeamError = Exclude<QuestV2CandidateTeamOutcome, CandidateTeam>;
 type SelectionSuccess = Extract<QuestV2CandidateTeamSelectionOutcome, { assignments: unknown[] }>;
 type SelectionError = Exclude<QuestV2CandidateTeamSelectionOutcome, SelectionSuccess>;
 
-const serializeTeam = (team: CandidateTeam) => ({
-  id: team.id,
-  questId: team.questId,
-  leaderId: team.leaderId,
-  name: team.name,
-  headcount: team.headcount,
-  state: team.state,
-  joinCode: team.joinCode,
-  joinCodeExpiresAt: team.joinCodeExpiresAt?.toISOString() ?? null,
-  members: team.members.map((member) => ({
-    memberId: member.memberId,
-    joinedAt: member.joinedAt.toISOString(),
-  })),
-  submission: team.submission
-    ? {
-        text: team.submission.text,
-        fileIds: team.submission.fileIds,
-        submittedAt: team.submission.submittedAt.toISOString(),
-      }
-    : null,
-  createdAt: team.createdAt.toISOString(),
-});
+const serializeTeams = async (teams: CandidateTeam[]) => {
+  const memberOf = await loadMemberSummaries(
+    teams.flatMap((team) => [team.leaderId, ...team.members.map(({ memberId }) => memberId)])
+  );
+  return teams.map((team) => ({
+    id: team.id,
+    questId: team.questId,
+    leaderId: team.leaderId,
+    leader: memberOf(team.leaderId),
+    name: team.name,
+    headcount: team.headcount,
+    state: team.state,
+    joinCode: team.joinCode,
+    joinCodeExpiresAt: team.joinCodeExpiresAt?.toISOString() ?? null,
+    members: team.members.map((member) => ({
+      memberId: member.memberId,
+      member: memberOf(member.memberId),
+      joinedAt: member.joinedAt.toISOString(),
+    })),
+    submission: team.submission
+      ? {
+          text: team.submission.text,
+          fileIds: team.submission.fileIds,
+          submittedAt: team.submission.submittedAt.toISOString(),
+        }
+      : null,
+    createdAt: team.createdAt.toISOString(),
+  }));
+};
+
+const serializeTeam = async (team: CandidateTeam) => {
+  const [serialized] = await serializeTeams([team]);
+  return serialized;
+};
 
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 409;
@@ -308,15 +322,19 @@ const mapSelectionError = (set: AuthedContext['set'], outcome: SelectionError) =
   return mapQuestCommandOutcome(set, outcome.outcome);
 };
 
-const serializeSelectionAssignment = (assignment: SelectionSuccess['assignments'][number]) => ({
-  id: assignment.id,
-  questId: assignment.questId,
-  workerId: assignment.workerId,
-  state: assignment.state,
-  questState: assignment.questState,
-  startedAt: assignment.startedAt?.toISOString() ?? null,
-  createdAt: assignment.createdAt.toISOString(),
-});
+const serializeSelectionAssignments = async (assignments: SelectionSuccess['assignments']) => {
+  const memberOf = await loadMemberSummaries(assignments.map(({ workerId }) => workerId));
+  return assignments.map((assignment) => ({
+    id: assignment.id,
+    questId: assignment.questId,
+    workerId: assignment.workerId,
+    member: memberOf(assignment.workerId),
+    state: assignment.state,
+    questState: assignment.questState,
+    startedAt: assignment.startedAt?.toISOString() ?? null,
+    createdAt: assignment.createdAt.toISOString(),
+  }));
+};
 
 export const createQuestV2CandidateTeamController = async ({
   body,
@@ -333,20 +351,24 @@ export const createQuestV2CandidateTeamController = async ({
   const result = await createQuestV2CandidateTeam(session.user.id, params.questId, body, commandId);
   if ('outcome' in result) return mapTeamError(set, result);
   set.status = 201;
-  return apiSuccess(serializeTeam(result));
+  return apiSuccess(await serializeTeam(result));
 };
 
 export const listQuestV2CandidateTeamsController = async ({
   params,
+  query,
   session,
   set,
-}: AuthedContext & { params: QuestV2CandidateTeamParams }) => {
-  const result = await listQuestV2CandidateTeams(session.user.id, params.questId);
+}: AuthedContext & {
+  params: QuestV2CandidateTeamParams;
+  query: QuestV2CandidateTeamListQuery;
+}) => {
+  const result = await listQuestV2CandidateTeams(session.user.id, params.questId, query.state);
   if ('outcome' in result) {
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
-  return apiSuccess({ items: result.map(serializeTeam) });
+  return apiSuccess({ items: await serializeTeams(result) });
 };
 
 export const getQuestV2CandidateTeamController = async ({
@@ -362,7 +384,7 @@ export const getQuestV2CandidateTeamController = async ({
       result.outcome === 'not-found' ? 'Quest not found' : 'Candidate Team not found'
     );
   }
-  return apiSuccess(serializeTeam(result));
+  return apiSuccess(await serializeTeam(result));
 };
 
 export const updateQuestV2CandidateTeamController = async ({
@@ -385,7 +407,7 @@ export const updateQuestV2CandidateTeamController = async ({
     commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
-  return apiSuccess(serializeTeam(result));
+  return apiSuccess(await serializeTeam(result));
 };
 
 export const joinQuestV2CandidateTeamController = async ({
@@ -408,7 +430,7 @@ export const joinQuestV2CandidateTeamController = async ({
     commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
-  return apiSuccess(serializeTeam(result));
+  return apiSuccess(await serializeTeam(result));
 };
 
 export const joinQuestV2CandidateTeamByCodeController = async ({
@@ -430,7 +452,7 @@ export const joinQuestV2CandidateTeamByCodeController = async ({
     commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
-  return apiSuccess(serializeTeam(result));
+  return apiSuccess(await serializeTeam(result));
 };
 
 export const leaveQuestV2CandidateTeamController = async ({
@@ -448,7 +470,7 @@ export const leaveQuestV2CandidateTeamController = async ({
     commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
-  return apiSuccess(serializeTeam(result));
+  return apiSuccess(await serializeTeam(result));
 };
 
 export const removeQuestV2CandidateTeamMemberController = async ({
@@ -467,7 +489,7 @@ export const removeQuestV2CandidateTeamMemberController = async ({
     commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
-  return apiSuccess(serializeTeam(result));
+  return apiSuccess(await serializeTeam(result));
 };
 
 export const regenerateQuestV2CandidateTeamJoinCodeController = async ({
@@ -485,7 +507,7 @@ export const regenerateQuestV2CandidateTeamJoinCodeController = async ({
     commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
-  return apiSuccess(serializeTeam(result));
+  return apiSuccess(await serializeTeam(result));
 };
 
 export const submitQuestV2CandidateTeamController = async ({
@@ -508,7 +530,7 @@ export const submitQuestV2CandidateTeamController = async ({
     commandId
   );
   if ('outcome' in result) return mapTeamError(set, result);
-  return apiSuccess(serializeTeam(result));
+  return apiSuccess(await serializeTeam(result));
 };
 
 export const uploadQuestV2CandidateTeamFileController = async ({
@@ -561,7 +583,7 @@ export const rejectQuestV2CandidateTeamController = async ({
     commandId
   );
   if ('outcome' in result) return mapRejectError(set, result);
-  return apiSuccess(serializeTeam(result));
+  return apiSuccess(await serializeTeam(result));
 };
 
 export const selectQuestV2CandidateTeamController = async ({
@@ -583,7 +605,7 @@ export const selectQuestV2CandidateTeamController = async ({
     if ('outcome' in result) return mapSelectionError(set, result);
     return apiSuccess({
       questState: result.questState,
-      assignments: result.assignments.map(serializeSelectionAssignment),
+      assignments: await serializeSelectionAssignments(result.assignments),
     });
   } catch (error) {
     if (error instanceof WorkChatTransitionError) {

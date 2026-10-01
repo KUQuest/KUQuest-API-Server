@@ -42,6 +42,7 @@ import {
   mapQuestCommandOutcome,
   requireQuestCommandId,
 } from '../../shared/command/quest-command.controller';
+import { loadMemberSummaries } from '../../shared/member-summary';
 import type { QuestV2ImageCommandContext, QuestV2ImageReference } from './quest-v2.service';
 import type { QuestV2PublishCheck } from './quest-v2.publish.policy';
 import type {
@@ -658,6 +659,22 @@ export const getQuestV2PublishCheckController = async ({
   return apiSuccess(toQuestV2PublishCheckResponse(result));
 };
 
+/** Adds the `member` summary the Hirer view needs next to each `workerId`. */
+const withEditResponseMembers = async (
+  data: Extract<QuestV2EditRequestOutcome, { request: unknown }>['request']
+): Promise<QuestV2EditRequestResponse> => {
+  const memberOf = await loadMemberSummaries(
+    (data.responses ?? []).map(({ workerId }) => workerId)
+  );
+  return {
+    ...data,
+    responses: data.responses?.map((response) => ({
+      ...response,
+      member: memberOf(response.workerId),
+    })),
+  };
+};
+
 export const createQuestV2EditRequestController = async ({
   body,
   params,
@@ -675,7 +692,7 @@ export const createQuestV2EditRequestController = async ({
   if ('outcome' in result) return mapQuestV2EditRequestOutcome(set, result.outcome);
 
   set.status = 201;
-  return apiSuccess(result.request);
+  return apiSuccess(await withEditResponseMembers(result.request));
 };
 
 export const getQuestV2EditRequestController = async ({
@@ -691,7 +708,7 @@ export const getQuestV2EditRequestController = async ({
     return apiError('QUEST_EDIT_NOT_FOUND', 'Quest Edit Request not found');
   }
 
-  return apiSuccess(result);
+  return apiSuccess(await withEditResponseMembers(result));
 };
 
 export const respondToQuestV2EditRequestController = async ({
@@ -715,7 +732,7 @@ export const respondToQuestV2EditRequestController = async ({
   );
   if ('outcome' in result) return mapQuestV2EditRequestOutcome(set, result.outcome);
 
-  return apiSuccess(result.request);
+  return apiSuccess(await withEditResponseMembers(result.request));
 };
 
 const mapQuestV2PublishError = (set: AuthedContext['set'], error: MoneyDomainError) => {

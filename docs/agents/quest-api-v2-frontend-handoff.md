@@ -162,6 +162,32 @@ They expire about 15 minutes after they are materialized.
 Call Quest detail again when a link expires.
 Do not store a temporary URL as a permanent asset URL.
 
+### 2.10 MemberSummary
+
+Every field that names a person with an ID is followed by a `member` object. Read
+`member.displayName` directly; do not call a profile endpoint per person.
+
+```json
+{
+  "id": "member-uuid",
+  "displayName": "Somchai Jaidee",
+  "avatar": { "fileId": "file-uuid", "url": "temporary-url" },
+  "faculty": "Engineering",
+  "department": "Computer Engineering",
+  "ratingAverage": 4.5
+}
+```
+
+- `displayName` is never empty and never a UUID. A Member who no longer exists reads "Former member".
+- `avatar` is null or `{ fileId, url }`, the same shape as Work Chat participants.
+- `faculty`, `department`, and `ratingAverage` are null when unknown. They carry the public-profile values.
+- The Server never returns the phone number or the Student ID here.
+- The `*Id` fields stay; `member` is added next to them.
+
+`member` appears on: Assignments (join, list, mine, Candidate and Team selection),
+Applications, Candidate Teams (`leader` and `members[].member`), Underfilled
+`responses[]`, and Quest Edit Request `responses[]`.
+
 ## 3. Quest states and lifecycle
 
 The Quest State values are:
@@ -408,7 +434,9 @@ The Server sends `{ "type": "SUBSCRIBED", "version": 1 }` after it accepts
 the connection. For each committed change to an owned v2 Quest, it sends
 `{ "type": "HIRER_QUEST_UPDATED", "version": 1, "questId": "quest-uuid",
 "changeType": "..." }`. Change types include existing Quest updates,
-`CANDIDATE_ROSTER_UPDATED`, `QUEST_PUBLISHED`, and `QUEST_CREATED`.
+`ASSIGNMENT_JOINED` (a first-come Worker joined), `ASSIGNMENT_STARTED` (a Worker
+pressed Start Work), `PROOF_SUBMITTED`, `QUEST_AUTO_CANCELLED` (the Server cancelled an
+unfilled Quest at its start time), `CANDIDATE_ROSTER_UPDATED`, `QUEST_PUBLISHED`, and `QUEST_CREATED`.
 The event contains no Quest or Candidate data.
 
 Read `GET /api/v2/quests/mine` from the first cursor page after `SUBSCRIBED`,
@@ -1108,6 +1136,7 @@ Success status: HTTP 200.
     "id": "assignment-uuid",
     "questId": "quest-uuid",
     "workerId": "worker-uuid",
+    "member": { "id": "worker-uuid", "displayName": "Somchai Jaidee", "avatar": null },
     "state": "ASSIGNMENT_ACTIVE",
     "questState": "QUEST_ASSIGNED",
     "startedAt": null,
@@ -1153,6 +1182,7 @@ Success status: HTTP 200.
         "id": "assignment-uuid",
         "questId": "quest-uuid",
         "workerId": "worker-uuid",
+        "member": { "id": "worker-uuid", "displayName": "Somchai Jaidee", "avatar": null },
         "state": "ASSIGNMENT_ACTIVE",
         "questState": "QUEST_ASSIGNED",
         "startedAt": null,
@@ -1173,6 +1203,7 @@ Assignment fields:
 | id         | Assignment identifier                                                                   |
 | questId    | Quest identifier                                                                        |
 | workerId   | Worker Member identifier                                                                |
+| member     | MemberSummary of the Worker                                                             |
 | state      | ASSIGNMENT_ACTIVE, ASSIGNMENT_COMPLETED, ASSIGNMENT_INCOMPLETE, or ASSIGNMENT_CANCELLED |
 | questState | Current Quest State                                                                     |
 | startedAt  | Required Start Work time or null                                                        |
@@ -1186,7 +1217,7 @@ Request:
 GET /api/v2/quests/:questId/assignments
 ```
 
-The owning Hirer receives all active Assignments.
+The owning Hirer receives every Assignment of the Quest in every Quest State, including terminal states.
 The current active Worker receives only their own Assignment.
 Other callers receive a masked 404 QUEST_NOT_FOUND.
 
@@ -1201,6 +1232,7 @@ Success response:
         "id": "assignment-uuid",
         "questId": "quest-uuid",
         "workerId": "worker-uuid",
+        "member": { "id": "worker-uuid", "displayName": "Somchai Jaidee", "avatar": null },
         "state": "ASSIGNMENT_ACTIVE",
         "questState": "QUEST_IN_PROGRESS",
         "startedAt": "2026-09-30T09:00:02.000+07:00",
@@ -1237,6 +1269,7 @@ Success status: HTTP 200.
     "id": "application-uuid",
     "questId": "quest-uuid",
     "memberId": "candidate-uuid",
+    "member": { "id": "candidate-uuid", "displayName": "Somchai Jaidee", "avatar": null },
     "state": "APPLICATION_APPLIED",
     "appliedAt": "2026-09-08T10:00:00.000+07:00"
   }
@@ -1250,6 +1283,7 @@ Application fields:
 | id        | Application identifier                                                                    |
 | questId   | Quest identifier                                                                          |
 | memberId  | Candidate Member identifier                                                               |
+| member    | MemberSummary of the Candidate                                                            |
 | state     | APPLICATION_APPLIED, APPLICATION_SELECTED, APPLICATION_REJECTED, or APPLICATION_WITHDRAWN |
 | appliedAt | Application time                                                                          |
 
@@ -1272,6 +1306,7 @@ GET /api/v2/quests/:questId/applications
 ```
 
 The owning Hirer sees all applications.
+Pass `?state=APPLICATION_APPLIED` to keep only applications in that state. An unknown state returns 400.
 The Candidate sees only their own application.
 The endpoint is readable while the Quest is QUEST_OPEN or QUEST_ASSIGNED.
 Other callers receive a masked 404 QUEST_NOT_FOUND.
@@ -1287,6 +1322,7 @@ Success status: HTTP 200.
         "id": "application-uuid",
         "questId": "quest-uuid",
         "memberId": "candidate-uuid",
+        "member": { "id": "candidate-uuid", "displayName": "Somchai Jaidee", "avatar": null },
         "state": "APPLICATION_APPLIED",
         "appliedAt": "2026-09-08T10:00:00.000+07:00"
       }
@@ -1462,6 +1498,7 @@ Use the Candidate roster WebSocket contract in Section 8.6 for Candidate Team up
   "id": "team-uuid",
   "questId": "quest-uuid",
   "leaderId": "leader-uuid",
+  "leader": { "id": "leader-uuid", "displayName": "Somchai Jaidee", "avatar": null },
   "name": "Frontend team",
   "headcount": 3,
   "state": "TEAM_FORMING",
@@ -1470,6 +1507,7 @@ Use the Candidate roster WebSocket contract in Section 8.6 for Candidate Team up
   "members": [
     {
       "memberId": "leader-uuid",
+      "member": { "id": "leader-uuid", "displayName": "Somchai Jaidee", "avatar": null },
       "joinedAt": "2026-09-08T10:00:00.000+07:00"
     }
   ],
@@ -1485,12 +1523,13 @@ Team fields:
 | id                | Team identifier                                                               |
 | questId           | Quest identifier                                                              |
 | leaderId          | Current Team Leader                                                           |
+| leader            | MemberSummary of the Team Leader                                              |
 | name              | Team name                                                                     |
 | headcount         | Required team size                                                            |
 | state             | TEAM_FORMING, TEAM_SUBMITTED, TEAM_SELECTED, TEAM_REJECTED, or TEAM_DISBANDED |
 | joinCode          | Plaintext code only when a new code is created; reads can return null         |
 | joinCodeExpiresAt | Code expiry time                                                              |
-| members           | Members with memberId and joinedAt                                            |
+| members           | Members with memberId, member (MemberSummary), and joinedAt                   |
 | submission        | Submission object or null                                                     |
 | createdAt         | Team creation time                                                            |
 
@@ -1548,6 +1587,7 @@ GET /api/v2/quests/:questId/teams
 ```
 
 The Quest must be QUEST_OPEN.
+Pass `?state=TEAM_SUBMITTED` to keep only submitted Teams. An unknown state returns 400.
 The Hirer sees all non-disbanded Teams.
 A Team member sees their own Team.
 This endpoint is not a Team history endpoint after assignment.
@@ -1564,6 +1604,7 @@ The data value is an object with items, where each item is a complete Team.
         "id": "team-uuid",
         "questId": "quest-uuid",
         "leaderId": "leader-uuid",
+        "leader": { "id": "leader-uuid", "displayName": "Somchai Jaidee", "avatar": null },
         "name": "Frontend team",
         "headcount": 3,
         "state": "TEAM_FORMING",
@@ -2157,6 +2198,7 @@ Decision response items:
 ```json
 {
   "workerId": "worker-uuid",
+  "member": { "id": "worker-uuid", "displayName": "Somchai Jaidee", "avatar": null },
   "assignmentId": "assignment-uuid",
   "decision": "ACCEPT",
   "questReward": 1960,
@@ -2818,6 +2860,7 @@ Public detail omits fileId.
   "id": "assignment-uuid",
   "questId": "quest-uuid",
   "workerId": "worker-uuid",
+  "member": { "id": "worker-uuid", "displayName": "Somchai Jaidee", "avatar": null },
   "state": "ASSIGNMENT_ACTIVE",
   "questState": "QUEST_ASSIGNED",
   "startedAt": null,
@@ -2832,6 +2875,7 @@ Public detail omits fileId.
   "id": "application-uuid",
   "questId": "quest-uuid",
   "memberId": "member-uuid",
+  "member": { "id": "member-uuid", "displayName": "Somchai Jaidee", "avatar": null },
   "state": "APPLICATION_APPLIED",
   "appliedAt": "2026-09-08T10:00:00.000+07:00"
 }
@@ -2864,6 +2908,7 @@ Public detail omits fileId.
   "responses": [
     {
       "workerId": "worker-uuid",
+      "member": { "id": "worker-uuid", "displayName": "Somchai Jaidee", "avatar": null },
       "decision": null,
       "reason": null,
       "respondedAt": null

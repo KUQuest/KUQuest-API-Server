@@ -1,5 +1,6 @@
 import { t, type Static } from 'elysia';
 
+import { memberSummarySchema } from '../../shared/member-summary';
 import {
   questV2States,
   questV2UnderfilledConsentDecisions,
@@ -44,13 +45,13 @@ export const questV2UnderfilledConsentInputSchema = t.Object(
   { additionalProperties: false }
 );
 
-const underfilledWorkerResponseSchema = t.Object({
+const underfilledWorkerResponseFields = {
   workerId: t.String({ format: 'uuid' }),
   assignmentId: t.String({ format: 'uuid' }),
   decision: t.Nullable(consentDecisionSchema),
   questReward: t.Number({ minimum: 0 }),
   respondedAt: t.Nullable(isoDateTimeSchema),
-});
+};
 
 const underfilledDecisionViewSchema = t.Object({
   status: t.Union([
@@ -76,7 +77,7 @@ const underfilledConsentViewSchema = t.Object({
   pendingCount: t.Integer({ minimum: 0 }),
 });
 
-const underfilledDataSchema = t.Object({
+const underfilledDataFields = {
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
   questState: questStateSchema,
@@ -88,7 +89,6 @@ const underfilledDataSchema = t.Object({
   dueAt: t.Nullable(isoDateTimeSchema),
   decision: underfilledDecisionViewSchema,
   consent: underfilledConsentViewSchema,
-  responses: t.Optional(t.Array(underfilledWorkerResponseSchema)),
   ownResponse: t.Optional(
     t.Nullable(
       t.Object({
@@ -98,11 +98,24 @@ const underfilledDataSchema = t.Object({
       })
     )
   ),
+};
+
+/** The stored and replayed shape: Worker responses carry IDs only. */
+const underfilledDataSchema = t.Object({
+  ...underfilledDataFields,
+  responses: t.Optional(t.Array(t.Object(underfilledWorkerResponseFields))),
+});
+
+const underfilledViewSchema = t.Object({
+  ...underfilledDataFields,
+  responses: t.Optional(
+    t.Array(t.Object({ ...underfilledWorkerResponseFields, member: memberSummarySchema }))
+  ),
 });
 
 export const questV2UnderfilledResponseSchema = t.Object({
   success: t.Literal(true),
-  data: underfilledDataSchema,
+  data: underfilledViewSchema,
 });
 
 export type QuestV2UnderfilledParams = Static<typeof questV2UnderfilledParamsSchema>;

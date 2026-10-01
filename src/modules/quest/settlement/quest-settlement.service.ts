@@ -1892,6 +1892,12 @@ const autoCancelInTransaction = async (
       terminalChatEntry(current, questStatus.cancelled, commandId, now, null),
     ],
   });
+  await notifyQuestUpdate(tx, {
+    questId,
+    recipientMemberIds: [...new Set([current.hirerId, ...workers.map(({ workerId }) => workerId)])],
+    closeMemberIds: workers.map(({ workerId }) => workerId),
+    changeType: 'QUEST_AUTO_CANCELLED',
+  });
   const result: CommandResult = {
     questStatus: questStatus.cancelled,
     outcome: 'CANCELLED',

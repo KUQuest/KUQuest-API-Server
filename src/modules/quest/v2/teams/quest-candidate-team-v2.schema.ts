@@ -1,5 +1,6 @@
 import { t, type Static } from 'elysia';
 
+import { memberSummarySchema } from '../../shared/member-summary';
 import { questV2TeamStates } from '../core/quest-v2.contract';
 
 const teamState = t.Union(
@@ -11,6 +12,7 @@ const teamState = t.Union(
 
 const memberSchema = t.Object({
   memberId: t.String({ format: 'uuid' }),
+  member: memberSummarySchema,
   joinedAt: t.String({ format: 'date-time' }),
 });
 
@@ -26,6 +28,7 @@ const teamSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
   leaderId: t.String({ format: 'uuid' }),
+  leader: memberSummarySchema,
   name: teamNameSchema,
   headcount: t.Integer({ minimum: 2, maximum: 20 }),
   state: teamState,
@@ -44,6 +47,11 @@ export const questV2CandidateTeamDetailParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
   teamId: t.String({ format: 'uuid' }),
 });
+
+export const questV2CandidateTeamListQuerySchema = t.Object(
+  { state: t.Optional(teamState) },
+  { additionalProperties: false }
+);
 
 export const questV2CandidateTeamMemberParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
@@ -120,6 +128,7 @@ export const questV2CandidateTeamListResponseSchema = t.Object({
 });
 
 export type QuestV2CandidateTeamParams = Static<typeof questV2CandidateTeamParamsSchema>;
+export type QuestV2CandidateTeamListQuery = Static<typeof questV2CandidateTeamListQuerySchema>;
 export type QuestV2CandidateTeamDetailParams = Static<
   typeof questV2CandidateTeamDetailParamsSchema
 >;

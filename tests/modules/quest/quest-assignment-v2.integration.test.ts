@@ -517,6 +517,10 @@ describe('Quest Assignment API v2', () => {
       'idempotency-key': 'assignment-v2-read-command',
     });
     expect(join.status).toBe(200);
+    expect((await join.json()).data.member).toMatchObject({
+      id: worker.id,
+      displayName: 'Assignment Worker',
+    });
 
     const workerRead = await request(`/api/v2/quests/${questId}/assignments`, 'GET', worker.id);
     expect(workerRead.status).toBe(200);
@@ -524,7 +528,26 @@ describe('Quest Assignment API v2', () => {
 
     const hirerRead = await request(`/api/v2/quests/${questId}/assignments`, 'GET', hirer.id);
     expect(hirerRead.status).toBe(200);
-    expect((await hirerRead.json()).data.items).toHaveLength(1);
+    const hirerItems = (await hirerRead.json()).data.items as Array<{
+      workerId: string;
+      startedAt: string | null;
+      member: Record<string, unknown>;
+    }>;
+    expect(hirerItems).toHaveLength(1);
+    expect(hirerItems[0]?.startedAt).toBeNull();
+    expect(hirerItems[0]?.member).toMatchObject({
+      id: worker.id,
+      displayName: 'Assignment Worker',
+      avatar: null,
+    });
+    expect(Object.keys(hirerItems[0]?.member ?? {}).sort()).toEqual([
+      'avatar',
+      'department',
+      'displayName',
+      'faculty',
+      'id',
+      'ratingAverage',
+    ]);
 
     const mine = await request('/api/v2/assignments/mine', 'GET', worker.id);
     expect(mine.status).toBe(200);
@@ -569,13 +592,19 @@ describe('Quest Assignment API v2', () => {
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
-      data: { items: Array<{ workerId: string; state: string }> };
+      data: {
+        items: Array<{ workerId: string; state: string; member: { displayName: string } }>;
+      };
     };
     expect(body.data.items).toHaveLength(2);
     expect(body.data.items.map(({ workerId }) => workerId)).toEqual(
       expect.arrayContaining([worker.id, secondWorker.id])
     );
     expect(body.data.items.every(({ state }) => state === 'ASSIGNMENT_COMPLETED')).toBe(true);
+    expect(body.data.items.map(({ member }) => member.displayName).sort()).toEqual([
+      'Assignment Worker',
+      'Second Worker',
+    ]);
   });
 
   it('filters the authenticated Worker assignments by active, completed, or all status', async () => {
