@@ -3,7 +3,6 @@ import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { quest, questLocation } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, publishQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import { ensureInitialMoneyPolicy, ensureWallet } from '@/modules/wallet';
 import {
@@ -19,6 +18,8 @@ import { randomUUID } from 'node:crypto';
 import { Elysia } from 'elysia';
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const testEmail = `quest-v2-publish-${randomUUID()}@ku.th`;
 const testPassword = 'TestStudent1!';

@@ -11,7 +11,6 @@ import {
   type AdminOverviewQuestState,
 } from '@/modules/admin/admin-overview.contract';
 import type { AdminOverviewData } from '@/modules/admin/admin-overview.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import {
   createPayoutDestinationEncryption,
@@ -28,6 +27,8 @@ import {
 import { Elysia } from 'elysia';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { eq, inArray } from 'drizzle-orm';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const adminEmail = `admin-overview-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';

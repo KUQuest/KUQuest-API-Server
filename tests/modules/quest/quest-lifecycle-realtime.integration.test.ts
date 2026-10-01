@@ -8,7 +8,6 @@ import {
   questCommand,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 import { createQuestV2, formatQuestV2ScheduleTime, type QuestV2CreateInput } from '@/modules/quest';
 import { assignmentStatus, questStatus } from '@/modules/quest/shared';
@@ -29,6 +28,7 @@ import { Elysia } from 'elysia';
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 import { QuestWebSocketClient } from './quest-update-test-client';
 import { randomUUID } from 'node:crypto';
 

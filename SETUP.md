@@ -168,17 +168,32 @@ bun run db:studio             # Launch Drizzle Studio web interface
 bun run db:reset-local        # Reset local database (caution: wipes data)
 ```
 
-### Database Seeding Scripts
+### Demo seed flow
 
 ```bash
-# Seed initial Admin user (requires .env.admin with credentials)
-bun --env-file=.env.admin run db:seed-admin
-
-# Seed demo users & test data
-bun run db:seed-demo-users
-bun run db:seed-frontend-demo
-bun run db:seed-finance-test
+# Apply reference data, then run Tags → Admin → Members → funded Quests.
+# Configure Admin credentials, STAGING_TEST_AUTH_PASSWORD, and S3 storage first.
+bun run db:migrate
+bun --env-file=.env.admin run db:seed-staging
+bun --env-file=.env.admin run db:verify-staging-seed
 ```
+
+The dedicated Member step creates exactly 10 demo Members with complete Academic
+Registration, Profile pictures, Portfolio items, Certificates, and Work Experience.
+The Quest step creates one v2 Published Quest per Member with an illustrative
+picture and a start date 30–120 days after the first run. Due dates are seven days
+later. Each new Wallet has ฿1,000 in Spending Balance after funding its Quest.
+
+Mobile debug login lists these same 10 Members by name. All share the configured
+`STAGING_TEST_AUTH_PASSWORD`. Login does not create Members. Normal Google login
+remains the Member login method outside staging debug use.
+
+For a focused rerun, use `db:seed-demo-users` or `db:seed-demo-quests` in that order.
+Reruns keep Member and Quest identities, do not add starter funds again, and preserve
+Quest participation and terminal decisions. They do not restore money spent later.
+The old frontend, image, staging-test-user, and finance-test seed commands are removed.
+The flow no longer creates extra finance Members, completed Quests, Reviews,
+Dispute Cases, Payout Destinations, or pending Payouts.
 
 ### Migration Guidelines
 
