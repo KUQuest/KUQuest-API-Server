@@ -5,7 +5,6 @@ import {
   adminDisputeCase,
   adminReportCase,
   adminReporterEntry,
-  memberPenaltyRecord,
 } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { paymentPayouts } from '@/database/schema/payment.schema';
@@ -13,11 +12,13 @@ import { chatMembership, chatMessage } from '@/database/schema/work-chat.schema'
 import { quest, questAssignment } from '@/database/schema/quest.schema';
 import { walletWallet } from '@/database/schema/wallet.schema';
 
-import { and, eq, exists, not, or, sql } from 'drizzle-orm';
+import { and, eq, exists, or, sql } from 'drizzle-orm';
 import type { SQLWrapper } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import { formatDisplayIdSql } from './admin-display-id';
+import { adminMemberStatusSql } from './admin-member-status';
+import type { AdminMemberStatus } from './admin-member.schema';
 import { adminSearchResultLimit } from './admin-search.schema';
 import type { AdminSearchItem, AdminSearchKind } from './admin-search.schema';
 
@@ -31,6 +32,9 @@ type SearchRow = {
   newestAt: Date | null;
 };
 
+type MemberSearchRow = Omit<SearchRow, 'status'> & { status: AdminMemberStatus };
+type NonMemberAdminSearchKind = Exclude<AdminSearchKind, 'member'>;
+
 const maxResults = adminSearchResultLimit;
 
 const reportReportedMember = alias(authUser, 'admin_search_report_member');
@@ -40,9 +44,11 @@ const disputeResolvedWorker = alias(authUser, 'admin_search_dispute_resolved_wor
 const disputeReportedWorker = alias(authUser, 'admin_search_dispute_reported_worker');
 const conductReportedMember = alias(authUser, 'admin_search_conduct_reported_member');
 
-const memberStatusLabels: Record<string, string> = {
-  ACTIVE: 'Active',
-  BANNED: 'Banned',
+const memberStatusLabels: Record<AdminMemberStatus, string> = {
+  NORMAL: 'Normal',
+  RED_FLAG: 'Red Flag',
+  TEMPORARY_BAN: 'Temporary Ban',
+  PERMANENT_BAN: 'Permanent Ban',
 };
 
 const questStatusLabels: Record<string, string> = {
@@ -145,38 +151,8 @@ const searchPredicate = (
 const newestFirstOrder = (createdAt: SQLWrapper, id: SQLWrapper) =>
   sql`case when ${createdAt} is null then 1 else 0 end, ${createdAt} desc, ${id} desc`;
 
-const memberPenaltyReversal = alias(memberPenaltyRecord, 'admin_search_member_penalty_reversal');
-
-const memberSearchStatus = () => {
-  const permanentBanWithoutReversal = exists(
-    db
-      .select({ id: memberPenaltyRecord.id })
-      .from(memberPenaltyRecord)
-      .where(
-        and(
-          eq(memberPenaltyRecord.memberId, authUser.id),
-          eq(memberPenaltyRecord.result, 'PENALTY_PERMANENT_BAN'),
-          not(
-            exists(
-              db
-                .select({ id: memberPenaltyReversal.id })
-                .from(memberPenaltyReversal)
-                .where(eq(memberPenaltyReversal.reversalOfRecordId, memberPenaltyRecord.id))
-            )
-          )
-        )
-      )
-  );
-
-  return sql<string>`case
-    when ${authUser.bannedUntil} > now() or ${permanentBanWithoutReversal}
-    then 'BANNED'
-    else 'ACTIVE'
-  end`;
-};
-
-const searchMembers = async (query: string): Promise<SearchRow[]> => {
-  const status = memberSearchStatus();
+const searchMembers = async (query: string): Promise<MemberSearchRow[]> => {
+  const status = adminMemberStatusSql();
   return db
     .select({
       id: authUser.id,
@@ -469,8 +445,9 @@ const searchActivity = async (query: string): Promise<SearchRow[]> =>
     .orderBy(newestFirstOrder(adminAction.createdAt, adminAction.id))
     .limit(maxResults);
 
-const searches: Record<AdminSearchKind, (query: string) => Promise<SearchRow[]>> = {
-  member: searchMembers,
+type NonMemberSearchItem = Exclude<AdminSearchItem, { kind: 'member' }>;
+
+const searches: Record<NonMemberAdminSearchKind, (query: string) => Promise<SearchRow[]>> = {
   quest: searchQuests,
   payout: searchPayouts,
   dispute: searchDisputes,
@@ -480,7 +457,17 @@ const searches: Record<AdminSearchKind, (query: string) => Promise<SearchRow[]>>
   activity: searchActivity,
 };
 
-const toItems = (kind: AdminSearchKind, rows: SearchRow[]): AdminSearchItem[] =>
+const toMemberItem = (row: MemberSearchRow): Extract<AdminSearchItem, { kind: 'member' }> => ({
+  kind: 'member',
+  id: row.id,
+  resourceId: row.resourceId,
+  ...(row.studentId === undefined ? {} : { studentId: row.studentId }),
+  title: row.title,
+  status: row.status,
+  newestAt: row.newestAt?.toISOString() ?? null,
+});
+
+const toItems = (kind: NonMemberAdminSearchKind, rows: SearchRow[]): NonMemberSearchItem[] =>
   rows.map((row) => ({
     kind,
     id: row.id,
@@ -496,6 +483,10 @@ export const searchAdminRecords = async (
   query: string,
   kind: AdminSearchKind
 ): Promise<AdminSearchItem[]> => {
+  if (kind === 'member') {
+    return (await searchMembers(query)).map(toMemberItem).slice(0, maxResults);
+  }
+
   const rows = await searches[kind](query);
   return toItems(kind, rows).slice(0, maxResults);
 };

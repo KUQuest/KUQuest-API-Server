@@ -29,6 +29,8 @@ const adminPassword = 'AdminSearchPass1!';
 const memberId = crypto.randomUUID();
 const studentId = String(Math.floor(1000000000 + Math.random() * 9000000000));
 const reportedMemberId = crypto.randomUUID();
+const restrictionMemberId = crypto.randomUUID();
+const restrictionStudentId = String(Math.floor(1000000000 + Math.random() * 9000000000));
 const resultLimitMemberIds: string[] = [];
 for (let index = 0; index < 13; index += 1) resultLimitMemberIds.push(crypto.randomUUID());
 const questId = crypto.randomUUID();
@@ -122,6 +124,16 @@ beforeAll(async () => {
     email: `${reportedMemberId}@ku.th`,
     firstName: 'Search',
     lastName: 'Reported',
+  });
+
+  await db.insert(authUser).values({
+    id: restrictionMemberId,
+    email: `${restrictionMemberId}@ku.th`,
+    firstName: 'Search',
+    lastName: 'Restricted',
+    studentId: restrictionStudentId,
+    redFlagExpiresAt: new Date('2099-01-01T00:00:00.000Z'),
+    createdAt: recordCreatedAt,
   });
 
   const resultLimitMembers: (typeof authUser.$inferInsert)[] = [];
@@ -283,6 +295,7 @@ afterAll(async () => {
   await db.delete(questAssignment).where(eq(questAssignment.id, assignmentId));
   await db.delete(quest).where(eq(quest.id, questId));
   await db.delete(tag).where(eq(tag.id, tagId));
+  await db.delete(authUser).where(eq(authUser.id, restrictionMemberId));
   await db.delete(authUser).where(eq(authUser.id, reportedMemberId));
   await db.delete(authUser).where(inArray(authUser.id, resultLimitMemberIds));
   // The immutable Wallet and Admin Action fixtures keep their owner identities.
@@ -296,7 +309,19 @@ describe('GET /api/v1/admin/search', () => {
       resourceId: memberId,
       studentId,
       title: 'Search Member',
-      status: 'ACTIVE',
+      status: 'NORMAL',
+      newestAt: recordCreatedAt.toISOString(),
+    });
+  });
+
+  it('returns a canonical restriction status for a Member Search result', async () => {
+    await expectSearchItem(restrictionStudentId, 'member', {
+      kind: 'member',
+      id: restrictionMemberId,
+      resourceId: restrictionMemberId,
+      studentId: restrictionStudentId,
+      title: 'Search Restricted',
+      status: 'RED_FLAG',
       newestAt: recordCreatedAt.toISOString(),
     });
   });

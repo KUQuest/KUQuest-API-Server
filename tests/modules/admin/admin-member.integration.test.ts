@@ -1,5 +1,6 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
+import { memberPenaltyRecord, type MemberPenaltyResult } from '@/database/schema/admin.schema';
 import { department, faculty, occupation } from '@/database/schema/academic.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
@@ -141,6 +142,151 @@ describe('Admin Members Endpoints Integration Tests', () => {
       expect(m.occupation).toContain('Student');
       expect(m.wallet).not.toBeNull();
       expect(m.wallet.walletStatus).toBe('ACTIVE');
+      expect(m.memberStatus).toBe('NORMAL');
+    });
+
+    it('classifies active restrictions and ignores expired or reversed penalties', async () => {
+      const marker = `restriction-${crypto.randomUUID()}`;
+      const now = new Date();
+      const recentCreatedAt = new Date(now.getTime() - 60_000);
+      const sevenDayExpiry = new Date(recentCreatedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const redFlagExpiry = new Date(recentCreatedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const oneMonthExpiry = new Date(recentCreatedAt);
+      oneMonthExpiry.setUTCMonth(oneMonthExpiry.getUTCMonth() + 1);
+      const expired = new Date('2000-01-01T00:00:00.000Z');
+      const cases: {
+        lastName: string;
+        expected: 'NORMAL' | 'RED_FLAG' | 'TEMPORARY_BAN' | 'PERMANENT_BAN';
+        bannedUntil?: Date;
+        redFlagExpiresAt?: Date;
+        penaltyCreatedAt?: Date;
+        penalties: {
+          result: MemberPenaltyResult;
+          reversed?: boolean;
+          source?: 'REPORT_CASE' | 'CONDUCT_REPORT';
+        }[];
+      }[] = [
+        {
+          lastName: 'RedFlag',
+          expected: 'RED_FLAG',
+          redFlagExpiresAt: redFlagExpiry,
+          penalties: [{ result: 'PENALTY_RED_FLAG' }],
+        },
+        {
+          lastName: 'SevenDayBan',
+          expected: 'TEMPORARY_BAN',
+          bannedUntil: sevenDayExpiry,
+          penalties: [{ result: 'PENALTY_TEMPORARY_BAN_7_DAYS' }],
+        },
+        {
+          lastName: 'OneMonthBan',
+          expected: 'TEMPORARY_BAN',
+          bannedUntil: oneMonthExpiry,
+          penalties: [{ result: 'PENALTY_TEMPORARY_BAN_1_MONTH' }],
+        },
+        {
+          lastName: 'PermanentBan',
+          expected: 'PERMANENT_BAN',
+          penalties: [{ result: 'PENALTY_PERMANENT_BAN' }],
+        },
+        {
+          lastName: 'Expired',
+          expected: 'NORMAL',
+          bannedUntil: expired,
+          redFlagExpiresAt: expired,
+          penaltyCreatedAt: expired,
+          penalties: [{ result: 'PENALTY_RED_FLAG' }, { result: 'PENALTY_TEMPORARY_BAN_7_DAYS' }],
+        },
+        {
+          lastName: 'ReversedPermanentBan',
+          expected: 'NORMAL',
+          penalties: [{ result: 'PENALTY_PERMANENT_BAN', source: 'REPORT_CASE', reversed: true }],
+        },
+        {
+          lastName: 'OverlappingRedFlagAndBan',
+          expected: 'TEMPORARY_BAN',
+          bannedUntil: sevenDayExpiry,
+          redFlagExpiresAt: redFlagExpiry,
+          penalties: [{ result: 'PENALTY_RED_FLAG' }, { result: 'PENALTY_TEMPORARY_BAN_7_DAYS' }],
+        },
+        {
+          lastName: 'OverlappingAllRestrictions',
+          expected: 'PERMANENT_BAN',
+          bannedUntil: sevenDayExpiry,
+          redFlagExpiresAt: redFlagExpiry,
+          penalties: [
+            { result: 'PENALTY_RED_FLAG' },
+            { result: 'PENALTY_TEMPORARY_BAN_7_DAYS' },
+            { result: 'PENALTY_PERMANENT_BAN' },
+          ],
+        },
+      ];
+      const members = cases.map((restriction) => ({
+        id: crypto.randomUUID(),
+        email: `${crypto.randomUUID()}@ku.th`,
+        firstName: marker,
+        lastName: restriction.lastName,
+        bannedUntil: restriction.bannedUntil ?? null,
+        redFlagExpiresAt: restriction.redFlagExpiresAt ?? null,
+      }));
+      const penaltyRows: (typeof memberPenaltyRecord.$inferInsert)[] = [];
+
+      // Retain these Members because their penalty records are immutable.
+      await db.insert(authUser).values(members);
+
+      for (const [index, restriction] of cases.entries()) {
+        const member = members[index]!;
+        const sequenceByLadder = new Map<string, number>();
+        for (const penalty of restriction.penalties) {
+          const isReviewPenalty = penalty.result === 'PENALTY_TEMPORARY_BAN_1_MONTH';
+          const ladder = isReviewPenalty ? 'REVIEW' : 'MISCONDUCT';
+          const source = isReviewPenalty ? 'REVIEW_AVERAGE' : (penalty.source ?? 'CONDUCT_REPORT');
+          const sequenceNumber = (sequenceByLadder.get(ladder) ?? 0) + 1;
+          sequenceByLadder.set(ladder, sequenceNumber);
+          const recordId = crypto.randomUUID();
+          const record: typeof memberPenaltyRecord.$inferInsert = {
+            id: recordId,
+            memberId: member.id,
+            ladder,
+            source,
+            sourceId: crypto.randomUUID(),
+            sequenceNumber,
+            result: penalty.result,
+            actorType: 'SYSTEM',
+            actorAdminId: null,
+            reasonCode: 'STATUS_FIXTURE',
+            createdAt: restriction.penaltyCreatedAt ?? recentCreatedAt,
+          };
+          penaltyRows.push(record);
+          if (penalty.reversed) {
+            penaltyRows.push({
+              ...record,
+              id: crypto.randomUUID(),
+              result: 'PENALTY_REVERSAL',
+              reversalOfRecordId: recordId,
+              createdAt: now,
+            });
+          }
+        }
+      }
+      await db.insert(memberPenaltyRecord).values(penaltyRows);
+
+      const response = await app.handle(
+        new Request(`http://localhost/api/v1/admin/members?search=${marker}`, {
+          headers: { cookie: adminCookie },
+        })
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      const statuses = Object.fromEntries(
+        body.data.items.map((item: { lastName: string; memberStatus: string }) => [
+          item.lastName,
+          item.memberStatus,
+        ])
+      );
+      expect(statuses).toEqual(
+        Object.fromEntries(cases.map(({ lastName, expected }) => [lastName, expected]))
+      );
     });
 
     const memberListRequest = (params: URLSearchParams) =>

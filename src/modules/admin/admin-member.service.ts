@@ -15,6 +15,7 @@ import type {
   AdminMemberListItem,
   AdminMemberListQuery,
 } from './admin-member.schema';
+import { adminMemberStatusSql } from './admin-member-status';
 
 export type AdminMemberListPage = {
   items: AdminMemberListItem[];
@@ -62,6 +63,7 @@ export const listAdminMembers = async (
           departmentName: department.name,
           facultyName: faculty.name,
           occupationName: occupation.name,
+          memberStatus: adminMemberStatusSql(),
           walletId: walletWallet.id,
           walletStatus: walletWallet.walletStatus,
           spendingBalanceSatang: walletWallet.spendingBalanceSatang,
@@ -109,6 +111,7 @@ export const listAdminMembers = async (
       department: r.departmentName,
       occupation: r.occupationName,
       wallet,
+      memberStatus: r.memberStatus,
       createdAt: r.createdAt.toISOString(),
     };
   });
