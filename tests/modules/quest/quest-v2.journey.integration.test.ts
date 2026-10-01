@@ -353,7 +353,12 @@ describe('Quest API v2 Hirer journey', () => {
       );
       expect(mineResponse.status).toBe(200);
       const mineItems = (await mineResponse.json()).data.items as Array<Record<string, unknown>>;
-      const { images: _images, ...canonicalQuest } = detail.data;
+      const {
+        images: _images,
+        dispute: _dispute,
+        moneyHold: _moneyHold,
+        ...canonicalQuest
+      } = detail.data;
       expect(mineItems).toContainEqual(canonicalQuest);
     }
   );

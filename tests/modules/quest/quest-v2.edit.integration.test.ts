@@ -592,6 +592,7 @@ describe('Quest Edit v2', () => {
     expect((await ownerRead.json()).data.responses).toMatchObject([
       {
         workerId: worker.id,
+        member: { id: worker.id, displayName: expect.stringMatching(/\S/) },
         decision: 'EDIT_RESPONSE_DECLINED',
         reason: 'The scope is not clear',
       },

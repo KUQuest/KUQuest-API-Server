@@ -1,5 +1,6 @@
 import { t, type Static } from 'elysia';
 
+import { memberSummarySchema } from '../../shared/member-summary';
 import { questV2AssignmentStates, questV2States } from '../core/quest-v2.contract';
 import { questV2UnderfilledSummarySchema } from '../lifecycle/quest-underfilled-v2.schema';
 
@@ -43,6 +44,7 @@ const assignmentSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
   workerId: t.String({ format: 'uuid' }),
+  member: memberSummarySchema,
   state,
   questState,
   startedAt: t.Nullable(t.String({ format: 'date-time' })),

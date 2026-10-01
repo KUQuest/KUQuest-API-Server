@@ -195,6 +195,8 @@ describe('Quest v2 Participation Detail', () => {
       id: assignedQuest,
       state: 'QUEST_ASSIGNED',
       assignment: { status: 'ASSIGNMENT_ACTIVE', startedAt: null },
+      workerSettlement: null,
+      questFundingTotal: 20,
       capabilities: { canViewOnly: false },
     });
 
@@ -243,6 +245,11 @@ describe('Quest v2 Participation Detail', () => {
       id: terminalQuest,
       state,
       assignment: { status: assignment },
+      workerSettlement: {
+        status: assignment === assignmentStatus.completed ? 'PENDING' : 'NO_PAYMENT',
+        amountSatang: assignment === assignmentStatus.completed ? null : 0,
+        settledAt: null,
+      },
       capabilities: { canViewOnly: true },
     });
   });
@@ -260,6 +267,23 @@ describe('Quest v2 Participation Detail', () => {
 
     const body = (await (await getParticipation(startedQuest)).json()) as ParticipationBody;
     expect(body.data.assignment.startedAt).toBe('2030-08-26T03:30:00.000Z');
+    expect(body.data).toMatchObject({ activeWorkerCount: 1, startedWorkerCount: 1 });
+  });
+
+  it('counts started Active Workers without naming them', async () => {
+    const groupQuest = await createPublishedQuest();
+    await assign(groupQuest);
+    await db.insert(questAssignment).values({
+      questId: groupQuest,
+      workerId: ownerId,
+      assignmentStatus: assignmentStatus.active,
+      startedAt: new Date('2030-08-26T03:30:00.000Z'),
+    });
+    await setQuestState(groupQuest, questStatus.inProgress);
+
+    const body = (await (await getParticipation(groupQuest)).json()) as ParticipationBody;
+    expect(body.data).toMatchObject({ activeWorkerCount: 2, startedWorkerCount: 1 });
+    expect(body.data.assignment.startedAt).toBeNull();
   });
 
   it('refuses every caller without an Assignment on the Quest', async () => {
@@ -340,6 +364,7 @@ describe('Quest v2 Participation Detail', () => {
       'capabilities',
       'condition',
       'description',
+      'dispute',
       'dueAt',
       'hasJoined',
       'headcount',
@@ -350,13 +375,17 @@ describe('Quest v2 Participation Detail', () => {
       'images',
       'locations',
       'mode',
+      'moneyHold',
       'participation',
       'proofRequired',
+      'questFundingTotal',
       'questReward',
       'startTime',
+      'startedWorkerCount',
       'state',
       'tag',
       'title',
+      'workerSettlement',
     ]);
     expect(Object.keys(body.data.capabilities as object)).toEqual(['canViewOnly']);
   });

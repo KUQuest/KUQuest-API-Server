@@ -12,7 +12,7 @@ import {
 import { purgeExpiredProviderEventPayloads } from '@/modules/top-up';
 import { cleanupExpiredWorkChatAttachments } from '@/modules/work-chat';
 
-import { and, asc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lte } from 'drizzle-orm';
 
 import {
   assignmentStatus,
@@ -20,6 +20,8 @@ import {
   questParticipation,
   questStatus,
 } from '../shared/contracts/quest.contract';
+import { disputeSelfFileWindowMs } from '../admin/quest-dispute-admin.service';
+import { notifyQuestUpdate } from '../v2/realtime';
 import { readQuestEscrow, releaseQuestEscrow } from '../shared/escrow/quest-escrow.service';
 import { autoApproveDueProofs } from '../v1';
 import { cancelUnfilledQuest, failQuestInTransaction } from '../settlement';
@@ -77,6 +79,7 @@ export type QuestLifecycleWorkerError = {
     | 'underfilled-detection'
     | 'underfilled-timeout'
     | 'failure-hold-release'
+    | 'dispute-window-close'
     | 'invitation-expiry'
     | 'edit-timeout'
     | 'auto-approval'
@@ -95,6 +98,7 @@ export type QuestLifecycleWorkerResult = {
   timedOutUnderfilledQuestIds: string[];
   failedQuestIds: string[];
   releasedFailedQuestIds: string[];
+  closedDisputeWindowQuestIds: string[];
   timedOutEditRequestIds: string[];
   expiredInvitationIds: string[];
   autoApprovedProofIds: string[];
@@ -399,6 +403,59 @@ const releaseFailedQuestReservation = async (questId: string, now: Date): Promis
     return true;
   });
 
+const dueDisputeWindowCloseIds = async (now: Date, limit: number) =>
+  db
+    .select({ id: quest.id })
+    .from(quest)
+    .where(
+      and(
+        eq(quest.apiVersion, questApiVersion.v2),
+        eq(quest.questStatus, questStatus.failed),
+        isNull(quest.disputeWindowClosedNotifiedAt),
+        lte(quest.failedAt, new Date(now.getTime() - disputeSelfFileWindowMs))
+      )
+    )
+    .orderBy(asc(quest.failedAt), asc(quest.id))
+    .limit(limit);
+
+/** Tells the Hirer and every Worker once that the self-file Dispute window ended. */
+const closeDisputeWindow = async (questId: string, now: Date): Promise<boolean> =>
+  db.transaction(async (transaction) => {
+    const [current] = await transaction
+      .select({ hirerId: quest.hirerId, failedAt: quest.failedAt })
+      .from(quest)
+      .where(
+        and(
+          eq(quest.id, questId),
+          eq(quest.questStatus, questStatus.failed),
+          isNull(quest.disputeWindowClosedNotifiedAt)
+        )
+      )
+      .for('update');
+    if (
+      !current?.failedAt ||
+      current.failedAt.getTime() > now.getTime() - disputeSelfFileWindowMs
+    ) {
+      return false;
+    }
+    await transaction
+      .update(quest)
+      .set({ disputeWindowClosedNotifiedAt: now })
+      .where(eq(quest.id, questId));
+    const workers = await transaction
+      .select({ workerId: questAssignment.workerId })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, questId));
+    await notifyQuestUpdate(transaction, {
+      questId,
+      recipientMemberIds: [
+        ...new Set([current.hirerId, ...workers.map(({ workerId }) => workerId)]),
+      ],
+      changeType: 'DISPUTE_WINDOW_CLOSED',
+    });
+    return true;
+  });
+
 const dueUnfilledQuestIds = async (now: Date, limit: number) =>
   db
     .select({ id: quest.id })
@@ -579,6 +636,14 @@ export const runQuestLifecycleWorker = async (
     options.onError
   );
 
+  const closedDisputeWindowQuestIds = await processIds(
+    (await dueDisputeWindowCloseIds(now, limit)).map(({ id }) => id),
+    'dispute-window-close',
+    (id) => closeDisputeWindow(id, now),
+    errors,
+    options.onError
+  );
+
   const timedOutLegacyEditRequestIds = await processIds(
     (await pendingEditRequestIds(limit)).map(({ id }) => id),
     'edit-timeout',
@@ -629,6 +694,7 @@ export const runQuestLifecycleWorker = async (
     timedOutUnderfilledQuestIds,
     failedQuestIds: [...failedQuestIds, ...legacyFailedQuestIds],
     releasedFailedQuestIds,
+    closedDisputeWindowQuestIds,
     timedOutEditRequestIds: [...timedOutLegacyEditRequestIds, ...timedOutV2EditRequestIds],
     expiredInvitationIds,
     autoApprovedProofIds,

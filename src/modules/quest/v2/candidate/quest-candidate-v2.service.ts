@@ -659,7 +659,8 @@ export const selectQuestV2CandidateApplication = async (
 
 export const listQuestV2CandidateApplications = async (
   memberId: string,
-  questId: string
+  questId: string,
+  state?: string
 ): Promise<QuestV2CandidateApplicationReadOutcome> => {
   const [current] = await db
     .select({
@@ -686,7 +687,7 @@ export const listQuestV2CandidateApplications = async (
     )
     .orderBy(asc(questCandidateApplicationV2.appliedAt), asc(questCandidateApplicationV2.id));
   if (current.hirerId !== memberId && rows.length === 0) return { outcome: 'not-authorized' };
-  return rows.map(toApplicationRow);
+  return rows.map(toApplicationRow).filter((row) => state === undefined || row.state === state);
 };
 
 export const getQuestV2CandidateApplication = async (

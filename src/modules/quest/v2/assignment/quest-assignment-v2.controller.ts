@@ -18,6 +18,7 @@ import type {
 import { WorkChatTransitionError } from '../../shared/work-chat/quest-work-chat.port';
 import { mapQuestStartWorkOutcome } from '../../shared/quest-start-work.controller';
 import { startQuestWork } from '../../shared/quest-start-work.service';
+import { loadMemberSummaries } from '../../shared/member-summary';
 
 type QuestV2Assignment = Extract<QuestV2AssignmentOutcome, { id: string }>;
 type QuestV2AssignmentError = Exclude<QuestV2AssignmentOutcome, QuestV2Assignment>;
@@ -31,6 +32,14 @@ const serializeAssignment = (assignment: QuestV2Assignment) => ({
   startedAt: assignment.startedAt?.toISOString() ?? null,
   createdAt: assignment.createdAt.toISOString(),
 });
+
+const serializeAssignments = async (assignments: QuestV2Assignment[]) => {
+  const memberOf = await loadMemberSummaries(assignments.map(({ workerId }) => workerId));
+  return assignments.map((assignment) => ({
+    ...serializeAssignment(assignment),
+    member: memberOf(assignment.workerId),
+  }));
+};
 
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 409;
@@ -97,7 +106,8 @@ export const joinQuestV2Controller = async ({
   try {
     const result = await joinQuestV2(session.user.id, params.questId, commandId, new Date());
     if ('outcome' in result) return mapJoinOutcome(set, result);
-    return apiSuccess(serializeAssignment(result));
+    const [assignment] = await serializeAssignments([result]);
+    return apiSuccess(assignment);
   } catch (error) {
     if (error instanceof WorkChatTransitionError) {
       set.status = 503;
@@ -137,15 +147,19 @@ export const listQuestV2AssignmentsController = async ({
 }: AuthedContext & { params: QuestV2AssignmentParams }) => {
   const result = await listQuestV2Assignments(session.user.id, params.questId);
   if ('outcome' in result) return mapReadOutcome(set);
-  return apiSuccess({ items: result.map(serializeAssignment) });
+  return apiSuccess({ items: await serializeAssignments(result) });
 };
 
 export const listMyQuestV2AssignmentsController = async ({
   query,
   session,
-}: AuthedContext & { query: QuestV2AssignmentMineQuery }) =>
-  apiSuccess({
-    items: (await listMyQuestV2Assignments(session.user.id, query.status)).map(
-      ({ underfilled, ...assignment }) => ({ ...serializeAssignment(assignment), underfilled })
-    ),
+}: AuthedContext & { query: QuestV2AssignmentMineQuery }) => {
+  const assignments = await listMyQuestV2Assignments(session.user.id, query.status);
+  const serialized = await serializeAssignments(assignments);
+  return apiSuccess({
+    items: serialized.map((assignment, index) => ({
+      ...assignment,
+      underfilled: assignments[index]?.underfilled ?? null,
+    })),
   });
+};

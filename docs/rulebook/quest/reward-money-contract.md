@@ -20,7 +20,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 ## Visibility rules
 
 - **Hirer reads**: May show `questFundingTotal`, `questReward`, `platformFee`, `platformFeeBps`, `feeRoundingMode`, `policyRevision`, and opaque `reservationId` for support and audit.
-- **Worker and public reads**: Show only the applicable `questReward`. They do not show Platform Fee, Money Policy details, Wallet details, or Funding Reservation details.
+- **Worker and public reads**: Show the Hirer’s inclusive `questFundingTotal` per published Worker slot on discovery, and retain the applicable net `questReward` for acceptance and consent. The participation read exposes only the authenticated Worker’s settlement amount in integer satang and transfer status; `PAID` requires a durable Wallet credit. They do not show Platform Fee, Money Policy details, Wallet details, or Funding Reservation details.
 
 ## Settlement and failure rules
 

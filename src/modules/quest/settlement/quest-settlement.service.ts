@@ -50,7 +50,8 @@ export type QuestSettlementOutcome =
         | 'invalid-idempotency-key'
         | 'idempotency-key-reused'
         | 'idempotency-key-required'
-        | 'idempotency-unavailable';
+        | 'idempotency-unavailable'
+        | 'preview-stale';
     }
   | {
       questStatus: QuestStatus;
@@ -1571,7 +1572,8 @@ const settleV2CancellationInTransaction = async (
   hirerId: string,
   commandId: string,
   requestHash: string,
-  now: Date
+  now: Date,
+  expectedPreviewVersion?: string
 ): Promise<QuestSettlementOutcome> => {
   const current = await lockQuest(tx, questId);
   if (!current || current.apiVersion !== 'v2') return { outcome: 'not-found' };
@@ -1593,6 +1595,14 @@ const settleV2CancellationInTransaction = async (
     return { outcome: command.outcome };
   }
   if ('replay' in command) return command.replay;
+  if (
+    expectedPreviewVersion !== undefined &&
+    expectedPreviewVersion !==
+      (await cancelPreviewVersion(current, await activeAssignments(tx, questId)))
+  ) {
+    await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId));
+    return { outcome: 'preview-stale' };
+  }
 
   const result = await applyV2CancellationInTransaction(tx, current, hirerId, commandId, now);
   if (!('questStatus' in result)) return result;
@@ -1604,7 +1614,8 @@ export const cancelQuestV2 = async (
   hirerId: string,
   questId: string,
   rawCommandId: string,
-  now = new Date()
+  now = new Date(),
+  expectedPreviewVersion?: string
 ): Promise<QuestSettlementOutcome> => {
   const commandId = rawCommandId.trim();
   if (commandId.length === 0) return { outcome: 'idempotency-key-required' };
@@ -1617,8 +1628,95 @@ export const cancelQuestV2 = async (
     body: null,
   });
   return db.transaction((tx) =>
-    settleV2CancellationInTransaction(tx, questId, hirerId, commandId, requestHash, now)
+    settleV2CancellationInTransaction(
+      tx,
+      questId,
+      hirerId,
+      commandId,
+      requestHash,
+      now,
+      expectedPreviewVersion
+    )
   );
+};
+
+/** Opaque token of the Quest facts that decide the cancellation tier and amounts. */
+const cancelPreviewVersion = (current: LockedQuest, workers: Array<{ id: string }>) =>
+  hash({
+    questId: current.id,
+    status: current.questStatus,
+    version: current.version,
+    assignmentIds: workers.map(({ id }) => id).sort(),
+  });
+
+export type QuestV2CancelPreview = {
+  questStatus: QuestStatus;
+  tier: 'NO_PENALTY' | 'PARTIAL_PENALTY' | 'FULL_PENALTY';
+  paidSatang: number;
+  refundedSatang: number;
+  platformFeeSatang: number;
+  affectedWorkerCount: number;
+  computedAt: Date;
+  previewVersion: string;
+};
+
+class CancelPreviewRollback extends Error {
+  constructor(readonly preview: QuestV2CancelPreview) {
+    super('Cancel preview rolls back its trial cancellation');
+  }
+}
+
+/**
+ * Reads what an immediate `cancelQuestV2` would pay and refund. It runs the real cancellation
+ * inside a transaction that always rolls back, so the preview cannot drift from the command.
+ */
+export const previewQuestV2Cancellation = async (
+  hirerId: string,
+  questId: string,
+  now = new Date()
+): Promise<QuestV2CancelPreview | Extract<QuestSettlementOutcome, { outcome: string }>> => {
+  try {
+    return await db.transaction(async (tx) => {
+      const current = await lockQuest(tx, questId);
+      if (!current || current.apiVersion !== 'v2') return { outcome: 'not-found' as const };
+      if (current.hirerId !== hirerId) return { outcome: 'not-authorized' as const };
+      const workers = await activeAssignments(tx, questId);
+      const previewVersion = await cancelPreviewVersion(current, workers);
+      const escrow = await readQuestEscrow(tx, { ownerUserId: current.hirerId, questId });
+      const result = await applyV2CancellationInTransaction(
+        tx,
+        current,
+        hirerId,
+        `cancel-preview:${crypto.randomUUID()}`,
+        now
+      );
+      if (!('questStatus' in result)) {
+        return result as Extract<QuestSettlementOutcome, { outcome: string }>;
+      }
+      const tier =
+        current.questStatus === questStatus.inProgress
+          ? 'FULL_PENALTY'
+          : current.questStatus === questStatus.assigned
+            ? 'PARTIAL_PENALTY'
+            : 'NO_PENALTY';
+      throw new CancelPreviewRollback({
+        questStatus: current.questStatus,
+        tier,
+        paidSatang: result.paidSatang,
+        refundedSatang: result.refundedSatang,
+        platformFeeSatang: Math.max(
+          0,
+          (escrow?.remainingSatang ?? 0) - result.paidSatang - result.refundedSatang
+        ),
+        affectedWorkerCount: workers.length,
+        computedAt: now,
+        previewVersion,
+      });
+    });
+  } catch (error) {
+    if (error instanceof CancelPreviewRollback) return error.preview;
+    throw error;
+  }
 };
 
 /** A system cancellation authorises against the Hirer but attributes the cancellation to nobody. */
@@ -1911,6 +2009,12 @@ const autoCancelInTransaction = async (
       terminalChatEntry(current, questStatus.cancelled, commandId, now, null),
     ],
     actor: { actorType: 'SYSTEM' },
+  });
+  await notifyQuestUpdate(tx, {
+    questId,
+    recipientMemberIds: [...new Set([current.hirerId, ...workers.map(({ workerId }) => workerId)])],
+    closeMemberIds: workers.map(({ workerId }) => workerId),
+    changeType: 'QUEST_AUTO_CANCELLED',
   });
   const result: CommandResult = {
     questStatus: questStatus.cancelled,

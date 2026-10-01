@@ -517,6 +517,38 @@ describe('Quest Candidate Team API v2', () => {
     expect((await memberList.json()).data.items).toEqual([
       expect.objectContaining({ id: team.id, joinCode: null }),
     ]);
+    const withSummaries = await request(`/api/v2/quests/${questId}/teams`, 'GET', hirer.id);
+    expect((await withSummaries.json()).data.items[0]).toMatchObject({
+      leaderId: candidate.id,
+      leader: { id: candidate.id, displayName: 'Candidate Worker', avatar: null },
+      members: [
+        {
+          memberId: candidate.id,
+          member: { id: candidate.id, displayName: 'Candidate Worker' },
+        },
+      ],
+    });
+
+    const forming = await request(
+      `/api/v2/quests/${questId}/teams?state=TEAM_FORMING`,
+      'GET',
+      hirer.id
+    );
+    expect(forming.status).toBe(200);
+    expect((await forming.json()).data.items).toHaveLength(1);
+    const submitted = await request(
+      `/api/v2/quests/${questId}/teams?state=TEAM_SUBMITTED`,
+      'GET',
+      hirer.id
+    );
+    expect(submitted.status).toBe(200);
+    expect((await submitted.json()).data.items).toEqual([]);
+    const invalidState = await request(
+      `/api/v2/quests/${questId}/teams?state=NOPE`,
+      'GET',
+      hirer.id
+    );
+    expect(invalidState.status).toBe(400);
 
     const detail = await request(`/api/v2/quests/${questId}/teams/${team.id}`, 'GET', hirer.id);
     expect(detail.status).toBe(200);

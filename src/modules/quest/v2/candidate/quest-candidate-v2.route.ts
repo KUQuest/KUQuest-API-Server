@@ -16,6 +16,7 @@ import { listMyQuestV2CandidateApplications } from './quest-candidate-v2.service
 import {
   questV2CandidateApplicationHeadersSchema,
   questV2CandidateApplicationDetailParamsSchema,
+  questV2CandidateApplicationListQuerySchema,
   questV2CandidateApplicationListResponseSchema,
   questV2CandidateApplicationParamsSchema,
   questV2CandidateApplicationResponseSchema,
@@ -63,12 +64,13 @@ export const questCandidateV2Route = new Elysia({
   })
   .get('/quests/:questId/applications', listQuestV2CandidateApplicationsController, {
     params: questV2CandidateApplicationParamsSchema,
-    response: responses(questV2CandidateApplicationListResponseSchema, 401, 404, 500),
+    query: questV2CandidateApplicationListQuerySchema,
+    response: responses(questV2CandidateApplicationListResponseSchema, 400, 401, 404, 500),
     detail: {
       tags: ['Quest Candidates v2'],
       summary: 'List permitted v2 Candidate applications',
       description:
-        "The owning Hirer can list all applications. A Candidate can read only that Candidate's application.",
+        "The owning Hirer can list all applications. A Candidate can read only that Candidate's application. Pass `state` (for example APPLICATION_APPLIED) to keep one state. Every application carries a `member` summary.",
       operationId: 'listQuestApplicationsV2',
       security: betterAuthSecurity,
     },

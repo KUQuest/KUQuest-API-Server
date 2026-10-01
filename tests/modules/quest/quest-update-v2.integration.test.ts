@@ -652,6 +652,54 @@ describe('Quest v2 realtime updates', () => {
     }
   });
 
+  it('tells the Hirer stream when a Worker joins and when a Worker starts work', async () => {
+    const [hirer, worker, otherWorker] = sessions;
+    if (!hirer || !worker || !otherWorker) throw new Error('Test sessions are missing');
+    const joinQuestId = await createOpenGroupQuest();
+    const startQuestId = await createAssignedQuest([otherWorker.id]);
+    await db
+      .update(quest)
+      .set({ startTime: new Date(Date.now() - 60_000), dueAt: new Date(Date.now() + 3_600_000) })
+      .where(eq(quest.id, startQuestId));
+    const stream = await connectToApp(
+      randomUUID(),
+      hirer.cookie,
+      undefined,
+      '/api/v2/me/hirer-quests/events'
+    );
+    const post = (path: string, cookie: string) =>
+      app.handle(
+        new Request(`http://localhost${path}`, {
+          method: 'POST',
+          headers: { cookie, 'idempotency-key': `hirer-stream-${randomUUID()}` },
+        })
+      );
+    const nextChange = async () => {
+      const event = JSON.parse((await stream.client.nextText())!);
+      return [event.questId, event.changeType];
+    };
+
+    try {
+      expect(JSON.parse((await stream.client.nextText())!)).toEqual({
+        type: 'SUBSCRIBED',
+        version: 1,
+      });
+
+      expect((await post(`/api/v2/quests/${joinQuestId}/join`, worker.cookie)).status).toBe(200);
+      expect(await nextChange()).toEqual([joinQuestId, 'ASSIGNMENT_ROSTER_UPDATED']);
+      expect(await nextChange()).toEqual([joinQuestId, 'ASSIGNMENT_JOINED']);
+
+      expect(
+        (await post(`/api/v2/quests/${startQuestId}/start-work`, otherWorker.cookie)).status
+      ).toBe(200);
+      expect(await nextChange()).toEqual([startQuestId, 'ASSIGNMENT_STARTED']);
+      expect(await nextChange()).toEqual([startQuestId, 'QUEST_STARTED']);
+    } finally {
+      stream.client.destroy();
+      await stream.server.stop();
+    }
+  });
+
   it('authorizes assigned and in-progress Quests for both modes and participation shapes', async () => {
     const [, worker, otherWorker] = sessions;
     if (!worker || !otherWorker) throw new Error('Worker sessions are missing');

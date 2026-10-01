@@ -28,6 +28,7 @@ import {
 } from '@/modules/quest/v2/realtime';
 import {
   getEffectiveFundingReservationPolicy,
+  readRecipientFundingSettlement,
   MoneyDomainError,
   positiveSatang,
   reserveSpending,
@@ -258,6 +259,7 @@ export type QuestV2BoardCard = {
   id: string;
   title: string;
   questReward: number;
+  questFundingTotal: number;
   tag: { id: string; name: string };
   mode: QuestV2Mode;
   participation: QuestV2Participation;
@@ -304,6 +306,7 @@ export type QuestV2PublicDetail = {
   participation: QuestV2Participation;
   state: QuestV2State;
   questReward: number;
+  questFundingTotal: number;
   headcount: number;
   activeWorkerCount: number;
   startTime: string;
@@ -321,6 +324,12 @@ export type QuestV2PublicDetail = {
 
 export type QuestV2ParticipationDetail = QuestV2PublicDetail & {
   assignment: { status: AssignmentStatus; startedAt: string | null };
+  workerSettlement: {
+    status: 'PAID' | 'PENDING' | 'NO_PAYMENT';
+    amountSatang: number | null;
+    settledAt: string | null;
+  } | null;
+  startedWorkerCount: number;
   capabilities: { canViewOnly: boolean };
 };
 
@@ -375,6 +384,7 @@ type QuestV2BoardRow = {
   id: string;
   title: string;
   rewardSatang: number | null;
+  questFundingTotalSatang: number | null;
   tagId: string | null;
   tagName: string | null;
   v2Mode: QuestV2Mode | null;
@@ -418,6 +428,7 @@ type QuestV2PublicDetailRow = QuestV2BoardRow &
 
 type CompleteQuestV2DiscoveryRow = QuestV2BoardRow & {
   rewardSatang: number;
+  questFundingTotalSatang: number;
   tagId: string;
   tagName: string;
   v2Mode: QuestV2Mode;
@@ -426,6 +437,7 @@ type CompleteQuestV2DiscoveryRow = QuestV2BoardRow & {
 };
 
 const isCompleteQuestV2DiscoveryRow = (row: QuestV2BoardRow): row is CompleteQuestV2DiscoveryRow =>
+  row.questFundingTotalSatang !== null &&
   row.rewardSatang !== null &&
   row.tagId !== null &&
   row.tagName !== null &&
@@ -2692,6 +2704,14 @@ const activeWorkerCountExpression = sql<number>`(
     AND ${questAssignment.assignmentStatus} = ${assignmentStatus.active}
 )`;
 
+const startedWorkerCountExpression = sql<number>`(
+  SELECT COUNT(*)::int
+  FROM ${questAssignment}
+  WHERE ${questAssignment.questId} = ${quest.id}
+    AND ${questAssignment.assignmentStatus} = ${assignmentStatus.active}
+    AND ${questAssignment.startedAt} IS NOT NULL
+)`;
+
 const questV2PublicReadConditions = (userId: string) => [
   eq(quest.apiVersion, questApiVersion.v2),
   and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
@@ -2796,6 +2816,7 @@ const toQuestV2BoardCard = (
     id: row.id,
     title: row.title,
     questReward: toBaht(satang(row.rewardSatang)),
+    questFundingTotal: toBaht(satang(row.questFundingTotalSatang)),
     tag: { id: row.tagId, name: row.tagName },
     mode: row.v2Mode,
     participation: row.v2Participation,
@@ -2849,6 +2870,16 @@ export const listQuestBoardV2 = async (
   if (filters.maxQuestReward !== undefined) {
     conditions.push(sql`${quest.rewardSatang} <= ${parseBahtFilterSatang(filters.maxQuestReward)}`);
   }
+  if (filters.minQuestFundingTotal !== undefined) {
+    conditions.push(
+      sql`${quest.questFundingTotalSatang} >= ${parseBahtFilterSatang(filters.minQuestFundingTotal)}`
+    );
+  }
+  if (filters.maxQuestFundingTotal !== undefined) {
+    conditions.push(
+      sql`${quest.questFundingTotalSatang} <= ${parseBahtFilterSatang(filters.maxQuestFundingTotal)}`
+    );
+  }
   if (filters.maxDurationMinutes !== undefined) {
     conditions.push(
       sql`${quest.dueAt} IS NOT NULL AND EXTRACT(EPOCH FROM (${quest.dueAt} - ${quest.startTime})) / 60 <= ${filters.maxDurationMinutes}`
@@ -2865,6 +2896,7 @@ export const listQuestBoardV2 = async (
       id: quest.id,
       title: quest.title,
       rewardSatang: quest.rewardSatang,
+      questFundingTotalSatang: quest.questFundingTotalSatang,
       tagId: tag.id,
       tagName: tag.name,
       v2Mode: quest.v2Mode,
@@ -2938,6 +2970,7 @@ export const getPublicQuestV2Detail = async (
       title: quest.title,
       description: quest.description,
       rewardSatang: quest.rewardSatang,
+      questFundingTotalSatang: quest.questFundingTotalSatang,
       tagId: tag.id,
       tagName: tag.name,
       v2Mode: quest.v2Mode,
@@ -2991,6 +3024,7 @@ export const getPublicQuestV2Detail = async (
     participation: publicRow.v2Participation,
     state: toV2State(publicRow.questStatus),
     questReward: toBaht(satang(publicRow.rewardSatang)),
+    questFundingTotal: toBaht(satang(publicRow.questFundingTotalSatang)),
     headcount: publicRow.headcount,
     activeWorkerCount: Number(publicRow.activeWorkerCount),
     startTime: formatQuestV2ScheduleTime(publicRow.startTime),
@@ -3017,6 +3051,7 @@ export const getQuestV2ParticipationDetail = async (
       title: quest.title,
       description: quest.description,
       rewardSatang: quest.rewardSatang,
+      questFundingTotalSatang: quest.questFundingTotalSatang,
       tagId: tag.id,
       tagName: tag.name,
       v2Mode: quest.v2Mode,
@@ -3036,6 +3071,11 @@ export const getQuestV2ParticipationDetail = async (
       assignmentId: questAssignment.id,
       assignmentStatus: questAssignment.assignmentStatus,
       assignmentStartedAt: questAssignment.startedAt,
+      fundingReservationId: quest.fundingReservationId,
+      selectedTeamLeaderId: sql<
+        string | null
+      >`(select ${questCandidateTeamV2.leaderId} from ${questCandidateTeamV2} where ${questCandidateTeamV2.questId} = ${quest.id} and ${questCandidateTeamV2.state} = 'TEAM_SELECTED' limit 1)`,
+      startedWorkerCount: startedWorkerCountExpression,
     })
     .from(quest)
     .innerJoin(authUser, eq(quest.hirerId, authUser.id))
@@ -3072,6 +3112,32 @@ export const getQuestV2ParticipationDetail = async (
   ]);
   if (conditionItems.length === 0) throw new Error(`Quest ${questId} has no Condition Items`);
 
+  let workerSettlement: QuestV2ParticipationDetail['workerSettlement'] = null;
+  if (participationRow.assignmentStatus !== 'ASSIGNMENT_ACTIVE') {
+    const paid = row.fundingReservationId
+      ? await readRecipientFundingSettlement(db, row.fundingReservationId, userId)
+      : null;
+    if (paid) {
+      workerSettlement = {
+        status: 'PAID',
+        amountSatang: paid.amountSatang,
+        settledAt: paid.settledAt.toISOString(),
+      };
+    } else {
+      const receivesTeamReward =
+        participationRow.v2Mode !== 'CANDIDATE' ||
+        participationRow.v2Participation !== 'GROUP' ||
+        row.selectedTeamLeaderId === userId;
+      const pending =
+        participationRow.assignmentStatus === 'ASSIGNMENT_COMPLETED' && receivesTeamReward;
+      workerSettlement = {
+        status: pending ? 'PENDING' : 'NO_PAYMENT',
+        amountSatang: pending ? null : 0,
+        settledAt: null,
+      };
+    }
+  }
+
   return {
     id: participationRow.id,
     title: participationRow.title,
@@ -3082,6 +3148,7 @@ export const getQuestV2ParticipationDetail = async (
     participation: participationRow.v2Participation,
     state: toV2State(participationRow.questStatus),
     questReward: toBaht(satang(participationRow.rewardSatang)),
+    questFundingTotal: toBaht(satang(participationRow.questFundingTotalSatang)),
     headcount: participationRow.headcount,
     activeWorkerCount: Number(participationRow.activeWorkerCount),
     startTime: formatQuestV2ScheduleTime(participationRow.startTime),
@@ -3095,10 +3162,12 @@ export const getQuestV2ParticipationDetail = async (
     hasJoined: participationRow.assignmentId !== null,
     assignmentId: participationRow.assignmentId,
     assignmentStatus: participationRow.assignmentStatus as QuestV2AssignmentState | null,
+    workerSettlement,
     assignment: {
       status: participationRow.assignmentStatus,
       startedAt: participationRow.assignmentStartedAt?.toISOString() ?? null,
     },
+    startedWorkerCount: Number(row.startedWorkerCount),
     capabilities: {
       canViewOnly: isTerminalQuestStatus(participationRow.questStatus),
     },

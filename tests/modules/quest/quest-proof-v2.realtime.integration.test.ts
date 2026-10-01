@@ -627,7 +627,22 @@ describe('Quest Proof v2 realtime source updates', () => {
         headers: { cookie: leader.cookie },
       });
       expect(read.status).toBe(200);
-      expect(JSON.stringify(await read.json())).toContain('QUEST_COMPLETED');
+      const participation = await read.json();
+      expect(participation.data.state).toBe('QUEST_COMPLETED');
+      expect(participation.data.workerSettlement).toMatchObject({
+        status: 'PAID',
+        amountSatang: 2000,
+      });
+      expect(participation.data.workerSettlement.settledAt).toBeString();
+      const teammateRead = await fetch(`${origin}/api/v2/quests/${questId}/participation`, {
+        headers: { cookie: teammate.cookie },
+      });
+      expect(teammateRead.status).toBe(200);
+      expect((await teammateRead.json()).data.workerSettlement).toEqual({
+        status: 'NO_PAYMENT',
+        amountSatang: 0,
+        settledAt: null,
+      });
     } finally {
       for (const socket of sockets) socket.destroy();
       await server.stop();
@@ -733,6 +748,14 @@ describe('Quest Proof v2 realtime source updates', () => {
           version: 1,
           questId,
           changeType: 'QUEST_FAILED',
+        });
+      }
+      for (const socket of [hirerSocket, workerSocket]) {
+        expect(JSON.parse((await socket.nextText())!)).toEqual({
+          type: 'QUEST_UPDATED',
+          version: 1,
+          questId,
+          changeType: 'DISPUTE_WINDOW_OPENED',
         });
       }
       const review = await fetch(
@@ -995,6 +1018,7 @@ describe('Quest Proof v2 realtime source updates', () => {
           changeType: 'QUEST_FAILED',
         });
       }
+      expect(JSON.parse((await sockets[0]!.nextText())!).changeType).toBe('DISPUTE_WINDOW_OPENED');
       expect((await sockets[1]?.nextFrame())?.opcode).toBe(8);
       expect(result.failedQuestIds).toContain(questId);
       const read = await fetch(`http://127.0.0.1:${port}/api/v2/quests/${questId}`, {
