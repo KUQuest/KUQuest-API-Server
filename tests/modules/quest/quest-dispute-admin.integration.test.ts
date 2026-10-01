@@ -5,7 +5,6 @@ import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { quest, questAssignment, proofSubmission } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 import { autoApproveDueProofs, reviewProof } from '@/modules/quest/v1';
 import { createAdminDisputeCaseInTransaction } from '@/modules/quest/admin';
@@ -41,6 +40,9 @@ let postgresAvailable = false;
 let adminCookie = '';
 let memberCookie = '';
 /** Fixture Quests whose seeded queue rows must leave the shared queue. */
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
+
 const queueWalkQuestIds: string[] = [];
 const adminEmail = `dispute-admin-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';

@@ -9,7 +9,6 @@ import {
   questCommand,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import {
   assignmentStatus,
@@ -23,6 +22,8 @@ import { deleteTestIdempotencyKeys } from '../wallet/wallet-test-fixtures';
 import { Elysia } from 'elysia';
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const workerEmail = `quest-v2-participation-worker-${crypto.randomUUID()}@ku.th`;
 const outsiderEmail = `quest-v2-participation-outsider-${crypto.randomUUID()}@ku.th`;

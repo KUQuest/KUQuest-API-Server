@@ -5,7 +5,6 @@ import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment, questImage, questLocation } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import { questStatus } from '@/modules/quest/shared';
 import { deleteTestIdempotencyKeys } from '../wallet/wallet-test-fixtures';
@@ -13,6 +12,8 @@ import { deleteTestIdempotencyKeys } from '../wallet/wallet-test-fixtures';
 import { Elysia } from 'elysia';
 import { asc, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const testEmail = `quest-v2-discovery-${crypto.randomUUID()}@ku.th`;
 const testPassword = 'TestStudent1!';

@@ -9,7 +9,7 @@ import {
   questImage,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute, createStudentAuth } from '@/modules/auth';
+import { createStudentAuth } from '@/modules/auth';
 import { listOwnQuests } from '@/modules/quest/v1';
 import {
   createQuestV2,
@@ -35,6 +35,8 @@ import { randomUUID } from 'node:crypto';
 import { Elysia } from 'elysia';
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const testEmail = `quest-v2-${randomUUID()}@ku.th`;
 const testPassword = 'TestStudent1!';

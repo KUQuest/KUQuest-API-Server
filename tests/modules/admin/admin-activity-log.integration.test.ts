@@ -1,7 +1,6 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authAdmin } from '@/database/schema/auth.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { encodeCursor } from '@/shared/cursor';
 
@@ -27,6 +26,8 @@ type ActivityResponse = {
   data?: { items: ActivityEntry[]; nextCursor: string | null };
   error?: { code: string; message: string };
 };
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const adminEmail = `admin-activity-log-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';

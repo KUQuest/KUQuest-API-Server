@@ -20,7 +20,6 @@ import {
   questV2EditRequest,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import { encodeCursor } from '@/shared/cursor';
@@ -30,6 +29,8 @@ import { randomUUID } from 'node:crypto';
 import { Elysia } from 'elysia';
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const adminEmail = `quest-admin-route-${randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';

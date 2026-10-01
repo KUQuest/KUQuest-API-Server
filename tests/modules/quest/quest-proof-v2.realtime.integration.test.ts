@@ -11,7 +11,6 @@ import {
   questV2ProofSubmission,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, formatQuestV2ScheduleTime, type QuestV2CreateInput } from '@/modules/quest';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 import { positiveSatang, reserveSpending } from '@/modules/wallet';
@@ -22,6 +21,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { Elysia } from 'elysia';
 import { randomUUID } from 'node:crypto';
 
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 import { QuestWebSocketClient } from './quest-update-test-client';
 import {
   fundTestWallet,

@@ -5,7 +5,6 @@ import { authUser } from '@/database/schema/auth.schema';
 import { paymentPayouts } from '@/database/schema/payment.schema';
 import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import {
   createPayoutDestinationEncryption,
   savePayoutDestination,
@@ -23,6 +22,8 @@ import { encodeCursor } from '@/shared/cursor';
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { Elysia } from 'elysia';
 import { and, eq, gt, inArray } from 'drizzle-orm';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const adminEmail = `payout-admin-route-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';

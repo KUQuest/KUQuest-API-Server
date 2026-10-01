@@ -11,6 +11,12 @@ test_image=${KUQUEST_BOOTSTRAP_TEST_IMAGE:-kuquest-api:bootstrap-test}
 : "${ADMIN_PASSWORD:?ADMIN_PASSWORD must be supplied by the caller}"
 : "${STAGING_TEST_AUTH_PASSWORD:?STAGING_TEST_AUTH_PASSWORD must be supplied by the caller}"
 
+: "${S3_ENDPOINT:?S3_ENDPOINT must be supplied by the caller}"
+: "${S3_REGION:?S3_REGION must be supplied by the caller}"
+: "${S3_BUCKET:?S3_BUCKET must be supplied by the caller}"
+: "${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID must be supplied by the caller}"
+: "${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY must be supplied by the caller}"
+
 cleanup() {
   docker stop "$database_container" >/dev/null 2>&1 || true
   docker network rm "$test_id" >/dev/null 2>&1 || true
@@ -36,15 +42,13 @@ printf '%s\n' \
   'ADMIN_FIRST_NAME=Bootstrap' \
   'ADMIN_LAST_NAME=Administrator' \
   'STAGING_TEST_AUTH_ENABLED=true' \
-  'STAGING_TEST_AUTH_EMAIL=bootstrap-test@ku.th' \
   "STAGING_TEST_AUTH_PASSWORD=$STAGING_TEST_AUTH_PASSWORD" \
-  'STAGING_TEST_AUTH_FIRST_NAME=Bootstrap' \
-  'STAGING_TEST_AUTH_LAST_NAME=Student' \
-  'LOCAL_FINANCE_TEST_RECIPIENT_EMAIL=bootstrap-recipient@ku.th' \
-  'LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME=Bootstrap' \
-  'LOCAL_FINANCE_TEST_RECIPIENT_LAST_NAME=Recipient' \
   'XENDIT_SECRET_KEY=xnd_development_bootstrap-only' \
-  'PAYOUT_DESTINATION_ENCRYPTION_KEY=bootstrap-payout-key-at-least-32' \
+  "S3_ENDPOINT=$S3_ENDPOINT" \
+  "S3_REGION=$S3_REGION" \
+  "S3_BUCKET=$S3_BUCKET" \
+  "S3_ACCESS_KEY_ID=$S3_ACCESS_KEY_ID" \
+  "S3_SECRET_ACCESS_KEY=$S3_SECRET_ACCESS_KEY" \
   > "$test_directory/.env"
 
 # The Compose fixture must receive these interpolation expressions literally.
