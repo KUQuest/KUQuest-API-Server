@@ -508,6 +508,18 @@ const validateBoardQuery = (query: QuestV2BoardQuery, set: AuthedContext['set'])
   }
 
   if (
+    query.minQuestFundingTotal !== undefined &&
+    query.maxQuestFundingTotal !== undefined &&
+    query.minQuestFundingTotal > query.maxQuestFundingTotal
+  ) {
+    return invalidInput(
+      set,
+      'VALIDATION',
+      'minQuestFundingTotal must be less than or equal to maxQuestFundingTotal'
+    );
+  }
+
+  if (
     query.minQuestReward !== undefined &&
     query.maxQuestReward !== undefined &&
     query.minQuestReward > query.maxQuestReward

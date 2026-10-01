@@ -394,6 +394,8 @@ const questV2BoardQueryProperties = {
   tagId: t.Optional(t.String({ format: 'uuid' })),
   mode: t.Optional(questV2ModeSchema),
   participation: t.Optional(questV2ParticipationSchema),
+  minQuestFundingTotal: t.Optional(t.Number({ minimum: 0, maximum: 700000 })),
+  maxQuestFundingTotal: t.Optional(t.Number({ minimum: 0, maximum: 700000 })),
   minQuestReward: t.Optional(t.Number({ minimum: 0, maximum: 700000 })),
   maxQuestReward: t.Optional(t.Number({ minimum: 0, maximum: 700000 })),
   maxDurationMinutes: t.Optional(t.Integer({ minimum: 1 })),
@@ -420,6 +422,8 @@ export const questV2BoardQuerySchema = t.Object(questV2BoardQueryProperties, {
 const questV2BoardQueryOpenApiSchema = t.Object(
   {
     ...questV2BoardQueryProperties,
+    minQuestFundingTotal: t.Optional(t.Number({ minimum: 0, maximum: 700000, multipleOf: 0.01 })),
+    maxQuestFundingTotal: t.Optional(t.Number({ minimum: 0, maximum: 700000, multipleOf: 0.01 })),
     minQuestReward: t.Optional(
       t.Number({
         minimum: 0,
@@ -475,6 +479,8 @@ const hasAtMostTwoBahtDecimals = (value: unknown): boolean => {
 };
 
 const numericQuestV2BoardQueryFields = [
+  'minQuestFundingTotal',
+  'maxQuestFundingTotal',
   'minQuestReward',
   'maxQuestReward',
   'maxDurationMinutes',
@@ -505,6 +511,8 @@ export const questV2BoardQueryHttpSchema = {
       if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
         const rawQuery = value as Record<string, unknown>;
         for (const [field, amount] of [
+          ['minQuestFundingTotal', rawQuery.minQuestFundingTotal],
+          ['maxQuestFundingTotal', rawQuery.maxQuestFundingTotal],
           ['minQuestReward', rawQuery.minQuestReward],
           ['maxQuestReward', rawQuery.maxQuestReward],
         ] as const) {
@@ -528,6 +536,8 @@ export const questV2BoardQueryHttpSchema = {
 
       const query = normalizedValue as Static<typeof questV2BoardQuerySchema>;
       for (const [field, amount] of [
+        ['minQuestFundingTotal', query.minQuestFundingTotal],
+        ['maxQuestFundingTotal', query.maxQuestFundingTotal],
         ['minQuestReward', query.minQuestReward],
         ['maxQuestReward', query.maxQuestReward],
       ] as const) {
@@ -836,6 +846,7 @@ export const questV2BoardCardSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   title: t.String(),
   questReward: questV2RewardSchema,
+  questFundingTotal: questFundingTotalSchema,
   tag: questV2TagSchema,
   mode: questV2ModeSchema,
   participation: questV2ParticipationSchema,
@@ -873,6 +884,7 @@ export const questV2PublicDetailSchema = t.Object({
   participation: questV2ParticipationSchema,
   state: questV2StateSchema,
   questReward: questV2RewardSchema,
+  questFundingTotal: questFundingTotalSchema,
   headcount: t.Integer({ minimum: 1, maximum: 20 }),
   activeWorkerCount: t.Integer({ minimum: 0, maximum: 20 }),
   startTime: questV2CanonicalScheduleSchema,
@@ -896,10 +908,17 @@ export const questV2PublicDetailResponseSchema = t.Object({
 });
 
 // The Participation projection carries the public Quest fields plus the caller's own
-// Assignment. Quest Funding Total, Platform Fee, Money Policy, Wallet, Funding
+// Assignment and own settlement. Platform Fee, Money Policy, Wallet, Funding
 // Reservation, hirerId, and the hidden overlay stay out, exactly as in the public one.
 export const questV2ParticipationDetailSchema = t.Object({
   ...questV2PublicDetailSchema.properties,
+  workerSettlement: t.Nullable(
+    t.Object({
+      status: t.Union([t.Literal('PAID'), t.Literal('PENDING'), t.Literal('NO_PAYMENT')]),
+      amountSatang: t.Nullable(t.Integer({ minimum: 0 })),
+      settledAt: t.Nullable(t.String({ format: 'date-time' })),
+    })
+  ),
   assignment: t.Object({
     status: questV2AssignmentStateSchema,
     startedAt: t.Nullable(t.String({ format: 'date-time' })),
