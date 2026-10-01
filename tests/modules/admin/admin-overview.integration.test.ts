@@ -25,6 +25,7 @@ import {
   formatPayoutDisplayId,
   formatReportCaseDisplayId,
 } from '@/modules/admin/admin-display-id';
+import { getAdminOverview } from '@/modules/admin/admin-overview.service';
 import type { AdminOverviewData } from '@/modules/admin/admin-overview.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import {
@@ -367,6 +368,10 @@ afterAll(async () => {
 });
 
 describe('Admin Overview API', () => {
+  it('debugs the Overview database projection', async () => {
+    const data = await getAdminOverview();
+    console.log('Admin Overview debug projection', JSON.stringify(data));
+  });
   it('distinguishes anonymous, Member, enabled Admin, and disabled Admin Sessions', async () => {
     const anonymous = await overviewRequest();
     expect(anonymous.status).toBe(401);
@@ -418,29 +423,22 @@ describe('Admin Overview API', () => {
 
     expect(response.status).toBe(200);
     const operation = document.paths['/api/v1/admin/overview']?.get;
-    expect(operation).toMatchObject({
-      operationId: 'getAdminOverview',
-      responses: expect.objectContaining({
-        '200': expect.anything(),
-        '401': expect.anything(),
-        '403': expect.anything(),
-      }),
-    });
-    console.log(
-      'Admin Overview OpenAPI debug response',
-      JSON.stringify(operation?.responses?.['200'])
-    );
+    expect(operation?.operationId).toBe('getAdminOverview');
+    expect(Object.keys(operation?.responses ?? {}).sort()).toEqual(['200', '401', '403']);
 
-    const overviewData =
-      operation?.responses?.['200']?.content?.['application/json']?.schema?.properties?.data
-        ?.properties;
-    expect(overviewData).toMatchObject({
-      reports: expect.anything(),
-      conductReports: expect.anything(),
-      members: expect.anything(),
-      wallets: expect.anything(),
-      queues: expect.anything(),
-    });
+    const responseSchema = operation?.responses?.['200']?.content?.['application/json']?.schema;
+    expect(responseSchema).toBeDefined();
+    const overviewData = responseSchema?.properties?.data?.properties;
+    expect(Object.keys(overviewData ?? {}).sort()).toEqual([
+      'conductReports',
+      'disputes',
+      'members',
+      'payouts',
+      'quests',
+      'queues',
+      'reports',
+      'wallets',
+    ]);
     const memberStatusProperties = overviewData?.members?.properties?.byStatus?.properties;
     expect(Object.keys(memberStatusProperties ?? {}).sort()).toEqual([
       'FLAG',
@@ -459,12 +457,12 @@ describe('Admin Overview API', () => {
     const oldestItemSchema = conductReportQueue?.oldest?.anyOf?.find(
       (alternative) => alternative.type === 'object'
     );
-    expect(oldestItemSchema?.properties).toMatchObject({
-      id: expect.anything(),
-      displayId: expect.anything(),
-      title: expect.anything(),
-      createdAt: expect.anything(),
-    });
+    expect(Object.keys(oldestItemSchema?.properties ?? {}).sort()).toEqual([
+      'createdAt',
+      'displayId',
+      'id',
+      'title',
+    ]);
     expect(oldestItemSchema?.properties?.displayId?.type).toBe('string');
     expect(conductReportQueue?.state?.enum).toEqual(['CLEAR', 'OPEN']);
   });
