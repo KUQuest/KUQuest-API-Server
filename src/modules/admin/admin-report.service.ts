@@ -7,13 +7,14 @@ import {
   adminReportCase,
   adminReporterEntry,
   conductReportStatus,
+  conductReportReasons,
   reportCaseStatus,
   type ConductReportReason,
   type ConductReportStatus,
   type ReportCaseStatus,
   type MemberPenaltyResult,
 } from '@/database/schema/admin.schema';
-import { authUser } from '@/database/schema/auth.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
   proofSubmission,
@@ -25,6 +26,11 @@ import {
   questTeamMember,
   questV2ProofSubmission,
 } from '@/database/schema/quest.schema';
+import {
+  questV2ModeFromStorage,
+  questV2ParticipationFromStorage,
+  type QuestStatus,
+} from '@/modules/quest/shared/contracts';
 import {
   chatAttachment,
   chatConversation,
@@ -47,7 +53,6 @@ import {
 import { enqueuePushDeliveryInTransaction } from '@/modules/push';
 
 import { createHash, randomBytes } from 'node:crypto';
-
 import {
   and,
   asc,
@@ -60,6 +65,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  or,
   sql,
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -82,6 +88,7 @@ import {
 import { formatConductReportDisplayId, formatReportCaseDisplayId } from './admin-display-id';
 import {
   reportAdminActionCatalog,
+  conductReportDismissReasonCodes,
   type ConductReportDismissReasonCode,
 } from './admin-report.policy';
 
@@ -138,10 +145,41 @@ export class AdminReportError extends Error {
 type ReportCaseRecord = typeof adminReportCase.$inferSelect;
 type ReportDatabase = typeof db | AdminActionTransaction;
 
+type MemberSummary = {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  studentId: string | null;
+};
+
+type QuestSummary = {
+  id: string;
+  title: string;
+  questStatus: QuestStatus;
+  mode: 'FIRST_COME_FIRST_SERVED' | 'CANDIDATE';
+  participation: 'SINGLE' | 'GROUP';
+};
+
+type QuestSummaryRow = Omit<QuestSummary, 'mode' | 'participation'> & {
+  apiVersion: 'v1' | 'v2';
+  mode: 'NO_CANDIDATE' | 'CANDIDATE';
+  participation: 'SOLO' | 'GROUP';
+  v2Mode: 'FIRST_COME_FIRST_SERVED' | 'CANDIDATE' | null;
+  v2Participation: 'SINGLE' | 'GROUP' | null;
+};
+
 type ReportCaseListRow = {
   reportCase: ReportCaseRecord;
   conversationId: string;
   questId: string;
+};
+type ReportCaseSummaryRow = ReportCaseListRow & {
+  source: 'CONVERSATION_CANDIDATE_INQUIRY' | 'CONVERSATION_WORK';
+  type: 'USER' | 'SYSTEM';
+  reportedMember: MemberSummary | null;
+  quest: QuestSummaryRow | null;
+  sortCreatedAt: string;
 };
 
 type ReportCaseCommandRow = ReportCaseListRow & { reportedMemberId: string | null };
@@ -149,7 +187,7 @@ type ReportCaseCommandRow = ReportCaseListRow & { reportedMemberId: string | nul
 type AdminReportKind = 'REPORT_CASE' | 'CONDUCT_REPORT';
 type ConductReportMember = Pick<
   typeof authUser.$inferSelect,
-  'id' | 'email' | 'firstName' | 'lastName'
+  'id' | 'email' | 'firstName' | 'lastName' | 'studentId'
 >;
 type ConductReportQuest = Pick<
   typeof quest.$inferSelect,
@@ -191,6 +229,7 @@ type ReporterRow = {
   reporterEmail: string;
   reporterFirstName: string;
   reporterLastName: string;
+  reporterStudentId: string | null;
 };
 
 type EvidenceReferenceRow = {
@@ -254,6 +293,7 @@ const reporterRowsFor = async (
       reporterEmail: authUser.email,
       reporterFirstName: authUser.firstName,
       reporterLastName: authUser.lastName,
+      reporterStudentId: authUser.studentId,
     })
     .from(adminReporterEntry)
     .innerJoin(authUser, eq(authUser.id, adminReporterEntry.reporterMemberId))
@@ -279,9 +319,51 @@ const evidenceReferenceRowsFor = async (
     .where(inArray(adminEvidenceReference.reportCaseId, reportCaseIds))
     .orderBy(asc(adminEvidenceReference.createdAt), asc(adminEvidenceReference.id));
 };
+const reportCaseSummaryQuery = (database: ReportDatabase) =>
+  database
+    .select({
+      reportCase: adminReportCase,
+      conversationId: chatMessage.conversationId,
+      questId: chatConversation.questId,
+      source: chatConversation.type,
+      type: chatMessage.kind,
+      reportedMember: {
+        id: authUser.id,
+        email: authUser.email,
+        firstName: authUser.firstName,
+        lastName: authUser.lastName,
+        studentId: authUser.studentId,
+      },
+      quest: {
+        id: quest.id,
+        title: quest.title,
+        questStatus: quest.questStatus,
+        apiVersion: quest.apiVersion,
+        mode: quest.mode,
+        participation: quest.participation,
+        v2Mode: quest.v2Mode,
+        v2Participation: quest.v2Participation,
+      },
+      sortCreatedAt: sql<string>`to_char(${adminReportCase.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+    })
+    .from(adminReportCase)
+    .innerJoin(chatMessage, eq(chatMessage.id, adminReportCase.messageId))
+    .innerJoin(chatConversation, eq(chatConversation.id, chatMessage.conversationId))
+    .leftJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId))
+    .leftJoin(authUser, eq(authUser.id, chatMembership.memberId))
+    .leftJoin(quest, eq(quest.id, chatConversation.questId));
+
+const reportCaseSummaryRowsFor = async (
+  database: ReportDatabase,
+  reportCaseIds: string[]
+): Promise<ReportCaseSummaryRow[]> => {
+  if (reportCaseIds.length === 0) return [];
+
+  return reportCaseSummaryQuery(database).where(inArray(adminReportCase.id, reportCaseIds));
+};
 
 const summaryFrom = (
-  row: ReportCaseListRow,
+  row: ReportCaseSummaryRow,
   reporterRows: ReporterRow[],
   referenceRows: EvidenceReferenceRow[]
 ): ReportCaseSummary => ({
@@ -291,6 +373,18 @@ const summaryFrom = (
   messageId: row.reportCase.messageId,
   conversationId: row.conversationId,
   questId: row.questId,
+  source: row.source,
+  type: row.type,
+  reportedMember: row.reportedMember,
+  quest: row.quest
+    ? {
+        id: row.quest.id,
+        title: row.quest.title,
+        questStatus: row.quest.questStatus,
+        mode: questV2ModeFromStorage(row.quest),
+        participation: questV2ParticipationFromStorage(row.quest),
+      }
+    : null,
   status: row.reportCase.status,
   version: row.reportCase.version,
   caseClosedAt: serializeDate(row.reportCase.caseClosedAt),
@@ -306,6 +400,7 @@ const summaryFrom = (
         email: entry.reporterEmail,
         firstName: entry.reporterFirstName,
         lastName: entry.reporterLastName,
+        studentId: entry.reporterStudentId,
       },
       reason: entry.reason as ReportCaseSummary['reporterEntries'][number]['reason'],
       detail: entry.detail,
@@ -373,7 +468,7 @@ const readReportCaseById = async (
 
 const summaryRows = async (
   database: ReportDatabase,
-  rows: ReportCaseListRow[]
+  rows: ReportCaseSummaryRow[]
 ): Promise<ReportCaseSummary[]> => {
   const reportCaseIds = rows.map((row) => row.reportCase.id);
   const [reporters, references] = await Promise.all([
@@ -392,12 +487,14 @@ const selectConductReportRows = (database: ReportDatabase) =>
         email: conductReportFilerUser.email,
         firstName: conductReportFilerUser.firstName,
         lastName: conductReportFilerUser.lastName,
+        studentId: conductReportFilerUser.studentId,
       },
       reportedMember: {
         id: conductReportReportedUser.id,
         email: conductReportReportedUser.email,
         firstName: conductReportReportedUser.firstName,
         lastName: conductReportReportedUser.lastName,
+        studentId: conductReportReportedUser.studentId,
       },
       quest: {
         id: quest.id,
@@ -423,6 +520,7 @@ const selectConductReportRows = (database: ReportDatabase) =>
         email: conductReportHirerUser.email,
         firstName: conductReportHirerUser.firstName,
         lastName: conductReportHirerUser.lastName,
+        studentId: conductReportHirerUser.studentId,
       },
       sortCreatedAt: sql<string>`to_char(${adminConductReport.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
     })
@@ -438,22 +536,6 @@ const selectConductReportRows = (database: ReportDatabase) =>
     )
     .innerJoin(conductReportHirerUser, eq(conductReportHirerUser.id, quest.hirerId));
 
-const canonicalQuestMode = (row: ConductReportQuest): ConductReportSummary['quest']['mode'] =>
-  row.apiVersion === 'v2' && row.v2Mode
-    ? row.v2Mode
-    : row.mode === 'NO_CANDIDATE'
-      ? 'FIRST_COME_FIRST_SERVED'
-      : 'CANDIDATE';
-
-const canonicalQuestParticipation = (
-  row: ConductReportQuest
-): ConductReportSummary['quest']['participation'] =>
-  row.apiVersion === 'v2' && row.v2Participation
-    ? row.v2Participation
-    : row.participation === 'SOLO'
-      ? 'SINGLE'
-      : 'GROUP';
-
 const conductReportSummaryFrom = (row: ConductReportListRow): ConductReportSummary => ({
   kind: 'CONDUCT_REPORT',
   id: row.report.id,
@@ -465,8 +547,8 @@ const conductReportSummaryFrom = (row: ConductReportListRow): ConductReportSumma
     displayId: `QST-${row.quest.publicSequence.toString().padStart(6, '0')}`,
     title: row.quest.title,
     questStatus: row.quest.questStatus,
-    mode: canonicalQuestMode(row.quest),
-    participation: canonicalQuestParticipation(row.quest),
+    mode: questV2ModeFromStorage(row.quest),
+    participation: questV2ParticipationFromStorage(row.quest),
     headcount: row.quest.headcount,
     proofRequired: row.quest.proofRequired,
     startTime: row.quest.startTime.toISOString(),
@@ -614,16 +696,7 @@ export const listAdminReports = async ({
           sort,
           where: reportCaseWhere,
           read: ({ where: pageWhere, orderBy, limit: probe }) =>
-            db
-              .select({
-                reportCase: adminReportCase,
-                conversationId: chatMessage.conversationId,
-                questId: chatConversation.questId,
-                sortCreatedAt: sql<string>`to_char(${adminReportCase.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
-              })
-              .from(adminReportCase)
-              .innerJoin(chatMessage, eq(chatMessage.id, adminReportCase.messageId))
-              .innerJoin(chatConversation, eq(chatConversation.id, chatMessage.conversationId))
+            reportCaseSummaryQuery(db)
               .where(pageWhere)
               .orderBy(...orderBy)
               .limit(probe),
@@ -636,7 +709,7 @@ export const listAdminReports = async ({
             new CursorInputError('INVALID_CURSOR', 'Report Case cursor is invalid.'),
         })
       : Promise.resolve({
-          rows: [] as Array<ReportCaseListRow & { sortCreatedAt: string }>,
+          rows: [] as ReportCaseSummaryRow[],
           hasNext: false,
         }),
     includeConductReports
@@ -735,14 +808,17 @@ const selectedCandidateTeamId = async (
     const [team] = await database
       .select({ id: questCandidateTeamV2.id })
       .from(questCandidateTeamV2)
-      .innerJoin(
+      .leftJoin(
         questCandidateTeamV2Member,
         eq(questCandidateTeamV2Member.teamId, questCandidateTeamV2.id)
       )
       .where(
         and(
           eq(questCandidateTeamV2.questId, questRow.id),
-          eq(questCandidateTeamV2Member.memberId, workerId),
+          or(
+            eq(questCandidateTeamV2.leaderId, workerId),
+            eq(questCandidateTeamV2Member.memberId, workerId)
+          ),
           eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
         )
       )
@@ -758,11 +834,11 @@ const selectedCandidateTeamId = async (
     const [team] = await database
       .select({ id: questTeam.id })
       .from(questTeam)
-      .innerJoin(questTeamMember, eq(questTeamMember.teamId, questTeam.id))
+      .leftJoin(questTeamMember, eq(questTeamMember.teamId, questTeam.id))
       .where(
         and(
           eq(questTeam.questId, questRow.id),
-          eq(questTeamMember.userId, workerId),
+          or(eq(questTeam.leaderId, workerId), eq(questTeamMember.userId, workerId)),
           eq(questTeam.teamStatus, 'TEAM_SELECTED')
         )
       )
@@ -803,6 +879,7 @@ const conductReportProofRowFor = async (
           email: conductReportProofSubmitter.email,
           firstName: conductReportProofSubmitter.firstName,
           lastName: conductReportProofSubmitter.lastName,
+          studentId: conductReportProofSubmitter.studentId,
         },
         description: questV2ProofSubmission.description,
         workerMessage: questV2ProofSubmission.workerMessage,
@@ -844,6 +921,7 @@ const conductReportProofRowFor = async (
         email: conductReportProofSubmitter.email,
         firstName: conductReportProofSubmitter.firstName,
         lastName: conductReportProofSubmitter.lastName,
+        studentId: conductReportProofSubmitter.studentId,
       },
       description: sql<string | null>`null`,
       workerMessage: sql<string | null>`null`,
@@ -938,6 +1016,7 @@ const permittedConductReportConversations = async (
         email: conductReportEvidenceCandidate.email,
         firstName: conductReportEvidenceCandidate.firstName,
         lastName: conductReportEvidenceCandidate.lastName,
+        studentId: conductReportEvidenceCandidate.studentId,
       },
     })
     .from(chatConversation)
@@ -1051,8 +1130,12 @@ const conductReportEvidenceHandlesFor = async (
 export const getAdminReport = async (reportId: string): Promise<AdminReportDetailData> => {
   const reportCaseRow = await readReportCaseById(db, reportId);
   if (reportCaseRow) {
-    const [summary] = await summaryRows(db, [reportCaseRow]);
-    return summary!;
+    const reportCaseRows = await reportCaseSummaryRowsFor(db, [reportCaseRow.reportCase.id]);
+    const [summary] = await summaryRows(db, reportCaseRows);
+    if (!summary) {
+      throw new AdminReportError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
+    }
+    return summary;
   }
 
   const [conductReportRow] = await selectConductReportRows(db)
@@ -1070,6 +1153,7 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
         email: conductReportAssignmentWorker.email,
         firstName: conductReportAssignmentWorker.firstName,
         lastName: conductReportAssignmentWorker.lastName,
+        studentId: conductReportAssignmentWorker.studentId,
       },
     })
     .from(questAssignment)
@@ -1093,6 +1177,64 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
     conductReportRow.quest,
     assignmentRow.assignment.workerId
   );
+  let decision: ConductReportDetail['decision'] = null;
+  if (conductReportRow.report.status !== conductReportStatus.pending) {
+    const { decisionReason, resolvedAt, resolvedByAdminId } = conductReportRow.report;
+    if (!decisionReason || !resolvedAt || !resolvedByAdminId) {
+      throw new Error('Conduct Report decision fields are incomplete.');
+    }
+    const [admin] = await db
+      .select({
+        id: authAdmin.id,
+        email: authAdmin.email,
+        firstName: authAdmin.firstName,
+        lastName: authAdmin.lastName,
+      })
+      .from(authAdmin)
+      .where(eq(authAdmin.id, resolvedByAdminId))
+      .limit(1);
+    if (!admin) throw new Error('Conduct Report decision Admin does not exist.');
+
+    const outcome = conductReportRow.report.status;
+    if (outcome === conductReportStatus.upheld) {
+      const isDismissalReason = conductReportDismissReasonCodes.includes(
+        decisionReason as ConductReportDismissReasonCode
+      );
+      if (
+        decisionReason !== conductReportRow.report.reason &&
+        (conductReportReasons.includes(decisionReason as ConductReportReason) || isDismissalReason)
+      ) {
+        throw new Error('Conduct Report upheld decision reason must match the report reason.');
+      }
+      decision = {
+        outcome,
+        reason:
+          decisionReason === conductReportRow.report.reason ? conductReportRow.report.reason : null,
+        resolvedAt: resolvedAt.toISOString(),
+        admin,
+      };
+    } else if (outcome === conductReportStatus.dismissed) {
+      const isDismissalReason = conductReportDismissReasonCodes.includes(
+        decisionReason as ConductReportDismissReasonCode
+      );
+      if (
+        !isDismissalReason &&
+        conductReportReasons.includes(decisionReason as ConductReportReason)
+      ) {
+        throw new Error('Conduct Report dismissal decision must use a dismissal reason.');
+      }
+      const reason = isDismissalReason ? (decisionReason as ConductReportDismissReasonCode) : null;
+      decision = {
+        outcome,
+        reason,
+        resolvedAt: resolvedAt.toISOString(),
+        admin,
+      };
+    } else {
+      throw new Error('Conduct Report decision outcome is invalid.');
+    }
+  }
+
   const summary = conductReportSummaryFrom(conductReportRow);
   const detail: ConductReportDetail = {
     ...summary,
@@ -1122,6 +1264,7 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
           updatedAt: serializeDate(proofRow.updatedAt),
         }
       : null,
+    decision,
     evidenceHandles: await db.transaction((transaction) =>
       conductReportEvidenceHandlesFor(transaction, conductReportRow)
     ),
