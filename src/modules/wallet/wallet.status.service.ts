@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   type WalletStatus,
   walletStatusHistory,
@@ -137,9 +138,41 @@ export const changeWalletStatusInTransaction = async (
 export const changeWalletStatus = async (input: ChangeWalletStatusInput) =>
   db.transaction((transaction) => changeWalletStatusInTransaction(transaction, input));
 
-export const listWalletStatusHistory = async (walletId: string) =>
-  db
-    .select()
+export const listWalletStatusHistory = async (walletId: string) => {
+  const rows = await db
+    .select({
+      id: walletStatusHistory.id,
+      walletId: walletStatusHistory.walletId,
+      fromStatus: walletStatusHistory.fromStatus,
+      toStatus: walletStatusHistory.toStatus,
+      reason: walletStatusHistory.reason,
+      actorUserId: walletStatusHistory.actorUserId,
+      actorAdminId: walletStatusHistory.actorAdminId,
+      occurredAt: walletStatusHistory.occurredAt,
+      actorUserFirstName: authUser.firstName,
+      actorUserLastName: authUser.lastName,
+      actorAdminFirstName: authAdmin.firstName,
+      actorAdminLastName: authAdmin.lastName,
+    })
     .from(walletStatusHistory)
+    .leftJoin(authUser, eq(walletStatusHistory.actorUserId, authUser.id))
+    .leftJoin(authAdmin, eq(walletStatusHistory.actorAdminId, authAdmin.id))
     .where(eq(walletStatusHistory.walletId, walletId))
     .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id));
+
+  return rows.map((row) => ({
+    id: row.id,
+    walletId: row.walletId,
+    fromStatus: row.fromStatus,
+    toStatus: row.toStatus,
+    reason: row.reason,
+    actorUserId: row.actorUserId,
+    actorAdminId: row.actorAdminId,
+    occurredAt: row.occurredAt,
+    actorDisplayName: row.actorUserId
+      ? `${row.actorUserFirstName} ${row.actorUserLastName}`
+      : row.actorAdminId
+        ? `${row.actorAdminFirstName} ${row.actorAdminLastName}`
+        : null,
+  }));
+};

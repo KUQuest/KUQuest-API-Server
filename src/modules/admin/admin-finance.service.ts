@@ -25,6 +25,7 @@ import { readKeysetPage } from '@/shared/keyset-page';
 
 import { and, desc, eq, gte, ilike, inArray, lte, sql } from 'drizzle-orm';
 
+import { formatLedgerTransactionDisplayReference } from './admin-display-id';
 import type {
   AdminFinanceOverviewData,
   AdminLedgerTransactionsData,
@@ -353,6 +354,7 @@ export const listAdminLedgerTransactions = async (
       db
         .select({
           id: walletLedgerTransaction.id,
+          publicSequence: walletLedgerTransaction.publicSequence,
           businessReference: walletLedgerTransaction.businessReference,
           eventType: walletLedgerTransaction.eventType,
           description: walletLedgerTransaction.description,
@@ -406,6 +408,7 @@ export const listAdminLedgerTransactions = async (
 
       items.push({
         id: tx.id,
+        displayReference: formatLedgerTransactionDisplayReference(tx.publicSequence),
         businessReference: tx.businessReference,
         eventType: tx.eventType,
         description: tx.description,

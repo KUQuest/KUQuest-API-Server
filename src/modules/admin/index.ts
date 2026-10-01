@@ -3,6 +3,7 @@ export { adminOverviewRoute } from './admin-overview.route';
 export { adminFinanceRoute } from './admin-finance.route';
 export { adminMemberRoute } from './admin-member.route';
 export { adminReportRoute } from './admin-report.route';
+export { formatWalletDisplayId } from './admin-display-id';
 export { createAdminActionService } from './admin-action.service';
 export type {
   AdminActionCommandInput,

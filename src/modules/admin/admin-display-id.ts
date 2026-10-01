@@ -12,3 +12,9 @@ export const formatPayoutDisplayId = (publicSequence: number): string =>
 
 export const formatTopUpDisplayId = (publicSequence: number): string =>
   formatDisplayId('TOP', publicSequence);
+
+export const formatWalletDisplayId = (publicSequence: number): string =>
+  formatDisplayId('WLT', publicSequence);
+
+export const formatLedgerTransactionDisplayReference = (publicSequence: number): string =>
+  formatDisplayId('LTX', publicSequence);

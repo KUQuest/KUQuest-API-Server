@@ -63,6 +63,9 @@ export const walletWallet = pgTable(
   'wallet_wallets',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'wallet_wallet_public_sequence' })
+      .unique(),
     userId: uuid('user_id')
       .notNull()
       .unique()
@@ -190,6 +193,9 @@ export const walletLedgerTransaction = pgTable(
   'wallet_ledger_transactions',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'wallet_ledger_transaction_public_sequence' })
+      .unique(),
     businessReference: text('business_reference').notNull().unique(),
     eventType: text('event_type').$type<LedgerEventType>().notNull(),
     idempotencyKeyId: uuid('idempotency_key_id')
