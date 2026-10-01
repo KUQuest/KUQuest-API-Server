@@ -1,6 +1,7 @@
 import { t, type Static } from 'elysia';
 
 import { questV2AssignmentStates, questV2States } from '../core/quest-v2.contract';
+import { questV2UnderfilledSummarySchema } from '../lifecycle/quest-underfilled-v2.schema';
 
 const state = t.Union(
   questV2AssignmentStates.map((value) => t.Literal(value)) as [
@@ -67,6 +68,18 @@ export const questV2AssignmentListResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
     items: t.Array(assignmentSchema),
+  }),
+});
+
+export const questV2MyAssignmentListResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    items: t.Array(
+      t.Object({
+        ...assignmentSchema.properties,
+        underfilled: t.Nullable(questV2UnderfilledSummarySchema),
+      })
+    ),
   }),
 });
 

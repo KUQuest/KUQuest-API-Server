@@ -274,7 +274,7 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
       tags: ['Quest'],
       summary: 'Subscribe to owned Quest updates',
       description:
-        'Sends SUBSCRIBED, then HIRER_QUEST_UPDATED for owned v2 Quest creation, publication, lifecycle, application, and Candidate Team changes. Read Quest state from REST after each update.',
+        'Sends SUBSCRIBED, then HIRER_QUEST_UPDATED for owned v2 Quest creation, publication, lifecycle, application, and Candidate Team changes. UNDERFILLED_DECISION_PENDING also carries `expiresAt`, the server decision deadline. Read Quest state from REST after each update.',
       operationId: 'subscribeHirerQuestUpdates',
     },
   })

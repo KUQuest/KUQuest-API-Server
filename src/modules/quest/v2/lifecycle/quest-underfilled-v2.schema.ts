@@ -2,6 +2,7 @@ import { t, type Static } from 'elysia';
 
 import {
   questV2States,
+  questV2UnderfilledCancellationReasons,
   questV2UnderfilledConsentDecisions,
   questV2UnderfilledDecisionValues,
   questV2UnderfilledStates,
@@ -17,6 +18,7 @@ const unionOfLiterals = (values: readonly string[]) =>
 
 const questStateSchema = unionOfLiterals(questV2States);
 const underfilledStateSchema = unionOfLiterals(questV2UnderfilledStates);
+const cancellationReasonSchema = unionOfLiterals(questV2UnderfilledCancellationReasons);
 const decisionSchema = unionOfLiterals(questV2UnderfilledDecisionValues);
 const consentDecisionSchema = unionOfLiterals(questV2UnderfilledConsentDecisions);
 const isoDateTimeSchema = t.String({ format: 'date-time' });
@@ -86,6 +88,8 @@ const underfilledDataSchema = t.Object({
   workerRewardPool: t.Nullable(t.Number({ minimum: 0 })),
   questReward: t.Nullable(t.Number({ minimum: 0 })),
   dueAt: t.Nullable(isoDateTimeSchema),
+  cancellationReason: t.Nullable(cancellationReasonSchema),
+  cancelledAt: t.Nullable(isoDateTimeSchema),
   decision: underfilledDecisionViewSchema,
   consent: underfilledConsentViewSchema,
   responses: t.Optional(t.Array(underfilledWorkerResponseSchema)),
@@ -100,6 +104,15 @@ const underfilledDataSchema = t.Object({
   ),
 });
 
+export const questV2UnderfilledSummarySchema = t.Object({
+  state: underfilledStateSchema,
+  decision: t.Object({ expiresAt: isoDateTimeSchema }),
+  consent: t.Object({ expiresAt: t.Nullable(isoDateTimeSchema) }),
+  activeWorkerCount: t.Integer({ minimum: 1, maximum: 20 }),
+  headcount: t.Integer({ minimum: 2, maximum: 20 }),
+  cancellationReason: t.Nullable(cancellationReasonSchema),
+});
+
 export const questV2UnderfilledResponseSchema = t.Object({
   success: t.Literal(true),
   data: underfilledDataSchema,
@@ -107,5 +120,6 @@ export const questV2UnderfilledResponseSchema = t.Object({
 
 export type QuestV2UnderfilledParams = Static<typeof questV2UnderfilledParamsSchema>;
 export type QuestV2UnderfilledDecisionInput = Static<typeof questV2UnderfilledDecisionInputSchema>;
+export type QuestV2UnderfilledSummary = Static<typeof questV2UnderfilledSummarySchema>;
 export type QuestV2UnderfilledConsentInput = Static<typeof questV2UnderfilledConsentInputSchema>;
 export type QuestV2UnderfilledData = Static<typeof underfilledDataSchema>;
