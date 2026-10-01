@@ -25,6 +25,7 @@ import {
   formatPayoutDisplayId,
   formatReportCaseDisplayId,
 } from '@/modules/admin/admin-display-id';
+import { getAdminOverview } from '@/modules/admin/admin-overview.service';
 import type { AdminOverviewData } from '@/modules/admin/admin-overview.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import {
@@ -367,6 +368,10 @@ afterAll(async () => {
 });
 
 describe('Admin Overview API', () => {
+  it('debugs the Overview database projection', async () => {
+    const data = await getAdminOverview();
+    console.log('Admin Overview debug projection', JSON.stringify(data));
+  });
   it('distinguishes anonymous, Member, enabled Admin, and disabled Admin Sessions', async () => {
     const anonymous = await overviewRequest();
     expect(anonymous.status).toBe(401);
@@ -426,6 +431,10 @@ describe('Admin Overview API', () => {
         '403': expect.anything(),
       }),
     });
+    console.log(
+      'Admin Overview OpenAPI debug schema',
+      JSON.stringify(operation?.responses?.['200']?.content?.['application/json']?.schema)
+    );
 
     const overviewData =
       operation?.responses?.['200']?.content?.['application/json']?.schema?.properties?.data
