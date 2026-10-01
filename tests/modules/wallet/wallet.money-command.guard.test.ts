@@ -16,7 +16,7 @@ const digestAllowedFiles: Record<string, true> = {
 };
 
 const boundaryAllowedFiles: Record<string, true> = {
-  // The barrel re-exports walletRoute, which imports @/modules/auth, so a barrel import cycles.
+  // These Auth-linked files bypass the barrel to avoid pulling Wallet routes into Auth initialization.
   'src/modules/auth/auth.config.ts': true,
   // auth.config imports Member Penalty to gate sign-in, so this service cannot import that barrel.
   'src/modules/admin/member-penalty/member-penalty.service.ts': true,

@@ -42,6 +42,7 @@ import { onboardingRoute } from './modules/onboarding';
 import { portfolioRoute } from './modules/portfolio';
 import { profileRoute } from './modules/profile';
 import { workExperienceRoute } from './modules/work-experience';
+import { teamInviteRoute } from './modules/team-invite/team-invite.route';
 import { localFinanceTestRoute } from './modules/local-finance-test';
 import { adminWalletRoute, walletRoute } from './modules/wallet';
 import { payoutDestinationRoute } from './modules/payout-destination';
@@ -71,6 +72,7 @@ export const createApp = () => {
       },
     })
     .use(authTestRoute)
+    .use(teamInviteRoute)
     .use(asyncApiRoute)
     .use(healthRoute)
     .use(onboardingRoute)

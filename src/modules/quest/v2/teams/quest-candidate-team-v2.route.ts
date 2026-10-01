@@ -8,6 +8,7 @@ import { Elysia } from 'elysia';
 import {
   createQuestV2CandidateTeamController,
   getQuestV2CandidateTeamController,
+  getQuestV2CandidateTeamFileController,
   joinQuestV2CandidateTeamByCodeController,
   joinQuestV2CandidateTeamController,
   leaveQuestV2CandidateTeamController,
@@ -33,6 +34,8 @@ import {
   questV2CandidateTeamResponseSchema,
   questV2CandidateTeamSubmissionSchema,
   questV2CandidateTeamUpdateSchema,
+  questV2CandidateTeamFileParamsSchema,
+  questV2CandidateTeamFileResponseSchema,
 } from './quest-candidate-team-v2.schema';
 import { questV2CandidateSelectionResponseSchema } from '../candidate/quest-candidate-v2.schema';
 
@@ -198,6 +201,18 @@ export const questCandidateTeamV2Route = new Elysia({
       description:
         'Only the Team Leader can upload one private image, PDF, or video file up to 10 MB while the Candidate Team is forming for an open GROUP Candidate Quest. Images must be at most 25 megapixels; larger images return 422 TEAM_FILE_DIMENSIONS_TOO_LARGE.',
       operationId: 'uploadQuestCandidateTeamFileV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/quests/:questId/teams/:teamId/files/:fileId', getQuestV2CandidateTeamFileController, {
+    params: questV2CandidateTeamFileParamsSchema,
+    response: responses(questV2CandidateTeamFileResponseSchema, 401, 404, 503),
+    detail: {
+      tags: ['Quest Candidate Teams v2'],
+      summary: 'Get a temporary Candidate Team submission file link',
+      description:
+        'Only the owning Hirer or a Member of the submitted Candidate Team can get a temporary link to an associated, non-deleted file.',
+      operationId: 'getQuestCandidateTeamFileV2',
       security: betterAuthSecurity,
     },
   })

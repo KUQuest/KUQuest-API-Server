@@ -184,6 +184,8 @@ jobs:
           PRIVACY_URL: ${{ secrets.PRIVACY_URL }}
           DATA_USAGE_URL: ${{ secrets.DATA_USAGE_URL }}
           CONTACT_US_URL: ${{ secrets.CONTACT_US_URL }}
+          ANDROID_APP_LINK_TARGETS: ${{ vars.ANDROID_APP_LINK_TARGETS }}
+          IOS_APP_LINK_APP_IDS: ${{ vars.IOS_APP_LINK_APP_IDS }}
         run: |
           set -euo pipefail
 
@@ -328,6 +330,8 @@ jobs:
             printf 'PRIVACY_URL=%s\n' "$PRIVACY_URL"
             printf 'DATA_USAGE_URL=%s\n' "$DATA_USAGE_URL"
             printf 'CONTACT_US_URL=%s\n' "$CONTACT_US_URL"
+            printf 'ANDROID_APP_LINK_TARGETS=%s\n' "$ANDROID_APP_LINK_TARGETS"
+            printf 'IOS_APP_LINK_APP_IDS=%s\n' "$IOS_APP_LINK_APP_IDS"
           } > "$ENV_FILE"
 
           if [ "${STAGING_ADMIN_SEED_ENABLED:-false}" = 'true' ]; then
