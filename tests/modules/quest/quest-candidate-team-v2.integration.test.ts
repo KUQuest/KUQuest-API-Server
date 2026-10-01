@@ -1,5 +1,6 @@
 import { app } from '@/app';
 import { db, sql as postgresSql } from '@/database/client';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
@@ -343,6 +344,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   if (!postgresAvailable) return;
+  await db.delete(auditRecord).where(inArray(auditRecord.actorUserId, memberIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(authUser).where(inArray(authUser.id, memberIds));
 });

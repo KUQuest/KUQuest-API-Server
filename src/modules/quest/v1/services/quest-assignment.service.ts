@@ -311,6 +311,7 @@ export const joinNoCandidateQuest = async (
         now,
         workChat: [transition],
         writer,
+        actor: { actorType: 'MEMBER', actorUserId: workerId },
       });
     } else {
       // The roster is not full yet: the Quest stays QUEST_OPEN, so only the Work

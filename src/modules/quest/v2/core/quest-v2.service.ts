@@ -2171,6 +2171,7 @@ const publishQuestV2InTransaction = async (
           questEscrowSatang: check.escrowRequirementSatang,
         },
         workChat: [],
+        actor: { actorType: 'MEMBER', actorUserId: userId },
       });
       if (!published) return { kind: 'rejected', rejection: { outcome: 'not-draft' } };
 

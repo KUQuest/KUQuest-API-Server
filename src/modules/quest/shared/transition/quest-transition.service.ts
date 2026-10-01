@@ -11,6 +11,7 @@ import { and, eq, sql } from 'drizzle-orm';
 
 import { quest } from '@/database/schema/quest.schema';
 import { notifyQuestRosterUpdate } from '@/modules/quest/v2/realtime/quest-update.delivery';
+import { recordAudit, type AuditActor } from '@/modules/audit/audit.service';
 
 import { questStatus, type QuestStatus } from '../contracts/quest.contract';
 import type {
@@ -102,6 +103,8 @@ export type QuestStateTransition = {
   workChat: readonly QuestWorkChatMembershipTransition[];
   /** Adapter for this call. Defaults to the configured Work Chat writer. */
   writer?: WorkChatMembershipWriter<QuestTransaction>;
+  actor: AuditActor;
+  reasonCode?: string | null;
 };
 
 const terminalStamp = (to: QuestStatus, now: Date): QuestTransitionColumns =>
@@ -166,6 +169,22 @@ export const applyQuestStateTransition = async (
     )
     .returning({ id: quest.id });
   if (!updated) return false;
+  if (input.from !== input.to) {
+    const reasonCode = input.reasonCode?.trim() || null;
+    await recordAudit(tx, {
+      ...input.actor,
+      action: 'QUEST_STATE_CHANGED',
+      resourceType: 'QUEST',
+      resourceId: input.questId,
+      oldValue: { state: input.from },
+      newValue: {
+        state: input.to,
+        ...(reasonCode ? { reasonCode } : {}),
+      },
+      reason: reasonCode,
+      createdAt: input.now,
+    });
+  }
   await applyWorkChat(tx, input, entries);
   if (input.from === questStatus.open && input.to === questStatus.assigned) {
     await notifyQuestRosterUpdate(tx, input.questId);

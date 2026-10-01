@@ -750,6 +750,7 @@ export const respondToQuestV2Underfilled = async (
                     assignedAt: now.toISOString(),
                   },
                 ],
+                actor: { actorType: 'MEMBER', actorUserId: workerId },
               });
               nextDecision = completed;
               nextCurrent = { ...current, questState: 'QUEST_ASSIGNED' };

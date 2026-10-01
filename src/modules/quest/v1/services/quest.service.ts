@@ -896,6 +896,7 @@ export const createQuestEditRequest = async (
       to: questStatus.awaitingConsent,
       now: new Date(),
       workChat: [],
+      actor: { actorType: 'MEMBER', actorUserId: userId },
     });
     if (!pausedQuest) return { outcome: 'not-editable' };
     return {
@@ -1142,6 +1143,7 @@ const resolveExpiredEditRequestInTransaction = async (
         to: request.previousQuestStatus,
         now,
         workChat: [],
+        actor: { actorType: 'SYSTEM' },
       });
     return { outcome: 'not-pending' };
   }
@@ -1161,6 +1163,7 @@ const resolveExpiredEditRequestInTransaction = async (
     to: request.previousQuestStatus,
     now,
     workChat: [],
+    actor: { actorType: 'SYSTEM' },
   });
   return { status: 'EDIT_REQUEST_REJECTED', requestId };
 };
@@ -1222,6 +1225,7 @@ export const respondToQuestEditRequest = async (
           to: request.previousQuestStatus,
           now,
           workChat: [],
+          actor: { actorType: 'SYSTEM' },
         });
       return { outcome: 'not-pending' };
     }
@@ -1236,6 +1240,7 @@ export const respondToQuestEditRequest = async (
         to: request.previousQuestStatus,
         now,
         workChat: [],
+        actor: { actorType: 'SYSTEM' },
       });
       return { outcome: 'expired' };
     }
@@ -1267,6 +1272,7 @@ export const respondToQuestEditRequest = async (
         to: request.previousQuestStatus,
         now,
         workChat: [],
+        actor: { actorType: 'MEMBER', actorUserId: userId },
       });
       return { status: 'EDIT_REQUEST_REJECTED', requestId };
     }
@@ -1294,6 +1300,7 @@ export const respondToQuestEditRequest = async (
         to: request.previousQuestStatus,
         now,
         workChat: [],
+        actor: { actorType: 'SYSTEM' },
       });
       return { outcome: 'not-pending' };
     }
@@ -1312,6 +1319,7 @@ export const respondToQuestEditRequest = async (
         to: request.previousQuestStatus,
         now,
         workChat: [],
+        actor: { actorType: 'SYSTEM' },
       });
       return { outcome: 'invalid-files' };
     }
@@ -1332,6 +1340,7 @@ export const respondToQuestEditRequest = async (
       to: request.previousQuestStatus,
       now,
       workChat: [],
+      actor: { actorType: 'MEMBER', actorUserId: userId },
     });
     return { status: 'EDIT_REQUEST_APPROVED', requestId };
   });
@@ -1688,6 +1697,7 @@ export const publishQuest = async (
         questEscrowSatang: Number(check.escrowRequirementSatang),
       },
       workChat: [],
+      actor: { actorType: 'MEMBER', actorUserId: userId },
     });
 
     return published

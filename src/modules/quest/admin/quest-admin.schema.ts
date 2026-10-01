@@ -1,6 +1,7 @@
 import { t } from 'elysia';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
+import { adminDisputeSummarySchema } from './quest-dispute-admin.schema';
 import { questStatuses } from '../shared/contracts/quest.contract';
 import { questV2Modes, questV2Participations } from '../v2/core/quest-v2.contract';
 
@@ -72,6 +73,7 @@ export const adminQuestListQuerySchema = t.Object({
 
 const adminQuestMemberSchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  studentId: t.Nullable(t.String()),
   firstName: t.String(),
   lastName: t.String(),
   email: t.String(),
@@ -218,8 +220,41 @@ const adminActionEntrySchema = t.Object({
   createdAt: t.String({ format: 'date-time' }),
 });
 
+const adminQuestImageSchema = t.Object({
+  imageId: t.String({ format: 'uuid' }),
+  fileId: t.String({ format: 'uuid' }),
+  position: t.Integer({ minimum: 0 }),
+  url: t.String({ format: 'uri' }),
+  urlExpiresAt: t.String({ format: 'date-time' }),
+});
+
+const adminQuestTimelineActorSchema = t.Union([
+  t.Object({
+    type: t.Literal('MEMBER'),
+    id: t.String({ format: 'uuid' }),
+  }),
+  t.Object({
+    type: t.Literal('ADMIN'),
+    id: t.String({ format: 'uuid' }),
+  }),
+  t.Object({
+    type: t.Literal('SYSTEM'),
+    id: t.Null(),
+  }),
+]);
+
+const adminQuestTimelineEntrySchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  fromState: t.String(),
+  toState: t.String(),
+  changedAt: t.String({ format: 'date-time' }),
+  actor: adminQuestTimelineActorSchema,
+  reasonCode: t.Nullable(t.String()),
+});
+
 export const adminQuestDetailSchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  displayId: t.String(),
   apiVersion: t.Union([t.Literal('v1'), t.Literal('v2')]),
   version: t.Integer(),
   title: t.String(),
@@ -229,6 +264,9 @@ export const adminQuestDetailSchema = t.Object({
     items: t.Array(adminQuestConditionItemSchema),
   }),
   locations: t.Array(adminQuestLocationSchema),
+  images: t.Array(adminQuestImageSchema),
+  timeline: t.Array(adminQuestTimelineEntrySchema),
+  disputeCases: t.Array(adminDisputeSummarySchema),
   questStatus: adminQuestStatusSchema,
   mode: adminQuestModeSchema,
   participation: adminQuestParticipationSchema,

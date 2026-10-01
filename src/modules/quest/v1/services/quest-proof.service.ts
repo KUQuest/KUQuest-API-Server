@@ -346,7 +346,8 @@ const moveIfSubmitted = async (
     participation: string;
     proofRequired: boolean;
   },
-  now: Date
+  now: Date,
+  userId: string
 ) => {
   if (await allObligationsSubmitted(tx, current)) {
     return applyQuestStateTransition(tx, {
@@ -355,6 +356,7 @@ const moveIfSubmitted = async (
       to: questStatus.submitted,
       now,
       workChat: [],
+      actor: { actorType: 'MEMBER', actorUserId: userId },
     });
   }
   return false;
@@ -447,7 +449,7 @@ export const submitProof = async (
       fileIds: persistedFileIds,
       submittedAt: now,
     });
-    await moveIfSubmitted(tx, current, now);
+    await moveIfSubmitted(tx, current, now, userId);
     return { proof };
   });
 
@@ -485,7 +487,7 @@ export const confirmProofFreeWork = async (
         confirmedByUserId: userId,
         confirmedAt: now,
       });
-    await moveIfSubmitted(tx, current, now);
+    await moveIfSubmitted(tx, current, now, userId);
     const [updated] = await tx
       .select({ questStatus: quest.questStatus })
       .from(quest)
@@ -592,6 +594,7 @@ export const reviewProof = async (
         to: questStatus.rework,
         now,
         workChat: [],
+        actor: { actorType: 'MEMBER', actorUserId: hirerId },
       });
     } else if (current.questStatus === questStatus.failed) {
       await settleApprovedLegacyQuestProofAfterFailureInTransaction(tx, questId, proofId);
@@ -602,13 +605,15 @@ export const reviewProof = async (
         to: questStatus.approved,
         now,
         workChat: [],
+        actor: { actorType: 'MEMBER', actorUserId: hirerId },
       });
       await settleApprovedQuestInTransaction(
         tx,
         questId,
         hirerId,
         `quest-completion:${questId}`,
-        now
+        now,
+        { actorType: 'MEMBER', actorUserId: hirerId }
       );
     }
     const updated = await loadProof(tx, proofId);
@@ -681,6 +686,7 @@ const autoApproveDueProofFreeQuests = async (tx: Tx, now: Date) => {
       to: questStatus.approved,
       now,
       workChat: [],
+      actor: { actorType: 'SYSTEM' },
     });
     if (approved)
       await settleApprovedQuestInTransaction(
@@ -688,7 +694,8 @@ const autoApproveDueProofFreeQuests = async (tx: Tx, now: Date) => {
         candidate.id,
         candidate.hirerId,
         `quest-completion:${candidate.id}`,
-        now
+        now,
+        { actorType: 'SYSTEM' }
       );
   }
 };
@@ -771,6 +778,7 @@ export const autoApproveDueProofs = async (now = new Date()): Promise<string[]> 
           to: questStatus.approved,
           now,
           workChat: [],
+          actor: { actorType: 'SYSTEM' },
         });
         if (approved)
           await settleApprovedQuestInTransaction(
@@ -778,7 +786,8 @@ export const autoApproveDueProofs = async (now = new Date()): Promise<string[]> 
             candidate.questId,
             current.hirerId,
             `quest-completion:${candidate.questId}`,
-            now
+            now,
+            { actorType: 'SYSTEM' }
           );
       }
     }
