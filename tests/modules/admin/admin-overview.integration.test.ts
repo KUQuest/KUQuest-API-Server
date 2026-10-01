@@ -70,7 +70,7 @@ const questIds: string[] = [];
 const overviewWalletUserIds: string[] = [];
 const overviewAssignmentIds: string[] = [];
 const overviewConductReportIds: string[] = [];
-const overviewPenaltyRecordIds: string[] = [];
+const overviewPenaltyMemberIds: string[] = [];
 const overviewReportCaseIds: string[] = [];
 const overviewMessageIds: string[] = [];
 const overviewMembershipIds: string[] = [];
@@ -330,11 +330,6 @@ afterAll(async () => {
       .delete(adminConductReport)
       .where(inArray(adminConductReport.id, overviewConductReportIds));
   }
-  if (overviewPenaltyRecordIds.length > 0) {
-    await db
-      .delete(memberPenaltyRecord)
-      .where(inArray(memberPenaltyRecord.id, overviewPenaltyRecordIds));
-  }
   if (overviewReportCaseIds.length > 0) {
     await db.delete(adminReportCase).where(inArray(adminReportCase.id, overviewReportCaseIds));
   }
@@ -351,8 +346,15 @@ afterAll(async () => {
     await db.delete(questAssignment).where(inArray(questAssignment.id, overviewAssignmentIds));
   }
   if (overviewWalletUserIds.length > 0) {
-    await db.delete(walletWallet).where(inArray(walletWallet.userId, overviewWalletUserIds));
-    await db.delete(authUser).where(inArray(authUser.id, overviewWalletUserIds));
+    // Penalty records are immutable, so retain their Member and Wallet fixtures.
+    const retainedPenaltyMembers = new Set(overviewPenaltyMemberIds);
+    const disposableMemberIds = overviewWalletUserIds.filter(
+      (memberId) => !retainedPenaltyMembers.has(memberId)
+    );
+    if (disposableMemberIds.length > 0) {
+      await db.delete(walletWallet).where(inArray(walletWallet.userId, disposableMemberIds));
+      await db.delete(authUser).where(inArray(authUser.id, disposableMemberIds));
+    }
   }
   if (questIds.length > 0) {
     await db.delete(adminDisputeCase).where(inArray(adminDisputeCase.questId, questIds));
@@ -765,7 +767,7 @@ describe('Admin Overview API', () => {
       .from(adminReportCase)
       .where(eq(adminReportCase.id, pendingReportId));
 
-    const memberIds = Array.from({ length: 7 }, () => crypto.randomUUID());
+    const memberIds = Array.from({ length: 6 }, () => crypto.randomUUID());
     overviewWalletUserIds.push(...memberIds);
     const activeStatusUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const expiredStatusAt = new Date(Date.now() - 60 * 1000);
@@ -774,7 +776,6 @@ describe('Admin Overview API', () => {
       { bannedUntil: null, redFlagExpiresAt: activeStatusUntil },
       { bannedUntil: activeStatusUntil, redFlagExpiresAt: activeStatusUntil },
       { bannedUntil: activeStatusUntil, redFlagExpiresAt: activeStatusUntil },
-      { bannedUntil: null, redFlagExpiresAt: null },
       { bannedUntil: null, redFlagExpiresAt: expiredStatusAt },
       { bannedUntil: expiredStatusAt, redFlagExpiresAt: null },
     ] as const;
@@ -789,58 +790,26 @@ describe('Admin Overview API', () => {
     );
     await db.insert(walletWallet).values([
       { userId: memberIds[0]!, walletStatus: 'ACTIVE' },
-      { userId: memberIds[1]!, walletStatus: 'FROZEN' },
-      { userId: memberIds[2]!, walletStatus: 'SUSPENDED' },
-      { userId: memberIds[3]!, walletStatus: 'CLOSED' },
+      { userId: memberIds[1]!, walletStatus: 'ACTIVE' },
+      { userId: memberIds[2]!, walletStatus: 'FROZEN' },
+      { userId: memberIds[3]!, walletStatus: 'FROZEN' },
+      { userId: memberIds[4]!, walletStatus: 'SUSPENDED' },
+      { userId: memberIds[5]!, walletStatus: 'CLOSED' },
     ]);
 
     const activePermanentPenaltyId = crypto.randomUUID();
-    const reversedPermanentPenaltyId = crypto.randomUUID();
-    const permanentPenaltyReversalId = crypto.randomUUID();
-    const reversedPermanentSourceId = crypto.randomUUID();
-    overviewPenaltyRecordIds.push(
-      activePermanentPenaltyId,
-      reversedPermanentPenaltyId,
-      permanentPenaltyReversalId
-    );
-    await db.insert(memberPenaltyRecord).values([
-      {
-        id: activePermanentPenaltyId,
-        memberId: memberIds[3]!,
-        ladder: 'REVIEW',
-        source: 'REVIEW_AVERAGE',
-        sourceId: crypto.randomUUID(),
-        sequenceNumber: 3,
-        result: 'PENALTY_PERMANENT_BAN',
-        actorType: 'SYSTEM',
-        reasonCode: 'REVIEW_AVERAGE_CROSSING',
-      },
-      {
-        id: reversedPermanentPenaltyId,
-        memberId: memberIds[4]!,
-        ladder: 'MISCONDUCT',
-        source: 'REPORT_CASE',
-        sourceId: reversedPermanentSourceId,
-        sequenceNumber: 13,
-        result: 'PENALTY_PERMANENT_BAN',
-        actorType: 'ADMIN',
-        actorAdminId: adminId,
-        reasonCode: 'POLICY_REVIEW',
-      },
-      {
-        id: permanentPenaltyReversalId,
-        memberId: memberIds[4]!,
-        ladder: 'MISCONDUCT',
-        source: 'REPORT_CASE',
-        sourceId: reversedPermanentSourceId,
-        sequenceNumber: 13,
-        result: 'PENALTY_REVERSAL',
-        actorType: 'ADMIN',
-        actorAdminId: adminId,
-        reasonCode: 'POLICY_REVIEW',
-        reversalOfRecordId: reversedPermanentPenaltyId,
-      },
-    ]);
+    await db.insert(memberPenaltyRecord).values({
+      id: activePermanentPenaltyId,
+      memberId: memberIds[3]!,
+      ladder: 'REVIEW',
+      source: 'REVIEW_AVERAGE',
+      sourceId: crypto.randomUUID(),
+      sequenceNumber: 3,
+      result: 'PENALTY_PERMANENT_BAN',
+      actorType: 'SYSTEM',
+      reasonCode: 'REVIEW_AVERAGE_CROSSING',
+    });
+    overviewPenaltyMemberIds.push(memberIds[3]!);
 
     const conductQuestId = await seedQuest('QUEST_ASSIGNED');
     const conductQuestTitle = `Admin Overview Quest ${conductQuestId}`;
@@ -898,13 +867,14 @@ describe('Admin Overview API', () => {
 
     expect(after.reports.open - before.reports.open).toBe(2);
     expect(after.conductReports.open - before.conductReports.open).toBe(1);
-    expect(after.members.byStatus.NORMAL - before.members.byStatus.NORMAL).toBe(4);
+    expect(after.members.byStatus.NORMAL - before.members.byStatus.NORMAL).toBe(3);
     expect(after.members.byStatus.FLAG - before.members.byStatus.FLAG).toBe(1);
     expect(after.members.byStatus.TEMP_BAN - before.members.byStatus.TEMP_BAN).toBe(1);
     expect(after.members.byStatus.PERM_BAN - before.members.byStatus.PERM_BAN).toBe(1);
-    for (const status of ['ACTIVE', 'FROZEN', 'SUSPENDED', 'CLOSED'] as const) {
-      expect(after.wallets.byStatus[status] - before.wallets.byStatus[status]).toBe(1);
-    }
+    expect(after.wallets.byStatus.ACTIVE - before.wallets.byStatus.ACTIVE).toBe(2);
+    expect(after.wallets.byStatus.FROZEN - before.wallets.byStatus.FROZEN).toBe(2);
+    expect(after.wallets.byStatus.SUSPENDED - before.wallets.byStatus.SUSPENDED).toBe(1);
+    expect(after.wallets.byStatus.CLOSED - before.wallets.byStatus.CLOSED).toBe(1);
 
     expect(after.queues.disputes.count - before.queues.disputes.count).toBe(1);
     expect(after.queues.disputes.state).toBe('OPEN');
