@@ -374,6 +374,48 @@ describe('Payout API routes', () => {
     expect((await missingHistoryResponse.json()).error.code).toBe('PAYOUT_NOT_FOUND');
   });
 
+  it('searches by Payout display ID without returning destination data', async () => {
+    const payout = await createPendingPayout();
+    const detailResponse = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts/${payout.id}`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    expect(detailResponse.status).toBe(200);
+    const displayId = (await detailResponse.json()).data.displayId as string;
+
+    const searchResponse = await app.handle(
+      new Request(
+        `http://localhost/api/v1/admin/search?q=${encodeURIComponent(displayId)}&kind=payout`,
+        { headers: { cookie: adminCookie } }
+      )
+    );
+    expect(searchResponse.status).toBe(200);
+    const searchBody = await searchResponse.json();
+    expect(searchBody.data.items).toHaveLength(1);
+    const item = searchBody.data.items[0];
+    expect(item).toMatchObject({
+      kind: 'payout',
+      id: payout.id,
+      resourceId: payout.id,
+      displayId,
+      title: 'Payout for Route Student',
+      status: 'PENDING_ADMIN_APPROVAL',
+    });
+    expect(Object.keys(item).sort()).toEqual([
+      'displayId',
+      'id',
+      'kind',
+      'newestAt',
+      'resourceId',
+      'status',
+      'title',
+    ]);
+    expect(JSON.stringify(item)).not.toContain('1234567890');
+    expect(JSON.stringify(item)).not.toContain('destinationAccountNumberCiphertext');
+    expect(JSON.stringify(item)).not.toContain('destinationRoutingValueCiphertext');
+  });
+
   it('serves the authenticated Admin cancellation contract', async () => {
     const payout = await createPendingPayout();
     const idempotencyKey = `payout-admin-route-cancellation-${crypto.randomUUID()}`;

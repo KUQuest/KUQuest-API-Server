@@ -58,6 +58,10 @@ export const openapiPlugin = openapi({
         name: 'Admin Reports',
         description: 'Admin Trust and Safety Report Case queue, evidence, and decisions.',
       },
+      {
+        name: 'Admin Search',
+        description: 'Searches safe fields within a required Admin resource type.',
+      },
     ],
     components: {
       ...authOpenAPIComponents,

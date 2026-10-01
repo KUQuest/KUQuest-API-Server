@@ -2,6 +2,7 @@ import { db } from '@/database/client';
 import { adminAction } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
+import { formatQuestDisplayId } from '@/modules/admin';
 import {
   proofSubmission,
   proofSubmissionImage,
@@ -126,7 +127,7 @@ export const serializeAdminQuestSummary = (value: AdminQuestSummary): AdminQuest
 
   return {
     ...summary,
-    displayId: `QST-${publicSequence.toString().padStart(6, '0')}`,
+    displayId: formatQuestDisplayId(publicSequence),
     startTime: value.startTime.toISOString(),
     dueAt: value.dueAt ? value.dueAt.toISOString() : null,
     hiddenAt: value.hiddenAt ? value.hiddenAt.toISOString() : null,
