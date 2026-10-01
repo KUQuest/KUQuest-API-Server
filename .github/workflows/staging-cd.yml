@@ -496,6 +496,7 @@ jobs:
             scripts/seed-admin.ts \
             src/config/default-database-url.ts \
             src/config/env.ts \
+            src/modules/team-invite/team-invite.config.ts \
             src/database \
             src/modules/auth/admin-auth.config.ts \
             src/modules/auth/admin-auth.policy.ts \
