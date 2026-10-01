@@ -125,10 +125,14 @@ export const getAdminOverview = async (): Promise<AdminOverviewData> =>
         when ${authUser.redFlagExpiresAt} > now() then 'FLAG'
         else 'NORMAL'
       end`;
-      const memberStatusRows = await transaction
-        .select({ status: memberStatus, total: count() })
+      const memberStatusProjection = transaction
+        .select({ status: memberStatus })
         .from(authUser)
-        .groupBy(memberStatus);
+        .as('admin_overview_member_statuses');
+      const memberStatusRows = await transaction
+        .select({ status: memberStatusProjection.status, total: count() })
+        .from(memberStatusProjection)
+        .groupBy(memberStatusProjection.status);
       const walletStatusRows = await transaction
         .select({ status: walletWallet.walletStatus, total: count() })
         .from(walletWallet)
@@ -201,7 +205,7 @@ export const getAdminOverview = async (): Promise<AdminOverviewData> =>
 
       const membersByStatus = emptyMemberStatusCounts();
       for (const row of memberStatusRows) {
-        membersByStatus[row.status] = row.total;
+        membersByStatus[row.status as MemberOverviewStatus] = row.total;
       }
 
       const countFor = <T extends string>(rows: Array<{ status: T; total: number }>, status: T) =>
