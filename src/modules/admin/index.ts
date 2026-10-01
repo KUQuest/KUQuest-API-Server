@@ -5,6 +5,7 @@ export { adminMemberRoute } from './admin-member.route';
 export { adminReportRoute } from './admin-report.route';
 export { adminSearchRoute } from './admin-search.route';
 export {
+  formatDisplayIdSql,
   formatDisputeDisplayId,
   formatQuestDisplayId,
   formatWalletDisplayId,

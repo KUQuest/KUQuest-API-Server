@@ -1,3 +1,5 @@
+import { sql, type SQLWrapper } from 'drizzle-orm';
+
 import {
   questMode,
   questParticipation,
@@ -10,6 +12,28 @@ import {
   type QuestV2Mode,
   type QuestV2Participation,
 } from '../../v2/core/quest-v2.contract';
+
+export const questV2ModeSearchSql = (input: {
+  apiVersion: SQLWrapper;
+  mode: SQLWrapper;
+  v2Mode: SQLWrapper;
+}) =>
+  sql`CASE
+    WHEN ${input.apiVersion} = 'v2' AND ${input.v2Mode} IS NOT NULL THEN ${input.v2Mode}
+    WHEN ${input.mode}::text = ${questMode.noCandidate} THEN ${questV2Mode.firstComeFirstServed}
+    ELSE ${questV2Mode.candidate}
+  END`;
+
+export const questV2ParticipationSearchSql = (input: {
+  apiVersion: SQLWrapper;
+  participation: SQLWrapper;
+  v2Participation: SQLWrapper;
+}) =>
+  sql`CASE
+    WHEN ${input.apiVersion} = 'v2' AND ${input.v2Participation} IS NOT NULL THEN ${input.v2Participation}
+    WHEN ${input.participation}::text = ${questParticipation.solo} THEN ${questV2Participation.single}
+    ELSE ${questV2Participation.group}
+  END`;
 
 export const questV2ModeFromStorage = (input: {
   apiVersion: 'v1' | 'v2';

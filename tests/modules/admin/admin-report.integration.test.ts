@@ -1285,6 +1285,93 @@ describe('Admin Report Case API', () => {
     }
   });
 
+  it('returns report status counts across cursor pages and searches only list fields', async () => {
+    if (!postgresAvailable) return;
+    const reportCase = await createReportFixture();
+    const conductReport = await createConductReportFixture();
+    const searchTerm = `report-count-${randomUUID()}`;
+    await db
+      .update(adminReporterEntry)
+      .set({ detail: searchTerm })
+      .where(eq(adminReporterEntry.reportCaseId, reportCase.caseId));
+    await db
+      .update(adminConductReport)
+      .set({ detail: searchTerm })
+      .where(eq(adminConductReport.id, conductReport.reportId));
+
+    type ListResponse = {
+      data: {
+        items: Array<{ kind: string; id: string }>;
+        nextCursor: string | null;
+        totalCount: number;
+        countsByStatus: Record<string, number>;
+      };
+    };
+    const list = (cursor?: string | null, status?: string) => {
+      const params = new URLSearchParams({ q: searchTerm, limit: '1' });
+      if (cursor) params.set('cursor', cursor);
+      if (status) params.set('status', status);
+      return adminRequest(`/api/v1/admin/reports?${params.toString()}`);
+    };
+
+    const first = await list();
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as ListResponse;
+    expect(firstBody.data).toMatchObject({
+      totalCount: 2,
+      countsByStatus: {
+        REPORT_CASE_PENDING: 1,
+        REPORT_CASE_DISMISSED: 0,
+        REPORT_CASE_HIDDEN: 0,
+        REPORT_CASE_RESTORED: 0,
+        CONDUCT_REPORT_PENDING: 1,
+        CONDUCT_REPORT_UPHELD: 0,
+        CONDUCT_REPORT_DISMISSED: 0,
+      },
+    });
+    expect(firstBody.data.items).toHaveLength(1);
+    expect(firstBody.data.nextCursor).toBeString();
+
+    const second = await list(firstBody.data.nextCursor);
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as ListResponse;
+    expect(secondBody.data).toMatchObject({
+      totalCount: 2,
+      countsByStatus: firstBody.data.countsByStatus,
+    });
+    expect(secondBody.data.items).toHaveLength(1);
+    expect(secondBody.data.nextCursor).toBeNull();
+    expect(
+      new Set([...firstBody.data.items, ...secondBody.data.items].map((item) => item.kind))
+    ).toEqual(new Set(['REPORT_CASE', 'CONDUCT_REPORT']));
+
+    const reportCaseOnly = await list(undefined, 'REPORT_CASE_PENDING');
+    expect(reportCaseOnly.status).toBe(200);
+    expect((await reportCaseOnly.json()).data).toMatchObject({
+      totalCount: 1,
+      countsByStatus: firstBody.data.countsByStatus,
+    });
+    const conductReportOnly = await list(undefined, 'CONDUCT_REPORT_PENDING');
+    expect(conductReportOnly.status).toBe(200);
+    expect((await conductReportOnly.json()).data).toMatchObject({
+      totalCount: 1,
+      countsByStatus: firstBody.data.countsByStatus,
+    });
+
+    const privateMessageSearch = await adminRequest(
+      `/api/v1/admin/reports?q=${encodeURIComponent('The reported Message content.')}`
+    );
+    expect(privateMessageSearch.status).toBe(200);
+    expect((await privateMessageSearch.json()).data).toMatchObject({
+      items: [],
+      totalCount: 0,
+      countsByStatus: {
+        REPORT_CASE_PENDING: 0,
+        CONDUCT_REPORT_PENDING: 0,
+      },
+    });
+  });
+
   it('does not expose an unsent v2 Proof Submission draft in Conduct Report detail', async () => {
     if (!postgresAvailable) return;
     const fixture = await createConductReportFixture({

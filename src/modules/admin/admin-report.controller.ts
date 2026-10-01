@@ -72,6 +72,7 @@ export const listAdminReportsController = async ({
 }: AdminContext & { query: AdminReportListQuery }): Promise<ApiResponse<AdminReportListData>> => {
   try {
     const result = await listAdminReports({
+      q: query.q,
       kind: query.kind,
       status: query.status,
       memberId: query.memberId,
@@ -83,6 +84,8 @@ export const listAdminReportsController = async ({
     return apiSuccess({
       items: result.items,
       nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null,
+      totalCount: result.totalCount,
+      countsByStatus: result.countsByStatus,
     });
   } catch (error) {
     return mapAdminReportError(set, error) as ApiResponse<AdminReportListData>;

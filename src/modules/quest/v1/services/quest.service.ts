@@ -21,6 +21,7 @@ import {
   isMemberRedFlaggedInTransaction,
 } from '@/modules/admin/member-penalty';
 import { decodeCursor, encodeCursor, parsePageLimit, type CursorPayload } from '@/shared/cursor';
+import { containsLikePattern } from '@/shared/list-search';
 
 import { and, asc, eq, exists, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 
@@ -354,8 +355,6 @@ const durationMinutes = (startTime: Date, dueAt: Date | null) => {
   return Math.max(1, Math.round((dueAt.getTime() - startTime.getTime()) / 60_000));
 };
 
-export const escapeLike = (value: string) => value.replace(/[\\%_]/g, '\\$&');
-
 const hirerName = (row: Pick<QuestRow, 'hirerFirstName' | 'hirerLastName'>) =>
   `${row.hirerFirstName} ${row.hirerLastName}`.trim();
 
@@ -410,7 +409,7 @@ const listRows = async (filters: QuestListFilters, hirerId?: string, excludeHire
   if (excludeHirerId) conditions.push(ne(quest.hirerId, excludeHirerId));
 
   if (filters.q) {
-    const pattern = `%${escapeLike(filters.q)}%`;
+    const pattern = containsLikePattern(filters.q);
     conditions.push(
       sql`(${quest.title} ILIKE ${pattern} ESCAPE ${'\\'} OR ${quest.description} ILIKE ${pattern} ESCAPE ${'\\'})`
     );

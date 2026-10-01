@@ -53,7 +53,7 @@ export const adminReportRoute = new Elysia({
       tags: ['Admin Reports'],
       summary: 'List Report Cases and Conduct Reports for Admin review',
       description:
-        'Lists the shared Report Case and Conduct Report queue with separate kind and status vocabularies. Supports exact kind, status, reported Member, and Quest filters. It omits Message content and file links.',
+        'Lists the shared Report Case and Conduct Report queue with separate kind and status vocabularies. Supports reported Member, Quest, and list-field search. It omits Message content and file links and returns matching status counts.',
       operationId: 'listAdminReports',
       security: betterAuthSecurity,
     },
