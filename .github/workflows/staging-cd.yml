@@ -359,12 +359,8 @@ jobs:
         shell: bash
         env:
           IMAGE_TAG: ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
-          STAGING_TEST_AUTH_PASSWORD: ${{ secrets.STAGING_TEST_AUTH_PASSWORD }}
         run: |
           set -euo pipefail
-
-          TEST_AUTH_DIR=$(mktemp -d "$RUNNER_TEMP/staging-test-auth.XXXXXX")
-          trap 'rm -rf -- "$TEST_AUTH_DIR"' EXIT
 
           ssh \
             -i "$RUNNER_TEMP/staging_key" \
@@ -373,32 +369,44 @@ jobs:
             -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
             deploy@"$STAGING_SERVER" \
             "cd /opt/backend && APP_IMAGE='$IMAGE_TAG' \
-             docker compose run --rm --no-deps api bun -e \
-             'import { demoMembers } from \"./src/shared/demo-members.ts\"; console.log(JSON.stringify(demoMembers));'" \
-            > "$TEST_AUTH_DIR/members.json"
+             docker compose run --rm --no-deps -T \
+             -e STAGING_PUBLIC_URL='$STAGING_PUBLIC_URL' api bun -" <<'BUN'
+          import { demoMembers } from './src/shared/demo-members.ts';
 
-          jq --exit-status 'length == 10' "$TEST_AUTH_DIR/members.json" >/dev/null
-          jq --raw-output '.[].email' "$TEST_AUTH_DIR/members.json" > "$TEST_AUTH_DIR/emails"
-          while IFS= read -r email; do
-            jq --null-input \
-              --arg email "$email" \
-              --arg password "$STAGING_TEST_AUTH_PASSWORD" \
-              '{email: $email, password: $password}' > "$TEST_AUTH_DIR/login.json"
-            curl \
-              --fail-with-body --silent --show-error --max-time 20 \
-              --cookie-jar "$TEST_AUTH_DIR/cookies" \
-              --header 'content-type: application/json' \
-              --data-binary "@$TEST_AUTH_DIR/login.json" \
-              "$STAGING_PUBLIC_URL/api/staging/test-auth/sign-in/email" \
-              > "$TEST_AUTH_DIR/login-response.json"
-            jq --exit-status --arg email "$email" \
-              '.user.email == $email' "$TEST_AUTH_DIR/login-response.json" >/dev/null
-            curl \
-              --fail-with-body --silent --show-error --max-time 20 \
-              --cookie "$TEST_AUTH_DIR/cookies" \
-              "$STAGING_PUBLIC_URL/api/v1/profile" > /dev/null
-            echo "Verified demo Member login: $email"
-          done < "$TEST_AUTH_DIR/emails"
+          const baseUrl = process.env.STAGING_PUBLIC_URL;
+          const password = process.env.STAGING_TEST_AUTH_PASSWORD;
+          if (!baseUrl || !password) throw new Error('Demo login verification configuration is missing.');
+          if (demoMembers.length !== 10) throw new Error('Expected 10 demo Members.');
+
+          for (const member of demoMembers) {
+            const login = await fetch(`${baseUrl}/api/staging/test-auth/sign-in/email`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ email: member.email, password }),
+              redirect: 'manual',
+              signal: AbortSignal.timeout(20_000),
+            });
+            if (login.status !== 200) {
+              throw new Error(`Demo Member login failed: ${member.email}, HTTP ${login.status}`);
+            }
+            const result = await login.json();
+            if (result.user?.email !== member.email) {
+              throw new Error(`Demo login returned the wrong Member: ${member.email}`);
+            }
+            const cookie = login.headers.getSetCookie().map((value) => value.split(';', 1)[0]).join('; ');
+            if (!cookie) throw new Error(`Demo login returned no session cookie: ${member.email}`);
+            const profile = await fetch(`${baseUrl}/api/v1/profile`, {
+              headers: { cookie },
+              redirect: 'manual',
+              signal: AbortSignal.timeout(20_000),
+            });
+            if (profile.status !== 200) {
+              throw new Error(`Demo Member Profile read failed: ${member.email}, HTTP ${profile.status}`);
+            }
+            await profile.arrayBuffer();
+            console.log(`Verified demo Member login: ${member.email}`);
+          }
+          BUN
 
       - name: Clean temporary secret files
         if: always()
