@@ -164,6 +164,14 @@ export type QuestV2CandidateTeamReadOutcome =
 
 export type QuestV2CandidateTeamDetailOutcome =
   CandidateTeam | { outcome: 'not-authorized' | 'not-found' | 'team-not-found' };
+export type QuestV2CandidateTeamFileAccess = {
+  fileId: string;
+  contentType: string;
+  sizeBytes: number;
+  position: number;
+  url: string;
+  urlExpiresAt: string;
+};
 
 type SelectionOutcomeCode = Extract<
   TeamCommandOutcomeCode,
@@ -744,6 +752,49 @@ export const getQuestV2CandidateTeam = async (
       ? { outcome: 'team-not-found' }
       : { outcome: 'not-authorized' };
   return readTeam(db, row);
+};
+export const getQuestV2CandidateTeamFile = async (
+  memberId: string,
+  questId: string,
+  teamId: string,
+  fileId: string
+): Promise<QuestV2CandidateTeamFileAccess | undefined> => {
+  const team = await getQuestV2CandidateTeam(memberId, questId, teamId);
+  if ('outcome' in team || !team.submission?.fileIds.includes(fileId)) return undefined;
+
+  const [row] = await db
+    .select({
+      fileId: questCandidateTeamV2SubmissionFile.fileId,
+      contentType: file.contentType,
+      sizeBytes: file.sizeBytes,
+      position: questCandidateTeamV2SubmissionFile.position,
+      bucket: file.bucket,
+      objectKey: file.objectKey,
+    })
+    .from(questCandidateTeamV2SubmissionFile)
+    .innerJoin(file, eq(file.id, questCandidateTeamV2SubmissionFile.fileId))
+    .where(
+      and(
+        eq(questCandidateTeamV2SubmissionFile.teamId, teamId),
+        eq(questCandidateTeamV2SubmissionFile.fileId, fileId),
+        isNull(file.deletedAt)
+      )
+    )
+    .limit(1);
+  if (!row) return undefined;
+
+  const link = questV2CandidateTeamStorage.linkForWithExpiry({
+    bucket: row.bucket,
+    objectKey: row.objectKey,
+  });
+  return {
+    fileId: row.fileId,
+    contentType: row.contentType,
+    sizeBytes: row.sizeBytes,
+    position: row.position,
+    url: link.url,
+    urlExpiresAt: link.expiresAt.toISOString(),
+  };
 };
 
 export const updateQuestV2CandidateTeam = async (

@@ -9,6 +9,7 @@ const uuid = t.String({ format: 'uuid' });
 
 export const adminWalletListItemSchema = t.Object({
   id: uuid,
+  displayId: t.String(),
   userId: uuid,
   member: t.Object({
     firstName: t.String(),
@@ -27,6 +28,7 @@ export const adminWalletListItemSchema = t.Object({
   }),
   createdAt: dateTime,
   updatedAt: dateTime,
+  latestTransactionAt: t.Union([dateTime, t.Null()]),
 });
 
 export const adminWalletListQuerySchema = t.Object({
@@ -52,6 +54,7 @@ export const adminWalletFullDetailResponseSchema = t.Object({
   data: t.Object({
     wallet: t.Object({
       id: uuid,
+      displayId: t.String(),
       userId: uuid,
       member: t.Object({
         firstName: t.String(),
@@ -71,6 +74,7 @@ export const adminWalletFullDetailResponseSchema = t.Object({
       projectionMatchesLedger: t.Boolean(),
       createdAt: dateTime,
       updatedAt: dateTime,
+      latestTransactionAt: t.Union([dateTime, t.Null()]),
     }),
   }),
 });
@@ -116,6 +120,7 @@ export const adminWalletStatusHistoryEntrySchema = t.Object({
   reason: t.String(),
   actorUserId: t.Nullable(t.String()),
   actorAdminId: t.Nullable(t.String()),
+  actorDisplayName: t.Union([t.String(), t.Null()]),
   createdAt: t.String(),
 });
 

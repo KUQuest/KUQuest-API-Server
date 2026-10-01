@@ -1186,6 +1186,7 @@ export const selectCandidate = async (
       now,
       workChat: [selectionTransition(commandId, questId, hirerId, now, assignments)],
       writer,
+      actor: { actorType: 'MEMBER', actorUserId: hirerId },
     });
     await tx
       .update(questCandidateSelectionCommand)

@@ -1,5 +1,6 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   quest,
@@ -161,6 +162,8 @@ afterAll(async () => {
   await db.delete(questCommand).where(inArray(questCommand.principalUserId, [workerId, ownerId]));
   await deleteTestIdempotencyKeys({ principalUserIds: [workerId, ownerId] });
   await db.delete(tag).where(eq(tag.id, tagId));
+  await db.delete(auditRecord).where(inArray(auditRecord.actorUserId, [workerId, ownerId]));
+  await db.delete(auditRecord).where(eq(auditRecord.actorAdminId, adminId));
   await db.delete(authAdmin).where(eq(authAdmin.id, adminId));
   await db.delete(authUser).where(eq(authUser.id, ownerId));
 });

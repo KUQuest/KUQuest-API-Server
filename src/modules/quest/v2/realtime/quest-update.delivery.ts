@@ -20,7 +20,11 @@ import { getQuestUpdateRoster } from './quest-update.service';
 const questUpdateChannel = 'kuquest_quest_updates';
 
 type HirerQuestChangeType =
-  QuestUpdateChangeType | 'CANDIDATE_ROSTER_UPDATED' | 'QUEST_PUBLISHED' | 'QUEST_CREATED';
+  | QuestUpdateChangeType
+  | 'CANDIDATE_ROSTER_UPDATED'
+  | 'QUEST_PUBLISHED'
+  | 'QUEST_CREATED'
+  | 'UNDERFILLED_DECISION_PENDING';
 
 type QuestUpdateSocket = {
   send: (message: string) => unknown;
@@ -252,7 +256,11 @@ const deliverQuestBoardInvalidated = async (
   }
 };
 
-const deliverHirerQuestUpdate = async (questId: string, changeType: HirerQuestChangeType) => {
+const deliverHirerQuestUpdate = async (
+  questId: string,
+  changeType: HirerQuestChangeType,
+  expiresAt?: string
+) => {
   const hirerSubscriptions: Array<[string, HirerQuestSubscription]> = [];
   for (const [id, subscription] of subscriptions) {
     if (subscription.stream === 'HIRER_QUESTS') hirerSubscriptions.push([id, subscription]);
@@ -288,6 +296,7 @@ const deliverHirerQuestUpdate = async (questId: string, changeType: HirerQuestCh
     version: 1,
     questId,
     changeType,
+    ...(expiresAt === undefined ? {} : { expiresAt }),
   });
 
   for (const [id, subscription] of hirerSessions) {
@@ -314,6 +323,8 @@ const deliverQuestRealtimeNotification = async (event: QuestRealtimeNotification
     } else if (event.type === 'QUEST_BOARD_INVALIDATED') {
       await deliverQuestBoardInvalidated(event);
       await deliverHirerQuestUpdate(event.questId, 'QUEST_PUBLISHED');
+    } else if (event.type === 'UNDERFILLED_DECISION_PENDING') {
+      await deliverHirerQuestUpdate(event.questId, event.type, event.expiresAt);
     } else {
       await deliverHirerQuestUpdate(event.questId, 'QUEST_CREATED');
     }
@@ -367,6 +378,17 @@ export const notifyQuestBoardInvalidated = async (transaction: QuestTransaction,
 
 export const notifyHirerQuestCreated = async (transaction: QuestTransaction, questId: string) =>
   notifyQuestRealtimeUpdate(transaction, { questId, type: 'QUEST_CREATED' });
+
+export const notifyHirerUnderfilledDecisionPending = async (
+  transaction: QuestTransaction,
+  questId: string,
+  expiresAt: Date
+) =>
+  notifyQuestRealtimeUpdate(transaction, {
+    questId,
+    type: 'UNDERFILLED_DECISION_PENDING',
+    expiresAt: expiresAt.toISOString(),
+  });
 
 export const notifyQuestRosterUpdate = async (transaction: QuestTransaction, questId: string) => {
   const roster = await getQuestUpdateRoster(transaction, questId);

@@ -1,3 +1,4 @@
+import { formatPayoutDisplayId } from '@/modules/admin/admin-display-id';
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import {
@@ -73,11 +74,13 @@ export type AdminPayoutSort = 'newest' | 'oldest';
 
 export type AdminPayout = {
   id: string;
+  displayId: string;
   student: {
     id: string;
     email: string;
     firstName: string;
     lastName: string;
+    studentId: string | null;
   };
   quoteId: string;
   principalSatang: number;
@@ -141,6 +144,7 @@ const bankNames: Record<string, string> = {
 
 const safePayoutColumns = {
   id: paymentPayouts.id,
+  publicSequence: paymentPayouts.publicSequence,
   userId: paymentPayouts.userId,
   quoteId: paymentPayouts.quoteId,
   receiptSatang: paymentPayoutQuotes.receiptSatang,
@@ -165,6 +169,7 @@ const safePayoutColumns = {
 
 type SafePayoutRecord = {
   id: string;
+  publicSequence: number;
   userId: string;
   quoteId: string;
   receiptSatang: number;
@@ -193,6 +198,7 @@ const adminPayoutFromRecord = (
   cancellationReasonCode: string | null
 ): AdminPayout => ({
   id: record.id,
+  displayId: formatPayoutDisplayId(record.publicSequence),
   student,
   quoteId: record.quoteId,
   principalSatang: record.principalSatang,
@@ -247,6 +253,7 @@ const adminPayoutRows = (executor: typeof db | AdminActionTransaction) =>
         email: authUser.email,
         firstName: authUser.firstName,
         lastName: authUser.lastName,
+        studentId: authUser.studentId,
       },
     })
     .from(paymentPayouts)
@@ -372,6 +379,7 @@ export const listAdminPayoutStatusHistory = adminPayoutHistory;
 
 export type ListAdminPayoutsInput = {
   status?: PayoutStatus;
+  userId?: string;
   limit?: number;
   cursor?: CursorPayload;
   sort?: AdminPayoutSort;
@@ -379,6 +387,7 @@ export type ListAdminPayoutsInput = {
 
 export const listAdminPayouts = async ({
   status = 'PENDING_ADMIN_APPROVAL',
+  userId,
   limit = 20,
   cursor,
   sort = 'newest',
@@ -391,7 +400,10 @@ export const listAdminPayouts = async ({
     cursor,
     limit,
     sort,
-    where: eq(paymentPayouts.payoutStatus, status),
+    where: and(
+      eq(paymentPayouts.payoutStatus, status),
+      userId ? eq(paymentPayouts.userId, userId) : undefined
+    ),
     read: ({ where, orderBy, limit: probe }) =>
       adminPayoutRows(db)
         .where(where)

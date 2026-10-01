@@ -1,5 +1,5 @@
 import type { AdminContext } from '@/modules/auth';
-import { apiError, apiSuccess, type ApiResponse } from '@/shared/api-response';
+import { apiError, apiSuccess, type ApiError, type ApiResponse } from '@/shared/api-response';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import { FileLinkUnavailableError } from '@/shared/object-storage';
 import { readResourceVersion } from '@/shared/resource-version';
@@ -24,6 +24,7 @@ import {
 } from './admin-report.service';
 import { AdminActionError } from './admin-action.policy';
 
+type AdminReportDetailResponse = { success: true; data: AdminReportDetailData } | ApiError;
 const mapAdminReportError = (set: AdminContext['set'], error: unknown): ApiResponse => {
   if (error instanceof CursorInputError) {
     set.status = 400;
@@ -71,6 +72,7 @@ export const listAdminReportsController = async ({
 }: AdminContext & { query: AdminReportListQuery }): Promise<ApiResponse<AdminReportListData>> => {
   try {
     const result = await listAdminReports({
+      q: query.q,
       kind: query.kind,
       status: query.status,
       memberId: query.memberId,
@@ -82,6 +84,8 @@ export const listAdminReportsController = async ({
     return apiSuccess({
       items: result.items,
       nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null,
+      totalCount: result.totalCount,
+      countsByStatus: result.countsByStatus,
     });
   } catch (error) {
     return mapAdminReportError(set, error) as ApiResponse<AdminReportListData>;
@@ -91,11 +95,11 @@ export const listAdminReportsController = async ({
 export const getAdminReportController = async ({
   params,
   set,
-}: AdminContext & { params: AdminReportParams }): Promise<ApiResponse<AdminReportDetailData>> => {
+}: AdminContext & { params: AdminReportParams }): Promise<AdminReportDetailResponse> => {
   try {
     return apiSuccess(await getAdminReport(params.reportId)) as ApiResponse<AdminReportDetailData>;
   } catch (error) {
-    return mapAdminReportError(set, error) as ApiResponse<AdminReportDetailData>;
+    return mapAdminReportError(set, error) as AdminReportDetailResponse;
   }
 };
 

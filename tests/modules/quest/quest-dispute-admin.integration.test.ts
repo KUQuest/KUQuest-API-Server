@@ -442,6 +442,89 @@ describe('Admin Dispute API', () => {
     expect(malformedBody.error?.code).toBe('INVALID_CURSOR');
   });
 
+  it('returns status counts across cursor pages and applies search to queue fields', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    queueWalkQuestIds.push(fixture.questId);
+    const pendingFilerIds = await Promise.all([
+      createMember('CountPendingFirst'),
+      createMember('CountPendingSecond'),
+    ]);
+    await Promise.all(
+      pendingFilerIds.map((filerUserId, index) =>
+        seedDisputeCase({
+          questId: fixture.questId,
+          filerUserId,
+          createdAt: `2030-08-06T00:00:00.00${index + 1}00Z`,
+        })
+      )
+    );
+
+    const dismissed = await adminRequest(
+      `/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': `dispute-count-dismiss-${fixture.disputeCaseId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'DISPUTE_CASE_DISMISSED',
+          reasonCode: 'DISPUTE_POLICY_REVIEW',
+        }),
+      }
+    );
+    expect(dismissed.status).toBe(200);
+
+    type QueueResponse = {
+      success: boolean;
+      data: {
+        items: Array<{ id: string }>;
+        nextCursor: string | null;
+        totalCount: number;
+        countsByStatus: Record<string, number>;
+      };
+    };
+    const list = (cursor?: string | null, status?: string) => {
+      const params = new URLSearchParams({ q: fixture.questId, limit: '1' });
+      if (cursor) params.set('cursor', cursor);
+      if (status) params.set('status', status);
+      return adminRequest(`/api/v1/admin/disputes?${params.toString()}`);
+    };
+
+    const first = await list();
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as QueueResponse;
+    expect(firstBody.data).toMatchObject({
+      totalCount: 2,
+      countsByStatus: {
+        DISPUTE_CASE_PENDING: 2,
+        DISPUTE_CASE_DISMISSED: 1,
+        DISPUTE_CASE_RESOLVED: 0,
+      },
+    });
+    expect(firstBody.data.items).toHaveLength(1);
+    expect(firstBody.data.nextCursor).toBeString();
+
+    const second = await list(firstBody.data.nextCursor);
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as QueueResponse;
+    expect(secondBody.data).toMatchObject({
+      totalCount: 2,
+      countsByStatus: firstBody.data.countsByStatus,
+    });
+    expect(secondBody.data.items).toHaveLength(1);
+    expect(secondBody.data.nextCursor).toBeNull();
+
+    const dismissedOnly = await list(undefined, 'DISPUTE_CASE_DISMISSED');
+    expect(dismissedOnly.status).toBe(200);
+    expect((await dismissedOnly.json()).data).toMatchObject({
+      totalCount: 1,
+      countsByStatus: firstBody.data.countsByStatus,
+    });
+  });
+
   it('dismisses a Case without money movement and replays the command', async () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();

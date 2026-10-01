@@ -1,3 +1,4 @@
+import { auditRecord } from '@/database/schema/audit.schema';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { quest } from '@/database/schema/quest.schema';
@@ -99,6 +100,7 @@ describe('Quest State transition module', () => {
     await expect(
       db.transaction((transaction) =>
         applyQuestStateTransition(transaction, {
+          actor: { actorType: 'SYSTEM' },
           questId,
           from: 'QUEST_DRAFT',
           to: 'QUEST_COMPLETED',
@@ -110,12 +112,45 @@ describe('Quest State transition module', () => {
     expect(await readQuest(questId)).toMatchObject({ questStatus: 'QUEST_DRAFT', version: 1 });
   });
 
+  it('records each committed State change with its actor and reason code', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest('QUEST_DRAFT');
+    const now = new Date('2030-03-03T10:00:00.000Z');
+    const applied = await db.transaction((transaction) =>
+      applyQuestStateTransition(transaction, {
+        questId,
+        from: 'QUEST_DRAFT',
+        to: 'QUEST_OPEN',
+        actor: { actorType: 'SYSTEM' },
+        reasonCode: 'POLICY_REVIEW',
+
+        now,
+        workChat: [],
+      })
+    );
+    const [event] = await db.select().from(auditRecord).where(eq(auditRecord.resourceId, questId));
+
+    expect(applied).toBe(true);
+    expect(event).toMatchObject({
+      actorType: 'SYSTEM',
+      actorUserId: null,
+      actorAdminId: null,
+      action: 'QUEST_STATE_CHANGED',
+      resourceType: 'QUEST',
+      resourceId: questId,
+      oldValue: { state: 'QUEST_DRAFT' },
+      newValue: { state: 'QUEST_OPEN', reasonCode: 'POLICY_REVIEW' },
+      createdAt: now,
+    });
+  });
+
   it('closes memberships before the State write and records read-only access after it', async () => {
     if (!postgresAvailable) return;
     const questId = await createQuest('QUEST_IN_PROGRESS');
     const seen: { type: string; questStatus: string }[] = [];
     const applied = await db.transaction((transaction) =>
       applyQuestStateTransition(transaction, {
+        actor: { actorType: 'SYSTEM' },
         questId,
         from: 'QUEST_IN_PROGRESS',
         to: 'QUEST_FAILED',
@@ -150,6 +185,7 @@ describe('Quest State transition module', () => {
     const questId = await createQuest('QUEST_IN_PROGRESS');
     const applied = await db.transaction((transaction) =>
       applyQuestStateTransition(transaction, {
+        actor: { actorType: 'SYSTEM' },
         questId,
         from: 'QUEST_IN_PROGRESS',
         to: 'QUEST_FAILED',
@@ -165,5 +201,11 @@ describe('Quest State transition module', () => {
       version: 1,
       failedAt: null,
     });
+    expect(
+      await db
+        .select({ id: auditRecord.id })
+        .from(auditRecord)
+        .where(eq(auditRecord.resourceId, questId))
+    ).toEqual([]);
   });
 });

@@ -300,6 +300,25 @@ components:
               - CANDIDATE_ROSTER_UPDATED
               - QUEST_PUBLISHED
               - QUEST_CREATED
+              - UNDERFILLED_DECISION_PENDING
+          expiresAt:
+            type: string
+            format: date-time
+            description: Present only when changeType is UNDERFILLED_DECISION_PENDING. It equals decision.expiresAt of GET /api/v2/quests/{questId}/underfilled. Sent once per Quest, when the ten-minute decision window opens.
+        allOf:
+          - if:
+              properties:
+                changeType:
+                  const: UNDERFILLED_DECISION_PENDING
+              required:
+                - changeType
+            then:
+              required:
+                - expiresAt
+            else:
+              not:
+                required:
+                  - expiresAt
     questUpdated:
       name: QUEST_UPDATED
       summary: Quest state or Assignment roster changed

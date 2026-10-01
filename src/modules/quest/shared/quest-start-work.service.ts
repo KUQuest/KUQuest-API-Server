@@ -218,6 +218,7 @@ export const startQuestWork = async (
             to: 'QUEST_IN_PROGRESS',
             now,
             workChat: [],
+            actor: { actorType: 'MEMBER', actorUserId: workerId },
           });
           if (!transitioned) return { kind: 'rejected', rejection: 'not-assigned' };
           questStatus = 'QUEST_IN_PROGRESS';

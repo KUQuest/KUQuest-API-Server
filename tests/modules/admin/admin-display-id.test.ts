@@ -1,9 +1,33 @@
 import {
   formatConductReportDisplayId,
+  formatDisputeDisplayId,
+  formatQuestDisplayId,
   formatReportCaseDisplayId,
 } from '@/modules/admin/admin-display-id';
 
 import { describe, expect, it } from 'bun:test';
+
+describe('Quest display ID', () => {
+  it('formats the first Quest as QST-000001', () => {
+    expect(formatQuestDisplayId(1)).toBe('QST-000001');
+  });
+
+  it('keeps the six-digit minimum while allowing larger sequences', () => {
+    expect(formatQuestDisplayId(42)).toBe('QST-000042');
+    expect(formatQuestDisplayId(1_000_000)).toBe('QST-1000000');
+  });
+});
+
+describe('Dispute Case display ID', () => {
+  it('formats the first Dispute Case as DSP-000001', () => {
+    expect(formatDisputeDisplayId(1)).toBe('DSP-000001');
+  });
+
+  it('keeps the six-digit minimum while allowing larger sequences', () => {
+    expect(formatDisputeDisplayId(42)).toBe('DSP-000042');
+    expect(formatDisputeDisplayId(1_000_000)).toBe('DSP-1000000');
+  });
+});
 
 describe('Report Case display ID', () => {
   it('formats the first Report Case as RPT-000001', () => {

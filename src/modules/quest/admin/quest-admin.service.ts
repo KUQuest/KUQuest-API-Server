@@ -1,7 +1,18 @@
 import { db } from '@/database/client';
-import { adminAction } from '@/database/schema/admin.schema';
+import { auditRecord } from '@/database/schema/audit.schema';
+import { adminAction, adminDisputeCase } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
+import { formatDisplayIdSql, formatQuestDisplayId } from '@/modules/admin';
+import { questV2Storage } from '@/modules/quest/v2';
+import { CursorInputError, type CursorPayload } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
+import {
+  buildStatusCounts,
+  containsLikeQueryPattern,
+  ilikeContains as adminListSearchValue,
+  isoDateSearchText as adminListSearchDate,
+} from '@/shared/list-search';
 import {
   proofSubmission,
   proofSubmissionImage,
@@ -13,6 +24,7 @@ import {
   questEditHistory,
   questEditRequest,
   questEditRequestResponse,
+  questImage,
   questLocation,
   questTeam,
   questTeamMember,
@@ -20,51 +32,42 @@ import {
   questV2EditRequestResponse,
   type QuestApiVersion,
 } from '@/database/schema/quest.schema';
-import { CursorInputError, type CursorPayload } from '@/shared/cursor';
-import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, asc, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
 
 import {
   questMode,
   questParticipation,
+  questStatuses,
   type QuestStatus,
 } from '../shared/contracts/quest.contract';
-import { escapeLike } from '../v1';
+import {
+  questV2ModeFromStorage,
+  questV2ModeSearchSql,
+  questV2ParticipationFromStorage,
+  questV2ParticipationSearchSql,
+} from '../shared/contracts/quest-legacy-columns';
+import type { QuestTransaction } from '../shared/work-chat/quest-work-chat.port';
 import {
   questV2Mode,
   questV2Participation,
   type QuestV2Mode,
   type QuestV2Participation,
 } from '../v2/core/quest-v2.contract';
-import type { QuestTransaction } from '../shared/work-chat/quest-work-chat.port';
+import { summaryFromRecord } from './quest-dispute-admin.service';
+import type { AdminDisputeCaseSummary } from './quest-dispute-admin.service';
 
 export type AdminQuestSort = 'newest' | 'oldest';
 
 export type AdminQuestMember = {
   id: string;
+  studentId: string | null;
   firstName: string;
   lastName: string;
   email: string;
 };
 
 type QuestRow = typeof quest.$inferSelect;
-
-const canonicalMode = (row: Pick<QuestRow, 'apiVersion' | 'mode' | 'v2Mode'>): QuestV2Mode =>
-  row.apiVersion === questApiVersion.v2 && row.v2Mode
-    ? (row.v2Mode as QuestV2Mode)
-    : row.mode === questMode.noCandidate
-      ? questV2Mode.firstComeFirstServed
-      : questV2Mode.candidate;
-
-const canonicalParticipation = (
-  row: Pick<QuestRow, 'apiVersion' | 'participation' | 'v2Participation'>
-): QuestV2Participation =>
-  row.apiVersion === questApiVersion.v2 && row.v2Participation
-    ? (row.v2Participation as QuestV2Participation)
-    : row.participation === questParticipation.solo
-      ? questV2Participation.single
-      : questV2Participation.group;
 
 export type AdminQuestSummary = {
   id: string;
@@ -108,8 +111,8 @@ const adminQuestSummaryFromRow = (row: {
   version: row.quest.version,
   title: row.quest.title,
   questStatus: row.quest.questStatus as QuestStatus,
-  mode: canonicalMode(row.quest),
-  participation: canonicalParticipation(row.quest),
+  mode: questV2ModeFromStorage(row.quest),
+  participation: questV2ParticipationFromStorage(row.quest),
   headcount: row.quest.headcount,
   rewardSatang: row.quest.rewardSatang,
   questFundingTotalSatang: row.quest.questFundingTotalSatang,
@@ -126,7 +129,7 @@ export const serializeAdminQuestSummary = (value: AdminQuestSummary): AdminQuest
 
   return {
     ...summary,
-    displayId: `QST-${publicSequence.toString().padStart(6, '0')}`,
+    displayId: formatQuestDisplayId(publicSequence),
     startTime: value.startTime.toISOString(),
     dueAt: value.dueAt ? value.dueAt.toISOString() : null,
     hiddenAt: value.hiddenAt ? value.hiddenAt.toISOString() : null,
@@ -147,6 +150,7 @@ const adminQuestRows = (executor: AdminQuestExecutor) =>
       quest,
       hirer: {
         id: authUser.id,
+        studentId: authUser.studentId,
         firstName: authUser.firstName,
         lastName: authUser.lastName,
         email: authUser.email,
@@ -184,46 +188,95 @@ export const listAdminQuests = async ({
   cursor,
   sort = 'newest',
 }: ListAdminQuestsInput = {}) => {
-  const searchTerm = q?.trim();
-  const searchPattern = searchTerm ? `%${escapeLike(searchTerm)}%` : undefined;
-
-  const page = await readKeysetPage({
-    anchor: { time: quest.createdAt, id: quest.id },
-    cursor,
-    limit,
-    sort,
-    where: and(
-      searchPattern
-        ? sql`(${quest.title} ILIKE ${searchPattern} ESCAPE ${'\\'} OR ${quest.description} ILIKE ${searchPattern} ESCAPE ${'\\'})`
-        : undefined,
-      status ? eq(quest.questStatus, status) : undefined,
-      mode
-        ? eq(
-            quest.mode,
-            mode === questV2Mode.firstComeFirstServed ? questMode.noCandidate : questMode.candidate
-          )
-        : undefined,
-      participation
-        ? eq(
-            quest.participation,
-            participation === questV2Participation.single
-              ? questParticipation.solo
-              : questParticipation.group
-          )
-        : undefined,
-      hidden === undefined ? undefined : hidden ? isNotNull(quest.hiddenAt) : isNull(quest.hiddenAt)
-    ),
-    read: ({ where, orderBy, limit: probe }) =>
-      adminQuestRows(db)
-        .where(where)
-        .orderBy(...orderBy)
-        .limit(probe),
-    rowCursor: (row) => ({ startTime: row.quest.createdAt, id: row.quest.id }),
-    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a Quest'),
+  const searchPattern = containsLikeQueryPattern(q);
+  const modeSearchValue = questV2ModeSearchSql({
+    apiVersion: quest.apiVersion,
+    mode: quest.mode,
+    v2Mode: quest.v2Mode,
   });
+  const participationSearchValue = questV2ParticipationSearchSql({
+    apiVersion: quest.apiVersion,
+    participation: quest.participation,
+    v2Participation: quest.v2Participation,
+  });
+  const filters = and(
+    searchPattern
+      ? or(
+          adminListSearchValue(sql`${quest.id}::text`, searchPattern),
+          adminListSearchValue(formatDisplayIdSql('quest', quest.publicSequence), searchPattern),
+          adminListSearchValue(quest.apiVersion, searchPattern),
+          adminListSearchValue(sql`${quest.version}::text`, searchPattern),
+          adminListSearchValue(quest.title, searchPattern),
+          adminListSearchValue(sql`${quest.questStatus}::text`, searchPattern),
+          adminListSearchValue(modeSearchValue, searchPattern),
+          adminListSearchValue(participationSearchValue, searchPattern),
+          adminListSearchValue(sql`${quest.headcount}::text`, searchPattern),
+          adminListSearchValue(sql`${quest.rewardSatang}::text`, searchPattern),
+          adminListSearchValue(sql`${quest.questFundingTotalSatang}::text`, searchPattern),
+          adminListSearchValue(adminListSearchDate(quest.startTime), searchPattern),
+          adminListSearchValue(adminListSearchDate(quest.dueAt), searchPattern),
+          adminListSearchValue(adminListSearchDate(quest.hiddenAt), searchPattern),
+          adminListSearchValue(adminListSearchDate(quest.createdAt), searchPattern),
+          adminListSearchValue(adminListSearchDate(quest.updatedAt), searchPattern),
+          adminListSearchValue(sql`${authUser.id}::text`, searchPattern),
+          adminListSearchValue(sql`${authUser.studentId}::text`, searchPattern),
+          adminListSearchValue(authUser.firstName, searchPattern),
+          adminListSearchValue(authUser.lastName, searchPattern),
+          adminListSearchValue(authUser.email, searchPattern)
+        )
+      : undefined,
+    mode
+      ? eq(
+          quest.mode,
+          mode === questV2Mode.firstComeFirstServed ? questMode.noCandidate : questMode.candidate
+        )
+      : undefined,
+    participation
+      ? eq(
+          quest.participation,
+          participation === questV2Participation.single
+            ? questParticipation.solo
+            : questParticipation.group
+        )
+      : undefined,
+    hidden === undefined ? undefined : hidden ? isNotNull(quest.hiddenAt) : isNull(quest.hiddenAt)
+  );
+  const [page, statusRows] = await Promise.all([
+    readKeysetPage({
+      anchor: { time: quest.createdAt, id: quest.id },
+      cursor,
+      limit,
+      sort,
+      where: and(filters, status ? eq(quest.questStatus, status) : undefined),
+      read: ({ where, orderBy, limit: probe }) =>
+        adminQuestRows(db)
+          .where(where)
+          .orderBy(...orderBy)
+          .limit(probe),
+      rowCursor: (row) => ({ startTime: row.quest.createdAt, id: row.quest.id }),
+      invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a Quest'),
+    }),
+    db
+      .select({ status: quest.questStatus, count: count() })
+      .from(quest)
+      .innerJoin(authUser, eq(authUser.id, quest.hirerId))
+      .where(filters)
+      .groupBy(quest.questStatus),
+  ]);
 
-  return { items: page.rows.map(adminQuestSummaryFromRow), nextCursor: page.nextCursor };
+  const countsByStatus = buildStatusCounts(questStatuses, statusRows);
+  const totalCount = status
+    ? countsByStatus[status]
+    : questStatuses.reduce((total, questStatus) => total + countsByStatus[questStatus], 0);
+
+  return {
+    items: page.rows.map(adminQuestSummaryFromRow),
+    nextCursor: page.nextCursor,
+    totalCount,
+    countsByStatus,
+  };
 };
+
 export type AdminQuestApplication = {
   id: string;
   worker: AdminQuestMember;
@@ -311,10 +364,30 @@ export type AdminQuestAdminAction = {
   createdAt: Date;
 };
 
+export type AdminQuestImage = {
+  imageId: string;
+  fileId: string;
+  position: number;
+  url: string;
+  urlExpiresAt: Date;
+};
+
+export type AdminQuestTimelineEntry = {
+  id: string;
+  fromState: string;
+  toState: string;
+  changedAt: Date;
+  actor:
+    { type: 'MEMBER'; id: string } | { type: 'ADMIN'; id: string } | { type: 'SYSTEM'; id: null };
+  reasonCode: string | null;
+};
 export type AdminQuestDetail = AdminQuestSummary & {
   description: string | null;
   condition: { text: string; items: Array<{ position: number; text: string }> };
   locations: AdminQuestLocation[];
+  images: AdminQuestImage[];
+  timeline: AdminQuestTimelineEntry[];
+  disputeCases: AdminDisputeCaseSummary[];
   proofRequired: boolean;
   tagId: string | null;
   fundingReservationId: string | null;
@@ -338,6 +411,7 @@ export type AdminQuestDetail = AdminQuestSummary & {
 
 const memberColumns = {
   id: authUser.id,
+  studentId: authUser.studentId,
   firstName: authUser.firstName,
   lastName: authUser.lastName,
   email: authUser.email,
@@ -580,6 +654,77 @@ const adminActionsFor = async (questId: string): Promise<AdminQuestAdminAction[]
   }));
 };
 
+const imagesFor = async (questId: string): Promise<AdminQuestImage[]> => {
+  const rows = await db
+    .select({
+      imageId: questImage.id,
+      fileId: questImage.fileId,
+      position: questImage.position,
+      bucket: file.bucket,
+      objectKey: file.objectKey,
+    })
+    .from(questImage)
+    .innerJoin(file, and(eq(file.id, questImage.fileId), isNull(file.deletedAt)))
+    .where(eq(questImage.questId, questId))
+    .orderBy(asc(questImage.position), asc(questImage.id));
+
+  return rows.map(({ bucket, objectKey, ...image }) => {
+    const link = questV2Storage.linkForWithExpiry({ bucket, objectKey });
+    return { ...image, url: link.url, urlExpiresAt: link.expiresAt };
+  });
+};
+
+const timelineFor = async (questId: string): Promise<AdminQuestTimelineEntry[]> => {
+  const rows = await db
+    .select()
+    .from(auditRecord)
+    .where(
+      and(
+        eq(auditRecord.action, 'QUEST_STATE_CHANGED'),
+        eq(auditRecord.resourceType, 'QUEST'),
+        eq(auditRecord.resourceId, questId)
+      )
+    )
+    .orderBy(asc(auditRecord.createdAt), asc(auditRecord.id));
+
+  return rows.flatMap((row) => {
+    const fromState = row.oldValue?.state;
+    const toState = row.newValue?.state;
+    if (typeof fromState !== 'string' || typeof toState !== 'string' || fromState === toState)
+      return [];
+
+    const actor =
+      row.actorType === 'SYSTEM'
+        ? { type: 'SYSTEM' as const, id: null }
+        : row.actorType === 'ADMIN' && row.actorAdminId
+          ? { type: 'ADMIN' as const, id: row.actorAdminId }
+          : row.actorType === 'MEMBER' && row.actorUserId
+            ? { type: 'MEMBER' as const, id: row.actorUserId }
+            : undefined;
+    if (!actor) return [];
+
+    return [
+      {
+        id: row.id,
+        fromState,
+        toState,
+        changedAt: row.createdAt,
+        actor,
+        reasonCode: typeof row.newValue?.reasonCode === 'string' ? row.newValue.reasonCode : null,
+      },
+    ];
+  });
+};
+
+const disputeCasesFor = async (questId: string): Promise<AdminDisputeCaseSummary[]> => {
+  const rows = await db
+    .select()
+    .from(adminDisputeCase)
+    .where(eq(adminDisputeCase.questId, questId))
+    .orderBy(asc(adminDisputeCase.createdAt), asc(adminDisputeCase.id));
+  return rows.map(summaryFromRecord);
+};
+
 export const getAdminQuestDetail = async (
   questId: string
 ): Promise<AdminQuestDetail | undefined> => {
@@ -589,6 +734,9 @@ export const getAdminQuestDetail = async (
   const [
     conditionItems,
     locations,
+    images,
+    timeline,
+    disputeCases,
     candidateApplications,
     candidateTeams,
     assignments,
@@ -602,6 +750,9 @@ export const getAdminQuestDetail = async (
       .where(eq(questConditionItem.questId, questId))
       .orderBy(asc(questConditionItem.position)),
     locationsFor(questId),
+    imagesFor(questId),
+    timelineFor(questId),
+    disputeCasesFor(questId),
     applicationsFor(questId),
     teamsFor(questId),
     assignmentsFor(questId),
@@ -615,6 +766,9 @@ export const getAdminQuestDetail = async (
     description: row.quest.description,
     condition: { text: row.quest.condition, items: conditionItems },
     locations,
+    images,
+    timeline,
+    disputeCases,
     proofRequired: row.quest.proofRequired,
     tagId: row.quest.tagId,
     fundingReservationId: row.quest.fundingReservationId,

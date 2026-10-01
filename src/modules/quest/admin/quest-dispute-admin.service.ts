@@ -9,6 +9,7 @@ import {
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
 import { file } from '@/database/schema/file.schema';
+import { formatDisputeDisplayId, formatDisplayIdSql } from '@/modules/admin';
 import {
   createAdminActionService,
   type AdminActionResult,
@@ -22,8 +23,14 @@ import {
 } from '@/modules/wallet';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
+import {
+  buildStatusCounts,
+  containsLikeQueryPattern,
+  ilikeContains as adminListSearchValue,
+  isoDateSearchText as adminListSearchDate,
+} from '@/shared/list-search';
 
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, count, eq, or, sql } from 'drizzle-orm';
 
 import { questV2ProofStorage } from '../v2/proof/quest-proof-v2.storage';
 
@@ -145,6 +152,7 @@ export type AdminDisputeEvidence = {
 };
 
 export type ListAdminDisputeCasesInput = {
+  q?: string;
   status?: DisputeCaseStatus;
   limit?: number;
   cursor?: CursorPayload;
@@ -180,7 +188,7 @@ export const summaryFromRecord = (
   record: typeof adminDisputeCase.$inferSelect
 ): AdminDisputeCaseSummary => ({
   id: record.id,
-  displayId: `DSP-${record.publicSequence.toString().padStart(6, '0')}`,
+  displayId: formatDisputeDisplayId(record.publicSequence),
   questId: record.questId,
   filerUserId: record.filerUserId,
   openedByAdminId: record.openedByAdminId,
@@ -309,6 +317,7 @@ export const createAdminDisputeCase = async (input: CreateAdminDisputeCaseInput)
   db.transaction((transaction) => createAdminDisputeCaseInTransaction(transaction, input));
 
 export const listAdminDisputeCases = async ({
+  q,
   status = 'DISPUTE_CASE_PENDING',
   limit = 20,
   cursor,
@@ -317,23 +326,60 @@ export const listAdminDisputeCases = async ({
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     throw new CursorInputError('INVALID_LIMIT', 'Dispute Case limit must be between 1 and 50.');
   }
-  const page = await readKeysetPage({
-    anchor: { time: adminDisputeCase.createdAt, id: adminDisputeCase.id },
-    cursor,
-    limit,
-    sort,
-    where: eq(adminDisputeCase.status, status),
-    read: ({ where, orderBy, limit: probe }) =>
-      db
-        .select()
-        .from(adminDisputeCase)
-        .where(where)
-        .orderBy(...orderBy)
-        .limit(probe),
-    rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
-    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'Dispute cursor is invalid.'),
-  });
-  return { items: page.rows.map(summaryFromRecord), nextCursor: page.nextCursor };
+
+  const searchPattern = containsLikeQueryPattern(q);
+  const search = searchPattern
+    ? or(
+        adminListSearchValue(sql`${adminDisputeCase.id}::text`, searchPattern),
+        adminListSearchValue(
+          formatDisplayIdSql('dispute', adminDisputeCase.publicSequence),
+          searchPattern
+        ),
+        adminListSearchValue(sql`${adminDisputeCase.questId}::text`, searchPattern),
+        adminListSearchValue(sql`${adminDisputeCase.filerUserId}::text`, searchPattern),
+        adminListSearchValue(sql`${adminDisputeCase.openedByAdminId}::text`, searchPattern),
+        adminListSearchValue(adminDisputeCase.status, searchPattern),
+        adminListSearchValue(sql`${adminDisputeCase.version}::text`, searchPattern),
+        adminListSearchValue(sql`${adminDisputeCase.resolvedWorkerId}::text`, searchPattern),
+        adminListSearchValue(sql`${adminDisputeCase.resolvedAmountSatang}::text`, searchPattern),
+        adminListSearchValue(sql`${adminDisputeCase.resolvedByAdminId}::text`, searchPattern),
+        adminListSearchValue(adminListSearchDate(adminDisputeCase.resolvedAt), searchPattern),
+        adminListSearchValue(adminListSearchDate(adminDisputeCase.createdAt), searchPattern),
+        adminListSearchValue(adminListSearchDate(adminDisputeCase.updatedAt), searchPattern)
+      )
+    : undefined;
+  const [page, statusRows] = await Promise.all([
+    readKeysetPage({
+      anchor: { time: adminDisputeCase.createdAt, id: adminDisputeCase.id },
+      cursor,
+      limit,
+      sort,
+      where: and(search, eq(adminDisputeCase.status, status)),
+      read: ({ where, orderBy, limit: probe }) =>
+        db
+          .select()
+          .from(adminDisputeCase)
+          .where(where)
+          .orderBy(...orderBy)
+          .limit(probe),
+      rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+      invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'Dispute cursor is invalid.'),
+    }),
+    db
+      .select({ status: adminDisputeCase.status, count: count() })
+      .from(adminDisputeCase)
+      .where(search)
+      .groupBy(adminDisputeCase.status),
+  ]);
+
+  const countsByStatus = buildStatusCounts(disputeCaseStatuses, statusRows);
+
+  return {
+    items: page.rows.map(summaryFromRecord),
+    nextCursor: page.nextCursor,
+    totalCount: countsByStatus[status],
+    countsByStatus,
+  };
 };
 
 export const getAdminDisputeCase = async (

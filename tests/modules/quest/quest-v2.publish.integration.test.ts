@@ -194,6 +194,7 @@ describe('Quest API v2 publish', () => {
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
+    expect(created.quest.questReward).toBeNull();
 
     const key = `quest-v2-publish-http-${randomUUID()}`;
     const response = await postPublish(created.quest.id, key);
@@ -202,7 +203,7 @@ describe('Quest API v2 publish', () => {
     expect(body).toMatchObject({
       success: true,
       data: {
-        quest: { id: created.quest.id, state: 'QUEST_OPEN' },
+        quest: { id: created.quest.id, state: 'QUEST_OPEN', questReward: 1 },
         questEscrow: {
           questFundingTotal: 1.03,
           questReward: 1,

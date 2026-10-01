@@ -1,4 +1,5 @@
 import { db, sql } from '@/database/client';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { proofSubmission, quest, questAssignment } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
@@ -70,6 +71,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db
+    .delete(auditRecord)
+    .where(inArray(auditRecord.actorUserId, [hirerId, workerId, secondWorkerId]));
   await db.delete(quest).where(inArray(quest.id, questIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(authUser).where(inArray(authUser.id, [hirerId, workerId, secondWorkerId]));

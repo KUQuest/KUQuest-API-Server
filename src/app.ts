@@ -17,6 +17,7 @@ import {
   adminMemberRoute,
   adminOverviewRoute,
   adminReportRoute,
+  adminSearchRoute,
 } from '@/modules/admin';
 import {
   questAssignmentV2Route,
@@ -100,6 +101,7 @@ export const createApp = () => {
     .use(adminFinanceRoute)
     .use(adminMemberRoute)
     .use(adminReportRoute)
+    .use(adminSearchRoute)
     .use(certificateRoute)
     .use(portfolioRoute)
     .use(workExperienceRoute)

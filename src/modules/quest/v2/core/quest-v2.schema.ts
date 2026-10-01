@@ -623,6 +623,14 @@ export const questV2CanonicalQuestSchema = t.Object({
   participation: questV2ParticipationSchema,
   state: questV2StateSchema,
   questFundingTotal: questFundingTotalSchema,
+  questReward: t.Nullable(
+    t.Number({
+      minimum: 0,
+      maximum: 700000,
+      description:
+        'Per-Worker Quest Reward in Baht. Null until the Quest is published. It is the published reward, before any underfilled revision.',
+    })
+  ),
   headcount: questV2HeadcountSchema,
   startTime: t.String({
     format: 'date-time',

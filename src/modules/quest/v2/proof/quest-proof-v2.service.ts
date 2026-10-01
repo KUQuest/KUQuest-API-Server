@@ -1857,7 +1857,9 @@ export const confirmQuestV2Completion = async (
             transaction,
             questId,
             `quest-v2-completion:${questId}`,
-            now
+            now,
+            undefined,
+            memberId
           );
           questStatus = 'QUEST_COMPLETED';
         }
@@ -2048,22 +2050,6 @@ const recordAssignmentAudits = async (
   }
 };
 
-const recordQuestFailureAudit = async (
-  transaction: QuestTransaction,
-  actor: ReviewCommandActor,
-  questId: string,
-  now: Date
-) =>
-  recordAudit(transaction, {
-    ...auditActorFor(actor),
-    action: 'QUEST_STATE_CHANGED',
-    resourceType: 'QUEST',
-    resourceId: questId,
-    oldValue: { state: 'QUEST_IN_PROGRESS' },
-    newValue: { state: 'QUEST_FAILED' },
-    createdAt: now,
-  });
-
 const reviewQuestV2ProofSubmissionInTransaction = async (
   transaction: QuestTransaction,
   input: ReviewCommandInput
@@ -2181,17 +2167,6 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           },
           createdAt: input.now,
         });
-        if (current.questState !== questStatus) {
-          await recordAudit(transaction, {
-            ...auditActorFor(input.actor),
-            action: 'QUEST_STATE_CHANGED',
-            resourceType: 'QUEST',
-            resourceId: input.questId,
-            oldValue: { state: current.questState },
-            newValue: { state: questStatus },
-            createdAt: input.now,
-          });
-        }
       } else {
         const failure = await failQuestV2InTransaction(
           transaction,
@@ -2253,9 +2228,6 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           'ASSIGNMENT_INCOMPLETE',
           input.now
         );
-        if (current.questState === 'QUEST_IN_PROGRESS') {
-          await recordQuestFailureAudit(transaction, input.actor, input.questId, input.now);
-        }
       }
       const proofMembers = await proofParticipantIds(transaction, updated);
       const changeType =
@@ -2513,7 +2485,6 @@ export const failQuestV2AtDueAt = async (questId: string, now = new Date()): Pro
       'ASSIGNMENT_INCOMPLETE',
       now
     );
-    await recordQuestFailureAudit(transaction, { actorType: 'SYSTEM' }, questId, now);
     await emitQuestUpdate(
       transaction,
       questId,

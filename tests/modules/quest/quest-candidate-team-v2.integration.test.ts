@@ -1,5 +1,6 @@
 import { app } from '@/app';
 import { db, sql as postgresSql } from '@/database/client';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
@@ -105,6 +106,7 @@ type OpenApiOperation = {
       };
     };
   };
+  responses?: Record<string, unknown>;
 };
 
 const successfulWriter = {
@@ -342,6 +344,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   if (!postgresAvailable) return;
+  await db.delete(auditRecord).where(inArray(auditRecord.actorUserId, memberIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(authUser).where(inArray(authUser.id, memberIds));
 });
@@ -423,6 +426,7 @@ describe('Quest Candidate Team API v2', () => {
     const submit = document.paths['/api/v2/quests/{questId}/teams/{teamId}/submit']?.post;
     const select = document.paths['/api/v2/quests/{questId}/teams/{teamId}/select']?.post;
     const reject = document.paths['/api/v2/quests/{questId}/teams/{teamId}/reject']?.post;
+    const fileLink = document.paths['/api/v2/quests/{questId}/teams/{teamId}/files/{fileId}']?.get;
 
     expect(collection?.post?.operationId).toBe('createQuestCandidateTeamV2');
     expect(collection?.get?.operationId).toBe('listQuestCandidateTeamsV2');
@@ -435,6 +439,15 @@ describe('Quest Candidate Team API v2', () => {
     expect(submit?.operationId).toBe('submitQuestCandidateTeamV2');
     expect(select?.operationId).toBe('selectQuestCandidateTeamV2');
     expect(reject?.operationId).toBe('rejectQuestCandidateTeamV2');
+    expect(fileLink?.operationId).toBe('getQuestCandidateTeamFileV2');
+    expect(fileLink?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(fileLink?.responses).toEqual(
+      expect.objectContaining({
+        '401': expect.anything(),
+        '404': expect.anything(),
+        '503': expect.anything(),
+      })
+    );
 
     expect(collection?.post?.requestBody?.content?.['application/json']?.schema).toMatchObject({
       additionalProperties: false,
@@ -1288,6 +1301,116 @@ describe('Quest Candidate Team API v2', () => {
     );
     expect(joinAfterSubmit.status).toBe(409);
     expect((await joinAfterSubmit.json()).error.code).toBe('TEAM_NOT_FORMING');
+  });
+  it('returns expiring links for submitted Candidate Team files to Hirers and Team Members only', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const questId = await createOpenGroupCandidateQuest();
+    const team = await createTeam(questId, candidate.id, 2, 'candidate-team-v2-file-link-create');
+    await joinTeam(
+      questId,
+      team.id,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-file-link-join'
+    );
+    const imageFileId = await createFile(candidate.id, 'image/png', 100);
+    const documentFileId = await createFile(candidate.id, 'application/pdf', 200);
+    const submitted = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/submit`,
+      'POST',
+      candidate.id,
+      {
+        'content-type': 'application/json',
+        'idempotency-key': 'candidate-team-v2-file-link-submit',
+      },
+      JSON.stringify({
+        text: 'Team work with image and document',
+        fileIds: [imageFileId, documentFileId],
+      })
+    );
+    expect(submitted.status).toBe(200);
+
+    const fileLinks = await Promise.all(
+      [hirer.id, secondCandidate.id].map(async (readerId) => {
+        const response = await request(
+          `/api/v2/quests/${questId}/teams/${team.id}/files/${imageFileId}`,
+          'GET',
+          readerId
+        );
+        expect(response.status).toBe(200);
+        expect(response.headers.get('cache-control')).toBe('no-store');
+        return (await response.json()).data as {
+          fileId: string;
+          contentType: string;
+          sizeBytes: number;
+          position: number;
+          url: string;
+          urlExpiresAt: string;
+        };
+      })
+    );
+    for (const body of fileLinks) {
+      expect(body).toMatchObject({
+        fileId: imageFileId,
+        contentType: 'image/png',
+        sizeBytes: 100,
+        position: 0,
+      });
+      expect(new URL(body.url).protocol).toMatch(/^https?:$/);
+      expect(Date.parse(body.urlExpiresAt)).toBeGreaterThan(Date.now());
+      expect(Date.parse(body.urlExpiresAt)).toBeLessThan(Date.now() + 16 * 60 * 1000);
+    }
+
+    const unrelatedReader = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/files/${imageFileId}`,
+      'GET',
+      unrelated.id
+    );
+    expect(unrelatedReader.status).toBe(404);
+  });
+  it('does not link forming, unassociated, or deleted Candidate Team files', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const questId = await createOpenGroupCandidateQuest();
+    const team = await createTeam(
+      questId,
+      candidate.id,
+      2,
+      'candidate-team-v2-file-link-guard-create'
+    );
+    const formingFileId = await createFile(candidate.id, 'image/png');
+    const path = `/api/v2/quests/${questId}/teams/${team.id}/files`;
+    const formingLink = await request(`${path}/${formingFileId}`, 'GET', hirer.id);
+    expect(formingLink.status).toBe(404);
+
+    await joinTeam(
+      questId,
+      team.id,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-file-link-guard-join'
+    );
+    const submittedFileId = await createFile(candidate.id, 'image/png');
+    const unassociatedFileId = await createFile(candidate.id, 'image/png');
+    const submitted = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/submit`,
+      'POST',
+      candidate.id,
+      {
+        'content-type': 'application/json',
+        'idempotency-key': 'candidate-team-v2-file-link-guard-submit',
+      },
+      JSON.stringify({ text: 'Submitted team', fileIds: [submittedFileId] })
+    );
+    expect(submitted.status).toBe(200);
+
+    const unassociatedLink = await request(`${path}/${unassociatedFileId}`, 'GET', hirer.id);
+    expect(unassociatedLink.status).toBe(404);
+
+    await db.update(file).set({ deletedAt: new Date() }).where(eq(file.id, submittedFileId));
+    const deletedLink = await request(`${path}/${submittedFileId}`, 'GET', hirer.id);
+    expect(deletedLink.status).toBe(404);
   });
 
   it('uploads a valid Team Leader PDF and accepts it when the full Candidate Team submits', async () => {

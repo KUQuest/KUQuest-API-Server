@@ -7,6 +7,10 @@ import { conductReportDismissReasonCodes } from './admin-report.policy';
 const dateTime = t.String({ format: 'date-time' });
 const uuid = t.String({ format: 'uuid' });
 
+const questModeSchema = t.Union([t.Literal('FIRST_COME_FIRST_SERVED'), t.Literal('CANDIDATE')]);
+
+const questParticipationSchema = t.Union([t.Literal('SINGLE'), t.Literal('GROUP')]);
+
 const reportCaseStatusSchema = t.Union([
   t.Literal('REPORT_CASE_PENDING'),
   t.Literal('REPORT_CASE_DISMISSED'),
@@ -27,10 +31,6 @@ const conductReportReasonSchema = t.Union([
 ]);
 
 const reportKindSchema = t.Union([t.Literal('REPORT_CASE'), t.Literal('CONDUCT_REPORT')]);
-
-const questModeSchema = t.Union([t.Literal('FIRST_COME_FIRST_SERVED'), t.Literal('CANDIDATE')]);
-
-const questParticipationSchema = t.Union([t.Literal('SINGLE'), t.Literal('GROUP')]);
 
 const questStatusSchema = t.Union([
   t.Literal('QUEST_DRAFT'),
@@ -83,6 +83,7 @@ export const adminReportEvidenceQuerySchema = t.Object({
 });
 
 export const adminReportListQuerySchema = t.Object({
+  q: t.Optional(t.String({ maxLength: 200 })),
   kind: t.Optional(reportKindSchema),
   status: t.Optional(t.Union([reportCaseStatusSchema, conductReportStatusSchema])),
   memberId: t.Optional(uuid),
@@ -149,16 +150,35 @@ export const adminReportDecisionBodySchema = t.Union([
   adminReportCaseDecisionBodySchema,
   adminConductReportDecisionBodySchema,
 ]);
+const adminReportMemberSummarySchema = t.Object({
+  id: uuid,
+  email: t.String(),
+  firstName: t.String(),
+  lastName: t.String(),
+  studentId: t.Nullable(t.String()),
+});
+
+const adminReportQuestSummarySchema = t.Object({
+  id: uuid,
+  title: t.String(),
+  questStatus: questStatusSchema,
+  mode: questModeSchema,
+  participation: questParticipationSchema,
+});
+
+const reportCaseSourceSchema = t.Union(
+  [t.Literal('CONVERSATION_CANDIDATE_INQUIRY'), t.Literal('CONVERSATION_WORK')],
+  { description: 'Conversation type that contains the reported Message.' }
+);
+
+const reportCaseTypeSchema = t.Union([t.Literal('USER'), t.Literal('SYSTEM')], {
+  description: 'Kind of the reported Message.',
+});
 
 const adminReporterSummarySchema = t.Object({
   id: uuid,
   reporterMemberId: uuid,
-  reporter: t.Object({
-    id: uuid,
-    email: t.String(),
-    firstName: t.String(),
-    lastName: t.String(),
-  }),
+  reporter: adminReportMemberSummarySchema,
   reason: reporterEntryReasonSchema,
   detail: t.Nullable(t.String()),
   createdAt: dateTime,
@@ -171,12 +191,7 @@ const adminEvidenceReferenceSummarySchema = t.Object({
   createdAt: dateTime,
 });
 
-const adminReportMemberSchema = t.Object({
-  id: uuid,
-  email: t.String(),
-  firstName: t.String(),
-  lastName: t.String(),
-});
+const adminReportMemberSchema = adminReportMemberSummarySchema;
 
 const adminConductReportQuestSchema = t.Object({
   id: uuid,
@@ -217,6 +232,10 @@ export const adminReportCaseSummarySchema = t.Object({
   messageId: uuid,
   conversationId: uuid,
   questId: uuid,
+  source: reportCaseSourceSchema,
+  type: reportCaseTypeSchema,
+  reportedMember: t.Nullable(adminReportMemberSummarySchema),
+  quest: t.Nullable(adminReportQuestSummarySchema),
   status: reportCaseStatusSchema,
   version: t.Integer({ minimum: 1 }),
   caseClosedAt: t.Nullable(dateTime),
@@ -262,11 +281,34 @@ const adminConductReportProofSchema = t.Object({
   updatedAt: t.Nullable(dateTime),
 });
 
+const adminConductReportAdminSummarySchema = t.Object({
+  id: uuid,
+  email: t.String(),
+  firstName: t.String(),
+  lastName: t.String(),
+});
+
+const adminConductReportDecisionSchema = t.Union([
+  t.Object({
+    outcome: t.Literal('CONDUCT_REPORT_UPHELD'),
+    reason: t.Nullable(conductReportReasonSchema),
+    resolvedAt: dateTime,
+    admin: adminConductReportAdminSummarySchema,
+  }),
+  t.Object({
+    outcome: t.Literal('CONDUCT_REPORT_DISMISSED'),
+    reason: t.Nullable(conductReportDecisionReasonCodeSchema),
+    resolvedAt: dateTime,
+    admin: adminConductReportAdminSummarySchema,
+  }),
+]);
+
 export const adminConductReportDetailSchema = t.Composite([
   adminConductReportSummarySchema,
   t.Object({
     assignment: adminConductReportAssignmentSchema,
     proofSubmission: t.Nullable(adminConductReportProofSchema),
+    decision: t.Nullable(adminConductReportDecisionSchema),
     evidenceHandles: t.Array(
       t.Object({
         handle: t.String({ pattern: '^CRH_[A-Za-z0-9_-]{43}$' }),
@@ -296,6 +338,16 @@ export const adminReportListResponseSchema = t.Object({
   data: t.Object({
     items: t.Array(adminReportListItemSchema),
     nextCursor: t.Nullable(t.String()),
+    totalCount: t.Integer({ minimum: 0 }),
+    countsByStatus: t.Object({
+      REPORT_CASE_PENDING: t.Integer({ minimum: 0 }),
+      REPORT_CASE_DISMISSED: t.Integer({ minimum: 0 }),
+      REPORT_CASE_HIDDEN: t.Integer({ minimum: 0 }),
+      REPORT_CASE_RESTORED: t.Integer({ minimum: 0 }),
+      CONDUCT_REPORT_PENDING: t.Integer({ minimum: 0 }),
+      CONDUCT_REPORT_UPHELD: t.Integer({ minimum: 0 }),
+      CONDUCT_REPORT_DISMISSED: t.Integer({ minimum: 0 }),
+    }),
   }),
 });
 
@@ -411,10 +463,11 @@ export type AdminReportEvidenceParams = Static<typeof adminReportEvidenceParamsS
 export type AdminReportEvidenceQuery = Static<typeof adminReportEvidenceQuerySchema>;
 export type AdminReportListQuery = Static<typeof adminReportListQuerySchema>;
 export type AdminReportDecisionBody = Static<typeof adminReportDecisionBodySchema>;
-export type AdminReportListData = Static<typeof adminReportListResponseSchema>['data'];
-export type AdminReportDetailData = Static<typeof adminReportDetailResponseSchema>['data'];
+export type AdminReportCaseSummary = Static<typeof adminReportCaseSummarySchema>;
 export type AdminConductReportSummary = Static<typeof adminConductReportSummarySchema>;
 export type AdminConductReportDetail = Static<typeof adminConductReportDetailSchema>;
+export type AdminReportListData = Static<typeof adminReportListResponseSchema>['data'];
+export type AdminReportDetailData = Static<typeof adminReportDetailResponseSchema>['data'];
 export type AdminConductReportCommandSummary = Static<
   typeof adminConductReportCommandSummarySchema
 >;

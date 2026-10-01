@@ -21,6 +21,7 @@ import {
   isMemberRedFlaggedInTransaction,
 } from '@/modules/admin/member-penalty';
 import { decodeCursor, encodeCursor, parsePageLimit, type CursorPayload } from '@/shared/cursor';
+import { containsLikePattern } from '@/shared/list-search';
 
 import { and, asc, eq, exists, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 
@@ -354,8 +355,6 @@ const durationMinutes = (startTime: Date, dueAt: Date | null) => {
   return Math.max(1, Math.round((dueAt.getTime() - startTime.getTime()) / 60_000));
 };
 
-export const escapeLike = (value: string) => value.replace(/[\\%_]/g, '\\$&');
-
 const hirerName = (row: Pick<QuestRow, 'hirerFirstName' | 'hirerLastName'>) =>
   `${row.hirerFirstName} ${row.hirerLastName}`.trim();
 
@@ -410,7 +409,7 @@ const listRows = async (filters: QuestListFilters, hirerId?: string, excludeHire
   if (excludeHirerId) conditions.push(ne(quest.hirerId, excludeHirerId));
 
   if (filters.q) {
-    const pattern = `%${escapeLike(filters.q)}%`;
+    const pattern = containsLikePattern(filters.q);
     conditions.push(
       sql`(${quest.title} ILIKE ${pattern} ESCAPE ${'\\'} OR ${quest.description} ILIKE ${pattern} ESCAPE ${'\\'})`
     );
@@ -896,6 +895,7 @@ export const createQuestEditRequest = async (
       to: questStatus.awaitingConsent,
       now: new Date(),
       workChat: [],
+      actor: { actorType: 'MEMBER', actorUserId: userId },
     });
     if (!pausedQuest) return { outcome: 'not-editable' };
     return {
@@ -1142,6 +1142,7 @@ const resolveExpiredEditRequestInTransaction = async (
         to: request.previousQuestStatus,
         now,
         workChat: [],
+        actor: { actorType: 'SYSTEM' },
       });
     return { outcome: 'not-pending' };
   }
@@ -1161,6 +1162,7 @@ const resolveExpiredEditRequestInTransaction = async (
     to: request.previousQuestStatus,
     now,
     workChat: [],
+    actor: { actorType: 'SYSTEM' },
   });
   return { status: 'EDIT_REQUEST_REJECTED', requestId };
 };
@@ -1222,6 +1224,7 @@ export const respondToQuestEditRequest = async (
           to: request.previousQuestStatus,
           now,
           workChat: [],
+          actor: { actorType: 'SYSTEM' },
         });
       return { outcome: 'not-pending' };
     }
@@ -1236,6 +1239,7 @@ export const respondToQuestEditRequest = async (
         to: request.previousQuestStatus,
         now,
         workChat: [],
+        actor: { actorType: 'SYSTEM' },
       });
       return { outcome: 'expired' };
     }
@@ -1267,6 +1271,7 @@ export const respondToQuestEditRequest = async (
         to: request.previousQuestStatus,
         now,
         workChat: [],
+        actor: { actorType: 'MEMBER', actorUserId: userId },
       });
       return { status: 'EDIT_REQUEST_REJECTED', requestId };
     }
@@ -1294,6 +1299,7 @@ export const respondToQuestEditRequest = async (
         to: request.previousQuestStatus,
         now,
         workChat: [],
+        actor: { actorType: 'SYSTEM' },
       });
       return { outcome: 'not-pending' };
     }
@@ -1312,6 +1318,7 @@ export const respondToQuestEditRequest = async (
         to: request.previousQuestStatus,
         now,
         workChat: [],
+        actor: { actorType: 'SYSTEM' },
       });
       return { outcome: 'invalid-files' };
     }
@@ -1332,6 +1339,7 @@ export const respondToQuestEditRequest = async (
       to: request.previousQuestStatus,
       now,
       workChat: [],
+      actor: { actorType: 'MEMBER', actorUserId: userId },
     });
     return { status: 'EDIT_REQUEST_APPROVED', requestId };
   });
@@ -1688,6 +1696,7 @@ export const publishQuest = async (
         questEscrowSatang: Number(check.escrowRequirementSatang),
       },
       workChat: [],
+      actor: { actorType: 'MEMBER', actorUserId: userId },
     });
 
     return published

@@ -1,5 +1,6 @@
 import type { AuthedContext } from '@/modules/auth';
 import {
+  FileLinkUnavailableError,
   FileTooLargeError,
   FileDimensionsTooLargeError,
   FileUploadError,
@@ -16,6 +17,7 @@ import type {
   QuestV2CandidateTeamMemberParams,
   QuestV2CandidateTeamParams,
   QuestV2CandidateTeamSubmissionInput,
+  QuestV2CandidateTeamFileParams,
   QuestV2CandidateTeamUpdateInput,
 } from './quest-candidate-team-v2.schema';
 import {
@@ -35,6 +37,8 @@ import {
   type QuestV2CandidateTeamOutcome,
   type QuestV2CandidateTeamRejectOutcome,
   type QuestV2CandidateTeamSelectionOutcome,
+  getQuestV2CandidateTeamFile,
+  type QuestV2CandidateTeamFileAccess,
 } from './quest-candidate-team-v2.service';
 import {
   mapQuestCommandOutcome,
@@ -385,6 +389,39 @@ export const getQuestV2CandidateTeamController = async ({
     );
   }
   return apiSuccess(await serializeTeam(result));
+};
+export const getQuestV2CandidateTeamFileController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  params: QuestV2CandidateTeamFileParams;
+  set: AuthedContext['set'] & { headers: Record<string, string | number> };
+}) => {
+  set.headers['Cache-Control'] = 'no-store';
+  let result: QuestV2CandidateTeamFileAccess | undefined;
+  try {
+    result = await getQuestV2CandidateTeamFile(
+      session.user.id,
+      params.questId,
+      params.teamId,
+      params.fileId
+    );
+  } catch (error) {
+    if (error instanceof FileLinkUnavailableError) {
+      set.status = 503;
+      return apiError(
+        'TEAM_FILE_LINK_UNAVAILABLE',
+        'Candidate Team file link could not be created'
+      );
+    }
+    throw error;
+  }
+  if (!result) {
+    set.status = 404;
+    return apiError('TEAM_FILE_NOT_FOUND', 'Candidate Team file not found');
+  }
+  return apiSuccess(result);
 };
 
 export const updateQuestV2CandidateTeamController = async ({
