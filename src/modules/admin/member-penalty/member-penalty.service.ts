@@ -12,16 +12,41 @@ import {
   count,
   desc,
   eq,
-  inArray,
+  exists,
   isNotNull,
   lte,
+  not,
   sql as drizzleSql,
   sum,
 } from 'drizzle-orm';
+import type { SQLWrapper } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 
 export type MemberPenaltyTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 type MemberPenaltyRow = typeof memberPenaltyRecord.$inferSelect;
+const memberPenaltyReversal = alias(memberPenaltyRecord, 'member_penalty_status_reversal');
+
+export const unreversedPermanentBanExists = (memberId: SQLWrapper) =>
+  drizzleSql<boolean>`${exists(
+    db
+      .select({ id: memberPenaltyRecord.id })
+      .from(memberPenaltyRecord)
+      .where(
+        and(
+          eq(memberPenaltyRecord.memberId, memberId),
+          eq(memberPenaltyRecord.result, 'PENALTY_PERMANENT_BAN'),
+          not(
+            exists(
+              db
+                .select({ id: memberPenaltyReversal.id })
+                .from(memberPenaltyReversal)
+                .where(eq(memberPenaltyReversal.reversalOfRecordId, memberPenaltyRecord.id))
+            )
+          )
+        )
+      )
+  )}`;
 type MemberPenaltyInput = {
   memberId: string;
   source: 'REPORT_CASE' | 'CONDUCT_REPORT';
@@ -493,7 +518,11 @@ export const readMemberPenaltyRestriction = async (
   now = new Date()
 ): Promise<MemberPenaltyRestriction> => {
   const [member] = await db
-    .select({ bannedUntil: authUser.bannedUntil, redFlagExpiresAt: authUser.redFlagExpiresAt })
+    .select({
+      bannedUntil: authUser.bannedUntil,
+      redFlagExpiresAt: authUser.redFlagExpiresAt,
+      permanentlyBanned: unreversedPermanentBanExists(authUser.id),
+    })
     .from(authUser)
     .where(eq(authUser.id, memberId))
     .limit(1);
@@ -506,25 +535,7 @@ export const readMemberPenaltyRestriction = async (
       redFlagExpiresAt: null,
     };
   }
-
-  const permanentRecords = await db
-    .select({ id: memberPenaltyRecord.id })
-    .from(memberPenaltyRecord)
-    .where(
-      and(
-        eq(memberPenaltyRecord.memberId, memberId),
-        eq(memberPenaltyRecord.result, 'PENALTY_PERMANENT_BAN')
-      )
-    );
-  const permanentRecordIds = permanentRecords.map((record) => record.id);
-  const reversals = permanentRecordIds.length
-    ? await db
-        .select({ reversalOfRecordId: memberPenaltyRecord.reversalOfRecordId })
-        .from(memberPenaltyRecord)
-        .where(inArray(memberPenaltyRecord.reversalOfRecordId, permanentRecordIds))
-    : [];
-  const reversedIds = new Set(reversals.map((record) => record.reversalOfRecordId));
-  const permanentlyBanned = permanentRecordIds.some((id) => !reversedIds.has(id));
+  const permanentlyBanned = member.permanentlyBanned;
   const bannedUntil = member.bannedUntil && member.bannedUntil > now ? member.bannedUntil : null;
   const redFlagExpiresAt =
     member.redFlagExpiresAt && member.redFlagExpiresAt > now ? member.redFlagExpiresAt : null;
