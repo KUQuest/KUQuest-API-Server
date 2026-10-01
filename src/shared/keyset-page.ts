@@ -7,14 +7,15 @@ import type { CursorPayload } from './cursor';
 
 export type KeysetSort = 'newest' | 'oldest';
 
-/**
- * The columns a cursor anchors on: the paging timestamp and the identity tiebreaker. Both belong
- * to the table that the reader pages, and the reader reads that table off the timestamp column.
- */
-export type KeysetAnchor = { time: PgColumn; id: PgColumn };
+/** The timestamp and identity columns of one table-backed keyset list. */
+export type KeysetAnchor = {
+  time: PgColumn;
+  id: PgColumn;
+};
 
 type KeysetCursorAnchorRow = { startTime: Date; id: string; scope: string };
 
+/** Resolves a cursor for a virtual list built from one or more backing tables. */
 export type KeysetCursorAnchor = {
   read: (cursor: CursorPayload) => Promise<KeysetCursorAnchorRow | undefined>;
   boundary: (anchor: KeysetCursorAnchorRow, sort: KeysetSort) => SQL;

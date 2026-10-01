@@ -34,6 +34,10 @@ import {
   questParticipation,
   type QuestStatus,
 } from '../shared/contracts/quest.contract';
+import {
+  questV2ModeFromStorage,
+  questV2ParticipationFromStorage,
+} from '../shared/contracts/quest-legacy-columns';
 import { escapeLike } from '../v1';
 import type { QuestTransaction } from '../shared/work-chat/quest-work-chat.port';
 import {
@@ -56,22 +60,6 @@ export type AdminQuestMember = {
 };
 
 type QuestRow = typeof quest.$inferSelect;
-
-const canonicalMode = (row: Pick<QuestRow, 'apiVersion' | 'mode' | 'v2Mode'>): QuestV2Mode =>
-  row.apiVersion === questApiVersion.v2 && row.v2Mode
-    ? (row.v2Mode as QuestV2Mode)
-    : row.mode === questMode.noCandidate
-      ? questV2Mode.firstComeFirstServed
-      : questV2Mode.candidate;
-
-const canonicalParticipation = (
-  row: Pick<QuestRow, 'apiVersion' | 'participation' | 'v2Participation'>
-): QuestV2Participation =>
-  row.apiVersion === questApiVersion.v2 && row.v2Participation
-    ? (row.v2Participation as QuestV2Participation)
-    : row.participation === questParticipation.solo
-      ? questV2Participation.single
-      : questV2Participation.group;
 
 export type AdminQuestSummary = {
   id: string;
@@ -115,8 +103,8 @@ const adminQuestSummaryFromRow = (row: {
   version: row.quest.version,
   title: row.quest.title,
   questStatus: row.quest.questStatus as QuestStatus,
-  mode: canonicalMode(row.quest),
-  participation: canonicalParticipation(row.quest),
+  mode: questV2ModeFromStorage(row.quest),
+  participation: questV2ParticipationFromStorage(row.quest),
   headcount: row.quest.headcount,
   rewardSatang: row.quest.rewardSatang,
   questFundingTotalSatang: row.quest.questFundingTotalSatang,

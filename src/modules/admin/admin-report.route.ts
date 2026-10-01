@@ -53,7 +53,7 @@ export const adminReportRoute = new Elysia({
       tags: ['Admin Reports'],
       summary: 'List Report Cases and Conduct Reports for Admin review',
       description:
-        'Lists a shared queue of Message-based Report Cases and Quest-based Conduct Reports. Supports exact kind, status, reported Member, and Quest filters. The default queue contains open reports and sorts newest first. Each item has a kind discriminator.',
+        'Lists the shared Report Case and Conduct Report queue with separate kind and status vocabularies. Supports exact kind, status, reported Member, and Quest filters. It omits Message content and file links.',
       operationId: 'listAdminReports',
       security: betterAuthSecurity,
     },
@@ -65,7 +65,7 @@ export const adminReportRoute = new Elysia({
       tags: ['Admin Reports'],
       summary: 'Get Report Case or Conduct Report detail for Admin review',
       description:
-        'Returns a Report Case summary or Conduct Report detail with the Quest, Assignment, and Proof Submission record. Report Case Message content is available only through the case-scoped evidence route.',
+        'Returns Report Case Reporter Entries and Evidence References, or Conduct Report detail with its Quest, Assignment, Proof Submission, Member, and decision context. Message content and file links are available only through the case-scoped evidence route.',
       operationId: 'getAdminReport',
       security: betterAuthSecurity,
     },
