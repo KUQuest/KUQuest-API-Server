@@ -42,12 +42,13 @@ export const adminQuestRoute = new Elysia({
   })
   .get('/:questId', getAdminQuestDetailController, {
     params: adminQuestParamsSchema,
-    response: responses(adminQuestDetailResponseSchema, 401, 403, 404),
+    response: responses(adminQuestDetailResponseSchema, 401, 403, 404, 503),
     detail: {
       tags: ['Admin Quests'],
       summary: 'Get Quest detail for Admin review',
       description:
-        'Reads Quest facts, Hirer, Candidates, Workers, Assignments, proof and file references, financial facts, edit history, and Admin Action history without secrets or unrelated Member data.',
+        'Reads Quest facts, Hirer, Candidates, Workers, Assignments, Proof Submissions, Quest Images with temporary links, state timeline, linked Dispute Cases, financial facts, edit history, and Admin Action history without secrets or unrelated Member data.',
+
       operationId: 'getAdminQuestDetail',
       security: betterAuthSecurity,
     },

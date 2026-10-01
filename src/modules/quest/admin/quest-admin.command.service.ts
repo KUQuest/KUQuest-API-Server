@@ -182,7 +182,8 @@ const applyTerminate = async (
     input.questId,
     input.adminId,
     requestKey,
-    now
+    now,
+    input.reasonCode
   );
   if (result.outcome === 'not-found') {
     throw new QuestAdminCommandError('QUEST_NOT_FOUND', 'Quest not found');

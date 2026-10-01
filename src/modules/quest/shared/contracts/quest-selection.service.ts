@@ -303,6 +303,7 @@ export const runQuestV2Selection = async <C extends string>(
               assignments,
             }),
           ],
+          actor: { actorType: 'MEMBER', actorUserId: input.hirerId },
         });
 
         return {

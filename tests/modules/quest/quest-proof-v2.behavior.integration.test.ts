@@ -1422,6 +1422,21 @@ describe('Quest Proof Submission v2 behavior', () => {
     );
     expect(confirmed.status).toBe(200);
     expect((await confirmed.json()).data.questStatus).toBe('QUEST_COMPLETED');
+    const [stateChangeAudit] = await db
+      .select()
+      .from(auditRecord)
+      .where(
+        and(
+          eq(auditRecord.action, 'QUEST_STATE_CHANGED'),
+          eq(auditRecord.resourceType, 'QUEST'),
+          eq(auditRecord.resourceId, questId)
+        )
+      );
+    expect(stateChangeAudit).toMatchObject({
+      actorType: 'MEMBER',
+      actorUserId: worker.id,
+      newValue: { state: 'QUEST_COMPLETED' },
+    });
     expect(
       await db
         .select()

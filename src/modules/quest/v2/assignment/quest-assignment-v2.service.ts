@@ -303,6 +303,7 @@ const joinQuestV2InTransaction = async (
           now,
           workChat: [workChat],
           writer,
+          actor: { actorType: 'MEMBER', actorUserId: userId },
         });
       } else {
         // The roster is not full yet: the Quest stays QUEST_OPEN, so only the Work
