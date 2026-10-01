@@ -50,6 +50,11 @@ reset the database. Repeat seed runs preserve Quest activity and do not repeat
 starter credit. `db:verify-staging-seed` is a separate check for a fresh bootstrap;
 it is not used after each CD run because Members can change their Wallets and Quests.
 
+CD verifies demo Member logins with Bun in the validated API image. For HTTP 429,
+it waits for the Server's retry delay and retries the login at most twice.
+Merge CD workflow fixes into `main` before merging the next PR into `develop`.
+That `develop` push starts CI and then a new CD run with the updated workflow.
+
 The one-time staging bootstrap runs from the validated API image:
 
 ```bash
