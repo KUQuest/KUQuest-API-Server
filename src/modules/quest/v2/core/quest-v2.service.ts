@@ -321,6 +321,7 @@ export type QuestV2PublicDetail = {
 
 export type QuestV2ParticipationDetail = QuestV2PublicDetail & {
   assignment: { status: AssignmentStatus; startedAt: string | null };
+  startedWorkerCount: number;
   capabilities: { canViewOnly: boolean };
 };
 
@@ -2692,6 +2693,14 @@ const activeWorkerCountExpression = sql<number>`(
     AND ${questAssignment.assignmentStatus} = ${assignmentStatus.active}
 )`;
 
+const startedWorkerCountExpression = sql<number>`(
+  SELECT COUNT(*)::int
+  FROM ${questAssignment}
+  WHERE ${questAssignment.questId} = ${quest.id}
+    AND ${questAssignment.assignmentStatus} = ${assignmentStatus.active}
+    AND ${questAssignment.startedAt} IS NOT NULL
+)`;
+
 const questV2PublicReadConditions = (userId: string) => [
   eq(quest.apiVersion, questApiVersion.v2),
   and(eq(quest.questStatus, questStatus.open), isNull(quest.hiddenAt)),
@@ -3036,6 +3045,7 @@ export const getQuestV2ParticipationDetail = async (
       assignmentId: questAssignment.id,
       assignmentStatus: questAssignment.assignmentStatus,
       assignmentStartedAt: questAssignment.startedAt,
+      startedWorkerCount: startedWorkerCountExpression,
     })
     .from(quest)
     .innerJoin(authUser, eq(quest.hirerId, authUser.id))
@@ -3099,6 +3109,7 @@ export const getQuestV2ParticipationDetail = async (
       status: participationRow.assignmentStatus,
       startedAt: participationRow.assignmentStartedAt?.toISOString() ?? null,
     },
+    startedWorkerCount: Number(row.startedWorkerCount),
     capabilities: {
       canViewOnly: isTerminalQuestStatus(participationRow.questStatus),
     },

@@ -108,6 +108,21 @@ const proofSubmissionSchema = t.Object({
   workerMessage: t.Nullable(t.String()),
   status: proofStatusSchema,
   submittedAt: t.Nullable(t.String({ format: 'date-time' })),
+  reviewDeadlineAt: t.Nullable(
+    t.String({
+      format: 'date-time',
+      description:
+        'Exact instant the Server auto-approves this Proof Submission. Non-null only while status is PROOF_PENDING, even when later than the Quest dueAt. Not reset by any edit: a sent Proof Submission is locked.',
+    })
+  ),
+  reviewReason: t.Nullable(
+    t.String({
+      description:
+        "The Hirer's reason, as stored. Returned to the Hirer and to the submitter; null for auto-approval, for approvals without a reason, and for summary rows.",
+    })
+  ),
+  reviewedAt: t.Nullable(t.String({ format: 'date-time' })),
+  reviewedBy: t.Nullable(t.Union([t.Literal('HIRER'), t.Literal('AUTO_APPROVE')])),
   createdAt: t.String({ format: 'date-time' }),
   updatedAt: t.String({ format: 'date-time' }),
   visibility: visibilitySchema,

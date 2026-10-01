@@ -5,7 +5,7 @@ import type { ApiResponse } from '@/shared/api-response';
 import type { Static } from 'elysia';
 
 import { WorkChatTransitionError } from '../shared/work-chat/quest-work-chat.port';
-import { cancelQuest, cancelQuestV2 } from './quest-settlement.service';
+import { cancelQuest, cancelQuestV2, previewQuestV2Cancellation } from './quest-settlement.service';
 import type { questSettlementParamsSchema } from './quest-settlement.schema';
 
 type Params = Static<typeof questSettlementParamsSchema>;
@@ -52,6 +52,13 @@ const moneyError = (set: AuthedContext['set'], error: unknown) => {
 };
 
 const v2CancellationErrorResponse = (set: AuthedContext['set'], outcome: string) => {
+  if (outcome === 'preview-stale') {
+    set.status = 409;
+    return apiError(
+      'CANCEL_PREVIEW_STALE',
+      'The Quest changed after the cancel preview. Read the preview again and confirm.'
+    );
+  }
   if (outcome === 'invalid-idempotency-key') {
     set.status = 400;
     return apiError(
@@ -86,9 +93,29 @@ export const cancelQuestV2Controller = async ({
 }: AuthedContext & { params: Params }): Promise<ApiResponse> => {
   const commandId = request?.headers.get('idempotency-key') ?? '';
   try {
-    const result = await cancelQuestV2(session.user.id, params.questId, commandId);
+    const result = await cancelQuestV2(
+      session.user.id,
+      params.questId,
+      commandId,
+      undefined,
+      request?.headers.get('x-cancel-preview-version') ?? undefined
+    );
     if (!('questStatus' in result)) return v2CancellationErrorResponse(set, result.outcome);
     return apiSuccess(result);
+  } catch (error) {
+    return moneyError(set, error);
+  }
+};
+
+export const previewQuestV2CancellationController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: Params }): Promise<ApiResponse> => {
+  try {
+    const result = await previewQuestV2Cancellation(session.user.id, params.questId);
+    if ('outcome' in result) return v2CancellationErrorResponse(set, result.outcome);
+    return apiSuccess({ ...result, computedAt: result.computedAt.toISOString() });
   } catch (error) {
     return moneyError(set, error);
   }

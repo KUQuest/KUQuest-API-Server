@@ -439,6 +439,19 @@ pressed Start Work), `PROOF_SUBMITTED`, `QUEST_AUTO_CANCELLED` (the Server cance
 unfilled Quest at its start time), `CANDIDATE_ROSTER_UPDATED`, `QUEST_PUBLISHED`, and `QUEST_CREATED`.
 The event contains no Quest or Candidate data.
 
+Failure and Dispute change types fire once per transition:
+
+| changeType              | When it fires                                                                                                                                                    | Who gets it                     |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `PROOF_REVIEWED`        | The Hirer reviewed a Proof. Read `reviewedBy`, `reviewReason`, and `reviewedAt` on the Proof Submission.                                                         | Hirer and the submitting Worker |
+| `PROOF_AUTO_APPROVED`   | The 24-hour review window ended and the Server approved the Proof.                                                                                               | Hirer and the submitting Worker |
+| `QUEST_FAILED`          | Yes: it fires at `dueAt` when work is unfinished (and when a Proof is not approved). One event per failure.                                                      | Hirer and the Workers           |
+| `DISPUTE_WINDOW_OPENED` | Sent right after `QUEST_FAILED` in the same commit. The 1-day self-file window starts.                                                                           | Hirer and the Workers           |
+| `DISPUTE_WINDOW_CLOSED` | Sent once, when the lifecycle worker first sees `failedAt + 1 day` has passed. It can lag by one worker interval; use `dispute.windowEndsAt` for the exact time. | Hirer and the Workers           |
+| `DISPUTE_CASE_UPDATED`  | A Dispute Case was created, resolved, or dismissed.                                                                                                              | The filer only                  |
+
+A Worker whose Assignment ended with the failure and who has no Proof left to review gets the socket closed after `QUEST_FAILED`, so that Worker may miss `DISPUTE_WINDOW_OPENED`. Read the Quest after reconnect and use `dispute` from REST.
+
 Read `GET /api/v2/quests/mine` from the first cursor page after `SUBSCRIBED`,
 after each event, and after reconnect. Continue paging as needed. REST is
 authoritative; the stream does not replay missed events. A client message
@@ -1072,13 +1085,16 @@ assignment and capabilities:
     "questReward": 980,
     "headcount": 1,
     "activeWorkerCount": 1,
+    "startedWorkerCount": 1,
     "assignment": {
       "status": "ASSIGNMENT_ACTIVE",
       "startedAt": "2026-09-30T02:00:00.000Z"
     },
     "capabilities": {
       "canViewOnly": false
-    }
+    },
+    "dispute": null,
+    "moneyHold": null
   }
 }
 ```
@@ -1090,6 +1106,12 @@ this view after settlement makes the Assignment terminal.
 assignment.startedAt is null until the assigned Worker uses the required Start Work action.
 It is a UTC instant with a Z suffix. The +07:00 rule in section 2.5 covers
 Quest schedule fields such as startTime and dueAt, not this one.
+
+startedWorkerCount counts the Active Assignments that have a Start Work time. Use it with
+activeWorkerCount to show GROUP progress (for example "2 of 3 started"). It names no one.
+
+dispute and moneyHold are null unless the Quest is QUEST_FAILED. See section 13.2.
+The same two fields are on GET /api/v2/quests/:questId for the Hirer.
 
 capabilities.canViewOnly is true in QUEST_COMPLETED, QUEST_CANCELLED, and
 QUEST_FAILED. A terminal Quest is read-only, and the client must not offer a
@@ -1226,6 +1248,12 @@ GET /api/v2/quests/:questId/assignments
 The owning Hirer receives every Assignment of the Quest in every Quest State, including terminal states.
 The current active Worker receives only their own Assignment.
 Other callers receive a masked 404 QUEST_NOT_FOUND.
+
+GROUP Quests (confirmed against the code):
+
+1. A Worker does **not** receive all Active Assignments. Other Workers' rows stay private. Use `activeWorkerCount` and `startedWorkerCount` from GET /api/v2/quests/:questId/participation to show roster progress.
+2. `member.displayName` is present on every row. It is never empty; a Member with no name reads `Former member`.
+3. `startedAt` is returned to a Worker on their own row. It is null until that Worker uses Start Work.
 
 Success response:
 
@@ -2383,6 +2411,10 @@ The Hirer reviews the Proof.
   "createdAt": "2026-10-01T09:00:00.000+07:00",
   "updatedAt": "2026-10-01T10:00:00.000+07:00",
   "visibility": "FULL",
+  "reviewDeadlineAt": "2026-10-02T10:00:00.000+07:00",
+  "reviewReason": null,
+  "reviewedAt": null,
+  "reviewedBy": null,
   "fileIds": ["private-file-uuid"],
   "files": [
     {
@@ -2406,6 +2438,15 @@ Proof status values:
 
 visibility is FULL for the submitter and Hirer.
 Other permitted viewers can receive SUMMARY.
+
+Review fields:
+
+| Field            | Meaning                                                                                                                                                                                                                                                     |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| reviewDeadlineAt | Non-null only while status is PROOF_PENDING. It is the exact instant the Server auto-approves: `submittedAt + 24 hours`. A sent Proof is locked, so it never moves. Visible to Hirer and Worker, also in SUMMARY rows. Null for drafts and reviewed Proofs. |
+| reviewedBy       | `HIRER`, `AUTO_APPROVE`, or null before review.                                                                                                                                                                                                             |
+| reviewedAt       | Time of the review or auto-approval, or null.                                                                                                                                                                                                               |
+| reviewReason     | The Hirer's reason for PROOF_NOT_APPROVED. Only FULL rows carry it, so only the submitting Worker (or Team) and the Hirer read it; SUMMARY rows always have null.                                                                                           |
 
 ### 12.2 Create a Proof Draft
 
@@ -2564,6 +2605,10 @@ Success status: HTTP 200.
         "createdAt": "2026-10-01T09:00:00.000+07:00",
         "updatedAt": "2026-10-01T10:00:00.000+07:00",
         "visibility": "FULL",
+        "reviewDeadlineAt": "2026-10-02T10:00:00.000+07:00",
+        "reviewReason": null,
+        "reviewedAt": null,
+        "reviewedBy": null,
         "fileIds": [],
         "files": []
       }
@@ -2725,6 +2770,74 @@ Errors:
 - money domain errors with HTTP 409
 - 503 WORK_CHAT_UNAVAILABLE
 - idempotency errors
+- 409 CANCEL_PREVIEW_STALE when you sent `X-Cancel-Preview-Version` and the Quest changed since the preview. Nothing moved. Read the preview again and ask the Hirer to confirm.
+
+Optional header: `X-Cancel-Preview-Version: <previewVersion>` from section 13.2. Omit it to cancel without the check.
+
+### 13.2 Preview a cancellation
+
+Request:
+
+```http
+GET /api/v2/quests/:questId/cancel-preview
+```
+
+Hirer only. It is read-only: no Idempotency-Key, no ledger write, no event, no state change. It runs the same code as `POST /cancel` and rolls it back, so the amounts match a real cancel made at once.
+
+```json
+{
+  "success": true,
+  "data": {
+    "questStatus": "QUEST_ASSIGNED",
+    "tier": "PARTIAL_PENALTY",
+    "paidSatang": 20000,
+    "refundedSatang": 82000,
+    "platformFeeSatang": 0,
+    "affectedWorkerCount": 1,
+    "computedAt": "2026-10-01T03:00:00.000Z",
+    "previewVersion": "opaque-token"
+  }
+}
+```
+
+| questStatus       | tier                       |
+| ----------------- | -------------------------- |
+| QUEST_DRAFT       | NO_PENALTY (all amounts 0) |
+| QUEST_OPEN        | NO_PENALTY                 |
+| QUEST_ASSIGNED    | PARTIAL_PENALTY            |
+| QUEST_IN_PROGRESS | FULL_PENALTY               |
+
+`platformFeeSatang` is the Platform Fee the Platform keeps; it is 0 when the fee is part of the refund. `computedAt` is a UTC instant. `previewVersion` is an opaque token of the Quest facts behind the amounts. Money can move between preview and confirm, so treat the amounts as a preview and send the token back on `POST /cancel`.
+
+Errors: 403 QUEST_NOT_AUTHORIZED (not the Hirer), 404 QUEST_NOT_FOUND, 409 QUEST_SETTLEMENT_NOT_ALLOWED (not cancellable, or an Assigned Quest with a pending Quest Edit Request or no active Worker, as `POST /cancel` refuses).
+
+### 13.3 Dispute window and money hold after failure
+
+`GET /api/v2/quests/:questId` (Hirer) and `GET /api/v2/quests/:questId/participation` (Worker) return two nullable objects. Both are null unless the Quest is QUEST_FAILED.
+
+```json
+{
+  "dispute": {
+    "canFile": true,
+    "windowEndsAt": "2026-10-02T10:00:00.000Z",
+    "myCase": null
+  },
+  "moneyHold": {
+    "status": "HELD",
+    "releasesAt": "2026-10-08T10:00:00.000Z",
+    "heldSatang": 102000
+  }
+}
+```
+
+- `dispute.windowEndsAt` is `failedAt + 1 day`; it is null once the window closed. `canFile` is true while the window is open, the viewer has no case, and the viewer is the Hirer or holds an Assignment.
+- `dispute.myCase` is `{ id, displayId, status, createdAt }` or null. It is the viewer's own case only.
+- GROUP rule: each Member (the Hirer and every assigned Worker) can file one Dispute Case per Quest and sees only their own `myCase`.
+- File with `POST /api/v1/quests/:questId/disputes` and read your case with `GET /api/v1/quests/:questId/disputes/mine`. Filing after the window answers 409 `DISPUTE_CASE_WINDOW_EXPIRED`. (The existing code is used; there is no separate `DISPUTE_WINDOW_CLOSED` error.) Filing again returns the Member's existing case.
+- `moneyHold.releasesAt` is `failedAt + 7 days`. A Dispute Case does **not** suspend or extend the hold (Admin Rulebook), so the date never moves and there is no `ON_DISPUTE_HOLD` state. `status` turns RELEASED after the lifecycle worker releases the Funding Reservation; `releasesAt` stays the nominal time, so show "released" from `status`, not from the clock.
+- `moneyHold.heldSatang` is what the Hirer's Funding Reservation still holds. It is null for a Worker, who has no view of the Hirer's reservation; a Worker sees only `releasesAt` and `status`.
+
+Push (B7): the Server sends no iOS push (APNs) in this release. That is an infrastructure and product decision. Use the realtime events in section 5.2 and in-app banners on iOS.
 
 ## 14. Rating Review flow
 
@@ -3024,6 +3137,7 @@ The current Quest v2 route set has 46 endpoints:
 |  10 | POST   | /api/v2/quests/:questId/publish                                     | Hirer                      |
 |  11 | POST   | /api/v2/quests/:questId/cancel                                      | Hirer                      |
 |  12 | GET    | /api/v2/quests/:questId/publish-check                               | Hirer                      |
+| 12a | GET    | /api/v2/quests/:questId/cancel-preview                              | Hirer                      |
 |  13 | GET    | /api/v2/quests/:questId/public                                      | authenticated non-owner    |
 |  14 | GET    | /api/v2/quests/:questId/participation                               | Assignment holder          |
 |  15 | GET    | /api/v2/quests/:questId                                             | owning Hirer               |

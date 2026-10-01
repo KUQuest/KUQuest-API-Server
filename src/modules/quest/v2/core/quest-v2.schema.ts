@@ -650,6 +650,41 @@ export const questV2CanonicalQuestSchema = t.Object({
   updatedAt: t.String({ format: 'date-time' }),
 });
 
+export const questV2MoneyHoldSchema = t.Nullable(
+  t.Object(
+    {
+      status: t.Union([t.Literal('HELD'), t.Literal('RELEASED')]),
+      releasesAt: t.String({ format: 'date-time' }),
+      heldSatang: t.Nullable(t.Integer({ minimum: 0 })),
+    },
+    {
+      description:
+        'The 7-day hold on a failed Quest. Null unless the Quest is QUEST_FAILED. releasesAt is failedAt + 7 days and a Dispute Case does not move it; it stays the nominal time if the lifecycle worker runs late. heldSatang is the Hirer’s still-held Satang and is null for a Worker.',
+    }
+  )
+);
+
+export const questV2DisputeSchema = t.Nullable(
+  t.Object(
+    {
+      canFile: t.Boolean(),
+      windowEndsAt: t.Nullable(t.String({ format: 'date-time' })),
+      myCase: t.Nullable(
+        t.Object({
+          id: t.String({ format: 'uuid' }),
+          displayId: t.String(),
+          status: t.String(),
+          createdAt: t.String({ format: 'date-time' }),
+        })
+      ),
+    },
+    {
+      description:
+        'The caller’s Dispute view. Null unless the Quest is QUEST_FAILED. canFile is the Server decision for the self-file window. myCase is the caller’s own Dispute Case only.',
+    }
+  )
+);
+
 const questV2CanonicalQuestOpenApiSchema = t.Object({
   ...questV2CanonicalQuestSchema.properties,
   questFundingTotal: questFundingTotalOpenApiSchema,
@@ -671,6 +706,8 @@ const questV2MineResponseOpenApiSchema = t.Object({
 const questV2DetailOpenApiSchema = t.Object({
   ...questV2CanonicalQuestOpenApiSchema.properties,
   images: t.Array(questV2ImageSchema),
+  dispute: t.Optional(questV2DisputeSchema),
+  moneyHold: t.Optional(questV2MoneyHoldSchema),
 });
 
 const questV2DetailResponseOpenApiSchema = t.Object({
@@ -867,9 +904,17 @@ export const questV2ParticipationDetailSchema = t.Object({
     status: questV2AssignmentStateSchema,
     startedAt: t.Nullable(t.String({ format: 'date-time' })),
   }),
+  startedWorkerCount: t.Integer({
+    minimum: 0,
+    maximum: 20,
+    description:
+      'How many Active Assignments on this Quest have a Start Work time. Pair it with activeWorkerCount to show GROUP progress without a roster read; no Worker identity is exposed.',
+  }),
   capabilities: t.Object({
     canViewOnly: t.Boolean(),
   }),
+  dispute: t.Optional(questV2DisputeSchema),
+  moneyHold: t.Optional(questV2MoneyHoldSchema),
 });
 
 export const questV2ParticipationDetailResponseSchema = t.Object({
@@ -975,7 +1020,11 @@ export type QuestV2EditRequestData = Static<typeof questV2EditRequestDataSchema>
 
 export const questV2DetailSchema = t.Composite([
   questV2CanonicalQuestSchema,
-  t.Object({ images: t.Array(questV2ImageSchema) }),
+  t.Object({
+    images: t.Array(questV2ImageSchema),
+    dispute: t.Optional(questV2DisputeSchema),
+    moneyHold: t.Optional(questV2MoneyHoldSchema),
+  }),
 ]);
 
 export const questV2DetailResponseSchema = t.Object({

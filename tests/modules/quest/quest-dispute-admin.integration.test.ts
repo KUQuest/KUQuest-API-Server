@@ -9,6 +9,10 @@ import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 import { autoApproveDueProofs, reviewProof } from '@/modules/quest/v1';
 import { createAdminDisputeCaseInTransaction } from '@/modules/quest/admin';
 import {
+  readQuestDisputeSummary,
+  readQuestMoneyHold,
+} from '@/modules/quest/admin/quest-dispute-admin.service';
+import {
   ensureInitialMoneyPolicy,
   ensureWallet,
   positiveSatang,
@@ -957,5 +961,132 @@ describe('Admin Dispute API', () => {
     expect(notFoundResponse.status).toBe(200);
     const emptyBody = (await notFoundResponse.json()) as { success: boolean; data: { case: null } };
     expect(emptyBody.data.case).toBeNull();
+  });
+
+  it('tells each viewer the self-file window and their own Case on a failed Quest', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    const outsiderId = await createMember('Outsider');
+    const [failed] = await db
+      .select({ failedAt: quest.failedAt })
+      .from(quest)
+      .where(eq(quest.id, fixture.questId));
+    const endsAt = new Date(failed!.failedAt!.getTime() + 24 * 60 * 60 * 1000);
+
+    const worker = await readQuestDisputeSummary(fixture.workerId, fixture.questId);
+    expect(worker).toMatchObject({
+      canFile: false,
+      windowEndsAt: endsAt,
+      myCase: { id: fixture.disputeCaseId, status: 'DISPUTE_CASE_PENDING' },
+    });
+    expect(await readQuestDisputeSummary(fixture.hirerId, fixture.questId)).toMatchObject({
+      canFile: true,
+      windowEndsAt: endsAt,
+      myCase: null,
+    });
+    expect(await readQuestDisputeSummary(outsiderId, fixture.questId)).toMatchObject({
+      canFile: false,
+      myCase: null,
+    });
+    expect(
+      await readQuestDisputeSummary(
+        fixture.hirerId,
+        fixture.questId,
+        new Date(endsAt.getTime() + 1)
+      )
+    ).toMatchObject({ canFile: false, windowEndsAt: null });
+
+    const cancelled = await createDisputeFixture('QUEST_CANCELLED');
+    expect(await readQuestDisputeSummary(cancelled.hirerId, cancelled.questId)).toBeNull();
+  });
+
+  it('shows the 7-day money hold to the Hirer and the Worker and keeps releasesAt after release', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    const [failed] = await db
+      .select({ failedAt: quest.failedAt })
+      .from(quest)
+      .where(eq(quest.id, fixture.questId));
+    const releasesAt = new Date(failed!.failedAt!.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    expect(await readQuestMoneyHold(fixture.hirerId, fixture.questId)).toEqual({
+      status: 'HELD',
+      releasesAt,
+      heldSatang: 1_000,
+    });
+    expect(await readQuestMoneyHold(fixture.workerId, fixture.questId)).toEqual({
+      status: 'HELD',
+      releasesAt,
+      heldSatang: null,
+    });
+
+    await runQuestLifecycleWorker({
+      clock: { now: () => releasesAt },
+      autoApprove: async () => [],
+    });
+    expect(await readQuestMoneyHold(fixture.hirerId, fixture.questId)).toEqual({
+      status: 'RELEASED',
+      releasesAt,
+      heldSatang: 0,
+    });
+
+    const cancelled = await createDisputeFixture('QUEST_CANCELLED');
+    expect(await readQuestMoneyHold(cancelled.hirerId, cancelled.questId)).toBeNull();
+  });
+
+  it('announces DISPUTE_CASE_UPDATED to the filer and DISPUTE_WINDOW_CLOSED once', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    await db
+      .update(quest)
+      .set({ apiVersion: 'v2', v2Mode: 'FIRST_COME_FIRST_SERVED', v2Participation: 'SINGLE' })
+      .where(eq(quest.id, fixture.questId));
+    type QuestUpdate = { questId: string; changeType: string; recipientMemberIds: string[] };
+    const events: QuestUpdate[] = [];
+    let wake!: () => void;
+    let waiting = new Promise<void>((resolve) => (wake = resolve));
+    const listener = await sql.listen('kuquest_quest_updates', (payload) => {
+      const event = JSON.parse(payload) as QuestUpdate;
+      if (event.questId !== fixture.questId) return;
+      events.push(event);
+      wake();
+      waiting = new Promise<void>((resolve) => (wake = resolve));
+    });
+    const until = async (changeType: string) => {
+      while (!events.some((event) => event.changeType === changeType)) await waiting;
+    };
+    try {
+      await db.transaction((transaction) =>
+        createAdminDisputeCaseInTransaction(transaction, {
+          questId: fixture.questId,
+          filerUserId: fixture.hirerId,
+        })
+      );
+      await until('DISPUTE_CASE_UPDATED');
+      expect(events.find(({ changeType }) => changeType === 'DISPUTE_CASE_UPDATED')).toMatchObject({
+        recipientMemberIds: [fixture.hirerId],
+      });
+
+      const [failed] = await db
+        .select({ failedAt: quest.failedAt })
+        .from(quest)
+        .where(eq(quest.id, fixture.questId));
+      const afterWindow = new Date(failed!.failedAt!.getTime() + 24 * 60 * 60 * 1000 + 1);
+      const beforeWindow = new Date(afterWindow.getTime() - 2);
+      const run = (now: Date) =>
+        runQuestLifecycleWorker({ clock: { now: () => now }, autoApprove: async () => [] });
+
+      expect((await run(beforeWindow)).closedDisputeWindowQuestIds).not.toContain(fixture.questId);
+      expect((await run(afterWindow)).closedDisputeWindowQuestIds).toContain(fixture.questId);
+      await until('DISPUTE_WINDOW_CLOSED');
+      expect((await run(afterWindow)).closedDisputeWindowQuestIds).not.toContain(fixture.questId);
+      const closed = events.filter(({ changeType }) => changeType === 'DISPUTE_WINDOW_CLOSED');
+      expect(closed).toHaveLength(1);
+      expect(closed[0]?.recipientMemberIds.sort()).toEqual(
+        [fixture.hirerId, fixture.workerId].sort()
+      );
+    } finally {
+      await listener.unlisten();
+    }
   });
 });

@@ -418,7 +418,12 @@ describe('Quest Proof Submission v2 behavior', () => {
       { 'idempotency-key': 'proof-v2-behavior-submit' }
     );
     expect(sent.status).toBe(200);
-    expect((await sent.json()).data.status).toBe('PROOF_PENDING');
+    const sentData = (await sent.json()).data;
+    expect(sentData.status).toBe('PROOF_PENDING');
+    expect(new Date(sentData.reviewDeadlineAt).getTime()).toBe(
+      new Date(sentData.submittedAt).getTime() + 24 * 60 * 60 * 1000
+    );
+    expect(sentData.reviewReason).toBeNull();
 
     const hirerSent = await request('GET', `/api/v2/quests/${questId}/proof-submissions`, hirer.id);
     expect((await hirerSent.json()).data.items).toEqual([
@@ -443,6 +448,10 @@ describe('Quest Proof Submission v2 behavior', () => {
         fileIds: [],
         files: [],
         status: 'PROOF_PENDING',
+        reviewDeadlineAt: expect.any(String),
+        reviewReason: null,
+        reviewedAt: null,
+        reviewedBy: null,
       }),
     ]);
 
@@ -627,6 +636,18 @@ describe('Quest Proof Submission v2 behavior', () => {
     );
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(firstBody);
+    expect(firstBody.data.proof).toMatchObject({
+      reviewDeadlineAt: null,
+      reviewReason: 'The submitted work is incomplete',
+      reviewedBy: 'HIRER',
+      reviewedAt: expect.any(String),
+    });
+    for (const viewer of [worker.id, hirer.id]) {
+      const listed = await request('GET', `/api/v2/quests/${questId}/proof-submissions`, viewer);
+      expect((await listed.json()).data.items[0]).toMatchObject({
+        reviewReason: 'The submitted work is incomplete',
+      });
+    }
 
     const reused = await jsonRequest(
       'POST',
@@ -777,6 +798,18 @@ describe('Quest Proof Submission v2 behavior', () => {
           .where(eq(questV2ProofSubmission.id, proofSubmissionId))
       )[0]?.status
     ).toBe('PROOF_APPROVED');
+    const autoApproved = await request(
+      'GET',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      worker.id
+    );
+    expect((await autoApproved.json()).data.items[0]).toMatchObject({
+      status: 'PROOF_APPROVED',
+      reviewDeadlineAt: null,
+      reviewReason: null,
+      reviewedBy: 'AUTO_APPROVE',
+      reviewedAt: expect.any(String),
+    });
     expect(
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
@@ -814,6 +847,34 @@ describe('Quest Proof Submission v2 behavior', () => {
           inArray(questAssignment.questId, [missingProof.questId, missingConfirmation.questId])
         )
     ).toEqual([{ status: 'ASSIGNMENT_INCOMPLETE' }, { status: 'ASSIGNMENT_INCOMPLETE' }]);
+  });
+
+  it('emits QUEST_FAILED and DISPUTE_WINDOW_OPENED once when dueAt fails the Quest', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const dueAt = new Date(Date.now() - 1_000);
+    const { questId } = await createQuest({
+      startTime: new Date(dueAt.getTime() - 60 * 60 * 1000),
+      dueAt,
+    });
+    await reserveQuest(questId, 1_020);
+    const changeTypes: string[] = [];
+    let wake!: () => void;
+    let waiting = new Promise<void>((resolve) => (wake = resolve));
+    const listener = await sql.listen('kuquest_quest_updates', (payload) => {
+      const event = JSON.parse(payload) as { questId: string; changeType: string };
+      if (event.questId !== questId) return;
+      changeTypes.push(event.changeType);
+      wake();
+      waiting = new Promise<void>((resolve) => (wake = resolve));
+    });
+    try {
+      expect(await failQuestV2AtDueAt(questId, new Date())).toBe(true);
+      expect(await failQuestV2AtDueAt(questId, new Date())).toBe(false);
+      while (changeTypes.length < 2) await waiting;
+      expect([...changeTypes].sort()).toEqual(['DISPUTE_WINDOW_OPENED', 'QUEST_FAILED']);
+    } finally {
+      await listener.unlisten();
+    }
   });
 
   it('reviews a valid pending Proof after another GROUP FCFS Assignment fails', async () => {
