@@ -1,0 +1,198 @@
+// Fictional campus work; photographs are illustrative stock images.
+export const demoQuests = [
+  {
+    title: 'Build a sign-up page for the KU board game club',
+    description:
+      'Our board game club needs a mobile-friendly page for weekly meetups at Bang Khen. We have the club logo, event schedule, and Google Form ready. Please turn them into one clear page that new members can share.',
+    conditions: [
+      'Build a responsive page with the club schedule and a working sign-up link.',
+      'Deliver the source files and a short guide to update the event date.',
+    ],
+    fundingBaht: 800,
+    tag: 'Design',
+    startDays: 30,
+    dueDays: 37,
+    imageAsset: 'quest-1.jpg',
+    imageSource: 'https://www.pexels.com/photo/3861969/',
+    portfolio: 'Club meetup sign-up website',
+    portfolioDescription: 'Built a responsive sign-up page for a weekly student meetup.',
+    certificate: 'Responsive Web Design',
+    experience: 'Student Web Developer',
+  },
+  {
+    title: 'Photograph the student craft market',
+    description:
+      'Help our student vendors show their handmade products. Take natural photos of 10 stalls and the market atmosphere at the KU activity courtyard. We will agree on a two-hour session before the event.',
+    conditions: [
+      'Deliver 30 edited JPEG photographs, including one photo of each stall.',
+      'Provide a shared download folder and obtain consent before close-up portraits.',
+    ],
+    fundingBaht: 650,
+    tag: 'Photography',
+    startDays: 40,
+    dueDays: 47,
+    imageAsset: 'quest-2.jpg',
+    imageSource: 'https://www.pexels.com/photo/3184465/',
+    portfolio: 'Student market photo collection',
+    portfolioDescription:
+      'Captured product displays and community activities for a student market.',
+    certificate: 'Introduction to Event Photography',
+    experience: 'Campus Event Photographer',
+  },
+  {
+    title: 'Summarise a campus transport survey',
+    description:
+      'We collected 120 anonymous responses about bus waiting times and bicycle parking. Help the club compare the results and prepare recommendations for the next student council meeting. We will supply a cleaned CSV with no personal details.',
+    conditions: [
+      'Prepare five clear charts and a one-page summary of the main findings.',
+      'Deliver the spreadsheet with formulas and explain missing-value handling.',
+    ],
+    fundingBaht: 500,
+    tag: 'Work/Homework',
+    startDays: 50,
+    dueDays: 57,
+    imageAsset: 'quest-3.jpg',
+    imageSource: 'https://www.pexels.com/photo/590022/',
+    portfolio: 'Campus transport survey dashboard',
+    portfolioDescription:
+      'Converted anonymous survey responses into charts for a student council presentation.',
+    certificate: 'Spreadsheet Data Analysis',
+    experience: 'Student Research Assistant',
+  },
+  {
+    title: 'Create a budget sheet for a charity bake sale',
+    description:
+      'Our volunteer group is planning a bake sale to support campus rescue animals. We need a practical spreadsheet to track ingredients, stall supplies, sales, and the final donation. The organiser will supply estimated quantities and prices.',
+    conditions: [
+      'Include editable cost, sales, and donation tables with automatic totals.',
+      'Provide a sample scenario and a short explanation of each sheet.',
+    ],
+    fundingBaht: 350,
+    tag: 'Work/Homework',
+    startDays: 60,
+    dueDays: 67,
+    imageAsset: 'quest-4.jpg',
+    imageSource: 'https://www.pexels.com/photo/6801648/',
+    portfolio: 'Charity event budget workbook',
+    portfolioDescription:
+      'Prepared a spreadsheet to track costs and donations for a volunteer bake sale.',
+    certificate: 'Practical Event Budgeting',
+    experience: 'Volunteer Finance Coordinator',
+  },
+  {
+    title: 'Design labels for the student herb garden',
+    description:
+      'The community garden has 12 herb beds used in student workshops. Create readable labels with the Thai name, English name, and a short care tip. We will supply the plant list and check the text before printing.',
+    conditions: [
+      'Deliver 12 print-ready A5 labels and editable source files.',
+      'Use large readable text and include watering and sunlight guidance.',
+    ],
+    fundingBaht: 450,
+    tag: 'Design',
+    startDays: 70,
+    dueDays: 77,
+    imageAsset: 'quest-5.jpg',
+    imageSource: 'https://www.pexels.com/photo/4505167/',
+    portfolio: 'Community herb garden guide',
+    portfolioDescription: 'Created plant care cards for a student community garden.',
+    certificate: 'Community Garden Planning',
+    experience: 'Community Garden Volunteer',
+  },
+  {
+    title: 'Prepare a bilingual Bang Khen campus walk',
+    description:
+      'Our buddy programme is welcoming visiting students. Plan a relaxed 60-minute walk from the university library to three nearby campus landmarks. Include shaded rest stops and a rain alternative.',
+    conditions: [
+      'Deliver a Thai-English route guide with five stops and estimated walking times.',
+      'Include an accessible route option and a simple printable map.',
+    ],
+    fundingBaht: 400,
+    tag: 'Work/Homework',
+    startDays: 80,
+    dueDays: 87,
+    imageAsset: 'quest-6.jpg',
+    imageSource: 'https://www.pexels.com/photo/256541/',
+    portfolio: 'International student welcome guide',
+    portfolioDescription:
+      'Designed a bilingual welcome route for students visiting Bang Khen campus.',
+    certificate: 'Visitor Experience Planning',
+    experience: 'Student Welcome Volunteer',
+  },
+  {
+    title: 'Organise a volunteer orientation slide deck',
+    description:
+      'Our student service club needs a short orientation for new volunteers. We have notes about the programme, contact people, and event safety. Turn them into a welcoming presentation that can be delivered in 15 minutes.',
+    conditions: [
+      'Create 12 to 15 slides with speaker notes and a simple agenda.',
+      'Deliver the editable presentation and a PDF with all contact placeholders marked.',
+    ],
+    fundingBaht: 550,
+    tag: 'Work/Homework',
+    startDays: 90,
+    dueDays: 97,
+    imageAsset: 'quest-7.jpg',
+    imageSource: 'https://www.pexels.com/photo/3184339/',
+    portfolio: 'Volunteer orientation presentation',
+    portfolioDescription: 'Prepared a clear introduction to campus volunteer activities.',
+    certificate: 'Team Project Coordination',
+    experience: 'Student Activity Coordinator',
+  },
+  {
+    title: 'Translate a library welcome leaflet into English',
+    description:
+      'The student buddy team has a 700-word Thai leaflet explaining library membership, borrowing, and quiet study areas. Translate it into friendly English for international students. We will supply the approved Thai text.',
+    conditions: [
+      'Deliver the English text alongside the Thai source in an editable document.',
+      'Keep names, hours, and borrowing limits unchanged and flag ambiguous wording.',
+    ],
+    fundingBaht: 300,
+    tag: 'Work/Homework',
+    startDays: 100,
+    dueDays: 107,
+    imageAsset: 'quest-8.jpg',
+    imageSource: 'https://www.pexels.com/photo/301920/',
+    portfolio: 'Bilingual student library leaflet',
+    portfolioDescription: 'Translated a campus library introduction for international students.',
+    certificate: 'Bilingual Communication',
+    experience: 'Student Language Buddy',
+  },
+  {
+    title: 'Research reusable cup ideas for a campus cafe',
+    description:
+      'A student business team is exploring a reusable cup programme. Compare three practical deposit or loyalty approaches and summarise likely costs for a small campus cafe. Use public information and state all assumptions.',
+    conditions: [
+      'Deliver a six-slide comparison with linked sources and a cost estimate.',
+      'Recommend one pilot approach and list three questions for cafe owners.',
+    ],
+    fundingBaht: 600,
+    tag: 'Work/Homework',
+    startDays: 110,
+    dueDays: 117,
+    imageAsset: 'quest-9.jpg',
+    imageSource: 'https://www.pexels.com/photo/3184418/',
+    portfolio: 'Reusable cup business proposal',
+    portfolioDescription:
+      'Compared practical business models for a student sustainability project.',
+    certificate: 'Student Business Research',
+    experience: 'Student Business Project Volunteer',
+  },
+  {
+    title: 'Design a poster for a student acoustic night',
+    description:
+      'The music club is holding a small acoustic evening at the campus activity centre. Design a warm, readable poster that fits a noticeboard and social media. We will supply the performers, event date, and final booking link.',
+    conditions: [
+      'Deliver one A3 print PDF and square and story-size JPEG versions.',
+      'Provide editable source files and use licensed fonts and graphics.',
+    ],
+    fundingBaht: 500,
+    tag: 'Design',
+    startDays: 120,
+    dueDays: 127,
+    imageAsset: 'quest-10.jpg',
+    imageSource: 'https://www.pexels.com/photo/196644/',
+    portfolio: 'Acoustic night poster series',
+    portfolioDescription: 'Designed print and social media posters for a student music evening.',
+    certificate: 'Visual Communication Basics',
+    experience: 'Student Event Designer',
+  },
+] as const;
