@@ -77,11 +77,7 @@ const mapJoinOutcome = (set: AuthedContext['set'], outcome: QuestV2AssignmentErr
     );
   }
   if (outcome.outcome === 'already-assigned') {
-    return conflict(
-      set,
-      'ASSIGNMENT_ALREADY_EXISTS',
-      'The Worker is already assigned to this Quest'
-    );
+    return conflict(set, 'ALREADY_JOINED', 'The Worker already has an active Assignment');
   }
   if (outcome.outcome === 'full') {
     return conflict(set, 'QUEST_FULL', 'The Quest has no open Worker slots');
@@ -149,5 +145,7 @@ export const listMyQuestV2AssignmentsController = async ({
   session,
 }: AuthedContext & { query: QuestV2AssignmentMineQuery }) =>
   apiSuccess({
-    items: (await listMyQuestV2Assignments(session.user.id, query.status)).map(serializeAssignment),
+    items: (await listMyQuestV2Assignments(session.user.id, query.status)).map(
+      ({ underfilled, ...assignment }) => ({ ...serializeAssignment(assignment), underfilled })
+    ),
   });

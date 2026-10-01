@@ -161,6 +161,25 @@ export const questV2UnderfilledResolutionCodes = [
 ] as const;
 export type QuestV2UnderfilledResolutionCode = (typeof questV2UnderfilledResolutionCodes)[number];
 
+export const questV2UnderfilledCancellationReasons = [
+  'HIRER_CANCELLED',
+  'HIRER_NO_DECISION',
+  'WORKER_DECLINED',
+  'CONSENT_TIMEOUT',
+] as const;
+export type QuestV2UnderfilledCancellationReason =
+  (typeof questV2UnderfilledCancellationReasons)[number];
+
+export const questV2UnderfilledCancellationReasonFor: Record<
+  QuestV2UnderfilledResolutionCode,
+  QuestV2UnderfilledCancellationReason
+> = {
+  HIRER_CANCELLED: 'HIRER_CANCELLED',
+  HIRER_DECISION_TIMEOUT: 'HIRER_NO_DECISION',
+  WORKER_DECLINED: 'WORKER_DECLINED',
+  WORKER_CONSENT_TIMEOUT: 'CONSENT_TIMEOUT',
+};
+
 export type QuestV2CanonicalQuest = {
   id: string;
   version: number;
@@ -178,6 +197,7 @@ export type QuestV2CanonicalQuest = {
   participation: QuestV2Participation;
   state: QuestV2State;
   questFundingTotal: number;
+  questReward: number | null;
   headcount: number;
   startTime: string;
   dueAt: string | null;

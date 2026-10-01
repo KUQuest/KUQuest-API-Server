@@ -360,6 +360,7 @@ type QuestV2Row = {
   v2Participation: QuestV2Participation | null;
   questStatus: QuestStatus;
   questFundingTotalSatang: number | null;
+  rewardSatang: number | null;
   headcount: number;
   startTime: Date;
   dueAt: Date | null;
@@ -442,6 +443,7 @@ const questV2RowSelection = {
   v2Participation: quest.v2Participation,
   questStatus: quest.questStatus,
   questFundingTotalSatang: quest.questFundingTotalSatang,
+  rewardSatang: quest.rewardSatang,
   headcount: quest.headcount,
   startTime: quest.startTime,
   dueAt: quest.dueAt,
@@ -784,6 +786,7 @@ const buildCanonicalQuest = async (
     participation: row.v2Participation,
     state: toV2State(row.questStatus),
     questFundingTotal: toBaht(questFundingTotalSatang),
+    questReward: row.rewardSatang === null ? null : toBaht(satang(row.rewardSatang)),
     headcount: row.headcount,
     startTime: formatQuestV2ScheduleTime(row.startTime),
     dueAt: row.dueAt ? formatQuestV2ScheduleTime(row.dueAt) : null,

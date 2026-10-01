@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { questV2UnderfilledDecision } from '@/database/schema/quest.schema';
 import { pushDelivery, pushDevice, type PushDeliveryStatus } from '@/database/schema/push.schema';
 
 import {
@@ -276,6 +277,19 @@ const disableDevices = async (deviceIds: string[], now: Date) => {
     .where(inArray(pushDevice.id, deviceIds));
 };
 
+// An underfilled Push names the decision state it announces in `eventType`. When the
+// decision has left that state before delivery, the alert is stale and must not be sent.
+const isStaleUnderfilledDelivery = async (delivery: typeof pushDelivery.$inferSelect) => {
+  const decisionId = delivery.data.decisionId;
+  if (!delivery.eventType.startsWith('UNDERFILLED_') || !decisionId) return false;
+  const [decision] = await db
+    .select({ state: questV2UnderfilledDecision.state })
+    .from(questV2UnderfilledDecision)
+    .where(eq(questV2UnderfilledDecision.id, decisionId))
+    .limit(1);
+  return decision?.state !== delivery.eventType;
+};
+
 const deliverOne = async (
   delivery: typeof pushDelivery.$inferSelect,
   dependencies: {
@@ -285,6 +299,10 @@ const deliverOne = async (
   }
 ) => {
   const attemptTime = dependencies.now();
+  if (await isStaleUnderfilledDelivery(delivery)) {
+    await updateDelivery(delivery.id, 'PUSH_DELIVERY_DISABLED', { now: attemptTime });
+    return;
+  }
   const devices = await db
     .select()
     .from(pushDevice)

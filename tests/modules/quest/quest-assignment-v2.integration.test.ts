@@ -795,17 +795,40 @@ describe('Quest Assignment API v2', () => {
       'idempotency-key': 'assignment-v2-group-duplicate',
     });
     expect(duplicate.status).toBe(409);
-    expect((await duplicate.json()).error.code).toBe('ASSIGNMENT_ALREADY_EXISTS');
+    expect((await duplicate.json()).error.code).toBe('ALREADY_JOINED');
 
     const overCapacity = await request(`/api/v2/quests/${questId}/join`, 'POST', thirdWorker.id, {
       'idempotency-key': 'assignment-v2-group-over-capacity',
     });
     expect(overCapacity.status).toBe(409);
-    expect((await overCapacity.json()).error.code).toBe('QUEST_NOT_OPEN');
+    expect((await overCapacity.json()).error.code).toBe('QUEST_FULL');
     expect(
       await db.select().from(questAssignment).where(eq(questAssignment.questId, questId))
     ).toHaveLength(2);
     expect(transitions).toHaveLength(2);
+  });
+
+  it('gives the last slot to one Worker, reports QUEST_FULL to the loser, and replays the winner', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenSingleFcfsQuest();
+    authenticate();
+    const join = (memberId: typeof worker.id, key: string) =>
+      request(`/api/v2/quests/${questId}/join`, 'POST', memberId, { 'idempotency-key': key });
+
+    const [first, second] = await Promise.all([
+      join(worker.id, 'assignment-v2-race-first'),
+      join(secondWorker.id, 'assignment-v2-race-second'),
+    ]);
+    const [winner, loser] = first.status === 200 ? [first, second] : [second, first];
+    expect([first.status, second.status].sort()).toEqual([200, 409]);
+    const winnerId = first.status === 200 ? worker.id : secondWorker.id;
+    const winnerKey =
+      first.status === 200 ? 'assignment-v2-race-first' : 'assignment-v2-race-second';
+    expect((await loser.json()).error.code).toBe('QUEST_FULL');
+
+    const replay = await join(winnerId, winnerKey);
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data.id).toBe((await winner.json()).data.id);
   });
 
   it('exposes a GROUP roster only to the owning Hirer and each accepted Worker', async () => {
@@ -960,7 +983,7 @@ describe('Quest Assignment API v2', () => {
       'idempotency-key': 'assignment-v2-duplicate-second',
     });
     expect(duplicate.status).toBe(409);
-    expect((await duplicate.json()).error.code).toBe('ASSIGNMENT_ALREADY_EXISTS');
+    expect((await duplicate.json()).error.code).toBe('ALREADY_JOINED');
 
     const closedQuestId = await createOpenSingleFcfsQuest();
     await db

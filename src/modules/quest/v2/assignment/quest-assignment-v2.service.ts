@@ -1,8 +1,13 @@
 import { db } from '@/database/client';
-import { quest, questApiVersion, questAssignment } from '@/database/schema/quest.schema';
+import {
+  quest,
+  questApiVersion,
+  questAssignment,
+  questV2UnderfilledDecision,
+} from '@/database/schema/quest.schema';
 import { isMemberRedFlaggedInTransaction } from '@/modules/admin/member-penalty';
 
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, lte, sql } from 'drizzle-orm';
 
 import {
   type QuestTransaction,
@@ -30,6 +35,13 @@ import type {
 } from '../../shared/work-chat/quest-work-chat.contract';
 import type { QuestV2AssignmentMineStatus } from './quest-assignment-v2.schema';
 import { notifyQuestRosterUpdate } from '../realtime';
+import {
+  detectQuestV2Underfilled,
+  expireQuestV2Underfilled,
+  summarizeQuestV2Underfilled,
+  type QuestV2UnderfilledSummary,
+} from '../lifecycle';
+import { enqueueUnderfilledPush } from '../lifecycle/quest-underfilled-v2.push';
 
 export const questV2AssignmentJoinOperationScope = 'quest.v2.assignment.join';
 
@@ -41,6 +53,10 @@ type QuestV2AssignmentRow = {
   startedAt: Date | null;
   createdAt: Date;
   questState: QuestV2State;
+};
+
+export type QuestV2MyAssignmentRow = QuestV2AssignmentRow & {
+  underfilled: QuestV2UnderfilledSummary | null;
 };
 
 type QuestV2AssignmentBusinessOutcomeCode =
@@ -248,18 +264,6 @@ const joinQuestV2InTransaction = async (
         .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, userId)))
         .limit(1);
       if (existing) return { kind: 'rejected', rejection: 'already-assigned' };
-      // A hidden Quest is out of reach for Members, so it refuses a join the same way a
-      // Quest that is not open does.
-      if (current.questState !== 'QUEST_OPEN' || current.hiddenAt !== null) {
-        return { kind: 'rejected', rejection: 'not-open' };
-      }
-      if (current.startTime.getTime() <= now.getTime()) {
-        return { kind: 'rejected', rejection: isGroupQuest ? 'roster-frozen' : 'not-open' };
-      }
-      if (await isMemberRedFlaggedInTransaction(transaction, userId, now)) {
-        return { kind: 'rejected', rejection: 'red-flagged' };
-      }
-
       const [activeCount] = await transaction
         .select({ count: sql<number>`count(*)` })
         .from(questAssignment)
@@ -270,6 +274,23 @@ const joinQuestV2InTransaction = async (
           )
         );
       const joinedCount = Number(activeCount?.count ?? 0);
+      // A hidden Quest is out of reach for Members, so it refuses a join the same way a
+      // Quest that is not open does.
+      if (current.hiddenAt !== null) return { kind: 'rejected', rejection: 'not-open' };
+      if (current.questState !== 'QUEST_OPEN') {
+        // The join that took the last slot moved the Quest to QUEST_ASSIGNED, so the Worker
+        // who lost that race reads full, not closed.
+        const lostLastSlot =
+          current.questState === 'QUEST_ASSIGNED' && joinedCount >= current.headcount;
+        return { kind: 'rejected', rejection: lostLastSlot ? 'full' : 'not-open' };
+      }
+      if (current.startTime.getTime() <= now.getTime()) {
+        return { kind: 'rejected', rejection: isGroupQuest ? 'roster-frozen' : 'not-open' };
+      }
+      if (await isMemberRedFlaggedInTransaction(transaction, userId, now)) {
+        return { kind: 'rejected', rejection: 'red-flagged' };
+      }
+
       if (joinedCount >= current.headcount) return { kind: 'rejected', rejection: 'full' };
 
       const [createdAssignment] = await transaction
@@ -305,6 +326,25 @@ const joinQuestV2InTransaction = async (
           writer,
           actor: { actorType: 'MEMBER', actorUserId: userId },
         });
+        if (isGroupQuest) {
+          const roster = await transaction
+            .select({ workerId: questAssignment.workerId })
+            .from(questAssignment)
+            .where(
+              and(
+                eq(questAssignment.questId, questId),
+                eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+              )
+            );
+          await enqueueUnderfilledPush(transaction, questId, {
+            type: 'QUEST_ASSIGNED',
+            recipientMemberIds: roster
+              .map(({ workerId }) => workerId)
+              .filter((id) => id !== userId),
+            questId,
+            now,
+          });
+        }
       } else {
         // The roster is not full yet: the Quest stays QUEST_OPEN, so only the Work
         // Conversation entry is applied and the State write is skipped.
@@ -390,15 +430,41 @@ const assignmentStatusPredicateFor = (status: QuestV2AssignmentMineStatus) => {
 
 export const listMyQuestV2Assignments = async (
   workerId: string,
-  status: QuestV2AssignmentMineStatus = 'active'
-): Promise<QuestV2AssignmentRow[]> => {
+  status: QuestV2AssignmentMineStatus = 'active',
+  now = new Date()
+): Promise<QuestV2MyAssignmentRow[]> => {
+  // GET /quests/:questId/underfilled opens and expires the decision lazily. Do the same for
+  // the Quests below so this list never lags behind that read.
+  const dueQuestIds = await db
+    .select({ questId: quest.id })
+    .from(questAssignment)
+    .innerJoin(quest, eq(questAssignment.questId, quest.id))
+    .where(
+      and(
+        eq(questAssignment.workerId, workerId),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
+        eq(quest.apiVersion, questApiVersion.v2),
+        eq(quest.v2Mode, questV2Mode.firstComeFirstServed),
+        eq(quest.v2Participation, questV2Participation.group),
+        eq(quest.questStatus, 'QUEST_OPEN'),
+        lte(quest.startTime, now)
+      )
+    );
+  for (const { questId } of dueQuestIds) {
+    await detectQuestV2Underfilled(questId, now);
+    await expireQuestV2Underfilled(questId, now);
+  }
+
   const rows = await db
     .select({
       ...assignmentFields,
       questState: quest.questStatus,
+      headcount: quest.headcount,
+      underfilled: questV2UnderfilledDecision,
     })
     .from(questAssignment)
     .innerJoin(quest, eq(questAssignment.questId, quest.id))
+    .leftJoin(questV2UnderfilledDecision, eq(questV2UnderfilledDecision.questId, quest.id))
     .where(
       and(
         eq(questAssignment.workerId, workerId),
@@ -407,5 +473,8 @@ export const listMyQuestV2Assignments = async (
       )
     )
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
-  return rows.map((row) => toQuestV2AssignmentRow(row, row.questState));
+  return rows.map(({ headcount, underfilled, questState, ...assignment }) => ({
+    ...toQuestV2AssignmentRow(assignment, questState),
+    underfilled: underfilled ? summarizeQuestV2Underfilled(underfilled, headcount) : null,
+  }));
 };
