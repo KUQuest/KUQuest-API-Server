@@ -124,7 +124,7 @@ export const getAdminOverview = async (): Promise<AdminOverviewData> =>
         when ${authUser.bannedUntil} > now() then 'TEMP_BAN'
         when ${authUser.redFlagExpiresAt} > now() then 'FLAG'
         else 'NORMAL'
-      end`;
+      end`.as('status');
       const memberStatusProjection = transaction
         .select({ status: memberStatus })
         .from(authUser)
