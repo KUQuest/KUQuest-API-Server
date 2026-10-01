@@ -627,7 +627,22 @@ describe('Quest Proof v2 realtime source updates', () => {
         headers: { cookie: leader.cookie },
       });
       expect(read.status).toBe(200);
-      expect(JSON.stringify(await read.json())).toContain('QUEST_COMPLETED');
+      const participation = await read.json();
+      expect(participation.data.state).toBe('QUEST_COMPLETED');
+      expect(participation.data.workerSettlement).toMatchObject({
+        status: 'PAID',
+        amountSatang: 2000,
+      });
+      expect(participation.data.workerSettlement.settledAt).toBeString();
+      const teammateRead = await fetch(`${origin}/api/v2/quests/${questId}/participation`, {
+        headers: { cookie: teammate.cookie },
+      });
+      expect(teammateRead.status).toBe(200);
+      expect((await teammateRead.json()).data.workerSettlement).toEqual({
+        status: 'NO_PAYMENT',
+        amountSatang: 0,
+        settledAt: null,
+      });
     } finally {
       for (const socket of sockets) socket.destroy();
       await server.stop();

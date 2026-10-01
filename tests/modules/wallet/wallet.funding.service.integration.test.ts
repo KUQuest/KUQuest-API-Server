@@ -18,6 +18,7 @@ import {
   increaseFundingReservation,
   positiveSatang,
   releaseFundingReservation,
+  readRecipientFundingSettlement,
   reserveSpending,
   satang,
   signedSatang,
@@ -569,6 +570,10 @@ describe('Funding Reservation service', () => {
     );
 
     expect(replay.id).toBe(first.id);
+    const credit = await readRecipientFundingSettlement(db, reservation.id, payeeUserId);
+    expect(credit?.amountSatang).toBe(600);
+    expect(credit?.settledAt).toBeInstanceOf(Date);
+    expect(await readRecipientFundingSettlement(db, reservation.id, ownerUserId)).toBeNull();
     expect(
       await db.select().from(walletWallet).where(eq(walletWallet.userId, payeeUserId))
     ).toMatchObject([{ earningsBalanceSatang: 600 }]);

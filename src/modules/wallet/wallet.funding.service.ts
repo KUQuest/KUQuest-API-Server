@@ -1523,3 +1523,43 @@ export const platformFeeForReservation = async (
   const policy = await policyRevisionInTransaction(transaction, reservation.policyRevisionId);
   return calculatePlatformFeeSatang(satang(input.rewardSatang), policy.platformFeeBps);
 };
+
+/** Reads only the recipient's durable credits, including Dispute settlements. */
+export const readRecipientFundingSettlement = async (
+  tx: Pick<WalletTransaction, 'select'>,
+  reservationId: string,
+  recipientUserId: string
+): Promise<{ amountSatang: number; settledAt: Date } | null> => {
+  const [funding, disputes] = await Promise.all([
+    tx
+      .select({
+        amountSatang: walletFundingReservationSettlement.recipientAmountSatang,
+        settledAt: walletFundingReservationSettlement.createdAt,
+      })
+      .from(walletFundingReservationSettlement)
+      .where(
+        and(
+          eq(walletFundingReservationSettlement.reservationId, reservationId),
+          eq(walletFundingReservationSettlement.recipientUserId, recipientUserId)
+        )
+      ),
+    tx
+      .select({
+        amountSatang: walletDisputeSettlement.amountSatang,
+        settledAt: walletDisputeSettlement.createdAt,
+      })
+      .from(walletDisputeSettlement)
+      .where(
+        and(
+          eq(walletDisputeSettlement.reservationId, reservationId),
+          eq(walletDisputeSettlement.recipientUserId, recipientUserId)
+        )
+      ),
+  ]);
+  const credits = [...funding, ...disputes];
+  if (!credits.length) return null;
+  return {
+    amountSatang: credits.reduce((total, row) => total + row.amountSatang, 0),
+    settledAt: new Date(Math.max(...credits.map((row) => row.settledAt.getTime()))),
+  };
+};

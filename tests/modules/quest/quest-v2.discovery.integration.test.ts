@@ -227,6 +227,20 @@ type OpenApiOperation = {
 };
 
 describe('Quest API v2 discovery contract', () => {
+  it('filters the inclusive Hirer price independently from net reward', async () => {
+    const id = await createOpenQuest(ownerId);
+    const response = await getBoard('?minQuestFundingTotal=20&maxQuestFundingTotal=20');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(
+      body.data.items.some(
+        (item: { id: string; questFundingTotal: number }) =>
+          item.id === id && item.questFundingTotal === 20
+      )
+    ).toBe(true);
+    expect((await getBoard('?minQuestFundingTotal=20.001')).status).toBe(400);
+  });
+
   it.each([
     ['GET', '/api/v2/quests'],
     ['GET', '/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/public'],
@@ -550,7 +564,7 @@ describe('Quest API v2 discovery contract', () => {
     expect(body.data.locations).toEqual(expectedLocations);
     expect(body.data.images[0]).not.toHaveProperty('fileId');
     expect(body.data).not.toHaveProperty('hirerId');
-    expect(body.data).not.toHaveProperty('questFundingTotal');
+    expect(body.data.questFundingTotal).toBe(20);
     expect(body.data).not.toHaveProperty('platformFee');
     expect(body.data).not.toHaveProperty('wallet');
     expect(body.data).not.toHaveProperty('fundingReservation');

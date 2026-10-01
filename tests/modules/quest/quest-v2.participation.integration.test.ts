@@ -195,6 +195,8 @@ describe('Quest v2 Participation Detail', () => {
       id: assignedQuest,
       state: 'QUEST_ASSIGNED',
       assignment: { status: 'ASSIGNMENT_ACTIVE', startedAt: null },
+      workerSettlement: null,
+      questFundingTotal: 20,
       capabilities: { canViewOnly: false },
     });
 
@@ -243,6 +245,11 @@ describe('Quest v2 Participation Detail', () => {
       id: terminalQuest,
       state,
       assignment: { status: assignment },
+      workerSettlement: {
+        status: assignment === assignmentStatus.completed ? 'PENDING' : 'NO_PAYMENT',
+        amountSatang: assignment === assignmentStatus.completed ? null : 0,
+        settledAt: null,
+      },
       capabilities: { canViewOnly: true },
     });
   });
@@ -371,12 +378,14 @@ describe('Quest v2 Participation Detail', () => {
       'moneyHold',
       'participation',
       'proofRequired',
+      'questFundingTotal',
       'questReward',
       'startTime',
       'startedWorkerCount',
       'state',
       'tag',
       'title',
+      'workerSettlement',
     ]);
     expect(Object.keys(body.data.capabilities as object)).toEqual(['canViewOnly']);
   });
