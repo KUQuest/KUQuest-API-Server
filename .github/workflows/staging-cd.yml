@@ -379,13 +379,24 @@ jobs:
           if (demoMembers.length !== 10) throw new Error('Expected 10 demo Members.');
 
           for (const member of demoMembers) {
-            const login = await fetch(`${baseUrl}/api/staging/test-auth/sign-in/email`, {
+            const signIn = () => fetch(`${baseUrl}/api/staging/test-auth/sign-in/email`, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ email: member.email, password }),
               redirect: 'manual',
               signal: AbortSignal.timeout(20_000),
             });
+            let login = await signIn();
+            for (let retry = 0; login.status === 429 && retry < 2; retry++) {
+              const seconds = Number(login.headers.get('retry-after') ?? login.headers.get('x-retry-after') ?? '10');
+              if (!Number.isFinite(seconds) || seconds < 0 || seconds > 60) {
+                throw new Error('Sign-in returned an unsupported rate-limit delay.');
+              }
+              await login.arrayBuffer();
+              console.log(`Sign-in rate limit reached; waiting ${seconds + 1} seconds.`);
+              await Bun.sleep((seconds + 1) * 1_000);
+              login = await signIn();
+            }
             if (login.status !== 200) {
               throw new Error(`Demo Member login failed: ${member.email}, HTTP ${login.status}`);
             }
