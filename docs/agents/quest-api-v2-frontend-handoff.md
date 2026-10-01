@@ -1124,10 +1124,10 @@ Errors:
 - 409 QUEST_MODE_NOT_ALLOWED
 - 409 QUEST_PARTICIPATION_NOT_ALLOWED
 - 409 HIRER_CANNOT_JOIN
-- 409 QUEST_NOT_OPEN
+- 409 QUEST_NOT_OPEN (the Quest is not QUEST_OPEN)
 - 409 QUEST_ROSTER_FROZEN
-- 409 ASSIGNMENT_ALREADY_EXISTS
-- 409 QUEST_FULL
+- 409 ALREADY_JOINED (the Worker already has an Assignment)
+- 409 QUEST_FULL (no free slot, including a Worker who lost the race for the last slot)
 - 503 WORK_CHAT_UNAVAILABLE
 - idempotency errors
 
@@ -1168,15 +1168,21 @@ It returns active v2 Assignments for the authenticated Worker.
 
 Assignment fields:
 
-| Field      | Meaning                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------- |
-| id         | Assignment identifier                                                                   |
-| questId    | Quest identifier                                                                        |
-| workerId   | Worker Member identifier                                                                |
-| state      | ASSIGNMENT_ACTIVE, ASSIGNMENT_COMPLETED, ASSIGNMENT_INCOMPLETE, or ASSIGNMENT_CANCELLED |
-| questState | Current Quest State                                                                     |
-| startedAt  | Required Start Work time or null                                                        |
-| createdAt  | Assignment creation time                                                                |
+| Field       | Meaning                                                                                 |
+| ----------- | --------------------------------------------------------------------------------------- |
+| id          | Assignment identifier                                                                   |
+| questId     | Quest identifier                                                                        |
+| workerId    | Worker Member identifier                                                                |
+| state       | ASSIGNMENT_ACTIVE, ASSIGNMENT_COMPLETED, ASSIGNMENT_INCOMPLETE, or ASSIGNMENT_CANCELLED |
+| questState  | Current Quest State                                                                     |
+| startedAt   | Required Start Work time or null                                                        |
+| createdAt   | Assignment creation time                                                                |
+| underfilled | Compact underfilled summary, or null when the Quest has none (see below)                |
+
+`underfilled` holds `state`, `decision.expiresAt`, `consent.expiresAt`,
+`activeWorkerCount`, `headcount`, and `cancellationReason`. It shows the same
+state as `GET /api/v2/quests/:questId/underfilled` at read time, so Home does not
+need one request for each Assignment.
 
 ### 7.3 List Quest Assignments
 
@@ -2172,21 +2178,23 @@ Response:
 
 Underfilled fields:
 
-| Field             | Meaning                                                                                                    |
-| ----------------- | ---------------------------------------------------------------------------------------------------------- |
-| id                | Underfilled process identifier                                                                             |
-| questId           | Quest identifier                                                                                           |
-| questState        | Current Quest State                                                                                        |
-| state             | UNDERFILLED_DECISION_PENDING, UNDERFILLED_CONSENT_PENDING, UNDERFILLED_COMPLETED, or UNDERFILLED_CANCELLED |
-| activeWorkerCount | Number of active Workers                                                                                   |
-| headcount         | Required slot count                                                                                        |
-| workerRewardPool  | Hirer-facing Worker pool or null                                                                           |
-| questReward       | Worker-facing reward or null                                                                               |
-| dueAt             | Quest deadline or null                                                                                     |
-| decision          | Hirer decision status, value, and expiry                                                                   |
-| consent           | Worker consent status, expiry, and counts                                                                  |
-| responses         | Hirer-facing response list                                                                                 |
-| ownResponse       | Worker-facing response                                                                                     |
+| Field              | Meaning                                                                                                    |
+| ------------------ | ---------------------------------------------------------------------------------------------------------- |
+| id                 | Underfilled process identifier                                                                             |
+| questId            | Quest identifier                                                                                           |
+| questState         | Current Quest State                                                                                        |
+| state              | UNDERFILLED_DECISION_PENDING, UNDERFILLED_CONSENT_PENDING, UNDERFILLED_COMPLETED, or UNDERFILLED_CANCELLED |
+| activeWorkerCount  | Number of active Workers                                                                                   |
+| headcount          | Required slot count                                                                                        |
+| workerRewardPool   | Hirer-facing Worker pool or null                                                                           |
+| questReward        | Worker-facing reward or null                                                                               |
+| dueAt              | Quest deadline or null                                                                                     |
+| decision           | Hirer decision status, value, and expiry                                                                   |
+| consent            | Worker consent status, expiry, and counts                                                                  |
+| responses          | Hirer-facing response list                                                                                 |
+| ownResponse        | Worker-facing response                                                                                     |
+| cancellationReason | Why the process was cancelled, or null                                                                     |
+| cancelledAt        | Server cancellation time, or null                                                                          |
 
 Decision response items:
 
@@ -2202,6 +2210,40 @@ Decision response items:
 
 The Hirer can see workerRewardPool and responses.
 The Worker can see questReward and ownResponse.
+
+Cancellation fields (set once, when `state` becomes UNDERFILLED_CANCELLED;
+both are null before that):
+
+| Field              | Meaning                                                                                                                |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| cancellationReason | HIRER_CANCELLED, HIRER_NO_DECISION (decision window ended), WORKER_DECLINED, or CONSENT_TIMEOUT (consent window ended) |
+| cancelledAt        | Server time of the cancellation                                                                                        |
+
+If a decline and a timeout happen at the same time, the server keeps the first
+one it commits. The reason does not change after that.
+
+The Hirer gets a Hirer-events message with `changeType`
+`UNDERFILLED_DECISION_PENDING` and `expiresAt` (equal to `decision.expiresAt`)
+once, when the decision window opens.
+
+The server also sends Android Push messages (data only, one per recipient and
+transition). `data.transitionId` is the delivery `eventKey`: ignore a second
+message with the same value. `data.expiresAt` is the server deadline: render
+the countdown from it, not from the receive time. The Push is not sent if the
+underfilled state changed before delivery. Register the device with
+`POST /api/v1/push/devices` and remove it with `DELETE /api/v1/push/devices/:deviceId`.
+
+| `data.type`                  | Recipient      | Open                          |
+| ---------------------------- | -------------- | ----------------------------- |
+| UNDERFILLED_DECISION_PENDING | Hirer          | /quest/:questId               |
+| UNDERFILLED_CONSENT_PENDING  | Active Workers | /quest/:questId/partial-start |
+| UNDERFILLED_COMPLETED        | Active Workers | /quest/:questId               |
+| UNDERFILLED_CANCELLED        | Active Workers | /quest/:questId               |
+| QUEST_ASSIGNED               | Active Workers | /quest/:questId               |
+
+`UNDERFILLED_CANCELLED` also carries `data.cancellationReason`.
+`QUEST_ASSIGNED` is sent when the last GROUP slot fills. The Worker who joined
+last does not get it.
 
 ### 11.2 Hirer decision
 
@@ -2819,6 +2861,7 @@ After assignment, use Work Chat.
   "participation": "SINGLE",
   "state": "QUEST_DRAFT",
   "questFundingTotal": 1000,
+  "questReward": null,
   "headcount": 1,
   "startTime": "2026-09-30T09:00:00.000+07:00",
   "dueAt": "2026-10-07T18:00:00.000+07:00",
@@ -2831,6 +2874,10 @@ After assignment, use Work Chat.
 
 tag can be null.
 description and dueAt can be null.
+questReward is the Worker Reward per slot in Baht. It is null in a Draft and set
+when the Quest is published. It is never changed by an underfilled revision; the
+revised amount is in the Underfilled object. Do not use questFundingTotal as a
+Worker Reward.
 Quest detail adds images.
 
 ### 16.2 Quest Image
@@ -2987,7 +3034,8 @@ Recommended mapping:
 | QUEST_NOT_DRAFT                 | Refresh Quest and leave Draft editor                            |
 | QUEST_EDIT_CONFLICT             | Refresh Quest and ask the user to review                        |
 | QUEST_FULL                      | Refresh Board or Team state                                     |
-| ASSIGNMENT_ALREADY_EXISTS       | Read Assignments and continue as Worker                         |
+| ALREADY_JOINED                  | Read Assignments and continue as Worker (direct join)           |
+| ASSIGNMENT_ALREADY_EXISTS       | Read Assignments and continue as Worker (Candidate or Team)     |
 | IDEMPOTENCY_KEY_REUSED          | Stop; do not change key or body silently                        |
 | IDEMPOTENCY_IN_PROGRESS         | Retry with same key after a short delay                         |
 | IDEMPOTENCY_UNAVAILABLE         | Keep retry state and use same key                               |

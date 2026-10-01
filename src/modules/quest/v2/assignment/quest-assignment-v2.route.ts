@@ -20,6 +20,7 @@ import {
   questV2AssignmentListResponseSchema,
   questV2AssignmentMineQuerySchema,
   questV2AssignmentParamsSchema,
+  questV2MyAssignmentListResponseSchema,
   questV2AssignmentResponseSchema,
   questV2StartWorkResponseSchema,
 } from './quest-assignment-v2.schema';
@@ -39,12 +40,12 @@ export const questAssignmentV2Route = new Elysia({
   .use(memberBanGuard)
   .get('/assignments/mine', listMyQuestV2AssignmentsController, {
     query: questV2AssignmentMineQuerySchema,
-    response: responses(questV2AssignmentListResponseSchema, 400, 401, 500),
+    response: responses(questV2MyAssignmentListResponseSchema, 400, 401, 500),
     detail: {
       tags: ['Quest Assignments v2'],
       summary: "List the authenticated Worker's v2 Assignments",
       description:
-        "Returns the authenticated Worker's v2 Assignments, filtered by active, completed, or all status.",
+        "Returns the authenticated Worker's v2 Assignments, filtered by active, completed, or all status. Each item carries a compact `underfilled` summary (state, decision and consent expiry, headcount, cancellation reason) or null when the Quest has no underfilled process. The summary matches GET /quests/{questId}/underfilled at read time, so clients need no per-Assignment fetch.",
       operationId: 'listMyQuestAssignmentsV2',
       security: betterAuthSecurity,
     },
@@ -69,7 +70,7 @@ export const questAssignmentV2Route = new Elysia({
       tags: ['Quest Assignments v2'],
       summary: 'Join an open v2 FCFS Quest',
       description:
-        'Creates an active Assignment for an eligible Worker. A GROUP Quest remains open until its published headcount is full.',
+        'Creates an active Assignment for an eligible Worker. A GROUP Quest remains open until its published headcount is full. The capacity check and the Assignment insert run in one locked transaction, so server order decides who gets the last slot, and a replay with the same Idempotency-Key returns the original result. A 409 error code is one of: QUEST_FULL (no free slot), QUEST_NOT_OPEN (the Quest is not QUEST_OPEN), ALREADY_JOINED (the Worker already has an Assignment), QUEST_ROSTER_FROZEN, QUEST_MODE_NOT_ALLOWED, QUEST_PARTICIPATION_NOT_ALLOWED, HIRER_CANNOT_JOIN, MEMBER_RED_FLAGGED.',
       operationId: 'joinQuestV2',
       security: betterAuthSecurity,
     },

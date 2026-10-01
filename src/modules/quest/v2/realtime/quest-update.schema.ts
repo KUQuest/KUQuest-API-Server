@@ -110,12 +110,21 @@ export const hirerQuestCreatedNotificationSchema = t.Object(
   },
   { additionalProperties: false }
 );
+export const hirerUnderfilledDecisionPendingNotificationSchema = t.Object(
+  {
+    questId: t.String({ format: 'uuid' }),
+    type: t.Literal('UNDERFILLED_DECISION_PENDING'),
+    expiresAt: t.String({ format: 'date-time' }),
+  },
+  { additionalProperties: false }
+);
 
 export const questRealtimeNotificationSchema = t.Union([
   questUpdateNotificationSchema,
   candidateRosterUpdateNotificationSchema,
   questBoardUpdateNotificationSchema,
   hirerQuestCreatedNotificationSchema,
+  hirerUnderfilledDecisionPendingNotificationSchema,
 ]);
 
 export type CandidateRosterScope = typeof candidateRosterScopeSchema.static;
