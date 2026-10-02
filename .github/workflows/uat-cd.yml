@@ -258,10 +258,9 @@ jobs:
       - name: Upload application environment and Compose file
         shell: bash
         run: |
-          set -euo pipefail
-
           # The remote commands are single-quoted on purpose: $ expands on the UAT server, not here.
           # shellcheck disable=SC2016
+          set -euo pipefail
 
           SSH=(
             ssh
