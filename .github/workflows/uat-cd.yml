@@ -258,34 +258,27 @@ jobs:
       - name: Upload application environment and Compose file
         shell: bash
         run: |
-          # The remote commands are single-quoted on purpose: $ expands on the UAT server, not here.
-          # shellcheck disable=SC2016
           set -euo pipefail
 
-          SSH=(
-            ssh
-            -i "$RUNNER_TEMP/uat_key"
-            -o BatchMode=yes
-            -o StrictHostKeyChecking=yes
-            -o UserKnownHostsFile="$RUNNER_TEMP/uat_known_hosts"
-            deploy@"$UAT_SERVER"
-          )
+          # install_remote <mode> <source file> <destination on the UAT server>
+          # Writes through a temporary file in the same directory, then renames it in place.
+          install_remote() {
+            ssh \
+              -i "$RUNNER_TEMP/uat_key" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/uat_known_hosts" \
+              deploy@"$UAT_SERVER" \
+              "set -e
+               TEMP_FILE=\$(mktemp '$3.XXXXXX')
+               cat > \"\$TEMP_FILE\"
+               chmod $1 \"\$TEMP_FILE\"
+               mv \"\$TEMP_FILE\" '$3'" \
+              < "$2"
+          }
 
-          "${SSH[@]}" \
-            'set -e
-             TEMP_FILE=$(mktemp /opt/backend/.env.XXXXXX)
-             cat > "$TEMP_FILE"
-             chmod 600 "$TEMP_FILE"
-             mv "$TEMP_FILE" /opt/backend/.env' \
-            < "$RUNNER_TEMP/backend.env"
-
-          "${SSH[@]}" \
-            'set -e
-             TEMP_FILE=$(mktemp /opt/backend/compose.yaml.XXXXXX)
-             cat > "$TEMP_FILE"
-             chmod 644 "$TEMP_FILE"
-             mv "$TEMP_FILE" /opt/backend/compose.yaml' \
-            < deploy/uat/compose.yaml
+          install_remote 600 "$RUNNER_TEMP/backend.env" /opt/backend/.env
+          install_remote 644 deploy/uat/compose.yaml /opt/backend/compose.yaml
 
       - name: Log UAT server into GHCR
         shell: bash
