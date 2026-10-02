@@ -32,6 +32,7 @@ export const adminActivityEntrySchema = t.Object({
   action: t.String(),
   resourceType: t.String(),
   resourceId: t.String(),
+  resourceDisplayId: t.Optional(t.String()),
   reasonCode: t.Nullable(t.String()),
   reasonCatalogVersion: t.Integer({ minimum: 1 }),
   resultVersion: t.Nullable(t.Integer({ minimum: 1 })),

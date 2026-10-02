@@ -1,11 +1,27 @@
 import { db } from '@/database/client';
-import { adminAction } from '@/database/schema/admin.schema';
+import {
+  adminAction,
+  adminConductReport,
+  adminDisputeCase,
+  adminReportCase,
+} from '@/database/schema/admin.schema';
 import { authAdmin } from '@/database/schema/auth.schema';
+import { paymentPayouts } from '@/database/schema/payment.schema';
+import { quest } from '@/database/schema/quest.schema';
+import { walletWallet } from '@/database/schema/wallet.schema';
+import {
+  formatConductReportDisplayId,
+  formatDisputeDisplayId,
+  formatPayoutDisplayId,
+  formatQuestDisplayId,
+  formatReportCaseDisplayId,
+  formatWalletDisplayId,
+} from '@/modules/admin/admin-display-id';
 import { CursorInputError } from '@/shared/cursor';
 import type { CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 
 export type AdminActivityEntry = {
   id: string;
@@ -13,6 +29,7 @@ export type AdminActivityEntry = {
   action: string;
   resourceType: string;
   resourceId: string;
+  resourceDisplayId?: string;
   reasonCode: string | null;
   reasonCatalogVersion: number;
   resultVersion: number | null;
@@ -87,7 +104,105 @@ export const listAdminActivity = async ({
       new CursorInputError('INVALID_CURSOR', 'cursor does not match an Admin Action'),
   });
 
-  return { items: page.rows, nextCursor: page.nextCursor };
+  const idsByResourceType = new Map<string, Set<string>>();
+  for (const entry of page.rows) {
+    if (!/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(entry.resourceId)) continue;
+    const resourceType = entry.resourceType.trim().toUpperCase();
+    const ids = idsByResourceType.get(resourceType) ?? new Set<string>();
+    ids.add(entry.resourceId);
+    idsByResourceType.set(resourceType, ids);
+  }
+
+  const resourceDisplayIds = new Map<string, string>();
+  const addResourceDisplayIds = async (
+    resourceType: string,
+    ids: string[],
+    read: (ids: string[]) => PromiseLike<Array<{ id: string; publicSequence: number }>>,
+    format: (publicSequence: number) => string
+  ) => {
+    if (!ids.length) return;
+    const rows = await read(ids);
+    for (const row of rows) {
+      resourceDisplayIds.set(`${resourceType}:${row.id}`, format(row.publicSequence));
+    }
+  };
+  const idsFor = (resourceType: string) => [...(idsByResourceType.get(resourceType) ?? [])];
+
+  await Promise.all([
+    addResourceDisplayIds(
+      'QUEST',
+      idsFor('QUEST'),
+      (ids) =>
+        db
+          .select({ id: quest.id, publicSequence: quest.publicSequence })
+          .from(quest)
+          .where(inArray(quest.id, ids)),
+      formatQuestDisplayId
+    ),
+    addResourceDisplayIds(
+      'PAYOUT',
+      idsFor('PAYOUT'),
+      (ids) =>
+        db
+          .select({ id: paymentPayouts.id, publicSequence: paymentPayouts.publicSequence })
+          .from(paymentPayouts)
+          .where(inArray(paymentPayouts.id, ids)),
+      formatPayoutDisplayId
+    ),
+    addResourceDisplayIds(
+      'DISPUTE_CASE',
+      idsFor('DISPUTE_CASE'),
+      (ids) =>
+        db
+          .select({ id: adminDisputeCase.id, publicSequence: adminDisputeCase.publicSequence })
+          .from(adminDisputeCase)
+          .where(inArray(adminDisputeCase.id, ids)),
+      formatDisputeDisplayId
+    ),
+    addResourceDisplayIds(
+      'REPORT_CASE',
+      idsFor('REPORT_CASE'),
+      (ids) =>
+        db
+          .select({ id: adminReportCase.id, publicSequence: adminReportCase.publicSequence })
+          .from(adminReportCase)
+          .where(inArray(adminReportCase.id, ids)),
+      formatReportCaseDisplayId
+    ),
+    addResourceDisplayIds(
+      'CONDUCT_REPORT',
+      idsFor('CONDUCT_REPORT'),
+      (ids) =>
+        db
+          .select({ id: adminConductReport.id, publicSequence: adminConductReport.publicSequence })
+          .from(adminConductReport)
+          .where(inArray(adminConductReport.id, ids)),
+      formatConductReportDisplayId
+    ),
+    addResourceDisplayIds(
+      'WALLET',
+      idsFor('WALLET'),
+      (ids) =>
+        db
+          .select({ id: walletWallet.id, publicSequence: walletWallet.publicSequence })
+          .from(walletWallet)
+          .where(inArray(walletWallet.id, ids)),
+      formatWalletDisplayId
+    ),
+  ]);
+
+  return {
+    items: page.rows.map((entry) => {
+      const resourceDisplayId = resourceDisplayIds.get(
+        `${entry.resourceType.trim().toUpperCase()}:${entry.resourceId}`
+      );
+      return {
+        ...entry,
+        ...(resourceDisplayId ? { resourceDisplayId } : {}),
+      };
+    }),
+    nextCursor: page.nextCursor,
+  };
 };
 
 export const serializeAdminActivityEntry = (entry: AdminActivityEntry) => ({
