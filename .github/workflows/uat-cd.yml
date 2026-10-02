@@ -260,6 +260,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          # The remote commands are single-quoted on purpose: $ expands on the UAT server, not here.
+          # shellcheck disable=SC2016
+
           SSH=(
             ssh
             -i "$RUNNER_TEMP/uat_key"
