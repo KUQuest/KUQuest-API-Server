@@ -10,6 +10,7 @@ import {
   questV2UnderfilledDecision,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
+import { pushDelivery, pushDevice } from '@/database/schema/push.schema';
 import {
   chatAttachment,
   chatConversation,
@@ -24,6 +25,11 @@ import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 import { decideQuestV2Underfilled, getQuestV2Underfilled } from '@/modules/quest/v2';
 import type { QuestTransaction, QuestWorkChatMembershipTransition } from '@/modules/quest';
 import { workChatMembershipWriter } from '@/modules/work-chat';
+import {
+  createPushDeviceEncryption,
+  processPendingPushDeliveries,
+  registerAndroidPushDevice,
+} from '@/modules/push';
 import {
   ensureInitialMoneyPolicy,
   ensureWallet,
@@ -147,14 +153,16 @@ const createQuest = async (
     startTime,
     dueAt: new Date(now.getTime() + 60 * 60 * 1_000),
   });
-  await db.insert(questAssignment).values(
-    workerIds.map((workerId, index) => ({
-      questId,
-      workerId,
-      assignmentStatus: 'ASSIGNMENT_ACTIVE',
-      createdAt: new Date(now.getTime() - 10_000 + index),
-    }))
-  );
+  if (workerIds.length > 0) {
+    await db.insert(questAssignment).values(
+      workerIds.map((workerId, index) => ({
+        questId,
+        workerId,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE',
+        createdAt: new Date(now.getTime() - 10_000 + index),
+      }))
+    );
+  }
   if (reserve) {
     await db.transaction((transaction) =>
       reserveSpending(transaction, {
@@ -244,6 +252,9 @@ afterEach(async () => {
   await db
     .delete(questCommand)
     .where(inArray(questCommand.principalUserId, [hirer.id, ...workers.map((w) => w.id)]));
+  const memberIds = [hirer.id, ...workers.map((w) => w.id)];
+  await db.delete(pushDelivery).where(inArray(pushDelivery.recipientMemberId, memberIds));
+  await db.delete(pushDevice).where(inArray(pushDevice.memberId, memberIds));
 });
 
 afterAll(async () => {
@@ -307,6 +318,10 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       decision: { status: 'UNDERFILLED_DECISION_PENDING', value: null },
       consent: { totalCount: 1, pendingCount: 1 },
     });
+    const hirerView = await request(`/api/v2/quests/${questId}/underfilled`, 'GET', hirer.id);
+    expect((await hirerView.json()).data.responses).toMatchObject([
+      { workerId: workers[0].id, member: { id: workers[0].id, displayName: 'First Worker' } },
+    ]);
 
     const lateJoin = await request(
       `/api/v2/quests/${questId}/join`,
@@ -339,6 +354,29 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
     ).toBe('QUEST_CANCELLED');
+  });
+
+  it('announces QUEST_AUTO_CANCELLED to the Hirer when an unfilled Quest is cancelled at startTime', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest([], true);
+    type QuestUpdate = { questId: string; changeType: string; recipientMemberIds: string[] };
+    let announce!: (event: QuestUpdate) => void;
+    const announced = new Promise<QuestUpdate>((resolve) => (announce = resolve));
+    const listener = await sql.listen('kuquest_quest_updates', (payload) => {
+      const event = JSON.parse(payload) as QuestUpdate;
+      if (event.questId === questId) announce(event);
+    });
+    try {
+      const result = await detect(new Date());
+      expect(result.autoCancelledQuestIds).toContain(questId);
+      expect(await announced).toMatchObject({
+        questId,
+        changeType: 'QUEST_AUTO_CANCELLED',
+        recipientMemberIds: [hirer.id],
+      });
+    } finally {
+      await listener.unlisten();
+    }
   });
 
   it('lets the Hirer proceed, exposes the exact revised Reward, and replays the decision command', async () => {
@@ -529,10 +567,13 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       { 'idempotency-key': 'underfilled-cancel' }
     );
     expect(response.status).toBe(200);
-    expect((await response.json()).data).toMatchObject({
+    const cancelled = (await response.json()).data;
+    expect(cancelled).toMatchObject({
       state: 'UNDERFILLED_CANCELLED',
       questState: 'QUEST_CANCELLED',
+      cancellationReason: 'HIRER_CANCELLED',
     });
+    expect(Number.isNaN(Date.parse(cancelled.cancelledAt))).toBe(false);
     expect(
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
@@ -549,6 +590,10 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       { 'idempotency-key': 'underfilled-cancel' }
     );
     expect(replay.status).toBe(200);
+    expect((await replay.json()).data).toMatchObject({
+      cancellationReason: 'HIRER_CANCELLED',
+      cancelledAt: cancelled.cancelledAt,
+    });
   });
 
   it('cancels when the Hirer decision window times out', async () => {
@@ -566,6 +611,11 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
     ).toBe('QUEST_CANCELLED');
+    const hirerView = await request(`/api/v2/quests/${questId}/underfilled`, 'GET', hirer.id);
+    expect((await hirerView.json()).data).toMatchObject({
+      state: 'UNDERFILLED_CANCELLED',
+      cancellationReason: 'HIRER_NO_DECISION',
+    });
     expect(
       (
         await db
@@ -601,6 +651,7 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
     expect((await declined.json()).data).toMatchObject({
       state: 'UNDERFILLED_CANCELLED',
       questState: 'QUEST_CANCELLED',
+      cancellationReason: 'WORKER_DECLINED',
     });
 
     const timeoutQuestId = await createQuest([workers[1].id], true);
@@ -627,6 +678,14 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
           .where(eq(quest.id, timeoutQuestId))
       )[0]?.status
     ).toBe('QUEST_CANCELLED');
+    const timeoutView = await request(
+      `/api/v2/quests/${timeoutQuestId}/underfilled`,
+      'GET',
+      hirer.id
+    );
+    expect((await timeoutView.json()).data).toMatchObject({
+      cancellationReason: 'CONSENT_TIMEOUT',
+    });
   });
 
   it('returns IDEMPOTENCY_IN_PROGRESS for an unfinished underfilled command', async () => {
@@ -808,5 +867,128 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       workers[1].id
     );
     expect(otherWorker.status).toBe(404);
+  });
+
+  it('queues one Push per transition with the server expiry, drops a stale Push, and lists the summary', async () => {
+    if (!postgresAvailable) return;
+    const encryption = createPushDeviceEncryption({ key: '9f'.repeat(32), keyVersion: 'test-v1' });
+    const questId = await createQuest([workers[0].id, workers[1].id], true);
+    const pushesFor = async (memberId: string) =>
+      (await db.select().from(pushDelivery).where(eq(pushDelivery.recipientMemberId, memberId)))
+        .filter(({ data }) => data.questId === questId)
+        .sort((a, b) => a.eventType.localeCompare(b.eventType));
+
+    await detect(new Date());
+    await detect(new Date());
+    const decisionView = (
+      await (await request(`/api/v2/quests/${questId}/underfilled`, 'GET', hirer.id)).json()
+    ).data;
+    const hirerPushes = await pushesFor(hirer.id);
+    expect(hirerPushes.map(({ eventType }) => eventType)).toEqual(['UNDERFILLED_DECISION_PENDING']);
+    expect(hirerPushes[0]?.data).toMatchObject({
+      type: 'UNDERFILLED_DECISION_PENDING',
+      expiresAt: decisionView.decision.expiresAt,
+      transitionId: hirerPushes[0]?.eventKey,
+    });
+
+    const summary = (
+      await (await request('/api/v2/assignments/mine', 'GET', workers[0].id)).json()
+    ).data.items.find((item: { questId: string }) => item.questId === questId);
+    expect(summary.underfilled).toEqual({
+      state: 'UNDERFILLED_DECISION_PENDING',
+      decision: { expiresAt: decisionView.decision.expiresAt },
+      consent: { expiresAt: null },
+      activeWorkerCount: 2,
+      headcount: 4,
+      cancellationReason: null,
+    });
+
+    for (const attempt of [1, 2]) {
+      const proceed = await request(
+        `/api/v2/quests/${questId}/underfilled/decision`,
+        'POST',
+        hirer.id,
+        { decision: 'PROCEED' },
+        { 'idempotency-key': 'underfilled-push-proceed' }
+      );
+      expect(proceed.status, `proceed attempt ${attempt}`).toBe(200);
+    }
+    const consentView = (
+      await (await request(`/api/v2/quests/${questId}/underfilled`, 'GET', workers[0].id)).json()
+    ).data;
+    for (const worker of [workers[0], workers[1]]) {
+      const pushes = await pushesFor(worker.id);
+      expect(pushes.map(({ eventType }) => eventType)).toEqual(['UNDERFILLED_CONSENT_PENDING']);
+      expect(pushes[0]?.data.expiresAt).toBe(consentView.consent.expiresAt);
+      expect(pushes[0]?.deepLink).toEndWith(`/${questId}/partial-start`);
+    }
+
+    await registerAndroidPushDevice(workers[0].id, `fcm-token-${randomUUID()}-underfilled`, {
+      encryption,
+    });
+    const declined = await request(
+      `/api/v2/quests/${questId}/underfilled/consent`,
+      'POST',
+      workers[0].id,
+      { decision: 'DECLINE' },
+      { 'idempotency-key': 'underfilled-push-decline' }
+    );
+    expect(declined.status).toBe(200);
+
+    const sent: string[] = [];
+    for (let batch = 0; batch < 5; batch += 1) {
+      const processed = await processPendingPushDeliveries({
+        now: () => new Date(Date.now() + 1),
+        encryption,
+        send: async (_token, message) => {
+          sent.push(message.data.type ?? '');
+          expect(message.data.cancellationReason).toBe('WORKER_DECLINED');
+          return { kind: 'DELIVERED' };
+        },
+      });
+      if (processed === 0) break;
+    }
+    // The consent alert is stale once the process is cancelled: only the cancellation is sent.
+    expect(sent).toEqual(['UNDERFILLED_CANCELLED']);
+    expect(
+      (await pushesFor(workers[0].id)).map(({ eventType, status }) => [eventType, status])
+    ).toEqual([
+      ['UNDERFILLED_CANCELLED', 'PUSH_DELIVERY_DELIVERED'],
+      ['UNDERFILLED_CONSENT_PENDING', 'PUSH_DELIVERY_DISABLED'],
+    ]);
+  });
+
+  it('emits UNDERFILLED_DECISION_PENDING with the server expiry once per record', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest([workers[0].id]);
+    const payloads: unknown[] = [];
+    let seenSentinel!: () => void;
+    const sentinel = new Promise<void>((resolve) => (seenSentinel = resolve));
+    const listener = await sql.listen('kuquest_quest_updates', (payload) => {
+      const event = JSON.parse(payload) as { questId?: string };
+      if (event.questId === questId) payloads.push(event);
+      if (event.questId === 'sentinel') seenSentinel();
+    });
+    try {
+      await detect(new Date());
+      await detect(new Date());
+      await request(`/api/v2/quests/${questId}/underfilled`, 'GET', hirer.id);
+      const [row] = await db
+        .select({ expiresAt: questV2UnderfilledDecision.decisionExpiresAt })
+        .from(questV2UnderfilledDecision)
+        .where(eq(questV2UnderfilledDecision.questId, questId));
+      // Notifications arrive in commit order, so the sentinel proves no later copy follows.
+      await sql`select pg_notify('kuquest_quest_updates', '{"questId":"sentinel"}')`;
+      await sentinel;
+      expect(payloads).toEqual([
+        {
+          questId,
+          type: 'UNDERFILLED_DECISION_PENDING',
+          expiresAt: row!.expiresAt.toISOString(),
+        },
+      ]);
+    } finally {
+      await listener.unlisten();
+    }
   });
 });

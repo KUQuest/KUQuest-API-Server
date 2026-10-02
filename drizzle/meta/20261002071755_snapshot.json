@@ -1,6 +1,6 @@
 {
-  "id": "5ba4ef43-de24-4c70-8166-b9c037af07a8",
-  "prevId": "34208aef-5a1f-448f-8a58-7336da798861",
+  "id": "25e81fc1-fd1b-4bf3-a807-84b6ba93f446",
+  "prevId": "3aaea880-a77d-4022-970f-250ea674cbb1",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2962,6 +2962,23 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "public_sequence": {
+          "name": "public_sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "byDefault",
+            "name": "auth_user_public_sequence",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
         "email": {
           "name": "email",
           "type": "text",
@@ -3157,6 +3174,13 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "auth_user_public_sequence_unique": {
+          "name": "auth_user_public_sequence_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "public_sequence"
+          ]
+        },
         "auth_user_email_key": {
           "name": "auth_user_email_key",
           "nullsNotDistinct": false,
@@ -6969,8 +6993,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "dispute_window_closed_at": {
-          "name": "dispute_window_closed_at",
+        "dispute_window_closed_notified_at": {
+          "name": "dispute_window_closed_notified_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

@@ -88,7 +88,7 @@ export const quest = pgTable(
     startTime: time('start_time').notNull(),
     dueAt: time('due_at'),
     failedAt: time('failed_at'),
-    disputeWindowClosedAt: time('dispute_window_closed_at'),
+    disputeWindowClosedNotifiedAt: time('dispute_window_closed_notified_at'),
     proofRequired: boolean('proof_required').default(true).notNull(),
     cancelledAt: time('cancelled_at'),
     cancelledByUserId: uuid('cancelled_by_user_id').references(() => authUser.id),

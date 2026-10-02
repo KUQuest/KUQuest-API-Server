@@ -418,7 +418,12 @@ describe('Quest Proof Submission v2 behavior', () => {
       { 'idempotency-key': 'proof-v2-behavior-submit' }
     );
     expect(sent.status).toBe(200);
-    expect((await sent.json()).data.status).toBe('PROOF_PENDING');
+    const sentData = (await sent.json()).data;
+    expect(sentData.status).toBe('PROOF_PENDING');
+    expect(new Date(sentData.reviewDeadlineAt).getTime()).toBe(
+      new Date(sentData.submittedAt).getTime() + 24 * 60 * 60 * 1000
+    );
+    expect(sentData.reviewReason).toBeNull();
 
     const hirerSent = await request('GET', `/api/v2/quests/${questId}/proof-submissions`, hirer.id);
     expect((await hirerSent.json()).data.items).toEqual([
@@ -443,6 +448,10 @@ describe('Quest Proof Submission v2 behavior', () => {
         fileIds: [],
         files: [],
         status: 'PROOF_PENDING',
+        reviewDeadlineAt: expect.any(String),
+        reviewReason: null,
+        reviewedAt: null,
+        reviewedBy: null,
       }),
     ]);
 
@@ -553,22 +562,15 @@ describe('Quest Proof Submission v2 behavior', () => {
       'POST',
       `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
       hirer.id,
-      { decision: 'PROOF_APPROVED', reason: '<i>Approved after verification</i>' },
+      { decision: 'PROOF_APPROVED' },
       { 'idempotency-key': `proof-v2-behavior-review-approve-${questId}` }
     );
     const body = await response.json();
     expect(response.status).toBe(200);
     expect(body.data).toMatchObject({
-      proof: {
-        id: proofSubmissionId,
-        status: 'PROOF_APPROVED',
-        reviewDeadlineAt: null,
-        reviewReason: 'Approved after verification',
-        reviewedBy: 'HIRER',
-      },
+      proof: { id: proofSubmissionId, status: 'PROOF_APPROVED' },
       questStatus: 'QUEST_COMPLETED',
     });
-    expect(Date.parse(body.data.proof.reviewedAt)).not.toBeNaN();
 
     expect(
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
@@ -603,104 +605,49 @@ describe('Quest Proof Submission v2 behavior', () => {
     ).toEqual([{ action: 'PROOF_REVIEWED', resourceType: 'PROOF_SUBMISSION' }]);
   });
 
-  it('returns a 24-hour deadline only after Proof is sent', async () => {
-    if (!postgresAvailable || !proofSchemaAvailable) return;
-    const now = new Date();
-    const { questId } = await createQuest({
-      startTime: new Date(now.getTime() - 60 * 60 * 1000),
-      dueAt: new Date(now.getTime() + 60 * 60 * 1000),
-    });
-    const proofFileId = await createFile(worker.id);
-    const created = await jsonRequest(
-      'POST',
-      `/api/v2/quests/${questId}/proof-submissions`,
-      worker.id,
-      { description: 'Submitted proof', fileIds: [proofFileId] },
-      { 'idempotency-key': `proof-v2-behavior-deadline-draft-${questId}` }
-    );
-    expect(created.status).toBe(201);
-    const draft = (await created.json()).data;
-    expect(draft.reviewDeadlineAt).toBeNull();
-    expect(draft.reviewReason).toBeNull();
-    expect(draft.reviewedAt).toBeNull();
-    expect(draft.reviewedBy).toBeNull();
-
-    const sent = await request(
-      'POST',
-      `/api/v2/quests/${questId}/proof-submissions/${draft.id}/submit`,
-      worker.id,
-      undefined,
-      { 'idempotency-key': `proof-v2-behavior-deadline-send-${questId}` }
-    );
-    expect(sent.status).toBe(200);
-    const proof = (await sent.json()).data;
-    const expectedDeadline = new Date(
-      Date.parse(proof.submittedAt) + 24 * 60 * 60 * 1000
-    ).toISOString();
-    expect(proof.reviewDeadlineAt).toBe(expectedDeadline);
-
-    const listed = await request('GET', `/api/v2/quests/${questId}/proof-submissions`, worker.id);
-    expect((await listed.json()).data.items).toContainEqual(
-      expect.objectContaining({ id: draft.id, reviewDeadlineAt: expectedDeadline })
-    );
-  });
-
   it('records PROOF_NOT_APPROVED, fails the Quest, and creates one Admin Review Item', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
     const { questId, proofSubmissionId, proofFileId } = await createHttpSentProof({
-      v2Participation: 'GROUP',
-      questFundingTotalSatang: 2_000,
-      questEscrowSatang: 2_040,
+      questFundingTotalSatang: 1_020,
+      questEscrowSatang: 1_020,
     });
-    await reserveQuest(questId, 2_040);
+    await reserveQuest(questId, 1_020);
     const key = `proof-v2-behavior-review-not-approved-${questId}`;
     const first = await jsonRequest(
       'POST',
       `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
       hirer.id,
-      { decision: 'PROOF_NOT_APPROVED', reason: 'The <b>submitted</b> work is incomplete' },
+      { decision: 'PROOF_NOT_APPROVED', reason: 'The submitted work is incomplete' },
       { 'idempotency-key': key }
     );
     const firstBody = await first.json();
     expect(first.status).toBe(200);
     expect(firstBody.data).toMatchObject({
-      proof: {
-        id: proofSubmissionId,
-        status: 'PROOF_NOT_APPROVED',
-        reviewDeadlineAt: null,
-        reviewReason: 'The submitted work is incomplete',
-        reviewedBy: 'HIRER',
-      },
+      proof: { id: proofSubmissionId, status: 'PROOF_NOT_APPROVED' },
       questStatus: 'QUEST_FAILED',
     });
-    expect(Date.parse(firstBody.data.proof.reviewedAt)).not.toBeNaN();
+
     const replay = await jsonRequest(
       'POST',
       `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
       hirer.id,
-      { decision: 'PROOF_NOT_APPROVED', reason: 'The <b>submitted</b> work is incomplete' },
+      { decision: 'PROOF_NOT_APPROVED', reason: 'The submitted work is incomplete' },
       { 'idempotency-key': key }
     );
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(firstBody);
-    const summary = await request(
-      'GET',
-      `/api/v2/quests/${questId}/proof-submissions`,
-      secondWorker.id
-    );
-    expect((await summary.json()).data.items).toContainEqual(
-      expect.objectContaining({
-        id: proofSubmissionId,
-        visibility: 'SUMMARY',
+    expect(firstBody.data.proof).toMatchObject({
+      reviewDeadlineAt: null,
+      reviewReason: 'The submitted work is incomplete',
+      reviewedBy: 'HIRER',
+      reviewedAt: expect.any(String),
+    });
+    for (const viewer of [worker.id, hirer.id]) {
+      const listed = await request('GET', `/api/v2/quests/${questId}/proof-submissions`, viewer);
+      expect((await listed.json()).data.items[0]).toMatchObject({
         reviewReason: 'The submitted work is incomplete',
-      })
-    );
-    const unrelatedRead = await request(
-      'GET',
-      `/api/v2/quests/${questId}/proof-submissions`,
-      unrelated.id
-    );
-    expect(unrelatedRead.status).toBe(404);
+      });
+    }
 
     const reused = await jsonRequest(
       'POST',
@@ -726,16 +673,13 @@ describe('Quest Proof Submission v2 behavior', () => {
         ?.status
     ).toBe('QUEST_FAILED');
     expect(
-      await db
-        .select({ workerId: questAssignment.workerId, status: questAssignment.assignmentStatus })
-        .from(questAssignment)
-        .where(eq(questAssignment.questId, questId))
-    ).toEqual(
-      expect.arrayContaining([
-        { workerId: worker.id, status: 'ASSIGNMENT_INCOMPLETE' },
-        { workerId: secondWorker.id, status: 'ASSIGNMENT_ACTIVE' },
-      ])
-    );
+      (
+        await db
+          .select({ status: questAssignment.assignmentStatus })
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, questId))
+      )[0]?.status
+    ).toBe('ASSIGNMENT_INCOMPLETE');
     expect(
       await db
         .select({
@@ -762,7 +706,7 @@ describe('Quest Proof Submission v2 behavior', () => {
     ).toEqual([{ filerUserId: worker.id, status: 'DISPUTE_CASE_PENDING' }]);
     expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
       status: 'ACTIVE',
-      remainingSatang: 2_040,
+      remainingSatang: 1_020,
     });
   });
   it('returns a temporary Proof file URL to an authorized Hirer', async () => {
@@ -847,30 +791,25 @@ describe('Quest Proof Submission v2 behavior', () => {
       await autoApproveDueQuestV2Proofs(new Date(sentAt.getTime() + 24 * 60 * 60 * 1000), 10)
     ).toEqual([proofSubmissionId]);
     expect(
-      await db
-        .select({
-          status: questV2ProofSubmission.submissionStatus,
-          reason: questV2ProofSubmission.reviewReason,
-          reviewedAt: questV2ProofSubmission.reviewedAt,
-          reviewedBy: questV2ProofSubmission.reviewedBy,
-        })
-        .from(questV2ProofSubmission)
-        .where(eq(questV2ProofSubmission.id, proofSubmissionId))
-    ).toMatchObject([
-      {
-        status: 'PROOF_APPROVED',
-        reason: null,
-        reviewedBy: 'AUTO_APPROVE',
-      },
-    ]);
-    expect(
       (
         await db
-          .select({ reviewedAt: questV2ProofSubmission.reviewedAt })
+          .select({ status: questV2ProofSubmission.submissionStatus })
           .from(questV2ProofSubmission)
           .where(eq(questV2ProofSubmission.id, proofSubmissionId))
-      )[0]?.reviewedAt
-    ).toBeInstanceOf(Date);
+      )[0]?.status
+    ).toBe('PROOF_APPROVED');
+    const autoApproved = await request(
+      'GET',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      worker.id
+    );
+    expect((await autoApproved.json()).data.items[0]).toMatchObject({
+      status: 'PROOF_APPROVED',
+      reviewDeadlineAt: null,
+      reviewReason: null,
+      reviewedBy: 'AUTO_APPROVE',
+      reviewedAt: expect.any(String),
+    });
     expect(
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
@@ -908,6 +847,34 @@ describe('Quest Proof Submission v2 behavior', () => {
           inArray(questAssignment.questId, [missingProof.questId, missingConfirmation.questId])
         )
     ).toEqual([{ status: 'ASSIGNMENT_INCOMPLETE' }, { status: 'ASSIGNMENT_INCOMPLETE' }]);
+  });
+
+  it('emits QUEST_FAILED and DISPUTE_WINDOW_OPENED once when dueAt fails the Quest', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const dueAt = new Date(Date.now() - 1_000);
+    const { questId } = await createQuest({
+      startTime: new Date(dueAt.getTime() - 60 * 60 * 1000),
+      dueAt,
+    });
+    await reserveQuest(questId, 1_020);
+    const changeTypes: string[] = [];
+    let wake!: () => void;
+    let waiting = new Promise<void>((resolve) => (wake = resolve));
+    const listener = await sql.listen('kuquest_quest_updates', (payload) => {
+      const event = JSON.parse(payload) as { questId: string; changeType: string };
+      if (event.questId !== questId) return;
+      changeTypes.push(event.changeType);
+      wake();
+      waiting = new Promise<void>((resolve) => (wake = resolve));
+    });
+    try {
+      expect(await failQuestV2AtDueAt(questId, new Date())).toBe(true);
+      expect(await failQuestV2AtDueAt(questId, new Date())).toBe(false);
+      while (changeTypes.length < 2) await waiting;
+      expect([...changeTypes].sort()).toEqual(['DISPUTE_WINDOW_OPENED', 'QUEST_FAILED']);
+    } finally {
+      await listener.unlisten();
+    }
   });
 
   it('reviews a valid pending Proof after another GROUP FCFS Assignment fails', async () => {

@@ -19,7 +19,7 @@ export const adminSearchRoute = new Elysia({
       tags: ['Admin Search'],
       summary: 'Search Admin Records',
       description:
-        'Searches Members, Quests, Payouts, Dispute Cases, Report Cases, Conduct Reports, Wallets, and Admin Activity Logs. It searches safe record fields only. Message text, Attachments, chat history, Evidence content, Payout Destination details, and Provider payloads are excluded.',
+        'Searches one supported record type when kind is set, or all supported types when kind is all. It searches safe record fields only. Message text, Attachments, chat history, Evidence content, Payout Destination details, and Provider payloads are excluded.',
       operationId: 'searchAdminRecords',
       security: betterAuthSecurity,
     },

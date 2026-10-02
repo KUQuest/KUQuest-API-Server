@@ -1,6 +1,8 @@
 import { t, type Static } from 'elysia';
 
+import { memberSummarySchema } from '../../shared/member-summary';
 import { questV2AssignmentStates, questV2States } from '../core/quest-v2.contract';
+import { questV2UnderfilledSummarySchema } from '../lifecycle/quest-underfilled-v2.schema';
 
 const state = t.Union(
   questV2AssignmentStates.map((value) => t.Literal(value)) as [
@@ -38,28 +40,15 @@ export const questV2AssignmentHeadersSchema = t.Object({
   }),
 });
 
-const teamSummarySchema = t.Object({
-  id: t.String({ format: 'uuid' }),
-  name: t.String(),
-  leaderId: t.String({ format: 'uuid' }),
-  members: t.Array(
-    t.Object({
-      id: t.String({ format: 'uuid' }),
-      displayName: t.String(),
-    })
-  ),
-});
-
 const assignmentSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
   workerId: t.String({ format: 'uuid' }),
+  member: memberSummarySchema,
   state,
   questState,
   startedAt: t.Nullable(t.String({ format: 'date-time' })),
   createdAt: t.String({ format: 'date-time' }),
-  teamRole: t.Nullable(t.Union([t.Literal('LEADER'), t.Literal('MEMBER')])),
-  team: t.Nullable(teamSummarySchema),
 });
 
 export const questV2AssignmentResponseSchema = t.Object({
@@ -81,8 +70,18 @@ export const questV2AssignmentListResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
     items: t.Array(assignmentSchema),
-    activeCount: t.Integer({ minimum: 0 }),
-    startedCount: t.Integer({ minimum: 0 }),
+  }),
+});
+
+export const questV2MyAssignmentListResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    items: t.Array(
+      t.Object({
+        ...assignmentSchema.properties,
+        underfilled: t.Nullable(questV2UnderfilledSummarySchema),
+      })
+    ),
   }),
 });
 

@@ -1,5 +1,4 @@
 import { db } from '@/database/client';
-import { adminDisputeCase } from '@/database/schema/admin.schema';
 import { authSession } from '@/database/schema/auth.schema';
 import { chatConversation } from '@/database/schema/work-chat.schema';
 import {
@@ -52,7 +51,6 @@ export const getQuestUpdateAccess = async (
       hirerId: quest.hirerId,
       state: quest.questStatus,
       dueAt: quest.dueAt,
-      failedAt: quest.failedAt,
     })
     .from(quest)
     .where(eq(quest.id, questId))
@@ -104,18 +102,8 @@ export const getQuestUpdateAccess = async (
     if (inquiry) return { role: 'PROSPECTIVE_WORKER', mode: 'LIVE' };
   }
   if (!assignment) return undefined;
+
   if (current.state !== 'QUEST_FAILED' || current.dueAt === null) return undefined;
-  const selfFileWindowEndsAt = current.failedAt
-    ? current.failedAt.getTime() + 24 * 60 * 60 * 1000
-    : 0;
-  const [ownCase] = await db
-    .select({ id: adminDisputeCase.id })
-    .from(adminDisputeCase)
-    .where(and(eq(adminDisputeCase.questId, questId), eq(adminDisputeCase.filerUserId, memberId)))
-    .limit(1);
-  if (Date.now() <= selfFileWindowEndsAt || ownCase) {
-    return { role: 'WORKER', mode: 'LIVE' };
-  }
   const [pendingProof] = await db
     .select({ id: questV2ProofSubmission.id })
     .from(questV2ProofSubmission)

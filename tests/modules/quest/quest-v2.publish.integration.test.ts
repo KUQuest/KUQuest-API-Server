@@ -3,7 +3,6 @@ import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { quest, questLocation } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, publishQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import { ensureInitialMoneyPolicy, ensureWallet } from '@/modules/wallet';
 import {
@@ -19,6 +18,8 @@ import { randomUUID } from 'node:crypto';
 import { Elysia } from 'elysia';
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const testEmail = `quest-v2-publish-${randomUUID()}@ku.th`;
 const testPassword = 'TestStudent1!';
@@ -194,6 +195,7 @@ describe('Quest API v2 publish', () => {
     );
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
+    expect(created.quest.questReward).toBeNull();
 
     const key = `quest-v2-publish-http-${randomUUID()}`;
     const response = await postPublish(created.quest.id, key);
@@ -202,7 +204,7 @@ describe('Quest API v2 publish', () => {
     expect(body).toMatchObject({
       success: true,
       data: {
-        quest: { id: created.quest.id, state: 'QUEST_OPEN' },
+        quest: { id: created.quest.id, state: 'QUEST_OPEN', questReward: 1 },
         questEscrow: {
           questFundingTotal: 1.03,
           questReward: 1,

@@ -257,6 +257,20 @@ components:
     hirerQuestUpdated:
       name: HIRER_QUEST_UPDATED
       summary: An owned Quest changed
+      description: |
+        The event carries no data; read REST after each event. Roster refresh types:
+        ASSIGNMENT_JOINED (a First-Come-First-Served Worker joined), ASSIGNMENT_STARTED
+        (a Worker pressed Start Work), PROOF_SUBMITTED (a Worker submitted Proof), and
+        QUEST_AUTO_CANCELLED (the Server cancelled an unfilled Quest at its start time).
+        Read GET /api/v2/quests/{questId}/assignments, /teams, and /applications for the
+        roster; each person there carries a `member` summary.
+
+        Failure and dispute types fire once per transition. QUEST_FAILED fires when dueAt
+        passes with unfinished work; DISPUTE_WINDOW_OPENED follows it in the same commit and
+        starts the 1-day self-file window; DISPUTE_WINDOW_CLOSED fires once, when the lifecycle
+        worker first sees the window ended (up to one worker interval after failedAt + 1 day);
+        DISPUTE_CASE_UPDATED goes to the filer only, when a Dispute Case is created, resolved,
+        or dismissed. Read GET /api/v2/quests/{questId} (`dispute`, `moneyHold`) after each.
       payload:
         type: object
         additionalProperties: false
@@ -278,21 +292,51 @@ components:
             enum:
               - ASSIGNMENT_ROSTER_UPDATED
               - QUEST_STARTED
+              - ASSIGNMENT_STARTED
+              - ASSIGNMENT_JOINED
+              - QUEST_AUTO_CANCELLED
               - PROOF_SUBMITTED
               - PROOF_REVIEWED
               - PROOF_AUTO_APPROVED
               - COMPLETION_CONFIRMED
               - QUEST_COMPLETED
               - QUEST_FAILED
+              - DISPUTE_WINDOW_OPENED
+              - DISPUTE_WINDOW_CLOSED
+              - DISPUTE_CASE_UPDATED
               - QUEST_CANCELLED
               - QUEST_OPEN_EDIT_UPDATED
               - QUEST_EDIT_UPDATED
               - CANDIDATE_ROSTER_UPDATED
               - QUEST_PUBLISHED
               - QUEST_CREATED
+              - UNDERFILLED_DECISION_PENDING
+          expiresAt:
+            type: string
+            format: date-time
+            description: Present only when changeType is UNDERFILLED_DECISION_PENDING. It equals decision.expiresAt of GET /api/v2/quests/{questId}/underfilled. Sent once per Quest, when the ten-minute decision window opens.
+        allOf:
+          - if:
+              properties:
+                changeType:
+                  const: UNDERFILLED_DECISION_PENDING
+              required:
+                - changeType
+            then:
+              required:
+                - expiresAt
+            else:
+              not:
+                required:
+                  - expiresAt
     questUpdated:
       name: QUEST_UPDATED
       summary: Quest state or Assignment roster changed
+      description: |
+        The event carries no data; read REST after each event. See hirerQuestUpdated for the
+        failure and dispute types. PROOF_REVIEWED means the Hirer reviewed a Proof and
+        PROOF_AUTO_APPROVED means the 24-hour review window ended; read
+        `reviewedBy`, `reviewReason`, and `reviewedAt` on the Proof Submission.
       payload:
         type: object
         additionalProperties: false
@@ -314,12 +358,18 @@ components:
             enum:
               - ASSIGNMENT_ROSTER_UPDATED
               - QUEST_STARTED
+              - ASSIGNMENT_STARTED
+              - ASSIGNMENT_JOINED
+              - QUEST_AUTO_CANCELLED
               - PROOF_SUBMITTED
               - PROOF_REVIEWED
               - PROOF_AUTO_APPROVED
               - COMPLETION_CONFIRMED
               - QUEST_COMPLETED
               - QUEST_FAILED
+              - DISPUTE_WINDOW_OPENED
+              - DISPUTE_WINDOW_CLOSED
+              - DISPUTE_CASE_UPDATED
               - QUEST_CANCELLED
               - QUEST_OPEN_EDIT_UPDATED
               - QUEST_EDIT_UPDATED

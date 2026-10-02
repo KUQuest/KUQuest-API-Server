@@ -1,1 +1,0 @@
-ALTER TABLE "quest" ADD COLUMN "dispute_window_closed_at" timestamp with time zone;--> statement-breakpoint

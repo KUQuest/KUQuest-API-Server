@@ -21,32 +21,35 @@ export const questCancellationResponseSchema = t.Object({
   }),
 });
 
-const questCancellationPreviewDataSchema = t.Object({
-  questStatus: t.Union([
-    t.Literal('QUEST_DRAFT'),
-    t.Literal('QUEST_OPEN'),
-    t.Literal('QUEST_ASSIGNED'),
-    t.Literal('QUEST_IN_PROGRESS'),
-  ]),
-  tier: t.Union([t.Literal('NO_PENALTY'), t.Literal('PARTIAL_PENALTY'), t.Literal('FULL_PENALTY')]),
-  paidSatang: t.Integer({ minimum: 0 }),
-  refundedSatang: t.Integer({ minimum: 0 }),
-  platformFeeSatang: t.Integer({ minimum: 0 }),
-  affectedWorkerCount: t.Integer({ minimum: 0 }),
-  computedAt: t.String({ format: 'date-time' }),
-  previewVersion: t.String({ minLength: 1 }),
+export const questV2CancelHeadersSchema = t.Object({
+  'idempotency-key': questSettlementHeadersSchema.properties['idempotency-key'],
+  'x-cancel-preview-version': t.Optional(
+    t.String({
+      minLength: 1,
+      maxLength: 200,
+      description:
+        'Optional previewVersion from GET /cancel-preview. When the Quest changed since the preview, the Server refuses with 409 CANCEL_PREVIEW_STALE and moves no money.',
+    })
+  ),
 });
 
-export const questCancellationPreviewResponseSchema = t.Object({
+export const questV2CancelPreviewResponseSchema = t.Object({
   success: t.Literal(true),
-  data: questCancellationPreviewDataSchema,
-});
-
-export const questCancellationPreviewStaleResponseSchema = t.Object({
-  success: t.Literal(false),
-  error: t.Object({
-    code: t.Literal('CANCEL_PREVIEW_STALE'),
-    message: t.String(),
-    preview: questCancellationPreviewDataSchema,
+  data: t.Object({
+    questStatus: t.String(),
+    tier: t.Union([
+      t.Literal('NO_PENALTY'),
+      t.Literal('PARTIAL_PENALTY'),
+      t.Literal('FULL_PENALTY'),
+    ]),
+    paidSatang: t.Integer({ minimum: 0, description: 'Paid to Workers.' }),
+    refundedSatang: t.Integer({ minimum: 0, description: 'Returned to the Hirer wallet.' }),
+    platformFeeSatang: t.Integer({
+      minimum: 0,
+      description: 'Platform Fee the Platform keeps. Zero when the fee is part of the refund.',
+    }),
+    affectedWorkerCount: t.Integer({ minimum: 0 }),
+    computedAt: t.String({ format: 'date-time' }),
+    previewVersion: t.String(),
   }),
 });

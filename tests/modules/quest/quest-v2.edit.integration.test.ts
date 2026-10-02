@@ -9,12 +9,13 @@ import {
   questEditHistory,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, expireQuestV2EditRequest, type QuestV2CreateInput } from '@/modules/quest';
 
 import { Elysia } from 'elysia';
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const ownerEmail = `quest-v2-edit-owner-${crypto.randomUUID()}@ku.th`;
 const workerEmail = `quest-v2-edit-worker-${crypto.randomUUID()}@ku.th`;
@@ -591,6 +592,7 @@ describe('Quest Edit v2', () => {
     expect((await ownerRead.json()).data.responses).toMatchObject([
       {
         workerId: worker.id,
+        member: { id: worker.id, displayName: expect.stringMatching(/\S/) },
         decision: 'EDIT_RESPONSE_DECLINED',
         reason: 'The scope is not clear',
       },

@@ -7,7 +7,6 @@ import {
   questV2EditRequest,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle/quest-lifecycle.worker';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import { assignmentStatus, questStatus } from '@/modules/quest/shared';
@@ -16,6 +15,7 @@ import { Elysia } from 'elysia';
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 import { QuestWebSocketClient } from './quest-update-test-client';
 
 const password = 'TestStudent1!';
@@ -332,11 +332,24 @@ describe('Quest Edit v2 realtime updates', () => {
         expect.arrayContaining([
           {
             workerId: workerSession.id,
+            member: expect.objectContaining({
+              id: workerSession.id,
+              displayName: expect.stringMatching(/\S/),
+            }),
             decision: 'EDIT_RESPONSE_DECLINED',
             reason: 'Private response detail',
             respondedAt: expect.any(String),
           },
-          { workerId: otherWorkerSession.id, decision: null, reason: null, respondedAt: null },
+          {
+            workerId: otherWorkerSession.id,
+            member: expect.objectContaining({
+              id: otherWorkerSession.id,
+              displayName: expect.stringMatching(/\S/),
+            }),
+            decision: null,
+            reason: null,
+            respondedAt: null,
+          },
         ])
       );
       const participation = await readParticipation(questId, workerSession.cookie);

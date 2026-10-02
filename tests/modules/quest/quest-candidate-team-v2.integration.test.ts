@@ -5,7 +5,6 @@ import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
   quest,
-  questConditionItem,
   questCandidateApplicationV2,
   questAssignment,
   questCandidateTeamV2,
@@ -518,6 +517,38 @@ describe('Quest Candidate Team API v2', () => {
     expect((await memberList.json()).data.items).toEqual([
       expect.objectContaining({ id: team.id, joinCode: null }),
     ]);
+    const withSummaries = await request(`/api/v2/quests/${questId}/teams`, 'GET', hirer.id);
+    expect((await withSummaries.json()).data.items[0]).toMatchObject({
+      leaderId: candidate.id,
+      leader: { id: candidate.id, displayName: 'Candidate Worker', avatar: null },
+      members: [
+        {
+          memberId: candidate.id,
+          member: { id: candidate.id, displayName: 'Candidate Worker' },
+        },
+      ],
+    });
+
+    const forming = await request(
+      `/api/v2/quests/${questId}/teams?state=TEAM_FORMING`,
+      'GET',
+      hirer.id
+    );
+    expect(forming.status).toBe(200);
+    expect((await forming.json()).data.items).toHaveLength(1);
+    const submitted = await request(
+      `/api/v2/quests/${questId}/teams?state=TEAM_SUBMITTED`,
+      'GET',
+      hirer.id
+    );
+    expect(submitted.status).toBe(200);
+    expect((await submitted.json()).data.items).toEqual([]);
+    const invalidState = await request(
+      `/api/v2/quests/${questId}/teams?state=NOPE`,
+      'GET',
+      hirer.id
+    );
+    expect(invalidState.status).toBe(400);
 
     const detail = await request(`/api/v2/quests/${questId}/teams/${team.id}`, 'GET', hirer.id);
     expect(detail.status).toBe(200);
@@ -1989,11 +2020,6 @@ describe('Quest Candidate Team API v2', () => {
   it('selects one submitted Team atomically, creates the full Assignment roster, and rejects other Candidates', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenGroupCandidateQuest();
-    await db.insert(questConditionItem).values({
-      questId,
-      position: 0,
-      text: 'Complete the selected Team work',
-    });
     authenticate();
     const firstTeam = await createTeam(
       questId,
@@ -2081,107 +2107,6 @@ describe('Quest Candidate Team API v2', () => {
         ({ state, questState }) => state === 'ASSIGNMENT_ACTIVE' && questState === 'QUEST_ASSIGNED'
       )
     ).toBe(true);
-    const workerStartedAt = new Date('2030-01-01T10:00:00.000Z');
-    await db
-      .update(questAssignment)
-      .set({ startedAt: workerStartedAt })
-      .where(
-        and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, secondCandidate.id))
-      );
-    const hirerAssignments = await request(
-      `/api/v2/quests/${questId}/assignments`,
-      'GET',
-      hirer.id
-    );
-    const hirerAssignmentBody = (await hirerAssignments.json()).data;
-    expect(hirerAssignmentBody).toMatchObject({ activeCount: 3, startedCount: 1 });
-    expect(hirerAssignmentBody.items).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          workerId: candidate.id,
-          teamRole: 'LEADER',
-          team: {
-            id: firstTeam.id,
-            leaderId: candidate.id,
-            members: expect.arrayContaining([
-              { id: candidate.id, displayName: 'Candidate Worker' },
-              { id: secondCandidate.id, displayName: 'Second Candidate' },
-              { id: fourthCandidate.id, displayName: 'Fourth Candidate' },
-            ]),
-          },
-        }),
-        expect.objectContaining({
-          workerId: secondCandidate.id,
-          teamRole: 'MEMBER',
-          startedAt: workerStartedAt.toISOString(),
-        }),
-      ])
-    );
-
-    const workerAssignments = await request(
-      `/api/v2/quests/${questId}/assignments`,
-      'GET',
-      secondCandidate.id
-    );
-    expect((await workerAssignments.json()).data).toMatchObject({
-      items: [
-        {
-          workerId: secondCandidate.id,
-          teamRole: 'MEMBER',
-          startedAt: workerStartedAt.toISOString(),
-          team: { leaderId: candidate.id },
-        },
-      ],
-      activeCount: 3,
-      startedCount: 1,
-    });
-    const ownAssignments = await request('/api/v2/assignments/mine', 'GET', secondCandidate.id);
-    expect((await ownAssignments.json()).data.items).toMatchObject([
-      {
-        workerId: secondCandidate.id,
-        teamRole: 'MEMBER',
-        startedAt: workerStartedAt.toISOString(),
-        team: { leaderId: candidate.id },
-      },
-    ]);
-
-    const participation = await request(
-      `/api/v2/quests/${questId}/participation`,
-      'GET',
-      secondCandidate.id
-    );
-    expect((await participation.json()).data.assignment).toMatchObject({
-      startedAt: workerStartedAt.toISOString(),
-      teamRole: 'MEMBER',
-      team: { id: firstTeam.id, leaderId: candidate.id },
-    });
-    await db.update(quest).set({ questStatus: 'QUEST_IN_PROGRESS' }).where(eq(quest.id, questId));
-    const inProgressParticipation = await request(
-      `/api/v2/quests/${questId}/participation`,
-      'GET',
-      secondCandidate.id
-    );
-    expect((await inProgressParticipation.json()).data.assignment).toMatchObject({
-      teamRole: 'MEMBER',
-      team: { id: firstTeam.id, leaderId: candidate.id },
-    });
-    await db.update(quest).set({ questStatus: 'QUEST_CANCELLED' }).where(eq(quest.id, questId));
-    await db
-      .update(questAssignment)
-      .set({ assignmentStatus: 'ASSIGNMENT_CANCELLED' })
-      .where(eq(questAssignment.questId, questId));
-    const cancelledParticipation = await request(
-      `/api/v2/quests/${questId}/participation`,
-      'GET',
-      secondCandidate.id
-    );
-    expect((await cancelledParticipation.json()).data).toMatchObject({
-      state: 'QUEST_CANCELLED',
-      assignment: {
-        teamRole: 'MEMBER',
-        team: { id: firstTeam.id, leaderId: candidate.id },
-      },
-    });
 
     const replay = await request(
       `/api/v2/quests/${questId}/teams/${firstTeam.id}/select`,

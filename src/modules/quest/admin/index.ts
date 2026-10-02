@@ -21,13 +21,10 @@ export {
   createAdminDisputeCaseInTransaction,
   getAdminDisputeCase,
   getAdminDisputeEvidence,
-  getQuestDisputeSnapshot,
-  getQuestFailedMoneyHold,
   listAdminDisputeCases,
   resolveAdminDisputeCase,
   summaryFromRecord,
 } from './quest-dispute-admin.service';
-export type { QuestDisputeSnapshot } from './quest-dispute-admin.service';
 export {
   getAdminQuestDetail,
   getAdminQuestSummaryInTransaction,

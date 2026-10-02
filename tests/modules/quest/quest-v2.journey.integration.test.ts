@@ -3,7 +3,6 @@ import { db, sql } from '@/database/client';
 import { file } from '@/database/schema/file.schema';
 import { quest, questApiVersion } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import type { QuestV2CreateInput } from '@/modules/quest';
 import { questV2Storage } from '@/modules/quest/v2';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
@@ -18,6 +17,8 @@ import { randomUUID } from 'node:crypto';
 import { Elysia } from 'elysia';
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const testEmail = `quest-v2-journey-${randomUUID()}@ku.th`;
 const testPassword = 'TestStudent1!';
@@ -352,7 +353,12 @@ describe('Quest API v2 Hirer journey', () => {
       );
       expect(mineResponse.status).toBe(200);
       const mineItems = (await mineResponse.json()).data.items as Array<Record<string, unknown>>;
-      const { images: _images, ...canonicalQuest } = detail.data;
+      const {
+        images: _images,
+        dispute: _dispute,
+        moneyHold: _moneyHold,
+        ...canonicalQuest
+      } = detail.data;
       expect(mineItems).toContainEqual(canonicalQuest);
     }
   );

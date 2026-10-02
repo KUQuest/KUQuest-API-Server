@@ -18,6 +18,7 @@ import {
   satang,
   settleFundingReservation,
 } from '@/modules/wallet';
+import { demoMembers } from '@/shared/demo-members';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 
@@ -49,8 +50,8 @@ class LocalFinanceTestError extends Error {
   }
 }
 
-const testUserEmail = env.stagingTestAuthEmail?.trim().toLowerCase();
-const recipientEmail = env.localFinanceTestRecipientEmail?.trim().toLowerCase();
+const testUserEmail = demoMembers[0].email;
+const recipientEmail = demoMembers[1].email;
 
 export const localFinanceTestIsEnabled = Boolean(
   env.localFinanceTestEnabled &&
@@ -114,41 +115,15 @@ const qrDataUrlFor = async (payload: string | null): Promise<string | null> =>
     : null;
 
 const ensureRecipient = async (payerId: string) => {
-  if (!recipientEmail || recipientEmail === testUserEmail) {
-    throw new LocalFinanceTestError(
-      'TEST_RECIPIENT_NOT_CONFIGURED',
-      'The local finance test recipient is not configured correctly.'
-    );
-  }
-
-  let [recipient] = await db
+  const [recipient] = await db
     .select({ id: authUser.id, email: authUser.email })
     .from(authUser)
     .where(eq(authUser.email, recipientEmail))
     .limit(1);
-  if (!recipient) {
-    [recipient] = await db
-      .insert(authUser)
-      .values({
-        id: crypto.randomUUID(),
-        email: recipientEmail,
-        firstName: env.localFinanceTestRecipientFirstName ?? 'Finance',
-        lastName: env.localFinanceTestRecipientLastName ?? 'Recipient',
-      })
-      .onConflictDoNothing()
-      .returning({ id: authUser.id, email: authUser.email });
-  }
-  if (!recipient) {
-    [recipient] = await db
-      .select({ id: authUser.id, email: authUser.email })
-      .from(authUser)
-      .where(eq(authUser.email, recipientEmail))
-      .limit(1);
-  }
   if (!recipient || recipient.id === payerId) {
     throw new LocalFinanceTestError(
       'TEST_RECIPIENT_NOT_FOUND',
-      'The local finance test recipient could not be created.'
+      'The demo recipient is missing. Run the demo Member seed first.'
     );
   }
   await ensureWallet(recipient.id);

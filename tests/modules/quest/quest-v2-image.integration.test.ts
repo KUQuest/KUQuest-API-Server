@@ -2,7 +2,6 @@ import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { file } from '@/database/schema/file.schema';
 import { quest, questCommand, questImage } from '@/database/schema/quest.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import {
   checkQuestV2ImageUpload,
   cleanupQuestV2ImageObjects,
@@ -41,6 +40,8 @@ import {
   mock,
   spyOn,
 } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const hirerEmail = `quest-v2-images-${crypto.randomUUID()}@ku.th`;
 const otherMemberEmail = `quest-v2-images-other-${crypto.randomUUID()}@ku.th`;

@@ -2,12 +2,11 @@ export { questSettlementRoute } from './quest-settlement.route';
 export {
   cancelQuestController,
   cancelQuestV2Controller,
-  previewQuestCancellationV2Controller,
+  previewQuestV2CancellationController,
 } from './quest-settlement.controller';
 export {
   cancelQuest,
   cancelQuestV2,
-  previewQuestCancellationV2,
   cancelUnfilledQuest,
   completeQuest,
   failQuestInTransaction,
@@ -19,12 +18,12 @@ export {
   settleProofFreeQuestV2InTransaction,
   settleUnderfilledCancellationInTransaction,
   terminateQuestInTransaction,
-  type QuestCancellationPreview,
   type QuestSettlementOutcome,
 } from './quest-settlement.service';
 export {
   questCancellationResponseSchema,
-  questCancellationPreviewResponseSchema,
-  questCancellationPreviewStaleResponseSchema,
+  questSettlementHeadersSchema,
   questSettlementParamsSchema,
+  questV2CancelHeadersSchema,
+  questV2CancelPreviewResponseSchema,
 } from './quest-settlement.schema';

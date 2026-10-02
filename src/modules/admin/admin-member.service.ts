@@ -10,11 +10,13 @@ import { readKeysetPage } from '@/shared/keyset-page';
 
 import { and, avg, count, eq, ilike, or, sql } from 'drizzle-orm';
 
+import { formatDisplayIdSql } from './admin-display-id';
 import type {
   AdminMemberDetailData,
   AdminMemberListItem,
   AdminMemberListQuery,
 } from './admin-member.schema';
+import { adminMemberStatusSql } from './admin-member-status';
 
 export type AdminMemberListPage = {
   items: AdminMemberListItem[];
@@ -43,6 +45,7 @@ export const listAdminMembers = async (
     );
   }
 
+  const displayId = formatDisplayIdSql('member', authUser.publicSequence);
   const page = await readKeysetPage({
     anchor: { time: authUser.createdAt, id: authUser.id },
     cursor,
@@ -52,6 +55,7 @@ export const listAdminMembers = async (
       db
         .select({
           id: authUser.id,
+          displayId,
           email: authUser.email,
           firstName: authUser.firstName,
           lastName: authUser.lastName,
@@ -62,6 +66,7 @@ export const listAdminMembers = async (
           departmentName: department.name,
           facultyName: faculty.name,
           occupationName: occupation.name,
+          memberStatus: adminMemberStatusSql(),
           walletId: walletWallet.id,
           walletStatus: walletWallet.walletStatus,
           spendingBalanceSatang: walletWallet.spendingBalanceSatang,
@@ -99,6 +104,7 @@ export const listAdminMembers = async (
 
     return {
       id: r.id,
+      displayId: r.displayId,
       email: r.email,
       firstName: r.firstName,
       lastName: r.lastName,
@@ -109,6 +115,7 @@ export const listAdminMembers = async (
       department: r.departmentName,
       occupation: r.occupationName,
       wallet,
+      memberStatus: r.memberStatus,
       createdAt: r.createdAt.toISOString(),
     };
   });
@@ -125,6 +132,7 @@ export const getAdminMemberDetail = async (
   const [memberRow] = await db
     .select({
       id: authUser.id,
+      displayId: formatDisplayIdSql('member', authUser.publicSequence),
       email: authUser.email,
       firstName: authUser.firstName,
       lastName: authUser.lastName,
@@ -136,6 +144,7 @@ export const getAdminMemberDetail = async (
       departmentName: department.name,
       facultyName: faculty.name,
       occupationName: occupation.name,
+      memberStatus: adminMemberStatusSql(),
     })
     .from(authUser)
     .leftJoin(department, eq(authUser.departmentId, department.id))
@@ -219,6 +228,7 @@ export const getAdminMemberDetail = async (
   return {
     member: {
       id: memberRow.id,
+      displayId: memberRow.displayId,
       email: memberRow.email,
       firstName: memberRow.firstName,
       lastName: memberRow.lastName,
@@ -229,6 +239,7 @@ export const getAdminMemberDetail = async (
       faculty: memberRow.facultyName,
       department: memberRow.departmentName,
       occupation: memberRow.occupationName,
+      memberStatus: memberRow.memberStatus,
       createdAt: memberRow.createdAt.toISOString(),
     },
     wallet: walletData,

@@ -10,15 +10,17 @@ import {
   questCandidateTeamV2SubmissionFile,
   questCommand,
   questV2ProofSubmission,
+  questV2UnderfilledDecision,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
+import { detectQuestV2Underfilled } from '@/modules/quest/v2';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import { fundTestWallet, releaseTestQuestEscrows } from '../wallet/wallet-test-fixtures';
 import { assignmentStatus, questStatus, startQuestWork } from '@/modules/quest/shared';
 
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 import { QuestWebSocketClient } from './quest-update-test-client';
 import { randomUUID } from 'node:crypto';
 
@@ -437,6 +439,70 @@ describe('Quest v2 realtime updates', () => {
       }
     }
   });
+
+  it('tells the owning Hirer, once, when the underfilled decision window opens', async () => {
+    const hirer = sessions[0];
+    const worker = sessions[1];
+    const otherHirer = sessions[3];
+    if (!hirer || !worker || !otherHirer) throw new Error('Test sessions are missing');
+
+    const path = '/api/v2/me/hirer-quests/events';
+    const hirerStream = await connectToApp(randomUUID(), hirer.cookie, undefined, path);
+    const otherHirerStream = await connectToApp(randomUUID(), otherHirer.cookie, undefined, path);
+    try {
+      await hirerStream.client.nextText();
+      await otherHirerStream.client.nextText();
+
+      const created = await createQuestV2(
+        hirer.id,
+        { ...baseInput, participation: 'GROUP', headcount: 3 },
+        `underfilled-event-${randomUUID()}`
+      );
+      if (!('quest' in created)) throw new Error(`Quest creation failed: ${created.outcome}`);
+      const questId = created.quest.id;
+      questIds.push(questId);
+      expect(JSON.parse((await hirerStream.client.nextText())!).changeType).toBe('QUEST_CREATED');
+
+      await db
+        .update(quest)
+        .set({
+          questStatus: questStatus.open,
+          rewardSatang: 1234,
+          startTime: new Date(Date.now() - 1_000),
+        })
+        .where(eq(quest.id, questId));
+      await db.insert(questAssignment).values({
+        questId,
+        workerId: worker.id,
+        assignmentStatus: assignmentStatus.active,
+      });
+      expect(await detectQuestV2Underfilled(questId)).toEqual({ underfilled: true, created: true });
+      expect(await detectQuestV2Underfilled(questId)).toEqual({
+        underfilled: true,
+        created: false,
+      });
+
+      const [decision] = await db
+        .select({ expiresAt: questV2UnderfilledDecision.decisionExpiresAt })
+        .from(questV2UnderfilledDecision)
+        .where(eq(questV2UnderfilledDecision.questId, questId));
+      expect(JSON.parse((await hirerStream.client.nextText())!)).toEqual({
+        type: 'HIRER_QUEST_UPDATED',
+        version: 1,
+        questId,
+        changeType: 'UNDERFILLED_DECISION_PENDING',
+        expiresAt: decision!.expiresAt.toISOString(),
+      });
+      expect(await hirerStream.client.nextText(250)).toBeUndefined();
+      expect(await otherHirerStream.client.nextText(250)).toBeUndefined();
+    } finally {
+      for (const connection of [hirerStream, otherHirerStream]) {
+        connection.client.destroy();
+        await connection.server.stop();
+      }
+    }
+  });
+
   it('notifies Hirer and open-inquiry Members when a pre-participation Quest changes', async () => {
     const hirer = sessions[0];
     const prospectiveWorker = sessions[1];
@@ -583,6 +649,54 @@ describe('Quest v2 realtime updates', () => {
       hirerSocket.destroy();
       workerSocket?.destroy();
       await server.stop();
+    }
+  });
+
+  it('tells the Hirer stream when a Worker joins and when a Worker starts work', async () => {
+    const [hirer, worker, otherWorker] = sessions;
+    if (!hirer || !worker || !otherWorker) throw new Error('Test sessions are missing');
+    const joinQuestId = await createOpenGroupQuest();
+    const startQuestId = await createAssignedQuest([otherWorker.id]);
+    await db
+      .update(quest)
+      .set({ startTime: new Date(Date.now() - 60_000), dueAt: new Date(Date.now() + 3_600_000) })
+      .where(eq(quest.id, startQuestId));
+    const stream = await connectToApp(
+      randomUUID(),
+      hirer.cookie,
+      undefined,
+      '/api/v2/me/hirer-quests/events'
+    );
+    const post = (path: string, cookie: string) =>
+      app.handle(
+        new Request(`http://localhost${path}`, {
+          method: 'POST',
+          headers: { cookie, 'idempotency-key': `hirer-stream-${randomUUID()}` },
+        })
+      );
+    const nextChange = async () => {
+      const event = JSON.parse((await stream.client.nextText())!);
+      return [event.questId, event.changeType];
+    };
+
+    try {
+      expect(JSON.parse((await stream.client.nextText())!)).toEqual({
+        type: 'SUBSCRIBED',
+        version: 1,
+      });
+
+      expect((await post(`/api/v2/quests/${joinQuestId}/join`, worker.cookie)).status).toBe(200);
+      expect(await nextChange()).toEqual([joinQuestId, 'ASSIGNMENT_ROSTER_UPDATED']);
+      expect(await nextChange()).toEqual([joinQuestId, 'ASSIGNMENT_JOINED']);
+
+      expect(
+        (await post(`/api/v2/quests/${startQuestId}/start-work`, otherWorker.cookie)).status
+      ).toBe(200);
+      expect(await nextChange()).toEqual([startQuestId, 'ASSIGNMENT_STARTED']);
+      expect(await nextChange()).toEqual([startQuestId, 'QUEST_STARTED']);
+    } finally {
+      stream.client.destroy();
+      await stream.server.stop();
     }
   });
 

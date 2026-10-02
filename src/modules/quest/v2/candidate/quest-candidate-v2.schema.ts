@@ -1,5 +1,6 @@
 import { t, type Static } from 'elysia';
 
+import { memberSummarySchema } from '../../shared/member-summary';
 import { questV2ApplicationStates, questV2AssignmentStates } from '../core/quest-v2.contract';
 
 const applicationState = t.Union(
@@ -17,6 +18,10 @@ export const questV2CandidateApplicationDetailParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
   applicationId: t.String({ format: 'uuid' }),
 });
+export const questV2CandidateApplicationListQuerySchema = t.Object(
+  { state: t.Optional(applicationState) },
+  { additionalProperties: false }
+);
 
 export const questV2CandidateApplicationHeadersSchema = t.Object({
   'idempotency-key': t.String({
@@ -31,6 +36,7 @@ const applicationSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
   memberId: t.String({ format: 'uuid' }),
+  member: memberSummarySchema,
   state: applicationState,
   appliedAt: t.String({ format: 'date-time' }),
 });
@@ -46,6 +52,7 @@ const selectionAssignmentSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
   workerId: t.String({ format: 'uuid' }),
+  member: memberSummarySchema,
   state: assignmentState,
   questState: t.Literal('QUEST_ASSIGNED'),
   startedAt: t.Nullable(t.String({ format: 'date-time' })),
@@ -112,6 +119,9 @@ export const questV2CandidateSelectionResponseSchema = t.Object({
 
 export type QuestV2CandidateApplicationParams = Static<
   typeof questV2CandidateApplicationParamsSchema
+>;
+export type QuestV2CandidateApplicationListQuery = Static<
+  typeof questV2CandidateApplicationListQuerySchema
 >;
 export type QuestV2CandidateApplicationDetailParams = Static<
   typeof questV2CandidateApplicationDetailParamsSchema

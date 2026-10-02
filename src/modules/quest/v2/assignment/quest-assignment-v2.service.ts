@@ -1,15 +1,13 @@
 import { db } from '@/database/client';
-import { authUser } from '@/database/schema/auth.schema';
 import {
   quest,
   questApiVersion,
   questAssignment,
-  questCandidateTeamV2,
-  questCandidateTeamV2Member,
+  questV2UnderfilledDecision,
 } from '@/database/schema/quest.schema';
 import { isMemberRedFlaggedInTransaction } from '@/modules/admin/member-penalty';
 
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, lte, sql } from 'drizzle-orm';
 
 import {
   type QuestTransaction,
@@ -36,7 +34,14 @@ import type {
   WorkChatMembershipWriter,
 } from '../../shared/work-chat/quest-work-chat.contract';
 import type { QuestV2AssignmentMineStatus } from './quest-assignment-v2.schema';
-import { notifyQuestRosterUpdate } from '../realtime';
+import { notifyQuestRosterUpdate, notifyQuestUpdate } from '../realtime';
+import {
+  detectQuestV2Underfilled,
+  expireQuestV2Underfilled,
+  summarizeQuestV2Underfilled,
+  type QuestV2UnderfilledSummary,
+} from '../lifecycle';
+import { enqueueUnderfilledPush } from '../lifecycle/quest-underfilled-v2.push';
 
 export const questV2AssignmentJoinOperationScope = 'quest.v2.assignment.join';
 
@@ -48,16 +53,11 @@ type QuestV2AssignmentRow = {
   startedAt: Date | null;
   createdAt: Date;
   questState: QuestV2State;
-  teamRole: 'LEADER' | 'MEMBER' | null;
-  team: {
-    id: string;
-    name: string;
-    leaderId: string;
-    members: Array<{ id: string; displayName: string }>;
-  } | null;
 };
 
-type SelectedTeam = NonNullable<QuestV2AssignmentRow['team']>;
+export type QuestV2MyAssignmentRow = QuestV2AssignmentRow & {
+  underfilled: QuestV2UnderfilledSummary | null;
+};
 
 type QuestV2AssignmentBusinessOutcomeCode =
   | 'already-assigned'
@@ -76,12 +76,7 @@ export type QuestV2AssignmentOutcome =
   QuestV2AssignmentRow | { outcome: QuestV2AssignmentOutcomeCode };
 
 export type QuestV2AssignmentReadOutcome =
-  | {
-      items: QuestV2AssignmentRow[];
-      activeCount: number;
-      startedCount: number;
-    }
-  | { outcome: 'not-authorized' | 'not-found' };
+  QuestV2AssignmentRow[] | { outcome: 'not-authorized' | 'not-found' };
 
 const assignmentFields = {
   id: questAssignment.id,
@@ -125,8 +120,6 @@ const toQuestV2AssignmentRow = (
     ...assignment,
     state: assignment.state as QuestV2AssignmentState,
     questState,
-    teamRole: null,
-    team: null,
   };
 };
 
@@ -168,8 +161,6 @@ const assignmentFromSnapshot = (value: unknown): QuestV2AssignmentRow | undefine
     questState: snapshot.questState,
     startedAt,
     createdAt,
-    teamRole: null,
-    team: null,
   };
 };
 
@@ -226,72 +217,7 @@ const listAssignments = async (
     .from(questAssignment)
     .where(eq(questAssignment.questId, questId))
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
-  return withSelectedTeam(
-    transaction,
-    rows.map((row) => toQuestV2AssignmentRow(row, questState))
-  );
-};
-
-const withSelectedTeam = async (
-  transaction: QuestTransaction,
-  assignments: QuestV2AssignmentRow[]
-): Promise<QuestV2AssignmentRow[]> => {
-  const questIds = [...new Set(assignments.map(({ questId }) => questId))];
-  if (questIds.length === 0) return assignments;
-  const members = await transaction
-    .select({
-      questId: questCandidateTeamV2.questId,
-      teamId: questCandidateTeamV2.id,
-      name: questCandidateTeamV2.name,
-      leaderId: questCandidateTeamV2.leaderId,
-      memberId: questCandidateTeamV2Member.memberId,
-      firstName: authUser.firstName,
-      lastName: authUser.lastName,
-    })
-    .from(questCandidateTeamV2)
-    .innerJoin(
-      questCandidateTeamV2Member,
-      eq(questCandidateTeamV2Member.teamId, questCandidateTeamV2.id)
-    )
-    .innerJoin(authUser, eq(authUser.id, questCandidateTeamV2Member.memberId))
-    .where(
-      and(
-        inArray(questCandidateTeamV2.questId, questIds),
-        eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
-      )
-    )
-    .orderBy(asc(questCandidateTeamV2Member.joinedAt), asc(questCandidateTeamV2Member.memberId));
-  const teams = new Map<string, SelectedTeam>();
-  for (const member of members) {
-    let team = teams.get(member.questId);
-    if (!team) {
-      team = {
-        id: member.teamId,
-        name: member.name,
-        leaderId: member.leaderId,
-        members: [],
-      };
-      teams.set(member.questId, team);
-    }
-    team.members.push({
-      id: member.memberId,
-      displayName: `${member.firstName} ${member.lastName}`.trim(),
-    });
-  }
-  return assignments.map((assignment) => {
-    const selectedTeam = teams.get(assignment.questId) ?? null;
-    const isTeamMember =
-      selectedTeam?.members.some(({ id }) => id === assignment.workerId) ?? false;
-    return {
-      ...assignment,
-      teamRole: isTeamMember
-        ? assignment.workerId === selectedTeam?.leaderId
-          ? 'LEADER'
-          : 'MEMBER'
-        : null,
-      team: isTeamMember ? selectedTeam : null,
-    };
-  });
+  return rows.map((row) => toQuestV2AssignmentRow(row, questState));
 };
 
 const joinQuestV2InTransaction = async (
@@ -338,18 +264,6 @@ const joinQuestV2InTransaction = async (
         .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, userId)))
         .limit(1);
       if (existing) return { kind: 'rejected', rejection: 'already-assigned' };
-      // A hidden Quest is out of reach for Members, so it refuses a join the same way a
-      // Quest that is not open does.
-      if (current.questState !== 'QUEST_OPEN' || current.hiddenAt !== null) {
-        return { kind: 'rejected', rejection: 'not-open' };
-      }
-      if (current.startTime.getTime() <= now.getTime()) {
-        return { kind: 'rejected', rejection: isGroupQuest ? 'roster-frozen' : 'not-open' };
-      }
-      if (await isMemberRedFlaggedInTransaction(transaction, userId, now)) {
-        return { kind: 'rejected', rejection: 'red-flagged' };
-      }
-
       const [activeCount] = await transaction
         .select({ count: sql<number>`count(*)` })
         .from(questAssignment)
@@ -360,6 +274,23 @@ const joinQuestV2InTransaction = async (
           )
         );
       const joinedCount = Number(activeCount?.count ?? 0);
+      // A hidden Quest is out of reach for Members, so it refuses a join the same way a
+      // Quest that is not open does.
+      if (current.hiddenAt !== null) return { kind: 'rejected', rejection: 'not-open' };
+      if (current.questState !== 'QUEST_OPEN') {
+        // The join that took the last slot moved the Quest to QUEST_ASSIGNED, so the Worker
+        // who lost that race reads full, not closed.
+        const lostLastSlot =
+          current.questState === 'QUEST_ASSIGNED' && joinedCount >= current.headcount;
+        return { kind: 'rejected', rejection: lostLastSlot ? 'full' : 'not-open' };
+      }
+      if (current.startTime.getTime() <= now.getTime()) {
+        return { kind: 'rejected', rejection: isGroupQuest ? 'roster-frozen' : 'not-open' };
+      }
+      if (await isMemberRedFlaggedInTransaction(transaction, userId, now)) {
+        return { kind: 'rejected', rejection: 'red-flagged' };
+      }
+
       if (joinedCount >= current.headcount) return { kind: 'rejected', rejection: 'full' };
 
       const [createdAssignment] = await transaction
@@ -395,6 +326,25 @@ const joinQuestV2InTransaction = async (
           writer,
           actor: { actorType: 'MEMBER', actorUserId: userId },
         });
+        if (isGroupQuest) {
+          const roster = await transaction
+            .select({ workerId: questAssignment.workerId })
+            .from(questAssignment)
+            .where(
+              and(
+                eq(questAssignment.questId, questId),
+                eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+              )
+            );
+          await enqueueUnderfilledPush(transaction, questId, {
+            type: 'QUEST_ASSIGNED',
+            recipientMemberIds: roster
+              .map(({ workerId }) => workerId)
+              .filter((id) => id !== userId),
+            questId,
+            now,
+          });
+        }
       } else {
         // The roster is not full yet: the Quest stays QUEST_OPEN, so only the Work
         // Conversation entry is applied and the State write is skipped.
@@ -405,6 +355,11 @@ const joinQuestV2InTransaction = async (
         }
         await notifyQuestRosterUpdate(transaction, questId);
       }
+      await notifyQuestUpdate(transaction, {
+        questId,
+        recipientMemberIds: [current.hirerId],
+        changeType: 'ASSIGNMENT_JOINED',
+      });
 
       return {
         kind: 'success',
@@ -451,43 +406,25 @@ export const listQuestV2Assignments = async (
     .limit(1);
   if (!current) return { outcome: 'not-found' };
 
-  let items: QuestV2AssignmentRow[];
   if (current.hirerId === memberId) {
-    items = await db.transaction((transaction) =>
+    return db.transaction((transaction) =>
       listAssignments(transaction, questId, current.questState)
     );
-  } else {
-    const assignments = await db
-      .select(assignmentFields)
-      .from(questAssignment)
-      .where(
-        and(
-          eq(questAssignment.questId, questId),
-          eq(questAssignment.workerId, memberId),
-          eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
-        )
-      )
-      .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
-    if (assignments.length === 0) return { outcome: 'not-authorized' };
-    items = await db.transaction((transaction) =>
-      withSelectedTeam(
-        transaction,
-        assignments.map((assignment) => toQuestV2AssignmentRow(assignment, current.questState))
-      )
-    );
   }
-  const [counts] = await db
-    .select({
-      activeCount: sql<number>`count(*) filter (where ${questAssignment.assignmentStatus} = 'ASSIGNMENT_ACTIVE')::int`,
-      startedCount: sql<number>`count(*) filter (where ${questAssignment.assignmentStatus} = 'ASSIGNMENT_ACTIVE' and ${questAssignment.startedAt} is not null)::int`,
-    })
+
+  const assignments = await db
+    .select(assignmentFields)
     .from(questAssignment)
-    .where(eq(questAssignment.questId, questId));
-  return {
-    items,
-    activeCount: counts?.activeCount ?? 0,
-    startedCount: counts?.startedCount ?? 0,
-  };
+    .where(
+      and(
+        eq(questAssignment.questId, questId),
+        eq(questAssignment.workerId, memberId),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+      )
+    )
+    .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
+  if (assignments.length === 0) return { outcome: 'not-authorized' };
+  return assignments.map((assignment) => toQuestV2AssignmentRow(assignment, current.questState));
 };
 
 const assignmentStatusPredicateFor = (status: QuestV2AssignmentMineStatus) => {
@@ -498,15 +435,41 @@ const assignmentStatusPredicateFor = (status: QuestV2AssignmentMineStatus) => {
 
 export const listMyQuestV2Assignments = async (
   workerId: string,
-  status: QuestV2AssignmentMineStatus = 'active'
-): Promise<QuestV2AssignmentRow[]> => {
+  status: QuestV2AssignmentMineStatus = 'active',
+  now = new Date()
+): Promise<QuestV2MyAssignmentRow[]> => {
+  // GET /quests/:questId/underfilled opens and expires the decision lazily. Do the same for
+  // the Quests below so this list never lags behind that read.
+  const dueQuestIds = await db
+    .select({ questId: quest.id })
+    .from(questAssignment)
+    .innerJoin(quest, eq(questAssignment.questId, quest.id))
+    .where(
+      and(
+        eq(questAssignment.workerId, workerId),
+        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE'),
+        eq(quest.apiVersion, questApiVersion.v2),
+        eq(quest.v2Mode, questV2Mode.firstComeFirstServed),
+        eq(quest.v2Participation, questV2Participation.group),
+        eq(quest.questStatus, 'QUEST_OPEN'),
+        lte(quest.startTime, now)
+      )
+    );
+  for (const { questId } of dueQuestIds) {
+    await detectQuestV2Underfilled(questId, now);
+    await expireQuestV2Underfilled(questId, now);
+  }
+
   const rows = await db
     .select({
       ...assignmentFields,
       questState: quest.questStatus,
+      headcount: quest.headcount,
+      underfilled: questV2UnderfilledDecision,
     })
     .from(questAssignment)
     .innerJoin(quest, eq(questAssignment.questId, quest.id))
+    .leftJoin(questV2UnderfilledDecision, eq(questV2UnderfilledDecision.questId, quest.id))
     .where(
       and(
         eq(questAssignment.workerId, workerId),
@@ -515,10 +478,8 @@ export const listMyQuestV2Assignments = async (
       )
     )
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
-  return db.transaction((transaction) =>
-    withSelectedTeam(
-      transaction,
-      rows.map((row) => toQuestV2AssignmentRow(row, row.questState))
-    )
-  );
+  return rows.map(({ headcount, underfilled, questState, ...assignment }) => ({
+    ...toQuestV2AssignmentRow(assignment, questState),
+    underfilled: underfilled ? summarizeQuestV2Underfilled(underfilled, headcount) : null,
+  }));
 };

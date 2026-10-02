@@ -60,7 +60,8 @@ export const openapiPlugin = openapi({
       },
       {
         name: 'Admin Search',
-        description: 'Searches safe fields within a required Admin resource type.',
+        description:
+          'Searches safe fields in one or all supported Admin record types. Use kind=all to search all types.',
       },
     ],
     components: {

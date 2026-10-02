@@ -1,8 +1,8 @@
 import { authGuard, memberBanGuard } from '@/modules/auth';
-import { apiErrorSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V2_PREFIX } from '@/shared/api-version';
 
-import { Elysia, t } from 'elysia';
+import { Elysia } from 'elysia';
 
 import {
   addQuestImagesV2Controller,
@@ -22,10 +22,10 @@ import {
 } from './quest-v2.controller';
 import {
   cancelQuestV2Controller,
-  questCancellationPreviewResponseSchema,
-  questCancellationPreviewStaleResponseSchema,
+  previewQuestV2CancellationController,
   questCancellationResponseSchema,
-  previewQuestCancellationV2Controller,
+  questV2CancelHeadersSchema,
+  questV2CancelPreviewResponseSchema,
 } from '../../settlement';
 import {
   questV2CreateHttpResponseSchema,
@@ -47,7 +47,6 @@ import {
   questV2PublishCheckHttpResponseSchema,
   questV2PublishHttpResponseSchema,
   questV2WriteHeadersSchema,
-  questV2CancellationHeadersSchema,
   normalizeQuestV2CreateBody,
   normalizeQuestV2BoardQuery,
   normalizeQuestV2EditBody,
@@ -211,29 +210,26 @@ export const questV2Route = new Elysia({
   })
   .post('/:questId/cancel', cancelQuestV2Controller, {
     params: questV2ParamsSchema,
-    headers: questV2CancellationHeadersSchema,
-    response: {
-      ...responses(questCancellationResponseSchema, 400, 401, 403, 404, 409, 503),
-      409: t.Union([questCancellationPreviewStaleResponseSchema, apiErrorSchema]),
-    },
+    headers: questV2CancelHeadersSchema,
+    response: responses(questCancellationResponseSchema, 400, 401, 403, 404, 409, 503),
     detail: {
       tags: ['Quests v2'],
       summary: 'Cancel a v2 Quest as its Hirer',
       description:
-        'Cancels a v2 Quest from Draft, Open, Assigned, or In Progress. The command has no business request body and applies the stage-specific Quest Escrow settlement atomically. Optional preview-version rejects stale cancellation requests with the fresh preview; idempotent replays still return their original result.',
+        'Cancels a v2 Quest from Draft, Open, Assigned, or In Progress. The command has no business request body and applies the stage-specific Quest Escrow settlement atomically.',
       operationId: 'cancelQuestV2',
       security: betterAuthSecurity,
     },
   })
-  .get('/:questId/cancel-preview', previewQuestCancellationV2Controller, {
+  .get('/:questId/cancel-preview', previewQuestV2CancellationController, {
     params: questV2ParamsSchema,
-    response: responses(questCancellationPreviewResponseSchema, 400, 401, 403, 404, 409, 503),
+    response: responses(questV2CancelPreviewResponseSchema, 400, 401, 403, 404, 409, 503),
     detail: {
       tags: ['Quests v2'],
-      summary: 'Preview v2 Quest cancellation settlement',
+      summary: 'Preview what cancelling a v2 Quest would pay and refund',
       description:
-        'Returns current cancellation settlement without changing Quest, Assignment, Wallet, or ledger state. DRAFT returns zero-value NO_PENALTY. OPEN returns 100% refund; ASSIGNED returns 20% of Worker Reward pool paid and remaining escrow refunded; IN_PROGRESS pays Worker Rewards and retains Platform Fee with no refund. platformFeeSatang is the fee refunded for NO_PENALTY/PARTIAL_PENALTY and retained for FULL_PENALTY.',
-      operationId: 'previewQuestCancellationV2',
+        'Hirer only. Returns the tier, paidSatang, refundedSatang, and platformFeeSatang an immediate cancelQuestV2 would settle, computed by the same code path. Moves no money and writes nothing. Draft and Open Quests return NO_PENALTY; Assigned returns PARTIAL_PENALTY; In Progress returns FULL_PENALTY. An Assigned Quest with no active Worker or a pending Quest Edit Request returns 409 QUEST_SETTLEMENT_NOT_ALLOWED, as cancelQuestV2 does. Pass previewVersion as the X-Cancel-Preview-Version header of cancelQuestV2 to refuse with 409 CANCEL_PREVIEW_STALE when the Quest changed.',
+      operationId: 'getQuestV2CancelPreview',
       security: betterAuthSecurity,
     },
   })
@@ -268,7 +264,8 @@ export const questV2Route = new Elysia({
       tags: ['Quests v2'],
       summary: 'Get Participation Quest Detail through the v2 contract',
       description:
-        "Returns the Quest to an authenticated Member who holds an Assignment on it, in every Quest State and while the Quest is hidden, together with that Member's own Assignment and viewer-specific dispute projection. In QUEST_FAILED, dispute reports the one-day Hirer/Worker self-file window, whether the caller can file, and only that caller's case; it is null for other Quest States. For GROUP + CANDIDATE Quests, selected Team Members see teamRole and selected Team summary, including every Member's displayName, in QUEST_ASSIGNED, QUEST_IN_PROGRESS, and archive reads after Hirer cancellation. A Worker outside the selected Team receives null teamRole and team. While the Team is forming, its Leader cannot be removed; if the Leader leaves, the earliest joined remaining Member becomes Team Leader, or the Team disbands if no Member remains. A submitted Team is immutable. Terminal Quests are read-only. Admin actions and Finance internals are excluded.",
+        "Returns the Quest to an authenticated Member who holds an Assignment on it, in every Quest State and while the Quest is hidden, together with that Member's own Assignment. `activeWorkerCount` and `startedWorkerCount` count the Active Assignments and the ones that started Work, without naming other Workers. `dispute` is null unless the Quest is QUEST_FAILED; then it tells the viewer whether they can still self-file (`canFile`, 1 day after failure, one Dispute Case per Member per Quest) and shows their own case. A closed window answers 409 DISPUTE_CASE_WINDOW_EXPIRED. `moneyHold` is null unless the Quest is QUEST_FAILED; then `releasesAt` is failedAt + 7 days and a Dispute Case never moves it. Terminal Quests are read-only. Admin actions and Finance internals are excluded.",
+      operationId: 'getQuestV2ParticipationDetail',
       security: betterAuthSecurity,
     },
   })
@@ -279,7 +276,7 @@ export const questV2Route = new Elysia({
       tags: ['Quests v2'],
       summary: 'Get a v2 Quest detail',
       description:
-        'Returns a Quest owned by the authenticated Hirer through the v2 contract, with the same viewer-specific dispute projection as Participation Detail. On QUEST_FAILED, it includes moneyHoldReleasesAt and remaining heldSatang; the Funding Reservation releases unconditionally seven days after failure even if a Dispute Case remains pending.',
+        'Returns a Quest owned by the authenticated Hirer through the v2 contract. `dispute` and `moneyHold` are null unless the Quest is QUEST_FAILED. `dispute.canFile` is true while the 1-day self-file window is open and the Hirer has no case; a closed window answers 409 DISPUTE_CASE_WINDOW_EXPIRED. `moneyHold.releasesAt` is failedAt + 7 days; a Dispute Case never moves it, so there is no ON_DISPUTE_HOLD state. `heldSatang` is what the Funding Reservation still holds.',
       operationId: 'getQuestV2Detail',
       security: betterAuthSecurity,
     },
