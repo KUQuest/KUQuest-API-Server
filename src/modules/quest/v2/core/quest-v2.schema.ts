@@ -922,6 +922,20 @@ export const questV2ParticipationDetailSchema = t.Object({
   assignment: t.Object({
     status: questV2AssignmentStateSchema,
     startedAt: t.Nullable(t.String({ format: 'date-time' })),
+    teamRole: t.Nullable(t.Union([t.Literal('LEADER'), t.Literal('MEMBER')])),
+    team: t.Nullable(
+      t.Object({
+        id: t.String({ format: 'uuid' }),
+        name: t.String(),
+        leaderId: t.String({ format: 'uuid' }),
+        members: t.Array(
+          t.Object({
+            id: t.String({ format: 'uuid' }),
+            displayName: t.String(),
+          })
+        ),
+      })
+    ),
   }),
   startedWorkerCount: t.Integer({
     minimum: 0,
