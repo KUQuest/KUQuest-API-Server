@@ -20,6 +20,9 @@ export const authUser = pgTable(
   'auth_user',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'auth_user_public_sequence' })
+      .unique(),
     email: text('email').notNull(),
     emailVerified: boolean('email_verified').default(false).notNull(),
     // better-auth's core `image` field has no equivalent in the design's auth_user;

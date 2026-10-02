@@ -65,6 +65,10 @@ const adminSearchItemFields = {
 export const adminSearchItemSchema = t.Union([
   t.Object({
     ...adminSearchItemFields,
+    displayId: t.String({
+      pattern: '^MEM-[0-9]{6,}$',
+      description: 'Stable Member Display ID.',
+    }),
     kind: t.Literal('member'),
     status: adminMemberStatusSchema,
   }),

@@ -27,6 +27,8 @@ import { eq, inArray } from 'drizzle-orm';
 const adminEmail = `admin-search-test-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminSearchPass1!';
 const memberId = crypto.randomUUID();
+const memberPublicSequence =
+  1_000_000 + (Number.parseInt(memberId.replaceAll('-', '').slice(0, 8), 16) % 1_147_483_647);
 const studentId = String(Math.floor(1000000000 + Math.random() * 9000000000));
 const reportedMemberId = crypto.randomUUID();
 const restrictionMemberId = crypto.randomUUID();
@@ -82,6 +84,7 @@ beforeAll(async () => {
   await sql`select 1`;
   await db.insert(authUser).values({
     id: memberId,
+    publicSequence: memberPublicSequence,
     email: `${memberId}@ku.th`,
     firstName: 'Search',
     lastName: 'Member',
@@ -302,11 +305,57 @@ afterAll(async () => {
 });
 
 describe('GET /api/v1/admin/search', () => {
-  it('returns a Member Student ID separately and keeps both identifiers as UUIDs', async () => {
-    await expectSearchItem(studentId, 'member', {
+  it('requires Member display IDs in the OpenAPI response schema', async () => {
+    const response = await app.handle(new Request('http://localhost/openapi/json'));
+    type OpenApiSchema = {
+      required?: string[];
+      properties?: Record<string, OpenApiSchema>;
+      items?: OpenApiSchema;
+      anyOf?: OpenApiSchema[];
+      const?: string;
+      enum?: string[];
+    };
+    const document = (await response.json()) as {
+      paths: Record<
+        string,
+        {
+          get?: {
+            responses?: Record<string, { content?: Record<string, { schema?: OpenApiSchema }> }>;
+          };
+        }
+      >;
+    };
+    const itemSchema =
+      document.paths['/api/v1/admin/search']?.get?.responses?.['200']?.content?.['application/json']
+        ?.schema?.properties?.data?.properties?.items?.items;
+    const memberVariant = itemSchema?.anyOf?.find(({ properties }) => {
+      const kind = properties?.kind;
+      return kind?.const === 'member' || kind?.enum?.includes('member');
+    });
+
+    expect(response.status).toBe(200);
+    expect(memberVariant).toBeDefined();
+    expect(memberVariant?.required).toContain('displayId');
+  });
+
+  it('returns and searches Member display IDs without changing existing identifiers', async () => {
+    const member = await expectSearchItem(studentId, 'member', {
       kind: 'member',
       id: memberId,
       resourceId: memberId,
+      studentId,
+      title: 'Search Member',
+      status: 'NORMAL',
+      newestAt: recordCreatedAt.toISOString(),
+    });
+    expect(member.displayId).toMatch(/^MEM-\d{6,}$/);
+    expect(member.displayId).toBe(`MEM-${memberPublicSequence}`);
+
+    await expectSearchItem(member.displayId, 'member', {
+      kind: 'member',
+      id: memberId,
+      resourceId: memberId,
+      displayId: member.displayId,
       studentId,
       title: 'Search Member',
       status: 'NORMAL',

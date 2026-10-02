@@ -22,6 +22,7 @@ export const adminMemberParamsSchema = t.Object({
 
 export const adminMemberListItemSchema = t.Object({
   id: uuid,
+  displayId: t.String({ pattern: '^MEM-[0-9]{6,}$' }),
   email: t.String(),
   firstName: t.String(),
   lastName: t.String(),
@@ -67,6 +68,7 @@ export const adminMemberDetailResponseSchema = t.Object({
   data: t.Object({
     member: t.Object({
       id: uuid,
+      displayId: t.String({ pattern: '^MEM-[0-9]{6,}$' }),
       email: t.String(),
       firstName: t.String(),
       lastName: t.String(),
