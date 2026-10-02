@@ -157,7 +157,7 @@ export const questProofV2Route = new Elysia({
         tags: ['Quest Proof v2'],
         summary: 'Review a v2 Proof Submission',
         description:
-          'Records the Hirer’s first final approval or non-approval decision for a sent Proof Submission.',
+          'Records the Hirer’s first final approval or non-approval decision for a sent Proof Submission. The first decision wins; later decisions return 409.',
         operationId: 'reviewQuestV2ProofSubmission',
         security: betterAuthSecurity,
       },

@@ -6,8 +6,9 @@ import {
   questAssignment,
   questApiVersion,
   questCandidateApplicationV2,
-  questCandidateTeamV2,
   questCommand,
+  questCandidateTeamV2,
+  questCandidateTeamV2Member,
   questConditionItem,
   questImage,
   questLocation,
@@ -20,6 +21,11 @@ import {
   isMemberRedFlagged,
   isMemberRedFlaggedInTransaction,
 } from '@/modules/admin/member-penalty';
+import {
+  getQuestDisputeSnapshot,
+  getQuestFailedMoneyHold,
+  type QuestDisputeSnapshot,
+} from '@/modules/quest/admin';
 import { avatarStorage } from '@/modules/profile/profile.storage';
 import {
   notifyHirerQuestCreated,
@@ -252,6 +258,9 @@ export type QuestV2ImageCommandContext = {
 
 export type QuestV2Detail = QuestV2CanonicalQuest & {
   images: QuestV2ImageReference[];
+  dispute: QuestDisputeSnapshot;
+  moneyHoldReleasesAt: string | null;
+  heldSatang: number;
 };
 
 export type QuestV2BoardCard = {
@@ -320,8 +329,19 @@ export type QuestV2PublicDetail = {
 };
 
 export type QuestV2ParticipationDetail = QuestV2PublicDetail & {
-  assignment: { status: AssignmentStatus; startedAt: string | null };
+  assignment: {
+    status: AssignmentStatus;
+    startedAt: string | null;
+    teamRole: 'LEADER' | 'MEMBER' | null;
+    team: {
+      id: string;
+      name: string;
+      leaderId: string;
+      members: Array<{ id: string; displayName: string }>;
+    } | null;
+  };
   capabilities: { canViewOnly: boolean };
+  dispute: QuestDisputeSnapshot;
 };
 
 type QuestV2ImageMutationOutcome =
@@ -3062,10 +3082,56 @@ export const getQuestV2ParticipationDetail = async (
     throw new Error(`Quest ${questId} has incomplete v2 Participation Detail data`);
   }
 
-  const [conditionItems, locations, images] = await Promise.all([
+  const selectedTeamMembers =
+    participationRow.v2Mode === 'CANDIDATE' && participationRow.v2Participation === 'GROUP'
+      ? await db
+          .select({
+            id: questCandidateTeamV2.id,
+            name: questCandidateTeamV2.name,
+            leaderId: questCandidateTeamV2.leaderId,
+            memberId: questCandidateTeamV2Member.memberId,
+            firstName: authUser.firstName,
+            lastName: authUser.lastName,
+          })
+          .from(questCandidateTeamV2)
+          .innerJoin(
+            questCandidateTeamV2Member,
+            eq(questCandidateTeamV2Member.teamId, questCandidateTeamV2.id)
+          )
+          .innerJoin(authUser, eq(authUser.id, questCandidateTeamV2Member.memberId))
+          .where(
+            and(
+              eq(questCandidateTeamV2.questId, questId),
+              eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
+            )
+          )
+          .orderBy(
+            asc(questCandidateTeamV2Member.joinedAt),
+            asc(questCandidateTeamV2Member.memberId)
+          )
+      : [];
+  const selectedTeam = selectedTeamMembers[0]
+    ? {
+        id: selectedTeamMembers[0].id,
+        name: selectedTeamMembers[0].name,
+        leaderId: selectedTeamMembers[0].leaderId,
+        members: selectedTeamMembers.map(({ memberId, firstName, lastName }) => ({
+          id: memberId,
+          displayName: `${firstName} ${lastName}`.trim(),
+        })),
+      }
+    : null;
+  const teamRole =
+    selectedTeam && selectedTeam.members.some(({ id }) => id === userId)
+      ? userId === selectedTeam.leaderId
+        ? 'LEADER'
+        : 'MEMBER'
+      : null;
+  const [conditionItems, locations, images, dispute] = await Promise.all([
     selectConditionItems(db, questId),
     selectLocations(db, questId),
     selectQuestV2Images(db, questId),
+    getQuestDisputeSnapshot(userId, questId),
   ]);
   if (conditionItems.length === 0) throw new Error(`Quest ${questId} has no Condition Items`);
 
@@ -3095,10 +3161,13 @@ export const getQuestV2ParticipationDetail = async (
     assignment: {
       status: participationRow.assignmentStatus,
       startedAt: participationRow.assignmentStartedAt?.toISOString() ?? null,
+      teamRole,
+      team: teamRole ? selectedTeam : null,
     },
     capabilities: {
       canViewOnly: isTerminalQuestStatus(participationRow.questStatus),
     },
+    dispute,
   };
 };
 
@@ -3148,11 +3217,13 @@ export const getQuestV2Detail = async (
   const row = await selectQuestV2Row(db, userId, questId);
   if (!row) return undefined;
 
-  const [canonicalQuest, images] = await Promise.all([
+  const [canonicalQuest, images, dispute, hold] = await Promise.all([
     buildCanonicalQuest(db, row),
     selectQuestV2Images(db, questId),
+    getQuestDisputeSnapshot(userId, questId),
+    getQuestFailedMoneyHold(userId, questId),
   ]);
-  return { ...canonicalQuest, images };
+  return { ...canonicalQuest, images, dispute, ...hold };
 };
 
 export const getQuestV2PublishCheck = async (

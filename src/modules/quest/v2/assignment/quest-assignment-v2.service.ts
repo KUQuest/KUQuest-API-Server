@@ -1,8 +1,15 @@
 import { db } from '@/database/client';
-import { quest, questApiVersion, questAssignment } from '@/database/schema/quest.schema';
+import { authUser } from '@/database/schema/auth.schema';
+import {
+  quest,
+  questApiVersion,
+  questAssignment,
+  questCandidateTeamV2,
+  questCandidateTeamV2Member,
+} from '@/database/schema/quest.schema';
 import { isMemberRedFlaggedInTransaction } from '@/modules/admin/member-penalty';
 
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import {
   type QuestTransaction,
@@ -41,7 +48,16 @@ type QuestV2AssignmentRow = {
   startedAt: Date | null;
   createdAt: Date;
   questState: QuestV2State;
+  teamRole: 'LEADER' | 'MEMBER' | null;
+  team: {
+    id: string;
+    name: string;
+    leaderId: string;
+    members: Array<{ id: string; displayName: string }>;
+  } | null;
 };
+
+type SelectedTeam = NonNullable<QuestV2AssignmentRow['team']>;
 
 type QuestV2AssignmentBusinessOutcomeCode =
   | 'already-assigned'
@@ -60,7 +76,12 @@ export type QuestV2AssignmentOutcome =
   QuestV2AssignmentRow | { outcome: QuestV2AssignmentOutcomeCode };
 
 export type QuestV2AssignmentReadOutcome =
-  QuestV2AssignmentRow[] | { outcome: 'not-authorized' | 'not-found' };
+  | {
+      items: QuestV2AssignmentRow[];
+      activeCount: number;
+      startedCount: number;
+    }
+  | { outcome: 'not-authorized' | 'not-found' };
 
 const assignmentFields = {
   id: questAssignment.id,
@@ -104,6 +125,8 @@ const toQuestV2AssignmentRow = (
     ...assignment,
     state: assignment.state as QuestV2AssignmentState,
     questState,
+    teamRole: null,
+    team: null,
   };
 };
 
@@ -145,6 +168,8 @@ const assignmentFromSnapshot = (value: unknown): QuestV2AssignmentRow | undefine
     questState: snapshot.questState,
     startedAt,
     createdAt,
+    teamRole: null,
+    team: null,
   };
 };
 
@@ -201,7 +226,72 @@ const listAssignments = async (
     .from(questAssignment)
     .where(eq(questAssignment.questId, questId))
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
-  return rows.map((row) => toQuestV2AssignmentRow(row, questState));
+  return withSelectedTeam(
+    transaction,
+    rows.map((row) => toQuestV2AssignmentRow(row, questState))
+  );
+};
+
+const withSelectedTeam = async (
+  transaction: QuestTransaction,
+  assignments: QuestV2AssignmentRow[]
+): Promise<QuestV2AssignmentRow[]> => {
+  const questIds = [...new Set(assignments.map(({ questId }) => questId))];
+  if (questIds.length === 0) return assignments;
+  const members = await transaction
+    .select({
+      questId: questCandidateTeamV2.questId,
+      teamId: questCandidateTeamV2.id,
+      name: questCandidateTeamV2.name,
+      leaderId: questCandidateTeamV2.leaderId,
+      memberId: questCandidateTeamV2Member.memberId,
+      firstName: authUser.firstName,
+      lastName: authUser.lastName,
+    })
+    .from(questCandidateTeamV2)
+    .innerJoin(
+      questCandidateTeamV2Member,
+      eq(questCandidateTeamV2Member.teamId, questCandidateTeamV2.id)
+    )
+    .innerJoin(authUser, eq(authUser.id, questCandidateTeamV2Member.memberId))
+    .where(
+      and(
+        inArray(questCandidateTeamV2.questId, questIds),
+        eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
+      )
+    )
+    .orderBy(asc(questCandidateTeamV2Member.joinedAt), asc(questCandidateTeamV2Member.memberId));
+  const teams = new Map<string, SelectedTeam>();
+  for (const member of members) {
+    let team = teams.get(member.questId);
+    if (!team) {
+      team = {
+        id: member.teamId,
+        name: member.name,
+        leaderId: member.leaderId,
+        members: [],
+      };
+      teams.set(member.questId, team);
+    }
+    team.members.push({
+      id: member.memberId,
+      displayName: `${member.firstName} ${member.lastName}`.trim(),
+    });
+  }
+  return assignments.map((assignment) => {
+    const selectedTeam = teams.get(assignment.questId) ?? null;
+    const isTeamMember =
+      selectedTeam?.members.some(({ id }) => id === assignment.workerId) ?? false;
+    return {
+      ...assignment,
+      teamRole: isTeamMember
+        ? assignment.workerId === selectedTeam?.leaderId
+          ? 'LEADER'
+          : 'MEMBER'
+        : null,
+      team: isTeamMember ? selectedTeam : null,
+    };
+  });
 };
 
 const joinQuestV2InTransaction = async (
@@ -361,25 +451,43 @@ export const listQuestV2Assignments = async (
     .limit(1);
   if (!current) return { outcome: 'not-found' };
 
+  let items: QuestV2AssignmentRow[];
   if (current.hirerId === memberId) {
-    return db.transaction((transaction) =>
+    items = await db.transaction((transaction) =>
       listAssignments(transaction, questId, current.questState)
     );
-  }
-
-  const assignments = await db
-    .select(assignmentFields)
-    .from(questAssignment)
-    .where(
-      and(
-        eq(questAssignment.questId, questId),
-        eq(questAssignment.workerId, memberId),
-        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+  } else {
+    const assignments = await db
+      .select(assignmentFields)
+      .from(questAssignment)
+      .where(
+        and(
+          eq(questAssignment.questId, questId),
+          eq(questAssignment.workerId, memberId),
+          eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
+        )
       )
-    )
-    .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
-  if (assignments.length === 0) return { outcome: 'not-authorized' };
-  return assignments.map((assignment) => toQuestV2AssignmentRow(assignment, current.questState));
+      .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
+    if (assignments.length === 0) return { outcome: 'not-authorized' };
+    items = await db.transaction((transaction) =>
+      withSelectedTeam(
+        transaction,
+        assignments.map((assignment) => toQuestV2AssignmentRow(assignment, current.questState))
+      )
+    );
+  }
+  const [counts] = await db
+    .select({
+      activeCount: sql<number>`count(*) filter (where ${questAssignment.assignmentStatus} = 'ASSIGNMENT_ACTIVE')::int`,
+      startedCount: sql<number>`count(*) filter (where ${questAssignment.assignmentStatus} = 'ASSIGNMENT_ACTIVE' and ${questAssignment.startedAt} is not null)::int`,
+    })
+    .from(questAssignment)
+    .where(eq(questAssignment.questId, questId));
+  return {
+    items,
+    activeCount: counts?.activeCount ?? 0,
+    startedCount: counts?.startedCount ?? 0,
+  };
 };
 
 const assignmentStatusPredicateFor = (status: QuestV2AssignmentMineStatus) => {
@@ -407,5 +515,10 @@ export const listMyQuestV2Assignments = async (
       )
     )
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
-  return rows.map((row) => toQuestV2AssignmentRow(row, row.questState));
+  return db.transaction((transaction) =>
+    withSelectedTeam(
+      transaction,
+      rows.map((row) => toQuestV2AssignmentRow(row, row.questState))
+    )
+  );
 };

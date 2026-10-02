@@ -38,6 +38,18 @@ export const questV2AssignmentHeadersSchema = t.Object({
   }),
 });
 
+const teamSummarySchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  name: t.String(),
+  leaderId: t.String({ format: 'uuid' }),
+  members: t.Array(
+    t.Object({
+      id: t.String({ format: 'uuid' }),
+      displayName: t.String(),
+    })
+  ),
+});
+
 const assignmentSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
@@ -46,6 +58,8 @@ const assignmentSchema = t.Object({
   questState,
   startedAt: t.Nullable(t.String({ format: 'date-time' })),
   createdAt: t.String({ format: 'date-time' }),
+  teamRole: t.Nullable(t.Union([t.Literal('LEADER'), t.Literal('MEMBER')])),
+  team: t.Nullable(teamSummarySchema),
 });
 
 export const questV2AssignmentResponseSchema = t.Object({
@@ -67,6 +81,8 @@ export const questV2AssignmentListResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
     items: t.Array(assignmentSchema),
+    activeCount: t.Integer({ minimum: 0 }),
+    startedCount: t.Integer({ minimum: 0 }),
   }),
 });
 

@@ -9,10 +9,11 @@ import {
   questTeam,
   questTeamInvitation,
 } from '@/database/schema/quest.schema';
+import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import { purgeExpiredProviderEventPayloads } from '@/modules/top-up';
 import { cleanupExpiredWorkChatAttachments } from '@/modules/work-chat';
 
-import { and, asc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lte } from 'drizzle-orm';
 
 import {
   assignmentStatus,
@@ -81,6 +82,7 @@ export type QuestLifecycleWorkerError = {
     | 'edit-timeout'
     | 'auto-approval'
     | 'due-at-failure'
+    | 'dispute-window-close'
     | 'quest-image-cleanup'
     | 'quest-proof-upload-cleanup'
     | 'work-chat-attachment-cleanup'
@@ -95,6 +97,7 @@ export type QuestLifecycleWorkerResult = {
   timedOutUnderfilledQuestIds: string[];
   failedQuestIds: string[];
   releasedFailedQuestIds: string[];
+  closedDisputeWindowQuestIds: string[];
   timedOutEditRequestIds: string[];
   expiredInvitationIds: string[];
   autoApprovedProofIds: string[];
@@ -399,6 +402,64 @@ const releaseFailedQuestReservation = async (questId: string, now: Date): Promis
     return true;
   });
 
+const dueDisputeWindowCloseIds = async (now: Date, limit: number) =>
+  db
+    .select({ id: quest.id })
+    .from(quest)
+    .where(
+      and(
+        eq(quest.apiVersion, questApiVersion.v2),
+        eq(quest.questStatus, questStatus.failed),
+        isNull(quest.disputeWindowClosedAt),
+        lte(quest.failedAt, new Date(now.getTime() - 24 * 60 * 60 * 1000))
+      )
+    )
+    .orderBy(asc(quest.failedAt), asc(quest.id))
+    .limit(limit);
+
+const closeDisputeWindow = async (questId: string, now: Date): Promise<boolean> =>
+  db.transaction(async (transaction) => {
+    const [current] = await transaction
+      .select({
+        hirerId: quest.hirerId,
+        failedAt: quest.failedAt,
+        apiVersion: quest.apiVersion,
+        questStatus: quest.questStatus,
+        disputeWindowClosedAt: quest.disputeWindowClosedAt,
+      })
+      .from(quest)
+      .where(eq(quest.id, questId))
+      .for('update');
+    if (
+      !current ||
+      current.apiVersion !== questApiVersion.v2 ||
+      current.questStatus !== questStatus.failed ||
+      !current.failedAt ||
+      current.disputeWindowClosedAt ||
+      now.getTime() < current.failedAt.getTime() + 24 * 60 * 60 * 1000
+    ) {
+      return false;
+    }
+    const [closed] = await transaction
+      .update(quest)
+      .set({ disputeWindowClosedAt: now })
+      .where(and(eq(quest.id, questId), isNull(quest.disputeWindowClosedAt)))
+      .returning({ id: quest.id });
+    if (!closed) return false;
+    const participants = await transaction
+      .select({ workerId: questAssignment.workerId })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, questId));
+    await notifyQuestUpdate(transaction, {
+      questId,
+      recipientMemberIds: [
+        ...new Set([current.hirerId, ...participants.map(({ workerId }) => workerId)]),
+      ],
+      changeType: 'DISPUTE_WINDOW_CLOSED',
+    });
+    return true;
+  });
+
 const dueUnfilledQuestIds = async (now: Date, limit: number) =>
   db
     .select({ id: quest.id })
@@ -579,6 +640,13 @@ export const runQuestLifecycleWorker = async (
     options.onError
   );
 
+  const closedDisputeWindowQuestIds = await processIds(
+    (await dueDisputeWindowCloseIds(now, limit)).map(({ id }) => id),
+    'dispute-window-close',
+    (id) => closeDisputeWindow(id, now),
+    errors,
+    options.onError
+  );
   const timedOutLegacyEditRequestIds = await processIds(
     (await pendingEditRequestIds(limit)).map(({ id }) => id),
     'edit-timeout',
@@ -629,6 +697,7 @@ export const runQuestLifecycleWorker = async (
     timedOutUnderfilledQuestIds,
     failedQuestIds: [...failedQuestIds, ...legacyFailedQuestIds],
     releasedFailedQuestIds,
+    closedDisputeWindowQuestIds,
     timedOutEditRequestIds: [...timedOutLegacyEditRequestIds, ...timedOutV2EditRequestIds],
     expiredInvitationIds,
     autoApprovedProofIds,

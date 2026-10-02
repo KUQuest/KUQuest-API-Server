@@ -462,7 +462,7 @@ describe('Quest Proof v2 realtime source updates', () => {
           type: 'QUEST_UPDATED',
           version: 1,
           questId,
-          changeType: 'PROOF_AUTO_APPROVED',
+          changeType: 'PROOF_REVIEWED',
         });
         expect(JSON.parse((await socket.nextText())!)).toEqual({
           type: 'QUEST_UPDATED',
@@ -732,6 +732,12 @@ describe('Quest Proof v2 realtime source updates', () => {
           type: 'QUEST_UPDATED',
           version: 1,
           questId,
+          changeType: 'DISPUTE_WINDOW_OPENED',
+        });
+        expect(JSON.parse((await socket.nextText())!)).toEqual({
+          type: 'QUEST_UPDATED',
+          version: 1,
+          questId,
           changeType: 'QUEST_FAILED',
         });
       }
@@ -988,6 +994,12 @@ describe('Quest Proof v2 realtime source updates', () => {
         batchSize: 1,
       });
       for (const socket of sockets) {
+        expect(JSON.parse((await socket.nextText())!)).toEqual({
+          type: 'QUEST_UPDATED',
+          version: 1,
+          questId,
+          changeType: 'DISPUTE_WINDOW_OPENED',
+        });
         expect(JSON.parse((await socket.nextText())!)).toEqual({
           type: 'QUEST_UPDATED',
           version: 1,
@@ -1270,7 +1282,7 @@ describe('Quest Proof v2 realtime source updates', () => {
       for (const socket of [hirerSocket, workerSocket]) {
         const proofUpdate = JSON.parse((await socket.nextText())!);
         expect(proofUpdate.questId).toBe(questId);
-        expect(['PROOF_REVIEWED', 'PROOF_AUTO_APPROVED']).toContain(proofUpdate.changeType);
+        expect(proofUpdate.changeType).toBe('PROOF_REVIEWED');
         expect(JSON.parse((await socket.nextText())!).changeType).toBe('QUEST_COMPLETED');
       }
       expect((await workerSocket.nextFrame())?.opcode).toBe(8);

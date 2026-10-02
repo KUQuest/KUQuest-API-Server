@@ -30,6 +30,8 @@ const serializeAssignment = (assignment: QuestV2Assignment) => ({
   questState: assignment.questState,
   startedAt: assignment.startedAt?.toISOString() ?? null,
   createdAt: assignment.createdAt.toISOString(),
+  teamRole: assignment.teamRole,
+  team: assignment.team,
 });
 
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
@@ -141,7 +143,11 @@ export const listQuestV2AssignmentsController = async ({
 }: AuthedContext & { params: QuestV2AssignmentParams }) => {
   const result = await listQuestV2Assignments(session.user.id, params.questId);
   if ('outcome' in result) return mapReadOutcome(set);
-  return apiSuccess({ items: result.map(serializeAssignment) });
+  return apiSuccess({
+    items: result.items.map(serializeAssignment),
+    activeCount: result.activeCount,
+    startedCount: result.startedCount,
+  });
 };
 
 export const listMyQuestV2AssignmentsController = async ({

@@ -52,6 +52,7 @@ export type QuestSettlementOutcome =
         | 'idempotency-key-required'
         | 'idempotency-unavailable';
     }
+  | { outcome: 'preview-stale'; preview: QuestCancellationPreview }
   | {
       questStatus: QuestStatus;
       outcome: 'COMPLETED' | 'CANCELLED';
@@ -1036,6 +1037,18 @@ export const failQuestV2InTransaction = async (
     ],
     actor: questStateAuditActor(actorId),
   });
+  const participants = await tx
+    .select({ workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .where(eq(questAssignment.questId, questId));
+  const recipients = [
+    ...new Set([current.hirerId, ...participants.map(({ workerId }) => workerId)]),
+  ];
+  await notifyQuestUpdate(tx, {
+    questId,
+    recipientMemberIds: recipients,
+    changeType: 'DISPUTE_WINDOW_OPENED',
+  });
   return {
     questStatus: questStatus.failed,
     incompleteAssignmentIds: affected.map(({ id }) => id),
@@ -1380,8 +1393,14 @@ const applyV2CancellationInTransaction = async (
       'Quest Escrow has invalid published terms.'
     );
   }
-
   const workers = await activeAssignments(tx, current.id);
+  const cancellationAmounts = calculateV2CancellationAmounts(
+    current.questStatus,
+    rewardSatang * current.headcount,
+    Number(fee) * current.headcount,
+    expectedEscrowSatang,
+    workers.length
+  );
   const groupCandidate = current.v2Mode === 'CANDIDATE' && current.v2Participation === 'GROUP';
   const groupFcfs =
     current.v2Mode === 'FIRST_COME_FIRST_SERVED' && current.v2Participation === 'GROUP';
@@ -1393,43 +1412,47 @@ const applyV2CancellationInTransaction = async (
     Promise.resolve(fee);
 
   if (current.questStatus === questStatus.assigned) {
-    if (workers.length === 0) return discard('invalid-state');
     if (reservation.remainingSatang !== expectedEscrowSatang) {
       throw new MoneyDomainError(
         'FUNDING_SETTLEMENT_FAILED',
         'Quest Escrow does not match the published funding terms.'
       );
     }
-    const rewardAllocations = groupFcfs
-      ? await v2UnderfilledAllocations(tx, current, expectedEscrowSatang)
-      : undefined;
-    if (groupCandidate) {
-      const leaderId = await selectedV2TeamLeader(tx, current.id);
-      if (!leaderId || !workers.some(({ workerId }) => workerId === leaderId)) {
-        throw new MoneyDomainError(
-          'FUNDING_SETTLEMENT_FAILED',
-          'Selected Team Leader Assignment is missing.'
+    if (workers.length > 0) {
+      const rewardAllocations = groupFcfs
+        ? await v2UnderfilledAllocations(tx, current, expectedEscrowSatang)
+        : undefined;
+      if (groupCandidate) {
+        const leaderId = await selectedV2TeamLeader(tx, current.id);
+        if (!leaderId || !workers.some(({ workerId }) => workerId === leaderId)) {
+          throw new MoneyDomainError(
+            'FUNDING_SETTLEMENT_FAILED',
+            'Selected Team Leader Assignment is missing.'
+          );
+        }
+        payoutWorkers = scaledCancellationAllocations(
+          [{ workerId: leaderId, amountSatang: rewardSatang * current.headcount }],
+          rewardSatang * current.headcount
+        );
+      } else {
+        const allocations = rewardAllocations
+          ? rewardAllocations.map(({ workerId, rewardSatang: amountSatang }) => ({
+              workerId,
+              amountSatang,
+            }))
+          : workers.map(({ workerId }) => ({ workerId, amountSatang: rewardSatang }));
+        if (
+          allocations.length !== workers.length ||
+          allocations.reduce((total, allocation) => total + allocation.amountSatang, 0) !==
+            rewardSatang * current.headcount
+        ) {
+          return discard('invalid-state');
+        }
+        payoutWorkers = scaledCancellationAllocations(
+          allocations,
+          rewardSatang * current.headcount
         );
       }
-      payoutWorkers = scaledCancellationAllocations(
-        [{ workerId: leaderId, amountSatang: rewardSatang * current.headcount }],
-        rewardSatang * current.headcount
-      );
-    } else {
-      const allocations = rewardAllocations
-        ? rewardAllocations.map(({ workerId, rewardSatang: amountSatang }) => ({
-            workerId,
-            amountSatang,
-          }))
-        : workers.map(({ workerId }) => ({ workerId, amountSatang: rewardSatang }));
-      if (
-        allocations.length !== workers.length ||
-        allocations.reduce((total, allocation) => total + allocation.amountSatang, 0) !==
-          rewardSatang * current.headcount
-      ) {
-        return discard('invalid-state');
-      }
-      payoutWorkers = scaledCancellationAllocations(allocations, rewardSatang * current.headcount);
     }
     if (payoutWorkers.length > 0) {
       remainingBeforeRelease = await settleQuestWorkers(
@@ -1442,7 +1465,13 @@ const applyV2CancellationInTransaction = async (
       );
     }
     paidSatang = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
-    expectedRemainingSatang -= paidSatang;
+    if (paidSatang !== cancellationAmounts.paidSatang) {
+      throw new MoneyDomainError(
+        'FUNDING_SETTLEMENT_FAILED',
+        'Quest cancellation payout does not match the preview calculation.'
+      );
+    }
+    expectedRemainingSatang = cancellationAmounts.refundedSatang;
   } else if (current.questStatus === questStatus.inProgress) {
     if (workers.length === 0) return discard('invalid-state');
     if (groupCandidate) {
@@ -1511,6 +1540,15 @@ const applyV2CancellationInTransaction = async (
     }
     expectedRemainingSatang = 0;
   }
+  if (
+    paidSatang !== cancellationAmounts.paidSatang ||
+    expectedRemainingSatang !== cancellationAmounts.refundedSatang
+  ) {
+    throw new MoneyDomainError(
+      'FUNDING_SETTLEMENT_FAILED',
+      'Quest cancellation settlement does not match the preview calculation.'
+    );
+  }
 
   if (remainingBeforeRelease !== expectedRemainingSatang) {
     throw new MoneyDomainError(
@@ -1564,6 +1602,135 @@ const applyV2CancellationInTransaction = async (
     refundedSatang,
   };
 };
+export type QuestCancellationPreview = {
+  questStatus: QuestStatus;
+  tier: 'NO_PENALTY' | 'PARTIAL_PENALTY' | 'FULL_PENALTY';
+  paidSatang: number;
+  refundedSatang: number;
+  platformFeeSatang: number;
+  affectedWorkerCount: number;
+  computedAt: Date;
+  previewVersion: string;
+};
+
+const calculateV2CancellationAmounts = (
+  status: QuestStatus,
+  rewardPoolSatang: number,
+  feePoolSatang: number,
+  escrowSatang: number,
+  activeWorkerCount: number
+) => {
+  if (status === questStatus.draft || status === questStatus.open) {
+    return {
+      tier: 'NO_PENALTY' as const,
+      paidSatang: 0,
+      refundedSatang: status === questStatus.draft ? 0 : escrowSatang,
+      platformFeeSatang: status === questStatus.draft ? 0 : feePoolSatang,
+    };
+  }
+  if (status === questStatus.assigned) {
+    const paidSatang = activeWorkerCount === 0 ? 0 : Math.floor((rewardPoolSatang * 20) / 100);
+    return {
+      tier: 'PARTIAL_PENALTY' as const,
+      paidSatang,
+      refundedSatang: escrowSatang - paidSatang,
+      platformFeeSatang: feePoolSatang,
+    };
+  }
+  return {
+    tier: 'FULL_PENALTY' as const,
+    paidSatang: rewardPoolSatang,
+    refundedSatang: 0,
+    platformFeeSatang: feePoolSatang,
+  };
+};
+
+const getV2CancellationPreviewInTransaction = async (
+  tx: QuestTransaction,
+  questId: string,
+  hirerId: string,
+  now: Date
+): Promise<QuestCancellationPreview | Extract<QuestSettlementOutcome, { outcome: string }>> => {
+  const current = await lockQuest(tx, questId);
+  if (!current || current.apiVersion !== 'v2') return { outcome: 'not-found' };
+  if (current.hirerId !== hirerId) return { outcome: 'not-authorized' };
+  const cancellableStatuses: QuestStatus[] = [
+    questStatus.draft,
+    questStatus.open,
+    questStatus.assigned,
+    questStatus.inProgress,
+  ];
+  if (!cancellableStatuses.includes(current.questStatus)) {
+    return { outcome: 'invalid-state' };
+  }
+  if (
+    current.questStatus === questStatus.assigned &&
+    (await hasPendingQuestV2EditRequest(tx, current.id))
+  ) {
+    return { outcome: 'invalid-state' };
+  }
+
+  const workers = await activeAssignments(tx, current.id);
+  const previewVersion = await hash({
+    questId: current.id,
+    version: current.version,
+    questStatus: current.questStatus,
+    assignments: workers.map(({ id, workerId }) => [id, workerId]),
+  });
+  if (current.questStatus === questStatus.draft) {
+    return {
+      questStatus: current.questStatus,
+      tier: 'NO_PENALTY',
+      paidSatang: 0,
+      refundedSatang: 0,
+      platformFeeSatang: 0,
+      affectedWorkerCount: 0,
+      computedAt: now,
+      previewVersion,
+    };
+  }
+
+  const reservation = await readQuestEscrow(tx, {
+    ownerUserId: current.hirerId,
+    questId: current.id,
+  });
+  if (
+    !reservation ||
+    reservation.status !== 'ACTIVE' ||
+    (current.fundingReservationId !== null &&
+      current.fundingReservationId !== reservation.reservationId)
+  ) {
+    throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'Quest Escrow is unavailable.');
+  }
+  const rewardSatang = requireQuestReward(current.rewardSatang);
+  const fee = await platformFeeForQuest(tx, current, reservation, rewardSatang);
+  const expectedEscrowSatang =
+    current.questEscrowSatang ?? (rewardSatang + Number(fee)) * current.headcount;
+  const rewardPoolSatang = rewardSatang * current.headcount;
+  if (!Number.isSafeInteger(expectedEscrowSatang) || expectedEscrowSatang <= 0) {
+    throw new MoneyDomainError(
+      'FUNDING_SETTLEMENT_FAILED',
+      'Quest Escrow has invalid published terms.'
+    );
+  }
+  const amounts = calculateV2CancellationAmounts(
+    current.questStatus,
+    rewardPoolSatang,
+    Number(fee) * current.headcount,
+    expectedEscrowSatang,
+    workers.length
+  );
+  return {
+    questStatus: current.questStatus,
+    ...amounts,
+    affectedWorkerCount: workers.length,
+    computedAt: now,
+    previewVersion,
+  };
+};
+
+export const previewQuestCancellationV2 = (hirerId: string, questId: string, now = new Date()) =>
+  db.transaction((tx) => getV2CancellationPreviewInTransaction(tx, questId, hirerId, now));
 
 const settleV2CancellationInTransaction = async (
   tx: QuestTransaction,
@@ -1571,7 +1738,8 @@ const settleV2CancellationInTransaction = async (
   hirerId: string,
   commandId: string,
   requestHash: string,
-  now: Date
+  now: Date,
+  previewVersion?: string
 ): Promise<QuestSettlementOutcome> => {
   const current = await lockQuest(tx, questId);
   if (!current || current.apiVersion !== 'v2') return { outcome: 'not-found' };
@@ -1593,6 +1761,15 @@ const settleV2CancellationInTransaction = async (
     return { outcome: command.outcome };
   }
   if ('replay' in command) return command.replay;
+  if (previewVersion !== undefined) {
+    const freshPreview = await getV2CancellationPreviewInTransaction(tx, questId, hirerId, now);
+    if ('tier' in freshPreview && freshPreview.previewVersion !== previewVersion) {
+      await tx
+        .delete(questSettlementCommand)
+        .where(eq(questSettlementCommand.commandId, commandId));
+      return { outcome: 'preview-stale', preview: freshPreview };
+    }
+  }
 
   const result = await applyV2CancellationInTransaction(tx, current, hirerId, commandId, now);
   if (!('questStatus' in result)) return result;
@@ -1604,7 +1781,8 @@ export const cancelQuestV2 = async (
   hirerId: string,
   questId: string,
   rawCommandId: string,
-  now = new Date()
+  now = new Date(),
+  previewVersion?: string
 ): Promise<QuestSettlementOutcome> => {
   const commandId = rawCommandId.trim();
   if (commandId.length === 0) return { outcome: 'idempotency-key-required' };
@@ -1617,7 +1795,15 @@ export const cancelQuestV2 = async (
     body: null,
   });
   return db.transaction((tx) =>
-    settleV2CancellationInTransaction(tx, questId, hirerId, commandId, requestHash, now)
+    settleV2CancellationInTransaction(
+      tx,
+      questId,
+      hirerId,
+      commandId,
+      requestHash,
+      now,
+      previewVersion
+    )
   );
 };
 

@@ -76,6 +76,10 @@ export type QuestV2ProofSubmission = {
   workerMessage: string | null;
   status: QuestV2ProofStatus | null;
   submittedAt: Date | null;
+  reviewDeadlineAt: Date | null;
+  reviewReason: string | null;
+  reviewedAt: Date | null;
+  reviewedBy: 'HIRER' | 'AUTO_APPROVE' | null;
   createdAt: Date;
   updatedAt: Date;
   visibility: 'FULL' | 'SUMMARY';
@@ -203,6 +207,9 @@ type SubmissionRow = {
   workerMessage: string | null;
   submissionStatus: string | null;
   sentAt: Date | null;
+  reviewReason: string | null;
+  reviewedAt: Date | null;
+  reviewedBy: 'HIRER' | 'AUTO_APPROVE' | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -217,6 +224,9 @@ const submissionFields = {
   workerMessage: questV2ProofSubmission.workerMessage,
   submissionStatus: questV2ProofSubmission.submissionStatus,
   sentAt: questV2ProofSubmission.sentAt,
+  reviewReason: questV2ProofSubmission.reviewReason,
+  reviewedAt: questV2ProofSubmission.reviewedAt,
+  reviewedBy: questV2ProofSubmission.reviewedBy,
   createdAt: questV2ProofSubmission.createdAt,
   updatedAt: questV2ProofSubmission.updatedAt,
 };
@@ -764,6 +774,13 @@ const toSubmission = async (
         ? (row.submissionStatus as QuestV2ProofStatus | null)
         : (row.submissionStatus as QuestV2ProofStatus),
     submittedAt: row.sentAt,
+    reviewDeadlineAt:
+      row.submissionStatus === 'PROOF_PENDING' && row.sentAt !== null
+        ? new Date(row.sentAt.getTime() + 24 * 60 * 60 * 1000)
+        : null,
+    reviewReason: row.reviewReason,
+    reviewedAt: row.reviewedAt,
+    reviewedBy: row.reviewedBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     visibility,
@@ -779,6 +796,8 @@ const toSubmission = async (
 const snapshotFor = (submission: QuestV2ProofSubmission) => ({
   ...submission,
   submittedAt: submission.submittedAt?.toISOString() ?? null,
+  reviewDeadlineAt: submission.reviewDeadlineAt?.toISOString() ?? null,
+  reviewedAt: submission.reviewedAt?.toISOString() ?? null,
   createdAt: submission.createdAt.toISOString(),
   updatedAt: submission.updatedAt.toISOString(),
 });
@@ -805,6 +824,19 @@ const submissionFromSnapshot = (value: unknown): QuestV2ProofSubmission | undefi
     (snapshot.status !== null &&
       (typeof snapshot.status !== 'string' || !isProofStatus(snapshot.status))) ||
     (snapshot.submittedAt !== null && typeof snapshot.submittedAt !== 'string') ||
+    (snapshot.reviewReason !== undefined &&
+      snapshot.reviewReason !== null &&
+      typeof snapshot.reviewReason !== 'string') ||
+    (snapshot.reviewedBy !== undefined &&
+      snapshot.reviewedBy !== null &&
+      snapshot.reviewedBy !== 'HIRER' &&
+      snapshot.reviewedBy !== 'AUTO_APPROVE') ||
+    (snapshot.reviewDeadlineAt !== undefined &&
+      snapshot.reviewDeadlineAt !== null &&
+      typeof snapshot.reviewDeadlineAt !== 'string') ||
+    (snapshot.reviewedAt !== undefined &&
+      snapshot.reviewedAt !== null &&
+      typeof snapshot.reviewedAt !== 'string') ||
     !Array.isArray(snapshot.fileIds) ||
     !Array.isArray(snapshot.files) ||
     snapshot.visibility !== 'FULL'
@@ -821,7 +853,11 @@ const submissionFromSnapshot = (value: unknown): QuestV2ProofSubmission | undefi
   }
   const createdAt = dateFromSnapshot(snapshot.createdAt);
   const updatedAt = dateFromSnapshot(snapshot.updatedAt);
-  if (!createdAt || !updatedAt) return undefined;
+  const reviewedAt =
+    snapshot.reviewedAt === undefined || snapshot.reviewedAt === null
+      ? null
+      : dateFromSnapshot(snapshot.reviewedAt);
+  if (!createdAt || !updatedAt || (snapshot.reviewedAt != null && !reviewedAt)) return undefined;
   return {
     id: snapshot.id,
     questId: snapshot.questId,
@@ -833,6 +869,14 @@ const submissionFromSnapshot = (value: unknown): QuestV2ProofSubmission | undefi
       snapshot.workerMessage === undefined ? null : (snapshot.workerMessage as string | null),
     status: snapshot.status as QuestV2ProofStatus | null,
     submittedAt,
+    reviewDeadlineAt:
+      snapshot.status === 'PROOF_PENDING' && submittedAt !== null
+        ? (dateFromSnapshot(snapshot.reviewDeadlineAt) ??
+          new Date(submittedAt.getTime() + 24 * 60 * 60 * 1000))
+        : null,
+    reviewReason: (snapshot.reviewReason as string | null | undefined) ?? null,
+    reviewedAt: reviewedAt ?? null,
+    reviewedBy: snapshot.reviewedBy ?? null,
     createdAt,
     updatedAt,
     visibility: 'FULL',
@@ -1984,6 +2028,9 @@ const reviewSubjectFor = async (
   };
 };
 
+const sanitizedReviewReason = (reason: string | null): string | null =>
+  reason?.replace(/<[^>]*>/g, '').trim() || null;
+
 const normalizedReviewReason = (
   decision: QuestV2ProofReviewDecision,
   reason: string | null
@@ -1998,11 +2045,8 @@ const normalizedReviewReason = (
   if (decision !== 'PROOF_APPROVED' && decision !== 'PROOF_NOT_APPROVED') {
     return { outcome: 'invalid-review-decision' };
   }
-  const value = reason?.trim() ?? null;
+  const value = sanitizedReviewReason(reason);
   if (value !== null && value.length > maxDescriptionLength) {
-    return { outcome: 'review-reason-invalid' };
-  }
-  if (decision === 'PROOF_APPROVED' && value !== null) {
     return { outcome: 'review-reason-invalid' };
   }
   if (decision === 'PROOF_NOT_APPROVED' && value === null) {
@@ -2114,6 +2158,9 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
         .update(questV2ProofSubmission)
         .set({
           submissionStatus: input.decision,
+          reviewReason: normalizedReason.reason,
+          reviewedAt: input.now,
+          reviewedBy: input.actor.actorType === 'SYSTEM' ? 'AUTO_APPROVE' : 'HIRER',
           updatedAt: input.now,
         })
         .where(
@@ -2230,10 +2277,6 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
         );
       }
       const proofMembers = await proofParticipantIds(transaction, updated);
-      const changeType =
-        input.operationScope === questV2ProofAutoApprovalOperationScope
-          ? 'PROOF_AUTO_APPROVED'
-          : 'PROOF_REVIEWED';
       const terminalFailure =
         current.questState === 'QUEST_IN_PROGRESS' && questStatus === 'QUEST_FAILED';
       const pendingAfterFailure =
@@ -2249,7 +2292,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
       await emitQuestUpdate(
         transaction,
         input.questId,
-        changeType,
+        'PROOF_REVIEWED',
         [current.hirerId, ...proofMembers],
         closesAffected
       );

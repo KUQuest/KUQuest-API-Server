@@ -88,6 +88,7 @@ export const quest = pgTable(
     startTime: time('start_time').notNull(),
     dueAt: time('due_at'),
     failedAt: time('failed_at'),
+    disputeWindowClosedAt: time('dispute_window_closed_at'),
     proofRequired: boolean('proof_required').default(true).notNull(),
     cancelledAt: time('cancelled_at'),
     cancelledByUserId: uuid('cancelled_by_user_id').references(() => authUser.id),
@@ -605,6 +606,9 @@ export const questV2ProofSubmission = pgTable(
       'PROOF_PENDING' | 'PROOF_APPROVED' | 'PROOF_NOT_APPROVED'
     >(),
     sentAt: time('sent_at'),
+    reviewReason: varchar('review_reason', { length: 1000 }),
+    reviewedAt: time('reviewed_at'),
+    reviewedBy: varchar('reviewed_by', { length: 16 }).$type<'HIRER' | 'AUTO_APPROVE'>(),
     createdAt: time('created_at').defaultNow().notNull(),
     updatedAt: time('updated_at').defaultNow().notNull(),
   },

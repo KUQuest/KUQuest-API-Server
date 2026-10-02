@@ -1,8 +1,8 @@
 import { authGuard, memberBanGuard } from '@/modules/auth';
-import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import { apiErrorSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V2_PREFIX } from '@/shared/api-version';
 
-import { Elysia } from 'elysia';
+import { Elysia, t } from 'elysia';
 
 import {
   addQuestImagesV2Controller,
@@ -20,7 +20,13 @@ import {
   publishQuestV2Controller,
   respondToQuestV2EditRequestController,
 } from './quest-v2.controller';
-import { cancelQuestV2Controller, questCancellationResponseSchema } from '../../settlement';
+import {
+  cancelQuestV2Controller,
+  questCancellationPreviewResponseSchema,
+  questCancellationPreviewStaleResponseSchema,
+  questCancellationResponseSchema,
+  previewQuestCancellationV2Controller,
+} from '../../settlement';
 import {
   questV2CreateHttpResponseSchema,
   questV2CreateHttpSchema,
@@ -41,6 +47,7 @@ import {
   questV2PublishCheckHttpResponseSchema,
   questV2PublishHttpResponseSchema,
   questV2WriteHeadersSchema,
+  questV2CancellationHeadersSchema,
   normalizeQuestV2CreateBody,
   normalizeQuestV2BoardQuery,
   normalizeQuestV2EditBody,
@@ -204,14 +211,29 @@ export const questV2Route = new Elysia({
   })
   .post('/:questId/cancel', cancelQuestV2Controller, {
     params: questV2ParamsSchema,
-    headers: questV2WriteHeadersSchema,
-    response: responses(questCancellationResponseSchema, 400, 401, 403, 404, 409, 503),
+    headers: questV2CancellationHeadersSchema,
+    response: {
+      ...responses(questCancellationResponseSchema, 400, 401, 403, 404, 409, 503),
+      409: t.Union([questCancellationPreviewStaleResponseSchema, apiErrorSchema]),
+    },
     detail: {
       tags: ['Quests v2'],
       summary: 'Cancel a v2 Quest as its Hirer',
       description:
-        'Cancels a v2 Quest from Draft, Open, Assigned, or In Progress. The command has no business request body and applies the stage-specific Quest Escrow settlement atomically.',
+        'Cancels a v2 Quest from Draft, Open, Assigned, or In Progress. The command has no business request body and applies the stage-specific Quest Escrow settlement atomically. Optional preview-version rejects stale cancellation requests with the fresh preview; idempotent replays still return their original result.',
       operationId: 'cancelQuestV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:questId/cancel-preview', previewQuestCancellationV2Controller, {
+    params: questV2ParamsSchema,
+    response: responses(questCancellationPreviewResponseSchema, 400, 401, 403, 404, 409, 503),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Preview v2 Quest cancellation settlement',
+      description:
+        'Returns current cancellation settlement without changing Quest, Assignment, Wallet, or ledger state. DRAFT returns zero-value NO_PENALTY. OPEN returns 100% refund; ASSIGNED returns 20% of Worker Reward pool paid and remaining escrow refunded; IN_PROGRESS pays Worker Rewards and retains Platform Fee with no refund. platformFeeSatang is the fee refunded for NO_PENALTY/PARTIAL_PENALTY and retained for FULL_PENALTY.',
+      operationId: 'previewQuestCancellationV2',
       security: betterAuthSecurity,
     },
   })
@@ -246,8 +268,7 @@ export const questV2Route = new Elysia({
       tags: ['Quests v2'],
       summary: 'Get Participation Quest Detail through the v2 contract',
       description:
-        "Returns the Quest to an authenticated Member who holds an Assignment on it, in every Quest State and while the Quest is hidden, together with that Member's own Assignment. Terminal Quests are read-only. Admin actions and Finance internals are excluded.",
-      operationId: 'getQuestV2ParticipationDetail',
+        "Returns the Quest to an authenticated Member who holds an Assignment on it, in every Quest State and while the Quest is hidden, together with that Member's own Assignment and viewer-specific dispute projection. In QUEST_FAILED, dispute reports the one-day Hirer/Worker self-file window, whether the caller can file, and only that caller's case; it is null for other Quest States. For GROUP + CANDIDATE Quests, selected Team Members see teamRole and selected Team summary, including every Member's displayName, in QUEST_ASSIGNED, QUEST_IN_PROGRESS, and archive reads after Hirer cancellation. A Worker outside the selected Team receives null teamRole and team. While the Team is forming, its Leader cannot be removed; if the Leader leaves, the earliest joined remaining Member becomes Team Leader, or the Team disbands if no Member remains. A submitted Team is immutable. Terminal Quests are read-only. Admin actions and Finance internals are excluded.",
       security: betterAuthSecurity,
     },
   })
@@ -257,7 +278,8 @@ export const questV2Route = new Elysia({
     detail: {
       tags: ['Quests v2'],
       summary: 'Get a v2 Quest detail',
-      description: 'Returns a Quest owned by the authenticated Hirer through the v2 contract.',
+      description:
+        'Returns a Quest owned by the authenticated Hirer through the v2 contract, with the same viewer-specific dispute projection as Participation Detail. On QUEST_FAILED, it includes moneyHoldReleasesAt and remaining heldSatang; the Funding Reservation releases unconditionally seven days after failure even if a Dispute Case remains pending.',
       operationId: 'getQuestV2Detail',
       security: betterAuthSecurity,
     },

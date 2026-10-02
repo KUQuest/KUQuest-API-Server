@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { adminDisputeCase, disputeCaseStatuses } from '@/database/schema/admin.schema';
+import { walletFundingReservation } from '@/database/schema/wallet.schema';
 import {
   proofSubmission,
   proofSubmissionImage,
@@ -9,6 +10,7 @@ import {
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
 import { file } from '@/database/schema/file.schema';
+import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import { formatDisputeDisplayId } from '@/modules/admin';
 import {
   createAdminActionService,
@@ -71,7 +73,8 @@ export class AdminDisputeCaseError extends Error {
     | 'DISPUTE_CASE_RESERVATION_NOT_FOUND'
     | 'DISPUTE_CASE_OUTCOME_INVALID'
     | 'DISPUTE_CASE_AMOUNT_REQUIRED'
-    | 'DISPUTE_CASE_WINDOW_EXPIRED';
+    | 'DISPUTE_CASE_WINDOW_EXPIRED'
+    | 'DISPUTE_WINDOW_CLOSED';
 
   constructor(code: AdminDisputeCaseError['code'], message: string) {
     super(message);
@@ -208,6 +211,100 @@ const caseByIdInTransaction = async (
   return record;
 };
 
+const disputeWindowEndsAt = (failedAt: Date | null, fallback: Date, days: number) =>
+  new Date((failedAt ?? fallback).getTime() + days * 24 * 60 * 60 * 1000);
+
+export type QuestDisputeSnapshot = {
+  canFile: boolean;
+  windowEndsAt: string | null;
+  myCase: {
+    id: string;
+    displayId: string;
+    status: DisputeCaseStatus;
+    createdAt: string;
+  } | null;
+} | null;
+
+export const getQuestDisputeSnapshot = async (
+  userId: string,
+  questId: string
+): Promise<QuestDisputeSnapshot> => {
+  const [current] = await db
+    .select({
+      hirerId: quest.hirerId,
+      questStatus: quest.questStatus,
+      failedAt: quest.failedAt,
+      updatedAt: quest.updatedAt,
+    })
+    .from(quest)
+    .where(and(eq(quest.id, questId), eq(quest.apiVersion, 'v2')))
+    .limit(1);
+  if (!current || current.questStatus !== 'QUEST_FAILED') return null;
+
+  const [myCase] = await db
+    .select()
+    .from(adminDisputeCase)
+    .where(and(eq(adminDisputeCase.questId, questId), eq(adminDisputeCase.filerUserId, userId)))
+    .limit(1);
+  const windowEndsAt = disputeWindowEndsAt(current.failedAt, current.updatedAt, 1);
+  let canFile = !myCase && new Date() <= windowEndsAt;
+  if (canFile && current.hirerId !== userId) {
+    const [assignment] = await db
+      .select({ id: questAssignment.id })
+      .from(questAssignment)
+      .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, userId)))
+      .limit(1);
+    canFile = assignment !== undefined;
+  }
+  return {
+    canFile,
+    windowEndsAt: windowEndsAt.toISOString(),
+    myCase: myCase
+      ? {
+          id: myCase.id,
+          displayId: formatDisputeDisplayId(myCase.publicSequence),
+          status: myCase.status,
+          createdAt: myCase.createdAt.toISOString(),
+        }
+      : null,
+  };
+};
+
+export const getQuestFailedMoneyHold = async (userId: string, questId: string) => {
+  const [current] = await db
+    .select({
+      failedAt: quest.failedAt,
+      questStatus: quest.questStatus,
+      fundingReservationId: quest.fundingReservationId,
+    })
+    .from(quest)
+    .where(and(eq(quest.id, questId), eq(quest.hirerId, userId), eq(quest.apiVersion, 'v2')))
+    .limit(1);
+  if (
+    !current ||
+    current.questStatus !== 'QUEST_FAILED' ||
+    !current.failedAt ||
+    !current.fundingReservationId
+  ) {
+    return { moneyHoldReleasesAt: null, heldSatang: 0 };
+  }
+  const [reservation] = await db
+    .select({
+      remainingSatang: walletFundingReservation.remainingSatang,
+      status: walletFundingReservation.status,
+    })
+    .from(walletFundingReservation)
+    .where(eq(walletFundingReservation.id, current.fundingReservationId))
+    .limit(1);
+  const active = reservation?.status === 'ACTIVE';
+  return {
+    moneyHoldReleasesAt: active
+      ? new Date(current.failedAt.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+      : null,
+    heldSatang: active ? reservation.remainingSatang : 0,
+  };
+};
+
 /** Create the queue record after a filing adapter has authenticated its actor. */
 export const createAdminDisputeCaseInTransaction = async (
   transaction: WalletTransaction,
@@ -245,10 +342,14 @@ export const createAdminDisputeCaseInTransaction = async (
   }
 
   const filingWindow = input.openedByAdminId ? 5 : 1;
-  const failedAt = currentQuest.failedAt ?? currentQuest.updatedAt;
-  if (now.getTime() > failedAt.getTime() + filingWindow * 24 * 60 * 60 * 1000) {
+  const windowEndsAt = disputeWindowEndsAt(
+    currentQuest.failedAt,
+    currentQuest.updatedAt,
+    filingWindow
+  );
+  if (now > windowEndsAt) {
     throw new AdminDisputeCaseError(
-      'DISPUTE_CASE_WINDOW_EXPIRED',
+      input.openedByAdminId ? 'DISPUTE_CASE_WINDOW_EXPIRED' : 'DISPUTE_WINDOW_CLOSED',
       'The Dispute Case filing window has expired.'
     );
   }
@@ -655,6 +756,7 @@ export const resolveAdminDisputeCase = async (
               failedAt: quest.failedAt,
               updatedAt: quest.updatedAt,
               fundingReservationId: quest.fundingReservationId,
+              apiVersion: quest.apiVersion,
             })
             .from(quest)
             .where(eq(quest.id, current.questId))
@@ -700,6 +802,13 @@ export const resolveAdminDisputeCase = async (
                 'DISPUTE_CASE_NOT_PENDING',
                 'Dispute Case changed before dismissal.'
               );
+            if (currentQuest.apiVersion === 'v2') {
+              await notifyQuestUpdate(transaction, {
+                questId: current.questId,
+                recipientMemberIds: [current.filerUserId],
+                changeType: 'DISPUTE_CASE_UPDATED',
+              });
+            }
             return summaryResultInTransaction(transaction, updated.id);
           }
 
@@ -757,6 +866,13 @@ export const resolveAdminDisputeCase = async (
               'DISPUTE_CASE_NOT_PENDING',
               'Dispute Case changed before resolution.'
             );
+          if (currentQuest.apiVersion === 'v2') {
+            await notifyQuestUpdate(transaction, {
+              questId: current.questId,
+              recipientMemberIds: [current.filerUserId],
+              changeType: 'DISPUTE_CASE_UPDATED',
+            });
+          }
           return summaryResultInTransaction(transaction, updated.id);
         },
       };

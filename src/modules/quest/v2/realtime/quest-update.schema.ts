@@ -16,6 +16,9 @@ const questUpdateOtherChangeTypeSchema = t.Union([
   t.Literal('QUEST_FAILED'),
   t.Literal('QUEST_CANCELLED'),
   t.Literal('QUEST_OPEN_EDIT_UPDATED'),
+  t.Literal('DISPUTE_WINDOW_OPENED'),
+  t.Literal('DISPUTE_WINDOW_CLOSED'),
+  t.Literal('DISPUTE_CASE_UPDATED'),
 ]);
 
 export const questUpdateChangeTypeSchema = t.Union([

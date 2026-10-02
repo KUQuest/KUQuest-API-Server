@@ -659,9 +659,46 @@ const questV2MineResponseOpenApiSchema = t.Object({
   }),
 });
 
+const questV2DisputeSchema = t.Nullable(
+  t.Object({
+    canFile: t.Boolean({
+      description: 'Whether the authenticated Hirer or Worker can file a Dispute Case now.',
+    }),
+    windowEndsAt: t.Nullable(
+      t.String({
+        format: 'date-time',
+        description: 'End of the one-day self-filing window after QUEST_FAILED.',
+      })
+    ),
+    myCase: t.Nullable(
+      t.Object({
+        id: t.String({ format: 'uuid' }),
+        displayId: t.String(),
+        status: t.Union([
+          t.Literal('DISPUTE_CASE_PENDING'),
+          t.Literal('DISPUTE_CASE_DISMISSED'),
+          t.Literal('DISPUTE_CASE_RESOLVED'),
+        ]),
+        createdAt: t.String({ format: 'date-time' }),
+      })
+    ),
+  })
+);
+
 const questV2DetailOpenApiSchema = t.Object({
   ...questV2CanonicalQuestOpenApiSchema.properties,
   images: t.Array(questV2ImageSchema),
+  dispute: questV2DisputeSchema,
+  moneyHoldReleasesAt: t.Nullable(
+    t.String({
+      format: 'date-time',
+      description: 'The 7-day failure hold release time while its Funding Reservation is active.',
+    })
+  ),
+  heldSatang: t.Integer({
+    minimum: 0,
+    description: 'Remaining integer satang in the Hirer’s active failed-Quest hold.',
+  }),
 });
 
 const questV2DetailResponseOpenApiSchema = t.Object({
@@ -857,10 +894,25 @@ export const questV2ParticipationDetailSchema = t.Object({
   assignment: t.Object({
     status: questV2AssignmentStateSchema,
     startedAt: t.Nullable(t.String({ format: 'date-time' })),
+    teamRole: t.Nullable(t.Union([t.Literal('LEADER'), t.Literal('MEMBER')])),
+    team: t.Nullable(
+      t.Object({
+        id: t.String({ format: 'uuid' }),
+        name: t.String(),
+        leaderId: t.String({ format: 'uuid' }),
+        members: t.Array(
+          t.Object({
+            id: t.String({ format: 'uuid' }),
+            displayName: t.String(),
+          })
+        ),
+      })
+    ),
   }),
   capabilities: t.Object({
     canViewOnly: t.Boolean(),
   }),
+  dispute: questV2DisputeSchema,
 });
 
 export const questV2ParticipationDetailResponseSchema = t.Object({
@@ -954,7 +1006,12 @@ export type QuestV2EditRequestData = Static<typeof questV2EditRequestDataSchema>
 
 export const questV2DetailSchema = t.Composite([
   questV2CanonicalQuestSchema,
-  t.Object({ images: t.Array(questV2ImageSchema) }),
+  t.Object({
+    images: t.Array(questV2ImageSchema),
+    dispute: questV2DisputeSchema,
+    moneyHoldReleasesAt: t.Nullable(t.String({ format: 'date-time' })),
+    heldSatang: t.Integer({ minimum: 0 }),
+  }),
 ]);
 
 export const questV2DetailResponseSchema = t.Object({
@@ -1166,6 +1223,14 @@ export const questV2PublishHttpResponseSchema = {
 export const questV2WriteHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
 });
+
+export const questV2CancellationHeadersSchema = t.Object(
+  {
+    'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
+    'preview-version': t.Optional(t.String({ minLength: 1, maxLength: 200, pattern: '\\S' })),
+  },
+  { additionalProperties: false }
+);
 
 export const questV2EditHeadersSchema = t.Object(
   {

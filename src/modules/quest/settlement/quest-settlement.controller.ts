@@ -5,7 +5,12 @@ import type { ApiResponse } from '@/shared/api-response';
 import type { Static } from 'elysia';
 
 import { WorkChatTransitionError } from '../shared/work-chat/quest-work-chat.port';
-import { cancelQuest, cancelQuestV2 } from './quest-settlement.service';
+import {
+  cancelQuest,
+  cancelQuestV2,
+  previewQuestCancellationV2,
+  type QuestCancellationPreview,
+} from './quest-settlement.service';
 import type { questSettlementParamsSchema } from './quest-settlement.schema';
 
 type Params = Static<typeof questSettlementParamsSchema>;
@@ -62,6 +67,22 @@ const v2CancellationErrorResponse = (set: AuthedContext['set'], outcome: string)
   return errorResponse(set, outcome);
 };
 
+export const previewQuestCancellationV2Controller = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: Params }): Promise<
+  ApiResponse<Omit<QuestCancellationPreview, 'computedAt'> & { computedAt: string }>
+> => {
+  try {
+    const result = await previewQuestCancellationV2(session.user.id, params.questId);
+    if (!('tier' in result)) return errorResponse(set, result.outcome);
+    return apiSuccess({ ...result, computedAt: result.computedAt.toISOString() });
+  } catch (error) {
+    return moneyError(set, error);
+  }
+};
+
 export const cancelQuestController = async ({
   params,
   request,
@@ -83,10 +104,38 @@ export const cancelQuestV2Controller = async ({
   request,
   session,
   set,
-}: AuthedContext & { params: Params }): Promise<ApiResponse> => {
+}: AuthedContext & { params: Params }): Promise<
+  | ApiResponse
+  | {
+      success: false;
+      error: {
+        code: 'CANCEL_PREVIEW_STALE';
+        message: string;
+        preview: Omit<QuestCancellationPreview, 'computedAt'> & { computedAt: string };
+      };
+    }
+> => {
   const commandId = request?.headers.get('idempotency-key') ?? '';
+  const previewVersion = request?.headers.get('preview-version') ?? undefined;
   try {
-    const result = await cancelQuestV2(session.user.id, params.questId, commandId);
+    const result = await cancelQuestV2(
+      session.user.id,
+      params.questId,
+      commandId,
+      new Date(),
+      previewVersion
+    );
+    if (result.outcome === 'preview-stale') {
+      set.status = 409;
+      return {
+        success: false,
+        error: {
+          code: 'CANCEL_PREVIEW_STALE',
+          message: 'Quest changed since cancellation preview',
+          preview: { ...result.preview, computedAt: result.preview.computedAt.toISOString() },
+        },
+      };
+    }
     if (!('questStatus' in result)) return v2CancellationErrorResponse(set, result.outcome);
     return apiSuccess(result);
   } catch (error) {

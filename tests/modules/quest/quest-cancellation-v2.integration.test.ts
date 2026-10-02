@@ -1,5 +1,5 @@
 import { app } from '@/app';
-import { db, sql } from '@/database/client';
+import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { auditRecord } from '@/database/schema/audit.schema';
 import {
@@ -29,7 +29,7 @@ import {
 
 import { randomUUID } from 'node:crypto';
 
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import {
   afterAll,
   afterEach,
@@ -68,7 +68,13 @@ const authenticate = () =>
     return { user: { id: userId }, session: { userId } } as never;
   }) as never);
 
-const request = (questId: string, memberId: string, key?: string, body?: unknown) =>
+const request = (
+  questId: string,
+  memberId: string,
+  key?: string,
+  body?: unknown,
+  extraHeaders: HeadersInit = {}
+) =>
   app.handle(
     new Request(`http://localhost/api/v2/quests/${questId}/cancel`, {
       method: 'POST',
@@ -76,8 +82,16 @@ const request = (questId: string, memberId: string, key?: string, body?: unknown
         'x-member-id': memberId,
         ...(key === undefined ? {} : { 'idempotency-key': key }),
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...extraHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  );
+const previewRequest = (questId: string, memberId: string) =>
+  app.handle(
+    new Request(`http://localhost/api/v2/quests/${questId}/cancel-preview`, {
+      method: 'GET',
+      headers: { 'x-member-id': memberId },
     })
   );
 
@@ -303,6 +317,12 @@ describe('Quest API v2 Hirer cancellation', () => {
       >;
     };
     const operation = document.paths['/api/v2/quests/{questId}/cancel']?.post;
+    const previewOperation = document.paths['/api/v2/quests/{questId}/cancel-preview']?.get;
+    expect(previewOperation?.operationId).toBe('previewQuestCancellationV2');
+    expect(previewOperation?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(Object.keys(previewOperation?.responses ?? {})).toEqual(
+      expect.arrayContaining(['200', '401', '403', '404', '409'])
+    );
 
     expect(operation?.operationId).toBe('cancelQuestV2');
     expect(operation?.security).toEqual([{ betterAuthSession: [] }]);
@@ -310,11 +330,161 @@ describe('Quest API v2 Hirer cancellation', () => {
     expect(operation?.parameters).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: 'idempotency-key', in: 'header', required: true }),
+        expect.objectContaining({ name: 'preview-version', in: 'header', required: false }),
       ])
     );
     expect(Object.keys(operation?.responses ?? {})).toEqual(
       expect.arrayContaining(['200', '400', '401', '403', '404', '409', '503'])
     );
+  });
+
+  it('previews cancellation money exactly as immediate cancellation for each active state', async () => {
+    if (!postgresAvailable) return;
+    for (const [status, workers] of [
+      ['QUEST_OPEN', []],
+      ['QUEST_ASSIGNED', [workerIds[0]]],
+      ['QUEST_IN_PROGRESS', [workerIds[1]]],
+    ] as const) {
+      const questId = await createV2Quest({ status, workers: [...workers] });
+      const previewResponse = await previewRequest(questId, hirerId);
+      expect(previewResponse.status).toBe(200);
+      const preview = (await previewResponse.json()).data;
+      const cancelResponse = await request(questId, hirerId, `cancel-preview-equality-${questId}`);
+      expect(cancelResponse.status).toBe(200);
+      const cancelled = (await cancelResponse.json()).data;
+      expect(preview.paidSatang).toBe(cancelled.paidSatang);
+      expect(preview.refundedSatang).toBe(cancelled.refundedSatang);
+    }
+  });
+
+  it('previews ASSIGNED GROUP with no Workers as a partial tier without Worker payments', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV2Quest({
+      status: 'QUEST_ASSIGNED',
+      participation: 'GROUP',
+      headcount: 2,
+    });
+    const preview = (await (await previewRequest(questId, hirerId)).json()).data;
+    expect(preview).toMatchObject({
+      tier: 'PARTIAL_PENALTY',
+      paidSatang: 0,
+      refundedSatang: 2_040,
+      platformFeeSatang: 40,
+      affectedWorkerCount: 0,
+    });
+    const cancelled = await request(questId, hirerId, `cancel-zero-workers-${questId}`);
+    expect(cancelled.status).toBe(200);
+    expect((await cancelled.json()).data).toMatchObject({
+      paidSatang: preview.paidSatang,
+      refundedSatang: preview.refundedSatang,
+    });
+  });
+
+  it('rejects stale preview hints with fresh preview and preserves idempotent replay', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV2Quest({
+      status: 'QUEST_ASSIGNED',
+      workers: [workerIds[0]],
+    });
+    const preview = (await (await previewRequest(questId, hirerId)).json()).data;
+    await db
+      .update(quest)
+      .set({
+        questStatus: 'QUEST_IN_PROGRESS',
+        version: sql`${quest.version} + 1`,
+      })
+      .where(eq(quest.id, questId));
+    const key = `cancel-stale-preview-${questId}`;
+    const stale = await request(questId, hirerId, key, undefined, {
+      'preview-version': preview.previewVersion,
+    });
+    expect(stale.status).toBe(409);
+    const staleBody = await stale.json();
+    expect(staleBody.error.code).toBe('CANCEL_PREVIEW_STALE');
+    expect(staleBody.error.preview).toMatchObject({
+      questStatus: 'QUEST_IN_PROGRESS',
+      tier: 'FULL_PENALTY',
+      paidSatang: 1_000,
+      refundedSatang: 0,
+    });
+
+    const fresh = staleBody.error.preview;
+    const cancelled = await request(questId, hirerId, key, undefined, {
+      'preview-version': fresh.previewVersion,
+    });
+    expect(cancelled.status).toBe(200);
+    const replay = await request(questId, hirerId, key, undefined, {
+      'preview-version': preview.previewVersion,
+    });
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data).toEqual((await cancelled.json()).data);
+  });
+  it('previews DRAFT as NO_PENALTY with zero amounts and zero affected workers', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV2Quest({ status: 'QUEST_DRAFT' });
+    const response = await previewRequest(questId, hirerId);
+    expect(response.status).toBe(200);
+    expect((await response.json()).data).toMatchObject({
+      questStatus: 'QUEST_DRAFT',
+      tier: 'NO_PENALTY',
+      paidSatang: 0,
+      refundedSatang: 0,
+      platformFeeSatang: 0,
+      affectedWorkerCount: 0,
+    });
+  });
+
+  it('previews underfilled decision window open as NO_PENALTY full refund in QUEST_OPEN', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV2Quest({
+      status: 'QUEST_OPEN',
+      participation: 'GROUP',
+      headcount: 3,
+      workers: [workerIds[0]],
+      rewardSatang: 1_000,
+      platformFeeSatang: 20,
+    });
+    const decisionId = randomUUID();
+    const now = new Date();
+    await db.insert(questV2UnderfilledDecision).values({
+      id: decisionId,
+      questId,
+      activeWorkerCount: 1,
+      workerRewardPoolSatang: 3_000,
+      state: 'UNDERFILLED_DECISION_PENDING',
+      decision: null,
+      decisionExpiresAt: new Date(now.getTime() + 600_000),
+      consentExpiresAt: null,
+      detectedAt: now,
+      resolvedAt: null,
+    });
+    const response = await previewRequest(questId, hirerId);
+    expect(response.status).toBe(200);
+    expect((await response.json()).data).toMatchObject({
+      questStatus: 'QUEST_OPEN',
+      tier: 'NO_PENALTY',
+      paidSatang: 0,
+      refundedSatang: 3_060,
+      platformFeeSatang: 60,
+      affectedWorkerCount: 1,
+    });
+  });
+
+  it('enforces authentication, Hirer authorization, masked not-found, and non-cancellable 409 on preview', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createV2Quest({ status: 'QUEST_OPEN' });
+    const nonHirer = await previewRequest(questId, otherMemberId);
+    expect(nonHirer.status).toBe(403);
+    expect((await nonHirer.json()).error.code).toBe('QUEST_NOT_AUTHORIZED');
+
+    const notFound = await previewRequest(randomUUID(), hirerId);
+    expect(notFound.status).toBe(404);
+    expect((await notFound.json()).error.code).toBe('QUEST_NOT_FOUND');
+
+    const failedQuestId = await createV2Quest({ status: 'QUEST_FAILED' });
+    const failed = await previewRequest(failedQuestId, hirerId);
+    expect(failed.status).toBe(409);
+    expect((await failed.json()).error.code).toBe('QUEST_SETTLEMENT_NOT_ALLOWED');
   });
 
   it('requires Idempotency-Key before authentication and rejects a non-owner', async () => {
