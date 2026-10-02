@@ -7,6 +7,7 @@ import {
   questApiVersion,
   questCandidateApplicationV2,
   questCandidateTeamV2,
+  questCandidateTeamV2Member,
   questCommand,
   questConditionItem,
   questImage,
@@ -26,6 +27,7 @@ import {
   notifyQuestBoardInvalidated,
   notifyQuestUpdate,
 } from '@/modules/quest/v2/realtime';
+import { loadMemberSummaries } from '../../shared/member-summary';
 import {
   getEffectiveFundingReservationPolicy,
   readRecipientFundingSettlement,
@@ -323,7 +325,17 @@ export type QuestV2PublicDetail = {
 };
 
 export type QuestV2ParticipationDetail = QuestV2PublicDetail & {
-  assignment: { status: AssignmentStatus; startedAt: string | null };
+  assignment: {
+    status: AssignmentStatus;
+    startedAt: string | null;
+    teamRole: 'LEADER' | 'MEMBER' | null;
+    team: {
+      id: string;
+      name: string;
+      leaderId: string;
+      members: Array<{ id: string; displayName: string }>;
+    } | null;
+  };
   workerSettlement: {
     status: 'PAID' | 'PENDING' | 'NO_PAYMENT';
     amountSatang: number | null;
@@ -3105,12 +3117,62 @@ export const getQuestV2ParticipationDetail = async (
     throw new Error(`Quest ${questId} has incomplete v2 Participation Detail data`);
   }
 
-  const [conditionItems, locations, images] = await Promise.all([
+  const [conditionItems, locations, images, selectedTeamRows] = await Promise.all([
     selectConditionItems(db, questId),
     selectLocations(db, questId),
     selectQuestV2Images(db, questId),
+    participationRow.v2Mode === 'CANDIDATE' && participationRow.v2Participation === 'GROUP'
+      ? db
+          .select({
+            id: questCandidateTeamV2.id,
+            name: questCandidateTeamV2.name,
+            leaderId: questCandidateTeamV2.leaderId,
+            memberId: questCandidateTeamV2Member.memberId,
+          })
+          .from(questCandidateTeamV2)
+          .innerJoin(
+            questCandidateTeamV2Member,
+            eq(questCandidateTeamV2Member.teamId, questCandidateTeamV2.id)
+          )
+          .where(
+            and(
+              eq(questCandidateTeamV2.questId, questId),
+              eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
+            )
+          )
+          .orderBy(
+            asc(questCandidateTeamV2Member.joinedAt),
+            asc(questCandidateTeamV2Member.memberId)
+          )
+      : Promise.resolve([]),
   ]);
   if (conditionItems.length === 0) throw new Error(`Quest ${questId} has no Condition Items`);
+
+  let selectedTeam: {
+    id: string;
+    name: string;
+    leaderId: string;
+    members: Array<{ id: string; displayName: string }>;
+  } | null = null;
+  if (selectedTeamRows.length > 0) {
+    const memberOf = await loadMemberSummaries(selectedTeamRows.map(({ memberId }) => memberId));
+    selectedTeam = {
+      id: selectedTeamRows[0].id,
+      name: selectedTeamRows[0].name,
+      leaderId: selectedTeamRows[0].leaderId,
+      members: selectedTeamRows.map(({ memberId }) => ({
+        id: memberId,
+        displayName: memberOf(memberId).displayName,
+      })),
+    };
+  }
+
+  const teamRole =
+    selectedTeam && selectedTeam.members.some(({ id }) => id === userId)
+      ? userId === selectedTeam.leaderId
+        ? 'LEADER'
+        : 'MEMBER'
+      : null;
 
   let workerSettlement: QuestV2ParticipationDetail['workerSettlement'] = null;
   if (participationRow.assignmentStatus !== 'ASSIGNMENT_ACTIVE') {
@@ -3166,6 +3228,8 @@ export const getQuestV2ParticipationDetail = async (
     assignment: {
       status: participationRow.assignmentStatus,
       startedAt: participationRow.assignmentStartedAt?.toISOString() ?? null,
+      teamRole,
+      team: teamRole ? selectedTeam : null,
     },
     startedWorkerCount: Number(row.startedWorkerCount),
     capabilities: {
