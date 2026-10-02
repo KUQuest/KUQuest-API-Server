@@ -10,6 +10,7 @@ import { readKeysetPage } from '@/shared/keyset-page';
 
 import { and, avg, count, eq, ilike, or, sql } from 'drizzle-orm';
 
+import { formatDisplayIdSql } from './admin-display-id';
 import type {
   AdminMemberDetailData,
   AdminMemberListItem,
@@ -44,6 +45,7 @@ export const listAdminMembers = async (
     );
   }
 
+  const displayId = formatDisplayIdSql('member', authUser.publicSequence);
   const page = await readKeysetPage({
     anchor: { time: authUser.createdAt, id: authUser.id },
     cursor,
@@ -53,6 +55,7 @@ export const listAdminMembers = async (
       db
         .select({
           id: authUser.id,
+          displayId,
           email: authUser.email,
           firstName: authUser.firstName,
           lastName: authUser.lastName,
@@ -101,6 +104,7 @@ export const listAdminMembers = async (
 
     return {
       id: r.id,
+      displayId: r.displayId,
       email: r.email,
       firstName: r.firstName,
       lastName: r.lastName,
@@ -128,6 +132,7 @@ export const getAdminMemberDetail = async (
   const [memberRow] = await db
     .select({
       id: authUser.id,
+      displayId: formatDisplayIdSql('member', authUser.publicSequence),
       email: authUser.email,
       firstName: authUser.firstName,
       lastName: authUser.lastName,
@@ -223,6 +228,7 @@ export const getAdminMemberDetail = async (
   return {
     member: {
       id: memberRow.id,
+      displayId: memberRow.displayId,
       email: memberRow.email,
       firstName: memberRow.firstName,
       lastName: memberRow.lastName,

@@ -24,6 +24,10 @@ _Avoid_: Rulebook, draft Rulebook, accepted contract
 The end user of KUQuest — anyone authenticated with a Google account under the `@ku.th` email domain. Represented by the `auth_user` table.
 _Avoid_: User, account holder, Student (use Member when the KUQuest identity matters, User only when referring generically to the auth record).
 
+**Member Display ID**:
+An Admin-facing identifier for one Member, formatted as `MEM-######` with at least six digits. It does not replace the Member's UUID or KU Student ID.
+_Avoid_: Student ID, internal auth identifier.
+
 **Admin**:
 A KUQuest Admin web app operator, signed in with credentials (not Google). Represented by the `auth_admin` table — a separate identity space from Member, sharing `auth_account`/`auth_session` via a nullable `userId`/`adminId` pair (exactly one set per row). Schema landed in [[BE-32]]; the second better-auth instance wiring credential login for Admins is a follow-up, not yet built. One undifferentiated permission tier — `auth_admin` has no role/permission column. For Payout Approval, Dispute Case, Quest Hide, Wallet Freeze/Suspend, Trust & Safety moderation, and the Member penalty ladders, read `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: User (Admins are never Members and vice versa).

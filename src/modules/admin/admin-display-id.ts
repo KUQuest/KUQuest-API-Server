@@ -2,6 +2,7 @@ import { sql, type SQLWrapper } from 'drizzle-orm';
 
 const displayIdWidth = 6;
 const displayIdPrefixes = {
+  member: 'MEM',
   quest: 'QST',
   dispute: 'DSP',
   reportCase: 'RPT',

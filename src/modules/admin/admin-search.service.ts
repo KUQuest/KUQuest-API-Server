@@ -32,7 +32,10 @@ type SearchRow = {
   newestAt: Date | null;
 };
 
-type MemberSearchRow = Omit<SearchRow, 'status'> & { status: AdminMemberStatus };
+type MemberSearchRow = Omit<SearchRow, 'status' | 'displayId'> & {
+  status: AdminMemberStatus;
+  displayId: string;
+};
 type NonMemberAdminSearchKind = Exclude<AdminSearchKind, 'member'>;
 
 const maxResults = adminSearchResultLimit;
@@ -152,11 +155,13 @@ const newestFirstOrder = (createdAt: SQLWrapper, id: SQLWrapper) =>
   sql`case when ${createdAt} is null then 1 else 0 end, ${createdAt} desc, ${id} desc`;
 
 const searchMembers = async (query: string): Promise<MemberSearchRow[]> => {
+  const displayId = formatDisplayIdSql('member', authUser.publicSequence);
   const status = adminMemberStatusSql();
   return db
     .select({
       id: authUser.id,
       resourceId: authUser.id,
+      displayId,
       studentId: authUser.studentId,
       title: fullName(authUser.firstName, authUser.lastName),
       status,
@@ -168,7 +173,12 @@ const searchMembers = async (query: string): Promise<MemberSearchRow[]> => {
         query,
         'Member',
         'member',
-        [authUser.id, fullName(authUser.firstName, authUser.lastName), authUser.studentId],
+        [
+          authUser.id,
+          displayId,
+          fullName(authUser.firstName, authUser.lastName),
+          authUser.studentId,
+        ],
         [statusMatches(query, status, memberStatusLabels)]
       )
     )
@@ -461,6 +471,7 @@ const toMemberItem = (row: MemberSearchRow): Extract<AdminSearchItem, { kind: 'm
   kind: 'member',
   id: row.id,
   resourceId: row.resourceId,
+  displayId: row.displayId,
   ...(row.studentId === undefined ? {} : { studentId: row.studentId }),
   title: row.title,
   status: row.status,

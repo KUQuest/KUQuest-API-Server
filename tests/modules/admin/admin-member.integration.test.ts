@@ -135,6 +135,7 @@ describe('Admin Members Endpoints Integration Tests', () => {
 
       const m = json.data.items[0];
       expect(m.id).toBe(memberId);
+      expect(m.displayId).toMatch(/^MEM-\d{6,}$/);
       expect(m.firstName).toBe('MemberDir');
       expect(m.studentId).toBe(memberStudentId);
       expect(m.department).toContain('Computer Engineering');
@@ -422,6 +423,7 @@ describe('Admin Members Endpoints Integration Tests', () => {
 
       const data = json.data;
       expect(data.member.id).toBe(memberId);
+      expect(data.member.displayId).toMatch(/^MEM-\d{6,}$/);
       expect(data.member.studentId).toBe(memberStudentId);
       expect(data.member.bio).toBe('Software Engineering student');
       expect(data.member.academicYear).toBe(2567);
