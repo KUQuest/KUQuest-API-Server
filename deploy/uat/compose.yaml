@@ -1,0 +1,37 @@
+name: kuquest-uat
+
+services:
+  api:
+    container_name: kuquest-uat-api
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    ports:
+      - '0.0.0.0:5000:5000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'bun',
+          '-e',
+          "fetch('http://0.0.0.0:5000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 4
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
