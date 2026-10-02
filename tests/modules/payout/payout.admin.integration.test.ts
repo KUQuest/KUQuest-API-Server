@@ -5,7 +5,6 @@ import { authUser } from '@/database/schema/auth.schema';
 import { paymentPayouts } from '@/database/schema/payment.schema';
 import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import {
   createPayoutDestinationEncryption,
   savePayoutDestination,
@@ -23,6 +22,8 @@ import { encodeCursor } from '@/shared/cursor';
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { Elysia } from 'elysia';
 import { and, eq, gt, inArray } from 'drizzle-orm';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const adminEmail = `payout-admin-route-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';
@@ -77,6 +78,7 @@ const createPendingPayout = async () => {
     email: `${studentId}@ku.th`,
     firstName: 'Route',
     lastName: 'Student',
+    studentId: String(1_000_000_000 + Math.floor(Math.random() * 9_000_000_000)),
   });
   await ensureWallet(studentId);
   await savePayoutDestination(
@@ -257,6 +259,32 @@ describe('Payout API routes', () => {
       new Set([firstPage.data.items[0]?.id, secondPage.data.items[0]?.id])
     );
 
+    const memberPageResponse = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts?userId=${firstPayout.principalUserId}`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    const memberPage = (await memberPageResponse.json()) as {
+      success: boolean;
+      data: {
+        items: Array<{
+          id: string;
+          displayId: string;
+          student: { id: string; studentId: string | null };
+        }>;
+      };
+    };
+    expect(memberPageResponse.status).toBe(200);
+    expect(memberPage.success).toBe(true);
+    expect(memberPage.data.items.map((item) => item.id)).toEqual([firstPayout.id]);
+    expect(memberPage.data.items[0]?.displayId).toMatch(/^PAY-\d{6,}$/);
+    expect(memberPage.data.items[0]?.id).toBe(firstPayout.id);
+    expect(memberPage.data.items[0]?.displayId).not.toBe(firstPayout.id);
+    expect(memberPage.data.items[0]?.student).toMatchObject({
+      id: firstPayout.principalUserId,
+      studentId: expect.stringMatching(/^\d{10}$/),
+    });
+
     const approvalResponse = await app.handle(
       new Request(`http://localhost/api/v1/admin/payouts/${firstPayout.id}/approve`, {
         method: 'POST',
@@ -302,9 +330,19 @@ describe('Payout API routes', () => {
       })
     );
     const detail = (await detailResponse.json()) as {
-      data: { history: Array<{ source: string; reason: string | null }>; [key: string]: unknown };
+      data: {
+        displayId: string;
+        student: { id: string; studentId: string | null };
+        history: Array<{ source: string; reason: string | null }>;
+        [key: string]: unknown;
+      };
     };
     expect(detailResponse.status).toBe(200);
+    expect(detail.data.displayId).toBe(memberPage.data.items[0]?.displayId);
+    expect(detail.data.student).toMatchObject({
+      id: firstPayout.principalUserId,
+      studentId: expect.stringMatching(/^\d{10}$/),
+    });
     expect(detail.data.history).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ source: 'ADMIN_APPROVAL', reason: 'PAYOUT_POLICY_REVIEW' }),
@@ -335,6 +373,48 @@ describe('Payout API routes', () => {
     );
     expect(missingHistoryResponse.status).toBe(404);
     expect((await missingHistoryResponse.json()).error.code).toBe('PAYOUT_NOT_FOUND');
+  });
+
+  it('searches by Payout display ID without returning destination data', async () => {
+    const payout = await createPendingPayout();
+    const detailResponse = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts/${payout.id}`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    expect(detailResponse.status).toBe(200);
+    const displayId = (await detailResponse.json()).data.displayId as string;
+
+    const searchResponse = await app.handle(
+      new Request(
+        `http://localhost/api/v1/admin/search?q=${encodeURIComponent(displayId)}&kind=payout`,
+        { headers: { cookie: adminCookie } }
+      )
+    );
+    expect(searchResponse.status).toBe(200);
+    const searchBody = await searchResponse.json();
+    expect(searchBody.data.items).toHaveLength(1);
+    const item = searchBody.data.items[0];
+    expect(item).toMatchObject({
+      kind: 'payout',
+      id: payout.id,
+      resourceId: payout.id,
+      displayId,
+      title: 'Payout for Route Student',
+      status: 'PENDING_ADMIN_APPROVAL',
+    });
+    expect(Object.keys(item).sort()).toEqual([
+      'displayId',
+      'id',
+      'kind',
+      'newestAt',
+      'resourceId',
+      'status',
+      'title',
+    ]);
+    expect(JSON.stringify(item)).not.toContain('1234567890');
+    expect(JSON.stringify(item)).not.toContain('destinationAccountNumberCiphertext');
+    expect(JSON.stringify(item)).not.toContain('destinationRoutingValueCiphertext');
   });
 
   it('serves the authenticated Admin cancellation contract', async () => {

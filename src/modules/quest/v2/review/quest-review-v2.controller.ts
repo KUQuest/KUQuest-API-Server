@@ -9,6 +9,8 @@ import type {
 } from './quest-review-v2.schema';
 import {
   createQuestV2Review,
+  getQuestV2Review,
+  listQuestV2Reviews,
   updateQuestV2Review,
   type QuestV2ReviewOutcome,
   type QuestV2ReviewRow,
@@ -134,5 +136,33 @@ export const updateQuestV2ReviewController = async ({
     commandId
   );
   if ('outcome' in result) return mapReviewError(set, result);
+  return apiSuccess(serializeReview(result));
+};
+export const listQuestV2ReviewsController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: QuestV2ReviewParams }) => {
+  const result = await listQuestV2Reviews(session.user.id, params.questId);
+  if (!Array.isArray(result)) {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+  return apiSuccess({ items: result.map(serializeReview) });
+};
+
+export const getQuestV2ReviewController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: QuestV2ReviewDetailParams }) => {
+  const result = await getQuestV2Review(session.user.id, params.questId, params.reviewId);
+  if ('outcome' in result) {
+    set.status = 404;
+    return apiError(
+      result.outcome === 'not-found' ? 'QUEST_NOT_FOUND' : 'REVIEW_NOT_FOUND',
+      result.outcome === 'not-found' ? 'Quest not found' : 'Review not found'
+    );
+  }
   return apiSuccess(serializeReview(result));
 };

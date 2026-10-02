@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import { department, faculty, occupation } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
+import { isRedFlagActive } from '@/modules/admin/member-penalty';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment } from '@/database/schema/quest.schema';
 import { countReviews, getReceivedRatings, listReviews } from '@/modules/quest/v1';
@@ -205,6 +206,7 @@ export const getPublicProfile = async (userId: string) => {
       bio: authUser.bio,
       academicYear: authUser.academicYear,
       version: authUser.version,
+      redFlagExpiresAt: authUser.redFlagExpiresAt,
       occupationId: occupation.id,
       occupationName: occupation.name,
       departmentId: department.id,
@@ -223,8 +225,10 @@ export const getPublicProfile = async (userId: string) => {
     .limit(1);
 
   if (!row) return undefined;
+  const reputation = await getProfileReputation(userId);
 
   const {
+    redFlagExpiresAt,
     departmentId,
     departmentName,
     facultyName,
@@ -238,6 +242,11 @@ export const getPublicProfile = async (userId: string) => {
 
   return {
     ...profile,
+    reputation: {
+      totalQuests: reputation.totalQuests,
+      rating: { average: reputation.rating.average },
+    },
+    redFlagged: isRedFlagActive(redFlagExpiresAt),
     department:
       departmentId && departmentName && facultyName
         ? { id: departmentId, name: departmentName, faculty: { name: facultyName } }

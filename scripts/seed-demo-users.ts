@@ -1,190 +1,144 @@
-import { env } from '@/config/env';
+/* eslint-disable no-await-in-loop -- Run seed steps and session assertions in order. */
 import { db, sql } from '@/database/client';
 import { department, occupation } from '@/database/schema/academic.schema';
-import { authUser } from '@/database/schema/auth.schema';
-import { profileCertificate, profilePortfolioItem } from '@/database/schema/profile.schema';
-import { defaultCookieAttributes } from '@/modules/auth/auth.config.shared';
+import { authAccount, authUser } from '@/database/schema/auth.schema';
+import {
+  profileCertificate,
+  profilePortfolioItem,
+  profilePortfolioItemImage,
+  profileWorkExperience,
+} from '@/database/schema/profile.schema';
+import { ensureWallet } from '@/modules/wallet';
+import { demoMembers } from '@/shared/demo-members';
 
-import { betterAuth } from 'better-auth';
-import { makeSignature } from 'better-auth/crypto';
-import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { testUtils } from 'better-auth/plugins';
-import { eq } from 'drizzle-orm';
+import { hashPassword } from 'better-auth/crypto';
+import { and, eq } from 'drizzle-orm';
 
-import { dirname, join } from 'node:path';
-import { mkdir } from 'node:fs/promises';
+import { assertDemoSeedEnvironment, demoPassword, storeDemoImage } from './demo-seed';
+import { demoQuests } from './demo-quests';
 
-import * as schema from '@/database/schema/auth.schema';
-
-const bruEnvironmentPath = (name: string): string =>
-  join(import.meta.dir, '..', 'bruno', 'environments', 'local-demo', `Demo - ${name}.bru`);
-
-const writeSessionCookieToBruEnvironment = async (name: string, cookie: string): Promise<void> => {
-  const path = bruEnvironmentPath(name);
-  await mkdir(dirname(path), { recursive: true });
-  const file = Bun.file(path);
-  const template = (await file.exists())
-    ? await file.text()
-    : `vars {\n  baseUrl: http://localhost:5000\n  userSessionCookie: \n}\n`;
-  const updated = template.replace(/^( *userSessionCookie:).*$/m, `$1 ${cookie}`);
-  await Bun.write(path, updated);
-};
-
-const DEMO_USERS = [
-  {
-    firstName: 'Nattapong',
-    lastName: 'Srisawat',
-    department: 'Software and Knowledge Engineering',
-  },
-  { firstName: 'Warisara', lastName: 'Boonmee', department: 'Marketing' },
-  { firstName: 'Thanakrit', lastName: 'Chaiyasit', department: 'Economics' },
-  { firstName: 'Supitcha', lastName: 'Wongsakul', department: 'Bachelor of Accountancy' },
-  { firstName: 'Kritchapon', lastName: 'Phromma', department: 'Tropical Agriculture' },
-  { firstName: 'Aphinya', lastName: 'Sukjai', department: 'Integrated Tourism Management' },
-  { firstName: 'Pattarapon', lastName: 'Ruangrit', department: 'Business Administration' },
-  {
-    firstName: 'Chutimon',
-    lastName: 'Thepsuriya',
-    department: 'Communicative Thai Language for Foreigners',
-  },
-  { firstName: 'Ekkapop', lastName: 'Wattana', department: 'Entrepreneurial Economics' },
-  { firstName: 'Nichakan', lastName: 'Kaewmanee', department: 'Marketing' },
-] as const;
-
-const writeDemoCookies = process.env.WRITE_DEMO_COOKIES !== 'false';
-
-const CERTIFICATES = [
-  { name: 'AWS Certified Cloud Practitioner', issuer: 'Amazon Web Services' },
-  { name: 'Google Data Analytics', issuer: 'Google' },
-  { name: 'Meta Front-End Developer', issuer: 'Meta' },
-];
-
-const PORTFOLIO_ITEMS = [
-  {
-    title: 'Campus Event Booking App',
-    description: 'A React Native app for booking KU campus events.',
-  },
-  {
-    title: 'Data Visualization Dashboard',
-    description: 'Dashboard for analysing student club participation.',
-  },
-];
-
-const seedAuth = betterAuth({
-  appName: 'KUQuest',
-  baseURL: env.betterAuthUrl || 'http://localhost:5000',
-  secret: env.betterAuthSecret || 'seed-only-secret-not-used-in-production!',
-  database: drizzleAdapter(db, { provider: 'pg', schema }),
-  user: {
-    modelName: 'authUser',
-    fields: { name: 'firstName' },
-    additionalFields: {
-      firstName: { type: 'string', required: true },
-      lastName: { type: 'string', required: true },
-    },
-  },
-  session: { modelName: 'authSession' },
-  account: { modelName: 'authAccount' },
-  verification: { modelName: 'authVerification' },
-  advanced: {
-    database: { generateId: 'uuid' },
-    defaultCookieAttributes,
-  },
-  plugins: [testUtils()],
-});
-
-const createDemoCookie = async (
-  context: Awaited<typeof seedAuth.$context>,
-  userId: string
-): Promise<string> => {
-  const session = await context.internalAdapter.createSession(userId, false, {
-    ipAddress: '127.0.0.1',
-    userAgent: 'KUQuest demo seed',
-  });
-  const signedToken = `${session.token}.${await makeSignature(session.token, context.secret)}`;
-  return `${context.authCookies.sessionToken.name}=${signedToken}`;
-};
-
-const main = async (): Promise<void> => {
-  const departments = await db.select().from(department);
-  const [studentOccupation] = await db
-    .select()
+export const seedDemoMembers = async (): Promise<void> => {
+  assertDemoSeedEnvironment();
+  const password = await hashPassword(demoPassword());
+  const [student] = await db
+    .select({ id: occupation.id })
     .from(occupation)
-    .where(eq(occupation.name, 'Student'))
+    .where(and(eq(occupation.name, 'Student'), eq(occupation.requiresStudentId, true)))
     .limit(1);
-
-  if (!studentOccupation) throw new Error('Seed the academic options before running this script');
-
-  const ctx = await seedAuth.$context;
-  const results: { email: string; name: string; cookie?: string }[] = [];
-
-  for (const [index, demo] of DEMO_USERS.entries()) {
-    const email = `${demo.firstName.toLowerCase()}.${demo.lastName.toLowerCase()}@ku.th`;
-    const dept = departments.find((d) => d.name === demo.department);
-    if (!dept) throw new Error(`No seeded department named "${demo.department}"`);
-    const studentId = `65${String(1000000 + index).padStart(8, '0')}`;
-
+  if (!student) throw new Error('Run db:migrate before seeding demo Members.');
+  const departments = await db.select().from(department);
+  for (const [index, member] of demoMembers.entries()) {
+    const academicDepartment = departments.find((row) => row.name === member.department);
+    if (!academicDepartment) throw new Error(`Missing Department: ${member.department}`);
+    const profile = {
+      firstName: member.firstName,
+      lastName: member.lastName,
+      bio: member.bio,
+      telephone: member.telephone,
+      studentId: member.studentId,
+      academicYear: member.academicYear,
+      departmentId: academicDepartment.id,
+      occupationId: student.id,
+      emailVerified: true,
+      termsAcceptedAt: new Date(),
+      termsVersion: '1.0',
+    };
     const [user] = await db
       .insert(authUser)
-      .values({
-        id: crypto.randomUUID(),
-        email,
-        emailVerified: true,
-        firstName: demo.firstName,
-        lastName: demo.lastName,
-        bio: `Hi, I'm ${demo.firstName}, studying ${demo.department} at KU.`,
-        telephone: `08${String(10000000 + index).padStart(8, '0')}`,
-        studentId,
-        departmentId: dept?.id,
-        academicYear: 2565 + (index % 4),
-        occupationId: studentOccupation.id,
-        termsAcceptedAt: new Date(),
-        termsVersion: '1.0',
-      })
-      .returning();
-
-    if (!user) throw new Error(`Failed to insert demo user ${email}`);
-
-    const certCount = 1 + (index % 3);
-    for (let i = 0; i < certCount; i++) {
-      const cert = CERTIFICATES[i % CERTIFICATES.length];
-      if (!cert) continue;
+      .values({ email: member.email, ...profile })
+      .onConflictDoUpdate({ target: authUser.email, set: profile })
+      .returning({ id: authUser.id });
+    if (!user) throw new Error(`Could not seed Member ${member.email}`);
+    await db
+      .insert(authAccount)
+      .values({ userId: user.id, accountId: user.id, providerId: 'credential', password })
+      .onConflictDoUpdate({
+        target: [authAccount.providerId, authAccount.accountId],
+        set: { password },
+      });
+    await ensureWallet(user.id);
+    const avatarId = await storeDemoImage(
+      user.id,
+      `demo/${user.id}/avatar.jpg`,
+      `avatar-${index + 1}.jpg`
+    );
+    await db.update(authUser).set({ imageFileId: avatarId }).where(eq(authUser.id, user.id));
+    const sample = demoQuests[index]!;
+    const portfolioTitle = sample.portfolio;
+    let [portfolio] = await db
+      .select({ id: profilePortfolioItem.id })
+      .from(profilePortfolioItem)
+      .where(
+        and(
+          eq(profilePortfolioItem.userId, user.id),
+          eq(profilePortfolioItem.title, portfolioTitle)
+        )
+      )
+      .limit(1);
+    if (!portfolio)
+      [portfolio] = await db
+        .insert(profilePortfolioItem)
+        .values({
+          userId: user.id,
+          title: portfolioTitle,
+          description: sample.portfolioDescription,
+        })
+        .returning({ id: profilePortfolioItem.id });
+    if (!portfolio) throw new Error('Demo Portfolio was not created.');
+    const portfolioImageId = await storeDemoImage(
+      user.id,
+      `demo/${user.id}/portfolio.jpg`,
+      sample.imageAsset
+    );
+    await db
+      .insert(profilePortfolioItemImage)
+      .values({ portfolioItemId: portfolio.id, fileId: portfolioImageId, position: 0 })
+      .onConflictDoNothing();
+    const [certificate] = await db
+      .select({ id: profileCertificate.id })
+      .from(profileCertificate)
+      .where(
+        and(eq(profileCertificate.userId, user.id), eq(profileCertificate.name, sample.certificate))
+      )
+      .limit(1);
+    if (!certificate)
       await db.insert(profileCertificate).values({
         userId: user.id,
-        name: cert.name,
-        issuer: cert.issuer,
-        issuedAt: `202${2 + (i % 3)}-0${1 + (i % 9)}-01`,
+        name: sample.certificate,
+        issuer: 'KU Student Skills Workshop',
+        issuedAt: '2026-02-15',
       });
-    }
-
-    if (index % 2 === 0) {
-      const item = PORTFOLIO_ITEMS[index % PORTFOLIO_ITEMS.length];
-      if (item) {
-        await db.insert(profilePortfolioItem).values({
-          userId: user.id,
-          title: item.title,
-          description: item.description,
-        });
-      }
-    }
-
-    const name = `${demo.firstName} ${demo.lastName}`;
-    const cookie = writeDemoCookies ? await createDemoCookie(ctx, user.id) : undefined;
-
-    if (cookie) await writeSessionCookieToBruEnvironment(name, cookie);
-
-    results.push({ email, name, ...(cookie ? { cookie } : {}) });
-  }
-
-  console.log('Seeded demo users:\n');
-  for (const r of results) {
-    console.log(`${r.name} <${r.email}>`);
-    if (r.cookie) console.log(`  Cookie: ${r.cookie}\n`);
+    const [experience] = await db
+      .select({ id: profileWorkExperience.id })
+      .from(profileWorkExperience)
+      .where(
+        and(
+          eq(profileWorkExperience.userId, user.id),
+          eq(profileWorkExperience.title, sample.experience)
+        )
+      )
+      .limit(1);
+    if (!experience)
+      await db.insert(profileWorkExperience).values({
+        userId: user.id,
+        title: sample.experience,
+        employmentType: 'VOLUNTEER',
+        org: 'Kasetsart University Student Community',
+        description: sample.portfolioDescription,
+        startedAt: '2025-06-01',
+        endedAt: null,
+      });
+    console.log(`Prepared ${member.key}: ${member.firstName} ${member.lastName} <${member.email}>`);
   }
 };
 
-try {
-  await main();
-} finally {
-  await sql.end();
+if (import.meta.main) {
+  try {
+    await seedDemoMembers();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  } finally {
+    await sql.end();
+  }
 }

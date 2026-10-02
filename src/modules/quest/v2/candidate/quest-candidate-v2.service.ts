@@ -1,11 +1,14 @@
 import { db } from '@/database/client';
+import { isMemberRedFlaggedInTransaction } from '@/modules/admin/member-penalty';
 import {
   quest,
   questApiVersion,
   questCandidateApplicationV2,
+  questCandidateTeamV2,
+  questCandidateTeamV2Member,
 } from '@/database/schema/quest.schema';
 
-import { and, asc, eq, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, ne } from 'drizzle-orm';
 
 import {
   runQuestCommand,
@@ -29,6 +32,8 @@ import {
   type SelectionAssignmentRow,
   type SelectionSuccess,
 } from '../../shared/contracts/quest-selection.service';
+import { notifyCandidateRosterUpdate } from '../realtime';
+import { isReadableCandidateApplicationRoster } from '../shared/candidate-roster-access.policy';
 
 export const questV2CandidateApplicationCreateOperationScope =
   'quest.v2.candidate-application.create';
@@ -39,6 +44,78 @@ export const questV2CandidateApplicationSelectOperationScope =
 export const questV2CandidateApplicationRejectOperationScope =
   'quest.v2.candidate-application.reject';
 
+/** A Member's Candidate history is distinct from the Hirer's per-Quest roster. */
+export const listMyQuestV2CandidateApplications = async (memberId: string) => {
+  const applications = await db
+    .select({
+      id: questCandidateApplicationV2.id,
+      questId: questCandidateApplicationV2.questId,
+      state: questCandidateApplicationV2.state,
+      appliedAt: questCandidateApplicationV2.appliedAt,
+      title: quest.title,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
+      mode: quest.v2Mode,
+      participation: quest.v2Participation,
+      questState: quest.questStatus,
+    })
+    .from(questCandidateApplicationV2)
+    .innerJoin(quest, eq(quest.id, questCandidateApplicationV2.questId))
+    .where(
+      and(
+        eq(questCandidateApplicationV2.memberId, memberId),
+        eq(quest.apiVersion, questApiVersion.v2)
+      )
+    )
+    .orderBy(desc(questCandidateApplicationV2.appliedAt), desc(questCandidateApplicationV2.id));
+
+  const teams = await db
+    .select({
+      id: questCandidateTeamV2.id,
+      questId: questCandidateTeamV2.questId,
+      state: questCandidateTeamV2.state,
+      appliedAt: questCandidateTeamV2.createdAt,
+      title: quest.title,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
+      mode: quest.v2Mode,
+      participation: quest.v2Participation,
+      questState: quest.questStatus,
+    })
+    .from(questCandidateTeamV2Member)
+    .innerJoin(questCandidateTeamV2, eq(questCandidateTeamV2.id, questCandidateTeamV2Member.teamId))
+    .innerJoin(quest, eq(quest.id, questCandidateTeamV2.questId))
+    .where(
+      and(
+        eq(questCandidateTeamV2Member.memberId, memberId),
+        eq(quest.apiVersion, questApiVersion.v2)
+      )
+    )
+    .orderBy(desc(questCandidateTeamV2.createdAt), desc(questCandidateTeamV2.id));
+
+  return [
+    ...applications.map((row) => ({ ...row, kind: 'SINGLE' as const })),
+    ...teams.map((row) => ({ ...row, kind: 'TEAM' as const })),
+  ]
+    .sort((a, b) => b.appliedAt.getTime() - a.appliedAt.getTime() || b.id.localeCompare(a.id))
+    .map((row) => ({
+      id: row.id,
+      questId: row.questId,
+      memberId,
+      kind: row.kind,
+      state: row.state,
+      appliedAt: row.appliedAt.toISOString(),
+      quest: {
+        title: row.title,
+        startTime: row.startTime.toISOString(),
+        dueAt: row.dueAt?.toISOString() ?? null,
+        mode: row.mode,
+        participation: row.participation,
+        state: row.questState,
+      },
+    }));
+};
+
 type QuestV2CandidateApplicationRow = {
   id: string;
   questId: string;
@@ -48,7 +125,12 @@ type QuestV2CandidateApplicationRow = {
 };
 
 type CandidateApplicationBusinessOutcomeCode =
-  'already-exists' | 'hirer-not-allowed' | 'not-candidate' | 'not-open' | 'not-single';
+  | 'already-exists'
+  | 'hirer-not-allowed'
+  | 'not-candidate'
+  | 'not-open'
+  | 'not-single'
+  | 'red-flagged';
 
 type CandidateApplicationOutcomeCode =
   CandidateApplicationBusinessOutcomeCode | 'not-found' | QuestCommandOutcomeCode;
@@ -118,14 +200,7 @@ const applicationFromSnapshot = (value: unknown): QuestV2CandidateApplicationRow
   };
 };
 
-const isReadableQuest = (current: {
-  v2Mode: string | null;
-  v2Participation: string | null;
-  questState: string;
-}) =>
-  current.v2Mode === questV2Mode.candidate &&
-  current.v2Participation === questV2Participation.single &&
-  (current.questState === 'QUEST_OPEN' || current.questState === 'QUEST_ASSIGNED');
+const isReadableQuest = isReadableCandidateApplicationRoster;
 
 export const createQuestV2CandidateApplication = async (
   memberId: string,
@@ -190,6 +265,9 @@ export const createQuestV2CandidateApplication = async (
           )
           .limit(1);
         if (existing) return { kind: 'rejected', rejection: 'already-exists' };
+        if (await isMemberRedFlaggedInTransaction(transaction, memberId, now)) {
+          return { kind: 'rejected', rejection: 'red-flagged' };
+        }
 
         const [createdApplication] = await transaction
           .insert(questCandidateApplicationV2)
@@ -203,6 +281,11 @@ export const createQuestV2CandidateApplication = async (
         if (!createdApplication) throw new Error('Candidate application insert returned no row');
 
         const application = toApplicationRow(createdApplication);
+        await notifyCandidateRosterUpdate(transaction, questId, { kind: 'HIRER' });
+        await notifyCandidateRosterUpdate(transaction, questId, {
+          kind: 'APPLICATION',
+          applicationId: application.id,
+        });
         return {
           kind: 'success',
           result: application,
@@ -315,6 +398,11 @@ export const withdrawQuestV2CandidateApplication = async (
         }
 
         const updated = toApplicationRow(updatedApplication);
+        await notifyCandidateRosterUpdate(transaction, questId, { kind: 'HIRER' });
+        await notifyCandidateRosterUpdate(transaction, questId, {
+          kind: 'APPLICATION',
+          applicationId: updated.id,
+        });
         return {
           kind: 'success',
           result: updated,
@@ -415,6 +503,11 @@ export const rejectQuestV2CandidateApplication = async (
         }
 
         const updated = toApplicationRow(updatedApplication);
+        await notifyCandidateRosterUpdate(transaction, questId, { kind: 'HIRER' });
+        await notifyCandidateRosterUpdate(transaction, questId, {
+          kind: 'APPLICATION',
+          applicationId: updated.id,
+        });
         return {
           kind: 'success',
           result: updated,
@@ -527,11 +620,12 @@ export const selectQuestV2CandidateApplication = async (
         workerIds: [application.memberId],
         resourceId: (assignments) => assignments[0].id,
         flipCandidateRecords: async (tx) => {
-          await tx
+          const [selectedApplication] = await tx
             .update(questCandidateApplicationV2)
             .set({ state: 'APPLICATION_SELECTED' })
-            .where(eq(questCandidateApplicationV2.id, application.id));
-          await tx
+            .where(eq(questCandidateApplicationV2.id, application.id))
+            .returning({ id: questCandidateApplicationV2.id });
+          const rejectedApplications = await tx
             .update(questCandidateApplicationV2)
             .set({ state: 'APPLICATION_REJECTED' })
             .where(
@@ -540,7 +634,22 @@ export const selectQuestV2CandidateApplication = async (
                 eq(questCandidateApplicationV2.state, 'APPLICATION_APPLIED'),
                 ne(questCandidateApplicationV2.id, application.id)
               )
-            );
+            )
+            .returning({ id: questCandidateApplicationV2.id });
+
+          await notifyCandidateRosterUpdate(tx, questId, { kind: 'HIRER' });
+          if (selectedApplication) {
+            await notifyCandidateRosterUpdate(tx, questId, {
+              kind: 'APPLICATION',
+              applicationId: selectedApplication.id,
+            });
+          }
+          for (const rejectedApplication of rejectedApplications) {
+            await notifyCandidateRosterUpdate(tx, questId, {
+              kind: 'APPLICATION',
+              applicationId: rejectedApplication.id,
+            });
+          }
         },
       };
     },
@@ -550,7 +659,8 @@ export const selectQuestV2CandidateApplication = async (
 
 export const listQuestV2CandidateApplications = async (
   memberId: string,
-  questId: string
+  questId: string,
+  state?: string
 ): Promise<QuestV2CandidateApplicationReadOutcome> => {
   const [current] = await db
     .select({
@@ -577,7 +687,7 @@ export const listQuestV2CandidateApplications = async (
     )
     .orderBy(asc(questCandidateApplicationV2.appliedAt), asc(questCandidateApplicationV2.id));
   if (current.hirerId !== memberId && rows.length === 0) return { outcome: 'not-authorized' };
-  return rows.map(toApplicationRow);
+  return rows.map(toApplicationRow).filter((row) => state === undefined || row.state === state);
 };
 
 export const getQuestV2CandidateApplication = async (

@@ -1,5 +1,6 @@
 import { app } from '@/app';
 import { db, sql as postgresSql } from '@/database/client';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
@@ -105,6 +106,7 @@ type OpenApiOperation = {
       };
     };
   };
+  responses?: Record<string, unknown>;
 };
 
 const successfulWriter = {
@@ -211,6 +213,20 @@ const joinTeam = async (
 ) =>
   request(
     `/api/v2/quests/${questId}/teams/${teamId}/join`,
+    'POST',
+    memberId,
+    { 'content-type': 'application/json', 'idempotency-key': commandId },
+    JSON.stringify({ joinCode })
+  );
+
+const joinByCode = (
+  questId: string,
+  memberId: string,
+  joinCode: string,
+  commandId = `candidate-team-v2-join-by-code-${randomUUID()}`
+) =>
+  request(
+    `/api/v2/quests/${questId}/teams/join`,
     'POST',
     memberId,
     { 'content-type': 'application/json', 'idempotency-key': commandId },
@@ -328,11 +344,48 @@ afterEach(async () => {
 
 afterAll(async () => {
   if (!postgresAvailable) return;
+  await db.delete(auditRecord).where(inArray(auditRecord.actorUserId, memberIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(authUser).where(inArray(authUser.id, memberIds));
 });
 
 describe('Quest Candidate Team API v2', () => {
+  it('does not submit a Candidate Team with a Member who has an active Red Flag', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const questId = await createOpenGroupCandidateQuest({ headcount: 2 });
+    const team = await createTeam(questId, candidate.id, 2);
+    const joined = await joinTeam(questId, team.id, secondCandidate.id, team.joinCode);
+    expect(joined.status).toBe(200);
+    const submissionFileId = await createFile(candidate.id);
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) })
+      .where(eq(authUser.id, secondCandidate.id));
+
+    try {
+      const response = await request(
+        `/api/v2/quests/${questId}/teams/${team.id}/submit`,
+        'POST',
+        candidate.id,
+        { 'content-type': 'application/json', 'idempotency-key': `red-flag-${randomUUID()}` },
+        JSON.stringify({ text: 'Submitted team', fileIds: [submissionFileId] })
+      );
+      expect(response.status).toBe(409);
+      expect((await response.json()).error.code).toBe('MEMBER_RED_FLAGGED');
+      const [storedTeam] = await db
+        .select({ state: questCandidateTeamV2.state })
+        .from(questCandidateTeamV2)
+        .where(eq(questCandidateTeamV2.id, team.id));
+      expect(storedTeam?.state).toBe('TEAM_FORMING');
+    } finally {
+      await db
+        .update(authUser)
+        .set({ redFlagExpiresAt: null })
+        .where(eq(authUser.id, secondCandidate.id));
+    }
+  });
+
   it('does not accept Candidate Team commands after the start boundary', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenGroupCandidateQuest({
@@ -373,6 +426,7 @@ describe('Quest Candidate Team API v2', () => {
     const submit = document.paths['/api/v2/quests/{questId}/teams/{teamId}/submit']?.post;
     const select = document.paths['/api/v2/quests/{questId}/teams/{teamId}/select']?.post;
     const reject = document.paths['/api/v2/quests/{questId}/teams/{teamId}/reject']?.post;
+    const fileLink = document.paths['/api/v2/quests/{questId}/teams/{teamId}/files/{fileId}']?.get;
 
     expect(collection?.post?.operationId).toBe('createQuestCandidateTeamV2');
     expect(collection?.get?.operationId).toBe('listQuestCandidateTeamsV2');
@@ -385,6 +439,15 @@ describe('Quest Candidate Team API v2', () => {
     expect(submit?.operationId).toBe('submitQuestCandidateTeamV2');
     expect(select?.operationId).toBe('selectQuestCandidateTeamV2');
     expect(reject?.operationId).toBe('rejectQuestCandidateTeamV2');
+    expect(fileLink?.operationId).toBe('getQuestCandidateTeamFileV2');
+    expect(fileLink?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(fileLink?.responses).toEqual(
+      expect.objectContaining({
+        '401': expect.anything(),
+        '404': expect.anything(),
+        '503': expect.anything(),
+      })
+    );
 
     expect(collection?.post?.requestBody?.content?.['application/json']?.schema).toMatchObject({
       additionalProperties: false,
@@ -454,6 +517,38 @@ describe('Quest Candidate Team API v2', () => {
     expect((await memberList.json()).data.items).toEqual([
       expect.objectContaining({ id: team.id, joinCode: null }),
     ]);
+    const withSummaries = await request(`/api/v2/quests/${questId}/teams`, 'GET', hirer.id);
+    expect((await withSummaries.json()).data.items[0]).toMatchObject({
+      leaderId: candidate.id,
+      leader: { id: candidate.id, displayName: 'Candidate Worker', avatar: null },
+      members: [
+        {
+          memberId: candidate.id,
+          member: { id: candidate.id, displayName: 'Candidate Worker' },
+        },
+      ],
+    });
+
+    const forming = await request(
+      `/api/v2/quests/${questId}/teams?state=TEAM_FORMING`,
+      'GET',
+      hirer.id
+    );
+    expect(forming.status).toBe(200);
+    expect((await forming.json()).data.items).toHaveLength(1);
+    const submitted = await request(
+      `/api/v2/quests/${questId}/teams?state=TEAM_SUBMITTED`,
+      'GET',
+      hirer.id
+    );
+    expect(submitted.status).toBe(200);
+    expect((await submitted.json()).data.items).toEqual([]);
+    const invalidState = await request(
+      `/api/v2/quests/${questId}/teams?state=NOPE`,
+      'GET',
+      hirer.id
+    );
+    expect(invalidState.status).toBe(400);
 
     const detail = await request(`/api/v2/quests/${questId}/teams/${team.id}`, 'GET', hirer.id);
     expect(detail.status).toBe(200);
@@ -792,6 +887,7 @@ describe('Quest Candidate Team API v2', () => {
     const read = await request(`/api/v2/quests/${questId}/teams/${team.id}`, 'GET', candidate.id);
     expect(read.status).toBe(200);
     const readTeam = (await read.json()).data as Record<string, unknown>;
+
     expect(readTeam.joinCode).toBeNull();
     expect(readTeam.joinCodeExpiresAt).toBe(team.joinCodeExpiresAt);
 
@@ -804,6 +900,107 @@ describe('Quest Candidate Team API v2', () => {
     );
     expect(secondTeam.status).toBe(409);
     expect((await secondTeam.json()).error.code).toBe('TEAM_MEMBERSHIP_ALREADY_EXISTS');
+  });
+
+  it('joins by quest-scoped code and replays after the code is regenerated', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId);
+
+    const joined = await joinByCode(
+      questId,
+      secondCandidate.id,
+      ` ${team.joinCode.toLowerCase()} `,
+      'candidate-team-v2-join-by-code'
+    );
+    expect(joined.status).toBe(200);
+    const joinedBody = (await joined.json()).data;
+    expect(joinedBody).toMatchObject({
+      id: team.id,
+      questId,
+      members: [
+        expect.objectContaining({ memberId: candidate.id }),
+        expect.objectContaining({ memberId: secondCandidate.id }),
+      ],
+    });
+
+    const regenerated = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/join-code`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': 'candidate-team-v2-join-by-code-regenerate' }
+    );
+    expect(regenerated.status).toBe(200);
+    expect((await regenerated.json()).data.joinCode).not.toBe(team.joinCode);
+
+    const oldCode = await joinByCode(
+      questId,
+      thirdCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-join-by-code-regenerated'
+    );
+    expect(oldCode.status).toBe(409);
+    expect((await oldCode.json()).error.code).toBe('JOIN_CODE_INVALID');
+
+    const replay = await joinByCode(
+      questId,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-join-by-code'
+    );
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data).toEqual(joinedBody);
+  });
+
+  it('hides team metadata for invalid codes and returns expiry for matching expired codes', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId);
+
+    const invalid = await joinByCode(
+      questId,
+      secondCandidate.id,
+      'NOTACODE',
+      'candidate-team-v2-join-by-code-invalid'
+    );
+    expect(invalid.status).toBe(409);
+    expect(await invalid.json()).toEqual({
+      success: false,
+      error: { code: 'JOIN_CODE_INVALID', message: 'The Join Code is invalid' },
+    });
+
+    await db
+      .update(questCandidateTeamV2)
+      .set({ joinCodeExpiresAt: new Date('2020-01-01T00:00:00.000Z') })
+      .where(eq(questCandidateTeamV2.id, team.id));
+    const expired = await joinByCode(
+      questId,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-join-by-code-expired'
+    );
+    expect(expired.status).toBe(409);
+    expect((await expired.json()).error.code).toBe('JOIN_CODE_EXPIRED');
+  });
+
+  it('enforces Candidate Team capacity for concurrent code-only joins', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId, candidate.id, 2);
+
+    const responses = await Promise.all([
+      joinByCode(questId, secondCandidate.id, team.joinCode, 'candidate-team-v2-code-cap-one'),
+      joinByCode(questId, thirdCandidate.id, team.joinCode, 'candidate-team-v2-code-cap-two'),
+    ]);
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 409]);
+    const rejected = responses.find(({ status }) => status === 409);
+    expect((await rejected!.json()).error.code).toBe('TEAM_FULL');
+
+    const detail = await request(`/api/v2/quests/${questId}/teams/${team.id}`, 'GET', hirer.id);
+    expect((await detail.json()).data.members).toHaveLength(2);
   });
 
   it('enforces current Join Code, expiry, regeneration, membership uniqueness, and team capacity', async () => {
@@ -1104,6 +1301,116 @@ describe('Quest Candidate Team API v2', () => {
     );
     expect(joinAfterSubmit.status).toBe(409);
     expect((await joinAfterSubmit.json()).error.code).toBe('TEAM_NOT_FORMING');
+  });
+  it('returns expiring links for submitted Candidate Team files to Hirers and Team Members only', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const questId = await createOpenGroupCandidateQuest();
+    const team = await createTeam(questId, candidate.id, 2, 'candidate-team-v2-file-link-create');
+    await joinTeam(
+      questId,
+      team.id,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-file-link-join'
+    );
+    const imageFileId = await createFile(candidate.id, 'image/png', 100);
+    const documentFileId = await createFile(candidate.id, 'application/pdf', 200);
+    const submitted = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/submit`,
+      'POST',
+      candidate.id,
+      {
+        'content-type': 'application/json',
+        'idempotency-key': 'candidate-team-v2-file-link-submit',
+      },
+      JSON.stringify({
+        text: 'Team work with image and document',
+        fileIds: [imageFileId, documentFileId],
+      })
+    );
+    expect(submitted.status).toBe(200);
+
+    const fileLinks = await Promise.all(
+      [hirer.id, secondCandidate.id].map(async (readerId) => {
+        const response = await request(
+          `/api/v2/quests/${questId}/teams/${team.id}/files/${imageFileId}`,
+          'GET',
+          readerId
+        );
+        expect(response.status).toBe(200);
+        expect(response.headers.get('cache-control')).toBe('no-store');
+        return (await response.json()).data as {
+          fileId: string;
+          contentType: string;
+          sizeBytes: number;
+          position: number;
+          url: string;
+          urlExpiresAt: string;
+        };
+      })
+    );
+    for (const body of fileLinks) {
+      expect(body).toMatchObject({
+        fileId: imageFileId,
+        contentType: 'image/png',
+        sizeBytes: 100,
+        position: 0,
+      });
+      expect(new URL(body.url).protocol).toMatch(/^https?:$/);
+      expect(Date.parse(body.urlExpiresAt)).toBeGreaterThan(Date.now());
+      expect(Date.parse(body.urlExpiresAt)).toBeLessThan(Date.now() + 16 * 60 * 1000);
+    }
+
+    const unrelatedReader = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/files/${imageFileId}`,
+      'GET',
+      unrelated.id
+    );
+    expect(unrelatedReader.status).toBe(404);
+  });
+  it('does not link forming, unassociated, or deleted Candidate Team files', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const questId = await createOpenGroupCandidateQuest();
+    const team = await createTeam(
+      questId,
+      candidate.id,
+      2,
+      'candidate-team-v2-file-link-guard-create'
+    );
+    const formingFileId = await createFile(candidate.id, 'image/png');
+    const path = `/api/v2/quests/${questId}/teams/${team.id}/files`;
+    const formingLink = await request(`${path}/${formingFileId}`, 'GET', hirer.id);
+    expect(formingLink.status).toBe(404);
+
+    await joinTeam(
+      questId,
+      team.id,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-file-link-guard-join'
+    );
+    const submittedFileId = await createFile(candidate.id, 'image/png');
+    const unassociatedFileId = await createFile(candidate.id, 'image/png');
+    const submitted = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/submit`,
+      'POST',
+      candidate.id,
+      {
+        'content-type': 'application/json',
+        'idempotency-key': 'candidate-team-v2-file-link-guard-submit',
+      },
+      JSON.stringify({ text: 'Submitted team', fileIds: [submittedFileId] })
+    );
+    expect(submitted.status).toBe(200);
+
+    const unassociatedLink = await request(`${path}/${unassociatedFileId}`, 'GET', hirer.id);
+    expect(unassociatedLink.status).toBe(404);
+
+    await db.update(file).set({ deletedAt: new Date() }).where(eq(file.id, submittedFileId));
+    const deletedLink = await request(`${path}/${submittedFileId}`, 'GET', hirer.id);
+    expect(deletedLink.status).toBe(404);
   });
 
   it('uploads a valid Team Leader PDF and accepts it when the full Candidate Team submits', async () => {

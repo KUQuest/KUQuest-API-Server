@@ -1,5 +1,6 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import {
   proofSubmission,
@@ -10,6 +11,7 @@ import {
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
+import { autoApproveDueProofs } from '@/modules/quest/v1';
 import type { QuestWorkChatMembershipTransition } from '@/modules/quest';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 import {
@@ -491,6 +493,46 @@ describe('Quest terminal settlement HTTP contract', () => {
         .from(questSettlementCommand)
         .where(eq(questSettlementCommand.questId, questId))
     ).toHaveLength(1);
+  });
+
+  it('attributes automatic legacy completion to SYSTEM', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest('QUEST_SUBMITTED', [workerIds[0]!]);
+    const proofId = randomUUID();
+    const approvalTime = new Date();
+    await db.insert(proofSubmission).values({
+      id: proofId,
+      questId,
+      workerId: workerIds[0]!,
+      submittedByUserId: workerIds[0]!,
+      content: 'Automatically approved work',
+      submissionStatus: 'PROOF_PENDING',
+      submittedAt: new Date(approvalTime.getTime() - 25 * 60 * 60 * 1000),
+    });
+
+    const approvedProofIds = await autoApproveDueProofs(approvalTime);
+    const [completedQuest] = await db
+      .select({ status: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, questId));
+    const stateChanges = await db
+      .select()
+      .from(auditRecord)
+      .where(eq(auditRecord.resourceId, questId));
+    const completion = stateChanges.find(
+      (event) =>
+        event.action === 'QUEST_STATE_CHANGED' &&
+        event.resourceType === 'QUEST' &&
+        event.newValue?.state === 'QUEST_COMPLETED'
+    );
+
+    expect(approvedProofIds).toContain(proofId);
+    expect(completedQuest?.status).toBe('QUEST_COMPLETED');
+    expect(completion).toMatchObject({
+      actorType: 'SYSTEM',
+      actorUserId: null,
+      newValue: { state: 'QUEST_COMPLETED' },
+    });
   });
 
   it('requires a command key before authentication', async () => {

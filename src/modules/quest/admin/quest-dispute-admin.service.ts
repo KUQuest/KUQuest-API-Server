@@ -9,6 +9,7 @@ import {
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
 import { file } from '@/database/schema/file.schema';
+import { formatDisputeDisplayId, formatDisplayIdSql } from '@/modules/admin';
 import {
   createAdminActionService,
   type AdminActionResult,
@@ -22,11 +23,38 @@ import {
 } from '@/modules/wallet';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
+import {
+  buildStatusCounts,
+  containsLikeQueryPattern,
+  ilikeContains as adminListSearchValue,
+  isoDateSearchText as adminListSearchDate,
+} from '@/shared/list-search';
 
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, count, eq, or, sql } from 'drizzle-orm';
 
+import { readQuestEscrow } from '../shared/escrow/quest-escrow.service';
+import { notifyQuestUpdate } from '../v2/realtime';
 import { questV2ProofStorage } from '../v2/proof/quest-proof-v2.storage';
 
+const dayMs = 24 * 60 * 60 * 1000;
+
+/** Rulebook: a Hirer or Worker may self-file within 1 day of the Quest failing. */
+export const disputeSelfFileWindowMs = dayMs;
+
+/** Tells the filer that their Dispute Case changed; clients refetch the Quest. */
+const notifyDisputeCaseUpdated = (
+  transaction: WalletTransaction,
+  record: Pick<typeof adminDisputeCase.$inferSelect, 'questId' | 'filerUserId'>
+) =>
+  notifyQuestUpdate(transaction, {
+    questId: record.questId,
+    recipientMemberIds: [record.filerUserId],
+    changeType: 'DISPUTE_CASE_UPDATED',
+  });
+
+/** Rulebook: Hirer/Worker self-file within 1 day of failure; Admin on a Worker's behalf within 5. */
+const disputeFilingWindowMs = (adminOpened: boolean) =>
+  adminOpened ? 5 * dayMs : disputeSelfFileWindowMs;
 export type DisputeCaseStatus = (typeof disputeCaseStatuses)[number];
 export type DisputeCaseOutcome = 'DISPUTE_CASE_DISMISSED' | 'DISPUTE_CASE_RESOLVED';
 
@@ -145,6 +173,7 @@ export type AdminDisputeEvidence = {
 };
 
 export type ListAdminDisputeCasesInput = {
+  q?: string;
   status?: DisputeCaseStatus;
   limit?: number;
   cursor?: CursorPayload;
@@ -180,7 +209,7 @@ export const summaryFromRecord = (
   record: typeof adminDisputeCase.$inferSelect
 ): AdminDisputeCaseSummary => ({
   id: record.id,
-  displayId: `DSP-${record.publicSequence.toString().padStart(6, '0')}`,
+  displayId: formatDisputeDisplayId(record.publicSequence),
   questId: record.questId,
   filerUserId: record.filerUserId,
   openedByAdminId: record.openedByAdminId,
@@ -243,9 +272,9 @@ export const createAdminDisputeCaseInTransaction = async (
     );
   }
 
-  const filingWindow = input.openedByAdminId ? 5 : 1;
+  const filingWindow = disputeFilingWindowMs(Boolean(input.openedByAdminId));
   const failedAt = currentQuest.failedAt ?? currentQuest.updatedAt;
-  if (now.getTime() > failedAt.getTime() + filingWindow * 24 * 60 * 60 * 1000) {
+  if (now.getTime() > failedAt.getTime() + filingWindow) {
     throw new AdminDisputeCaseError(
       'DISPUTE_CASE_WINDOW_EXPIRED',
       'The Dispute Case filing window has expired.'
@@ -289,7 +318,10 @@ export const createAdminDisputeCaseInTransaction = async (
       target: [adminDisputeCase.questId, adminDisputeCase.filerUserId],
     })
     .returning();
-  if (created) return created;
+  if (created) {
+    await notifyDisputeCaseUpdated(transaction, created);
+    return created;
+  }
   const [concurrent] = await transaction
     .select()
     .from(adminDisputeCase)
@@ -309,6 +341,7 @@ export const createAdminDisputeCase = async (input: CreateAdminDisputeCaseInput)
   db.transaction((transaction) => createAdminDisputeCaseInTransaction(transaction, input));
 
 export const listAdminDisputeCases = async ({
+  q,
   status = 'DISPUTE_CASE_PENDING',
   limit = 20,
   cursor,
@@ -317,23 +350,60 @@ export const listAdminDisputeCases = async ({
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     throw new CursorInputError('INVALID_LIMIT', 'Dispute Case limit must be between 1 and 50.');
   }
-  const page = await readKeysetPage({
-    anchor: { time: adminDisputeCase.createdAt, id: adminDisputeCase.id },
-    cursor,
-    limit,
-    sort,
-    where: eq(adminDisputeCase.status, status),
-    read: ({ where, orderBy, limit: probe }) =>
-      db
-        .select()
-        .from(adminDisputeCase)
-        .where(where)
-        .orderBy(...orderBy)
-        .limit(probe),
-    rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
-    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'Dispute cursor is invalid.'),
-  });
-  return { items: page.rows.map(summaryFromRecord), nextCursor: page.nextCursor };
+
+  const searchPattern = containsLikeQueryPattern(q);
+  const search = searchPattern
+    ? or(
+        adminListSearchValue(sql`${adminDisputeCase.id}::text`, searchPattern),
+        adminListSearchValue(
+          formatDisplayIdSql('dispute', adminDisputeCase.publicSequence),
+          searchPattern
+        ),
+        adminListSearchValue(sql`${adminDisputeCase.questId}::text`, searchPattern),
+        adminListSearchValue(sql`${adminDisputeCase.filerUserId}::text`, searchPattern),
+        adminListSearchValue(sql`${adminDisputeCase.openedByAdminId}::text`, searchPattern),
+        adminListSearchValue(adminDisputeCase.status, searchPattern),
+        adminListSearchValue(sql`${adminDisputeCase.version}::text`, searchPattern),
+        adminListSearchValue(sql`${adminDisputeCase.resolvedWorkerId}::text`, searchPattern),
+        adminListSearchValue(sql`${adminDisputeCase.resolvedAmountSatang}::text`, searchPattern),
+        adminListSearchValue(sql`${adminDisputeCase.resolvedByAdminId}::text`, searchPattern),
+        adminListSearchValue(adminListSearchDate(adminDisputeCase.resolvedAt), searchPattern),
+        adminListSearchValue(adminListSearchDate(adminDisputeCase.createdAt), searchPattern),
+        adminListSearchValue(adminListSearchDate(adminDisputeCase.updatedAt), searchPattern)
+      )
+    : undefined;
+  const [page, statusRows] = await Promise.all([
+    readKeysetPage({
+      anchor: { time: adminDisputeCase.createdAt, id: adminDisputeCase.id },
+      cursor,
+      limit,
+      sort,
+      where: and(search, eq(adminDisputeCase.status, status)),
+      read: ({ where, orderBy, limit: probe }) =>
+        db
+          .select()
+          .from(adminDisputeCase)
+          .where(where)
+          .orderBy(...orderBy)
+          .limit(probe),
+      rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+      invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'Dispute cursor is invalid.'),
+    }),
+    db
+      .select({ status: adminDisputeCase.status, count: count() })
+      .from(adminDisputeCase)
+      .where(search)
+      .groupBy(adminDisputeCase.status),
+  ]);
+
+  const countsByStatus = buildStatusCounts(disputeCaseStatuses, statusRows);
+
+  return {
+    items: page.rows.map(summaryFromRecord),
+    nextCursor: page.nextCursor,
+    totalCount: countsByStatus[status],
+    countsByStatus,
+  };
 };
 
 export const getAdminDisputeCase = async (
@@ -665,11 +735,8 @@ export const resolveAdminDisputeCase = async (
             );
           }
           const failedAt = currentQuest.failedAt ?? currentQuest.updatedAt;
-          const filingWindow = current.openedByAdminId ? 5 : 1;
-          if (
-            current.createdAt.getTime() >
-            failedAt.getTime() + filingWindow * 24 * 60 * 60 * 1000
-          ) {
+          const filingWindow = disputeFilingWindowMs(Boolean(current.openedByAdminId));
+          if (current.createdAt.getTime() > failedAt.getTime() + filingWindow) {
             throw new AdminDisputeCaseError(
               'DISPUTE_CASE_WINDOW_EXPIRED',
               'Dispute Case was opened after its allowed filing window.'
@@ -699,6 +766,7 @@ export const resolveAdminDisputeCase = async (
                 'DISPUTE_CASE_NOT_PENDING',
                 'Dispute Case changed before dismissal.'
               );
+            await notifyDisputeCaseUpdated(transaction, updated);
             return summaryResultInTransaction(transaction, updated.id);
           }
 
@@ -756,10 +824,106 @@ export const resolveAdminDisputeCase = async (
               'DISPUTE_CASE_NOT_PENDING',
               'Dispute Case changed before resolution.'
             );
+          await notifyDisputeCaseUpdated(transaction, updated);
           return summaryResultInTransaction(transaction, updated.id);
         },
       };
     },
   });
   return { ...result, outcome: input.outcome };
+};
+
+export type QuestDisputeSummary = {
+  canFile: boolean;
+  windowEndsAt: Date | null;
+  myCase: { id: string; displayId: string; status: DisputeCaseStatus; createdAt: Date } | null;
+};
+
+/**
+ * The viewer's Dispute view of a Quest. Null unless the Quest is `QUEST_FAILED`.
+ * `canFile` and `windowEndsAt` follow the self-file window used by `createAdminDisputeCase`.
+ */
+export const readQuestDisputeSummary = async (
+  viewerId: string,
+  questId: string,
+  now = new Date()
+): Promise<QuestDisputeSummary | null> => {
+  const [row] = await db
+    .select({
+      hirerId: quest.hirerId,
+      questStatus: quest.questStatus,
+      failedAt: quest.failedAt,
+      updatedAt: quest.updatedAt,
+    })
+    .from(quest)
+    .where(eq(quest.id, questId))
+    .limit(1);
+  if (!row || row.questStatus !== 'QUEST_FAILED') return null;
+
+  const [existing] = await db
+    .select()
+    .from(adminDisputeCase)
+    .where(and(eq(adminDisputeCase.questId, questId), eq(adminDisputeCase.filerUserId, viewerId)))
+    .limit(1);
+  const [assignment] =
+    viewerId === row.hirerId
+      ? [undefined]
+      : await db
+          .select({ id: questAssignment.id })
+          .from(questAssignment)
+          .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, viewerId)))
+          .limit(1);
+  const endsAt = new Date((row.failedAt ?? row.updatedAt).getTime() + disputeFilingWindowMs(false));
+  const open = now.getTime() <= endsAt.getTime();
+  return {
+    canFile: open && !existing && (viewerId === row.hirerId || assignment !== undefined),
+    windowEndsAt: open ? endsAt : null,
+    myCase: existing
+      ? {
+          id: existing.id,
+          displayId: formatDisputeDisplayId(existing.publicSequence),
+          status: existing.status,
+          createdAt: existing.createdAt,
+        }
+      : null,
+  };
+};
+
+export type QuestMoneyHold = {
+  status: 'HELD' | 'RELEASED';
+  releasesAt: Date;
+  /** Satang still held in the Hirer's Funding Reservation; null for a Worker viewer. */
+  heldSatang: number | null;
+};
+
+/**
+ * The 7-day hold on a failed Quest. It ends at `failedAt + 7 days` and a Dispute Case does not
+ * move that instant (Admin Rulebook), so `releasesAt` stays the nominal time even if the
+ * lifecycle worker runs late. Null unless the Quest is `QUEST_FAILED`.
+ */
+export const readQuestMoneyHold = async (
+  viewerId: string,
+  questId: string
+): Promise<QuestMoneyHold | null> => {
+  const [row] = await db
+    .select({
+      hirerId: quest.hirerId,
+      questStatus: quest.questStatus,
+      failedAt: quest.failedAt,
+      updatedAt: quest.updatedAt,
+    })
+    .from(quest)
+    .where(eq(quest.id, questId))
+    .limit(1);
+  if (!row || row.questStatus !== 'QUEST_FAILED') return null;
+  const releasesAt = new Date((row.failedAt ?? row.updatedAt).getTime() + 7 * dayMs);
+  const escrow = await db.transaction((transaction) =>
+    readQuestEscrow(transaction, { ownerUserId: row.hirerId, questId })
+  );
+  const held = escrow?.status === 'ACTIVE';
+  return {
+    status: held ? 'HELD' : 'RELEASED',
+    releasesAt,
+    heldSatang: viewerId === row.hirerId ? (held ? escrow.remainingSatang : 0) : null,
+  };
 };

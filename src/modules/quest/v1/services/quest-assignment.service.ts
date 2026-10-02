@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { quest, questAssignment, questDirectJoinCommand } from '@/database/schema/quest.schema';
+import { isMemberRedFlaggedInTransaction } from '@/modules/admin/member-penalty';
 
 import { and, eq, sql } from 'drizzle-orm';
 
@@ -43,6 +44,7 @@ type AssignmentRow = {
 type DirectJoinOutcomeCode =
   | 'not-found'
   | 'not-open'
+  | 'red-flagged'
   | 'not-direct-join'
   | 'hirer-not-allowed'
   | 'already-assigned'
@@ -263,6 +265,9 @@ export const joinNoCandidateQuest = async (
     if (current.questStatus !== questStatus.open || current.hiddenAt !== null) {
       return discardCommand('not-open');
     }
+    if (await isMemberRedFlaggedInTransaction(transaction, workerId, now)) {
+      return discardCommand('red-flagged');
+    }
 
     const [activeCount] = await transaction
       .select({ count: sql<number>`count(*)` })
@@ -306,6 +311,7 @@ export const joinNoCandidateQuest = async (
         now,
         workChat: [transition],
         writer,
+        actor: { actorType: 'MEMBER', actorUserId: workerId },
       });
     } else {
       // The roster is not full yet: the Quest stays QUEST_OPEN, so only the Work

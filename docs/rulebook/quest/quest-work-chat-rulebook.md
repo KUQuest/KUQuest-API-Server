@@ -5,7 +5,7 @@ Status: accepted
 Domain: Quest and Work Chat
 Authority: Defines accepted Quest and Work Chat policy and overrides Legacy Implementation in this domain. For shared flows, it owns Quest State and Assignment behavior; the Admin Rulebook owns Admin actions and timing.
 Approved by: Domain Owner
-Approved at: 2026-08-31
+Approved at: 2026-09-25
 
 This document and its disclosed sub-contracts define the accepted target behavior for Candidate Inquiry Conversations, Work Chat, Quest Conditions, Quest Edits, Sent Work, Proof Submissions, Reviews, Notifications, and Reward flow.
 

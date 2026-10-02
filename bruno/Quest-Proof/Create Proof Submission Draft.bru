@@ -1,0 +1,40 @@
+meta {
+  name: Create Proof Submission Draft
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/proof-submissions
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "description": "ส่งผลงานออกแบบโปสเตอร์เสร็จเรียบร้อยครับ ขนาด A3 สีเขียว KU",
+    "fileIds": []
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && data.data && data.data.id) {
+    bru.setEnvVar("proofSubmissionId", data.data.id);
+  }
+}
+
+docs {
+  Worker creates an unsent Proof Submission Draft for an in-progress v2 Quest.
+  Captures proofSubmissionId into the active environment on success.
+}

@@ -3,6 +3,7 @@ import { apiError, apiSuccess } from '@/shared/api-response';
 
 import type {
   QuestV2CandidateApplicationDetailParams,
+  QuestV2CandidateApplicationListQuery,
   QuestV2CandidateApplicationParams,
   QuestV2CandidateSelectionParams,
 } from './quest-candidate-v2.schema';
@@ -22,6 +23,7 @@ import {
   requireQuestCommandId,
 } from '../../shared/command/quest-command.controller';
 import { WorkChatTransitionError } from '../../shared/work-chat/quest-work-chat.port';
+import { loadMemberSummaries } from '../../shared/member-summary';
 
 type Application = Extract<QuestV2CandidateApplicationOutcome, { id: string }>;
 type ApplicationError = Exclude<QuestV2CandidateApplicationOutcome, Application>;
@@ -30,13 +32,22 @@ type RejectError = Exclude<QuestV2CandidateApplicationRejectOutcome, Application
 type WithdrawError = Exclude<WithdrawOutcome, Application>;
 type SelectionError = Exclude<QuestV2CandidateSelectionOutcome, { assignments: unknown[] }>;
 
-const serializeApplication = (application: Application) => ({
-  id: application.id,
-  questId: application.questId,
-  memberId: application.memberId,
-  state: application.state,
-  appliedAt: application.appliedAt.toISOString(),
-});
+const serializeApplications = async (applications: Application[]) => {
+  const memberOf = await loadMemberSummaries(applications.map(({ memberId }) => memberId));
+  return applications.map((application) => ({
+    id: application.id,
+    questId: application.questId,
+    memberId: application.memberId,
+    member: memberOf(application.memberId),
+    state: application.state,
+    appliedAt: application.appliedAt.toISOString(),
+  }));
+};
+
+const serializeApplication = async (application: Application) => {
+  const [serialized] = await serializeApplications([application]);
+  return serialized;
+};
 
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 409;
@@ -64,6 +75,13 @@ const mapApplicationError = (set: AuthedContext['set'], outcome: ApplicationErro
   if (outcome.outcome === 'not-open') {
     return conflict(set, 'QUEST_NOT_OPEN', 'Only an open Quest accepts Candidate applications');
   }
+  if (outcome.outcome === 'red-flagged') {
+    return conflict(
+      set,
+      'MEMBER_RED_FLAGGED',
+      'A Member with an active Red Flag cannot apply as a Candidate'
+    );
+  }
   if (outcome.outcome === 'already-exists') {
     return conflict(
       set,
@@ -89,20 +107,28 @@ export const createQuestV2CandidateApplicationController = async ({
     commandId
   );
   if ('outcome' in result) return mapApplicationError(set, result);
-  return apiSuccess(serializeApplication(result));
+  return apiSuccess(await serializeApplication(result));
 };
 
 export const listQuestV2CandidateApplicationsController = async ({
   params,
+  query,
   session,
   set,
-}: AuthedContext & { params: QuestV2CandidateApplicationParams }) => {
-  const result = await listQuestV2CandidateApplications(session.user.id, params.questId);
+}: AuthedContext & {
+  params: QuestV2CandidateApplicationParams;
+  query: QuestV2CandidateApplicationListQuery;
+}) => {
+  const result = await listQuestV2CandidateApplications(
+    session.user.id,
+    params.questId,
+    query.state
+  );
   if ('outcome' in result) {
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
-  return apiSuccess({ items: result.map(serializeApplication) });
+  return apiSuccess({ items: await serializeApplications(result) });
 };
 
 export const getQuestV2CandidateApplicationController = async ({
@@ -122,7 +148,7 @@ export const getQuestV2CandidateApplicationController = async ({
       result.outcome === 'not-found' ? 'Quest not found' : 'Application not found'
     );
   }
-  return apiSuccess(serializeApplication(result));
+  return apiSuccess(await serializeApplication(result));
 };
 
 const mapWithdrawError = (set: AuthedContext['set'], outcome: WithdrawError) => {
@@ -210,7 +236,7 @@ export const rejectQuestV2CandidateApplicationController = async ({
     commandId
   );
   if ('outcome' in result) return mapRejectError(set, result);
-  return apiSuccess(serializeApplication(result));
+  return apiSuccess(await serializeApplication(result));
 };
 
 export const withdrawQuestV2CandidateApplicationController = async ({
@@ -229,26 +255,32 @@ export const withdrawQuestV2CandidateApplicationController = async ({
     commandId
   );
   if ('outcome' in result) return mapWithdrawError(set, result);
-  return apiSuccess(serializeApplication(result));
+  return apiSuccess(await serializeApplication(result));
 };
 
-const serializeSelectionAssignment = (assignment: {
-  id: string;
-  questId: string;
-  workerId: string;
-  state: string;
-  questState: 'QUEST_ASSIGNED';
-  startedAt: Date | null;
-  createdAt: Date;
-}) => ({
-  id: assignment.id,
-  questId: assignment.questId,
-  workerId: assignment.workerId,
-  state: assignment.state,
-  questState: assignment.questState,
-  startedAt: assignment.startedAt?.toISOString() ?? null,
-  createdAt: assignment.createdAt.toISOString(),
-});
+const serializeSelectionAssignments = async (
+  assignments: Array<{
+    id: string;
+    questId: string;
+    workerId: string;
+    state: string;
+    questState: 'QUEST_ASSIGNED';
+    startedAt: Date | null;
+    createdAt: Date;
+  }>
+) => {
+  const memberOf = await loadMemberSummaries(assignments.map(({ workerId }) => workerId));
+  return assignments.map((assignment) => ({
+    id: assignment.id,
+    questId: assignment.questId,
+    workerId: assignment.workerId,
+    member: memberOf(assignment.workerId),
+    state: assignment.state,
+    questState: assignment.questState,
+    startedAt: assignment.startedAt?.toISOString() ?? null,
+    createdAt: assignment.createdAt.toISOString(),
+  }));
+};
 
 const mapSelectionError = (set: AuthedContext['set'], outcome: SelectionError) => {
   if (outcome.outcome === 'not-found') {
@@ -309,7 +341,7 @@ export const selectQuestV2CandidateApplicationController = async ({
     if ('outcome' in result) return mapSelectionError(set, result);
     return apiSuccess({
       questState: result.questState,
-      assignments: result.assignments.map(serializeSelectionAssignment),
+      assignments: await serializeSelectionAssignments(result.assignments),
     });
   } catch (error) {
     if (error instanceof WorkChatTransitionError) {

@@ -1,4 +1,5 @@
 import { db, sql } from '@/database/client';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import {
   quest,
@@ -12,6 +13,7 @@ import {
   listTeamInvitations,
   listTeamMembers,
   listTeams,
+  submitTeam,
   updateTeam,
 } from '@/modules/quest/v1';
 
@@ -83,6 +85,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db
+    .delete(auditRecord)
+    .where(inArray(auditRecord.actorUserId, [hirerId, leaderId, memberId, invitedUserId]));
   await db.delete(quest).where(eq(quest.id, questId));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db
@@ -111,5 +116,24 @@ describe('Candidate Team authorization persistence', () => {
     expect((await listTeamInvitations(leaderId, questId, teamId))?.map(({ id }) => id)).toEqual([
       invitationId,
     ]);
+  });
+
+  it('does not submit a Candidate Team that has a Member with an active Red Flag', async () => {
+    const now = new Date('2031-01-01T00:00:00.000Z');
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(now.getTime() + 60_000) })
+      .where(eq(authUser.id, memberId));
+
+    try {
+      expect(await submitTeam(leaderId, questId, teamId, now)).toEqual({ outcome: 'red-flagged' });
+      const [team] = await db
+        .select({ teamStatus: questTeam.teamStatus })
+        .from(questTeam)
+        .where(eq(questTeam.id, teamId));
+      expect(team?.teamStatus).toBe('TEAM_FORMING');
+    } finally {
+      await db.update(authUser).set({ redFlagExpiresAt: null }).where(eq(authUser.id, memberId));
+    }
   });
 });

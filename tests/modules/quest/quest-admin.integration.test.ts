@@ -1,6 +1,7 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
-import { adminAction } from '@/database/schema/admin.schema';
+import { applyQuestStateTransition } from '@/modules/quest/shared';
+import { adminAction, adminDisputeCase } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
@@ -12,13 +13,13 @@ import {
   questEditHistory,
   questEditRequest,
   questEditRequestResponse,
+  questImage,
   questLocation,
   questTeam,
   questTeamMember,
   questV2EditRequest,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import { encodeCursor } from '@/shared/cursor';
@@ -28,6 +29,8 @@ import { randomUUID } from 'node:crypto';
 import { Elysia } from 'elysia';
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const adminEmail = `quest-admin-route-${randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';
@@ -50,8 +53,17 @@ let memberCookie = '';
 
 const hirerId = randomUUID();
 const workerIds = [randomUUID(), randomUUID(), randomUUID()];
+const studentIdFor = (userId: string): string => `KU-${userId.slice(0, 8)}`;
 const tagId = randomUUID();
 const questIds: string[] = [];
+const fixtureHirerIds: string[] = [];
+const questImageFileId = randomUUID();
+const questImageId = randomUUID();
+const disputeQuestId = randomUUID();
+const disputeCaseIds = [randomUUID(), randomUUID()] as const;
+const detailStateChangedAt = new Date('2030-06-03T01:00:00.000Z');
+const timelineReasonChangedAt = new Date('2030-06-08T01:00:00.000Z');
+const timelineReasonQuestId = randomUUID();
 
 let openQuestId = '';
 let hiddenQuestId = '';
@@ -80,12 +92,19 @@ beforeAll(async () => {
   await ensureInitialMoneyPolicy();
 
   await db.insert(authUser).values([
-    { id: hirerId, email: `${hirerId}@ku.th`, firstName: 'Admin', lastName: 'Hirer' },
+    {
+      id: hirerId,
+      email: `${hirerId}@ku.th`,
+      firstName: 'Admin',
+      lastName: 'Hirer',
+      studentId: studentIdFor(hirerId),
+    },
     ...workerIds.map((id, index) => ({
       id,
       email: `${id}@ku.th`,
       firstName: 'Admin',
       lastName: `Worker ${index}`,
+      studentId: studentIdFor(id),
     })),
   ]);
   await db.insert(tag).values({ id: tagId, name: `Admin quest test ${tagId}` });
@@ -172,7 +191,8 @@ beforeAll(async () => {
     condition: 'Deliver the artifact',
     mode: 'CANDIDATE',
     participation: 'SOLO',
-    questStatus: 'QUEST_IN_PROGRESS',
+    questStatus: 'QUEST_ASSIGNED',
+
     rewardSatang: 1_000,
     tagId,
     startTime: new Date('2030-06-03T00:00:00.000Z'),
@@ -199,6 +219,19 @@ beforeAll(async () => {
     startedAt: new Date('2030-06-03T01:00:00.000Z'),
   });
 
+  const detailStateTransitionApplied = await db.transaction((transaction) =>
+    applyQuestStateTransition(transaction, {
+      questId: detailQuestId,
+      from: 'QUEST_ASSIGNED',
+      to: 'QUEST_IN_PROGRESS',
+      actor: { actorType: 'MEMBER', actorUserId: workerIds[0]! },
+      now: detailStateChangedAt,
+      workChat: [],
+    })
+  );
+  if (!detailStateTransitionApplied)
+    throw new Error('Admin Quest test timeline transition failed.');
+
   fileId = randomUUID();
   await db.insert(file).values({
     id: fileId,
@@ -207,6 +240,21 @@ beforeAll(async () => {
     contentType: 'image/png',
     sizeBytes: 2048,
     uploadedByUserId: workerIds[0]!,
+  });
+
+  await db.insert(file).values({
+    id: questImageFileId,
+    bucket: 'test-bucket',
+    objectKey: `admin-quest-image/${questImageFileId}`,
+    contentType: 'image/png',
+    sizeBytes: 1024,
+    uploadedByUserId: hirerId,
+  });
+  await db.insert(questImage).values({
+    id: questImageId,
+    questId: detailQuestId,
+    fileId: questImageFileId,
+    position: 0,
   });
 
   proofId = randomUUID();
@@ -257,6 +305,33 @@ beforeAll(async () => {
     metadata: {},
     resultData: {},
   });
+
+  questIds.push(timelineReasonQuestId);
+  await db.insert(quest).values({
+    id: timelineReasonQuestId,
+    hirerId,
+    title: 'Quest State timeline with a reason code',
+    condition: 'Complete the work',
+    mode: 'NO_CANDIDATE',
+    participation: 'SOLO',
+    questStatus: 'QUEST_OPEN',
+    rewardSatang: 1_000,
+    tagId,
+    startTime: new Date('2030-06-08T00:00:00.000Z'),
+  });
+  const reasonTransitionApplied = await db.transaction((transaction) =>
+    applyQuestStateTransition(transaction, {
+      questId: timelineReasonQuestId,
+      from: 'QUEST_OPEN',
+      to: 'QUEST_CANCELLED',
+      actor: { actorType: 'ADMIN', actorAdminId: adminId },
+      reasonCode: 'POLICY_REVIEW',
+      now: timelineReasonChangedAt,
+      columns: { cancelledByAdminId: adminId },
+      workChat: [],
+    })
+  );
+  if (!reasonTransitionApplied) throw new Error('Admin Quest test timeline transition failed.');
 
   teamQuestId = randomUUID();
   questIds.push(teamQuestId);
@@ -311,11 +386,40 @@ beforeAll(async () => {
     expiresAt: new Date('2030-06-06T00:00:00.000Z'),
     appliedAt: new Date('2030-06-05T12:00:00.000Z'),
   });
+  questIds.push(disputeQuestId);
+  await db.insert(quest).values({
+    id: disputeQuestId,
+    hirerId,
+    title: 'Failed Quest with multiple Dispute Cases',
+    condition: 'Complete the work',
+    mode: 'CANDIDATE',
+    participation: 'SOLO',
+    questStatus: 'QUEST_FAILED',
+    rewardSatang: 1_000,
+    tagId,
+    startTime: new Date('2030-06-06T00:00:00.000Z'),
+    failedAt: new Date('2030-06-07T00:00:00.000Z'),
+  });
+  await db.insert(questAssignment).values({
+    questId: disputeQuestId,
+    workerId: workerIds[0]!,
+    assignmentStatus: 'ASSIGNMENT_INCOMPLETE',
+  });
+  await db.insert(adminDisputeCase).values([
+    { id: disputeCaseIds[0], questId: disputeQuestId, filerUserId: hirerId },
+    {
+      id: disputeCaseIds[1],
+      questId: disputeQuestId,
+      filerUserId: workerIds[0]!,
+      openedByAdminId: adminId,
+    },
+  ]);
 });
 
 afterAll(async () => {
-  if (questIds.length === 0) return;
-  await db.delete(quest).where(inArray(quest.id, questIds));
+  if (questIds.length > 0) await db.delete(quest).where(inArray(quest.id, questIds));
+  if (fixtureHirerIds.length > 0)
+    await db.delete(authUser).where(inArray(authUser.id, fixtureHirerIds));
 });
 
 describe('Admin Quest API routes', () => {
@@ -359,8 +463,23 @@ describe('Admin Quest API routes', () => {
 
   it('publishes the Admin Quest contract in OpenAPI', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
+    type OpenApiSchema = {
+      required?: string[];
+      properties?: Record<string, OpenApiSchema>;
+      items?: OpenApiSchema;
+    };
     const document = (await response.json()) as {
-      paths: Record<string, Record<string, { operationId?: string; security?: unknown }>>;
+      paths: Record<
+        string,
+        Record<
+          string,
+          {
+            operationId?: string;
+            security?: unknown;
+            responses?: Record<string, { content?: Record<string, { schema?: OpenApiSchema }> }>;
+          }
+        >
+      >;
     };
 
     expect(response.status).toBe(200);
@@ -368,6 +487,29 @@ describe('Admin Quest API routes', () => {
     expect(document.paths['/api/v1/admin/quests/{questId}']?.get?.operationId).toBe(
       'getAdminQuestDetail'
     );
+    const detailDataSchema =
+      document.paths['/api/v1/admin/quests/{questId}']?.get?.responses?.['200']?.content?.[
+        'application/json'
+      ]?.schema?.properties?.data;
+    expect(detailDataSchema?.required).toEqual(
+      expect.arrayContaining(['displayId', 'images', 'timeline', 'disputeCases'])
+    );
+    expect(detailDataSchema?.properties?.hirer?.required).toContain('studentId');
+    expect(detailDataSchema?.properties?.images?.items?.required).toEqual([
+      'imageId',
+      'fileId',
+      'position',
+      'url',
+      'urlExpiresAt',
+    ]);
+    expect(detailDataSchema?.properties?.timeline?.items?.required).toEqual([
+      'id',
+      'fromState',
+      'toState',
+      'changedAt',
+      'actor',
+      'reasonCode',
+    ]);
   });
 
   it('returns 404 for a Quest that does not exist', async () => {
@@ -499,7 +641,7 @@ describe('Admin Quest API routes', () => {
     expect(staleBody.error?.code).toBe('INVALID_CURSOR');
   });
 
-  it('searches Quest title and description within the Admin filter scope', async () => {
+  it('searches only list response fields within the Admin filter scope', async () => {
     type ListResponse = {
       data: { items: Array<Record<string, unknown>>; nextCursor: string | null };
     };
@@ -515,7 +657,7 @@ describe('Admin Quest API routes', () => {
     );
     const byDescriptionBody = (await byDescription.json()) as ListResponse;
     expect(byDescription.status).toBe(200);
-    expect(byDescriptionBody.data.items.map((item) => item.id)).toContain(detailQuestId);
+    expect(byDescriptionBody.data.items.map((item) => item.id)).not.toContain(detailQuestId);
 
     const withFilter = await adminRequest(
       '/api/v1/admin/quests?q=list%20quest&hidden=false&limit=50'
@@ -531,6 +673,114 @@ describe('Admin Quest API routes', () => {
     expect(wildcardBody.data.items.map((item) => item.id)).not.toContain(openQuestId);
   });
 
+  it('returns counts across pages and searches exposed Quest list fields', async () => {
+    type ListResponse = {
+      success: boolean;
+      data: {
+        items: Array<{ id: string }>;
+        nextCursor: string | null;
+        totalCount: number;
+        countsByStatus: Record<string, number>;
+      };
+    };
+
+    const searchTerm = `count-hirer-${randomUUID()}`;
+    const countHirerId = randomUUID();
+    const countQuestIds = [randomUUID(), randomUUID()];
+    fixtureHirerIds.push(countHirerId);
+    questIds.push(...countQuestIds);
+    await db.insert(authUser).values({
+      id: countHirerId,
+      email: `${searchTerm}@ku.th`,
+      firstName: searchTerm,
+      lastName: 'Count Hirer',
+    });
+    await db.insert(quest).values([
+      {
+        id: countQuestIds[0]!,
+        publicSequence: 1_234_567,
+        hirerId: countHirerId,
+        title: 'Count queue Open Quest',
+        description: 'Not present in the list response.',
+        condition: 'Complete the work',
+        mode: 'NO_CANDIDATE',
+        participation: 'SOLO',
+        questStatus: 'QUEST_OPEN',
+        rewardSatang: 1_000,
+        tagId,
+        startTime: new Date('2030-10-01T00:00:00.000Z'),
+      },
+      {
+        id: countQuestIds[1]!,
+        hirerId: countHirerId,
+        title: 'Count queue Assigned Quest',
+        description: 'Also not present in the list response.',
+        condition: 'Complete the work',
+        mode: 'NO_CANDIDATE',
+        participation: 'SOLO',
+        questStatus: 'QUEST_ASSIGNED',
+        rewardSatang: 1_000,
+        tagId,
+        startTime: new Date('2030-10-02T00:00:00.000Z'),
+      },
+    ]);
+
+    const list = (cursor?: string | null, status?: string) => {
+      const params = new URLSearchParams({
+        q: searchTerm,
+        hidden: 'false',
+        limit: '1',
+      });
+      if (cursor) params.set('cursor', cursor);
+      if (status) params.set('status', status);
+      return adminRequest(`/api/v1/admin/quests?${params.toString()}`);
+    };
+
+    const first = await list();
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as ListResponse;
+    expect(firstBody.data).toMatchObject({
+      totalCount: 2,
+      countsByStatus: {
+        QUEST_OPEN: 1,
+        QUEST_ASSIGNED: 1,
+        QUEST_CANCELLED: 0,
+      },
+    });
+    expect(firstBody.data.items).toHaveLength(1);
+    expect(firstBody.data.nextCursor).toBeString();
+
+    const second = await list(firstBody.data.nextCursor);
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as ListResponse;
+    expect(secondBody.data).toMatchObject({
+      totalCount: 2,
+      countsByStatus: firstBody.data.countsByStatus,
+    });
+    expect(secondBody.data.items).toHaveLength(1);
+    expect(secondBody.data.nextCursor).toBeNull();
+    expect(
+      new Set([...firstBody.data.items, ...secondBody.data.items].map((item) => item.id))
+    ).toEqual(new Set(countQuestIds));
+
+    const openOnly = await list(undefined, 'QUEST_OPEN');
+    const openBody = (await openOnly.json()) as ListResponse;
+    expect(openOnly.status).toBe(200);
+    expect(openBody.data).toMatchObject({
+      totalCount: 1,
+      countsByStatus: firstBody.data.countsByStatus,
+    });
+    expect(openBody.data.items.map((item) => item.id)).toEqual([countQuestIds[0]]);
+    const byDisplayId = await adminRequest('/api/v1/admin/quests?q=QST-1234567&limit=10');
+    expect(byDisplayId.status).toBe(200);
+    const displayIdBody = (await byDisplayId.json()) as ListResponse;
+    expect(displayIdBody.data).toMatchObject({
+      totalCount: 1,
+      countsByStatus: { QUEST_OPEN: 1 },
+      items: [{ id: countQuestIds[0] }],
+    });
+  });
+
   it('reads full Quest detail facets for Admin review', async () => {
     const response = await adminRequest(`/api/v1/admin/quests/${detailQuestId}`);
     const body = (await response.json()) as { data: Record<string, any> };
@@ -538,30 +788,85 @@ describe('Admin Quest API routes', () => {
     expect(response.status).toBe(200);
     expect(body.data).toMatchObject({
       id: detailQuestId,
+      displayId: expect.stringMatching(/^QST-\d{6,}$/),
       questStatus: 'QUEST_IN_PROGRESS',
       description: 'Full facet quest for Admin detail read.',
-      hirer: expect.objectContaining({ id: hirerId }),
+      hirer: {
+        id: hirerId,
+        studentId: studentIdFor(hirerId),
+        firstName: 'Admin',
+        lastName: 'Hirer',
+        email: `${hirerId}@ku.th`,
+      },
       locations: [{ label: 'Engineering Building' }],
+      timeline: [
+        {
+          fromState: 'QUEST_ASSIGNED',
+          toState: 'QUEST_IN_PROGRESS',
+          changedAt: '2030-06-03T01:00:00.000Z',
+          actor: { type: 'MEMBER', id: workerIds[0] },
+          reasonCode: null,
+        },
+      ],
     });
+    expect(body.data.images).toHaveLength(1);
+    const image = body.data.images[0] as {
+      imageId: string;
+      fileId: string;
+      position: number;
+      url: string;
+      urlExpiresAt: string;
+    };
+    expect(image.imageId).toBe(questImageId);
+    expect(image.fileId).toBe(questImageFileId);
+    expect(image.position).toBe(0);
+    expect(image.url).toMatch(/^https?:\/\//);
+    expect(image.urlExpiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
+    const imageUrlExpiresAt = Date.parse(image.urlExpiresAt);
+    expect(imageUrlExpiresAt).toBeGreaterThan(Date.now());
+    expect(imageUrlExpiresAt).toBeLessThan(Date.now() + 16 * 60 * 1000);
+
     expect(body.data.candidates.applications).toEqual([
       expect.objectContaining({
         id: applicationId,
         applicationStatus: 'APPLICATION_SELECTED',
-        worker: expect.objectContaining({ id: workerIds[0] }),
+        worker: expect.objectContaining({
+          id: workerIds[0],
+          studentId: studentIdFor(workerIds[0]!),
+          firstName: 'Admin',
+          lastName: 'Worker 0',
+          email: `${workerIds[0]}@ku.th`,
+        }),
       }),
     ]);
     expect(body.data.assignments).toEqual([
       expect.objectContaining({
         id: assignmentId,
         assignmentStatus: 'ASSIGNMENT_ACTIVE',
-        worker: expect.objectContaining({ id: workerIds[0] }),
+        worker: expect.objectContaining({
+          id: workerIds[0],
+          studentId: studentIdFor(workerIds[0]!),
+          firstName: 'Admin',
+          lastName: 'Worker 0',
+          email: `${workerIds[0]}@ku.th`,
+        }),
       }),
     ]);
     expect(body.data.proofSubmissions).toEqual([
       expect.objectContaining({
         id: proofId,
         submissionStatus: 'PROOF_PENDING',
-        submittedBy: expect.objectContaining({ id: workerIds[0] }),
+        submittedBy: expect.objectContaining({
+          id: workerIds[0],
+          studentId: studentIdFor(workerIds[0]!),
+          firstName: 'Admin',
+          lastName: 'Worker 0',
+          email: `${workerIds[0]}@ku.th`,
+        }),
+        worker: expect.objectContaining({
+          id: workerIds[0],
+          studentId: studentIdFor(workerIds[0]!),
+        }),
         files: [expect.objectContaining({ fileId, contentType: 'image/png', sizeBytes: 2048 })],
       }),
     ]);
@@ -591,6 +896,50 @@ describe('Admin Quest API routes', () => {
       }),
     ]);
   });
+  it('returns empty images, state timeline, and Dispute Case collections when none exist', async () => {
+    const response = await adminRequest(`/api/v1/admin/quests/${openQuestId}`);
+    const body = (await response.json()) as { data: Record<string, any> };
+
+    expect(response.status).toBe(200);
+    expect(body.data.images).toEqual([]);
+    expect(body.data.timeline).toEqual([]);
+    expect(body.data.disputeCases).toEqual([]);
+  });
+  it('returns an Admin actor and reason code in the Quest State timeline', async () => {
+    const response = await adminRequest(`/api/v1/admin/quests/${timelineReasonQuestId}`);
+    const body = (await response.json()) as { data: Record<string, any> };
+
+    expect(response.status).toBe(200);
+    expect(body.data.timeline).toEqual([
+      expect.objectContaining({
+        fromState: 'QUEST_OPEN',
+        toState: 'QUEST_CANCELLED',
+        changedAt: timelineReasonChangedAt.toISOString(),
+        actor: { type: 'ADMIN', id: adminId },
+        reasonCode: 'POLICY_REVIEW',
+      }),
+    ]);
+  });
+
+  it('returns all Dispute Cases linked to a failed Quest', async () => {
+    const response = await adminRequest(`/api/v1/admin/quests/${disputeQuestId}`);
+    const body = (await response.json()) as { data: Record<string, any> };
+
+    expect(response.status).toBe(200);
+    expect(body.data.disputeCases).toHaveLength(2);
+    expect(body.data.disputeCases).toEqual(
+      expect.arrayContaining(
+        disputeCaseIds.map((id) =>
+          expect.objectContaining({
+            id,
+            displayId: expect.stringMatching(/^DSP-\d{6,}$/),
+            questId: disputeQuestId,
+            status: 'DISPUTE_CASE_PENDING',
+          })
+        )
+      )
+    );
+  });
 
   it('reads team candidates for a Group Quest', async () => {
     const response = await adminRequest(`/api/v1/admin/quests/${teamQuestId}`);
@@ -604,8 +953,24 @@ describe('Admin Quest API routes', () => {
         teamStatus: 'TEAM_SELECTED',
         leaderId: workerIds[1],
         members: expect.arrayContaining([
-          expect.objectContaining({ member: expect.objectContaining({ id: workerIds[1] }) }),
-          expect.objectContaining({ member: expect.objectContaining({ id: workerIds[2] }) }),
+          expect.objectContaining({
+            member: expect.objectContaining({
+              id: workerIds[1],
+              studentId: studentIdFor(workerIds[1]!),
+              firstName: 'Admin',
+              lastName: 'Worker 1',
+              email: `${workerIds[1]}@ku.th`,
+            }),
+          }),
+          expect.objectContaining({
+            member: expect.objectContaining({
+              id: workerIds[2],
+              studentId: studentIdFor(workerIds[2]!),
+              firstName: 'Admin',
+              lastName: 'Worker 2',
+              email: `${workerIds[2]}@ku.th`,
+            }),
+          }),
         ]),
       }),
     ]);

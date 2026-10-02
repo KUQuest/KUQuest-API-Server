@@ -50,7 +50,8 @@ export const adminDisputeRoute = new Elysia({
     detail: {
       tags: ['Admin Disputes'],
       summary: 'List Dispute Cases for Admin review',
-      description: 'Lists bounded Dispute Case queue pages. Pending Cases are returned by default.',
+      description:
+        'Lists bounded Dispute Case queue pages. Pending Cases are returned by default. Supports list-field search and status counts.',
       operationId: 'listAdminDisputes',
       security: betterAuthSecurity,
     },

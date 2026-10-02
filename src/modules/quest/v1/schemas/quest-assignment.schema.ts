@@ -18,7 +18,7 @@ export const questAssignmentHeadersSchema = t.Object({
     minLength: 1,
     maxLength: 200,
     pattern: '\\S',
-    description: 'Non-blank command identity for replay-safe direct joins',
+    description: 'Non-blank command identity for replay-safe Worker commands',
   }),
 });
 
@@ -41,6 +41,16 @@ const questStatus = t.Union(
 export const questAssignmentResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Intersect([assignmentSchema, t.Object({ questStatus })]),
+});
+
+export const questStartWorkResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    questId: t.String({ format: 'uuid' }),
+    assignmentId: t.String({ format: 'uuid' }),
+    startedAt: t.String({ format: 'date-time' }),
+    questStatus: t.Union([t.Literal('QUEST_ASSIGNED'), t.Literal('QUEST_IN_PROGRESS')]),
+  }),
 });
 
 export type QuestAssignmentParams = typeof questAssignmentParamsSchema.static;

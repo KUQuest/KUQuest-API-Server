@@ -1,11 +1,11 @@
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { db, sql } from '@/database/client';
 import { tag } from '@/database/schema/tag.schema';
 import { listTags } from '@/modules/tag/tag.service';
 
 import { randomUUID } from 'node:crypto';
 
-import { inArray } from 'drizzle-orm';
-import { beforeAll, afterEach, describe, expect, it } from 'bun:test';
+import { eq, inArray } from 'drizzle-orm';
 
 const prefix = `TestTag_${randomUUID().slice(0, 8)}`;
 const fixtureNames = [`${prefix}_Zebra`, `${prefix}_Alpha`, `${prefix}_Beta`, `${prefix}_Gamma`];
@@ -60,6 +60,23 @@ describe('Tag persistence and search service', () => {
 
     expect(matched.length).toBe(1);
     expect(matched[0]?.name).toBe(`${prefix}_Alpha`);
+  });
+
+  it('returns Thai labels for fixed Tags without changing their canonical names or IDs', async () => {
+    const created = await db
+      .insert(tag)
+      .values({ name: 'Cleaning' })
+      .onConflictDoNothing({ target: tag.name })
+      .returning({ id: tag.id });
+    tagIds = created.map(({ id }) => id);
+    const [existing] = await db.select({ id: tag.id }).from(tag).where(eq(tag.name, 'Cleaning'));
+
+    const result = await listTags({ q: 'Cleaning' });
+    expect(result.items.find((item) => item.id === existing?.id)).toEqual({
+      id: existing?.id,
+      name: 'Cleaning',
+      nameTh: 'ทำความสะอาด',
+    });
   });
 
   it('walks pages using keyset cursor pagination at limit=1', async () => {

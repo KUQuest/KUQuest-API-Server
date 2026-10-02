@@ -6,6 +6,7 @@ import { CursorInputError, decodeCursor, parsePageLimit } from '@/shared/cursor'
 import {
   ImageLinkUnavailableError,
   ImageTooLargeError,
+  ImageDimensionsTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
 } from '@/shared/object-storage';
@@ -126,6 +127,10 @@ const serializeQuestImagesOrError = (
 };
 
 const mapImageUploadError = (set: AuthedContext['set'], error: unknown) => {
+  if (error instanceof ImageDimensionsTooLargeError) {
+    set.status = 422;
+    return apiError('IMAGE_DIMENSIONS_TOO_LARGE', 'Image dimensions must not exceed 25 megapixels');
+  }
   if (error instanceof ImageTooLargeError) {
     set.status = 413;
     return apiError('IMAGE_TOO_LARGE', error.message);
@@ -486,6 +491,14 @@ const notDraft = (set: AuthedContext['set']) => {
   return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be published');
 };
 
+const memberRedFlagged = (set: AuthedContext['set']) => {
+  set.status = 409;
+  return apiError(
+    'MEMBER_RED_FLAGGED',
+    'A Member with an active Red Flag cannot publish a new Quest'
+  );
+};
+
 const mapQuestEscrowError = (set: AuthedContext['set'], error: MoneyDomainError) => {
   const clientSafeCodes = new Set([
     'AMOUNT_OUT_OF_RANGE',
@@ -514,7 +527,10 @@ export const getQuestPublishCheckController = async ({
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
-  if ('outcome' in result) return notDraft(set);
+  if ('outcome' in result) {
+    if (result.outcome === 'red-flagged') return memberRedFlagged(set);
+    return notDraft(set);
+  }
 
   return apiSuccess(result);
 };
@@ -535,6 +551,7 @@ export const publishQuestController = async ({
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
+  if (result.outcome === 'red-flagged') return memberRedFlagged(set);
   if (result.outcome === 'not-draft') return notDraft(set);
   if (result.outcome === 'blocked') {
     const [firstReason] = result.check.blockingReasons;

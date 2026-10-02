@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
@@ -28,6 +28,7 @@ export const payoutRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/payouts`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .post('/quotes', createPayoutQuoteController, {
     body: payoutQuoteCreateSchema,
     response: responses(payoutQuoteResponseSchema, 400, 401, 404, 409),

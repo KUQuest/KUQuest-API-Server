@@ -1,0 +1,710 @@
+asyncapi: 3.1.0
+info:
+  title: KUQuest Realtime API
+  version: 2.0.0
+  description: |
+    Authenticated WebSocket APIs for Quest Board, Quest, and Candidate roster
+    invalidations, Candidate Inquiry Conversation messages, and Work Conversation
+    messages. REST remains authoritative for current state and conversation history.
+
+    Frontend clients can optionally append `?traceId=<uuid>` to any WebSocket URL
+    to correlate handshake attempts and connection lifecycle events in Server logs.
+defaultContentType: application/json
+servers:
+  local:
+    host: localhost:5000
+    protocol: ws
+    description: Local development default. Use the deployed API host and wss over TLS.
+    security:
+      - $ref: '#/components/securitySchemes/memberSessionCookie'
+channels:
+  questUpdates:
+    address: /api/v2/quests/{questId}/events
+    description: |
+      Quest state and Assignment roster invalidations. The Server authorizes the Hirer or a Worker
+      with current access. This stream does not replay messages after reconnect.
+    parameters:
+      questId:
+        description: UUID of the Quest in this channel address.
+        examples:
+          - 00000000-0000-0000-0000-000000000000
+    messages:
+      subscribed:
+        $ref: '#/components/messages/subscriptionAccepted'
+      questUpdated:
+        $ref: '#/components/messages/questUpdated'
+  candidateRosterUpdates:
+    address: /api/v2/quests/{questId}/candidate-roster/events
+    description: |
+      Candidate application and Candidate Team roster invalidations. The Server authorizes the
+      Hirer or a Candidate who can read the current roster. This stream does not replay messages
+      after reconnect.
+    parameters:
+      questId:
+        description: UUID of the Quest in this channel address.
+        examples:
+          - 00000000-0000-0000-0000-000000000000
+    messages:
+      subscribed:
+        $ref: '#/components/messages/subscriptionAccepted'
+      candidateRosterUpdated:
+        $ref: '#/components/messages/candidateRosterUpdated'
+  questBoardUpdates:
+    address: /api/v2/quests/board/events
+    description: |
+      Any authenticated Member can subscribe, including a Prospective Worker. This
+      stream invalidates Quest Board state only; it does not contain a Board Card.
+    messages:
+      subscribed:
+        $ref: '#/components/messages/questBoardSubscriptionAccepted'
+      questBoardInvalidated:
+        $ref: '#/components/messages/questBoardInvalidated'
+
+  hirerQuestUpdates:
+    address: /api/v2/me/hirer-quests/events
+    description: |
+      All v2 Quests owned by the authenticated Hirer, including Quests not currently
+      displayed on Home. The Server sends invalidations only, with no replay.
+    messages:
+      subscribed:
+        $ref: '#/components/messages/hirerQuestSubscriptionAccepted'
+      hirerQuestUpdated:
+        $ref: '#/components/messages/hirerQuestUpdated'
+
+  workConversations:
+    address: /api/v1/chat/conversations/{conversationId}/events
+    description: |
+      The Hirer and all current Active Workers share one Work Conversation. The Server
+      checks Conversation membership. A terminal Work Conversation remains readable
+      but read-only. REST provides message history after reconnect.
+    parameters:
+      conversationId:
+        description: UUID of the Work Conversation.
+        examples:
+          - 00000000-0000-0000-0000-000000000000
+    messages:
+      sendChatMessage:
+        $ref: '#/components/messages/sendChatMessage'
+      messageAccepted:
+        $ref: '#/components/messages/chatMessageAccepted'
+      messageRejected:
+        $ref: '#/components/messages/chatMessageRejected'
+      workConversationMessage:
+        $ref: '#/components/messages/workConversationMessageEvent'
+  candidateInquiries:
+    address: /api/v1/chat/candidate-inquiries/{conversationId}/events
+    description: |
+      A Candidate Inquiry Conversation is private to the Hirer and one Prospective
+      Worker while the Quest is QUEST_OPEN. It closes when that Prospective Worker
+      receives an Assignment, the Quest enters QUEST_ASSIGNED, or the Quest is
+      cancelled. It never becomes a Work Conversation. REST provides history after reconnect.
+    parameters:
+      conversationId:
+        description: UUID of the Candidate Inquiry Conversation.
+        examples:
+          - 00000000-0000-0000-0000-000000000000
+    messages:
+      sendChatMessage:
+        $ref: '#/components/messages/sendChatMessage'
+      messageAccepted:
+        $ref: '#/components/messages/chatMessageAccepted'
+      messageRejected:
+        $ref: '#/components/messages/chatMessageRejected'
+      candidateInquiryMessage:
+        $ref: '#/components/messages/candidateInquiryMessageEvent'
+operations:
+  receiveQuestUpdates:
+    action: receive
+    channel:
+      $ref: '#/channels/questUpdates'
+    summary: Receive Quest invalidations
+    description: |
+      The Server sends SUBSCRIBED after it accepts the connection. It then sends QUEST_UPDATED
+      when an authorized Quest change occurs. The message contains no Quest snapshot. Read the
+      current Quest or Assignment state from the matching REST endpoint. The stream is read-only;
+      a client message closes the connection with code 1008.
+    messages:
+      - $ref: '#/channels/questUpdates/messages/subscribed'
+      - $ref: '#/channels/questUpdates/messages/questUpdated'
+  receiveCandidateRosterUpdates:
+    action: receive
+    channel:
+      $ref: '#/channels/candidateRosterUpdates'
+    summary: Receive Candidate roster invalidations
+    description: |
+      The Server sends SUBSCRIBED after it accepts the connection. It then sends
+      CANDIDATE_ROSTER_UPDATED after an authorized roster change. For a SINGLE Candidate Quest,
+      read GET /api/v2/quests/{questId}/applications. For a GROUP Candidate Quest, read
+      GET /api/v2/quests/{questId}/teams. The event contains no roster data. The stream is
+      read-only; a client message closes the connection with code 1008.
+    messages:
+      - $ref: '#/channels/candidateRosterUpdates/messages/subscribed'
+      - $ref: '#/channels/candidateRosterUpdates/messages/candidateRosterUpdated'
+  receiveQuestBoardUpdates:
+    action: receive
+    channel:
+      $ref: '#/channels/questBoardUpdates'
+    summary: Receive Quest Board invalidations
+    description: |
+      The Server sends SUBSCRIBED after it accepts the connection. After a committed
+      Hirer Publish changes a Quest to QUEST_OPEN, it sends QUEST_BOARD_INVALIDATED
+      with the Quest ID. It sends no event for Draft creation, a failed or rolled-back
+      Publish, or an idempotent Publish replay. Fetch GET /api/v2/quests with current
+      filters after each event and after reconnect. Start cursor paging at the first
+      page. REST enforces Board visibility, including exclusion of the current
+      Hirer's own Quest. The Server does not replay missed messages. A client message
+      closes the connection with code 1008. Session expiry closes with code 4401;
+      denied Origin closes with code 4403.
+
+  receiveHirerQuestUpdates:
+    action: receive
+    channel:
+      $ref: '#/channels/hirerQuestUpdates'
+    summary: Receive updates for all owned Quests
+    description: |
+      The Server sends SUBSCRIBED after it accepts the connection, then
+      HIRER_QUEST_UPDATED after a committed change to any owned v2 Quest.
+      Reload GET /api/v2/quests/mine from the first cursor page after
+      SUBSCRIBED, each event, and every reconnect. The stream contains no
+      Quest data and does not replay missed events. A client message closes
+      the connection with code 1008.
+    messages:
+      - $ref: '#/channels/hirerQuestUpdates/messages/subscribed'
+      - $ref: '#/channels/hirerQuestUpdates/messages/hirerQuestUpdated'
+
+  sendWorkConversationMessage:
+    action: send
+    channel:
+      $ref: '#/channels/workConversations'
+    summary: Send a Work Conversation Message
+    messages:
+      - $ref: '#/channels/workConversations/messages/sendChatMessage'
+  receiveWorkConversationEvents:
+    action: receive
+    channel:
+      $ref: '#/channels/workConversations'
+    summary: Receive Work Conversation events
+    description: |
+      The Server acknowledges or rejects each SEND_MESSAGE command. It sends
+      WORK_CONVERSATION_MESSAGE for committed Messages delivered to conversation
+      subscribers. The socket does not replay missed Messages; read history from REST
+      after reconnect.
+    messages:
+      - $ref: '#/channels/workConversations/messages/messageAccepted'
+      - $ref: '#/channels/workConversations/messages/messageRejected'
+      - $ref: '#/channels/workConversations/messages/workConversationMessage'
+  sendCandidateInquiryMessage:
+    action: send
+    channel:
+      $ref: '#/channels/candidateInquiries'
+    summary: Send a Candidate Inquiry Message
+    messages:
+      - $ref: '#/channels/candidateInquiries/messages/sendChatMessage'
+  receiveCandidateInquiryEvents:
+    action: receive
+    channel:
+      $ref: '#/channels/candidateInquiries'
+    summary: Receive Candidate Inquiry events
+    description: |
+      The Server acknowledges or rejects each SEND_MESSAGE command. It sends
+      CANDIDATE_INQUIRY_MESSAGE for committed Messages delivered to conversation
+      subscribers. The socket does not replay missed Messages; read history from REST
+      after reconnect.
+    messages:
+      - $ref: '#/channels/candidateInquiries/messages/messageAccepted'
+      - $ref: '#/channels/candidateInquiries/messages/messageRejected'
+      - $ref: '#/channels/candidateInquiries/messages/candidateInquiryMessage'
+components:
+  securitySchemes:
+    memberSessionCookie:
+      type: httpApiKey
+      name: better-auth.session_token
+      in: cookie
+      description: Better Auth session cookie. The API checks the session and the applicable access rules for each channel.
+  messages:
+    subscriptionAccepted:
+      name: SUBSCRIBED
+      summary: WebSocket subscription accepted
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+          - questId
+        properties:
+          type:
+            const: SUBSCRIBED
+          version:
+            const: 1
+          questId:
+            type: string
+            format: uuid
+    hirerQuestSubscriptionAccepted:
+      name: SUBSCRIBED
+      summary: Hirer-owned Quest subscription accepted
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+        properties:
+          type:
+            const: SUBSCRIBED
+          version:
+            const: 1
+    hirerQuestUpdated:
+      name: HIRER_QUEST_UPDATED
+      summary: An owned Quest changed
+      description: |
+        The event carries no data; read REST after each event. Roster refresh types:
+        ASSIGNMENT_JOINED (a First-Come-First-Served Worker joined), ASSIGNMENT_STARTED
+        (a Worker pressed Start Work), PROOF_SUBMITTED (a Worker submitted Proof), and
+        QUEST_AUTO_CANCELLED (the Server cancelled an unfilled Quest at its start time).
+        Read GET /api/v2/quests/{questId}/assignments, /teams, and /applications for the
+        roster; each person there carries a `member` summary.
+
+        Failure and dispute types fire once per transition. QUEST_FAILED fires when dueAt
+        passes with unfinished work; DISPUTE_WINDOW_OPENED follows it in the same commit and
+        starts the 1-day self-file window; DISPUTE_WINDOW_CLOSED fires once, when the lifecycle
+        worker first sees the window ended (up to one worker interval after failedAt + 1 day);
+        DISPUTE_CASE_UPDATED goes to the filer only, when a Dispute Case is created, resolved,
+        or dismissed. Read GET /api/v2/quests/{questId} (`dispute`, `moneyHold`) after each.
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+          - questId
+          - changeType
+        properties:
+          type:
+            const: HIRER_QUEST_UPDATED
+          version:
+            const: 1
+          questId:
+            type: string
+            format: uuid
+          changeType:
+            type: string
+            enum:
+              - ASSIGNMENT_ROSTER_UPDATED
+              - QUEST_STARTED
+              - ASSIGNMENT_STARTED
+              - ASSIGNMENT_JOINED
+              - QUEST_AUTO_CANCELLED
+              - PROOF_SUBMITTED
+              - PROOF_REVIEWED
+              - PROOF_AUTO_APPROVED
+              - COMPLETION_CONFIRMED
+              - QUEST_COMPLETED
+              - QUEST_FAILED
+              - DISPUTE_WINDOW_OPENED
+              - DISPUTE_WINDOW_CLOSED
+              - DISPUTE_CASE_UPDATED
+              - QUEST_CANCELLED
+              - QUEST_OPEN_EDIT_UPDATED
+              - QUEST_EDIT_UPDATED
+              - CANDIDATE_ROSTER_UPDATED
+              - QUEST_PUBLISHED
+              - QUEST_CREATED
+              - UNDERFILLED_DECISION_PENDING
+          expiresAt:
+            type: string
+            format: date-time
+            description: Present only when changeType is UNDERFILLED_DECISION_PENDING. It equals decision.expiresAt of GET /api/v2/quests/{questId}/underfilled. Sent once per Quest, when the ten-minute decision window opens.
+        allOf:
+          - if:
+              properties:
+                changeType:
+                  const: UNDERFILLED_DECISION_PENDING
+              required:
+                - changeType
+            then:
+              required:
+                - expiresAt
+            else:
+              not:
+                required:
+                  - expiresAt
+    questUpdated:
+      name: QUEST_UPDATED
+      summary: Quest state or Assignment roster changed
+      description: |
+        The event carries no data; read REST after each event. See hirerQuestUpdated for the
+        failure and dispute types. PROOF_REVIEWED means the Hirer reviewed a Proof and
+        PROOF_AUTO_APPROVED means the 24-hour review window ended; read
+        `reviewedBy`, `reviewReason`, and `reviewedAt` on the Proof Submission.
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+          - questId
+          - changeType
+        properties:
+          type:
+            const: QUEST_UPDATED
+          version:
+            const: 1
+          questId:
+            type: string
+            format: uuid
+          changeType:
+            type: string
+            enum:
+              - ASSIGNMENT_ROSTER_UPDATED
+              - QUEST_STARTED
+              - ASSIGNMENT_STARTED
+              - ASSIGNMENT_JOINED
+              - QUEST_AUTO_CANCELLED
+              - PROOF_SUBMITTED
+              - PROOF_REVIEWED
+              - PROOF_AUTO_APPROVED
+              - COMPLETION_CONFIRMED
+              - QUEST_COMPLETED
+              - QUEST_FAILED
+              - DISPUTE_WINDOW_OPENED
+              - DISPUTE_WINDOW_CLOSED
+              - DISPUTE_CASE_UPDATED
+              - QUEST_CANCELLED
+              - QUEST_OPEN_EDIT_UPDATED
+              - QUEST_EDIT_UPDATED
+          editRequestId:
+            type: string
+            format: uuid
+            description: Present only when changeType is QUEST_EDIT_UPDATED.
+        allOf:
+          - if:
+              properties:
+                changeType:
+                  const: QUEST_EDIT_UPDATED
+              required:
+                - changeType
+            then:
+              required:
+                - editRequestId
+            else:
+              not:
+                required:
+                  - editRequestId
+    candidateRosterUpdated:
+      name: CANDIDATE_ROSTER_UPDATED
+      summary: Candidate application or Candidate Team roster changed
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+          - questId
+        properties:
+          type:
+            const: CANDIDATE_ROSTER_UPDATED
+          version:
+            const: 1
+          questId:
+            type: string
+            format: uuid
+    questBoardSubscriptionAccepted:
+      name: SUBSCRIBED
+      summary: Quest Board subscription accepted
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+          - scope
+        properties:
+          type:
+            const: SUBSCRIBED
+          version:
+            const: 1
+          scope:
+            const: QUEST_BOARD
+    questBoardInvalidated:
+      name: QUEST_BOARD_INVALIDATED
+      summary: Quest Board state invalidated
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - version
+          - questId
+        properties:
+          type:
+            const: QUEST_BOARD_INVALIDATED
+          version:
+            const: 1
+          questId:
+            type: string
+            format: uuid
+
+    sendChatMessage:
+      name: SEND_MESSAGE
+      summary: Send a chat Message
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+          - clientMessageId
+        anyOf:
+          - required:
+              - text
+          - required:
+              - attachmentIds
+            properties:
+              attachmentIds:
+                minItems: 1
+        properties:
+          type:
+            const: SEND_MESSAGE
+          clientMessageId:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '\S'
+          text:
+            type: string
+            minLength: 1
+            maxLength: 1000
+            pattern: '\S'
+            description: Optional when the Message includes at least one Attachment.
+          attachmentIds:
+            type: array
+            uniqueItems: true
+            items:
+              type: string
+              format: uuid
+            description: IDs of Attachments uploaded through the REST API.
+    chatMessageAccepted:
+      name: MESSAGE_ACCEPTED
+      summary: Chat Message accepted
+      payload:
+        type: object
+        required:
+          - type
+          - clientMessageId
+          - message
+        properties:
+          type:
+            const: MESSAGE_ACCEPTED
+          clientMessageId:
+            type: string
+          message:
+            anyOf:
+              - $ref: '#/components/schemas/workConversationMessage'
+              - $ref: '#/components/schemas/candidateInquiryMessage'
+    chatMessageRejected:
+      name: MESSAGE_REJECTED
+      summary: Chat Message rejected
+      payload:
+        type: object
+        required:
+          - type
+          - clientMessageId
+          - error
+        properties:
+          type:
+            const: MESSAGE_REJECTED
+          clientMessageId:
+            type:
+              - string
+              - 'null'
+          error:
+            type: object
+            required:
+              - code
+              - message
+            properties:
+              code:
+                type: string
+              message:
+                type: string
+    workConversationMessageEvent:
+      name: WORK_CONVERSATION_MESSAGE
+      summary: Committed Work Conversation Message
+      payload:
+        type: object
+        required:
+          - type
+          - message
+        properties:
+          type:
+            const: WORK_CONVERSATION_MESSAGE
+          message:
+            $ref: '#/components/schemas/workConversationMessage'
+    candidateInquiryMessageEvent:
+      name: CANDIDATE_INQUIRY_MESSAGE
+      summary: Committed Candidate Inquiry Message
+      payload:
+        type: object
+        required:
+          - type
+          - message
+        properties:
+          type:
+            const: CANDIDATE_INQUIRY_MESSAGE
+          message:
+            $ref: '#/components/schemas/candidateInquiryMessage'
+  schemas:
+    chatAvatar:
+      type: object
+      required:
+        - fileId
+        - url
+      properties:
+        fileId:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+    chatSender:
+      type: object
+      required:
+        - id
+        - displayName
+        - avatar
+      properties:
+        id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        displayName:
+          type: string
+        avatar:
+          anyOf:
+            - $ref: '#/components/schemas/chatAvatar'
+            - type: 'null'
+    chatAttachment:
+      type: object
+      required:
+        - id
+        - fileName
+        - mediaType
+        - sizeBytes
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        fileName:
+          type: string
+        mediaType:
+          type: string
+        sizeBytes:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+    workConversationMessage:
+      type: object
+      required:
+        - id
+        - conversationId
+        - sequence
+        - kind
+        - sender
+        - text
+        - attachments
+        - systemType
+        - systemPayload
+        - eventId
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversationId:
+          type: string
+          format: uuid
+        sequence:
+          type: integer
+          minimum: 1
+        kind:
+          type: string
+          enum:
+            - USER
+            - SYSTEM
+        sender:
+          anyOf:
+            - $ref: '#/components/schemas/chatSender'
+            - type: 'null'
+        text:
+          type:
+            - string
+            - 'null'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/chatAttachment'
+        systemType:
+          type:
+            - string
+            - 'null'
+        systemPayload:
+          anyOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        eventId:
+          type:
+            - string
+            - 'null'
+        createdAt:
+          type: string
+          format: date-time
+    candidateInquiryMessage:
+      type: object
+      required:
+        - id
+        - conversationId
+        - sequence
+        - kind
+        - sender
+        - text
+        - attachments
+        - systemType
+        - systemPayload
+        - eventId
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversationId:
+          type: string
+          format: uuid
+        sequence:
+          type: integer
+          minimum: 1
+        kind:
+          const: USER
+        sender:
+          $ref: '#/components/schemas/chatSender'
+        text:
+          type:
+            - string
+            - 'null'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/chatAttachment'
+        systemType:
+          const: null
+        systemPayload:
+          const: null
+        eventId:
+          const: null
+        createdAt:
+          type: string
+          format: date-time

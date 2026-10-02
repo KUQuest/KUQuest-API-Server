@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V2_PREFIX } from '@/shared/api-version';
 
@@ -20,7 +20,13 @@ import {
   publishQuestV2Controller,
   respondToQuestV2EditRequestController,
 } from './quest-v2.controller';
-import { cancelQuestV2Controller, questCancellationResponseSchema } from '../../settlement';
+import {
+  cancelQuestV2Controller,
+  previewQuestV2CancellationController,
+  questCancellationResponseSchema,
+  questV2CancelHeadersSchema,
+  questV2CancelPreviewResponseSchema,
+} from '../../settlement';
 import {
   questV2CreateHttpResponseSchema,
   questV2CreateHttpSchema,
@@ -57,6 +63,7 @@ export const questV2Route = new Elysia({
   prefix: `${API_V2_PREFIX}/quests`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .get('', listQuestBoardV2Controller, {
     query: questV2BoardQueryHttpSchema,
     transform: normalizeQuestV2BoardQuery,
@@ -153,10 +160,10 @@ export const questV2Route = new Elysia({
     response: responses(questV2EditHttpResponseSchema, 400, 401, 404, 409, 500, 503),
     detail: {
       tags: ['Quests v2'],
-      summary: 'Edit a v2 Quest Draft',
+      summary: 'Edit a v2 Quest Draft or eligible open Quest',
       description:
-        'Updates the supplied fields of an owned QUEST_DRAFT with optimistic concurrency.',
-      operationId: 'editQuestV2Draft',
+        'Updates supplied fields of an owned Quest with optimistic concurrency. In QUEST_OPEN, the Hirer may edit title, description, Condition, mode, participation, schedule, Tag, proof requirement, and locations before the first Candidate application, Candidate Team, or Assignment. `questFundingTotal` and `headcount` are locked. The API returns 409 `QUEST_OPEN_FIELD_LOCKED` for locked fields and 409 `QUEST_OPEN_EDIT_CLOSED` after participation starts. A Quest must retain a Tag, a future `startTime`, and a `dueAt` after `startTime`; otherwise the API returns 400 `INVALID_OPEN_QUEST`. `QUEST_ASSIGNED` Condition changes use the separate Quest Edit Request protocol.',
+      operationId: 'editQuestV2',
       security: betterAuthSecurity,
     },
   })
@@ -165,12 +172,12 @@ export const questV2Route = new Elysia({
     body: questV2ImagesUploadSchema,
     headers: questV2WriteHeadersSchema,
     type: 'multipart/form-data',
-    response: responses(questV2ImagesResponseSchema, 400, 401, 404, 409, 413, 415, 500, 503),
+    response: responses(questV2ImagesResponseSchema, 400, 401, 404, 409, 413, 415, 422, 500, 503),
     detail: {
       tags: ['Quests v2'],
       summary: 'Add Quest Images to a v2 Draft',
       description:
-        'Accepts a multipart images field with one to three validated JPEG, PNG, or WebP files of at most 5 MB each. Appends files to the authenticated Hirer’s QUEST_DRAFT in request order and returns imageId, fileId, position, url, and urlExpiresAt for the complete ordered gallery. A retry with the same Idempotency-Key replays the original response; temporary links expire 15 minutes after materialization, so use Quest detail for a fresh link.',
+        'Accepts a multipart images field with one to three validated JPEG, PNG, or WebP files of at most 5 MB each and 25 megapixels each. Appends files to the authenticated Hirer’s QUEST_DRAFT in request order and returns imageId, fileId, position, url, and urlExpiresAt for the complete ordered gallery. A retry with the same Idempotency-Key replays the original response; temporary links expire 15 minutes after materialization, so use Quest detail for a fresh link.',
       operationId: 'addQuestImagesV2',
       security: betterAuthSecurity,
     },
@@ -203,7 +210,7 @@ export const questV2Route = new Elysia({
   })
   .post('/:questId/cancel', cancelQuestV2Controller, {
     params: questV2ParamsSchema,
-    headers: questV2WriteHeadersSchema,
+    headers: questV2CancelHeadersSchema,
     response: responses(questCancellationResponseSchema, 400, 401, 403, 404, 409, 503),
     detail: {
       tags: ['Quests v2'],
@@ -211,6 +218,18 @@ export const questV2Route = new Elysia({
       description:
         'Cancels a v2 Quest from Draft, Open, Assigned, or In Progress. The command has no business request body and applies the stage-specific Quest Escrow settlement atomically.',
       operationId: 'cancelQuestV2',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:questId/cancel-preview', previewQuestV2CancellationController, {
+    params: questV2ParamsSchema,
+    response: responses(questV2CancelPreviewResponseSchema, 400, 401, 403, 404, 409, 503),
+    detail: {
+      tags: ['Quests v2'],
+      summary: 'Preview what cancelling a v2 Quest would pay and refund',
+      description:
+        'Hirer only. Returns the tier, paidSatang, refundedSatang, and platformFeeSatang an immediate cancelQuestV2 would settle, computed by the same code path. Moves no money and writes nothing. Draft and Open Quests return NO_PENALTY; Assigned returns PARTIAL_PENALTY; In Progress returns FULL_PENALTY. An Assigned Quest with no active Worker or a pending Quest Edit Request returns 409 QUEST_SETTLEMENT_NOT_ALLOWED, as cancelQuestV2 does. Pass previewVersion as the X-Cancel-Preview-Version header of cancelQuestV2 to refuse with 409 CANCEL_PREVIEW_STALE when the Quest changed.',
+      operationId: 'getQuestV2CancelPreview',
       security: betterAuthSecurity,
     },
   })
@@ -245,7 +264,7 @@ export const questV2Route = new Elysia({
       tags: ['Quests v2'],
       summary: 'Get Participation Quest Detail through the v2 contract',
       description:
-        "Returns the Quest to an authenticated Member who holds an Assignment on it, in every Quest State and while the Quest is hidden, together with that Member's own Assignment. Terminal Quests are read-only. Admin actions and Finance internals are excluded.",
+        "Returns the Quest to an authenticated Member who holds an Assignment on it, in every Quest State and while the Quest is hidden, together with that Member's own Assignment. `activeWorkerCount` and `startedWorkerCount` count the Active Assignments and the ones that started Work, without naming other Workers. `dispute` is null unless the Quest is QUEST_FAILED; then it tells the viewer whether they can still self-file (`canFile`, 1 day after failure, one Dispute Case per Member per Quest) and shows their own case. A closed window answers 409 DISPUTE_CASE_WINDOW_EXPIRED. `moneyHold` is null unless the Quest is QUEST_FAILED; then `releasesAt` is failedAt + 7 days and a Dispute Case never moves it. Terminal Quests are read-only. Admin actions and Finance internals are excluded.",
       operationId: 'getQuestV2ParticipationDetail',
       security: betterAuthSecurity,
     },
@@ -256,7 +275,8 @@ export const questV2Route = new Elysia({
     detail: {
       tags: ['Quests v2'],
       summary: 'Get a v2 Quest detail',
-      description: 'Returns a Quest owned by the authenticated Hirer through the v2 contract.',
+      description:
+        'Returns a Quest owned by the authenticated Hirer through the v2 contract. `dispute` and `moneyHold` are null unless the Quest is QUEST_FAILED. `dispute.canFile` is true while the 1-day self-file window is open and the Hirer has no case; a closed window answers 409 DISPUTE_CASE_WINDOW_EXPIRED. `moneyHold.releasesAt` is failedAt + 7 days; a Dispute Case never moves it, so there is no ON_DISPUTE_HOLD state. `heldSatang` is what the Funding Reservation still holds.',
       operationId: 'getQuestV2Detail',
       security: betterAuthSecurity,
     },

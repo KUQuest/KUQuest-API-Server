@@ -1,6 +1,7 @@
 import { enabledAdminGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
 import { Elysia } from 'elysia';
 
@@ -13,15 +14,32 @@ import {
 import {
   adminReportCommandHeadersSchema,
   adminReportCommandResponseSchema,
+  adminConductReportDismissDecisionBodySchema,
+  adminConductReportUpholdDecisionBodySchema,
+  adminReportCaseDecisionBodySchema,
   adminReportDecisionBodySchema,
   adminReportDetailResponseSchema,
   adminReportEvidenceHeadersSchema,
   adminReportEvidenceParamsSchema,
+  adminReportEvidenceQuerySchema,
   adminReportEvidenceResponseSchema,
   adminReportListQuerySchema,
   adminReportListResponseSchema,
   adminReportParamsSchema,
 } from './admin-report.schema';
+
+const rejectUnknownAdminReportDecisionFields = ({ body }: { body: unknown }) => {
+  const schema =
+    body !== null && typeof body === 'object' && !Array.isArray(body) && 'outcome' in body
+      ? body.outcome === 'CONDUCT_REPORT_DISMISSED'
+        ? adminConductReportDismissDecisionBodySchema
+        : body.outcome === 'CONDUCT_REPORT_UPHELD'
+          ? adminConductReportUpholdDecisionBodySchema
+          : adminReportCaseDecisionBodySchema
+      : adminReportCaseDecisionBodySchema;
+
+  rejectUnknownFields(schema)({ body });
+};
 
 export const adminReportRoute = new Elysia({
   name: 'admin-report-route',
@@ -33,9 +51,9 @@ export const adminReportRoute = new Elysia({
     response: responses(adminReportListResponseSchema, 400, 401, 403),
     detail: {
       tags: ['Admin Reports'],
-      summary: 'List Report Cases for Trust and Safety review',
+      summary: 'List Report Cases and Conduct Reports for Admin review',
       description:
-        'Lists Report Case queue pages with Reporter Entries and Evidence References, without unrelated Work Conversation content.',
+        'Lists the shared Report Case and Conduct Report queue with separate kind and status vocabularies. Supports reported Member, Quest, and list-field search. It omits Message content and file links and returns matching status counts.',
       operationId: 'listAdminReports',
       security: betterAuthSecurity,
     },
@@ -45,9 +63,9 @@ export const adminReportRoute = new Elysia({
     response: responses(adminReportDetailResponseSchema, 400, 401, 403, 404),
     detail: {
       tags: ['Admin Reports'],
-      summary: 'Get Report Case detail for Trust and Safety review',
+      summary: 'Get Report Case or Conduct Report detail for Admin review',
       description:
-        'Returns the Report Case, Reporter Entries, and Evidence References. Message content is available only through the case-scoped evidence route.',
+        'Returns Report Case Reporter Entries and Evidence References, or Conduct Report detail with its Quest, Assignment, Proof Submission, Member, and decision context. Message content and file links are available only through the case-scoped evidence route.',
       operationId: 'getAdminReport',
       security: betterAuthSecurity,
     },
@@ -56,25 +74,27 @@ export const adminReportRoute = new Elysia({
     params: adminReportParamsSchema,
     headers: adminReportCommandHeadersSchema,
     body: adminReportDecisionBodySchema,
+    transform: rejectUnknownAdminReportDecisionFields,
     response: responses(adminReportCommandResponseSchema, 400, 401, 403, 404, 409),
     detail: {
       tags: ['Admin Reports'],
-      summary: 'Apply a Trust and Safety Report Case decision',
+      summary: 'Apply a Report Case or Conduct Report decision',
       description:
-        'Dismisses, hides, or restores a Report Case with an Admin Action, a current resource version, and an immutable Moderation Decision.',
+        'Applies an Admin decision to a Report Case, or dismisses or upholds a pending Conduct Report. Commands require an action-specific reason code, current resource version, Idempotency-Key, and immutable Admin Action.',
       operationId: 'decideAdminReport',
       security: betterAuthSecurity,
     },
   })
   .get('/evidence/:evidenceRef', getAdminReportEvidenceController, {
     params: adminReportEvidenceParamsSchema,
+    query: adminReportEvidenceQuerySchema,
     headers: adminReportEvidenceHeadersSchema,
     response: responses(adminReportEvidenceResponseSchema, 400, 401, 403, 404, 503),
     detail: {
       tags: ['Admin Reports'],
-      summary: 'Read case-scoped Report evidence',
+      summary: 'Read case-scoped Report evidence or Conduct Report Chat history',
       description:
-        'Returns the reported Message and bounded surrounding Messages. Every access is recorded as an Admin Action and is not a general Work Conversation read.',
+        'Returns Report Case context or one bounded chronological page from a Conduct Report Conversation. Conduct Report evidence handles are scoped to their Report and permitted Conversation. Every page read is recorded as an Admin Action.',
       operationId: 'getAdminReportEvidence',
       security: betterAuthSecurity,
     },

@@ -187,6 +187,7 @@ export const listAdminPayoutsController = async ({
   try {
     const result = await listAdminPayouts({
       status: query.status,
+      userId: query.userId,
       limit: parsePageLimit(query.limit),
       cursor: decodeCursor(query.cursor),
       sort: query.sort,

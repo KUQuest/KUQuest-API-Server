@@ -1,7 +1,9 @@
 import { t, type Static } from 'elysia';
 
+import { memberSummarySchema } from '../../shared/member-summary';
 import {
   questV2States,
+  questV2UnderfilledCancellationReasons,
   questV2UnderfilledConsentDecisions,
   questV2UnderfilledDecisionValues,
   questV2UnderfilledStates,
@@ -17,6 +19,7 @@ const unionOfLiterals = (values: readonly string[]) =>
 
 const questStateSchema = unionOfLiterals(questV2States);
 const underfilledStateSchema = unionOfLiterals(questV2UnderfilledStates);
+const cancellationReasonSchema = unionOfLiterals(questV2UnderfilledCancellationReasons);
 const decisionSchema = unionOfLiterals(questV2UnderfilledDecisionValues);
 const consentDecisionSchema = unionOfLiterals(questV2UnderfilledConsentDecisions);
 const isoDateTimeSchema = t.String({ format: 'date-time' });
@@ -44,13 +47,13 @@ export const questV2UnderfilledConsentInputSchema = t.Object(
   { additionalProperties: false }
 );
 
-const underfilledWorkerResponseSchema = t.Object({
+const underfilledWorkerResponseFields = {
   workerId: t.String({ format: 'uuid' }),
   assignmentId: t.String({ format: 'uuid' }),
   decision: t.Nullable(consentDecisionSchema),
   questReward: t.Number({ minimum: 0 }),
   respondedAt: t.Nullable(isoDateTimeSchema),
-});
+};
 
 const underfilledDecisionViewSchema = t.Object({
   status: t.Union([
@@ -76,7 +79,7 @@ const underfilledConsentViewSchema = t.Object({
   pendingCount: t.Integer({ minimum: 0 }),
 });
 
-const underfilledDataSchema = t.Object({
+const underfilledDataFields = {
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
   questState: questStateSchema,
@@ -86,9 +89,10 @@ const underfilledDataSchema = t.Object({
   workerRewardPool: t.Nullable(t.Number({ minimum: 0 })),
   questReward: t.Nullable(t.Number({ minimum: 0 })),
   dueAt: t.Nullable(isoDateTimeSchema),
+  cancellationReason: t.Nullable(cancellationReasonSchema),
+  cancelledAt: t.Nullable(isoDateTimeSchema),
   decision: underfilledDecisionViewSchema,
   consent: underfilledConsentViewSchema,
-  responses: t.Optional(t.Array(underfilledWorkerResponseSchema)),
   ownResponse: t.Optional(
     t.Nullable(
       t.Object({
@@ -98,14 +102,37 @@ const underfilledDataSchema = t.Object({
       })
     )
   ),
+};
+
+/** The stored and replayed shape: Worker responses carry IDs only. */
+const underfilledDataSchema = t.Object({
+  ...underfilledDataFields,
+  responses: t.Optional(t.Array(t.Object(underfilledWorkerResponseFields))),
+});
+
+const underfilledViewSchema = t.Object({
+  ...underfilledDataFields,
+  responses: t.Optional(
+    t.Array(t.Object({ ...underfilledWorkerResponseFields, member: memberSummarySchema }))
+  ),
+});
+
+export const questV2UnderfilledSummarySchema = t.Object({
+  state: underfilledStateSchema,
+  decision: t.Object({ expiresAt: isoDateTimeSchema }),
+  consent: t.Object({ expiresAt: t.Nullable(isoDateTimeSchema) }),
+  activeWorkerCount: t.Integer({ minimum: 1, maximum: 20 }),
+  headcount: t.Integer({ minimum: 2, maximum: 20 }),
+  cancellationReason: t.Nullable(cancellationReasonSchema),
 });
 
 export const questV2UnderfilledResponseSchema = t.Object({
   success: t.Literal(true),
-  data: underfilledDataSchema,
+  data: underfilledViewSchema,
 });
 
 export type QuestV2UnderfilledParams = Static<typeof questV2UnderfilledParamsSchema>;
 export type QuestV2UnderfilledDecisionInput = Static<typeof questV2UnderfilledDecisionInputSchema>;
+export type QuestV2UnderfilledSummary = Static<typeof questV2UnderfilledSummarySchema>;
 export type QuestV2UnderfilledConsentInput = Static<typeof questV2UnderfilledConsentInputSchema>;
 export type QuestV2UnderfilledData = Static<typeof underfilledDataSchema>;
