@@ -428,6 +428,7 @@ describe('Admin Members Endpoints Integration Tests', () => {
       expect(data.member.department).toContain('Computer Engineering');
       expect(data.member.faculty).toContain('Engineering');
       expect(data.member.occupation).toContain('Student');
+      expect(data.member.memberStatus).toBe('NORMAL');
 
       expect(data.wallet).not.toBeNull();
       expect(data.wallet.walletStatus).toBe('ACTIVE');

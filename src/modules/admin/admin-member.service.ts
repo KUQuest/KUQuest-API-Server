@@ -139,6 +139,7 @@ export const getAdminMemberDetail = async (
       departmentName: department.name,
       facultyName: faculty.name,
       occupationName: occupation.name,
+      memberStatus: adminMemberStatusSql(),
     })
     .from(authUser)
     .leftJoin(department, eq(authUser.departmentId, department.id))
@@ -232,6 +233,7 @@ export const getAdminMemberDetail = async (
       faculty: memberRow.facultyName,
       department: memberRow.departmentName,
       occupation: memberRow.occupationName,
+      memberStatus: memberRow.memberStatus,
       createdAt: memberRow.createdAt.toISOString(),
     },
     wallet: walletData,

@@ -77,6 +77,7 @@ export const adminMemberDetailResponseSchema = t.Object({
       faculty: t.Union([t.String(), t.Null()]),
       department: t.Union([t.String(), t.Null()]),
       occupation: t.Union([t.String(), t.Null()]),
+      memberStatus: adminMemberStatusSchema,
       createdAt: dateTime,
     }),
     wallet: t.Union([
