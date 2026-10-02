@@ -410,21 +410,55 @@ describe('GET /api/v1/admin/search', () => {
     const body = await response.json();
     expect(body.data.items).toHaveLength(0);
   });
-  it('requires a resource type filter', async () => {
+  it('searches all resource types when kind is all', async () => {
     const response = await app.handle(
-      new Request(`http://localhost/api/v1/admin/search?q=${encodeURIComponent(studentId)}`, {
+      new Request(
+        `http://localhost/api/v1/admin/search?q=${encodeURIComponent(memberId)}&kind=all`,
+        { headers: { cookie: adminCookie } }
+      )
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'member', id: memberId, resourceId: memberId }),
+        expect.objectContaining({ kind: 'wallet', id: walletId, resourceId: walletId }),
+        expect.objectContaining({ kind: 'dispute', id: disputeCaseId, resourceId: disputeCaseId }),
+        expect.objectContaining({ kind: 'report', id: reportCaseId, resourceId: reportCaseId }),
+      ])
+    );
+  });
+
+  it('requires kind to select a record type or all resource types', async () => {
+    const response = await app.handle(
+      new Request(`http://localhost/api/v1/admin/search?q=${encodeURIComponent(memberId)}`, {
         headers: { cookie: adminCookie },
       })
     );
     expect(response.status).toBe(400);
   });
 
-  it('keeps the existing 12-result limit', async () => {
+  it('keeps the existing 12-result limit for one resource type', async () => {
     const response = await searchRequest('member', 'member');
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data.items).toHaveLength(12);
   });
+
+  it('keeps the 12-result limit across resource types when kind is all', async () => {
+    const response = await app.handle(
+      new Request(
+        `http://localhost/api/v1/admin/search?q=${encodeURIComponent('Search')}&kind=all`,
+        {
+          headers: { cookie: adminCookie },
+        }
+      )
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.items).toHaveLength(12);
+  });
+
   it('searches Wallets by display ID and preserves the UUID used to open them', async () => {
     await expectSearchItem(walletDisplayId, 'wallet', {
       kind: 'wallet',
