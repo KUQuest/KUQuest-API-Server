@@ -4,6 +4,17 @@ import { t, type Static } from 'elysia';
 
 const dateTime = t.String({ format: 'date-time' });
 const uuid = t.String({ format: 'uuid' });
+export const adminMemberStatusSchema = t.Union(
+  [
+    t.Literal('NORMAL'),
+    t.Literal('RED_FLAG'),
+    t.Literal('TEMPORARY_BAN'),
+    t.Literal('PERMANENT_BAN'),
+  ],
+  {
+    description: 'Current Member restriction status. It is separate from Wallet status.',
+  }
+);
 
 export const adminMemberParamsSchema = t.Object({
   id: uuid,
@@ -11,6 +22,7 @@ export const adminMemberParamsSchema = t.Object({
 
 export const adminMemberListItemSchema = t.Object({
   id: uuid,
+  displayId: t.String({ pattern: '^MEM-[0-9]{6,}$' }),
   email: t.String(),
   firstName: t.String(),
   lastName: t.String(),
@@ -20,6 +32,7 @@ export const adminMemberListItemSchema = t.Object({
   faculty: t.Union([t.String(), t.Null()]),
   department: t.Union([t.String(), t.Null()]),
   occupation: t.Union([t.String(), t.Null()]),
+  memberStatus: adminMemberStatusSchema,
   wallet: t.Union([
     t.Object({
       id: uuid,
@@ -55,6 +68,7 @@ export const adminMemberDetailResponseSchema = t.Object({
   data: t.Object({
     member: t.Object({
       id: uuid,
+      displayId: t.String({ pattern: '^MEM-[0-9]{6,}$' }),
       email: t.String(),
       firstName: t.String(),
       lastName: t.String(),
@@ -65,6 +79,7 @@ export const adminMemberDetailResponseSchema = t.Object({
       faculty: t.Union([t.String(), t.Null()]),
       department: t.Union([t.String(), t.Null()]),
       occupation: t.Union([t.String(), t.Null()]),
+      memberStatus: adminMemberStatusSchema,
       createdAt: dateTime,
     }),
     wallet: t.Union([
@@ -94,6 +109,7 @@ export const adminMemberDetailResponseSchema = t.Object({
 
 export type AdminMemberParams = Static<typeof adminMemberParamsSchema>;
 export type AdminMemberListItem = Static<typeof adminMemberListItemSchema>;
+export type AdminMemberStatus = Static<typeof adminMemberStatusSchema>;
 export type AdminMemberListQuery = Static<typeof adminMemberListQuerySchema>;
 export type AdminMemberListData = Static<typeof adminMemberListResponseSchema>['data'];
 export type AdminMemberDetailData = Static<typeof adminMemberDetailResponseSchema>['data'];

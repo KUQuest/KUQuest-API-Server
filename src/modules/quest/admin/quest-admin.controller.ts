@@ -5,6 +5,7 @@ import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 import { readResourceVersion } from '@/shared/resource-version';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
+import { FileLinkUnavailableError } from '@/shared/object-storage';
 
 import type { Static } from 'elysia';
 
@@ -87,6 +88,14 @@ const serializeQuestDetail = (quest: AdminQuestDetail): AdminQuestDetailResponse
     startedAt: assignment.startedAt ? assignment.startedAt.toISOString() : null,
     createdAt: assignment.createdAt.toISOString(),
   })),
+  images: quest.images.map((image) => ({
+    ...image,
+    urlExpiresAt: image.urlExpiresAt.toISOString(),
+  })),
+  timeline: quest.timeline.map((event) => ({
+    ...event,
+    changedAt: event.changedAt.toISOString(),
+  })),
   proofSubmissions: quest.proofSubmissions.map((proof) => ({
     ...proof,
     submittedAt: proof.submittedAt.toISOString(),
@@ -117,6 +126,8 @@ export const listAdminQuestsController = async ({
     return apiSuccess({
       items: result.items.map(serializeAdminQuestSummary),
       nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null,
+      totalCount: result.totalCount,
+      countsByStatus: result.countsByStatus,
     });
   } catch (error) {
     if (error instanceof CursorInputError) {
@@ -131,11 +142,19 @@ export const getAdminQuestDetailController = async ({
   params,
   set,
 }: AdminContext & { params: AdminQuestParams }): Promise<ApiResponse<AdminQuestDetailResponse>> => {
-  const quest = await getAdminQuestDetail(params.questId);
-  if (!quest) return questNotFound(set);
-
-  return apiSuccess(serializeQuestDetail(quest));
+  try {
+    const quest = await getAdminQuestDetail(params.questId);
+    if (!quest) return questNotFound(set);
+    return apiSuccess(serializeQuestDetail(quest));
+  } catch (error) {
+    if (error instanceof FileLinkUnavailableError) {
+      set.status = 503;
+      return apiError('QUEST_IMAGE_STORAGE_UNAVAILABLE', 'Quest Image storage is unavailable');
+    }
+    throw error;
+  }
 };
+
 const mapQuestAdminCommandError = (
   set: AdminContext['set'],
   error: unknown

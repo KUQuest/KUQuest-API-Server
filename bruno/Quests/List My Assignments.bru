@@ -1,0 +1,19 @@
+meta {
+  name: List My Assignments
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/api/v2/assignments/mine
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns all active Assignments for the authenticated Worker across v2 Quests.
+}

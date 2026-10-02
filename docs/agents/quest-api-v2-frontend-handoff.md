@@ -162,6 +162,32 @@ They expire about 15 minutes after they are materialized.
 Call Quest detail again when a link expires.
 Do not store a temporary URL as a permanent asset URL.
 
+### 2.10 MemberSummary
+
+Every field that names a person with an ID is followed by a `member` object. Read
+`member.displayName` directly; do not call a profile endpoint per person.
+
+```json
+{
+  "id": "member-uuid",
+  "displayName": "Somchai Jaidee",
+  "avatar": { "fileId": "file-uuid", "url": "temporary-url" },
+  "faculty": "Engineering",
+  "department": "Computer Engineering",
+  "ratingAverage": 4.5
+}
+```
+
+- `displayName` is never empty and never a UUID. A Member who no longer exists reads "Former member".
+- `avatar` is null or `{ fileId, url }`, the same shape as Work Chat participants.
+- `faculty`, `department`, and `ratingAverage` are null when unknown. They carry the public-profile values.
+- The Server never returns the phone number or the Student ID here.
+- The `*Id` fields stay; `member` is added next to them.
+
+`member` appears on: Assignments (join, list, mine, Candidate and Team selection),
+Applications, Candidate Teams (`leader` and `members[].member`), Underfilled
+`responses[]`, and Quest Edit Request `responses[]`.
+
 ## 3. Quest states and lifecycle
 
 The Quest State values are:
@@ -188,20 +214,21 @@ QUEST_IN_PROGRESS -> QUEST_FAILED
 The backend owns all state transitions.
 The frontend must render the state returned by the server.
 
-### Important: no v2 Start Work endpoint
+### Start Work
 
-There is no endpoint named Start Work in the current Quest v2 API.
-There is no POST /api/v2/quests/:questId/start route.
-Do not invent or call one.
+`POST /api/v2/quests/:questId/start-work` is the Worker-authenticated Start Work
+command. Send a non-blank `Idempotency-Key`. The Server accepts it only while
+the Quest is `QUEST_ASSIGNED` and `startTime <= now <= dueAt`, and only from an
+Active Assignment's required starter:
 
-When a Quest is QUEST_ASSIGNED and startTime is due, the backend lifecycle
-worker changes it to QUEST_IN_PROGRESS.
-The worker also sets startedAt on active Assignments.
-The transition can be delayed by worker scheduling.
-Poll or refresh the Quest and Assignment with the application's normal refresh
-mechanism.
+- `SINGLE`: the Worker.
+- `GROUP + FIRST_COME_FIRST_SERVED`: every Active Worker.
+- `GROUP + CANDIDATE`: the Team Leader.
 
-A pending Quest Edit prevents the assigned-to-in-progress transition.
+Each accepted command persists `startedAt` on that Assignment. The Quest stays
+`QUEST_ASSIGNED` until every required starter acts; only then does it become
+`QUEST_IN_PROGRESS`. A missing required Start Work action at `dueAt` fails the
+Quest. The lifecycle worker does not start assigned Quests automatically.
 
 ## 4. Select the correct lifecycle branch
 
@@ -224,7 +251,7 @@ Use this table:
 | CANDIDATE plus SINGLE                           | Candidate application                       |
 | CANDIDATE plus GROUP                            | Candidate Team                              |
 | GROUP first-come Quest is not full at startTime | Underfilled decision and consent            |
-| Quest is assigned                               | Assignment, Work Chat, automatic start      |
+| Quest is assigned                               | Assignment, Work Chat, explicit Start Work  |
 | Quest is in progress                            | Proof Submission or completion confirmation |
 | Quest is terminal                               | Rating Review                               |
 
@@ -394,6 +421,42 @@ Success status: HTTP 200.
 
 Each item is a complete CanonicalQuest without the image gallery.
 The example is shortened. Use the CanonicalQuest shape in section 16.
+
+#### Subscribe to all owned Quest updates
+
+Connect with the Better Auth session cookie:
+
+```text
+WS /api/v2/me/hirer-quests/events
+```
+
+The Server sends `{ "type": "SUBSCRIBED", "version": 1 }` after it accepts
+the connection. For each committed change to an owned v2 Quest, it sends
+`{ "type": "HIRER_QUEST_UPDATED", "version": 1, "questId": "quest-uuid",
+"changeType": "..." }`. Change types include existing Quest updates,
+`ASSIGNMENT_JOINED` (a first-come Worker joined), `ASSIGNMENT_STARTED` (a Worker
+pressed Start Work), `PROOF_SUBMITTED`, `QUEST_AUTO_CANCELLED` (the Server cancelled an
+unfilled Quest at its start time), `CANDIDATE_ROSTER_UPDATED`, `QUEST_PUBLISHED`, and `QUEST_CREATED`.
+The event contains no Quest or Candidate data.
+
+Failure and Dispute change types fire once per transition:
+
+| changeType              | When it fires                                                                                                                                                    | Who gets it                     |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `PROOF_REVIEWED`        | The Hirer reviewed a Proof. Read `reviewedBy`, `reviewReason`, and `reviewedAt` on the Proof Submission.                                                         | Hirer and the submitting Worker |
+| `PROOF_AUTO_APPROVED`   | The 24-hour review window ended and the Server approved the Proof.                                                                                               | Hirer and the submitting Worker |
+| `QUEST_FAILED`          | Yes: it fires at `dueAt` when work is unfinished (and when a Proof is not approved). One event per failure.                                                      | Hirer and the Workers           |
+| `DISPUTE_WINDOW_OPENED` | Sent right after `QUEST_FAILED` in the same commit. The 1-day self-file window starts.                                                                           | Hirer and the Workers           |
+| `DISPUTE_WINDOW_CLOSED` | Sent once, when the lifecycle worker first sees `failedAt + 1 day` has passed. It can lag by one worker interval; use `dispute.windowEndsAt` for the exact time. | Hirer and the Workers           |
+| `DISPUTE_CASE_UPDATED`  | A Dispute Case was created, resolved, or dismissed.                                                                                                              | The filer only                  |
+
+A Worker whose Assignment ended with the failure and who has no Proof left to review gets the socket closed after `QUEST_FAILED`, so that Worker may miss `DISPUTE_WINDOW_OPENED`. Read the Quest after reconnect and use `dispute` from REST.
+
+Read `GET /api/v2/quests/mine` from the first cursor page after `SUBSCRIBED`,
+after each event, and after reconnect. Continue paging as needed. REST is
+authoritative; the stream does not replay missed events. A client message
+closes the connection with code 1008. The public `GET /api/v2/quests` Board
+does not list the Hirer's owned Quests.
 
 ### 5.3 Read the Hirer’s Quest detail
 
@@ -881,12 +944,57 @@ Board Card fields:
 name, Bio, Academic Year, Department, Occupation, and Avatar. It does not
 include Telephone, Student ID, Email, Work Experience, Portfolio items, or
 Certificates. Call `GET /api/v1/profile/:userId` for the full Public Profile.
+The Public Profile includes `reputation.totalQuests`, the Member's completed
+Quest count, and `reputation.rating.average`. Average is null when no eligible
+Review exists.
 
 Board Card does not include state, description, condition, images, Quest
 Funding Total, fee, escrow, wallet, or policy data. Call public detail for full
 public Quest content.
 
-### 6.2 Read public Quest detail
+### 6.2 Subscribe to Quest Board updates
+
+Connect:
+
+```text
+WS /api/v2/quests/board/events
+```
+
+Any authenticated Member can connect, including a Prospective Worker.
+
+After the Server accepts the connection, it sends:
+
+```json
+{
+  "type": "SUBSCRIBED",
+  "version": 1,
+  "scope": "QUEST_BOARD"
+}
+```
+
+After a successful Publish changes a Quest to QUEST_OPEN, the Server sends:
+
+```json
+{
+  "type": "QUEST_BOARD_INVALIDATED",
+  "version": 1,
+  "questId": "quest-uuid"
+}
+```
+
+The event does not contain a Quest Board Card. Fetch `GET /api/v2/quests` with
+the current filters after each invalidation. Restart cursor paging from the
+first page. The Quest may not match the current Member's filters or Board
+visibility rules. The current Hirer does not see their own Quest.
+
+The Server sends no event when a Hirer creates a QUEST_DRAFT. REST is
+authoritative. On reconnect, fetch the Quest Board again; the Server does not
+replay missed events.
+
+The stream is read-only. If a client sends a message, the Server closes the
+connection with code 1008.
+
+### 6.3 Read public Quest detail
 
 Request:
 
@@ -977,13 +1085,16 @@ assignment and capabilities:
     "questReward": 980,
     "headcount": 1,
     "activeWorkerCount": 1,
+    "startedWorkerCount": 1,
     "assignment": {
       "status": "ASSIGNMENT_ACTIVE",
       "startedAt": "2026-09-30T02:00:00.000Z"
     },
     "capabilities": {
       "canViewOnly": false
-    }
+    },
+    "dispute": null,
+    "moneyHold": null
   }
 }
 ```
@@ -992,9 +1103,15 @@ assignment.status is ASSIGNMENT_ACTIVE, ASSIGNMENT_COMPLETED,
 ASSIGNMENT_INCOMPLETE, or ASSIGNMENT_CANCELLED.
 Access rests on the Assignment row in any of those states, so the Member keeps
 this view after settlement makes the Assignment terminal.
-assignment.startedAt is null until automatic start sets it.
+assignment.startedAt is null until the assigned Worker uses the required Start Work action.
 It is a UTC instant with a Z suffix. The +07:00 rule in section 2.5 covers
 Quest schedule fields such as startTime and dueAt, not this one.
+
+startedWorkerCount counts the Active Assignments that have a Start Work time. Use it with
+activeWorkerCount to show GROUP progress (for example "2 of 3 started"). It names no one.
+
+dispute and moneyHold are null unless the Quest is QUEST_FAILED. See section 13.2.
+The same two fields are on GET /api/v2/quests/:questId for the Hirer.
 
 capabilities.canViewOnly is true in QUEST_COMPLETED, QUEST_CANCELLED, and
 QUEST_FAILED. A terminal Quest is read-only, and the client must not offer a
@@ -1041,6 +1158,7 @@ Success status: HTTP 200.
     "id": "assignment-uuid",
     "questId": "quest-uuid",
     "workerId": "worker-uuid",
+    "member": { "id": "worker-uuid", "displayName": "Somchai Jaidee", "avatar": null },
     "state": "ASSIGNMENT_ACTIVE",
     "questState": "QUEST_ASSIGNED",
     "startedAt": null,
@@ -1057,10 +1175,10 @@ Errors:
 - 409 QUEST_MODE_NOT_ALLOWED
 - 409 QUEST_PARTICIPATION_NOT_ALLOWED
 - 409 HIRER_CANNOT_JOIN
-- 409 QUEST_NOT_OPEN
+- 409 QUEST_NOT_OPEN (the Quest is not QUEST_OPEN)
 - 409 QUEST_ROSTER_FROZEN
-- 409 ASSIGNMENT_ALREADY_EXISTS
-- 409 QUEST_FULL
+- 409 ALREADY_JOINED (the Worker already has an Assignment)
+- 409 QUEST_FULL (no free slot, including a Worker who lost the race for the last slot)
 - 503 WORK_CHAT_UNAVAILABLE
 - idempotency errors
 
@@ -1086,6 +1204,7 @@ Success status: HTTP 200.
         "id": "assignment-uuid",
         "questId": "quest-uuid",
         "workerId": "worker-uuid",
+        "member": { "id": "worker-uuid", "displayName": "Somchai Jaidee", "avatar": null },
         "state": "ASSIGNMENT_ACTIVE",
         "questState": "QUEST_ASSIGNED",
         "startedAt": null,
@@ -1101,15 +1220,22 @@ It returns active v2 Assignments for the authenticated Worker.
 
 Assignment fields:
 
-| Field      | Meaning                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------- |
-| id         | Assignment identifier                                                                   |
-| questId    | Quest identifier                                                                        |
-| workerId   | Worker Member identifier                                                                |
-| state      | ASSIGNMENT_ACTIVE, ASSIGNMENT_COMPLETED, ASSIGNMENT_INCOMPLETE, or ASSIGNMENT_CANCELLED |
-| questState | Current Quest State                                                                     |
-| startedAt  | Automatic start time or null                                                            |
-| createdAt  | Assignment creation time                                                                |
+| Field       | Meaning                                                                                 |
+| ----------- | --------------------------------------------------------------------------------------- |
+| id          | Assignment identifier                                                                   |
+| questId     | Quest identifier                                                                        |
+| workerId    | Worker Member identifier                                                                |
+| member      | MemberSummary of the Worker                                                             |
+| state       | ASSIGNMENT_ACTIVE, ASSIGNMENT_COMPLETED, ASSIGNMENT_INCOMPLETE, or ASSIGNMENT_CANCELLED |
+| questState  | Current Quest State                                                                     |
+| startedAt   | Required Start Work time or null                                                        |
+| createdAt   | Assignment creation time                                                                |
+| underfilled | Compact underfilled summary, or null when the Quest has none (see below)                |
+
+`underfilled` holds `state`, `decision.expiresAt`, `consent.expiresAt`,
+`activeWorkerCount`, `headcount`, and `cancellationReason`. It shows the same
+state as `GET /api/v2/quests/:questId/underfilled` at read time, so Home does not
+need one request for each Assignment.
 
 ### 7.3 List Quest Assignments
 
@@ -1119,9 +1245,15 @@ Request:
 GET /api/v2/quests/:questId/assignments
 ```
 
-The owning Hirer receives all active Assignments.
+The owning Hirer receives every Assignment of the Quest in every Quest State, including terminal states.
 The current active Worker receives only their own Assignment.
 Other callers receive a masked 404 QUEST_NOT_FOUND.
+
+GROUP Quests (confirmed against the code):
+
+1. A Worker does **not** receive all Active Assignments. Other Workers' rows stay private. Use `activeWorkerCount` and `startedWorkerCount` from GET /api/v2/quests/:questId/participation to show roster progress.
+2. `member.displayName` is present on every row. It is never empty; a Member with no name reads `Former member`.
+3. `startedAt` is returned to a Worker on their own row. It is null until that Worker uses Start Work.
 
 Success response:
 
@@ -1134,6 +1266,7 @@ Success response:
         "id": "assignment-uuid",
         "questId": "quest-uuid",
         "workerId": "worker-uuid",
+        "member": { "id": "worker-uuid", "displayName": "Somchai Jaidee", "avatar": null },
         "state": "ASSIGNMENT_ACTIVE",
         "questState": "QUEST_IN_PROGRESS",
         "startedAt": "2026-09-30T09:00:02.000+07:00",
@@ -1170,6 +1303,7 @@ Success status: HTTP 200.
     "id": "application-uuid",
     "questId": "quest-uuid",
     "memberId": "candidate-uuid",
+    "member": { "id": "candidate-uuid", "displayName": "Somchai Jaidee", "avatar": null },
     "state": "APPLICATION_APPLIED",
     "appliedAt": "2026-09-08T10:00:00.000+07:00"
   }
@@ -1183,6 +1317,7 @@ Application fields:
 | id        | Application identifier                                                                    |
 | questId   | Quest identifier                                                                          |
 | memberId  | Candidate Member identifier                                                               |
+| member    | MemberSummary of the Candidate                                                            |
 | state     | APPLICATION_APPLIED, APPLICATION_SELECTED, APPLICATION_REJECTED, or APPLICATION_WITHDRAWN |
 | appliedAt | Application time                                                                          |
 
@@ -1205,6 +1340,7 @@ GET /api/v2/quests/:questId/applications
 ```
 
 The owning Hirer sees all applications.
+Pass `?state=APPLICATION_APPLIED` to keep only applications in that state. An unknown state returns 400.
 The Candidate sees only their own application.
 The endpoint is readable while the Quest is QUEST_OPEN or QUEST_ASSIGNED.
 Other callers receive a masked 404 QUEST_NOT_FOUND.
@@ -1220,6 +1356,7 @@ Success status: HTTP 200.
         "id": "application-uuid",
         "questId": "quest-uuid",
         "memberId": "candidate-uuid",
+        "member": { "id": "candidate-uuid", "displayName": "Somchai Jaidee", "avatar": null },
         "state": "APPLICATION_APPLIED",
         "appliedAt": "2026-09-08T10:00:00.000+07:00"
       }
@@ -1317,6 +1454,67 @@ Errors:
 - 503 WORK_CHAT_UNAVAILABLE
 - idempotency errors
 
+### 8.6 Candidate roster WebSocket (SINGLE and GROUP)
+
+Connect:
+
+```text
+WS /api/v2/quests/:questId/candidate-roster/events
+```
+
+This is a separate stream from `/api/v2/quests/:questId/events`.
+Do not expect Candidate roster events on `/events`.
+
+The Hirer can connect when the Hirer can read the Candidate roster from REST.
+A Candidate can connect only when that Candidate can read the Candidate
+application or Candidate Team from REST:
+
+- SINGLE: the Hirer can read all applications. A Candidate can read only their
+  own application while the Quest is QUEST_OPEN or QUEST_ASSIGNED.
+- GROUP: the Hirer can read Candidate Teams. A Team Member can read only that
+  Candidate Team while the Quest is QUEST_OPEN.
+
+The Server sends this message after it accepts the connection:
+
+```json
+{
+  "type": "SUBSCRIBED",
+  "version": 1,
+  "questId": "quest-uuid"
+}
+```
+
+The Server sends this invalidation after a permitted roster change:
+
+```json
+{
+  "type": "CANDIDATE_ROSTER_UPDATED",
+  "version": 1,
+  "questId": "quest-uuid"
+}
+```
+
+The event has no application, Candidate, or Team data.
+For SINGLE, the Server sends it to the Hirer and the affected Candidate.
+For GROUP, the Server sends it to the Hirer and the affected Team Members.
+The Server does not send an event to other Candidates or Teams.
+
+After `SUBSCRIBED` and each invalidation, read the current roster from REST.
+Use `GET /api/v2/quests/:questId/applications` for SINGLE or
+`GET /api/v2/quests/:questId/teams` for GROUP.
+REST is authoritative. The Server does not replay missed WebSocket messages.
+
+The stream is read-only.
+If a client sends a message, the Server closes the connection with code 1008.
+If a Candidate leaves or is removed from a Team, the Server closes that
+Candidate's connection with code 4403.
+When a Quest State change removes REST roster access, the Server sends one
+final invalidation and closes each Candidate roster connection with code 4403.
+This occurs at QUEST_ASSIGNED for GROUP and at QUEST_IN_PROGRESS,
+QUEST_COMPLETED, QUEST_FAILED, or QUEST_CANCELLED for SINGLE.
+The Candidate Teams REST list is no longer readable after a GROUP Quest is
+assigned.
+
 ## 9. Candidate GROUP flow: Candidate Teams
 
 Use this branch only when mode is CANDIDATE and participation is GROUP.
@@ -1325,6 +1523,8 @@ A Candidate Team is a team of Prospective Workers.
 The Team Leader creates and submits it.
 The Hirer selects one submitted Team.
 
+Use the Candidate roster WebSocket contract in Section 8.6 for Candidate Team updates.
+
 ### 9.1 Team response shape
 
 ```json
@@ -1332,6 +1532,7 @@ The Hirer selects one submitted Team.
   "id": "team-uuid",
   "questId": "quest-uuid",
   "leaderId": "leader-uuid",
+  "leader": { "id": "leader-uuid", "displayName": "Somchai Jaidee", "avatar": null },
   "name": "Frontend team",
   "headcount": 3,
   "state": "TEAM_FORMING",
@@ -1340,6 +1541,7 @@ The Hirer selects one submitted Team.
   "members": [
     {
       "memberId": "leader-uuid",
+      "member": { "id": "leader-uuid", "displayName": "Somchai Jaidee", "avatar": null },
       "joinedAt": "2026-09-08T10:00:00.000+07:00"
     }
   ],
@@ -1355,12 +1557,13 @@ Team fields:
 | id                | Team identifier                                                               |
 | questId           | Quest identifier                                                              |
 | leaderId          | Current Team Leader                                                           |
+| leader            | MemberSummary of the Team Leader                                              |
 | name              | Team name                                                                     |
 | headcount         | Required team size                                                            |
 | state             | TEAM_FORMING, TEAM_SUBMITTED, TEAM_SELECTED, TEAM_REJECTED, or TEAM_DISBANDED |
 | joinCode          | Plaintext code only when a new code is created; reads can return null         |
 | joinCodeExpiresAt | Code expiry time                                                              |
-| members           | Members with memberId and joinedAt                                            |
+| members           | Members with memberId, member (MemberSummary), and joinedAt                   |
 | submission        | Submission object or null                                                     |
 | createdAt         | Team creation time                                                            |
 
@@ -1418,6 +1621,7 @@ GET /api/v2/quests/:questId/teams
 ```
 
 The Quest must be QUEST_OPEN.
+Pass `?state=TEAM_SUBMITTED` to keep only submitted Teams. An unknown state returns 400.
 The Hirer sees all non-disbanded Teams.
 A Team member sees their own Team.
 This endpoint is not a Team history endpoint after assignment.
@@ -1434,6 +1638,7 @@ The data value is an object with items, where each item is a complete Team.
         "id": "team-uuid",
         "questId": "quest-uuid",
         "leaderId": "leader-uuid",
+        "leader": { "id": "leader-uuid", "displayName": "Somchai Jaidee", "avatar": null },
         "name": "Frontend team",
         "headcount": 3,
         "state": "TEAM_FORMING",
@@ -1509,6 +1714,25 @@ Errors:
 - 409 HIRER_CANNOT_JOIN_TEAM
 - 409 QUEST_NOT_OPEN
 - idempotency errors
+
+The alternate code-only route needs no Team ID:
+
+```http
+POST /api/v2/quests/:questId/teams/join
+Idempotency-Key: join-team-client-action-id
+Content-Type: application/json
+```
+
+Send the same `{ "joinCode": "abcd2345" }` body. The Server finds the forming
+Team within the specified Quest and runs the same join checks. Success
+returns the complete Team object. An unknown or ambiguous code returns
+`409 JOIN_CODE_INVALID`; a matching expired code returns
+`409 JOIN_CODE_EXPIRED`. The code-only route does not reveal Team details
+until the join succeeds. The existing Team-ID route remains available.
+
+Team reads cannot recover the plaintext Join Code because the Server stores
+only its hash. A Team Leader who loses the code must regenerate it; this
+invalidates the previous code.
 
 ### 9.7 Leave a Candidate Team
 
@@ -1724,19 +1948,56 @@ Errors:
 - 503 WORK_CHAT_UNAVAILABLE
 - idempotency errors
 
-## 10. Automatic start and Work Chat
+### 9.13 Read a submitted Candidate Team file link
 
-### 10.1 Automatic start
+Request:
+
+```http
+GET /api/v2/quests/:questId/teams/:teamId/files/:fileId
+```
+
+Only the owning Hirer or a Member who can read the Candidate Team may request a
+link. The Team must be submitted, the file ID must appear in its submission,
+and the file must not be deleted. Missing, unassociated, deleted, or
+inaccessible files return the same `404 TEAM_FILE_NOT_FOUND` response.
+
+Success status: HTTP 200. The response uses `Cache-Control: no-store`; the
+signed URL is temporary and its expiry is returned explicitly.
+
+```json
+{
+  "success": true,
+  "data": {
+    "fileId": "private-file-uuid",
+    "contentType": "image/png",
+    "sizeBytes": 120000,
+    "position": 0,
+    "url": "https://storage.example.test/private-file?signature=...",
+    "urlExpiresAt": "2026-09-08T10:15:00.000+07:00"
+  }
+}
+```
+
+Errors:
+
+- 401 unauthorized
+- 404 `TEAM_FILE_NOT_FOUND`
+- 503 `TEAM_FILE_LINK_UNAVAILABLE`
+
+## 10. Start Work and Work Chat
+
+### 10.1 Start Work
 
 After an Assignment is created:
 
-1. Render QUEST_ASSIGNED before startTime.
-2. Refresh after the scheduled start.
-3. Enable work and Proof Submission UI after QUEST_IN_PROGRESS.
-4. Handle a delayed worker transition without showing a false failure.
-5. Check for a pending Quest Edit before assuming that the Quest can start.
-
-There is no client Start Work command.
+1. Render `QUEST_ASSIGNED` until `startTime`.
+2. Show Start Work only to the required starter for that participation mode.
+3. Send `POST /api/v2/quests/:questId/start-work` with an `Idempotency-Key`.
+4. Keep the Quest in `QUEST_ASSIGNED` until every required starter acts.
+5. Enable work and Proof Submission UI only after the Server returns
+   `QUEST_IN_PROGRESS`.
+6. Handle a Start Work refusal after `dueAt` as a failed deadline, not a
+   delayed lifecycle-worker transition.
 
 ### 10.2 Work Chat
 
@@ -1813,7 +2074,7 @@ It is not the private fileId required by Candidate Team submission.
 
 A Hirer can propose a Condition change only while the Quest is
 QUEST_ASSIGNED and there is at least one active Worker.
-A pending Quest Edit blocks automatic start.
+An edit request does not start the Quest automatically.
 
 Create request:
 
@@ -1986,27 +2247,30 @@ Response:
 
 Underfilled fields:
 
-| Field             | Meaning                                                                                                    |
-| ----------------- | ---------------------------------------------------------------------------------------------------------- |
-| id                | Underfilled process identifier                                                                             |
-| questId           | Quest identifier                                                                                           |
-| questState        | Current Quest State                                                                                        |
-| state             | UNDERFILLED_DECISION_PENDING, UNDERFILLED_CONSENT_PENDING, UNDERFILLED_COMPLETED, or UNDERFILLED_CANCELLED |
-| activeWorkerCount | Number of active Workers                                                                                   |
-| headcount         | Required slot count                                                                                        |
-| workerRewardPool  | Hirer-facing Worker pool or null                                                                           |
-| questReward       | Worker-facing reward or null                                                                               |
-| dueAt             | Quest deadline or null                                                                                     |
-| decision          | Hirer decision status, value, and expiry                                                                   |
-| consent           | Worker consent status, expiry, and counts                                                                  |
-| responses         | Hirer-facing response list                                                                                 |
-| ownResponse       | Worker-facing response                                                                                     |
+| Field              | Meaning                                                                                                    |
+| ------------------ | ---------------------------------------------------------------------------------------------------------- |
+| id                 | Underfilled process identifier                                                                             |
+| questId            | Quest identifier                                                                                           |
+| questState         | Current Quest State                                                                                        |
+| state              | UNDERFILLED_DECISION_PENDING, UNDERFILLED_CONSENT_PENDING, UNDERFILLED_COMPLETED, or UNDERFILLED_CANCELLED |
+| activeWorkerCount  | Number of active Workers                                                                                   |
+| headcount          | Required slot count                                                                                        |
+| workerRewardPool   | Hirer-facing Worker pool or null                                                                           |
+| questReward        | Worker-facing reward or null                                                                               |
+| dueAt              | Quest deadline or null                                                                                     |
+| decision           | Hirer decision status, value, and expiry                                                                   |
+| consent            | Worker consent status, expiry, and counts                                                                  |
+| responses          | Hirer-facing response list                                                                                 |
+| ownResponse        | Worker-facing response                                                                                     |
+| cancellationReason | Why the process was cancelled, or null                                                                     |
+| cancelledAt        | Server cancellation time, or null                                                                          |
 
 Decision response items:
 
 ```json
 {
   "workerId": "worker-uuid",
+  "member": { "id": "worker-uuid", "displayName": "Somchai Jaidee", "avatar": null },
   "assignmentId": "assignment-uuid",
   "decision": "ACCEPT",
   "questReward": 1960,
@@ -2016,6 +2280,40 @@ Decision response items:
 
 The Hirer can see workerRewardPool and responses.
 The Worker can see questReward and ownResponse.
+
+Cancellation fields (set once, when `state` becomes UNDERFILLED_CANCELLED;
+both are null before that):
+
+| Field              | Meaning                                                                                                                |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| cancellationReason | HIRER_CANCELLED, HIRER_NO_DECISION (decision window ended), WORKER_DECLINED, or CONSENT_TIMEOUT (consent window ended) |
+| cancelledAt        | Server time of the cancellation                                                                                        |
+
+If a decline and a timeout happen at the same time, the server keeps the first
+one it commits. The reason does not change after that.
+
+The Hirer gets a Hirer-events message with `changeType`
+`UNDERFILLED_DECISION_PENDING` and `expiresAt` (equal to `decision.expiresAt`)
+once, when the decision window opens.
+
+The server also sends Android Push messages (data only, one per recipient and
+transition). `data.transitionId` is the delivery `eventKey`: ignore a second
+message with the same value. `data.expiresAt` is the server deadline: render
+the countdown from it, not from the receive time. The Push is not sent if the
+underfilled state changed before delivery. Register the device with
+`POST /api/v1/push/devices` and remove it with `DELETE /api/v1/push/devices/:deviceId`.
+
+| `data.type`                  | Recipient      | Open                          |
+| ---------------------------- | -------------- | ----------------------------- |
+| UNDERFILLED_DECISION_PENDING | Hirer          | /quest/:questId               |
+| UNDERFILLED_CONSENT_PENDING  | Active Workers | /quest/:questId/partial-start |
+| UNDERFILLED_COMPLETED        | Active Workers | /quest/:questId               |
+| UNDERFILLED_CANCELLED        | Active Workers | /quest/:questId               |
+| QUEST_ASSIGNED               | Active Workers | /quest/:questId               |
+
+`UNDERFILLED_CANCELLED` also carries `data.cancellationReason`.
+`QUEST_ASSIGNED` is sent when the last GROUP slot fills. The Worker who joined
+last does not get it.
 
 ### 11.2 Hirer decision
 
@@ -2113,6 +2411,10 @@ The Hirer reviews the Proof.
   "createdAt": "2026-10-01T09:00:00.000+07:00",
   "updatedAt": "2026-10-01T10:00:00.000+07:00",
   "visibility": "FULL",
+  "reviewDeadlineAt": "2026-10-02T10:00:00.000+07:00",
+  "reviewReason": null,
+  "reviewedAt": null,
+  "reviewedBy": null,
   "fileIds": ["private-file-uuid"],
   "files": [
     {
@@ -2136,6 +2438,15 @@ Proof status values:
 
 visibility is FULL for the submitter and Hirer.
 Other permitted viewers can receive SUMMARY.
+
+Review fields:
+
+| Field            | Meaning                                                                                                                                                                                                                                                     |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| reviewDeadlineAt | Non-null only while status is PROOF_PENDING. It is the exact instant the Server auto-approves: `submittedAt + 24 hours`. A sent Proof is locked, so it never moves. Visible to Hirer and Worker, also in SUMMARY rows. Null for drafts and reviewed Proofs. |
+| reviewedBy       | `HIRER`, `AUTO_APPROVE`, or null before review.                                                                                                                                                                                                             |
+| reviewedAt       | Time of the review or auto-approval, or null.                                                                                                                                                                                                               |
+| reviewReason     | The Hirer's reason for PROOF_NOT_APPROVED. Only FULL rows carry it, so only the submitting Worker (or Team) and the Hirer read it; SUMMARY rows always have null.                                                                                           |
 
 ### 12.2 Create a Proof Draft
 
@@ -2294,6 +2605,10 @@ Success status: HTTP 200.
         "createdAt": "2026-10-01T09:00:00.000+07:00",
         "updatedAt": "2026-10-01T10:00:00.000+07:00",
         "visibility": "FULL",
+        "reviewDeadlineAt": "2026-10-02T10:00:00.000+07:00",
+        "reviewReason": null,
+        "reviewedAt": null,
+        "reviewedBy": null,
         "fileIds": [],
         "files": []
       }
@@ -2455,6 +2770,74 @@ Errors:
 - money domain errors with HTTP 409
 - 503 WORK_CHAT_UNAVAILABLE
 - idempotency errors
+- 409 CANCEL_PREVIEW_STALE when you sent `X-Cancel-Preview-Version` and the Quest changed since the preview. Nothing moved. Read the preview again and ask the Hirer to confirm.
+
+Optional header: `X-Cancel-Preview-Version: <previewVersion>` from section 13.2. Omit it to cancel without the check.
+
+### 13.2 Preview a cancellation
+
+Request:
+
+```http
+GET /api/v2/quests/:questId/cancel-preview
+```
+
+Hirer only. It is read-only: no Idempotency-Key, no ledger write, no event, no state change. It runs the same code as `POST /cancel` and rolls it back, so the amounts match a real cancel made at once.
+
+```json
+{
+  "success": true,
+  "data": {
+    "questStatus": "QUEST_ASSIGNED",
+    "tier": "PARTIAL_PENALTY",
+    "paidSatang": 20000,
+    "refundedSatang": 82000,
+    "platformFeeSatang": 0,
+    "affectedWorkerCount": 1,
+    "computedAt": "2026-10-01T03:00:00.000Z",
+    "previewVersion": "opaque-token"
+  }
+}
+```
+
+| questStatus       | tier                       |
+| ----------------- | -------------------------- |
+| QUEST_DRAFT       | NO_PENALTY (all amounts 0) |
+| QUEST_OPEN        | NO_PENALTY                 |
+| QUEST_ASSIGNED    | PARTIAL_PENALTY            |
+| QUEST_IN_PROGRESS | FULL_PENALTY               |
+
+`platformFeeSatang` is the Platform Fee the Platform keeps; it is 0 when the fee is part of the refund. `computedAt` is a UTC instant. `previewVersion` is an opaque token of the Quest facts behind the amounts. Money can move between preview and confirm, so treat the amounts as a preview and send the token back on `POST /cancel`.
+
+Errors: 403 QUEST_NOT_AUTHORIZED (not the Hirer), 404 QUEST_NOT_FOUND, 409 QUEST_SETTLEMENT_NOT_ALLOWED (not cancellable, or an Assigned Quest with a pending Quest Edit Request or no active Worker, as `POST /cancel` refuses).
+
+### 13.3 Dispute window and money hold after failure
+
+`GET /api/v2/quests/:questId` (Hirer) and `GET /api/v2/quests/:questId/participation` (Worker) return two nullable objects. Both are null unless the Quest is QUEST_FAILED.
+
+```json
+{
+  "dispute": {
+    "canFile": true,
+    "windowEndsAt": "2026-10-02T10:00:00.000Z",
+    "myCase": null
+  },
+  "moneyHold": {
+    "status": "HELD",
+    "releasesAt": "2026-10-08T10:00:00.000Z",
+    "heldSatang": 102000
+  }
+}
+```
+
+- `dispute.windowEndsAt` is `failedAt + 1 day`; it is null once the window closed. `canFile` is true while the window is open, the viewer has no case, and the viewer is the Hirer or holds an Assignment.
+- `dispute.myCase` is `{ id, displayId, status, createdAt }` or null. It is the viewer's own case only.
+- GROUP rule: each Member (the Hirer and every assigned Worker) can file one Dispute Case per Quest and sees only their own `myCase`.
+- File with `POST /api/v1/quests/:questId/disputes` and read your case with `GET /api/v1/quests/:questId/disputes/mine`. Filing after the window answers 409 `DISPUTE_CASE_WINDOW_EXPIRED`. (The existing code is used; there is no separate `DISPUTE_WINDOW_CLOSED` error.) Filing again returns the Member's existing case.
+- `moneyHold.releasesAt` is `failedAt + 7 days`. A Dispute Case does **not** suspend or extend the hold (Admin Rulebook), so the date never moves and there is no `ON_DISPUTE_HOLD` state. `status` turns RELEASED after the lifecycle worker releases the Funding Reservation; `releasesAt` stays the nominal time, so show "released" from `status`, not from the clock.
+- `moneyHold.heldSatang` is what the Hirer's Funding Reservation still holds. It is null for a Worker, who has no view of the Hirer's reservation; a Worker sees only `releasesAt` and `status`.
+
+Push (B7): the Server sends no iOS push (APNs) in this release. That is an infrastructure and product decision. Use the realtime events in section 5.2 and in-app banners on iOS.
 
 ## 14. Rating Review flow
 
@@ -2633,6 +3016,7 @@ After assignment, use Work Chat.
   "participation": "SINGLE",
   "state": "QUEST_DRAFT",
   "questFundingTotal": 1000,
+  "questReward": null,
   "headcount": 1,
   "startTime": "2026-09-30T09:00:00.000+07:00",
   "dueAt": "2026-10-07T18:00:00.000+07:00",
@@ -2645,6 +3029,10 @@ After assignment, use Work Chat.
 
 tag can be null.
 description and dueAt can be null.
+questReward is the Worker Reward per slot in Baht. It is null in a Draft and set
+when the Quest is published. It is never changed by an underfilled revision; the
+revised amount is in the Underfilled object. Do not use questFundingTotal as a
+Worker Reward.
 Quest detail adds images.
 
 ### 16.2 Quest Image
@@ -2668,6 +3056,7 @@ Public detail omits fileId.
   "id": "assignment-uuid",
   "questId": "quest-uuid",
   "workerId": "worker-uuid",
+  "member": { "id": "worker-uuid", "displayName": "Somchai Jaidee", "avatar": null },
   "state": "ASSIGNMENT_ACTIVE",
   "questState": "QUEST_ASSIGNED",
   "startedAt": null,
@@ -2682,6 +3071,7 @@ Public detail omits fileId.
   "id": "application-uuid",
   "questId": "quest-uuid",
   "memberId": "member-uuid",
+  "member": { "id": "member-uuid", "displayName": "Somchai Jaidee", "avatar": null },
   "state": "APPLICATION_APPLIED",
   "appliedAt": "2026-09-08T10:00:00.000+07:00"
 }
@@ -2714,6 +3104,7 @@ Public detail omits fileId.
   "responses": [
     {
       "workerId": "worker-uuid",
+      "member": { "id": "worker-uuid", "displayName": "Somchai Jaidee", "avatar": null },
       "decision": null,
       "reason": null,
       "respondedAt": null
@@ -2746,6 +3137,7 @@ The current Quest v2 route set has 46 endpoints:
 |  10 | POST   | /api/v2/quests/:questId/publish                                     | Hirer                      |
 |  11 | POST   | /api/v2/quests/:questId/cancel                                      | Hirer                      |
 |  12 | GET    | /api/v2/quests/:questId/publish-check                               | Hirer                      |
+| 12a | GET    | /api/v2/quests/:questId/cancel-preview                              | Hirer                      |
 |  13 | GET    | /api/v2/quests/:questId/public                                      | authenticated non-owner    |
 |  14 | GET    | /api/v2/quests/:questId/participation                               | Assignment holder          |
 |  15 | GET    | /api/v2/quests/:questId                                             | owning Hirer               |
@@ -2801,7 +3193,8 @@ Recommended mapping:
 | QUEST_NOT_DRAFT                 | Refresh Quest and leave Draft editor                            |
 | QUEST_EDIT_CONFLICT             | Refresh Quest and ask the user to review                        |
 | QUEST_FULL                      | Refresh Board or Team state                                     |
-| ASSIGNMENT_ALREADY_EXISTS       | Read Assignments and continue as Worker                         |
+| ALREADY_JOINED                  | Read Assignments and continue as Worker (direct join)           |
+| ASSIGNMENT_ALREADY_EXISTS       | Read Assignments and continue as Worker (Candidate or Team)     |
 | IDEMPOTENCY_KEY_REUSED          | Stop; do not change key or body silently                        |
 | IDEMPOTENCY_IN_PROGRESS         | Retry with same key after a short delay                         |
 | IDEMPOTENCY_UNAVAILABLE         | Keep retry state and use same key                               |
@@ -2825,8 +3218,8 @@ The Quest v2 integration is complete only when all items below are true:
 - [ ] The client uses If-Match for Draft edits.
 - [ ] The client refreshes temporary image URLs after expiry.
 - [ ] The client selects the correct mode and participation branch.
-- [ ] The client does not call or invent a v2 Start Work endpoint.
-- [ ] The client handles automatic QUEST_ASSIGNED to QUEST_IN_PROGRESS.
+- [ ] The client calls the v2 Start Work endpoint as the required starter.
+- [ ] The client does not rely on the lifecycle worker to transition an assigned Quest.
 - [ ] The client does not grant Work Chat membership.
 - [ ] The client does not confuse Candidate Inquiry Conversation with Work Chat.
 - [ ] The client does not send Chat Attachment IDs as Candidate Team fileIds.
@@ -2838,11 +3231,11 @@ The Quest v2 integration is complete only when all items below are true:
 
 ## 20. Known contract gaps
 
-### 20.1 No v2 Start Work command
+### 20.1 Start Work is explicit
 
-The lifecycle requires an automatic start transition.
-The current v2 route set has no Start Work endpoint.
-The frontend must wait for the lifecycle worker and refresh state.
+The v2 route set includes `POST /api/v2/quests/:questId/start-work`; legacy
+clients use `POST /api/v1/quests/:questId/start-work`. Neither API version
+automatically starts a Quest when `startTime` arrives.
 
 ### 20.2 Work Chat is v1
 

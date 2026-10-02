@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
@@ -47,6 +47,7 @@ export const questRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/quests`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .post('', createQuestController, {
     body: questCreateSchema,
     transform: rejectUnknownFields(questCreateSchema),
@@ -148,11 +149,12 @@ export const questRoute = new Elysia({
     params: questParamsSchema,
     body: questImagesUploadSchema,
     type: 'multipart/form-data',
-    response: responses(questImagesUploadResponseSchema, 400, 401, 404, 409, 413, 415, 502),
+    response: responses(questImagesUploadResponseSchema, 400, 401, 404, 409, 413, 415, 422, 502),
     detail: {
       tags: ['Quests'],
       summary: 'Add images to a Quest Draft',
-      description: 'Adds up to 3 total images to the authenticated Hirer’s Draft Quest.',
+      description:
+        'Adds up to 3 total JPEG, PNG, or WebP images (each up to 5 MB and 25 megapixels) to the authenticated Hirer’s Draft Quest.',
       operationId: 'addQuestImages',
       security: betterAuthSecurity,
     },

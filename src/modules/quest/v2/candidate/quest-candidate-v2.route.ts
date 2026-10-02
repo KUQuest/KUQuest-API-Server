@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V2_PREFIX } from '@/shared/api-version';
 
@@ -12,14 +12,17 @@ import {
   selectQuestV2CandidateApplicationController,
   withdrawQuestV2CandidateApplicationController,
 } from './quest-candidate-v2.controller';
+import { listMyQuestV2CandidateApplications } from './quest-candidate-v2.service';
 import {
   questV2CandidateApplicationHeadersSchema,
   questV2CandidateApplicationDetailParamsSchema,
+  questV2CandidateApplicationListQuerySchema,
   questV2CandidateApplicationListResponseSchema,
   questV2CandidateApplicationParamsSchema,
   questV2CandidateApplicationResponseSchema,
   questV2CandidateSelectionParamsSchema,
   questV2CandidateSelectionResponseSchema,
+  questV2MyCandidateApplicationsResponseSchema,
 } from './quest-candidate-v2.schema';
 
 export const questCandidateV2Route = new Elysia({
@@ -27,6 +30,25 @@ export const questCandidateV2Route = new Elysia({
   prefix: API_V2_PREFIX,
 })
   .use(authGuard)
+  .use(memberBanGuard)
+  .get(
+    '/applications/mine',
+    async ({ session }) => {
+      const items = await listMyQuestV2CandidateApplications(session.user.id);
+      return { success: true, data: { items } };
+    },
+    {
+      response: responses(questV2MyCandidateApplicationsResponseSchema, 401, 500),
+      detail: {
+        tags: ['Quest Candidates v2'],
+        summary: "List authenticated Member's Candidate applications",
+        description:
+          "Lists the authenticated Member's individual Candidate applications and Candidate Team memberships across all Quests, including rejected and terminal history.",
+        operationId: 'listMyCandidateApplicationsV2',
+        security: betterAuthSecurity,
+      },
+    }
+  )
   .post('/quests/:questId/applications', createQuestV2CandidateApplicationController, {
     params: questV2CandidateApplicationParamsSchema,
     headers: questV2CandidateApplicationHeadersSchema,
@@ -42,12 +64,13 @@ export const questCandidateV2Route = new Elysia({
   })
   .get('/quests/:questId/applications', listQuestV2CandidateApplicationsController, {
     params: questV2CandidateApplicationParamsSchema,
-    response: responses(questV2CandidateApplicationListResponseSchema, 401, 404, 500),
+    query: questV2CandidateApplicationListQuerySchema,
+    response: responses(questV2CandidateApplicationListResponseSchema, 400, 401, 404, 500),
     detail: {
       tags: ['Quest Candidates v2'],
       summary: 'List permitted v2 Candidate applications',
       description:
-        "The owning Hirer can list all applications. A Candidate can read only that Candidate's application.",
+        "The owning Hirer can list all applications. A Candidate can read only that Candidate's application. Pass `state` (for example APPLICATION_APPLIED) to keep one state. Every application carries a `member` summary.",
       operationId: 'listQuestApplicationsV2',
       security: betterAuthSecurity,
     },

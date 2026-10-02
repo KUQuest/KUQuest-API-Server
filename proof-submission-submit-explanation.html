@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>What changes when a Worker sends Proof Submission?</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #f6f7f9;
+        --ink: #182230;
+        --muted: #536273;
+        --line: #d7dde5;
+        --panel: #ffffff;
+        --accent: #b33a2f;
+        --accent-bg: #fff1ef;
+        --blue: #185da8;
+        --green: #176b4d;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family:
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+        line-height: 1.55;
+      }
+      main {
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 48px 24px 72px;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 28px;
+        margin-bottom: 28px;
+      }
+      .eyebrow,
+      .label {
+        color: var(--muted);
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      h1 {
+        max-width: 760px;
+        margin: 8px 0 12px;
+        font-size: clamp(2rem, 5vw, 3.4rem);
+        line-height: 1.08;
+        letter-spacing: -0.035em;
+      }
+      h2 {
+        margin: 34px 0 12px;
+        font-size: 1.35rem;
+        line-height: 1.2;
+      }
+      h3 {
+        margin: 0 0 8px;
+        font-size: 1rem;
+      }
+      p {
+        margin: 8px 0 14px;
+      }
+      .summary {
+        max-width: 760px;
+        font-size: 1.15rem;
+        color: var(--muted);
+      }
+      .answer {
+        border-left: 4px solid var(--accent);
+        background: var(--accent-bg);
+        padding: 16px 18px;
+        margin: 24px 0;
+      }
+      .answer strong {
+        color: var(--accent);
+      }
+      .trace {
+        display: grid;
+        gap: 12px;
+        counter-reset: step;
+      }
+      .step {
+        display: grid;
+        grid-template-columns: 40px 1fr;
+        gap: 14px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        padding: 16px;
+      }
+      .step::before {
+        counter-increment: step;
+        content: counter(step);
+        width: 28px;
+        height: 28px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--line);
+        color: var(--blue);
+        font-weight: 700;
+        border-radius: 50%;
+      }
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      code {
+        font-size: 0.9em;
+      }
+      pre {
+        overflow-x: auto;
+        padding: 14px 16px;
+        background: #202936;
+        color: #f4f7fb;
+        border-radius: 4px;
+        font-size: 0.86rem;
+        line-height: 1.5;
+      }
+      .path {
+        color: var(--blue);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.82rem;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+      }
+      th,
+      td {
+        padding: 11px 13px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        color: var(--muted);
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      .yes {
+        color: var(--green);
+        font-weight: 700;
+      }
+      .no {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .note {
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      .traceability {
+        margin-top: 44px;
+        padding-top: 20px;
+        border-top: 1px solid var(--line);
+      }
+      .traceability ul {
+        padding-left: 20px;
+      }
+      footer {
+        margin-top: 42px;
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+      @media (max-width: 620px) {
+        main {
+          padding: 32px 16px 56px;
+        }
+        .step {
+          grid-template-columns: 32px 1fr;
+          gap: 10px;
+          padding: 13px;
+        }
+        th,
+        td {
+          padding: 9px 8px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="eyebrow">KUQuest API · v2 Proof Submission</div>
+        <h1>What changes when a Worker sends Proof Submission?</h1>
+        <p class="summary">
+          This page traces the POST request from the Worker to the database. It answers which Quest,
+          Assignment, and Proof Submission states change at send time.
+        </p>
+      </header>
+
+      <section class="answer" aria-label="Direct answer">
+        <strong>Direct answer:</strong> the POST changes only the Proof Submission from an unsent
+        draft to <code>PROOF_PENDING</code>. It sets <code>sentAt</code> and locks the Proof
+        Submission. It does <strong>not</strong> change the Quest or Assignment state at that
+        moment: the Quest stays <code>QUEST_IN_PROGRESS</code>, and the Assignment stays
+        <code>ASSIGNMENT_ACTIVE</code>.
+      </section>
+
+      <h2>Execution trace</h2>
+      <div class="trace">
+        <article class="step">
+          <div>
+            <h3>Route and command identity</h3>
+            <p>
+              The route is
+              <code>POST /api/v2/quests/:questId/proof-submissions/:proofSubmissionId/submit</code>.
+              The request must include a non-blank <code>idempotency-key</code>. The controller
+              passes the authenticated Member, Quest ID, Proof Submission ID, and command ID to the
+              service.
+            </p>
+            <div class="path">
+              src/modules/quest/v2/proof/quest-proof-v2.route.ts#L118-L131 ·
+              src/modules/quest/v2/proof/quest-proof-v2.controller.ts#L336-L350
+            </div>
+          </div>
+        </article>
+
+        <article class="step">
+          <div>
+            <h3>Server checks the required submitter</h3>
+            <p>
+              The service locks the Quest row in one database transaction. It requires a v2 Quest
+              with Proof required, state <code>QUEST_IN_PROGRESS</code>, a present and future
+              <code>dueAt</code>, and an authenticated Worker who owns the active Assignment. The
+              draft must belong to that Worker or, for a selected Candidate Group, to the Team
+              Leader.
+            </p>
+            <div class="path">
+              src/modules/quest/v2/proof/quest-proof-v2.service.ts#L479-L563 · #L1110-L1136
+            </div>
+          </div>
+        </article>
+
+        <article class="step">
+          <div>
+            <h3>Server checks the draft files</h3>
+            <p>
+              The Proof Submission must still be unsent. It must contain at least one file, and no
+              attached file can have <code>PROOF_FILE_FAILED</code>. A failed check returns an error
+              and leaves the draft unchanged.
+            </p>
+            <div class="path">src/modules/quest/v2/proof/quest-proof-v2.service.ts#L1537-L1554</div>
+          </div>
+        </article>
+
+        <article class="step">
+          <div>
+            <h3>Only the Proof Submission row changes</h3>
+            <p>The successful write is:</p>
+            <pre><code>submissionStatus: 'PROOF_PENDING'
+sentAt: now
+updatedAt: now</code></pre>
+            <p>
+              The database constraint treats a non-null status and non-null <code>sentAt</code> as a
+              sent Proof Submission. A later PATCH or DELETE is rejected because the Proof
+              Submission is locked.
+            </p>
+            <div class="path">
+              src/modules/quest/v2/proof/quest-proof-v2.service.ts#L1555-L1584 ·
+              src/database/schema/quest.schema.ts#L590-L633
+            </div>
+          </div>
+        </article>
+
+        <article class="step">
+          <div>
+            <h3>HTTP response</h3>
+            <p>
+              The endpoint returns HTTP 200 with the serialized Proof Submission. The important
+              fields are <code>status: "PROOF_PENDING"</code> and an ISO <code>submittedAt</code>. A
+              replay with the same command ID returns the stored command result instead of applying
+              a second write.
+            </p>
+            <div class="path">
+              src/modules/quest/v2/proof/quest-proof-v2.controller.ts#L42-L57 ·
+              tests/modules/quest/quest-proof-v2.behavior.integration.test.ts#L409-L417
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <h2>State changes at send time</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Entity</th>
+            <th>Before</th>
+            <th>After POST</th>
+            <th>Changed?</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Proof Submission</td>
+            <td>Unsent draft: <code>status = null</code>, <code>sentAt = null</code></td>
+            <td><code>PROOF_PENDING</code>, <code>sentAt = now</code></td>
+            <td class="yes">Yes</td>
+          </tr>
+          <tr>
+            <td>Quest</td>
+            <td><code>QUEST_IN_PROGRESS</code></td>
+            <td><code>QUEST_IN_PROGRESS</code></td>
+            <td class="no">No</td>
+          </tr>
+          <tr>
+            <td>Assignment</td>
+            <td><code>ASSIGNMENT_ACTIVE</code></td>
+            <td><code>ASSIGNMENT_ACTIVE</code></td>
+            <td class="no">No</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="note">
+        The Rulebook calls this the Proof Review Window. The Hirer decides the outcome after the
+        Worker sends the Proof Submission.
+      </p>
+
+      <h2>What changes later?</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Later event</th>
+            <th>Proof Submission</th>
+            <th>Assignment</th>
+            <th>Quest</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Hirer approves</td>
+            <td><code>PROOF_APPROVED</code></td>
+            <td><code>ASSIGNMENT_COMPLETED</code>; Reward settlement runs</td>
+            <td>
+              <code>QUEST_COMPLETED</code> when no Active Worker remains; otherwise it stays in
+              progress. Approval after an existing failure leaves <code>QUEST_FAILED</code>.
+            </td>
+          </tr>
+          <tr>
+            <td>Hirer does not approve</td>
+            <td><code>PROOF_NOT_APPROVED</code></td>
+            <td><code>ASSIGNMENT_INCOMPLETE</code></td>
+            <td><code>QUEST_FAILED</code>; one Admin Review Item is created</td>
+          </tr>
+          <tr>
+            <td>No Hirer decision for 24 hours</td>
+            <td>System auto-approves to <code>PROOF_APPROVED</code></td>
+            <td>Same approval settlement path</td>
+            <td>Same approval rules</td>
+          </tr>
+          <tr>
+            <td>Required Proof is missing at <code>dueAt</code></td>
+            <td>No successful send</td>
+            <td>Failure handling applies</td>
+            <td><code>QUEST_FAILED</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="path">
+        docs/rulebook/quest/proof-submission-contract.md#L24-L46 ·
+        src/modules/quest/v2/proof/quest-proof-v2.service.ts#L1967-L2173 ·
+        src/modules/quest/settlement/quest-settlement.service.ts#L752-L958 ·
+        src/modules/quest/lifecycle/quest-lifecycle.worker.ts#L530-L598
+      </p>
+
+      <section class="traceability">
+        <h2>Traceability</h2>
+        <ul>
+          <li>
+            <strong>Snapshot:</strong> source root
+            <code>/home/phy9/Projects/SWE/KUQuest-API-Server</code>; Git commit
+            <code>6a194e103afa2ecd49216e0e25921286993ec41a</code>; branch
+            <code>ci/fix-staging-admin-seed</code>; relevant working-tree edits were present during
+            investigation.
+          </li>
+          <li>
+            <strong>Entry point:</strong> the v2 submit route and
+            <code>submitQuestV2ProofSubmissionController</code>.
+          </li>
+          <li>
+            <strong>State owner:</strong> <code>quest_v2_proof_submission</code> owns Proof
+            Submission status and send time; <code>quest</code> owns Quest State;
+            <code>quest_assignment</code> owns Assignment state.
+          </li>
+          <li>
+            <strong>Persistent effect:</strong> one PostgreSQL transaction updates the Proof
+            Submission and records the idempotent Quest command result. The submit request does not
+            upload files; it checks already-attached files.
+          </li>
+          <li>
+            <strong>Output artifact:</strong> the HTTP 200 Proof Submission response described
+            above.
+          </li>
+        </ul>
+        <p class="note">
+          Observed behavior is separated from target policy: the source code shows the exact write
+          and state guards. The Rulebook defines the later review, auto-approval, failure, and
+          Reward behavior.
+        </p>
+      </section>
+
+      <footer>
+        Explainer generated from the source locations listed in the Traceability section. No diagram
+        is used because the state table communicates the single send transition more clearly than an
+        additional figure.
+      </footer>
+    </main>
+  </body>
+</html>

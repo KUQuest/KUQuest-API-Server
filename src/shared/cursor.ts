@@ -5,7 +5,10 @@ export type CursorPayload = {
   v: 1;
   startTime: string;
   id: string;
+  scope?: string;
 };
+
+type CursorValue = Omit<CursorPayload, 'v'>;
 
 export class CursorInputError extends Error {
   readonly code: 'INVALID_CURSOR' | 'INVALID_LIMIT';
@@ -48,13 +51,24 @@ const fromBase64Url = (value: string): string => {
   return atob(padded);
 };
 
-export const encodeCursor = (payload: Omit<CursorPayload, 'v'>): string => {
+export const encodeCursor = (payload: CursorValue): string => {
   const startTime = new Date(payload.startTime);
-  if (Number.isNaN(startTime.getTime()) || !uuidPattern.test(payload.id)) {
+  if (
+    Number.isNaN(startTime.getTime()) ||
+    !uuidPattern.test(payload.id) ||
+    (payload.scope !== undefined && !/^[A-Z][A-Z0-9_]{0,63}$/.test(payload.scope))
+  ) {
     throw new CursorInputError('INVALID_CURSOR', 'Cannot encode an invalid cursor');
   }
 
-  return toBase64Url(JSON.stringify({ v: 1, startTime: startTime.toISOString(), id: payload.id }));
+  return toBase64Url(
+    JSON.stringify({
+      v: 1,
+      startTime: startTime.toISOString(),
+      id: payload.id,
+      ...(payload.scope === undefined ? {} : { scope: payload.scope }),
+    })
+  );
 };
 
 export const decodeCursor = (value: unknown): CursorPayload | undefined => {
@@ -71,17 +85,16 @@ export const decodeCursor = (value: unknown): CursorPayload | undefined => {
 
     const payload = parsed as Record<string, unknown>;
     const keys = Object.keys(payload);
-    if (
-      keys.length !== 3 ||
-      !keys.includes('v') ||
-      !keys.includes('startTime') ||
-      !keys.includes('id')
-    ) {
+    const hasBaseFields = keys.includes('v') && keys.includes('startTime') && keys.includes('id');
+    const hasOnlySupportedFields =
+      keys.length === 3 || (keys.length === 4 && keys.includes('scope'));
+    if (!hasBaseFields || !hasOnlySupportedFields) {
       throw new Error('invalid cursor payload');
     }
 
     const parsedStartTime = payload.startTime;
     const parsedId = payload.id;
+    const parsedScope = payload.scope;
     const startTime = typeof parsedStartTime === 'string' ? new Date(parsedStartTime) : null;
 
     if (
@@ -91,12 +104,19 @@ export const decodeCursor = (value: unknown): CursorPayload | undefined => {
       Number.isNaN(startTime.getTime()) ||
       startTime.toISOString() !== parsedStartTime ||
       typeof parsedId !== 'string' ||
-      !uuidPattern.test(parsedId)
+      !uuidPattern.test(parsedId) ||
+      (parsedScope !== undefined &&
+        (typeof parsedScope !== 'string' || !/^[A-Z][A-Z0-9_]{0,63}$/.test(parsedScope)))
     ) {
       throw new Error('invalid cursor payload');
     }
 
-    return { v: 1, startTime: parsedStartTime, id: parsedId };
+    return {
+      v: 1,
+      startTime: parsedStartTime,
+      id: parsedId,
+      ...(parsedScope === undefined ? {} : { scope: parsedScope as string }),
+    };
   } catch {
     throw new CursorInputError('INVALID_CURSOR', 'cursor is invalid');
   }

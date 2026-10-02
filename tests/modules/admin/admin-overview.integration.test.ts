@@ -1,17 +1,31 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
-import { adminDisputeCase, adminReviewItem } from '@/database/schema/admin.schema';
+import {
+  adminConductReport,
+  adminDisputeCase,
+  adminReportCase,
+  memberPenaltyRecord,
+  adminReviewItem,
+  conductReportStatus,
+  reportCaseStatus,
+} from '@/database/schema/admin.schema';
 import { authAccount, authAdmin, authSession, authUser } from '@/database/schema/auth.schema';
 import { quest, questAssignment, questV2ProofSubmission } from '@/database/schema/quest.schema';
 import { paymentPayoutAccounts, paymentPayouts } from '@/database/schema/payment.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
+import { chatConversation, chatMembership, chatMessage } from '@/database/schema/work-chat.schema';
 import {
   adminOverviewQuestStates,
   type AdminOverviewQuestState,
 } from '@/modules/admin/admin-overview.contract';
+import {
+  formatConductReportDisplayId,
+  formatDisputeDisplayId,
+  formatPayoutDisplayId,
+  formatReportCaseDisplayId,
+} from '@/modules/admin/admin-display-id';
 import type { AdminOverviewData } from '@/modules/admin/admin-overview.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import {
   createPayoutDestinationEncryption,
@@ -28,6 +42,8 @@ import {
 import { Elysia } from 'elysia';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { eq, inArray } from 'drizzle-orm';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const adminEmail = `admin-overview-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminPass1!';
@@ -51,6 +67,12 @@ let memberCookie = '';
 const hirerId = crypto.randomUUID();
 const tagId = crypto.randomUUID();
 const questIds: string[] = [];
+const overviewAssignmentIds: string[] = [];
+const overviewConductReportIds: string[] = [];
+const overviewReportCaseIds: string[] = [];
+const overviewMessageIds: string[] = [];
+const overviewMembershipIds: string[] = [];
+const overviewConversationIds: string[] = [];
 const payoutEncryption = createPayoutDestinationEncryption({
   activeKeyVersion: 'v1',
   keys: { v1: 'o'.repeat(32) },
@@ -139,8 +161,9 @@ const creditEarnings = async (userId: string, amountSatang: number): Promise<str
 
 const seedPayout = async (
   payoutStatus:
-    'PENDING_ADMIN_APPROVAL' | 'SUBMITTED_TO_PROVIDER' | 'PROVIDER_PENDING' | 'SUCCEEDED'
-): Promise<void> => {
+    'PENDING_ADMIN_APPROVAL' | 'SUBMITTED_TO_PROVIDER' | 'PROVIDER_PENDING' | 'SUCCEEDED',
+  createdAt?: Date
+): Promise<string> => {
   const userId = crypto.randomUUID();
   await db.insert(authUser).values({
     id: userId,
@@ -244,6 +267,10 @@ const seedPayout = async (
   if (payoutStatus !== 'PENDING_ADMIN_APPROVAL') {
     await db.update(paymentPayouts).set({ payoutStatus }).where(eq(paymentPayouts.id, payoutId));
   }
+  if (createdAt) {
+    await db.update(paymentPayouts).set({ createdAt }).where(eq(paymentPayouts.id, payoutId));
+  }
+  return payoutId;
 };
 
 beforeAll(async () => {
@@ -296,6 +323,26 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (overviewConductReportIds.length > 0) {
+    await db
+      .delete(adminConductReport)
+      .where(inArray(adminConductReport.id, overviewConductReportIds));
+  }
+  if (overviewReportCaseIds.length > 0) {
+    await db.delete(adminReportCase).where(inArray(adminReportCase.id, overviewReportCaseIds));
+  }
+  if (overviewMessageIds.length > 0) {
+    await db.delete(chatMessage).where(inArray(chatMessage.id, overviewMessageIds));
+  }
+  if (overviewMembershipIds.length > 0) {
+    await db.delete(chatMembership).where(inArray(chatMembership.id, overviewMembershipIds));
+  }
+  if (overviewConversationIds.length > 0) {
+    await db.delete(chatConversation).where(inArray(chatConversation.id, overviewConversationIds));
+  }
+  if (overviewAssignmentIds.length > 0) {
+    await db.delete(questAssignment).where(inArray(questAssignment.id, overviewAssignmentIds));
+  }
   if (questIds.length > 0) {
     await db.delete(adminDisputeCase).where(inArray(adminDisputeCase.questId, questIds));
     await db.delete(quest).where(inArray(quest.id, questIds));
@@ -340,22 +387,68 @@ describe('Admin Overview API', () => {
 
   it('publishes the Overview path under the versioned Admin boundary', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
+    type OpenApiSchema = {
+      type?: string;
+      enum?: string[];
+      properties?: Record<string, OpenApiSchema>;
+      anyOf?: OpenApiSchema[];
+    };
     const document = (await response.json()) as {
       paths: Record<
         string,
-        Record<string, { operationId?: string; responses?: Record<string, unknown> }>
+        {
+          get?: {
+            operationId?: string;
+            responses?: Record<string, { content?: Record<string, { schema?: OpenApiSchema }> }>;
+          };
+        }
       >;
     };
 
     expect(response.status).toBe(200);
-    expect(document.paths['/api/v1/admin/overview']?.get).toMatchObject({
-      operationId: 'getAdminOverview',
-      responses: expect.objectContaining({
-        '200': expect.anything(),
-        '401': expect.anything(),
-        '403': expect.anything(),
-      }),
-    });
+    const operation = document.paths['/api/v1/admin/overview']?.get;
+    expect(operation?.operationId).toBe('getAdminOverview');
+    expect(Object.keys(operation?.responses ?? {}).sort()).toEqual(['200', '401', '403']);
+
+    const responseSchema = operation?.responses?.['200']?.content?.['application/json']?.schema;
+    expect(responseSchema).toBeDefined();
+    const overviewData = responseSchema?.properties?.data?.properties;
+    expect(Object.keys(overviewData ?? {}).sort()).toEqual([
+      'conductReports',
+      'disputes',
+      'members',
+      'payouts',
+      'quests',
+      'queues',
+      'reports',
+      'wallets',
+    ]);
+    const memberStatusProperties = overviewData?.members?.properties?.byStatus?.properties;
+    expect(Object.keys(memberStatusProperties ?? {}).sort()).toEqual([
+      'FLAG',
+      'NORMAL',
+      'PERM_BAN',
+      'TEMP_BAN',
+    ]);
+    const queueProperties = overviewData?.queues?.properties;
+    expect(Object.keys(queueProperties ?? {}).sort()).toEqual([
+      'conductReports',
+      'disputes',
+      'payouts',
+      'reports',
+    ]);
+    const conductReportQueue = queueProperties?.conductReports?.properties;
+    const oldestItemSchema = conductReportQueue?.oldest?.anyOf?.find(
+      (alternative) => alternative.type === 'object'
+    );
+    expect(Object.keys(oldestItemSchema?.properties ?? {}).sort()).toEqual([
+      'createdAt',
+      'displayId',
+      'id',
+      'title',
+    ]);
+    expect(oldestItemSchema?.properties?.displayId?.type).toBe('string');
+    expect(conductReportQueue?.state?.enum).toEqual(['CLEAR', 'OPEN']);
   });
 
   it('counts canonical Quest States, the Hidden overlay, Dispute Cases, and Wallet holds', async () => {
@@ -447,7 +540,6 @@ describe('Admin Overview API', () => {
     expect(after.disputes.awaitingResolution - before.disputes.awaitingResolution).toBe(1);
     expect(after.members.frozenWallets - before.members.frozenWallets).toBe(1);
     expect(after.members.suspendedWallets - before.members.suspendedWallets).toBe(1);
-    expect(after).not.toHaveProperty('reports');
   });
 
   it('does not use Legacy Quest State or Admin Review Items for Dispute counters', async () => {
@@ -470,14 +562,30 @@ describe('Admin Overview API', () => {
 
   it('counts only the accepted Payout approval and Provider in-flight statuses', async () => {
     const before = await readOverview();
-    await seedPayout('PENDING_ADMIN_APPROVAL');
+    const payoutOldestAt = before.queues.payouts.oldest
+      ? new Date(Date.parse(before.queues.payouts.oldest.createdAt) - 60_000)
+      : new Date('1899-01-01T00:00:00Z');
+    const pendingPayoutId = await seedPayout('PENDING_ADMIN_APPROVAL', payoutOldestAt);
     await seedPayout('SUBMITTED_TO_PROVIDER');
     await seedPayout('PROVIDER_PENDING');
     await seedPayout('SUCCEEDED');
 
+    const [pendingPayout] = await db
+      .select({ publicSequence: paymentPayouts.publicSequence })
+      .from(paymentPayouts)
+      .where(eq(paymentPayouts.id, pendingPayoutId));
+
     const after = await readOverview();
     expect(after.payouts.pendingAdminApproval - before.payouts.pendingAdminApproval).toBe(1);
     expect(after.payouts.inFlight - before.payouts.inFlight).toBe(2);
+    expect(after.queues.payouts.count - before.queues.payouts.count).toBe(1);
+    expect(after.queues.payouts.state).toBe('OPEN');
+    expect(after.queues.payouts.oldest).toMatchObject({
+      id: pendingPayoutId,
+      displayId: formatPayoutDisplayId(pendingPayout!.publicSequence!),
+      title: 'Payout review',
+      createdAt: payoutOldestAt.toISOString(),
+    });
   });
 
   it('reads all counters from one database snapshot', async () => {
@@ -546,5 +654,239 @@ describe('Admin Overview API', () => {
     expect(after.quests.byState.QUEST_CANCELLED).toBe(before.quests.byState.QUEST_CANCELLED + 1);
     expect(after.members.frozenWallets).toBe(before.members.frozenWallets - 1);
     expect(after.members.suspendedWallets).toBe(before.members.suspendedWallets + 1);
+  });
+  it('returns open queue counts, oldest entries, and Wallet status counts', async () => {
+    type Queue = AdminOverviewData['queues']['payouts'];
+    type QueueItem = NonNullable<Queue['oldest']>;
+    const before = await readOverview();
+
+    expect(before).toHaveProperty('queues');
+    for (const queue of Object.values(before.queues)) {
+      if (queue.count === 0) {
+        expect(queue.state).toBe('CLEAR');
+        expect(queue.oldest).toBeNull();
+      }
+    }
+
+    const earlierThan = (oldest: QueueItem | null): Date =>
+      oldest ? new Date(Date.parse(oldest.createdAt) - 60_000) : new Date('1899-01-01T00:00:00Z');
+    const laterThan = (date: Date): Date => new Date(date.getTime() + 60_000);
+    const disputeOldestAt = earlierThan(before.queues.disputes.oldest);
+    const reportOldestAt = earlierThan(before.queues.reports.oldest);
+    const conductOldestAt = earlierThan(before.queues.conductReports.oldest);
+
+    const disputeQuestId = await seedQuest('QUEST_FAILED');
+    const disputeId = crypto.randomUUID();
+    await db.insert(adminDisputeCase).values({
+      id: disputeId,
+      questId: disputeQuestId,
+      filerUserId: hirerId,
+      createdAt: disputeOldestAt,
+    });
+    const [dispute] = await db
+      .select({ publicSequence: adminDisputeCase.publicSequence })
+      .from(adminDisputeCase)
+      .where(eq(adminDisputeCase.id, disputeId));
+
+    const reportQuestId = await seedQuest('QUEST_OPEN');
+    const reportQuestTitle = `Admin Overview Quest ${reportQuestId}`;
+    const reportConversationId = crypto.randomUUID();
+    const reportMembershipId = crypto.randomUUID();
+    const pendingReportId = crypto.randomUUID();
+    const hiddenReportId = crypto.randomUUID();
+    const dismissedReportId = crypto.randomUUID();
+    const reportMessageIds = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    overviewConversationIds.push(reportConversationId);
+    overviewMembershipIds.push(reportMembershipId);
+    overviewMessageIds.push(...reportMessageIds);
+    overviewReportCaseIds.push(pendingReportId, hiddenReportId, dismissedReportId);
+    await db.insert(chatConversation).values({
+      id: reportConversationId,
+      questId: reportQuestId,
+      questTitle: reportQuestTitle,
+      questStatus: 'QUEST_OPEN',
+      nextSequence: 4,
+      createdAt: reportOldestAt,
+    });
+    await db.insert(chatMembership).values({
+      id: reportMembershipId,
+      conversationId: reportConversationId,
+      memberId: hirerId,
+      role: 'HIRER',
+      joinedAt: reportOldestAt,
+      createdAt: reportOldestAt,
+    });
+    await db.insert(chatMessage).values(
+      reportMessageIds.map((id, index) => ({
+        id,
+        conversationId: reportConversationId,
+        sequence: index + 1,
+        kind: 'USER' as const,
+        senderMembershipId: reportMembershipId,
+        clientMessageId: `admin-overview-${id}`,
+        contentText: 'Overview Report Case fixture',
+        createdAt: new Date(reportOldestAt.getTime() + index * 60_000),
+      }))
+    );
+    await db.insert(adminReportCase).values([
+      {
+        id: pendingReportId,
+        messageId: reportMessageIds[0]!,
+        status: reportCaseStatus.pending,
+        createdAt: reportOldestAt,
+      },
+      {
+        id: hiddenReportId,
+        messageId: reportMessageIds[1]!,
+        status: reportCaseStatus.hidden,
+        createdAt: laterThan(reportOldestAt),
+      },
+      {
+        id: dismissedReportId,
+        messageId: reportMessageIds[2]!,
+        status: reportCaseStatus.dismissed,
+        caseClosedAt: laterThan(laterThan(reportOldestAt)),
+        createdAt: laterThan(laterThan(reportOldestAt)),
+      },
+    ]);
+    const [pendingReport] = await db
+      .select({ publicSequence: adminReportCase.publicSequence })
+      .from(adminReportCase)
+      .where(eq(adminReportCase.id, pendingReportId));
+
+    // Wallet rows and Member Penalty records are immutable; retain their Member fixtures.
+    const memberIds = Array.from({ length: 6 }, () => crypto.randomUUID());
+    const activeStatusUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const expiredStatusAt = new Date(Date.now() - 60 * 1000);
+    const memberRestrictions = [
+      { bannedUntil: null, redFlagExpiresAt: null },
+      { bannedUntil: null, redFlagExpiresAt: activeStatusUntil },
+      { bannedUntil: activeStatusUntil, redFlagExpiresAt: activeStatusUntil },
+      { bannedUntil: activeStatusUntil, redFlagExpiresAt: activeStatusUntil },
+      { bannedUntil: null, redFlagExpiresAt: expiredStatusAt },
+      { bannedUntil: expiredStatusAt, redFlagExpiresAt: null },
+    ] as const;
+    await db.insert(authUser).values(
+      memberIds.map((id, index) => ({
+        id,
+        email: `${id}@ku.th`,
+        firstName: 'Overview',
+        lastName: 'Queue Member',
+        ...memberRestrictions[index]!,
+      }))
+    );
+    await db.insert(walletWallet).values([
+      { userId: memberIds[0]!, walletStatus: 'ACTIVE' },
+      { userId: memberIds[1]!, walletStatus: 'ACTIVE' },
+      { userId: memberIds[2]!, walletStatus: 'FROZEN' },
+      { userId: memberIds[3]!, walletStatus: 'FROZEN' },
+      { userId: memberIds[4]!, walletStatus: 'SUSPENDED' },
+      { userId: memberIds[5]!, walletStatus: 'CLOSED' },
+    ]);
+
+    const activePermanentPenaltyId = crypto.randomUUID();
+    await db.insert(memberPenaltyRecord).values({
+      id: activePermanentPenaltyId,
+      memberId: memberIds[3]!,
+      ladder: 'REVIEW',
+      source: 'REVIEW_AVERAGE',
+      sourceId: crypto.randomUUID(),
+      sequenceNumber: 3,
+      result: 'PENALTY_PERMANENT_BAN',
+      actorType: 'SYSTEM',
+      reasonCode: 'REVIEW_AVERAGE_CROSSING',
+    });
+
+    const conductQuestId = await seedQuest('QUEST_ASSIGNED');
+    const conductQuestTitle = `Admin Overview Quest ${conductQuestId}`;
+    const pendingAssignmentId = crypto.randomUUID();
+    const dismissedAssignmentId = crypto.randomUUID();
+    const pendingConductReportId = crypto.randomUUID();
+    const dismissedConductReportId = crypto.randomUUID();
+    overviewAssignmentIds.push(pendingAssignmentId, dismissedAssignmentId);
+    overviewConductReportIds.push(pendingConductReportId, dismissedConductReportId);
+    await db.insert(questAssignment).values([
+      {
+        id: pendingAssignmentId,
+        questId: conductQuestId,
+        workerId: memberIds[0]!,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE',
+      },
+      {
+        id: dismissedAssignmentId,
+        questId: conductQuestId,
+        workerId: memberIds[1]!,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE',
+      },
+    ]);
+    await db.insert(adminConductReport).values([
+      {
+        id: pendingConductReportId,
+        questId: conductQuestId,
+        filerUserId: hirerId,
+        reportedMemberId: memberIds[0]!,
+        assignmentId: pendingAssignmentId,
+        reason: 'CONDUCT_ABANDONED',
+        createdAt: conductOldestAt,
+      },
+      {
+        id: dismissedConductReportId,
+        questId: conductQuestId,
+        filerUserId: hirerId,
+        reportedMemberId: memberIds[1]!,
+        assignmentId: dismissedAssignmentId,
+        reason: 'CONDUCT_ABANDONED',
+        status: conductReportStatus.dismissed,
+        decisionReason: 'The report was reviewed.',
+        resolvedByAdminId: adminId,
+        resolvedAt: laterThan(conductOldestAt),
+        createdAt: conductOldestAt,
+      },
+    ]);
+
+    const [pendingConductReport] = await db
+      .select({ publicSequence: adminConductReport.publicSequence })
+      .from(adminConductReport)
+      .where(eq(adminConductReport.id, pendingConductReportId));
+
+    const after = await readOverview();
+
+    expect(after.reports.open - before.reports.open).toBe(2);
+    expect(after.conductReports.open - before.conductReports.open).toBe(1);
+    expect(after.members.byStatus.NORMAL - before.members.byStatus.NORMAL).toBe(3);
+    expect(after.members.byStatus.FLAG - before.members.byStatus.FLAG).toBe(1);
+    expect(after.members.byStatus.TEMP_BAN - before.members.byStatus.TEMP_BAN).toBe(1);
+    expect(after.members.byStatus.PERM_BAN - before.members.byStatus.PERM_BAN).toBe(1);
+    expect(after.wallets.byStatus.ACTIVE - before.wallets.byStatus.ACTIVE).toBe(2);
+    expect(after.wallets.byStatus.FROZEN - before.wallets.byStatus.FROZEN).toBe(2);
+    expect(after.wallets.byStatus.SUSPENDED - before.wallets.byStatus.SUSPENDED).toBe(1);
+    expect(after.wallets.byStatus.CLOSED - before.wallets.byStatus.CLOSED).toBe(1);
+
+    expect(after.queues.disputes.count - before.queues.disputes.count).toBe(1);
+    expect(after.queues.disputes.state).toBe('OPEN');
+    expect(after.queues.disputes.oldest).toMatchObject({
+      id: disputeId,
+      displayId: formatDisputeDisplayId(dispute!.publicSequence!),
+      title: `Admin Overview Quest ${disputeQuestId}`,
+      createdAt: disputeOldestAt.toISOString(),
+    });
+
+    expect(after.queues.reports.count - before.queues.reports.count).toBe(2);
+    expect(after.queues.reports.state).toBe('OPEN');
+    expect(after.queues.reports.oldest).toMatchObject({
+      id: pendingReportId,
+      displayId: formatReportCaseDisplayId(pendingReport!.publicSequence!),
+      title: reportQuestTitle,
+      createdAt: reportOldestAt.toISOString(),
+    });
+
+    expect(after.queues.conductReports.count - before.queues.conductReports.count).toBe(1);
+    expect(after.queues.conductReports.state).toBe('OPEN');
+    expect(after.queues.conductReports.oldest).toMatchObject({
+      id: pendingConductReportId,
+      displayId: formatConductReportDisplayId(pendingConductReport!.publicSequence!),
+      title: conductQuestTitle,
+      createdAt: conductOldestAt.toISOString(),
+    });
   });
 });

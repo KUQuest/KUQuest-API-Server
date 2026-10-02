@@ -1,6 +1,8 @@
+import { formatTopUpDisplayId } from '@/modules/admin/admin-display-id';
+import { MoneyDomainError } from '@/modules/wallet';
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { paymentTopUps } from '@/database/schema/payment.schema';
+import { paymentTopUps, type TopUpStatus } from '@/database/schema/payment.schema';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
@@ -11,6 +13,70 @@ import type { AdminTopUpListItem, AdminTopUpListQuery } from './top-up.admin.sch
 export type AdminTopUpListPage = {
   items: AdminTopUpListItem[];
   nextCursor: string | null;
+};
+
+const adminTopUpColumns = {
+  id: paymentTopUps.id,
+  publicSequence: paymentTopUps.publicSequence,
+  userId: paymentTopUps.userId,
+  topUpStatus: paymentTopUps.topUpStatus,
+  creditSatang: paymentTopUps.creditSatang,
+  providerFeeSatang: paymentTopUps.providerFeeSatang,
+  providerTaxSatang: paymentTopUps.providerTaxSatang,
+  paymentTotalSatang: paymentTopUps.paymentTotalSatang,
+  providerChannelCode: paymentTopUps.providerChannelCode,
+  providerReference: paymentTopUps.providerReference,
+  qrExpiresAt: paymentTopUps.qrExpiresAt,
+  createdAt: paymentTopUps.createdAt,
+  updatedAt: paymentTopUps.updatedAt,
+  firstName: authUser.firstName,
+  lastName: authUser.lastName,
+  studentId: authUser.studentId,
+};
+
+type AdminTopUpRow = {
+  id: string;
+  publicSequence: number;
+  userId: string;
+  topUpStatus: TopUpStatus;
+  creditSatang: number;
+  providerFeeSatang: number;
+  providerTaxSatang: number;
+  paymentTotalSatang: number;
+  providerChannelCode: string | null;
+  providerReference: string | null;
+  qrExpiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  firstName: string;
+  lastName: string;
+  studentId: string | null;
+};
+
+const adminTopUpItemFromRow = (r: AdminTopUpRow): AdminTopUpListItem => {
+  const expiresAt = (r.qrExpiresAt ?? r.createdAt).toISOString();
+  const paidAt = r.topUpStatus === 'PAID' ? r.updatedAt.toISOString() : null;
+
+  return {
+    id: r.id,
+    displayId: formatTopUpDisplayId(r.publicSequence),
+    userId: r.userId,
+    member: {
+      firstName: r.firstName,
+      lastName: r.lastName,
+      studentId: r.studentId,
+    },
+    topUpStatus: r.topUpStatus,
+    creditAmountSatang: r.creditSatang,
+    providerFeeSatang: r.providerFeeSatang,
+    providerTaxSatang: r.providerTaxSatang,
+    paymentTotalSatang: r.paymentTotalSatang,
+    paymentMethod: r.providerChannelCode ?? 'PROMPTPAY',
+    providerReference: r.providerReference,
+    expiresAt,
+    paidAt,
+    createdAt: r.createdAt.toISOString(),
+  };
 };
 
 export const listAdminTopUps = async (
@@ -29,23 +95,7 @@ export const listAdminTopUps = async (
     ),
     read: ({ where, orderBy, limit: probe }) =>
       db
-        .select({
-          id: paymentTopUps.id,
-          userId: paymentTopUps.userId,
-          topUpStatus: paymentTopUps.topUpStatus,
-          creditSatang: paymentTopUps.creditSatang,
-          providerFeeSatang: paymentTopUps.providerFeeSatang,
-          providerTaxSatang: paymentTopUps.providerTaxSatang,
-          paymentTotalSatang: paymentTopUps.paymentTotalSatang,
-          providerChannelCode: paymentTopUps.providerChannelCode,
-          providerReference: paymentTopUps.providerReference,
-          qrExpiresAt: paymentTopUps.qrExpiresAt,
-          createdAt: paymentTopUps.createdAt,
-          updatedAt: paymentTopUps.updatedAt,
-          firstName: authUser.firstName,
-          lastName: authUser.lastName,
-          studentId: authUser.studentId,
-        })
+        .select(adminTopUpColumns)
         .from(paymentTopUps)
         .innerJoin(authUser, eq(paymentTopUps.userId, authUser.id))
         .where(where)
@@ -57,28 +107,21 @@ export const listAdminTopUps = async (
 
   const nextCursor = page.nextCursor ? encodeCursor(page.nextCursor) : null;
 
-  const items: AdminTopUpListItem[] = page.rows.map((r) => ({
-    id: r.id,
-    userId: r.userId,
-    member: {
-      firstName: r.firstName,
-      lastName: r.lastName,
-      studentId: r.studentId,
-    },
-    topUpStatus: r.topUpStatus,
-    creditAmountSatang: r.creditSatang,
-    providerFeeSatang: r.providerFeeSatang,
-    providerTaxSatang: r.providerTaxSatang,
-    paymentTotalSatang: r.paymentTotalSatang,
-    paymentMethod: r.providerChannelCode ?? 'PROMPTPAY',
-    providerReference: r.providerReference,
-    expiresAt: (r.qrExpiresAt ?? r.createdAt).toISOString(),
-    paidAt: r.topUpStatus === 'PAID' ? r.updatedAt.toISOString() : null,
-    createdAt: r.createdAt.toISOString(),
-  }));
+  const items: AdminTopUpListItem[] = page.rows.map(adminTopUpItemFromRow);
 
   return {
     items,
     nextCursor,
   };
+};
+
+export const getAdminTopUp = async (topUpId: string): Promise<AdminTopUpListItem> => {
+  const [row] = await db
+    .select(adminTopUpColumns)
+    .from(paymentTopUps)
+    .innerJoin(authUser, eq(paymentTopUps.userId, authUser.id))
+    .where(eq(paymentTopUps.id, topUpId))
+    .limit(1);
+  if (!row) throw new MoneyDomainError('TOP_UP_NOT_FOUND', 'Top-up does not exist.');
+  return adminTopUpItemFromRow(row);
 };

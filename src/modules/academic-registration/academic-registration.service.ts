@@ -175,3 +175,5 @@ export const getAcademicRegistrationOptions = async () => {
     faculties: [...faculties.values()],
   };
 };
+
+export { academicCatalog, seedAcademicOptions } from './academic-seed';

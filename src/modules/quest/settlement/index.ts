@@ -1,5 +1,9 @@
 export { questSettlementRoute } from './quest-settlement.route';
-export { cancelQuestController, cancelQuestV2Controller } from './quest-settlement.controller';
+export {
+  cancelQuestController,
+  cancelQuestV2Controller,
+  previewQuestV2CancellationController,
+} from './quest-settlement.controller';
 export {
   cancelQuest,
   cancelQuestV2,
@@ -20,4 +24,6 @@ export {
   questCancellationResponseSchema,
   questSettlementHeadersSchema,
   questSettlementParamsSchema,
+  questV2CancelHeadersSchema,
+  questV2CancelPreviewResponseSchema,
 } from './quest-settlement.schema';

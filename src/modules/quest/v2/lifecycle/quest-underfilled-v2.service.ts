@@ -11,6 +11,7 @@ import { satang, toBaht } from '@/modules/wallet';
 import { and, asc, eq, isNull, lte, or } from 'drizzle-orm';
 
 import { settleUnderfilledCancellationInTransaction } from '../../settlement';
+import { notifyHirerUnderfilledDecisionPending } from '../realtime';
 import type { QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
 import { applyQuestStateTransition } from '../../shared/transition/quest-transition.service';
 import {
@@ -24,6 +25,7 @@ import {
   questV2Mode,
   questV2Participation,
   questV2States,
+  questV2UnderfilledCancellationReasonFor,
   questV2UnderfilledConsentDecisions,
   questV2UnderfilledDecisionValues,
   questV2UnderfilledStates,
@@ -37,7 +39,9 @@ import type {
   QuestV2UnderfilledConsentInput,
   QuestV2UnderfilledData,
   QuestV2UnderfilledDecisionInput,
+  QuestV2UnderfilledSummary,
 } from './quest-underfilled-v2.schema';
+import { enqueueUnderfilledPush } from './quest-underfilled-v2.push';
 
 export const questV2UnderfilledDecisionOperationScope = 'quest.v2.underfilled.decision';
 export const questV2UnderfilledConsentOperationScope = 'quest.v2.underfilled.consent';
@@ -126,14 +130,23 @@ const snapshotFor = (data: QuestV2UnderfilledData): Record<string, unknown> => (
   workerRewardPool: data.workerRewardPool,
   questReward: data.questReward,
   dueAt: data.dueAt,
+  cancellationReason: data.cancellationReason,
+  cancelledAt: data.cancelledAt,
   decision: data.decision,
   consent: data.consent,
   ...(data.responses !== undefined ? { responses: data.responses } : {}),
   ...(data.ownResponse !== undefined ? { ownResponse: data.ownResponse } : {}),
 });
 
+// Snapshots saved before these fields existed hold no cancellation data.
 const underfilledFromSnapshot = (value: unknown): QuestV2UnderfilledData | undefined =>
-  isData(value) ? value : undefined;
+  isData(value)
+    ? {
+        ...value,
+        cancellationReason: value.cancellationReason ?? null,
+        cancelledAt: value.cancelledAt ?? null,
+      }
+    : undefined;
 
 const requestHashFor = (
   userId: string,
@@ -200,6 +213,9 @@ const selectConsents = async (
     .orderBy(asc(questV2UnderfilledConsent.createdAt), asc(questV2UnderfilledConsent.id));
   return lock ? query.for('update') : query;
 };
+
+const consentWorkerIds = async (transaction: QuestTransaction, decisionId: string) =>
+  (await selectConsents(transaction, decisionId)).map(({ workerId }) => workerId);
 
 const activeAssignments = async (transaction: QuestTransaction, questId: string) =>
   transaction
@@ -279,6 +295,14 @@ const createDecisionInTransaction = async (
     })
     .returning();
   if (!created) return { underfilled: false, created: false };
+  await notifyHirerUnderfilledDecisionPending(transaction, current.id, created.decisionExpiresAt);
+  await enqueueUnderfilledPush(transaction, created.id, {
+    type: 'UNDERFILLED_DECISION_PENDING',
+    recipientMemberIds: [current.hirerId],
+    questId: current.id,
+    expiresAt: created.decisionExpiresAt,
+    now,
+  });
 
   await transaction.insert(questV2UnderfilledConsent).values(
     assignments.map((assignment, index) => ({
@@ -309,6 +333,26 @@ const consentStatusFor = (decision: DecisionRow) => {
   return 'UNDERFILLED_CONSENT_CANCELLED' as const;
 };
 
+const cancellationReasonFor = (decision: DecisionRow) =>
+  decision.state === 'UNDERFILLED_CANCELLED' && decision.resolutionCode
+    ? questV2UnderfilledCancellationReasonFor[
+        decision.resolutionCode as QuestV2UnderfilledResolutionCode
+      ]
+    : null;
+
+/** Compact, per-assignment view of the same decision row that `project` reads. */
+export const summarizeQuestV2Underfilled = (
+  decision: DecisionRow,
+  headcount: number
+): QuestV2UnderfilledSummary => ({
+  state: decision.state,
+  decision: { expiresAt: decision.decisionExpiresAt.toISOString() },
+  consent: { expiresAt: decision.consentExpiresAt?.toISOString() ?? null },
+  activeWorkerCount: decision.activeWorkerCount,
+  headcount,
+  cancellationReason: cancellationReasonFor(decision),
+});
+
 const project = async (
   transaction: QuestTransaction,
   memberId: string,
@@ -335,6 +379,11 @@ const project = async (
     workerRewardPool: isHirer ? toBaht(satang(decision.workerRewardPoolSatang)) : null,
     questReward: ownResponse ? toBaht(satang(ownResponse.rewardSatang)) : null,
     dueAt: current.dueAt ? formatQuestV2ScheduleTime(current.dueAt) : null,
+    cancellationReason: cancellationReasonFor(decision),
+    cancelledAt:
+      decision.state === 'UNDERFILLED_CANCELLED'
+        ? (decision.resolvedAt?.toISOString() ?? null)
+        : null,
     decision: {
       status: decisionStatusFor(decision),
       value: decision.decision,
@@ -375,32 +424,21 @@ const cancelUnderfilledInTransaction = async (
   resolutionCode: QuestV2UnderfilledResolutionCode,
   now: Date
 ): Promise<{ current: QuestRow; decision: DecisionRow }> => {
-  if (current.questState !== 'QUEST_OPEN') {
-    const [updated] = await transaction
-      .update(questV2UnderfilledDecision)
-      .set({
-        state: 'UNDERFILLED_CANCELLED',
-        decision: resolutionCode === 'HIRER_CANCELLED' ? 'CANCEL' : decision.decision,
-        consentExpiresAt: null,
-        resolutionCode,
-        resolvedAt: now,
-      })
-      .where(eq(questV2UnderfilledDecision.id, decision.id))
-      .returning();
-    return { current, decision: updated ?? decision };
-  }
-
-  const systemCancellation = resolutionCode !== 'HIRER_CANCELLED';
-  const settlement = await settleUnderfilledCancellationInTransaction(
-    transaction,
-    current.id,
-    current.hirerId,
-    `quest-underfilled-cancel:${decision.id}:${resolutionCode}`,
-    now,
-    systemCancellation
-  );
-  if (!('questStatus' in settlement)) {
-    throw new Error(`Quest ${current.id} could not be cancelled for underfilled resolution`);
+  let settled = current;
+  if (current.questState === 'QUEST_OPEN') {
+    const systemCancellation = resolutionCode !== 'HIRER_CANCELLED';
+    const settlement = await settleUnderfilledCancellationInTransaction(
+      transaction,
+      current.id,
+      current.hirerId,
+      `quest-underfilled-cancel:${decision.id}:${resolutionCode}`,
+      now,
+      systemCancellation
+    );
+    if (!('questStatus' in settlement)) {
+      throw new Error(`Quest ${current.id} could not be cancelled for underfilled resolution`);
+    }
+    settled = { ...current, questState: settlement.questStatus };
   }
   const [updated] = await transaction
     .update(questV2UnderfilledDecision)
@@ -413,10 +451,14 @@ const cancelUnderfilledInTransaction = async (
     })
     .where(eq(questV2UnderfilledDecision.id, decision.id))
     .returning();
-  return {
-    current: { ...current, questState: settlement.questStatus },
-    decision: updated ?? decision,
-  };
+  await enqueueUnderfilledPush(transaction, decision.id, {
+    type: 'UNDERFILLED_CANCELLED',
+    recipientMemberIds: await consentWorkerIds(transaction, decision.id),
+    questId: current.id,
+    reason: questV2UnderfilledCancellationReasonFor[resolutionCode],
+    now,
+  });
+  return { current: settled, decision: updated ?? decision };
 };
 
 const expireInTransaction = async (
@@ -597,6 +639,13 @@ export const decideQuestV2Underfilled = async (
               .returning();
             if (!updated) return { kind: 'rejected', rejection: 'not-pending' };
             nextDecision = updated;
+            await enqueueUnderfilledPush(transaction, updated.id, {
+              type: 'UNDERFILLED_CONSENT_PENDING',
+              recipientMemberIds: await consentWorkerIds(transaction, updated.id),
+              questId,
+              expiresAt: updated.consentExpiresAt ?? now,
+              now,
+            });
           }
 
           const dataResult = await project(transaction, hirerId, nextCurrent, nextDecision);
@@ -750,9 +799,16 @@ export const respondToQuestV2Underfilled = async (
                     assignedAt: now.toISOString(),
                   },
                 ],
+                actor: { actorType: 'MEMBER', actorUserId: workerId },
               });
               nextDecision = completed;
               nextCurrent = { ...current, questState: 'QUEST_ASSIGNED' };
+              await enqueueUnderfilledPush(transaction, completed.id, {
+                type: 'UNDERFILLED_COMPLETED',
+                recipientMemberIds: await consentWorkerIds(transaction, completed.id),
+                questId,
+                now,
+              });
             }
           }
 

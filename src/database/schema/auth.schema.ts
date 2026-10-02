@@ -20,6 +20,9 @@ export const authUser = pgTable(
   'auth_user',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'auth_user_public_sequence' })
+      .unique(),
     email: text('email').notNull(),
     emailVerified: boolean('email_verified').default(false).notNull(),
     // better-auth's core `image` field has no equivalent in the design's auth_user;
@@ -36,6 +39,8 @@ export const authUser = pgTable(
     occupationId: uuid('occupation_id').references(() => occupation.id),
     termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
     termsVersion: text('terms_version'),
+    bannedUntil: timestamp('banned_until', { withTimezone: true }),
+    redFlagExpiresAt: timestamp('red_flag_expires_at', { withTimezone: true }),
     version: integer('version').default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })

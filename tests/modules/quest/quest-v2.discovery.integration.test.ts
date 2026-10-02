@@ -5,7 +5,6 @@ import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment, questImage, questLocation } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import { questStatus } from '@/modules/quest/shared';
 import { deleteTestIdempotencyKeys } from '../wallet/wallet-test-fixtures';
@@ -13,6 +12,8 @@ import { deleteTestIdempotencyKeys } from '../wallet/wallet-test-fixtures';
 import { Elysia } from 'elysia';
 import { asc, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const testEmail = `quest-v2-discovery-${crypto.randomUUID()}@ku.th`;
 const testPassword = 'TestStudent1!';
@@ -181,6 +182,7 @@ beforeEach(async () => {
     await db.delete(quest).where(inArray(quest.id, questIds));
     questIds.splice(0, questIds.length);
   }
+  await db.update(authUser).set({ redFlagExpiresAt: null }).where(eq(authUser.id, ownerId));
 });
 
 afterAll(async () => {
@@ -225,6 +227,20 @@ type OpenApiOperation = {
 };
 
 describe('Quest API v2 discovery contract', () => {
+  it('filters the inclusive Hirer price independently from net reward', async () => {
+    const id = await createOpenQuest(ownerId);
+    const response = await getBoard('?minQuestFundingTotal=20&maxQuestFundingTotal=20');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(
+      body.data.items.some(
+        (item: { id: string; questFundingTotal: number }) =>
+          item.id === id && item.questFundingTotal === 20
+      )
+    ).toBe(true);
+    expect((await getBoard('?minQuestFundingTotal=20.001')).status).toBe(400);
+  });
+
   it.each([
     ['GET', '/api/v2/quests'],
     ['GET', '/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/public'],
@@ -351,6 +367,10 @@ describe('Quest API v2 discovery contract', () => {
     const ownQuest = await createOpenQuest(memberId, {
       title: `${fixturePrefix} Own Quest`,
     });
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) })
+      .where(eq(authUser.id, ownerId));
 
     const response = await getBoard(`?q=${encodeURIComponent(fixturePrefix)}`);
     expect(response.status).toBe(200);
@@ -375,6 +395,7 @@ describe('Quest API v2 discovery contract', () => {
             department: unknown;
             avatar: unknown;
             occupation: unknown;
+            redFlagged: boolean;
           };
         }>;
         nextCursor: string | null;
@@ -417,6 +438,7 @@ describe('Quest API v2 discovery contract', () => {
           url: expect.stringMatching(/^https?:\/\//),
         },
         occupation: { id: occupationId, name: 'Student' },
+        redFlagged: true,
       },
     });
     expect(body.data.items.some((item) => item.id === ownQuest)).toBe(false);
@@ -488,6 +510,10 @@ describe('Quest API v2 discovery contract', () => {
       fileId: publicFile.id,
       position: 0,
     });
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) })
+      .where(eq(authUser.id, ownerId));
 
     const linkCreatedAt = Date.now();
     const response = await getPublicDetail(publicQuestId);
@@ -512,6 +538,7 @@ describe('Quest API v2 discovery contract', () => {
       activeWorkerCount: 0,
       proofRequired: true,
       hirerName: 'Quest Owner',
+      hirerRedFlagged: true,
       hirerAvatar: {
         fileId: ownerAvatarFileId,
         url: expect.stringMatching(/^https?:\/\//),
@@ -537,7 +564,7 @@ describe('Quest API v2 discovery contract', () => {
     expect(body.data.locations).toEqual(expectedLocations);
     expect(body.data.images[0]).not.toHaveProperty('fileId');
     expect(body.data).not.toHaveProperty('hirerId');
-    expect(body.data).not.toHaveProperty('questFundingTotal');
+    expect(body.data.questFundingTotal).toBe(20);
     expect(body.data).not.toHaveProperty('platformFee');
     expect(body.data).not.toHaveProperty('wallet');
     expect(body.data).not.toHaveProperty('fundingReservation');

@@ -24,6 +24,10 @@ _Avoid_: Rulebook, draft Rulebook, accepted contract
 The end user of KUQuest — anyone authenticated with a Google account under the `@ku.th` email domain. Represented by the `auth_user` table.
 _Avoid_: User, account holder, Student (use Member when the KUQuest identity matters, User only when referring generically to the auth record).
 
+**Member Display ID**:
+An Admin-facing identifier for one Member, formatted as `MEM-######` with at least six digits. It does not replace the Member's UUID or KU Student ID.
+_Avoid_: Student ID, internal auth identifier.
+
 **Admin**:
 A KUQuest Admin web app operator, signed in with credentials (not Google). Represented by the `auth_admin` table — a separate identity space from Member, sharing `auth_account`/`auth_session` via a nullable `userId`/`adminId` pair (exactly one set per row). Schema landed in [[BE-32]]; the second better-auth instance wiring credential login for Admins is a follow-up, not yet built. One undifferentiated permission tier — `auth_admin` has no role/permission column. For Payout Approval, Dispute Case, Quest Hide, Wallet Freeze/Suspend, Trust & Safety moderation, and the Member penalty ladders, read `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: User (Admins are never Members and vice versa).
@@ -45,12 +49,12 @@ A public entry in a Member's profile describing one role or activity through its
 _Avoid_: Experience history, treating Work Experience as a single profile field.
 
 **Public Profile**:
-The read-only view of another Member's Profile, served by `GET /api/v1/profile/:userId` — same underlying data as own-Profile, narrower field set (no Telephone/Student ID), requires an authenticated Member caller but not ownership (settled via /grilling, 2026-08-09). Unlike own-Profile, Portfolio items and Certificates ARE inlined into the Public Profile response (a deliberate exception to Profile's "separate resource" rule, made so a viewer doesn't need per-userId variants of every sub-resource endpoint). Reputation is derived from eligible Quest relationships, while Profile Tags are derived from successfully completed Quest participation; neither has a shipped runtime module yet (BE-76/79-83 still Backlog). No opt-out: every Member is browsable, no privacy toggle exists.
+The read-only view of another Member's Profile, served by `GET /api/v1/profile/:userId` — same underlying data as own-Profile, narrower field set (no Telephone/Student ID), requires an authenticated Member caller but not ownership (settled via /grilling, 2026-08-09). Unlike own-Profile, Portfolio items and Certificates ARE inlined into the Public Profile response (a deliberate exception to Profile's "separate resource" rule, made so a viewer doesn't need per-userId variants of every sub-resource endpoint). Reputation is derived from eligible Quest relationships and is included in this view. Profile Tags are derived from successfully completed Quest participation. No opt-out: every Member is browsable, no privacy toggle exists.
 _Avoid_: conflating with own-Profile's response shape — they share a resource but not a schema.
 
 **Tag**:
-A shared Quest skill label used to describe the ability demonstrated by a Quest. Each Quest has exactly one canonical Tag. A Member's profile Tags are derived from their three most frequent Tags across successfully completed Quest participation; they are not manually assigned profile data.
-_Avoid_: profile skill, occupation, treating Tags as editable Member fields.
+A shared Quest category that describes the type of work a Quest needs. Each Quest has exactly one canonical Tag, and every Tag name uses English only. A Member's Profile Tags are derived from their three most frequent Quest Tags across successfully completed Quest participation; they describe work categories, not abilities, and are not manually assigned.
+_Avoid_: treating Tag as a skill label, Occupation, or manually assigned Profile field.
 
 **Review**:
 A rating and optional comment that a Hirer or Worker gives to the other after a Quest reaches any Terminal State: `QUEST_COMPLETED`, `QUEST_FAILED`, or `QUEST_CANCELLED`. A Review is tied to one Quest, each direction is allowed once per Quest, and the author may edit it until seven days after the Quest becomes Terminal. Reviews cannot be deleted and contribute to the reviewed Member's Reputation.

@@ -1,0 +1,23 @@
+meta {
+  name: Get Own Wallet
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/wallet
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns the four integer-satang Wallet compartments for the authenticated Student:
+  - spendingBalanceSatang: Balance available to fund Quests
+  - earningsBalanceSatang: Accumulated earnings from completed Quests
+  - fundingReservedSatang: Funds currently held in Quest Escrow
+  - reservedForPayoutsSatang: Funds held pending manual Payout review
+}

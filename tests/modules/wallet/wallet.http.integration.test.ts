@@ -1,12 +1,13 @@
 import { app } from '@/app';
 import { db } from '@/database/client';
-import { createStagingTestAuthRoute } from '@/modules/auth/staging-test-auth.route';
 import { walletLedgerAccount } from '@/database/schema/wallet.schema';
 import { createSealedLedgerTransaction, ensureWallet, signedSatang } from '@/modules/wallet';
 
 import { Elysia } from 'elysia';
 import { describe, expect, it } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const testAuthApp = new Elysia({ name: 'wallet-http-test-auth' }).use(
   createStagingTestAuthRoute({

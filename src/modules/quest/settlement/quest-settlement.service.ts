@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import { recordAudit, type AuditActor } from '@/modules/audit/audit.service';
 import {
   quest,
@@ -49,7 +50,8 @@ export type QuestSettlementOutcome =
         | 'invalid-idempotency-key'
         | 'idempotency-key-reused'
         | 'idempotency-key-required'
-        | 'idempotency-unavailable';
+        | 'idempotency-unavailable'
+        | 'preview-stale';
     }
   | {
       questStatus: QuestStatus;
@@ -61,6 +63,8 @@ export type QuestSettlementOutcome =
 type Actor = { userId?: string; adminId?: string };
 type CommandType = 'COMPLETE' | 'CANCEL' | 'AUTO_CANCEL';
 type CommandResult = Extract<QuestSettlementOutcome, { questStatus: QuestStatus }>;
+const questStateAuditActor = (actorUserId: string | null): AuditActor =>
+  actorUserId ? { actorType: 'MEMBER', actorUserId } : { actorType: 'SYSTEM' };
 
 export const questV2CancellationOperationScope = 'quest.v2.cancellation';
 const questV2CancellationPath = '/api/v2/quests/:questId/cancel';
@@ -296,7 +300,8 @@ const completeInTransaction = async (
   questId: string,
   actorUserId: string,
   commandId: string,
-  now: Date
+  now: Date,
+  auditActor: AuditActor
 ): Promise<QuestSettlementOutcome> => {
   const current = await lockQuest(tx, questId);
   if (!current) return { outcome: 'not-found' };
@@ -374,6 +379,7 @@ const completeInTransaction = async (
     to: questStatus.completed,
     now,
     workChat: [terminalChatEntry(current, questStatus.completed, commandId, now)],
+    actor: auditActor,
   });
   const result: CommandResult = {
     questStatus: questStatus.completed,
@@ -547,8 +553,8 @@ export const settleProofFreeQuestV2InTransaction = async (
   questId: string,
   commandId: string,
   now: Date,
-  completedWorkerId?: string,
-  actorId: string | null = null
+  completedWorkerId: string | undefined,
+  actorUserId: string
 ): Promise<CommandResult | undefined> => {
   const current = await lockQuest(tx, questId);
   if (!current || current.apiVersion !== 'v2' || current.questStatus !== questStatus.inProgress) {
@@ -708,7 +714,7 @@ export const settleProofFreeQuestV2InTransaction = async (
         [assignment],
         assignmentStatus.completed,
         now,
-        actorId
+        actorUserId
       );
       return undefined;
     }
@@ -734,6 +740,7 @@ export const settleProofFreeQuestV2InTransaction = async (
     to: questStatus.completed,
     now,
     workChat: [terminalChatEntry(current, questStatus.completed, commandId, now)],
+    actor: { actorType: 'MEMBER', actorUserId },
   });
   return {
     questStatus: questStatus.completed,
@@ -940,6 +947,7 @@ export const settleApprovedQuestV2ProofInTransaction = async (
         to: questStatus.completed,
         now,
         workChat: [terminalChatEntry(current, questStatus.completed, commandId, now, actorId)],
+        actor: questStateAuditActor(actorId),
       });
       resultingQuestStatus = questStatus.completed;
     } else {
@@ -976,7 +984,11 @@ export const failQuestV2InTransaction = async (
   if (!current || current.apiVersion !== 'v2') {
     throw new MoneyDomainError('FUNDING_SETTLEMENT_FAILED', 'The Quest is not a v2 Quest.');
   }
-  if (![questStatus.inProgress, questStatus.failed].includes(current.questStatus as never)) {
+  if (
+    ![questStatus.assigned, questStatus.inProgress, questStatus.failed].includes(
+      current.questStatus as never
+    )
+  ) {
     throw new MoneyDomainError(
       'FUNDING_SETTLEMENT_FAILED',
       'The v2 Quest cannot fail from its current state.'
@@ -1023,6 +1035,7 @@ export const failQuestV2InTransaction = async (
       ...inactiveWorkerEntries(current, affected, assignmentStatus.incomplete, now, actorId),
       terminalChatEntry(current, questStatus.failed, commandId, now, actorId),
     ],
+    actor: questStateAuditActor(actorId),
   });
   return {
     questStatus: questStatus.failed,
@@ -1036,7 +1049,8 @@ export const failQuestInTransaction = async (
   questId: string,
   commandId: string,
   now: Date,
-  actorId: string | null
+  actorId: string | null,
+  assignmentIdsToMarkIncomplete?: string[]
 ): Promise<QuestV2FailureEffect> => {
   const current = await lockQuest(tx, questId);
   if (!current || current.apiVersion !== 'v1') {
@@ -1046,9 +1060,12 @@ export const failQuestInTransaction = async (
     return { questStatus: questStatus.failed, incompleteAssignmentIds: [] };
   }
   if (
-    ![questStatus.inProgress, questStatus.submitted, questStatus.rework].includes(
-      current.questStatus as never
-    )
+    ![
+      questStatus.assigned,
+      questStatus.inProgress,
+      questStatus.submitted,
+      questStatus.rework,
+    ].includes(current.questStatus as never)
   ) {
     throw new MoneyDomainError(
       'FUNDING_SETTLEMENT_FAILED',
@@ -1057,6 +1074,9 @@ export const failQuestInTransaction = async (
   }
 
   const active = await activeAssignments(tx, questId);
+  const affected = assignmentIdsToMarkIncomplete
+    ? active.filter(({ id }) => assignmentIdsToMarkIncomplete.includes(id))
+    : active;
   const approvedProofs = await tx
     .select({ id: proofSubmission.id })
     .from(proofSubmission)
@@ -1067,7 +1087,7 @@ export const failQuestInTransaction = async (
       )
     )
     .for('update');
-  if (active.length > 0) {
+  if (affected.length > 0) {
     await tx
       .update(questAssignment)
       .set({ assignmentStatus: assignmentStatus.incomplete })
@@ -1075,7 +1095,7 @@ export const failQuestInTransaction = async (
         and(
           inArray(
             questAssignment.id,
-            active.map(({ id }) => id)
+            affected.map(({ id }) => id)
           ),
           eq(questAssignment.assignmentStatus, assignmentStatus.active)
         )
@@ -1088,11 +1108,12 @@ export const failQuestInTransaction = async (
     to: questStatus.failed,
     now,
     workChat: [
-      ...(active.length > 0
-        ? inactiveWorkerEntries(current, active, assignmentStatus.incomplete, now, actorId)
+      ...(affected.length > 0
+        ? inactiveWorkerEntries(current, affected, assignmentStatus.incomplete, now, actorId)
         : []),
       terminalChatEntry(current, questStatus.failed, commandId, now, actorId),
     ],
+    actor: questStateAuditActor(actorId),
   });
   if (!applied) return { questStatus: questStatus.failed, incompleteAssignmentIds: [] };
 
@@ -1108,18 +1129,23 @@ export const failQuestInTransaction = async (
   }
   return {
     questStatus: questStatus.failed,
-    incompleteAssignmentIds: active
+    incompleteAssignmentIds: affected
       .map(({ id }) => id)
       .filter((id) => !completedAssignmentIds.has(id)),
   };
 };
-
 export const completeQuest = async (
   questId: string,
   actorUserId: string,
   commandId = `quest-completion:${questId}`,
   now = new Date()
-) => db.transaction((tx) => completeInTransaction(tx, questId, actorUserId, commandId, now));
+): Promise<QuestSettlementOutcome> =>
+  db.transaction((tx) =>
+    completeInTransaction(tx, questId, actorUserId, commandId, now, {
+      actorType: 'MEMBER',
+      actorUserId,
+    })
+  );
 
 type LockedQuest = NonNullable<Awaited<ReturnType<typeof lockQuest>>>;
 type ActiveWorker = Awaited<ReturnType<typeof activeAssignments>>[number];
@@ -1264,21 +1290,11 @@ const scaledCancellationAllocations = (
 
 const recordV2CancellationAudit = async (
   tx: QuestTransaction,
-  current: LockedQuest,
   workers: ActiveWorker[],
   hirerId: string,
   now: Date
 ) => {
   const actor: AuditActor = { actorType: 'MEMBER', actorUserId: hirerId };
-  await recordAudit(tx, {
-    ...actor,
-    action: 'QUEST_STATE_CHANGED',
-    resourceType: 'QUEST',
-    resourceId: current.id,
-    oldValue: { state: current.questStatus },
-    newValue: { state: questStatus.cancelled },
-    createdAt: now,
-  });
   for (const worker of workers) {
     await recordAudit(tx, {
       ...actor,
@@ -1324,8 +1340,9 @@ const applyV2CancellationInTransaction = async (
       version: current.version,
       columns: { cancelledByUserId, cancelledByAdminId: null },
       workChat: [terminalChatEntry(current, questStatus.cancelled, commandId, now, hirerId)],
+      actor: { actorType: 'MEMBER', actorUserId: hirerId },
     });
-    await recordV2CancellationAudit(tx, current, [], hirerId, now);
+    await recordV2CancellationAudit(tx, [], hirerId, now);
     return {
       questStatus: questStatus.cancelled,
       outcome: 'CANCELLED',
@@ -1516,7 +1533,7 @@ const applyV2CancellationInTransaction = async (
         eq(questAssignment.assignmentStatus, assignmentStatus.active)
       )
     );
-  await applyQuestStateTransition(tx, {
+  const cancelled = await applyQuestStateTransition(tx, {
     questId: current.id,
     from: current.questStatus,
     to: questStatus.cancelled,
@@ -1527,8 +1544,20 @@ const applyV2CancellationInTransaction = async (
       ...inactiveWorkerEntries(current, workers, assignmentStatus.cancelled, now, hirerId),
       terminalChatEntry(current, questStatus.cancelled, commandId, now, hirerId),
     ],
+    actor: { actorType: 'MEMBER', actorUserId: hirerId },
   });
-  await recordV2CancellationAudit(tx, current, workers, hirerId, now);
+  await recordV2CancellationAudit(tx, workers, hirerId, now);
+  if (
+    cancelled &&
+    (current.questStatus === questStatus.assigned || current.questStatus === questStatus.inProgress)
+  ) {
+    await notifyQuestUpdate(tx, {
+      questId: current.id,
+      recipientMemberIds: [...new Set([hirerId, ...workers.map(({ workerId }) => workerId)])],
+      closeMemberIds: workers.map(({ workerId }) => workerId),
+      changeType: 'QUEST_CANCELLED',
+    });
+  }
   return {
     questStatus: questStatus.cancelled,
     outcome: 'CANCELLED',
@@ -1543,7 +1572,8 @@ const settleV2CancellationInTransaction = async (
   hirerId: string,
   commandId: string,
   requestHash: string,
-  now: Date
+  now: Date,
+  expectedPreviewVersion?: string
 ): Promise<QuestSettlementOutcome> => {
   const current = await lockQuest(tx, questId);
   if (!current || current.apiVersion !== 'v2') return { outcome: 'not-found' };
@@ -1565,6 +1595,14 @@ const settleV2CancellationInTransaction = async (
     return { outcome: command.outcome };
   }
   if ('replay' in command) return command.replay;
+  if (
+    expectedPreviewVersion !== undefined &&
+    expectedPreviewVersion !==
+      (await cancelPreviewVersion(current, await activeAssignments(tx, questId)))
+  ) {
+    await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId));
+    return { outcome: 'preview-stale' };
+  }
 
   const result = await applyV2CancellationInTransaction(tx, current, hirerId, commandId, now);
   if (!('questStatus' in result)) return result;
@@ -1576,7 +1614,8 @@ export const cancelQuestV2 = async (
   hirerId: string,
   questId: string,
   rawCommandId: string,
-  now = new Date()
+  now = new Date(),
+  expectedPreviewVersion?: string
 ): Promise<QuestSettlementOutcome> => {
   const commandId = rawCommandId.trim();
   if (commandId.length === 0) return { outcome: 'idempotency-key-required' };
@@ -1589,8 +1628,95 @@ export const cancelQuestV2 = async (
     body: null,
   });
   return db.transaction((tx) =>
-    settleV2CancellationInTransaction(tx, questId, hirerId, commandId, requestHash, now)
+    settleV2CancellationInTransaction(
+      tx,
+      questId,
+      hirerId,
+      commandId,
+      requestHash,
+      now,
+      expectedPreviewVersion
+    )
   );
+};
+
+/** Opaque token of the Quest facts that decide the cancellation tier and amounts. */
+const cancelPreviewVersion = (current: LockedQuest, workers: Array<{ id: string }>) =>
+  hash({
+    questId: current.id,
+    status: current.questStatus,
+    version: current.version,
+    assignmentIds: workers.map(({ id }) => id).sort(),
+  });
+
+export type QuestV2CancelPreview = {
+  questStatus: QuestStatus;
+  tier: 'NO_PENALTY' | 'PARTIAL_PENALTY' | 'FULL_PENALTY';
+  paidSatang: number;
+  refundedSatang: number;
+  platformFeeSatang: number;
+  affectedWorkerCount: number;
+  computedAt: Date;
+  previewVersion: string;
+};
+
+class CancelPreviewRollback extends Error {
+  constructor(readonly preview: QuestV2CancelPreview) {
+    super('Cancel preview rolls back its trial cancellation');
+  }
+}
+
+/**
+ * Reads what an immediate `cancelQuestV2` would pay and refund. It runs the real cancellation
+ * inside a transaction that always rolls back, so the preview cannot drift from the command.
+ */
+export const previewQuestV2Cancellation = async (
+  hirerId: string,
+  questId: string,
+  now = new Date()
+): Promise<QuestV2CancelPreview | Extract<QuestSettlementOutcome, { outcome: string }>> => {
+  try {
+    return await db.transaction(async (tx) => {
+      const current = await lockQuest(tx, questId);
+      if (!current || current.apiVersion !== 'v2') return { outcome: 'not-found' as const };
+      if (current.hirerId !== hirerId) return { outcome: 'not-authorized' as const };
+      const workers = await activeAssignments(tx, questId);
+      const previewVersion = await cancelPreviewVersion(current, workers);
+      const escrow = await readQuestEscrow(tx, { ownerUserId: current.hirerId, questId });
+      const result = await applyV2CancellationInTransaction(
+        tx,
+        current,
+        hirerId,
+        `cancel-preview:${crypto.randomUUID()}`,
+        now
+      );
+      if (!('questStatus' in result)) {
+        return result as Extract<QuestSettlementOutcome, { outcome: string }>;
+      }
+      const tier =
+        current.questStatus === questStatus.inProgress
+          ? 'FULL_PENALTY'
+          : current.questStatus === questStatus.assigned
+            ? 'PARTIAL_PENALTY'
+            : 'NO_PENALTY';
+      throw new CancelPreviewRollback({
+        questStatus: current.questStatus,
+        tier,
+        paidSatang: result.paidSatang,
+        refundedSatang: result.refundedSatang,
+        platformFeeSatang: Math.max(
+          0,
+          (escrow?.remainingSatang ?? 0) - result.paidSatang - result.refundedSatang
+        ),
+        affectedWorkerCount: workers.length,
+        computedAt: now,
+        previewVersion,
+      });
+    });
+  } catch (error) {
+    if (error instanceof CancelPreviewRollback) return error.preview;
+    throw error;
+  }
 };
 
 /** A system cancellation authorises against the Hirer but attributes the cancellation to nobody. */
@@ -1600,7 +1726,8 @@ const cancelInTransaction = async (
   actor: Actor,
   commandId: string,
   now: Date,
-  system = false
+  system = false,
+  reasonCode?: string | null
 ): Promise<QuestSettlementOutcome> => {
   const current = await lockQuest(tx, questId);
   if (!current) return { outcome: 'not-found' };
@@ -1609,6 +1736,13 @@ const cancelInTransaction = async (
   const cancelledByUserId = system ? null : (actor.userId ?? null);
   const cancelledByAdminId = actor.adminId ?? null;
   const chatActorId = cancelledByUserId ?? cancelledByAdminId;
+  const auditActor: AuditActor = system
+    ? { actorType: 'SYSTEM' }
+    : actor.adminId
+      ? { actorType: 'ADMIN', actorAdminId: actor.adminId }
+      : actor.userId
+        ? { actorType: 'MEMBER', actorUserId: actor.userId }
+        : { actorType: 'SYSTEM' };
   if (
     current.apiVersion === 'v2' &&
     current.questStatus === questStatus.assigned &&
@@ -1625,6 +1759,8 @@ const cancelInTransaction = async (
       version: current.version,
       columns: { cancelledByUserId, cancelledByAdminId },
       workChat: [],
+      actor: auditActor,
+      reasonCode,
     });
     return {
       questStatus: questStatus.cancelled,
@@ -1720,6 +1856,8 @@ const cancelInTransaction = async (
       ...inactiveWorkerEntries(current, workers, assignmentStatus.cancelled, now, chatActorId),
       terminalChatEntry(current, questStatus.cancelled, commandId, now, chatActorId),
     ],
+    actor: auditActor,
+    reasonCode,
   });
   return {
     questStatus: questStatus.cancelled,
@@ -1734,8 +1872,9 @@ export const terminateQuestInTransaction = (
   questId: string,
   adminId: string,
   commandId: string,
-  now = new Date()
-) => cancelInTransaction(tx, questId, { adminId }, commandId, now);
+  now = new Date(),
+  reasonCode?: string | null
+) => cancelInTransaction(tx, questId, { adminId }, commandId, now, false, reasonCode);
 
 const settleCancellationInTransaction = async (
   tx: QuestTransaction,
@@ -1869,6 +2008,13 @@ const autoCancelInTransaction = async (
       ...inactiveWorkerEntries(current, workers, assignmentStatus.cancelled, now, null),
       terminalChatEntry(current, questStatus.cancelled, commandId, now, null),
     ],
+    actor: { actorType: 'SYSTEM' },
+  });
+  await notifyQuestUpdate(tx, {
+    questId,
+    recipientMemberIds: [...new Set([current.hirerId, ...workers.map(({ workerId }) => workerId)])],
+    closeMemberIds: workers.map(({ workerId }) => workerId),
+    changeType: 'QUEST_AUTO_CANCELLED',
   });
   const result: CommandResult = {
     questStatus: questStatus.cancelled,

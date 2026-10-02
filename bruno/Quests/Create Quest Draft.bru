@@ -1,0 +1,54 @@
+meta {
+  name: Create Quest Draft
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "title": "Design a promotional poster",
+    "description": "Need an A3 promotional poster for the campus open house",
+    "tagId": "{{tagId}}",
+    "condition": {
+      "items": [
+        "Use KU green brand colors",
+        "Deliver editable PSD/PNG file"
+      ]
+    },
+    "mode": "FIRST_COME_FIRST_SERVED",
+    "participation": "SINGLE",
+    "questFundingTotal": 100.0,
+    "headcount": 1,
+    "startTime": "2026-10-01T10:00:00.000+07:00",
+    "dueAt": "2026-10-03T18:00:00.000+07:00"
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && data.data && data.data.id) {
+    bru.setEnvVar("questId", data.data.id);
+    bru.setEnvVar("questVersion", data.data.version);
+  }
+}
+
+docs {
+  Creates a new Quest in QUEST_DRAFT state.
+  Automatically captures questId and questVersion into the active environment on success.
+}

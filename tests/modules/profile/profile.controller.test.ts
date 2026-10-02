@@ -380,6 +380,7 @@ describe('getPublicReviews', () => {
   it("returns another member's Reviews when the profile exists", async () => {
     spyOn(profileService, 'getPublicProfile').mockResolvedValue({
       version: 1,
+      redFlagged: false,
       firstName: 'Student',
       lastName: 'Two',
       bio: null,
@@ -387,6 +388,7 @@ describe('getPublicReviews', () => {
       department: null,
       occupation: null,
       avatar: null,
+      reputation: { totalQuests: 0, rating: { average: null } },
     });
     spyOn(profileService, 'getProfileReviews').mockResolvedValue({
       rows: [
@@ -456,6 +458,7 @@ const reviewRow = (id: string, overrides: Record<string, unknown> = {}) => ({
 
 const publicProfileRecord = {
   version: 1,
+  redFlagged: false,
   firstName: 'Student',
   lastName: 'Two',
   bio: null,
@@ -463,6 +466,7 @@ const publicProfileRecord = {
   department: null,
   occupation: null,
   avatar: null,
+  reputation: { totalQuests: 0, rating: { average: null } },
 };
 
 describe('getPublicReviews pagination', () => {
@@ -633,6 +637,7 @@ describe('getPublicProfile', () => {
   it('inlines public resources without exposing private fields', async () => {
     spyOn(profileService, 'getPublicProfile').mockResolvedValue({
       version: 1,
+      redFlagged: false,
       firstName: 'Student',
       lastName: 'Two',
       bio: 'A public bio',
@@ -643,6 +648,7 @@ describe('getPublicProfile', () => {
         faculty: { name: 'Engineering' },
       },
       occupation: null,
+      reputation: { totalQuests: 2, rating: { average: 4.5 } },
       avatar: {
         fileId,
         bucket: 'kuquest',
@@ -704,6 +710,7 @@ describe('getPublicProfile', () => {
       success: true,
       data: {
         version: 1,
+        redFlagged: false,
         firstName: 'Student',
         lastName: 'Two',
         bio: 'A public bio',
@@ -715,6 +722,7 @@ describe('getPublicProfile', () => {
         },
         avatar: { fileId, url: 'https://storage.test/avatar.png' },
         occupation: null,
+        reputation: { totalQuests: 2, rating: { average: 4.5 } },
         experience: [
           {
             id: 'experience-1',

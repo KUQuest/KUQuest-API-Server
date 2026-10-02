@@ -1,4 +1,5 @@
 import type { AuthedContext } from '@/modules/auth';
+import { mapQuestStartWorkOutcome, startQuestWork } from '@/modules/quest/shared';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 
@@ -52,6 +53,13 @@ export const joinNoCandidateQuestController = async ({
     if (result.outcome === 'not-open') {
       return conflict(set, 'QUEST_NOT_OPEN', 'Only an open Quest can accept a direct join');
     }
+    if (result.outcome === 'red-flagged') {
+      return conflict(
+        set,
+        'MEMBER_RED_FLAGGED',
+        'A Member with an active Red Flag cannot join a direct-join Quest'
+      );
+    }
     if (result.outcome === 'hirer-not-allowed') {
       return conflict(set, 'HIRER_CANNOT_JOIN', 'The Hirer cannot join their own Quest');
     }
@@ -81,6 +89,25 @@ export const joinNoCandidateQuestController = async ({
     }
     throw error;
   }
+};
+
+export const startQuestWorkV1Controller = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & { params: QuestAssignmentParams }): Promise<ApiResponse> => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+
+  const result = await startQuestWork('v1', session.user.id, params.questId, commandId);
+  if ('outcome' in result) return mapQuestStartWorkOutcome(set, result);
+  return apiSuccess({
+    questId: result.questId,
+    assignmentId: result.assignmentId,
+    startedAt: result.startedAt.toISOString(),
+    questStatus: result.questStatus,
+  });
 };
 
 export const joinQuestDirectlyController = joinNoCandidateQuestController;

@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V2_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
@@ -36,6 +36,7 @@ export const questProofV2Route = new Elysia({
   prefix: `${API_V2_PREFIX}/quests`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .post('/:questId/proof-submissions', createQuestV2ProofSubmissionController, {
     params: questV2ProofSubmissionParamsSchema,
     body: questV2ProofSubmissionCreateSchema,
@@ -51,6 +52,7 @@ export const questProofV2Route = new Elysia({
       409,
       413,
       415,
+      422,
       500,
       502,
       503
@@ -59,7 +61,7 @@ export const questProofV2Route = new Elysia({
       tags: ['Quest Proof v2'],
       summary: 'Create a v2 Proof Submission Draft',
       description:
-        'Creates an unsent Proof Submission Draft for the required submitter of an in-progress v2 Quest.',
+        'Creates an unsent Proof Submission Draft for the required submitter of an in-progress v2 Quest. Each image must be at most 10 MB and 25 megapixels; larger images return 422 PROOF_FILE_DIMENSIONS_TOO_LARGE.',
       operationId: 'createQuestV2ProofSubmission',
       security: betterAuthSecurity,
     },
@@ -78,6 +80,7 @@ export const questProofV2Route = new Elysia({
       409,
       413,
       415,
+      422,
       500,
       502,
       503
@@ -85,7 +88,8 @@ export const questProofV2Route = new Elysia({
     detail: {
       tags: ['Quest Proof v2'],
       summary: 'Edit a v2 Proof Submission Draft',
-      description: 'Edits the required submitter’s unsent Proof Submission Draft before dueAt.',
+      description:
+        'Edits the required submitter’s unsent Proof Submission Draft before dueAt. Retry a failed image with retryPosition; images must be at most 25 megapixels, or the Server returns 422 PROOF_FILE_DIMENSIONS_TOO_LARGE.',
       operationId: 'editQuestV2ProofSubmission',
       security: betterAuthSecurity,
     },

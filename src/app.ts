@@ -17,6 +17,7 @@ import {
   adminMemberRoute,
   adminOverviewRoute,
   adminReportRoute,
+  adminSearchRoute,
 } from '@/modules/admin';
 import {
   questAssignmentV2Route,
@@ -24,13 +25,17 @@ import {
   questCandidateTeamV2Route,
   questProofV2Route,
   questReviewV2Route,
+  questV2RealtimeRoute,
   questV2Route,
 } from '@/modules/quest';
 import { candidateInquiryRoute, messageReportRoute, workChatRoute } from '@/modules/work-chat';
+import { pushRoute } from '@/modules/push';
+import { finishRequestLog, startRequestLog } from '@/shared/request-log';
 
 import { Elysia } from 'elysia';
 
 import { academicRegistrationRoute } from './modules/academic-registration';
+import { asyncApiRoute } from './modules/asyncapi/asyncapi.route';
 import { authPlugin, authTestRoute, stagingTestAuthRoute } from './modules/auth';
 import { certificateRoute } from './modules/certificate';
 import { healthRoute } from './modules/health';
@@ -38,6 +43,7 @@ import { onboardingRoute } from './modules/onboarding';
 import { portfolioRoute } from './modules/portfolio';
 import { profileRoute } from './modules/profile';
 import { workExperienceRoute } from './modules/work-experience';
+import { teamInviteRoute } from './modules/team-invite/team-invite.route';
 import { localFinanceTestRoute } from './modules/local-finance-test';
 import { adminWalletRoute, walletRoute } from './modules/wallet';
 import { payoutDestinationRoute } from './modules/payout-destination';
@@ -49,6 +55,8 @@ export const createApp = () => {
   return new Elysia({
     name: 'kuquest-api',
   })
+    .onRequest(startRequestLog)
+    .onAfterResponse(finishRequestLog)
     .use(errorHandlerPlugin)
     .use(corsPlugin)
     .use(authPlugin)
@@ -65,10 +73,13 @@ export const createApp = () => {
       },
     })
     .use(authTestRoute)
+    .use(teamInviteRoute)
+    .use(asyncApiRoute)
     .use(healthRoute)
     .use(onboardingRoute)
     .use(academicRegistrationRoute)
     .use(profileRoute)
+    .use(pushRoute)
     .use(questAssignmentRoute)
     .use(questCandidateRoute)
     .use(questProofRoute)
@@ -81,6 +92,7 @@ export const createApp = () => {
     .use(questCandidateTeamV2Route)
     .use(questProofV2Route)
     .use(questReviewV2Route)
+    .use(questV2RealtimeRoute)
     .use(questV2Route)
     .use(questRoute)
     .use(adminQuestRoute)
@@ -89,6 +101,7 @@ export const createApp = () => {
     .use(adminFinanceRoute)
     .use(adminMemberRoute)
     .use(adminReportRoute)
+    .use(adminSearchRoute)
     .use(certificateRoute)
     .use(portfolioRoute)
     .use(workExperienceRoute)

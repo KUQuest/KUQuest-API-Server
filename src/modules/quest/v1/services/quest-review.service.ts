@@ -2,6 +2,7 @@ import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment, review } from '@/database/schema/quest.schema';
+import { recordReviewAveragePenaltyInTransaction } from '@/modules/admin/member-penalty';
 
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
@@ -164,7 +165,15 @@ export const createReview = async (
         target: [review.questId, review.reviewerId, review.revieweeId],
       })
       .returning(reviewFields);
-    if (created) return created;
+    if (created) {
+      await recordReviewAveragePenaltyInTransaction(tx, {
+        memberId: revieweeId,
+        reviewId: created.id,
+        rating: created.rating,
+        now,
+      });
+      return created;
+    }
 
     const concurrent = await tx
       .select(reviewFields)

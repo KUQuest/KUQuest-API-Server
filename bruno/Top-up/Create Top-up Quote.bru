@@ -1,0 +1,35 @@
+meta {
+  name: Create Top-up Quote
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/top-ups/quotes
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "creditSatang": 50000
+  }
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && data.data && data.data.id) {
+    bru.setEnvVar("topUpQuoteId", data.data.id);
+  }
+}
+
+docs {
+  Requests a binding 300-second Provider Quote for the requested creditSatang (50000 = 500.00 THB).
+  The server calculates PromptPay fees (0.8% + VAT 7%) and returns paymentTotalSatang.
+  Automatically sets topUpQuoteId in the active environment on success.
+}

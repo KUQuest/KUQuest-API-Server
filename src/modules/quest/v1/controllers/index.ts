@@ -18,7 +18,10 @@ export {
   listApplicationsController,
   selectCandidateController,
 } from './quest-candidate.controller';
-export { joinNoCandidateQuestController } from './quest-assignment.controller';
+export {
+  joinNoCandidateQuestController,
+  startQuestWorkV1Controller,
+} from './quest-assignment.controller';
 export {
   submitProofController,
   listProofsController,

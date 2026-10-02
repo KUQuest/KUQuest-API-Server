@@ -6,6 +6,7 @@ import { CursorInputError, decodeCursor, parsePageLimit } from '@/shared/cursor'
 import {
   ImageLinkUnavailableError,
   ImageTooLargeError,
+  ImageDimensionsTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
 } from '@/shared/object-storage';
@@ -41,7 +42,12 @@ import {
   mapQuestCommandOutcome,
   requireQuestCommandId,
 } from '../../shared/command/quest-command.controller';
+import { loadMemberSummaries } from '../../shared/member-summary';
 import type { QuestV2ImageCommandContext, QuestV2ImageReference } from './quest-v2.service';
+import {
+  readQuestDisputeSummary,
+  readQuestMoneyHold,
+} from '../../admin/quest-dispute-admin.service';
 import type { QuestV2PublishCheck } from './quest-v2.publish.policy';
 import type {
   questV2CreateResponseSchema,
@@ -142,6 +148,10 @@ const mapQuestV2ImageMutationOutcome = (
 };
 
 const mapQuestV2ImageStorageError = (set: AuthedContext['set'], error: unknown) => {
+  if (error instanceof ImageDimensionsTooLargeError) {
+    set.status = 422;
+    return apiError('IMAGE_DIMENSIONS_TOO_LARGE', 'Image dimensions must not exceed 25 megapixels');
+  }
   if (error instanceof ImageTooLargeError) {
     set.status = 413;
     return apiError('IMAGE_TOO_LARGE', error.message);
@@ -246,17 +256,38 @@ const mapEditOutcome = (
       'A Quest edit with this idempotency key is still processing'
     );
   }
+  if (outcome === 'open-field-locked') {
+    set.status = 409;
+    return apiError(
+      'QUEST_OPEN_FIELD_LOCKED',
+      'questFundingTotal and headcount cannot change after publish'
+    );
+  }
+  if (outcome === 'participation-started') {
+    set.status = 409;
+    return apiError(
+      'QUEST_OPEN_EDIT_CLOSED',
+      'A Quest cannot be edited after Candidate, Candidate Team, or Worker participation starts'
+    );
+  }
+  if (outcome === 'open-quest-invalid') {
+    return invalidInput(
+      set,
+      'INVALID_OPEN_QUEST',
+      'An open Quest must keep a future startTime, a dueAt after startTime, and a Tag'
+    );
+  }
   if (outcome === 'not-found') {
     set.status = 404;
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
   if (outcome === 'not-draft') {
     set.status = 409;
-    return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be edited');
+    return apiError('QUEST_NOT_EDITABLE', 'Quest cannot be edited in its current State');
   }
   if (outcome === 'conflict') {
     set.status = 409;
-    return apiError('QUEST_EDIT_CONFLICT', 'The Draft was changed by another request');
+    return apiError('QUEST_EDIT_CONFLICT', 'Quest was changed by another request');
   }
   if (outcome === 'tag-not-found') return invalidInput(set, 'TAG_NOT_FOUND', 'Tag not found');
   if (outcome === 'invalid-dates') {
@@ -477,6 +508,18 @@ const validateBoardQuery = (query: QuestV2BoardQuery, set: AuthedContext['set'])
   }
 
   if (
+    query.minQuestFundingTotal !== undefined &&
+    query.maxQuestFundingTotal !== undefined &&
+    query.minQuestFundingTotal > query.maxQuestFundingTotal
+  ) {
+    return invalidInput(
+      set,
+      'VALIDATION',
+      'minQuestFundingTotal must be less than or equal to maxQuestFundingTotal'
+    );
+  }
+
+  if (
     query.minQuestReward !== undefined &&
     query.maxQuestReward !== undefined &&
     query.minQuestReward > query.maxQuestReward
@@ -525,6 +568,23 @@ export const listQuestBoardV2Controller = async ({
   return apiSuccess(await listQuestBoardV2(session.user.id, query));
 };
 
+const serializeMoneyHold = async (viewerId: string, questId: string) => {
+  const hold = await readQuestMoneyHold(viewerId, questId);
+  return hold ? { ...hold, releasesAt: hold.releasesAt.toISOString() } : null;
+};
+
+const serializeDispute = async (viewerId: string, questId: string) => {
+  const dispute = await readQuestDisputeSummary(viewerId, questId);
+  if (!dispute) return null;
+  return {
+    canFile: dispute.canFile,
+    windowEndsAt: dispute.windowEndsAt?.toISOString() ?? null,
+    myCase: dispute.myCase
+      ? { ...dispute.myCase, createdAt: dispute.myCase.createdAt.toISOString() }
+      : null,
+  };
+};
+
 export const getQuestV2DetailController = async ({
   params,
   session,
@@ -540,7 +600,12 @@ export const getQuestV2DetailController = async ({
 
   const images = serializeQuestV2Images(set, questDetail.images);
   if ('success' in images) return images;
-  return apiSuccess({ ...questDetail, images });
+  return apiSuccess({
+    ...questDetail,
+    images,
+    dispute: await serializeDispute(session.user.id, params.questId),
+    moneyHold: await serializeMoneyHold(session.user.id, params.questId),
+  });
 };
 
 export const getPublicQuestV2DetailController = async ({
@@ -592,7 +657,12 @@ export const getQuestV2ParticipationDetailController = async ({
     return apiError('QUEST_IMAGE_STORAGE_UNAVAILABLE', 'Quest Image storage is unavailable');
   }
 
-  return apiSuccess({ ...questDetail, images });
+  return apiSuccess({
+    ...questDetail,
+    images,
+    dispute: await serializeDispute(session.user.id, params.questId),
+    moneyHold: await serializeMoneyHold(session.user.id, params.questId),
+  });
 };
 
 export const getQuestV2PublishCheckController = async ({
@@ -618,11 +688,34 @@ export const getQuestV2PublishCheckController = async ({
     return apiError('QUEST_NOT_FOUND', 'Quest not found');
   }
   if ('outcome' in result) {
+    if (result.outcome === 'red-flagged') {
+      set.status = 409;
+      return apiError(
+        'MEMBER_RED_FLAGGED',
+        'A Member with an active Red Flag cannot publish a new Quest'
+      );
+    }
     set.status = 409;
     return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be checked');
   }
 
   return apiSuccess(toQuestV2PublishCheckResponse(result));
+};
+
+/** Adds the `member` summary the Hirer view needs next to each `workerId`. */
+const withEditResponseMembers = async (
+  data: Extract<QuestV2EditRequestOutcome, { request: unknown }>['request']
+): Promise<QuestV2EditRequestResponse> => {
+  const memberOf = await loadMemberSummaries(
+    (data.responses ?? []).map(({ workerId }) => workerId)
+  );
+  return {
+    ...data,
+    responses: data.responses?.map((response) => ({
+      ...response,
+      member: memberOf(response.workerId),
+    })),
+  };
 };
 
 export const createQuestV2EditRequestController = async ({
@@ -642,7 +735,7 @@ export const createQuestV2EditRequestController = async ({
   if ('outcome' in result) return mapQuestV2EditRequestOutcome(set, result.outcome);
 
   set.status = 201;
-  return apiSuccess(result.request);
+  return apiSuccess(await withEditResponseMembers(result.request));
 };
 
 export const getQuestV2EditRequestController = async ({
@@ -658,7 +751,7 @@ export const getQuestV2EditRequestController = async ({
     return apiError('QUEST_EDIT_NOT_FOUND', 'Quest Edit Request not found');
   }
 
-  return apiSuccess(result);
+  return apiSuccess(await withEditResponseMembers(result));
 };
 
 export const respondToQuestV2EditRequestController = async ({
@@ -682,7 +775,7 @@ export const respondToQuestV2EditRequestController = async ({
   );
   if ('outcome' in result) return mapQuestV2EditRequestOutcome(set, result.outcome);
 
-  return apiSuccess(result.request);
+  return apiSuccess(await withEditResponseMembers(result.request));
 };
 
 const mapQuestV2PublishError = (set: AuthedContext['set'], error: MoneyDomainError) => {
@@ -734,6 +827,13 @@ export const publishQuestV2Controller = async ({
     if (result.outcome === 'not-draft') {
       set.status = 409;
       return apiError('QUEST_NOT_DRAFT', 'Only Draft Quests can be published');
+    }
+    if (result.outcome === 'red-flagged') {
+      set.status = 409;
+      return apiError(
+        'MEMBER_RED_FLAGGED',
+        'A Member with an active Red Flag cannot publish a new Quest'
+      );
     }
     return mapQuestCommandOutcome(
       set,

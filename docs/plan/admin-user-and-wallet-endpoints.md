@@ -48,6 +48,7 @@ Lists all Member Wallets with both Spending and Earnings balances in a single re
 interface AdminWalletListResponse {
   items: Array<{
     id: string; // Wallet UUID
+    displayId: string; // e.g. WLT-000001
     userId: string; // Member UUID
     member: {
       firstName: string;
@@ -66,6 +67,7 @@ interface AdminWalletListResponse {
     };
     createdAt: string;
     updatedAt: string;
+    latestTransactionAt: string | null;
   }>;
   nextCursor: string | null;
 }
@@ -82,6 +84,7 @@ Retrieves a single wallet and its balance compartments by wallet ID.
 interface AdminWalletDetailResponse {
   wallet: {
     id: string;
+    displayId: string; // e.g. WLT-000001
     userId: string;
     member: {
       firstName: string;
@@ -101,13 +104,43 @@ interface AdminWalletDetailResponse {
     projectionMatchesLedger: boolean;
     createdAt: string;
     updatedAt: string;
+    latestTransactionAt: string | null;
   };
 }
 ```
 
-### 3.3 `GET /api/v1/admin/members`
+### 3.3 `GET /api/v1/admin/wallets/:walletId/status-history`
+
+Returns the recorded status changes for one Wallet.
+
+- **Parameters**: `walletId` (UUID)
+- **Response Data Shape**:
+
+```typescript
+interface AdminWalletStatusHistoryResponse {
+  history: Array<{
+    id: string;
+    walletId: string;
+    fromStatus: string | null;
+    toStatus: string;
+    reason: string;
+    actorUserId: string | null;
+    actorAdminId: string | null;
+    actorDisplayName: string | null;
+    createdAt: string;
+  }>;
+}
+```
+
+`actorDisplayName` contains the actor's first and last name. It is `null` when no actor is recorded.
+
+### 3.4 `GET /api/v1/admin/members`
 
 Search and list all Members on the platform for the Admin User Directory table.
+
+`displayId` is a stable Admin identifier (`MEM-######`, at least six digits). It does not replace
+the UUID `id` or KU Student ID. The migration assigns existing Members in `created_at`, then UUID
+order. New Members get IDs from the identity sequence. Gaps can occur; existing IDs do not change.
 
 - **Query Parameters**:
   - `search` (optional): string (matches name, studentId, email)
@@ -120,6 +153,7 @@ Search and list all Members on the platform for the Admin User Directory table.
 interface AdminMemberListResponse {
   items: Array<{
     id: string;
+    displayId: string; // MEM-######, at least six digits
     email: string;
     firstName: string;
     lastName: string;
@@ -142,7 +176,7 @@ interface AdminMemberListResponse {
 }
 ```
 
-### 3.4 `GET /api/v1/admin/members/:id`
+### 3.5 `GET /api/v1/admin/members/:id`
 
 Retrieves comprehensive details for a specific Member, including profile, wallet, and marketplace performance statistics.
 
@@ -153,6 +187,7 @@ Retrieves comprehensive details for a specific Member, including profile, wallet
 interface AdminMemberDetailResponse {
   member: {
     id: string;
+    displayId: string; // MEM-######, at least six digits
     email: string;
     firstName: string;
     lastName: string;

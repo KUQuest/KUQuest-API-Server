@@ -30,6 +30,8 @@ const workerId = crypto.randomUUID();
 const tagId = crypto.randomUUID();
 const hirerStudentId = String(Math.floor(1000000000 + Math.random() * 9000000000));
 const workerStudentId = String(Math.floor(1000000000 + Math.random() * 9000000000));
+const financeLedgerBusinessReference = `admin-finance-credit:${crypto.randomUUID()}`;
+let financeLedgerTransactionId = '';
 let testQuestId = '';
 let testReservationId = '';
 
@@ -60,7 +62,7 @@ const creditSpending = async (userId: string, amountSatang: number): Promise<str
   const spending = accounts.find((account) => account.type === 'SPENDING');
   if (!spending || !suspense) throw new Error('Test Wallet accounts were not provisioned.');
   const ledgerTransaction = await createSealedLedgerTransaction({
-    businessReference: `admin-finance-credit:${crypto.randomUUID()}`,
+    businessReference: financeLedgerBusinessReference,
     eventType: 'TOP_UP',
     postings: [
       { accountId: spending.id, amountSatang: signedSatang(amountSatang) },
@@ -94,7 +96,7 @@ beforeAll(async () => {
 
   await ensureWallet(hirerId);
   await ensureWallet(workerId);
-  await creditSpending(hirerId, 50_000);
+  financeLedgerTransactionId = await creditSpending(hirerId, 50_000);
 
   await db.insert(tag).values({ id: tagId, name: `Finance Tag ${tagId}` });
 
@@ -290,6 +292,27 @@ describe('Admin Finance Endpoints Integration Tests', () => {
         new Request('http://localhost/api/v1/admin/finance/ledger/transactions')
       );
       expect(response.status).toBe(401);
+    });
+    it('returns a stable display reference and keeps the business reference', async () => {
+      const params = new URLSearchParams({ businessReference: financeLedgerBusinessReference });
+      const requestUrl = `http://localhost/api/v1/admin/finance/ledger/transactions?${params}`;
+      const response = await app.handle(
+        new Request(requestUrl, { headers: { cookie: adminCookie } })
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.data.items).toHaveLength(1);
+      const transaction = body.data.items[0];
+
+      expect(transaction.id).toBe(financeLedgerTransactionId);
+      expect(transaction.businessReference).toBe(financeLedgerBusinessReference);
+      expect(transaction.displayReference).toMatch(/^LTX-\d{6}$/);
+
+      const replayResponse = await app.handle(
+        new Request(requestUrl, { headers: { cookie: adminCookie } })
+      );
+      const replayBody = await replayResponse.json();
+      expect(replayBody.data.items[0].displayReference).toBe(transaction.displayReference);
     });
 
     it('returns paginated transactions with zero-sum invariant verified', async () => {

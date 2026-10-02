@@ -1,0 +1,26 @@
+meta {
+  name: Submit Proof to Hirer
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/proof-submissions/{{proofSubmissionId}}/submit
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Worker locks and submits the Proof Submission Draft to the Hirer for review.
+  Transitions the proof to PROOF_PENDING and Quest to QUEST_SUBMITTED.
+}

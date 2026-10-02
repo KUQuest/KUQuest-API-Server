@@ -1,0 +1,19 @@
+meta {
+  name: List Inquiry Messages
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/v1/chat/candidate-inquiries/{{conversationId}}/messages?limit=20
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns the message history for the Candidate Inquiry Conversation.
+}

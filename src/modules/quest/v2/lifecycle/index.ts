@@ -12,6 +12,7 @@ export {
   questV2UnderfilledConsentOperationScope,
   questV2UnderfilledDecisionOperationScope,
   respondToQuestV2Underfilled,
+  summarizeQuestV2Underfilled,
   type QuestV2UnderfilledDetectionResult,
   type QuestV2UnderfilledOutcome,
 } from './quest-underfilled-v2.service';
@@ -21,8 +22,10 @@ export {
   questV2UnderfilledHeadersSchema,
   questV2UnderfilledParamsSchema,
   questV2UnderfilledResponseSchema,
+  questV2UnderfilledSummarySchema,
   type QuestV2UnderfilledConsentInput,
   type QuestV2UnderfilledData,
   type QuestV2UnderfilledDecisionInput,
   type QuestV2UnderfilledParams,
+  type QuestV2UnderfilledSummary,
 } from './quest-underfilled-v2.schema';

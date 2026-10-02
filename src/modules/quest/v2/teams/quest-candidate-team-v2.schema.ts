@@ -1,5 +1,6 @@
 import { t, type Static } from 'elysia';
 
+import { memberSummarySchema } from '../../shared/member-summary';
 import { questV2TeamStates } from '../core/quest-v2.contract';
 
 const teamState = t.Union(
@@ -11,6 +12,7 @@ const teamState = t.Union(
 
 const memberSchema = t.Object({
   memberId: t.String({ format: 'uuid' }),
+  member: memberSummarySchema,
   joinedAt: t.String({ format: 'date-time' }),
 });
 
@@ -26,6 +28,7 @@ const teamSchema = t.Object({
   id: t.String({ format: 'uuid' }),
   questId: t.String({ format: 'uuid' }),
   leaderId: t.String({ format: 'uuid' }),
+  leader: memberSummarySchema,
   name: teamNameSchema,
   headcount: t.Integer({ minimum: 2, maximum: 20 }),
   state: teamState,
@@ -44,6 +47,16 @@ export const questV2CandidateTeamDetailParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
   teamId: t.String({ format: 'uuid' }),
 });
+export const questV2CandidateTeamFileParamsSchema = t.Object({
+  questId: t.String({ format: 'uuid' }),
+  teamId: t.String({ format: 'uuid' }),
+  fileId: t.String({ format: 'uuid' }),
+});
+
+export const questV2CandidateTeamListQuerySchema = t.Object(
+  { state: t.Optional(teamState) },
+  { additionalProperties: false }
+);
 
 export const questV2CandidateTeamMemberParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
@@ -103,6 +116,19 @@ const uploadedFileSchema = t.Object({
   sizeBytes: t.Integer({ minimum: 1 }),
   createdAt: t.String({ format: 'date-time' }),
 });
+const candidateTeamFileAccessSchema = t.Object({
+  fileId: t.String({ format: 'uuid' }),
+  contentType: t.String(),
+  sizeBytes: t.Integer({ minimum: 1, maximum: 10 * 1024 * 1024 }),
+  position: t.Integer({ minimum: 0 }),
+  url: t.String({ format: 'uri' }),
+  urlExpiresAt: t.String({ format: 'date-time' }),
+});
+
+export const questV2CandidateTeamFileResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: candidateTeamFileAccessSchema,
+});
 
 export const questV2CandidateTeamFileUploadResponseSchema = t.Object({
   success: t.Literal(true),
@@ -120,12 +146,14 @@ export const questV2CandidateTeamListResponseSchema = t.Object({
 });
 
 export type QuestV2CandidateTeamParams = Static<typeof questV2CandidateTeamParamsSchema>;
+export type QuestV2CandidateTeamListQuery = Static<typeof questV2CandidateTeamListQuerySchema>;
 export type QuestV2CandidateTeamDetailParams = Static<
   typeof questV2CandidateTeamDetailParamsSchema
 >;
 export type QuestV2CandidateTeamMemberParams = Static<
   typeof questV2CandidateTeamMemberParamsSchema
 >;
+export type QuestV2CandidateTeamFileParams = Static<typeof questV2CandidateTeamFileParamsSchema>;
 
 export type QuestV2CandidateTeamCreateInput = Static<typeof questV2CandidateTeamCreateSchema>;
 export type QuestV2CandidateTeamUpdateInput = Static<typeof questV2CandidateTeamUpdateSchema>;

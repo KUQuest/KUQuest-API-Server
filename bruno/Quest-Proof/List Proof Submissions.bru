@@ -1,0 +1,20 @@
+meta {
+  name: List Proof Submissions
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/proof-submissions
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns role-filtered Proof Submissions for the Quest.
+  Hirer sees all submitted proofs; Worker sees their own draft and submitted proofs.
+}

@@ -1,0 +1,26 @@
+meta {
+  name: Confirm Completion (Proof-free)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/completion-confirmation
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Worker confirms completion for a Quest where proofRequired is false.
+  Completes the assignment and moves Quest towards settlement.
+}

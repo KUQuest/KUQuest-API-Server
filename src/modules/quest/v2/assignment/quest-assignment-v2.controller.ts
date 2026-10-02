@@ -16,6 +16,9 @@ import type {
   QuestV2AssignmentParams,
 } from './quest-assignment-v2.schema';
 import { WorkChatTransitionError } from '../../shared/work-chat/quest-work-chat.port';
+import { mapQuestStartWorkOutcome } from '../../shared/quest-start-work.controller';
+import { startQuestWork } from '../../shared/quest-start-work.service';
+import { loadMemberSummaries } from '../../shared/member-summary';
 
 type QuestV2Assignment = Extract<QuestV2AssignmentOutcome, { id: string }>;
 type QuestV2AssignmentError = Exclude<QuestV2AssignmentOutcome, QuestV2Assignment>;
@@ -29,6 +32,14 @@ const serializeAssignment = (assignment: QuestV2Assignment) => ({
   startedAt: assignment.startedAt?.toISOString() ?? null,
   createdAt: assignment.createdAt.toISOString(),
 });
+
+const serializeAssignments = async (assignments: QuestV2Assignment[]) => {
+  const memberOf = await loadMemberSummaries(assignments.map(({ workerId }) => workerId));
+  return assignments.map((assignment) => ({
+    ...serializeAssignment(assignment),
+    member: memberOf(assignment.workerId),
+  }));
+};
 
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
   set.status = 409;
@@ -60,6 +71,13 @@ const mapJoinOutcome = (set: AuthedContext['set'], outcome: QuestV2AssignmentErr
   if (outcome.outcome === 'not-open') {
     return conflict(set, 'QUEST_NOT_OPEN', 'Only an open Quest can accept a direct join');
   }
+  if (outcome.outcome === 'red-flagged') {
+    return conflict(
+      set,
+      'MEMBER_RED_FLAGGED',
+      'A Member with an active Red Flag cannot join a direct-join Quest'
+    );
+  }
   if (outcome.outcome === 'roster-frozen') {
     return conflict(
       set,
@@ -68,11 +86,7 @@ const mapJoinOutcome = (set: AuthedContext['set'], outcome: QuestV2AssignmentErr
     );
   }
   if (outcome.outcome === 'already-assigned') {
-    return conflict(
-      set,
-      'ASSIGNMENT_ALREADY_EXISTS',
-      'The Worker is already assigned to this Quest'
-    );
+    return conflict(set, 'ALREADY_JOINED', 'The Worker already has an active Assignment');
   }
   if (outcome.outcome === 'full') {
     return conflict(set, 'QUEST_FULL', 'The Quest has no open Worker slots');
@@ -92,7 +106,8 @@ export const joinQuestV2Controller = async ({
   try {
     const result = await joinQuestV2(session.user.id, params.questId, commandId, new Date());
     if ('outcome' in result) return mapJoinOutcome(set, result);
-    return apiSuccess(serializeAssignment(result));
+    const [assignment] = await serializeAssignments([result]);
+    return apiSuccess(assignment);
   } catch (error) {
     if (error instanceof WorkChatTransitionError) {
       set.status = 503;
@@ -100,6 +115,24 @@ export const joinQuestV2Controller = async ({
     }
     throw error;
   }
+};
+
+export const startQuestWorkV2Controller = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & { params: QuestV2AssignmentParams }) => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+  const result = await startQuestWork('v2', session.user.id, params.questId, commandId, new Date());
+  if ('outcome' in result) return mapQuestStartWorkOutcome(set, result);
+  return apiSuccess({
+    questId: result.questId,
+    assignmentId: result.assignmentId,
+    startedAt: result.startedAt.toISOString(),
+    questState: result.questStatus,
+  });
 };
 
 const mapReadOutcome = (set: AuthedContext['set']) => {
@@ -114,13 +147,19 @@ export const listQuestV2AssignmentsController = async ({
 }: AuthedContext & { params: QuestV2AssignmentParams }) => {
   const result = await listQuestV2Assignments(session.user.id, params.questId);
   if ('outcome' in result) return mapReadOutcome(set);
-  return apiSuccess({ items: result.map(serializeAssignment) });
+  return apiSuccess({ items: await serializeAssignments(result) });
 };
 
 export const listMyQuestV2AssignmentsController = async ({
   query,
   session,
-}: AuthedContext & { query: QuestV2AssignmentMineQuery }) =>
-  apiSuccess({
-    items: (await listMyQuestV2Assignments(session.user.id, query.status)).map(serializeAssignment),
+}: AuthedContext & { query: QuestV2AssignmentMineQuery }) => {
+  const assignments = await listMyQuestV2Assignments(session.user.id, query.status);
+  const serialized = await serializeAssignments(assignments);
+  return apiSuccess({
+    items: serialized.map((assignment, index) => ({
+      ...assignment,
+      underfilled: assignments[index]?.underfilled ?? null,
+    })),
   });
+};
