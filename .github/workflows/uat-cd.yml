@@ -1,0 +1,401 @@
+name: Backend UAT CD
+
+# Manual promotion of an image that Backend Staging CD already built.
+# This workflow never builds an image and never resets or seeds the UAT database.
+on:
+  workflow_dispatch:
+    inputs:
+      image_sha:
+        description: Full 40-character commit SHA on develop whose image Backend Staging CD already built
+        required: true
+        type: string
+      operation:
+        description: deploy runs migrations; rollback only swaps the image and does NOT revert the schema
+        required: true
+        type: choice
+        default: deploy
+        options:
+          - deploy
+          - rollback
+
+concurrency:
+  group: backend-uat
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  IMAGE_NAME: ghcr.io/kuquest/kuquest-api-server
+
+jobs:
+  # Runs on a GitHub-hosted runner, before the `uat` reviewer approval and before any
+  # repository code from image_sha runs on the self-hosted deployer.
+  provenance:
+    name: Verify image provenance
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      IMAGE_SHA: ${{ inputs.image_sha }}
+      OPERATION: ${{ inputs.operation }}
+
+    steps:
+      - name: Validate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$IMAGE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'image_sha must be a full 40-character lowercase commit SHA.'
+            exit 1
+          fi
+
+          if [[ ! "$OPERATION" =~ ^(deploy|rollback)$ ]]; then
+            echo 'operation must be deploy or rollback.'
+            exit 1
+          fi
+
+      - name: Verify the commit is in this repository and in develop history
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FOUND=$(gh api "repos/$REPOSITORY/commits/$IMAGE_SHA" --jq .sha)
+          if [ "$FOUND" != "$IMAGE_SHA" ]; then
+            echo "Commit $IMAGE_SHA was not found in $REPOSITORY."
+            exit 1
+          fi
+
+          # compare develop...<sha>: "behind" or "identical" means the commit is an ancestor of develop.
+          RELATION=$(gh api "repos/$REPOSITORY/compare/develop...$IMAGE_SHA" --jq .status)
+          if [ "$RELATION" != 'behind' ] && [ "$RELATION" != 'identical' ]; then
+            echo "Commit $IMAGE_SHA is not reachable from develop (relation: $RELATION)."
+            exit 1
+          fi
+
+      - name: Verify Backend CI succeeded for this commit on develop
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PASSED=$(gh api \
+            "repos/$REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$IMAGE_SHA&branch=develop&event=push&status=completed&per_page=20" \
+            --jq "[.workflow_runs[] | select(.head_sha == \"$IMAGE_SHA\" and .head_branch == \"develop\" and .event == \"push\" and .conclusion == \"success\")] | length")
+
+          if [ "$PASSED" -lt 1 ]; then
+            echo "No successful Backend CI push run on develop was found for $IMAGE_SHA."
+            exit 1
+          fi
+
+      - name: Verify the images built by Backend Staging CD exist in GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+
+          REGISTRY_TOKEN=$(curl --fail --silent --show-error --max-time 20 \
+            --user "$GHCR_USER:$GHCR_TOKEN" \
+            'https://ghcr.io/token?service=ghcr.io&scope=repository:kuquest/kuquest-api-server:pull' |
+            sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+
+          for TAG in "$IMAGE_SHA" "postgres-client-$IMAGE_SHA"; do
+            STATUS=$(curl --silent --output /dev/null --max-time 20 --write-out '%{http_code}' \
+              --head \
+              --header "Authorization: Bearer $REGISTRY_TOKEN" \
+              --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+              "https://ghcr.io/v2/kuquest/kuquest-api-server/manifests/$TAG")
+
+            if [ "$STATUS" != '200' ]; then
+              echo "Image tag $TAG was not found in GHCR (HTTP $STATUS). UAT never builds images."
+              exit 1
+            fi
+          done
+
+      - name: Report what this workflow cannot verify
+        shell: bash
+        run: |
+          echo "::notice::Verified: commit exists, is in develop history, has a successful Backend CI push run, and both images exist. Not verified: that Backend Staging CD deployed this exact commit successfully (its runs do not record the image SHA). The uat reviewer must confirm that before approving."
+
+  deploy:
+    name: Deploy UAT API
+
+    needs: provenance
+
+    # Existing self-hosted deployer, selected by its dedicated UAT label.
+    runs-on:
+      - self-hosted
+      - linux
+      - deploy-uat
+
+    environment: uat
+
+    permissions:
+      contents: read
+      packages: read
+
+    env:
+      IMAGE_SHA: ${{ inputs.image_sha }}
+      OPERATION: ${{ inputs.operation }}
+      UAT_SERVER: ${{ vars.UAT_SERVER }}
+      UAT_PUBLIC_URL: ${{ vars.UAT_PUBLIC_URL }}
+
+    steps:
+      - name: Validate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$IMAGE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'image_sha must be a full 40-character lowercase commit SHA.'
+            exit 1
+          fi
+
+          if [[ ! "$OPERATION" =~ ^(deploy|rollback)$ ]]; then
+            echo 'operation must be deploy or rollback.'
+            exit 1
+          fi
+
+          if [[ ! "$UAT_SERVER" =~ ^[A-Za-z0-9.-]+$ ]]; then
+            echo 'GitHub variable UAT_SERVER is missing or not a plain host name or IP address.'
+            exit 1
+          fi
+
+      # Reached only after the provenance job proved this commit is CI-validated develop history.
+      # The ops script and Compose file are the ones released with the image.
+      - name: Checkout deployment files
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.image_sha }}
+          persist-credentials: false
+
+      - name: Confirm the checked-out commit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$(git rev-parse HEAD)" != "$IMAGE_SHA" ]; then
+            echo 'Checked-out commit does not match image_sha.'
+            exit 1
+          fi
+
+      - name: Prepare SSH credentials
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.UAT_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.UAT_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "Missing GitHub secret: UAT_SSH_KEY"
+            exit 1
+          fi
+
+          if [ -z "$SSH_KNOWN_HOSTS" ]; then
+            echo "Missing GitHub secret: UAT_KNOWN_HOSTS"
+            exit 1
+          fi
+
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$RUNNER_TEMP/uat_key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/uat_known_hosts"
+
+      - name: Test SSH connection
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/uat_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/uat_known_hosts" \
+            deploy@"$UAT_SERVER" \
+            'echo "SSH connection successful"'
+
+      - name: Create application environment file
+        shell: bash
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          ADMIN_BETTER_AUTH_SECRET: ${{ secrets.ADMIN_BETTER_AUTH_SECRET }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          XENDIT_SECRET_KEY: ${{ secrets.XENDIT_SECRET_KEY }}
+          XENDIT_WEBHOOK_TOKEN: ${{ secrets.XENDIT_WEBHOOK_TOKEN }}
+          PAYOUT_DESTINATION_ENCRYPTION_KEY: ${{ secrets.PAYOUT_DESTINATION_ENCRYPTION_KEY }}
+          PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY: ${{ secrets.PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY }}
+
+          BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
+          S3_REGION: ${{ vars.S3_REGION }}
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          PAYOUT_DESTINATION_ENCRYPTION_KEY_VERSION: ${{ vars.PAYOUT_DESTINATION_ENCRYPTION_KEY_VERSION }}
+          PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION: ${{ vars.PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION }}
+          CMS_ORIGIN: ${{ vars.CMS_ORIGIN }}
+          TERMS_URL: ${{ vars.TERMS_URL }}
+          PRIVACY_URL: ${{ vars.PRIVACY_URL }}
+          DATA_USAGE_URL: ${{ vars.DATA_USAGE_URL }}
+          CONTACT_US_URL: ${{ vars.CONTACT_US_URL }}
+          ANDROID_APP_LINK_TARGETS: ${{ vars.ANDROID_APP_LINK_TARGETS }}
+          IOS_APP_LINK_APP_IDS: ${{ vars.IOS_APP_LINK_APP_IDS }}
+        run: |
+          set -euo pipefail
+
+          bash scripts/uat-write-env.sh "$RUNNER_TEMP/backend.env"
+
+      - name: Upload application environment and Compose file
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SSH=(
+            ssh
+            -i "$RUNNER_TEMP/uat_key"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/uat_known_hosts"
+            deploy@"$UAT_SERVER"
+          )
+
+          "${SSH[@]}" \
+            'set -e
+             TEMP_FILE=$(mktemp /opt/backend/.env.XXXXXX)
+             cat > "$TEMP_FILE"
+             chmod 600 "$TEMP_FILE"
+             mv "$TEMP_FILE" /opt/backend/.env' \
+            < "$RUNNER_TEMP/backend.env"
+
+          "${SSH[@]}" \
+            'set -e
+             TEMP_FILE=$(mktemp /opt/backend/compose.yaml.XXXXXX)
+             cat > "$TEMP_FILE"
+             chmod 644 "$TEMP_FILE"
+             mv "$TEMP_FILE" /opt/backend/compose.yaml' \
+            < deploy/uat/compose.yaml
+
+      - name: Log UAT server into GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$GHCR_USER" =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]]; then
+            echo 'Unexpected GitHub actor name.'
+            exit 1
+          fi
+
+          printf '%s' "$GHCR_TOKEN" |
+            ssh \
+              -i "$RUNNER_TEMP/uat_key" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/uat_known_hosts" \
+              deploy@"$UAT_SERVER" \
+              "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+
+      - name: Migrate and deploy the exact image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/uat_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/uat_known_hosts" \
+            deploy@"$UAT_SERVER" \
+            "APP_IMAGE='${IMAGE_NAME}:${IMAGE_SHA}' \
+             POSTGRES_CLIENT_IMAGE='${IMAGE_NAME}:postgres-client-${IMAGE_SHA}' \
+             bash -s -- '${OPERATION}'" \
+            < scripts/uat-operations.sh
+
+      - name: Verify the deployed image and server-side health
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DEPLOYED=$(ssh \
+            -i "$RUNNER_TEMP/uat_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/uat_known_hosts" \
+            deploy@"$UAT_SERVER" \
+            'docker inspect --format "{{.Config.Image}} {{.State.Health.Status}}" kuquest-uat-api &&
+             curl --fail --silent --show-error --max-time 10 http://127.0.0.1:5000/health >/dev/null')
+
+          echo "Container: $DEPLOYED"
+
+          if [ "$DEPLOYED" != "${IMAGE_NAME}:${IMAGE_SHA} healthy" ]; then
+            echo 'The running container is not the requested image, or is not healthy.'
+            exit 1
+          fi
+
+      - name: Smoke test the public health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "$UAT_PUBLIC_URL" ]; then
+            echo 'UAT_PUBLIC_URL is not set; skipping the public health check.'
+            exit 0
+          fi
+
+          for ATTEMPT in $(seq 1 10); do
+            if curl --fail --silent --show-error --max-time 10 "$UAT_PUBLIC_URL/health" |
+              grep --quiet '"success":true'; then
+              echo "Public health check passed on attempt $ATTEMPT."
+              exit 0
+            fi
+            sleep 6
+          done
+
+          echo "Public health check failed: $UAT_PUBLIC_URL/health"
+          exit 1
+
+      - name: Report deployed image
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo "### UAT ${OPERATION} succeeded"
+            echo ''
+            echo "- Image: \`${IMAGE_NAME}:${IMAGE_SHA}\`"
+            echo "- Server: \`${UAT_SERVER}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove GHCR login from the UAT server
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/uat_key" ]; then
+            ssh \
+              -i "$RUNNER_TEMP/uat_key" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/uat_known_hosts" \
+              deploy@"$UAT_SERVER" \
+              'docker logout ghcr.io' >/dev/null 2>&1 || true
+          fi
+
+      - name: Clean temporary secret files
+        if: always()
+        shell: bash
+        run: |
+          rm -f \
+            "$RUNNER_TEMP/uat_key" \
+            "$RUNNER_TEMP/uat_known_hosts" \
+            "$RUNNER_TEMP/backend.env"
