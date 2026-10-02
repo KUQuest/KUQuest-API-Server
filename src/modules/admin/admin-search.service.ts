@@ -20,7 +20,7 @@ import { formatDisplayIdSql } from './admin-display-id';
 import { adminMemberStatusSql } from './admin-member-status';
 import type { AdminMemberStatus } from './admin-member.schema';
 import { adminSearchResultLimit } from './admin-search.schema';
-import type { AdminSearchItem, AdminSearchKind } from './admin-search.schema';
+import type { AdminSearchItem, AdminSearchKind, AdminSearchQueryKind } from './admin-search.schema';
 
 type SearchRow = {
   id: string;
@@ -479,10 +479,41 @@ const toItems = (kind: NonMemberAdminSearchKind, rows: SearchRow[]): NonMemberSe
     newestAt: row.newestAt?.toISOString() ?? null,
   }));
 
+const searchKinds: AdminSearchKind[] = [
+  'member',
+  ...(Object.keys(searches) as NonMemberAdminSearchKind[]),
+];
+
+const compareSearchItems = (left: AdminSearchItem, right: AdminSearchItem): number => {
+  if (left.newestAt === null) {
+    if (right.newestAt !== null) return 1;
+  } else if (right.newestAt === null) {
+    return -1;
+  } else if (left.newestAt !== right.newestAt) {
+    return left.newestAt > right.newestAt ? -1 : 1;
+  }
+
+  return left.kind.localeCompare(right.kind) || right.id.localeCompare(left.id);
+};
+
 export const searchAdminRecords = async (
   query: string,
-  kind: AdminSearchKind
+  kind: AdminSearchQueryKind
 ): Promise<AdminSearchItem[]> => {
+  if (kind === 'all') {
+    const resultsByKind = await Promise.all(
+      searchKinds.map(async (searchKind) => {
+        if (searchKind === 'member') {
+          return (await searchMembers(query)).map(toMemberItem);
+        }
+
+        const rows = await searches[searchKind](query);
+        return toItems(searchKind, rows);
+      })
+    );
+    return resultsByKind.flat().sort(compareSearchItems).slice(0, maxResults);
+  }
+
   if (kind === 'member') {
     return (await searchMembers(query)).map(toMemberItem).slice(0, maxResults);
   }

@@ -19,12 +19,15 @@ export const adminSearchKindSchema = t.Union(
     description: 'Supported resource type for Admin Search.',
   }
 );
+export const adminSearchQueryKindSchema = t.Union([adminSearchKindSchema, t.Literal('all')], {
+  description: 'A supported resource type, or all supported resource types.',
+});
 
 export const adminSearchQuerySchema = t.Object({
   q: t.String({
     description: 'Trimmed by the server. It must contain 1 to 100 characters.',
   }),
-  kind: adminSearchKindSchema,
+  kind: adminSearchQueryKindSchema,
 });
 
 const adminSearchNonMemberKindSchema = t.Union([
@@ -84,3 +87,4 @@ export const adminSearchResponseSchema = t.Object({
 export type AdminSearchQuery = Static<typeof adminSearchQuerySchema>;
 export type AdminSearchItem = Static<typeof adminSearchItemSchema>;
 export type AdminSearchKind = Static<typeof adminSearchKindSchema>;
+export type AdminSearchQueryKind = Static<typeof adminSearchQueryKindSchema>;
