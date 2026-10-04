@@ -1560,6 +1560,7 @@ type AdminReportCommandInput = {
   reportId: string;
   expectedVersion: number;
   requestKey: string;
+  decisionReasonText?: string;
 };
 
 export type DecideAdminReportCaseInput = AdminReportCommandInput & {
@@ -1590,6 +1591,7 @@ export const decideAdminReportCase = async (
     resourceId: input.reportId,
     requestKey: input.requestKey,
     reasonCode: input.reasonCode,
+    decisionReasonText: input.decisionReasonText,
     request: { outcome: input.outcome },
     metadata: { outcome: input.outcome },
     expectedVersion: input.expectedVersion,
@@ -1711,6 +1713,7 @@ const decideAdminConductReport = async (
     resourceId: input.reportId,
     requestKey: input.requestKey,
     reasonCode,
+    decisionReasonText: input.decisionReasonText,
     request: { outcome: input.outcome },
     metadata: { outcome: input.outcome },
     expectedVersion: input.expectedVersion,
@@ -1856,6 +1859,7 @@ export const decideAdminReport = async (
     requestKey: input.requestKey,
     now: input.now,
     reasonCode: input.reasonCode,
+    decisionReasonText: input.decisionReasonText,
     outcome: input.outcome,
   });
   return { ...result, outcome: input.outcome };

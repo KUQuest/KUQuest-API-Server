@@ -27,7 +27,7 @@ Admin resolves a `REPORT_CASE_PENDING` case, or re-evaluates a `REPORT_CASE_HIDD
 - `REPORT_CASE_HIDDEN`: Message and Attachments become invisible to participants (except sender and Admin); case remains open at `REPORT_CASE_HIDDEN`. **Creates a confirmed violation strike on the Misconduct ladder** (see [Admin Member Penalty Contract](admin-member-penalty-contract.md)).
 - `REPORT_CASE_RESTORED`: Valid only from `REPORT_CASE_HIDDEN`; restores Message visibility; case closes. **Reverses the strike created by the earlier hide decision**.
 
-Every decision requires a reason and creates an immutable Moderation Decision. `REPORT_CASE_HIDDEN` notifies the sender via System Message (if conversation open) or Android Push (if conversation closed).
+Every decision requires an action-specific controlled reason code and creates an immutable Moderation Decision. `REPORT_CASE_HIDDEN` notifies the sender via System Message (if conversation open) or Android Push (if conversation closed). A decision note is not included in that notification.
 
 ## Persistence boundary
 
@@ -41,9 +41,7 @@ The Admin schema persists these Trust & Safety records:
 The application remains responsible for checking the actor's Chat visibility,
 case-scoping Attachment references, writing the matching Admin Action, and
 updating the Message and Attachment visibility atomically with a decision.
-The reason-code values are owned by the shared Admin operation contract; this
-schema stores the catalog version and validates the code shape until the
-operation contract publishes the Trust & Safety catalog.
+Report Case decisions use `POLICY_REVIEW` or `SAFETY_REVIEW` for dismiss, hide, and restore. An Admin may add an optional `decisionReasonText` of up to 200 characters. The note is stored separately on the immutable Admin Action and does not replace `reasonCode`.
 
 ## Retention
 

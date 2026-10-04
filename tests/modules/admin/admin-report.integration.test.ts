@@ -994,16 +994,30 @@ describe('Admin Report Case API', () => {
     const detailSchema = detailOperation?.responses?.['200']?.content?.['application/json']?.schema;
     const decisionRequestSchema =
       decisionOperation?.requestBody?.content?.['application/json']?.schema;
+    const detailSchemaText = JSON.stringify(detailSchema);
+    const decisionRequestSchemaText = JSON.stringify(decisionRequestSchema);
     expect(JSON.stringify(listSchema)).toContain('REPORT_CASE');
     expect(JSON.stringify(listSchema)).toContain('CONDUCT_REPORT');
-    expect(JSON.stringify(detailSchema)).toContain('REPORT_CASE');
-    expect(JSON.stringify(detailSchema)).toContain('CONDUCT_REPORT');
-    expect(JSON.stringify(detailSchema)).toContain('assignment');
-    expect(JSON.stringify(detailSchema)).toContain('proofSubmission');
-    expect(JSON.stringify(decisionRequestSchema)).toContain('CONDUCT_REPORT_DISMISSED');
-    expect(JSON.stringify(decisionRequestSchema)).toContain('CONDUCT_REPORT_UPHELD');
-    expect(JSON.stringify(decisionRequestSchema)).toContain('CONDUCT_REPORT_NO_VIOLATION');
-    expect(JSON.stringify(decisionRequestSchema)).toContain('CONDUCT_REPORT_INSUFFICIENT_EVIDENCE');
+    expect(detailSchemaText).toContain('REPORT_CASE');
+    expect(detailSchemaText).toContain('CONDUCT_REPORT');
+    expect(detailSchemaText).toContain('REPORT_ABUSIVE_OR_HARASSMENT');
+    expect(detailSchemaText).toContain('REPORT_SPAM');
+    expect(detailSchemaText).toContain('REPORT_INAPPROPRIATE_CONTENT');
+    expect(detailSchemaText).toContain('REPORT_DANGER_OR_THREAT');
+    expect(detailSchemaText).toContain('REPORT_OTHER');
+    expect(detailSchemaText).toContain('CONDUCT_ABANDONED');
+    expect(detailSchemaText).toContain('CONDUCT_OUT_OF_SCOPE');
+    expect(detailSchemaText).toContain('CONDUCT_NO_SHOW');
+    expect(detailSchemaText).toContain('assignment');
+    expect(detailSchemaText).toContain('proofSubmission');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_DISMISSED');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_UPHELD');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_NO_VIOLATION');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_INSUFFICIENT_EVIDENCE');
+    expect(decisionRequestSchemaText).toContain('POLICY_REVIEW');
+    expect(decisionRequestSchemaText).toContain('SAFETY_REVIEW');
+    expect(decisionRequestSchemaText).toContain('decisionReasonText');
+    expect(decisionRequestSchemaText).toContain('"maxLength":200');
 
     const anonymous = await app.handle(new Request('http://localhost/api/v1/admin/reports'));
     expect(anonymous.status).toBe(401);
@@ -1886,9 +1900,11 @@ describe('Admin Report Case API', () => {
       .select({ assignmentStatus: questAssignment.assignmentStatus })
       .from(questAssignment)
       .where(eq(questAssignment.id, fixture.assignmentId));
+    const decisionReasonText = 'x'.repeat(200);
     const body = {
       outcome: 'CONDUCT_REPORT_DISMISSED',
       decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+      decisionReasonText,
     };
 
     const first = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
@@ -1941,6 +1957,7 @@ describe('Admin Report Case API', () => {
       resultVersion: 2,
       metadata: { outcome: 'CONDUCT_REPORT_DISMISSED' },
     });
+    expect(action?.decisionReasonText).toBe(decisionReasonText);
     expect(action?.metadata).not.toHaveProperty('decisionReasonText');
     expect(action?.resultData).not.toHaveProperty('decisionReasonText');
     expect(action?.resultData).not.toHaveProperty('detail');
@@ -1961,6 +1978,16 @@ describe('Admin Report Case API', () => {
         .from(questAssignment)
         .where(eq(questAssignment.id, fixture.assignmentId))
     ).toEqual([assignmentBefore]);
+    const activityLog = await adminRequest(
+      `/api/v1/admin/activity-log?resourceType=conduct_report&resourceId=${fixture.reportId}`
+    );
+    expect(activityLog.status).toBe(200);
+    expect((await activityLog.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        reasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        decisionReasonText,
+      })
+    );
 
     const replay = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
       method: 'POST',
@@ -1969,6 +1996,19 @@ describe('Admin Report Case API', () => {
     });
     expect(replay.status).toBe(200);
     expect((await replay.json()).data.adminActionId).toBe(firstBody.data.adminActionId);
+    const changedNoteReplay = await adminRequest(
+      `/api/v1/admin/reports/${fixture.reportId}/decide`,
+      {
+        method: 'POST',
+        headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+        body: JSON.stringify({
+          ...body,
+          decisionReasonText: 'A different note must not replay the original decision.',
+        }),
+      }
+    );
+    expect(changedNoteReplay.status).toBe(409);
+    expect((await changedNoteReplay.json()).error.code).toBe('ADMIN_ACTION_KEY_REUSED');
     expect(
       await db
         .select({ id: adminAction.id })
@@ -1986,7 +2026,8 @@ describe('Admin Report Case API', () => {
     if (!postgresAvailable) return;
     const fixture = await createConductReportFixture({ reason: conductReportReason.outOfScope });
     const path = `/api/v1/admin/reports/${fixture.reportId}/decide`;
-    const body = { outcome: 'CONDUCT_REPORT_UPHELD' };
+    const decisionReasonText = 'Admin-only note for the upheld Conduct Report.';
+    const body = { outcome: 'CONDUCT_REPORT_UPHELD', decisionReasonText };
     const requestKey = `conduct-uphold-${fixture.reportId}`;
 
     const first = await adminRequest(path, {
@@ -2040,6 +2081,17 @@ describe('Admin Report Case API', () => {
       resultVersion: 2,
       metadata: { outcome: 'CONDUCT_REPORT_UPHELD' },
     });
+    expect(action?.decisionReasonText).toBe(decisionReasonText);
+    const activityLog = await adminRequest(
+      `/api/v1/admin/activity-log?resourceType=conduct_report&resourceId=${fixture.reportId}`
+    );
+    expect(activityLog.status).toBe(200);
+    expect((await activityLog.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        reasonCode: 'CONDUCT_OUT_OF_SCOPE',
+        decisionReasonText,
+      })
+    );
 
     const penaltyRows = await db
       .select({
@@ -2095,6 +2147,7 @@ describe('Admin Report Case API', () => {
     expect(delivery?.body).toBe(
       'Your Conduct Report was upheld for work outside the agreed scope. The result is no additional restriction.'
     );
+    expect(delivery?.body).not.toContain(decisionReasonText);
     expect(delivery?.deepLink).toMatch(/^kuquest:\/\/conduct-reports\/CND-\d{6}$/);
 
     const detail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
@@ -2737,17 +2790,28 @@ describe('Admin Report Case API', () => {
     expect(invalidCode.status).toBe(400);
     expect((await invalidCode.json()).error.code).toBe('VALIDATION');
 
-    const freeFormText = await adminRequest(path, {
+    const overLimitText = await adminRequest(path, {
       method: 'POST',
       headers: { 'idempotency-key': `conduct-dismiss-text-${fixture.reportId}`, 'if-match': '1' },
       body: JSON.stringify({
         outcome: 'CONDUCT_REPORT_DISMISSED',
         decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
-        decisionReasonText: 'This free-form reason must not be accepted.',
+        decisionReasonText: 'x'.repeat(201),
       }),
     });
-    expect(freeFormText.status).toBe(400);
-    expect((await freeFormText.json()).error.code).toBe('VALIDATION');
+    expect(overLimitText.status).toBe(400);
+    expect((await overLimitText.json()).error.code).toBe('VALIDATION');
+    const emptyText = await adminRequest(path, {
+      method: 'POST',
+      headers: { 'idempotency-key': `conduct-dismiss-empty-${fixture.reportId}`, 'if-match': '1' },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_DISMISSED',
+        decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        decisionReasonText: '',
+      }),
+    });
+    expect(emptyText.status).toBe(400);
+    expect((await emptyText.json()).error.code).toBe('VALIDATION');
 
     const anonymous = await app.handle(
       new Request(`http://localhost${path}`, {
@@ -3041,7 +3105,11 @@ describe('Admin Report Case API', () => {
             'idempotency-key': `report-hide-${suffix}-${fixture.caseId}`,
             'if-match': '1',
           },
-          body: JSON.stringify({ outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'SAFETY_REVIEW' }),
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_HIDDEN',
+            reasonCode: 'SAFETY_REVIEW',
+            decisionReasonText: 'Admin confirmed a safety policy violation.',
+          }),
         })
       )
     );
@@ -3079,6 +3147,16 @@ describe('Admin Report Case API', () => {
         .from(adminModerationDecision)
         .where(eq(adminModerationDecision.reportCaseId, fixture.caseId))
     ).toHaveLength(1);
+    const hideActivityLog = await adminRequest(
+      `/api/v1/admin/activity-log?resourceType=report_case&resourceId=${fixture.caseId}`
+    );
+    expect(hideActivityLog.status).toBe(200);
+    expect((await hideActivityLog.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        reasonCode: 'SAFETY_REVIEW',
+        decisionReasonText: 'Admin confirmed a safety policy violation.',
+      })
+    );
     expect(
       await db
         .select({ result: memberPenaltyRecord.result })
@@ -3219,17 +3297,48 @@ describe('Admin Report Case API', () => {
   it('dismisses a pending Report Case without hiding the Message and rejects a repeated transition', async () => {
     if (!postgresAvailable) return;
     const fixture = await createReportFixture();
+    const requestKey = `report-dismiss-${fixture.caseId}`;
+    const body = { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'POLICY_REVIEW' };
 
     const dismiss = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
       method: 'POST',
-      headers: {
-        'idempotency-key': `report-dismiss-${fixture.caseId}`,
-        'if-match': '1',
-      },
-      body: JSON.stringify({ outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'POLICY_REVIEW' }),
+      headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+      body: JSON.stringify(body),
     });
     expect(dismiss.status).toBe(200);
+    const dismissBody = await dismiss.json();
 
+    const legacyRequest = JSON.stringify({
+      action: 'REPORT_CASE_DISMISS',
+      adminId,
+      expectedTimestamp: null,
+      expectedVersion: 1,
+      kind: 'COMMAND',
+      metadata: { outcome: 'REPORT_CASE_DISMISSED' },
+      reasonCatalogVersion: 1,
+      reasonCode: 'POLICY_REVIEW',
+      request: { outcome: 'REPORT_CASE_DISMISSED' },
+      requestKey,
+      resourceId: fixture.caseId,
+      resourceType: 'report_case',
+    });
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(legacyRequest));
+    const legacyRequestHash = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, '0')
+    ).join('');
+    const [action] = await db
+      .select({ id: adminAction.id, requestHash: adminAction.requestHash })
+      .from(adminAction)
+      .where(eq(adminAction.id, dismissBody.data.adminActionId));
+    expect(action?.requestHash).toBe(legacyRequestHash);
+
+    const replay = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+      method: 'POST',
+      headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+      body: JSON.stringify(body),
+    });
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data.adminActionId).toBe(dismissBody.data.adminActionId);
     const openQueue = await adminRequest(
       `/api/v1/admin/reports?kind=REPORT_CASE&questId=${fixture.questId}`
     );

@@ -15,6 +15,7 @@ type ActivityEntry = {
   resourceType: string;
   resourceId: string;
   reasonCode: string | null;
+  decisionReasonText: string | null;
   reasonCatalogVersion: number;
   resultVersion: number | null;
   resultTimestamp: string | null;
@@ -81,6 +82,7 @@ const seedAdminAction = async (values: {
   resourceId: string;
   createdAt: string;
   reasonCode?: string | null;
+  decisionReasonText?: string | null;
   reasonCatalogVersion?: number;
   resultVersion?: number | null;
   resultTimestamp?: string | null;
@@ -91,12 +93,13 @@ const seedAdminAction = async (values: {
   const [row] = await sql`
     insert into admin_action
       (admin_id, action, resource_type, resource_id, request_key, request_hash,
-       reason_catalog_version, reason_code, result_version, result_timestamp,
+       reason_catalog_version, reason_code, decision_reason_text, result_version, result_timestamp,
        metadata, result_data, created_at)
     values
       (${values.actorId ?? adminId}, ${values.action}, ${values.resourceType}, ${values.resourceId},
        ${requestKey}, ${'a'.repeat(64)}, ${values.reasonCatalogVersion ?? 1},
        ${values.reasonCode === undefined ? 'ACTIVITY_REVIEW' : values.reasonCode},
+       ${values.decisionReasonText ?? null},
        ${values.resultVersion === undefined ? 1 : values.resultVersion},
        ${values.resultTimestamp === undefined ? null : values.resultTimestamp},
        ${JSON.stringify(values.metadata ?? { safe: 'value' })}::jsonb,
@@ -244,6 +247,7 @@ describe('Admin Activity Log API', () => {
       resourceType,
       resourceId,
       createdAt: '2030-08-02T00:00:00.000Z',
+      decisionReasonText: 'Admin review details stay with the immutable action.',
       reasonCatalogVersion: 7,
       resultVersion: 4,
       resultTimestamp: null,
@@ -295,6 +299,7 @@ describe('Admin Activity Log API', () => {
       'action',
       'admin',
       'createdAt',
+      'decisionReasonText',
       'id',
       'reasonCatalogVersion',
       'reasonCode',
@@ -313,6 +318,7 @@ describe('Admin Activity Log API', () => {
       resultVersion: 4,
       resultTimestamp: null,
       admin: { id: secondAdminId, firstName: 'Second', lastName: 'Admin' },
+      decisionReasonText: 'Admin review details stay with the immutable action.',
     });
     expect(JSON.stringify(entry)).not.toContain('private Message text');
     expect(JSON.stringify(entry)).not.toContain('signed-token');

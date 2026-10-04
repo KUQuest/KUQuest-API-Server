@@ -33,6 +33,7 @@ export const adminActivityEntrySchema = t.Object({
   resourceType: t.String(),
   resourceId: t.String(),
   reasonCode: t.Nullable(t.String()),
+  decisionReasonText: t.Nullable(t.String({ maxLength: 200 })),
   reasonCatalogVersion: t.Integer({ minimum: 1 }),
   resultVersion: t.Nullable(t.Integer({ minimum: 1 })),
   resultTimestamp: t.Nullable(t.String({ format: 'date-time' })),

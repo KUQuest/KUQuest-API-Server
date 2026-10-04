@@ -80,7 +80,7 @@ export const adminReportRoute = new Elysia({
       tags: ['Admin Reports'],
       summary: 'Apply a Report Case or Conduct Report decision',
       description:
-        'Applies an Admin decision to a Report Case, or dismisses or upholds a pending Conduct Report. Commands require an action-specific reason code, current resource version, Idempotency-Key, and immutable Admin Action.',
+        'For REPORT_CASE decisions, reasonCode is POLICY_REVIEW or SAFETY_REVIEW; Reporter Entry reasons are REPORT_ABUSIVE_OR_HARASSMENT, REPORT_SPAM, REPORT_INAPPROPRIATE_CONTENT, REPORT_DANGER_OR_THREAT, or REPORT_OTHER. CONDUCT_REPORT dismissal uses decisionReasonCode CONDUCT_REPORT_NO_VIOLATION or CONDUCT_REPORT_INSUFFICIENT_EVIDENCE; filing reasons are CONDUCT_ABANDONED, CONDUCT_OUT_OF_SCOPE, or CONDUCT_NO_SHOW. Uphold reuses the filed reason. Each decision can include an optional Admin-only decisionReasonText of up to 200 characters. Commands require an action-specific reason code, current resource version, Idempotency-Key, and immutable Admin Action.',
       operationId: 'decideAdminReport',
       security: betterAuthSecurity,
     },

@@ -2,7 +2,7 @@ import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import { t, type Static } from 'elysia';
 
-import { conductReportDismissReasonCodes } from './admin-report.policy';
+import { conductReportDismissReasonCodes, reportAdminReasonCodes } from './admin-report.policy';
 
 const dateTime = t.String({ format: 'date-time' });
 const uuid = t.String({ format: 'uuid' });
@@ -55,11 +55,20 @@ const reporterEntryReasonSchema = t.Union([
   t.Literal('REPORT_OTHER'),
 ]);
 
-const adminReportReasonCodeSchema = t.String({
-  minLength: 1,
-  maxLength: 100,
-  pattern: '^[A-Z][A-Z0-9_.-]*$',
-});
+const adminReportReasonCodeSchema = t.Union([
+  t.Literal(reportAdminReasonCodes[0]),
+  t.Literal(reportAdminReasonCodes[1]),
+]);
+
+const adminDecisionReasonTextSchema = t.Optional(
+  t.String({
+    minLength: 1,
+    maxLength: 200,
+    pattern: '\\S',
+    description:
+      'Optional Admin-only decision note. It does not replace the controlled reason code.',
+  })
+);
 
 const conductReportDecisionReasonCodeSchema = t.Union([
   t.Literal(conductReportDismissReasonCodes[0]),
@@ -124,6 +133,7 @@ export const adminReportCaseDecisionBodySchema = t.Object(
       t.Literal('REPORT_CASE_RESTORED'),
     ]),
     reasonCode: adminReportReasonCodeSchema,
+    decisionReasonText: adminDecisionReasonTextSchema,
   },
   { additionalProperties: false }
 );
@@ -132,12 +142,16 @@ export const adminConductReportDismissDecisionBodySchema = t.Object(
   {
     outcome: t.Literal('CONDUCT_REPORT_DISMISSED'),
     decisionReasonCode: conductReportDecisionReasonCodeSchema,
+    decisionReasonText: adminDecisionReasonTextSchema,
   },
   { additionalProperties: false }
 );
 
 export const adminConductReportUpholdDecisionBodySchema = t.Object(
-  { outcome: t.Literal('CONDUCT_REPORT_UPHELD') },
+  {
+    outcome: t.Literal('CONDUCT_REPORT_UPHELD'),
+    decisionReasonText: adminDecisionReasonTextSchema,
+  },
   { additionalProperties: false }
 );
 

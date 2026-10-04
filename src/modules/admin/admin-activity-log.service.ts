@@ -14,6 +14,7 @@ export type AdminActivityEntry = {
   resourceType: string;
   resourceId: string;
   reasonCode: string | null;
+  decisionReasonText: string | null;
   reasonCatalogVersion: number;
   resultVersion: number | null;
   resultTimestamp: Date | null;
@@ -72,6 +73,7 @@ export const listAdminActivity = async ({
           resourceType: adminAction.resourceType,
           resourceId: adminAction.resourceId,
           reasonCode: adminAction.reasonCode,
+          decisionReasonText: adminAction.decisionReasonText,
           reasonCatalogVersion: adminAction.reasonCatalogVersion,
           resultVersion: adminAction.resultVersion,
           resultTimestamp: adminAction.resultTimestamp,
