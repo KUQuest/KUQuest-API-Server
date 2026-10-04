@@ -1,0 +1,2 @@
+ALTER TABLE "admin_action" ADD COLUMN "decision_reason_text" varchar(200);--> statement-breakpoint
+ALTER TABLE "admin_action" ADD CONSTRAINT "admin_action_decision_reason_text_check" CHECK ("admin_action"."decision_reason_text" IS NULL OR btrim("admin_action"."decision_reason_text") <> '');
