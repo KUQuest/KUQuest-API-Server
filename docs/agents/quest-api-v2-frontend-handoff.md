@@ -1984,6 +1984,37 @@ Errors:
 - 404 `TEAM_FILE_NOT_FOUND`
 - 503 `TEAM_FILE_LINK_UNAVAILABLE`
 
+### 9.14 Read the Team Leader after selection
+
+After the Hirer selects a Candidate Team the Quest leaves `QUEST_OPEN`, and
+`GET /api/v2/quests/{questId}/teams` stays unavailable to Workers. Read the
+Team Leader from the Assignment instead. These fields are on
+`GET /api/v2/quests/{questId}/participation` (`data.assignment`),
+`GET /api/v2/quests/{questId}/assignments` (`items[]`), and
+`GET /api/v2/assignments/mine` (`items[]`):
+
+```json
+{
+  "teamRole": "LEADER",
+  "team": {
+    "id": "team-uuid",
+    "name": "Team A",
+    "leaderId": "member-uuid",
+    "members": [{ "id": "member-uuid", "displayName": "Somchai J." }]
+  }
+}
+```
+
+- `teamRole` is `LEADER`, `MEMBER`, or `null`.
+- `teamRole` and `team` are `null` for every Quest that is not `GROUP` +
+  `CANDIDATE`, and for a Worker outside the selected Team.
+- The fields stay readable in `QUEST_ASSIGNED`, `QUEST_IN_PROGRESS`, and after a
+  Hirer cancellation.
+- Only the Team Leader starts work, submits Proof, and confirms completion. A
+  Team Member who calls Start Work gets `START_WORK_NOT_REQUIRED`.
+- If the Team Leader leaves before selection, the earliest joined remaining
+  Member becomes Team Leader. If no Member remains, the Team disbands.
+
 ## 10. Start Work and Work Chat
 
 ### 10.1 Start Work
