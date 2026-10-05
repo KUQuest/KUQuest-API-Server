@@ -1873,6 +1873,7 @@ export const confirmQuestV2Completion = async (
           throw new Error('Quest API v2 Completion Confirmation insert returned no row');
         const activeWorkerIds = await activeAssignmentWorkerIds(transaction, questId);
         let questStatus: QuestV2State = currentQuestState;
+        let allocationPending = false;
         const groupFcfs =
           current.v2Mode === questV2Mode.firstComeFirstServed &&
           current.v2Participation === questV2Participation.group;
@@ -1885,9 +1886,12 @@ export const confirmQuestV2Completion = async (
             checks.owner.workerId!,
             memberId
           );
-          if (settlement) questStatus = 'QUEST_COMPLETED';
+          if (settlement) {
+            questStatus = 'QUEST_COMPLETED';
+            allocationPending = settlement.allocationPending === true;
+          }
         } else if (await allCompletionObligationsConfirmed(transaction, current, questId)) {
-          await settleProofFreeQuestV2InTransaction(
+          const settlement = await settleProofFreeQuestV2InTransaction(
             transaction,
             questId,
             `quest-v2-completion:${questId}`,
@@ -1896,6 +1900,7 @@ export const confirmQuestV2Completion = async (
             memberId
           );
           questStatus = 'QUEST_COMPLETED';
+          allocationPending = settlement?.allocationPending === true;
         }
         const participants = await proofParticipantIds(transaction, checks.owner);
         const closeMemberIds =
@@ -1913,7 +1918,7 @@ export const confirmQuestV2Completion = async (
             questId,
             'QUEST_COMPLETED',
             [current.hirerId, ...activeWorkerIds],
-            activeWorkerIds
+            allocationPending ? [] : activeWorkerIds
           );
         }
         return {
@@ -2174,6 +2179,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
 
       const activeWorkerIds = await activeAssignmentWorkerIds(transaction, input.questId);
       let questStatus: QuestV2State = current.questState as QuestV2State;
+      let allocationPending = false;
       if (input.decision === 'PROOF_APPROVED') {
         const settlement = await settleApprovedQuestV2ProofInTransaction(
           transaction,
@@ -2184,6 +2190,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null
         );
         questStatus = settlement.questStatus as QuestV2State;
+        allocationPending = settlement.allocationPending;
         await recordAssignmentAudits(
           transaction,
           input.actor,
@@ -2193,12 +2200,16 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
         );
         await recordAudit(transaction, {
           ...auditActorFor(input.actor),
-          action: 'QUEST_REWARD_SETTLED',
+          action: settlement.allocationPending
+            ? 'QUEST_TEAM_REWARD_ALLOCATION_PENDING'
+            : 'QUEST_REWARD_SETTLED',
           resourceType: 'QUEST_REWARD',
           resourceId: input.questId,
           oldValue: { state: 'QUEST_REWARD_HELD' },
           newValue: {
-            state: 'QUEST_REWARD_SETTLED',
+            state: settlement.allocationPending
+              ? 'QUEST_TEAM_REWARD_ALLOCATION_PENDING'
+              : 'QUEST_REWARD_SETTLED',
             paidSatang: settlement.paidSatang,
             assignmentIds: settlement.completedAssignmentIds,
           },
@@ -2311,7 +2322,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           input.questId,
           'QUEST_COMPLETED',
           [current.hirerId, ...activeWorkerIds],
-          activeWorkerIds
+          allocationPending ? [] : activeWorkerIds
         );
       }
 

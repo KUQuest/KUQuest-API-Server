@@ -17,6 +17,8 @@ export {
   settleApprovedQuestV2ProofInTransaction,
   settleProofFreeQuestV2InTransaction,
   settleUnderfilledCancellationInTransaction,
+  settleV2TeamRewardAllocationInTransaction,
+  teamRewardAllocationWindowMs,
   terminateQuestInTransaction,
   type QuestSettlementOutcome,
 } from './quest-settlement.service';
