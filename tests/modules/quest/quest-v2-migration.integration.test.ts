@@ -1714,6 +1714,36 @@ describe('Quest API v1 to v2 migration verification', () => {
         .where(eq(questV2ProofSubmission.id, proofSubmissionId))
     ).toEqual([{ status: 'PROOF_APPROVED' }]);
 
+    const pendingAllocation = await request(
+      `/api/v2/quests/${questId}/reward-allocation`,
+      'GET',
+      winningTeam.leaderId
+    );
+    expect(pendingAllocation.status).toBe(200);
+    expect((await pendingAllocation.json()).data).toMatchObject({
+      status: 'PENDING',
+      leaderId: winningTeam.leaderId,
+      totalRewardSatang: 2_000,
+      viewerIsLeader: true,
+    });
+    const winningTeammateId =
+      winningTeam.leaderId === worker.id ? secondWorker.id : fourthWorker.id;
+    const submittedAllocation = await jsonRequest(
+      `/api/v2/quests/${questId}/reward-allocation`,
+      'POST',
+      winningTeam.leaderId,
+      {
+        teammateShares: [{ memberId: winningTeammateId, percentageBasisPoints: 4_000 }],
+      },
+      'quest-migration-team-reward-allocation'
+    );
+    expect(submittedAllocation.status).toBe(200);
+    expect((await submittedAllocation.json()).data).toMatchObject({
+      status: 'SUBMITTED',
+      totalRewardSatang: 2_000,
+      viewerIsLeader: true,
+    });
+
     const reservation = await readTestQuestEscrow({
       ownerUserId: hirer.id,
       questId,
@@ -1725,9 +1755,9 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(reserveLedger?.eventType).toBe('FUNDING_RESERVE');
     const settlements = await listTestQuestEscrowSettlements(reservation!.id);
     expect(settlements).toHaveLength(2);
-    expect(
-      settlements.every(({ recipientUserId }) => recipientUserId === winningTeam.leaderId)
-    ).toBe(true);
+    expect(settlements.map(({ recipientUserId }) => recipientUserId).sort()).toEqual(
+      [winningTeam.leaderId, winningTeammateId].sort()
+    );
     expect(
       settlements.reduce((total, settlement) => total + settlement.recipientAmountSatang, 0)
     ).toBe(2_000);
