@@ -8,6 +8,7 @@ import {
   questEditRequest,
   questTeam,
   questTeamInvitation,
+  questV2TeamRewardAllocation,
 } from '@/database/schema/quest.schema';
 import { purgeExpiredProviderEventPayloads } from '@/modules/top-up';
 import { cleanupExpiredWorkChatAttachments } from '@/modules/work-chat';
@@ -40,6 +41,7 @@ import {
   failDueAtQuestV2Proofs,
   retryQuestV2ProofUploadCleanup,
 } from '../v2/proof';
+import { settleDueQuestV2RewardAllocation } from '../v2/reward-allocation';
 import {
   cleanupQuestV2ImageObjects,
   recoverQuestV2ImageUploadManifests,
@@ -87,7 +89,8 @@ export type QuestLifecycleWorkerError = {
     | 'quest-image-cleanup'
     | 'quest-proof-upload-cleanup'
     | 'work-chat-attachment-cleanup'
-    | 'provider-event-payload-purge';
+    | 'provider-event-payload-purge'
+    | 'team-reward-allocation-timeout';
   id?: string;
   cause: unknown;
 };
@@ -101,6 +104,7 @@ export type QuestLifecycleWorkerResult = {
   closedDisputeWindowQuestIds: string[];
   timedOutEditRequestIds: string[];
   expiredInvitationIds: string[];
+  autoAllocatedTeamRewardQuestIds: string[];
   autoApprovedProofIds: string[];
   errors: QuestLifecycleWorkerError[];
 };
@@ -364,6 +368,19 @@ const dueFailedQuestIds = async (now: Date, limit: number) =>
       )
     )
     .orderBy(asc(quest.failedAt), asc(quest.id))
+    .limit(limit);
+
+const dueTeamRewardAllocationQuestIds = async (now: Date, limit: number) =>
+  db
+    .select({ questId: questV2TeamRewardAllocation.questId })
+    .from(questV2TeamRewardAllocation)
+    .where(
+      and(
+        eq(questV2TeamRewardAllocation.status, 'PENDING'),
+        lte(questV2TeamRewardAllocation.deadlineAt, now)
+      )
+    )
+    .orderBy(asc(questV2TeamRewardAllocation.deadlineAt), asc(questV2TeamRewardAllocation.questId))
     .limit(limit);
 
 const releaseFailedQuestReservation = async (questId: string, now: Date): Promise<boolean> =>
@@ -636,6 +653,17 @@ export const runQuestLifecycleWorker = async (
     options.onError
   );
 
+  const autoAllocatedTeamRewardQuestIds = await processIds(
+    (await dueTeamRewardAllocationQuestIds(now, limit)).map(({ questId }) => questId),
+    'team-reward-allocation-timeout',
+    async (id) => {
+      const result = await settleDueQuestV2RewardAllocation(id, now);
+      return !('outcome' in result);
+    },
+    errors,
+    options.onError
+  );
+
   const closedDisputeWindowQuestIds = await processIds(
     (await dueDisputeWindowCloseIds(now, limit)).map(({ id }) => id),
     'dispute-window-close',
@@ -697,6 +725,7 @@ export const runQuestLifecycleWorker = async (
     closedDisputeWindowQuestIds,
     timedOutEditRequestIds: [...timedOutLegacyEditRequestIds, ...timedOutV2EditRequestIds],
     expiredInvitationIds,
+    autoAllocatedTeamRewardQuestIds,
     autoApprovedProofIds,
     errors,
   };

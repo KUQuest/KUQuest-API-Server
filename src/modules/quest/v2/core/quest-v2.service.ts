@@ -8,6 +8,8 @@ import {
   questCandidateApplicationV2,
   questCandidateTeamV2,
   questCandidateTeamV2Member,
+  questV2TeamRewardAllocation,
+  questV2TeamRewardAllocationMember,
   questCommand,
   questConditionItem,
   questImage,
@@ -3084,9 +3086,6 @@ export const getQuestV2ParticipationDetail = async (
       assignmentStatus: questAssignment.assignmentStatus,
       assignmentStartedAt: questAssignment.startedAt,
       fundingReservationId: quest.fundingReservationId,
-      selectedTeamLeaderId: sql<
-        string | null
-      >`(select ${questCandidateTeamV2.leaderId} from ${questCandidateTeamV2} where ${questCandidateTeamV2.questId} = ${quest.id} and ${questCandidateTeamV2.state} = 'TEAM_SELECTED' limit 1)`,
       startedWorkerCount: startedWorkerCountExpression,
     })
     .from(quest)
@@ -3186,12 +3185,43 @@ export const getQuestV2ParticipationDetail = async (
         settledAt: paid.settledAt.toISOString(),
       };
     } else {
-      const receivesTeamReward =
-        participationRow.v2Mode !== 'CANDIDATE' ||
-        participationRow.v2Participation !== 'GROUP' ||
-        row.selectedTeamLeaderId === userId;
+      const [teamAllocation] =
+        participationRow.v2Mode === 'CANDIDATE' && participationRow.v2Participation === 'GROUP'
+          ? await db
+              .select({
+                status: questV2TeamRewardAllocation.status,
+                rewardSatang: questV2TeamRewardAllocationMember.rewardSatang,
+              })
+              .from(questV2TeamRewardAllocation)
+              .leftJoin(
+                questV2TeamRewardAllocationMember,
+                and(
+                  eq(
+                    questV2TeamRewardAllocationMember.allocationId,
+                    questV2TeamRewardAllocation.id
+                  ),
+                  eq(questV2TeamRewardAllocationMember.memberId, userId)
+                )
+              )
+              .innerJoin(
+                questCandidateTeamV2Member,
+                eq(questCandidateTeamV2Member.teamId, questV2TeamRewardAllocation.teamId)
+              )
+              .where(
+                and(
+                  eq(questV2TeamRewardAllocation.questId, questId),
+                  eq(questCandidateTeamV2Member.memberId, userId)
+                )
+              )
+              .limit(1)
+          : [];
+      const candidateTeamAllocation =
+        participationRow.v2Mode === 'CANDIDATE' && participationRow.v2Participation === 'GROUP';
       const pending =
-        participationRow.assignmentStatus === 'ASSIGNMENT_COMPLETED' && receivesTeamReward;
+        participationRow.assignmentStatus === 'ASSIGNMENT_COMPLETED' &&
+        (candidateTeamAllocation
+          ? teamAllocation?.status === 'PENDING' || (teamAllocation?.rewardSatang ?? 0) > 0
+          : true);
       workerSettlement = {
         status: pending ? 'PENDING' : 'NO_PAYMENT',
         amountSatang: pending ? null : 0,

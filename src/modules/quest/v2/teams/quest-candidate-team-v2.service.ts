@@ -690,6 +690,9 @@ export const listQuestV2CandidateTeams = async (
       and(
         eq(questCandidateTeamV2.questId, questId),
         ne(questCandidateTeamV2.state, 'TEAM_DISBANDED'),
+        ...(current.questState === 'QUEST_OPEN'
+          ? []
+          : [eq(questCandidateTeamV2.state, 'TEAM_SELECTED')]),
         ...(current.hirerId === memberId
           ? []
           : [
@@ -734,6 +737,9 @@ export const getQuestV2CandidateTeam = async (
         eq(questCandidateTeamV2.id, teamId),
         eq(questCandidateTeamV2.questId, questId),
         ne(questCandidateTeamV2.state, 'TEAM_DISBANDED'),
+        ...(current.questState === 'QUEST_OPEN'
+          ? []
+          : [eq(questCandidateTeamV2.state, 'TEAM_SELECTED')]),
         ...(current.hirerId === memberId
           ? []
           : [

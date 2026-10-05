@@ -14,4 +14,7 @@ export const isReadableCandidateApplicationRoster = (current: CandidateRosterQue
 export const isReadableCandidateTeamRoster = (current: CandidateRosterQuestAccessState) =>
   current.v2Mode === questV2Mode.candidate &&
   current.v2Participation === questV2Participation.group &&
-  current.questState === 'QUEST_OPEN';
+  (current.questState === 'QUEST_OPEN' ||
+    current.questState === 'QUEST_ASSIGNED' ||
+    current.questState === 'QUEST_IN_PROGRESS' ||
+    current.questState === 'QUEST_COMPLETED');

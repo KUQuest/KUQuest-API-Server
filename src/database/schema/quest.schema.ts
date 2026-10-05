@@ -565,6 +565,77 @@ export const questCandidateTeamV2Member = pgTable(
   ]
 );
 
+/** Holds a completed Candidate Team Reward until its Leader submits an allocation. */
+export const questV2TeamRewardAllocation = pgTable(
+  'quest_v2_team_reward_allocation',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => questCandidateTeamV2.id),
+    leaderId: uuid('leader_id')
+      .notNull()
+      .references(() => authUser.id),
+    status: varchar('status', { length: 24 })
+      .$type<'PENDING' | 'SUBMITTED' | 'AUTO_EQUAL'>()
+      .default('PENDING')
+      .notNull(),
+    totalRewardSatang: integer('total_reward_satang').notNull(),
+    totalPlatformFeeSatang: integer('total_platform_fee_satang').notNull(),
+    deadlineAt: time('deadline_at').notNull(),
+    submittedAt: time('submitted_at'),
+    settledAt: time('settled_at'),
+    createdAt: time('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    check(
+      'quest_v2_team_reward_allocation_status_check',
+      sql`${table.status} IN ('PENDING', 'SUBMITTED', 'AUTO_EQUAL')`
+    ),
+    check(
+      'quest_v2_team_reward_allocation_amount_check',
+      sql`${table.totalRewardSatang} > 0 AND ${table.totalPlatformFeeSatang} >= 0`
+    ),
+    check(
+      'quest_v2_team_reward_allocation_completion_check',
+      sql`(${table.status} = 'PENDING' AND ${table.submittedAt} IS NULL AND ${table.settledAt} IS NULL) OR (${table.status} <> 'PENDING' AND ${table.submittedAt} IS NOT NULL AND ${table.settledAt} IS NOT NULL)`
+    ),
+    unique('quest_v2_team_reward_allocation_quest_id_key').on(table.questId),
+    index('quest_v2_team_reward_allocation_due_idx').on(table.status, table.deadlineAt),
+  ]
+);
+
+/** Immutable per-Worker percentage and integer-satang result for an allocation. */
+export const questV2TeamRewardAllocationMember = pgTable(
+  'quest_v2_team_reward_allocation_member',
+  {
+    allocationId: uuid('allocation_id')
+      .notNull()
+      .references(() => questV2TeamRewardAllocation.id, { onDelete: 'cascade' }),
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => authUser.id),
+    percentageBasisPoints: smallint('percentage_basis_points').notNull(),
+    rewardSatang: integer('reward_satang').notNull(),
+    platformFeeSatang: integer('platform_fee_satang').notNull(),
+    createdAt: time('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.allocationId, table.memberId] }),
+    check(
+      'quest_v2_team_reward_allocation_member_basis_points_check',
+      sql`${table.percentageBasisPoints} BETWEEN 0 AND 10000`
+    ),
+    check(
+      'quest_v2_team_reward_allocation_member_amount_check',
+      sql`${table.rewardSatang} >= 0 AND ${table.platformFeeSatang} >= 0`
+    ),
+  ]
+);
+
 export const questCandidateTeamV2SubmissionFile = pgTable(
   'quest_candidate_team_v2_submission_file',
   {
