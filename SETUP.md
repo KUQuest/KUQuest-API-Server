@@ -191,9 +191,27 @@ remains the Member login method outside staging debug use.
 For a focused rerun, use `db:seed-demo-users` or `db:seed-demo-quests` in that order.
 Reruns keep Member and Quest identities, do not add starter funds again, and preserve
 Quest participation and terminal decisions. They do not restore money spent later.
-The old frontend, image, staging-test-user, and finance-test seed commands are removed.
-The flow no longer creates extra finance Members, completed Quests, Reviews,
-Dispute Cases, Payout Destinations, or pending Payouts.
+The old generic frontend, image, staging-test-user, and finance-test seed commands are removed.
+The staging flow does not create extra finance Members, completed Quests, Reviews, Dispute Cases,
+Payout Destinations, or pending Payouts.
+
+### Local Admin frontend demo seed
+
+Run this only against a local development database. Configure Admin credentials,
+`STAGING_TEST_AUTH_PASSWORD`, `PAYOUT_DESTINATION_ENCRYPTION_KEY`, and S3 storage in
+`.env.admin`. If `XENDIT_SECRET_KEY` is set, it must be an Xendit Development key.
+
+```bash
+bun --env-file=.env.admin run db:migrate
+bun --env-file=.env.admin run db:seed-demo-frontend
+```
+
+The one-command seed creates one Admin, 10 Student Members, one Staff Member, and
+one Lecturer Member. It prepares 50 v2 Quests: five in each non-open Quest State
+and 20 in `QUEST_OPEN`. It also prepares five of each `Report Case`, `Conduct
+Report`, and `Dispute Case` status, five Top-ups, five Payouts, and all four Wallet
+statuses. It uses the real Quest, Wallet, and Admin decision services. Reruns keep
+stable records and preserve Admin decisions.
 
 ### Migration Guidelines
 
