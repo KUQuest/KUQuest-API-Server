@@ -2439,12 +2439,7 @@ describe('Quest Candidate Team API v2', () => {
       .select({ kind: chatMessage.kind, systemType: chatMessage.systemType })
       .from(chatMessage)
       .where(eq(chatMessage.conversationId, conversation!.id));
-    expect(messages).toHaveLength(3);
-    expect(
-      messages.every(
-        ({ kind, systemType }) => kind === 'SYSTEM' && systemType === 'ACCEPTED_PARTICIPANT_JOINED'
-      )
-    ).toBe(true);
+    expect(messages).toHaveLength(0);
 
     const commands = await db
       .select({ processingStatus: chatTransitionCommand.processingStatus })

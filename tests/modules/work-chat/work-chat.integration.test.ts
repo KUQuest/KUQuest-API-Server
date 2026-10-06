@@ -467,18 +467,7 @@ describe('Work Chat Member API', () => {
         }>;
       };
     };
-    expect(historyBody.data.items[0]?.kind).toBe('SYSTEM');
-    expect(historyBody.data.items[0]?.sender).toEqual({
-      id: null,
-      displayName: 'KU bot',
-      avatar: null,
-    });
-    expect(historyBody.data.items[0]?.eventId).toBeString();
-    expect(historyBody.data.items[0]?.systemType).toBe('ACCEPTED_PARTICIPANT_JOINED');
-    expect(historyBody.data.items[0]?.systemPayload).toMatchObject({
-      memberDisplayName: 'Route Hirer',
-      action: { type: 'OPEN_WORK_CONVERSATION' },
-    });
+    expect(historyBody.data.items).toHaveLength(0);
 
     const participants = await workChatApp.handle(
       new Request(`http://localhost/api/v1/chat/conversations/${conversationId}/participants`, {

@@ -7,7 +7,6 @@ import {
 } from '@/database/schema/work-chat.schema';
 import { quest, questAssignment } from '@/database/schema/quest.schema';
 import type {
-  AcceptedWorker,
   ApplyQuestWorkChatMembershipResult,
   QuestTransaction,
   QuestWorkChatMembershipTransition,
@@ -22,8 +21,6 @@ import {
 } from './candidate-inquiry.lifecycle';
 
 const systemTypes = {
-  acceptedParticipantJoined: 'ACCEPTED_PARTICIPANT_JOINED',
-  workerDeparted: 'WORKER_DEPARTED',
   conversationReadOnly: 'CONVERSATION_READ_ONLY',
 } as const;
 
@@ -315,11 +312,6 @@ const appendSystemMessage = async (
   return false;
 };
 
-const eventForWorker = (
-  transition: QuestWorkChatMembershipTransition,
-  worker: AcceptedWorker
-): Promise<string> => eventIdentity(transition, `worker:${worker.assignmentId}`);
-
 const ensureHirerMembership = async (
   transaction: QuestTransaction,
   conversationId: string,
@@ -403,17 +395,7 @@ const applyWorkersAccepted = async (
     workerIds: transition.workers.map(({ workerId }) => workerId),
   });
 
-  if (await ensureHirerMembership(transaction, conversation.id, transition.hirerId, occurredAt)) {
-    await appendSystemMessage(
-      transaction,
-      conversation.id,
-      await eventIdentity(transition, 'hirer'),
-      systemTypes.acceptedParticipantJoined,
-      'The Hirer joined the Work Conversation.',
-      { role: 'HIRER', memberId: transition.hirerId, joinedAt: occurredAt.toISOString() },
-      occurredAt
-    );
-  }
+  await ensureHirerMembership(transaction, conversation.id, transition.hirerId, occurredAt);
 
   for (const worker of transition.workers) {
     const [existing] = await transaction
@@ -448,20 +430,6 @@ const applyWorkersAccepted = async (
       joinedAt,
       createdAt: joinedAt,
     });
-    await appendSystemMessage(
-      transaction,
-      conversation.id,
-      await eventForWorker(transition, worker),
-      systemTypes.acceptedParticipantJoined,
-      'A Worker joined the Work Conversation.',
-      {
-        role: 'WORKER',
-        memberId: worker.workerId,
-        assignmentId: worker.assignmentId,
-        joinedAt: joinedAt.toISOString(),
-      },
-      joinedAt
-    );
   }
 
   await transaction
@@ -526,21 +494,6 @@ const applyWorkerBecameInactive = async (
     .update(chatMembership)
     .set({ leftAt })
     .where(eq(chatMembership.id, membership.id));
-  await appendSystemMessage(
-    transaction,
-    conversation.id,
-    await eventIdentity(transition, 'worker-inactive'),
-    systemTypes.workerDeparted,
-    'A Worker left the Work Conversation.',
-    {
-      role: 'WORKER',
-      memberId: transition.workerId,
-      assignmentId: transition.assignmentId,
-      assignmentStatus: transition.assignmentStatus,
-      leftAt: leftAt.toISOString(),
-    },
-    leftAt
-  );
   await transaction
     .update(chatConversation)
     .set({ updatedAt: leftAt })

@@ -67,6 +67,26 @@ export const workChatRoute = new Elysia({
 })
   .use(authGuard)
   .use(memberBanGuard)
+  .ws('/events', {
+    async open(ws) {
+      const memberId = ws.data.session.user.id;
+      const unsubscribe = workChatDelivery.subscribe(memberId, async () => {
+        if (await closeSocketForActiveMemberBan(ws, memberId)) return;
+        ws.send(JSON.stringify({ type: 'CHAT_INBOX_INVALIDATED', version: 1 }));
+      });
+      webSocketUnsubscribers.set(ws, unsubscribe);
+      logSocket(ws, 'subscribed', { type: 'CHAT_INBOX' });
+    },
+    message(ws) {
+      logSocket(ws, 'rejected', { type: 'READ_ONLY_COMMAND', code: 1008 });
+      ws.close(1008, 'Chat inbox stream is read-only');
+    },
+    close(ws, code) {
+      webSocketUnsubscribers.get(ws)?.();
+      webSocketUnsubscribers.delete(ws);
+      logSocket(ws, 'close', { code });
+    },
+  })
   .ws('/conversations/:conversationId/events', {
     params: workChatConversationParamsSchema,
     async open(ws) {
