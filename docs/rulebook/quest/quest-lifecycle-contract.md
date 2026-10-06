@@ -46,7 +46,7 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 2. No Hirer choice cancels the Quest.
 3. To proceed, every current Active Worker has 10 minutes to consent.
 4. The consent view shows the exact new Quest Reward and `dueAt`.
-5. A decline or timeout cancels the Quest.
+5. A decline or timeout cancels the Quest. Workers recorded in the consent roster retain read access to their own response and the cancellation result after their Assignment ends. Unrelated Members cannot read the process.
 6. All consent changes the Quest from `QUEST_OPEN` to `QUEST_ASSIGNED`.
 7. Every current Active Worker must still press Start Work by `dueAt`.
 8. The Quest changes to `QUEST_IN_PROGRESS` after every required Start Work action.

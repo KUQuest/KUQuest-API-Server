@@ -498,11 +498,13 @@ const materialize = async (
   let current = await lockQuest(transaction, questId);
   if (!current) return { outcome: 'not-found' };
   const isHirer = current.hirerId === memberId;
-  if (!isHirer && !(await hasActiveAssignment(transaction, questId, memberId))) {
-    return { outcome: 'not-authorized' };
-  }
   let decision = await selectDecision(transaction, questId, true);
   if (!decision) {
+    // Only an Active Worker can materialize a new process. Existing consent
+    // records retain read access after cancellation ends the Assignment.
+    if (!isHirer && !(await hasActiveAssignment(transaction, questId, memberId))) {
+      return { outcome: 'not-authorized' };
+    }
     const created = await createDecisionInTransaction(transaction, current, now);
     if (!created.underfilled) return { outcome: 'not-underfilled' };
     decision = await selectDecision(transaction, questId, true);
