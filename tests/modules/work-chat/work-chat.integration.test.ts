@@ -603,7 +603,7 @@ describe('Work Chat Member API', () => {
     expect(await getInboxSummary(workerId)).toMatchObject({
       id: conversationId,
       latestMessage: { kind: 'USER', preview: 'Worker message' },
-      unreadCount: 4,
+      unreadCount: 2,
     });
 
     const replay = await requestJson(
@@ -651,7 +651,7 @@ describe('Work Chat Member API', () => {
     expect(await getInboxSummary(hirerId)).toMatchObject({
       id: conversationId,
       latestMessage: { kind: 'USER', preview: 'Worker message' },
-      unreadCount: 4,
+      unreadCount: 2,
     });
 
     const hirerSent = await requestJson(

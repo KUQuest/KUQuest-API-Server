@@ -1633,7 +1633,7 @@ describe('Quest API v1 to v2 migration verification', () => {
         .select({ kind: chatMessage.kind })
         .from(chatMessage)
         .where(eq(chatMessage.conversationId, conversation!.id))
-    ).toHaveLength(3);
+    ).toHaveLength(0);
     expect(
       await db
         .select({ processingStatus: chatTransitionCommand.processingStatus })

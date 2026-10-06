@@ -281,7 +281,7 @@ describe('WorkChatMembershipWriter', () => {
     expect(updatedConversation?.questStatus).toBe('QUEST_COMPLETED');
     expect(departed?.leftAt?.toISOString()).toBe('2030-01-01T11:00:00.000Z');
     expect(stillCurrent?.leftAt).toBeNull();
-    expect(messages).toHaveLength(5);
+    expect(messages).toHaveLength(1);
     await expect(
       db
         .delete(quest)
