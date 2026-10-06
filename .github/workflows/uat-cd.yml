@@ -1,7 +1,8 @@
 name: Backend UAT CD
 
 # Manual promotion of an image that Backend Staging CD already built.
-# This workflow never builds an image and never resets or seeds the UAT database.
+# This workflow never builds an image or resets the UAT database.
+# A successful deploy seeds the first Admin; rollback does not seed.
 on:
   workflow_dispatch:
     inputs:
@@ -168,6 +169,36 @@ jobs:
             echo 'GitHub variable UAT_SERVER is missing or not a plain host name or IP address.'
             exit 1
           fi
+
+      - name: Validate UAT Admin seed secrets
+        if: ${{ inputs.operation == 'deploy' }}
+        shell: bash
+        env:
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          ADMIN_FIRST_NAME: ${{ secrets.ADMIN_FIRST_NAME }}
+          ADMIN_LAST_NAME: ${{ secrets.ADMIN_LAST_NAME }}
+        run: |
+          set -euo pipefail
+
+          ADMIN_SEED_SECRETS=(
+            ADMIN_EMAIL
+            ADMIN_PASSWORD
+            ADMIN_FIRST_NAME
+            ADMIN_LAST_NAME
+          )
+
+          for SECRET_NAME in "${ADMIN_SEED_SECRETS[@]}"; do
+            if [ -z "${!SECRET_NAME}" ]; then
+              echo "Missing UAT GitHub secret: $SECRET_NAME"
+              exit 1
+            fi
+
+            if [[ "${!SECRET_NAME}" == *$'\n'* || "${!SECRET_NAME}" == *$'\r'* ]]; then
+              echo "UAT GitHub secret $SECRET_NAME contains a line break."
+              exit 1
+            fi
+          done
 
       # Reached only after the provenance job proved this commit is CI-validated develop history.
       # The ops script and Compose file are the ones released with the image.
@@ -361,6 +392,67 @@ jobs:
           echo "Public health check failed: $UAT_PUBLIC_URL/health"
           exit 1
 
+      - name: Seed UAT Admin account
+        if: ${{ inputs.operation == 'deploy' }}
+        shell: bash
+        env:
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          ADMIN_FIRST_NAME: ${{ secrets.ADMIN_FIRST_NAME }}
+          ADMIN_LAST_NAME: ${{ secrets.ADMIN_LAST_NAME }}
+        run: |
+          set -euo pipefail
+
+          SEED_SCRIPT="$RUNNER_TEMP/uat-admin-seed.sh"
+          SEED_OUTPUT_LOG="$RUNNER_TEMP/uat-admin-seed-output.log"
+          umask 077
+
+          uat_ssh() {
+            ssh \
+              -i "$RUNNER_TEMP/uat_key" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/uat_known_hosts" \
+              deploy@"$UAT_SERVER" \
+              "$@"
+          }
+
+          cleanup_seed_files() {
+            rm -f -- "$SEED_SCRIPT" "$SEED_OUTPUT_LOG"
+          }
+          trap cleanup_seed_files EXIT
+
+          {
+            printf 'set -euo pipefail\n'
+            printf 'export ADMIN_EMAIL=%q\n' "$ADMIN_EMAIL"
+            printf 'export ADMIN_PASSWORD=%q\n' "$ADMIN_PASSWORD"
+            printf 'export ADMIN_FIRST_NAME=%q\n' "$ADMIN_FIRST_NAME"
+            printf 'export ADMIN_LAST_NAME=%q\n' "$ADMIN_LAST_NAME"
+            printf 'cd /opt/backend\n'
+            printf 'APP_IMAGE=%q docker compose run --rm --no-deps \\\n' \
+              "${IMAGE_NAME}:${IMAGE_SHA}"
+            printf '  --env ADMIN_EMAIL \\\n'
+            printf '  --env ADMIN_PASSWORD \\\n'
+            printf '  --env ADMIN_FIRST_NAME \\\n'
+            printf '  --env ADMIN_LAST_NAME \\\n'
+            printf '  api bun scripts/seed-admin.ts\n'
+          } > "$SEED_SCRIPT"
+
+          set +e
+          uat_ssh 'bash -s' < "$SEED_SCRIPT" > "$SEED_OUTPUT_LOG" 2>&1
+          SEED_STATUS=$?
+          set -e
+
+          cat "$SEED_OUTPUT_LOG"
+
+          if [ "$SEED_STATUS" -ne 0 ]; then
+            if grep -Fq 'An Admin with this email already exists; no changes were made' "$SEED_OUTPUT_LOG"; then
+              echo 'UAT Admin already exists; no changes were made.'
+            else
+              exit "$SEED_STATUS"
+            fi
+          fi
+
       - name: Report deployed image
         if: success()
         shell: bash
@@ -393,4 +485,6 @@ jobs:
           rm -f \
             "$RUNNER_TEMP/uat_key" \
             "$RUNNER_TEMP/uat_known_hosts" \
-            "$RUNNER_TEMP/backend.env"
+            "$RUNNER_TEMP/backend.env" \
+            "$RUNNER_TEMP/uat-admin-seed.sh" \
+            "$RUNNER_TEMP/uat-admin-seed-output.log"
