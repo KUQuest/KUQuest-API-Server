@@ -106,6 +106,87 @@ export const adminMemberDetailResponseSchema = t.Object({
     }),
   }),
 });
+export const adminMemberProfileCollectionQuerySchema = t.Object({
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
+  cursor: t.Optional(t.String()),
+});
+
+const adminMemberProfileIdentitySchema = t.Object({
+  displayId: t.String({ pattern: '^MEM-[0-9]{6,}$' }),
+});
+
+const adminMemberProfileTagSchema = t.Object({
+  name: t.String(),
+});
+
+export const adminMemberProfileTagsResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    member: adminMemberProfileIdentitySchema,
+    tags: t.Array(adminMemberProfileTagSchema, { maxItems: 3 }),
+  }),
+});
+
+const adminMemberWorkExperienceSchema = t.Object({
+  title: t.String(),
+  employmentType: t.String(),
+  organization: t.Union([t.String(), t.Null()]),
+  description: t.Union([t.String(), t.Null()]),
+  startedAt: t.String({ format: 'date' }),
+  endedAt: t.Union([t.String({ format: 'date' }), t.Null()]),
+});
+
+export const adminMemberWorkExperiencesResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    member: adminMemberProfileIdentitySchema,
+    items: t.Array(adminMemberWorkExperienceSchema),
+    totalCount: t.Integer({ minimum: 0 }),
+    nextCursor: t.Union([t.String(), t.Null()]),
+  }),
+});
+
+const adminMemberCertificateImageSchema = t.Union([
+  t.Object({
+    contentType: t.String(),
+    sizeBytes: t.Integer({ minimum: 0 }),
+  }),
+  t.Null(),
+]);
+
+const adminMemberCertificateSchema = t.Object({
+  name: t.String(),
+  issuer: t.String(),
+  issuedAt: t.String({ format: 'date' }),
+  image: adminMemberCertificateImageSchema,
+});
+
+export const adminMemberCertificatesResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    member: adminMemberProfileIdentitySchema,
+    items: t.Array(adminMemberCertificateSchema),
+    totalCount: t.Integer({ minimum: 0 }),
+    nextCursor: t.Union([t.String(), t.Null()]),
+  }),
+});
+
+export type AdminMemberProfileIdentity = Static<typeof adminMemberProfileIdentitySchema>;
+export type AdminMemberWorkExperienceItem = Static<typeof adminMemberWorkExperienceSchema>;
+export type AdminMemberCertificateItem = Static<typeof adminMemberCertificateSchema>;
+
+export type AdminMemberProfileCollectionQuery = Static<
+  typeof adminMemberProfileCollectionQuerySchema
+>;
+export type AdminMemberProfileTagsData = Static<
+  typeof adminMemberProfileTagsResponseSchema
+>['data'];
+export type AdminMemberWorkExperiencesData = Static<
+  typeof adminMemberWorkExperiencesResponseSchema
+>['data'];
+export type AdminMemberCertificatesData = Static<
+  typeof adminMemberCertificatesResponseSchema
+>['data'];
 
 export type AdminMemberParams = Static<typeof adminMemberParamsSchema>;
 export type AdminMemberListItem = Static<typeof adminMemberListItemSchema>;
