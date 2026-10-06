@@ -244,6 +244,33 @@ The cursor must belong to the requested Member's collection. A cursor from anoth
 `400 INVALID_CURSOR`.
 A failed read remains an error; it does not return an empty list.
 
+### 3.7 `GET /api/v1/admin/members/:id/penalty-history`
+
+This read requires an enabled Admin Session. It rejects a Member Session. The path uses the Member
+UUID. The response identifies the Member by `displayId` (`MEM-######`) and does not return record,
+source, Member, or Admin UUIDs as visible identifiers.
+
+The response includes all `memberPenaltyRecord` rows in newest-first order. Each item contains
+`ladder`, `source`, `sourceDisplayId`, `sequenceNumber`, `result`, `actor`, `reasonCode`, `createdAt`,
+`reviewRating`, `isEffectiveActiveMisconductPenalty`, and `reversal`. `actor` contains `type`
+(`ADMIN` or `SYSTEM`) and a safe `displayName`. `reversal` links the original and reversal by
+`sequenceNumber`, `result`, and `createdAt`; it does not expose a UUID. `sourceDisplayId` uses `RPT`
+for a Report Case, `CND` for a Conduct Report, and the source Review's Quest Display ID (`QST`) for
+a Review-ladder record. It is `null` when the source record is not available.
+
+`confirmedMisconductCount` counts original `MISCONDUCT` records from Report Cases and Conduct
+Reports created on or after Member creation. It includes `PENALTY_EXEMPT` originals and originals
+with a linked reversal. It excludes `PENALTY_REVERSAL` rows. `effectiveActiveMisconductPenaltyCount`
+counts only non-exempt, unreversed original Misconduct records created on or after Member creation.
+`reviewLadderRecordCount` counts original `REVIEW` records separately; Review-ladder records never
+increase `confirmedMisconductCount`. These values come from `memberPenaltyRecord`, not current
+Member status or average rating.
+
+`limit` uses the shared page limit (1–50). `cursor` is Member-scoped. `totalCount` covers every
+penalty record, including reversals, and is not limited to the current page. Empty history returns
+zero counts, an empty `items` list, and a null `nextCursor`. A missing Member returns
+`404 MEMBER_NOT_FOUND`; a cursor from another Member returns `400 INVALID_CURSOR`.
+
 ---
 
 ## 4. Implementation Steps

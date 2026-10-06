@@ -12,6 +12,7 @@ import {
   getAdminMemberProfileTags,
   listAdminMemberCertificates,
   listAdminMemberWorkExperiences,
+  listAdminMemberPenaltyHistory,
   listAdminMembers,
 } from './admin-member.service';
 const memberNotFound = (set: AdminContext['set']): ApiResponse => {
@@ -94,6 +95,25 @@ export const listAdminMemberCertificatesController = async ({
 }): Promise<ApiResponse> => {
   try {
     const data = await listAdminMemberCertificates(params.id, query);
+    if (!data) return memberNotFound(set);
+    return apiSuccess(data);
+  } catch (error) {
+    const response = cursorInputErrorResponse(error, set);
+    if (response) return response;
+    throw error;
+  }
+};
+
+export const listAdminMemberPenaltyHistoryController = async ({
+  params,
+  query,
+  set,
+}: AdminContext & {
+  params: AdminMemberParams;
+  query: AdminMemberProfileCollectionQuery;
+}): Promise<ApiResponse> => {
+  try {
+    const data = await listAdminMemberPenaltyHistory(params.id, query);
     if (!data) return memberNotFound(set);
     return apiSuccess(data);
   } catch (error) {
