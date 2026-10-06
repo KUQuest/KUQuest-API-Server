@@ -8,6 +8,9 @@ import {
   questV2UnderfilledDecision,
   questV2UnderfilledConsent,
   questV2ProofSubmission,
+  questV2TeamRewardAllocation,
+  questV2TeamRewardAllocationMember,
+  questCandidateTeamV2Member,
   proofSubmission,
   questSettlementCommand,
   questTeam,
@@ -40,6 +43,14 @@ import type {
   InactiveAssignmentStatus,
   QuestWorkChatMembershipTransition,
 } from '../shared/work-chat/quest-work-chat.contract';
+import {
+  calculateTeamRewardAmounts,
+  equalTeamRewardShares,
+  sharesWithLeaderRemainder,
+  type TeamRewardShare,
+} from './quest-team-reward-allocation';
+
+export const teamRewardAllocationWindowMs = 24 * 60 * 60 * 1000;
 
 export type QuestSettlementOutcome =
   | {
@@ -231,6 +242,147 @@ const selectedTeamLeader = async (
     .limit(1)
     .for('update');
   return team?.leaderId ?? null;
+};
+
+const createPendingTeamRewardAllocation = async (
+  tx: QuestTransaction,
+  input: {
+    questId: string;
+    teamId: string;
+    leaderId: string;
+    rewardSatang: number;
+    platformFeeSatang: number;
+    now: Date;
+  }
+) => {
+  const [allocation] = await tx
+    .insert(questV2TeamRewardAllocation)
+    .values({
+      questId: input.questId,
+      teamId: input.teamId,
+      leaderId: input.leaderId,
+      status: 'PENDING',
+      totalRewardSatang: input.rewardSatang,
+      totalPlatformFeeSatang: input.platformFeeSatang,
+      deadlineAt: new Date(input.now.getTime() + teamRewardAllocationWindowMs),
+      createdAt: input.now,
+    })
+    .returning({ id: questV2TeamRewardAllocation.id });
+  if (!allocation) throw new Error('Candidate Team Reward Allocation insert returned no row');
+  return allocation;
+};
+
+export type TeamRewardAllocationSettlementOutcome =
+  | { outcome: 'not-found' | 'not-pending' | 'deadline-passed' | 'invalid-allocation' }
+  | {
+      allocationId: string;
+      status: 'SUBMITTED' | 'AUTO_EQUAL';
+      settledAt: Date;
+      members: ReturnType<typeof calculateTeamRewardAmounts>;
+    };
+
+/** Settle a completed Candidate Team's held Quest Reward inside the caller's transaction. */
+export const settleV2TeamRewardAllocationInTransaction = async (
+  tx: QuestTransaction,
+  questId: string,
+  now: Date,
+  source: 'SUBMITTED' | 'AUTO_EQUAL',
+  teammateShares?: readonly TeamRewardShare[]
+): Promise<TeamRewardAllocationSettlementOutcome> => {
+  const current = await lockQuest(tx, questId);
+  if (!current || current.apiVersion !== 'v2') return { outcome: 'not-found' };
+  const [allocation] = await tx
+    .select()
+    .from(questV2TeamRewardAllocation)
+    .where(eq(questV2TeamRewardAllocation.questId, questId))
+    .limit(1)
+    .for('update');
+  if (!allocation) return { outcome: 'not-found' };
+  if (current.questStatus !== questStatus.completed || allocation.status !== 'PENDING') {
+    return { outcome: 'not-pending' };
+  }
+  if (source === 'SUBMITTED' && now.getTime() >= allocation.deadlineAt.getTime()) {
+    return { outcome: 'deadline-passed' };
+  }
+
+  const members = await tx
+    .select({ memberId: questCandidateTeamV2Member.memberId })
+    .from(questCandidateTeamV2Member)
+    .where(eq(questCandidateTeamV2Member.teamId, allocation.teamId))
+    .orderBy(asc(questCandidateTeamV2Member.joinedAt), asc(questCandidateTeamV2Member.memberId))
+    .for('update');
+  const memberIds = members.map(({ memberId }) => memberId);
+  const assignments = await tx
+    .select({ workerId: questAssignment.workerId, status: questAssignment.assignmentStatus })
+    .from(questAssignment)
+    .where(and(eq(questAssignment.questId, questId), inArray(questAssignment.workerId, memberIds)))
+    .for('update');
+  if (
+    members.length === 0 ||
+    assignments.length !== members.length ||
+    assignments.some(({ status }) => status !== assignmentStatus.completed) ||
+    !memberIds.includes(allocation.leaderId)
+  ) {
+    return { outcome: 'invalid-allocation' };
+  }
+
+  let shares: TeamRewardShare[];
+  try {
+    shares =
+      source === 'AUTO_EQUAL'
+        ? equalTeamRewardShares(memberIds)
+        : sharesWithLeaderRemainder(allocation.leaderId, teammateShares ?? [], memberIds);
+  } catch {
+    return { outcome: 'invalid-allocation' };
+  }
+  const amounts = calculateTeamRewardAmounts(
+    allocation.totalRewardSatang,
+    allocation.totalPlatformFeeSatang,
+    shares
+  );
+  const reservation = await readQuestEscrow(tx, { ownerUserId: current.hirerId, questId });
+  if (!reservation || reservation.status !== 'ACTIVE') return { outcome: 'invalid-allocation' };
+
+  await tx
+    .insert(questV2TeamRewardAllocationMember)
+    .values(amounts.map((amount) => ({ allocationId: allocation.id, ...amount, createdAt: now })));
+  const payoutAmounts = amounts.filter(({ rewardSatang }) => rewardSatang > 0);
+  const feeByMember = new Map(
+    amounts.map(({ memberId, platformFeeSatang }) => [memberId, platformFeeSatang])
+  );
+  const remaining = await settleQuestWorkers(
+    tx,
+    current.hirerId,
+    reservation.reservationId,
+    payoutAmounts.map(({ memberId, rewardSatang }) => ({
+      workerId: memberId,
+      amountSatang: rewardSatang,
+    })),
+    (_amount, workerId) => Promise.resolve(satang(feeByMember.get(workerId ?? '') ?? 0)),
+    `quest-v2-team-reward-allocation:${allocation.id}`
+  );
+  if (remaining !== 0) {
+    throw new MoneyDomainError(
+      'FUNDING_SETTLEMENT_FAILED',
+      'Quest Escrow does not match the Candidate Team Reward Allocation.'
+    );
+  }
+
+  await tx
+    .update(questV2TeamRewardAllocation)
+    .set({
+      status: source,
+      submittedAt: source === 'SUBMITTED' ? now : allocation.deadlineAt,
+      settledAt: now,
+    })
+    .where(eq(questV2TeamRewardAllocation.id, allocation.id));
+  await notifyQuestUpdate(tx, {
+    questId,
+    recipientMemberIds: [...new Set([current.hirerId, ...memberIds])],
+    closeMemberIds: memberIds,
+    changeType: 'TEAM_REWARD_ALLOCATED',
+  });
+  return { allocationId: allocation.id, status: source, settledAt: now, members: amounts };
 };
 
 const terminalChatEntry = (
@@ -555,7 +707,7 @@ export const settleProofFreeQuestV2InTransaction = async (
   now: Date,
   completedWorkerId: string | undefined,
   actorUserId: string
-): Promise<CommandResult | undefined> => {
+): Promise<(CommandResult & { allocationPending?: boolean }) | undefined> => {
   const current = await lockQuest(tx, questId);
   if (!current || current.apiVersion !== 'v2' || current.questStatus !== questStatus.inProgress) {
     throw new MoneyDomainError(
@@ -655,9 +807,10 @@ export const settleProofFreeQuestV2InTransaction = async (
     completedWorkerId === undefined
       ? workers.map(({ workerId }) => ({ workerId, amountSatang: rewardSatang }))
       : [{ workerId: completedWorkerId, amountSatang: payoutRewardSatang }];
+  let allocationPending = false;
   if (groupCandidate) {
     const [team] = await tx
-      .select({ leaderId: questCandidateTeamV2.leaderId })
+      .select({ id: questCandidateTeamV2.id, leaderId: questCandidateTeamV2.leaderId })
       .from(questCandidateTeamV2)
       .where(
         and(
@@ -673,21 +826,29 @@ export const settleProofFreeQuestV2InTransaction = async (
         'Selected Team Leader Assignment is missing.'
       );
     }
-    payoutWorkers = Array.from({ length: current.headcount }, () => ({
-      workerId: team.leaderId,
-      amountSatang: rewardSatang,
-    }));
+    await createPendingTeamRewardAllocation(tx, {
+      questId,
+      teamId: team.id,
+      leaderId: team.leaderId,
+      rewardSatang: rewardSatang * current.headcount,
+      platformFeeSatang: Number(fee) * current.headcount,
+      now,
+    });
+    allocationPending = true;
+    payoutWorkers = [];
   }
-  const remaining = await settleQuestWorkers(
-    tx,
-    current.hirerId,
-    reservation.reservationId,
-    payoutWorkers,
-    () => Promise.resolve(payoutFee),
-    completedWorkerId === undefined
-      ? `quest-v2-complete:${questId}`
-      : `quest-v2-complete:${questId}:${completedWorkerId}`
-  );
+  const remaining = allocationPending
+    ? reservation.remainingSatang
+    : await settleQuestWorkers(
+        tx,
+        current.hirerId,
+        reservation.reservationId,
+        payoutWorkers,
+        () => Promise.resolve(payoutFee),
+        completedWorkerId === undefined
+          ? `quest-v2-complete:${questId}`
+          : `quest-v2-complete:${questId}:${completedWorkerId}`
+      );
   const paid = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
   if (completedWorkerId !== undefined) {
     const assignment = partialWorker;
@@ -719,7 +880,7 @@ export const settleProofFreeQuestV2InTransaction = async (
       return undefined;
     }
   }
-  if (remaining !== 0) {
+  if (remaining !== 0 && !allocationPending) {
     throw new MoneyDomainError(
       'FUNDING_SETTLEMENT_FAILED',
       'Quest Escrow does not match the completion payout.'
@@ -745,8 +906,9 @@ export const settleProofFreeQuestV2InTransaction = async (
   return {
     questStatus: questStatus.completed,
     outcome: 'COMPLETED',
-    paidSatang: paid,
+    paidSatang: allocationPending ? 0 : paid,
     refundedSatang: 0,
+    ...(allocationPending ? { allocationPending: true } : {}),
   };
 };
 
@@ -754,6 +916,7 @@ export type QuestV2ProofApprovalSettlement = {
   questStatus: QuestStatus;
   paidSatang: number;
   completedAssignmentIds: string[];
+  allocationPending: boolean;
 };
 
 /** Settle one approved v2 Proof, including a valid post-failure approval. */
@@ -826,6 +989,7 @@ export const settleApprovedQuestV2ProofInTransaction = async (
   let payoutWorkers: { workerId: string; amountSatang: number }[];
   let payoutFee: Satang | 0 = fee;
   let completedAssignmentIds: string[];
+  let allocationPending = false;
 
   if (groupCandidate) {
     const [team] = await tx
@@ -849,10 +1013,23 @@ export const settleApprovedQuestV2ProofInTransaction = async (
         'Selected Team Leader Assignment is missing.'
       );
     }
-    payoutWorkers = Array.from({ length: current.headcount }, () => ({
-      workerId: team.leaderId,
-      amountSatang: rewardSatang,
-    }));
+    if (current.questStatus === questStatus.inProgress) {
+      await createPendingTeamRewardAllocation(tx, {
+        questId,
+        teamId: team.id,
+        leaderId: team.leaderId,
+        rewardSatang: rewardSatang * current.headcount,
+        platformFeeSatang: Number(fee) * current.headcount,
+        now,
+      });
+      allocationPending = true;
+      payoutWorkers = [];
+    } else {
+      payoutWorkers = Array.from({ length: current.headcount }, () => ({
+        workerId: team.leaderId,
+        amountSatang: rewardSatang,
+      }));
+    }
     completedAssignmentIds = workers.map(({ id }) => id);
   } else {
     if (!submission.workerId) {
@@ -912,14 +1089,16 @@ export const settleApprovedQuestV2ProofInTransaction = async (
     completedAssignmentIds = [assignment.id];
   }
 
-  const remaining = await settleQuestWorkers(
-    tx,
-    current.hirerId,
-    reservation.reservationId,
-    payoutWorkers,
-    () => Promise.resolve(payoutFee),
-    `quest-v2-proof-approval:${proofSubmissionId}`
-  );
+  const remaining = allocationPending
+    ? reservation.remainingSatang
+    : await settleQuestWorkers(
+        tx,
+        current.hirerId,
+        reservation.reservationId,
+        payoutWorkers,
+        () => Promise.resolve(payoutFee),
+        `quest-v2-proof-approval:${proofSubmissionId}`
+      );
   const paidSatang = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
   await tx
     .update(questAssignment)
@@ -935,7 +1114,7 @@ export const settleApprovedQuestV2ProofInTransaction = async (
   if (current.questStatus === questStatus.inProgress) {
     const remainingWorkers = await activeAssignments(tx, questId);
     if (remainingWorkers.length === 0) {
-      if (remaining !== 0) {
+      if (remaining !== 0 && !allocationPending) {
         throw new MoneyDomainError(
           'FUNDING_SETTLEMENT_FAILED',
           'Quest Escrow does not match the completion payout.'
@@ -963,7 +1142,12 @@ export const settleApprovedQuestV2ProofInTransaction = async (
     }
   }
 
-  return { questStatus: resultingQuestStatus, paidSatang, completedAssignmentIds };
+  return {
+    questStatus: resultingQuestStatus,
+    paidSatang: allocationPending ? 0 : paidSatang,
+    completedAssignmentIds,
+    allocationPending,
+  };
 };
 
 export type QuestV2FailureEffect = {

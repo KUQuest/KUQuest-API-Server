@@ -8,6 +8,7 @@ import {
   questCandidateApplicationV2,
   questCandidateTeamV2,
   questCandidateTeamV2Member,
+  questV2TeamRewardAllocation,
   questV2ProofSubmission,
 } from '@/database/schema/quest.schema';
 import type { QuestTransaction } from '@/modules/quest/shared';
@@ -85,6 +86,23 @@ export const getQuestUpdateAccess = async (
       current.state === 'QUEST_IN_PROGRESS')
   ) {
     return { role: 'WORKER', mode: 'LIVE' };
+  }
+  if (assignment?.status === 'ASSIGNMENT_COMPLETED' && current.state === 'QUEST_COMPLETED') {
+    const [allocation] = await db
+      .select({ id: questV2TeamRewardAllocation.id })
+      .from(questV2TeamRewardAllocation)
+      .innerJoin(
+        questCandidateTeamV2Member,
+        eq(questCandidateTeamV2Member.teamId, questV2TeamRewardAllocation.teamId)
+      )
+      .where(
+        and(
+          eq(questV2TeamRewardAllocation.questId, questId),
+          eq(questCandidateTeamV2Member.memberId, memberId)
+        )
+      )
+      .limit(1);
+    if (allocation) return { role: 'WORKER', mode: 'LIVE' };
   }
   if (current.state === 'QUEST_OPEN') {
     const [inquiry] = await db

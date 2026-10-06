@@ -24,6 +24,10 @@ _Avoid_: Rulebook, draft Rulebook, accepted contract
 The end user of KUQuest — anyone authenticated with a Google account under the `@ku.th` email domain. Represented by the `auth_user` table.
 _Avoid_: User, account holder, Student (use Member when the KUQuest identity matters, User only when referring generically to the auth record).
 
+**Member Display ID**:
+An Admin-facing identifier for one Member, formatted as `MEM-######` with at least six digits. It does not replace the Member's UUID or KU Student ID.
+_Avoid_: Student ID, internal auth identifier.
+
 **Admin**:
 A KUQuest Admin web app operator, signed in with credentials (not Google). Represented by the `auth_admin` table — a separate identity space from Member, sharing `auth_account`/`auth_session` via a nullable `userId`/`adminId` pair (exactly one set per row). Schema landed in [[BE-32]]; the second better-auth instance wiring credential login for Admins is a follow-up, not yet built. One undifferentiated permission tier — `auth_admin` has no role/permission column. For Payout Approval, Dispute Case, Quest Hide, Wallet Freeze/Suspend, Trust & Safety moderation, and the Member penalty ladders, read `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: User (Admins are never Members and vice versa).
@@ -205,6 +209,12 @@ The Candidate who creates and represents a Candidate `GROUP` Team. If the
 Hirer selects the Team, the Team Leader becomes a Worker. The Team Leader
 starts and submits or confirms the Team's required work.
 _Avoid_: treating a Team Leader as the Hirer or as a leader of a FCFS Group.
+
+**Team Reward Allocation**:
+A post-completion percentage split of a successful `GROUP + CANDIDATE` Quest's
+Worker Reward pool. The Team Leader assigns teammate shares within 24 hours and
+receives the remainder; the Server equally splits the pool if the deadline passes.
+_Avoid_: Peer-to-Peer transfers or treating the full pool as the Leader's personal reward.
 
 **First Come, First Served (FCFS)**:
 A Quest selection mode where an eligible Worker joins directly. It replaces the

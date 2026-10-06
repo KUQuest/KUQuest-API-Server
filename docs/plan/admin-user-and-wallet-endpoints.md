@@ -138,6 +138,10 @@ interface AdminWalletStatusHistoryResponse {
 
 Search and list all Members on the platform for the Admin User Directory table.
 
+`displayId` is a stable Admin identifier (`MEM-######`, at least six digits). It does not replace
+the UUID `id` or KU Student ID. The migration assigns existing Members in `created_at`, then UUID
+order. New Members get IDs from the identity sequence. Gaps can occur; existing IDs do not change.
+
 - **Query Parameters**:
   - `search` (optional): string (matches name, studentId, email)
   - `walletStatus` (optional): `ACTIVE` | `FROZEN` | `SUSPENDED` | `CLOSED`
@@ -149,6 +153,7 @@ Search and list all Members on the platform for the Admin User Directory table.
 interface AdminMemberListResponse {
   items: Array<{
     id: string;
+    displayId: string; // MEM-######, at least six digits
     email: string;
     firstName: string;
     lastName: string;
@@ -182,6 +187,7 @@ Retrieves comprehensive details for a specific Member, including profile, wallet
 interface AdminMemberDetailResponse {
   member: {
     id: string;
+    displayId: string; // MEM-######, at least six digits
     email: string;
     firstName: string;
     lastName: string;

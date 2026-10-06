@@ -24,6 +24,7 @@
     "db:seed-admin": "bun scripts/seed-admin.ts",
     "db:seed-demo-users": "bun scripts/seed-demo-users.ts",
     "db:seed-demo-quests": "bun scripts/seed-demo-quests.ts",
+    "db:seed-demo-frontend": "NODE_ENV=development DEPLOYMENT_ENV=development bun scripts/seed-demo-frontend.ts",
     "db:seed-staging": "bun scripts/seed-staging.ts",
     "db:verify-migration-journal": "bun scripts/verify-migration-journal.ts",
     "db:verify-staging-seed": "bun scripts/verify-staging-seed.ts",

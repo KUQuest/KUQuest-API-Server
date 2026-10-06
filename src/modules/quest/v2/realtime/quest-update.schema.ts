@@ -16,6 +16,7 @@ const questUpdateOtherChangeTypeSchema = t.Union([
   t.Literal('PROOF_AUTO_APPROVED'),
   t.Literal('COMPLETION_CONFIRMED'),
   t.Literal('QUEST_COMPLETED'),
+  t.Literal('TEAM_REWARD_ALLOCATED'),
   t.Literal('QUEST_FAILED'),
   t.Literal('DISPUTE_WINDOW_OPENED'),
   t.Literal('DISPUTE_WINDOW_CLOSED'),

@@ -31,15 +31,15 @@ A **Conduct Report** evaluates how a Member behaved on a Quest, supported by the
 - Admin resolves a `CONDUCT_REPORT_PENDING` report as:
   - `CONDUCT_REPORT_DISMISSED`: No violation; case closes.
   - `CONDUCT_REPORT_UPHELD`: Confirms a violation on the **Misconduct ladder** (see [Admin Member Penalty Contract](admin-member-penalty-contract.md)). Permanent strike; no restore path.
-- Requires a reason and a non-blank `Idempotency-Key`.
+- Each decision requires its controlled reason code and a non-blank `Idempotency-Key`. An Admin may also provide an optional `decisionReasonText` of up to 200 characters.
 - Decisions are final and create an Audit Record.
 
 ### Decision reason catalog
 
 Admin Action reason catalog version `1` defines the action-specific codes for a
 Conduct Report decision. `CONDUCT_REPORT_UPHOLD` uses the Conduct Report's
-reason as its `AdminAction.reasonCode` and `decisionReason`. Admins cannot
-submit a separate or free-form reason for an upheld report.
+filed reason as its `AdminAction.reasonCode` and `decisionReason`; Admin does
+not submit a separate decision code for an upheld report.
 
 `CONDUCT_REPORT_DISMISS` accepts:
 
@@ -48,12 +48,14 @@ submit a separate or free-form reason for an upheld report.
 
 The immutable `AdminAction` is the authoritative record of the decision reason
 code and catalog version. The Conduct Report's `decisionReason` stores the same
-controlled code to mark the final decision. Admins cannot submit or persist
-free-form decision text.
+controlled code for a dismissal. The optional decision note is stored separately
+on the immutable Admin Action and does not change the Conduct Report reason or
+decision code.
 
 ## Notifications and privacy
 
-- `CONDUCT_REPORT_UPHELD` sends an Android Push Notification to the reported Member naming the reason and result.
+- `CONDUCT_REPORT_UPHELD` sends an Android Push Notification naming the filed
+  reason and result. The Admin decision note is not included in the notification.
 - Filing and dismissals send no notification.
 - The filer's identity is never revealed to the reported Member.
 

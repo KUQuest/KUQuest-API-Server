@@ -27,8 +27,12 @@ import { eq, inArray } from 'drizzle-orm';
 const adminEmail = `admin-search-test-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminSearchPass1!';
 const memberId = crypto.randomUUID();
+const memberPublicSequence =
+  1_000_000 + (Number.parseInt(memberId.replaceAll('-', '').slice(0, 8), 16) % 1_147_483_647);
 const studentId = String(Math.floor(1000000000 + Math.random() * 9000000000));
 const reportedMemberId = crypto.randomUUID();
+const restrictionMemberId = crypto.randomUUID();
+const restrictionStudentId = String(Math.floor(1000000000 + Math.random() * 9000000000));
 const resultLimitMemberIds: string[] = [];
 for (let index = 0; index < 13; index += 1) resultLimitMemberIds.push(crypto.randomUUID());
 const questId = crypto.randomUUID();
@@ -80,6 +84,7 @@ beforeAll(async () => {
   await sql`select 1`;
   await db.insert(authUser).values({
     id: memberId,
+    publicSequence: memberPublicSequence,
     email: `${memberId}@ku.th`,
     firstName: 'Search',
     lastName: 'Member',
@@ -122,6 +127,16 @@ beforeAll(async () => {
     email: `${reportedMemberId}@ku.th`,
     firstName: 'Search',
     lastName: 'Reported',
+  });
+
+  await db.insert(authUser).values({
+    id: restrictionMemberId,
+    email: `${restrictionMemberId}@ku.th`,
+    firstName: 'Search',
+    lastName: 'Restricted',
+    studentId: restrictionStudentId,
+    redFlagExpiresAt: new Date('2099-01-01T00:00:00.000Z'),
+    createdAt: recordCreatedAt,
   });
 
   const resultLimitMembers: (typeof authUser.$inferInsert)[] = [];
@@ -283,20 +298,79 @@ afterAll(async () => {
   await db.delete(questAssignment).where(eq(questAssignment.id, assignmentId));
   await db.delete(quest).where(eq(quest.id, questId));
   await db.delete(tag).where(eq(tag.id, tagId));
+  await db.delete(authUser).where(eq(authUser.id, restrictionMemberId));
   await db.delete(authUser).where(eq(authUser.id, reportedMemberId));
   await db.delete(authUser).where(inArray(authUser.id, resultLimitMemberIds));
   // The immutable Wallet and Admin Action fixtures keep their owner identities.
 });
 
 describe('GET /api/v1/admin/search', () => {
-  it('returns a Member Student ID separately and keeps both identifiers as UUIDs', async () => {
-    await expectSearchItem(studentId, 'member', {
+  it('requires Member display IDs in the OpenAPI response schema', async () => {
+    const response = await app.handle(new Request('http://localhost/openapi/json'));
+    type OpenApiSchema = {
+      required?: string[];
+      properties?: Record<string, OpenApiSchema>;
+      items?: OpenApiSchema;
+      anyOf?: OpenApiSchema[];
+      const?: string;
+      enum?: string[];
+    };
+    const document = (await response.json()) as {
+      paths: Record<
+        string,
+        {
+          get?: {
+            responses?: Record<string, { content?: Record<string, { schema?: OpenApiSchema }> }>;
+          };
+        }
+      >;
+    };
+    const itemSchema =
+      document.paths['/api/v1/admin/search']?.get?.responses?.['200']?.content?.['application/json']
+        ?.schema?.properties?.data?.properties?.items?.items;
+    const memberVariant = itemSchema?.anyOf?.find(({ properties }) => {
+      const kind = properties?.kind;
+      return kind?.const === 'member' || kind?.enum?.includes('member');
+    });
+
+    expect(response.status).toBe(200);
+    expect(memberVariant).toBeDefined();
+    expect(memberVariant?.required).toContain('displayId');
+  });
+
+  it('returns and searches Member display IDs without changing existing identifiers', async () => {
+    const member = await expectSearchItem(studentId, 'member', {
       kind: 'member',
       id: memberId,
       resourceId: memberId,
       studentId,
       title: 'Search Member',
-      status: 'ACTIVE',
+      status: 'NORMAL',
+      newestAt: recordCreatedAt.toISOString(),
+    });
+    expect(member.displayId).toMatch(/^MEM-\d{6,}$/);
+    expect(member.displayId).toBe(`MEM-${memberPublicSequence}`);
+
+    await expectSearchItem(member.displayId, 'member', {
+      kind: 'member',
+      id: memberId,
+      resourceId: memberId,
+      displayId: member.displayId,
+      studentId,
+      title: 'Search Member',
+      status: 'NORMAL',
+      newestAt: recordCreatedAt.toISOString(),
+    });
+  });
+
+  it('returns a canonical restriction status for a Member Search result', async () => {
+    await expectSearchItem(restrictionStudentId, 'member', {
+      kind: 'member',
+      id: restrictionMemberId,
+      resourceId: restrictionMemberId,
+      studentId: restrictionStudentId,
+      title: 'Search Restricted',
+      status: 'RED_FLAG',
       newestAt: recordCreatedAt.toISOString(),
     });
   });
@@ -385,21 +459,55 @@ describe('GET /api/v1/admin/search', () => {
     const body = await response.json();
     expect(body.data.items).toHaveLength(0);
   });
-  it('requires a resource type filter', async () => {
+  it('searches all resource types when kind is all', async () => {
     const response = await app.handle(
-      new Request(`http://localhost/api/v1/admin/search?q=${encodeURIComponent(studentId)}`, {
+      new Request(
+        `http://localhost/api/v1/admin/search?q=${encodeURIComponent(memberId)}&kind=all`,
+        { headers: { cookie: adminCookie } }
+      )
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'member', id: memberId, resourceId: memberId }),
+        expect.objectContaining({ kind: 'wallet', id: walletId, resourceId: walletId }),
+        expect.objectContaining({ kind: 'dispute', id: disputeCaseId, resourceId: disputeCaseId }),
+        expect.objectContaining({ kind: 'report', id: reportCaseId, resourceId: reportCaseId }),
+      ])
+    );
+  });
+
+  it('requires kind to select a record type or all resource types', async () => {
+    const response = await app.handle(
+      new Request(`http://localhost/api/v1/admin/search?q=${encodeURIComponent(memberId)}`, {
         headers: { cookie: adminCookie },
       })
     );
     expect(response.status).toBe(400);
   });
 
-  it('keeps the existing 12-result limit', async () => {
+  it('keeps the existing 12-result limit for one resource type', async () => {
     const response = await searchRequest('member', 'member');
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data.items).toHaveLength(12);
   });
+
+  it('keeps the 12-result limit across resource types when kind is all', async () => {
+    const response = await app.handle(
+      new Request(
+        `http://localhost/api/v1/admin/search?q=${encodeURIComponent('Search')}&kind=all`,
+        {
+          headers: { cookie: adminCookie },
+        }
+      )
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.items).toHaveLength(12);
+  });
+
   it('searches Wallets by display ID and preserves the UUID used to open them', async () => {
     await expectSearchItem(walletDisplayId, 'wallet', {
       kind: 'wallet',

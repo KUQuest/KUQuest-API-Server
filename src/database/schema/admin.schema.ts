@@ -38,6 +38,7 @@ export const adminAction = pgTable(
     requestHash: varchar('request_hash', { length: 64 }).notNull(),
     reasonCatalogVersion: integer('reason_catalog_version').notNull(),
     reasonCode: text('reason_code'),
+    decisionReasonText: varchar('decision_reason_text', { length: 200 }),
     expectedVersion: integer('expected_version'),
     expectedTimestamp: timestamp('expected_timestamp', { withTimezone: true }),
     resultVersion: integer('result_version'),
@@ -64,6 +65,10 @@ export const adminAction = pgTable(
     check(
       'admin_action_reason_code_check',
       sql`${table.reasonCode} IS NULL OR ${table.reasonCode} ~ '^[A-Z][A-Z0-9_.-]{0,99}$'`
+    ),
+    check(
+      'admin_action_decision_reason_text_check',
+      sql`${table.decisionReasonText} IS NULL OR btrim(${table.decisionReasonText}) <> ''`
     ),
     check(
       'admin_action_resource_version_check',

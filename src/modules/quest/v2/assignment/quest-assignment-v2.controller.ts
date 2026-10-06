@@ -31,6 +31,8 @@ const serializeAssignment = (assignment: QuestV2Assignment) => ({
   questState: assignment.questState,
   startedAt: assignment.startedAt?.toISOString() ?? null,
   createdAt: assignment.createdAt.toISOString(),
+  teamRole: assignment.teamRole,
+  team: assignment.team,
 });
 
 const serializeAssignments = async (assignments: QuestV2Assignment[]) => {

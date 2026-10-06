@@ -45,7 +45,7 @@ export const questAssignmentV2Route = new Elysia({
       tags: ['Quest Assignments v2'],
       summary: "List the authenticated Worker's v2 Assignments",
       description:
-        "Returns the authenticated Worker's v2 Assignments, filtered by active, completed, or all status. Each item carries a compact `underfilled` summary (state, decision and consent expiry, headcount, cancellation reason) or null when the Quest has no underfilled process. The summary matches GET /quests/{questId}/underfilled at read time, so clients need no per-Assignment fetch.",
+        "Returns the authenticated Worker's v2 Assignments, filtered by active, completed, or all status. Each item carries a compact `underfilled` summary (state, decision and consent expiry, headcount, cancellation reason) or null when the Quest has no underfilled process. For GROUP + CANDIDATE Quests, each Assignment also includes selected `teamRole` ('LEADER' or 'MEMBER') and `team` summary; other Quest shapes and Workers outside the selected Team return null for both. The summary matches GET /quests/{questId}/underfilled at read time, so clients need no per-Assignment fetch.",
       operationId: 'listMyQuestAssignmentsV2',
       security: betterAuthSecurity,
     },
@@ -57,7 +57,7 @@ export const questAssignmentV2Route = new Elysia({
       tags: ['Quest Assignments v2'],
       summary: 'List permitted v2 Quest Assignments',
       description:
-        'The owning Hirer can read all Assignments, including completed, incomplete, and cancelled Assignments, for Reviews. A Worker can read only that Worker\'s own active Assignment. On a GROUP Quest a Worker does NOT receive the other Workers\' Assignments (privacy); to show roster progress, read `activeWorkerCount` and `startedWorkerCount` from GET /quests/{questId}/participation. Every row carries `member.displayName` (the Member Summary; "Former member" when the Member has no name). `startedAt` is returned to the Worker on their own row and is null until Start Work.',
+        "The owning Hirer can read all Assignments, including completed, incomplete, and cancelled Assignments, for Reviews. A Worker can read only that Worker's own active Assignment. On a GROUP Quest a Worker does NOT receive the other Workers' Assignments (privacy); to show roster progress, read `activeWorkerCount` and `startedWorkerCount` from GET /quests/{questId}/participation. Every row carries `member.displayName` (the Member Summary; \"Former member\" when the Member has no name). `startedAt` is returned to the Worker on their own row and is null until Start Work. For GROUP + CANDIDATE Quests, each Assignment also includes selected `teamRole` ('LEADER' or 'MEMBER') and `team` summary; other Quest shapes and Workers outside the selected Team return null for both.",
       operationId: 'listQuestAssignmentsV2',
       security: betterAuthSecurity,
     },

@@ -46,7 +46,7 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 2. No Hirer choice cancels the Quest.
 3. To proceed, every current Active Worker has 10 minutes to consent.
 4. The consent view shows the exact new Quest Reward and `dueAt`.
-5. A decline or timeout cancels the Quest.
+5. A decline or timeout cancels the Quest. Workers recorded in the consent roster retain read access to their own response and the cancellation result after their Assignment ends. Unrelated Members cannot read the process.
 6. All consent changes the Quest from `QUEST_OPEN` to `QUEST_ASSIGNED`.
 7. Every current Active Worker must still press Start Work by `dueAt`.
 8. The Quest changes to `QUEST_IN_PROGRESS` after every required Start Work action.
@@ -59,7 +59,7 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 - The Hirer approves or does not approve each submitted Proof Submission.
 - If the Hirer has not decided 24 hours after a Proof Submission is sent, the Server records `PROOF_APPROVED`.
 - Approved or proof-free Team work makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_COMPLETED`.
-- For approved or proof-free Team work in a `GROUP + CANDIDATE` Quest, the Team Leader receives the complete Worker Reward pool for every published Quest `headcount` slot. Other Team Member Assignments receive no Quest Reward.
+- Approved or proof-free `GROUP + CANDIDATE` Team work opens a 24-hour Team Reward Allocation window after the Quest becomes `QUEST_COMPLETED`. The Team Leader assigns each teammate a percentage; the Leader receives the remainder. Teammate percentages cannot exceed 100% in total. If no allocation is submitted before the deadline, the Server applies an equal split. Every member's Assignment is completed when the work succeeds; payment waits for the allocation and then goes directly from Quest Escrow to each member's Earnings Balance.
 - Non-approved Team work makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_INCOMPLETE`.
 - A missing required Team Proof Submission or Team confirmation makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_INCOMPLETE`.
 - Hirer non-approval, a missing required submission, a missing proof-free confirmation, or a missing Start Work action at `dueAt` makes the Quest `QUEST_FAILED`.
@@ -72,7 +72,7 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `QUEST_OPEN`                | Refund the Hirer 100% of Quest Escrow.                                                                                                                                |
 | `QUEST_ASSIGNED`            | Pay 20% of the Worker Reward pool to Active Workers. For `GROUP + CANDIDATE`, pay the full 20% only to the Team Leader. Return 80% and the Platform Fee to the Hirer. |
-| `QUEST_IN_PROGRESS`         | Settle full Worker Rewards and the Platform Fee. For `GROUP + CANDIDATE`, pay the full Worker Reward pool only to the Team Leader. The Hirer receives no refund.      |
+| `QUEST_IN_PROGRESS`         | Settle full Worker Rewards and the Platform Fee. For `GROUP + CANDIDATE`, pay the full Worker Reward pool to the Team Leader. The Hirer receives no refund.           |
 
 An Active Worker cannot voluntarily leave or be replaced. The cancellation rules create the allowed departure transition.
 
