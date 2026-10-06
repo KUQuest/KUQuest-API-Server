@@ -95,7 +95,14 @@ export const adminReportListQuerySchema = t.Object({
   q: t.Optional(t.String({ maxLength: 200 })),
   kind: t.Optional(reportKindSchema),
   status: t.Optional(t.Union([reportCaseStatusSchema, conductReportStatusSchema])),
+  statusMode: t.Optional(
+    t.Union([t.Literal('OPEN_QUEUE'), t.Literal('FULL_HISTORY')], {
+      description:
+        'OPEN_QUEUE is the default. FULL_HISTORY includes every Report Case and Conduct Report status. An exact status filter takes precedence.',
+    })
+  ),
   memberId: t.Optional(uuid),
+  submittedByMemberId: t.Optional(uuid),
   questId: t.Optional(uuid),
   limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
@@ -166,6 +173,7 @@ export const adminReportDecisionBodySchema = t.Union([
 ]);
 const adminReportMemberSummarySchema = t.Object({
   id: uuid,
+  displayId: t.String({ pattern: '^MEM-[0-9]{6,}$' }),
   email: t.String(),
   firstName: t.String(),
   lastName: t.String(),
@@ -174,6 +182,7 @@ const adminReportMemberSummarySchema = t.Object({
 
 const adminReportQuestSummarySchema = t.Object({
   id: uuid,
+  displayId: t.String({ pattern: '^QST-[0-9]{6,}$' }),
   title: t.String(),
   questStatus: questStatusSchema,
   mode: questModeSchema,
@@ -242,7 +251,7 @@ export const adminConductReportSummarySchema = t.Object({
 export const adminReportCaseSummarySchema = t.Object({
   kind: t.Literal('REPORT_CASE'),
   id: uuid,
-  displayId: t.String(),
+  displayId: t.String({ pattern: '^RPT-[0-9]{6,}$' }),
   messageId: uuid,
   conversationId: uuid,
   questId: uuid,
