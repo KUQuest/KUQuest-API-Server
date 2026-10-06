@@ -17,7 +17,7 @@ export const adminPayoutHeadersSchema = t.Object({
 });
 
 export const adminPayoutListQuerySchema = t.Object({
-  status: t.Optional(payoutStatusSchema),
+  status: t.Optional(t.Union([payoutStatusSchema, t.Literal('ALL')])),
   userId: t.Optional(t.String({ format: 'uuid' })),
   limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   cursor: t.Optional(t.String()),
@@ -49,6 +49,7 @@ const adminPayoutDataSchema = t.Object({
   displayId: t.String(),
   student: t.Object({
     id: t.String({ format: 'uuid' }),
+    displayId: t.String(),
     email: t.String(),
     firstName: t.String(),
     lastName: t.String(),
@@ -111,6 +112,7 @@ export const adminPayoutListResponseSchema = t.Object({
   data: t.Object({
     items: t.Array(adminPayoutDataSchema),
     nextCursor: t.Union([t.String(), t.Null()]),
+    totalCount: t.Integer({ minimum: 0 }),
   }),
 });
 

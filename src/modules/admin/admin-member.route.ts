@@ -6,13 +6,20 @@ import { Elysia } from 'elysia';
 
 import {
   getAdminMemberDetailController,
+  getAdminMemberProfileTagsController,
+  listAdminMemberCertificatesController,
+  listAdminMemberWorkExperiencesController,
   listAdminMembersController,
 } from './admin-member.controller';
 import {
+  adminMemberCertificatesResponseSchema,
   adminMemberDetailResponseSchema,
   adminMemberListQuerySchema,
   adminMemberListResponseSchema,
   adminMemberParamsSchema,
+  adminMemberProfileCollectionQuerySchema,
+  adminMemberProfileTagsResponseSchema,
+  adminMemberWorkExperiencesResponseSchema,
 } from './admin-member.schema';
 
 export const adminMemberRoute = new Elysia({
@@ -41,6 +48,42 @@ export const adminMemberRoute = new Elysia({
       description:
         'Returns member profile, academic details, wallet compartments, and quest/review stats.',
       operationId: 'getAdminMemberDetail',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:id/profile-tags', getAdminMemberProfileTagsController, {
+    params: adminMemberParamsSchema,
+    response: responses(adminMemberProfileTagsResponseSchema, 400, 401, 403, 404, 500),
+    detail: {
+      tags: ['Admin Members'],
+      summary: 'List a Member’s Profile Tags',
+      description: 'Returns up to three Tags derived from completed Worker Assignments.',
+      operationId: 'getAdminMemberProfileTags',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:id/work-experiences', listAdminMemberWorkExperiencesController, {
+    params: adminMemberParamsSchema,
+    query: adminMemberProfileCollectionQuerySchema,
+    response: responses(adminMemberWorkExperiencesResponseSchema, 400, 401, 403, 404, 500),
+    detail: {
+      tags: ['Admin Members'],
+      summary: 'List a Member’s Work Experience',
+      description: 'Returns Work Experience with bounded cursor pagination and a total count.',
+      operationId: 'listAdminMemberWorkExperiences',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:id/certificates', listAdminMemberCertificatesController, {
+    params: adminMemberParamsSchema,
+    query: adminMemberProfileCollectionQuerySchema,
+    response: responses(adminMemberCertificatesResponseSchema, 400, 401, 403, 404, 500),
+    detail: {
+      tags: ['Admin Members'],
+      summary: 'List a Member’s Certificates',
+      description:
+        'Returns Certificates with bounded cursor pagination and safe image metadata. It does not return storage URLs or storage object details.',
+      operationId: 'listAdminMemberCertificates',
       security: betterAuthSecurity,
     },
   });

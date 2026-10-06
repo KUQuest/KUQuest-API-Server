@@ -222,6 +222,28 @@ interface AdminMemberDetailResponse {
 }
 ```
 
+### 3.6 Admin Member Profile collections
+
+These reads require an enabled Admin Session. They reject a Member Session. They use a Member UUID
+in the path, but every successful response identifies the Member by `displayId` (`MEM-######`).
+
+- `GET /api/v1/admin/members/:id/profile-tags` returns up to three Profile Tags. It uses the
+  existing derivation: the three most frequent Tags from completed Worker Assignments on
+  `QUEST_COMPLETED` Quests. The response does not need pagination.
+- `GET /api/v1/admin/members/:id/work-experiences` returns `title`, `employmentType`,
+  `organization`, `description`, `startedAt`, and `endedAt`. A null `endedAt` means that the
+  Work Experience is ongoing.
+- `GET /api/v1/admin/members/:id/certificates` returns `name`, `issuer`, `issuedAt`, and optional
+  image metadata (`contentType` and `sizeBytes`). The response does not return a storage URL,
+  bucket, object key, or secret.
+
+Work Experience and Certificate responses include `totalCount` and an opaque `nextCursor`.
+Pagination uses the shared page limits. A real empty collection returns an empty list and a zero
+`totalCount`. A missing Member returns `404 MEMBER_NOT_FOUND`. An invalid cursor returns an error.
+The cursor must belong to the requested Member's collection. A cursor from another Member returns
+`400 INVALID_CURSOR`.
+A failed read remains an error; it does not return an empty list.
+
 ---
 
 ## 4. Implementation Steps

@@ -195,6 +195,7 @@ export const listAdminPayoutsController = async ({
     return apiSuccess({
       items: result.items.map(serializePayout),
       nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null,
+      totalCount: result.totalCount,
     });
   } catch (error) {
     return mapAdminError(set, error);
