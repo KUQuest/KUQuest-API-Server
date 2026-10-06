@@ -972,6 +972,12 @@ describe('Admin Report Case API', () => {
           {
             operationId?: string;
             security?: unknown;
+            parameters?: Array<{
+              name?: string;
+              in?: string;
+              required?: boolean;
+              schema?: unknown;
+            }>;
             requestBody?: { content?: Record<string, { schema?: unknown }> };
             responses?: Record<string, { content?: Record<string, { schema?: unknown }> }>;
           }
@@ -1018,15 +1024,85 @@ describe('Admin Report Case API', () => {
     expect(decisionRequestSchemaText).toContain('SAFETY_REVIEW');
     expect(decisionRequestSchemaText).toContain('decisionReasonText');
     expect(decisionRequestSchemaText).toContain('"maxLength":200');
+    const listParameters = listOperation?.parameters ?? [];
+    const submittedByParameter = listParameters.find(
+      (parameter) => parameter.name === 'submittedByMemberId'
+    );
+    expect(submittedByParameter).toMatchObject({
+      name: 'submittedByMemberId',
+      in: 'query',
+      required: false,
+      schema: { type: 'string', format: 'uuid' },
+    });
+    const statusModeParameter = listParameters.find((parameter) => parameter.name === 'statusMode');
+    expect(statusModeParameter).toMatchObject({
+      name: 'statusMode',
+      in: 'query',
+      required: false,
+    });
+    const statusModeSchema = statusModeParameter?.schema as
+      { enum?: string[]; anyOf?: Array<{ const?: string }> } | undefined;
+    const allowedStatusModes =
+      statusModeSchema?.enum ?? statusModeSchema?.anyOf?.map((option) => option.const);
+    expect(allowedStatusModes).toEqual(['OPEN_QUEUE', 'FULL_HISTORY']);
+    const listSchemaText = JSON.stringify(listSchema);
+    expect(listSchemaText).toContain('MEM-[0-9]{6,}');
+    expect(listSchemaText).toContain('RPT-[0-9]{6,}');
+    expect(listSchemaText).toContain('CND-[0-9]{6,}');
+    expect(listSchemaText).toContain('QST-[0-9]{6,}');
+    expect(JSON.stringify(detailSchema)).toContain('MEM-[0-9]{6,}');
+    expect(JSON.stringify(detailSchema)).toContain('RPT-[0-9]{6,}');
+    expect(JSON.stringify(detailSchema)).toContain('QST-[0-9]{6,}');
+    for (const operation of [
+      listOperation,
+      detailOperation,
+      decisionOperation,
+      document.paths['/api/v1/admin/evidence/{evidenceRef}']?.get,
+    ]) {
+      expect(operation?.security).toBeDefined();
+    }
 
-    const anonymous = await app.handle(new Request('http://localhost/api/v1/admin/reports'));
-    expect(anonymous.status).toBe(401);
-    expect((await anonymous.json()).error.code).toBe('UNAUTHORIZED');
+    const guardedRoutes: Array<{ path: string; init?: RequestInit }> = [
+      { path: '/reports' },
+      { path: `/reports/${randomUUID()}` },
+      {
+        path: `/reports/${randomUUID()}/decide`,
+        init: {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': 'report-auth-decision',
+            'if-match': '1',
+          },
+          body: JSON.stringify({ outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'POLICY_REVIEW' }),
+        },
+      },
+      {
+        path: `/evidence/${randomUUID()}`,
+        init: { headers: { 'idempotency-key': 'report-auth-evidence' } },
+      },
+    ];
+
+    for (const route of guardedRoutes) {
+      // eslint-disable-next-line no-await-in-loop
+      const response = await app.handle(
+        new Request(`http://localhost/api/v1/admin${route.path}`, route.init)
+      );
+      expect(response.status).toBe(401);
+      // eslint-disable-next-line no-await-in-loop
+      expect((await response.json()).error.code).toBe('UNAUTHORIZED');
+    }
 
     memberAuthentication(reporterId);
-    const member = await app.handle(new Request('http://localhost/api/v1/admin/reports'));
-    expect(member.status).toBe(403);
-    expect((await member.json()).error.code).toBe('FORBIDDEN');
+    for (const route of guardedRoutes) {
+      // eslint-disable-next-line no-await-in-loop
+      const response = await app.handle(
+        new Request(`http://localhost/api/v1/admin${route.path}`, route.init)
+      );
+      expect(response.status).toBe(403);
+      // eslint-disable-next-line no-await-in-loop
+      expect((await response.json()).error.code).toBe('FORBIDDEN');
+    }
   });
 
   it('returns Report Case Member and Quest summaries without Message content', async () => {
@@ -1299,90 +1375,381 @@ describe('Admin Report Case API', () => {
     }
   });
 
-  it('returns report status counts across cursor pages and searches only list fields', async () => {
+  it('filters, counts, and paginates full Admin Report history', async () => {
     if (!postgresAvailable) return;
-    const reportCase = await createReportFixture();
-    const conductReport = await createConductReportFixture();
-    const searchTerm = `report-count-${randomUUID()}`;
-    await db
-      .update(adminReporterEntry)
-      .set({ detail: searchTerm })
-      .where(eq(adminReporterEntry.reportCaseId, reportCase.caseId));
-    await db
-      .update(adminConductReport)
-      .set({ detail: searchTerm })
-      .where(eq(adminConductReport.id, conductReport.reportId));
+    const reportCases = [
+      await createReportFixture(),
+      await createReportFixture(),
+      await createReportFixture(),
+      await createReportFixture(),
+    ];
+    const conductReports = [
+      await createConductReportFixture(),
+      await createConductReportFixture(),
+      await createConductReportFixture(),
+    ];
+    const searchTerm = `report-history-${randomUUID()}`;
+    const createdAt = '2035-04-01T00:00:00.101300Z';
+    const resolvedAt = '2035-04-01T00:00:01.101300Z';
+    const reportCaseStatuses = [
+      'REPORT_CASE_PENDING',
+      'REPORT_CASE_DISMISSED',
+      'REPORT_CASE_HIDDEN',
+      'REPORT_CASE_RESTORED',
+    ] as const;
+    const conductReportStatuses = [
+      'CONDUCT_REPORT_PENDING',
+      'CONDUCT_REPORT_UPHELD',
+      'CONDUCT_REPORT_DISMISSED',
+    ] as const;
+    const allStatuses = [...reportCaseStatuses, ...conductReportStatuses];
 
-    type ListResponse = {
-      data: {
-        items: Array<{ kind: string; id: string }>;
-        nextCursor: string | null;
-        totalCount: number;
-        countsByStatus: Record<string, number>;
-      };
+    const multipleReporterCase = reportCases[0]!;
+    await db.insert(adminReporterEntry).values({
+      id: randomUUID(),
+      reportCaseId: multipleReporterCase.caseId,
+      messageId: multipleReporterCase.messageId,
+      reporterMemberId: senderId,
+      reason: 'REPORT_OTHER',
+      detail: searchTerm,
+      createdAt: new Date('2035-04-01T00:00:00.102Z'),
+    });
+
+    for (const [index, fixture] of reportCases.entries()) {
+      const status = reportCaseStatuses[index]!;
+      const caseClosedAt =
+        status === 'REPORT_CASE_DISMISSED' || status === 'REPORT_CASE_RESTORED' ? resolvedAt : null;
+      const updatedAt = caseClosedAt ?? createdAt;
+      // eslint-disable-next-line no-await-in-loop
+      await db
+        .update(adminReporterEntry)
+        .set({ detail: searchTerm })
+        .where(eq(adminReporterEntry.reportCaseId, fixture.caseId));
+      // Raw SQL keeps every Report Case on the same microsecond timestamp.
+      // eslint-disable-next-line no-await-in-loop
+      await sql`
+        UPDATE admin_report_cases
+        SET status = ${status},
+            case_closed_at = ${caseClosedAt}::timestamptz,
+            created_at = ${createdAt}::timestamptz,
+            updated_at = ${updatedAt}::timestamptz
+        WHERE id = ${fixture.caseId}
+      `;
+    }
+
+    for (const [index, fixture] of conductReports.entries()) {
+      const status = conductReportStatuses[index]!;
+      const decisionReason =
+        status === 'CONDUCT_REPORT_UPHELD'
+          ? 'CONDUCT_ABANDONED'
+          : status === 'CONDUCT_REPORT_DISMISSED'
+            ? 'CONDUCT_REPORT_NO_VIOLATION'
+            : null;
+      const resolvedByAdminId = decisionReason ? adminId : null;
+      const decisionAt = decisionReason ? resolvedAt : null;
+      const updatedAt = decisionAt ?? createdAt;
+      // Raw SQL keeps every Conduct Report on the same microsecond timestamp.
+      // eslint-disable-next-line no-await-in-loop
+      await sql`
+        UPDATE admin_conduct_reports
+        SET detail = ${searchTerm},
+            status = ${status},
+            decision_reason = ${decisionReason},
+            resolved_by_admin_id = ${resolvedByAdminId},
+            resolved_at = ${decisionAt}::timestamptz,
+            version = ${decisionReason ? 2 : 1},
+            created_at = ${createdAt}::timestamptz,
+            updated_at = ${updatedAt}::timestamptz
+        WHERE id = ${fixture.reportId}
+      `;
+    }
+
+    type MemberSummary = { id: string; displayId: string };
+    type ReportHistoryItem = {
+      kind: 'REPORT_CASE' | 'CONDUCT_REPORT';
+      id: string;
+      displayId: string;
+      status: string;
+      createdAt: string;
+      updatedAt: string;
+      caseClosedAt?: string | null;
+      resolvedAt?: string | null;
+      reportedMember?: MemberSummary | null;
+      filer?: MemberSummary;
+      quest?: { displayId: string } | null;
+      reporterEntries?: Array<{ reporter: MemberSummary }>;
+      assignment?: { worker: MemberSummary };
     };
-    const list = (cursor?: string | null, status?: string) => {
-      const params = new URLSearchParams({ q: searchTerm, limit: '1' });
-      if (cursor) params.set('cursor', cursor);
-      if (status) params.set('status', status);
+    type ReportHistoryPage = {
+      items: ReportHistoryItem[];
+      nextCursor: string | null;
+      totalCount: number;
+      countsByStatus: Record<string, number>;
+    };
+    const list = (query: Record<string, string> = {}) => {
+      const params = new URLSearchParams({ q: searchTerm, ...query });
       return adminRequest(`/api/v1/admin/reports?${params.toString()}`);
     };
 
-    const first = await list();
-    expect(first.status).toBe(200);
-    const firstBody = (await first.json()) as ListResponse;
-    expect(firstBody.data).toMatchObject({
-      totalCount: 2,
-      countsByStatus: {
-        REPORT_CASE_PENDING: 1,
-        REPORT_CASE_DISMISSED: 0,
-        REPORT_CASE_HIDDEN: 0,
-        REPORT_CASE_RESTORED: 0,
-        CONDUCT_REPORT_PENDING: 1,
-        CONDUCT_REPORT_UPHELD: 0,
-        CONDUCT_REPORT_DISMISSED: 0,
+    const defaultQueueResponse = await list();
+    expect(defaultQueueResponse.status).toBe(200);
+    const defaultQueue = (await defaultQueueResponse.json()).data as ReportHistoryPage;
+    expect(defaultQueue.totalCount).toBe(3);
+    expect(defaultQueue.countsByStatus).toEqual({
+      REPORT_CASE_PENDING: 1,
+      REPORT_CASE_DISMISSED: 0,
+      REPORT_CASE_HIDDEN: 1,
+      REPORT_CASE_RESTORED: 0,
+      CONDUCT_REPORT_PENDING: 1,
+      CONDUCT_REPORT_UPHELD: 0,
+      CONDUCT_REPORT_DISMISSED: 0,
+    });
+    expect(new Set(defaultQueue.items.map((item) => item.status))).toEqual(
+      new Set(['REPORT_CASE_PENDING', 'REPORT_CASE_HIDDEN', 'CONDUCT_REPORT_PENDING'])
+    );
+
+    const fullHistoryResponse = await list({
+      statusMode: 'FULL_HISTORY',
+      limit: '20',
+    });
+    expect(fullHistoryResponse.status).toBe(200);
+    const fullHistory = (await fullHistoryResponse.json()).data as ReportHistoryPage;
+    expect(fullHistory.totalCount).toBe(7);
+    expect(fullHistory.countsByStatus).toEqual({
+      REPORT_CASE_PENDING: 1,
+      REPORT_CASE_DISMISSED: 1,
+      REPORT_CASE_HIDDEN: 1,
+      REPORT_CASE_RESTORED: 1,
+      CONDUCT_REPORT_PENDING: 1,
+      CONDUCT_REPORT_UPHELD: 1,
+      CONDUCT_REPORT_DISMISSED: 1,
+    });
+    expect(new Set(fullHistory.items.map((item) => item.createdAt))).toEqual(
+      new Set(['2035-04-01T00:00:00.101Z'])
+    );
+    for (const item of fullHistory.items) {
+      expect(item.displayId).toMatch(item.kind === 'REPORT_CASE' ? /^RPT-/ : /^CND-/);
+      expect(item.quest?.displayId).toMatch(/^QST-/);
+      expect(item.reportedMember?.displayId).toMatch(/^MEM-/);
+      if (item.kind === 'REPORT_CASE') {
+        expect(
+          item.reporterEntries?.every(({ reporter }) => /^MEM-/.test(reporter.displayId))
+        ).toBe(true);
+      } else {
+        expect(item.filer?.displayId).toMatch(/^MEM-/);
+        expect(item.quest?.displayId).toMatch(/^QST-/);
+      }
+    }
+    expect(
+      fullHistory.items.find((item) => item.id === reportCases[2]!.caseId)?.caseClosedAt
+    ).toBeNull();
+    expect(
+      fullHistory.items.find((item) => item.id === reportCases[3]!.caseId)?.caseClosedAt
+    ).toBeString();
+
+    const filteredReportCaseResponse = await list({
+      kind: 'REPORT_CASE',
+      statusMode: 'FULL_HISTORY',
+      status: 'REPORT_CASE_PENDING',
+      memberId: senderId,
+      submittedByMemberId: reporterId,
+    });
+    expect(filteredReportCaseResponse.status).toBe(200);
+    const filteredReportCase = (await filteredReportCaseResponse.json()).data as ReportHistoryPage;
+    expect(filteredReportCase.totalCount).toBe(1);
+    expect(filteredReportCase.items).toHaveLength(1);
+    expect(filteredReportCase.items[0]).toMatchObject({
+      kind: 'REPORT_CASE',
+      id: multipleReporterCase.caseId,
+      status: 'REPORT_CASE_PENDING',
+      displayId: expect.stringMatching(/^RPT-\d{6,}$/),
+      reportedMember: { id: senderId, displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      quest: { displayId: expect.stringMatching(/^QST-\d{6,}$/) },
+    });
+    expect(filteredReportCase.items[0]?.reporterEntries).toHaveLength(2);
+    expect(
+      filteredReportCase.items[0]?.reporterEntries?.every(({ reporter }) =>
+        /^MEM-\d{6,}$/.test(reporter.displayId)
+      )
+    ).toBe(true);
+    expect(filteredReportCase.countsByStatus).toMatchObject({
+      REPORT_CASE_PENDING: 1,
+      REPORT_CASE_DISMISSED: 0,
+      REPORT_CASE_HIDDEN: 0,
+      REPORT_CASE_RESTORED: 0,
+      CONDUCT_REPORT_PENDING: 0,
+      CONDUCT_REPORT_UPHELD: 0,
+      CONDUCT_REPORT_DISMISSED: 0,
+    });
+
+    const secondReporterResponse = await list({
+      kind: 'REPORT_CASE',
+      statusMode: 'FULL_HISTORY',
+      status: 'REPORT_CASE_PENDING',
+      memberId: senderId,
+      submittedByMemberId: senderId,
+    });
+    expect((await secondReporterResponse.json()).data.items).toHaveLength(1);
+    const wrongReportedMember = await list({
+      kind: 'REPORT_CASE',
+      statusMode: 'FULL_HISTORY',
+      memberId: reporterId,
+      submittedByMemberId: senderId,
+    });
+    expect((await wrongReportedMember.json()).data).toMatchObject({
+      items: [],
+      totalCount: 0,
+    });
+
+    const filteredConductResponse = await list({
+      kind: 'CONDUCT_REPORT',
+      statusMode: 'FULL_HISTORY',
+      status: 'CONDUCT_REPORT_PENDING',
+      memberId: reporterId,
+      submittedByMemberId: senderId,
+    });
+    expect(filteredConductResponse.status).toBe(200);
+    const filteredConduct = (await filteredConductResponse.json()).data as ReportHistoryPage;
+    expect(filteredConduct.totalCount).toBe(1);
+    expect(filteredConduct.items[0]).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      id: conductReports[0]!.reportId,
+      status: 'CONDUCT_REPORT_PENDING',
+      displayId: expect.stringMatching(/^CND-\d{6,}$/),
+      filer: { id: senderId, displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      reportedMember: { id: reporterId, displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      quest: {
+        displayId: expect.stringMatching(/^QST-\d{6,}$/),
+        hirer: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
       },
     });
-    expect(firstBody.data.items).toHaveLength(1);
-    expect(firstBody.data.nextCursor).toBeString();
-
-    const second = await list(firstBody.data.nextCursor);
-    expect(second.status).toBe(200);
-    const secondBody = (await second.json()) as ListResponse;
-    expect(secondBody.data).toMatchObject({
-      totalCount: 2,
-      countsByStatus: firstBody.data.countsByStatus,
+    expect(filteredConduct.countsByStatus).toMatchObject({
+      REPORT_CASE_PENDING: 0,
+      CONDUCT_REPORT_PENDING: 1,
+      CONDUCT_REPORT_UPHELD: 0,
+      CONDUCT_REPORT_DISMISSED: 0,
     });
-    expect(secondBody.data.items).toHaveLength(1);
-    expect(secondBody.data.nextCursor).toBeNull();
-    expect(
-      new Set([...firstBody.data.items, ...secondBody.data.items].map((item) => item.kind))
-    ).toEqual(new Set(['REPORT_CASE', 'CONDUCT_REPORT']));
-
-    const reportCaseOnly = await list(undefined, 'REPORT_CASE_PENDING');
-    expect(reportCaseOnly.status).toBe(200);
-    expect((await reportCaseOnly.json()).data).toMatchObject({
-      totalCount: 1,
-      countsByStatus: firstBody.data.countsByStatus,
+    const wrongConductFiler = await list({
+      kind: 'CONDUCT_REPORT',
+      statusMode: 'FULL_HISTORY',
+      memberId: senderId,
+      submittedByMemberId: reporterId,
     });
-    const conductReportOnly = await list(undefined, 'CONDUCT_REPORT_PENDING');
-    expect(conductReportOnly.status).toBe(200);
-    expect((await conductReportOnly.json()).data).toMatchObject({
-      totalCount: 1,
-      countsByStatus: firstBody.data.countsByStatus,
+    expect((await wrongConductFiler.json()).data).toMatchObject({
+      items: [],
+      totalCount: 0,
     });
 
-    const privateMessageSearch = await adminRequest(
-      `/api/v1/admin/reports?q=${encodeURIComponent('The reported Message content.')}`
+    for (const status of allStatuses) {
+      // eslint-disable-next-line no-await-in-loop
+      const filteredResponse = await list({ statusMode: 'FULL_HISTORY', status });
+      // eslint-disable-next-line no-await-in-loop
+      const filtered = (await filteredResponse.json()).data as ReportHistoryPage;
+      expect(filtered.totalCount).toBe(1);
+      expect(filtered.items).toHaveLength(1);
+      expect(filtered.items[0]?.status).toBe(status);
+      expect(filtered.countsByStatus).toEqual(
+        Object.fromEntries(allStatuses.map((value) => [value, value === status ? 1 : 0]))
+      );
+    }
+
+    const readEveryPage = async (sort: 'newest' | 'oldest') => {
+      const rows: Array<{ kind: ReportHistoryItem['kind']; id: string }> = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 7; page += 1) {
+        const query: Record<string, string> = {
+          statusMode: 'FULL_HISTORY',
+          limit: '1',
+          sort,
+        };
+        if (cursor) query.cursor = cursor;
+        // Each cursor comes from the prior response, so these requests stay sequential.
+        // eslint-disable-next-line no-await-in-loop
+        const response = await list(query);
+        // eslint-disable-next-line no-await-in-loop
+        const body = (await response.json()).data as ReportHistoryPage;
+        expect(response.status).toBe(200);
+        expect(body.totalCount).toBe(7);
+        rows.push(...body.items.map(({ kind, id }) => ({ kind, id })));
+        cursor = body.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      return rows;
+    };
+    const newest = await readEveryPage('newest');
+    const repeatedNewest = await readEveryPage('newest');
+    const oldest = await readEveryPage('oldest');
+    const expectedRows = new Set([
+      ...reportCases.map((fixture) => `REPORT_CASE:${fixture.caseId}`),
+      ...conductReports.map((fixture) => `CONDUCT_REPORT:${fixture.reportId}`),
+    ]);
+    expect(newest).toHaveLength(7);
+    expect(new Set(newest.map((row) => `${row.kind}:${row.id}`))).toEqual(expectedRows);
+    expect(repeatedNewest).toEqual(newest);
+    expect(oldest).toEqual([...newest].reverse());
+
+    const restoredCaseDetailResponse = await adminRequest(
+      `/api/v1/admin/reports/${reportCases[3]!.caseId}`
     );
-    expect(privateMessageSearch.status).toBe(200);
-    expect((await privateMessageSearch.json()).data).toMatchObject({
+    expect(restoredCaseDetailResponse.status).toBe(200);
+    const restoredCaseDetail = (await restoredCaseDetailResponse.json()).data as ReportHistoryItem;
+    expect(restoredCaseDetail).toMatchObject({
+      kind: 'REPORT_CASE',
+      status: 'REPORT_CASE_RESTORED',
+      displayId: expect.stringMatching(/^RPT-\d{6,}$/),
+      caseClosedAt: expect.any(String),
+      reportedMember: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      quest: { displayId: expect.stringMatching(/^QST-\d{6,}$/) },
+    });
+
+    const upheldReportDetailResponse = await adminRequest(
+      `/api/v1/admin/reports/${conductReports[1]!.reportId}`
+    );
+    expect(upheldReportDetailResponse.status).toBe(200);
+    const upheldReportDetail = (await upheldReportDetailResponse.json()).data as ReportHistoryItem;
+    expect(upheldReportDetail).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      status: 'CONDUCT_REPORT_UPHELD',
+      displayId: expect.stringMatching(/^CND-\d{6,}$/),
+      resolvedAt: expect.any(String),
+      filer: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      reportedMember: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      quest: { displayId: expect.stringMatching(/^QST-\d{6,}$/) },
+      assignment: { worker: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) } },
+    });
+
+    const empty = await list({
+      kind: 'REPORT_CASE',
+      statusMode: 'FULL_HISTORY',
+      submittedByMemberId: randomUUID(),
+    });
+    expect((await empty.json()).data).toMatchObject({
       items: [],
       totalCount: 0,
       countsByStatus: {
         REPORT_CASE_PENDING: 0,
+        REPORT_CASE_DISMISSED: 0,
+        REPORT_CASE_HIDDEN: 0,
+        REPORT_CASE_RESTORED: 0,
         CONDUCT_REPORT_PENDING: 0,
+        CONDUCT_REPORT_UPHELD: 0,
+        CONDUCT_REPORT_DISMISSED: 0,
       },
+    });
+
+    const invalidCursor = await adminRequest('/api/v1/admin/reports?cursor=not-a-cursor');
+    expect(invalidCursor.status).toBe(400);
+    expect((await invalidCursor.json()).error.code).toBe('INVALID_CURSOR');
+    const missingReport = await adminRequest(`/api/v1/admin/reports/${randomUUID()}`);
+    expect(missingReport.status).toBe(404);
+    expect((await missingReport.json()).error.code).toBe('REPORT_NOT_FOUND');
+
+    const privateMessageSearch = await list({ q: 'The reported Message content.' });
+    expect(privateMessageSearch.status).toBe(200);
+    expect((await privateMessageSearch.json()).data).toMatchObject({
+      items: [],
+      totalCount: 0,
     });
   });
 

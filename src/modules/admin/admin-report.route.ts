@@ -53,7 +53,12 @@ export const adminReportRoute = new Elysia({
       tags: ['Admin Reports'],
       summary: 'List Report Cases and Conduct Reports for Admin review',
       description:
-        'Lists the shared Report Case and Conduct Report queue with separate kind and status vocabularies. Supports reported Member, Quest, and list-field search. It omits Message content and file links and returns matching status counts.',
+        'Lists the shared Report Case and Conduct Report queue. The default statusMode=OPEN_QUEUE ' +
+        'includes Report Case pending/hidden and Conduct Report pending; FULL_HISTORY includes every ' +
+        'status. A status filter selects one status. memberId filters the reported Member; ' +
+        'submittedByMemberId filters a Reporter Entry or the Conduct Report filer. countsByStatus ' +
+        'uses the same kind, Member, submitter, Quest, search, mode, and status filters. Message ' +
+        'content and file links remain available only through case-scoped evidence reads.',
       operationId: 'listAdminReports',
       security: betterAuthSecurity,
     },
