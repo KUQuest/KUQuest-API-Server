@@ -510,6 +510,41 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
     expect(lateJoin.status).toBe(409);
   });
 
+  it('keeps a partially accepted roster pending and requires every Worker to start after unanimous consent', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest([workers[0].id, workers[1].id]);
+    await detect(new Date());
+    const path = `/api/v2/quests/${questId}`;
+    const command = (suffix: string, memberId: string, body?: unknown) =>
+      request(`${path}/${suffix}`, 'POST', memberId, body, { 'idempotency-key': randomUUID() });
+    expect((await command('underfilled/decision', hirer.id, { decision: 'PROCEED' })).status).toBe(
+      200
+    );
+    expect(
+      (await command('underfilled/consent', workers[0].id, { decision: 'ACCEPT' })).status
+    ).toBe(200);
+    const pending = await (await request(`${path}/underfilled`, 'GET', workers[0].id)).json();
+    expect(pending.data).toMatchObject({
+      state: 'UNDERFILLED_CONSENT_PENDING',
+      questState: 'QUEST_OPEN',
+      consent: { acceptedCount: 1, pendingCount: 1 },
+      ownResponse: { decision: 'ACCEPT', questReward: 20 },
+    });
+    expect((await command('start-work', workers[0].id)).status).toBe(409);
+    expect(
+      (await command('underfilled/consent', workers[0].id, { decision: 'DECLINE' })).status
+    ).toBe(409);
+    expect(
+      (await command('underfilled/consent', workers[1].id, { decision: 'ACCEPT' })).status
+    ).toBe(200);
+    const firstStart = await command('start-work', workers[0].id);
+    expect(firstStart.status).toBe(200);
+    expect((await firstStart.json()).data.questState).toBe('QUEST_ASSIGNED');
+    const secondStart = await command('start-work', workers[1].id);
+    expect(secondStart.status).toBe(200);
+    expect((await secondStart.json()).data.questState).toBe('QUEST_IN_PROGRESS');
+  });
+
   it('closes remaining Candidate Inquiry Conversations when unanimous consent assigns the Quest', async () => {
     if (!postgresAvailable) return;
     applySpy?.mockRestore();
@@ -654,6 +689,28 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       cancellationReason: 'WORKER_DECLINED',
     });
 
+    for (const worker of workers.slice(0, 2)) {
+      const outcome = await request(
+        `/api/v2/quests/${declinedQuestId}/underfilled`,
+        'GET',
+        worker.id
+      );
+      expect(outcome.status).toBe(200);
+      const body = await outcome.json();
+      expect(body.data).toMatchObject({
+        state: 'UNDERFILLED_CANCELLED',
+        cancellationReason: 'WORKER_DECLINED',
+      });
+      expect(body.data.responses).toBeUndefined();
+      expect(body.data.workerRewardPool).toBeNull();
+    }
+    const outsider = await request(
+      `/api/v2/quests/${declinedQuestId}/underfilled`,
+      'GET',
+      workers[2].id
+    );
+    expect(outsider.status).toBe(404);
+
     const timeoutQuestId = await createQuest([workers[1].id], true);
     const detectedAt = new Date();
     await detect(detectedAt);
@@ -684,6 +741,16 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       hirer.id
     );
     expect((await timeoutView.json()).data).toMatchObject({
+      cancellationReason: 'CONSENT_TIMEOUT',
+    });
+    const workerTimeout = await request(
+      `/api/v2/quests/${timeoutQuestId}/underfilled`,
+      'GET',
+      workers[1].id
+    );
+    expect(workerTimeout.status).toBe(200);
+    expect((await workerTimeout.json()).data).toMatchObject({
+      state: 'UNDERFILLED_CANCELLED',
       cancellationReason: 'CONSENT_TIMEOUT',
     });
   });
