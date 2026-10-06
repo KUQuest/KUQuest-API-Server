@@ -283,18 +283,16 @@ const failRequest = async (
   };
 };
 
-const materializePendingRequest = async (
+/** Returns the responding Workers, or undefined when an Active Worker left the request. */
+const selectRespondersWhileActive = async (
   transaction: QuestTransaction,
   questId: string,
-  request: QuestV2EditRequestRow,
-  now: Date
-): Promise<{ request: QuestV2EditRequestRow; outcome?: 'expired' | 'departed' }> => {
-  if (request.requestStatus !== 'EDIT_REQUEST_PENDING') return { request };
-
+  requestId: string
+): Promise<string[] | undefined> => {
   const snapshot = await transaction
     .select({ workerId: questV2EditRequestResponse.workerId })
     .from(questV2EditRequestResponse)
-    .where(eq(questV2EditRequestResponse.requestId, request.id));
+    .where(eq(questV2EditRequestResponse.requestId, requestId));
   const active = await transaction
     .select({ workerId: questAssignment.workerId })
     .from(questAssignment)
@@ -310,6 +308,20 @@ const materializePendingRequest = async (
     snapshotIds.length !== activeIds.length ||
     snapshotIds.some((id, index) => id !== activeIds[index])
   ) {
+    return undefined;
+  }
+  return snapshotIds;
+};
+
+const materializePendingRequest = async (
+  transaction: QuestTransaction,
+  questId: string,
+  request: QuestV2EditRequestRow,
+  now: Date
+): Promise<{ request: QuestV2EditRequestRow; outcome?: 'expired' | 'departed' }> => {
+  if (request.requestStatus !== 'EDIT_REQUEST_PENDING') return { request };
+
+  if (!(await selectRespondersWhileActive(transaction, questId, request.id))) {
     return {
       request: await failRequest(transaction, request, 'ACTIVE_WORKER_LEFT', now),
       outcome: 'departed',
