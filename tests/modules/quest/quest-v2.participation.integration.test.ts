@@ -377,6 +377,7 @@ describe('Quest v2 Participation Detail', () => {
       'mode',
       'moneyHold',
       'participation',
+      'pendingEditRequest',
       'proofRequired',
       'questFundingTotal',
       'questReward',

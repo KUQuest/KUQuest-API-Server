@@ -733,6 +733,7 @@ const questV2DetailOpenApiSchema = t.Object({
   images: t.Array(questV2ImageSchema),
   dispute: t.Optional(questV2DisputeSchema),
   moneyHold: t.Optional(questV2MoneyHoldSchema),
+  pendingEditRequest: t.Optional(questV2PendingEditRequestSchema),
 });
 
 const questV2DetailResponseOpenApiSchema = t.Object({
@@ -963,6 +964,7 @@ export const questV2ParticipationDetailSchema = t.Object({
   }),
   dispute: t.Optional(questV2DisputeSchema),
   moneyHold: t.Optional(questV2MoneyHoldSchema),
+  pendingEditRequest: t.Optional(questV2PendingEditRequestSchema),
 });
 
 export const questV2ParticipationDetailResponseSchema = t.Object({
@@ -1072,6 +1074,7 @@ export const questV2DetailSchema = t.Composite([
     images: t.Array(questV2ImageSchema),
     dispute: t.Optional(questV2DisputeSchema),
     moneyHold: t.Optional(questV2MoneyHoldSchema),
+    pendingEditRequest: t.Optional(questV2PendingEditRequestSchema),
   }),
 ]);
 
