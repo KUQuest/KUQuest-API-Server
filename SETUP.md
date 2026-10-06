@@ -246,12 +246,13 @@ ADMIN_FIRST_NAME=System
 ADMIN_LAST_NAME=Administrator
 ```
 
-The seed is the supported first-Admin bootstrap. It requires the six values
-shown above. It exits with status 1 and makes no changes when any Admin already
-exists, including an Admin with a different email. Credential creation goes
-through Better Auth, which stores a password hash in `auth_account`; the
-plaintext password is never stored or printed. Keep `.env.admin` outside source
-control and run this command only in the controlled deployment workflow.
+The standalone seed script is the supported first-Admin bootstrap. It requires
+the six values shown above. It exits with status 1 and makes no changes when
+any Admin already exists, including an Admin with a different email.
+Credential creation goes through Better Auth, which stores a password hash in
+`auth_account`; the plaintext password is never stored or printed. Keep
+`.env.admin` outside source control. Run the standalone command only in a
+controlled deployment process.
 
 Run the seed script:
 
@@ -259,9 +260,19 @@ Run the seed script:
 bun --env-file=.env.admin run db:seed-admin
 ```
 
-If the command reports that an Admin already exists, stop the bootstrap. This
-seed never updates or resets an existing Admin. Verify the bootstrap by signing
-in to the Admin web app with these credentials before you close the deployment.
+For UAT, `Backend UAT CD` runs the first-Admin seed after each successful
+`deploy` operation. It skips the seed on `rollback`. Configure these GitHub
+environment secrets for `uat`: `ADMIN_EMAIL`, `ADMIN_PASSWORD`,
+`ADMIN_FIRST_NAME`, and `ADMIN_LAST_NAME`. The workflow uses the UAT
+`DATABASE_URL` and `ADMIN_BETTER_AUTH_SECRET`.
+
+If the configured Admin already exists, the UAT workflow treats the seed as a
+successful no-op. It does not change that Admin's credentials. If a different
+Admin exists, the seed step fails. Staging is unchanged.
+
+If the standalone command reports an existing Admin, stop that bootstrap.
+The command never updates or resets an existing Admin. Verify sign-in to the
+Admin web app with these credentials before closing the deployment.
 
 ---
 
