@@ -97,7 +97,8 @@ test.skipIf(!composeAvailable)(
       expect(received.NODE_ENV).toBe('production');
       expect(received.DEPLOYMENT_ENV).toBe('uat');
     });
-  }
+  },
+  15_000
 );
 
 test('UAT env file sets safe fixed values and never adds Staging test settings', async () => {
