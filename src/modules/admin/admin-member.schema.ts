@@ -1,3 +1,4 @@
+import { questStatus as persistedQuestStatus } from '@/database/schema/quest.schema';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import { t, type Static } from 'elysia';
@@ -250,3 +251,99 @@ export type AdminMemberStatus = Static<typeof adminMemberStatusSchema>;
 export type AdminMemberListQuery = Static<typeof adminMemberListQuerySchema>;
 export type AdminMemberListData = Static<typeof adminMemberListResponseSchema>['data'];
 export type AdminMemberDetailData = Static<typeof adminMemberDetailResponseSchema>['data'];
+
+const adminMemberHistoryRoleSchema = t.Union([t.Literal('HIRER'), t.Literal('WORKER')], {
+  description: 'The Member role in each history row.',
+});
+type AdminMemberHistoryQuestStatus = (typeof persistedQuestStatus.enumValues)[number];
+const adminMemberHistoryQuestStatusSchema = t.Union(
+  persistedQuestStatus.enumValues.map((value) => t.Literal(value)) as [
+    ReturnType<typeof t.Literal<AdminMemberHistoryQuestStatus>>,
+    ...ReturnType<typeof t.Literal<AdminMemberHistoryQuestStatus>>[],
+  ],
+  { description: 'The current Quest State.' }
+);
+const adminMemberHistoryAssignmentStatusSchema = t.Union(
+  [
+    t.Literal('ASSIGNMENT_ACTIVE'),
+    t.Literal('ASSIGNMENT_COMPLETED'),
+    t.Literal('ASSIGNMENT_INCOMPLETE'),
+    t.Literal('ASSIGNMENT_CANCELLED'),
+  ],
+  { description: 'The current Assignment status.' }
+);
+
+export const adminMemberHistoryQuerySchema = t.Object({
+  role: t.Optional(adminMemberHistoryRoleSchema),
+  questStatus: t.Optional(adminMemberHistoryQuestStatusSchema),
+  assignmentStatus: t.Optional(adminMemberHistoryAssignmentStatusSchema),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
+  cursor: t.Optional(t.String()),
+});
+
+const adminMemberHistoryAssignmentStatusChangedAtSchema = t.Union([dateTime, t.Null()], {
+  description:
+    'Current Assignment status time. Sources include Assignment events, Proof Submission reviews, completion confirmations, and terminal Quest State events. Null when no event time is recorded.',
+});
+const adminMemberHistoryQuestStatusChangedAtSchema = t.Union([dateTime, t.Null()], {
+  description:
+    'Time the current Quest State was entered. Uses a Quest State event when available and persisted terminal-state events otherwise. Null when no event time is recorded.',
+});
+
+const adminMemberHistoryRelatedMemberSchema = t.Object({
+  role: adminMemberHistoryRoleSchema,
+  member: t.Object({
+    id: t.String({
+      format: 'uuid',
+      description: 'Internal API reference. Use displayId as the visible Member identifier.',
+    }),
+    displayId: t.String({
+      pattern: '^MEM-[0-9]{6,}$',
+      description: 'Visible Member Display ID.',
+    }),
+    firstName: t.String(),
+    lastName: t.String(),
+  }),
+  assignmentStatus: t.Union([adminMemberHistoryAssignmentStatusSchema, t.Null()]),
+  assignmentCreatedAt: t.Union([dateTime, t.Null()]),
+  startedAt: t.Union([dateTime, t.Null()]),
+  assignmentStatusChangedAt: adminMemberHistoryAssignmentStatusChangedAtSchema,
+});
+
+const adminMemberHistoryItemSchema = t.Object({
+  role: adminMemberHistoryRoleSchema,
+  createdAt: dateTime,
+  assignmentStatus: t.Union([adminMemberHistoryAssignmentStatusSchema, t.Null()]),
+  startedAt: t.Union([dateTime, t.Null()]),
+  assignmentStatusChangedAt: adminMemberHistoryAssignmentStatusChangedAtSchema,
+  quest: t.Object({
+    id: t.String({
+      format: 'uuid',
+      description: 'Internal API reference. Use displayId as the visible Quest identifier.',
+    }),
+    displayId: t.String({
+      pattern: '^QST-[0-9]{6,}$',
+      description: 'Visible Quest Display ID.',
+    }),
+    title: t.String(),
+    questStatus: adminMemberHistoryQuestStatusSchema,
+    createdAt: dateTime,
+    questStatusChangedAt: adminMemberHistoryQuestStatusChangedAtSchema,
+  }),
+  relatedMembers: t.Array(adminMemberHistoryRelatedMemberSchema),
+});
+
+export const adminMemberHistoryResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    member: adminMemberProfileIdentitySchema,
+    items: t.Array(adminMemberHistoryItemSchema, { maxItems: MAX_PAGE_LIMIT }),
+    totalCount: t.Integer({ minimum: 0 }),
+    nextCursor: t.Union([t.String(), t.Null()]),
+  }),
+});
+
+export type AdminMemberHistoryQuery = Static<typeof adminMemberHistoryQuerySchema>;
+export type AdminMemberHistoryData = Static<typeof adminMemberHistoryResponseSchema>['data'];
+export type AdminMemberHistoryItem = AdminMemberHistoryData['items'][number];
+export type AdminMemberHistoryRelatedMember = AdminMemberHistoryItem['relatedMembers'][number];

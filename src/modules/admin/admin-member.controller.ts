@@ -3,6 +3,7 @@ import { apiError, apiSuccess, type ApiResponse } from '@/shared/api-response';
 import { CursorInputError } from '@/shared/cursor';
 
 import type {
+  AdminMemberHistoryQuery,
   AdminMemberListQuery,
   AdminMemberParams,
   AdminMemberProfileCollectionQuery,
@@ -11,6 +12,7 @@ import {
   getAdminMemberDetail,
   getAdminMemberProfileTags,
   listAdminMemberCertificates,
+  listAdminMemberHistory,
   listAdminMemberWorkExperiences,
   listAdminMemberPenaltyHistory,
   listAdminMembers,
@@ -95,6 +97,25 @@ export const listAdminMemberCertificatesController = async ({
 }): Promise<ApiResponse> => {
   try {
     const data = await listAdminMemberCertificates(params.id, query);
+    if (!data) return memberNotFound(set);
+    return apiSuccess(data);
+  } catch (error) {
+    const response = cursorInputErrorResponse(error, set);
+    if (response) return response;
+    throw error;
+  }
+};
+
+export const listAdminMemberHistoryController = async ({
+  params,
+  query,
+  set,
+}: AdminContext & {
+  params: AdminMemberParams;
+  query: AdminMemberHistoryQuery;
+}): Promise<ApiResponse> => {
+  try {
+    const data = await listAdminMemberHistory(params.id, query);
     if (!data) return memberNotFound(set);
     return apiSuccess(data);
   } catch (error) {

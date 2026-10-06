@@ -1,6 +1,10 @@
 import { enabledAdminGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
-import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import {
+  betterAuthAdminSecurity,
+  betterAuthSecurity,
+  responses,
+} from '@/shared/api-response.schema';
 
 import { Elysia } from 'elysia';
 
@@ -9,12 +13,15 @@ import {
   getAdminMemberProfileTagsController,
   listAdminMemberCertificatesController,
   listAdminMemberPenaltyHistoryController,
+  listAdminMemberHistoryController,
   listAdminMemberWorkExperiencesController,
   listAdminMembersController,
 } from './admin-member.controller';
 import {
   adminMemberCertificatesResponseSchema,
   adminMemberDetailResponseSchema,
+  adminMemberHistoryQuerySchema,
+  adminMemberHistoryResponseSchema,
   adminMemberListQuerySchema,
   adminMemberListResponseSchema,
   adminMemberParamsSchema,
@@ -51,6 +58,24 @@ export const adminMemberRoute = new Elysia({
         'Returns member profile, academic details, wallet compartments, and quest/review stats.',
       operationId: 'getAdminMemberDetail',
       security: betterAuthSecurity,
+    },
+  })
+  .get('/:id/history', listAdminMemberHistoryController, {
+    params: adminMemberParamsSchema,
+    query: adminMemberHistoryQuerySchema,
+    response: responses(adminMemberHistoryResponseSchema, 400, 401, 403, 404, 500),
+    detail: {
+      tags: ['Admin Members'],
+      summary: 'List a Member’s Quest and Assignment history',
+      description:
+        'Returns one HIRER item per Quest and one WORKER item per Assignment. Defaults include ' +
+        'every Quest State and Assignment status. `questStatus` filters both roles. ' +
+        '`assignmentStatus` filters Worker Assignments and Hirer Quests with a matching Assignment; ' +
+        'Hirer items show only matching Workers. One bounded cursor orders both roles by record ' +
+        'creation time, record ID, then role. Status dates use persisted Assignment, Quest State, ' +
+        'Proof Submission review, or completion-confirmation events. The API never uses `updatedAt`.',
+      operationId: 'listAdminMemberHistory',
+      security: betterAuthAdminSecurity,
     },
   })
   .get('/:id/profile-tags', getAdminMemberProfileTagsController, {
