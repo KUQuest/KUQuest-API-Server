@@ -1,26 +1,198 @@
 import { db } from '@/database/client';
 import { department, faculty, occupation } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
+import { file } from '@/database/schema/file.schema';
+import { profileCertificate, profileWorkExperience } from '@/database/schema/profile.schema';
 import { paymentPayouts } from '@/database/schema/payment.schema';
 import { quest, questAssignment, review } from '@/database/schema/quest.schema';
 import { walletFundingReservationSettlement, walletWallet } from '@/database/schema/wallet.schema';
 import { walletProjectionMatchesLedger } from '@/modules/wallet';
-import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
-import { readKeysetPage } from '@/shared/keyset-page';
+import { getProfileTags } from '@/modules/profile';
+import {
+  CursorInputError,
+  decodeCursor,
+  encodeCursor,
+  parsePageLimit,
+  type CursorPayload,
+} from '@/shared/cursor';
+import { readKeysetPage, type KeysetAnchor } from '@/shared/keyset-page';
 
-import { and, avg, count, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, avg, count, eq, ilike, isNull, or, sql, type SQL } from 'drizzle-orm';
 
 import { formatDisplayIdSql } from './admin-display-id';
 import type {
+  AdminMemberCertificateItem,
+  AdminMemberCertificatesData,
   AdminMemberDetailData,
   AdminMemberListItem,
   AdminMemberListQuery,
+  AdminMemberProfileCollectionQuery,
+  AdminMemberProfileIdentity,
+  AdminMemberProfileTagsData,
+  AdminMemberWorkExperienceItem,
+  AdminMemberWorkExperiencesData,
 } from './admin-member.schema';
 import { adminMemberStatusSql } from './admin-member-status';
 
 export type AdminMemberListPage = {
   items: AdminMemberListItem[];
   nextCursor: string | null;
+};
+const getAdminMemberProfileIdentity = async (
+  userId: string
+): Promise<AdminMemberProfileIdentity | null> => {
+  const [member] = await db
+    .select({ displayId: formatDisplayIdSql('member', authUser.publicSequence) })
+    .from(authUser)
+    .where(eq(authUser.id, userId));
+
+  return member ?? null;
+};
+const assertMemberProfileCollectionCursor = async (
+  cursor: CursorPayload | undefined,
+  anchor: KeysetAnchor,
+  memberFilter: SQL,
+  resource: 'Work Experience' | 'Certificate'
+): Promise<void> => {
+  if (!cursor) return;
+
+  const [row] = await db
+    .select({ id: anchor.id })
+    .from(anchor.time.table)
+    .where(
+      and(
+        memberFilter,
+        eq(anchor.id, cursor.id),
+        sql`date_trunc('milliseconds', ${anchor.time}) = ${cursor.startTime}::timestamptz`
+      )
+    )
+    .limit(1);
+  if (!row) {
+    throw new CursorInputError('INVALID_CURSOR', `cursor does not match a ${resource}`);
+  }
+};
+
+export const getAdminMemberProfileTags = async (
+  userId: string
+): Promise<AdminMemberProfileTagsData | null> => {
+  const member = await getAdminMemberProfileIdentity(userId);
+  if (!member) return null;
+
+  const tags = await getProfileTags(userId);
+  return { member, tags: tags.map(({ name }) => ({ name })) };
+};
+
+export const listAdminMemberWorkExperiences = async (
+  userId: string,
+  query: AdminMemberProfileCollectionQuery
+): Promise<AdminMemberWorkExperiencesData | null> => {
+  const cursor = decodeCursor(query.cursor);
+  const limit = parsePageLimit(query.limit);
+  const member = await getAdminMemberProfileIdentity(userId);
+  if (!member) return null;
+
+  const where = eq(profileWorkExperience.userId, userId);
+  const anchor = { time: profileWorkExperience.createdAt, id: profileWorkExperience.id };
+  await assertMemberProfileCollectionCursor(cursor, anchor, where, 'Work Experience');
+  const [totalRows, page] = await Promise.all([
+    db.select({ total: count() }).from(profileWorkExperience).where(where),
+    readKeysetPage({
+      anchor,
+      cursor,
+      limit,
+      where,
+      read: ({ where: pageWhere, orderBy, limit: probe }) =>
+        db
+          .select({
+            id: profileWorkExperience.id,
+            title: profileWorkExperience.title,
+            employmentType: profileWorkExperience.employmentType,
+            organization: profileWorkExperience.org,
+            description: profileWorkExperience.description,
+            startedAt: profileWorkExperience.startedAt,
+            endedAt: profileWorkExperience.endedAt,
+            createdAt: profileWorkExperience.createdAt,
+          })
+          .from(profileWorkExperience)
+          .where(pageWhere)
+          .orderBy(...orderBy)
+          .limit(probe),
+      rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+      invalidCursor: () =>
+        new CursorInputError('INVALID_CURSOR', 'cursor does not match a Work Experience'),
+    }),
+  ]);
+
+  return {
+    member,
+    items: page.rows.map((row): AdminMemberWorkExperienceItem => ({
+      title: row.title,
+      employmentType: row.employmentType,
+      organization: row.organization,
+      description: row.description,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt,
+    })),
+    totalCount: totalRows[0]?.total ?? 0,
+    nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
+  };
+};
+
+export const listAdminMemberCertificates = async (
+  userId: string,
+  query: AdminMemberProfileCollectionQuery
+): Promise<AdminMemberCertificatesData | null> => {
+  const cursor = decodeCursor(query.cursor);
+  const limit = parsePageLimit(query.limit);
+  const member = await getAdminMemberProfileIdentity(userId);
+  if (!member) return null;
+
+  const where = eq(profileCertificate.userId, userId);
+  const anchor = { time: profileCertificate.createdAt, id: profileCertificate.id };
+  await assertMemberProfileCollectionCursor(cursor, anchor, where, 'Certificate');
+  const [totalRows, page] = await Promise.all([
+    db.select({ total: count() }).from(profileCertificate).where(where),
+    readKeysetPage({
+      anchor,
+      cursor,
+      limit,
+      where,
+      read: ({ where: pageWhere, orderBy, limit: probe }) =>
+        db
+          .select({
+            id: profileCertificate.id,
+            name: profileCertificate.name,
+            issuer: profileCertificate.issuer,
+            issuedAt: profileCertificate.issuedAt,
+            imageContentType: file.contentType,
+            imageSizeBytes: file.sizeBytes,
+            createdAt: profileCertificate.createdAt,
+          })
+          .from(profileCertificate)
+          .leftJoin(file, and(eq(profileCertificate.imageFileId, file.id), isNull(file.deletedAt)))
+          .where(pageWhere)
+          .orderBy(...orderBy)
+          .limit(probe),
+      rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+      invalidCursor: () =>
+        new CursorInputError('INVALID_CURSOR', 'cursor does not match a Certificate'),
+    }),
+  ]);
+
+  return {
+    member,
+    items: page.rows.map((row): AdminMemberCertificateItem => ({
+      name: row.name,
+      issuer: row.issuer,
+      issuedAt: row.issuedAt,
+      image:
+        row.imageContentType === null || row.imageSizeBytes === null
+          ? null
+          : { contentType: row.imageContentType, sizeBytes: row.imageSizeBytes },
+    })),
+    totalCount: totalRows[0]?.total ?? 0,
+    nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
+  };
 };
 
 export const listAdminMembers = async (
