@@ -1,6 +1,11 @@
 import { db } from '@/database/client';
 import { department, faculty, occupation } from '@/database/schema/academic.schema';
-import { authUser } from '@/database/schema/auth.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
+import {
+  adminConductReport,
+  adminReportCase,
+  memberPenaltyRecord,
+} from '@/database/schema/admin.schema';
 import { file } from '@/database/schema/file.schema';
 import { profileCertificate, profileWorkExperience } from '@/database/schema/profile.schema';
 import { paymentPayouts } from '@/database/schema/payment.schema';
@@ -17,7 +22,8 @@ import {
 } from '@/shared/cursor';
 import { readKeysetPage, type KeysetAnchor } from '@/shared/keyset-page';
 
-import { and, avg, count, eq, ilike, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, avg, count, eq, exists, ilike, isNull, not, or, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 
 import { formatDisplayIdSql } from './admin-display-id';
 import type {
@@ -26,6 +32,7 @@ import type {
   AdminMemberDetailData,
   AdminMemberListItem,
   AdminMemberListQuery,
+  AdminMemberPenaltyHistoryData,
   AdminMemberProfileCollectionQuery,
   AdminMemberProfileIdentity,
   AdminMemberProfileTagsData,
@@ -52,7 +59,7 @@ const assertMemberProfileCollectionCursor = async (
   cursor: CursorPayload | undefined,
   anchor: KeysetAnchor,
   memberFilter: SQL,
-  resource: 'Work Experience' | 'Certificate'
+  resource: 'Work Experience' | 'Certificate' | 'Penalty History'
 ): Promise<void> => {
   if (!cursor) return;
 
@@ -71,6 +78,10 @@ const assertMemberProfileCollectionCursor = async (
     throw new CursorInputError('INVALID_CURSOR', `cursor does not match a ${resource}`);
   }
 };
+
+const adminMemberPenaltyReversal = alias(memberPenaltyRecord, 'admin_member_penalty_reversal');
+const adminMemberPenaltyOriginal = alias(memberPenaltyRecord, 'admin_member_penalty_original');
+const adminMemberPenaltyActor = alias(authAdmin, 'admin_member_penalty_actor');
 
 export const getAdminMemberProfileTags = async (
   userId: string
@@ -195,6 +206,207 @@ export const listAdminMemberCertificates = async (
   };
 };
 
+export const listAdminMemberPenaltyHistory = async (
+  userId: string,
+  query: AdminMemberProfileCollectionQuery
+): Promise<AdminMemberPenaltyHistoryData | null> => {
+  const cursor = decodeCursor(query.cursor);
+  const limit = parsePageLimit(query.limit);
+  const [member] = await db
+    .select({
+      displayId: formatDisplayIdSql('member', authUser.publicSequence),
+      createdAt: authUser.createdAt,
+    })
+    .from(authUser)
+    .where(eq(authUser.id, userId));
+
+  if (!member) return null;
+
+  const where = eq(memberPenaltyRecord.memberId, userId);
+  const anchor = { time: memberPenaltyRecord.createdAt, id: memberPenaltyRecord.id };
+  await assertMemberProfileCollectionCursor(cursor, anchor, where, 'Penalty History');
+
+  const originalMisconduct = sql<boolean>`
+    ${memberPenaltyRecord.ladder} = 'MISCONDUCT'
+    AND ${memberPenaltyRecord.source} IN ('REPORT_CASE', 'CONDUCT_REPORT')
+    AND ${memberPenaltyRecord.result} <> 'PENALTY_REVERSAL'
+    AND ${memberPenaltyRecord.createdAt} >= ${member.createdAt.toISOString()}::timestamptz
+  `;
+  const hasPenaltyReversal = exists(
+    db
+      .select({ id: adminMemberPenaltyReversal.id })
+      .from(adminMemberPenaltyReversal)
+      .where(eq(adminMemberPenaltyReversal.reversalOfRecordId, memberPenaltyRecord.id))
+  );
+  const effectiveActiveMisconduct = sql<boolean>`
+    ${originalMisconduct}
+    AND ${memberPenaltyRecord.result} <> 'PENALTY_EXEMPT'
+    AND ${not(hasPenaltyReversal)}
+  `;
+
+  const [countRows, page] = await Promise.all([
+    db
+      .select({
+        totalCount: count(),
+        confirmedMisconductCount: sql<number>`
+          count(*) FILTER (WHERE ${originalMisconduct})
+        `.mapWith(Number),
+        effectiveActiveMisconductPenaltyCount: sql<number>`
+          count(*) FILTER (WHERE ${effectiveActiveMisconduct})
+        `.mapWith(Number),
+        reviewLadderRecordCount: sql<number>`
+          count(*) FILTER (
+            WHERE ${memberPenaltyRecord.ladder} = 'REVIEW'
+              AND ${memberPenaltyRecord.result} <> 'PENALTY_REVERSAL'
+          )
+        `.mapWith(Number),
+      })
+      .from(memberPenaltyRecord)
+      .where(where),
+    readKeysetPage({
+      anchor,
+      cursor,
+      limit,
+      where,
+      read: ({ where: pageWhere, orderBy, limit: probe }) =>
+        db
+          .select({
+            id: memberPenaltyRecord.id,
+            ladder: memberPenaltyRecord.ladder,
+            source: memberPenaltyRecord.source,
+            sourceDisplayId: sql<string | null>`case
+              when ${memberPenaltyRecord.source} = 'REPORT_CASE'
+                and ${adminReportCase.id} is not null
+                then ${formatDisplayIdSql('reportCase', adminReportCase.publicSequence)}
+              when ${memberPenaltyRecord.source} = 'CONDUCT_REPORT'
+                and ${adminConductReport.id} is not null
+                then ${formatDisplayIdSql('conductReport', adminConductReport.publicSequence)}
+              when ${memberPenaltyRecord.source} = 'REVIEW_AVERAGE'
+                and ${review.id} is not null
+                and ${quest.id} is not null
+                then ${formatDisplayIdSql('quest', quest.publicSequence)}
+              else null
+            end`,
+            sequenceNumber: memberPenaltyRecord.sequenceNumber,
+            result: memberPenaltyRecord.result,
+            actorType: memberPenaltyRecord.actorType,
+            actorFirstName: adminMemberPenaltyActor.firstName,
+            actorLastName: adminMemberPenaltyActor.lastName,
+            reasonCode: memberPenaltyRecord.reasonCode,
+            createdAt: memberPenaltyRecord.createdAt,
+            reviewRating: review.rating,
+            isEffectiveActiveMisconductPenalty: effectiveActiveMisconduct,
+            originalSequenceNumber: adminMemberPenaltyOriginal.sequenceNumber,
+            originalResult: adminMemberPenaltyOriginal.result,
+            originalCreatedAt: adminMemberPenaltyOriginal.createdAt,
+            reversalSequenceNumber: adminMemberPenaltyReversal.sequenceNumber,
+            reversalResult: adminMemberPenaltyReversal.result,
+            reversalCreatedAt: adminMemberPenaltyReversal.createdAt,
+          })
+          .from(memberPenaltyRecord)
+          .leftJoin(
+            adminReportCase,
+            and(
+              eq(adminReportCase.id, memberPenaltyRecord.sourceId),
+              eq(memberPenaltyRecord.source, 'REPORT_CASE')
+            )
+          )
+          .leftJoin(
+            adminConductReport,
+            and(
+              eq(adminConductReport.id, memberPenaltyRecord.sourceId),
+              eq(memberPenaltyRecord.source, 'CONDUCT_REPORT')
+            )
+          )
+          .leftJoin(
+            review,
+            and(
+              eq(review.id, memberPenaltyRecord.sourceId),
+              eq(memberPenaltyRecord.source, 'REVIEW_AVERAGE')
+            )
+          )
+          .leftJoin(quest, eq(quest.id, review.questId))
+          .leftJoin(
+            adminMemberPenaltyOriginal,
+            eq(adminMemberPenaltyOriginal.id, memberPenaltyRecord.reversalOfRecordId)
+          )
+          .leftJoin(
+            adminMemberPenaltyReversal,
+            eq(adminMemberPenaltyReversal.reversalOfRecordId, memberPenaltyRecord.id)
+          )
+          .leftJoin(
+            adminMemberPenaltyActor,
+            eq(adminMemberPenaltyActor.id, memberPenaltyRecord.actorAdminId)
+          )
+          .where(pageWhere)
+          .orderBy(...orderBy)
+          .limit(probe),
+      rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+      invalidCursor: () =>
+        new CursorInputError('INVALID_CURSOR', 'cursor does not match a Penalty History record'),
+    }),
+  ]);
+
+  const items: AdminMemberPenaltyHistoryData['items'] = page.rows.map((row) => {
+    const linkedRecord =
+      row.result === 'PENALTY_REVERSAL'
+        ? {
+            sequenceNumber: row.originalSequenceNumber,
+            result: row.originalResult,
+            createdAt: row.originalCreatedAt,
+          }
+        : {
+            sequenceNumber: row.reversalSequenceNumber,
+            result: row.reversalResult,
+            createdAt: row.reversalCreatedAt,
+          };
+    const reversal =
+      linkedRecord.sequenceNumber === null ||
+      linkedRecord.result === null ||
+      linkedRecord.createdAt === null
+        ? null
+        : {
+            relation:
+              row.result === 'PENALTY_REVERSAL'
+                ? ('REVERSAL_OF' as const)
+                : ('REVERSED_BY' as const),
+            sequenceNumber: linkedRecord.sequenceNumber,
+            result: linkedRecord.result,
+            createdAt: linkedRecord.createdAt.toISOString(),
+          };
+    const adminDisplayName = [row.actorFirstName, row.actorLastName]
+      .filter((name): name is string => name !== null)
+      .join(' ');
+
+    return {
+      ladder: row.ladder,
+      source: row.source,
+      sourceDisplayId: row.sourceDisplayId,
+      sequenceNumber: row.sequenceNumber,
+      result: row.result,
+      actor: {
+        type: row.actorType,
+        displayName: row.actorType === 'SYSTEM' ? 'System' : adminDisplayName || 'Admin',
+      },
+      reasonCode: row.reasonCode,
+      createdAt: row.createdAt.toISOString(),
+      reviewRating: row.reviewRating,
+      isEffectiveActiveMisconductPenalty: row.isEffectiveActiveMisconductPenalty,
+      reversal,
+    };
+  });
+  const counts = countRows[0];
+
+  return {
+    member: { displayId: member.displayId },
+    confirmedMisconductCount: counts?.confirmedMisconductCount ?? 0,
+    effectiveActiveMisconductPenaltyCount: counts?.effectiveActiveMisconductPenaltyCount ?? 0,
+    reviewLadderRecordCount: counts?.reviewLadderRecordCount ?? 0,
+    items,
+    totalCount: counts?.totalCount ?? 0,
+    nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
+  };
+};
 export const listAdminMembers = async (
   query: AdminMemberListQuery = {}
 ): Promise<AdminMemberListPage> => {

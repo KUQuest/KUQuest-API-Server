@@ -171,6 +171,59 @@ export const adminMemberCertificatesResponseSchema = t.Object({
   }),
 });
 
+const memberPenaltyLadderSchema = t.Union([t.Literal('MISCONDUCT'), t.Literal('REVIEW')]);
+const memberPenaltySourceSchema = t.Union([
+  t.Literal('REPORT_CASE'),
+  t.Literal('CONDUCT_REPORT'),
+  t.Literal('REVIEW_AVERAGE'),
+]);
+const memberPenaltyResultSchema = t.Union([
+  t.Literal('PENALTY_EXEMPT'),
+  t.Literal('PENALTY_RED_FLAG'),
+  t.Literal('PENALTY_TEMPORARY_BAN_7_DAYS'),
+  t.Literal('PENALTY_TEMPORARY_BAN_1_MONTH'),
+  t.Literal('PENALTY_PERMANENT_BAN'),
+  t.Literal('PENALTY_REVERSAL'),
+]);
+
+const adminMemberPenaltyHistoryItemSchema = t.Object({
+  ladder: memberPenaltyLadderSchema,
+  source: memberPenaltySourceSchema,
+  sourceDisplayId: t.Union([t.String({ pattern: '^(RPT|CND|QST)-[0-9]{6,}$' }), t.Null()]),
+  sequenceNumber: t.Integer({ minimum: 1 }),
+  result: memberPenaltyResultSchema,
+  actor: t.Object({
+    type: t.Union([t.Literal('ADMIN'), t.Literal('SYSTEM')]),
+    displayName: t.String(),
+  }),
+  reasonCode: t.String(),
+  createdAt: dateTime,
+  reviewRating: t.Union([t.Integer({ minimum: 1, maximum: 5 }), t.Null()]),
+  isEffectiveActiveMisconductPenalty: t.Boolean(),
+  reversal: t.Union([
+    t.Object({
+      relation: t.Union([t.Literal('REVERSAL_OF'), t.Literal('REVERSED_BY')]),
+      sequenceNumber: t.Integer({ minimum: 1 }),
+      result: memberPenaltyResultSchema,
+      createdAt: dateTime,
+    }),
+    t.Null(),
+  ]),
+});
+
+export const adminMemberPenaltyHistoryResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    member: adminMemberProfileIdentitySchema,
+    confirmedMisconductCount: t.Integer({ minimum: 0 }),
+    effectiveActiveMisconductPenaltyCount: t.Integer({ minimum: 0 }),
+    reviewLadderRecordCount: t.Integer({ minimum: 0 }),
+    items: t.Array(adminMemberPenaltyHistoryItemSchema),
+    totalCount: t.Integer({ minimum: 0 }),
+    nextCursor: t.Union([t.String(), t.Null()]),
+  }),
+});
+
 export type AdminMemberProfileIdentity = Static<typeof adminMemberProfileIdentitySchema>;
 export type AdminMemberWorkExperienceItem = Static<typeof adminMemberWorkExperienceSchema>;
 export type AdminMemberCertificateItem = Static<typeof adminMemberCertificateSchema>;
@@ -186,6 +239,9 @@ export type AdminMemberWorkExperiencesData = Static<
 >['data'];
 export type AdminMemberCertificatesData = Static<
   typeof adminMemberCertificatesResponseSchema
+>['data'];
+export type AdminMemberPenaltyHistoryData = Static<
+  typeof adminMemberPenaltyHistoryResponseSchema
 >['data'];
 
 export type AdminMemberParams = Static<typeof adminMemberParamsSchema>;

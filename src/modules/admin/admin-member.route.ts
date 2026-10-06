@@ -8,6 +8,7 @@ import {
   getAdminMemberDetailController,
   getAdminMemberProfileTagsController,
   listAdminMemberCertificatesController,
+  listAdminMemberPenaltyHistoryController,
   listAdminMemberWorkExperiencesController,
   listAdminMembersController,
 } from './admin-member.controller';
@@ -20,6 +21,7 @@ import {
   adminMemberProfileCollectionQuerySchema,
   adminMemberProfileTagsResponseSchema,
   adminMemberWorkExperiencesResponseSchema,
+  adminMemberPenaltyHistoryResponseSchema,
 } from './admin-member.schema';
 
 export const adminMemberRoute = new Elysia({
@@ -84,6 +86,19 @@ export const adminMemberRoute = new Elysia({
       description:
         'Returns Certificates with bounded cursor pagination and safe image metadata. It does not return storage URLs or storage object details.',
       operationId: 'listAdminMemberCertificates',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:id/penalty-history', listAdminMemberPenaltyHistoryController, {
+    params: adminMemberParamsSchema,
+    query: adminMemberProfileCollectionQuerySchema,
+    response: responses(adminMemberPenaltyHistoryResponseSchema, 400, 401, 403, 404, 500),
+    detail: {
+      tags: ['Admin Members'],
+      summary: 'List a Member’s Penalty History',
+      description:
+        'Returns immutable penalty records and separate Misconduct and Review ladder counts with safe source Display IDs.',
+      operationId: 'listAdminMemberPenaltyHistory',
       security: betterAuthSecurity,
     },
   });
