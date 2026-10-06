@@ -49,12 +49,12 @@ let memberCookie = '';
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
-const creditEarnings = async (studentId: string, amountSatang: number) => {
+const creditEarnings = async (memberId: string, amountSatang: number) => {
   const accounts = await db
     .select({ id: walletLedgerAccount.id, type: walletLedgerAccount.type })
     .from(walletLedgerAccount)
     .innerJoin(walletWallet, eq(walletLedgerAccount.walletId, walletWallet.id))
-    .where(eq(walletWallet.userId, studentId));
+    .where(eq(walletWallet.userId, memberId));
   const [suspense] = await db
     .select({ id: walletLedgerAccount.id })
     .from(walletLedgerAccount)
@@ -71,19 +71,32 @@ const creditEarnings = async (studentId: string, amountSatang: number) => {
   });
 };
 
+const createPayoutForMember = async (memberId: string) => {
+  await creditEarnings(memberId, 10_000);
+  const quote = await quotePayout({
+    principalUserId: memberId,
+    receiptSatang: positiveSatang(1_234),
+  });
+  return initiatePayout({
+    principalUserId: memberId,
+    quoteId: quote.id,
+    idempotency: { key: `payout-admin-route-submit-${crypto.randomUUID()}` },
+  });
+};
+
 const createPendingPayout = async () => {
-  const studentId = crypto.randomUUID();
+  const memberId = crypto.randomUUID();
   await db.insert(authUser).values({
-    id: studentId,
-    email: `${studentId}@ku.th`,
+    id: memberId,
+    email: `${memberId}@ku.th`,
     firstName: 'Route',
     lastName: 'Student',
     studentId: String(1_000_000_000 + Math.floor(Math.random() * 9_000_000_000)),
   });
-  await ensureWallet(studentId);
+  await ensureWallet(memberId);
   await savePayoutDestination(
     {
-      principalUserId: studentId,
+      principalUserId: memberId,
       givenName: 'Route',
       surname: 'Student',
       relationship: 'SELF',
@@ -95,16 +108,7 @@ const createPendingPayout = async () => {
     },
     encryption
   );
-  await creditEarnings(studentId, 10_000);
-  const quote = await quotePayout({
-    principalUserId: studentId,
-    receiptSatang: positiveSatang(1_234),
-  });
-  return initiatePayout({
-    principalUserId: studentId,
-    quoteId: quote.id,
-    idempotency: { key: `payout-admin-route-submit-${crypto.randomUUID()}` },
-  });
+  return createPayoutForMember(memberId);
 };
 
 beforeAll(async () => {
@@ -211,7 +215,10 @@ describe('Payout API routes', () => {
   it('publishes Student and Admin Payout contracts in OpenAPI', async () => {
     const response = await app.handle(new Request('http://localhost/openapi/json'));
     const document = (await response.json()) as {
-      paths: Record<string, Record<string, { operationId?: string; security?: unknown }>>;
+      paths: Record<
+        string,
+        Record<string, { operationId?: string; security?: unknown; description?: string }>
+      >;
     };
 
     expect(response.status).toBe(200);
@@ -224,6 +231,10 @@ describe('Payout API routes', () => {
     expect(document.paths['/api/v1/admin/payouts/{payoutId}/cancel']?.post?.operationId).toBe(
       'cancelPayout'
     );
+    const payoutList = document.paths['/api/v1/admin/payouts']?.get;
+    expect(payoutList?.description).toContain('status=ALL');
+    expect(JSON.stringify(document)).toContain('"ALL"');
+    expect(JSON.stringify(document)).toContain('totalCount');
   });
 
   it('serves the authenticated Admin queue, cursor, detail, and history contracts', async () => {
@@ -568,6 +579,207 @@ describe('Payout API routes', () => {
         .set({ createdAt: new Date() })
         .where(inArray(paymentPayouts.id, seededIds));
     }
+  }, 60_000);
+
+  it('lists complete filtered Member Payout history across all statuses', async () => {
+    const failedPayout = await createPendingPayout();
+    await db
+      .update(paymentPayouts)
+      .set({ payoutStatus: 'FAILED' })
+      .where(eq(paymentPayouts.id, failedPayout.id));
+    const cancelledPayout = await createPayoutForMember(failedPayout.principalUserId);
+    const pendingPayout = await createPendingPayout();
+    const submittedPayout = await createPendingPayout();
+    const providerPendingPayout = await createPendingPayout();
+    const succeededPayout = await createPendingPayout();
+    const statusCases = [
+      { payout: pendingPayout, status: 'PENDING_ADMIN_APPROVAL' },
+      { payout: submittedPayout, status: 'SUBMITTED_TO_PROVIDER' },
+      { payout: providerPendingPayout, status: 'PROVIDER_PENDING' },
+      { payout: succeededPayout, status: 'SUCCEEDED' },
+      { payout: failedPayout, status: 'FAILED' },
+      { payout: cancelledPayout, status: 'CANCELLED' },
+    ] as const;
+    const timestamp = '2099-01-05T00:00:00.101300Z';
+    await Promise.all(
+      statusCases.map(
+        ({ payout, status }) => sql`
+          update payment_payouts
+          set payout_status = ${status},
+              created_at = ${timestamp}::timestamptz,
+              updated_at = ${timestamp}::timestamptz
+          where id = ${payout.id}
+        `
+      )
+    );
+
+    type PayoutListItem = {
+      id: string;
+      displayId: string;
+      student: { id: string; displayId: string };
+      payoutStatus: string;
+      bankCode: string;
+      bankName: string;
+      destinationType: string;
+      maskedDestinationValue: string;
+      maskedRoutingValue: string;
+      createdAt: string;
+      updatedAt: string;
+    };
+    type PayoutListPage = {
+      data: { items: PayoutListItem[]; nextCursor: string | null; totalCount: number };
+    };
+    const seededIds = statusCases.map(({ payout }) => payout.id);
+    const ascendingSeedIds = [...seededIds].sort();
+
+    const readLatestAllStatusPages = async () => {
+      const items: PayoutListItem[] = [];
+      let cursor: string | null = null;
+
+      for (let page = 0; page < statusCases.length; page += 1) {
+        const params = new URLSearchParams({ status: 'ALL', limit: '1', sort: 'newest' });
+        if (cursor) params.set('cursor', cursor);
+        // eslint-disable-next-line no-await-in-loop
+        const response = await app.handle(
+          new Request(`http://localhost/api/v1/admin/payouts?${params}`, {
+            headers: { cookie: adminCookie },
+          })
+        );
+        expect(response.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const body = (await response.json()) as PayoutListPage;
+        expect(body.data.totalCount).toBeGreaterThanOrEqual(statusCases.length);
+        expect(body.data.items).toHaveLength(1);
+        const item = body.data.items[0];
+        if (!item) throw new Error('Payout history page did not contain its expected item.');
+        expect(seededIds).toContain(item.id);
+        expect(item).toMatchObject({
+          displayId: expect.stringMatching(/^PAY-\d{6,}$/),
+          student: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+          bankCode: 'SCB',
+          bankName: 'Siam Commercial Bank',
+          destinationType: 'BANK_ACCOUNT',
+          maskedDestinationValue: '****7890',
+          maskedRoutingValue: '****7890',
+          createdAt: '2099-01-05T00:00:00.101Z',
+          updatedAt: '2099-01-05T00:00:00.101Z',
+        });
+        expect(JSON.stringify(body)).not.toContain('1234567890');
+        expect(JSON.stringify(body)).not.toContain('destinationAccountNumberCiphertext');
+        expect(JSON.stringify(body)).not.toContain('destinationRoutingValueCiphertext');
+        items.push(item);
+        cursor = body.data.nextCursor;
+        if (page < statusCases.length - 1) expect(cursor).toBeString();
+      }
+
+      expect(items).toHaveLength(statusCases.length);
+      expect(new Set(items.map((item) => item.id)).size).toBe(statusCases.length);
+      expect(items.map((item) => item.id)).toEqual([...ascendingSeedIds].reverse());
+      for (const { payout, status } of statusCases) {
+        expect(items.find((item) => item.id === payout.id)?.payoutStatus).toBe(status);
+      }
+    };
+
+    await readLatestAllStatusPages();
+
+    const readMemberHistory = async (sort: 'newest' | 'oldest') => {
+      const items: PayoutListItem[] = [];
+      let cursor: string | null = null;
+
+      for (let page = 0; page < 2; page += 1) {
+        const params = new URLSearchParams({
+          status: 'ALL',
+          userId: failedPayout.principalUserId,
+          limit: '1',
+          sort,
+        });
+        if (cursor) params.set('cursor', cursor);
+        // eslint-disable-next-line no-await-in-loop
+        const response = await app.handle(
+          new Request(`http://localhost/api/v1/admin/payouts?${params}`, {
+            headers: { cookie: adminCookie },
+          })
+        );
+        expect(response.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const body = (await response.json()) as PayoutListPage;
+        expect(body.data.totalCount).toBe(2);
+        expect(body.data.items).toHaveLength(1);
+        expect(body.data.items[0]?.student).toMatchObject({
+          id: failedPayout.principalUserId,
+          displayId: expect.stringMatching(/^MEM-\d{6,}$/),
+        });
+        if (page === 0) expect(body.data.nextCursor).toBeString();
+        else expect(body.data.nextCursor).toBeNull();
+        items.push(...body.data.items);
+        cursor = body.data.nextCursor;
+        if (!cursor) break;
+      }
+
+      expect(cursor).toBeNull();
+      const ascendingMemberIds = [failedPayout.id, cancelledPayout.id].sort();
+      expect(items.map((item) => item.id)).toEqual(
+        sort === 'newest' ? [...ascendingMemberIds].reverse() : ascendingMemberIds
+      );
+      return items;
+    };
+
+    await readMemberHistory('newest');
+    await readMemberHistory('oldest');
+
+    const singleStatusResults = await Promise.all(
+      statusCases.map(async ({ payout, status }) => {
+        const params = new URLSearchParams({ status, userId: payout.principalUserId, limit: '50' });
+        const response = await app.handle(
+          new Request(`http://localhost/api/v1/admin/payouts?${params}`, {
+            headers: { cookie: adminCookie },
+          })
+        );
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as PayoutListPage;
+        expect(body.data.totalCount).toBe(1);
+        expect(body.data.items.map((item) => item.id)).toEqual([payout.id]);
+        return body.data.items[0]?.payoutStatus;
+      })
+    );
+    expect(singleStatusResults).toEqual(statusCases.map(({ status }) => status));
+
+    const defaultResponse = await app.handle(
+      new Request(
+        `http://localhost/api/v1/admin/payouts?userId=${pendingPayout.principalUserId}&limit=50`,
+        { headers: { cookie: adminCookie } }
+      )
+    );
+    const defaultBody = (await defaultResponse.json()) as PayoutListPage;
+    expect(defaultResponse.status).toBe(200);
+    expect(defaultBody.data).toMatchObject({
+      items: [
+        expect.objectContaining({ id: pendingPayout.id, payoutStatus: 'PENDING_ADMIN_APPROVAL' }),
+      ],
+      totalCount: 1,
+      nextCursor: null,
+    });
+
+    const emptyResults = await Promise.all(
+      ['ALL', 'FAILED'].map(async (status) => {
+        const params = new URLSearchParams({ status, userId: crypto.randomUUID() });
+        const response = await app.handle(
+          new Request(`http://localhost/api/v1/admin/payouts?${params}`, {
+            headers: { cookie: adminCookie },
+          })
+        );
+        expect(response.status).toBe(200);
+        return response.json();
+      })
+    );
+    for (const result of emptyResults) {
+      expect(result).toMatchObject({ data: { items: [], totalCount: 0, nextCursor: null } });
+    }
+    const restoredAt = new Date();
+    await db
+      .update(paymentPayouts)
+      .set({ createdAt: restoredAt, updatedAt: restoredAt })
+      .where(inArray(paymentPayouts.id, seededIds));
   }, 60_000);
 
   it('rejects a cursor whose Payout no longer exists', async () => {

@@ -1,10 +1,11 @@
-import { formatPayoutDisplayId } from '@/modules/admin/admin-display-id';
+import { formatDisplayIdSql, formatPayoutDisplayId } from '@/modules/admin/admin-display-id';
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import {
   paymentPayoutStatusHistory,
   paymentPayoutQuotes,
   paymentPayouts,
+  payoutStatuses,
   type PayoutStatus,
 } from '@/database/schema/payment.schema';
 import {
@@ -17,7 +18,7 @@ import { MoneyDomainError } from '@/modules/wallet';
 import type { CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
 
 import { approvePayoutInTransaction, cancelPayoutInTransaction } from './payout.service';
 
@@ -77,6 +78,7 @@ export type AdminPayout = {
   displayId: string;
   student: {
     id: string;
+    displayId: string;
     email: string;
     firstName: string;
     lastName: string;
@@ -250,6 +252,7 @@ const adminPayoutRows = (executor: typeof db | AdminActionTransaction) =>
       payout: safePayoutColumns,
       student: {
         id: authUser.id,
+        displayId: formatDisplayIdSql('member', authUser.publicSequence),
         email: authUser.email,
         firstName: authUser.firstName,
         lastName: authUser.lastName,
@@ -378,7 +381,7 @@ export const getAdminPayout = async (payoutId: string): Promise<AdminPayout> => 
 export const listAdminPayoutStatusHistory = adminPayoutHistory;
 
 export type ListAdminPayoutsInput = {
-  status?: PayoutStatus;
+  status?: PayoutStatus | 'ALL';
   userId?: string;
   limit?: number;
   cursor?: CursorPayload;
@@ -395,23 +398,28 @@ export const listAdminPayouts = async ({
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     throw new MoneyDomainError('INVALID_LIMIT', 'Admin Payout limit must be between 1 and 50.');
   }
-  const page = await readKeysetPage({
-    anchor: { time: paymentPayouts.createdAt, id: paymentPayouts.id },
-    cursor,
-    limit,
-    sort,
-    where: and(
-      eq(paymentPayouts.payoutStatus, status),
-      userId ? eq(paymentPayouts.userId, userId) : undefined
-    ),
-    read: ({ where, orderBy, limit: probe }) =>
-      adminPayoutRows(db)
-        .where(where)
-        .orderBy(...orderBy)
-        .limit(probe),
-    rowCursor: (row) => ({ startTime: row.payout.createdAt, id: row.payout.id }),
-    invalidCursor: () => new MoneyDomainError('INVALID_LIMIT', 'Admin Payout cursor is invalid.'),
-  });
+  const statusFilter =
+    status === 'ALL'
+      ? inArray(paymentPayouts.payoutStatus, payoutStatuses)
+      : eq(paymentPayouts.payoutStatus, status);
+  const where = and(statusFilter, userId ? eq(paymentPayouts.userId, userId) : undefined);
+  const [[countResult], page] = await Promise.all([
+    db.select({ totalCount: count() }).from(paymentPayouts).where(where),
+    readKeysetPage({
+      anchor: { time: paymentPayouts.createdAt, id: paymentPayouts.id },
+      cursor,
+      limit,
+      sort,
+      where,
+      read: ({ where: pageWhere, orderBy, limit: probe }) =>
+        adminPayoutRows(db)
+          .where(pageWhere)
+          .orderBy(...orderBy)
+          .limit(probe),
+      rowCursor: (row) => ({ startTime: row.payout.createdAt, id: row.payout.id }),
+      invalidCursor: () => new MoneyDomainError('INVALID_LIMIT', 'Admin Payout cursor is invalid.'),
+    }),
+  ]);
   const items = await Promise.all(
     page.rows.map(async (row: { payout: SafePayoutRecord; student: AdminPayout['student'] }) =>
       adminPayoutFromRecord(
@@ -421,5 +429,5 @@ export const listAdminPayouts = async ({
       )
     )
   );
-  return { items, nextCursor: page.nextCursor };
+  return { items, nextCursor: page.nextCursor, totalCount: countResult?.totalCount ?? 0 };
 };

@@ -40,7 +40,7 @@ export const adminPayoutRoute = new Elysia({
       tags: ['Admin Payouts'],
       summary: 'List Payouts for Admin review',
       description:
-        'Lists waiting Payouts by default. Historical status filters, cursor pagination, and newest or oldest sorting are supported.',
+        'Lists Payouts in PENDING_ADMIN_APPROVAL by default. Use status=ALL for complete Member history across all six statuses. Supports Member filtering, bounded cursor pagination, newest or oldest sorting, and totalCount for the active filters.',
       operationId: 'listAdminPayouts',
       security: betterAuthSecurity,
     },
