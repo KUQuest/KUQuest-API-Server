@@ -1,6 +1,10 @@
 import { enabledAdminGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
-import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import {
+  betterAuthAdminSecurity,
+  betterAuthSecurity,
+  responses,
+} from '@/shared/api-response.schema';
 
 import { Elysia } from 'elysia';
 
@@ -9,6 +13,7 @@ import {
   getAdminMemberProfileTagsController,
   listAdminMemberCertificatesController,
   listAdminMemberPenaltyHistoryController,
+  listAdminMemberReviewsController,
   listAdminMemberWorkExperiencesController,
   listAdminMembersController,
 } from './admin-member.controller';
@@ -22,6 +27,8 @@ import {
   adminMemberProfileTagsResponseSchema,
   adminMemberWorkExperiencesResponseSchema,
   adminMemberPenaltyHistoryResponseSchema,
+  adminMemberReviewsQuerySchema,
+  adminMemberReviewsResponseSchema,
 } from './admin-member.schema';
 
 export const adminMemberRoute = new Elysia({
@@ -39,6 +46,19 @@ export const adminMemberRoute = new Elysia({
         'Lists students and staff with academic affiliation, status, and wallet summary.',
       operationId: 'listAdminMembers',
       security: betterAuthSecurity,
+    },
+  })
+  .get('/:id/reviews', listAdminMemberReviewsController, {
+    params: adminMemberParamsSchema,
+    query: adminMemberReviewsQuerySchema,
+    response: responses(adminMemberReviewsResponseSchema, 400, 401, 403, 404),
+    detail: {
+      tags: ['Admin Members'],
+      summary: 'List Reviews received by a Member',
+      description:
+        'Lists received Reviews with rating, comment, dates, Reviewer and Quest display IDs, and the current Quest State. The Review has no status.',
+      operationId: 'listAdminMemberReviews',
+      security: betterAuthAdminSecurity,
     },
   })
   .get('/:id', getAdminMemberDetailController, {

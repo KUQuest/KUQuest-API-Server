@@ -25,8 +25,17 @@ export type KeysetCursorAnchor = {
 type KeysetRowCursor = { startTime: Date; id: string; scope?: string };
 
 export type KeysetPageRequest<TRow> = (
-  | { anchor: KeysetAnchor; cursorAnchor?: never }
-  | { anchor?: never; cursorAnchor: KeysetCursorAnchor }
+  | {
+      anchor: KeysetAnchor;
+      cursorAnchor?: never;
+      /** Resolves a table-backed cursor anchor with the list's current filters. */
+      cursorAnchorRead?: KeysetCursorAnchor['read'];
+    }
+  | {
+      anchor?: never;
+      cursorAnchor: KeysetCursorAnchor;
+      cursorAnchorRead?: never;
+    }
 ) & {
   cursor?: CursorPayload | undefined;
   /** Rows per page. Check it against the page-limit rule with `parsePageLimit` first. */
@@ -61,6 +70,7 @@ export type KeysetPage<TRow> = {
 export const readKeysetPage = async <TRow>({
   anchor,
   cursorAnchor,
+  cursorAnchorRead,
   cursor,
   limit,
   sort = 'newest',
@@ -83,6 +93,15 @@ export const readKeysetPage = async <TRow>({
         throw invalidCursor();
       }
       customBoundary = cursorAnchor.boundary(matched, sort);
+    } else if (cursorAnchorRead) {
+      const matched = await cursorAnchorRead(cursor);
+      if (
+        !matched ||
+        matched.startTime.toISOString() !== cursor.startTime ||
+        matched.scope !== cursor.scope
+      ) {
+        throw invalidCursor();
+      }
     } else {
       if (!anchor || cursor.scope !== undefined) throw invalidCursor();
       const [matched] = await db

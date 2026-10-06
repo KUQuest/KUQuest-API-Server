@@ -11,6 +11,7 @@ import { profileCertificate, profileWorkExperience } from '@/database/schema/pro
 import { paymentPayouts } from '@/database/schema/payment.schema';
 import { quest, questAssignment, review } from '@/database/schema/quest.schema';
 import { walletFundingReservationSettlement, walletWallet } from '@/database/schema/wallet.schema';
+import { validReceivedReviewFilter } from '@/modules/quest/shared/rating-review.service';
 import { walletProjectionMatchesLedger } from '@/modules/wallet';
 import { getProfileTags } from '@/modules/profile';
 import {
@@ -36,6 +37,8 @@ import type {
   AdminMemberProfileCollectionQuery,
   AdminMemberProfileIdentity,
   AdminMemberProfileTagsData,
+  AdminMemberReviewsData,
+  AdminMemberReviewsQuery,
   AdminMemberWorkExperienceItem,
   AdminMemberWorkExperiencesData,
 } from './admin-member.schema';
@@ -636,5 +639,94 @@ export const getAdminMemberDetail = async (
       totalEarnedSatang: Number(earnedStats?.totalEarned ?? 0),
       totalPaidOutSatang: Number(payoutsStats?.totalPaidOut ?? 0),
     },
+  };
+};
+
+export const listAdminMemberReviews = async (
+  memberId: string,
+  query: AdminMemberReviewsQuery
+): Promise<AdminMemberReviewsData | null> => {
+  const [member] = await db
+    .select({ id: authUser.id })
+    .from(authUser)
+    .where(eq(authUser.id, memberId))
+    .limit(1);
+  if (!member) return null;
+
+  const cursor = decodeCursor(query.cursor);
+  const limit = parsePageLimit(query.limit);
+  const cursorScope = `MEMBER_REVIEW_${query.rating ?? 'ALL'}`;
+  const conditions = [validReceivedReviewFilter(memberId)];
+  if (query.rating !== undefined) {
+    conditions.push(eq(review.rating, query.rating));
+  }
+  const where = and(...conditions);
+  const page = await readKeysetPage({
+    anchor: { time: review.createdAt, id: review.id },
+    cursor,
+    limit,
+    cursorAnchorRead: async (pageCursor) => {
+      const [row] = await db
+        .select({ startTime: review.createdAt, id: review.id })
+        .from(review)
+        .innerJoin(quest, eq(review.questId, quest.id))
+        .where(and(where, eq(review.id, pageCursor.id)))
+        .limit(1);
+      return row ? { ...row, scope: cursorScope } : undefined;
+    },
+    where,
+    read: ({ where: pageWhere, orderBy, limit: probe }) =>
+      db
+        .select({
+          id: review.id,
+          rating: review.rating,
+          comment: review.comment,
+          createdAt: review.createdAt,
+          updatedAt: review.updatedAt,
+          reviewerDisplayId: formatDisplayIdSql('member', authUser.publicSequence),
+          reviewerFirstName: authUser.firstName,
+          reviewerLastName: authUser.lastName,
+          questDisplayId: formatDisplayIdSql('quest', quest.publicSequence),
+          questTitle: quest.title,
+          questStatus: quest.questStatus,
+        })
+        .from(review)
+        .innerJoin(authUser, eq(review.reviewerId, authUser.id))
+        .innerJoin(quest, eq(review.questId, quest.id))
+        .where(pageWhere)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({
+      startTime: row.createdAt,
+      id: row.id,
+      scope: cursorScope,
+    }),
+    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a Review'),
+  });
+  const [totalCount] = await db
+    .select({ total: count() })
+    .from(review)
+    .innerJoin(quest, eq(review.questId, quest.id))
+    .where(where);
+
+  return {
+    items: page.rows.map((row) => ({
+      id: row.id,
+      rating: row.rating,
+      comment: row.comment,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      reviewer: {
+        displayId: row.reviewerDisplayId,
+        name: `${row.reviewerFirstName} ${row.reviewerLastName}`,
+      },
+      quest: {
+        displayId: row.questDisplayId,
+        title: row.questTitle,
+        questStatus: row.questStatus,
+      },
+    })),
+    nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
+    totalCount: totalCount?.total ?? 0,
   };
 };

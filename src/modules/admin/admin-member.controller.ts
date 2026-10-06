@@ -6,13 +6,15 @@ import type {
   AdminMemberListQuery,
   AdminMemberParams,
   AdminMemberProfileCollectionQuery,
+  AdminMemberReviewsQuery,
 } from './admin-member.schema';
 import {
   getAdminMemberDetail,
   getAdminMemberProfileTags,
   listAdminMemberCertificates,
-  listAdminMemberWorkExperiences,
   listAdminMemberPenaltyHistory,
+  listAdminMemberReviews,
+  listAdminMemberWorkExperiences,
   listAdminMembers,
 } from './admin-member.service';
 const memberNotFound = (set: AdminContext['set']): ApiResponse => {
@@ -24,7 +26,6 @@ const cursorInputErrorResponse = (
   set: AdminContext['set']
 ): ApiResponse | undefined => {
   if (!(error instanceof CursorInputError)) return undefined;
-
   set.status = 400;
   return apiError(error.code, error.message);
 };
@@ -114,6 +115,25 @@ export const listAdminMemberPenaltyHistoryController = async ({
 }): Promise<ApiResponse> => {
   try {
     const data = await listAdminMemberPenaltyHistory(params.id, query);
+    if (!data) return memberNotFound(set);
+    return apiSuccess(data);
+  } catch (error) {
+    const response = cursorInputErrorResponse(error, set);
+    if (response) return response;
+    throw error;
+  }
+};
+
+export const listAdminMemberReviewsController = async ({
+  params,
+  query,
+  set,
+}: AdminContext & {
+  params: AdminMemberParams;
+  query: AdminMemberReviewsQuery;
+}): Promise<ApiResponse> => {
+  try {
+    const data = await listAdminMemberReviews(params.id, query);
     if (!data) return memberNotFound(set);
     return apiSuccess(data);
   } catch (error) {
