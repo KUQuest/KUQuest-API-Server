@@ -701,6 +701,13 @@
       "when": 1791230803253,
       "tag": "20261005200643_panoramic_matthew_murdock",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1791316800000,
+      "tag": "20261006000100_wallet_realtime_events",
+      "breakpoints": true
     }
   ]
 }
