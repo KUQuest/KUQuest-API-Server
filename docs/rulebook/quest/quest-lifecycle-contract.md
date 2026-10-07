@@ -20,7 +20,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 - An eligible Prospective Worker joins only by accepting the current Join Code, until the Team reaches its entered Team `headcount`. A Candidate may belong to one Team for one Quest.
 - A Join Code is valid for 24 hours. The Team Leader may regenerate it; the prior code becomes invalid.
 - A forming Member may leave. The Team Leader may remove another Member. If the Team Leader leaves, leadership transfers to the earliest joined remaining Member. If the last Member leaves, the Team disbands.
-- At the entered Team `headcount`, the Team Leader explicitly submits the Team to the Hirer. The submission must contain text and at least one file. Each file follows the type and size rules for a Work Conversation Attachment. A submitted Team is immutable and its Join Code is invalid.
+- At the entered Team `headcount`, the Team Leader explicitly submits the Team to the Hirer. The submission must contain text and may contain files. Each file follows the type and size rules for a Work Conversation Attachment. A submitted Team is immutable and its Join Code is invalid.
 - A submitted Team cannot withdraw.
 - Hirer selection creates the accepted Assignment roster and rejects every other Candidate application and submitted Team in the same transaction.
 - A Candidate Quest still `QUEST_OPEN` at `startTime` cancels.

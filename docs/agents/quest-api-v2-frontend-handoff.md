@@ -1804,8 +1804,9 @@ joinCode and joinCodeExpiresAt.
 
 ### 9.10 Upload a private Candidate Team file
 
-Upload each private file before submitting the Team. Keep each returned fileId
-and send those UUIDs in the subsequent Team submission fileIds array.
+When the Team Leader wants to include files, upload each private file before
+submitting the Team. Keep each returned fileId and send those UUIDs in the
+subsequent Team submission fileIds array.
 
 Request:
 
@@ -1854,8 +1855,8 @@ Errors:
 
 ### 9.11 Submit a Candidate Team
 
-Upload the private files first, then submit the returned fileIds. Do not use
-Chat Attachment IDs.
+Upload private files first when the Team Leader wants to include them, then
+submit the returned fileIds. Files are optional. Do not use Chat Attachment IDs.
 
 Request:
 
@@ -1877,7 +1878,7 @@ Fields:
 | Field   | Type       | Required | Rule                                                                          |
 | ------- | ---------- | -------- | ----------------------------------------------------------------------------- |
 | text    | string     | yes      | Non-blank submission text                                                     |
-| fileIds | UUID array | yes      | Returned private file IDs owned by Team Leader; allowed types; maximum 10 MiB |
+| fileIds | UUID array | no       | Optional returned private file IDs owned by Team Leader; allowed types; maximum 10 MiB |
 
 The Team Leader can submit only when the Team is full.
 Submission changes the Team to TEAM_SUBMITTED.
@@ -1893,6 +1894,7 @@ Submission response:
 }
 ```
 
+Omit fileIds or send an empty array when the Team has no files.
 Do not send a Chat Attachment ID as fileIds.
 Do not guess an ID conversion.
 
