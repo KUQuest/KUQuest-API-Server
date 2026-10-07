@@ -1086,6 +1086,7 @@ assignment and capabilities:
     "headcount": 1,
     "activeWorkerCount": 1,
     "startedWorkerCount": 1,
+    "workers": null,
     "assignment": {
       "status": "ASSIGNMENT_ACTIVE",
       "startedAt": "2026-09-30T02:00:00.000Z"
@@ -1109,6 +1110,13 @@ Quest schedule fields such as startTime and dueAt, not this one.
 
 startedWorkerCount counts the Active Assignments that have a Start Work time. Use it with
 activeWorkerCount to show GROUP progress (for example "2 of 3 started"). It names no one.
+
+workers is null except on GROUP + FIRST_COME_FIRST_SERVED Quests. There it lists
+`{ "id", "displayName" }` for every Worker whose Assignment was not cancelled,
+the caller included, in acceptance order. Completed and incomplete Workers stay
+in the list, so a finished Quest still names everyone who worked it. Use it for
+the Group FCFS roster instead of the Work Conversation participants, which drop
+each Worker who finishes before the others.
 
 dispute and moneyHold are null unless the Quest is QUEST_FAILED. See section 13.2.
 The same two fields are on GET /api/v2/quests/:questId for the Hirer.
@@ -1251,7 +1259,7 @@ Other callers receive a masked 404 QUEST_NOT_FOUND.
 
 GROUP Quests (confirmed against the code):
 
-1. A Worker does **not** receive all Active Assignments. Other Workers' rows stay private. Use `activeWorkerCount` and `startedWorkerCount` from GET /api/v2/quests/:questId/participation to show roster progress.
+1. A Worker does **not** receive other Workers' Assignment rows here. Use `activeWorkerCount` and `startedWorkerCount` from GET /api/v2/quests/:questId/participation to show roster progress. On GROUP + FIRST_COME_FIRST_SERVED Quests, read the names from that response's `workers` (every Worker whose Assignment was not cancelled, in acceptance order, also after settlement).
 2. `member.displayName` is present on every row. It is never empty; a Member with no name reads `Former member`.
 3. `startedAt` is returned to a Worker on their own row. It is null until that Worker uses Start Work.
 
