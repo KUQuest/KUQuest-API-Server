@@ -14,7 +14,6 @@ import {
 import {
   adminConductReportDismissDecisionBodySchema,
   adminConductReportUpholdDecisionBodySchema,
-  adminReportCaseDecisionBodySchema,
   adminReportCaseDismissDecisionBodySchema,
   adminReportCaseHideDecisionBodySchema,
   adminReportCaseRestoreDecisionBodySchema,
