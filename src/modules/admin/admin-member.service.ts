@@ -26,11 +26,10 @@ import { walletFundingReservationSettlement, walletWallet } from '@/database/sch
 import { validReceivedReviewFilter } from '@/modules/quest/shared/rating-review.service';
 import { walletProjectionMatchesLedger } from '@/modules/wallet';
 import { getProfileTags } from '@/modules/profile';
-import {
-  assignmentStatuses,
-  type AssignmentStatus,
-  type QuestStatus,
-} from '@/modules/quest/shared';
+import type {
+  AssignmentStatus,
+  QuestStatus,
+} from '@/modules/quest/shared/contracts/quest.contract';
 import {
   CursorInputError,
   decodeCursor,
@@ -727,22 +726,26 @@ const memberHistoryQuestCompletedAt = () =>
       select "proof_submission"."reviewed_at" as event_at
       from ${proofSubmission}
       where "proof_submission"."quest_id" = "quest"."id"
+        and "quest"."api_version" = 'v1'
         and "proof_submission"."submission_status" = 'PROOF_APPROVED'
         and "proof_submission"."reviewed_at" is not null
       union all
       select "quest_v2_proof_submission"."reviewed_at" as event_at
       from ${questV2ProofSubmission}
       where "quest_v2_proof_submission"."quest_id" = "quest"."id"
+        and "quest"."api_version" = 'v2'
         and "quest_v2_proof_submission"."submission_status" = 'PROOF_APPROVED'
         and "quest_v2_proof_submission"."reviewed_at" is not null
       union all
       select "quest_completion_confirmation"."confirmed_at" as event_at
       from ${questCompletionConfirmation}
       where "quest_completion_confirmation"."quest_id" = "quest"."id"
+        and "quest"."api_version" = 'v1'
       union all
       select "quest_v2_completion_confirmation"."confirmed_at" as event_at
       from ${questV2CompletionConfirmation}
       where "quest_v2_completion_confirmation"."quest_id" = "quest"."id"
+        and "quest"."api_version" = 'v2'
     ) as completion_event
   )`;
 
@@ -840,6 +843,7 @@ const memberHistoryAssignmentStatusChangedAt = () =>
           and "quest_v2_proof_submission"."submission_status" = 'PROOF_APPROVED'
           and "quest_v2_proof_submission"."reviewed_at" is not null
           and "quest_assignment"."assignment_status" = 'ASSIGNMENT_COMPLETED'
+          and "quest"."api_version" = 'v2'
           and (
             "quest_v2_proof_submission"."worker_id" = "quest_assignment"."worker_id"
             or "quest_candidate_team_v2_member"."member_id" is not null
@@ -861,6 +865,7 @@ const memberHistoryAssignmentStatusChangedAt = () =>
           and "quest_candidate_team_v2_member"."member_id" = "quest_assignment"."worker_id"
         where "quest_v2_completion_confirmation"."quest_id" = "quest_assignment"."quest_id"
           and "quest_assignment"."assignment_status" = 'ASSIGNMENT_COMPLETED'
+          and "quest"."api_version" = 'v2'
           and (
             "quest_v2_completion_confirmation"."worker_id" = "quest_assignment"."worker_id"
             or "quest_candidate_team_v2_member"."member_id" is not null
@@ -898,10 +903,7 @@ const memberHistoryCursorScope = (
     query.questStatus === undefined
       ? 'N'
       : persistedQuestStatus.enumValues.indexOf(query.questStatus).toString(36).toUpperCase();
-  const assignmentStatusFilter =
-    query.assignmentStatus === undefined
-      ? 'N'
-      : assignmentStatuses.indexOf(query.assignmentStatus).toString(36).toUpperCase();
+  const assignmentStatusFilter = query.assignmentStatus ?? 'N';
   return `MH_${role}_${query.role ?? 'ALL'}_${questStatusFilter}_${assignmentStatusFilter}`;
 };
 

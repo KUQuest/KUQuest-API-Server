@@ -545,7 +545,7 @@ describe('Admin Member Quest and Assignment history', () => {
       title: `${marker} GROUP proof completion`,
       createdAt: proofQuestCreatedAt,
       participation: 'GROUP',
-      headcount: 2,
+      headcount: 3,
     });
     const proofReviewCases = [
       {
@@ -583,6 +583,36 @@ describe('Admin Member Quest and Assignment history', () => {
         });
       })
     );
+
+    const crossVersionV2ProofReviewedAt = new Date(proofQuestCreatedAt.getTime() + 55_000);
+    const crossVersionV2ConfirmedAt = new Date(proofQuestCreatedAt.getTime() + 60_000);
+    await createHistoryAssignment({
+      questId: proofCompletedQuest.id,
+      workerId: workerOnlyHirerId,
+      assignmentStatus: 'ASSIGNMENT_COMPLETED',
+      createdAt: new Date(proofQuestCreatedAt.getTime() + 30_000),
+      startedAt: new Date(proofQuestCreatedAt.getTime() + 35_000),
+      statusChangedAt: null,
+      recordStatusAudit: false,
+    });
+    await db.insert(questV2ProofSubmission).values({
+      questId: proofCompletedQuest.id,
+      workerId: workerOnlyHirerId,
+      teamId: null,
+      submittedByUserId: workerOnlyHirerId,
+      description: 'V2 Proof row for a V1 Quest',
+      submissionStatus: 'PROOF_APPROVED',
+      sentAt: new Date(crossVersionV2ProofReviewedAt.getTime() - 5_000),
+      reviewedAt: crossVersionV2ProofReviewedAt,
+      reviewedBy: 'HIRER',
+    });
+    await db.insert(questV2CompletionConfirmation).values({
+      questId: proofCompletedQuest.id,
+      workerId: workerOnlyHirerId,
+      teamId: null,
+      confirmedByUserId: workerOnlyHirerId,
+      confirmedAt: crossVersionV2ConfirmedAt,
+    });
 
     const assignmentCases: Array<{
       questStatus: QuestStatus;
@@ -845,15 +875,79 @@ describe('Admin Member Quest and Assignment history', () => {
       confirmedAt: v2TeamConfirmedAt,
     });
 
+    const v2TerminalQuestId = crypto.randomUUID();
+    const v2TerminalAssignmentId = crypto.randomUUID();
+    const v2TerminalCreatedAt = new Date('2032-06-21T00:00:00.000Z');
+    const v2TerminalConfirmedAt = new Date('2032-06-21T00:00:30.000Z');
+    const strayV1ProofReviewedAt = new Date('2032-06-21T00:00:40.000Z');
+    const strayV1ConfirmationAt = new Date('2032-06-21T00:00:50.000Z');
+    await db.insert(quest).values({
+      id: v2TerminalQuestId,
+      hirerId: statusMemberId,
+      apiVersion: 'v2',
+      title: `${marker} v2 terminal completion`,
+      condition: 'Complete the history fixture work',
+      mode: 'NO_CANDIDATE',
+      participation: 'SOLO',
+      v2Mode: 'FIRST_COME_FIRST_SERVED',
+      v2Participation: 'SINGLE',
+      questStatus: 'QUEST_COMPLETED',
+      rewardSatang: 1_500,
+      tagId,
+      headcount: 1,
+      startTime: new Date(v2TerminalCreatedAt.getTime() + 5_000),
+      dueAt: new Date(v2TerminalCreatedAt.getTime() + 20 * 60_000),
+      proofRequired: false,
+      createdAt: v2TerminalCreatedAt,
+      updatedAt: new Date(v2TerminalCreatedAt.getTime() + 24 * 60 * 60 * 1000),
+    });
+    fixtureQuestIds.push(v2TerminalQuestId);
+    await db.insert(questAssignment).values({
+      id: v2TerminalAssignmentId,
+      questId: v2TerminalQuestId,
+      workerId: relatedMemberId,
+      assignmentStatus: 'ASSIGNMENT_COMPLETED',
+      createdAt: new Date(v2TerminalCreatedAt.getTime() + 10_000),
+      startedAt: new Date(v2TerminalCreatedAt.getTime() + 15_000),
+    });
+    fixtureAssignmentIds.push(v2TerminalAssignmentId);
+    await db.insert(questV2CompletionConfirmation).values({
+      questId: v2TerminalQuestId,
+      workerId: relatedMemberId,
+      teamId: null,
+      confirmedByUserId: relatedMemberId,
+      confirmedAt: v2TerminalConfirmedAt,
+    });
+    const strayV1ProofId = crypto.randomUUID();
+    fixtureProofSubmissionIds.push(strayV1ProofId);
+    await db.insert(proofSubmission).values({
+      id: strayV1ProofId,
+      questId: v2TerminalQuestId,
+      workerId: relatedMemberId,
+      teamId: null,
+      submittedByUserId: relatedMemberId,
+      content: 'Legacy Proof row for a V2 Quest',
+      submissionStatus: 'PROOF_APPROVED',
+      submittedAt: new Date(v2TerminalConfirmedAt.getTime() - 5_000),
+      reviewedAt: strayV1ProofReviewedAt,
+    });
+    await db.insert(questCompletionConfirmation).values({
+      questId: v2TerminalQuestId,
+      workerId: relatedMemberId,
+      teamId: null,
+      confirmedByUserId: relatedMemberId,
+      confirmedAt: strayV1ConfirmationAt,
+    });
+
     const allHistoryResponse = await adminGet(`${historyPathFor(statusMemberId)}?limit=50`);
     expect(allHistoryResponse.status).toBe(200);
     const allHistory = (await allHistoryResponse.json()) as HistoryBody;
-    expect(allHistory.data.totalCount).toBe(20);
+    expect(allHistory.data.totalCount).toBe(21);
 
     const hirerResponse = await adminGet(`${historyPathFor(statusMemberId)}?role=HIRER&limit=50`);
     expect(hirerResponse.status).toBe(200);
     const hirerHistory = (await hirerResponse.json()) as HistoryBody;
-    expect(hirerHistory.data.totalCount).toBe(13);
+    expect(hirerHistory.data.totalCount).toBe(14);
     expect(new Set(hirerHistory.data.items.map(({ quest: item }) => item.questStatus))).toEqual(
       new Set(persistedQuestStatus.enumValues)
     );
@@ -905,6 +999,37 @@ describe('Admin Member Quest and Assignment history', () => {
         reviewedAt.toISOString()
       );
     }
+    const crossVersionV2Worker = proofCompletedQuestItem.relatedMembers.find(
+      ({ member }) => member.id === workerOnlyHirerId
+    );
+    expect(crossVersionV2Worker?.assignmentStatus).toBe('ASSIGNMENT_COMPLETED');
+    if (!crossVersionV2Worker?.assignmentStatusChangedAt) {
+      throw new Error('A V1 Assignment must ignore V2 completion events.');
+    }
+    expect(new Date(crossVersionV2Worker.assignmentStatusChangedAt).toISOString()).toBe(
+      lastProofReviewAt.toISOString()
+    );
+
+    const v2TerminalItem = hirerHistory.data.items.find(
+      ({ quest: item }) => item.id === v2TerminalQuestId
+    );
+    expect(v2TerminalItem?.quest.questStatus).toBe('QUEST_COMPLETED');
+    if (!v2TerminalItem?.quest.questStatusChangedAt) {
+      throw new Error('A V2 Quest must ignore V1 completion events.');
+    }
+    expect(new Date(v2TerminalItem.quest.questStatusChangedAt).toISOString()).toBe(
+      v2TerminalConfirmedAt.toISOString()
+    );
+    const v2TerminalWorker = v2TerminalItem.relatedMembers.find(
+      ({ member }) => member.id === relatedMemberId
+    );
+    expect(v2TerminalWorker?.assignmentStatus).toBe('ASSIGNMENT_COMPLETED');
+    if (!v2TerminalWorker?.assignmentStatusChangedAt) {
+      throw new Error('A V2 Assignment must ignore V1 completion events.');
+    }
+    expect(new Date(v2TerminalWorker.assignmentStatusChangedAt).toISOString()).toBe(
+      v2TerminalConfirmedAt.toISOString()
+    );
 
     const draftQuest = questsByStatus.get('QUEST_DRAFT');
     expect(
