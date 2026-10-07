@@ -1,4 +1,4 @@
-import type { AdminActionReasonCatalog } from '@/modules/admin/admin-action.policy';
+import type { AdminActionReasonCatalog } from '@/modules/admin';
 
 export const disputeCaseDismissReasonCodes = [
   'DISPUTE_INSUFFICIENT_EVIDENCE',
