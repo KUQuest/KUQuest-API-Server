@@ -343,6 +343,7 @@ export type QuestV2ParticipationDetail = QuestV2PublicDetail & {
     amountSatang: number | null;
     settledAt: string | null;
   } | null;
+  workers: Array<{ id: string; displayName: string }> | null;
   startedWorkerCount: number;
   capabilities: { canViewOnly: boolean };
 };
@@ -3116,7 +3117,10 @@ export const getQuestV2ParticipationDetail = async (
     throw new Error(`Quest ${questId} has incomplete v2 Participation Detail data`);
   }
 
-  const [conditionItems, locations, images, selectedTeamRows] = await Promise.all([
+  const groupFirstCome =
+    participationRow.v2Mode === 'FIRST_COME_FIRST_SERVED' &&
+    participationRow.v2Participation === 'GROUP';
+  const [conditionItems, locations, images, selectedTeamRows, groupWorkerRows] = await Promise.all([
     selectConditionItems(db, questId),
     selectLocations(db, questId),
     selectQuestV2Images(db, questId),
@@ -3144,6 +3148,20 @@ export const getQuestV2ParticipationDetail = async (
             asc(questCandidateTeamV2Member.memberId)
           )
       : Promise.resolve([]),
+    // Every Worker who held a place on the Quest, in acceptance order. Settlement closes an
+    // early finisher's Work Chat membership, so the chat roster cannot name them afterwards.
+    groupFirstCome
+      ? db
+          .select({ workerId: questAssignment.workerId })
+          .from(questAssignment)
+          .where(
+            and(
+              eq(questAssignment.questId, questId),
+              ne(questAssignment.assignmentStatus, assignmentStatus.cancelled)
+            )
+          )
+          .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id))
+      : Promise.resolve([]),
   ]);
   if (conditionItems.length === 0) throw new Error(`Quest ${questId} has no Condition Items`);
 
@@ -3164,6 +3182,15 @@ export const getQuestV2ParticipationDetail = async (
         displayName: memberOf(memberId).displayName,
       })),
     };
+  }
+
+  let workers: QuestV2ParticipationDetail['workers'] = null;
+  if (groupFirstCome) {
+    const memberOf = await loadMemberSummaries(groupWorkerRows.map(({ workerId }) => workerId));
+    workers = groupWorkerRows.map(({ workerId }) => ({
+      id: workerId,
+      displayName: memberOf(workerId).displayName,
+    }));
   }
 
   const teamRole =
@@ -3262,6 +3289,7 @@ export const getQuestV2ParticipationDetail = async (
       team: teamRole ? selectedTeam : null,
     },
     startedWorkerCount: Number(row.startedWorkerCount),
+    workers,
     capabilities: {
       canViewOnly: isTerminalQuestStatus(participationRow.questStatus),
     },
