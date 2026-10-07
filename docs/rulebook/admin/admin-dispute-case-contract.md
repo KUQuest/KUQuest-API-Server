@@ -32,6 +32,8 @@ A Dispute Case reverses part of the automatic settlement a `QUEST_FAILED` Quest 
 - Admin resolves a Dispute Case as:
   - `DISPUTE_CASE_DISMISSED`: No money movement; case closes.
   - `DISPUTE_CASE_RESOLVED`: An explicit positive Satang amount is redirected to the named Worker's Earnings Balance as a reversing Ledger Transaction.
-- Requires a non-blank `Idempotency-Key`.
+- Each decision requires a controlled `reasonCode` and a non-blank `Idempotency-Key`.
+- An Admin may also provide an optional `decisionReasonText` of 1 to 200 characters with at least one non-whitespace character.
+- The note is stored separately on the immutable Admin Action and is visible only to enabled Admins through the Activity Log. It does not replace `reasonCode` or appear in Member notifications.
 - The first confirmed decision is final and creates an Audit Record.
 - A non-active Hirer Wallet (`FROZEN`, `SUSPENDED`, `CLOSED`) does not block the redirect.

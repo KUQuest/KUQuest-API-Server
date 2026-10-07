@@ -10,6 +10,7 @@ export {
   formatQuestDisplayId,
   formatWalletDisplayId,
 } from './admin-display-id';
+export { adminDecisionReasonTextSchema } from './admin-action.schema';
 export { createAdminActionService } from './admin-action.service';
 export type {
   AdminActionCommandInput,

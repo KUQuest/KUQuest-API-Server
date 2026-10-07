@@ -19,4 +19,6 @@ Fully specified by `docs/adr/0022-manual-admin-approval-for-payouts.md` and `doc
 - **Approve**: Commits the approval record in the database, transitioning the Payout to provider-processing. A background Payout worker then initiates the transfer with the external provider.
 - **Cancel**: Releases held reserves back to the Member's Earnings Balance with an immutable reversing Ledger Transaction (ADR 0010).
 - All decisions require an `Idempotency-Key`, a numeric `If-Match` Payout version, and a controlled `reasonCode`. `PAYOUT_APPROVE` accepts `PAYOUT_POLICY_REVIEW` or `PAYOUT_RISK_REVIEW`. `PAYOUT_CANCEL` also accepts `PAYOUT_INVALID_DESTINATION`. The Server records the immutable Admin Action and the Payout change in one transaction. A successful command returns the updated Payout summary, its new `resourceVersion`, and the `adminActionId`.
+- An Admin may also provide an optional `decisionReasonText` of 1 to 200 characters with at least one non-whitespace character.
+- The note is stored separately on the immutable Admin Action. It does not replace the controlled `reasonCode`, is available only through the enabled-Admin Activity Log, and is not part of Member-facing Payout data or the Provider request.
 - Once decided, the Admin decision is final and provider webhooks own subsequent status transitions.

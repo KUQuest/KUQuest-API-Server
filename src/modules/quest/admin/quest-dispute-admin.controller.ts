@@ -207,6 +207,7 @@ export const resolveAdminDisputeController = async ({
       expectedVersion: revision.value,
       requestKey: request.headers.get('idempotency-key') ?? '',
       reasonCode: body.reasonCode,
+      decisionReasonText: body.decisionReasonText,
       outcome: body.outcome,
       workerId: body.workerId,
       amountSatang: body.amountSatang,

@@ -217,7 +217,15 @@ describe('Payout API routes', () => {
     const document = (await response.json()) as {
       paths: Record<
         string,
-        Record<string, { operationId?: string; security?: unknown; description?: string }>
+        Record<
+          string,
+          {
+            operationId?: string;
+            security?: unknown;
+            description?: string;
+            requestBody?: { content?: Record<string, { schema?: unknown }> };
+          }
+        >
       >;
     };
 
@@ -231,6 +239,21 @@ describe('Payout API routes', () => {
     expect(document.paths['/api/v1/admin/payouts/{payoutId}/cancel']?.post?.operationId).toBe(
       'cancelPayout'
     );
+
+    const approveOperation = document.paths['/api/v1/admin/payouts/{payoutId}/approve']?.post;
+    const cancelOperation = document.paths['/api/v1/admin/payouts/{payoutId}/cancel']?.post;
+    const approvalSchemaText = JSON.stringify(
+      approveOperation?.requestBody?.content?.['application/json']?.schema
+    );
+    const cancellationSchemaText = JSON.stringify(
+      cancelOperation?.requestBody?.content?.['application/json']?.schema
+    );
+    expect(approveOperation?.description).toContain('decisionReasonText');
+    expect(cancelOperation?.description).toContain('decisionReasonText');
+    expect(approvalSchemaText).toContain('decisionReasonText');
+    expect(cancellationSchemaText).toContain('decisionReasonText');
+    expect(approvalSchemaText).toContain('"maxLength":200');
+    expect(cancellationSchemaText).toContain('"maxLength":200');
     const payoutList = document.paths['/api/v1/admin/payouts']?.get;
     expect(payoutList?.description).toContain('status=ALL');
     expect(JSON.stringify(document)).toContain('"ALL"');
@@ -463,6 +486,120 @@ describe('Payout API routes', () => {
     });
     expect(replay.status).toBe(200);
     expect(replayBody).toEqual(firstBody);
+  });
+
+  it('stores optional Admin notes for Payout approval and cancellation', async () => {
+    const approvedPayout = await createPendingPayout();
+    const cancelledPayout = await createPendingPayout();
+    const approvalNote = 'x'.repeat(200);
+    const cancellationNote = 'The Payout Destination could not be verified.';
+
+    const approveResponse = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts/${approvedPayout.id}/approve`, {
+        method: 'POST',
+        headers: {
+          cookie: adminCookie,
+          'content-type': 'application/json',
+          'idempotency-key': `payout-admin-note-approve-${approvedPayout.id}`,
+          'if-match': String(approvedPayout.version),
+        },
+        body: JSON.stringify({
+          reasonCode: 'PAYOUT_POLICY_REVIEW',
+          decisionReasonText: approvalNote,
+        }),
+      })
+    );
+    const cancelResponse = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts/${cancelledPayout.id}/cancel`, {
+        method: 'POST',
+        headers: {
+          cookie: adminCookie,
+          'content-type': 'application/json',
+          'idempotency-key': `payout-admin-note-cancel-${cancelledPayout.id}`,
+          'if-match': String(cancelledPayout.version),
+        },
+        body: JSON.stringify({
+          reasonCode: 'PAYOUT_INVALID_DESTINATION',
+          decisionReasonText: cancellationNote,
+        }),
+      })
+    );
+    const approveBody = await approveResponse.json();
+    const cancelBody = await cancelResponse.json();
+
+    expect(approveResponse.status).toBe(200);
+    expect(cancelResponse.status).toBe(200);
+    expect(approveBody.data.resourceSummary).not.toHaveProperty('decisionReasonText');
+    expect(cancelBody.data.resourceSummary).not.toHaveProperty('decisionReasonText');
+
+    const approveActivity = await app.handle(
+      new Request(
+        `http://localhost/api/v1/admin/activity-log?resourceType=payout&resourceId=${approvedPayout.id}`,
+        { headers: { cookie: adminCookie } }
+      )
+    );
+    const cancelActivity = await app.handle(
+      new Request(
+        `http://localhost/api/v1/admin/activity-log?resourceType=payout&resourceId=${cancelledPayout.id}`,
+        { headers: { cookie: adminCookie } }
+      )
+    );
+    expect(approveActivity.status).toBe(200);
+    expect(cancelActivity.status).toBe(200);
+    expect((await approveActivity.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        action: 'PAYOUT_APPROVE',
+        reasonCode: 'PAYOUT_POLICY_REVIEW',
+        decisionReasonText: approvalNote,
+      })
+    );
+    expect((await cancelActivity.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        action: 'PAYOUT_CANCEL',
+        reasonCode: 'PAYOUT_INVALID_DESTINATION',
+        decisionReasonText: cancellationNote,
+      })
+    );
+  });
+
+  it('rejects blank and over-200-character Admin decision notes', async () => {
+    const rejectNote = async (
+      operation: 'approve' | 'cancel',
+      reasonCode: string,
+      decisionReasonText: string
+    ) => {
+      const payout = await createPendingPayout();
+      const requestKey = `payout-admin-invalid-note-${payout.id}`;
+      const response = await app.handle(
+        new Request(`http://localhost/api/v1/admin/payouts/${payout.id}/${operation}`, {
+          method: 'POST',
+          headers: {
+            cookie: adminCookie,
+            'content-type': 'application/json',
+            'idempotency-key': requestKey,
+            'if-match': String(payout.version),
+          },
+          body: JSON.stringify({ reasonCode, decisionReasonText }),
+        })
+      );
+      const body = await response.json();
+      const [storedPayout] = await db
+        .select({ payoutStatus: paymentPayouts.payoutStatus, version: paymentPayouts.version })
+        .from(paymentPayouts)
+        .where(eq(paymentPayouts.id, payout.id));
+      const actions = await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey));
+
+      expect(response.status).toBe(400);
+      expect(body.error.code).toBe('VALIDATION');
+      expect(storedPayout).toEqual({ payoutStatus: 'PENDING_ADMIN_APPROVAL', version: 1 });
+      expect(actions).toHaveLength(0);
+    };
+
+    await rejectNote('approve', 'PAYOUT_POLICY_REVIEW', '   ');
+    await rejectNote('cancel', 'PAYOUT_INVALID_DESTINATION', 'x'.repeat(201));
   });
 
   it('rejects a stale Payout version without changing the Payout or writing an Admin Action', async () => {

@@ -67,6 +67,7 @@ export type AdminPayoutDecisionInput = {
   idempotencyKey: string;
   expectedVersion: number;
   reasonCode: string;
+  decisionReasonText?: string;
 };
 
 export type AdminPayoutCommandResult = AdminActionResult<AdminPayoutCommandSummary>;
@@ -293,6 +294,7 @@ const executePayoutAdminCommand = async (
     resourceId: input.payoutId,
     requestKey: input.idempotencyKey,
     reasonCode: input.reasonCode,
+    decisionReasonText: input.decisionReasonText,
     request: {},
     metadata: {},
     expectedVersion: input.expectedVersion,

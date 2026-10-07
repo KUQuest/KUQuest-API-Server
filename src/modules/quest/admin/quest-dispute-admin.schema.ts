@@ -1,5 +1,7 @@
-import { t } from 'elysia';
+import { adminDecisionReasonTextSchema } from '@/modules/admin';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
+
+import { t } from 'elysia';
 
 const disputeCaseStatusSchema = t.Union([
   t.Literal('DISPUTE_CASE_PENDING'),
@@ -58,6 +60,7 @@ export const adminDisputeResolveBodySchema = t.Object(
   {
     outcome: t.Union([t.Literal('DISPUTE_CASE_DISMISSED'), t.Literal('DISPUTE_CASE_RESOLVED')]),
     reasonCode: adminDisputeReasonCodeSchema,
+    decisionReasonText: adminDecisionReasonTextSchema,
     workerId: t.Optional(t.String({ format: 'uuid' })),
     amountSatang: t.Optional(t.Integer({ minimum: 1, maximum: 2_000_000_000 })),
   },
