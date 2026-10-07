@@ -3,17 +3,29 @@ import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import { t } from 'elysia';
 
+import {
+  disputeCaseDismissReasonCodes,
+  disputeCaseResolveReasonCodes,
+} from './quest-dispute-admin.policy';
+
 const disputeCaseStatusSchema = t.Union([
   t.Literal('DISPUTE_CASE_PENDING'),
   t.Literal('DISPUTE_CASE_DISMISSED'),
   t.Literal('DISPUTE_CASE_RESOLVED'),
 ]);
 
-const adminDisputeReasonCodeSchema = t.String({
-  minLength: 1,
-  maxLength: 100,
-  pattern: '^[A-Z][A-Z0-9_.-]*$',
-});
+const adminDisputeDismissReasonCodeSchema = t.Union([
+  t.Literal(disputeCaseDismissReasonCodes[0]),
+  t.Literal(disputeCaseDismissReasonCodes[1]),
+  t.Literal(disputeCaseDismissReasonCodes[2]),
+  t.Literal(disputeCaseDismissReasonCodes[3]),
+]);
+
+const adminDisputeResolveReasonCodeSchema = t.Union([
+  t.Literal(disputeCaseResolveReasonCodes[0]),
+  t.Literal(disputeCaseResolveReasonCodes[1]),
+  t.Literal(disputeCaseResolveReasonCodes[2]),
+]);
 
 export const adminDisputeParamsSchema = t.Object({
   disputeCaseId: t.String({ format: 'uuid' }),
@@ -56,16 +68,30 @@ export const adminDisputeEvidenceHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
 });
 
-export const adminDisputeResolveBodySchema = t.Object(
+export const adminDisputeDismissBodySchema = t.Object(
   {
-    outcome: t.Union([t.Literal('DISPUTE_CASE_DISMISSED'), t.Literal('DISPUTE_CASE_RESOLVED')]),
-    reasonCode: adminDisputeReasonCodeSchema,
+    outcome: t.Literal('DISPUTE_CASE_DISMISSED'),
+    reasonCode: adminDisputeDismissReasonCodeSchema,
+    decisionReasonText: adminDecisionReasonTextSchema,
+  },
+  { additionalProperties: false }
+);
+
+export const adminDisputeResolveDecisionBodySchema = t.Object(
+  {
+    outcome: t.Literal('DISPUTE_CASE_RESOLVED'),
+    reasonCode: adminDisputeResolveReasonCodeSchema,
     decisionReasonText: adminDecisionReasonTextSchema,
     workerId: t.Optional(t.String({ format: 'uuid' })),
     amountSatang: t.Optional(t.Integer({ minimum: 1, maximum: 2_000_000_000 })),
   },
   { additionalProperties: false }
 );
+
+export const adminDisputeResolveBodySchema = t.Union([
+  adminDisputeDismissBodySchema,
+  adminDisputeResolveDecisionBodySchema,
+]);
 
 export const adminDisputeSummarySchema = t.Object({
   id: t.String({ format: 'uuid' }),

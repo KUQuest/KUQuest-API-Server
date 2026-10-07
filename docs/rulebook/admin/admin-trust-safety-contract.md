@@ -41,7 +41,13 @@ The Admin schema persists these Trust & Safety records:
 The application remains responsible for checking the actor's Chat visibility,
 case-scoping Attachment references, writing the matching Admin Action, and
 updating the Message and Attachment visibility atomically with a decision.
-Report Case decisions use `POLICY_REVIEW` or `SAFETY_REVIEW` for dismiss, hide, and restore. An Admin may add an optional `decisionReasonText` of up to 200 characters. The note is stored separately on the immutable Admin Action and does not replace `reasonCode`.
+Admin Action reason catalog version `2` defines action-specific Report Case codes:
+
+- `REPORT_CASE_DISMISS`: `REPORT_NO_POLICY_VIOLATION`, `REPORT_INSUFFICIENT_EVIDENCE`, or `REPORT_CONTEXT_SUPPORTS_MESSAGE`.
+- `REPORT_CASE_HIDE`: `REPORT_HARASSMENT_CONFIRMED`, `REPORT_SPAM_CONFIRMED`, `REPORT_THREAT_CONFIRMED`, `REPORT_INAPPROPRIATE_CONTENT_CONFIRMED`, or `REPORT_OTHER_POLICY_VIOLATION_CONFIRMED`.
+- `REPORT_CASE_RESTORE`: `REPORT_MESSAGE_COMPLIES_WITH_POLICY`, `REPORT_CONTEXT_WAS_MISUNDERSTOOD`, or `REPORT_NEW_EVIDENCE_OVERTURNS_HIDE`.
+
+Version-1 Admin Actions remain readable with their recorded catalog version and reason code. An Admin may add an optional `decisionReasonText` of up to 200 characters. The note is stored separately on the immutable Admin Action and does not replace `reasonCode`.
 
 ## Retention
 

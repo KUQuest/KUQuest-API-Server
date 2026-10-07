@@ -145,6 +145,7 @@ export const decideAdminReportController = async ({
           ? await decideAdminReport({
               ...command,
               outcome: 'CONDUCT_REPORT_UPHELD',
+              decisionReasonCode: body.decisionReasonCode,
               decisionReasonText: body.decisionReasonText,
             })
           : await decideAdminReport({

@@ -1,6 +1,7 @@
 import { enabledAdminGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
+import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
 
 import { Elysia } from 'elysia';
 
@@ -13,18 +14,32 @@ import {
 } from './quest-dispute-admin.controller';
 import {
   adminDisputeCommandHeadersSchema,
+  adminDisputeCommandResponseSchema,
   adminDisputeDetailResponseSchema,
+  adminDisputeDismissBodySchema,
   adminDisputeEvidenceHeadersSchema,
   adminDisputeEvidenceResponseSchema,
+  adminDisputeListQuerySchema,
+  adminDisputeListResponseSchema,
   adminDisputeOpenBodySchema,
   adminDisputeOpenParamsSchema,
   adminDisputeOpenResponseSchema,
-  adminDisputeListQuerySchema,
-  adminDisputeListResponseSchema,
   adminDisputeParamsSchema,
   adminDisputeResolveBodySchema,
-  adminDisputeCommandResponseSchema,
+  adminDisputeResolveDecisionBodySchema,
 } from './quest-dispute-admin.schema';
+
+const rejectUnknownAdminDisputeDecisionFields = ({ body }: { body: unknown }) => {
+  const isDismissal =
+    body !== null &&
+    typeof body === 'object' &&
+    !Array.isArray(body) &&
+    'outcome' in body &&
+    body.outcome === 'DISPUTE_CASE_DISMISSED';
+  rejectUnknownFields(
+    isDismissal ? adminDisputeDismissBodySchema : adminDisputeResolveDecisionBodySchema
+  )({ body });
+};
 
 export const adminDisputeRoute = new Elysia({
   name: 'admin-dispute-route',
@@ -85,12 +100,14 @@ export const adminDisputeRoute = new Elysia({
     params: adminDisputeParamsSchema,
     headers: adminDisputeCommandHeadersSchema,
     body: adminDisputeResolveBodySchema,
+    transform: rejectUnknownAdminDisputeDecisionFields,
     response: responses(adminDisputeCommandResponseSchema, 400, 401, 403, 404, 409, 503),
     detail: {
       tags: ['Admin Disputes'],
       summary: 'Dismiss or resolve a Dispute Case',
       description:
-        'Accepts only DISPUTE_CASE_DISMISSED or DISPUTE_CASE_RESOLVED. Wallet owns the balanced financial settlement. Each decision may include an optional Admin-only decisionReasonText of up to 200 characters. The note is stored on the immutable Admin Action and does not replace reasonCode.',
+        'DISPUTE_CASE_DISMISSED reasonCode is DISPUTE_INSUFFICIENT_EVIDENCE, DISPUTE_QUEST_RECORD_DOES_NOT_SUPPORT_CLAIM, DISPUTE_NO_UNFAIR_SETTLEMENT_FOUND, or DISPUTE_WORKER_ALREADY_COMPENSATED. ' +
+        'DISPUTE_CASE_RESOLVED reasonCode is DISPUTE_VALID_PROOF_NOT_APPROVED, DISPUTE_WORKER_MET_QUEST_CONDITION, or DISPUTE_PARTIAL_WORK_EARNED_REWARD. Wallet owns the balanced financial settlement. Each decision may include an optional Admin-only decisionReasonText of up to 200 characters. The note is stored on the immutable Admin Action and does not replace reasonCode.',
       operationId: 'resolveAdminDispute',
       security: betterAuthSecurity,
     },

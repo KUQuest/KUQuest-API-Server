@@ -103,7 +103,12 @@ import {
 import {
   reportAdminActionCatalog,
   conductReportDismissReasonCodes,
+  conductReportUpholdReasonCodes,
   type ConductReportDismissReasonCode,
+  type ConductReportUpholdReasonCode,
+  type ReportCaseDismissReasonCode,
+  type ReportCaseHideReasonCode,
+  type ReportCaseRestoreReasonCode,
 } from './admin-report.policy';
 
 export type ReportCaseOutcome =
@@ -1446,19 +1451,15 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
 
     const outcome = conductReportRow.report.status;
     if (outcome === conductReportStatus.upheld) {
-      const isDismissalReason = conductReportDismissReasonCodes.includes(
-        decisionReason as ConductReportDismissReasonCode
+      const isUpholdReason = conductReportUpholdReasonCodes.includes(
+        decisionReason as ConductReportUpholdReasonCode
       );
-      if (
-        decisionReason !== conductReportRow.report.reason &&
-        (conductReportReasons.includes(decisionReason as ConductReportReason) || isDismissalReason)
-      ) {
-        throw new Error('Conduct Report upheld decision reason must match the report reason.');
+      if (decisionReason !== conductReportRow.report.reason && !isUpholdReason) {
+        throw new Error('Conduct Report upheld decision reason is invalid.');
       }
       decision = {
         outcome,
-        reason:
-          decisionReason === conductReportRow.report.reason ? conductReportRow.report.reason : null,
+        reason: decisionReason as ConductReportReason | ConductReportUpholdReasonCode,
         resolvedAt: resolvedAt.toISOString(),
         admin,
       };
@@ -1605,8 +1606,8 @@ type AdminReportCommandInput = {
 };
 
 export type DecideAdminReportCaseInput = AdminReportCommandInput & {
-  reasonCode?: string;
   outcome: ReportCaseOutcome;
+  reasonCode: ReportCaseDismissReasonCode | ReportCaseHideReasonCode | ReportCaseRestoreReasonCode;
   now?: Date;
 };
 
@@ -1727,22 +1728,24 @@ type DecideAdminConductReportInput =
       outcome: typeof conductReportStatus.dismissed;
       decisionReasonCode: ConductReportDismissReasonCode;
     })
-  | (AdminReportCommandInput & { outcome: typeof conductReportStatus.upheld });
+  | (AdminReportCommandInput & {
+      outcome: typeof conductReportStatus.upheld;
+      decisionReasonCode: ConductReportUpholdReasonCode;
+    });
 
 const decideAdminConductReport = async (
   input: DecideAdminConductReportInput
 ): Promise<AdminActionResult<ConductReportCommandSummary>> => {
   const now = new Date();
   const [report] = await db
-    .select({ reason: adminConductReport.reason })
+    .select({ id: adminConductReport.id })
     .from(adminConductReport)
     .where(eq(adminConductReport.id, input.reportId))
     .limit(1);
   if (!report) {
     throw new AdminReportError('CONDUCT_REPORT_NOT_FOUND', 'Conduct Report does not exist.');
   }
-  const reasonCode =
-    input.outcome === conductReportStatus.dismissed ? input.decisionReasonCode : report.reason;
+  const reasonCode = input.decisionReasonCode;
 
   return adminActionService.executeCommand<ConductReportCommandSummary>({
     adminId: input.adminId,
@@ -1818,10 +1821,7 @@ const decideAdminConductReport = async (
             .update(adminConductReport)
             .set({
               status: input.outcome,
-              decisionReason:
-                input.outcome === conductReportStatus.dismissed
-                  ? input.decisionReasonCode
-                  : current.reason,
+              decisionReason: input.decisionReasonCode,
               resolvedByAdminId: input.adminId,
               resolvedAt: now,
               version: sql`${adminConductReport.version} + 1`,
@@ -1869,12 +1869,20 @@ const decideAdminConductReport = async (
 
 export type DecideAdminReportInput = AdminReportCommandInput &
   (
-    | { outcome: ReportCaseOutcome; reasonCode?: string; now?: Date }
+    | {
+        outcome: ReportCaseOutcome;
+        reasonCode:
+          ReportCaseDismissReasonCode | ReportCaseHideReasonCode | ReportCaseRestoreReasonCode;
+        now?: Date;
+      }
     | {
         outcome: typeof conductReportStatus.dismissed;
         decisionReasonCode: ConductReportDismissReasonCode;
       }
-    | { outcome: typeof conductReportStatus.upheld }
+    | {
+        outcome: typeof conductReportStatus.upheld;
+        decisionReasonCode: ConductReportUpholdReasonCode;
+      }
   );
 
 export type DecideAdminReportResult = AdminActionResult<AdminReportCommandSummary> & {
@@ -1885,24 +1893,16 @@ export type DecideAdminReportResult = AdminActionResult<AdminReportCommandSummar
 export const decideAdminReport = async (
   input: DecideAdminReportInput
 ): Promise<DecideAdminReportResult> => {
-  if (
-    input.outcome === conductReportStatus.dismissed ||
-    input.outcome === conductReportStatus.upheld
-  ) {
+  if (input.outcome === conductReportStatus.dismissed) {
+    const result = await decideAdminConductReport(input);
+    return { ...result, outcome: input.outcome };
+  }
+  if (input.outcome === conductReportStatus.upheld) {
     const result = await decideAdminConductReport(input);
     return { ...result, outcome: input.outcome };
   }
 
-  const result = await decideAdminReportCase({
-    adminId: input.adminId,
-    reportId: input.reportId,
-    expectedVersion: input.expectedVersion,
-    requestKey: input.requestKey,
-    now: input.now,
-    reasonCode: input.reasonCode,
-    decisionReasonText: input.decisionReasonText,
-    outcome: input.outcome,
-  });
+  const result = await decideAdminReportCase(input);
   return { ...result, outcome: input.outcome };
 };
 

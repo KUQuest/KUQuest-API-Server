@@ -209,8 +209,8 @@ export const resolveAdminDisputeController = async ({
       reasonCode: body.reasonCode,
       decisionReasonText: body.decisionReasonText,
       outcome: body.outcome,
-      workerId: body.workerId,
-      amountSatang: body.amountSatang,
+      workerId: 'workerId' in body ? body.workerId : undefined,
+      amountSatang: 'amountSatang' in body ? body.amountSatang : undefined,
     });
     if (result.resourceVersion === null) {
       set.status = 500;
