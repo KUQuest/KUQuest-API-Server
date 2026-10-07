@@ -14,7 +14,6 @@ import {
   createAdminActionService,
   type AdminActionResult,
 } from '@/modules/admin/admin-action.service';
-import type { AdminActionReasonCatalog } from '@/modules/admin/admin-action.policy';
 import {
   MoneyDomainError,
   positiveSatang,
@@ -35,6 +34,11 @@ import { and, asc, count, eq, or, sql } from 'drizzle-orm';
 import { readQuestEscrow } from '../shared/escrow/quest-escrow.service';
 import { notifyQuestUpdate } from '../v2/realtime';
 import { questV2ProofStorage } from '../v2/proof/quest-proof-v2.storage';
+import {
+  disputeAdminActionCatalog,
+  type DisputeCaseDismissReasonCode,
+  type DisputeCaseResolveReasonCode,
+} from './quest-dispute-admin.policy';
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -57,32 +61,6 @@ const disputeFilingWindowMs = (adminOpened: boolean) =>
   adminOpened ? 5 * dayMs : disputeSelfFileWindowMs;
 export type DisputeCaseStatus = (typeof disputeCaseStatuses)[number];
 export type DisputeCaseOutcome = 'DISPUTE_CASE_DISMISSED' | 'DISPUTE_CASE_RESOLVED';
-
-export const disputeAdminReasonCodes = [
-  'DISPUTE_POLICY_REVIEW',
-  'DISPUTE_EVIDENCE_REVIEW',
-] as const;
-
-export const disputeAdminActionCatalog: AdminActionReasonCatalog = {
-  version: 1,
-  actions: {
-    DISPUTE_CASE_DISMISS: {
-      kind: 'COMMAND',
-      requiresReason: true,
-      allowedReasonCodes: disputeAdminReasonCodes,
-    },
-    DISPUTE_CASE_RESOLVE: {
-      kind: 'COMMAND',
-      requiresReason: true,
-      allowedReasonCodes: disputeAdminReasonCodes,
-    },
-    DISPUTE_CASE_EVIDENCE_ACCESS: {
-      kind: 'EVIDENCE_ACCESS',
-      requiresReason: false,
-      allowedReasonCodes: [],
-    },
-  },
-};
 
 const adminActionService = createAdminActionService(disputeAdminActionCatalog);
 const maxDisputeEvidenceAssignments = 100;
@@ -185,7 +163,7 @@ export type ResolveAdminDisputeCaseInput = {
   disputeCaseId: string;
   expectedVersion: number;
   requestKey: string;
-  reasonCode?: string;
+  reasonCode: DisputeCaseDismissReasonCode | DisputeCaseResolveReasonCode;
   decisionReasonText?: string;
   outcome: DisputeCaseOutcome;
   workerId?: string;

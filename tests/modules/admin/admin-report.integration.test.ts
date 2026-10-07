@@ -1020,8 +1020,27 @@ describe('Admin Report Case API', () => {
     expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_UPHELD');
     expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_NO_VIOLATION');
     expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_INSUFFICIENT_EVIDENCE');
-    expect(decisionRequestSchemaText).toContain('POLICY_REVIEW');
-    expect(decisionRequestSchemaText).toContain('SAFETY_REVIEW');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_QUEST_RECORD_DISPROVES_CLAIM');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_OUTSIDE_RULEBOOK_SCOPE');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_PROOF_RECORD_CONFIRMS_VIOLATION');
+    expect(decisionRequestSchemaText).toContain(
+      'CONDUCT_REPORT_CHAT_CONTEXT_CORROBORATES_VIOLATION'
+    );
+    expect(decisionRequestSchemaText).toContain('REPORT_NO_POLICY_VIOLATION');
+    expect(decisionRequestSchemaText).toContain('REPORT_INSUFFICIENT_EVIDENCE');
+    expect(decisionRequestSchemaText).toContain('REPORT_CONTEXT_SUPPORTS_MESSAGE');
+    expect(decisionRequestSchemaText).toContain('REPORT_HARASSMENT_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_SPAM_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_THREAT_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_INAPPROPRIATE_CONTENT_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_OTHER_POLICY_VIOLATION_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_MESSAGE_COMPLIES_WITH_POLICY');
+    expect(decisionRequestSchemaText).toContain('REPORT_CONTEXT_WAS_MISUNDERSTOOD');
+    expect(decisionRequestSchemaText).toContain('REPORT_NEW_EVIDENCE_OVERTURNS_HIDE');
+    expect(decisionRequestSchemaText).toContain('decisionReasonCode');
+    expect(decisionRequestSchemaText).not.toContain('POLICY_REVIEW');
+    expect(decisionRequestSchemaText).not.toContain('SAFETY_REVIEW');
     expect(decisionRequestSchemaText).toContain('decisionReasonText');
     expect(decisionRequestSchemaText).toContain('"maxLength":200');
     const listParameters = listOperation?.parameters ?? [];
@@ -1074,7 +1093,10 @@ describe('Admin Report Case API', () => {
             'idempotency-key': 'report-auth-decision',
             'if-match': '1',
           },
-          body: JSON.stringify({ outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'POLICY_REVIEW' }),
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_DISMISSED',
+            reasonCode: 'REPORT_NO_POLICY_VIOLATION',
+          }),
         },
       },
       {
@@ -2318,7 +2340,7 @@ describe('Admin Report Case API', () => {
       resourceType: 'conduct_report',
       resourceId: fixture.reportId,
       requestKey,
-      reasonCatalogVersion: 1,
+      reasonCatalogVersion: 2,
       reasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
       expectedVersion: 1,
       resultVersion: 2,
@@ -2394,7 +2416,11 @@ describe('Admin Report Case API', () => {
     const fixture = await createConductReportFixture({ reason: conductReportReason.outOfScope });
     const path = `/api/v1/admin/reports/${fixture.reportId}/decide`;
     const decisionReasonText = 'Admin-only note for the upheld Conduct Report.';
-    const body = { outcome: 'CONDUCT_REPORT_UPHELD', decisionReasonText };
+    const body = {
+      outcome: 'CONDUCT_REPORT_UPHELD',
+      decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      decisionReasonText,
+    };
     const requestKey = `conduct-uphold-${fixture.reportId}`;
 
     const first = await adminRequest(path, {
@@ -2427,7 +2453,7 @@ describe('Admin Report Case API', () => {
       status: 'CONDUCT_REPORT_UPHELD',
       version: 2,
       reason: 'CONDUCT_OUT_OF_SCOPE',
-      decisionReason: 'CONDUCT_OUT_OF_SCOPE',
+      decisionReason: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
       resolvedByAdminId: adminId,
       resolvedAt: expect.any(Date),
     });
@@ -2442,8 +2468,8 @@ describe('Admin Report Case API', () => {
       resourceType: 'conduct_report',
       resourceId: fixture.reportId,
       requestKey,
-      reasonCatalogVersion: 1,
-      reasonCode: 'CONDUCT_OUT_OF_SCOPE',
+      reasonCatalogVersion: 2,
+      reasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
       expectedVersion: 1,
       resultVersion: 2,
       metadata: { outcome: 'CONDUCT_REPORT_UPHELD' },
@@ -2455,7 +2481,7 @@ describe('Admin Report Case API', () => {
     expect(activityLog.status).toBe(200);
     expect((await activityLog.json()).data.items).toContainEqual(
       expect.objectContaining({
-        reasonCode: 'CONDUCT_OUT_OF_SCOPE',
+        reasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
         decisionReasonText,
       })
     );
@@ -2524,7 +2550,7 @@ describe('Admin Report Case API', () => {
       status: 'CONDUCT_REPORT_UPHELD',
       decision: {
         outcome: 'CONDUCT_REPORT_UPHELD',
-        reason: 'CONDUCT_OUT_OF_SCOPE',
+        reason: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
         resolvedAt: expect.any(String),
         admin: { id: adminId, email: adminEmail },
       },
@@ -2597,7 +2623,7 @@ describe('Admin Report Case API', () => {
     ).toHaveLength(1);
     await db
       .update(adminConductReport)
-      .set({ decisionReason: conductReportReason.abandoned })
+      .set({ decisionReason: 'NOT_AN_APPROVED_DECISION_CODE' })
       .where(eq(adminConductReport.id, fixture.reportId));
     const expectedFailureLog = spyOn(console, 'error').mockImplementation(() => undefined);
     try {
@@ -2668,7 +2694,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `conduct-uphold-temp-ban-${fixture.reportId}`,
         'if-match': '1',
       },
-      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
     });
     expect(decision.status).toBe(200);
 
@@ -2817,7 +2846,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `conduct-uphold-permanent-ban-${fixture.reportId}`,
         'if-match': '1',
       },
-      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
     });
     expect(decision.status).toBe(200);
     expect(
@@ -2858,7 +2890,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `conduct-uphold-existing-freeze-${fixture.reportId}`,
         'if-match': '1',
       },
-      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
     });
     expect(decision.status).toBe(200);
 
@@ -2904,7 +2939,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `conduct-uphold-suspended-wallet-${fixture.reportId}`,
         'if-match': '1',
       },
-      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
     });
     expect(decision.status).toBe(200);
 
@@ -3038,7 +3076,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `conduct-uphold-push-failure-${fixture.reportId}`,
         'if-match': '1',
       },
-      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
     });
     expect(decision.status).toBe(200);
 
@@ -3093,7 +3134,10 @@ describe('Admin Report Case API', () => {
             'idempotency-key': `conduct-uphold-race-${suffix}-${fixture.reportId}`,
             'if-match': '1',
           },
-          body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+          body: JSON.stringify({
+            outcome: 'CONDUCT_REPORT_UPHELD',
+            decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+          }),
         })
       )
     );
@@ -3397,7 +3441,10 @@ describe('Admin Report Case API', () => {
           'idempotency-key': `conduct-uphold-atomic-${fixture.reportId}`,
           'if-match': '1',
         },
-        body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+        body: JSON.stringify({
+          outcome: 'CONDUCT_REPORT_UPHELD',
+          decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+        }),
       });
       expect(response.status).toBe(500);
 
@@ -3474,7 +3521,7 @@ describe('Admin Report Case API', () => {
           },
           body: JSON.stringify({
             outcome: 'REPORT_CASE_HIDDEN',
-            reasonCode: 'SAFETY_REVIEW',
+            reasonCode: 'REPORT_OTHER_POLICY_VIOLATION_CONFIRMED',
             decisionReasonText: 'Admin confirmed a safety policy violation.',
           }),
         })
@@ -3520,7 +3567,7 @@ describe('Admin Report Case API', () => {
     expect(hideActivityLog.status).toBe(200);
     expect((await hideActivityLog.json()).data.items).toContainEqual(
       expect.objectContaining({
-        reasonCode: 'SAFETY_REVIEW',
+        reasonCode: 'REPORT_OTHER_POLICY_VIOLATION_CONFIRMED',
         decisionReasonText: 'Admin confirmed a safety policy violation.',
       })
     );
@@ -3542,7 +3589,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `report-rehide-${fixture.caseId}`,
         'if-match': '2',
       },
-      body: JSON.stringify({ outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'POLICY_REVIEW' }),
+      body: JSON.stringify({
+        outcome: 'REPORT_CASE_HIDDEN',
+        reasonCode: 'REPORT_OTHER_POLICY_VIOLATION_CONFIRMED',
+      }),
     });
     expect(rehide.status).toBe(200);
     expect((await rehide.json()).data.resourceSummary).toMatchObject({
@@ -3613,7 +3663,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `report-stale-${fixture.caseId}`,
         'if-match': '1',
       },
-      body: JSON.stringify({ outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'POLICY_REVIEW' }),
+      body: JSON.stringify({
+        outcome: 'REPORT_CASE_DISMISSED',
+        reasonCode: 'REPORT_NO_POLICY_VIOLATION',
+      }),
     });
     expect(stale.status).toBe(409);
     expect((await stale.json()).error.code).toBe('ADMIN_ACTION_CONFLICT');
@@ -3624,7 +3677,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `report-restore-${fixture.caseId}`,
         'if-match': '3',
       },
-      body: JSON.stringify({ outcome: 'REPORT_CASE_RESTORED', reasonCode: 'POLICY_REVIEW' }),
+      body: JSON.stringify({
+        outcome: 'REPORT_CASE_RESTORED',
+        reasonCode: 'REPORT_MESSAGE_COMPLIES_WITH_POLICY',
+      }),
     });
     expect(restore.status).toBe(200);
     expect((await restore.json()).data.resourceSummary).toMatchObject({
@@ -3665,7 +3721,7 @@ describe('Admin Report Case API', () => {
     if (!postgresAvailable) return;
     const fixture = await createReportFixture();
     const requestKey = `report-dismiss-${fixture.caseId}`;
-    const body = { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'POLICY_REVIEW' };
+    const body = { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'REPORT_NO_POLICY_VIOLATION' };
 
     const dismiss = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
       method: 'POST',
@@ -3682,8 +3738,8 @@ describe('Admin Report Case API', () => {
       expectedVersion: 1,
       kind: 'COMMAND',
       metadata: { outcome: 'REPORT_CASE_DISMISSED' },
-      reasonCatalogVersion: 1,
-      reasonCode: 'POLICY_REVIEW',
+      reasonCatalogVersion: 2,
+      reasonCode: 'REPORT_NO_POLICY_VIOLATION',
       request: { outcome: 'REPORT_CASE_DISMISSED' },
       requestKey,
       resourceId: fixture.caseId,
@@ -3735,7 +3791,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `report-repeated-${fixture.caseId}`,
         'if-match': '2',
       },
-      body: JSON.stringify({ outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'SAFETY_REVIEW' }),
+      body: JSON.stringify({
+        outcome: 'REPORT_CASE_HIDDEN',
+        reasonCode: 'REPORT_SPAM_CONFIRMED',
+      }),
     });
     expect(repeated.status).toBe(409);
     expect((await repeated.json()).error.code).toBe('REPORT_CASE_OUTCOME_INVALID');
@@ -3745,5 +3804,259 @@ describe('Admin Report Case API', () => {
         .from(adminModerationDecision)
         .where(eq(adminModerationDecision.reportCaseId, fixture.caseId))
     ).toHaveLength(1);
+  });
+  const reportCaseReasonCodeCases = [
+    { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'REPORT_NO_POLICY_VIOLATION' },
+    { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'REPORT_INSUFFICIENT_EVIDENCE' },
+    { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'REPORT_CONTEXT_SUPPORTS_MESSAGE' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_HARASSMENT_CONFIRMED' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_SPAM_CONFIRMED' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_THREAT_CONFIRMED' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_INAPPROPRIATE_CONTENT_CONFIRMED' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_OTHER_POLICY_VIOLATION_CONFIRMED' },
+    { outcome: 'REPORT_CASE_RESTORED', reasonCode: 'REPORT_MESSAGE_COMPLIES_WITH_POLICY' },
+    { outcome: 'REPORT_CASE_RESTORED', reasonCode: 'REPORT_CONTEXT_WAS_MISUNDERSTOOD' },
+    { outcome: 'REPORT_CASE_RESTORED', reasonCode: 'REPORT_NEW_EVIDENCE_OVERTURNS_HIDE' },
+  ] as const;
+
+  for (const { outcome, reasonCode } of reportCaseReasonCodeCases) {
+    it(`${outcome} records ${reasonCode} with catalog version 2`, async () => {
+      if (!postgresAvailable) return;
+      const fixture = await createReportFixture();
+      if (outcome === 'REPORT_CASE_RESTORED') {
+        const hide = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `report-catalog-hide-${fixture.caseId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_HIDDEN',
+            reasonCode: 'REPORT_HARASSMENT_CONFIRMED',
+          }),
+        });
+        expect(hide.status).toBe(200);
+      }
+
+      const action =
+        outcome === 'REPORT_CASE_DISMISSED'
+          ? 'REPORT_CASE_DISMISS'
+          : outcome === 'REPORT_CASE_HIDDEN'
+            ? 'REPORT_CASE_HIDE'
+            : 'REPORT_CASE_RESTORE';
+      const requestKey = `report-catalog-${reasonCode}-${fixture.caseId}`;
+      const expectedVersion = outcome === 'REPORT_CASE_RESTORED' ? '2' : '1';
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+        method: 'POST',
+        headers: { 'idempotency-key': requestKey, 'if-match': expectedVersion },
+        body: JSON.stringify({ outcome, reasonCode }),
+      });
+      expect(response.status).toBe(200);
+
+      const [actionRow] = await db
+        .select({
+          action: adminAction.action,
+          reasonCatalogVersion: adminAction.reasonCatalogVersion,
+          reasonCode: adminAction.reasonCode,
+        })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey));
+      expect(actionRow).toEqual({ action, reasonCatalogVersion: 2, reasonCode });
+
+      const moderationDecisions = await db
+        .select({
+          newStatus: adminModerationDecision.newStatus,
+          reasonCatalogVersion: adminModerationDecision.reasonCatalogVersion,
+          reasonCode: adminModerationDecision.reasonCode,
+        })
+        .from(adminModerationDecision)
+        .where(eq(adminModerationDecision.reportCaseId, fixture.caseId));
+      expect(moderationDecisions).toContainEqual({
+        newStatus: outcome,
+        reasonCatalogVersion: 2,
+        reasonCode,
+      });
+
+      const activityLog = await adminRequest(
+        `/api/v1/admin/activity-log?resourceType=report_case&resourceId=${fixture.caseId}`
+      );
+      expect(activityLog.status).toBe(200);
+      expect((await activityLog.json()).data.items).toContainEqual(
+        expect.objectContaining({ action, reasonCatalogVersion: 2, reasonCode })
+      );
+    });
+  }
+
+  const conductReportDecisionReasonCodeCases = [
+    {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_INSUFFICIENT_EVIDENCE',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_DISPROVES_CLAIM',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_OUTSIDE_RULEBOOK_SCOPE',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_UPHELD',
+      decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_UPHELD',
+      decisionReasonCode: 'CONDUCT_REPORT_PROOF_RECORD_CONFIRMS_VIOLATION',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_UPHELD',
+      decisionReasonCode: 'CONDUCT_REPORT_CHAT_CONTEXT_CORROBORATES_VIOLATION',
+    },
+  ] as const;
+
+  for (const { outcome, decisionReasonCode } of conductReportDecisionReasonCodeCases) {
+    it(`${outcome} records Admin-selected ${decisionReasonCode} with catalog version 2`, async () => {
+      if (!postgresAvailable) return;
+      const filedReason = conductReportReason.outOfScope;
+      const fixture = await createConductReportFixture({ reason: filedReason });
+      const requestKey = `conduct-catalog-${decisionReasonCode}-${fixture.reportId}`;
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+        method: 'POST',
+        headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+        body: JSON.stringify({ outcome, decisionReasonCode }),
+      });
+      expect(response.status).toBe(200);
+
+      const [storedReport] = await db
+        .select({
+          reason: adminConductReport.reason,
+          status: adminConductReport.status,
+          decisionReason: adminConductReport.decisionReason,
+        })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId));
+      expect(storedReport).toEqual({
+        reason: filedReason,
+        status: outcome,
+        decisionReason: decisionReasonCode,
+      });
+
+      const [actionRow] = await db
+        .select({
+          action: adminAction.action,
+          reasonCatalogVersion: adminAction.reasonCatalogVersion,
+          reasonCode: adminAction.reasonCode,
+        })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey));
+      expect(actionRow).toEqual({
+        action:
+          outcome === 'CONDUCT_REPORT_DISMISSED'
+            ? 'CONDUCT_REPORT_DISMISS'
+            : 'CONDUCT_REPORT_UPHOLD',
+        reasonCatalogVersion: 2,
+        reasonCode: decisionReasonCode,
+      });
+
+      const activityLog = await adminRequest(
+        `/api/v1/admin/activity-log?resourceType=conduct_report&resourceId=${fixture.reportId}`
+      );
+      expect(activityLog.status).toBe(200);
+      expect((await activityLog.json()).data.items).toContainEqual(
+        expect.objectContaining({ reasonCatalogVersion: 2, reasonCode: decisionReasonCode })
+      );
+
+      const detail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+      expect(detail.status).toBe(200);
+      expect((await detail.json()).data).toMatchObject({
+        reason: filedReason,
+        decision: { outcome, reason: decisionReasonCode },
+      });
+      if (outcome === 'CONDUCT_REPORT_UPHELD') {
+        expect(
+          await db
+            .select({ reasonCode: memberPenaltyRecord.reasonCode })
+            .from(memberPenaltyRecord)
+            .where(eq(memberPenaltyRecord.sourceId, fixture.reportId))
+        ).toEqual([{ reasonCode: filedReason }]);
+      }
+    });
+  }
+
+  it('rejects old or outcome-mismatched Report Case codes without writing an Admin Action', async () => {
+    if (!postgresAvailable) return;
+    const invalidCases = [
+      { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'POLICY_REVIEW' },
+      { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'SAFETY_REVIEW' },
+      { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_NO_POLICY_VIOLATION' },
+      { outcome: 'REPORT_CASE_RESTORED', reasonCode: 'REPORT_CONTEXT_SUPPORTS_MESSAGE' },
+    ] as const;
+
+    for (const { outcome, reasonCode } of invalidCases) {
+      const fixture = await createReportFixture();
+      if (outcome === 'REPORT_CASE_RESTORED') {
+        const hide = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `report-invalid-hide-${fixture.caseId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_HIDDEN',
+            reasonCode: 'REPORT_HARASSMENT_CONFIRMED',
+          }),
+        });
+        expect(hide.status).toBe(200);
+      }
+      const requestKey = `report-invalid-${reasonCode}-${fixture.caseId}`;
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+        method: 'POST',
+        headers: {
+          'idempotency-key': requestKey,
+          'if-match': outcome === 'REPORT_CASE_RESTORED' ? '2' : '1',
+        },
+        body: JSON.stringify({ outcome, reasonCode }),
+      });
+      expect(response.status).toBe(400);
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(eq(adminAction.requestKey, requestKey))
+      ).toHaveLength(0);
+    }
+  });
+
+  it('requires a separate approved Admin decision code for Conduct Report uphold', async () => {
+    if (!postgresAvailable) return;
+    const invalidCases = [
+      { outcome: 'CONDUCT_REPORT_UPHELD' },
+      { outcome: 'CONDUCT_REPORT_UPHELD', decisionReasonCode: 'CONDUCT_OUT_OF_SCOPE' },
+      {
+        outcome: 'CONDUCT_REPORT_DISMISSED',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      },
+    ] as const;
+
+    for (const body of invalidCases) {
+      const fixture = await createConductReportFixture({ reason: conductReportReason.outOfScope });
+      const requestKey = `conduct-invalid-${fixture.reportId}`;
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+        method: 'POST',
+        headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(400);
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(eq(adminAction.requestKey, requestKey))
+      ).toHaveLength(0);
+    }
   });
 });

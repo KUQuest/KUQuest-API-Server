@@ -12,11 +12,14 @@ import {
   listAdminReportsController,
 } from './admin-report.controller';
 import {
-  adminReportCommandHeadersSchema,
-  adminReportCommandResponseSchema,
   adminConductReportDismissDecisionBodySchema,
   adminConductReportUpholdDecisionBodySchema,
   adminReportCaseDecisionBodySchema,
+  adminReportCaseDismissDecisionBodySchema,
+  adminReportCaseHideDecisionBodySchema,
+  adminReportCaseRestoreDecisionBodySchema,
+  adminReportCommandHeadersSchema,
+  adminReportCommandResponseSchema,
   adminReportDecisionBodySchema,
   adminReportDetailResponseSchema,
   adminReportEvidenceHeadersSchema,
@@ -35,8 +38,12 @@ const rejectUnknownAdminReportDecisionFields = ({ body }: { body: unknown }) => 
         ? adminConductReportDismissDecisionBodySchema
         : body.outcome === 'CONDUCT_REPORT_UPHELD'
           ? adminConductReportUpholdDecisionBodySchema
-          : adminReportCaseDecisionBodySchema
-      : adminReportCaseDecisionBodySchema;
+          : body.outcome === 'REPORT_CASE_DISMISSED'
+            ? adminReportCaseDismissDecisionBodySchema
+            : body.outcome === 'REPORT_CASE_HIDDEN'
+              ? adminReportCaseHideDecisionBodySchema
+              : adminReportCaseRestoreDecisionBodySchema
+      : adminReportCaseDismissDecisionBodySchema;
 
   rejectUnknownFields(schema)({ body });
 };
@@ -85,7 +92,7 @@ export const adminReportRoute = new Elysia({
       tags: ['Admin Reports'],
       summary: 'Apply a Report Case or Conduct Report decision',
       description:
-        'For REPORT_CASE decisions, reasonCode is POLICY_REVIEW or SAFETY_REVIEW; Reporter Entry reasons are REPORT_ABUSIVE_OR_HARASSMENT, REPORT_SPAM, REPORT_INAPPROPRIATE_CONTENT, REPORT_DANGER_OR_THREAT, or REPORT_OTHER. CONDUCT_REPORT dismissal uses decisionReasonCode CONDUCT_REPORT_NO_VIOLATION or CONDUCT_REPORT_INSUFFICIENT_EVIDENCE; filing reasons are CONDUCT_ABANDONED, CONDUCT_OUT_OF_SCOPE, or CONDUCT_NO_SHOW. Uphold reuses the filed reason. Each decision can include an optional Admin-only decisionReasonText of up to 200 characters. Commands require an action-specific reason code, current resource version, Idempotency-Key, and immutable Admin Action.',
+        'REPORT_CASE_DISMISSED reasonCode is REPORT_NO_POLICY_VIOLATION, REPORT_INSUFFICIENT_EVIDENCE, or REPORT_CONTEXT_SUPPORTS_MESSAGE. REPORT_CASE_HIDDEN reasonCode is REPORT_HARASSMENT_CONFIRMED, REPORT_SPAM_CONFIRMED, REPORT_THREAT_CONFIRMED, REPORT_INAPPROPRIATE_CONTENT_CONFIRMED, or REPORT_OTHER_POLICY_VIOLATION_CONFIRMED. REPORT_CASE_RESTORED reasonCode is REPORT_MESSAGE_COMPLIES_WITH_POLICY, REPORT_CONTEXT_WAS_MISUNDERSTOOD, or REPORT_NEW_EVIDENCE_OVERTURNS_HIDE. Reporter Entry reasons are REPORT_ABUSIVE_OR_HARASSMENT, REPORT_SPAM, REPORT_INAPPROPRIATE_CONTENT, REPORT_DANGER_OR_THREAT, or REPORT_OTHER. CONDUCT_REPORT_DISMISSED and CONDUCT_REPORT_UPHELD require an Admin-selected decisionReasonCode from their outcome-specific catalogs; filed reasons CONDUCT_ABANDONED, CONDUCT_OUT_OF_SCOPE, or CONDUCT_NO_SHOW remain separate. Each decision can include an optional Admin-only decisionReasonText of up to 200 characters. Commands require a current resource version, Idempotency-Key, and immutable Admin Action.',
       operationId: 'decideAdminReport',
       security: betterAuthSecurity,
     },

@@ -1,4 +1,4 @@
-import { adminDecisionReasonTextSchema } from '@/modules/admin';
+import { adminDecisionReasonTextSchema } from '@/modules/admin/admin-action.schema';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import { t } from 'elysia';

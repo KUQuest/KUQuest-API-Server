@@ -37,3 +37,29 @@ A Dispute Case reverses part of the automatic settlement a `QUEST_FAILED` Quest 
 - The note is stored separately on the immutable Admin Action and is visible only to enabled Admins through the Activity Log. It does not replace `reasonCode` or appear in Member notifications.
 - The first confirmed decision is final and creates an Audit Record.
 - A non-active Hirer Wallet (`FROZEN`, `SUSPENDED`, `CLOSED`) does not block the redirect.
+
+## Decision reason catalog
+
+Admin Action reason catalog version `2` defines the action-specific reason codes:
+
+`DISPUTE_CASE_DISMISS` accepts:
+
+- `DISPUTE_INSUFFICIENT_EVIDENCE`
+- `DISPUTE_QUEST_RECORD_DOES_NOT_SUPPORT_CLAIM`
+- `DISPUTE_NO_UNFAIR_SETTLEMENT_FOUND`
+- `DISPUTE_WORKER_ALREADY_COMPENSATED`
+
+`DISPUTE_CASE_RESOLVE` accepts:
+
+- `DISPUTE_VALID_PROOF_NOT_APPROVED`: the Proof Submission meets the Quest Condition, but the Hirer did not approve it.
+- `DISPUTE_WORKER_MET_QUEST_CONDITION`: Quest records show the Worker met the agreed condition, but failure settlement returned the slot funds to the Hirer.
+- `DISPUTE_PARTIAL_WORK_EARNED_REWARD`: evidence supports payment for part of the work, so the Admin redirects the matching Satang amount.
+
+The Admin selects `reasonCode`; the Server does not derive it from the outcome.
+The code records the Admin's finding. It does not calculate the redirect amount
+or change the accepted settlement. Version-1 Admin Actions remain readable with
+their recorded catalog version and code.
+
+An Admin may also provide an optional `decisionReasonText` of up to 200
+characters. The note is stored separately on the immutable Admin Action and
+does not replace `reasonCode` or change the money movement.

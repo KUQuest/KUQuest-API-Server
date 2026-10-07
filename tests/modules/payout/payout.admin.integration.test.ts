@@ -258,6 +258,14 @@ describe('Payout API routes', () => {
     expect(payoutList?.description).toContain('status=ALL');
     expect(JSON.stringify(document)).toContain('"ALL"');
     expect(JSON.stringify(document)).toContain('totalCount');
+    const approval = document.paths['/api/v1/admin/payouts/{payoutId}/approve']?.post;
+    const cancellation = document.paths['/api/v1/admin/payouts/{payoutId}/cancel']?.post;
+    expect(approval?.description).toContain('decisionReasonText');
+    expect(cancellation?.description).toContain('decisionReasonText');
+    expect(JSON.stringify(approval?.requestBody)).toContain('decisionReasonText');
+    expect(JSON.stringify(cancellation?.requestBody)).toContain('decisionReasonText');
+    expect(JSON.stringify(approval?.requestBody)).toContain('"maxLength":200');
+    expect(JSON.stringify(cancellation?.requestBody)).toContain('"maxLength":200');
   });
 
   it('serves the authenticated Admin queue, cursor, detail, and history contracts', async () => {
@@ -933,5 +941,61 @@ describe('Payout API routes', () => {
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: { code: string } };
     expect(body.error.code).toBe('INVALID_LIMIT');
+  });
+  it('keeps the version-1 Payout decision codes and the API cancel outcome', async () => {
+    const decisions = [
+      { action: 'PAYOUT_APPROVE', path: 'approve', reasonCode: 'PAYOUT_POLICY_REVIEW' },
+      { action: 'PAYOUT_APPROVE', path: 'approve', reasonCode: 'PAYOUT_RISK_REVIEW' },
+      { action: 'PAYOUT_CANCEL', path: 'cancel', reasonCode: 'PAYOUT_POLICY_REVIEW' },
+      { action: 'PAYOUT_CANCEL', path: 'cancel', reasonCode: 'PAYOUT_RISK_REVIEW' },
+      { action: 'PAYOUT_CANCEL', path: 'cancel', reasonCode: 'PAYOUT_INVALID_DESTINATION' },
+    ] as const;
+
+    for (const decision of decisions) {
+      const payout = await createPendingPayout();
+      const requestKey = `payout-v1-catalog-${decision.reasonCode}-${payout.id}`;
+      const response = await app.handle(
+        new Request(`http://localhost/api/v1/admin/payouts/${payout.id}/${decision.path}`, {
+          method: 'POST',
+          headers: {
+            cookie: adminCookie,
+            'content-type': 'application/json',
+            'idempotency-key': requestKey,
+            'if-match': String(payout.version),
+          },
+          body: JSON.stringify({ reasonCode: decision.reasonCode }),
+        })
+      );
+      expect(response.status).toBe(200);
+
+      const [action] = await db
+        .select({
+          action: adminAction.action,
+          reasonCatalogVersion: adminAction.reasonCatalogVersion,
+          reasonCode: adminAction.reasonCode,
+        })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey));
+      expect(action).toEqual({
+        action: decision.action,
+        reasonCatalogVersion: 1,
+        reasonCode: decision.reasonCode,
+      });
+
+      const activityLog = await app.handle(
+        new Request(
+          `http://localhost/api/v1/admin/activity-log?resourceType=payout&resourceId=${payout.id}`,
+          { headers: { cookie: adminCookie } }
+        )
+      );
+      expect(activityLog.status).toBe(200);
+      expect((await activityLog.json()).data.items).toContainEqual(
+        expect.objectContaining({
+          action: decision.action,
+          reasonCatalogVersion: 1,
+          reasonCode: decision.reasonCode,
+        })
+      );
+    }
   });
 });
