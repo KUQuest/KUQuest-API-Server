@@ -245,6 +245,41 @@ export type AdminMemberPenaltyHistoryData = Static<
   typeof adminMemberPenaltyHistoryResponseSchema
 >['data'];
 
+export const adminMemberReviewsQuerySchema = t.Object({
+  rating: t.Optional(t.Integer({ minimum: 1, maximum: 5 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
+  cursor: t.Optional(t.String()),
+});
+
+export const adminMemberReviewItemSchema = t.Object({
+  id: uuid,
+  rating: t.Integer({ minimum: 1, maximum: 5 }),
+  comment: t.Union([t.String(), t.Null()]),
+  createdAt: dateTime,
+  updatedAt: dateTime,
+  reviewer: t.Object({
+    displayId: t.String({ pattern: '^MEM-[0-9]{6,}$' }),
+    name: t.String(),
+  }),
+  quest: t.Object({
+    displayId: t.String({ pattern: '^QST-[0-9]{6,}$' }),
+    title: t.String(),
+    questStatus: t.String(),
+  }),
+});
+
+export const adminMemberReviewsResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    items: t.Array(adminMemberReviewItemSchema),
+    nextCursor: t.Union([t.String(), t.Null()]),
+    totalCount: t.Integer({ minimum: 0 }),
+  }),
+});
+
+export type AdminMemberReviewsQuery = Static<typeof adminMemberReviewsQuerySchema>;
+export type AdminMemberReviewsData = Static<typeof adminMemberReviewsResponseSchema>['data'];
+
 export type AdminMemberParams = Static<typeof adminMemberParamsSchema>;
 export type AdminMemberListItem = Static<typeof adminMemberListItemSchema>;
 export type AdminMemberStatus = Static<typeof adminMemberStatusSchema>;

@@ -59,6 +59,7 @@ See `src/modules/onboarding/` as the reference shape.
 
 - A list that pages on a timestamp reads its page through `readKeysetPage` (`src/shared/keyset-page.ts`). The reader owns the anchor check, the row-wise boundary in both sort directions, the `limit + 1` probe, the trim, and the `nextCursor` pair; the call site keeps its projection, its filters, its own invalid-cursor error, and its own page-limit rule. A second copy of those mechanics fails `tests/shared/cursor.guard.test.ts`.
 - A timestamp cursor compares row-wise against the anchor row read back from the database, never against a millisecond value from the cursor text — `defaultNow()` writes microseconds. A cursor whose anchor row is gone rejects with the module's invalid-cursor error (both rules live in `src/shared/keyset-page.ts`).
+- A filtered table-backed list can use `cursorAnchorRead` to read an anchor only when it matches the current filters. Return the same stable `scope` from `cursorAnchorRead` and `rowCursor`; `readKeysetPage` validates the timestamp and scope, and still owns the row boundary and ordering.
 - One page-limit rule holds for the whole API: `parsePageLimit` in `src/shared/cursor.ts` defaults to `DEFAULT_PAGE_LIMIT` and rejects a limit outside 1..`MAX_PAGE_LIMIT`. A query schema caps `limit` at `MAX_PAGE_LIMIT`, never at a number of its own.
 
 ## Testing

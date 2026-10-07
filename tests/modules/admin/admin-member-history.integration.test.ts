@@ -41,6 +41,7 @@ const statusMemberId = crypto.randomUUID();
 const cursorMemberId = crypto.randomUUID();
 const relatedMemberId = crypto.randomUUID();
 const approvedBeforeFailureWorkerId = crypto.randomUUID();
+const confirmedBeforeFailureWorkerId = crypto.randomUUID();
 const workerOnlyHirerId = crypto.randomUUID();
 const emptyMemberId = crypto.randomUUID();
 const fixtureMemberIds = [
@@ -49,6 +50,7 @@ const fixtureMemberIds = [
   cursorMemberId,
   relatedMemberId,
   approvedBeforeFailureWorkerId,
+  confirmedBeforeFailureWorkerId,
   workerOnlyHirerId,
   emptyMemberId,
 ];
@@ -139,6 +141,7 @@ const createHistoryQuest = async ({
   createdAt,
   participation = 'SOLO',
   headcount = 1,
+  proofRequired = true,
 }: {
   hirerId: string;
   questStatus: QuestStatus;
@@ -146,6 +149,7 @@ const createHistoryQuest = async ({
   createdAt: Date;
   participation?: QuestParticipation;
   headcount?: number;
+  proofRequired?: boolean;
 }): Promise<HistoryQuestFixture> => {
   const id = crypto.randomUUID();
   const questStateEventAt =
@@ -161,6 +165,7 @@ const createHistoryQuest = async ({
     rewardSatang: 500,
     tagId,
     headcount,
+    proofRequired,
     startTime: new Date(createdAt.getTime() + 5_000),
     failedAt: questStatus === 'QUEST_FAILED' ? questStateEventAt : null,
     cancelledAt: questStatus === 'QUEST_CANCELLED' ? questStateEventAt : null,
@@ -262,6 +267,12 @@ beforeAll(async () => {
       id: approvedBeforeFailureWorkerId,
       email: `${approvedBeforeFailureWorkerId}@ku.th`,
       firstName: 'Approved',
+      lastName: 'Worker',
+    },
+    {
+      id: confirmedBeforeFailureWorkerId,
+      email: `${confirmedBeforeFailureWorkerId}@ku.th`,
+      firstName: 'Confirmed',
       lastName: 'Worker',
     },
     {
@@ -496,7 +507,8 @@ describe('Admin Member Quest and Assignment history', () => {
           title: `${marker} ${questStatus}`,
           createdAt: new Date(firstCreatedAt.getTime() + index * 24 * 60 * 60 * 1000),
           participation: questStatus === 'QUEST_FAILED' ? 'GROUP' : 'SOLO',
-          headcount: questStatus === 'QUEST_FAILED' ? 3 : 1,
+          headcount: questStatus === 'QUEST_FAILED' ? 4 : 1,
+          proofRequired: questStatus !== 'QUEST_COMPLETED',
         })
       )
     );
@@ -516,21 +528,8 @@ describe('Admin Member Quest and Assignment history', () => {
     });
     const completedQuestFixture = questsByStatus.get('QUEST_COMPLETED');
     if (!completedQuestFixture?.questStatusChangedAt) {
-      throw new Error('The completed Quest fixture needs its Proof review event.');
+      throw new Error('The proof-free completed Quest fixture needs its confirmation time.');
     }
-    const completedProofId = crypto.randomUUID();
-    fixtureProofSubmissionIds.push(completedProofId);
-    await db.insert(proofSubmission).values({
-      id: completedProofId,
-      questId: completedQuestFixture.id,
-      workerId: statusMemberId,
-      teamId: null,
-      submittedByUserId: statusMemberId,
-      content: 'Proof approved before Quest completion',
-      submissionStatus: 'PROOF_APPROVED',
-      submittedAt: new Date(completedQuestFixture.questStatusChangedAt.getTime() - 10_000),
-      reviewedAt: new Date(completedQuestFixture.questStatusChangedAt.getTime() - 5_000),
-    });
     await db.insert(questCompletionConfirmation).values({
       questId: completedQuestFixture.id,
       workerId: statusMemberId,
@@ -538,6 +537,52 @@ describe('Admin Member Quest and Assignment history', () => {
       confirmedByUserId: statusMemberId,
       confirmedAt: completedQuestFixture.questStatusChangedAt,
     });
+
+    const proofQuestCreatedAt = new Date('2032-06-20T00:00:00.000Z');
+    const proofCompletedQuest = await createHistoryQuest({
+      hirerId: statusMemberId,
+      questStatus: 'QUEST_COMPLETED',
+      title: `${marker} GROUP proof completion`,
+      createdAt: proofQuestCreatedAt,
+      participation: 'GROUP',
+      headcount: 2,
+    });
+    const proofReviewCases = [
+      {
+        workerId: approvedBeforeFailureWorkerId,
+        reviewedAt: new Date(proofQuestCreatedAt.getTime() + 40_000),
+      },
+      {
+        workerId: confirmedBeforeFailureWorkerId,
+        reviewedAt: new Date(proofQuestCreatedAt.getTime() + 50_000),
+      },
+    ];
+    await Promise.all(
+      proofReviewCases.map(async ({ workerId, reviewedAt }) => {
+        await createHistoryAssignment({
+          questId: proofCompletedQuest.id,
+          workerId,
+          assignmentStatus: 'ASSIGNMENT_COMPLETED',
+          createdAt: new Date(proofQuestCreatedAt.getTime() + 10_000),
+          startedAt: new Date(proofQuestCreatedAt.getTime() + 15_000),
+          statusChangedAt: null,
+          recordStatusAudit: false,
+        });
+        const proofId = crypto.randomUUID();
+        fixtureProofSubmissionIds.push(proofId);
+        await db.insert(proofSubmission).values({
+          id: proofId,
+          questId: proofCompletedQuest.id,
+          workerId,
+          teamId: null,
+          submittedByUserId: workerId,
+          content: 'Approved proof for a completed history Assignment',
+          submissionStatus: 'PROOF_APPROVED',
+          submittedAt: new Date(reviewedAt.getTime() - 5_000),
+          reviewedAt,
+        });
+      })
+    );
 
     const assignmentCases: Array<{
       questStatus: QuestStatus;
@@ -647,6 +692,24 @@ describe('Admin Member Quest and Assignment history', () => {
       submissionStatus: 'PROOF_APPROVED',
       submittedAt: new Date(failedQuest.questStatusChangedAt.getTime() - 10_000),
       reviewedAt: new Date(failedQuest.questStatusChangedAt.getTime() - 5_000),
+    });
+
+    const confirmedBeforeFailureAt = new Date(failedQuest.questStatusChangedAt.getTime() - 5_000);
+    await createHistoryAssignment({
+      questId: failedQuest.id,
+      workerId: confirmedBeforeFailureWorkerId,
+      assignmentStatus: 'ASSIGNMENT_COMPLETED',
+      createdAt: new Date(failedQuest.createdAt.getTime() + 30_000),
+      startedAt: new Date(failedQuest.createdAt.getTime() + 35_000),
+      statusChangedAt: null,
+      recordStatusAudit: false,
+    });
+    await db.insert(questCompletionConfirmation).values({
+      questId: failedQuest.id,
+      workerId: confirmedBeforeFailureWorkerId,
+      teamId: null,
+      confirmedByUserId: confirmedBeforeFailureWorkerId,
+      confirmedAt: confirmedBeforeFailureAt,
     });
 
     const openQuest = questsByStatus.get('QUEST_OPEN');
@@ -785,12 +848,12 @@ describe('Admin Member Quest and Assignment history', () => {
     const allHistoryResponse = await adminGet(`${historyPathFor(statusMemberId)}?limit=50`);
     expect(allHistoryResponse.status).toBe(200);
     const allHistory = (await allHistoryResponse.json()) as HistoryBody;
-    expect(allHistory.data.totalCount).toBe(19);
+    expect(allHistory.data.totalCount).toBe(20);
 
     const hirerResponse = await adminGet(`${historyPathFor(statusMemberId)}?role=HIRER&limit=50`);
     expect(hirerResponse.status).toBe(200);
     const hirerHistory = (await hirerResponse.json()) as HistoryBody;
-    expect(hirerHistory.data.totalCount).toBe(12);
+    expect(hirerHistory.data.totalCount).toBe(13);
     expect(new Set(hirerHistory.data.items.map(({ quest: item }) => item.questStatus))).toEqual(
       new Set(persistedQuestStatus.enumValues)
     );
@@ -816,6 +879,30 @@ describe('Admin Member Quest and Assignment history', () => {
       ).toBe(fixture.questStatusChangedAt?.toISOString() ?? null);
       expect(item?.quest.questStatusChangedAt).not.toBe(
         new Date(fixture.createdAt.getTime() + 24 * 60 * 60 * 1000).toISOString()
+      );
+    }
+
+    const proofCompletedQuestItem = hirerHistory.data.items.find(
+      ({ quest: item }) => item.id === proofCompletedQuest.id
+    );
+    if (!proofCompletedQuestItem?.quest.questStatusChangedAt) {
+      throw new Error('The proof-required GROUP Quest needs its last Proof review time.');
+    }
+    const lastProofReviewAt = proofReviewCases[1]?.reviewedAt;
+    if (!lastProofReviewAt) throw new Error('The latest Proof review fixture is missing.');
+    expect(new Date(proofCompletedQuestItem.quest.questStatusChangedAt).toISOString()).toBe(
+      lastProofReviewAt.toISOString()
+    );
+    for (const { workerId, reviewedAt } of proofReviewCases) {
+      const completedWorker = proofCompletedQuestItem.relatedMembers.find(
+        ({ member }) => member.id === workerId
+      );
+      expect(completedWorker?.assignmentStatus).toBe('ASSIGNMENT_COMPLETED');
+      if (!completedWorker?.assignmentStatusChangedAt) {
+        throw new Error('A completed V1 Assignment needs its own Proof review time.');
+      }
+      expect(new Date(completedWorker.assignmentStatusChangedAt).toISOString()).toBe(
+        reviewedAt.toISOString()
       );
     }
 
@@ -861,6 +948,17 @@ describe('Admin Member Quest and Assignment history', () => {
     }
     expect(new Date(previouslyApprovedWorker.assignmentStatusChangedAt).toISOString()).toBe(
       failedQuest.questStatusChangedAt.toISOString()
+    );
+
+    const confirmedBeforeFailureWorker = failedQuestItem?.relatedMembers.find(
+      ({ member }) => member.id === confirmedBeforeFailureWorkerId
+    );
+    expect(confirmedBeforeFailureWorker?.assignmentStatus).toBe('ASSIGNMENT_COMPLETED');
+    if (!confirmedBeforeFailureWorker?.assignmentStatusChangedAt) {
+      throw new Error('A proof-free Worker Assignment needs its confirmation time.');
+    }
+    expect(new Date(confirmedBeforeFailureWorker.assignmentStatusChangedAt).toISOString()).toBe(
+      confirmedBeforeFailureAt.toISOString()
     );
 
     const workerResponse = await adminGet(`${historyPathFor(statusMemberId)}?role=WORKER&limit=50`);
@@ -1070,6 +1168,53 @@ describe('Admin Member Quest and Assignment history', () => {
     expect(items.map(({ role, quest: item }) => `${role}:${item.id}`)).toEqual(
       expectedRecords.map(({ role, questId: id }) => `${role}:${id}`)
     );
+    const filteredHirerFirstPage = await adminGet(
+      `${historyPathFor(cursorMemberId)}?role=HIRER&limit=1`
+    );
+    expect(filteredHirerFirstPage.status).toBe(200);
+    const filteredHirerCursor = ((await filteredHirerFirstPage.json()) as HistoryBody).data
+      .nextCursor;
+    if (!filteredHirerCursor) throw new Error('The Hirer cursor fixture needs another page.');
+
+    const roleMismatch = await adminGet(
+      `${historyPathFor(cursorMemberId)}?${new URLSearchParams({
+        role: 'WORKER',
+        limit: '1',
+        cursor: filteredHirerCursor,
+      })}`
+    );
+    expect(roleMismatch.status).toBe(400);
+    expect((await roleMismatch.json()).error.code).toBe('INVALID_CURSOR');
+
+    const questStatusMismatch = await adminGet(
+      `${historyPathFor(cursorMemberId)}?${new URLSearchParams({
+        role: 'HIRER',
+        questStatus: 'QUEST_FAILED',
+        limit: '1',
+        cursor: filteredHirerCursor,
+      })}`
+    );
+    expect(questStatusMismatch.status).toBe(400);
+    expect((await questStatusMismatch.json()).error.code).toBe('INVALID_CURSOR');
+
+    const filteredWorkerFirstPage = await adminGet(
+      `${historyPathFor(cursorMemberId)}?role=WORKER&limit=1`
+    );
+    expect(filteredWorkerFirstPage.status).toBe(200);
+    const filteredWorkerCursor = ((await filteredWorkerFirstPage.json()) as HistoryBody).data
+      .nextCursor;
+    if (!filteredWorkerCursor) throw new Error('The Worker cursor fixture needs another page.');
+
+    const assignmentStatusMismatch = await adminGet(
+      `${historyPathFor(cursorMemberId)}?${new URLSearchParams({
+        role: 'WORKER',
+        assignmentStatus: 'ASSIGNMENT_COMPLETED',
+        limit: '1',
+        cursor: filteredWorkerCursor,
+      })}`
+    );
+    expect(assignmentStatusMismatch.status).toBe(400);
+    expect((await assignmentStatusMismatch.json()).error.code).toBe('INVALID_CURSOR');
   });
 
   it('returns empty history, missing-Member, and invalid-cursor responses separately', async () => {

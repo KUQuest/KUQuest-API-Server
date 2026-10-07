@@ -16,15 +16,21 @@ import {
   questAssignment,
   questCandidateTeamV2Member,
   questCompletionConfirmation,
+  questStatus as persistedQuestStatus,
   questTeamMember,
   questV2CompletionConfirmation,
   questV2ProofSubmission,
   review,
 } from '@/database/schema/quest.schema';
 import { walletFundingReservationSettlement, walletWallet } from '@/database/schema/wallet.schema';
+import { validReceivedReviewFilter } from '@/modules/quest/shared/rating-review.service';
 import { walletProjectionMatchesLedger } from '@/modules/wallet';
 import { getProfileTags } from '@/modules/profile';
-import type { AssignmentStatus, QuestStatus } from '@/modules/quest/shared';
+import {
+  assignmentStatuses,
+  type AssignmentStatus,
+  type QuestStatus,
+} from '@/modules/quest/shared';
 import {
   CursorInputError,
   decodeCursor,
@@ -73,6 +79,8 @@ import type {
   AdminMemberProfileCollectionQuery,
   AdminMemberProfileIdentity,
   AdminMemberProfileTagsData,
+  AdminMemberReviewsData,
+  AdminMemberReviewsQuery,
   AdminMemberWorkExperienceItem,
   AdminMemberWorkExperiencesData,
 } from './admin-member.schema';
@@ -788,13 +796,37 @@ const memberHistoryAssignmentStatusChangedAt = () =>
           and "proof_submission"."submission_status" = 'PROOF_APPROVED'
           and "proof_submission"."reviewed_at" is not null
           and "quest_assignment"."assignment_status" = 'ASSIGNMENT_COMPLETED'
-          and "quest"."quest_status" = 'QUEST_FAILED'
-          and "quest"."failed_at" <= "proof_submission"."reviewed_at"
+          and "quest"."api_version" = 'v1'
+          and (
+            "quest"."quest_status" = 'QUEST_COMPLETED'
+            or (
+              "quest"."quest_status" = 'QUEST_FAILED'
+              and "quest"."failed_at" <= "proof_submission"."reviewed_at"
+            )
+          )
           and (
             "proof_submission"."worker_id" = "quest_assignment"."worker_id"
             or "quest_team_member"."user_id" is not null
           )
         order by "proof_submission"."reviewed_at" desc, "proof_submission"."id" desc
+        limit 1
+      ),
+      (
+        select ${memberHistoryTimestampText(questCompletionConfirmation.confirmedAt)}
+        from ${questCompletionConfirmation}
+        left join ${questTeamMember}
+          on "quest_team_member"."team_id" = "quest_completion_confirmation"."team_id"
+          and "quest_team_member"."user_id" = "quest_assignment"."worker_id"
+        where "quest_completion_confirmation"."quest_id" = "quest_assignment"."quest_id"
+          and "quest_assignment"."assignment_status" = 'ASSIGNMENT_COMPLETED'
+          and "quest"."api_version" = 'v1'
+          and (
+            "quest_completion_confirmation"."worker_id" = "quest_assignment"."worker_id"
+            or "quest_team_member"."user_id" is not null
+          )
+        order by
+          "quest_completion_confirmation"."confirmed_at" desc,
+          "quest_completion_confirmation"."id" desc
         limit 1
       ),
       (
@@ -857,42 +889,94 @@ const memberHistoryAssignmentStatusChangedAt = () =>
     )
   )`;
 
-const readMemberHistoryCursorAnchor = async (userId: string, cursor: CursorPayload) => {
+// Bind the cursor to its role and filters so a reused cursor cannot skip matching rows.
+const memberHistoryCursorScope = (
+  role: 'HIRER' | 'WORKER',
+  query: AdminMemberHistoryQuery
+): string => {
+  const questStatusFilter =
+    query.questStatus === undefined
+      ? 'N'
+      : persistedQuestStatus.enumValues.indexOf(query.questStatus).toString(36).toUpperCase();
+  const assignmentStatusFilter =
+    query.assignmentStatus === undefined
+      ? 'N'
+      : assignmentStatuses.indexOf(query.assignmentStatus).toString(36).toUpperCase();
+  return `MH_${role}_${query.role ?? 'ALL'}_${questStatusFilter}_${assignmentStatusFilter}`;
+};
+
+const memberHistoryFiltersFor = (userId: string, query: AdminMemberHistoryQuery) => {
+  const hirerAssignmentFilter = query.assignmentStatus
+    ? exists(
+        db
+          .select({ id: questAssignment.id })
+          .from(questAssignment)
+          .where(
+            and(
+              eq(questAssignment.questId, quest.id),
+              eq(questAssignment.assignmentStatus, query.assignmentStatus)
+            )
+          )
+      )
+    : undefined;
+  const hirerWhere = and(
+    eq(quest.hirerId, userId),
+    query.role === 'WORKER' ? sql`false` : undefined,
+    query.questStatus ? sql`${quest.questStatus} = ${query.questStatus}::quest_status` : undefined,
+    hirerAssignmentFilter
+  );
+  const workerWhere = and(
+    eq(questAssignment.workerId, userId),
+    query.role === 'HIRER' ? sql`false` : undefined,
+    query.questStatus ? sql`${quest.questStatus} = ${query.questStatus}::quest_status` : undefined,
+    query.assignmentStatus
+      ? eq(questAssignment.assignmentStatus, query.assignmentStatus)
+      : undefined
+  );
+  return { hirerWhere, workerWhere };
+};
+
+const readMemberHistoryCursorAnchor = async (
+  userId: string,
+  cursor: CursorPayload,
+  query: AdminMemberHistoryQuery
+) => {
+  const { hirerWhere, workerWhere } = memberHistoryFiltersFor(userId, query);
+  const hirerScope = memberHistoryCursorScope('HIRER', query);
+  const workerScope = memberHistoryCursorScope('WORKER', query);
   const readHirer = async () => {
     const [row] = await db
       .select({ startTime: quest.createdAt })
       .from(quest)
-      .where(and(eq(quest.id, cursor.id), eq(quest.hirerId, userId)))
+      .where(and(eq(quest.id, cursor.id), hirerWhere))
       .limit(1);
-    return row ? { ...row, id: cursor.id, scope: 'HIRER' } : undefined;
+    return row ? { ...row, id: cursor.id, scope: hirerScope } : undefined;
   };
   const readWorker = async () => {
     const [row] = await db
       .select({ startTime: questAssignment.createdAt })
       .from(questAssignment)
-      .where(and(eq(questAssignment.id, cursor.id), eq(questAssignment.workerId, userId)))
+      .innerJoin(quest, eq(quest.id, questAssignment.questId))
+      .where(and(eq(questAssignment.id, cursor.id), workerWhere))
       .limit(1);
-    return row ? { ...row, id: cursor.id, scope: 'WORKER' } : undefined;
+    return row ? { ...row, id: cursor.id, scope: workerScope } : undefined;
   };
 
-  if (cursor.scope === 'HIRER') return readHirer();
-  if (cursor.scope === 'WORKER') return readWorker();
-  if (cursor.scope !== undefined) return undefined;
-
-  const [hirerAnchor, workerAnchor] = await Promise.all([readHirer(), readWorker()]);
-  if (hirerAnchor && workerAnchor) return undefined;
-  return hirerAnchor ?? workerAnchor;
+  if (cursor.scope === hirerScope) return readHirer();
+  if (cursor.scope === workerScope) return readWorker();
+  return undefined;
 };
 
 const memberHistoryCursorAnchorFor = (
   role: 'HIRER' | 'WORKER',
   target: KeysetAnchor,
-  userId: string
+  userId: string,
+  query: AdminMemberHistoryQuery
 ): KeysetCursorAnchor => ({
-  read: (cursor) => readMemberHistoryCursorAnchor(userId, cursor),
+  read: (cursor) => readMemberHistoryCursorAnchor(userId, cursor, query),
   boundary: (anchor, sort) => {
     const anchorRow =
-      anchor.scope === 'HIRER'
+      anchor.scope === memberHistoryCursorScope('HIRER', query)
         ? sql`(
             select ${quest.createdAt}, ${quest.id}, 'HIRER'::text
             from ${quest}
@@ -926,33 +1010,7 @@ export const listAdminMemberHistory = async (
   const member = await getAdminMemberProfileIdentity(userId);
   if (!member) return null;
 
-  const hirerAssignmentFilter = query.assignmentStatus
-    ? exists(
-        db
-          .select({ id: questAssignment.id })
-          .from(questAssignment)
-          .where(
-            and(
-              eq(questAssignment.questId, quest.id),
-              eq(questAssignment.assignmentStatus, query.assignmentStatus)
-            )
-          )
-      )
-    : undefined;
-  const hirerWhere = and(
-    eq(quest.hirerId, userId),
-    query.role === 'WORKER' ? sql`false` : undefined,
-    query.questStatus ? sql`${quest.questStatus} = ${query.questStatus}::quest_status` : undefined,
-    hirerAssignmentFilter
-  );
-  const workerWhere = and(
-    eq(questAssignment.workerId, userId),
-    query.role === 'HIRER' ? sql`false` : undefined,
-    query.questStatus ? sql`${quest.questStatus} = ${query.questStatus}::quest_status` : undefined,
-    query.assignmentStatus
-      ? eq(questAssignment.assignmentStatus, query.assignmentStatus)
-      : undefined
-  );
+  const { hirerWhere, workerWhere } = memberHistoryFiltersFor(userId, query);
 
   const [hirerCountRows, workerCountRows, hirerPage, workerPage] = await Promise.all([
     db.select({ total: count() }).from(quest).where(hirerWhere),
@@ -965,7 +1023,8 @@ export const listAdminMemberHistory = async (
       cursorAnchor: memberHistoryCursorAnchorFor(
         'HIRER',
         { time: quest.createdAt, id: quest.id },
-        userId
+        userId,
+        query
       ),
       cursor,
       limit,
@@ -987,7 +1046,11 @@ export const listAdminMemberHistory = async (
           .where(where)
           .orderBy(...orderBy)
           .limit(probe),
-      rowCursor: (row) => ({ startTime: row.createdAt, id: row.id, scope: 'HIRER' }),
+      rowCursor: (row) => ({
+        startTime: row.createdAt,
+        id: row.id,
+        scope: memberHistoryCursorScope('HIRER', query),
+      }),
       invalidCursor: () =>
         new CursorInputError('INVALID_CURSOR', 'Member history cursor is invalid.'),
     }),
@@ -995,7 +1058,8 @@ export const listAdminMemberHistory = async (
       cursorAnchor: memberHistoryCursorAnchorFor(
         'WORKER',
         { time: questAssignment.createdAt, id: questAssignment.id },
-        userId
+        userId,
+        query
       ),
       cursor,
       limit,
@@ -1026,7 +1090,11 @@ export const listAdminMemberHistory = async (
           .where(where)
           .orderBy(...orderBy)
           .limit(probe),
-      rowCursor: (row) => ({ startTime: row.createdAt, id: row.id, scope: 'WORKER' }),
+      rowCursor: (row) => ({
+        startTime: row.createdAt,
+        id: row.id,
+        scope: memberHistoryCursorScope('WORKER', query),
+      }),
       invalidCursor: () =>
         new CursorInputError('INVALID_CURSOR', 'Member history cursor is invalid.'),
     }),
@@ -1148,8 +1216,97 @@ export const listAdminMemberHistory = async (
         ? encodeCursor({
             startTime: last.createdAt.toISOString(),
             id: last.id,
-            scope: last.role,
+            scope: memberHistoryCursorScope(last.role, query),
           })
         : null,
+  };
+};
+
+export const listAdminMemberReviews = async (
+  memberId: string,
+  query: AdminMemberReviewsQuery
+): Promise<AdminMemberReviewsData | null> => {
+  const [member] = await db
+    .select({ id: authUser.id })
+    .from(authUser)
+    .where(eq(authUser.id, memberId))
+    .limit(1);
+  if (!member) return null;
+
+  const cursor = decodeCursor(query.cursor);
+  const limit = parsePageLimit(query.limit);
+  const cursorScope = `MEMBER_REVIEW_${query.rating ?? 'ALL'}`;
+  const conditions = [validReceivedReviewFilter(memberId)];
+  if (query.rating !== undefined) {
+    conditions.push(eq(review.rating, query.rating));
+  }
+  const where = and(...conditions);
+  const page = await readKeysetPage({
+    anchor: { time: review.createdAt, id: review.id },
+    cursor,
+    limit,
+    cursorAnchorRead: async (pageCursor) => {
+      const [row] = await db
+        .select({ startTime: review.createdAt, id: review.id })
+        .from(review)
+        .innerJoin(quest, eq(review.questId, quest.id))
+        .where(and(where, eq(review.id, pageCursor.id)))
+        .limit(1);
+      return row ? { ...row, scope: cursorScope } : undefined;
+    },
+    where,
+    read: ({ where: pageWhere, orderBy, limit: probe }) =>
+      db
+        .select({
+          id: review.id,
+          rating: review.rating,
+          comment: review.comment,
+          createdAt: review.createdAt,
+          updatedAt: review.updatedAt,
+          reviewerDisplayId: formatDisplayIdSql('member', authUser.publicSequence),
+          reviewerFirstName: authUser.firstName,
+          reviewerLastName: authUser.lastName,
+          questDisplayId: formatDisplayIdSql('quest', quest.publicSequence),
+          questTitle: quest.title,
+          questStatus: quest.questStatus,
+        })
+        .from(review)
+        .innerJoin(authUser, eq(review.reviewerId, authUser.id))
+        .innerJoin(quest, eq(review.questId, quest.id))
+        .where(pageWhere)
+        .orderBy(...orderBy)
+        .limit(probe),
+    rowCursor: (row) => ({
+      startTime: row.createdAt,
+      id: row.id,
+      scope: cursorScope,
+    }),
+    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a Review'),
+  });
+  const [totalCount] = await db
+    .select({ total: count() })
+    .from(review)
+    .innerJoin(quest, eq(review.questId, quest.id))
+    .where(where);
+
+  return {
+    items: page.rows.map((row) => ({
+      id: row.id,
+      rating: row.rating,
+      comment: row.comment,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      reviewer: {
+        displayId: row.reviewerDisplayId,
+        name: `${row.reviewerFirstName} ${row.reviewerLastName}`,
+      },
+      quest: {
+        displayId: row.questDisplayId,
+        title: row.questTitle,
+        questStatus: row.questStatus,
+      },
+    })),
+    nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
+    totalCount: totalCount?.total ?? 0,
   };
 };
