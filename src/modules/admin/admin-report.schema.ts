@@ -2,6 +2,7 @@ import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import { t, type Static } from 'elysia';
 
+import { adminDecisionReasonTextSchema } from './admin-action.schema';
 import { conductReportDismissReasonCodes, reportAdminReasonCodes } from './admin-report.policy';
 
 const dateTime = t.String({ format: 'date-time' });
@@ -59,16 +60,6 @@ const adminReportReasonCodeSchema = t.Union([
   t.Literal(reportAdminReasonCodes[0]),
   t.Literal(reportAdminReasonCodes[1]),
 ]);
-
-const adminDecisionReasonTextSchema = t.Optional(
-  t.String({
-    minLength: 1,
-    maxLength: 200,
-    pattern: '\\S',
-    description:
-      'Optional Admin-only decision note. It does not replace the controlled reason code.',
-  })
-);
 
 const conductReportDecisionReasonCodeSchema = t.Union([
   t.Literal(conductReportDismissReasonCodes[0]),

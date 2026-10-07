@@ -251,6 +251,31 @@ describe('Admin Dispute API', () => {
     expect(member.status).toBe(403);
   });
 
+  it('publishes the optional Admin decision note in OpenAPI', async () => {
+    const response = await app.handle(new Request('http://localhost/openapi/json'));
+    const document = (await response.json()) as {
+      paths: Record<
+        string,
+        Record<
+          string,
+          {
+            description?: string;
+            requestBody?: { content?: Record<string, { schema?: unknown }> };
+          }
+        >
+      >;
+    };
+    const operation = document.paths['/api/v1/admin/disputes/{disputeCaseId}/resolve']?.post;
+    const requestSchemaText = JSON.stringify(
+      operation?.requestBody?.content?.['application/json']?.schema
+    );
+
+    expect(response.status).toBe(200);
+    expect(operation?.description).toContain('decisionReasonText');
+    expect(requestSchemaText).toContain('decisionReasonText');
+    expect(requestSchemaText).toContain('"maxLength":200');
+  });
+
   it('opens an Admin-filed Dispute Case through the production queue route', async () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
@@ -531,10 +556,11 @@ describe('Admin Dispute API', () => {
     });
   });
 
-  it('dismisses a Case without money movement and replays the command', async () => {
+  it('dismisses a Case with an Admin note and replays the command', async () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
     const requestKey = `dispute-dismiss-${fixture.disputeCaseId}`;
+    const decisionReasonText = 'Evidence does not support the claim.';
     const request = () =>
       adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`, {
         method: 'POST',
@@ -546,6 +572,7 @@ describe('Admin Dispute API', () => {
         body: JSON.stringify({
           outcome: 'DISPUTE_CASE_DISMISSED',
           reasonCode: 'DISPUTE_POLICY_REVIEW',
+          decisionReasonText,
         }),
       });
     const first = await request();
@@ -564,8 +591,20 @@ describe('Admin Dispute API', () => {
         adminActionId: expect.any(String),
       },
     });
+    expect(firstBody.data.resourceSummary).not.toHaveProperty('decisionReasonText');
     expect(replay.status).toBe(200);
     expect(replayBody).toEqual(firstBody);
+    const activityLog = await adminRequest(
+      `/api/v1/admin/activity-log?resourceType=dispute_case&resourceId=${fixture.disputeCaseId}`
+    );
+    expect(activityLog.status).toBe(200);
+    expect((await activityLog.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        action: 'DISPUTE_CASE_DISMISS',
+        reasonCode: 'DISPUTE_POLICY_REVIEW',
+        decisionReasonText,
+      })
+    );
     expect(await listTestQuestEscrowSettlements(fixture.reservationId)).toHaveLength(0);
     const escrow = await readTestQuestEscrow({
       ownerUserId: fixture.hirerId,
@@ -574,9 +613,10 @@ describe('Admin Dispute API', () => {
     expect(escrow).toMatchObject({ status: 'ACTIVE', remainingSatang: 1_000 });
   });
 
-  it('resolves a Case through Wallet with balanced postings and keeps the Quest failed', async () => {
+  it('resolves a Case through Wallet with an Admin note and balanced postings', async () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
+    const decisionReasonText = 'x'.repeat(200);
     const response = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`, {
       method: 'POST',
       headers: {
@@ -589,6 +629,7 @@ describe('Admin Dispute API', () => {
         reasonCode: 'DISPUTE_EVIDENCE_REVIEW',
         workerId: fixture.workerId,
         amountSatang: 300,
+        decisionReasonText,
       }),
     });
     const body = (await response.json()) as { data: { resourceSummary: Record<string, unknown> } };
@@ -600,6 +641,7 @@ describe('Admin Dispute API', () => {
       resolvedWorkerId: fixture.workerId,
       resolvedAmountSatang: 300,
     });
+    expect(body.data.resourceSummary).not.toHaveProperty('decisionReasonText');
 
     const [storedQuest] = await db
       .select({ status: quest.questStatus, version: quest.version })
@@ -631,6 +673,60 @@ describe('Admin Dispute API', () => {
     expect(postings.reduce((total, posting) => total + posting.amountSatang, 0)).toBe(0);
     const workerWallet = await readTestWallet(fixture.workerId);
     expect(workerWallet.earningsBalanceSatang).toBe(300);
+
+    const activityLog = await adminRequest(
+      `/api/v1/admin/activity-log?resourceType=dispute_case&resourceId=${fixture.disputeCaseId}`
+    );
+    expect(activityLog.status).toBe(200);
+    expect((await activityLog.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        action: 'DISPUTE_CASE_RESOLVE',
+        reasonCode: 'DISPUTE_EVIDENCE_REVIEW',
+        decisionReasonText,
+      })
+    );
+  });
+
+  it('rejects blank and over-200-character Dispute decision notes', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+
+    const rejectNote = async (decisionReasonText: string) => {
+      const requestKey = `dispute-invalid-note-${crypto.randomUUID()}`;
+      const response = await adminRequest(
+        `/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': requestKey,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'DISPUTE_CASE_DISMISSED',
+            reasonCode: 'DISPUTE_POLICY_REVIEW',
+            decisionReasonText,
+          }),
+        }
+      );
+      const body = await response.json();
+      const [storedCase] = await db
+        .select({ status: adminDisputeCase.status, version: adminDisputeCase.version })
+        .from(adminDisputeCase)
+        .where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+      const actions = await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey));
+
+      expect(response.status).toBe(400);
+      expect(body.error.code).toBe('VALIDATION');
+      expect(storedCase).toEqual({ status: 'DISPUTE_CASE_PENDING', version: 1 });
+      expect(actions).toHaveLength(0);
+    };
+
+    await rejectNote('   ');
+    await rejectNote('x'.repeat(201));
   });
 
   it('settles a pending legacy Proof approved after failure from the held Quest Escrow', async () => {

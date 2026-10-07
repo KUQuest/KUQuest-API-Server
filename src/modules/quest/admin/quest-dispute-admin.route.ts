@@ -90,7 +90,7 @@ export const adminDisputeRoute = new Elysia({
       tags: ['Admin Disputes'],
       summary: 'Dismiss or resolve a Dispute Case',
       description:
-        'Accepts only DISPUTE_CASE_DISMISSED or DISPUTE_CASE_RESOLVED. Wallet owns the balanced financial settlement.',
+        'Accepts only DISPUTE_CASE_DISMISSED or DISPUTE_CASE_RESOLVED. Wallet owns the balanced financial settlement. Each decision may include an optional Admin-only decisionReasonText of up to 200 characters. The note is stored on the immutable Admin Action and does not replace reasonCode.',
       operationId: 'resolveAdminDispute',
       security: betterAuthSecurity,
     },

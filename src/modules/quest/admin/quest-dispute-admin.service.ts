@@ -186,6 +186,7 @@ export type ResolveAdminDisputeCaseInput = {
   expectedVersion: number;
   requestKey: string;
   reasonCode?: string;
+  decisionReasonText?: string;
   outcome: DisputeCaseOutcome;
   workerId?: string;
   amountSatang?: number;
@@ -695,6 +696,7 @@ export const resolveAdminDisputeCase = async (
     resourceId: input.disputeCaseId,
     requestKey: input.requestKey,
     reasonCode: input.reasonCode,
+    decisionReasonText: input.decisionReasonText,
     request: {
       outcome: input.outcome,
       workerId: input.workerId ?? null,

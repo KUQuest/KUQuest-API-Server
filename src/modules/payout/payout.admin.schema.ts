@@ -1,5 +1,7 @@
-import { t } from 'elysia';
+import { adminDecisionReasonTextSchema } from '@/modules/admin';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
+
+import { t } from 'elysia';
 
 import { payoutResponseSchema, payoutStatusSchema } from './payout.schema';
 
@@ -33,6 +35,7 @@ const adminPayoutReasonCodeSchema = t.String({
 export const adminPayoutApprovalSchema = t.Object(
   {
     reasonCode: adminPayoutReasonCodeSchema,
+    decisionReasonText: adminDecisionReasonTextSchema,
   },
   { additionalProperties: false }
 );
@@ -40,6 +43,7 @@ export const adminPayoutApprovalSchema = t.Object(
 export const adminPayoutCancellationSchema = t.Object(
   {
     reasonCode: adminPayoutReasonCodeSchema,
+    decisionReasonText: adminDecisionReasonTextSchema,
   },
   { additionalProperties: false }
 );
