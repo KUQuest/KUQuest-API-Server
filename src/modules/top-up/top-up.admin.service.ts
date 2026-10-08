@@ -1,12 +1,16 @@
-import { formatTopUpDisplayId } from '@/modules/admin/admin-display-id';
+import { formatDisplayIdSql, formatTopUpDisplayId } from '@/modules/admin/admin-display-id';
 import { MoneyDomainError } from '@/modules/wallet';
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { paymentTopUps, type TopUpStatus } from '@/database/schema/payment.schema';
+import {
+  paymentTopUps,
+  paymentTopUpStatusHistory,
+  type TopUpStatus,
+} from '@/database/schema/payment.schema';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 
 import type { AdminTopUpListItem, AdminTopUpListQuery } from './top-up.admin.schema';
 
@@ -32,6 +36,7 @@ const adminTopUpColumns = {
   firstName: authUser.firstName,
   lastName: authUser.lastName,
   studentId: authUser.studentId,
+  memberDisplayId: formatDisplayIdSql('member', authUser.publicSequence),
 };
 
 type AdminTopUpRow = {
@@ -51,6 +56,7 @@ type AdminTopUpRow = {
   firstName: string;
   lastName: string;
   studentId: string | null;
+  memberDisplayId: string;
 };
 
 const adminTopUpItemFromRow = (r: AdminTopUpRow): AdminTopUpListItem => {
@@ -62,6 +68,7 @@ const adminTopUpItemFromRow = (r: AdminTopUpRow): AdminTopUpListItem => {
     displayId: formatTopUpDisplayId(r.publicSequence),
     userId: r.userId,
     member: {
+      displayId: r.memberDisplayId,
       firstName: r.firstName,
       lastName: r.lastName,
       studentId: r.studentId,
@@ -124,4 +131,39 @@ export const getAdminTopUp = async (topUpId: string): Promise<AdminTopUpListItem
     .limit(1);
   if (!row) throw new MoneyDomainError('TOP_UP_NOT_FOUND', 'Top-up does not exist.');
   return adminTopUpItemFromRow(row);
+};
+
+export type AdminTopUpStatusHistoryEntry = {
+  id: string;
+  fromStatus: TopUpStatus | null;
+  toStatus: TopUpStatus;
+  providerStatus: string | null;
+  source: string;
+  reason: string | null;
+  occurredAt: Date;
+};
+
+export const listAdminTopUpStatusHistory = async (
+  topUpId: string
+): Promise<AdminTopUpStatusHistoryEntry[]> => {
+  const [topUp] = await db
+    .select({ id: paymentTopUps.id })
+    .from(paymentTopUps)
+    .where(eq(paymentTopUps.id, topUpId))
+    .limit(1);
+  if (!topUp) throw new MoneyDomainError('TOP_UP_NOT_FOUND', 'Top-up does not exist.');
+
+  return db
+    .select({
+      id: paymentTopUpStatusHistory.id,
+      fromStatus: paymentTopUpStatusHistory.fromStatus,
+      toStatus: paymentTopUpStatusHistory.toStatus,
+      providerStatus: paymentTopUpStatusHistory.providerStatus,
+      source: paymentTopUpStatusHistory.source,
+      reason: paymentTopUpStatusHistory.reason,
+      occurredAt: paymentTopUpStatusHistory.occurredAt,
+    })
+    .from(paymentTopUpStatusHistory)
+    .where(eq(paymentTopUpStatusHistory.topUpId, topUpId))
+    .orderBy(asc(paymentTopUpStatusHistory.occurredAt), asc(paymentTopUpStatusHistory.id));
 };

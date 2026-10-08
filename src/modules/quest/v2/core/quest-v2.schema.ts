@@ -695,6 +695,21 @@ export const questV2DisputeSchema = t.Nullable(
   )
 );
 
+export const questV2PendingEditRequestSchema = t.Nullable(
+  t.Object(
+    {
+      requestId: t.String({ format: 'uuid' }),
+      expiresAt: t.String({ format: 'date-time' }),
+    },
+    {
+      description:
+        'The Quest Edit Request that waits for the caller. Null unless an EDIT_REQUEST_PENDING request has not expired and the caller is the Hirer or an Active Worker who must respond to it. Read the request with getQuestV2EditRequest.',
+    }
+  )
+);
+
+export type QuestV2PendingEditRequest = Static<typeof questV2PendingEditRequestSchema>;
+
 const questV2CanonicalQuestOpenApiSchema = t.Object({
   ...questV2CanonicalQuestSchema.properties,
   questFundingTotal: questFundingTotalOpenApiSchema,
@@ -718,6 +733,7 @@ const questV2DetailOpenApiSchema = t.Object({
   images: t.Array(questV2ImageSchema),
   dispute: t.Optional(questV2DisputeSchema),
   moneyHold: t.Optional(questV2MoneyHoldSchema),
+  pendingEditRequest: t.Optional(questV2PendingEditRequestSchema),
 });
 
 const questV2DetailResponseOpenApiSchema = t.Object({
@@ -960,6 +976,7 @@ export const questV2ParticipationDetailSchema = t.Object({
   }),
   dispute: t.Optional(questV2DisputeSchema),
   moneyHold: t.Optional(questV2MoneyHoldSchema),
+  pendingEditRequest: t.Optional(questV2PendingEditRequestSchema),
 });
 
 export const questV2ParticipationDetailResponseSchema = t.Object({
@@ -1069,6 +1086,7 @@ export const questV2DetailSchema = t.Composite([
     images: t.Array(questV2ImageSchema),
     dispute: t.Optional(questV2DisputeSchema),
     moneyHold: t.Optional(questV2MoneyHoldSchema),
+    pendingEditRequest: t.Optional(questV2PendingEditRequestSchema),
   }),
 ]);
 

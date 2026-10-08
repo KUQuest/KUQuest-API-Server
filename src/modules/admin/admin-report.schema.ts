@@ -1,8 +1,16 @@
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
+import { adminMemberModerationContextFieldsSchema } from '@/modules/admin/admin-member.schema';
 
 import { t, type Static } from 'elysia';
 
-import { conductReportDismissReasonCodes, reportAdminReasonCodes } from './admin-report.policy';
+import {
+  conductReportDismissReasonCodes,
+  conductReportUpholdReasonCodes,
+  reportCaseDismissReasonCodes,
+  reportCaseHideReasonCodes,
+  reportCaseRestoreReasonCodes,
+} from './admin-report.policy';
+import { adminDecisionReasonTextSchema } from './admin-action.schema';
 
 const dateTime = t.String({ format: 'date-time' });
 const uuid = t.String({ format: 'uuid' });
@@ -55,24 +63,37 @@ const reporterEntryReasonSchema = t.Union([
   t.Literal('REPORT_OTHER'),
 ]);
 
-const adminReportReasonCodeSchema = t.Union([
-  t.Literal(reportAdminReasonCodes[0]),
-  t.Literal(reportAdminReasonCodes[1]),
+const reportCaseDismissReasonCodeSchema = t.Union([
+  t.Literal(reportCaseDismissReasonCodes[0]),
+  t.Literal(reportCaseDismissReasonCodes[1]),
+  t.Literal(reportCaseDismissReasonCodes[2]),
 ]);
 
-const adminDecisionReasonTextSchema = t.Optional(
-  t.String({
-    minLength: 1,
-    maxLength: 200,
-    pattern: '\\S',
-    description:
-      'Optional Admin-only decision note. It does not replace the controlled reason code.',
-  })
-);
+const reportCaseHideReasonCodeSchema = t.Union([
+  t.Literal(reportCaseHideReasonCodes[0]),
+  t.Literal(reportCaseHideReasonCodes[1]),
+  t.Literal(reportCaseHideReasonCodes[2]),
+  t.Literal(reportCaseHideReasonCodes[3]),
+  t.Literal(reportCaseHideReasonCodes[4]),
+]);
 
-const conductReportDecisionReasonCodeSchema = t.Union([
+const reportCaseRestoreReasonCodeSchema = t.Union([
+  t.Literal(reportCaseRestoreReasonCodes[0]),
+  t.Literal(reportCaseRestoreReasonCodes[1]),
+  t.Literal(reportCaseRestoreReasonCodes[2]),
+]);
+
+const conductReportDismissDecisionReasonCodeSchema = t.Union([
   t.Literal(conductReportDismissReasonCodes[0]),
   t.Literal(conductReportDismissReasonCodes[1]),
+  t.Literal(conductReportDismissReasonCodes[2]),
+  t.Literal(conductReportDismissReasonCodes[3]),
+]);
+
+const conductReportUpholdDecisionReasonCodeSchema = t.Union([
+  t.Literal(conductReportUpholdReasonCodes[0]),
+  t.Literal(conductReportUpholdReasonCodes[1]),
+  t.Literal(conductReportUpholdReasonCodes[2]),
 ]);
 
 export const adminReportParamsSchema = t.Object({
@@ -132,23 +153,43 @@ export const adminReportEvidenceHeadersSchema = t.Object({
   'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
 });
 
-export const adminReportCaseDecisionBodySchema = t.Object(
+export const adminReportCaseDismissDecisionBodySchema = t.Object(
   {
-    outcome: t.Union([
-      t.Literal('REPORT_CASE_DISMISSED'),
-      t.Literal('REPORT_CASE_HIDDEN'),
-      t.Literal('REPORT_CASE_RESTORED'),
-    ]),
-    reasonCode: adminReportReasonCodeSchema,
+    outcome: t.Literal('REPORT_CASE_DISMISSED'),
+    reasonCode: reportCaseDismissReasonCodeSchema,
     decisionReasonText: adminDecisionReasonTextSchema,
   },
   { additionalProperties: false }
 );
 
+export const adminReportCaseHideDecisionBodySchema = t.Object(
+  {
+    outcome: t.Literal('REPORT_CASE_HIDDEN'),
+    reasonCode: reportCaseHideReasonCodeSchema,
+    decisionReasonText: adminDecisionReasonTextSchema,
+  },
+  { additionalProperties: false }
+);
+
+export const adminReportCaseRestoreDecisionBodySchema = t.Object(
+  {
+    outcome: t.Literal('REPORT_CASE_RESTORED'),
+    reasonCode: reportCaseRestoreReasonCodeSchema,
+    decisionReasonText: adminDecisionReasonTextSchema,
+  },
+  { additionalProperties: false }
+);
+
+export const adminReportCaseDecisionBodySchema = t.Union([
+  adminReportCaseDismissDecisionBodySchema,
+  adminReportCaseHideDecisionBodySchema,
+  adminReportCaseRestoreDecisionBodySchema,
+]);
+
 export const adminConductReportDismissDecisionBodySchema = t.Object(
   {
     outcome: t.Literal('CONDUCT_REPORT_DISMISSED'),
-    decisionReasonCode: conductReportDecisionReasonCodeSchema,
+    decisionReasonCode: conductReportDismissDecisionReasonCodeSchema,
     decisionReasonText: adminDecisionReasonTextSchema,
   },
   { additionalProperties: false }
@@ -157,6 +198,7 @@ export const adminConductReportDismissDecisionBodySchema = t.Object(
 export const adminConductReportUpholdDecisionBodySchema = t.Object(
   {
     outcome: t.Literal('CONDUCT_REPORT_UPHELD'),
+    decisionReasonCode: conductReportUpholdDecisionReasonCodeSchema,
     decisionReasonText: adminDecisionReasonTextSchema,
   },
   { additionalProperties: false }
@@ -227,6 +269,7 @@ const adminConductReportQuestSchema = t.Object({
   proofRequired: t.Boolean(),
   startTime: dateTime,
   dueAt: t.Nullable(dateTime),
+  failedAt: t.Nullable(dateTime),
   createdAt: dateTime,
   updatedAt: dateTime,
   hirer: adminReportMemberSchema,
@@ -314,13 +357,15 @@ const adminConductReportAdminSummarySchema = t.Object({
 const adminConductReportDecisionSchema = t.Union([
   t.Object({
     outcome: t.Literal('CONDUCT_REPORT_UPHELD'),
-    reason: t.Nullable(conductReportReasonSchema),
+    reason: t.Nullable(
+      t.Union([conductReportReasonSchema, conductReportUpholdDecisionReasonCodeSchema])
+    ),
     resolvedAt: dateTime,
     admin: adminConductReportAdminSummarySchema,
   }),
   t.Object({
     outcome: t.Literal('CONDUCT_REPORT_DISMISSED'),
-    reason: t.Nullable(conductReportDecisionReasonCodeSchema),
+    reason: t.Nullable(conductReportDismissDecisionReasonCodeSchema),
     resolvedAt: dateTime,
     admin: adminConductReportAdminSummarySchema,
   }),
@@ -328,6 +373,7 @@ const adminConductReportDecisionSchema = t.Union([
 
 export const adminConductReportDetailSchema = t.Composite([
   adminConductReportSummarySchema,
+  adminMemberModerationContextFieldsSchema,
   t.Object({
     assignment: adminConductReportAssignmentSchema,
     proofSubmission: t.Nullable(adminConductReportProofSchema),
@@ -346,13 +392,18 @@ export const adminConductReportDetailSchema = t.Composite([
   }),
 ]);
 
+const adminReportCaseDetailSchema = t.Composite([
+  adminReportCaseSummarySchema,
+  adminMemberModerationContextFieldsSchema,
+]);
+
 const adminReportListItemSchema = t.Union([
   adminReportCaseSummarySchema,
   adminConductReportSummarySchema,
 ]);
 
 const adminReportDetailSchema = t.Union([
-  adminReportCaseSummarySchema,
+  adminReportCaseDetailSchema,
   adminConductReportDetailSchema,
 ]);
 

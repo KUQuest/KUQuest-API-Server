@@ -611,7 +611,7 @@ const seedPayouts = async (adminId: string, members: DemoSeedMember[]) => {
         payoutId,
         expectedVersion: payout.version,
         idempotencyKey: `admin-demo-finance-v1:payout-cancel:${index + 1}`,
-        reasonCode: 'PAYOUT_POLICY_REVIEW',
+        reasonCode: 'PAYOUT_RISK_REVIEW_FAILED',
       });
       payoutStatus = 'CANCELLED';
     }
@@ -1144,7 +1144,10 @@ const applyDisputeStatus = async (input: {
     disputeCaseId: current.id,
     expectedVersion: current.version,
     requestKey: `frontend-demo-v1:dispute:${current.id}:${input.desiredStatus}`,
-    reasonCode: 'DISPUTE_EVIDENCE_REVIEW',
+    reasonCode:
+      input.desiredStatus === disputeCaseStatus.resolved
+        ? 'DISPUTE_VALID_PROOF_NOT_APPROVED'
+        : 'DISPUTE_INSUFFICIENT_EVIDENCE',
     outcome: input.desiredStatus,
     ...(input.desiredStatus === disputeCaseStatus.resolved
       ? { workerId: input.resolvedWorkerId, amountSatang: disputeResolutionSatang }
@@ -1171,6 +1174,8 @@ const seedDisputeCases = async (
     const disputeCase = await createAdminDisputeCase({
       questId: questSeed.questId,
       filerUserId: questSeed.roleIds[seed.filerRole],
+      category: 'PROOF_REVIEW',
+      submittedDetail: 'The proof review needs an Admin decision.',
     });
     results.push(
       await applyDisputeStatus({
@@ -1222,6 +1227,7 @@ const applyConductReportStatus = async (input: {
     await decideAdminReport({
       ...command,
       outcome: conductReportStatus.upheld,
+      decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
     });
   }
   const [updated] = await db
@@ -1434,15 +1440,33 @@ const applyReportStatus = async (input: {
   const decide = async (
     outcome: Exclude<(typeof reportStatusPool)[number], typeof reportCaseStatus.pending>,
     version: number
-  ) =>
-    decideAdminReportCase({
+  ) => {
+    const command = {
       adminId: input.adminId,
       reportId: current.id,
       expectedVersion: version,
       requestKey: `frontend-demo-v1:report:${current.id}:${outcome}`,
-      reasonCode: outcome === reportCaseStatus.dismissed ? 'POLICY_REVIEW' : 'SAFETY_REVIEW',
+    };
+    if (outcome === reportCaseStatus.dismissed) {
+      return decideAdminReportCase({
+        ...command,
+        outcome,
+        reasonCode: 'REPORT_NO_POLICY_VIOLATION',
+      });
+    }
+    if (outcome === reportCaseStatus.hidden) {
+      return decideAdminReportCase({
+        ...command,
+        outcome,
+        reasonCode: 'REPORT_SPAM_CONFIRMED',
+      });
+    }
+    return decideAdminReportCase({
+      ...command,
       outcome,
+      reasonCode: 'REPORT_MESSAGE_COMPLIES_WITH_POLICY',
     });
+  };
 
   let version = current.version;
   if (desiredStatus === reportCaseStatus.restored && current.status === reportCaseStatus.pending) {

@@ -9,7 +9,7 @@ import {
   questV2EditRequestResponse,
 } from '@/database/schema/quest.schema';
 
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, sql } from 'drizzle-orm';
 
 import { recordQuestEditHistory } from '../../shared/contracts/quest-edit-history.service';
 import {
@@ -31,6 +31,7 @@ import type {
   QuestV2EditRequestCreateInput,
   QuestV2EditRequestData,
   QuestV2EditRequestResponseInput,
+  QuestV2PendingEditRequest,
 } from './quest-v2.schema';
 import type { QuestTransaction } from '../../shared/work-chat';
 
@@ -283,18 +284,16 @@ const failRequest = async (
   };
 };
 
-const materializePendingRequest = async (
+/** Returns the responding Workers, or undefined when an Active Worker left the request. */
+const selectRespondersWhileActive = async (
   transaction: QuestTransaction,
   questId: string,
-  request: QuestV2EditRequestRow,
-  now: Date
-): Promise<{ request: QuestV2EditRequestRow; outcome?: 'expired' | 'departed' }> => {
-  if (request.requestStatus !== 'EDIT_REQUEST_PENDING') return { request };
-
+  requestId: string
+): Promise<string[] | undefined> => {
   const snapshot = await transaction
     .select({ workerId: questV2EditRequestResponse.workerId })
     .from(questV2EditRequestResponse)
-    .where(eq(questV2EditRequestResponse.requestId, request.id));
+    .where(eq(questV2EditRequestResponse.requestId, requestId));
   const active = await transaction
     .select({ workerId: questAssignment.workerId })
     .from(questAssignment)
@@ -310,6 +309,20 @@ const materializePendingRequest = async (
     snapshotIds.length !== activeIds.length ||
     snapshotIds.some((id, index) => id !== activeIds[index])
   ) {
+    return undefined;
+  }
+  return snapshotIds;
+};
+
+const materializePendingRequest = async (
+  transaction: QuestTransaction,
+  questId: string,
+  request: QuestV2EditRequestRow,
+  now: Date
+): Promise<{ request: QuestV2EditRequestRow; outcome?: 'expired' | 'departed' }> => {
+  if (request.requestStatus !== 'EDIT_REQUEST_PENDING') return { request };
+
+  if (!(await selectRespondersWhileActive(transaction, questId, request.id))) {
     return {
       request: await failRequest(transaction, request, 'ACTIVE_WORKER_LEFT', now),
       outcome: 'departed',
@@ -745,6 +758,42 @@ export const pendingQuestV2EditRequestIds = async (limit: number) =>
     .where(eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING'))
     .orderBy(asc(questV2EditRequest.expiresAt), asc(questV2EditRequest.id))
     .limit(limit);
+
+/**
+ * Finds the pending Quest Edit Request a detail read shows to its viewer. The read
+ * never writes: an expired request, or one an Active Worker left, reads as null until
+ * the lifecycle worker or getQuestV2EditRequest fails it.
+ */
+export const readPendingQuestV2EditRequestSummary = async (
+  memberId: string,
+  questId: string,
+  now = new Date()
+): Promise<QuestV2PendingEditRequest> =>
+  db.transaction(async (transaction) => {
+    const [pending] = await transaction
+      .select({
+        requestId: questV2EditRequest.id,
+        expiresAt: questV2EditRequest.expiresAt,
+        hirerId: quest.hirerId,
+      })
+      .from(questV2EditRequest)
+      .innerJoin(quest, eq(quest.id, questV2EditRequest.questId))
+      .where(
+        and(
+          eq(questV2EditRequest.questId, questId),
+          eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING'),
+          gt(questV2EditRequest.expiresAt, now)
+        )
+      )
+      .limit(1);
+    if (!pending) return null;
+
+    const responders = await selectRespondersWhileActive(transaction, questId, pending.requestId);
+    if (!responders) return null;
+    if (pending.hirerId !== memberId && !responders.includes(memberId)) return null;
+
+    return { requestId: pending.requestId, expiresAt: pending.expiresAt.toISOString() };
+  });
 
 export const hasPendingQuestV2EditRequest = async (
   transaction: QuestTransaction,

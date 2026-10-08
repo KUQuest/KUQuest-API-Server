@@ -1,7 +1,11 @@
-import { t } from 'elysia';
+import { adminDecisionReasonTextSchema } from '@/modules/admin';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
+import { unionOfLiterals } from '@/shared/typebox-schema';
+
+import { t } from 'elysia';
 
 import { payoutResponseSchema, payoutStatusSchema } from './payout.schema';
+import { payoutApprovalReasonCodes, payoutCancellationReasonCodes } from './payout.admin.policy';
 
 export const adminPayoutParamsSchema = t.Object({
   payoutId: t.String({ format: 'uuid' }),
@@ -24,22 +28,21 @@ export const adminPayoutListQuerySchema = t.Object({
   sort: t.Optional(t.Union([t.Literal('newest'), t.Literal('oldest')])),
 });
 
-const adminPayoutReasonCodeSchema = t.String({
-  minLength: 1,
-  maxLength: 100,
-  pattern: '^[A-Z][A-Z0-9_.-]*$',
-});
+const adminPayoutApprovalReasonCodeSchema = unionOfLiterals(payoutApprovalReasonCodes);
+const adminPayoutCancellationReasonCodeSchema = unionOfLiterals(payoutCancellationReasonCodes);
 
 export const adminPayoutApprovalSchema = t.Object(
   {
-    reasonCode: adminPayoutReasonCodeSchema,
+    reasonCode: adminPayoutApprovalReasonCodeSchema,
+    decisionReasonText: adminDecisionReasonTextSchema,
   },
   { additionalProperties: false }
 );
 
 export const adminPayoutCancellationSchema = t.Object(
   {
-    reasonCode: adminPayoutReasonCodeSchema,
+    reasonCode: adminPayoutCancellationReasonCodeSchema,
+    decisionReasonText: adminDecisionReasonTextSchema,
   },
   { additionalProperties: false }
 );
@@ -85,8 +88,11 @@ const adminPayoutHistoryEntrySchema = t.Object({
   providerStatus: t.Union([t.String(), t.Null()]),
   actorUserId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
   actorAdminId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
+  admin: t.Union([t.Object({ firstName: t.String(), lastName: t.String() }), t.Null()]),
   source: t.String(),
   reason: t.Union([t.String(), t.Null()]),
+  reasonCode: t.Union([t.String(), t.Null()]),
+  decisionReasonText: t.Union([t.String({ maxLength: 200 }), t.Null()]),
   occurredAt: t.String({ format: 'date-time' }),
 });
 

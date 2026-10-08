@@ -1,8 +1,8 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { adminAction } from '@/database/schema/admin.schema';
-import { authUser } from '@/database/schema/auth.schema';
-import { paymentPayouts } from '@/database/schema/payment.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
+import { paymentPayoutStatusHistory, paymentPayouts } from '@/database/schema/payment.schema';
 import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import {
@@ -111,6 +111,26 @@ const createPendingPayout = async () => {
   return createPayoutForMember(memberId);
 };
 
+const adminPayoutDecisionRequest = (
+  payoutId: string,
+  action: 'approve' | 'cancel',
+  version: number,
+  reasonCode: string,
+  idempotencyKey: string
+) =>
+  app.handle(
+    new Request(`http://localhost/api/v1/admin/payouts/${payoutId}/${action}`, {
+      method: 'POST',
+      headers: {
+        cookie: adminCookie,
+        'content-type': 'application/json',
+        'idempotency-key': idempotencyKey,
+        'if-match': String(version),
+      },
+      body: JSON.stringify({ reasonCode }),
+    })
+  );
+
 beforeAll(async () => {
   await sql`select 1`;
   await ensureInitialMoneyPolicy();
@@ -187,7 +207,7 @@ describe('Payout API routes', () => {
             'idempotency-key': 'admin-auth-check',
             'if-match': '1',
           },
-          body: JSON.stringify({ reasonCode: 'PAYOUT_POLICY_REVIEW' }),
+          body: JSON.stringify({ reasonCode: 'PAYOUT_DESTINATION_VERIFIED' }),
         }
       )
     );
@@ -217,7 +237,15 @@ describe('Payout API routes', () => {
     const document = (await response.json()) as {
       paths: Record<
         string,
-        Record<string, { operationId?: string; security?: unknown; description?: string }>
+        Record<
+          string,
+          {
+            operationId?: string;
+            security?: unknown;
+            description?: string;
+            requestBody?: { content?: Record<string, { schema?: unknown }> };
+          }
+        >
       >;
     };
 
@@ -231,10 +259,41 @@ describe('Payout API routes', () => {
     expect(document.paths['/api/v1/admin/payouts/{payoutId}/cancel']?.post?.operationId).toBe(
       'cancelPayout'
     );
+
+    const approveOperation = document.paths['/api/v1/admin/payouts/{payoutId}/approve']?.post;
+    const cancelOperation = document.paths['/api/v1/admin/payouts/{payoutId}/cancel']?.post;
+    expect(approveOperation?.description).toContain('Payout reason catalog version 2');
+    expect(approveOperation?.description).toContain('PAYOUT_RISK_REVIEW_CLEARED');
+    expect(cancelOperation?.description).toContain('Payout reason catalog version 2');
+    expect(cancelOperation?.description).toContain('PAYOUT_REQUIRED_INFORMATION_MISSING');
+    const approvalSchemaText = JSON.stringify(
+      approveOperation?.requestBody?.content?.['application/json']?.schema
+    );
+    const cancellationSchemaText = JSON.stringify(
+      cancelOperation?.requestBody?.content?.['application/json']?.schema
+    );
+    expect(approveOperation?.description).toContain('decisionReasonText');
+    expect(cancelOperation?.description).toContain('decisionReasonText');
+    expect(approvalSchemaText).toContain('decisionReasonText');
+    expect(cancellationSchemaText).toContain('decisionReasonText');
+    expect(approvalSchemaText).toContain('PAYOUT_DESTINATION_VERIFIED');
+    expect(approvalSchemaText).not.toContain('PAYOUT_POLICY_REVIEW');
+    expect(cancellationSchemaText).toContain('PAYOUT_REQUIRED_INFORMATION_MISSING');
+    expect(cancellationSchemaText).not.toContain('PAYOUT_POLICY_REVIEW');
+    expect(approvalSchemaText).toContain('"maxLength":200');
+    expect(cancellationSchemaText).toContain('"maxLength":200');
     const payoutList = document.paths['/api/v1/admin/payouts']?.get;
     expect(payoutList?.description).toContain('status=ALL');
     expect(JSON.stringify(document)).toContain('"ALL"');
     expect(JSON.stringify(document)).toContain('totalCount');
+    const approval = document.paths['/api/v1/admin/payouts/{payoutId}/approve']?.post;
+    const cancellation = document.paths['/api/v1/admin/payouts/{payoutId}/cancel']?.post;
+    expect(approval?.description).toContain('decisionReasonText');
+    expect(cancellation?.description).toContain('decisionReasonText');
+    expect(JSON.stringify(approval?.requestBody)).toContain('decisionReasonText');
+    expect(JSON.stringify(cancellation?.requestBody)).toContain('decisionReasonText');
+    expect(JSON.stringify(approval?.requestBody)).toContain('"maxLength":200');
+    expect(JSON.stringify(cancellation?.requestBody)).toContain('"maxLength":200');
   });
 
   it('serves the authenticated Admin queue, cursor, detail, and history contracts', async () => {
@@ -305,7 +364,7 @@ describe('Payout API routes', () => {
           'idempotency-key': `payout-admin-route-approval-${crypto.randomUUID()}`,
           'if-match': String(firstPayout.version),
         },
-        body: JSON.stringify({ reasonCode: 'PAYOUT_POLICY_REVIEW' }),
+        body: JSON.stringify({ reasonCode: 'PAYOUT_DESTINATION_VERIFIED' }),
       })
     );
     expect(approvalResponse.status).toBe(200);
@@ -344,7 +403,13 @@ describe('Payout API routes', () => {
       data: {
         displayId: string;
         student: { id: string; studentId: string | null };
-        history: Array<{ source: string; reason: string | null }>;
+        history: Array<{
+          source: string;
+          reason: string | null;
+          reasonCode: string | null;
+          decisionReasonText: string | null;
+          admin: { firstName: string; lastName: string } | null;
+        }>;
         [key: string]: unknown;
       };
     };
@@ -356,7 +421,13 @@ describe('Payout API routes', () => {
     });
     expect(detail.data.history).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ source: 'ADMIN_APPROVAL', reason: 'PAYOUT_POLICY_REVIEW' }),
+        expect.objectContaining({
+          source: 'ADMIN_APPROVAL',
+          reason: 'PAYOUT_DESTINATION_VERIFIED',
+          reasonCode: 'PAYOUT_DESTINATION_VERIFIED',
+          decisionReasonText: null,
+          admin: { firstName: 'Route', lastName: 'Admin' },
+        }),
       ])
     );
     expect(detail.data).toMatchObject({
@@ -465,6 +536,299 @@ describe('Payout API routes', () => {
     expect(replayBody).toEqual(firstBody);
   });
 
+  it('stores optional Admin notes for Payout approval and cancellation', async () => {
+    const approvedPayout = await createPendingPayout();
+    const cancelledPayout = await createPendingPayout();
+    const approvalNote = 'x'.repeat(200);
+    const cancellationNote = 'The Payout Destination could not be verified.';
+
+    const approveResponse = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts/${approvedPayout.id}/approve`, {
+        method: 'POST',
+        headers: {
+          cookie: adminCookie,
+          'content-type': 'application/json',
+          'idempotency-key': `payout-admin-note-approve-${approvedPayout.id}`,
+          'if-match': String(approvedPayout.version),
+        },
+        body: JSON.stringify({
+          reasonCode: 'PAYOUT_DESTINATION_VERIFIED',
+          decisionReasonText: approvalNote,
+        }),
+      })
+    );
+    const cancelResponse = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts/${cancelledPayout.id}/cancel`, {
+        method: 'POST',
+        headers: {
+          cookie: adminCookie,
+          'content-type': 'application/json',
+          'idempotency-key': `payout-admin-note-cancel-${cancelledPayout.id}`,
+          'if-match': String(cancelledPayout.version),
+        },
+        body: JSON.stringify({
+          reasonCode: 'PAYOUT_INVALID_DESTINATION',
+          decisionReasonText: cancellationNote,
+        }),
+      })
+    );
+    const approveBody = await approveResponse.json();
+    const cancelBody = await cancelResponse.json();
+
+    expect(approveResponse.status).toBe(200);
+    expect(cancelResponse.status).toBe(200);
+    expect(approveBody.data.resourceSummary).not.toHaveProperty('decisionReasonText');
+    expect(cancelBody.data.resourceSummary).not.toHaveProperty('decisionReasonText');
+
+    const approveActivity = await app.handle(
+      new Request(
+        `http://localhost/api/v1/admin/activity-log?resourceType=payout&resourceId=${approvedPayout.id}`,
+        { headers: { cookie: adminCookie } }
+      )
+    );
+    const cancelActivity = await app.handle(
+      new Request(
+        `http://localhost/api/v1/admin/activity-log?resourceType=payout&resourceId=${cancelledPayout.id}`,
+        { headers: { cookie: adminCookie } }
+      )
+    );
+    expect(approveActivity.status).toBe(200);
+    expect(cancelActivity.status).toBe(200);
+    expect((await approveActivity.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        action: 'PAYOUT_APPROVE',
+        reasonCode: 'PAYOUT_DESTINATION_VERIFIED',
+        decisionReasonText: approvalNote,
+      })
+    );
+    expect((await cancelActivity.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        action: 'PAYOUT_CANCEL',
+        reasonCode: 'PAYOUT_INVALID_DESTINATION',
+        decisionReasonText: cancellationNote,
+      })
+    );
+
+    const approvedDetail = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts/${approvedPayout.id}`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    const cancelledDetail = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts/${cancelledPayout.id}`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    expect(approvedDetail.status).toBe(200);
+    expect(cancelledDetail.status).toBe(200);
+    expect((await approvedDetail.json()).data.history).toContainEqual(
+      expect.objectContaining({
+        reasonCode: 'PAYOUT_DESTINATION_VERIFIED',
+        decisionReasonText: approvalNote,
+        admin: { firstName: 'Route', lastName: 'Admin' },
+      })
+    );
+    expect((await cancelledDetail.json()).data.history).toContainEqual(
+      expect.objectContaining({
+        reasonCode: 'PAYOUT_INVALID_DESTINATION',
+        decisionReasonText: cancellationNote,
+        admin: { firstName: 'Route', lastName: 'Admin' },
+      })
+    );
+  });
+
+  it('rejects blank and over-200-character Admin decision notes', async () => {
+    const rejectNote = async (
+      operation: 'approve' | 'cancel',
+      reasonCode: string,
+      decisionReasonText: string
+    ) => {
+      const payout = await createPendingPayout();
+      const requestKey = `payout-admin-invalid-note-${payout.id}`;
+      const response = await app.handle(
+        new Request(`http://localhost/api/v1/admin/payouts/${payout.id}/${operation}`, {
+          method: 'POST',
+          headers: {
+            cookie: adminCookie,
+            'content-type': 'application/json',
+            'idempotency-key': requestKey,
+            'if-match': String(payout.version),
+          },
+          body: JSON.stringify({ reasonCode, decisionReasonText }),
+        })
+      );
+      const body = await response.json();
+      const [storedPayout] = await db
+        .select({ payoutStatus: paymentPayouts.payoutStatus, version: paymentPayouts.version })
+        .from(paymentPayouts)
+        .where(eq(paymentPayouts.id, payout.id));
+      const actions = await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey));
+
+      expect(response.status).toBe(400);
+      expect(body.error.code).toBe('VALIDATION');
+      expect(storedPayout).toEqual({ payoutStatus: 'PENDING_ADMIN_APPROVAL', version: 1 });
+      expect(actions).toHaveLength(0);
+    };
+
+    await rejectNote('approve', 'PAYOUT_DESTINATION_VERIFIED', '   ');
+    await rejectNote('cancel', 'PAYOUT_INVALID_DESTINATION', 'x'.repeat(201));
+  });
+
+  const decisionReasonCases = [
+    ['approve', 'PAYOUT_DESTINATION_VERIFIED', 'PAYOUT_APPROVE'],
+    ['approve', 'PAYOUT_ACCOUNT_OWNER_MATCHED', 'PAYOUT_APPROVE'],
+    ['approve', 'PAYOUT_POLICY_CHECK_PASSED', 'PAYOUT_APPROVE'],
+    ['approve', 'PAYOUT_RISK_REVIEW_CLEARED', 'PAYOUT_APPROVE'],
+    ['cancel', 'PAYOUT_INVALID_DESTINATION', 'PAYOUT_CANCEL'],
+    ['cancel', 'PAYOUT_ACCOUNT_OWNER_MISMATCH', 'PAYOUT_CANCEL'],
+    ['cancel', 'PAYOUT_POLICY_CHECK_FAILED', 'PAYOUT_CANCEL'],
+    ['cancel', 'PAYOUT_RISK_REVIEW_FAILED', 'PAYOUT_CANCEL'],
+    ['cancel', 'PAYOUT_REQUIRED_INFORMATION_MISSING', 'PAYOUT_CANCEL'],
+  ] as const;
+
+  const expectReasonCodeRejected = async (
+    action: 'approve' | 'cancel',
+    reasonCode: string,
+    idempotencyKeyPrefix: string
+  ) => {
+    const payout = await createPendingPayout();
+    const idempotencyKey = `${idempotencyKeyPrefix}-${crypto.randomUUID()}`;
+    const response = await adminPayoutDecisionRequest(
+      payout.id,
+      action,
+      payout.version,
+      reasonCode,
+      idempotencyKey
+    );
+    const body = await response.json();
+    const actions = await db
+      .select({ id: adminAction.id })
+      .from(adminAction)
+      .where(eq(adminAction.requestKey, idempotencyKey));
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe('VALIDATION');
+    expect(actions).toHaveLength(0);
+  };
+
+  for (const [action, reasonCode, expectedAction] of decisionReasonCases) {
+    it(`records ${reasonCode} in Payout Admin Action catalog version 2`, async () => {
+      const payout = await createPendingPayout();
+      const response = await adminPayoutDecisionRequest(
+        payout.id,
+        action,
+        payout.version,
+        reasonCode,
+        `payout-catalog-v2-${crypto.randomUUID()}`
+      );
+      expect(response.status).toBe(200);
+      if (response.status !== 200) return;
+      const body = (await response.json()) as { data: { adminActionId: string } };
+      const [record] = await db
+        .select({
+          action: adminAction.action,
+          reasonCatalogVersion: adminAction.reasonCatalogVersion,
+          reasonCode: adminAction.reasonCode,
+        })
+        .from(adminAction)
+        .where(eq(adminAction.id, body.data.adminActionId));
+
+      expect(record).toEqual({
+        action: expectedAction,
+        reasonCatalogVersion: 2,
+        reasonCode,
+      });
+    });
+  }
+
+  for (const [action, reasonCode] of decisionReasonCases) {
+    const mismatchedAction = action === 'approve' ? 'cancel' : 'approve';
+    it(`rejects ${reasonCode} for Payout ${mismatchedAction}`, async () => {
+      await expectReasonCodeRejected(mismatchedAction, reasonCode, 'payout-wrong-action');
+    });
+  }
+
+  for (const action of ['approve', 'cancel'] as const) {
+    for (const reasonCode of ['PAYOUT_POLICY_REVIEW', 'PAYOUT_RISK_REVIEW'] as const) {
+      it(`rejects version-1 ${reasonCode} for Payout ${action}`, async () => {
+        await expectReasonCodeRejected(action, reasonCode, 'payout-catalog-v1');
+      });
+    }
+  }
+
+  it('keeps version-1 Payout Admin Actions readable in the Activity Log', async () => {
+    const payout = await createPendingPayout();
+    const [admin] = await db
+      .select({ id: authAdmin.id })
+      .from(authAdmin)
+      .where(eq(authAdmin.email, adminEmail));
+    if (!admin) throw new Error('Admin account was not provisioned.');
+
+    await db.insert(adminAction).values({
+      adminId: admin.id,
+      action: 'PAYOUT_APPROVE',
+      resourceType: 'payout',
+      resourceId: payout.id,
+      requestKey: `payout-catalog-v1-history-${crypto.randomUUID()}`,
+      requestHash: 'a'.repeat(64),
+      reasonCatalogVersion: 1,
+      reasonCode: 'PAYOUT_POLICY_REVIEW',
+      expectedVersion: payout.version,
+      resultVersion: payout.version + 1,
+      metadata: {},
+      resultData: {},
+    });
+
+    const response = await app.handle(
+      new Request(
+        `http://localhost/api/v1/admin/activity-log?resourceType=payout&resourceId=${payout.id}`,
+        { headers: { cookie: adminCookie } }
+      )
+    );
+    const body = (await response.json()) as {
+      data: {
+        items: Array<{ action: string; reasonCatalogVersion: number; reasonCode: string }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data.items).toContainEqual(
+      expect.objectContaining({
+        action: 'PAYOUT_APPROVE',
+        reasonCatalogVersion: 1,
+        reasonCode: 'PAYOUT_POLICY_REVIEW',
+      })
+    );
+  });
+
+  it('keeps version-1 reason codes readable in Payout status history', async () => {
+    const payout = await createPendingPayout();
+    await db.insert(paymentPayoutStatusHistory).values({
+      payoutId: payout.id,
+      fromStatus: 'PENDING_ADMIN_APPROVAL',
+      toStatus: 'CANCELLED',
+      source: 'ADMIN_CANCELLATION',
+      reason: 'PAYOUT_POLICY_REVIEW',
+    });
+
+    const response = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts/${payout.id}/status-history`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    const body = (await response.json()) as {
+      data: Array<{ source: string; reason: string | null }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data).toContainEqual(
+      expect.objectContaining({ source: 'ADMIN_CANCELLATION', reason: 'PAYOUT_POLICY_REVIEW' })
+    );
+  });
+
   it('rejects a stale Payout version without changing the Payout or writing an Admin Action', async () => {
     const payout = await createPendingPayout();
     const idempotencyKey = `payout-admin-route-stale-${crypto.randomUUID()}`;
@@ -477,7 +841,7 @@ describe('Payout API routes', () => {
           'idempotency-key': idempotencyKey,
           'if-match': String(payout.version + 1),
         },
-        body: JSON.stringify({ reasonCode: 'PAYOUT_POLICY_REVIEW' }),
+        body: JSON.stringify({ reasonCode: 'PAYOUT_DESTINATION_VERIFIED' }),
       })
     );
     const body = await response.json();

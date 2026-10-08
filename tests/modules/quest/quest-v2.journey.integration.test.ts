@@ -357,6 +357,7 @@ describe('Quest API v2 Hirer journey', () => {
         images: _images,
         dispute: _dispute,
         moneyHold: _moneyHold,
+        pendingEditRequest: _pendingEditRequest,
         ...canonicalQuest
       } = detail.data;
       expect(mineItems).toContainEqual(canonicalQuest);
