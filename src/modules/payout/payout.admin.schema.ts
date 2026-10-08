@@ -1,18 +1,11 @@
 import { adminDecisionReasonTextSchema } from '@/modules/admin';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
+import { unionOfLiterals } from '@/shared/typebox-schema';
 
 import { t } from 'elysia';
 
 import { payoutResponseSchema, payoutStatusSchema } from './payout.schema';
 import { payoutApprovalReasonCodes, payoutCancellationReasonCodes } from './payout.admin.policy';
-
-const unionOfLiterals = (values: readonly string[]) =>
-  t.Union(
-    values.map((value) => t.Literal(value)) as [
-      ReturnType<typeof t.Literal<string>>,
-      ...ReturnType<typeof t.Literal<string>>[],
-    ]
-  );
 
 export const adminPayoutParamsSchema = t.Object({
   payoutId: t.String({ format: 'uuid' }),
