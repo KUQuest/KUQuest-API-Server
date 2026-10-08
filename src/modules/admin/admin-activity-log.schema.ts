@@ -23,15 +23,16 @@ export const adminActivityListQuerySchema = t.Object({
 });
 
 export const adminActivityEntrySchema = t.Object({
-  id: t.String({ format: 'uuid' }),
+  activityDisplayId: t.String(),
   admin: t.Object({
-    id: t.String({ format: 'uuid' }),
     firstName: t.String(),
     lastName: t.String(),
   }),
   action: t.String(),
   resourceType: t.String(),
-  resourceId: t.String(),
+  resourceDisplayId: t.Nullable(t.String()),
+  beforeState: t.Nullable(t.String()),
+  afterState: t.Nullable(t.String()),
   reasonCode: t.Nullable(t.String()),
   decisionReasonText: t.Nullable(t.String({ maxLength: 200 })),
   reasonCatalogVersion: t.Integer({ minimum: 1 }),

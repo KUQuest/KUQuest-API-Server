@@ -5,6 +5,16 @@ export { adminMemberRoute } from './admin-member.route';
 export { adminReportRoute } from './admin-report.route';
 export { adminSearchRoute } from './admin-search.route';
 export {
+  adminMemberModerationContextFieldsSchema,
+  adminMemberStatusSchema,
+} from './admin-member.schema';
+export type {
+  AdminMemberModerationAction,
+  AdminMemberModerationContextFields,
+  AdminMemberStatus,
+} from './admin-member.schema';
+export { getAdminMemberModerationContext } from './admin-member-moderation-context.service';
+export {
   formatConductReportDisplayId,
   formatDisplayIdSql,
   formatDisputeDisplayId,

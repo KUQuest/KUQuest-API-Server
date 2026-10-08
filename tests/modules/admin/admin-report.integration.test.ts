@@ -265,6 +265,7 @@ const createConductReportFixture = async (
     participation?: 'SINGLE' | 'GROUP';
     reason?: (typeof conductReportReason)[keyof typeof conductReportReason];
     filerId?: string;
+    hirerId?: string;
     reportedMemberId?: string;
     assignmentWorkerId?: string;
     assignmentWorkerIds?: string[];
@@ -279,6 +280,7 @@ const createConductReportFixture = async (
   const mode = input.mode ?? 'FIRST_COME_FIRST_SERVED';
   const participation = input.participation ?? 'SINGLE';
   const filerId = input.filerId ?? senderId;
+  const hirerId = input.hirerId ?? senderId;
   const reportedMemberId = input.reportedMemberId ?? reporterId;
   const assignmentWorkerId = input.assignmentWorkerId ?? reportedMemberId;
   const assignmentWorkerIds = [...new Set(input.assignmentWorkerIds ?? [assignmentWorkerId])];
@@ -288,7 +290,7 @@ const createConductReportFixture = async (
 
   await db.insert(quest).values({
     id: questId,
-    hirerId: senderId,
+    hirerId,
     apiVersion: 'v2',
     title: `Conduct report fixture ${questId}`,
     condition: 'Complete the reported Quest work.',
@@ -1016,6 +1018,10 @@ describe('Admin Report Case API', () => {
     expect(detailSchemaText).toContain('CONDUCT_NO_SHOW');
     expect(detailSchemaText).toContain('assignment');
     expect(detailSchemaText).toContain('proofSubmission');
+    expect(detailSchemaText).toContain('memberStatus');
+    expect(detailSchemaText).toContain('previousReportCount');
+    expect(detailSchemaText).toContain('confirmedViolationCount');
+    expect(detailSchemaText).toContain('previousModerationActions');
     expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_DISMISSED');
     expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_UPHELD');
     expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_NO_VIOLATION');
@@ -1183,6 +1189,10 @@ describe('Admin Report Case API', () => {
       kind: 'REPORT_CASE',
       messageId: fixture.messageId,
       reportedMember: { id: senderId, studentId: senderStudentId },
+      memberStatus: expect.any(String),
+      previousReportCount: 0,
+      confirmedViolationCount: 0,
+      previousModerationActions: [],
       quest: { id: fixture.questId, title: `Admin report fixture ${fixture.questId}` },
       reporterEntries: [{ reporter: { id: reporterId, studentId: reporterStudentId } }],
       source: 'CONVERSATION_WORK',
@@ -1254,6 +1264,80 @@ describe('Admin Report Case API', () => {
     ).toEqual([expect.objectContaining({ url: null, urlExpiresAt: null })]);
   });
 
+  it('returns earlier Report Cases and Conduct Reports in Member moderation context', async () => {
+    if (!postgresAvailable) return;
+    const priorReportCase = await createReportFixture();
+    const priorConductReport = await createConductReportFixture({
+      filerId: reporterId,
+      hirerId: reporterId,
+      reportedMemberId: senderId,
+      assignmentWorkerId: senderId,
+    });
+    const reportCaseDetail = await createReportFixture();
+    const conductReportDetail = await createConductReportFixture({
+      filerId: reporterId,
+      hirerId: reporterId,
+      reportedMemberId: senderId,
+      assignmentWorkerId: senderId,
+    });
+    const currentCaseCreatedAt = new Date('2020-02-03T10:00:00.000Z');
+    const priorConductResolvedAt = new Date('2020-02-02T11:00:00.000Z');
+
+    await db
+      .update(adminReportCase)
+      .set({ createdAt: currentCaseCreatedAt, updatedAt: currentCaseCreatedAt })
+      .where(eq(adminReportCase.id, reportCaseDetail.caseId));
+    await db
+      .update(adminConductReport)
+      .set({
+        status: 'CONDUCT_REPORT_UPHELD',
+        decisionReason: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+        resolvedByAdminId: adminId,
+        resolvedAt: priorConductResolvedAt,
+        createdAt: new Date('2020-02-02T10:00:00.000Z'),
+        updatedAt: priorConductResolvedAt,
+      })
+      .where(eq(adminConductReport.id, priorConductReport.reportId));
+    await db
+      .update(adminConductReport)
+      .set({ createdAt: currentCaseCreatedAt, updatedAt: currentCaseCreatedAt })
+      .where(eq(adminConductReport.id, conductReportDetail.reportId));
+    await db.insert(adminModerationDecision).values({
+      reportCaseId: priorReportCase.caseId,
+      adminId,
+      previousStatus: 'REPORT_CASE_PENDING',
+      newStatus: 'REPORT_CASE_HIDDEN',
+      reasonCatalogVersion: 2,
+      reasonCode: 'REPORT_SPAM_CONFIRMED',
+      createdAt: new Date('2020-02-01T10:01:00.000Z'),
+    });
+    await db.insert(memberPenaltyRecord).values({
+      memberId: senderId,
+      ladder: 'MISCONDUCT',
+      source: 'CONDUCT_REPORT',
+      sourceId: priorConductReport.reportId,
+      sequenceNumber: 1,
+      result: 'PENALTY_EXEMPT',
+      actorType: 'ADMIN',
+      actorAdminId: adminId,
+      reasonCode: 'CONDUCT_REPORT_CONFIRMED',
+      createdAt: priorConductResolvedAt,
+    });
+
+    for (const reportId of [reportCaseDetail.caseId, conductReportDetail.reportId]) {
+      // eslint-disable-next-line no-await-in-loop
+      const detail = await adminRequest(`/api/v1/admin/reports/${reportId}`);
+      expect(detail.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      expect((await detail.json()).data).toMatchObject({
+        memberStatus: expect.any(String),
+        previousReportCount: 2,
+        confirmedViolationCount: 1,
+        previousModerationActions: ['CONDUCT_REPORT_UPHOLD', 'REPORT_CASE_HIDE'],
+      });
+    }
+  });
+
   it('returns null for a system Message Member and empty Report Case collections', async () => {
     if (!postgresAvailable) return;
     const fixture = await createReportFixture();
@@ -1290,6 +1374,10 @@ describe('Admin Report Case API', () => {
     expect((await detail.json()).data).toMatchObject({
       type: 'SYSTEM',
       reportedMember: null,
+      memberStatus: null,
+      previousReportCount: null,
+      confirmedViolationCount: null,
+      previousModerationActions: [],
       reporterEntries: [],
       evidenceReferences: [],
       quest: { id: fixture.questId },
@@ -1332,7 +1420,11 @@ describe('Admin Report Case API', () => {
       id: fixture.reportId,
       displayId: expect.stringMatching(/^CND-\d{6}$/),
       reportedMember: { id: reporterId, studentId: reporterStudentId },
-      quest: { hirer: { id: senderId, studentId: senderStudentId } },
+      memberStatus: expect.any(String),
+      previousReportCount: 0,
+      confirmedViolationCount: 0,
+      previousModerationActions: [],
+      quest: { failedAt: null, hirer: { id: senderId, studentId: senderStudentId } },
       assignment: {
         id: fixture.assignmentId,
         worker: { id: reporterId, studentId: reporterStudentId },
@@ -1342,6 +1434,15 @@ describe('Admin Report Case API', () => {
       decision: null,
       detail: 'The Quest record requires Admin review.',
     });
+
+    const failedAt = new Date('2020-02-02T10:30:00.000Z');
+    await db
+      .update(quest)
+      .set({ questStatus: 'QUEST_FAILED', failedAt })
+      .where(eq(quest.id, fixture.questId));
+    const failedDetail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(failedDetail.status).toBe(200);
+    expect((await failedDetail.json()).data.quest.failedAt).toBe(failedAt.toISOString());
 
     const resolvedAt = new Date('2020-02-02T11:00:00.000Z');
     await db

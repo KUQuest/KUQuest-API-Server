@@ -1,6 +1,6 @@
 # Admin Dispute Case Contract
 
-Part of the [Admin Rulebook](admin-rulebook.md). Defines accepted policy for Dispute Cases on `QUEST_FAILED` Quests, the 7-day money hold, filing windows, and Satang redirection.
+Part of the [Admin Rulebook](admin-rulebook.md). Defines accepted policy for Dispute Cases on `QUEST_FAILED` Quests, filing content, respondent statements, the 7-day money hold, filing windows, and Satang redirection.
 
 ## Scope and purpose
 
@@ -18,6 +18,25 @@ A Dispute Case reverses part of the automatic settlement a `QUEST_FAILED` Quest 
 - **Self-file window (Hirer / Worker)**: Within **1 day** of the Quest becoming `QUEST_FAILED`.
 - **Admin-filed window (on Worker's behalf)**: Within **5 days** of the Quest becoming `QUEST_FAILED`. An Admin-opened case counts toward the same per-Quest cap.
 - **Admin Review Item relationship**: An Admin needs no Admin Review Item to open a case. An Admin Review Item is an automatic audit record for `PROOF_NOT_APPROVED`; it is not a Dispute Case.
+
+## Filing content and case response
+
+Every filing requires a `category` and `submittedDetail`.
+
+The allowed `category` values are:
+
+- `PROOF_REVIEW`: the filing concerns review of a Proof Submission.
+- `QUEST_CONDITION`: the filing says the Worker met the Quest Condition.
+- `PARTIAL_WORK`: the filing asks for a Reward for part of the work.
+- `OTHER`: the filing has another basis.
+
+The filing Member selects the category and provides `submittedDetail` when filing a Case. For an Admin-filed Case, the Worker selects the category and provides `submittedDetail`; the Admin submits the Worker's values. The Admin does not write either value as if it came from the Worker.
+
+`filerStatement` is optional and must come from the filing Member. For an Admin-filed Case, the Worker provides the statement and the Admin submits it. The Admin does not write a statement as if it came from the Worker.
+
+The opposing Member may submit an optional `respondentStatement` directly by calling `POST /api/v1/disputes/:disputeCaseId/respond`. The route accepts a response only while the Quest is `QUEST_FAILED` and the Dispute Case is `DISPUTE_CASE_PENDING`. The response must be submitted no later than 7 days after the Quest became `QUEST_FAILED`. If the Case remains pending and the respondent submits no statement by that deadline, the Admin may still review and decide the Case.
+
+The filing `category` is separate from the Admin decision `reasonCode`. The category describes the basis of the filing. The reason code records the Admin's finding.
 
 ## 7-Day money hold
 

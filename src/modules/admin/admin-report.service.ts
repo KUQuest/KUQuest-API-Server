@@ -110,6 +110,7 @@ import {
   type ReportCaseHideReasonCode,
   type ReportCaseRestoreReasonCode,
 } from './admin-report.policy';
+import { getAdminMemberModerationContext } from './admin-member-moderation-context.service';
 
 export type ReportCaseOutcome =
   'REPORT_CASE_DISMISSED' | 'REPORT_CASE_HIDDEN' | 'REPORT_CASE_RESTORED';
@@ -203,7 +204,10 @@ type ReportCaseSummaryRow = ReportCaseListRow & {
   sortCreatedAt: string;
 };
 
-type ReportCaseCommandRow = ReportCaseListRow & { reportedMemberId: string | null };
+type ReportCaseCommandRow = ReportCaseListRow & {
+  reportedMemberId: string | null;
+  sortCreatedAt: string;
+};
 
 type AdminReportKind = 'REPORT_CASE' | 'CONDUCT_REPORT';
 type ConductReportMember = Pick<
@@ -483,6 +487,7 @@ const readReportCaseById = async (
       conversationId: chatMessage.conversationId,
       questId: chatConversation.questId,
       reportedMemberId: chatMembership.memberId,
+      sortCreatedAt: sql<string>`to_char(${adminReportCase.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
     })
     .from(adminReportCase)
     .innerJoin(chatMessage, eq(chatMessage.id, adminReportCase.messageId))
@@ -584,6 +589,7 @@ const conductReportSummaryFrom = (row: ConductReportListRow): ConductReportSumma
     proofRequired: row.quest.proofRequired,
     startTime: row.quest.startTime.toISOString(),
     dueAt: serializeDate(row.quest.dueAt),
+    failedAt: serializeDate(row.quest.failedAt),
     createdAt: row.quest.createdAt.toISOString(),
     updatedAt: row.quest.updatedAt.toISOString(),
     hirer: row.hirer,
@@ -1388,7 +1394,11 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
     if (!summary) {
       throw new AdminReportError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
     }
-    return summary;
+    const moderationContext = await getAdminMemberModerationContext(
+      reportCaseRow.reportedMemberId,
+      reportCaseRow.sortCreatedAt
+    );
+    return { ...summary, ...moderationContext };
   }
 
   const [conductReportRow] = await selectConductReportRows(db)
@@ -1486,8 +1496,13 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
   }
 
   const summary = conductReportSummaryFrom(conductReportRow);
+  const moderationContext = await getAdminMemberModerationContext(
+    conductReportRow.report.reportedMemberId,
+    conductReportRow.sortCreatedAt
+  );
   const detail: ConductReportDetail = {
     ...summary,
+    ...moderationContext,
     assignment: {
       id: assignmentRow.assignment.id,
       worker: assignmentRow.worker,

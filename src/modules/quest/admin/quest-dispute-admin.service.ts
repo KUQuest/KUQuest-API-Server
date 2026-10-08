@@ -1,5 +1,12 @@
 import { db } from '@/database/client';
-import { adminDisputeCase, disputeCaseStatuses } from '@/database/schema/admin.schema';
+import {
+  adminAction,
+  adminDisputeCase,
+  disputeCaseStatuses,
+  type DisputeCaseCategory,
+} from '@/database/schema/admin.schema';
+import { authUser } from '@/database/schema/auth.schema';
+import { file } from '@/database/schema/file.schema';
 import {
   proofSubmission,
   proofSubmissionImage,
@@ -8,8 +15,13 @@ import {
   questV2ProofSubmission,
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
-import { file } from '@/database/schema/file.schema';
-import { formatDisputeDisplayId, formatDisplayIdSql } from '@/modules/admin';
+import {
+  formatDisputeDisplayId,
+  formatDisplayIdSql,
+  formatQuestDisplayId,
+  getAdminMemberModerationContext,
+} from '@/modules/admin';
+import type { AdminMemberModerationContextFields, AdminMemberStatus } from '@/modules/admin';
 import {
   createAdminActionService,
   type AdminActionResult,
@@ -29,7 +41,7 @@ import {
   isoDateSearchText as adminListSearchDate,
 } from '@/shared/list-search';
 
-import { and, asc, count, eq, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, or, sql } from 'drizzle-orm';
 
 import { readQuestEscrow } from '../shared/escrow/quest-escrow.service';
 import { notifyQuestUpdate } from '../v2/realtime';
@@ -48,11 +60,13 @@ export const disputeSelfFileWindowMs = dayMs;
 /** Tells the filer that their Dispute Case changed; clients refetch the Quest. */
 const notifyDisputeCaseUpdated = (
   transaction: WalletTransaction,
-  record: Pick<typeof adminDisputeCase.$inferSelect, 'questId' | 'filerUserId'>
+  record: Pick<typeof adminDisputeCase.$inferSelect, 'questId' | 'filerUserId' | 'respondentUserId'>
 ) =>
   notifyQuestUpdate(transaction, {
     questId: record.questId,
-    recipientMemberIds: [record.filerUserId],
+    recipientMemberIds: [record.filerUserId, record.respondentUserId].filter(
+      (userId): userId is string => userId !== null
+    ),
     changeType: 'DISPUTE_CASE_UPDATED',
   });
 
@@ -76,7 +90,11 @@ export class AdminDisputeCaseError extends Error {
     | 'DISPUTE_CASE_RESERVATION_NOT_FOUND'
     | 'DISPUTE_CASE_OUTCOME_INVALID'
     | 'DISPUTE_CASE_AMOUNT_REQUIRED'
-    | 'DISPUTE_CASE_WINDOW_EXPIRED';
+    | 'DISPUTE_CASE_WINDOW_EXPIRED'
+    | 'DISPUTE_CASE_FAILED_AT_UNAVAILABLE'
+    | 'DISPUTE_CASE_RESPONDENT_NOT_ALLOWED'
+    | 'DISPUTE_CASE_RESPONSE_WINDOW_EXPIRED'
+    | 'DISPUTE_CASE_RESPONSE_ALREADY_SUBMITTED';
 
   constructor(code: AdminDisputeCaseError['code'], message: string) {
     super(message);
@@ -101,17 +119,32 @@ export type AdminDisputeCaseSummary = {
   updatedAt: string;
 };
 
-export type AdminDisputeCaseDetail = AdminDisputeCaseSummary & {
-  quest: {
-    id: string;
-    title: string;
-    hirerId: string;
-    questStatus: string;
-    version: number;
-    failedAt: string | null;
-    fundingReservationId: string | null;
+export type AdminDisputeCaseDetail = AdminDisputeCaseSummary &
+  AdminMemberModerationContextFields & {
+    category: DisputeCaseCategory | null;
+    submittedDetail: string | null;
+    filerStatement: string | null;
+    respondentStatement: string | null;
+    filerDisplayId: string | null;
+    respondentDisplayId: string | null;
+    member: { status: AdminMemberStatus } | null;
+    resolvedWorkerDisplayId: string | null;
+    decision: {
+      reasonCode: string | null;
+      decisionReasonText: string | null;
+    };
+    quest: {
+      id: string;
+      displayId: string | null;
+      title: string;
+      hirerId: string;
+      hirerDisplayId: string | null;
+      questStatus: string;
+      version: number;
+      failedAt: string | null;
+      fundingReservationId: string | null;
+    };
   };
-};
 
 export type AdminDisputeEvidence = {
   caseId: string;
@@ -174,7 +207,17 @@ export type ResolveAdminDisputeCaseInput = {
 export type CreateAdminDisputeCaseInput = {
   questId: string;
   filerUserId: string;
+  category: DisputeCaseCategory;
+  submittedDetail: string;
+  filerStatement?: string;
   openedByAdminId?: string;
+  now?: Date;
+};
+
+export type SubmitDisputeCaseResponseInput = {
+  disputeCaseId: string;
+  respondentUserId: string;
+  respondentStatement: string;
   now?: Date;
 };
 
@@ -230,8 +273,13 @@ export const createAdminDisputeCaseInTransaction = async (
         eq(adminDisputeCase.filerUserId, input.filerUserId)
       )
     )
-    .limit(1);
-  if (existing) return existing;
+    .for('update');
+  if (
+    existing &&
+    ((existing.category !== null && existing.submittedDetail !== null) ||
+      existing.status !== 'DISPUTE_CASE_PENDING')
+  )
+    return existing;
 
   const [currentQuest] = await transaction
     .select({
@@ -239,7 +287,6 @@ export const createAdminDisputeCaseInTransaction = async (
       hirerId: quest.hirerId,
       questStatus: quest.questStatus,
       failedAt: quest.failedAt,
-      updatedAt: quest.updatedAt,
     })
     .from(quest)
     .where(eq(quest.id, input.questId))
@@ -252,7 +299,13 @@ export const createAdminDisputeCaseInTransaction = async (
   }
 
   const filingWindow = disputeFilingWindowMs(Boolean(input.openedByAdminId));
-  const failedAt = currentQuest.failedAt ?? currentQuest.updatedAt;
+  const failedAt = currentQuest.failedAt;
+  if (!failedAt) {
+    throw new AdminDisputeCaseError(
+      'DISPUTE_CASE_FAILED_AT_UNAVAILABLE',
+      'The Quest failure time is unavailable.'
+    );
+  }
   if (now.getTime() > failedAt.getTime() + filingWindow) {
     throw new AdminDisputeCaseError(
       'DISPUTE_CASE_WINDOW_EXPIRED',
@@ -284,19 +337,40 @@ export const createAdminDisputeCaseInTransaction = async (
     }
   }
 
-  const [created] = await transaction
-    .insert(adminDisputeCase)
-    .values({
-      questId: input.questId,
-      filerUserId: input.filerUserId,
-      openedByAdminId: input.openedByAdminId,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoNothing({
-      target: [adminDisputeCase.questId, adminDisputeCase.filerUserId],
-    })
-    .returning();
+  const [created] = existing
+    ? await transaction
+        .update(adminDisputeCase)
+        .set({
+          category: input.category,
+          submittedDetail: input.submittedDetail,
+          filerStatement: existing.filerStatement ?? input.filerStatement ?? null,
+          openedByAdminId: input.openedByAdminId ?? existing.openedByAdminId,
+          version: sql`${adminDisputeCase.version} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(adminDisputeCase.id, existing.id),
+            eq(adminDisputeCase.status, 'DISPUTE_CASE_PENDING')
+          )
+        )
+        .returning()
+    : await transaction
+        .insert(adminDisputeCase)
+        .values({
+          questId: input.questId,
+          filerUserId: input.filerUserId,
+          openedByAdminId: input.openedByAdminId,
+          category: input.category,
+          submittedDetail: input.submittedDetail,
+          filerStatement: input.filerStatement ?? null,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoNothing({
+          target: [adminDisputeCase.questId, adminDisputeCase.filerUserId],
+        })
+        .returning();
   if (created) {
     await notifyDisputeCaseUpdated(transaction, created);
     return created;
@@ -318,6 +392,116 @@ export const createAdminDisputeCaseInTransaction = async (
 
 export const createAdminDisputeCase = async (input: CreateAdminDisputeCaseInput) =>
   db.transaction((transaction) => createAdminDisputeCaseInTransaction(transaction, input));
+
+export const submitDisputeCaseResponse = async ({
+  disputeCaseId,
+  respondentUserId,
+  respondentStatement,
+  now = new Date(),
+}: SubmitDisputeCaseResponseInput) =>
+  db.transaction(async (transaction) => {
+    const [row] = await transaction
+      .select({
+        disputeCase: adminDisputeCase,
+        quest: {
+          id: quest.id,
+          hirerId: quest.hirerId,
+          questStatus: quest.questStatus,
+          failedAt: quest.failedAt,
+        },
+      })
+      .from(adminDisputeCase)
+      .innerJoin(quest, eq(quest.id, adminDisputeCase.questId))
+      .where(eq(adminDisputeCase.id, disputeCaseId))
+      .for('update');
+    if (!row)
+      throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
+    if (row.quest.questStatus !== 'QUEST_FAILED') {
+      throw new AdminDisputeCaseError(
+        'DISPUTE_CASE_QUEST_NOT_FAILED',
+        'A response is only available while the Quest is failed.'
+      );
+    }
+    if (row.disputeCase.status !== 'DISPUTE_CASE_PENDING') {
+      throw new AdminDisputeCaseError(
+        'DISPUTE_CASE_NOT_PENDING',
+        'A response is only available while the Dispute Case is pending.'
+      );
+    }
+
+    const failedAt = row.quest.failedAt;
+    if (!failedAt) {
+      throw new AdminDisputeCaseError(
+        'DISPUTE_CASE_FAILED_AT_UNAVAILABLE',
+        'The Quest failure time is unavailable.'
+      );
+    }
+    if (now.getTime() > failedAt.getTime() + 7 * dayMs) {
+      throw new AdminDisputeCaseError(
+        'DISPUTE_CASE_RESPONSE_WINDOW_EXPIRED',
+        'The Dispute Case response window has expired.'
+      );
+    }
+
+    let isRespondent = false;
+    if (row.disputeCase.filerUserId === row.quest.hirerId) {
+      const [assignment] = await transaction
+        .select({ id: questAssignment.id })
+        .from(questAssignment)
+        .where(
+          and(
+            eq(questAssignment.questId, row.disputeCase.questId),
+            eq(questAssignment.workerId, respondentUserId)
+          )
+        )
+        .limit(1);
+      isRespondent = assignment !== undefined;
+    } else {
+      isRespondent = respondentUserId === row.quest.hirerId;
+    }
+    if (!isRespondent || respondentUserId === row.disputeCase.filerUserId) {
+      throw new AdminDisputeCaseError(
+        'DISPUTE_CASE_RESPONDENT_NOT_ALLOWED',
+        'Only the other Member in this Dispute Case may submit a response.'
+      );
+    }
+
+    if (row.disputeCase.respondentStatement !== null) {
+      if (
+        row.disputeCase.respondentUserId === respondentUserId &&
+        row.disputeCase.respondentStatement === respondentStatement
+      )
+        return summaryFromRecord(row.disputeCase);
+      throw new AdminDisputeCaseError(
+        'DISPUTE_CASE_RESPONSE_ALREADY_SUBMITTED',
+        'A respondent statement has already been submitted.'
+      );
+    }
+
+    const [updated] = await transaction
+      .update(adminDisputeCase)
+      .set({
+        respondentUserId,
+        respondentStatement,
+        version: sql`${adminDisputeCase.version} + 1`,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(adminDisputeCase.id, disputeCaseId),
+          eq(adminDisputeCase.status, 'DISPUTE_CASE_PENDING')
+        )
+      )
+      .returning();
+    if (!updated) {
+      throw new AdminDisputeCaseError(
+        'DISPUTE_CASE_NOT_PENDING',
+        'Dispute Case changed before the response was submitted.'
+      );
+    }
+    await notifyDisputeCaseUpdated(transaction, updated);
+    return summaryFromRecord(updated);
+  });
 
 export const listAdminDisputeCases = async ({
   q,
@@ -391,8 +575,10 @@ export const getAdminDisputeCase = async (
   const [row] = await db
     .select({
       disputeCase: adminDisputeCase,
+      caseCreatedAt: sql<string>`to_char(${adminDisputeCase.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
       quest: {
         id: quest.id,
+        publicSequence: quest.publicSequence,
         title: quest.title,
         hirerId: quest.hirerId,
         questStatus: quest.questStatus,
@@ -400,6 +586,30 @@ export const getAdminDisputeCase = async (
         failedAt: quest.failedAt,
         fundingReservationId: quest.fundingReservationId,
       },
+      filerDisplayId: sql<string | null>`(
+        SELECT ${formatDisplayIdSql('member', authUser.publicSequence)}
+        FROM ${authUser}
+        WHERE ${authUser.id} = ${adminDisputeCase.filerUserId}
+        LIMIT 1
+      )`,
+      respondentDisplayId: sql<string | null>`(
+        SELECT ${formatDisplayIdSql('member', authUser.publicSequence)}
+        FROM ${authUser}
+        WHERE ${authUser.id} = ${adminDisputeCase.respondentUserId}
+        LIMIT 1
+      )`,
+      resolvedWorkerDisplayId: sql<string | null>`(
+        SELECT ${formatDisplayIdSql('member', authUser.publicSequence)}
+        FROM ${authUser}
+        WHERE ${authUser.id} = ${adminDisputeCase.resolvedWorkerId}
+        LIMIT 1
+      )`,
+      hirerDisplayId: sql<string | null>`(
+        SELECT ${formatDisplayIdSql('member', authUser.publicSequence)}
+        FROM ${authUser}
+        WHERE ${authUser.id} = ${quest.hirerId}
+        LIMIT 1
+      )`,
     })
     .from(adminDisputeCase)
     .innerJoin(quest, eq(quest.id, adminDisputeCase.questId))
@@ -407,10 +617,64 @@ export const getAdminDisputeCase = async (
     .limit(1);
   if (!row)
     throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
+  let respondentUserId = row.disputeCase.respondentUserId;
+  if (!respondentUserId) {
+    if (row.disputeCase.filerUserId === row.quest.hirerId) {
+      if (row.disputeCase.resolvedWorkerId) {
+        respondentUserId = row.disputeCase.resolvedWorkerId;
+      } else {
+        const assignedWorkers = await db
+          .select({ workerId: questAssignment.workerId })
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, row.quest.id))
+          .limit(2);
+        if (assignedWorkers.length === 1) respondentUserId = assignedWorkers[0]!.workerId;
+      }
+    } else {
+      respondentUserId = row.quest.hirerId;
+    }
+  }
+  const moderationContext = await getAdminMemberModerationContext(
+    respondentUserId,
+    row.caseCreatedAt
+  );
+  const [decision] = await db
+    .select({
+      reasonCode: adminAction.reasonCode,
+      decisionReasonText: adminAction.decisionReasonText,
+    })
+    .from(adminAction)
+    .where(
+      and(
+        eq(adminAction.resourceType, 'dispute_case'),
+        eq(adminAction.resourceId, disputeCaseId),
+        or(
+          eq(adminAction.action, 'DISPUTE_CASE_DISMISS'),
+          eq(adminAction.action, 'DISPUTE_CASE_RESOLVE')
+        )
+      )
+    )
+    .orderBy(desc(adminAction.createdAt), desc(adminAction.id))
+    .limit(1);
   return {
     ...summaryFromRecord(row.disputeCase),
+    category: row.disputeCase.category,
+    submittedDetail: row.disputeCase.submittedDetail,
+    filerStatement: row.disputeCase.filerStatement,
+    respondentStatement: row.disputeCase.respondentStatement,
+    filerDisplayId: row.filerDisplayId,
+    respondentDisplayId: row.respondentDisplayId,
+    ...moderationContext,
+    member: moderationContext.memberStatus ? { status: moderationContext.memberStatus } : null,
+    resolvedWorkerDisplayId: row.resolvedWorkerDisplayId,
+    decision: {
+      reasonCode: decision?.reasonCode ?? null,
+      decisionReasonText: decision?.decisionReasonText ?? null,
+    },
     quest: {
       ...row.quest,
+      displayId: formatQuestDisplayId(row.quest.publicSequence),
+      hirerDisplayId: row.hirerDisplayId,
       failedAt: serializeDate(row.quest.failedAt),
     },
   };

@@ -9,7 +9,11 @@ import {
 import { tagRoute } from '@/modules/tag';
 import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
 import { adminTopUpRoute, topUpRoute, topUpWebhookRoute } from '@/modules/top-up';
-import { adminDisputeRoute, questDisputeRoute } from '@/modules/quest/admin';
+import {
+  adminDisputeRoute,
+  disputeCaseResponseRoute,
+  questDisputeRoute,
+} from '@/modules/quest/admin';
 import { questSettlementRoute } from '@/modules/quest';
 import {
   adminActivityLogRoute,
@@ -87,6 +91,7 @@ export const createApp = () => {
     .use(questProofRoute)
     .use(questReviewRoute)
     .use(questDisputeRoute)
+    .use(disputeCaseResponseRoute)
     .use(questSettlementRoute)
     .use(adminDisputeRoute)
     .use(questAssignmentV2Route)
