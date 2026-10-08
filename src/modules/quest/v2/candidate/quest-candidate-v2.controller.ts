@@ -319,6 +319,13 @@ const mapSelectionError = (set: AuthedContext['set'], outcome: SelectionError) =
       'The Candidate is already assigned to this Quest'
     );
   }
+  if (outcome.outcome === 'worker-schedule-conflict') {
+    return conflict(
+      set,
+      'WORKER_SCHEDULE_CONFLICT',
+      'The Candidate has an active Worker Assignment with overlapping scheduled work time'
+    );
+  }
   return mapQuestCommandOutcome(set, outcome.outcome);
 };
 

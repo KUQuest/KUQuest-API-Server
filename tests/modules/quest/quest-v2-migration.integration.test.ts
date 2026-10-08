@@ -1337,7 +1337,7 @@ describe('Quest API v1 to v2 migration verification', () => {
     );
     const secondApplicationId = (await secondApplication.json()).data.id as string;
     const singleCandidateSelection = await request(
-      `/api/v2/quests/${singleCandidateQuestId}/applications/${firstApplicationId}/select`,
+      `/api/v2/quests/${singleCandidateQuestId}/applications/${secondApplicationId}/select`,
       'POST',
       hirer.id,
       { 'idempotency-key': 'quest-migration-matrix-single-candidate-select' }
@@ -1352,8 +1352,8 @@ describe('Quest API v1 to v2 migration verification', () => {
         .from(questCandidateApplicationV2)
         .where(eq(questCandidateApplicationV2.questId, singleCandidateQuestId))
     ).toEqual([
-      { memberId: worker.id, state: 'APPLICATION_SELECTED' },
-      { memberId: secondWorker.id, state: 'APPLICATION_REJECTED' },
+      { memberId: secondWorker.id, state: 'APPLICATION_SELECTED' },
+      { memberId: worker.id, state: 'APPLICATION_REJECTED' },
     ]);
     expect(
       await db

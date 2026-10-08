@@ -22,6 +22,7 @@ import {
   type QuestTransaction,
 } from '../../shared/work-chat/quest-work-chat.port';
 import { applyQuestStateTransition } from '../../shared/transition/quest-transition.service';
+import { hasOverlappingActiveWorkerAssignment } from '../../shared/worker-schedule-conflict.service';
 import type {
   AcceptedWorker,
   WorkChatMembershipWriter,
@@ -138,6 +139,8 @@ const lockQuest = async (tx: Tx, questId: string) => {
       questStatus: quest.questStatus,
       headcount: quest.headcount,
       hiddenAt: quest.hiddenAt,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
     })
     .from(quest)
     .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v1)))
@@ -891,6 +894,7 @@ type SelectionOutcomeCode =
   | 'not-selectable'
   | 'headcount-mismatch'
   | 'already-assigned'
+  | 'worker-schedule-conflict'
   | 'idempotency-key-required'
   | 'idempotency-key-reused'
   | 'idempotency-unavailable';
@@ -1113,6 +1117,15 @@ export const selectCandidate = async (
       roster.push(selected.workerId);
       if (assignmentRows.some((assignment) => assignment.workerId === selected.workerId))
         return discardCommand('already-assigned');
+      if (
+        await hasOverlappingActiveWorkerAssignment(tx, {
+          questId,
+          workerIds: roster,
+          startTime: current.startTime,
+          dueAt: current.dueAt,
+        })
+      )
+        return discardCommand('worker-schedule-conflict');
       await tx
         .update(questApplication)
         .set({ applicationStatus: applicationStatus.selected })
@@ -1152,6 +1165,15 @@ export const selectCandidate = async (
         )
       )
         return discardCommand('already-assigned');
+      if (
+        await hasOverlappingActiveWorkerAssignment(tx, {
+          questId,
+          workerIds: roster,
+          startTime: current.startTime,
+          dueAt: current.dueAt,
+        })
+      )
+        return discardCommand('worker-schedule-conflict');
       await tx
         .update(questTeam)
         .set({ teamStatus: teamStatus.selected })

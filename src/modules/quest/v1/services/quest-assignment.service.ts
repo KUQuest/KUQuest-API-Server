@@ -22,6 +22,7 @@ import {
 } from '../../shared/work-chat/quest-work-chat.port';
 import type { QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
 import { applyQuestStateTransition } from '../../shared/transition/quest-transition.service';
+import { hasOverlappingActiveWorkerAssignment } from '../../shared/worker-schedule-conflict.service';
 
 type QuestWorkChatWriter = WorkChatMembershipWriter<QuestTransaction>;
 
@@ -49,6 +50,7 @@ type DirectJoinOutcomeCode =
   | 'hirer-not-allowed'
   | 'already-assigned'
   | 'full'
+  | 'worker-schedule-conflict'
   | 'idempotency-key-reused'
   | 'idempotency-key-required'
   | 'idempotency-unavailable';
@@ -179,6 +181,8 @@ const lockQuest = async (transaction: QuestTransaction, questId: string) => {
       questStatus: quest.questStatus,
       headcount: quest.headcount,
       hiddenAt: quest.hiddenAt,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
     })
     .from(quest)
     .where(eq(quest.id, questId))
@@ -268,6 +272,15 @@ export const joinNoCandidateQuest = async (
     if (await isMemberRedFlaggedInTransaction(transaction, workerId, now)) {
       return discardCommand('red-flagged');
     }
+    if (
+      await hasOverlappingActiveWorkerAssignment(transaction, {
+        questId,
+        workerIds: [workerId],
+        startTime: current.startTime,
+        dueAt: current.dueAt,
+      })
+    )
+      return discardCommand('worker-schedule-conflict');
 
     const [activeCount] = await transaction
       .select({ count: sql<number>`count(*)` })
