@@ -81,6 +81,7 @@ Fully automatic system evaluation (not Admin-triggered):
 - Remove reason codes are `MEMBER_PENALTY_ADMIN_ERROR`, `MEMBER_PENALTY_NEW_EVIDENCE`, `MEMBER_PENALTY_POLICY_REVIEW`, and `MEMBER_PENALTY_OTHER_CORRECTION`.
 - The Admin must select a Remove reason code. An optional Admin note has a maximum of 200 characters and appears in Penalty History.
 - Penalty History exposes a version token and marks whether each penalty record is effective.
+- Every Penalty History item exposes its stable `recordId` UUID. The Admin uses this ID to select the exact immutable record for Remove; `sourceDisplayId` identifies the source event and is not a penalty record ID.
 - `GET /api/v1/admin/members/:id/penalty-history` exposes `versionToken`, an integer equal to the current immutable history row count, and marks whether each penalty record is effective. Every appended command, reversal, or recalculated result advances the token.
 - `POST /api/v1/admin/members/:id/penalty-actions/add` and `/remove` require `expectedVersionToken` and an `Idempotency-Key` header. The API rejects a stale token, rejects reuse of a key with a different request, and replays a retry with the original result and version token.
 - Add and Remove are audited in `memberPenaltyRecord`. They do not create a separate `AdminAction` record.

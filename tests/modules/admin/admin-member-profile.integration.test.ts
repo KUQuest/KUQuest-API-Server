@@ -671,6 +671,7 @@ type CertificateItem = {
 };
 
 type PenaltyHistoryItem = {
+  recordId: string;
   ladder: 'MISCONDUCT' | 'REVIEW';
   source: 'REPORT_CASE' | 'CONDUCT_REPORT' | 'REVIEW_AVERAGE';
   sourceDisplayId: string | null;
@@ -779,6 +780,7 @@ describe('Admin Member Profile collection reads', () => {
       'ladder',
       'reasonCode',
       'recalculatedFrom',
+      'recordId',
       'replacedBy',
       'result',
       'reversal',
@@ -875,6 +877,7 @@ describe('Admin Member Profile collection reads', () => {
       'ladder',
       'reasonCode',
       'recalculatedFrom',
+      'recordId',
       'replacedBy',
       'result',
       'reversal',
@@ -923,6 +926,7 @@ describe('Admin Member Profile collection reads', () => {
       isEffectiveActiveMisconductPenalty: false,
       actor: { type: 'SYSTEM', displayName: 'System' },
     });
+    // Penalty record UUIDs are returned so the Admin can target a record for Remove.
     const privateIdentifiers = [
       penaltyHistoryMemberId,
       penaltyHistoryFilerId,
@@ -936,7 +940,6 @@ describe('Admin Member Profile collection reads', () => {
       ...penaltyHistoryReportCaseIds,
       penaltyHistoryConductReportId,
       ...penaltyHistoryReviewIds,
-      ...Object.values(penaltyHistoryRecordIds),
       adminId,
     ];
     const serializedPages = JSON.stringify(pages);

@@ -143,7 +143,7 @@ export const adminMemberRoute = new Elysia({
       tags: ['Admin Members'],
       summary: 'List a Member’s Penalty History',
       description:
-        'Returns immutable penalty records, effective status, Admin notes, reversal and recalculation links, separate Misconduct and Review counts, and a version token for Add/Remove commands. Expired timed penalties remain effective until reversed.',
+        'Returns immutable penalty records with stable record IDs, effective status, Admin notes, reversal and recalculation links, separate Misconduct and Review counts, and a version token for Add/Remove commands. Expired timed penalties remain effective until reversed.',
       operationId: 'listAdminMemberPenaltyHistory',
       security: betterAuthAdminSecurity,
     },
