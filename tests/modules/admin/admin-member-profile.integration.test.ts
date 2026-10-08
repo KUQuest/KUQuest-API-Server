@@ -766,8 +766,8 @@ describe('Admin Member Profile collection reads', () => {
       'member',
       'nextCursor',
       'reviewLadderRecordCount',
-      'versionToken',
       'totalCount',
+      'versionToken',
     ]);
     const itemProperties = dataProperties?.items?.items?.properties;
     expect(Object.keys(itemProperties ?? {}).sort()).toEqual([
@@ -779,9 +779,9 @@ describe('Admin Member Profile collection reads', () => {
       'ladder',
       'recalculatedFrom',
       'reasonCode',
+      'replacedBy',
       'result',
       'reversal',
-      'replacedBy',
       'reviewRating',
       'sequenceNumber',
       'source',
