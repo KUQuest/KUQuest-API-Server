@@ -1,6 +1,6 @@
-import { t, type Static } from 'elysia';
-
 import { unionOfLiterals } from '@/shared/typebox-schema';
+
+import { t, type Static } from 'elysia';
 
 import { memberSummarySchema } from '../../shared/member-summary';
 import {
