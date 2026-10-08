@@ -4,11 +4,17 @@ import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
 import { Elysia } from 'elysia';
 
-import { fileAdminDisputeCaseController } from './quest-dispute-admin.controller';
 import {
+  fileAdminDisputeCaseController,
+  respondToQuestDisputeController,
+} from './quest-dispute-admin.controller';
+import {
+  adminDisputeParamsSchema,
   adminDisputeOpenParamsSchema,
   adminDisputeOpenResponseSchema,
+  questDisputeFilingBodySchema,
   questDisputeMineResponseSchema,
+  questDisputeResponseBodySchema,
 } from './quest-dispute-admin.schema';
 import { summaryFromRecord } from './quest-dispute-admin.service';
 import { db } from '@/database/client';
@@ -23,12 +29,13 @@ export const questDisputeRoute = new Elysia({
   .use(memberBanGuard)
   .post('/:questId/disputes', fileAdminDisputeCaseController, {
     params: adminDisputeOpenParamsSchema,
+    body: questDisputeFilingBodySchema,
     response: responses(adminDisputeOpenResponseSchema, 400, 401, 404, 409),
     detail: {
       tags: ['Quest Disputes'],
       summary: 'File a Dispute Case as the Hirer or Worker',
       description:
-        'Files one Dispute Case for the authenticated Hirer or an assigned Worker on a failed Quest within the one-day self-file window.',
+        'Files one Dispute Case for the authenticated Hirer or an assigned Worker on a failed Quest within the one-day self-file window. The Member supplies the required category and submittedDetail and may supply filerStatement.',
       operationId: 'fileQuestDispute',
       security: betterAuthSecurity,
     },
@@ -66,3 +73,23 @@ export const questDisputeRoute = new Elysia({
       },
     }
   );
+
+export const disputeCaseResponseRoute = new Elysia({
+  name: 'dispute-case-response-route',
+  prefix: `${API_V1_PREFIX}/disputes`,
+})
+  .use(authGuard)
+  .use(memberBanGuard)
+  .post('/:disputeCaseId/respond', respondToQuestDisputeController, {
+    params: adminDisputeParamsSchema,
+    body: questDisputeResponseBodySchema,
+    response: responses(adminDisputeOpenResponseSchema, 400, 401, 403, 404, 409),
+    detail: {
+      tags: ['Quest Disputes'],
+      summary: 'Submit a respondent statement for a Dispute Case',
+      description:
+        'Lets the opposing Member submit one statement while the Quest is QUEST_FAILED and the Dispute Case is DISPUTE_CASE_PENDING, no later than seven days after the Quest failed.',
+      operationId: 'respondToDisputeCase',
+      security: betterAuthSecurity,
+    },
+  });

@@ -957,8 +957,20 @@ export const questV2ParticipationDetailSchema = t.Object({
     minimum: 0,
     maximum: 20,
     description:
-      'How many Active Assignments on this Quest have a Start Work time. Pair it with activeWorkerCount to show GROUP progress without a roster read; no Worker identity is exposed.',
+      'How many Active Assignments on this Quest have a Start Work time. Pair it with activeWorkerCount to show GROUP progress; this count names no Worker.',
   }),
+  workers: t.Nullable(
+    t.Array(
+      t.Object({
+        id: t.String({ format: 'uuid' }),
+        displayName: t.String(),
+      }),
+      {
+        description:
+          'GROUP + FIRST_COME_FIRST_SERVED only: every Worker whose Assignment was not cancelled, the caller included, in acceptance order. It stays complete after settlement, so a finished Quest still names the Workers who worked it. null for every other Quest shape.',
+      }
+    )
+  ),
   capabilities: t.Object({
     canViewOnly: t.Boolean(),
   }),

@@ -76,7 +76,9 @@ export const listAdminReportsController = async ({
       q: query.q,
       kind: query.kind,
       status: query.status,
+      statusMode: query.statusMode,
       memberId: query.memberId,
+      submittedByMemberId: query.submittedByMemberId,
       questId: query.questId,
       limit: parsePageLimit(query.limit),
       cursor: decodeCursor(query.cursor),
@@ -143,6 +145,7 @@ export const decideAdminReportController = async ({
           ? await decideAdminReport({
               ...command,
               outcome: 'CONDUCT_REPORT_UPHELD',
+              decisionReasonCode: body.decisionReasonCode,
               decisionReasonText: body.decisionReasonText,
             })
           : await decideAdminReport({

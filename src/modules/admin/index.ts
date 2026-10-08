@@ -5,11 +5,22 @@ export { adminMemberRoute } from './admin-member.route';
 export { adminReportRoute } from './admin-report.route';
 export { adminSearchRoute } from './admin-search.route';
 export {
+  adminMemberModerationContextFieldsSchema,
+  adminMemberStatusSchema,
+} from './admin-member.schema';
+export type {
+  AdminMemberModerationAction,
+  AdminMemberModerationContextFields,
+  AdminMemberStatus,
+} from './admin-member.schema';
+export { getAdminMemberModerationContext } from './admin-member-moderation-context.service';
+export {
   formatDisplayIdSql,
   formatDisputeDisplayId,
   formatQuestDisplayId,
   formatWalletDisplayId,
 } from './admin-display-id';
+export { adminDecisionReasonTextSchema } from './admin-action.schema';
 export { createAdminActionService } from './admin-action.service';
 export type {
   AdminActionCommandInput,

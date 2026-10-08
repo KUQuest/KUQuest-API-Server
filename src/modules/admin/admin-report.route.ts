@@ -12,11 +12,13 @@ import {
   listAdminReportsController,
 } from './admin-report.controller';
 import {
-  adminReportCommandHeadersSchema,
-  adminReportCommandResponseSchema,
   adminConductReportDismissDecisionBodySchema,
   adminConductReportUpholdDecisionBodySchema,
-  adminReportCaseDecisionBodySchema,
+  adminReportCaseDismissDecisionBodySchema,
+  adminReportCaseHideDecisionBodySchema,
+  adminReportCaseRestoreDecisionBodySchema,
+  adminReportCommandHeadersSchema,
+  adminReportCommandResponseSchema,
   adminReportDecisionBodySchema,
   adminReportDetailResponseSchema,
   adminReportEvidenceHeadersSchema,
@@ -35,8 +37,12 @@ const rejectUnknownAdminReportDecisionFields = ({ body }: { body: unknown }) => 
         ? adminConductReportDismissDecisionBodySchema
         : body.outcome === 'CONDUCT_REPORT_UPHELD'
           ? adminConductReportUpholdDecisionBodySchema
-          : adminReportCaseDecisionBodySchema
-      : adminReportCaseDecisionBodySchema;
+          : body.outcome === 'REPORT_CASE_DISMISSED'
+            ? adminReportCaseDismissDecisionBodySchema
+            : body.outcome === 'REPORT_CASE_HIDDEN'
+              ? adminReportCaseHideDecisionBodySchema
+              : adminReportCaseRestoreDecisionBodySchema
+      : adminReportCaseDismissDecisionBodySchema;
 
   rejectUnknownFields(schema)({ body });
 };
@@ -53,7 +59,12 @@ export const adminReportRoute = new Elysia({
       tags: ['Admin Reports'],
       summary: 'List Report Cases and Conduct Reports for Admin review',
       description:
-        'Lists the shared Report Case and Conduct Report queue with separate kind and status vocabularies. Supports reported Member, Quest, and list-field search. It omits Message content and file links and returns matching status counts.',
+        'Lists the shared Report Case and Conduct Report queue. The default statusMode=OPEN_QUEUE ' +
+        'includes Report Case pending/hidden and Conduct Report pending; FULL_HISTORY includes every ' +
+        'status. A status filter selects one status. memberId filters the reported Member; ' +
+        'submittedByMemberId filters a Reporter Entry or the Conduct Report filer. countsByStatus ' +
+        'uses the same kind, Member, submitter, Quest, search, mode, and status filters. Message ' +
+        'content and file links remain available only through case-scoped evidence reads.',
       operationId: 'listAdminReports',
       security: betterAuthSecurity,
     },
@@ -80,7 +91,7 @@ export const adminReportRoute = new Elysia({
       tags: ['Admin Reports'],
       summary: 'Apply a Report Case or Conduct Report decision',
       description:
-        'For REPORT_CASE decisions, reasonCode is POLICY_REVIEW or SAFETY_REVIEW; Reporter Entry reasons are REPORT_ABUSIVE_OR_HARASSMENT, REPORT_SPAM, REPORT_INAPPROPRIATE_CONTENT, REPORT_DANGER_OR_THREAT, or REPORT_OTHER. CONDUCT_REPORT dismissal uses decisionReasonCode CONDUCT_REPORT_NO_VIOLATION or CONDUCT_REPORT_INSUFFICIENT_EVIDENCE; filing reasons are CONDUCT_ABANDONED, CONDUCT_OUT_OF_SCOPE, or CONDUCT_NO_SHOW. Uphold reuses the filed reason. Each decision can include an optional Admin-only decisionReasonText of up to 200 characters. Commands require an action-specific reason code, current resource version, Idempotency-Key, and immutable Admin Action.',
+        'REPORT_CASE_DISMISSED reasonCode is REPORT_NO_POLICY_VIOLATION, REPORT_INSUFFICIENT_EVIDENCE, or REPORT_CONTEXT_SUPPORTS_MESSAGE. REPORT_CASE_HIDDEN reasonCode is REPORT_HARASSMENT_CONFIRMED, REPORT_SPAM_CONFIRMED, REPORT_THREAT_CONFIRMED, REPORT_INAPPROPRIATE_CONTENT_CONFIRMED, or REPORT_OTHER_POLICY_VIOLATION_CONFIRMED. REPORT_CASE_RESTORED reasonCode is REPORT_MESSAGE_COMPLIES_WITH_POLICY, REPORT_CONTEXT_WAS_MISUNDERSTOOD, or REPORT_NEW_EVIDENCE_OVERTURNS_HIDE. Reporter Entry reasons are REPORT_ABUSIVE_OR_HARASSMENT, REPORT_SPAM, REPORT_INAPPROPRIATE_CONTENT, REPORT_DANGER_OR_THREAT, or REPORT_OTHER. CONDUCT_REPORT_DISMISSED and CONDUCT_REPORT_UPHELD require an Admin-selected decisionReasonCode from their outcome-specific catalogs; filed reasons CONDUCT_ABANDONED, CONDUCT_OUT_OF_SCOPE, or CONDUCT_NO_SHOW remain separate. Each decision can include an optional Admin-only decisionReasonText of up to 200 characters. Commands require a current resource version, Idempotency-Key, and immutable Admin Action.',
       operationId: 'decideAdminReport',
       security: betterAuthSecurity,
     },

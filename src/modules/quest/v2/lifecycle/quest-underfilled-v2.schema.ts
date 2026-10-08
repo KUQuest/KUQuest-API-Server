@@ -1,3 +1,5 @@
+import { unionOfLiterals } from '@/shared/typebox-schema';
+
 import { t, type Static } from 'elysia';
 
 import { memberSummarySchema } from '../../shared/member-summary';
@@ -8,14 +10,6 @@ import {
   questV2UnderfilledDecisionValues,
   questV2UnderfilledStates,
 } from '../core/quest-v2.contract';
-
-const unionOfLiterals = (values: readonly string[]) =>
-  t.Union(
-    values.map((value) => t.Literal(value)) as [
-      ReturnType<typeof t.Literal<string>>,
-      ...ReturnType<typeof t.Literal<string>>[],
-    ]
-  );
 
 const questStateSchema = unionOfLiterals(questV2States);
 const underfilledStateSchema = unionOfLiterals(questV2UnderfilledStates);

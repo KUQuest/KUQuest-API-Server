@@ -70,6 +70,16 @@ let workerId = '';
 let workerCookie = '';
 let outsiderCookie = '';
 const ownerId = crypto.randomUUID();
+const earlyFinisherId = crypto.randomUUID();
+const lateFinisherId = crypto.randomUUID();
+const incompleteWorkerId = crypto.randomUUID();
+const cancelledWorkerId = crypto.randomUUID();
+const teammates = [
+  { id: earlyFinisherId, firstName: 'Early', lastName: 'Finisher' },
+  { id: lateFinisherId, firstName: 'Late', lastName: 'Finisher' },
+  { id: incompleteWorkerId, firstName: 'Incomplete', lastName: 'Worker' },
+  { id: cancelledWorkerId, firstName: 'Cancelled', lastName: 'Worker' },
+];
 const adminId = crypto.randomUUID();
 const tagId = crypto.randomUUID();
 const questIds: string[] = [];
@@ -142,6 +152,9 @@ beforeAll(async () => {
     firstName: 'Quest',
     lastName: 'Owner',
   });
+  await db
+    .insert(authUser)
+    .values(teammates.map((member) => ({ ...member, email: `${member.id}@ku.th` })));
   await db.insert(authAdmin).values({
     id: adminId,
     email: `${adminId}@admin.kuquest`,
@@ -166,7 +179,9 @@ afterAll(async () => {
   await db.delete(auditRecord).where(inArray(auditRecord.actorUserId, [workerId, ownerId]));
   await db.delete(auditRecord).where(eq(auditRecord.actorAdminId, adminId));
   await db.delete(authAdmin).where(eq(authAdmin.id, adminId));
-  await db.delete(authUser).where(eq(authUser.id, ownerId));
+  await db
+    .delete(authUser)
+    .where(inArray(authUser.id, [ownerId, ...teammates.map(({ id }) => id)]));
 });
 
 type ParticipationBody = {
@@ -175,6 +190,7 @@ type ParticipationBody = {
     state: string;
     assignment: { status: string; startedAt: string | null };
     capabilities: { canViewOnly: boolean };
+    workers: Array<{ id: string; displayName: string }> | null;
   };
 };
 
@@ -284,6 +300,80 @@ describe('Quest v2 Participation Detail', () => {
     const body = (await (await getParticipation(groupQuest)).json()) as ParticipationBody;
     expect(body.data).toMatchObject({ activeWorkerCount: 2, startedWorkerCount: 1 });
     expect(body.data.assignment.startedAt).toBeNull();
+    expect(body.data.workers).toBeNull();
+  });
+
+  // Mobile #287: a GROUP + FIRST_COME_FIRST_SERVED Worker sees who worked the Quest with
+  // them. Settlement closes each early finisher's Work Chat membership, so the chat roster
+  // cannot answer this once the Quest ends; the Assignment rows can.
+  it('names every Worker who worked a GROUP + FIRST_COME_FIRST_SERVED Quest', async () => {
+    const groupQuest = await createPublishedQuest({
+      participation: 'GROUP',
+      headcount: 4,
+      questFundingTotal: 80,
+    });
+    const at = (minute: number) => new Date(Date.UTC(2030, 7, 1, 0, minute));
+    await db.insert(questAssignment).values([
+      {
+        questId: groupQuest,
+        workerId: earlyFinisherId,
+        assignmentStatus: assignmentStatus.completed,
+        createdAt: at(1),
+      },
+      {
+        questId: groupQuest,
+        workerId,
+        assignmentStatus: assignmentStatus.completed,
+        createdAt: at(2),
+      },
+      {
+        questId: groupQuest,
+        workerId: cancelledWorkerId,
+        assignmentStatus: assignmentStatus.cancelled,
+        createdAt: at(3),
+      },
+      {
+        questId: groupQuest,
+        workerId: incompleteWorkerId,
+        assignmentStatus: assignmentStatus.incomplete,
+        createdAt: at(4),
+      },
+      {
+        questId: groupQuest,
+        workerId: lateFinisherId,
+        assignmentStatus: assignmentStatus.completed,
+        createdAt: at(5),
+      },
+    ]);
+    await setQuestState(groupQuest, questStatus.completed);
+
+    const body = (await (await getParticipation(groupQuest)).json()) as ParticipationBody;
+    expect(body.data.workers).toEqual([
+      { id: earlyFinisherId, displayName: 'Early Finisher' },
+      { id: workerId, displayName: 'Participation Worker' },
+      { id: incompleteWorkerId, displayName: 'Incomplete Worker' },
+      { id: lateFinisherId, displayName: 'Late Finisher' },
+    ]);
+  });
+
+  it('names the current Active Workers while a GROUP + FIRST_COME_FIRST_SERVED Quest runs', async () => {
+    const groupQuest = await createPublishedQuest({
+      participation: 'GROUP',
+      headcount: 2,
+      questFundingTotal: 40,
+    });
+    await assign(groupQuest);
+    await db.insert(questAssignment).values({
+      questId: groupQuest,
+      workerId: lateFinisherId,
+      assignmentStatus: assignmentStatus.active,
+    });
+    await setQuestState(groupQuest, questStatus.inProgress);
+
+    const body = (await (await getParticipation(groupQuest)).json()) as ParticipationBody;
+    expect(body.data.workers?.map(({ id }) => id).sort()).toEqual(
+      [workerId, lateFinisherId].sort()
+    );
   });
 
   it('refuses every caller without an Assignment on the Quest', async () => {
@@ -387,6 +477,7 @@ describe('Quest v2 Participation Detail', () => {
       'tag',
       'title',
       'workerSettlement',
+      'workers',
     ]);
     expect(Object.keys(body.data.capabilities as object)).toEqual(['canViewOnly']);
   });

@@ -147,6 +147,17 @@ describe('Top-up Provider event application services', () => {
     expect(await getWallet(userId)).toMatchObject({
       spendingBalanceSatang: topUp.creditSatang,
     });
+    const statusHistory = await db
+      .select()
+      .from(paymentTopUpStatusHistory)
+      .where(eq(paymentTopUpStatusHistory.topUpId, topUp.id));
+    expect(statusHistory).toContainEqual(
+      expect.objectContaining({
+        toStatus: 'PAID',
+        source: 'WEBHOOK',
+        occurredAt: new Date('2026-08-27T00:00:00.000Z'),
+      })
+    );
     expect(
       await db
         .select()

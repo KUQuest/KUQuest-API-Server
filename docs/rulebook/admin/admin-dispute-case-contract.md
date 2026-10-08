@@ -1,6 +1,6 @@
 # Admin Dispute Case Contract
 
-Part of the [Admin Rulebook](admin-rulebook.md). Defines accepted policy for Dispute Cases on `QUEST_FAILED` Quests, the 7-day money hold, filing windows, and Satang redirection.
+Part of the [Admin Rulebook](admin-rulebook.md). Defines accepted policy for Dispute Cases on `QUEST_FAILED` Quests, filing content, respondent statements, the 7-day money hold, filing windows, and Satang redirection.
 
 ## Scope and purpose
 
@@ -19,6 +19,25 @@ A Dispute Case reverses part of the automatic settlement a `QUEST_FAILED` Quest 
 - **Admin-filed window (on Worker's behalf)**: Within **5 days** of the Quest becoming `QUEST_FAILED`. An Admin-opened case counts toward the same per-Quest cap.
 - **Admin Review Item relationship**: An Admin needs no Admin Review Item to open a case. An Admin Review Item is an automatic audit record for `PROOF_NOT_APPROVED`; it is not a Dispute Case.
 
+## Filing content and case response
+
+Every filing requires a `category` and `submittedDetail`.
+
+The allowed `category` values are:
+
+- `PROOF_REVIEW`: the filing concerns review of a Proof Submission.
+- `QUEST_CONDITION`: the filing says the Worker met the Quest Condition.
+- `PARTIAL_WORK`: the filing asks for a Reward for part of the work.
+- `OTHER`: the filing has another basis.
+
+The filing Member selects the category and provides `submittedDetail` when filing a Case. For an Admin-filed Case, the Worker selects the category and provides `submittedDetail`; the Admin submits the Worker's values. The Admin does not write either value as if it came from the Worker.
+
+`filerStatement` is optional and must come from the filing Member. For an Admin-filed Case, the Worker provides the statement and the Admin submits it. The Admin does not write a statement as if it came from the Worker.
+
+The opposing Member may submit an optional `respondentStatement` directly by calling `POST /api/v1/disputes/:disputeCaseId/respond`. The route accepts a response only while the Quest is `QUEST_FAILED` and the Dispute Case is `DISPUTE_CASE_PENDING`. The response must be submitted no later than 7 days after the Quest became `QUEST_FAILED`. If the Case remains pending and the respondent submits no statement by that deadline, the Admin may still review and decide the Case.
+
+The filing `category` is separate from the Admin decision `reasonCode`. The category describes the basis of the filing. The reason code records the Admin's finding.
+
 ## 7-Day money hold
 
 - When a Quest becomes `QUEST_FAILED`, the returned funding is held for **7 days** in the Quest's Funding Reservation (kept `ACTIVE` with remaining Satang), not released as ordinary Spending Balance.
@@ -32,6 +51,34 @@ A Dispute Case reverses part of the automatic settlement a `QUEST_FAILED` Quest 
 - Admin resolves a Dispute Case as:
   - `DISPUTE_CASE_DISMISSED`: No money movement; case closes.
   - `DISPUTE_CASE_RESOLVED`: An explicit positive Satang amount is redirected to the named Worker's Earnings Balance as a reversing Ledger Transaction.
-- Requires a non-blank `Idempotency-Key`.
+- Each decision requires a controlled `reasonCode` and a non-blank `Idempotency-Key`.
+- An Admin may also provide an optional `decisionReasonText` of 1 to 200 characters with at least one non-whitespace character.
+- The note is stored separately on the immutable Admin Action and is visible only to enabled Admins through the Activity Log. It does not replace `reasonCode` or appear in Member notifications.
 - The first confirmed decision is final and creates an Audit Record.
 - A non-active Hirer Wallet (`FROZEN`, `SUSPENDED`, `CLOSED`) does not block the redirect.
+
+## Decision reason catalog
+
+Admin Action reason catalog version `2` defines the action-specific reason codes:
+
+`DISPUTE_CASE_DISMISS` accepts:
+
+- `DISPUTE_INSUFFICIENT_EVIDENCE`
+- `DISPUTE_QUEST_RECORD_DOES_NOT_SUPPORT_CLAIM`
+- `DISPUTE_NO_UNFAIR_SETTLEMENT_FOUND`
+- `DISPUTE_WORKER_ALREADY_COMPENSATED`
+
+`DISPUTE_CASE_RESOLVE` accepts:
+
+- `DISPUTE_VALID_PROOF_NOT_APPROVED`: the Proof Submission meets the Quest Condition, but the Hirer did not approve it.
+- `DISPUTE_WORKER_MET_QUEST_CONDITION`: Quest records show the Worker met the agreed condition, but failure settlement returned the slot funds to the Hirer.
+- `DISPUTE_PARTIAL_WORK_EARNED_REWARD`: evidence supports payment for part of the work, so the Admin redirects the matching Satang amount.
+
+The Admin selects `reasonCode`; the Server does not derive it from the outcome.
+The code records the Admin's finding. It does not calculate the redirect amount
+or change the accepted settlement. Version-1 Admin Actions remain readable with
+their recorded catalog version and code.
+
+An Admin may also provide an optional `decisionReasonText` of up to 200
+characters. The note is stored separately on the immutable Admin Action and
+does not replace `reasonCode` or change the money movement.

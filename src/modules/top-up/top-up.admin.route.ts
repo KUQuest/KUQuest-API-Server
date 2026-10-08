@@ -6,6 +6,7 @@ import { Elysia } from 'elysia';
 
 import {
   getAdminTopUpController,
+  listAdminTopUpStatusHistoryController,
   listAdminTopUpsController,
   reconcileTopUpAdminController,
   retryTopUpEventAdminController,
@@ -18,6 +19,7 @@ import {
   adminTopUpListResponseSchema,
   adminTopUpParamsSchema,
   adminTopUpResponseSchema,
+  adminTopUpStatusHistoryResponseSchema,
 } from './top-up.admin.schema';
 
 export const adminTopUpRoute = new Elysia({
@@ -33,6 +35,18 @@ export const adminTopUpRoute = new Elysia({
       summary: 'List and filter Top-Ups for Admin review',
       description: 'Returns paginated PromptPay Top-Ups with status, amount, and member details.',
       operationId: 'listAdminTopUps',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/:topUpId/status-history', listAdminTopUpStatusHistoryController, {
+    params: adminTopUpParamsSchema,
+    response: responses(adminTopUpStatusHistoryResponseSchema, 400, 401, 403, 404, 500),
+    detail: {
+      tags: ['Admin Top-Ups'],
+      summary: 'List Top-Up status history for Admin review',
+      description:
+        'Returns recorded Top-Up status transitions in occurrence order, including the authoritative transition time.',
+      operationId: 'listAdminTopUpStatusHistory',
       security: betterAuthSecurity,
     },
   })

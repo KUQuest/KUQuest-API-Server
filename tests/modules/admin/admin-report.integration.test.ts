@@ -265,6 +265,7 @@ const createConductReportFixture = async (
     participation?: 'SINGLE' | 'GROUP';
     reason?: (typeof conductReportReason)[keyof typeof conductReportReason];
     filerId?: string;
+    hirerId?: string;
     reportedMemberId?: string;
     assignmentWorkerId?: string;
     assignmentWorkerIds?: string[];
@@ -279,6 +280,7 @@ const createConductReportFixture = async (
   const mode = input.mode ?? 'FIRST_COME_FIRST_SERVED';
   const participation = input.participation ?? 'SINGLE';
   const filerId = input.filerId ?? senderId;
+  const hirerId = input.hirerId ?? senderId;
   const reportedMemberId = input.reportedMemberId ?? reporterId;
   const assignmentWorkerId = input.assignmentWorkerId ?? reportedMemberId;
   const assignmentWorkerIds = [...new Set(input.assignmentWorkerIds ?? [assignmentWorkerId])];
@@ -288,7 +290,7 @@ const createConductReportFixture = async (
 
   await db.insert(quest).values({
     id: questId,
-    hirerId: senderId,
+    hirerId,
     apiVersion: 'v2',
     title: `Conduct report fixture ${questId}`,
     condition: 'Complete the reported Quest work.',
@@ -972,6 +974,12 @@ describe('Admin Report Case API', () => {
           {
             operationId?: string;
             security?: unknown;
+            parameters?: Array<{
+              name?: string;
+              in?: string;
+              required?: boolean;
+              schema?: unknown;
+            }>;
             requestBody?: { content?: Record<string, { schema?: unknown }> };
             responses?: Record<string, { content?: Record<string, { schema?: unknown }> }>;
           }
@@ -1010,23 +1018,119 @@ describe('Admin Report Case API', () => {
     expect(detailSchemaText).toContain('CONDUCT_NO_SHOW');
     expect(detailSchemaText).toContain('assignment');
     expect(detailSchemaText).toContain('proofSubmission');
+    expect(detailSchemaText).toContain('memberStatus');
+    expect(detailSchemaText).toContain('previousReportCount');
+    expect(detailSchemaText).toContain('confirmedViolationCount');
+    expect(detailSchemaText).toContain('previousModerationActions');
     expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_DISMISSED');
     expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_UPHELD');
     expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_NO_VIOLATION');
     expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_INSUFFICIENT_EVIDENCE');
-    expect(decisionRequestSchemaText).toContain('POLICY_REVIEW');
-    expect(decisionRequestSchemaText).toContain('SAFETY_REVIEW');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_QUEST_RECORD_DISPROVES_CLAIM');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_OUTSIDE_RULEBOOK_SCOPE');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_PROOF_RECORD_CONFIRMS_VIOLATION');
+    expect(decisionRequestSchemaText).toContain(
+      'CONDUCT_REPORT_CHAT_CONTEXT_CORROBORATES_VIOLATION'
+    );
+    expect(decisionRequestSchemaText).toContain('REPORT_NO_POLICY_VIOLATION');
+    expect(decisionRequestSchemaText).toContain('REPORT_INSUFFICIENT_EVIDENCE');
+    expect(decisionRequestSchemaText).toContain('REPORT_CONTEXT_SUPPORTS_MESSAGE');
+    expect(decisionRequestSchemaText).toContain('REPORT_HARASSMENT_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_SPAM_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_THREAT_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_INAPPROPRIATE_CONTENT_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_OTHER_POLICY_VIOLATION_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_MESSAGE_COMPLIES_WITH_POLICY');
+    expect(decisionRequestSchemaText).toContain('REPORT_CONTEXT_WAS_MISUNDERSTOOD');
+    expect(decisionRequestSchemaText).toContain('REPORT_NEW_EVIDENCE_OVERTURNS_HIDE');
+    expect(decisionRequestSchemaText).toContain('decisionReasonCode');
+    expect(decisionRequestSchemaText).not.toContain('POLICY_REVIEW');
+    expect(decisionRequestSchemaText).not.toContain('SAFETY_REVIEW');
     expect(decisionRequestSchemaText).toContain('decisionReasonText');
     expect(decisionRequestSchemaText).toContain('"maxLength":200');
+    const listParameters = listOperation?.parameters ?? [];
+    const submittedByParameter = listParameters.find(
+      (parameter) => parameter.name === 'submittedByMemberId'
+    );
+    expect(submittedByParameter).toMatchObject({
+      name: 'submittedByMemberId',
+      in: 'query',
+      required: false,
+      schema: { type: 'string', format: 'uuid' },
+    });
+    const statusModeParameter = listParameters.find((parameter) => parameter.name === 'statusMode');
+    expect(statusModeParameter).toMatchObject({
+      name: 'statusMode',
+      in: 'query',
+      required: false,
+    });
+    const statusModeSchema = statusModeParameter?.schema as
+      { enum?: string[]; anyOf?: Array<{ const?: string }> } | undefined;
+    const allowedStatusModes =
+      statusModeSchema?.enum ?? statusModeSchema?.anyOf?.map((option) => option.const);
+    expect(allowedStatusModes).toEqual(['OPEN_QUEUE', 'FULL_HISTORY']);
+    const listSchemaText = JSON.stringify(listSchema);
+    expect(listSchemaText).toContain('MEM-[0-9]{6,}');
+    expect(listSchemaText).toContain('RPT-[0-9]{6,}');
+    expect(listSchemaText).toContain('CND-[0-9]{6,}');
+    expect(listSchemaText).toContain('QST-[0-9]{6,}');
+    expect(JSON.stringify(detailSchema)).toContain('MEM-[0-9]{6,}');
+    expect(JSON.stringify(detailSchema)).toContain('RPT-[0-9]{6,}');
+    expect(JSON.stringify(detailSchema)).toContain('QST-[0-9]{6,}');
+    for (const operation of [
+      listOperation,
+      detailOperation,
+      decisionOperation,
+      document.paths['/api/v1/admin/evidence/{evidenceRef}']?.get,
+    ]) {
+      expect(operation?.security).toBeDefined();
+    }
 
-    const anonymous = await app.handle(new Request('http://localhost/api/v1/admin/reports'));
-    expect(anonymous.status).toBe(401);
-    expect((await anonymous.json()).error.code).toBe('UNAUTHORIZED');
+    const guardedRoutes: Array<{ path: string; init?: RequestInit }> = [
+      { path: '/reports' },
+      { path: `/reports/${randomUUID()}` },
+      {
+        path: `/reports/${randomUUID()}/decide`,
+        init: {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': 'report-auth-decision',
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_DISMISSED',
+            reasonCode: 'REPORT_NO_POLICY_VIOLATION',
+          }),
+        },
+      },
+      {
+        path: `/evidence/${randomUUID()}`,
+        init: { headers: { 'idempotency-key': 'report-auth-evidence' } },
+      },
+    ];
+
+    for (const route of guardedRoutes) {
+      // eslint-disable-next-line no-await-in-loop
+      const response = await app.handle(
+        new Request(`http://localhost/api/v1/admin${route.path}`, route.init)
+      );
+      expect(response.status).toBe(401);
+      // eslint-disable-next-line no-await-in-loop
+      expect((await response.json()).error.code).toBe('UNAUTHORIZED');
+    }
 
     memberAuthentication(reporterId);
-    const member = await app.handle(new Request('http://localhost/api/v1/admin/reports'));
-    expect(member.status).toBe(403);
-    expect((await member.json()).error.code).toBe('FORBIDDEN');
+    for (const route of guardedRoutes) {
+      // eslint-disable-next-line no-await-in-loop
+      const response = await app.handle(
+        new Request(`http://localhost/api/v1/admin${route.path}`, route.init)
+      );
+      expect(response.status).toBe(403);
+      // eslint-disable-next-line no-await-in-loop
+      expect((await response.json()).error.code).toBe('FORBIDDEN');
+    }
   });
 
   it('returns Report Case Member and Quest summaries without Message content', async () => {
@@ -1085,6 +1189,10 @@ describe('Admin Report Case API', () => {
       kind: 'REPORT_CASE',
       messageId: fixture.messageId,
       reportedMember: { id: senderId, studentId: senderStudentId },
+      memberStatus: expect.any(String),
+      previousReportCount: 0,
+      confirmedViolationCount: 0,
+      previousModerationActions: [],
       quest: { id: fixture.questId, title: `Admin report fixture ${fixture.questId}` },
       reporterEntries: [{ reporter: { id: reporterId, studentId: reporterStudentId } }],
       source: 'CONVERSATION_WORK',
@@ -1156,6 +1264,80 @@ describe('Admin Report Case API', () => {
     ).toEqual([expect.objectContaining({ url: null, urlExpiresAt: null })]);
   });
 
+  it('returns earlier Report Cases and Conduct Reports in Member moderation context', async () => {
+    if (!postgresAvailable) return;
+    const priorReportCase = await createReportFixture();
+    const priorConductReport = await createConductReportFixture({
+      filerId: reporterId,
+      hirerId: reporterId,
+      reportedMemberId: senderId,
+      assignmentWorkerId: senderId,
+    });
+    const reportCaseDetail = await createReportFixture();
+    const conductReportDetail = await createConductReportFixture({
+      filerId: reporterId,
+      hirerId: reporterId,
+      reportedMemberId: senderId,
+      assignmentWorkerId: senderId,
+    });
+    const currentCaseCreatedAt = new Date('2020-02-03T10:00:00.000Z');
+    const priorConductResolvedAt = new Date('2020-02-02T11:00:00.000Z');
+
+    await db
+      .update(adminReportCase)
+      .set({ createdAt: currentCaseCreatedAt, updatedAt: currentCaseCreatedAt })
+      .where(eq(adminReportCase.id, reportCaseDetail.caseId));
+    await db
+      .update(adminConductReport)
+      .set({
+        status: 'CONDUCT_REPORT_UPHELD',
+        decisionReason: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+        resolvedByAdminId: adminId,
+        resolvedAt: priorConductResolvedAt,
+        createdAt: new Date('2020-02-02T10:00:00.000Z'),
+        updatedAt: priorConductResolvedAt,
+      })
+      .where(eq(adminConductReport.id, priorConductReport.reportId));
+    await db
+      .update(adminConductReport)
+      .set({ createdAt: currentCaseCreatedAt, updatedAt: currentCaseCreatedAt })
+      .where(eq(adminConductReport.id, conductReportDetail.reportId));
+    await db.insert(adminModerationDecision).values({
+      reportCaseId: priorReportCase.caseId,
+      adminId,
+      previousStatus: 'REPORT_CASE_PENDING',
+      newStatus: 'REPORT_CASE_HIDDEN',
+      reasonCatalogVersion: 2,
+      reasonCode: 'REPORT_SPAM_CONFIRMED',
+      createdAt: new Date('2020-02-01T10:01:00.000Z'),
+    });
+    await db.insert(memberPenaltyRecord).values({
+      memberId: senderId,
+      ladder: 'MISCONDUCT',
+      source: 'CONDUCT_REPORT',
+      sourceId: priorConductReport.reportId,
+      sequenceNumber: 1,
+      result: 'PENALTY_EXEMPT',
+      actorType: 'ADMIN',
+      actorAdminId: adminId,
+      reasonCode: 'CONDUCT_REPORT_CONFIRMED',
+      createdAt: priorConductResolvedAt,
+    });
+
+    for (const reportId of [reportCaseDetail.caseId, conductReportDetail.reportId]) {
+      // eslint-disable-next-line no-await-in-loop
+      const detail = await adminRequest(`/api/v1/admin/reports/${reportId}`);
+      expect(detail.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      expect((await detail.json()).data).toMatchObject({
+        memberStatus: expect.any(String),
+        previousReportCount: 2,
+        confirmedViolationCount: 1,
+        previousModerationActions: ['CONDUCT_REPORT_UPHOLD', 'REPORT_CASE_HIDE'],
+      });
+    }
+  });
+
   it('returns null for a system Message Member and empty Report Case collections', async () => {
     if (!postgresAvailable) return;
     const fixture = await createReportFixture();
@@ -1192,6 +1374,10 @@ describe('Admin Report Case API', () => {
     expect((await detail.json()).data).toMatchObject({
       type: 'SYSTEM',
       reportedMember: null,
+      memberStatus: null,
+      previousReportCount: null,
+      confirmedViolationCount: null,
+      previousModerationActions: [],
       reporterEntries: [],
       evidenceReferences: [],
       quest: { id: fixture.questId },
@@ -1234,7 +1420,11 @@ describe('Admin Report Case API', () => {
       id: fixture.reportId,
       displayId: expect.stringMatching(/^CND-\d{6}$/),
       reportedMember: { id: reporterId, studentId: reporterStudentId },
-      quest: { hirer: { id: senderId, studentId: senderStudentId } },
+      memberStatus: expect.any(String),
+      previousReportCount: 0,
+      confirmedViolationCount: 0,
+      previousModerationActions: [],
+      quest: { failedAt: null, hirer: { id: senderId, studentId: senderStudentId } },
       assignment: {
         id: fixture.assignmentId,
         worker: { id: reporterId, studentId: reporterStudentId },
@@ -1244,6 +1434,15 @@ describe('Admin Report Case API', () => {
       decision: null,
       detail: 'The Quest record requires Admin review.',
     });
+
+    const failedAt = new Date('2020-02-02T10:30:00.000Z');
+    await db
+      .update(quest)
+      .set({ questStatus: 'QUEST_FAILED', failedAt })
+      .where(eq(quest.id, fixture.questId));
+    const failedDetail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(failedDetail.status).toBe(200);
+    expect((await failedDetail.json()).data.quest.failedAt).toBe(failedAt.toISOString());
 
     const resolvedAt = new Date('2020-02-02T11:00:00.000Z');
     await db
@@ -1299,90 +1498,381 @@ describe('Admin Report Case API', () => {
     }
   });
 
-  it('returns report status counts across cursor pages and searches only list fields', async () => {
+  it('filters, counts, and paginates full Admin Report history', async () => {
     if (!postgresAvailable) return;
-    const reportCase = await createReportFixture();
-    const conductReport = await createConductReportFixture();
-    const searchTerm = `report-count-${randomUUID()}`;
-    await db
-      .update(adminReporterEntry)
-      .set({ detail: searchTerm })
-      .where(eq(adminReporterEntry.reportCaseId, reportCase.caseId));
-    await db
-      .update(adminConductReport)
-      .set({ detail: searchTerm })
-      .where(eq(adminConductReport.id, conductReport.reportId));
+    const reportCases = [
+      await createReportFixture(),
+      await createReportFixture(),
+      await createReportFixture(),
+      await createReportFixture(),
+    ];
+    const conductReports = [
+      await createConductReportFixture(),
+      await createConductReportFixture(),
+      await createConductReportFixture(),
+    ];
+    const searchTerm = `report-history-${randomUUID()}`;
+    const createdAt = '2035-04-01T00:00:00.101300Z';
+    const resolvedAt = '2035-04-01T00:00:01.101300Z';
+    const reportCaseStatuses = [
+      'REPORT_CASE_PENDING',
+      'REPORT_CASE_DISMISSED',
+      'REPORT_CASE_HIDDEN',
+      'REPORT_CASE_RESTORED',
+    ] as const;
+    const conductReportStatuses = [
+      'CONDUCT_REPORT_PENDING',
+      'CONDUCT_REPORT_UPHELD',
+      'CONDUCT_REPORT_DISMISSED',
+    ] as const;
+    const allStatuses = [...reportCaseStatuses, ...conductReportStatuses];
 
-    type ListResponse = {
-      data: {
-        items: Array<{ kind: string; id: string }>;
-        nextCursor: string | null;
-        totalCount: number;
-        countsByStatus: Record<string, number>;
-      };
+    const multipleReporterCase = reportCases[0]!;
+    await db.insert(adminReporterEntry).values({
+      id: randomUUID(),
+      reportCaseId: multipleReporterCase.caseId,
+      messageId: multipleReporterCase.messageId,
+      reporterMemberId: senderId,
+      reason: 'REPORT_OTHER',
+      detail: searchTerm,
+      createdAt: new Date('2035-04-01T00:00:00.102Z'),
+    });
+
+    for (const [index, fixture] of reportCases.entries()) {
+      const status = reportCaseStatuses[index]!;
+      const caseClosedAt =
+        status === 'REPORT_CASE_DISMISSED' || status === 'REPORT_CASE_RESTORED' ? resolvedAt : null;
+      const updatedAt = caseClosedAt ?? createdAt;
+      // eslint-disable-next-line no-await-in-loop
+      await db
+        .update(adminReporterEntry)
+        .set({ detail: searchTerm })
+        .where(eq(adminReporterEntry.reportCaseId, fixture.caseId));
+      // Raw SQL keeps every Report Case on the same microsecond timestamp.
+      // eslint-disable-next-line no-await-in-loop
+      await sql`
+        UPDATE admin_report_cases
+        SET status = ${status},
+            case_closed_at = ${caseClosedAt}::timestamptz,
+            created_at = ${createdAt}::timestamptz,
+            updated_at = ${updatedAt}::timestamptz
+        WHERE id = ${fixture.caseId}
+      `;
+    }
+
+    for (const [index, fixture] of conductReports.entries()) {
+      const status = conductReportStatuses[index]!;
+      const decisionReason =
+        status === 'CONDUCT_REPORT_UPHELD'
+          ? 'CONDUCT_ABANDONED'
+          : status === 'CONDUCT_REPORT_DISMISSED'
+            ? 'CONDUCT_REPORT_NO_VIOLATION'
+            : null;
+      const resolvedByAdminId = decisionReason ? adminId : null;
+      const decisionAt = decisionReason ? resolvedAt : null;
+      const updatedAt = decisionAt ?? createdAt;
+      // Raw SQL keeps every Conduct Report on the same microsecond timestamp.
+      // eslint-disable-next-line no-await-in-loop
+      await sql`
+        UPDATE admin_conduct_reports
+        SET detail = ${searchTerm},
+            status = ${status},
+            decision_reason = ${decisionReason},
+            resolved_by_admin_id = ${resolvedByAdminId},
+            resolved_at = ${decisionAt}::timestamptz,
+            version = ${decisionReason ? 2 : 1},
+            created_at = ${createdAt}::timestamptz,
+            updated_at = ${updatedAt}::timestamptz
+        WHERE id = ${fixture.reportId}
+      `;
+    }
+
+    type MemberSummary = { id: string; displayId: string };
+    type ReportHistoryItem = {
+      kind: 'REPORT_CASE' | 'CONDUCT_REPORT';
+      id: string;
+      displayId: string;
+      status: string;
+      createdAt: string;
+      updatedAt: string;
+      caseClosedAt?: string | null;
+      resolvedAt?: string | null;
+      reportedMember?: MemberSummary | null;
+      filer?: MemberSummary;
+      quest?: { displayId: string } | null;
+      reporterEntries?: Array<{ reporter: MemberSummary }>;
+      assignment?: { worker: MemberSummary };
     };
-    const list = (cursor?: string | null, status?: string) => {
-      const params = new URLSearchParams({ q: searchTerm, limit: '1' });
-      if (cursor) params.set('cursor', cursor);
-      if (status) params.set('status', status);
+    type ReportHistoryPage = {
+      items: ReportHistoryItem[];
+      nextCursor: string | null;
+      totalCount: number;
+      countsByStatus: Record<string, number>;
+    };
+    const list = (query: Record<string, string> = {}) => {
+      const params = new URLSearchParams({ q: searchTerm, ...query });
       return adminRequest(`/api/v1/admin/reports?${params.toString()}`);
     };
 
-    const first = await list();
-    expect(first.status).toBe(200);
-    const firstBody = (await first.json()) as ListResponse;
-    expect(firstBody.data).toMatchObject({
-      totalCount: 2,
-      countsByStatus: {
-        REPORT_CASE_PENDING: 1,
-        REPORT_CASE_DISMISSED: 0,
-        REPORT_CASE_HIDDEN: 0,
-        REPORT_CASE_RESTORED: 0,
-        CONDUCT_REPORT_PENDING: 1,
-        CONDUCT_REPORT_UPHELD: 0,
-        CONDUCT_REPORT_DISMISSED: 0,
+    const defaultQueueResponse = await list();
+    expect(defaultQueueResponse.status).toBe(200);
+    const defaultQueue = (await defaultQueueResponse.json()).data as ReportHistoryPage;
+    expect(defaultQueue.totalCount).toBe(3);
+    expect(defaultQueue.countsByStatus).toEqual({
+      REPORT_CASE_PENDING: 1,
+      REPORT_CASE_DISMISSED: 0,
+      REPORT_CASE_HIDDEN: 1,
+      REPORT_CASE_RESTORED: 0,
+      CONDUCT_REPORT_PENDING: 1,
+      CONDUCT_REPORT_UPHELD: 0,
+      CONDUCT_REPORT_DISMISSED: 0,
+    });
+    expect(new Set(defaultQueue.items.map((item) => item.status))).toEqual(
+      new Set(['REPORT_CASE_PENDING', 'REPORT_CASE_HIDDEN', 'CONDUCT_REPORT_PENDING'])
+    );
+
+    const fullHistoryResponse = await list({
+      statusMode: 'FULL_HISTORY',
+      limit: '20',
+    });
+    expect(fullHistoryResponse.status).toBe(200);
+    const fullHistory = (await fullHistoryResponse.json()).data as ReportHistoryPage;
+    expect(fullHistory.totalCount).toBe(7);
+    expect(fullHistory.countsByStatus).toEqual({
+      REPORT_CASE_PENDING: 1,
+      REPORT_CASE_DISMISSED: 1,
+      REPORT_CASE_HIDDEN: 1,
+      REPORT_CASE_RESTORED: 1,
+      CONDUCT_REPORT_PENDING: 1,
+      CONDUCT_REPORT_UPHELD: 1,
+      CONDUCT_REPORT_DISMISSED: 1,
+    });
+    expect(new Set(fullHistory.items.map((item) => item.createdAt))).toEqual(
+      new Set(['2035-04-01T00:00:00.101Z'])
+    );
+    for (const item of fullHistory.items) {
+      expect(item.displayId).toMatch(item.kind === 'REPORT_CASE' ? /^RPT-/ : /^CND-/);
+      expect(item.quest?.displayId).toMatch(/^QST-/);
+      expect(item.reportedMember?.displayId).toMatch(/^MEM-/);
+      if (item.kind === 'REPORT_CASE') {
+        expect(
+          item.reporterEntries?.every(({ reporter }) => /^MEM-/.test(reporter.displayId))
+        ).toBe(true);
+      } else {
+        expect(item.filer?.displayId).toMatch(/^MEM-/);
+        expect(item.quest?.displayId).toMatch(/^QST-/);
+      }
+    }
+    expect(
+      fullHistory.items.find((item) => item.id === reportCases[2]!.caseId)?.caseClosedAt
+    ).toBeNull();
+    expect(
+      fullHistory.items.find((item) => item.id === reportCases[3]!.caseId)?.caseClosedAt
+    ).toBeString();
+
+    const filteredReportCaseResponse = await list({
+      kind: 'REPORT_CASE',
+      statusMode: 'FULL_HISTORY',
+      status: 'REPORT_CASE_PENDING',
+      memberId: senderId,
+      submittedByMemberId: reporterId,
+    });
+    expect(filteredReportCaseResponse.status).toBe(200);
+    const filteredReportCase = (await filteredReportCaseResponse.json()).data as ReportHistoryPage;
+    expect(filteredReportCase.totalCount).toBe(1);
+    expect(filteredReportCase.items).toHaveLength(1);
+    expect(filteredReportCase.items[0]).toMatchObject({
+      kind: 'REPORT_CASE',
+      id: multipleReporterCase.caseId,
+      status: 'REPORT_CASE_PENDING',
+      displayId: expect.stringMatching(/^RPT-\d{6,}$/),
+      reportedMember: { id: senderId, displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      quest: { displayId: expect.stringMatching(/^QST-\d{6,}$/) },
+    });
+    expect(filteredReportCase.items[0]?.reporterEntries).toHaveLength(2);
+    expect(
+      filteredReportCase.items[0]?.reporterEntries?.every(({ reporter }) =>
+        /^MEM-\d{6,}$/.test(reporter.displayId)
+      )
+    ).toBe(true);
+    expect(filteredReportCase.countsByStatus).toMatchObject({
+      REPORT_CASE_PENDING: 1,
+      REPORT_CASE_DISMISSED: 0,
+      REPORT_CASE_HIDDEN: 0,
+      REPORT_CASE_RESTORED: 0,
+      CONDUCT_REPORT_PENDING: 0,
+      CONDUCT_REPORT_UPHELD: 0,
+      CONDUCT_REPORT_DISMISSED: 0,
+    });
+
+    const secondReporterResponse = await list({
+      kind: 'REPORT_CASE',
+      statusMode: 'FULL_HISTORY',
+      status: 'REPORT_CASE_PENDING',
+      memberId: senderId,
+      submittedByMemberId: senderId,
+    });
+    expect((await secondReporterResponse.json()).data.items).toHaveLength(1);
+    const wrongReportedMember = await list({
+      kind: 'REPORT_CASE',
+      statusMode: 'FULL_HISTORY',
+      memberId: reporterId,
+      submittedByMemberId: senderId,
+    });
+    expect((await wrongReportedMember.json()).data).toMatchObject({
+      items: [],
+      totalCount: 0,
+    });
+
+    const filteredConductResponse = await list({
+      kind: 'CONDUCT_REPORT',
+      statusMode: 'FULL_HISTORY',
+      status: 'CONDUCT_REPORT_PENDING',
+      memberId: reporterId,
+      submittedByMemberId: senderId,
+    });
+    expect(filteredConductResponse.status).toBe(200);
+    const filteredConduct = (await filteredConductResponse.json()).data as ReportHistoryPage;
+    expect(filteredConduct.totalCount).toBe(1);
+    expect(filteredConduct.items[0]).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      id: conductReports[0]!.reportId,
+      status: 'CONDUCT_REPORT_PENDING',
+      displayId: expect.stringMatching(/^CND-\d{6,}$/),
+      filer: { id: senderId, displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      reportedMember: { id: reporterId, displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      quest: {
+        displayId: expect.stringMatching(/^QST-\d{6,}$/),
+        hirer: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
       },
     });
-    expect(firstBody.data.items).toHaveLength(1);
-    expect(firstBody.data.nextCursor).toBeString();
-
-    const second = await list(firstBody.data.nextCursor);
-    expect(second.status).toBe(200);
-    const secondBody = (await second.json()) as ListResponse;
-    expect(secondBody.data).toMatchObject({
-      totalCount: 2,
-      countsByStatus: firstBody.data.countsByStatus,
+    expect(filteredConduct.countsByStatus).toMatchObject({
+      REPORT_CASE_PENDING: 0,
+      CONDUCT_REPORT_PENDING: 1,
+      CONDUCT_REPORT_UPHELD: 0,
+      CONDUCT_REPORT_DISMISSED: 0,
     });
-    expect(secondBody.data.items).toHaveLength(1);
-    expect(secondBody.data.nextCursor).toBeNull();
-    expect(
-      new Set([...firstBody.data.items, ...secondBody.data.items].map((item) => item.kind))
-    ).toEqual(new Set(['REPORT_CASE', 'CONDUCT_REPORT']));
-
-    const reportCaseOnly = await list(undefined, 'REPORT_CASE_PENDING');
-    expect(reportCaseOnly.status).toBe(200);
-    expect((await reportCaseOnly.json()).data).toMatchObject({
-      totalCount: 1,
-      countsByStatus: firstBody.data.countsByStatus,
+    const wrongConductFiler = await list({
+      kind: 'CONDUCT_REPORT',
+      statusMode: 'FULL_HISTORY',
+      memberId: senderId,
+      submittedByMemberId: reporterId,
     });
-    const conductReportOnly = await list(undefined, 'CONDUCT_REPORT_PENDING');
-    expect(conductReportOnly.status).toBe(200);
-    expect((await conductReportOnly.json()).data).toMatchObject({
-      totalCount: 1,
-      countsByStatus: firstBody.data.countsByStatus,
+    expect((await wrongConductFiler.json()).data).toMatchObject({
+      items: [],
+      totalCount: 0,
     });
 
-    const privateMessageSearch = await adminRequest(
-      `/api/v1/admin/reports?q=${encodeURIComponent('The reported Message content.')}`
+    for (const status of allStatuses) {
+      // eslint-disable-next-line no-await-in-loop
+      const filteredResponse = await list({ statusMode: 'FULL_HISTORY', status });
+      // eslint-disable-next-line no-await-in-loop
+      const filtered = (await filteredResponse.json()).data as ReportHistoryPage;
+      expect(filtered.totalCount).toBe(1);
+      expect(filtered.items).toHaveLength(1);
+      expect(filtered.items[0]?.status).toBe(status);
+      expect(filtered.countsByStatus).toEqual(
+        Object.fromEntries(allStatuses.map((value) => [value, value === status ? 1 : 0]))
+      );
+    }
+
+    const readEveryPage = async (sort: 'newest' | 'oldest') => {
+      const rows: Array<{ kind: ReportHistoryItem['kind']; id: string }> = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 7; page += 1) {
+        const query: Record<string, string> = {
+          statusMode: 'FULL_HISTORY',
+          limit: '1',
+          sort,
+        };
+        if (cursor) query.cursor = cursor;
+        // Each cursor comes from the prior response, so these requests stay sequential.
+        // eslint-disable-next-line no-await-in-loop
+        const response = await list(query);
+        // eslint-disable-next-line no-await-in-loop
+        const body = (await response.json()).data as ReportHistoryPage;
+        expect(response.status).toBe(200);
+        expect(body.totalCount).toBe(7);
+        rows.push(...body.items.map(({ kind, id }) => ({ kind, id })));
+        cursor = body.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      return rows;
+    };
+    const newest = await readEveryPage('newest');
+    const repeatedNewest = await readEveryPage('newest');
+    const oldest = await readEveryPage('oldest');
+    const expectedRows = new Set([
+      ...reportCases.map((fixture) => `REPORT_CASE:${fixture.caseId}`),
+      ...conductReports.map((fixture) => `CONDUCT_REPORT:${fixture.reportId}`),
+    ]);
+    expect(newest).toHaveLength(7);
+    expect(new Set(newest.map((row) => `${row.kind}:${row.id}`))).toEqual(expectedRows);
+    expect(repeatedNewest).toEqual(newest);
+    expect(oldest).toEqual([...newest].reverse());
+
+    const restoredCaseDetailResponse = await adminRequest(
+      `/api/v1/admin/reports/${reportCases[3]!.caseId}`
     );
-    expect(privateMessageSearch.status).toBe(200);
-    expect((await privateMessageSearch.json()).data).toMatchObject({
+    expect(restoredCaseDetailResponse.status).toBe(200);
+    const restoredCaseDetail = (await restoredCaseDetailResponse.json()).data as ReportHistoryItem;
+    expect(restoredCaseDetail).toMatchObject({
+      kind: 'REPORT_CASE',
+      status: 'REPORT_CASE_RESTORED',
+      displayId: expect.stringMatching(/^RPT-\d{6,}$/),
+      caseClosedAt: expect.any(String),
+      reportedMember: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      quest: { displayId: expect.stringMatching(/^QST-\d{6,}$/) },
+    });
+
+    const upheldReportDetailResponse = await adminRequest(
+      `/api/v1/admin/reports/${conductReports[1]!.reportId}`
+    );
+    expect(upheldReportDetailResponse.status).toBe(200);
+    const upheldReportDetail = (await upheldReportDetailResponse.json()).data as ReportHistoryItem;
+    expect(upheldReportDetail).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      status: 'CONDUCT_REPORT_UPHELD',
+      displayId: expect.stringMatching(/^CND-\d{6,}$/),
+      resolvedAt: expect.any(String),
+      filer: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      reportedMember: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      quest: { displayId: expect.stringMatching(/^QST-\d{6,}$/) },
+      assignment: { worker: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) } },
+    });
+
+    const empty = await list({
+      kind: 'REPORT_CASE',
+      statusMode: 'FULL_HISTORY',
+      submittedByMemberId: randomUUID(),
+    });
+    expect((await empty.json()).data).toMatchObject({
       items: [],
       totalCount: 0,
       countsByStatus: {
         REPORT_CASE_PENDING: 0,
+        REPORT_CASE_DISMISSED: 0,
+        REPORT_CASE_HIDDEN: 0,
+        REPORT_CASE_RESTORED: 0,
         CONDUCT_REPORT_PENDING: 0,
+        CONDUCT_REPORT_UPHELD: 0,
+        CONDUCT_REPORT_DISMISSED: 0,
       },
+    });
+
+    const invalidCursor = await adminRequest('/api/v1/admin/reports?cursor=not-a-cursor');
+    expect(invalidCursor.status).toBe(400);
+    expect((await invalidCursor.json()).error.code).toBe('INVALID_CURSOR');
+    const missingReport = await adminRequest(`/api/v1/admin/reports/${randomUUID()}`);
+    expect(missingReport.status).toBe(404);
+    expect((await missingReport.json()).error.code).toBe('REPORT_NOT_FOUND');
+
+    const privateMessageSearch = await list({ q: 'The reported Message content.' });
+    expect(privateMessageSearch.status).toBe(200);
+    expect((await privateMessageSearch.json()).data).toMatchObject({
+      items: [],
+      totalCount: 0,
     });
   });
 
@@ -1951,7 +2441,7 @@ describe('Admin Report Case API', () => {
       resourceType: 'conduct_report',
       resourceId: fixture.reportId,
       requestKey,
-      reasonCatalogVersion: 1,
+      reasonCatalogVersion: 2,
       reasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
       expectedVersion: 1,
       resultVersion: 2,
@@ -2027,7 +2517,11 @@ describe('Admin Report Case API', () => {
     const fixture = await createConductReportFixture({ reason: conductReportReason.outOfScope });
     const path = `/api/v1/admin/reports/${fixture.reportId}/decide`;
     const decisionReasonText = 'Admin-only note for the upheld Conduct Report.';
-    const body = { outcome: 'CONDUCT_REPORT_UPHELD', decisionReasonText };
+    const body = {
+      outcome: 'CONDUCT_REPORT_UPHELD',
+      decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      decisionReasonText,
+    };
     const requestKey = `conduct-uphold-${fixture.reportId}`;
 
     const first = await adminRequest(path, {
@@ -2060,7 +2554,7 @@ describe('Admin Report Case API', () => {
       status: 'CONDUCT_REPORT_UPHELD',
       version: 2,
       reason: 'CONDUCT_OUT_OF_SCOPE',
-      decisionReason: 'CONDUCT_OUT_OF_SCOPE',
+      decisionReason: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
       resolvedByAdminId: adminId,
       resolvedAt: expect.any(Date),
     });
@@ -2075,8 +2569,8 @@ describe('Admin Report Case API', () => {
       resourceType: 'conduct_report',
       resourceId: fixture.reportId,
       requestKey,
-      reasonCatalogVersion: 1,
-      reasonCode: 'CONDUCT_OUT_OF_SCOPE',
+      reasonCatalogVersion: 2,
+      reasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
       expectedVersion: 1,
       resultVersion: 2,
       metadata: { outcome: 'CONDUCT_REPORT_UPHELD' },
@@ -2088,7 +2582,7 @@ describe('Admin Report Case API', () => {
     expect(activityLog.status).toBe(200);
     expect((await activityLog.json()).data.items).toContainEqual(
       expect.objectContaining({
-        reasonCode: 'CONDUCT_OUT_OF_SCOPE',
+        reasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
         decisionReasonText,
       })
     );
@@ -2157,7 +2651,7 @@ describe('Admin Report Case API', () => {
       status: 'CONDUCT_REPORT_UPHELD',
       decision: {
         outcome: 'CONDUCT_REPORT_UPHELD',
-        reason: 'CONDUCT_OUT_OF_SCOPE',
+        reason: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
         resolvedAt: expect.any(String),
         admin: { id: adminId, email: adminEmail },
       },
@@ -2230,7 +2724,7 @@ describe('Admin Report Case API', () => {
     ).toHaveLength(1);
     await db
       .update(adminConductReport)
-      .set({ decisionReason: conductReportReason.abandoned })
+      .set({ decisionReason: 'NOT_AN_APPROVED_DECISION_CODE' })
       .where(eq(adminConductReport.id, fixture.reportId));
     const expectedFailureLog = spyOn(console, 'error').mockImplementation(() => undefined);
     try {
@@ -2301,7 +2795,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `conduct-uphold-temp-ban-${fixture.reportId}`,
         'if-match': '1',
       },
-      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
     });
     expect(decision.status).toBe(200);
 
@@ -2450,7 +2947,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `conduct-uphold-permanent-ban-${fixture.reportId}`,
         'if-match': '1',
       },
-      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
     });
     expect(decision.status).toBe(200);
     expect(
@@ -2491,7 +2991,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `conduct-uphold-existing-freeze-${fixture.reportId}`,
         'if-match': '1',
       },
-      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
     });
     expect(decision.status).toBe(200);
 
@@ -2537,7 +3040,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `conduct-uphold-suspended-wallet-${fixture.reportId}`,
         'if-match': '1',
       },
-      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
     });
     expect(decision.status).toBe(200);
 
@@ -2671,7 +3177,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `conduct-uphold-push-failure-${fixture.reportId}`,
         'if-match': '1',
       },
-      body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
     });
     expect(decision.status).toBe(200);
 
@@ -2726,7 +3235,10 @@ describe('Admin Report Case API', () => {
             'idempotency-key': `conduct-uphold-race-${suffix}-${fixture.reportId}`,
             'if-match': '1',
           },
-          body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+          body: JSON.stringify({
+            outcome: 'CONDUCT_REPORT_UPHELD',
+            decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+          }),
         })
       )
     );
@@ -3030,7 +3542,10 @@ describe('Admin Report Case API', () => {
           'idempotency-key': `conduct-uphold-atomic-${fixture.reportId}`,
           'if-match': '1',
         },
-        body: JSON.stringify({ outcome: 'CONDUCT_REPORT_UPHELD' }),
+        body: JSON.stringify({
+          outcome: 'CONDUCT_REPORT_UPHELD',
+          decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+        }),
       });
       expect(response.status).toBe(500);
 
@@ -3107,7 +3622,7 @@ describe('Admin Report Case API', () => {
           },
           body: JSON.stringify({
             outcome: 'REPORT_CASE_HIDDEN',
-            reasonCode: 'SAFETY_REVIEW',
+            reasonCode: 'REPORT_OTHER_POLICY_VIOLATION_CONFIRMED',
             decisionReasonText: 'Admin confirmed a safety policy violation.',
           }),
         })
@@ -3153,7 +3668,7 @@ describe('Admin Report Case API', () => {
     expect(hideActivityLog.status).toBe(200);
     expect((await hideActivityLog.json()).data.items).toContainEqual(
       expect.objectContaining({
-        reasonCode: 'SAFETY_REVIEW',
+        reasonCode: 'REPORT_OTHER_POLICY_VIOLATION_CONFIRMED',
         decisionReasonText: 'Admin confirmed a safety policy violation.',
       })
     );
@@ -3175,7 +3690,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `report-rehide-${fixture.caseId}`,
         'if-match': '2',
       },
-      body: JSON.stringify({ outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'POLICY_REVIEW' }),
+      body: JSON.stringify({
+        outcome: 'REPORT_CASE_HIDDEN',
+        reasonCode: 'REPORT_OTHER_POLICY_VIOLATION_CONFIRMED',
+      }),
     });
     expect(rehide.status).toBe(200);
     expect((await rehide.json()).data.resourceSummary).toMatchObject({
@@ -3246,7 +3764,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `report-stale-${fixture.caseId}`,
         'if-match': '1',
       },
-      body: JSON.stringify({ outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'POLICY_REVIEW' }),
+      body: JSON.stringify({
+        outcome: 'REPORT_CASE_DISMISSED',
+        reasonCode: 'REPORT_NO_POLICY_VIOLATION',
+      }),
     });
     expect(stale.status).toBe(409);
     expect((await stale.json()).error.code).toBe('ADMIN_ACTION_CONFLICT');
@@ -3257,7 +3778,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `report-restore-${fixture.caseId}`,
         'if-match': '3',
       },
-      body: JSON.stringify({ outcome: 'REPORT_CASE_RESTORED', reasonCode: 'POLICY_REVIEW' }),
+      body: JSON.stringify({
+        outcome: 'REPORT_CASE_RESTORED',
+        reasonCode: 'REPORT_MESSAGE_COMPLIES_WITH_POLICY',
+      }),
     });
     expect(restore.status).toBe(200);
     expect((await restore.json()).data.resourceSummary).toMatchObject({
@@ -3298,7 +3822,7 @@ describe('Admin Report Case API', () => {
     if (!postgresAvailable) return;
     const fixture = await createReportFixture();
     const requestKey = `report-dismiss-${fixture.caseId}`;
-    const body = { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'POLICY_REVIEW' };
+    const body = { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'REPORT_NO_POLICY_VIOLATION' };
 
     const dismiss = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
       method: 'POST',
@@ -3315,8 +3839,8 @@ describe('Admin Report Case API', () => {
       expectedVersion: 1,
       kind: 'COMMAND',
       metadata: { outcome: 'REPORT_CASE_DISMISSED' },
-      reasonCatalogVersion: 1,
-      reasonCode: 'POLICY_REVIEW',
+      reasonCatalogVersion: 2,
+      reasonCode: 'REPORT_NO_POLICY_VIOLATION',
       request: { outcome: 'REPORT_CASE_DISMISSED' },
       requestKey,
       resourceId: fixture.caseId,
@@ -3368,7 +3892,10 @@ describe('Admin Report Case API', () => {
         'idempotency-key': `report-repeated-${fixture.caseId}`,
         'if-match': '2',
       },
-      body: JSON.stringify({ outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'SAFETY_REVIEW' }),
+      body: JSON.stringify({
+        outcome: 'REPORT_CASE_HIDDEN',
+        reasonCode: 'REPORT_SPAM_CONFIRMED',
+      }),
     });
     expect(repeated.status).toBe(409);
     expect((await repeated.json()).error.code).toBe('REPORT_CASE_OUTCOME_INVALID');
@@ -3378,5 +3905,259 @@ describe('Admin Report Case API', () => {
         .from(adminModerationDecision)
         .where(eq(adminModerationDecision.reportCaseId, fixture.caseId))
     ).toHaveLength(1);
+  });
+  const reportCaseReasonCodeCases = [
+    { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'REPORT_NO_POLICY_VIOLATION' },
+    { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'REPORT_INSUFFICIENT_EVIDENCE' },
+    { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'REPORT_CONTEXT_SUPPORTS_MESSAGE' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_HARASSMENT_CONFIRMED' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_SPAM_CONFIRMED' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_THREAT_CONFIRMED' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_INAPPROPRIATE_CONTENT_CONFIRMED' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_OTHER_POLICY_VIOLATION_CONFIRMED' },
+    { outcome: 'REPORT_CASE_RESTORED', reasonCode: 'REPORT_MESSAGE_COMPLIES_WITH_POLICY' },
+    { outcome: 'REPORT_CASE_RESTORED', reasonCode: 'REPORT_CONTEXT_WAS_MISUNDERSTOOD' },
+    { outcome: 'REPORT_CASE_RESTORED', reasonCode: 'REPORT_NEW_EVIDENCE_OVERTURNS_HIDE' },
+  ] as const;
+
+  for (const { outcome, reasonCode } of reportCaseReasonCodeCases) {
+    it(`${outcome} records ${reasonCode} with catalog version 2`, async () => {
+      if (!postgresAvailable) return;
+      const fixture = await createReportFixture();
+      if (outcome === 'REPORT_CASE_RESTORED') {
+        const hide = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `report-catalog-hide-${fixture.caseId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_HIDDEN',
+            reasonCode: 'REPORT_HARASSMENT_CONFIRMED',
+          }),
+        });
+        expect(hide.status).toBe(200);
+      }
+
+      const action =
+        outcome === 'REPORT_CASE_DISMISSED'
+          ? 'REPORT_CASE_DISMISS'
+          : outcome === 'REPORT_CASE_HIDDEN'
+            ? 'REPORT_CASE_HIDE'
+            : 'REPORT_CASE_RESTORE';
+      const requestKey = `report-catalog-${reasonCode}-${fixture.caseId}`;
+      const expectedVersion = outcome === 'REPORT_CASE_RESTORED' ? '2' : '1';
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+        method: 'POST',
+        headers: { 'idempotency-key': requestKey, 'if-match': expectedVersion },
+        body: JSON.stringify({ outcome, reasonCode }),
+      });
+      expect(response.status).toBe(200);
+
+      const [actionRow] = await db
+        .select({
+          action: adminAction.action,
+          reasonCatalogVersion: adminAction.reasonCatalogVersion,
+          reasonCode: adminAction.reasonCode,
+        })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey));
+      expect(actionRow).toEqual({ action, reasonCatalogVersion: 2, reasonCode });
+
+      const moderationDecisions = await db
+        .select({
+          newStatus: adminModerationDecision.newStatus,
+          reasonCatalogVersion: adminModerationDecision.reasonCatalogVersion,
+          reasonCode: adminModerationDecision.reasonCode,
+        })
+        .from(adminModerationDecision)
+        .where(eq(adminModerationDecision.reportCaseId, fixture.caseId));
+      expect(moderationDecisions).toContainEqual({
+        newStatus: outcome,
+        reasonCatalogVersion: 2,
+        reasonCode,
+      });
+
+      const activityLog = await adminRequest(
+        `/api/v1/admin/activity-log?resourceType=report_case&resourceId=${fixture.caseId}`
+      );
+      expect(activityLog.status).toBe(200);
+      expect((await activityLog.json()).data.items).toContainEqual(
+        expect.objectContaining({ action, reasonCatalogVersion: 2, reasonCode })
+      );
+    });
+  }
+
+  const conductReportDecisionReasonCodeCases = [
+    {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_INSUFFICIENT_EVIDENCE',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_DISPROVES_CLAIM',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_OUTSIDE_RULEBOOK_SCOPE',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_UPHELD',
+      decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_UPHELD',
+      decisionReasonCode: 'CONDUCT_REPORT_PROOF_RECORD_CONFIRMS_VIOLATION',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_UPHELD',
+      decisionReasonCode: 'CONDUCT_REPORT_CHAT_CONTEXT_CORROBORATES_VIOLATION',
+    },
+  ] as const;
+
+  for (const { outcome, decisionReasonCode } of conductReportDecisionReasonCodeCases) {
+    it(`${outcome} records Admin-selected ${decisionReasonCode} with catalog version 2`, async () => {
+      if (!postgresAvailable) return;
+      const filedReason = conductReportReason.outOfScope;
+      const fixture = await createConductReportFixture({ reason: filedReason });
+      const requestKey = `conduct-catalog-${decisionReasonCode}-${fixture.reportId}`;
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+        method: 'POST',
+        headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+        body: JSON.stringify({ outcome, decisionReasonCode }),
+      });
+      expect(response.status).toBe(200);
+
+      const [storedReport] = await db
+        .select({
+          reason: adminConductReport.reason,
+          status: adminConductReport.status,
+          decisionReason: adminConductReport.decisionReason,
+        })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId));
+      expect(storedReport).toEqual({
+        reason: filedReason,
+        status: outcome,
+        decisionReason: decisionReasonCode,
+      });
+
+      const [actionRow] = await db
+        .select({
+          action: adminAction.action,
+          reasonCatalogVersion: adminAction.reasonCatalogVersion,
+          reasonCode: adminAction.reasonCode,
+        })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey));
+      expect(actionRow).toEqual({
+        action:
+          outcome === 'CONDUCT_REPORT_DISMISSED'
+            ? 'CONDUCT_REPORT_DISMISS'
+            : 'CONDUCT_REPORT_UPHOLD',
+        reasonCatalogVersion: 2,
+        reasonCode: decisionReasonCode,
+      });
+
+      const activityLog = await adminRequest(
+        `/api/v1/admin/activity-log?resourceType=conduct_report&resourceId=${fixture.reportId}`
+      );
+      expect(activityLog.status).toBe(200);
+      expect((await activityLog.json()).data.items).toContainEqual(
+        expect.objectContaining({ reasonCatalogVersion: 2, reasonCode: decisionReasonCode })
+      );
+
+      const detail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+      expect(detail.status).toBe(200);
+      expect((await detail.json()).data).toMatchObject({
+        reason: filedReason,
+        decision: { outcome, reason: decisionReasonCode },
+      });
+      if (outcome === 'CONDUCT_REPORT_UPHELD') {
+        expect(
+          await db
+            .select({ reasonCode: memberPenaltyRecord.reasonCode })
+            .from(memberPenaltyRecord)
+            .where(eq(memberPenaltyRecord.sourceId, fixture.reportId))
+        ).toEqual([{ reasonCode: filedReason }]);
+      }
+    });
+  }
+
+  it('rejects old or outcome-mismatched Report Case codes without writing an Admin Action', async () => {
+    if (!postgresAvailable) return;
+    const invalidCases = [
+      { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'POLICY_REVIEW' },
+      { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'SAFETY_REVIEW' },
+      { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_NO_POLICY_VIOLATION' },
+      { outcome: 'REPORT_CASE_RESTORED', reasonCode: 'REPORT_CONTEXT_SUPPORTS_MESSAGE' },
+    ] as const;
+
+    for (const { outcome, reasonCode } of invalidCases) {
+      const fixture = await createReportFixture();
+      if (outcome === 'REPORT_CASE_RESTORED') {
+        const hide = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `report-invalid-hide-${fixture.caseId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_HIDDEN',
+            reasonCode: 'REPORT_HARASSMENT_CONFIRMED',
+          }),
+        });
+        expect(hide.status).toBe(200);
+      }
+      const requestKey = `report-invalid-${reasonCode}-${fixture.caseId}`;
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+        method: 'POST',
+        headers: {
+          'idempotency-key': requestKey,
+          'if-match': outcome === 'REPORT_CASE_RESTORED' ? '2' : '1',
+        },
+        body: JSON.stringify({ outcome, reasonCode }),
+      });
+      expect(response.status).toBe(400);
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(eq(adminAction.requestKey, requestKey))
+      ).toHaveLength(0);
+    }
+  });
+
+  it('requires a separate approved Admin decision code for Conduct Report uphold', async () => {
+    if (!postgresAvailable) return;
+    const invalidCases = [
+      { outcome: 'CONDUCT_REPORT_UPHELD' },
+      { outcome: 'CONDUCT_REPORT_UPHELD', decisionReasonCode: 'CONDUCT_OUT_OF_SCOPE' },
+      {
+        outcome: 'CONDUCT_REPORT_DISMISSED',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      },
+    ] as const;
+
+    for (const body of invalidCases) {
+      const fixture = await createConductReportFixture({ reason: conductReportReason.outOfScope });
+      const requestKey = `conduct-invalid-${fixture.reportId}`;
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+        method: 'POST',
+        headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(400);
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(eq(adminAction.requestKey, requestKey))
+      ).toHaveLength(0);
+    }
   });
 });

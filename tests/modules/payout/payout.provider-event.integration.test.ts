@@ -144,7 +144,7 @@ const createPendingPayout = async (
     payoutId: payout.id,
     idempotencyKey: `${prefix}-approval-${crypto.randomUUID()}`,
     expectedVersion: payout.version,
-    reasonCode: 'PAYOUT_POLICY_REVIEW',
+    reasonCode: 'PAYOUT_DESTINATION_VERIFIED',
   });
   try {
     payout = await processApprovedPayout(payout.id, provider, encryption);

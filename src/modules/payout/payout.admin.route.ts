@@ -40,7 +40,7 @@ export const adminPayoutRoute = new Elysia({
       tags: ['Admin Payouts'],
       summary: 'List Payouts for Admin review',
       description:
-        'Lists waiting Payouts by default. Historical status filters, cursor pagination, and newest or oldest sorting are supported.',
+        'Lists Payouts in PENDING_ADMIN_APPROVAL by default. Use status=ALL for complete Member history across all six statuses. Supports Member filtering, bounded cursor pagination, newest or oldest sorting, and totalCount for the active filters.',
       operationId: 'listAdminPayouts',
       security: betterAuthSecurity,
     },
@@ -74,7 +74,7 @@ export const adminPayoutRoute = new Elysia({
       tags: ['Admin Payouts'],
       summary: 'Approve a waiting Payout',
       description:
-        'Records a final Admin approval and hands the Payout to the separate Payout Worker. The Provider is called by the Worker, not this request.',
+        'Records a final Admin approval and hands the Payout to the separate Payout Worker. The Provider is called by the Worker, not this request. Payout reason catalog version 2 accepts PAYOUT_DESTINATION_VERIFIED, PAYOUT_ACCOUNT_OWNER_MATCHED, PAYOUT_POLICY_CHECK_PASSED, or PAYOUT_RISK_REVIEW_CLEARED. It also accepts an optional Admin-only decisionReasonText of up to 200 characters. The note is stored on the immutable Admin Action and does not replace reasonCode.',
       operationId: 'approvePayout',
       security: betterAuthSecurity,
     },
@@ -88,7 +88,7 @@ export const adminPayoutRoute = new Elysia({
       tags: ['Admin Payouts'],
       summary: 'Cancel a waiting Payout',
       description:
-        'Records a final Admin cancellation with a controlled reason code and releases the full Payout Reserve to Earnings Balance.',
+        'Records a final Admin cancellation with a controlled reason code and releases the full Payout Reserve to Earnings Balance. Payout reason catalog version 2 accepts PAYOUT_INVALID_DESTINATION, PAYOUT_ACCOUNT_OWNER_MISMATCH, PAYOUT_POLICY_CHECK_FAILED, PAYOUT_RISK_REVIEW_FAILED, or PAYOUT_REQUIRED_INFORMATION_MISSING. Admin UI Reject uses this API cancel action. It also accepts an optional Admin-only decisionReasonText of up to 200 characters. The note is stored on the immutable Admin Action and does not replace reasonCode.',
       operationId: 'cancelPayout',
       security: betterAuthSecurity,
     },

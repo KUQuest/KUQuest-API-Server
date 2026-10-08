@@ -142,6 +142,8 @@ const createDisputeFixture = async (
           createAdminDisputeCaseInTransaction(transaction, {
             questId,
             filerUserId: workerId,
+            category: 'PROOF_REVIEW',
+            submittedDetail: 'The submitted Proof meets the Quest Condition.',
           })
         )
       : (
@@ -242,13 +244,58 @@ describe('Admin Dispute API', () => {
   it('requires an Admin Session and rejects a Member Session', async () => {
     if (!postgresAvailable) return;
     const anonymous = await app.handle(new Request('http://localhost/api/v1/admin/disputes'));
+    const anonymousDetail = await app.handle(
+      new Request(`http://localhost/api/v1/admin/disputes/${crypto.randomUUID()}`)
+    );
     const member = await app.handle(
       new Request('http://localhost/api/v1/admin/disputes', {
         headers: { cookie: memberCookie },
       })
     );
+    const memberDetail = await app.handle(
+      new Request(`http://localhost/api/v1/admin/disputes/${crypto.randomUUID()}`, {
+        headers: { cookie: memberCookie },
+      })
+    );
     expect(anonymous.status).toBe(401);
+    expect(anonymousDetail.status).toBe(401);
     expect(member.status).toBe(403);
+    expect(memberDetail.status).toBe(403);
+  });
+
+  it('publishes the optional Admin decision note in OpenAPI', async () => {
+    const response = await app.handle(new Request('http://localhost/openapi/json'));
+    const document = (await response.json()) as {
+      paths: Record<
+        string,
+        Record<
+          string,
+          {
+            description?: string;
+            requestBody?: { content?: Record<string, { schema?: unknown }> };
+            responses?: Record<string, { content?: Record<string, { schema?: unknown }> }>;
+          }
+        >
+      >;
+    };
+    const operation = document.paths['/api/v1/admin/disputes/{disputeCaseId}/resolve']?.post;
+    const requestSchemaText = JSON.stringify(
+      operation?.requestBody?.content?.['application/json']?.schema
+    );
+
+    expect(response.status).toBe(200);
+    expect(operation?.description).toContain('decisionReasonText');
+    expect(requestSchemaText).toContain('decisionReasonText');
+    expect(requestSchemaText).toContain('"maxLength":200');
+    const detailSchemaText = JSON.stringify(
+      document.paths['/api/v1/admin/disputes/{disputeCaseId}']?.get?.responses?.['200']?.content?.[
+        'application/json'
+      ]?.schema
+    );
+    expect(detailSchemaText).toContain('memberStatus');
+    expect(detailSchemaText).toContain('previousReportCount');
+    expect(detailSchemaText).toContain('confirmedViolationCount');
+    expect(detailSchemaText).toContain('previousModerationActions');
   });
 
   it('opens an Admin-filed Dispute Case through the production queue route', async () => {
@@ -259,7 +306,11 @@ describe('Admin Dispute API', () => {
     const response = await adminRequest(`/api/v1/admin/disputes/open/${fixture.questId}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ workerId: fixture.workerId }),
+      body: JSON.stringify({
+        workerId: fixture.workerId,
+        category: 'PROOF_REVIEW',
+        submittedDetail: 'The Worker provided this dispute detail.',
+      }),
     });
     const body = (await response.json()) as {
       data: { id: string; questId: string; filerUserId: string; openedByAdminId: string | null };
@@ -280,7 +331,11 @@ describe('Admin Dispute API', () => {
     const response = await adminRequest(`/api/v1/admin/disputes/open/${fixture.questId}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ workerId: fixture.hirerId }),
+      body: JSON.stringify({
+        workerId: fixture.hirerId,
+        category: 'PROOF_REVIEW',
+        submittedDetail: 'The Worker provided this dispute detail.',
+      }),
     });
     const body = (await response.json()) as { error: { code: string } };
     expect(response.status).toBe(409);
@@ -308,7 +363,13 @@ describe('Admin Dispute API', () => {
       displayId: expect.stringMatching(/^DSP-\d{6,}$/),
       questId: fixture.questId,
       status: 'DISPUTE_CASE_PENDING',
+      decision: { reasonCode: null, decisionReasonText: null },
       quest: { id: fixture.questId, questStatus: 'QUEST_FAILED' },
+      memberStatus: expect.any(String),
+      previousReportCount: 0,
+      confirmedViolationCount: 0,
+      previousModerationActions: [],
+      member: { status: expect.any(String) },
     });
     expect(JSON.stringify(detailBody)).not.toContain(`${fixture.hirerId}@ku.th`);
 
@@ -477,7 +538,7 @@ describe('Admin Dispute API', () => {
         },
         body: JSON.stringify({
           outcome: 'DISPUTE_CASE_DISMISSED',
-          reasonCode: 'DISPUTE_POLICY_REVIEW',
+          reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
         }),
       }
     );
@@ -531,10 +592,11 @@ describe('Admin Dispute API', () => {
     });
   });
 
-  it('dismisses a Case without money movement and replays the command', async () => {
+  it('dismisses a Case with an Admin note and replays the command', async () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
     const requestKey = `dispute-dismiss-${fixture.disputeCaseId}`;
+    const decisionReasonText = 'Evidence does not support the claim.';
     const request = () =>
       adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`, {
         method: 'POST',
@@ -545,7 +607,8 @@ describe('Admin Dispute API', () => {
         },
         body: JSON.stringify({
           outcome: 'DISPUTE_CASE_DISMISSED',
-          reasonCode: 'DISPUTE_POLICY_REVIEW',
+          reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
+          decisionReasonText,
         }),
       });
     const first = await request();
@@ -564,8 +627,26 @@ describe('Admin Dispute API', () => {
         adminActionId: expect.any(String),
       },
     });
+    expect(firstBody.data.resourceSummary).not.toHaveProperty('decisionReasonText');
     expect(replay.status).toBe(200);
     expect(replayBody).toEqual(firstBody);
+    const detail = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}`);
+    expect(detail.status).toBe(200);
+    expect((await detail.json()).data.decision).toEqual({
+      reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
+      decisionReasonText,
+    });
+    const activityLog = await adminRequest(
+      `/api/v1/admin/activity-log?resourceType=dispute_case&resourceId=${fixture.disputeCaseId}`
+    );
+    expect(activityLog.status).toBe(200);
+    expect((await activityLog.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        action: 'DISPUTE_CASE_DISMISS',
+        reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
+        decisionReasonText,
+      })
+    );
     expect(await listTestQuestEscrowSettlements(fixture.reservationId)).toHaveLength(0);
     const escrow = await readTestQuestEscrow({
       ownerUserId: fixture.hirerId,
@@ -574,9 +655,10 @@ describe('Admin Dispute API', () => {
     expect(escrow).toMatchObject({ status: 'ACTIVE', remainingSatang: 1_000 });
   });
 
-  it('resolves a Case through Wallet with balanced postings and keeps the Quest failed', async () => {
+  it('resolves a Case through Wallet with an Admin note and balanced postings', async () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
+    const decisionReasonText = 'x'.repeat(200);
     const response = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`, {
       method: 'POST',
       headers: {
@@ -586,9 +668,10 @@ describe('Admin Dispute API', () => {
       },
       body: JSON.stringify({
         outcome: 'DISPUTE_CASE_RESOLVED',
-        reasonCode: 'DISPUTE_EVIDENCE_REVIEW',
+        reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION',
         workerId: fixture.workerId,
         amountSatang: 300,
+        decisionReasonText,
       }),
     });
     const body = (await response.json()) as { data: { resourceSummary: Record<string, unknown> } };
@@ -600,6 +683,7 @@ describe('Admin Dispute API', () => {
       resolvedWorkerId: fixture.workerId,
       resolvedAmountSatang: 300,
     });
+    expect(body.data.resourceSummary).not.toHaveProperty('decisionReasonText');
 
     const [storedQuest] = await db
       .select({ status: quest.questStatus, version: quest.version })
@@ -631,6 +715,137 @@ describe('Admin Dispute API', () => {
     expect(postings.reduce((total, posting) => total + posting.amountSatang, 0)).toBe(0);
     const workerWallet = await readTestWallet(fixture.workerId);
     expect(workerWallet.earningsBalanceSatang).toBe(300);
+
+    const activityLog = await adminRequest(
+      `/api/v1/admin/activity-log?resourceType=dispute_case&resourceId=${fixture.disputeCaseId}`
+    );
+    expect(activityLog.status).toBe(200);
+    expect((await activityLog.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        action: 'DISPUTE_CASE_RESOLVE',
+        reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION',
+        decisionReasonText,
+      })
+    );
+  });
+
+  it('rejects blank and over-200-character Dispute decision notes', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+
+    const rejectNote = async (decisionReasonText: string) => {
+      const requestKey = `dispute-invalid-note-${crypto.randomUUID()}`;
+      const response = await adminRequest(
+        `/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': requestKey,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'DISPUTE_CASE_DISMISSED',
+            reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
+            decisionReasonText,
+          }),
+        }
+      );
+      const body = await response.json();
+      const [storedCase] = await db
+        .select({ status: adminDisputeCase.status, version: adminDisputeCase.version })
+        .from(adminDisputeCase)
+        .where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+      const actions = await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey));
+
+      expect(response.status).toBe(400);
+      expect(body.error.code).toBe('VALIDATION');
+      expect(storedCase).toEqual({ status: 'DISPUTE_CASE_PENDING', version: 1 });
+      expect(actions).toHaveLength(0);
+    };
+
+    await rejectNote('   ');
+    await rejectNote('x'.repeat(201));
+  });
+
+  it('stores an optional Admin note on a Dispute Case decision', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    const decisionReasonText = 'The Quest record confirms the Worker met the condition.';
+    const requestKey = `dispute-note-${fixture.disputeCaseId}`;
+    const response = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'idempotency-key': requestKey,
+        'if-match': '1',
+      },
+      body: JSON.stringify({
+        outcome: 'DISPUTE_CASE_DISMISSED',
+        reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
+        decisionReasonText,
+      }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.resourceSummary).not.toHaveProperty('decisionReasonText');
+    expect(
+      await db
+        .select({ decisionReasonText: adminAction.decisionReasonText })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey))
+    ).toEqual([{ decisionReasonText }]);
+    const detail = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}`);
+    expect(detail.status).toBe(200);
+    expect((await detail.json()).data.decision).toEqual({
+      reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
+      decisionReasonText,
+    });
+  });
+
+  it('rejects blank and over-200-character Dispute decision notes', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+
+    for (const decisionReasonText of ['   ', 'x'.repeat(201)]) {
+      const requestKey = `dispute-invalid-note-${crypto.randomUUID()}`;
+      const response = await adminRequest(
+        `/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': requestKey,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'DISPUTE_CASE_DISMISSED',
+            reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
+            decisionReasonText,
+          }),
+        }
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error.code).toBe('VALIDATION');
+      expect(
+        await db
+          .select({ status: adminDisputeCase.status, version: adminDisputeCase.version })
+          .from(adminDisputeCase)
+          .where(eq(adminDisputeCase.id, fixture.disputeCaseId))
+      ).toEqual([{ status: 'DISPUTE_CASE_PENDING', version: 1 }]);
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(eq(adminAction.requestKey, requestKey))
+      ).toHaveLength(0);
+    }
   });
 
   it('settles a pending legacy Proof approved after failure from the held Quest Escrow', async () => {
@@ -721,7 +936,7 @@ describe('Admin Dispute API', () => {
         },
         body: JSON.stringify({
           outcome: 'DISPUTE_CASE_RESOLVED',
-          reasonCode: 'DISPUTE_EVIDENCE_REVIEW',
+          reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION',
           workerId: fixture.workerId,
           amountSatang: 300,
         }),
@@ -762,7 +977,7 @@ describe('Admin Dispute API', () => {
       },
       body: JSON.stringify({
         outcome: 'DISPUTE_CASE_RESOLVED',
-        reasonCode: 'DISPUTE_POLICY_REVIEW',
+        reasonCode: 'DISPUTE_VALID_PROOF_NOT_APPROVED',
         workerId: fixture.workerId,
         amountSatang: 250,
       }),
@@ -837,7 +1052,7 @@ describe('Admin Dispute API', () => {
         },
         body: JSON.stringify({
           outcome: 'DISPUTE_CASE_DISMISSED',
-          reasonCode: 'DISPUTE_POLICY_REVIEW',
+          reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
         }),
       }
     );
@@ -861,7 +1076,7 @@ describe('Admin Dispute API', () => {
         },
         body: JSON.stringify({
           outcome: 'DISPUTE_CASE_DISMISSED',
-          reasonCode: 'DISPUTE_POLICY_REVIEW',
+          reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
           amountSatang: 2,
         }),
       }
@@ -879,7 +1094,7 @@ describe('Admin Dispute API', () => {
         },
         body: JSON.stringify({
           outcome: 'DISPUTE_CASE_RESOLVED',
-          reasonCode: 'DISPUTE_EVIDENCE_REVIEW',
+          reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION',
           workerId: staleFixture.workerId,
           amountSatang: 2_000,
         }),
@@ -906,7 +1121,7 @@ describe('Admin Dispute API', () => {
         },
         body: JSON.stringify({
           outcome: 'DISPUTE_CASE_DISMISSED',
-          reasonCode: 'DISPUTE_POLICY_REVIEW',
+          reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
         }),
       }
     );
@@ -1060,6 +1275,8 @@ describe('Admin Dispute API', () => {
         createAdminDisputeCaseInTransaction(transaction, {
           questId: fixture.questId,
           filerUserId: fixture.hirerId,
+          category: 'OTHER',
+          submittedDetail: 'The Worker did not meet the Quest Condition.',
         })
       );
       await until('DISPUTE_CASE_UPDATED');
@@ -1088,5 +1305,142 @@ describe('Admin Dispute API', () => {
     } finally {
       await listener.unlisten();
     }
+  });
+  const disputeDecisionReasonCodeCases = [
+    { outcome: 'DISPUTE_CASE_DISMISSED', reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE' },
+    {
+      outcome: 'DISPUTE_CASE_DISMISSED',
+      reasonCode: 'DISPUTE_QUEST_RECORD_DOES_NOT_SUPPORT_CLAIM',
+    },
+    { outcome: 'DISPUTE_CASE_DISMISSED', reasonCode: 'DISPUTE_NO_UNFAIR_SETTLEMENT_FOUND' },
+    { outcome: 'DISPUTE_CASE_DISMISSED', reasonCode: 'DISPUTE_WORKER_ALREADY_COMPENSATED' },
+    { outcome: 'DISPUTE_CASE_RESOLVED', reasonCode: 'DISPUTE_VALID_PROOF_NOT_APPROVED' },
+    { outcome: 'DISPUTE_CASE_RESOLVED', reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION' },
+    { outcome: 'DISPUTE_CASE_RESOLVED', reasonCode: 'DISPUTE_PARTIAL_WORK_EARNED_REWARD' },
+  ] as const;
+
+  for (const { outcome, reasonCode } of disputeDecisionReasonCodeCases) {
+    it(`${outcome} records ${reasonCode} with catalog version 2`, async () => {
+      if (!postgresAvailable) return;
+      const fixture = await createDisputeFixture();
+      const requestKey = `dispute-catalog-${reasonCode}-${fixture.disputeCaseId}`;
+      const action =
+        outcome === 'DISPUTE_CASE_DISMISSED' ? 'DISPUTE_CASE_DISMISS' : 'DISPUTE_CASE_RESOLVE';
+      const body =
+        outcome === 'DISPUTE_CASE_DISMISSED'
+          ? { outcome, reasonCode }
+          : { outcome, reasonCode, workerId: fixture.workerId, amountSatang: 300 };
+      const response = await adminRequest(
+        `/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': requestKey,
+            'if-match': '1',
+          },
+          body: JSON.stringify(body),
+        }
+      );
+      expect(response.status).toBe(200);
+
+      const [actionRow] = await db
+        .select({
+          action: adminAction.action,
+          reasonCatalogVersion: adminAction.reasonCatalogVersion,
+          reasonCode: adminAction.reasonCode,
+        })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey));
+      expect(actionRow).toEqual({ action, reasonCatalogVersion: 2, reasonCode });
+
+      const activityLog = await adminRequest(
+        `/api/v1/admin/activity-log?resourceType=dispute_case&resourceId=${fixture.disputeCaseId}`
+      );
+      expect(activityLog.status).toBe(200);
+      expect((await activityLog.json()).data.items).toContainEqual(
+        expect.objectContaining({ action, reasonCatalogVersion: 2, reasonCode })
+      );
+    });
+  }
+
+  it('rejects old and outcome-mismatched Dispute codes without writing an Admin Action', async () => {
+    if (!postgresAvailable) return;
+    const invalidCases = [
+      { outcome: 'DISPUTE_CASE_DISMISSED', reasonCode: 'DISPUTE_POLICY_REVIEW' },
+      { outcome: 'DISPUTE_CASE_DISMISSED', reasonCode: 'DISPUTE_VALID_PROOF_NOT_APPROVED' },
+      { outcome: 'DISPUTE_CASE_RESOLVED', reasonCode: 'DISPUTE_EVIDENCE_REVIEW' },
+      { outcome: 'DISPUTE_CASE_RESOLVED', reasonCode: 'DISPUTE_NO_UNFAIR_SETTLEMENT_FOUND' },
+    ] as const;
+
+    for (const { outcome, reasonCode } of invalidCases) {
+      const fixture = await createDisputeFixture();
+      const requestKey = `dispute-invalid-${reasonCode}-${fixture.disputeCaseId}`;
+      const body =
+        outcome === 'DISPUTE_CASE_DISMISSED'
+          ? { outcome, reasonCode }
+          : { outcome, reasonCode, workerId: fixture.workerId, amountSatang: 300 };
+      const response = await adminRequest(
+        `/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': requestKey,
+            'if-match': '1',
+          },
+          body: JSON.stringify(body),
+        }
+      );
+      expect(response.status).toBe(400);
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(eq(adminAction.requestKey, requestKey))
+      ).toHaveLength(0);
+      expect(
+        await db
+          .select({ status: adminDisputeCase.status, version: adminDisputeCase.version })
+          .from(adminDisputeCase)
+          .where(eq(adminDisputeCase.id, fixture.disputeCaseId))
+      ).toEqual([{ status: 'DISPUTE_CASE_PENDING', version: 1 }]);
+      expect(await listTestDisputeSettlements(fixture.reservationId)).toHaveLength(0);
+    }
+  });
+
+  it('publishes the outcome-specific Dispute reason-code catalog in OpenAPI', async () => {
+    const response = await app.handle(new Request('http://localhost/openapi/json'));
+    const document = (await response.json()) as {
+      paths: Record<
+        string,
+        Record<
+          string,
+          {
+            description?: string;
+            requestBody?: { content?: Record<string, { schema?: unknown }> };
+          }
+        >
+      >;
+    };
+    const operation = document.paths['/api/v1/admin/disputes/{disputeCaseId}/resolve']?.post;
+    const schemaText = JSON.stringify(
+      operation?.requestBody?.content?.['application/json']?.schema
+    );
+
+    expect(response.status).toBe(200);
+    expect(schemaText).toContain('DISPUTE_INSUFFICIENT_EVIDENCE');
+    expect(schemaText).toContain('DISPUTE_QUEST_RECORD_DOES_NOT_SUPPORT_CLAIM');
+    expect(schemaText).toContain('DISPUTE_NO_UNFAIR_SETTLEMENT_FOUND');
+    expect(schemaText).toContain('DISPUTE_WORKER_ALREADY_COMPENSATED');
+    expect(schemaText).toContain('DISPUTE_VALID_PROOF_NOT_APPROVED');
+    expect(schemaText).toContain('DISPUTE_WORKER_MET_QUEST_CONDITION');
+    expect(schemaText).toContain('DISPUTE_PARTIAL_WORK_EARNED_REWARD');
+    expect(schemaText).not.toContain('DISPUTE_POLICY_REVIEW');
+    expect(schemaText).not.toContain('DISPUTE_EVIDENCE_REVIEW');
+    expect(schemaText).toContain('decisionReasonText');
+    expect(schemaText).toContain('maxLength');
+    expect(operation?.description).toContain('DISPUTE_CASE_DISMISSED reasonCode is');
+    expect(operation?.description).toContain('decisionReasonText');
   });
 });

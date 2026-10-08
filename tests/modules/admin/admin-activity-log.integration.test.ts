@@ -1,5 +1,6 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
+import { adminAction } from '@/database/schema/admin.schema';
 import { authAdmin } from '@/database/schema/auth.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { encodeCursor } from '@/shared/cursor';
@@ -9,11 +10,13 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 
 type ActivityEntry = {
-  id: string;
-  admin: { id: string; firstName: string; lastName: string };
+  activityDisplayId: string;
+  admin: { firstName: string; lastName: string };
   action: string;
   resourceType: string;
-  resourceId: string;
+  resourceDisplayId: string | null;
+  beforeState: string | null;
+  afterState: string | null;
   reasonCode: string | null;
   decisionReasonText: string | null;
   reasonCatalogVersion: number;
@@ -111,6 +114,15 @@ const seedAdminAction = async (values: {
   return (row as { id: string }).id;
 };
 
+const activityDisplayIdFor = async (id: string): Promise<string> => {
+  const [row] = await db
+    .select({ publicSequence: adminAction.publicSequence })
+    .from(adminAction)
+    .where(eq(adminAction.id, id));
+  if (!row) throw new Error('The seeded Admin Action is missing.');
+  return `ACT-${row.publicSequence.toString().padStart(6, '0')}`;
+};
+
 beforeAll(async () => {
   await sql`select 1`;
 
@@ -200,7 +212,12 @@ describe('Admin Activity Log API', () => {
     const enabledAdmin = await activityRequest(query({ resourceId }));
     expect(enabledAdmin.status).toBe(200);
     const enabledBody = (await enabledAdmin.json()) as ActivityResponse;
-    expect(enabledBody.data?.items[0]?.admin.id).toBe(secondAdminId);
+    const entry = enabledBody.data?.items[0];
+    expect(entry?.activityDisplayId).toMatch(/^ACT-\d{6,}$/);
+    expect(entry?.admin).toEqual({ firstName: 'Second', lastName: 'Admin' });
+    expect(entry).not.toHaveProperty('id');
+    expect(entry?.admin).not.toHaveProperty('id');
+    expect(entry).not.toHaveProperty('resourceId');
 
     await db.update(authAdmin).set({ disabledAt: new Date() }).where(eq(authAdmin.id, adminId));
     try {
@@ -248,7 +265,8 @@ describe('Admin Activity Log API', () => {
       resourceId,
       createdAt: '2030-08-02T00:00:00.000Z',
       decisionReasonText: 'Admin review details stay with the immutable action.',
-      reasonCatalogVersion: 7,
+      reasonCatalogVersion: 1,
+      reasonCode: 'POLICY_REVIEW',
       resultVersion: 4,
       resultTimestamp: null,
       metadata: {
@@ -278,46 +296,50 @@ describe('Admin Activity Log API', () => {
       createdAt: '2030-08-01T00:00:00.000Z',
     });
 
-    expect((await readActivity({ action })).items.map((item) => item.id)).toEqual([
-      actionMatch,
-      main,
+    const [actionMatchDisplayId, mainDisplayId, typeMatchDisplayId, resourceMatchDisplayId] =
+      await Promise.all([actionMatch, main, typeMatch, resourceMatch].map(activityDisplayIdFor));
+    expect((await readActivity({ action })).items.map((item) => item.activityDisplayId)).toEqual([
+      actionMatchDisplayId,
+      mainDisplayId,
     ]);
-    expect((await readActivity({ resourceType })).items.map((item) => item.id)).toEqual([
-      typeMatch,
-      main,
-    ]);
-    expect((await readActivity({ resourceId })).items.map((item) => item.id)).toEqual([
-      main,
-      resourceMatch,
-    ]);
-    expect((await readActivity({ adminId: secondAdminId })).items.map((item) => item.id)).toContain(
-      main
-    );
+    expect(
+      (await readActivity({ resourceType })).items.map((item) => item.activityDisplayId)
+    ).toEqual([typeMatchDisplayId, mainDisplayId]);
+    expect(
+      (await readActivity({ resourceId })).items.map((item) => item.activityDisplayId)
+    ).toEqual([mainDisplayId, resourceMatchDisplayId]);
+    expect(
+      (await readActivity({ adminId: secondAdminId })).items.map((item) => item.activityDisplayId)
+    ).toContain(mainDisplayId);
 
     const entry = (await readActivity({ resourceId })).items[0]!;
     expect(Object.keys(entry).sort()).toEqual([
       'action',
+      'activityDisplayId',
       'admin',
+      'afterState',
+      'beforeState',
       'createdAt',
       'decisionReasonText',
-      'id',
       'reasonCatalogVersion',
       'reasonCode',
-      'resourceId',
+      'resourceDisplayId',
       'resourceType',
       'resultTimestamp',
       'resultVersion',
     ]);
     expect(entry).toMatchObject({
-      id: main,
+      activityDisplayId: mainDisplayId,
       action,
       resourceType,
-      resourceId,
-      reasonCode: 'ACTIVITY_REVIEW',
-      reasonCatalogVersion: 7,
+      resourceDisplayId: null,
+      beforeState: null,
+      afterState: null,
+      reasonCode: 'POLICY_REVIEW',
+      reasonCatalogVersion: 1,
       resultVersion: 4,
       resultTimestamp: null,
-      admin: { id: secondAdminId, firstName: 'Second', lastName: 'Admin' },
+      admin: { firstName: 'Second', lastName: 'Admin' },
       decisionReasonText: 'Admin review details stay with the immutable action.',
     });
     expect(JSON.stringify(entry)).not.toContain('private Message text');
@@ -352,6 +374,10 @@ describe('Admin Activity Log API', () => {
       createdAt: '2030-08-05T00:00:00.102400Z',
     });
     const tieAscending = [tieFirst, tieSecond].sort((left, right) => (left < right ? -1 : 1));
+    const expectedOldest = await Promise.all(
+      [first, ...tieAscending, last].map(activityDisplayIdFor)
+    );
+    const expectedNewest = [...expectedOldest].reverse();
 
     const readEveryPage = async (sort: 'newest' | 'oldest'): Promise<string[]> => {
       const ids: string[] = [];
@@ -367,7 +393,7 @@ describe('Admin Activity Log API', () => {
         // eslint-disable-next-line no-await-in-loop
         const body = (await response.json()) as ActivityResponse;
         expect(body.success).toBe(true);
-        ids.push(...body.data!.items.map((item) => item.id));
+        ids.push(...body.data!.items.map((item) => item.activityDisplayId));
         cursor = body.data!.nextCursor;
         if (!cursor) break;
       }
@@ -375,8 +401,8 @@ describe('Admin Activity Log API', () => {
       return ids;
     };
 
-    expect(await readEveryPage('oldest')).toEqual([first, ...tieAscending, last]);
-    expect(await readEveryPage('newest')).toEqual([last, ...tieAscending.reverse(), first]);
+    expect(await readEveryPage('oldest')).toEqual(expectedOldest);
+    expect(await readEveryPage('newest')).toEqual(expectedNewest);
   });
 
   it('rejects invalid cursors and invalid query values with the shared error envelope', async () => {
