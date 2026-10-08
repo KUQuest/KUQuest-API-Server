@@ -472,6 +472,7 @@ export const listAdminMemberPenaltyHistory = async (
       .join(' ');
 
     return {
+      recordId: row.id,
       ladder: row.ladder,
       source: row.source,
       sourceDisplayId: row.sourceDisplayId,

@@ -671,6 +671,7 @@ type CertificateItem = {
 };
 
 type PenaltyHistoryItem = {
+  recordId: string;
   ladder: 'MISCONDUCT' | 'REVIEW';
   source: 'REPORT_CASE' | 'CONDUCT_REPORT' | 'REVIEW_AVERAGE';
   sourceDisplayId: string | null;
@@ -779,6 +780,7 @@ describe('Admin Member Profile collection reads', () => {
       'ladder',
       'reasonCode',
       'recalculatedFrom',
+      'recordId',
       'replacedBy',
       'result',
       'reversal',
@@ -875,6 +877,7 @@ describe('Admin Member Profile collection reads', () => {
       'ladder',
       'reasonCode',
       'recalculatedFrom',
+      'recordId',
       'replacedBy',
       'result',
       'reversal',

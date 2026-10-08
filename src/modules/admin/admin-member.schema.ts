@@ -237,6 +237,7 @@ const memberPenaltyRemoveReasonCodeSchema = t.Union(
 );
 
 const adminMemberPenaltyHistoryItemSchema = t.Object({
+  recordId: uuid,
   ladder: memberPenaltyLadderSchema,
   source: memberPenaltySourceSchema,
   sourceDisplayId: t.Union([t.String({ pattern: '^(RPT|CND|QST)-[0-9]{6,}$' }), t.Null()]),
