@@ -1875,9 +1875,9 @@ Content-Type: application/json
 
 Fields:
 
-| Field   | Type       | Required | Rule                                                                          |
-| ------- | ---------- | -------- | ----------------------------------------------------------------------------- |
-| text    | string     | yes      | Non-blank submission text                                                     |
+| Field   | Type       | Required | Rule                                                                                   |
+| ------- | ---------- | -------- | -------------------------------------------------------------------------------------- |
+| text    | string     | yes      | Non-blank submission text                                                              |
 | fileIds | UUID array | no       | Optional returned private file IDs owned by Team Leader; allowed types; maximum 10 MiB |
 
 The Team Leader can submit only when the Team is full.
