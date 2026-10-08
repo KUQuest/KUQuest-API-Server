@@ -926,6 +926,7 @@ describe('Admin Member Profile collection reads', () => {
       isEffectiveActiveMisconductPenalty: false,
       actor: { type: 'SYSTEM', displayName: 'System' },
     });
+    // Penalty record UUIDs are returned so the Admin can target a record for Remove.
     const privateIdentifiers = [
       penaltyHistoryMemberId,
       penaltyHistoryFilerId,
@@ -939,7 +940,6 @@ describe('Admin Member Profile collection reads', () => {
       ...penaltyHistoryReportCaseIds,
       penaltyHistoryConductReportId,
       ...penaltyHistoryReviewIds,
-      ...Object.values(penaltyHistoryRecordIds),
       adminId,
     ];
     const serializedPages = JSON.stringify(pages);
