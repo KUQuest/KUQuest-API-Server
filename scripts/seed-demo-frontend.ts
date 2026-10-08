@@ -611,7 +611,7 @@ const seedPayouts = async (adminId: string, members: DemoSeedMember[]) => {
         payoutId,
         expectedVersion: payout.version,
         idempotencyKey: `admin-demo-finance-v1:payout-cancel:${index + 1}`,
-        reasonCode: 'PAYOUT_POLICY_REVIEW',
+        reasonCode: 'PAYOUT_RISK_REVIEW_FAILED',
       });
       payoutStatus = 'CANCELLED';
     }

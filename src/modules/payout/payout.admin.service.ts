@@ -10,7 +10,6 @@ import {
 } from '@/database/schema/payment.schema';
 import {
   createAdminActionService,
-  type AdminActionReasonCatalog,
   type AdminActionResult,
   type AdminActionTransaction,
 } from '@/modules/admin';
@@ -20,19 +19,25 @@ import { readKeysetPage } from '@/shared/keyset-page';
 
 import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
 
+import {
+  payoutAdminActionCatalog,
+  payoutApprovalReasonCodes,
+  payoutApprovalReasonCodesV1,
+  payoutCancellationReasonCodes,
+  payoutCancellationReasonCodesV1,
+} from './payout.admin.policy';
 import { approvePayoutInTransaction, cancelPayoutInTransaction } from './payout.service';
 
-export const payoutAdminReasonCodes = [
-  'PAYOUT_POLICY_REVIEW',
-  'PAYOUT_RISK_REVIEW',
-  'PAYOUT_INVALID_DESTINATION',
-] as const;
+export { payoutAdminActionCatalog, payoutAdminReasonCodes } from './payout.admin.policy';
 
-const payoutApprovalReasonCodes = ['PAYOUT_POLICY_REVIEW', 'PAYOUT_RISK_REVIEW'] as const;
-
-const payoutCancellationReasonCodes = payoutAdminReasonCodes;
-const payoutApprovalReasonCodeSet = new Set<string>(payoutApprovalReasonCodes);
-const payoutCancellationReasonCodeSet = new Set<string>(payoutCancellationReasonCodes);
+const payoutApprovalReasonCodeSet = new Set<string>([
+  ...payoutApprovalReasonCodesV1,
+  ...payoutApprovalReasonCodes,
+]);
+const payoutCancellationReasonCodeSet = new Set<string>([
+  ...payoutCancellationReasonCodesV1,
+  ...payoutCancellationReasonCodes,
+]);
 
 const safePayoutReasonCode = (
   reason: string | null,
@@ -41,22 +46,6 @@ const safePayoutReasonCode = (
   const allowedReasonCodes =
     action === 'PAYOUT_APPROVE' ? payoutApprovalReasonCodeSet : payoutCancellationReasonCodeSet;
   return reason && allowedReasonCodes.has(reason) ? reason : null;
-};
-
-export const payoutAdminActionCatalog: AdminActionReasonCatalog = {
-  version: 1,
-  actions: {
-    PAYOUT_APPROVE: {
-      kind: 'COMMAND',
-      requiresReason: true,
-      allowedReasonCodes: payoutApprovalReasonCodes,
-    },
-    PAYOUT_CANCEL: {
-      kind: 'COMMAND',
-      requiresReason: true,
-      allowedReasonCodes: payoutCancellationReasonCodes,
-    },
-  },
 };
 
 const adminActionService = createAdminActionService(payoutAdminActionCatalog);
