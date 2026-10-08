@@ -28,6 +28,10 @@ export const adminAction = pgTable(
   'admin_action',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'admin_action_public_sequence' })
+      .notNull()
+      .unique(),
     adminId: uuid('admin_id')
       .notNull()
       .references(() => authAdmin.id, { onDelete: 'restrict' }),
@@ -430,6 +434,14 @@ export const disputeCaseStatuses = [
 ] as const;
 export type DisputeCaseStatus = (typeof disputeCaseStatuses)[number];
 
+export const disputeCaseCategories = [
+  'PROOF_REVIEW',
+  'QUEST_CONDITION',
+  'PARTIAL_WORK',
+  'OTHER',
+] as const;
+export type DisputeCaseCategory = (typeof disputeCaseCategories)[number];
+
 /** An Admin queue record for a payment dispute on a failed Quest. */
 export const adminDisputeCase = pgTable(
   'admin_dispute_cases',
@@ -445,6 +457,11 @@ export const adminDisputeCase = pgTable(
       .notNull()
       .references(() => authUser.id),
     openedByAdminId: uuid('opened_by_admin_id').references(() => authAdmin.id),
+    category: text('category').$type<DisputeCaseCategory>(),
+    submittedDetail: text('submitted_detail'),
+    filerStatement: text('filer_statement'),
+    respondentStatement: text('respondent_statement'),
+    respondentUserId: uuid('respondent_user_id').references(() => authUser.id),
     status: text('status').$type<DisputeCaseStatus>().default('DISPUTE_CASE_PENDING').notNull(),
     version: integer('version').default(1).notNull(),
     resolvedWorkerId: uuid('resolved_worker_id').references(() => authUser.id),
@@ -459,6 +476,22 @@ export const adminDisputeCase = pgTable(
     index('admin_dispute_cases_status_created_idx').on(table.status, table.createdAt, table.id),
     index('admin_dispute_cases_quest_idx').on(table.questId, table.createdAt),
     index('admin_dispute_cases_filer_idx').on(table.filerUserId),
+    check(
+      'admin_dispute_cases_category_check',
+      sql`${table.category} IS NULL OR ${table.category} IN ('PROOF_REVIEW', 'QUEST_CONDITION', 'PARTIAL_WORK', 'OTHER')`
+    ),
+    check(
+      'admin_dispute_cases_filing_content_check',
+      sql`(${table.category} IS NULL AND ${table.submittedDetail} IS NULL) OR (${table.category} IS NOT NULL AND ${table.submittedDetail} IS NOT NULL AND btrim(${table.submittedDetail}) <> '')`
+    ),
+    check(
+      'admin_dispute_cases_filer_statement_check',
+      sql`${table.filerStatement} IS NULL OR btrim(${table.filerStatement}) <> ''`
+    ),
+    check(
+      'admin_dispute_cases_respondent_statement_check',
+      sql`(${table.respondentStatement} IS NULL AND ${table.respondentUserId} IS NULL) OR (${table.respondentStatement} IS NOT NULL AND btrim(${table.respondentStatement}) <> '' AND ${table.respondentUserId} IS NOT NULL)`
+    ),
     check(
       'admin_dispute_cases_status_check',
       sql`${table.status} IN ('DISPUTE_CASE_PENDING', 'DISPUTE_CASE_DISMISSED', 'DISPUTE_CASE_RESOLVED')`

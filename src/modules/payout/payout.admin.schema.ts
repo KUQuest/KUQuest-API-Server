@@ -88,8 +88,11 @@ const adminPayoutHistoryEntrySchema = t.Object({
   providerStatus: t.Union([t.String(), t.Null()]),
   actorUserId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
   actorAdminId: t.Union([t.String({ format: 'uuid' }), t.Null()]),
+  admin: t.Union([t.Object({ firstName: t.String(), lastName: t.String() }), t.Null()]),
   source: t.String(),
   reason: t.Union([t.String(), t.Null()]),
+  reasonCode: t.Union([t.String(), t.Null()]),
+  decisionReasonText: t.Union([t.String({ maxLength: 200 }), t.Null()]),
   occurredAt: t.String({ format: 'date-time' }),
 });
 

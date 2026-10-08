@@ -403,7 +403,13 @@ describe('Payout API routes', () => {
       data: {
         displayId: string;
         student: { id: string; studentId: string | null };
-        history: Array<{ source: string; reason: string | null }>;
+        history: Array<{
+          source: string;
+          reason: string | null;
+          reasonCode: string | null;
+          decisionReasonText: string | null;
+          admin: { firstName: string; lastName: string } | null;
+        }>;
         [key: string]: unknown;
       };
     };
@@ -418,6 +424,9 @@ describe('Payout API routes', () => {
         expect.objectContaining({
           source: 'ADMIN_APPROVAL',
           reason: 'PAYOUT_DESTINATION_VERIFIED',
+          reasonCode: 'PAYOUT_DESTINATION_VERIFIED',
+          decisionReasonText: null,
+          admin: { firstName: 'Route', lastName: 'Admin' },
         }),
       ])
     );
@@ -597,6 +606,33 @@ describe('Payout API routes', () => {
         action: 'PAYOUT_CANCEL',
         reasonCode: 'PAYOUT_INVALID_DESTINATION',
         decisionReasonText: cancellationNote,
+      })
+    );
+
+    const approvedDetail = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts/${approvedPayout.id}`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    const cancelledDetail = await app.handle(
+      new Request(`http://localhost/api/v1/admin/payouts/${cancelledPayout.id}`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    expect(approvedDetail.status).toBe(200);
+    expect(cancelledDetail.status).toBe(200);
+    expect((await approvedDetail.json()).data.history).toContainEqual(
+      expect.objectContaining({
+        reasonCode: 'PAYOUT_DESTINATION_VERIFIED',
+        decisionReasonText: approvalNote,
+        admin: { firstName: 'Route', lastName: 'Admin' },
+      })
+    );
+    expect((await cancelledDetail.json()).data.history).toContainEqual(
+      expect.objectContaining({
+        reasonCode: 'PAYOUT_INVALID_DESTINATION',
+        decisionReasonText: cancellationNote,
+        admin: { firstName: 'Route', lastName: 'Admin' },
       })
     );
   });
