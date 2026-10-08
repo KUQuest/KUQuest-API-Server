@@ -6,7 +6,7 @@ import { isValidAdminPassword } from '@/modules/auth/admin-auth.policy';
 
 import { sql as drizzleSql } from 'drizzle-orm';
 
-const firstAdminBootstrapLockName = 'kuquest:first-admin-bootstrap';
+const adminSeedLockName = 'kuquest:admin-seed';
 
 const readRequiredEnv = (name: string, trim = true): string => {
   const rawValue = process.env[name];
@@ -38,11 +38,10 @@ const main = async (): Promise<void> => {
 
   // Keep this transaction open for the full awaited critical section. Better Auth
   // uses its own pooled connection, so this transaction provides the advisory
-  // lock only; Better Auth owns write atomicity. auth_admin has no one-row
-  // database constraint.
+  // lock only; Better Auth owns write atomicity.
   const result = await sql.begin(async (transaction) => {
     await transaction`select pg_advisory_xact_lock(
-      hashtextextended(${firstAdminBootstrapLockName}, 0)
+      hashtextextended(${adminSeedLockName}, 0)
     )`;
 
     const [configuredAdmin] = await db
@@ -52,11 +51,6 @@ const main = async (): Promise<void> => {
       .limit(1);
 
     if (configuredAdmin) return null;
-
-    const [existingAdmin] = await db.select({ email: authAdmin.email }).from(authAdmin).limit(1);
-    if (existingAdmin) {
-      throw new Error('An Admin already exists; first-Admin bootstrap made no changes');
-    }
 
     const seedAuth = createAdminAuth({
       allowSignUp: true,
