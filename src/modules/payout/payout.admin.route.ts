@@ -74,7 +74,7 @@ export const adminPayoutRoute = new Elysia({
       tags: ['Admin Payouts'],
       summary: 'Approve a waiting Payout',
       description:
-        'Records a final Admin approval and hands the Payout to the separate Payout Worker. The Provider is called by the Worker, not this request. It also accepts an optional Admin-only decisionReasonText of up to 200 characters. The note is stored on the immutable Admin Action and does not replace reasonCode.',
+        'Records a final Admin approval and hands the Payout to the separate Payout Worker. The Provider is called by the Worker, not this request. Payout reason catalog version 2 accepts PAYOUT_DESTINATION_VERIFIED, PAYOUT_ACCOUNT_OWNER_MATCHED, PAYOUT_POLICY_CHECK_PASSED, or PAYOUT_RISK_REVIEW_CLEARED. It also accepts an optional Admin-only decisionReasonText of up to 200 characters. The note is stored on the immutable Admin Action and does not replace reasonCode.',
       operationId: 'approvePayout',
       security: betterAuthSecurity,
     },
@@ -88,7 +88,7 @@ export const adminPayoutRoute = new Elysia({
       tags: ['Admin Payouts'],
       summary: 'Cancel a waiting Payout',
       description:
-        'Records a final Admin cancellation with a controlled reason code and releases the full Payout Reserve to Earnings Balance. It also accepts an optional Admin-only decisionReasonText of up to 200 characters. The note is stored on the immutable Admin Action and does not replace reasonCode.',
+        'Records a final Admin cancellation with a controlled reason code and releases the full Payout Reserve to Earnings Balance. Payout reason catalog version 2 accepts PAYOUT_INVALID_DESTINATION, PAYOUT_ACCOUNT_OWNER_MISMATCH, PAYOUT_POLICY_CHECK_FAILED, PAYOUT_RISK_REVIEW_FAILED, or PAYOUT_REQUIRED_INFORMATION_MISSING. Admin UI Reject uses this API cancel action. It also accepts an optional Admin-only decisionReasonText of up to 200 characters. The note is stored on the immutable Admin Action and does not replace reasonCode.',
       operationId: 'cancelPayout',
       security: betterAuthSecurity,
     },

@@ -160,7 +160,7 @@ const approveForTest = (
   payoutId: string,
   idempotencyKey: string,
   expectedVersion = 1,
-  reasonCode = 'PAYOUT_POLICY_REVIEW'
+  reasonCode = 'PAYOUT_DESTINATION_VERIFIED'
 ) =>
   approvePayout({
     adminId,
@@ -248,7 +248,7 @@ describe('Payout application services', () => {
         payoutId: payout.id,
         idempotencyKey: 'be199-approval-decision-1',
         expectedVersion: payout.version,
-        reasonCode: 'PAYOUT_RISK_REVIEW',
+        reasonCode: 'PAYOUT_RISK_REVIEW_CLEARED',
       })
     ).rejects.toMatchObject({ code: 'ADMIN_ACTION_KEY_REUSED' });
 
@@ -272,7 +272,7 @@ describe('Payout application services', () => {
           fromStatus: 'PENDING_ADMIN_APPROVAL',
           toStatus: 'SUBMITTED_TO_PROVIDER',
           actorAdminId: adminId,
-          reason: 'PAYOUT_POLICY_REVIEW',
+          reason: 'PAYOUT_DESTINATION_VERIFIED',
         }),
       ])
     );
@@ -360,7 +360,7 @@ describe('Payout application services', () => {
         payoutId: payout.id,
         idempotencyKey: 'be199-admin-race-approve-1',
         expectedVersion: payout.version,
-        reasonCode: 'PAYOUT_POLICY_REVIEW',
+        reasonCode: 'PAYOUT_DESTINATION_VERIFIED',
       }),
       cancelPayout({
         adminId: cancelAdminId,

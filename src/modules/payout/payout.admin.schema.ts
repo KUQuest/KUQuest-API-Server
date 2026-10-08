@@ -4,6 +4,7 @@ import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 import { t } from 'elysia';
 
 import { payoutResponseSchema, payoutStatusSchema } from './payout.schema';
+import { payoutApprovalReasonCodes, payoutCancellationReasonCodes } from './payout.admin.policy';
 
 export const adminPayoutParamsSchema = t.Object({
   payoutId: t.String({ format: 'uuid' }),
@@ -26,15 +27,24 @@ export const adminPayoutListQuerySchema = t.Object({
   sort: t.Optional(t.Union([t.Literal('newest'), t.Literal('oldest')])),
 });
 
-const adminPayoutReasonCodeSchema = t.String({
-  minLength: 1,
-  maxLength: 100,
-  pattern: '^[A-Z][A-Z0-9_.-]*$',
-});
+const adminPayoutApprovalReasonCodeSchema = t.Union([
+  t.Literal(payoutApprovalReasonCodes[0]),
+  t.Literal(payoutApprovalReasonCodes[1]),
+  t.Literal(payoutApprovalReasonCodes[2]),
+  t.Literal(payoutApprovalReasonCodes[3]),
+]);
+
+const adminPayoutCancellationReasonCodeSchema = t.Union([
+  t.Literal(payoutCancellationReasonCodes[0]),
+  t.Literal(payoutCancellationReasonCodes[1]),
+  t.Literal(payoutCancellationReasonCodes[2]),
+  t.Literal(payoutCancellationReasonCodes[3]),
+  t.Literal(payoutCancellationReasonCodes[4]),
+]);
 
 export const adminPayoutApprovalSchema = t.Object(
   {
-    reasonCode: adminPayoutReasonCodeSchema,
+    reasonCode: adminPayoutApprovalReasonCodeSchema,
     decisionReasonText: adminDecisionReasonTextSchema,
   },
   { additionalProperties: false }
@@ -42,7 +52,7 @@ export const adminPayoutApprovalSchema = t.Object(
 
 export const adminPayoutCancellationSchema = t.Object(
   {
-    reasonCode: adminPayoutReasonCodeSchema,
+    reasonCode: adminPayoutCancellationReasonCodeSchema,
     decisionReasonText: adminDecisionReasonTextSchema,
   },
   { additionalProperties: false }
