@@ -9,7 +9,7 @@ import {
 import { authUser } from '@/database/schema/auth.schema';
 import { chatMembership, chatMessage } from '@/database/schema/work-chat.schema';
 
-import { and, count, desc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 
 import { adminMemberStatusSql } from './admin-member-status';
 import type {
@@ -102,8 +102,9 @@ export const getAdminMemberModerationContext = async (
         and(
           eq(memberPenaltyRecord.memberId, memberId),
           eq(memberPenaltyRecord.ladder, 'MISCONDUCT'),
-          inArray(memberPenaltyRecord.source, ['REPORT_CASE', 'CONDUCT_REPORT']),
+          inArray(memberPenaltyRecord.source, ['REPORT_CASE', 'CONDUCT_REPORT', 'ADMIN']),
           sql`${memberPenaltyRecord.result} <> 'PENALTY_REVERSAL'`,
+          isNull(memberPenaltyRecord.recalculationOfRecordId),
           lt(memberPenaltyRecord.createdAt, caseCreatedAtSql)
         )
       ),

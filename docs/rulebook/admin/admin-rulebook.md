@@ -60,21 +60,21 @@ Follow the context pointer for the Admin branch being planned or implemented:
 | **Quest Hide & Restore**      | Independent `hiddenAt`/`hiddenByAdminId` flags across non-terminal Quests, discovery removal only, Push notifications to Hirer, idempotency.       | [admin-quest-hide-contract.md](admin-quest-hide-contract.md)           |
 | **Wallet Freeze & Suspend**   | Setting `FROZEN`/`SUSPENDED` statuses, blocking new commitments while honoring active obligations, discretionary vs auto-ban freeze.               | [admin-wallet-freeze-contract.md](admin-wallet-freeze-contract.md)     |
 | **Trust & Safety (Messages)** | Message moderation in Work Chat & Candidate Inquiries, Reporter Entries, Evidence References, hiding messages, strike creation, and retention.     | [admin-trust-safety-contract.md](admin-trust-safety-contract.md)       |
-| **Member Penalty Ladders**    | Misconduct and Review ladders, first Report Case exemption, Conduct Report strikes, Report Case reversals.                                         | [admin-member-penalty-contract.md](admin-member-penalty-contract.md)   |
+| **Member Penalty Ladders**    | Automatic Misconduct and Review ladders, direct Admin Add and Remove actions, source-specific exemptions, and linked reversals.                    | [admin-member-penalty-contract.md](admin-member-penalty-contract.md)   |
 | **Conduct Reports (Quests)**  | Quest behavior reports (`CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE`, `CONDUCT_NO_SHOW`), filing windows, Quest record evidence, permanent strikes. | [admin-conduct-report-contract.md](admin-conduct-report-contract.md)   |
 
 ## Scope boundaries & deferred capabilities
 
 - **Admin managing other Admins**: Enabling or disabling other Admin accounts is out of scope.
 - **Candidate Team member reporting**: A ghosting teammate on `GROUP + CANDIDATE` cannot be reported individually; only the Team Leader carries duties under `CONDUCT_ABANDONED`.
-- **No Conduct Report appeal**: A `CONDUCT_REPORT_UPHELD` decision has no restore path and creates a permanent strike.
+- **No Conduct Report appeal**: A `CONDUCT_REPORT_UPHELD` decision has no restore path. An Admin may remove its effective penalty through the separate Remove Penalty action without changing the source decision.
 - **Insufficient Hirer balance risk**: When a Dispute Case resolves after the 7-day money hold has released funds, insufficient Hirer balance fails the transfer as an accepted operational risk.
 - **Hidden Message retention hold**: A `REPORT_CASE_HIDDEN` case never auto-closes, retaining evidence indefinitely.
 - **Failed Quest Dispute boundary**: Cancelled Quests have no Dispute Case path; Dispute Cases only redirect money from Hirer to Worker.
 
 ## Admin Action audit coverage & exemptions
 
-The central `AdminAction` executor writes an immutable `AdminAction` record for each discretionary Admin operation. Each record stores the Admin identity, the request payload, the resource summary, and the `Idempotency-Key`.
+The central `AdminAction` executor writes an immutable `AdminAction` record for each covered discretionary Admin operation. Each record stores the Admin identity, the request payload, the resource summary, and the `Idempotency-Key`.
 
 Covered operations:
 
@@ -84,8 +84,9 @@ Covered operations:
 - **Conduct Report decisions**: `CONDUCT_REPORT_DISMISS`, `CONDUCT_REPORT_UPHOLD`.
 - **Wallet status changes**: `WALLET_FREEZE`, `WALLET_UNFREEZE`, `WALLET_SUSPEND`, `WALLET_CLOSE`.
 
-Exemptions. These non-discretionary or non-Admin operations do not write `AdminAction` records:
+Other operations do not write separate `AdminAction` records. Their audit trail is recorded on their own source-of-truth history:
 
 - **Payment Provider Event Reconcile & Retry**: Webhook and worker reconciliation tasks (`POST /api/v1/admin/top-ups/:topUpId/reconcile`, `POST /api/v1/admin/top-ups/events/:eventId/retry`, and the Payout counterparts) process external payment gateway events. Their audit trail lives in `paymentProviderEventInbox` and the status history tables (`paymentPayoutStatusHistory`, `paymentTopUpStatusHistory`).
 - **Dispute Case Opening**: Opening an initial Dispute Case on behalf of a Worker (`POST /api/v1/admin/disputes/open/:questId`) is an intake and filing flow. It records `openedByAdminId` directly on the `adminDisputeCase` entity, not an `AdminAction`. Discretionary resolution and evidence access stay full `AdminAction` records.
 - **Wallet Projection Rebuild**: The diagnostic recalculation from immutable ledger postings (`POST /api/v1/admin/wallets/:walletId/rebuild-projection`) makes no discretionary state change.
+- **Member Penalty Add and Remove**: The immutable `memberPenaltyRecord` history records these commands and their Admin actor. They do not create a separate `AdminAction` record.

@@ -715,6 +715,13 @@
       "when": 1791454202922,
       "tag": "20261008101002_eminent_young_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1791486409002,
+      "tag": "20261008190648_heavy_red_hulk",
+      "breakpoints": true
     }
   ]
 }
