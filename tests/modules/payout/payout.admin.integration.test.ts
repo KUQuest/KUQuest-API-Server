@@ -653,6 +653,31 @@ describe('Payout API routes', () => {
     ['cancel', 'PAYOUT_REQUIRED_INFORMATION_MISSING', 'PAYOUT_CANCEL'],
   ] as const;
 
+  const expectReasonCodeRejected = async (
+    action: 'approve' | 'cancel',
+    reasonCode: string,
+    idempotencyKeyPrefix: string
+  ) => {
+    const payout = await createPendingPayout();
+    const idempotencyKey = `${idempotencyKeyPrefix}-${crypto.randomUUID()}`;
+    const response = await adminPayoutDecisionRequest(
+      payout.id,
+      action,
+      payout.version,
+      reasonCode,
+      idempotencyKey
+    );
+    const body = await response.json();
+    const actions = await db
+      .select({ id: adminAction.id })
+      .from(adminAction)
+      .where(eq(adminAction.requestKey, idempotencyKey));
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe('VALIDATION');
+    expect(actions).toHaveLength(0);
+  };
+
   for (const [action, reasonCode, expectedAction] of decisionReasonCases) {
     it(`records ${reasonCode} in Payout Admin Action catalog version 2`, async () => {
       const payout = await createPendingPayout();
@@ -683,27 +708,17 @@ describe('Payout API routes', () => {
     });
   }
 
+  for (const [action, reasonCode] of decisionReasonCases) {
+    const mismatchedAction = action === 'approve' ? 'cancel' : 'approve';
+    it(`rejects ${reasonCode} for Payout ${mismatchedAction}`, async () => {
+      await expectReasonCodeRejected(mismatchedAction, reasonCode, 'payout-wrong-action');
+    });
+  }
+
   for (const action of ['approve', 'cancel'] as const) {
     for (const reasonCode of ['PAYOUT_POLICY_REVIEW', 'PAYOUT_RISK_REVIEW'] as const) {
       it(`rejects version-1 ${reasonCode} for Payout ${action}`, async () => {
-        const payout = await createPendingPayout();
-        const idempotencyKey = `payout-catalog-v1-${crypto.randomUUID()}`;
-        const response = await adminPayoutDecisionRequest(
-          payout.id,
-          action,
-          payout.version,
-          reasonCode,
-          idempotencyKey
-        );
-        const body = await response.json();
-        const actions = await db
-          .select({ id: adminAction.id })
-          .from(adminAction)
-          .where(eq(adminAction.requestKey, idempotencyKey));
-
-        expect(response.status).toBe(400);
-        expect(body.error.code).toBe('VALIDATION');
-        expect(actions).toHaveLength(0);
+        await expectReasonCodeRejected(action, reasonCode, 'payout-catalog-v1');
       });
     }
   }

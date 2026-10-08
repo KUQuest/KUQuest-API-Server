@@ -6,6 +6,14 @@ import { t } from 'elysia';
 import { payoutResponseSchema, payoutStatusSchema } from './payout.schema';
 import { payoutApprovalReasonCodes, payoutCancellationReasonCodes } from './payout.admin.policy';
 
+const unionOfLiterals = (values: readonly string[]) =>
+  t.Union(
+    values.map((value) => t.Literal(value)) as [
+      ReturnType<typeof t.Literal<string>>,
+      ...ReturnType<typeof t.Literal<string>>[],
+    ]
+  );
+
 export const adminPayoutParamsSchema = t.Object({
   payoutId: t.String({ format: 'uuid' }),
 });
@@ -27,20 +35,8 @@ export const adminPayoutListQuerySchema = t.Object({
   sort: t.Optional(t.Union([t.Literal('newest'), t.Literal('oldest')])),
 });
 
-const adminPayoutApprovalReasonCodeSchema = t.Union([
-  t.Literal(payoutApprovalReasonCodes[0]),
-  t.Literal(payoutApprovalReasonCodes[1]),
-  t.Literal(payoutApprovalReasonCodes[2]),
-  t.Literal(payoutApprovalReasonCodes[3]),
-]);
-
-const adminPayoutCancellationReasonCodeSchema = t.Union([
-  t.Literal(payoutCancellationReasonCodes[0]),
-  t.Literal(payoutCancellationReasonCodes[1]),
-  t.Literal(payoutCancellationReasonCodes[2]),
-  t.Literal(payoutCancellationReasonCodes[3]),
-  t.Literal(payoutCancellationReasonCodes[4]),
-]);
+const adminPayoutApprovalReasonCodeSchema = unionOfLiterals(payoutApprovalReasonCodes);
+const adminPayoutCancellationReasonCodeSchema = unionOfLiterals(payoutCancellationReasonCodes);
 
 export const adminPayoutApprovalSchema = t.Object(
   {
