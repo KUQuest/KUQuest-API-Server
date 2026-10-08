@@ -33,6 +33,7 @@ const tagId = randomUUID();
 const questId = randomUUID();
 const teamId = randomUUID();
 const invitationId = randomUUID();
+const testQuestIds: string[] = [];
 
 beforeAll(async () => {
   try {
@@ -91,7 +92,7 @@ afterAll(async () => {
   await db
     .delete(auditRecord)
     .where(inArray(auditRecord.actorUserId, [hirerId, leaderId, memberId, invitedUserId]));
-  await db.delete(quest).where(eq(quest.id, questId));
+  await db.delete(quest).where(inArray(quest.id, [questId, ...testQuestIds]));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db
     .delete(authUser)
@@ -144,6 +145,7 @@ describe('Candidate Team authorization persistence', () => {
     const activeQuestId = randomUUID();
     const selectionQuestId = randomUUID();
     const applicationId = randomUUID();
+    testQuestIds.push(activeQuestId, selectionQuestId);
     await db.insert(quest).values([
       {
         id: activeQuestId,
@@ -206,6 +208,7 @@ describe('Candidate Team authorization persistence', () => {
     const activeQuestId = randomUUID();
     const selectionQuestId = randomUUID();
     const selectionTeamId = randomUUID();
+    testQuestIds.push(activeQuestId, selectionQuestId);
     await db.insert(quest).values([
       {
         id: activeQuestId,

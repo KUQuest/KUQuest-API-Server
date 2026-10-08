@@ -927,7 +927,7 @@ describe('Quest Candidate API v2', () => {
       candidate.id,
       { 'idempotency-key': 'candidate-v2-race-apply' }
     );
-    expect(application.status).toBe(201);
+    expect(application.status).toBe(200);
     const applicationId = (await application.json()).data.id as string;
 
     const [selection, join] = await Promise.all([

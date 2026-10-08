@@ -93,6 +93,17 @@ const baseInput: QuestV2CreateInput = {
   locations: [{ label: 'Quest update location' }],
 };
 
+let nextFixtureStartTime = new Date('2030-08-26T03:00:00.000Z');
+
+const nextFixtureSchedule = () => {
+  const startTime = nextFixtureStartTime;
+  nextFixtureStartTime = new Date(nextFixtureStartTime.getTime() + 3 * 60 * 60 * 1000);
+  return {
+    startTime: startTime.toISOString(),
+    dueAt: new Date(startTime.getTime() + 2 * 60 * 60 * 1000).toISOString(),
+  };
+};
+
 const createAssignedQuest = async (
   workerIds: string[],
   options: {
@@ -108,6 +119,7 @@ const createAssignedQuest = async (
     hirerId,
     {
       ...baseInput,
+      ...nextFixtureSchedule(),
       mode,
       participation: workerIds.length > 1 ? 'GROUP' : 'SINGLE',
       headcount: Math.max(workerIds.length, 1),
@@ -142,7 +154,7 @@ const createOpenGroupQuest = async () => {
   if (!hirerId) throw new Error('Hirer session is missing');
   const result = await createQuestV2(
     hirerId,
-    { ...baseInput, participation: 'GROUP', headcount: 2 },
+    { ...baseInput, ...nextFixtureSchedule(), participation: 'GROUP', headcount: 2 },
     `quest-update-open-group-${randomUUID()}`
   );
   if (!('quest' in result)) throw new Error(`Quest creation failed: ${result.outcome}`);
@@ -163,6 +175,7 @@ const createOpenCandidateQuest = async (participation: QuestV2CreateInput['parti
     hirerId,
     {
       ...baseInput,
+      ...nextFixtureSchedule(),
       mode: 'CANDIDATE',
       participation,
       headcount: participation === 'GROUP' ? 3 : 1,
