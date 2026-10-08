@@ -173,22 +173,24 @@ export type QuestV2CandidateTeamFileAccess = {
   urlExpiresAt: string;
 };
 
-type SelectionOutcomeCode = Extract<
-  TeamCommandOutcomeCode,
-  | 'already-assigned'
-  | 'idempotency-in-progress'
-  | 'idempotency-key-reused'
-  | 'idempotency-unavailable'
-  | 'invalid-idempotency-key'
-  | 'not-authorized'
-  | 'not-candidate'
-  | 'not-found'
-  | 'not-group'
-  | 'not-open'
-  | 'not-selectable'
-  | 'team-not-found'
-  | 'headcount-mismatch'
->;
+type SelectionOutcomeCode =
+  | Extract<
+      TeamCommandOutcomeCode,
+      | 'already-assigned'
+      | 'idempotency-in-progress'
+      | 'idempotency-key-reused'
+      | 'idempotency-unavailable'
+      | 'invalid-idempotency-key'
+      | 'not-authorized'
+      | 'not-candidate'
+      | 'not-found'
+      | 'not-group'
+      | 'not-open'
+      | 'not-selectable'
+      | 'team-not-found'
+      | 'headcount-mismatch'
+    >
+  | 'worker-schedule-conflict';
 
 export type QuestV2CandidateTeamSelectionOutcome =
   SelectionSuccess | { outcome: SelectionOutcomeCode };
@@ -1661,7 +1663,8 @@ type SelectionBusinessOutcomeCode =
   | 'not-group'
   | 'not-open'
   | 'not-selectable'
-  | 'team-not-found';
+  | 'team-not-found'
+  | 'worker-schedule-conflict';
 
 export const selectQuestV2CandidateTeam = async (
   hirerId: string,

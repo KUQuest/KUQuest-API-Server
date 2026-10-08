@@ -93,6 +93,13 @@ const mapJoinOutcome = (set: AuthedContext['set'], outcome: QuestV2AssignmentErr
   if (outcome.outcome === 'full') {
     return conflict(set, 'QUEST_FULL', 'The Quest has no open Worker slots');
   }
+  if (outcome.outcome === 'worker-schedule-conflict') {
+    return conflict(
+      set,
+      'WORKER_SCHEDULE_CONFLICT',
+      'The Worker has an active Assignment with overlapping scheduled work time'
+    );
+  }
   return mapQuestCommandOutcome(set, outcome.outcome);
 };
 

@@ -12,6 +12,7 @@ import { isMemberRedFlaggedInTransaction } from '@/modules/admin/member-penalty'
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 
 import { loadMemberSummaries } from '../../shared/member-summary';
+import { hasOverlappingActiveWorkerAssignment } from '../../shared/worker-schedule-conflict.service';
 import {
   type QuestTransaction,
   defaultQuestWorkChatMembershipWriter,
@@ -80,7 +81,8 @@ type QuestV2AssignmentBusinessOutcomeCode =
   | 'not-found'
   | 'roster-frozen'
   | 'not-first-come-first-served'
-  | 'red-flagged';
+  | 'red-flagged'
+  | 'worker-schedule-conflict';
 
 type QuestV2AssignmentOutcomeCode = QuestV2AssignmentBusinessOutcomeCode | QuestCommandOutcomeCode;
 
@@ -190,6 +192,7 @@ const lockQuest = async (transaction: QuestTransaction, questId: string) => {
       headcount: quest.headcount,
       hiddenAt: quest.hiddenAt,
       startTime: quest.startTime,
+      dueAt: quest.dueAt,
     })
     .from(quest)
     .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
@@ -369,6 +372,16 @@ const joinQuestV2InTransaction = async (
       }
       if (await isMemberRedFlaggedInTransaction(transaction, userId, now)) {
         return { kind: 'rejected', rejection: 'red-flagged' };
+      }
+      if (
+        await hasOverlappingActiveWorkerAssignment(transaction, {
+          questId,
+          workerIds: [userId],
+          startTime: current.startTime,
+          dueAt: current.dueAt,
+        })
+      ) {
+        return { kind: 'rejected', rejection: 'worker-schedule-conflict' };
       }
 
       if (joinedCount >= current.headcount) return { kind: 'rejected', rejection: 'full' };

@@ -293,6 +293,37 @@ describe('direct NO_CANDIDATE joins', () => {
     expect(current?.status).toBe('QUEST_ASSIGNED');
   });
 
+  it('rejects an overlapping Worker Assignment and allows an adjacent Quest', async () => {
+    if (!postgresAvailable) return;
+    const activeQuestId = await createAssignedQuest('NO_CANDIDATE', 'SOLO', [workers[0].id]);
+    const activeQuest = await db
+      .select({ dueAt: quest.dueAt })
+      .from(quest)
+      .where(eq(quest.id, activeQuestId));
+    const dueAt = activeQuest[0]?.dueAt;
+    if (!dueAt) throw new Error('Active Quest fixture needs a due time');
+    const overlappingQuestId = await createOpenQuest({
+      startTime: new Date(dueAt.getTime() - 30 * 60_000),
+      dueAt: new Date(dueAt.getTime() + 30 * 60_000),
+    });
+    const adjacentQuestId = await createOpenQuest({
+      startTime: dueAt,
+      dueAt: new Date(dueAt.getTime() + 60 * 60_000),
+    });
+    authenticate();
+
+    const conflicting = await request(overlappingQuestId, workers[0].id, {
+      'idempotency-key': 'join-overlapping-worker-assignment',
+    });
+    expect(conflicting.status).toBe(409);
+    expect((await conflicting.json()).error.code).toBe('WORKER_SCHEDULE_CONFLICT');
+
+    const adjacent = await request(adjacentQuestId, workers[0].id, {
+      'idempotency-key': 'join-adjacent-worker-assignment',
+    });
+    expect(adjacent.status).toBe(200);
+  });
+
   it('serializes concurrent retries of the same command', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenQuest();
