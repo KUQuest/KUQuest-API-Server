@@ -244,13 +244,23 @@ describe('Admin Dispute API', () => {
   it('requires an Admin Session and rejects a Member Session', async () => {
     if (!postgresAvailable) return;
     const anonymous = await app.handle(new Request('http://localhost/api/v1/admin/disputes'));
+    const anonymousDetail = await app.handle(
+      new Request(`http://localhost/api/v1/admin/disputes/${crypto.randomUUID()}`)
+    );
     const member = await app.handle(
       new Request('http://localhost/api/v1/admin/disputes', {
         headers: { cookie: memberCookie },
       })
     );
+    const memberDetail = await app.handle(
+      new Request(`http://localhost/api/v1/admin/disputes/${crypto.randomUUID()}`, {
+        headers: { cookie: memberCookie },
+      })
+    );
     expect(anonymous.status).toBe(401);
+    expect(anonymousDetail.status).toBe(401);
     expect(member.status).toBe(403);
+    expect(memberDetail.status).toBe(403);
   });
 
   it('publishes the optional Admin decision note in OpenAPI', async () => {
@@ -263,6 +273,7 @@ describe('Admin Dispute API', () => {
           {
             description?: string;
             requestBody?: { content?: Record<string, { schema?: unknown }> };
+            responses?: Record<string, { content?: Record<string, { schema?: unknown }> }>;
           }
         >
       >;
@@ -276,6 +287,15 @@ describe('Admin Dispute API', () => {
     expect(operation?.description).toContain('decisionReasonText');
     expect(requestSchemaText).toContain('decisionReasonText');
     expect(requestSchemaText).toContain('"maxLength":200');
+    const detailSchemaText = JSON.stringify(
+      document.paths['/api/v1/admin/disputes/{disputeCaseId}']?.get?.responses?.['200']?.content?.[
+        'application/json'
+      ]?.schema
+    );
+    expect(detailSchemaText).toContain('memberStatus');
+    expect(detailSchemaText).toContain('previousReportCount');
+    expect(detailSchemaText).toContain('confirmedViolationCount');
+    expect(detailSchemaText).toContain('previousModerationActions');
   });
 
   it('opens an Admin-filed Dispute Case through the production queue route', async () => {
@@ -345,6 +365,11 @@ describe('Admin Dispute API', () => {
       status: 'DISPUTE_CASE_PENDING',
       decision: { reasonCode: null, decisionReasonText: null },
       quest: { id: fixture.questId, questStatus: 'QUEST_FAILED' },
+      memberStatus: expect.any(String),
+      previousReportCount: 0,
+      confirmedViolationCount: 0,
+      previousModerationActions: [],
+      member: { status: expect.any(String) },
     });
     expect(JSON.stringify(detailBody)).not.toContain(`${fixture.hirerId}@ku.th`);
 

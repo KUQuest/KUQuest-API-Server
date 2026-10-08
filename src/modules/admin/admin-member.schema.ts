@@ -31,7 +31,7 @@ export const adminMemberModerationContextFieldsSchema = t.Object({
   }),
   previousReportCount: t.Union([t.Integer({ minimum: 0 }), t.Null()], {
     description:
-      'The number of earlier Report Cases filed against this Member. Each Case counts once; the current Case is excluded. Null when the Member record is unavailable.',
+      'The number of earlier Report Cases and Conduct Reports filed against this Member. Each Case counts once; the current Case is excluded. Null when the Member record is unavailable.',
   }),
   confirmedViolationCount: t.Union([t.Integer({ minimum: 0 }), t.Null()], {
     description:

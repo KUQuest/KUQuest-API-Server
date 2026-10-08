@@ -617,8 +617,25 @@ export const getAdminDisputeCase = async (
     .limit(1);
   if (!row)
     throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
+  let respondentUserId = row.disputeCase.respondentUserId;
+  if (!respondentUserId) {
+    if (row.disputeCase.filerUserId === row.quest.hirerId) {
+      if (row.disputeCase.resolvedWorkerId) {
+        respondentUserId = row.disputeCase.resolvedWorkerId;
+      } else {
+        const assignedWorkers = await db
+          .select({ workerId: questAssignment.workerId })
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, row.quest.id))
+          .limit(2);
+        if (assignedWorkers.length === 1) respondentUserId = assignedWorkers[0]!.workerId;
+      }
+    } else {
+      respondentUserId = row.quest.hirerId;
+    }
+  }
   const moderationContext = await getAdminMemberModerationContext(
-    row.disputeCase.respondentUserId,
+    respondentUserId,
     row.caseCreatedAt
   );
   const [decision] = await db

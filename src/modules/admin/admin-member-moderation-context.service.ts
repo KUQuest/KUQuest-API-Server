@@ -65,74 +65,86 @@ export const getAdminMemberModerationContext = async (
   if (!memberId) return emptyMemberModerationContext();
   const caseCreatedAtSql = sql`${caseCreatedAt}::timestamptz`;
 
-  const [memberRows, reportCountRows, violationCountRows, reportDecisionRows, conductDecisionRows] =
-    await Promise.all([
-      db
-        .select({ memberStatus: adminMemberStatusSql() })
-        .from(authUser)
-        .where(eq(authUser.id, memberId))
-        .limit(1),
-      db
-        .select({ total: count() })
-        .from(adminReportCase)
-        .innerJoin(chatMessage, eq(chatMessage.id, adminReportCase.messageId))
-        .innerJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId))
-        .where(
-          and(
-            eq(chatMembership.memberId, memberId),
-            lt(adminReportCase.createdAt, caseCreatedAtSql)
-          )
-        ),
-      db
-        .select({ total: count() })
-        .from(memberPenaltyRecord)
-        .where(
-          and(
-            eq(memberPenaltyRecord.memberId, memberId),
-            eq(memberPenaltyRecord.ladder, 'MISCONDUCT'),
-            inArray(memberPenaltyRecord.source, ['REPORT_CASE', 'CONDUCT_REPORT']),
-            sql`${memberPenaltyRecord.result} <> 'PENALTY_REVERSAL'`,
-            lt(memberPenaltyRecord.createdAt, caseCreatedAtSql)
-          )
-        ),
-      db
-        .select({
-          id: adminModerationDecision.id,
-          newStatus: adminModerationDecision.newStatus,
-          occurredAt: sql<string>`to_char(${adminModerationDecision.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
-        })
-        .from(adminModerationDecision)
-        .innerJoin(adminReportCase, eq(adminReportCase.id, adminModerationDecision.reportCaseId))
-        .innerJoin(chatMessage, eq(chatMessage.id, adminReportCase.messageId))
-        .innerJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId))
-        .where(
-          and(
-            eq(chatMembership.memberId, memberId),
-            lt(adminModerationDecision.createdAt, caseCreatedAtSql)
-          )
+  const [
+    memberRows,
+    reportCaseCountRows,
+    conductReportCountRows,
+    violationCountRows,
+    reportDecisionRows,
+    conductDecisionRows,
+  ] = await Promise.all([
+    db
+      .select({ memberStatus: adminMemberStatusSql() })
+      .from(authUser)
+      .where(eq(authUser.id, memberId))
+      .limit(1),
+    db
+      .select({ total: count() })
+      .from(adminReportCase)
+      .innerJoin(chatMessage, eq(chatMessage.id, adminReportCase.messageId))
+      .innerJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId))
+      .where(
+        and(eq(chatMembership.memberId, memberId), lt(adminReportCase.createdAt, caseCreatedAtSql))
+      ),
+    db
+      .select({ total: count() })
+      .from(adminConductReport)
+      .where(
+        and(
+          eq(adminConductReport.reportedMemberId, memberId),
+          lt(adminConductReport.createdAt, caseCreatedAtSql)
         )
-        .orderBy(desc(adminModerationDecision.createdAt), desc(adminModerationDecision.id))
-        .limit(previousModerationActionLimit),
-      db
-        .select({
-          id: adminConductReport.id,
-          status: adminConductReport.status,
-          occurredAt: sql<string>`to_char(${adminConductReport.resolvedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
-        })
-        .from(adminConductReport)
-        .where(
-          and(
-            eq(adminConductReport.reportedMemberId, memberId),
-            inArray(adminConductReport.status, [
-              conductReportStatus.upheld,
-              conductReportStatus.dismissed,
-            ]),
-            lt(adminConductReport.resolvedAt, caseCreatedAtSql)
-          )
+      ),
+    db
+      .select({ total: count() })
+      .from(memberPenaltyRecord)
+      .where(
+        and(
+          eq(memberPenaltyRecord.memberId, memberId),
+          eq(memberPenaltyRecord.ladder, 'MISCONDUCT'),
+          inArray(memberPenaltyRecord.source, ['REPORT_CASE', 'CONDUCT_REPORT']),
+          sql`${memberPenaltyRecord.result} <> 'PENALTY_REVERSAL'`,
+          lt(memberPenaltyRecord.createdAt, caseCreatedAtSql)
         )
-        .orderBy(desc(adminConductReport.resolvedAt), desc(adminConductReport.id))
-        .limit(previousModerationActionLimit),
-    ]);
+      ),
+    db
+      .select({
+        id: adminModerationDecision.id,
+        newStatus: adminModerationDecision.newStatus,
+        occurredAt: sql<string>`to_char(${adminModerationDecision.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+      })
+      .from(adminModerationDecision)
+      .innerJoin(adminReportCase, eq(adminReportCase.id, adminModerationDecision.reportCaseId))
+      .innerJoin(chatMessage, eq(chatMessage.id, adminReportCase.messageId))
+      .innerJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId))
+      .where(
+        and(
+          eq(chatMembership.memberId, memberId),
+          lt(adminModerationDecision.createdAt, caseCreatedAtSql)
+        )
+      )
+      .orderBy(desc(adminModerationDecision.createdAt), desc(adminModerationDecision.id))
+      .limit(previousModerationActionLimit),
+    db
+      .select({
+        id: adminConductReport.id,
+        status: adminConductReport.status,
+        occurredAt: sql<string>`to_char(${adminConductReport.resolvedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+      })
+      .from(adminConductReport)
+      .where(
+        and(
+          eq(adminConductReport.reportedMemberId, memberId),
+          inArray(adminConductReport.status, [
+            conductReportStatus.upheld,
+            conductReportStatus.dismissed,
+          ]),
+          lt(adminConductReport.resolvedAt, caseCreatedAtSql)
+        )
+      )
+      .orderBy(desc(adminConductReport.resolvedAt), desc(adminConductReport.id))
+      .limit(previousModerationActionLimit),
+  ]);
 
   const memberStatus = memberRows[0]?.memberStatus ?? null;
   if (memberStatus === null) return emptyMemberModerationContext();
@@ -154,7 +166,8 @@ export const getAdminMemberModerationContext = async (
 
   return {
     memberStatus: memberStatus as AdminMemberStatus,
-    previousReportCount: reportCountRows[0]?.total ?? 0,
+    previousReportCount:
+      (reportCaseCountRows[0]?.total ?? 0) + (conductReportCountRows[0]?.total ?? 0),
     confirmedViolationCount: violationCountRows[0]?.total ?? 0,
     previousModerationActions: actionEvents
       .slice(0, previousModerationActionLimit)
