@@ -21,3 +21,4 @@ export {
   type QuestStartWorkOutcome,
 } from './quest-start-work.service';
 export { mapQuestStartWorkOutcome } from './quest-start-work.controller';
+export { hasOverlappingActiveWorkerAssignment } from './worker-schedule-conflict.service';

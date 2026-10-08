@@ -323,6 +323,45 @@ describe('Quest Assignment API v2', () => {
     expect(transitions[0]?.producer).toBe('QUEST_ASSIGNMENT_V2');
   });
 
+  it('rejects an overlapping Worker Assignment and allows an adjacent Quest', async () => {
+    if (!postgresAvailable) return;
+    const activeQuestId = await createAssignedQuest({
+      mode: 'FIRST_COME_FIRST_SERVED',
+      participation: 'SINGLE',
+      workerIds: [worker.id],
+    });
+    const [activeQuest] = await db
+      .select({ dueAt: quest.dueAt })
+      .from(quest)
+      .where(eq(quest.id, activeQuestId));
+    if (!activeQuest?.dueAt) throw new Error('Active Quest fixture needs a due time');
+    const overlappingQuestId = await createOpenSingleFcfsQuest({
+      startTime: new Date(activeQuest.dueAt.getTime() - 30 * 60_000),
+      dueAt: new Date(activeQuest.dueAt.getTime() + 30 * 60_000),
+    });
+    const adjacentQuestId = await createOpenSingleFcfsQuest({
+      startTime: activeQuest.dueAt,
+      dueAt: new Date(activeQuest.dueAt.getTime() + 60 * 60_000),
+    });
+    authenticate();
+
+    const conflicting = await request(
+      `/api/v2/quests/${overlappingQuestId}/join`,
+      'POST',
+      worker.id,
+      {
+        'idempotency-key': 'assignment-v2-overlapping-worker-assignment',
+      }
+    );
+    expect(conflicting.status).toBe(409);
+    expect((await conflicting.json()).error.code).toBe('WORKER_SCHEDULE_CONFLICT');
+
+    const adjacent = await request(`/api/v2/quests/${adjacentQuestId}/join`, 'POST', worker.id, {
+      'idempotency-key': 'assignment-v2-adjacent-worker-assignment',
+    });
+    expect(adjacent.status).toBe(200);
+  });
+
   it('starts SINGLE FCFS and Candidate Quests explicitly and replays Start Work commands', async () => {
     if (!postgresAvailable) return;
     authenticate();
