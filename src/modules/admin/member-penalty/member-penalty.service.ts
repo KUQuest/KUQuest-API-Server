@@ -152,31 +152,6 @@ const nextSequenceNumber = (records: MemberPenaltyRow[], ladder: 'MISCONDUCT' | 
     0
   ) + 1;
 
-const banLiftTimes = (records: MemberPenaltyRow[], now: Date): Date[] => {
-  const reversals = new Map(
-    records.flatMap((record) =>
-      record.result === 'PENALTY_REVERSAL' && record.reversalOfRecordId
-        ? [[record.reversalOfRecordId, record.createdAt] as const]
-        : []
-    )
-  );
-
-  return originalRecords(records).flatMap((record) => {
-    if (record.result === 'PENALTY_PERMANENT_BAN') {
-      const reversalAt = reversals.get(record.id);
-      return reversalAt ? [reversalAt] : [];
-    }
-
-    if (!isTemporaryBan(record.result)) return [];
-    const expiry = temporaryBanExpiresAt(record);
-    if (!expiry) return [];
-
-    const reversalAt = reversals.get(record.id);
-    if (reversalAt) return [reversalAt < expiry ? reversalAt : expiry];
-    return expiry <= now ? [expiry] : [];
-  });
-};
-
 const activeBanRecord = (records: MemberPenaltyRow[], now: Date): MemberPenaltyRow | undefined =>
   activeOriginalRecords(records).find((record) => {
     if (record.result === 'PENALTY_PERMANENT_BAN') return true;
@@ -296,13 +271,8 @@ export const recordMemberConfirmedViolationInTransaction = async (
   if (existing) return existing;
 
   const confirmed = confirmedMisconductRecords(records, member.createdAt);
-  const lastBanLift = latestDate(banLiftTimes(records, input.now));
-  const violationsSinceBanLift = lastBanLift
-    ? confirmed.filter((record) => record.createdAt >= lastBanLift).length
-    : Number.POSITIVE_INFINITY;
-  const pc13ExemptionApplies =
-    lastBanLift !== null && !activeBanRecord(records, input.now) && violationsSinceBanLift < 3;
-  const exemptionApplies = confirmed.length < 10 || pc13ExemptionApplies;
+  const reportCaseExemptionUsed = confirmed.some((record) => record.source === 'REPORT_CASE');
+  const exemptionApplies = input.source === 'REPORT_CASE' && !reportCaseExemptionUsed;
   const strikeCount = activeOriginalRecords(records).filter(
     (record) => record.ladder === 'MISCONDUCT' && record.result !== 'PENALTY_EXEMPT'
   ).length;

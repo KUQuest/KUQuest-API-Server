@@ -17,21 +17,21 @@ Triggered when an Admin confirms a violation:
 
 ### Penalty tiers
 
-| Confirmed-violation count | Result                             | Duration         |
-| ------------------------- | ---------------------------------- | ---------------- |
-| 1st strike                | Red Flag                           | 7 days (`PC-09`) |
-| 2nd strike                | Temporary ban + Wallet Auto-Freeze | 7 days (`PC-11`) |
-| 3rd strike                | Permanent ban                      | Permanent        |
+| Misconduct ladder strike | Result                             | Duration         |
+| ------------------------ | ---------------------------------- | ---------------- |
+| 1st strike               | Red Flag                           | 7 days (`PC-09`) |
+| 2nd strike               | Temporary ban + Wallet Auto-Freeze | 7 days (`PC-11`) |
+| 3rd strike               | Permanent ban                      | Permanent        |
 
 ### Rules and exemptions
 
 - **Red Flag**: Visible on Member Profile, mini-profile during Candidate selection, and Hirer identity on Quest pages. Blocks applying as Candidate, joining FCFS Quests, and **publishing new Quests**. Runs existing Quests unchanged. Expires automatically after 7 days without Admin intervention.
 - **Temporary ban (2nd strike)**: Denies sign-in for 7 days. Auto-freezes Wallet in the same action; auto-restores Wallet to `ACTIVE` upon expiry.
 - **Permanent ban (3rd strike)**: Denies sign-in permanently and auto-freezes Wallet. Read directly from `memberPenaltyRecord`.
-- **Exemptions (`PC-12` & `PC-13`)**:
-  - The first 10 (`PC-12`) confirmed violations after account creation do not advance the ladder.
-  - The first 3 (`PC-13`) confirmed violations after a temporary or permanent ban lifts do not advance the ladder.
-  - A Member's 1st result (Red Flag) arrives at confirmed violation 11, 2nd result (Temp ban) at violation 12, and 3rd result (Permanent ban) at violation 13.
+- **Report Case exemption**: The first confirmed `REPORT_CASE` for a Member receives `PENALTY_EXEMPT`. A Conduct Report does not use or consume this exemption. The exemption stays consumed after `REPORT_CASE_RESTORED`; a later Report Case advances the Misconduct ladder.
+- **Conduct Reports**: Every newly upheld `CONDUCT_REPORT` advances the Misconduct ladder. There are no first-10 or post-Ban exemptions. Existing `PENALTY_EXEMPT` Conduct Report records remain unchanged and do not count as strikes.
+- **Report Case decisions**: A Report Case dismissed before Hide creates no penalty record and does not consume the exemption. Dismissing a hidden Report Case keeps its penalty record. Only `REPORT_CASE_RESTORED` reverses the penalty; reversal does not return the exemption.
+- **Prospective policy**: These rules apply to new decisions. Existing penalty records are not recalculated.
 - **Reversals**: A `REPORT_CASE_RESTORED` decision cancels the strike created by its earlier `REPORT_CASE_HIDDEN` decision. Writes a linked reversing row in `memberPenaltyRecord` without deleting the original row, immediately clearing any Red Flag or ban produced by that strike. (Conduct Report strikes cannot be reversed).
 - **Assignments during bans**: A banned Member's active Assignments are not force-cancelled. The standard deadline and Start Work rules apply; unfulfilled work fails via standard rules.
 
@@ -52,7 +52,7 @@ Fully automatic system evaluation (not Admin-triggered):
 - Triggers only once a Member has received at least **10 Reviews**.
 - From the 10th Review onward, each time a new Review causes the Member's running average rating to cross from &ge;3.0 down to below 3.0, that crossing counts as one violation.
 - Further Reviews received while the average remains below 3.0 do not increment the count. A new strike occurs only on subsequent downward crossings after recovering to &ge;3.0.
-- `PC-12` and `PC-13` exemptions do not apply to this ladder.
+- The Report Case exemption and Conduct Report rules do not apply to this ladder.
 - Evaluated only upon Review creation. Review edits within the 7-day window update displayed ratings but never alter recorded strikes.
 
 ---

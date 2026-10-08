@@ -60,7 +60,7 @@ Follow the context pointer for the Admin branch being planned or implemented:
 | **Quest Hide & Restore**      | Independent `hiddenAt`/`hiddenByAdminId` flags across non-terminal Quests, discovery removal only, Push notifications to Hirer, idempotency.       | [admin-quest-hide-contract.md](admin-quest-hide-contract.md)           |
 | **Wallet Freeze & Suspend**   | Setting `FROZEN`/`SUSPENDED` statuses, blocking new commitments while honoring active obligations, discretionary vs auto-ban freeze.               | [admin-wallet-freeze-contract.md](admin-wallet-freeze-contract.md)     |
 | **Trust & Safety (Messages)** | Message moderation in Work Chat & Candidate Inquiries, Reporter Entries, Evidence References, hiding messages, strike creation, and retention.     | [admin-trust-safety-contract.md](admin-trust-safety-contract.md)       |
-| **Member Penalty Ladders**    | Misconduct ladder (Red Flag 7d, Temp ban 7d, Permanent ban), Review ladder (<3.0 average), `PC-12`/`PC-13` exemptions, strike reversals.           | [admin-member-penalty-contract.md](admin-member-penalty-contract.md)   |
+| **Member Penalty Ladders**    | Misconduct and Review ladders, first Report Case exemption, Conduct Report strikes, Report Case reversals.                                         | [admin-member-penalty-contract.md](admin-member-penalty-contract.md)   |
 | **Conduct Reports (Quests)**  | Quest behavior reports (`CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE`, `CONDUCT_NO_SHOW`), filing windows, Quest record evidence, permanent strikes. | [admin-conduct-report-contract.md](admin-conduct-report-contract.md)   |
 
 ## Scope boundaries & deferred capabilities
