@@ -116,7 +116,19 @@ const memberAuthentication = (memberId: string) =>
     session: { userId: memberId },
   })) as never);
 
-const createReportFixture = async () => {
+const ensureFixtureMember = async (memberId: string, firstName: string, lastName: string) => {
+  if (memberId === senderId || fixtureMemberIds.includes(memberId)) return;
+
+  fixtureMemberIds.push(memberId);
+  await db.insert(authUser).values({
+    id: memberId,
+    email: `${memberId}@ku.th`,
+    firstName,
+    lastName,
+  });
+};
+
+const createReportFixture = async (reportedMemberId = randomUUID()) => {
   const questId = randomUUID();
   const conversationId = randomUUID();
   const assignmentId = randomUUID();
@@ -135,10 +147,11 @@ const createReportFixture = async () => {
   fixtureAttachmentIds.push(attachmentId);
   fixtureFileIds.push(fileId);
   fixtureCaseIds.push(caseId);
+  await ensureFixtureMember(reportedMemberId, 'Report', 'Sender');
 
   await db.insert(quest).values({
     id: questId,
-    hirerId: senderId,
+    hirerId: reportedMemberId,
     title: `Admin report fixture ${questId}`,
     condition: 'Review the reported Message',
     mode: 'NO_CANDIDATE',
@@ -170,7 +183,7 @@ const createReportFixture = async () => {
     {
       id: senderMembershipId,
       conversationId,
-      memberId: senderId,
+      memberId: reportedMemberId,
       role: 'HIRER',
       joinedAt: createdAt,
       createdAt,
@@ -203,7 +216,7 @@ const createReportFixture = async () => {
     objectKey: `admin-report-fixture/${fileId}`,
     contentType: 'image/png',
     sizeBytes: 3,
-    uploadedByUserId: senderId,
+    uploadedByUserId: reportedMemberId,
     createdAt,
   });
   await db.insert(chatAttachment).values({
@@ -256,6 +269,7 @@ const createReportFixture = async () => {
     assignmentId,
     conversationId,
     questId,
+    reportedMemberId,
   };
 };
 
@@ -281,7 +295,10 @@ const createConductReportFixture = async (
   const participation = input.participation ?? 'SINGLE';
   const filerId = input.filerId ?? senderId;
   const hirerId = input.hirerId ?? senderId;
-  const reportedMemberId = input.reportedMemberId ?? reporterId;
+  const reportedMemberId = input.reportedMemberId ?? randomUUID();
+  if (!input.reportedMemberId) {
+    await ensureFixtureMember(reportedMemberId, 'Conduct', 'Reported Member');
+  }
   const assignmentWorkerId = input.assignmentWorkerId ?? reportedMemberId;
   const assignmentWorkerIds = [...new Set(input.assignmentWorkerIds ?? [assignmentWorkerId])];
 
@@ -547,27 +564,19 @@ const createBanConductReportFixture = async (
   const firstViolationAt = new Date(
     Date.now() - (input.permanentBan ? 8 : 0) * 24 * 60 * 60 * 1000 - 60_000
   );
-  const priorViolationCount = input.permanentBan ? 12 : 11;
+  const priorViolationCount = input.permanentBan ? 2 : 1;
   await db.transaction(async (transaction) => {
     for (let index = 0; index < priorViolationCount; index += 1) {
       // eslint-disable-next-line no-await-in-loop
       const penalty = await recordMemberConfirmedViolationInTransaction(transaction, {
         memberId: reportedMemberId,
-        source: 'REPORT_CASE',
+        source: 'CONDUCT_REPORT',
         sourceId: randomUUID(),
         actorAdminId: adminId,
         reasonCode: 'SAFETY_REVIEW',
         now: firstViolationAt,
       });
-      const expectedPriorResult = input.permanentBan
-        ? index === 11
-          ? 'PENALTY_TEMPORARY_BAN_7_DAYS'
-          : index === 10
-            ? 'PENALTY_RED_FLAG'
-            : 'PENALTY_EXEMPT'
-        : index === 10
-          ? 'PENALTY_RED_FLAG'
-          : 'PENALTY_EXEMPT';
+      const expectedPriorResult = index === 0 ? 'PENALTY_RED_FLAG' : 'PENALTY_TEMPORARY_BAN_7_DAYS';
       if (penalty.result !== expectedPriorResult) {
         throw new Error('The Conduct Report fixture did not reach the expected penalty threshold.');
       }
@@ -583,24 +592,6 @@ const createBanConductReportFixture = async (
       throw new Error('The Conduct Report fixture did not create a temporary Ban.');
     }
     await processExpiredMemberBanWalletFreeze(reportedMemberId, new Date());
-
-    const afterBanLiftAt = new Date();
-    for (let index = 0; index < 3; index += 1) {
-      // eslint-disable-next-line no-await-in-loop
-      const penalty = await db.transaction((transaction) =>
-        recordMemberConfirmedViolationInTransaction(transaction, {
-          memberId: reportedMemberId,
-          source: 'REPORT_CASE',
-          sourceId: randomUUID(),
-          actorAdminId: adminId,
-          reasonCode: 'SAFETY_REVIEW',
-          now: afterBanLiftAt,
-        })
-      );
-      if (penalty.result !== 'PENALTY_EXEMPT') {
-        throw new Error('The Conduct Report fixture did not apply a PC-13 exemption.');
-      }
-    }
   }
 
   return { fixture, reportedMemberId, wallet };
@@ -848,11 +839,16 @@ const cleanFixtures = async () => {
         .where(inArray(questAssignment.questId, fixtureQuestIds));
       await transaction.delete(quest).where(inArray(quest.id, fixtureQuestIds));
     }
-    if (fixtureMemberIds.length > 0) {
-      await transaction.delete(authUser).where(inArray(authUser.id, fixtureMemberIds));
-    }
     if (fixtureFileIds.length > 0) {
       await transaction.delete(file).where(inArray(file.id, fixtureFileIds));
+    }
+    if (fixtureMemberIds.length > 0) {
+      const removableMemberIds = fixtureMemberIds.filter(
+        (memberId) => !penaltyMemberIds.has(memberId)
+      );
+      if (removableMemberIds.length > 0) {
+        await transaction.delete(authUser).where(inArray(authUser.id, removableMemberIds));
+      }
     }
   });
 
@@ -1135,7 +1131,7 @@ describe('Admin Report Case API', () => {
 
   it('returns Report Case Member and Quest summaries without Message content', async () => {
     if (!postgresAvailable) return;
-    const fixture = await createReportFixture();
+    const fixture = await createReportFixture(senderId);
 
     const list = await adminRequest(`/api/v1/admin/reports?questId=${fixture.questId}`);
     expect(list.status).toBe(200);
@@ -1266,14 +1262,14 @@ describe('Admin Report Case API', () => {
 
   it('returns earlier Report Cases and Conduct Reports in Member moderation context', async () => {
     if (!postgresAvailable) return;
-    const priorReportCase = await createReportFixture();
+    const priorReportCase = await createReportFixture(senderId);
     const priorConductReport = await createConductReportFixture({
       filerId: reporterId,
       hirerId: reporterId,
       reportedMemberId: senderId,
       assignmentWorkerId: senderId,
     });
-    const reportCaseDetail = await createReportFixture();
+    const reportCaseDetail = await createReportFixture(senderId);
     const conductReportDetail = await createConductReportFixture({
       filerId: reporterId,
       hirerId: reporterId,
@@ -1386,7 +1382,7 @@ describe('Admin Report Case API', () => {
 
   it('lists and details a Conduct Report with its Quest record discriminator', async () => {
     if (!postgresAvailable) return;
-    const fixture = await createConductReportFixture();
+    const fixture = await createConductReportFixture({ reportedMemberId: reporterId });
 
     const list = await adminRequest(
       `/api/v1/admin/reports?kind=CONDUCT_REPORT&status=CONDUCT_REPORT_PENDING&memberId=${reporterId}&questId=${fixture.questId}`
@@ -1501,15 +1497,15 @@ describe('Admin Report Case API', () => {
   it('filters, counts, and paginates full Admin Report history', async () => {
     if (!postgresAvailable) return;
     const reportCases = [
-      await createReportFixture(),
-      await createReportFixture(),
-      await createReportFixture(),
-      await createReportFixture(),
+      await createReportFixture(senderId),
+      await createReportFixture(senderId),
+      await createReportFixture(senderId),
+      await createReportFixture(senderId),
     ];
     const conductReports = [
-      await createConductReportFixture(),
-      await createConductReportFixture(),
-      await createConductReportFixture(),
+      await createConductReportFixture({ reportedMemberId: reporterId }),
+      await createConductReportFixture({ reportedMemberId: reporterId }),
+      await createConductReportFixture({ reportedMemberId: reporterId }),
     ];
     const searchTerm = `report-history-${randomUUID()}`;
     const createdAt = '2035-04-01T00:00:00.101300Z';
@@ -2284,13 +2280,13 @@ describe('Admin Report Case API', () => {
 
   it('walks the shared Report queue at limit 1 in both sort directions across microsecond rows', async () => {
     if (!postgresAvailable) return;
-    const reportCaseEarly = await createReportFixture();
+    const reportCaseEarly = await createReportFixture(senderId);
     const conductReportEarly = await createConductReportFixture({
       filerId: reporterId,
       reportedMemberId: senderId,
       assignmentWorkerId: reporterId,
     });
-    const reportCaseLate = await createReportFixture();
+    const reportCaseLate = await createReportFixture(senderId);
     const conductReportLate = await createConductReportFixture({
       filerId: reporterId,
       reportedMemberId: senderId,
@@ -2610,7 +2606,7 @@ describe('Admin Report Case API', () => {
         ladder: 'MISCONDUCT',
         source: 'CONDUCT_REPORT',
         sourceId: fixture.reportId,
-        result: 'PENALTY_EXEMPT',
+        result: 'PENALTY_RED_FLAG',
         actorType: 'ADMIN',
         actorAdminId: adminId,
         reasonCode: 'CONDUCT_OUT_OF_SCOPE',
@@ -2635,11 +2631,11 @@ describe('Admin Report Case API', () => {
         reportId: fixture.reportId,
         reasonCode: 'CONDUCT_OUT_OF_SCOPE',
         decision: 'UPHELD',
-        penaltyResult: 'PENALTY_EXEMPT',
+        penaltyResult: 'PENALTY_RED_FLAG',
       },
     });
     expect(delivery?.body).toBe(
-      'Your Conduct Report was upheld for work outside the agreed scope. The result is no additional restriction.'
+      'Your Conduct Report was upheld for work outside the agreed scope. The result is a 7-day Red Flag.'
     );
     expect(delivery?.body).not.toContain(decisionReasonText);
     expect(delivery?.deepLink).toMatch(/^kuquest:\/\/conduct-reports\/CND-\d{6}$/);
@@ -3678,7 +3674,7 @@ describe('Admin Report Case API', () => {
         .from(memberPenaltyRecord)
         .where(
           and(
-            eq(memberPenaltyRecord.memberId, senderId),
+            eq(memberPenaltyRecord.memberId, fixture.reportedMemberId),
             eq(memberPenaltyRecord.sourceId, fixture.caseId)
           )
         )
@@ -3706,7 +3702,7 @@ describe('Admin Report Case API', () => {
         .from(memberPenaltyRecord)
         .where(
           and(
-            eq(memberPenaltyRecord.memberId, senderId),
+            eq(memberPenaltyRecord.memberId, fixture.reportedMemberId),
             eq(memberPenaltyRecord.sourceId, fixture.caseId)
           )
         )
@@ -3745,7 +3741,7 @@ describe('Admin Report Case API', () => {
     expect((await hiddenReport.json()).error.code).toBe('MESSAGE_NOT_FOUND');
 
     mock.restore();
-    memberAuthentication(senderId);
+    memberAuthentication(fixture.reportedMemberId);
     const senderMessages = await app.handle(
       new Request(`http://localhost/api/v1/chat/conversations/${fixture.conversationId}/messages`)
     );
@@ -3807,7 +3803,7 @@ describe('Admin Report Case API', () => {
       .from(memberPenaltyRecord)
       .where(
         and(
-          eq(memberPenaltyRecord.memberId, senderId),
+          eq(memberPenaltyRecord.memberId, fixture.reportedMemberId),
           eq(memberPenaltyRecord.sourceId, fixture.caseId)
         )
       );
@@ -3816,6 +3812,105 @@ describe('Admin Report Case API', () => {
     expect(
       penaltyRows.find((row) => row.result === 'PENALTY_REVERSAL')?.reversalOfRecordId
     ).toEqual(expect.any(String));
+  });
+
+  it('does not use the exemption for a pending dismissal and keeps a hidden penalty after dismissal', async () => {
+    if (!postgresAvailable) return;
+    const reportedMemberId = randomUUID();
+    const dismissedBeforeHide = await createReportFixture(reportedMemberId);
+    const firstConfirmedReportCase = await createReportFixture(reportedMemberId);
+    const hiddenThenDismissed = await createReportFixture(reportedMemberId);
+
+    const pendingDismissal = await adminRequest(
+      `/api/v1/admin/reports/${dismissedBeforeHide.caseId}/decide`,
+      {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `report-dismiss-before-hide-${dismissedBeforeHide.caseId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'REPORT_CASE_DISMISSED',
+          reasonCode: 'REPORT_NO_POLICY_VIOLATION',
+        }),
+      }
+    );
+    expect(pendingDismissal.status).toBe(200);
+    expect(
+      await db
+        .select({ result: memberPenaltyRecord.result })
+        .from(memberPenaltyRecord)
+        .where(eq(memberPenaltyRecord.sourceId, dismissedBeforeHide.caseId))
+    ).toEqual([]);
+
+    const firstHide = await adminRequest(
+      `/api/v1/admin/reports/${firstConfirmedReportCase.caseId}/decide`,
+      {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `report-first-confirmed-hide-${firstConfirmedReportCase.caseId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'REPORT_CASE_HIDDEN',
+          reasonCode: 'REPORT_HARASSMENT_CONFIRMED',
+        }),
+      }
+    );
+    expect(firstHide.status).toBe(200);
+    expect(
+      await db
+        .select({ result: memberPenaltyRecord.result })
+        .from(memberPenaltyRecord)
+        .where(eq(memberPenaltyRecord.sourceId, firstConfirmedReportCase.caseId))
+    ).toEqual([{ result: 'PENALTY_EXEMPT' }]);
+
+    const secondHide = await adminRequest(
+      `/api/v1/admin/reports/${hiddenThenDismissed.caseId}/decide`,
+      {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `report-second-confirmed-hide-${hiddenThenDismissed.caseId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'REPORT_CASE_HIDDEN',
+          reasonCode: 'REPORT_HARASSMENT_CONFIRMED',
+        }),
+      }
+    );
+    expect(secondHide.status).toBe(200);
+    expect(
+      await db
+        .select({ result: memberPenaltyRecord.result })
+        .from(memberPenaltyRecord)
+        .where(eq(memberPenaltyRecord.sourceId, hiddenThenDismissed.caseId))
+    ).toEqual([{ result: 'PENALTY_RED_FLAG' }]);
+
+    const dismissalAfterHide = await adminRequest(
+      `/api/v1/admin/reports/${hiddenThenDismissed.caseId}/decide`,
+      {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `report-dismiss-after-hide-${hiddenThenDismissed.caseId}`,
+          'if-match': '2',
+        },
+        body: JSON.stringify({
+          outcome: 'REPORT_CASE_DISMISSED',
+          reasonCode: 'REPORT_NO_POLICY_VIOLATION',
+        }),
+      }
+    );
+    expect(dismissalAfterHide.status).toBe(200);
+    expect((await dismissalAfterHide.json()).data.resourceSummary).toMatchObject({
+      status: 'REPORT_CASE_DISMISSED',
+      version: 3,
+    });
+    const retainedPenaltyRows = await db
+      .select({ result: memberPenaltyRecord.result })
+      .from(memberPenaltyRecord)
+      .where(eq(memberPenaltyRecord.sourceId, hiddenThenDismissed.caseId));
+    expect(retainedPenaltyRows).toEqual([{ result: 'PENALTY_RED_FLAG' }]);
   });
 
   it('dismisses a pending Report Case without hiding the Message and rejects a repeated transition', async () => {

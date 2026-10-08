@@ -18,7 +18,7 @@ import { describe, expect, it } from 'bun:test';
 const rollback = new Error('ROLLBACK_MEMBER_PENALTY_FIXTURE');
 
 describe('Member Penalty persistence', () => {
-  it('records the first ten confirmed Misconduct violations as exempt', async () => {
+  it('exempts only the first confirmed Report Case and never exempts a Conduct Report', async () => {
     const memberId = randomUUID();
     const adminId = randomUUID();
     const createdAt = new Date('2020-01-01T00:00:00.000Z');
@@ -40,24 +40,34 @@ describe('Member Penalty persistence', () => {
           lastName: 'Admin',
         });
 
-        const records = [];
-        for (let index = 0; index < 11; index += 1) {
-          records.push(
-            await recordMemberConfirmedViolationInTransaction(transaction, {
-              memberId,
-              source: 'REPORT_CASE',
-              sourceId: randomUUID(),
-              actorAdminId: adminId,
-              reasonCode: 'SAFETY_REVIEW',
-              now,
-            })
-          );
-        }
+        const conductReport = await recordMemberConfirmedViolationInTransaction(transaction, {
+          memberId,
+          source: 'CONDUCT_REPORT',
+          sourceId: randomUUID(),
+          actorAdminId: adminId,
+          reasonCode: 'SAFETY_REVIEW',
+          now,
+        });
+        const firstReportCase = await recordMemberConfirmedViolationInTransaction(transaction, {
+          memberId,
+          source: 'REPORT_CASE',
+          sourceId: randomUUID(),
+          actorAdminId: adminId,
+          reasonCode: 'SAFETY_REVIEW',
+          now: new Date(now.getTime() + 1_000),
+        });
+        const secondReportCase = await recordMemberConfirmedViolationInTransaction(transaction, {
+          memberId,
+          source: 'REPORT_CASE',
+          sourceId: randomUUID(),
+          actorAdminId: adminId,
+          reasonCode: 'SAFETY_REVIEW',
+          now: new Date(now.getTime() + 2_000),
+        });
 
-        expect(records.slice(0, 10).map((record) => record.result)).toEqual(
-          Array.from({ length: 10 }, () => 'PENALTY_EXEMPT')
-        );
-        expect(records[10]?.result).toBe('PENALTY_RED_FLAG');
+        expect(conductReport.result).toBe('PENALTY_RED_FLAG');
+        expect(firstReportCase.result).toBe('PENALTY_EXEMPT');
+        expect(secondReportCase.result).toBe('PENALTY_TEMPORARY_BAN_7_DAYS');
 
         const persisted = await transaction
           .select({
@@ -67,15 +77,18 @@ describe('Member Penalty persistence', () => {
           .from(memberPenaltyRecord)
           .where(eq(memberPenaltyRecord.memberId, memberId))
           .orderBy(asc(memberPenaltyRecord.sequenceNumber));
-        expect(persisted).toHaveLength(11);
-        expect(persisted[10]).toEqual({ sequenceNumber: 11, result: 'PENALTY_RED_FLAG' });
+        expect(persisted).toEqual([
+          { sequenceNumber: 1, result: 'PENALTY_RED_FLAG' },
+          { sequenceNumber: 2, result: 'PENALTY_EXEMPT' },
+          { sequenceNumber: 3, result: 'PENALTY_TEMPORARY_BAN_7_DAYS' },
+        ]);
 
         throw rollback;
       })
     ).rejects.toBe(rollback);
   });
 
-  it('keeps reversed violations in the PC-12 count and records one violation per source', async () => {
+  it('does not return the Report Case exemption after a Restore', async () => {
     const memberId = randomUUID();
     const adminId = randomUUID();
     const createdAt = new Date('2020-01-01T00:00:00.000Z');
@@ -106,6 +119,7 @@ describe('Member Penalty persistence', () => {
           reasonCode: 'POLICY_REVIEW',
           now,
         });
+        expect(restoredViolation.result).toBe('PENALTY_EXEMPT');
         await reverseReportCaseViolationInTransaction(transaction, {
           memberId,
           reportCaseId: restoredReportCaseId,
@@ -123,22 +137,15 @@ describe('Member Penalty persistence', () => {
         });
         expect(repeatedHide.id).toBe(restoredViolation.id);
 
-        const results = [];
-        for (let index = 0; index < 9; index += 1) {
-          results.push(
-            (
-              await recordMemberConfirmedViolationInTransaction(transaction, {
-                memberId,
-                source: 'REPORT_CASE',
-                sourceId: randomUUID(),
-                actorAdminId: adminId,
-                reasonCode: 'SAFETY_REVIEW',
-                now: new Date(now.getTime() + 3_000 + index),
-              })
-            ).result
-          );
-        }
-        const eleventh = await recordMemberConfirmedViolationInTransaction(transaction, {
+        const secondReportCase = await recordMemberConfirmedViolationInTransaction(transaction, {
+          memberId,
+          source: 'REPORT_CASE',
+          sourceId: randomUUID(),
+          actorAdminId: adminId,
+          reasonCode: 'SAFETY_REVIEW',
+          now: new Date(now.getTime() + 3_000),
+        });
+        const thirdReportCase = await recordMemberConfirmedViolationInTransaction(transaction, {
           memberId,
           source: 'REPORT_CASE',
           sourceId: randomUUID(),
@@ -147,20 +154,26 @@ describe('Member Penalty persistence', () => {
           now: new Date(now.getTime() + 4_000),
         });
 
-        expect(results).toEqual(Array.from({ length: 9 }, () => 'PENALTY_EXEMPT'));
-        expect(eleventh.result).toBe('PENALTY_RED_FLAG');
+        expect(secondReportCase.result).toBe('PENALTY_RED_FLAG');
+        expect(thirdReportCase.result).toBe('PENALTY_TEMPORARY_BAN_7_DAYS');
         const persisted = await transaction
           .select({ result: memberPenaltyRecord.result })
           .from(memberPenaltyRecord)
-          .where(eq(memberPenaltyRecord.memberId, memberId));
-        expect(persisted).toHaveLength(12);
+          .where(eq(memberPenaltyRecord.memberId, memberId))
+          .orderBy(asc(memberPenaltyRecord.createdAt), asc(memberPenaltyRecord.id));
+        expect(persisted.map(({ result }) => result)).toEqual([
+          'PENALTY_EXEMPT',
+          'PENALTY_REVERSAL',
+          'PENALTY_RED_FLAG',
+          'PENALTY_TEMPORARY_BAN_7_DAYS',
+        ]);
 
         throw rollback;
       })
     ).rejects.toBe(rollback);
   });
 
-  it('projects bans and applies the three PC-13 exemptions after the ban expires', async () => {
+  it('advances the Conduct Report Misconduct ladder after a Ban expires', async () => {
     const memberId = randomUUID();
     const adminId = randomUUID();
     const createdAt = new Date('2020-01-01T00:00:00.000Z');
@@ -184,20 +197,19 @@ describe('Member Penalty persistence', () => {
         const wallet = await ensureWalletInTransaction(transaction, memberId);
 
         const results = [];
-        for (let index = 0; index < 12; index += 1) {
+        for (let index = 0; index < 2; index += 1) {
           const record = await recordMemberConfirmedViolationInTransaction(transaction, {
             memberId,
-            source: 'REPORT_CASE',
+            source: 'CONDUCT_REPORT',
             sourceId: randomUUID(),
             actorAdminId: adminId,
             reasonCode: 'SAFETY_REVIEW',
-            now: firstViolationAt,
+            now: new Date(firstViolationAt.getTime() + index * 1_000),
           });
           results.push(record.result);
         }
 
-        expect(results.slice(0, 10)).toEqual(Array.from({ length: 10 }, () => 'PENALTY_EXEMPT'));
-        expect(results.slice(10)).toEqual(['PENALTY_RED_FLAG', 'PENALTY_TEMPORARY_BAN_7_DAYS']);
+        expect(results).toEqual(['PENALTY_RED_FLAG', 'PENALTY_TEMPORARY_BAN_7_DAYS']);
         const [frozenWallet] = await transaction
           .select({ walletStatus: walletWallet.walletStatus })
           .from(walletWallet)
@@ -221,28 +233,21 @@ describe('Member Penalty persistence', () => {
           .from(authUser)
           .where(eq(authUser.id, memberId));
         expect(initialRestriction[0]?.bannedUntil).toEqual(
-          new Date(firstViolationAt.getTime() + 7 * 24 * 60 * 60 * 1000)
+          new Date(firstViolationAt.getTime() + 7 * 24 * 60 * 60 * 1000 + 1_000)
         );
 
-        const afterBanExpiry = new Date(firstViolationAt.getTime() + 7 * 24 * 60 * 60 * 1000);
-        const afterLiftResults = [];
-        for (let index = 0; index < 4; index += 1) {
-          const record = await recordMemberConfirmedViolationInTransaction(transaction, {
-            memberId,
-            source: 'REPORT_CASE',
-            sourceId: randomUUID(),
-            actorAdminId: adminId,
-            reasonCode: 'SAFETY_REVIEW',
-            now: afterBanExpiry,
-          });
-          afterLiftResults.push(record.result);
-        }
-        expect(afterLiftResults).toEqual([
-          'PENALTY_EXEMPT',
-          'PENALTY_EXEMPT',
-          'PENALTY_EXEMPT',
-          'PENALTY_PERMANENT_BAN',
-        ]);
+        const afterBanExpiry = new Date(
+          firstViolationAt.getTime() + 7 * 24 * 60 * 60 * 1000 + 1_000
+        );
+        const afterExpiryConduct = await recordMemberConfirmedViolationInTransaction(transaction, {
+          memberId,
+          source: 'CONDUCT_REPORT',
+          sourceId: randomUUID(),
+          actorAdminId: adminId,
+          reasonCode: 'SAFETY_REVIEW',
+          now: afterBanExpiry,
+        });
+        expect(afterExpiryConduct.result).toBe('PENALTY_PERMANENT_BAN');
         const [permanentlyFrozenWallet] = await transaction
           .select({ walletStatus: walletWallet.walletStatus })
           .from(walletWallet)
@@ -259,7 +264,7 @@ describe('Member Penalty persistence', () => {
     const adminId = randomUUID();
     const createdAt = new Date('2020-01-01T00:00:00.000Z');
     const now = new Date('2026-09-24T00:00:00.000Z');
-    const reportCaseIds = Array.from({ length: 11 }, () => randomUUID());
+    const reportCaseIds = Array.from({ length: 2 }, () => randomUUID());
 
     await expect(
       db.transaction(async (transaction) => {
@@ -278,7 +283,7 @@ describe('Member Penalty persistence', () => {
         });
 
         for (const reportCaseId of reportCaseIds) {
-          await recordMemberConfirmedViolationInTransaction(transaction, {
+          const record = await recordMemberConfirmedViolationInTransaction(transaction, {
             memberId,
             source: 'REPORT_CASE',
             sourceId: reportCaseId,
@@ -286,11 +291,14 @@ describe('Member Penalty persistence', () => {
             reasonCode: 'POLICY_REVIEW',
             now,
           });
+          if (reportCaseId === reportCaseIds[1]) {
+            expect(record.result).toBe('PENALTY_RED_FLAG');
+          }
         }
 
         const reversal = await reverseReportCaseViolationInTransaction(transaction, {
           memberId,
-          reportCaseId: reportCaseIds[10]!,
+          reportCaseId: reportCaseIds[1]!,
           actorAdminId: adminId,
           reasonCode: 'POLICY_REVIEW',
           now: new Date(now.getTime() + 1000),
